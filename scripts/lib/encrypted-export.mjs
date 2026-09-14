@@ -8,7 +8,7 @@ import process from "node:process";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import dotenv from "dotenv";
-import { stableSnapshotJson } from "../../src/server/tourney/snapshotContract.js";
+import { stableSnapshotJson } from "../../src/server/archive/snapshotContract.js";
 import {
   deleteGenericPassword,
   runMacosSecurityCommand,

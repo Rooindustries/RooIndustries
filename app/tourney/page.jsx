@@ -1,399 +1,68 @@
-import {
-  Section,
-  TourneyHosts,
-  TourneyShell,
-  getTourneyHostsWithLiveStatus,
-  getTourneySession,
-} from "./TourneyShared";
-import TourneyPromotionLinks from "./TourneyPromotionLinks";
-import JsonLd from "../../src/next/JsonLd";
+import { Medal, Trophy } from "lucide-react";
+import { Section, TourneyShell } from "./TourneyShared";
 import seo from "../../src/lib/seo";
-import ConnectedAccounts from "../../src/components/ConnectedAccounts";
-import TourneyFreeSession from "./TourneyFreeSession";
-import TourneyLoginOutcome from "./TourneyLoginOutcome";
-
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+import { tourneyResults as results } from "../../src/lib/tourneyResults";
+import "./results.css";
 
 export const metadata = seo.getMetadataForPath("/tourney");
 
-const competitiveRules = [
-  {
-    title: "Format",
-    body: "6v6 Overwatch. Double elimination. Bracket matches are Best of 5 and Grand Final is Best of 7 with no bracket reset.",
-  },
-  {
-    title: "Teams",
-    body: "Twelve captains lead twelve teams. Each roster has seven players: 2 Tank, 2 Damage, 2 Support, and 1 Flex.",
-  },
-  {
-    title: "Roles",
-    body: "No role swaps. Players must play the role they registered, drafted, or were assigned for that series.",
-  },
-  {
-    title: "Subs",
-    body: "The Flex player can substitute between maps. Once substituted into a role for a match, that player stays role-locked for the match.",
-  },
-  {
-    title: "Check-In",
-    body: "Teams must field 6 eligible players within 10 minutes of match time or admins may call a forfeit.",
-  },
-  {
-    title: "Maps",
-    body: "Map 1 is Control. After that, the previous map loser picks the next legal map, mode, and starting side.",
-  },
-  {
-    title: "Hero Bans",
-    body: "Each team bans 1 hero per map. Teams cannot repeat their own ban in a series, and both bans cannot be from the same role.",
-  },
-  {
-    title: "Conduct",
-    body: "No cheating, throwing, griefing, harassment, stream sniping, lobby leaks, alt play, impersonation, or intentional stalling.",
-  },
-  {
-    title: "Penalties",
-    body: "Rule breaks can result in immediate penalty or disqualification. No warnings are required.",
-  },
-  {
-    title: "Community Event Notice",
-    body: "Roo Industries runs this tournament independently. It is not endorsed, sponsored, or affiliated with Blizzard Entertainment.",
-  },
-];
-
-const scheduleItems = [
-  {
-    title: "Registration closes",
-    dateLabel: "July 22, 2026",
-    body: "Registration closes at 00:00 UTC.",
-  },
-  {
-    title: "Draft day",
-    dateLabel: "July 26, 2026",
-    body: "The blind snake draft begins at 19:00 UTC. Captains see each player's rank and top three heroes.",
-  },
-  {
-    title: "Event dates",
-    dateLabel: "August 15-16, 2026",
-    body: "The tournament runs across both event days. All match times are official and listed in PST.",
-  },
-  {
-    title: "Day 1 schedule",
-    dateLabel: "Saturday, August 15, 2026",
-    body: "Winners Round 1 at 12:00 PM, Winners Round 2 at 1:45 PM, Winners Round 3 and Losers Round 1 at 3:30 PM, and Losers Round 2 at 5:15 PM PST.",
-  },
-  {
-    title: "Day 2 schedule",
-    dateLabel: "Sunday, August 16, 2026",
-    body: "Losers Round 1 at 12:00 PM, Winners Semifinals and Losers Semifinals at 1:45 PM, Losers Finals at 3:30 PM, and the Grand Final at 5:15 PM PST.",
-  },
-  {
-    title: "Winner payouts",
-    dateLabel: "By August 30, 2026",
-    body: "Tournament winner payouts will be sent within 14 days after the tournament ends.",
-  },
-  {
-    title: "Charity payouts",
-    dateLabel: "By October 31, 2026",
-    body: "Charity donations will be finalized and sent. Proof of each donation will be posted publicly in the Roo Industries Discord.",
-  },
-];
-
-const bracketItems = [
-  {
-    title: "Bracket access",
-    body: "The live bracket page shows matchups and results after owner setup.",
-  },
-  {
-    title: "Format",
-    body: "Double elimination, Best of 5 bracket matches, and a Best of 7 Grand Final.",
-  },
-  {
-    title: "Grand Final path",
-    body: "The winners-side finalist and the losers-side finalist both qualify for Grand Final.",
-  },
-];
-
-const infoItems = [
-  {
-    title: "Format",
-    body: "6v6 Overwatch, double elimination, Best of 5 bracket matches, and a Best of 7 Grand Final.",
-  },
-  {
-    title: "Draft format",
-    body: "Twelve captains use a blind snake draft. Round 1 selects a Master player, Round 2 selects a Grandmaster player, and the remaining roster is filled from the approved pool.",
-  },
-  {
-    title: "Team composition",
-    body: "Each seven-player roster has 2 Tank, 2 Damage, 2 Support, and 1 Flex player.",
-  },
-  {
-    title: "Prize pool",
-    body: "$2,000 USD for 1st and 2nd place. Split is TBD and payouts are handled after final results are confirmed.",
-  },
-  {
-    title: "Payment method",
-    body: "All tournament-related payments will be made by PayPal only, including winner payouts, prize-equivalent payouts, and charity donations.",
-  },
-  {
-    title: "Website proceeds",
-    body: "100% of Roo Industries website revenue from August 1-16, 2026 goes to charity recipients including GAWS, (RED), and The Trevor Project.",
-  },
-  {
-    title: "Giveaways",
-    body: "Community prizes and the client-only AMD Ryzen 9 9900X3D draw are listed in the giveaway section below. The Ryzen 9 9900X3D draw requires a qualifying Roo Industries purchase.",
-  },
-];
-
-const giveawayItems = [
-  {
-    title: "Community Discord giveaway",
-    body: "3 Logitech G PRO X2 SUPERSTRIKE wireless gaming mice and 32 GB of RAM. Community entry requirements will be posted before entries open.",
-  },
-  {
-    title: "Client-only AMD Ryzen 9 9900X3D draw",
-    body: "A qualifying Roo Industries purchase is required for the Ryzen 9 9900X3D draw. This draw is separate from the community giveaway.",
-  },
-  {
-    title: "Giveaway window",
-    body: "The giveaway window will run for 30 days. Roo Industries may start the community giveaway before the tournament so players can join the Discord early.",
-  },
-  {
-    title: "Prize fulfillment",
-    body: "Winners will receive the promised item when U.S. shipping is available, or the USD price equivalent based on the U.S. pricing market. Fulfillment will happen within 14 days after winners are confirmed.",
-  },
-];
-
-const charityRecipients = [
-  {
-    title: "(RED)",
-    body: "Donation recipient.",
-    href: "https://www.red.org/",
-  },
-  {
-    title: "GAWS",
-    body: "Geelong Animal Welfare Society supports animals in need across the Geelong region.",
-    href: "https://www.gaws.org.au/",
-    logo: {
-      src: "/tourney/charities/gaws-logo.png",
-      webp: "/tourney/charities/gaws-logo.webp",
-      alt: "GAWS - Geelong Animal Welfare Society",
-    },
-  },
-  {
-    title: "The Trevor Project",
-    body: "Donation recipient.",
-    href: "https://www.thetrevorproject.org/",
-  },
-];
-
-const DashboardPage = ({ hosts, loginOutcome = "", session }) => (
-  <TourneyShell session={session}>
-    <section className="tourney-hero" aria-labelledby="tourney-title">
-      <div>
-        <span className="tourney-badge">Overwatch Creator Tournament</span>
-        <h1 id="tourney-title">
-          <span className="tourney-title-line">6v6 Legacy Series</span>
-        </h1>
-        <p>
-          Event information, rules, roster status, draft updates, and bracket
-          access for the Overwatch Creator Tournament.
-        </p>
-        <div className="tourney-registration-status" role="status">
-          <strong>Registration closed</strong>
-          <span>Team draft: July 26, 2026 at 19:00 UTC</span>
-        </div>
-        <TourneyPromotionLinks />
-      </div>
-    </section>
-
-    <TourneyLoginOutcome outcome={loginOutcome} />
-
-    {session ? (
-      <ConnectedAccounts
-        flow="tourney"
-        nextPath="/tourney"
-        variant="tourney"
-      />
-    ) : null}
-
-    {session?.role === "player" ? <TourneyFreeSession /> : null}
-
-    <TourneyHosts hosts={hosts} />
-
-    <div className="tourney-grid">
-      <Section id="dates" eyebrow="Important Dates" title="Important Dates" wide>
-        <div className="tourney-date-callout">
-          <strong>Draft begins July 26, 2026</strong>
-          <span>
-            The twelve captains begin the blind snake draft at 19:00 UTC. Round
-            1 is a Master pick, Round 2 is a Grandmaster pick, and later rounds
-            complete each seven-player roster.
-          </span>
-        </div>
-        <ul className="tourney-card-list tourney-date-list">
-          {scheduleItems.map((item) => (
-            <li key={item.title}>
-              <strong>{item.title}</strong>
-              {item.dateLabel ? (
-                <span className="tourney-date-highlight">{item.dateLabel}</span>
-              ) : null}
-              <span>{item.body}</span>
-            </li>
-          ))}
-        </ul>
-      </Section>
-
-      <Section
-        id="info"
-        eyebrow="Event Information"
-        title="Event Information"
-        wide
-      >
-        <div className="tourney-action-callout">
-          <strong>No warnings for rule breaks</strong>
-          <span>
-            Any rule break can result in immediate penalty or disqualification.
-            Hosts and admins will rule based on proof, impact, and cooperation.
-          </span>
-        </div>
-        <ul className="tourney-info-list">
-          {infoItems.map((item) => (
-            <li key={item.title}>
-              <strong>{item.title}</strong>
-              <span>{item.body}</span>
-            </li>
-          ))}
-        </ul>
-      </Section>
-
-      <Section id="charities" eyebrow="Charity Drive" title="Charity Revenue Window" wide>
-        <div className="tourney-charity-callout">
-          <strong>August 1-16, 2026</strong>
-          <span>
-            Roo Industries is independently donating 100% of website revenue
-            from the two weeks before the tournament and the August 15-16
-            tournament days to charity recipients including GAWS, (RED), and
-            The Trevor Project.
-          </span>
-          <small>
-            Charity listing does not imply sponsorship, endorsement, or
-            administration of the tournament.
-          </small>
-        </div>
-        <div className="tourney-charity-grid">
-          {charityRecipients.map((recipient) => (
-            <a
-              className={
-                recipient.logo
-                  ? "tourney-charity-card has-logo"
-                  : "tourney-charity-card"
-              }
-              href={recipient.href}
-              key={recipient.title}
-              rel="noopener noreferrer"
-              target="_blank"
-            >
-              {recipient.logo ? (
-                <span className="tourney-charity-logo">
-                  <picture>
-                    <source srcSet={recipient.logo.webp} type="image/webp" />
-                    <img
-                      alt={recipient.logo.alt}
-                      height="259"
-                      loading="lazy"
-                      src={recipient.logo.src}
-                      width="640"
-                    />
-                  </picture>
-                </span>
-              ) : (
-                <span className="tourney-charity-name">{recipient.title}</span>
-              )}
-              <strong>{recipient.title}</strong>
-              <span>{recipient.body}</span>
-            </a>
-          ))}
-        </div>
-      </Section>
-
-      <Section id="giveaway" eyebrow="Giveaway" title="Giveaway Details" wide>
-        <div className="tourney-giveaway-callout">
-          <strong>Community prizes and a client-only draw</strong>
-          <span>
-            The public giveaway details will separate Discord community entries
-            from the client-only AMD Ryzen 9 9900X3D draw, which requires a
-            qualifying Roo Industries purchase.
-          </span>
-        </div>
-        <ul className="tourney-card-list tourney-giveaway-list">
-          {giveawayItems.map((item) => (
-            <li key={item.title}>
-              <strong>{item.title}</strong>
-              <span>{item.body}</span>
-            </li>
-          ))}
-        </ul>
-      </Section>
-
-      <Section id="rules" eyebrow="Rules" title="Competitive Rules" wide>
-        <p className="tourney-rulebook-intro">
-          If you join, check in, or play a map, these rules apply. Owner and
-          designated caster rulings are final.
-        </p>
-        <div className="tourney-map-process">
-          <strong>Map and hero-ban process in plain English</strong>
-          <p>
-            This tournament uses an OWCS-style map and hero-ban process. Map 1
-            is Control and the higher seed chooses the Control map and starting
-            side. After that, the team that lost the previous map picks the next
-            legal map, mode, and starting side. Each team bans one hero per map;
-            teams cannot repeat their own hero ban in the same series, and both
-            bans on a map cannot be from the same role.
-          </p>
-        </div>
-        <ol className="tourney-rulebook">
-          {competitiveRules.map((section) => (
-            <li className="tourney-rule" key={section.title}>
-              <h3>{section.title}</h3>
-              <p>{section.body}</p>
-            </li>
-          ))}
-        </ol>
-      </Section>
-
-      <Section id="bracket" eyebrow="Bracket" title="Bracket" wide>
-        <ul className="tourney-card-list tourney-bracket-list">
-          {bracketItems.map((item) => (
-            <li key={item.title}>
-              <strong>{item.title}</strong>
-              <span>{item.body}</span>
-            </li>
-          ))}
-        </ul>
-        <p className="tourney-section-link">
-          <a href="/tourney/bracket">Open live bracket</a>
-        </p>
-      </Section>
-
-    </div>
-  </TourneyShell>
-);
-
-export default async function TourneyPage({ searchParams } = {}) {
-  const [session, hosts, resolvedSearchParams] = await Promise.all([
-    getTourneySession(),
-    getTourneyHostsWithLiveStatus(),
-    searchParams || Promise.resolve({}),
-  ]);
-
+function PodiumFinish({ place, label, team, medal }) {
   return (
-    <>
-      <JsonLd data={seo.buildTourneyEventJsonLd()} />
-      <DashboardPage
-        hosts={hosts}
-        loginOutcome={session ? resolvedSearchParams?.notice || "" : ""}
-        session={session}
-      />
-    </>
+    <li className={`tourney-podium-finish is-${medal}`} value={place}>
+      {place === 1 ? (
+        <div className="tourney-podium-trophy" aria-hidden="true">
+          <Trophy strokeWidth={1.15} />
+        </div>
+      ) : (
+        <div className="tourney-podium-medal" aria-hidden="true">
+          <Medal strokeWidth={1.2} />
+        </div>
+      )}
+      <div className="tourney-podium-team">
+        <span className="tourney-podium-place">{label}</span>
+        <h3>{team}</h3>
+      </div>
+      <div className="tourney-podium-step" aria-hidden="true">
+        <span>{place}</span>
+        <div className="tourney-podium-step-line" />
+      </div>
+    </li>
+  );
+}
+
+export default function TourneyResultsPage() {
+  return (
+    <TourneyShell>
+      <section className="tourney-hero" aria-labelledby="tourney-title">
+        <div>
+          <span className="tourney-badge">Overwatch Creator Tournament</span>
+          <h1 id="tourney-title"><span className="tourney-title-line">{results.event}</span></h1>
+          <p>Thank you to every player, host, caster, and everyone who watched.</p>
+          <div className="tourney-registration-status" role="status">
+            <strong>Event complete</strong><span>{results.dates}</span>
+          </div>
+        </div>
+      </section>
+      <div className="tourney-grid">
+        <Section id="results" eyebrow="Final results" title="Our winners" wide>
+          <ol className="tourney-podium" aria-label="Tournament podium" role="list">
+            <PodiumFinish place={1} label="Champions" team={results.champion} medal="gold" />
+            <PodiumFinish place={2} label="Runners-up" team={results.runnerUp} medal="silver" />
+            <PodiumFinish place={3} label="Third place" team={results.third} medal="bronze" />
+          </ol>
+          <div className="tourney-final-score" aria-label={`Grand final: ${results.champion} ${results.finalScore[0]}, ${results.runnerUp} ${results.finalScore[1]}`}>
+            <span className="tourney-final-label">Grand final</span>
+            <div className="tourney-final-match">
+              <span>{results.champion}</span>
+              <strong>{results.finalScore[0]}<span aria-hidden="true">–</span>{results.finalScore[1]}</strong>
+              <span>{results.runnerUp}</span>
+            </div>
+          </div>
+        </Section>
+        <Section id="next" eyebrow="The next tournament" title="Stay Tuned." wide>
+          <p>Keep an eye out for what comes next.</p>
+        </Section>
+      </div>
+    </TourneyShell>
   );
 }
