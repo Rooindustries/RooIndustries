@@ -59,6 +59,7 @@ describe("home section hydration", () => {
   test("defers cached client data until after the server fallback hydrates", async () => {
     const page = <MemoryRouter><Services initialData={null} /></MemoryRouter>;
     container.innerHTML = renderToString(page);
+    expect(container.querySelector(".ri-services-skeleton").closest("[data-section-placeholder]")).not.toBeNull();
     window.sessionStorage.setItem(
       "roo-home-data:services",
       JSON.stringify(CACHED_SERVICES)
