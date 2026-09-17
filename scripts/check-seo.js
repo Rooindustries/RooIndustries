@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const seo = require("../src/lib/seo");
-const { ALL_PUBLIC_ROUTES } = require("../src/lib/routes");
+const { ALL_PUBLIC_ROUTES, INDEXABLE_ROUTES, NOINDEX_ROUTES } = require("../src/lib/routes");
 
 const titleRange = [50, 60];
 const descriptionRange = [150, 160];
@@ -26,6 +26,17 @@ metadataRoutes.forEach((route) => {
     errors.push(`[${route}] Missing route metadata.`);
   }
 });
+
+for (const route of INDEXABLE_ROUTES) {
+  if (seo.routeMeta[route]?.noindex !== false) {
+    errors.push(`[${route}] Indexable route has conflicting robots metadata.`);
+  }
+}
+for (const route of NOINDEX_ROUTES) {
+  if (seo.routeMeta[route]?.noindex !== true) {
+    errors.push(`[${route}] Private route must be marked noindex.`);
+  }
+}
 
 const checkLength = (label, value, min, max, route) => {
   const len = String(value || "").trim().length;

@@ -1,3 +1,5 @@
+const { NOINDEX_ROUTES } = require("./routes");
+
 const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || "https://www.rooindustries.com").replace(/\/$/, "");
 
 const { CONTACT_EMAIL } = require("./companyContent");
@@ -105,13 +107,13 @@ const routeMeta = {
     title: "Referral Partner Login | Roo Industries Performance Portal",
     description:
       "Sign in to your Roo Industries referral portal to track clicks, monitor conversions, review payout progress, and manage your active partner account securely.",
-    noindex: false,
+    noindex: true,
   },
   "/referrals/register": {
     title: "Referral Program Sign Up | Roo Industries Partner Access",
     description:
       "Create your Roo Industries referral partner account to get a unique tracking link, monitor conversions, and earn rewards for qualified customer referrals.",
-    noindex: false,
+    noindex: true,
   },
   "/referrals/dashboard": {
     title: "Referral Earnings Dashboard | Roo Industries Partner Portal",
@@ -152,7 +154,7 @@ const normalizePath = (value) => {
 };
 
 const isProd =
-  (process.env.VERCEL_ENV || process.env.NEXT_PUBLIC_VERCEL_ENV || "production") ===
+  (process.env.VERCEL_ENV || process.env.NEXT_PUBLIC_VERCEL_ENV || process.env.NODE_ENV || "development").trim().toLowerCase() ===
   "production";
 
 const resolveCanonical = (pathname) => {
@@ -171,7 +173,7 @@ function buildMetadata({
 }) {
   const canonicalUrl = resolveCanonical(pathname);
   const normalizedPath = normalizePath(pathname);
-  const forceNoIndex = !isProd || noindex;
+  const forceNoIndex = !isProd || noindex || NOINDEX_ROUTES.includes(normalizedPath);
   const imageUrl = image.startsWith("http") ? image : `${siteUrl}${image}`;
 
   return {
