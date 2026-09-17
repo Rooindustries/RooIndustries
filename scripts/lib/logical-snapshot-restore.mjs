@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { validateFullLogicalSnapshot } from "../../src/server/tourney/snapshotContract.js";
+import { validateFullLogicalSnapshot } from "../../src/server/archive/snapshotContract.js";
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 

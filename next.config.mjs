@@ -136,10 +136,6 @@ const nextConfig = {
         source: '/:path*',
         headers: globalSecurityHeaders,
       },
-      {
-        source: '/tourney/overlay/:path*',
-        headers: overlayFrameHeaders,
-      },
       ...assets.map((asset) => ({
         source: `/${asset.replace(/[.*+?^${}()|[\]\\:]/g, "\\$&")}`,
         headers: assetCacheHeaders,

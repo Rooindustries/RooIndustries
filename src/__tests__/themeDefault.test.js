@@ -20,7 +20,6 @@ describe("site theme default", () => {
 
   test.each([
     "src/components/Navbar.jsx",
-    "app/tourney/TourneyThemeToggle.jsx",
   ])("keeps Roo Blue opt-in while treating missing and legacy values as dark in %s", (relativePath) => {
     const source = readSource(relativePath);
 

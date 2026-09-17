@@ -10,14 +10,13 @@ export function middleware(req) {
 
   if (process.env.SALES_PREVIEW_READ_ONLY === "1" && process.env.VERCEL_ENV !== "production") {
     const readableApi = /^\/api\/content\/[a-z-]+$/.test(pathname) || pathname === "/api/bookingAvailability";
-    if (!["GET", "HEAD"].includes(req.method) || (pathname.startsWith("/api/") && !readableApi)) {
+    if (pathname.startsWith("/auth/") || !["GET", "HEAD"].includes(req.method) || (pathname.startsWith("/api/") && !readableApi)) {
       return NextResponse.json({ ok: false, error: "This preview does not create bookings or accept payments." }, { status: 503 });
     }
   }
 
   if (
-    !pathname.startsWith("/api/") &&
-    pathname !== "/tourney/overlay/caster"
+    !pathname.startsWith("/api/")
   ) {
     const sensitiveKeys = new Set([
       "data",

@@ -217,8 +217,6 @@ export const alignToHashTarget = ({
   }
 
   userIntentHandler = (event) => {
-    if (firstAlign) return;
-
     if (event?.type === "keydown") {
       const key = String(event.key || "");
       const scrollKeys = new Set([
@@ -248,7 +246,20 @@ export const alignToHashTarget = ({
     if (!el) {
       if (now < deadline) {
         rafId = window.requestAnimationFrame(tick);
+      } else {
+        finish({ notify: true });
       }
+      return;
+    }
+
+    const hasPendingLayout = [...document.querySelectorAll("[data-section-placeholder]")]
+      .some((placeholder) =>
+        el.contains(placeholder) ||
+        Boolean(placeholder.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)
+      );
+    if (hasPendingLayout && now < deadline) {
+      markUnstable();
+      rafId = window.requestAnimationFrame(tick);
       return;
     }
 
@@ -283,7 +294,7 @@ export const alignToHashTarget = ({
     const readyToAlign =
       preAlignStableFrames >= preAlignStableFramesRequired;
 
-    if (firstAlign && !readyToAlign) {
+    if (firstAlign && !readyToAlign && now < deadline) {
       rafId = window.requestAnimationFrame(tick);
       return;
     }

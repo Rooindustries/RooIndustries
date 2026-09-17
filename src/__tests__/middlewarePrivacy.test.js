@@ -57,13 +57,13 @@ describe("URL privacy middleware", () => {
     expect(clean.headers.get("cdn-cache-control")).toBeNull();
   });
 
-  test("preserves signed caster overlay tokens", () => {
+  test("strips credentials from retired caster URLs", () => {
     const request = new NextRequest(
       "https://www.rooindustries.com/tourney/overlay/caster?token=signed-match-token&theme=dark"
     );
     const response = middleware(request);
 
-    expect(response.headers.get("x-middleware-next")).toBe("1");
-    expect(response.headers.get("location")).toBeNull();
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://www.rooindustries.com/tourney/overlay/caster?theme=dark");
   });
 });

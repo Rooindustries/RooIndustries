@@ -178,7 +178,7 @@ export default function Packages({
 
   if (isLoading) {
     return (
-      <section className="ri-packages-section relative z-10 pt-16 pb-24 text-center text-ink" aria-hidden="true">
+      <section className="ri-packages-section relative z-10 pt-16 pb-24 text-center text-ink" aria-hidden="true" data-section-placeholder="">
         <div className="mt-12 px-6">
           <div className="ri-packages-skeleton mx-auto max-w-6xl min-h-[1320px] rounded-3xl border border-line-input bg-skeleton" />
         </div>

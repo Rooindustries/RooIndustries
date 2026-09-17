@@ -3,8 +3,8 @@ import crypto from "node:crypto";
 import {
   generateSnapshotTransportKeyPair,
   openSnapshotTransportPayload,
-} from "../../src/server/tourney/snapshotTransportCrypto.js";
-import { stableSnapshotJson } from "../../src/server/tourney/snapshotContract.js";
+} from "../../src/server/archive/snapshotTransportCrypto.js";
+import { stableSnapshotJson } from "../../src/server/archive/snapshotContract.js";
 import { parseSupabaseDatabaseTargetPayload } from "./supabase-database-target-stdin.mjs";
 
 const MAX_RESPONSE_BYTES = 64 * 1024;
