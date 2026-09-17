@@ -797,7 +797,11 @@ describe("release runtime environment validation", () => {
   );
 
   test("referral releases do not require retired tournament credentials or Discord roles", () => {
-    const retired = Object.fromEntries(Object.keys(supabaseTourneyEnv).filter(key => key.startsWith("TOURNEY_") || key.startsWith("DISCORD_")).map(key => [key, ""]));
+    const retired = Object.fromEntries(
+      Object.keys({ ...validReleaseEnv(), ...supabaseTourneyEnv })
+        .filter(key => key.startsWith("TOURNEY_") || key.startsWith("DISCORD_"))
+        .map(key => [key, ""])
+    );
     const result = validate({ ...supabaseTourneyEnv, ...retired });
     expect(result.status).toBe(0);
   });

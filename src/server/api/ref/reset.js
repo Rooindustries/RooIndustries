@@ -1,6 +1,7 @@
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../../../lib/passwordPolicy.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
@@ -36,12 +37,11 @@ export default async function handler(req, res) {
     const normalizedPassword = String(password || "");
     if (
       !/^[a-f0-9]{64}$/i.test(String(token || "")) ||
-      normalizedPassword.length < 10 ||
-      normalizedPassword.length > 128
+      !isValidNewPassword(normalizedPassword)
     ) {
       return res
         .status(400)
-        .json({ ok: false, error: "Use a password between 10 and 128 characters." });
+        .json({ ok: false, error: NEW_PASSWORD_REQUIREMENT });
     }
 
     const clientAddress = getClientAddress(req);

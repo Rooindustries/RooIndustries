@@ -154,6 +154,30 @@ describe("referral authenticated recovery API", () => {
     expect(mockDataClientOptions).toContainEqual({ allowLegacyFallback: false });
   });
 
+  test.each(["a".repeat(73), `${"é".repeat(36)}a`, `${"🔒".repeat(18)}a`])(
+    "rejects an oversized password without using or clearing recovery: %s", async (password) => {
+      const res = createRes();
+      await recoverPassword(createReq({ password }), res);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error).toContain("72 UTF-8 bytes");
+      expect(mockGetUser).not.toHaveBeenCalled();
+      expect(mockResumeCredentialOperation).not.toHaveBeenCalled();
+      expect(mockUpdatePassword).not.toHaveBeenCalled();
+      expect(mockReconcileCredentialSource).not.toHaveBeenCalled();
+      expect(mockClearReferralSessionCookie).not.toHaveBeenCalled();
+      expect(mockClearLegacySupabaseSession).not.toHaveBeenCalled();
+    }
+  );
+
+  test.each(["a".repeat(72), "é".repeat(36), "🔒".repeat(18)])(
+    "recovers using the exact accepted password: %s", async (password) => {
+      const res = createRes();
+      await recoverPassword(createReq({ password }), res);
+      expect(res.statusCode).toBe(200);
+      expect(mockUpdatePassword).toHaveBeenCalledWith(expect.objectContaining({ password }));
+    }
+  );
+
   test("updates both Auth and creator credential sources from a verified OTP session", async () => {
     const req = createReq({ password: "new-password-123" });
     const res = createRes();

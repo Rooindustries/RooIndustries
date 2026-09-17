@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { getSupabaseBrowserClient } from "../lib/supabaseBrowser";
+import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../lib/passwordPolicy";
 
 const RESET_TOKEN_STORAGE_KEY = "referral_reset_token";
 const PASSWORD_UPDATE_TIMEOUT_MS = 15_000;
@@ -126,10 +127,10 @@ export default function RefReset() {
       setOutcome({ type: "error", message: "Passwords do not match." });
       return;
     }
-    if (pass1.length < 10 || pass1.length > 128) {
+    if (!isValidNewPassword(pass1)) {
       setOutcome({
         type: "error",
-        message: "Use a password between 10 and 128 characters.",
+        message: NEW_PASSWORD_REQUIREMENT,
       });
       return;
     }
@@ -249,12 +250,16 @@ export default function RefReset() {
           <input
             id="ref-reset-new-password"
             type="password"
+            aria-describedby="ref-reset-password-requirement"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl
                        outline-none focus:border-info-border transition text-base text-ink"
             placeholder="Enter new password"
             value={pass1}
             onChange={(event) => setPass1(event.target.value)}
           />
+          <p id="ref-reset-password-requirement" className="mt-2 text-xs text-ink-muted">
+            {NEW_PASSWORD_REQUIREMENT}
+          </p>
         </div>
 
         <div>

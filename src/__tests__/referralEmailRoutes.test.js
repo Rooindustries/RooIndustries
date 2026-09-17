@@ -594,7 +594,26 @@ describe("Supabase-primary referral email routes", () => {
     );
   });
 
-  test("creates registration documents and the verification dispatch in one RPC", async () => {
+  test.each(["a".repeat(73), `${"é".repeat(36)}a`, `${"🔒".repeat(18)}a`])(
+    "rejects oversized registration passwords before creating pending accounts: %s", async (password) => {
+      const loaded = loadRegisterHandler();
+      const response = createResponse();
+      await loaded.handler({
+        method: "POST",
+        body: { discordUsername: "Creator", email: "creator@example.com", paypalEmail: "creator-paypal@example.com", slug: "creator-code", password },
+      }, response);
+      expect(response.statusCode).toBe(400);
+      expect(response.body.error).toContain("72 UTF-8 bytes");
+      expect(loaded.fetch).not.toHaveBeenCalled();
+      expect(loaded.resolveSupabaseCreatorRegistrationConflicts).not.toHaveBeenCalled();
+      expect(loaded.transaction).not.toHaveBeenCalled();
+      expect(loaded.enqueueReferralEmailMutation).not.toHaveBeenCalled();
+      expect(loaded.deliverReferralEmailDispatch).not.toHaveBeenCalled();
+    }
+  );
+
+  test.each([testPassword, "a".repeat(72), "é".repeat(36), "🔒".repeat(18)])(
+    "creates registration documents and verification dispatch for accepted passwords: %s", async (password) => {
     const loaded = loadRegisterHandler();
     const response = createResponse();
 
@@ -607,7 +626,7 @@ describe("Supabase-primary referral email routes", () => {
           email: "creator@example.com",
           paypalEmail: "creator-paypal@example.com",
           slug: "creator-code",
-          password: testPassword,
+          password,
         },
       },
       response

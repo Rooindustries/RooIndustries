@@ -333,6 +333,40 @@ describe("pending Discord referral linking", () => {
     );
   });
 
+  test.each(["discord", "google"])("projects a retired tournament %s identity without merging its principal", async (provider) => {
+    const rpc = jest.fn().mockResolvedValue({
+      data: { linked: true, domain: "referral" },
+      error: null,
+    });
+    const subject = "224466880022446688";
+    const result = await linkPendingDiscordIdentity({
+      adminClient: { rpc },
+      pendingUser: {
+        id: pendingUserId,
+        identities: [{ provider, provider_id: subject }],
+      },
+      primaryAccount,
+      primaryUserId,
+      provider,
+      resolveAccount: jest.fn().mockResolvedValue({
+        ...pendingAccount,
+        roles: ["tourney_retired"],
+        status: "active",
+      }),
+    });
+
+    expect(result).toMatchObject({ linked: true, crossDomain: true, provider });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith("roo_link_domain_social_identity", expect.objectContaining({
+      p_domain: "referral",
+      p_principal_id: primaryAccount.principal_id,
+      p_provider: provider,
+      p_provider_subject: subject,
+    }));
+    expect(rpc).not.toHaveBeenCalledWith("roo_merge_account_principals", expect.anything());
+    expect(rpc).not.toHaveBeenCalledWith("roo_create_reauth_grant", expect.anything());
+  });
+
   test("projects a tourney-owned Google into the creator without merging", async () => {
     const rpc = jest
       .fn()

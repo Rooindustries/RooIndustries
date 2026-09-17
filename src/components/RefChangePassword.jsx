@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../lib/passwordPolicy";
 
 const PASSWORD_PENDING_MESSAGE =
   "Your password change is saving. It will finish in a moment.";
@@ -47,10 +48,10 @@ export default function RefChangePassword() {
       setOutcome({ type: "error", message: "Passwords do not match." });
       return;
     }
-    if (pass1.length < 10 || pass1.length > 128) {
+    if (!isValidNewPassword(pass1)) {
       setOutcome({
         type: "error",
-        message: "Use a password between 10 and 128 characters.",
+        message: NEW_PASSWORD_REQUIREMENT,
       });
       return;
     }
@@ -167,12 +168,16 @@ export default function RefChangePassword() {
             id="ref-change-new-password"
             autoComplete="new-password"
             type="password"
+            aria-describedby="ref-change-password-requirement"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl
                        outline-none focus:border-info-border transition text-base"
             placeholder="Enter new password"
             value={pass1}
             onChange={(e) => setPass1(e.target.value)}
           />
+          <p id="ref-change-password-requirement" className="mt-2 text-xs text-ink-muted">
+            {NEW_PASSWORD_REQUIREMENT}
+          </p>
         </div>
 
         <div>

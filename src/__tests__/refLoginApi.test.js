@@ -105,14 +105,14 @@ const createRes = () => ({
   },
 });
 
-const makeReferral = async () => ({
+const makeReferral = async (password = "correct-password") => ({
   _id: "ref_creator_1",
   _rev: "referral-revision-1",
   name: "Creator",
   slug: { current: "creator-code" },
   creatorEmail: "creator@example.com",
   paypalEmail: "payout@example.com",
-  creatorPassword: await bcrypt.hash("correct-password", 4),
+  creatorPassword: await bcrypt.hash(password, 4),
 });
 
 const findReferralByIdentifier = (referral, query, identifier) => {
@@ -199,6 +199,46 @@ afterAll(() => {
 describe("referral login API", () => {
   test("disables broad Supabase fallback for credential reads", () => {
     expect(mockDataClientOptions).toContainEqual({ allowLegacyFallback: false });
+  });
+
+  test.each([
+    ["supabase", "a".repeat(128)],
+    ["supabase", "a".repeat(73)],
+    ["supabase", "é".repeat(37)],
+    ["supabase", "🔒".repeat(19)],
+    ["sanity", "a".repeat(128)],
+    ["sanity", "a".repeat(73)],
+    ["sanity", "é".repeat(37)],
+    ["sanity", "🔒".repeat(19)],
+  ])("offers recovery before account reads or credential migration for an overlong %s sign-in", async (backend, password) => {
+    process.env.DATA_PRIMARY_BACKEND = backend;
+    mockAuthenticateSupabaseAccount.mockResolvedValue({ ok: false, reason: "invalid_credentials" });
+    mockFetch.mockResolvedValue({ ...(await makeReferral()), creatorPassword: password });
+    const res = createRes();
+
+    await login(createReq({ code: "creator-code", password }), res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe("This password exceeds the supported sign-in length. Use Forgot Password to choose a new password.");
+    expect(mockAuthenticateSupabaseAccount).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockPatch).not.toHaveBeenCalled();
+    expect(mockInstallLegacySupabaseSession).not.toHaveBeenCalled();
+    expect(res.headers["Set-Cookie"]).toBeUndefined();
+  });
+
+  test.each([
+    ["unavailable", 503, "Login is temporarily unavailable. Please try again shortly."],
+    ["invalid_credentials", 401, "Invalid login details. Use Forgot Password if you need to reset access."],
+  ])("retains the normal %s response for supported password lengths", async (reason, status, error) => {
+    process.env.DATA_PRIMARY_BACKEND = "supabase";
+    mockAuthenticateSupabaseAccount.mockResolvedValue({ ok: false, reason });
+    const res = createRes();
+
+    await login(createReq({ code: "creator-code", password: "🔒".repeat(18) }), res);
+
+    expect(res.statusCode).toBe(status);
+    expect(res.body).toEqual({ ok: false, error });
   });
 
   test("links a pending Discord identity after creator password authentication", async () => {
@@ -428,15 +468,15 @@ describe("referral login API", () => {
     expect(mockInstallLegacySupabaseSession).toHaveBeenCalledTimes(1);
   });
 
-  test("logs in with a referral code", async () => {
-    const referral = await makeReferral();
+  test.each(["correct-password", "🔒".repeat(5), "🔒".repeat(18)])("logs in with a referral code and existing password: %s", async (password) => {
+    const referral = await makeReferral(password);
     mockFetch.mockImplementation((query, params = {}) =>
       Promise.resolve(findReferralByIdentifier(referral, query, params.identifier))
     );
 
     const req = createReq({
       code: " CREATOR-CODE ",
-      password: "correct-password",
+      password,
       rememberMe: true,
     });
     const res = createRes();
@@ -659,10 +699,10 @@ describe("referral login API", () => {
     expect(res.headers["Set-Cookie"]).toBeUndefined();
   });
 
-  test("preserves a legacy password and upgrades its storage after login", async () => {
+  test.each(["correct-password", "🔒".repeat(5)])("preserves a legacy password and upgrades its storage after login: %s", async (password) => {
     const referral = {
       ...(await makeReferral()),
-      creatorPassword: "correct-password",
+      creatorPassword: password,
       passwordResetRequired: false,
     };
     mockFetch.mockImplementation((query, params = {}) =>
@@ -671,7 +711,7 @@ describe("referral login API", () => {
     const res = createRes();
 
     await login(
-      createReq({ code: "creator-code", password: "correct-password" }),
+      createReq({ code: "creator-code", password }),
       res
     );
 
@@ -686,7 +726,7 @@ describe("referral login API", () => {
     });
     expect(storedUpgrade.passwordStorageUpgradedAt).toEqual(expect.any(String));
     await expect(
-      bcrypt.compare("correct-password", storedUpgrade.creatorPassword)
+      bcrypt.compare(password, storedUpgrade.creatorPassword)
     ).resolves.toBe(true);
     expect(mockPatchCommit).toHaveBeenCalledWith({ visibility: "sync" });
   });
