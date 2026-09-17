@@ -1,3 +1,9 @@
+import { render } from "@testing-library/react";
+import { Analytics } from "@vercel/analytics/react";
+import AppClientRuntime from "../next/AppClientRuntime";
+
+jest.mock("@vercel/analytics/react", () => ({ Analytics: jest.fn(() => null) }));
+
 import {
   loadSeorceScript,
   shouldLoadSeorce,
@@ -54,4 +60,11 @@ describe("Seorce runtime loading", () => {
     errorSpy.mockRestore();
     warnSpy.mockRestore();
   });
+});
+
+test("the shared runtime tracks public routes without a sales router", () => {
+  render(<AppClientRuntime />);
+  const { beforeSend } = Analytics.mock.calls.at(-1)[0];
+  expect(beforeSend({ type: "pageview", url: "https://www.rooindustries.com/tourney?email=private@example.invalid#token" })).toEqual({ type: "pageview", url: "https://www.rooindustries.com/tourney" });
+  expect(beforeSend({ type: "pageview", url: "https://www.rooindustries.com/referrals/reset?token=secret" })).toBeNull();
 });

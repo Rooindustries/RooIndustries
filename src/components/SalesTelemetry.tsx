@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
-import { Analytics } from "@vercel/analytics/react";
-import { captureSalesAttribution, salesPath, sanitizeAnalyticsEvent } from "../lib/salesAttribution";
+import { captureSalesAttribution, salesPath } from "../lib/salesAttribution";
 import { trackEvent } from "../lib/analytics";
 
 export default function SalesTelemetry() {
@@ -17,5 +16,5 @@ export default function SalesTelemetry() {
       if (trackEvent("service_visit", { page: path })) sessionStorage.setItem(key, "1");
     } catch {}
   }, [path, location.search]);
-  return path ? <Analytics beforeSend={sanitizeAnalyticsEvent} /> : null;
+  return null;
 }

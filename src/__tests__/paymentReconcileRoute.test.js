@@ -188,6 +188,35 @@ describe("payment reconciliation route authorization", () => {
     }
   );
 
+  test("verifies commerce parity after recovery and mirror writes have settled", async () => {
+    const loaded = await loadHandler();
+    const { response, state } = createResponse();
+    let mirrored = false;
+    loaded.reconcileReverseMirror.mockImplementation(async () => {
+      await Promise.resolve();
+      mirrored = true;
+      return { supported: true, mirrored: 2, failed: 0 };
+    });
+    loaded.refreshCommerceParityIfStale.mockImplementation(async () => {
+      if (!mirrored) throw Object.assign(new Error("Unmirrored documents"), { code: "COMMERCE_PARITY_FAILED" });
+      return { supported: true, skipped: false, parity: { ok: true } };
+    });
+    await loaded.handler({ method: "GET", headers: {} }, response);
+    expect(state.status).toBe(200);
+    expect(state.body.summary.commerceParity).toEqual({ supported: true, skipped: false, parity: { ok: true } });
+    const checkpoint = loaded.adminRpc.mock.calls.find(([name]) => name === "roo_record_reconciliation_checkpoint");
+    expect(checkpoint[1].p_counters.commerceParity.parity.ok).toBe(true);
+  });
+
+  test("keeps genuine parity failures pending after the mirror finishes", async () => {
+    const loaded = await loadHandler();
+    const { response, state } = createResponse();
+    loaded.refreshCommerceParityIfStale.mockRejectedValue(Object.assign(new Error("Persistent drift"), { code: "COMMERCE_PARITY_FAILED" }));
+    await loaded.handler({ method: "GET", headers: {} }, response);
+    expect(loaded.reconcileReverseMirror).toHaveBeenCalled();
+    expect(state.body.summary.commerceParity).toEqual({ pending: true });
+  });
+
   test("mirror-only scope drains the outbox without payments or emails", async () => {
     const loaded = await loadHandler();
     const { response, state } = createResponse();

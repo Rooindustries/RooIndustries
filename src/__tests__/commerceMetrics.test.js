@@ -12,10 +12,31 @@ jest.mock("../server/supabase/runtime", () => ({
   }),
 }));
 
-import { recordCommerceResponseMetric } from "../server/supabase/commerceMetrics";
+import { recordCommerceMetric, recordCommerceResponseMetric } from "../server/supabase/commerceMetrics";
 
 describe("commerce request metrics", () => {
-  beforeEach(() => rpc.mockClear());
+  const originalEnv = { ...process.env };
+
+  beforeEach(() => {
+    rpc.mockClear();
+    process.env = { ...originalEnv };
+  });
+
+  afterEach(() => { process.env = originalEnv; });
+
+  test("does not write metrics from a read-only preview", async () => {
+    process.env.SALES_PREVIEW_READ_ONLY = "1";
+    process.env.VERCEL_ENV = "preview";
+    await recordCommerceMetric({ route: "booking/availability", durationMs: 12, statusCode: 200 });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  test("continues recording production metrics when the preview flag is present", async () => {
+    process.env.SALES_PREVIEW_READ_ONLY = "1";
+    process.env.VERCEL_ENV = "production";
+    await recordCommerceMetric({ route: "booking/availability", durationMs: 12, statusCode: 200 });
+    expect(rpc).toHaveBeenCalledWith("roo_record_commerce_metric", expect.objectContaining({ p_route: "booking/availability", p_status_code: 200 }));
+  });
 
   test("measures a response body even when Content-Length is absent", async () => {
     const body = JSON.stringify({ ok: true, value: "measured" });

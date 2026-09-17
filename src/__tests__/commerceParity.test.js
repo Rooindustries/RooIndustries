@@ -166,6 +166,20 @@ describe("Supabase-primary commerce parity refresh", () => {
     }));
   });
 
+  test("never reports verified parity while commerce mirror writes remain pending", async () => {
+    const { client, rpc } = clientWith({ readiness: { mirror: { pending: 2 }, captured_without_booking: 0 } });
+    await expect(refreshCommerceParityIfStale({ env, force: true, sanityClient: { fetch: jest.fn(async () => [document]) }, supabaseClient: client })).rejects.toMatchObject({ code: "COMMERCE_PARITY_FAILED" });
+    expect(rpc).toHaveBeenCalledWith("roo_finish_sync_run", expect.objectContaining({ p_status: "failed", p_counters: expect.objectContaining({ parity: expect.objectContaining({ mirrorPending: 2, categories: ["mirror_pending"] }) }) }));
+  });
+
+  test.each([
+    { mirror: { pending: 1 }, captured_without_booking: 0 },
+    { mirror: { pending: 0 }, captured_without_booking: 1 },
+  ])("does not reuse a recent success when readiness is blocked: %j", async readiness => {
+    const { client } = clientWith({ readiness: { ...readiness, last_parity: { direction: "compare", status: "completed", completed_at: new Date().toISOString(), counters: { mode: "verify" } } } });
+    await expect(refreshCommerceParityIfStale({ env, sanityClient: { fetch: jest.fn(async () => [document]) }, supabaseClient: client })).rejects.toMatchObject({ code: "COMMERCE_PARITY_FAILED" });
+  });
+
   test("does nothing while Sanity remains the commerce primary", async () => {
     await expect(refreshCommerceParityIfStale({
       env: { ...env, COMMERCE_PRIMARY_BACKEND: "sanity" },
