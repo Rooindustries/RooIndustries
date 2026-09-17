@@ -1,3 +1,5 @@
+import { INDEXABLE_ROUTES } from "./routes";
+
 export type SalesAttribution = {
   version: 1;
   journeyId: string;
@@ -79,7 +81,7 @@ export function salesEventProperties(attribution: unknown = captureSalesAttribut
 export function sanitizeAnalyticsEvent<T extends { url: string; type: string }>(event: T): T | null {
   try {
     const url = new URL(event.url);
-    const path = salesPath(url.pathname);
+    const path = salesPath(url.pathname) || (INDEXABLE_ROUTES.includes(url.pathname) || url.pathname === "/downloads/utilities" ? url.pathname : "");
     if (!path) return null;
     return { ...event, url: `${url.origin}${path}` };
   } catch { return null; }

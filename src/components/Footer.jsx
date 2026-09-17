@@ -46,6 +46,9 @@ export default function Footer() {
 
           <div className="w-full md:w-auto md:ml-auto flex flex-col md:flex-row items-center md:items-center gap-4">
             <nav className="flex flex-wrap items-center justify-center md:justify-end gap-x-7 gap-y-2 text-xs font-semibold tracking-wide uppercase text-ink-secondary">
+              {[["/packages", "Packages"], ["/faq", "FAQ"], ["/contact", "Contact"], ["/BIOSGuide", "BIOS Guide"]].map(([href, label]) => (
+                <a key={href} href={href} className="hover:text-[color:var(--color-link-hover)] transition-colors">{label}</a>
+              ))}
               <Link
                 to="/about"
                 className="hover:text-[color:var(--color-link-hover)] transition-colors"

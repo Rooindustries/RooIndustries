@@ -61,6 +61,18 @@ describe("sales attribution", () => {
     expect(sanitizeAnalyticsEvent({ type: "pageview", url: "https://www.rooindustries.com/upgrade/customer-order" }).url).toBe("https://www.rooindustries.com/upgrade");
   });
 
+  test.each(["/meet-the-team", "/downloads/utilities", "/tourney"])("counts public pageviews on %s without starting a sales journey", pathname => {
+    const { captureSalesAttribution, sanitizeAnalyticsEvent } = require("../lib/salesAttribution");
+    window.history.replaceState({}, "", `${pathname}?email=private@example.invalid#secret`);
+    expect(captureSalesAttribution()).toBeNull();
+    expect(sanitizeAnalyticsEvent({ type: "pageview", url: `https://www.rooindustries.com${pathname}?email=private@example.invalid#secret` })).toEqual({ type: "pageview", url: `https://www.rooindustries.com${pathname}` });
+  });
+
+  test.each(["/referrals/dashboard", "/referrals/verify", "/admin", "/downloads/private-token", "/tourney/manage", "/missing/private-token"])("excludes private and unknown pageviews on %s", pathname => {
+    const { sanitizeAnalyticsEvent } = require("../lib/salesAttribution");
+    expect(sanitizeAnalyticsEvent({ type: "pageview", url: `https://www.rooindustries.com${pathname}` })).toBeNull();
+  });
+
   test("starts a new attribution journey for a different explicit campaign", () => {
     const { captureSalesAttribution } = require("../lib/salesAttribution");
     window.history.replaceState({}, "", "/?ref=winton&utm_campaign=first");

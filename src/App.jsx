@@ -17,6 +17,9 @@ import PerfDebugOverlay from "./components/PerfDebugOverlay";
 import { initializePerformanceProfile } from "./lib/performanceProfile";
 import Home from "./legacyPages/Home";
 import AboutPage from "./legacyPages/About";
+import Packages from "./legacyPages/Packages";
+import Contact from "./legacyPages/Contact";
+import FaqPage from "./legacyPages/Faq";
 import {
   consumeRouteTransitionIntent,
   isHomeSectionHash,
@@ -38,10 +41,7 @@ const RefVerifyRegistration = lazy(() => import("./legacyPages/RefVerifyRegistra
 const Benchmarks = lazy(() => import("./legacyPages/Benchmarks"));
 const Terms = lazy(() => import("./legacyPages/Terms"));
 const Privacy = lazy(() => import("./legacyPages/PrivacyPolicy"));
-const Packages = lazy(() => import("./legacyPages/Packages"));
-const Contact = lazy(() => import("./legacyPages/Contact"));
 const Book = lazy(() => import("./legacyPages/Book"));
-const FaqPage = lazy(() => import("./legacyPages/Faq"));
 const Payment = lazy(() => import("./legacyPages/Payment"));
 const PaymentSuccess = lazy(() => import("./legacyPages/PaymentSuccess"));
 const Thankyou = lazy(() => import("./legacyPages/Thankyou"));
@@ -151,9 +151,7 @@ function AnimatedRoutes({
           <Route path="/" element={<Home initialData={initialHomeData} />} />
           <Route
             path="/packages"
-            element={withRouteSuspense(
-              <Packages initialData={initialRouteData?.packages || null} />
-            )}
+            element={<Packages initialData={initialRouteData?.packages || null} />}
           />
           <Route
             path="/benchmarks"
@@ -172,12 +170,10 @@ function AnimatedRoutes({
             element={withRouteSuspense(<Reviews setIsModalOpen={setIsModalOpen} />)}
           />
           <Route path="/booking" element={withRouteSuspense(<Book />)} />
-          <Route path="/contact" element={withRouteSuspense(<Contact />)} />
+          <Route path="/contact" element={<Contact initialData={initialRouteData?.contact || null} />} />
           <Route
             path="/faq"
-            element={withRouteSuspense(
-              <FaqPage initialData={initialHomeData} />
-            )}
+            element={<FaqPage initialData={initialHomeData} />}
           />
           <Route path="/discord" element={<RedirectToDiscord />} />
           <Route path="/payment" element={withRouteSuspense(<Payment />)} />

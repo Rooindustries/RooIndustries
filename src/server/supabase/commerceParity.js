@@ -22,6 +22,8 @@ const completedParityIsFresh = ({ readiness, maxAgeMs }) => {
   const parity = readiness?.last_parity;
   const completedAt = Date.parse(String(parity?.completed_at || ""));
   return (
+    Number(readiness?.mirror?.pending || 0) === 0 &&
+    Number(readiness?.captured_without_booking || 0) === 0 &&
     parity?.status === "completed" &&
     parity?.direction === "compare" &&
     parity?.counters?.mode === "verify" &&
@@ -88,6 +90,9 @@ const compareCommerceParity = async ({ documents, client }) => {
     }
   }
 
+  if (Number(readiness?.mirror?.pending || 0) > 0) {
+    failures.push({ category: "mirror_pending" });
+  }
   collectTypedGapFailures(typedSummary, failures);
   for (const section of [
     "bookings",

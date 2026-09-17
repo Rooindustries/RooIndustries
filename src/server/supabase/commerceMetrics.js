@@ -8,6 +8,7 @@ export const recordCommerceMetric = async ({
   statusCode,
   responseBytes = 0,
 } = {}) => {
+  if (process.env.SALES_PREVIEW_READ_ONLY === "1" && process.env.VERCEL_ENV !== "production") return;
   if (!isSupabaseAdminConfigured()) return;
   try {
     const policy = resolveSupabaseRuntimePolicy();

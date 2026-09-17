@@ -99,6 +99,7 @@ const nextConfig = {
   },
   async redirects() {
     return [
+      { source: '/tourney/:page(bracket|roster)', destination: '/tourney', permanent: true },
       {
         source: '/:path*',
         has: [{ type: 'host', value: 'rooindustries.com' }],

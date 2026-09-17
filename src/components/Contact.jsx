@@ -5,8 +5,8 @@ import companyContent from "../lib/companyContent";
 
 const { CONTACT_GUIDANCE } = companyContent;
 
-export default function Contact() {
-  const [contactData, setContactData] = useState(null);
+export default function Contact({ initialData = null }) {
+  const [contactData, setContactData] = useState(initialData);
   const [copyStatus, setCopyStatus] = useState("idle");
   const copyResetTimeoutRef = useRef(null);
 
@@ -180,7 +180,6 @@ export default function Contact() {
         ))}
       </div>
 
-      {/* Designed by Nerky */}
       <p className="mt-4 text-xs text-ink-muted">
         Designed by{" "}
         <a

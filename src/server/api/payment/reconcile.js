@@ -272,15 +272,6 @@ export default async function handler(req, res) {
         value: { skipped: true, reason: mirrorSkipReason },
         error: null,
       });
-  const commerceParityPromise = supabaseConfigured && sanityConfigured
-    ? refreshCommerceParityIfStale().then(
-        (value) => ({ value, error: null }),
-        (error) => ({ value: null, error })
-      )
-    : Promise.resolve({
-        value: { supported: false, skipped: true, reason: mirrorSkipReason },
-        error: null,
-      });
   const expiredHoldCleanupPromise =
     supabaseConfigured && policy.commercePrimaryBackend === "supabase"
       ? cleanupExpiredSupabaseHolds({
@@ -409,13 +400,6 @@ export default async function handler(req, res) {
     result.body.summary.referralEmailRecovery =
       referralEmailReconciliation.value;
   }
-  const commerceParity = await commerceParityPromise;
-  if (commerceParity.error) {
-    logSafeError("Commerce parity refresh failed", commerceParity.error);
-    result.body.summary.commerceParity = { pending: true };
-  } else {
-    result.body.summary.commerceParity = commerceParity.value;
-  }
   const expiredHoldCleanup = await expiredHoldCleanupPromise;
   if (expiredHoldCleanup.error) {
     logSafeError("Expired Supabase hold cleanup failed", expiredHoldCleanup.error);
@@ -505,6 +489,16 @@ export default async function handler(req, res) {
         logSafeError("Account security reconciliation failed", error);
         result.body.summary.accountSecurity = { pending: true };
       }
+    }
+    if (supabaseConfigured && sanityConfigured) {
+      try {
+        result.body.summary.commerceParity = await refreshCommerceParityIfStale();
+      } catch (error) {
+        logSafeError("Commerce parity refresh failed", error);
+        result.body.summary.commerceParity = { pending: true };
+      }
+    } else {
+      result.body.summary.commerceParity = { supported: false, skipped: true, reason: mirrorSkipReason };
     }
     if (result.httpStatus === 200 && isSupabaseAdminConfigured()) {
       try {
