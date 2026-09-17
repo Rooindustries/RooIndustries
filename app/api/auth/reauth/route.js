@@ -25,7 +25,7 @@ const purposes = new Set([
   "change_password",
 ]);
 const providers = new Set(["google", "discord"]);
-const flows = new Set(["referral", "tourney"]);
+const flows = new Set(["referral"]);
 const slots = new Set(["", "primary", "secondary"]);
 const noStore = (response) => {
   response.headers.set("Cache-Control", "private, no-store");

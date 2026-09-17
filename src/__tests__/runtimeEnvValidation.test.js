@@ -403,17 +403,7 @@ describe("release runtime environment validation", () => {
     );
   });
 
-  test("rejects insecure Tourney cookies in production", () => {
-    const result = validate({
-      VERCEL_ENV: "production",
-      TOURNEY_ALLOW_INSECURE_COOKIE: "1",
-    });
 
-    expect(result.status).toBe(1);
-    expect(result.output).toContain(
-      "TOURNEY_ALLOW_INSECURE_COOKIE=1 is forbidden in production"
-    );
-  });
 
   test.each([
     ["writes enabled", "0"],
@@ -792,20 +782,7 @@ describe("release runtime environment validation", () => {
     );
   });
 
-  test("rejects a legacy Neon URL masquerading as the Supabase database", () => {
-    const result = validate({
-      TOURNEY_DATABASE_MODE: "supabase",
-      SUPABASE_URL: "https://ntezmxzaibrrsgtujgxu.supabase.co",
-      SUPABASE_SECRET_KEY: "s".repeat(40),
-      SUPABASE_PUBLISHABLE_KEY: "p".repeat(24),
-      SUPABASE_DATABASE_URL: "postgresql://owner:secret@ep-example.neon.tech/neondb",
-    });
-    expect(result.status).toBe(1);
-    expect(result.output).toContain(
-      "SUPABASE_DATABASE_URL must connect to the configured Supabase project"
-    );
-    expect(result.output).not.toContain("ep-example.neon.tech");
-  });
+
 
   test.each([["preview", 0], ["production", 1]])(
     "%s enforces the correct Supabase project boundary",
@@ -819,221 +796,10 @@ describe("release runtime environment validation", () => {
     }
   );
 
-  test("accepts configured Supabase primary with the mirror retired", () => {
-    const result = validate({
-      ...supabaseTourneyEnv,
-      TOURNEY_DATABASE_URL:
-        "postgresql://owner:placeholder@ep-example.neon.tech/neondb?sslmode=require",
-    });
+  test("referral releases do not require retired tournament credentials or Discord roles", () => {
+    const retired = Object.fromEntries(Object.keys(supabaseTourneyEnv).filter(key => key.startsWith("TOURNEY_") || key.startsWith("DISCORD_")).map(key => [key, ""]));
+    const result = validate({ ...supabaseTourneyEnv, ...retired });
     expect(result.status).toBe(0);
-  });
-
-  test("rejects the retired mirror even with a reachable legacy URL", () => {
-    const result = validate({
-      ...supabaseTourneyEnv,
-      TOURNEY_MIRROR_ENABLED: "1",
-    });
-    expect(result.status).toBe(1);
-    expect(result.output).toContain("TOURNEY_MIRROR_ENABLED must be 0");
-  });
-
-  test("blocks Supabase Tourney releases when social Auth is hidden", () => {
-    const result = validate({
-      ...supabaseTourneyEnv,
-      SUPABASE_SOCIAL_AUTH_ENABLED: "0",
-      NEXT_PUBLIC_SUPABASE_SOCIAL_AUTH_ENABLED: "0",
-    });
-    expect(result.status).toBe(1);
-    expect(result.output).toContain(
-      "Supabase Tourney mode requires Google and Discord social Auth to remain enabled"
-    );
-  });
-
-  test("requires confirmed providers, manual linking, and both managed Discord roles", () => {
-    const socialEnv = {
-      SUPABASE_SOCIAL_AUTH_ENABLED: "1",
-      NEXT_PUBLIC_SUPABASE_SOCIAL_AUTH_ENABLED: "1",
-      SUPABASE_URL: "https://ntezmxzaibrrsgtujgxu.supabase.co",
-      SUPABASE_SECRET_KEY: "s".repeat(40),
-      SUPABASE_PUBLISHABLE_KEY: "p".repeat(24),
-      SUPABASE_MANUAL_LINKING_ENABLED: "0",
-      SUPABASE_GOOGLE_OAUTH_ENABLED: "1",
-      SUPABASE_DISCORD_OAUTH_ENABLED: "1",
-      DISCORD_BOT_TOKEN: "bot-token",
-      DISCORD_GUILD_ID: "111111111111111111",
-      DISCORD_PARTICIPANT_ROLE_ID: "222222222222222222",
-      DISCORD_HOST_ROLE_ID: "",
-    };
-    const result = validate(socialEnv);
-
-    expect(result.status).toBe(1);
-    expect(result.output).toContain("DISCORD_HOST_ROLE_ID");
-
-    const linkingResult = validate({
-      ...socialEnv,
-      DISCORD_HOST_ROLE_ID: "333333333333333333",
-    });
-    expect(linkingResult.status).toBe(1);
-    expect(linkingResult.output).toContain("confirmed manual identity linking");
-  });
-
-  test("accepts a hardened post-activation release without a staging marker", () => {
-    const result = validate({
-      ...supabaseTourneyEnv,
-      TOURNEY_WRITES_PAUSED: "1",
-      TOURNEY_FAILOVER_GENERATION: "1",
-      TOURNEY_HARDENING_V4_ENABLED: "1",
-      DISCORD_BOT_TOKEN: "bot-token",
-      DISCORD_GUILD_ID: "111111111111111111",
-      DISCORD_PARTICIPANT_ROLE_ID: "222222222222222222",
-      DISCORD_HOST_ROLE_ID: "333333333333333333",
-    });
-
-    expect(result.status).toBe(0);
-  });
-
-  test("rejects an invalid activation intent marker", () => {
-    const result = validate({
-      ...supabaseTourneyEnv,
-      TOURNEY_V4_ACTIVATION_ENABLED: "enabled",
-    });
-
-    expect(result.status).toBe(1);
-    expect(result.output).toContain(
-      "TOURNEY_V4_ACTIVATION_ENABLED must be an explicit boolean value"
-    );
-  });
-
-  test("rejects an activation-staged tuple when its explicit marker is missing", () => {
-    const result = validate({
-      ...supabaseTourneyEnv,
-      // The tuple is only recognised with mirroring on, which is itself now refused.
-      // Both failures are expected here: the point is that an implied staging still
-      // demands its explicit marker rather than being inferred from the controls.
-      TOURNEY_MIRROR_ENABLED: "1",
-      TOURNEY_V4_ACTIVATION_ENABLED: "",
-      TOURNEY_WRITES_PAUSED: "1",
-      TOURNEY_FAILOVER_GENERATION: "1",
-      TOURNEY_HARDENING_V4_ENABLED: "0",
-    });
-
-    expect(result.status).toBe(1);
-    expect(result.output).toContain(
-      "The activation-ready v4 control tuple requires TOURNEY_V4_ACTIVATION_ENABLED=1"
-    );
-    expect(result.output).toContain("TOURNEY_MIRROR_ENABLED must be 0");
-  });
-
-  test("does not classify legacy generation-zero maintenance as activation", () => {
-    const result = validate({
-      ...supabaseTourneyEnv,
-      TOURNEY_DATABASE_MODE: "legacy",
-      TOURNEY_WRITES_PAUSED: "1",
-      TOURNEY_FAILOVER_GENERATION: "0",
-      TOURNEY_HARDENING_V4_ENABLED: "0",
-    });
-
-    expect(result.status).toBe(0);
-  });
-
-  // Staging an activation required the mirror to be live, because the cutover replicated
-  // into the legacy backend while writes were paused. That backend is retired, so no
-  // combination of the other controls can produce a valid staged release any more --
-  // whatever else is set, the answer is the same and it is not a contradictory pair.
-  test.each([
-    ["Supabase primary", { TOURNEY_DATABASE_MODE: "legacy" }],
-    ["paused writes", { TOURNEY_WRITES_PAUSED: "0" }],
-    ["generation one", { TOURNEY_FAILOVER_GENERATION: "2" }],
-    ["canonical generation one", { TOURNEY_FAILOVER_GENERATION: "01" }],
-    ["v4 hardening remains disabled", { TOURNEY_HARDENING_V4_ENABLED: "1" }],
-  ])("refuses to re-stage activation regardless of %s", (_control, override) => {
-    const result = validate({
-      ...supabaseTourneyEnv,
-      TOURNEY_V4_ACTIVATION_ENABLED: "1",
-      TOURNEY_WRITES_PAUSED: "1",
-      TOURNEY_FAILOVER_GENERATION: "1",
-      TOURNEY_HARDENING_V4_ENABLED: "0",
-      DISCORD_BOT_TOKEN: "bot-token",
-      DISCORD_GUILD_ID: "111111111111111111",
-      DISCORD_PARTICIPANT_ROLE_ID: "222222222222222222",
-      DISCORD_HOST_ROLE_ID: "333333333333333333",
-      ...override,
-    });
-
-    expect(result.status).toBe(1);
-    expect(result.output).toContain(
-      "Tourney v4 activation is complete and cannot be re-staged"
-    );
-    // The two rules must not both fire: asking for the mirror and forbidding it at once
-    // would leave the operator with no satisfiable configuration to act on.
-    expect(result.output).not.toContain(
-      "Supabase primary, mirroring enabled, writes paused, failover generation 1"
-    );
-  });
-
-  test("requires Discord inventory credentials for an activation release", () => {
-    const result = validate({
-      ...supabaseTourneyEnv,
-      TOURNEY_V4_ACTIVATION_ENABLED: "1",
-      TOURNEY_WRITES_PAUSED: "1",
-      TOURNEY_FAILOVER_GENERATION: "1",
-      TOURNEY_HARDENING_V4_ENABLED: "0",
-      DISCORD_BOT_TOKEN: "",
-      DISCORD_GUILD_ID: "",
-      DISCORD_PARTICIPANT_ROLE_ID: "",
-      DISCORD_HOST_ROLE_ID: "",
-    });
-
-    expect(result.status).toBe(1);
-    for (const key of [
-      "DISCORD_BOT_TOKEN",
-      "DISCORD_GUILD_ID",
-      "DISCORD_PARTICIPANT_ROLE_ID",
-      "DISCORD_HOST_ROLE_ID",
-    ]) {
-      expect(result.output).toContain(key);
-    }
-  });
-
-  test("requires valid distinct Discord inventory role ids for activation", () => {
-    const result = validate({
-      ...supabaseTourneyEnv,
-      TOURNEY_V4_ACTIVATION_ENABLED: "1",
-      TOURNEY_WRITES_PAUSED: "1",
-      TOURNEY_FAILOVER_GENERATION: "1",
-      TOURNEY_HARDENING_V4_ENABLED: "0",
-      DISCORD_BOT_TOKEN: "bot-token",
-      DISCORD_GUILD_ID: "not-a-snowflake",
-      DISCORD_PARTICIPANT_ROLE_ID: "222222222222222222",
-      DISCORD_HOST_ROLE_ID: "222222222222222222",
-    });
-
-    expect(result.status).toBe(1);
-    expect(result.output).toContain("valid numeric snowflakes");
-    expect(result.output).toContain("must use different role ids");
-  });
-
-  test("keeps post-activation releases valid now that staging is closed", () => {
-    const activationEnv = {
-      ...supabaseTourneyEnv,
-      TOURNEY_V4_ACTIVATION_ENABLED: "1",
-      TOURNEY_WRITES_PAUSED: "1",
-      TOURNEY_FAILOVER_GENERATION: "1",
-      TOURNEY_HARDENING_V4_ENABLED: "0",
-      DISCORD_BOT_TOKEN: "bot-token",
-      DISCORD_GUILD_ID: "111111111111111111",
-      DISCORD_PARTICIPANT_ROLE_ID: "222222222222222222",
-      DISCORD_HOST_ROLE_ID: "333333333333333333",
-    };
-    // The tuple that was valid before the retirement is now refused on purpose.
-    expect(validate(activationEnv).status).toBe(1);
-    // The shape production actually runs still passes.
-    expect(validate({
-      ...supabaseTourneyEnv,
-      TOURNEY_HARDENING_V4_ENABLED: "1",
-      TOURNEY_WRITES_PAUSED: "0",
-      TOURNEY_FAILOVER_GENERATION: "1",
-    }).status).toBe(0);
   });
 
   test("includes the Supabase project reference in custom-auth fingerprints", () => {

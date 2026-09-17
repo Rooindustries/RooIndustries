@@ -92,24 +92,22 @@ export default function ConnectedAccounts({
   }, [linkProof]);
 
   const managedProviders = allProviders.filter((provider) => providerIds.includes(provider));
-  const isTourney = variant === "tourney";
+
   if (state.loading) return null;
   if (state.error) {
     return (
       <section
         aria-labelledby={`${flow}-connections-title`}
         className={
-          isTourney
-            ? "tourney-connected-accounts"
-            : "mt-6 w-full rounded-xl border border-line-input bg-surface-card p-5 shadow-glow-soft"
+          "mt-6 w-full rounded-xl border border-line-input bg-surface-card p-5 shadow-glow-soft"
         }
       >
         <h2 id={`${flow}-connections-title`}>Connected accounts</h2>
-        <p className={isTourney ? "tourney-form-message" : "mt-3 text-xs text-danger-text"} role="alert">
+        <p className={"mt-3 text-xs text-danger-text"} role="alert">
           {state.error}
         </p>
         <button
-          className={isTourney ? "tourney-owner-button" : "mt-3 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"}
+          className={"mt-3 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"}
           onClick={load}
           type="button"
         >
@@ -244,32 +242,26 @@ export default function ConnectedAccounts({
   return (
     <section
       className={
-        isTourney
-          ? "tourney-connected-accounts"
-          : "mt-6 w-full rounded-xl border border-line-input bg-surface-card p-5 shadow-glow-soft"
+        "mt-6 w-full rounded-xl border border-line-input bg-surface-card p-5 shadow-glow-soft"
       }
       aria-labelledby={`${flow}-connections-title`}
     >
-      <div className={isTourney ? "tourney-connected-copy" : "space-y-1"}>
+      <div className={"space-y-1"}>
         <h2
-          className={isTourney ? undefined : "text-base font-semibold text-ink"}
+          className={"text-base font-semibold text-ink"}
           id={`${flow}-connections-title`}
         >
           Connected accounts
         </h2>
-        <p className={isTourney ? undefined : "text-xs leading-5 text-ink-muted"}>
+        <p className={"text-xs leading-5 text-ink-muted"}>
           Link Google or Discord so you can use either one to sign in.
         </p>
       </div>
-      <div className={isTourney ? "tourney-connected-status" : "mt-3 flex flex-wrap gap-2"}>
+      <div className={"mt-3 flex flex-wrap gap-2"}>
         {managedProviders.map((provider) => (
           <span
             className={
-              isTourney
-                ? linked.has(provider)
-                  ? "is-linked"
-                  : "is-unlinked"
-                : linked.has(provider)
+              linked.has(provider)
                   ? "rounded-full border border-success-border bg-success-soft px-3 py-1 text-xs font-semibold text-success-text"
                   : "rounded-full border border-line-input px-3 py-1 text-xs text-ink-muted"
             }
@@ -278,7 +270,7 @@ export default function ConnectedAccounts({
             {provider[0].toUpperCase() + provider.slice(1)}: {linked.has(provider) ? "Linked" : "Not linked"}
             {linked.has(provider) && canUnlink && unlinkable.has(provider) ? (
               <button
-                className={isTourney ? "tourney-owner-link" : "ml-2 underline underline-offset-2"}
+                className={"ml-2 underline underline-offset-2"}
                 aria-label={`Unlink ${provider}`}
                 disabled={busy || Boolean(syncingProvider)}
                 onClick={() => unlink(provider)}
@@ -297,18 +289,18 @@ export default function ConnectedAccounts({
           managedProviders.some(
             (provider) => linked.has(provider) && unlinkable.has(provider)
           ))) ? (
-        <div className={isTourney ? "tourney-connected-reauth" : "mt-4 flex flex-col gap-2 sm:flex-row"}>
+        <div className={"mt-4 flex flex-col gap-2 sm:flex-row"}>
           <input
             aria-label="Current password"
             autoComplete="current-password"
-            className={isTourney ? "tourney-connected-input" : "min-h-[44px] flex-1 rounded-xl border border-line-input bg-surface-input px-3 text-sm text-ink"}
+            className={"min-h-[44px] flex-1 rounded-xl border border-line-input bg-surface-input px-3 text-sm text-ink"}
             onChange={(event) => setPassword(event.target.value)}
             placeholder="Current password"
             type="password"
             value={password}
           />
           <button
-            className={isTourney ? "tourney-owner-button tourney-connected-confirm" : "rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"}
+            className={"rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"}
             disabled={busy || !password}
             onClick={confirmPassword}
             type="button"
@@ -338,12 +330,12 @@ export default function ConnectedAccounts({
         />
       ) : null}
       {recoveryProvider ? (
-        <p className={isTourney ? "tourney-form-message" : "mt-3 text-xs leading-5 text-danger-text"} role="alert">
+        <p className={"mt-3 text-xs leading-5 text-danger-text"} role="alert">
           {`${recoveryProvider[0].toUpperCase() + recoveryProvider.slice(1)} is held by an unused sign-in. Confirm your identity, then use Recover to release only that orphan and finish linking.`}
         </p>
       ) : null}
       {missing.length > 0 ? (
-        <p className={isTourney ? "tourney-form-message" : "mt-3 text-xs leading-5 text-ink-muted"}>
+        <p className={"mt-3 text-xs leading-5 text-ink-muted"}>
           {hasLinkProof
             ? `Link proof confirmed until ${proofExpiryLabel(linkProof.expiresAt)}. It will be used by the next link attempt.`
             : "You're signed in, so you can link an account below."}
@@ -386,7 +378,7 @@ export default function ConnectedAccounts({
         />
       ) : null}
       {message ? (
-        <p className={isTourney ? "tourney-form-message" : "mt-3 text-xs leading-5 text-ink-muted"} role="status">
+        <p className={"mt-3 text-xs leading-5 text-ink-muted"} role="status">
           {message}
         </p>
       ) : null}

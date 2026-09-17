@@ -25,18 +25,7 @@ const referralStyles = {
   previewNote: "text-center text-xs leading-5 text-ink-muted",
 };
 
-const tourneyStyles = {
-  container: "cs-social",
-  divider: "cs-social-divider",
-  dividerLine: "cs-social-divider-line",
-  dividerLabel: "cs-social-divider-label",
-  buttonGroup: "cs-social-buttons",
-  button: "cs-social-button",
-  icon: "cs-social-icon",
-  discordIcon: "cs-social-discord-icon",
-  error: "cs-social-error",
-  previewNote: "cs-social-preview-note",
-};
+
 
 export default function SupabaseSocialLogin({
   action = "signin",
@@ -52,21 +41,14 @@ export default function SupabaseSocialLogin({
 }) {
   const [busyProvider, setBusyProvider] = useState("");
   const [message, setMessage] = useState("");
-  const styles = variant === "tourney" ? tourneyStyles : referralStyles;
+  const styles = referralStyles;
   const visibleProviders = providers.filter(({ id }) => providerIds.includes(id));
   const socialAuthEnabled = ["1", "true", "yes", "on"].includes(
     String(process.env.NEXT_PUBLIC_SUPABASE_SOCIAL_AUTH_ENABLED || "")
       .trim()
       .toLowerCase()
   );
-  const previewOnly =
-    flow === "tourney" &&
-    !socialAuthEnabled &&
-    ["1", "true", "yes", "on"].includes(
-      String(process.env.NEXT_PUBLIC_TOURNEY_PREVIEW_OAUTH_MOCK || "")
-        .trim()
-        .toLowerCase()
-    );
+  const previewOnly = process.env.NEXT_PUBLIC_PREVIEW_READ_ONLY === "1";
 
   const actionCopy = {
     link: { button: "Link", divider: "or link an account", error: "Account linking" },
@@ -118,9 +100,7 @@ export default function SupabaseSocialLogin({
         redirectTo: intent.callbackUrl,
         ...(provider === "discord"
           ? {
-              scopes: flow === "tourney"
-                ? "identify email guilds.join"
-                : "identify email",
+              scopes: "identify email",
             }
           : {}),
       };

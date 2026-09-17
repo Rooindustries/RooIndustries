@@ -75,7 +75,7 @@ jest.mock("../server/supabase/orphanIdentityReclaim", () => ({
 jest.mock("../server/tourney/discordDesiredState", () => ({
   queueTourneyDiscordIdentityUnlinkProjection: (...args) =>
     mockQueueIdentityUnlink(...args),
-}));
+}), { virtual: true });
 
 const route = require("../../app/api/auth/identities/route.js");
 
@@ -88,11 +88,11 @@ const user = {
 };
 
 const getRequest = () => ({
-  url: "https://www.rooindustries.com/api/auth/identities?flow=tourney",
+  url: "https://www.rooindustries.com/api/auth/identities?flow=referral",
   headers: { get: () => "" },
 });
 
-const postRequest = (provider = "discord", flow = "tourney") => {
+const postRequest = (provider = "discord", flow = "referral") => {
   const body = JSON.stringify({ flow, provider });
   return {
     url: "https://www.rooindustries.com/api/auth/identities",
@@ -128,7 +128,7 @@ describe("Supabase connected identity route", () => {
     mockResolveAccount.mockResolvedValue({
       connected_providers: ["email", "google", "discord"],
       creator_active: true,
-      roles: ["tourney_player"],
+      roles: ["creator", "tourney_player"],
       status: "active",
       tourney_active: true,
       tourney_role: "tourney_player",
@@ -181,48 +181,15 @@ describe("Supabase connected identity route", () => {
     );
   });
 
-  test("queues provider-bound grant consumption inside the durable unlink command", async () => {
-    const response = await route.POST(postRequest("discord"));
-    expect(response.status).toBe(200);
-    expect(mockRpc).not.toHaveBeenCalledWith("roo_consume_reauth_grant", expect.anything());
-    expect(mockUnlinkIdentity).not.toHaveBeenCalled();
-    expect(mockQueueIdentityUnlink).toHaveBeenCalledWith({
-      accessToken: "short-lived-user-token",
-      commandId: `identity-unlink:discord:${user.id}:hash:reauth-token`,
-      expiresAt: "2100-01-01T00:00:00.000Z",
-      identityId: "discord-one",
-      provider: "discord",
-      reauthTokenHash: "hash:reauth-token",
-      userId: user.id,
-    });
-  });
 
-  test("replays the durable unlink projection after Auth already removed the identity", async () => {
-    mockResolveExactDomainIdentity.mockResolvedValue({
-      account: {
-        principal_id: "22222222-2222-4222-8222-222222222222",
-        roles: ["tourney_player"],
-        status: "active",
-        tourney_active: true,
-        tourney_role: "tourney_player",
-        tourney_username: "player-one",
-      },
-      user: { ...user, identities: [user.identities[0]] },
-    });
 
-    const response = await route.POST(postRequest("discord"));
 
-    expect(response.status).toBe(200);
-    expect(mockRpc).not.toHaveBeenCalled();
-    expect(mockUnlinkIdentity).not.toHaveBeenCalled();
-    expect(mockQueueIdentityUnlink).toHaveBeenCalledTimes(1);
-  });
 
   test("keeps at least one sign-in method connected", async () => {
     mockResolveExactDomainIdentity.mockResolvedValue({
       account: {
         principal_id: "22222222-2222-4222-8222-222222222222",
-        roles: ["tourney_player"],
+        roles: ["creator", "tourney_player"],
         status: "active",
         tourney_active: true,
         tourney_role: "tourney_player",
@@ -236,12 +203,15 @@ describe("Supabase connected identity route", () => {
     expect(mockUnlinkIdentity).not.toHaveBeenCalled();
   });
 
-  test("keeps dual-role principals on the durable Tourney saga from referral pages", async () => {
+  test("unlinks a dual-role creator without tournament storage or jobs", async () => {
+    process.env.TOURNEY_DATABASE_MODE = "legacy";
+    mockQueueIdentityUnlink.mockRejectedValue(new Error("Tournament storage removed"));
     const response = await route.POST(postRequest("discord", "referral"));
-
     expect(response.status).toBe(200);
-    expect(mockUnlinkIdentity).not.toHaveBeenCalled();
-    expect(mockQueueIdentityUnlink).toHaveBeenCalledTimes(1);
+    expect(mockRpc).toHaveBeenCalledWith("roo_consume_reauth_grant", expect.objectContaining({ p_user_id: user.id, p_provider: "discord" }));
+    expect(mockUnlinkIdentity).toHaveBeenCalledWith(user.identities[1]);
+    expect(mockRpc).toHaveBeenCalledWith("roo_reconcile_auth_identity_links", { p_user_id: user.id });
+    expect(mockQueueIdentityUnlink).not.toHaveBeenCalled();
   });
 
   test("uses the referral-only path only for a verified creator-only principal", async () => {

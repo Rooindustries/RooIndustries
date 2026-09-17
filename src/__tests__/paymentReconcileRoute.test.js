@@ -120,7 +120,7 @@ const loadHandler = async ({
   }));
   jest.doMock("../server/tourney/reconcile.js", () => ({
     runTourneyReconciliation,
-  }));
+  }), { virtual: true });
   jest.doMock("../server/api/payment/backend.js", () => ({
     createPaymentBackendClient: jest.fn(() => ({
       reconcileReverseMirror,
@@ -169,6 +169,24 @@ describe("payment reconciliation route authorization", () => {
     expect(loaded.reconcileReverseMirror).not.toHaveBeenCalled();
     expect(loaded.reconcileReferralEmailDispatches).not.toHaveBeenCalled();
   });
+
+  test.each(["tourney-only", "payments-only", "invalid", " TOURNEY-ONLY "])(
+    "rejects unsupported scope %s before any backend work",
+    async (scope) => {
+      const loaded = await loadHandler();
+      const { response, state } = createResponse();
+      await loaded.handler({ method: "POST", headers: { "x-reconcile-scope": scope } }, response);
+      expect(state.status).toBe(400);
+      expect(loaded.events).toEqual([]);
+      expect(loaded.reconcilePaymentSessions).not.toHaveBeenCalled();
+      expect(loaded.reconcileBookingEmailDispatches).not.toHaveBeenCalled();
+      expect(loaded.reconcileReferralEmailDispatches).not.toHaveBeenCalled();
+      expect(loaded.cleanupExpiredRateLimitBuckets).not.toHaveBeenCalled();
+      expect(loaded.reconcileReverseMirror).not.toHaveBeenCalled();
+      expect(loaded.reconcileDocumentMirror).not.toHaveBeenCalled();
+      expect(loaded.refreshCommerceParityIfStale).not.toHaveBeenCalled();
+    }
+  );
 
   test("mirror-only scope drains the outbox without payments or emails", async () => {
     const loaded = await loadHandler();
@@ -341,29 +359,7 @@ describe("payment reconciliation route authorization", () => {
     });
   });
 
-  test("keeps the manual Tourney scope while the shared scheduler uses a bounded budget", async () => {
-    const loaded = await loadHandler();
-    const { response, state } = createResponse();
 
-    await loaded.handler(
-      {
-        method: "POST",
-        headers: { "x-reconcile-scope": "tourney-only" },
-      },
-      response
-    );
-
-    expect(state.status).toBe(200);
-    expect(state.body).toEqual({
-      ok: true,
-      skipped: false,
-      durationMs: 25,
-      summary: { tourneyParity: { status: "clean" } },
-    });
-    expect(loaded.runTourneyReconciliation).toHaveBeenCalledWith();
-    expect(loaded.syncSanityCommerceChanges).not.toHaveBeenCalled();
-    expect(loaded.reconcilePaymentSessions).not.toHaveBeenCalled();
-  });
 
   test("parity-only scope verifies commerce without payments, emails, or Tourney work", async () => {
     const loaded = await loadHandler();
@@ -396,75 +392,9 @@ describe("payment reconciliation route authorization", () => {
     expect(loaded.runTourneyReconciliation).not.toHaveBeenCalled();
   });
 
-  test("safely skips Tourney reconciliation while another worker holds the lease", async () => {
-    const previousCronFlag = process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
-    process.env.TOURNEY_RECONCILIATION_CRON_ENABLED = "1";
-    try {
-      const loaded = await loadHandler();
-      loaded.runTourneyReconciliation.mockResolvedValue({
-        skipped: true,
-        reason: "already_running",
-        summary: {},
-      });
-      const { response, state } = createResponse();
 
-      await loaded.handler({ method: "GET", headers: {} }, response);
 
-      expect(state.status).toBe(200);
-      expect(state.body.summary.tourneyReconciliation).toEqual({
-        skipped: true,
-        reason: "already_running",
-      });
-      expect(loaded.adminRpc).toHaveBeenCalledWith(
-        "roo_record_reconciliation_checkpoint",
-        expect.any(Object)
-      );
-    } finally {
-      if (previousCronFlag === undefined) delete process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
-      else process.env.TOURNEY_RECONCILIATION_CRON_ENABLED = previousCronFlag;
-    }
-  });
 
-  test("keeps payment recovery successful when Tourney reconciliation is pending", async () => {
-    const previousCronFlag = process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
-    process.env.TOURNEY_RECONCILIATION_CRON_ENABLED = "1";
-    try {
-      const loaded = await loadHandler();
-      loaded.runTourneyReconciliation.mockRejectedValue(Object.assign(
-        new Error("mirror unavailable"),
-        {
-          failedStage: "tourneyMirror",
-          partialSummary: {
-            tourneyExternalOperations: { claimed: 1, applied: 1 },
-          },
-        }
-      ));
-      const { response, state } = createResponse();
-
-      await loaded.handler({ method: "GET", headers: {} }, response);
-
-      expect(state.status).toBe(200);
-      expect(state.body).toMatchObject({
-        ok: true,
-        summary: {
-          tourneyReconciliation: {
-            pending: true,
-            failedStage: "tourneyMirror",
-            partialSummary: {
-              tourneyExternalOperations: { claimed: 1, applied: 1 },
-            },
-          },
-        },
-      });
-      expect(loaded.adminRpc).toHaveBeenCalledWith(
-        "roo_record_reconciliation_checkpoint",
-        expect.any(Object)
-      );
-    } finally {
-      if (previousCronFlag === undefined) delete process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
-      else process.env.TOURNEY_RECONCILIATION_CRON_ENABLED = previousCronFlag;
-    }
-  });
 
   test("runs referral email recovery even when payment reconciliation fails", async () => {
     const loaded = await loadHandler();
@@ -498,52 +428,9 @@ describe("payment reconciliation route authorization", () => {
     });
   });
 
-  test("runs the Tourney worker independently on the shared payment schedule", async () => {
-    const previous = process.env.SUPABASE_SOCIAL_AUTH_ENABLED;
-    const previousHardening = process.env.TOURNEY_HARDENING_V4_ENABLED;
-    const previousGuild = process.env.DISCORD_GUILD_ID;
-    const previousCronFlag = process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
-    process.env.SUPABASE_SOCIAL_AUTH_ENABLED = "1";
-    process.env.TOURNEY_HARDENING_V4_ENABLED = "1";
-    process.env.DISCORD_GUILD_ID = "111111111111111111";
-    process.env.TOURNEY_RECONCILIATION_CRON_ENABLED = "1";
-    try {
-      const loaded = await loadHandler();
-      const { response, state } = createResponse();
-      await loaded.handler({ method: "GET", headers: {} }, response);
-      expect(state.status).toBe(200);
-      expect(loaded.events).toContain("tourney-full");
-      expect(loaded.events.filter((event) => event.startsWith("payment:"))).toHaveLength(2);
-      expect(loaded.runTourneyReconciliation).toHaveBeenCalledWith({
-        budgetMs: 90_000,
-      });
-      expect(loaded.reconcileDocumentMirror).toHaveBeenCalledWith({
-        limit: 25,
-        maxBatches: 4,
-        budgetMs: 30_000,
-      });
-      expect(loaded.refreshCommerceParityIfStale).toHaveBeenCalledWith();
-      expect(loaded.adminRpc).toHaveBeenCalledWith(
-        "roo_reconcile_account_security",
-        { p_guild_id: null }
-      );
-      expect(loaded.adminRpc).toHaveBeenCalledWith(
-        "roo_record_reconciliation_checkpoint",
-        expect.any(Object)
-      );
-    } finally {
-      if (previous === undefined) delete process.env.SUPABASE_SOCIAL_AUTH_ENABLED;
-      else process.env.SUPABASE_SOCIAL_AUTH_ENABLED = previous;
-      if (previousHardening === undefined) delete process.env.TOURNEY_HARDENING_V4_ENABLED;
-      else process.env.TOURNEY_HARDENING_V4_ENABLED = previousHardening;
-      if (previousGuild === undefined) delete process.env.DISCORD_GUILD_ID;
-      else process.env.DISCORD_GUILD_ID = previousGuild;
-      if (previousCronFlag === undefined) delete process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
-      else process.env.TOURNEY_RECONCILIATION_CRON_ENABLED = previousCronFlag;
-    }
-  });
 
-  test("skips the Tourney worker on the shared schedule unless explicitly enabled", async () => {
+
+  test("keeps tournament jobs out of the payment scheduler", async () => {
     const previousCronFlag = process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
     delete process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
     try {
@@ -554,10 +441,7 @@ describe("payment reconciliation route authorization", () => {
 
       expect(state.status).toBe(200);
       expect(loaded.runTourneyReconciliation).not.toHaveBeenCalled();
-      expect(state.body.summary.tourneyReconciliation).toEqual({
-        skipped: true,
-        reason: "reconciliation_cron_disabled",
-      });
+      expect(state.body.summary.tourneyReconciliation).toBeUndefined();
     } finally {
       if (previousCronFlag === undefined) delete process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
       else process.env.TOURNEY_RECONCILIATION_CRON_ENABLED = previousCronFlag;

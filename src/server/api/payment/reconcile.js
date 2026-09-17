@@ -13,11 +13,9 @@ import {
 import { reconcileBookingEmailDispatches } from "../ref/bookingEmails.js";
 import { reconcileReferralEmailDispatches } from "../ref/referralEmailDispatches.js";
 import { syncSanityCommerceChanges } from "../../supabase/incrementalCommerceSync.js";
-import {
-  runTourneyReconciliation,
-} from "../../tourney/reconcile.js";
+
 import { reconcileCredentialOperations } from "../../supabase/credentialRecovery.js";
-import { isEnabledTourneyFlag } from "../../tourney/canonical.js";
+
 import { createDocumentWriteClient } from "../../data/documentClient.js";
 import { refreshCommerceParityIfStale } from "../../supabase/commerceParity.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
@@ -151,6 +149,13 @@ export default async function handler(req, res) {
     });
   }
 
+  const scope = String(
+    req?.headers?.["x-reconcile-scope"] || req?.headers?.["X-Reconcile-Scope"] || ""
+  ).trim().toLowerCase();
+  if (scope && !["full", "mirror-only", "parity-only"].includes(scope)) {
+    return res.status(400).json({ ok: false, error: "Unsupported reconciliation scope." });
+  }
+
   const policy = resolveSupabaseRuntimePolicy();
   const sanity = inspectSanityConfiguration(process.env);
   const sanityConfigured = sanity.writeConfigured;
@@ -160,18 +165,6 @@ export default async function handler(req, res) {
       reason: sanity.status === "partial" ? "sanity_incomplete" : "sanity_unconfigured",
       domain: "commerce",
     });
-  }
-
-  const scope = String(
-    req?.headers?.["x-reconcile-scope"] || req?.headers?.["X-Reconcile-Scope"] || ""
-  )
-    .trim()
-    .toLowerCase();
-  if (
-    scope &&
-    !["full", "mirror-only", "parity-only", "tourney-only"].includes(scope)
-  ) {
-    return res.status(400).json({ ok: false, error: "Invalid reconciliation scope." });
   }
 
   if (scope === "mirror-only") {
@@ -225,22 +218,7 @@ export default async function handler(req, res) {
     }
   }
 
-  if (scope === "tourney-only") {
-    try {
-      return res.status(200).json({
-        ok: true,
-        ...(await runTourneyReconciliation()),
-      });
-    } catch (error) {
-      logSafeError("Tourney-only reconciliation failed", error);
-      return res.status(Number(error?.status || 503)).json({
-        ok: false,
-        error: "Tournament reconciliation is temporarily unavailable.",
-        failedStage: String(error?.failedStage || "tourneyUnknown").slice(0, 64),
-        summary: error?.partialSummary || {},
-      });
-    }
-  }
+
 
   if (scope === "parity-only") {
     if (!sanityConfigured) {
@@ -276,21 +254,7 @@ export default async function handler(req, res) {
         value: { skipped: true, reason: "supabase_unavailable" },
         error: null,
       });
-  // Keep heavy tourney reconciliation out of the payment cron unless explicitly
-  // enabled; /api/tourney/reconcile remains available for on-demand runs.
-  const tourneyReconciliationPromise = isEnabledTourneyFlag(
-    process.env.TOURNEY_RECONCILIATION_CRON_ENABLED
-  )
-    ? runTourneyReconciliation({
-        budgetMs: 90_000,
-      }).then(
-        (value) => ({ value, error: null }),
-        (error) => ({ value: null, error })
-      )
-    : Promise.resolve({
-        value: { skipped: true, reason: "reconciliation_cron_disabled" },
-        error: null,
-      });
+
   const supabaseConfigured = isSupabaseAdminConfigured();
   const mirrorSkipReason = supabaseConfigured
     ? "sanity_unconfigured"
@@ -532,9 +496,7 @@ export default async function handler(req, res) {
         const accountSecurity = await createSupabaseAdminClient().rpc(
           "roo_reconcile_account_security",
           {
-            p_guild_id: isEnabledTourneyFlag(process.env.TOURNEY_HARDENING_V4_ENABLED)
-              ? null
-              : String(process.env.DISCORD_GUILD_ID || "").trim() || null,
+            p_guild_id: null,
           }
         );
         if (accountSecurity.error) throw accountSecurity.error;
@@ -564,22 +526,7 @@ export default async function handler(req, res) {
       }
     }
   }
-  const tourneyReconciliation = await tourneyReconciliationPromise;
-  if (tourneyReconciliation.error) {
-    const error = tourneyReconciliation.error;
-    logSafeError("Tourney reconciliation failed", error);
-    result.body.summary.tourneyReconciliation = {
-      pending: true,
-      failedStage: String(error?.failedStage || "tourneyUnknown").slice(0, 64),
-      partialSummary: error?.partialSummary || {},
-    };
-  } else if (tourneyReconciliation.value.skipped) {
-    result.body.summary.tourneyReconciliation = {
-      skipped: true,
-      reason: tourneyReconciliation.value.reason,
-    };
-  } else {
-    Object.assign(result.body.summary, tourneyReconciliation.value.summary);
-  }
+
+
   return res.status(result.httpStatus).json(result.body);
 }

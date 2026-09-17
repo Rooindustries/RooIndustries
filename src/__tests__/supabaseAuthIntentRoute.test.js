@@ -113,7 +113,7 @@ describe("Supabase OAuth intent route", () => {
   test("rejects cross-origin intent creation", async () => {
     const response = await POST(
       makeRequest(
-        { action: "signin", flow: "tourney", provider: "google" },
+        { action: "signin", flow: "referral", provider: "google" },
         { origin: "https://attacker.example" }
       )
     );
@@ -123,7 +123,7 @@ describe("Supabase OAuth intent route", () => {
   });
 
   test.each([undefined, "   "])(
-    "treats an unset or blank Tourney database mode as legacy",
+    "rejects the retired tournament flow regardless of database configuration",
     async (mode) => {
       if (mode === undefined) {
         delete process.env.TOURNEY_DATABASE_MODE;
@@ -136,8 +136,8 @@ describe("Supabase OAuth intent route", () => {
       );
       const body = await response.json();
 
-      expect(response.status).toBe(503);
-      expect(body.code).toBe("TOURNEY_OAUTH_TEMPORARILY_UNAVAILABLE");
+      expect(response.status).toBe(400);
+      expect(body.error).toBe("OAuth request is invalid.");
       expect(mockCreateOAuthIntent).not.toHaveBeenCalled();
     }
   );
@@ -145,7 +145,7 @@ describe("Supabase OAuth intent route", () => {
   test("requires the exact custom and Supabase session before linking", async () => {
     mockResolveExactDomainIdentity.mockResolvedValue(null);
     const response = await POST(
-      makeRequest({ action: "link", flow: "tourney", provider: "discord" })
+      makeRequest({ action: "link", flow: "referral", provider: "discord" })
     );
 
     expect(response.status).toBe(409);
@@ -161,9 +161,9 @@ describe("Supabase OAuth intent route", () => {
     const response = await POST(
       makeRequest({
         action: "link",
-        flow: "tourney",
+        flow: "referral",
         provider: "discord",
-        returnPath: "/tourney",
+        returnPath: "/referrals/dashboard",
       })
     );
     const body = await response.json();
@@ -303,7 +303,7 @@ describe("Supabase OAuth intent route", () => {
       makeRequest({ action: "signup", flow: "referral", provider: "google" })
     );
     const second = await POST(
-      makeRequest({ action: "signup", flow: "tourney", provider: "discord" })
+      makeRequest({ action: "signup", flow: "referral", provider: "discord" })
     );
 
     expect(first.cookies.values.at(-1).name).toContain("11111111");

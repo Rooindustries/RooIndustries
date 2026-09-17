@@ -22,7 +22,7 @@ describe("Supabase route regions", () => {
     expect(config.functions[pattern]).toEqual({ regions: ["dub1"] });
   });
 
-  test.each(TOURNEY_PATTERNS)("pins %s near Supabase", (pattern) => {
-    expect(config.functions[pattern]).toEqual({ regions: ["dub1"] });
+  test.each(TOURNEY_PATTERNS)("removes retired function mapping %s", (pattern) => {
+    expect(config.functions[pattern]).toBeUndefined();
   });
 });
