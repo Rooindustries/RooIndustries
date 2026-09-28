@@ -1,10 +1,5 @@
 const { test, expect } = require("@playwright/test");
 
-const BASE_URL = process.env.BASE_URL;
-if (!BASE_URL) {
-  throw new Error("BASE_URL is required for footer tests.");
-}
-
 test.use({ javaScriptEnabled: true });
 
 const PRIMARY_HREFS = ["/packages", "/faq", "/contact", "/BIOSGuide", "/tools", "/about"];
@@ -16,7 +11,7 @@ for (const [width, height, singleRow] of [
 ]) {
   test(`footer stays compact at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height });
-    await page.goto(`${BASE_URL}/packages`, { waitUntil: "networkidle" });
+    await page.goto("/packages", { waitUntil: "networkidle" });
     const footer = page.locator("footer").last();
     await footer.scrollIntoViewIfNeeded();
 
