@@ -89,6 +89,7 @@
     "test:smoke:routes": "playwright test tests/routes-smoke.spec.js",
     "test:nav:sections": "cross-env BASE_URL=http://127.0.0.1:3001 playwright test tests/section-nav.spec.js",
     "test:nav:chaos": "cross-env BASE_URL=http://127.0.0.1:3001 playwright test tests/nav-chaos.spec.js",
+    "test:footer": "playwright test tests/footer.spec.js",
     "audit:phase1:context": "cross-env BASE_URL=http://127.0.0.1:3001 node scripts/phase1-run-context.js",
     "audit:phase1:browser:pre": "node scripts/phase1-browser-hygiene.js",
     "audit:phase1:browser:cleanup": "cross-env APPLY_CLEANUP=1 node scripts/phase1-browser-hygiene.js",

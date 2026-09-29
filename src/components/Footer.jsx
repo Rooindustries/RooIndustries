@@ -49,70 +49,40 @@ export default function Footer() {
               {[["/packages", "Packages"], ["/faq", "FAQ"], ["/contact", "Contact"], ["/BIOSGuide", "BIOS Guide"]].map(([href, label]) => (
                 <a key={href} href={href} className="hover:text-[color:var(--color-link-hover)] transition-colors">{label}</a>
               ))}
-              <Link
-                to="/about"
-                className="hover:text-[color:var(--color-link-hover)] transition-colors"
-              >
-                About
-              </Link>
-              <Link
-                to="/privacy"
-                className="hover:text-[color:var(--color-link-hover)] transition-colors"
-              >
-                Privacy Policy
-              </Link>
-              <Link
-                to="/terms"
-                className="hover:text-[color:var(--color-link-hover)] transition-colors"
-              >
-                Terms of Service
-              </Link>
-              <Link
-                to="/tools"
-                className="hover:text-[color:var(--color-link-hover)] transition-colors"
-              >
-                Tools
-              </Link>
-              <Link
-                to="/referrals/register"
-                className="hover:text-[color:var(--color-link-hover)] transition-colors"
-              >
-                Referrals
-              </Link>
-              <Link
-                to="/meet-the-team"
-                className="hover:text-[color:var(--color-link-hover)] transition-colors"
-              >
-                Meet the team
-              </Link>
+              {[["/tools", "Tools"], ["/about", "About"]].map(([to, label]) => (
+                <Link key={to} to={to} className="hover:text-[color:var(--color-link-hover)] transition-colors">{label}</Link>
+              ))}
+            </nav>
+
+            <div className="flex items-center gap-3">
               <a
                 href="https://www.trustpilot.com/review/rooindustries.com"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-xs font-semibold tracking-wide uppercase text-ink-secondary hover:text-[color:var(--color-link-hover)] transition-colors"
+                className="h-12 w-12 rounded-full border border-line-accent bg-info-soft flex items-center justify-center hover:border-line-accent hover:bg-surface-hover-accent transition-all shadow-info-soft"
+                aria-label="Review us on Trustpilot"
+                title="Review us on Trustpilot"
               >
                 <img
                   src="/trustpilot-star.png"
-                  alt="Trustpilot"
+                  alt=""
                   loading="lazy"
                   decoding="async"
                   width={96}
                   height={96}
-                  className="h-[1.15em] w-auto -translate-y-[0.1em] object-contain"
+                  className="h-6 w-6 object-contain"
                 />
-                Review on Trustpilot
               </a>
-            </nav>
-
-            <a
-              href="https://discord.com/invite/qs5HKNyazD"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="h-12 w-12 rounded-full border border-line-accent bg-info-soft flex items-center justify-center text-ink-secondary hover:text-[color:var(--color-link-hover)] hover:border-line-accent hover:bg-surface-hover-accent transition-all shadow-info-soft"
-              aria-label="Discord"
-            >
-              <FaDiscord className="text-[28px]" />
-            </a>
+              <a
+                href="https://discord.com/invite/qs5HKNyazD"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="h-12 w-12 rounded-full border border-line-accent bg-info-soft flex items-center justify-center text-ink-secondary hover:text-[color:var(--color-link-hover)] hover:border-line-accent hover:bg-surface-hover-accent transition-all shadow-info-soft"
+                aria-label="Discord"
+              >
+                <FaDiscord className="text-[28px]" />
+              </a>
+            </div>
           </div>
         </div>
 
@@ -167,8 +137,16 @@ export default function Footer() {
 
         <div className="flex flex-col md:flex-row items-center justify-between gap-3 pt-1">
           <div className="flex flex-col items-center md:items-start gap-1">
-            <p className="text-[11px] text-ink-muted">
-              © {new Date().getFullYear()} Roo Industries. All rights reserved.
+            <p className="text-center md:text-left text-[11px] text-ink-muted">
+              <span className="block md:inline">
+                © {new Date().getFullYear()} Roo Industries. All rights reserved.
+              </span>
+              {[["/privacy", "Privacy Policy"], ["/terms", "Terms of Service"]].map(([to, label], index) => (
+                <React.Fragment key={to}>
+                  <span aria-hidden="true" className={`mx-2 ${index === 0 ? "hidden md:inline" : ""}`}>·</span>
+                  <Link to={to} className="whitespace-nowrap hover:text-[color:var(--color-link-hover)] transition-colors">{label}</Link>
+                </React.Fragment>
+              ))}
             </p>
 
             <p className="text-[11px] text-ink-muted">
