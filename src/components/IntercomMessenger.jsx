@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
+import { isProductionBrowser } from "../lib/productionBrowser";
 
 const INTERCOM_APP_ID =
   process.env.NEXT_PUBLIC_INTERCOM_APP_ID ||
@@ -110,7 +111,7 @@ function IntercomMessenger({ disabledRoutes = [], disabled = false }) {
   isDisabledRef.current = isDisabled;
 
   useEffect(() => {
-    if (typeof window === "undefined" || typeof document === "undefined") {
+    if (typeof window === "undefined" || typeof document === "undefined" || !isProductionBrowser()) {
       return;
     }
 
@@ -129,7 +130,7 @@ function IntercomMessenger({ disabledRoutes = [], disabled = false }) {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined" || typeof document === "undefined") {
+    if (typeof window === "undefined" || typeof document === "undefined" || !isProductionBrowser()) {
       return;
     }
 

@@ -16,13 +16,20 @@ const unavailable = (message, code = "COMMERCE_CONTROL_UNAVAILABLE") => {
   return error;
 };
 
-const normalizeControl = (value = {}) => ({
-  primaryBackend: normalizeBackend(value?.primary_backend),
-  generation: Math.max(0, Number(value?.generation) || 0),
-  startsPaused: Boolean(value?.starts_paused),
-  changeReason: String(value?.change_reason || "").trim(),
-  updatedAt: String(value?.updated_at || "").trim(),
-});
+const normalizeControl = (value = {}) => {
+  const primaryBackend = normalizeBackend(value?.primary_backend);
+  if (!primaryBackend || !Number.isSafeInteger(value?.generation) ||
+      value.generation < 0 || typeof value?.starts_paused !== "boolean") {
+    throw unavailable("The commerce control response is invalid.", "COMMERCE_CONTROL_INVALID");
+  }
+  return {
+    primaryBackend,
+    generation: value.generation,
+    startsPaused: value.starts_paused,
+    changeReason: String(value?.change_reason || "").trim(),
+    updatedAt: String(value?.updated_at || "").trim(),
+  };
+};
 
 export const getCommerceControl = async ({
   client = createSupabaseAdminClient(),
@@ -34,8 +41,11 @@ export const getCommerceControl = async ({
     throw unavailable("The commerce control plane is unavailable.");
   }
   const { data, error } = result || {};
-  if (error || !data || typeof data !== "object") {
+  if (error) {
     throw unavailable("The commerce control plane is unavailable.");
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw unavailable("The commerce control response is invalid.", "COMMERCE_CONTROL_INVALID");
   }
   return normalizeControl(data);
 };

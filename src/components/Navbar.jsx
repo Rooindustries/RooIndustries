@@ -852,6 +852,7 @@ export default function Navbar({ routeShell = "browser" }) {
 
         <div
           id="mobile-site-menu"
+          inert={!open}
           className={`md:hidden overflow-hidden transition-all duration-300 ease-out ${
             open
               ? "pb-4 max-h-[680px] opacity-100 translate-y-0"
@@ -932,6 +933,8 @@ export default function Navbar({ routeShell = "browser" }) {
               </button>
               <div
                 id="mobile-proof-menu"
+                inert={!proofOpen}
+                aria-hidden={!proofOpen}
                 className={`flex flex-col bg-[color:var(--color-surface-veil)] overflow-hidden transition-all duration-300 ${
                   proofOpen
                     ? "max-h-40 opacity-100"
@@ -1015,6 +1018,8 @@ export default function Navbar({ routeShell = "browser" }) {
               </button>
               <div
                 id="mobile-referrals-menu"
+                inert={!referralsOpen}
+                aria-hidden={!referralsOpen}
                 className={`flex flex-col bg-[color:var(--color-surface-veil)] overflow-hidden transition-all duration-300 ${
                   referralsOpen
                     ? "max-h-32 opacity-100"

@@ -53,9 +53,20 @@ export const toMoney = (value) => {
 };
 
 export const toSubunits = (amount, currency = "USD") => {
-  const factors = { USD: 100, INR: 100, JPY: 1 };
-  const factor = factors[currency] ?? 100;
+  const factors = { BIF: 1, CLP: 1, DJF: 1, GNF: 1, ISK: 1, JPY: 1, KMF: 1, KRW: 1, PYG: 1, RWF: 1, UGX: 1, UYI: 1, VND: 1, VUV: 1, XAF: 1, XOF: 1, XPF: 1, BHD: 1000, IQD: 1000, JOD: 1000, KWD: 1000, LYD: 1000, OMR: 1000, TND: 1000 };
+  const factor = factors[String(currency).trim().toUpperCase()] ?? 100;
   return Math.round(amount * factor);
+};
+
+export const parseMoneySubunits = (value, currency = "USD") => {
+  const text = String(value ?? "").trim();
+  if (!/^\d+(?:\.\d+)?$/.test(text)) return null;
+  const factor = toSubunits(1, currency);
+  const precision = Math.log10(factor);
+  const fraction = text.split(".")[1] || "";
+  if (/[1-9]/.test(fraction.slice(precision))) return null;
+  const amount = toSubunits(Number(text), currency);
+  return Number.isSafeInteger(amount) && amount > 0 ? amount : null;
 };
 
 export const resolveRazorpayCredentials = () => {
@@ -159,10 +170,10 @@ export const verifyRazorpaySignature = ({
     .createHmac("sha256", secret)
     .update(payload)
     .digest("hex");
-  return (
-    signature.length === expected.length &&
-    crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
-  );
+  const providedBuffer = Buffer.from(String(signature));
+  const expectedBuffer = Buffer.from(expected);
+  return providedBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(providedBuffer, expectedBuffer);
 };
 
 export const createRazorpayOrder = async ({
@@ -290,11 +301,17 @@ export const inspectRazorpayOrder = async ({ orderId }) => {
     const payload = await response.json().catch(() => ({}));
     const payments = Array.isArray(payload?.items) ? payload.items : [];
     const captured = payments.find(
-      (entry) => String(entry?.status || "").trim().toLowerCase() === "captured"
+      (entry) => ["captured", "refunded"].includes(String(entry?.status || "").trim().toLowerCase())
     );
     if (captured?.id) {
+      if (String(captured.order_id || "").trim() !== String(orderId).trim() ||
+          captured.captured !== true) {
+        return { state: "unavailable", reason: "razorpay_payment_binding_mismatch" };
+      }
       return {
-        state: "captured",
+        state: captured.status === "refunded" || Number(captured.amount_refunded) > 0 ? "refunded" : "captured",
+        refundStatus: String(captured.refund_status || ""),
+        amountRefundedInSubunits: Number(captured.amount_refunded || 0),
         providerOrderId: String(orderId),
         providerPaymentId: String(captured.id),
         payerEmail: String(captured.email || "").trim(),
@@ -335,6 +352,9 @@ export const inspectRazorpayPayment = async ({ paymentId }) => {
       };
     }
     const payment = await response.json().catch(() => ({}));
+    if (String(payment?.id || "").trim() !== String(paymentId).trim()) {
+      return { state: "unavailable", reason: "razorpay_payment_id_mismatch" };
+    }
     const orderId = String(payment?.order_id || "").trim();
     if (!orderId) {
       return {
@@ -345,7 +365,7 @@ export const inspectRazorpayPayment = async ({ paymentId }) => {
     return {
       state: "found",
       providerOrderId: orderId,
-      providerPaymentId: String(payment?.id || paymentId).trim(),
+      providerPaymentId: String(payment.id).trim(),
       status: String(payment?.status || "").trim().toLowerCase(),
       amountInSubunits: Number(payment?.amount || 0),
       currency: String(payment?.currency || "").trim().toUpperCase(),
@@ -392,8 +412,12 @@ export const verifyRazorpayPayment = async ({
 
     const payment = await response.json().catch(() => ({}));
     const status = String(payment?.status || "").trim().toLowerCase();
-    const paidAmount = Number(payment?.amount || 0);
-    const expectedSubunits = toSubunits(expectedAmount, expectedCurrency);
+    const paidAmount = payment?.amount;
+    const expectedSubunits = parseMoneySubunits(expectedAmount, expectedCurrency);
+
+    if (String(payment?.id || "").trim() !== String(paymentId || "").trim()) {
+      return { ok: false, reason: "razorpay_payment_id_mismatch" };
+    }
 
     if (String(payment?.order_id || "") !== String(orderId || "")) {
       return { ok: false, reason: "razorpay_order_mismatch" };
@@ -403,15 +427,58 @@ export const verifyRazorpayPayment = async ({
       return { ok: false, captured: status === "captured", reason: "razorpay_currency_mismatch" };
     }
 
-    if (status !== "captured") {
+    if (!["captured", "refunded"].includes(status) || payment.captured !== true) {
       return { ok: false, reason: `razorpay_status_${status || "unknown"}` };
     }
 
-    if (paidAmount !== expectedSubunits) {
+    if (!expectedSubunits || !Number.isSafeInteger(paidAmount) || paidAmount !== expectedSubunits) {
       return { ok: false, captured: true, reason: "razorpay_amount_mismatch" };
     }
 
-    return { ok: true };
+    const amountRefundedInSubunits = payment.amount_refunded ?? 0;
+    const refundStatus = String(payment.refund_status || "").trim().toLowerCase();
+    if (!Number.isSafeInteger(amountRefundedInSubunits) || amountRefundedInSubunits < 0 || amountRefundedInSubunits > paidAmount ||
+        (refundStatus === "full" && amountRefundedInSubunits !== paidAmount) ||
+        (refundStatus === "partial" && (amountRefundedInSubunits <= 0 || amountRefundedInSubunits >= paidAmount)) ||
+        (status === "refunded" && amountRefundedInSubunits !== paidAmount)) {
+      return { ok: false, captured: true, reason: "razorpay_refund_state_mismatch" };
+    }
+    if (amountRefundedInSubunits === paidAmount) {
+      return { ok: false, refunded: true, captured: true, reason: "razorpay_status_refunded",
+        refundStatus: "full", amountRefundedInSubunits, totalAmount: paidAmount, currency: expectedCurrency,
+        providerOrderId: orderId, providerPaymentId: paymentId };
+    }
+    if (payment.amount_captured != null && (!Number.isSafeInteger(payment.amount_captured) || payment.amount_captured !== paidAmount)) {
+      return { ok: false, captured: true, reason: "razorpay_amount_mismatch" };
+    }
+    const refunds = new Map();
+    if (amountRefundedInSubunits > 0) {
+      let total = 0;
+      for (let page = 0; page < 5; page += 1) {
+        const response = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}/refunds?count=100&skip=${page * 100}`,
+          { headers: { Authorization: `Basic ${basic}` }, signal: AbortSignal.timeout(8000) });
+        if (!response.ok) return { ok: false, captured: true, reason: `razorpay_refund_lookup_failed_${response.status}` };
+        const payload = await response.json();
+        if (!Array.isArray(payload.items)) return { ok: false, captured: true, reason: "razorpay_refund_details_pending" };
+        for (const refund of payload.items) {
+          if (refund.status !== "processed") continue;
+          if (!refund.id || refund.payment_id !== paymentId || refund.currency !== expectedCurrency ||
+              !Number.isSafeInteger(refund.amount) || refund.amount <= 0 || refund.amount > paidAmount) {
+            return { ok: false, captured: true, reason: "razorpay_refund_state_mismatch" };
+          }
+          const prior = refunds.get(refund.id);
+          if (prior && prior.amountInSubunits !== refund.amount) return { ok: false, captured: true, reason: "razorpay_refund_state_mismatch" };
+          if (!prior) total += refund.amount;
+          refunds.set(refund.id, { id: refund.id, status: refund.status, amountInSubunits: refund.amount, currency: refund.currency });
+        }
+        if (total === amountRefundedInSubunits || payload.items.length < 100) break;
+      }
+      if ([...refunds.values()].reduce((sum, refund) => sum + refund.amountInSubunits, 0) !== amountRefundedInSubunits) {
+        return { ok: false, captured: true, reason: "razorpay_refund_details_pending" };
+      }
+    }
+    return { ok: true, refundStatus: amountRefundedInSubunits > 0 ? "partial" : refundStatus,
+      amountRefundedInSubunits, refunds: [...refunds.values()] };
   } catch (error) {
     logSafeError("Razorpay payment verification failed", error);
     return { ok: false, reason: "razorpay_lookup_exception" };
@@ -428,10 +495,10 @@ export const verifyRazorpayWebhookSignature = ({
     .createHmac("sha256", secret)
     .update(rawBody)
     .digest("hex");
-  return (
-    signature.length === expected.length &&
-    crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
-  );
+  const providedBuffer = Buffer.from(String(signature));
+  const expectedBuffer = Buffer.from(expected);
+  return providedBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(providedBuffer, expectedBuffer);
 };
 
 export const getPayPalToken = async () => {
@@ -543,15 +610,23 @@ export const createPayPalOrder = async ({
 
 const inspectPayPalDetails = (details = {}) => {
   const status = String(details?.status || "").trim().toUpperCase();
+  if (!Array.isArray(details.purchase_units) || details.purchase_units.length !== 1) {
+    return { state: "unavailable", reason: "paypal_purchase_units_mismatch", details };
+  }
+  const captures = details.purchase_units[0]?.payments?.captures;
+  if (Array.isArray(captures) && captures.length > 1) {
+    return { state: "unavailable", reason: "paypal_captures_mismatch", details };
+  }
   const capture = details?.purchase_units?.[0]?.payments?.captures?.[0] || {};
   const captureStatus = String(capture?.status || "").trim().toUpperCase();
   if (
     status === "COMPLETED" &&
     capture?.id &&
-    captureStatus === "COMPLETED"
+    ["COMPLETED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(captureStatus)
   ) {
     return {
-      state: "captured",
+      state: captureStatus === "COMPLETED" ? "captured" : "refunded",
+      refundStatus: captureStatus === "REFUNDED" ? "full" : captureStatus === "PARTIALLY_REFUNDED" ? "partial" : "",
       providerOrderId: String(details?.id || "").trim(),
       providerPaymentId: String(capture.id || "").trim(),
       payerEmail: String(details?.payer?.email_address || "").trim(),
@@ -598,7 +673,11 @@ export const inspectPayPalOrder = async ({ orderId }) => {
     if (!response.ok) {
       return { state: "unavailable", reason: `paypal_lookup_failed_${response.status}` };
     }
-    return inspectPayPalDetails(await response.json().catch(() => ({})));
+    const details = await response.json().catch(() => ({}));
+    if (String(details?.id || "").trim() !== String(orderId).trim()) {
+      return { state: "unavailable", reason: "paypal_order_mismatch" };
+    }
+    return inspectPayPalDetails(details);
   } catch {
     return { state: "unavailable", reason: "paypal_lookup_exception" };
   }
@@ -606,6 +685,7 @@ export const inspectPayPalOrder = async ({ orderId }) => {
 
 export const verifyPayPalOrder = async ({
   orderId,
+  expectedPaymentId = "",
   expectedAmount,
   expectedCurrency = DEFAULT_PAYPAL_CURRENCY,
 }) => {
@@ -632,17 +712,25 @@ export const verifyPayPalOrder = async ({
     }
 
     const details = await response.json().catch(() => ({}));
+    if (String(details?.id || "").trim() !== String(orderId || "").trim()) {
+      return { ok: false, reason: "paypal_order_mismatch" };
+    }
     const status = String(details?.status || "").trim().toUpperCase();
     if (status !== "COMPLETED") {
       return { ok: false, reason: `paypal_status_${status || "unknown"}` };
     }
 
+    const inspection = inspectPayPalDetails(details);
+    if (inspection.state === "unavailable") return { ok: false, reason: inspection.reason };
     const capture = details?.purchase_units?.[0]?.payments?.captures?.[0] || {};
     const captureStatus = String(capture?.status || "").trim().toUpperCase();
     if (!capture?.id) {
       return { ok: false, reason: "paypal_capture_missing" };
     }
-    if (captureStatus !== "COMPLETED") {
+    if (expectedPaymentId && String(capture.id).trim() !== String(expectedPaymentId).trim()) {
+      return { ok: false, reason: "paypal_payment_id_mismatch" };
+    }
+    if (!["COMPLETED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(captureStatus)) {
       return {
         ok: false,
         captured: true,
@@ -652,14 +740,15 @@ export const verifyPayPalOrder = async ({
       };
     }
 
-    const paidAmount = toMoney(capture?.amount?.value || 0) || 0;
     const paidCurrency = String(
       capture?.amount?.currency_code || ""
     )
       .trim()
       .toUpperCase();
 
-    if (Math.abs(paidAmount - expectedAmount) > 0.01) {
+    const paidAmount = parseMoneySubunits(capture?.amount?.value, paidCurrency);
+    const expectedSubunits = parseMoneySubunits(expectedAmount, expectedCurrency);
+    if (!paidAmount || !expectedSubunits || paidAmount !== expectedSubunits) {
       return { ok: false, captured: true, reason: "paypal_amount_mismatch" };
     }
 
@@ -667,8 +756,46 @@ export const verifyPayPalOrder = async ({
       return { ok: false, captured: true, reason: "paypal_currency_mismatch" };
     }
 
+    if (captureStatus === "REFUNDED") {
+      return { ok: false, refunded: true, captured: true, reason: "paypal_capture_status_refunded",
+        refundStatus: "full", amountRefundedInSubunits: paidAmount, totalAmount: paidAmount, currency: paidCurrency,
+        providerOrderId: orderId, providerPaymentId: String(capture.id).trim() };
+    }
+    const refunds = new Map();
+    let reportedRefundTotal = 0;
+    for (const refund of details.purchase_units[0]?.payments?.refunds || []) {
+      if (refund.status !== "COMPLETED") continue;
+      const amountInSubunits = parseMoneySubunits(refund.amount?.value, paidCurrency);
+      if (!refund.id || refund.amount?.currency_code !== paidCurrency || !amountInSubunits || amountInSubunits > paidAmount) {
+        return { ok: false, captured: true, reason: "paypal_refund_state_mismatch" };
+      }
+      const reportedTotal = refund.seller_payable_breakdown?.total_refunded_amount;
+      if (reportedTotal != null) {
+        const total = parseMoneySubunits(reportedTotal.value, paidCurrency);
+        if (!total || reportedTotal.currency_code !== paidCurrency || total < amountInSubunits || total > paidAmount) {
+          return { ok: false, captured: true, reason: "paypal_refund_state_mismatch" };
+        }
+        reportedRefundTotal = Math.max(reportedRefundTotal, total);
+      }
+      const prior = refunds.get(refund.id);
+      if (prior && prior.amountInSubunits !== amountInSubunits) return { ok: false, captured: true, reason: "paypal_refund_state_mismatch" };
+      refunds.set(refund.id, { id: refund.id, status: refund.status, amount: refund.amount.value, amountInSubunits, currency: paidCurrency });
+    }
+    const identifiedRefundTotal = [...refunds.values()].reduce((sum, refund) => sum + refund.amountInSubunits, 0);
+    const amountRefundedInSubunits = Math.max(identifiedRefundTotal, reportedRefundTotal);
+    if (amountRefundedInSubunits === paidAmount) {
+      return { ok: false, refunded: true, captured: true, reason: "paypal_capture_status_refunded",
+        refundStatus: "full", amountRefundedInSubunits, totalAmount: paidAmount, currency: paidCurrency,
+        providerOrderId: orderId, providerPaymentId: String(capture.id).trim() };
+    }
+    if (amountRefundedInSubunits > paidAmount || (captureStatus === "PARTIALLY_REFUNDED" && amountRefundedInSubunits >= paidAmount)) {
+      return { ok: false, captured: true, reason: "paypal_refund_state_mismatch" };
+    }
     return {
       ok: true,
+      refundStatus: captureStatus === "PARTIALLY_REFUNDED" || amountRefundedInSubunits > 0 ? "partial" : "",
+      amountRefundedInSubunits, refunds: [...refunds.values()],
+      refundDetailsMissing: amountRefundedInSubunits > identifiedRefundTotal,
       payerEmail: String(details?.payer?.email_address || "").trim(),
       payerId: String(details?.payer?.payer_id || "").trim(),
       providerPaymentId: String(capture?.id || "").trim(),
@@ -677,6 +804,42 @@ export const verifyPayPalOrder = async ({
     logSafeError("PayPal order verification failed", error);
     return { ok: false, reason: "paypal_lookup_exception" };
   }
+};
+
+export const getPayPalRefundCaptureId = (resource = {}) => {
+  const relatedId = String(resource.supplementary_data?.related_ids?.capture_id || resource.capture_id || "").trim();
+  const links = Array.isArray(resource.links) ? resource.links : [];
+  for (const link of links) {
+    if (link?.rel !== "up") continue;
+    try {
+      const url = new URL(link.href);
+      if (!["https://api-m.paypal.com", "https://api-m.sandbox.paypal.com", "https://api.paypal.com", "https://api.sandbox.paypal.com"].includes(url.origin)) continue;
+      const match = url.pathname.match(/^\/v2\/payments\/captures\/([A-Za-z0-9_-]+)$/);
+      if (match) return relatedId && relatedId !== match[1] ? "" : match[1];
+    } catch {}
+  }
+  return relatedId;
+};
+
+export const inspectPayPalCapture = async ({ paymentId }) => {
+  if (!paymentId) return { state: "unavailable", reason: "paypal_payment_id_missing" };
+  const tokenResult = await getPayPalToken();
+  if (!tokenResult.ok) return { state: "unavailable", reason: tokenResult.reason };
+  try {
+    const response = await fetch(`${getPayPalBaseUrl()}/v2/payments/captures/${encodeURIComponent(paymentId)}`, {
+      headers: { Authorization: `Bearer ${tokenResult.token}` },
+    });
+    if (!response.ok) return { state: "unavailable", reason: `paypal_capture_lookup_failed_${response.status}` };
+    const capture = await response.json().catch(() => ({}));
+    if (String(capture.id || "").trim() !== String(paymentId).trim()) {
+      return { state: "unavailable", reason: "paypal_payment_id_mismatch" };
+    }
+    return { state: "found", providerPaymentId: String(capture.id).trim(),
+      providerOrderId: String(capture.supplementary_data?.related_ids?.order_id || "").trim(),
+      status: String(capture.status || "").trim().toUpperCase(),
+      amountInSubunits: parseMoneySubunits(capture.amount?.value, capture.amount?.currency_code),
+      currency: String(capture.amount?.currency_code || "").trim().toUpperCase() };
+  } catch { return { state: "unavailable", reason: "paypal_capture_lookup_exception" }; }
 };
 
 export const verifyPayPalWebhookSignature = async ({
@@ -720,7 +883,7 @@ export const verifyPayPalWebhookSignature = async ({
 
   const tokenResult = await getPayPalToken();
   if (!tokenResult.ok) {
-    return { ok: false, reason: tokenResult.reason || "paypal_token_missing" };
+    return { ok: false, retryable: true, reason: tokenResult.reason || "paypal_token_missing" };
   }
 
   let webhookEvent = {};
@@ -730,29 +893,33 @@ export const verifyPayPalWebhookSignature = async ({
     return { ok: false, reason: "paypal_webhook_body_invalid" };
   }
 
-  const response = await fetch(
-    `${getPayPalBaseUrl()}/v1/notifications/verify-webhook-signature`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${tokenResult.token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        auth_algo: authAlgo,
-        cert_url: certUrl,
-        transmission_id: transmissionId,
-        transmission_sig: transmissionSig,
-        transmission_time: transmissionTime,
-        webhook_id: webhookId,
-        webhook_event: webhookEvent,
-      }),
-    }
-  );
+  let response;
+  try {
+    response = await fetch(
+      `${getPayPalBaseUrl()}/v1/notifications/verify-webhook-signature`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenResult.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          auth_algo: authAlgo,
+          cert_url: certUrl,
+          transmission_id: transmissionId,
+          transmission_sig: transmissionSig,
+          transmission_time: transmissionTime,
+          webhook_id: webhookId,
+          webhook_event: webhookEvent,
+        }),
+      }
+    );
+  } catch { return { ok: false, retryable: true, reason: "paypal_webhook_verify_exception" }; }
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    return { ok: false, reason: `paypal_webhook_verify_failed_${response.status}` };
+    return { ok: false, retryable: [401, 403, 429].includes(response.status) || response.status >= 500,
+      reason: `paypal_webhook_verify_failed_${response.status}` };
   }
 
   const verificationStatus = String(

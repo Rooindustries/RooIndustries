@@ -129,7 +129,7 @@ try {
     captureStatus = status;
     await check(`${status} capture is not accepted as settled`, async () => {
       assert.equal((await verify()).ok, false);
-      assert.equal((await providers.inspectPayPalOrder({ orderId: "isolated-order" })).state, "pending");
+      assert.equal((await providers.inspectPayPalOrder({ orderId: "isolated-order" })).state, status === "REFUNDED" ? "refunded" : "pending");
     }, 2, 2);
   }
   captureStatus = "COMPLETED";

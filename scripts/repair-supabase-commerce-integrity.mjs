@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 
 import crypto from "node:crypto";
-import fs from "node:fs";
 import process from "node:process";
 import { createClient as createSanityClient } from "@sanity/client";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import dotenv from "dotenv";
+import operatorEnvironment from "./lib/operator-environment.cjs";
 import { drainCommerceMirrorOutbox } from "../src/server/supabase/commerceMirrorOutbox.js";
 import { SupabaseDocumentClient } from "../src/server/supabase/documentClient.js";
 
@@ -19,11 +18,7 @@ const expectedGenerationText = argument("--expected-generation");
 const expectedGeneration = Number(expectedGenerationText);
 const confirmedDigest = argument("--confirm-digest");
 
-for (const candidate of [envPath, ".env.local", ".vercel/.env.production.local"]) {
-  if (candidate && fs.existsSync(candidate)) {
-    dotenv.config({ path: candidate, override: false, quiet: true });
-  }
-}
+operatorEnvironment.loadOperatorEnvironment(envPath);
 
 const readEnv = (...keys) =>
   keys.map((key) => String(process.env[key] || "").trim()).find(Boolean) || "";

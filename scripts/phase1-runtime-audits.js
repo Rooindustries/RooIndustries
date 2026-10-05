@@ -4,7 +4,7 @@ const path = require("path");
 const { execSync } = require("child_process");
 const { chromium, firefox, webkit } = require("playwright");
 
-const BASE_URL = process.env.BASE_URL;
+let BASE_URL = process.env.BASE_URL;
 if (!BASE_URL) {
   console.error("[phase1-runtime-audits] BASE_URL is required");
   process.exit(1);
@@ -67,10 +67,12 @@ const captureSeoReport = () => {
 };
 
 const captureCssIntegrity = async () => {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: false });
   const page = await browser.newPage({
+    serviceWorkers: "block",
     viewport: { width: 1536, height: 960 },
   });
+  await (await import("./lib/test-target-safety.mjs")).guardBrowserContext(page.context(), [BASE_URL]);
   const response = await page.goto(`${BASE_URL}/`, {
     waitUntil: "domcontentloaded",
     timeout: 60000,
@@ -136,7 +138,7 @@ const browserMatrix = async () => {
   for (const b of browserEntries) {
     let browser = null;
     try {
-      browser = await b.launcher.launch({ headless: true });
+      browser = await b.launcher.launch({ headless: false });
     } catch (err) {
       rows.push([b.name, "all", "/", "launch_failed", 0, 0, 0, "false"].join(","));
       continue;
@@ -144,8 +146,10 @@ const browserMatrix = async () => {
 
     for (const vp of viewports) {
       const context = await browser.newContext({
+        serviceWorkers: "block",
         viewport: { width: vp.width, height: vp.height },
       });
+      await (await import("./lib/test-target-safety.mjs")).guardBrowserContext(context, [BASE_URL]);
       const page = await context.newPage();
       const response = await page.goto(`${BASE_URL}/`, {
         waitUntil: "domcontentloaded",
@@ -178,7 +182,7 @@ const browserMatrix = async () => {
 
 const visualParity = async () => {
   fs.mkdirSync(visualDir, { recursive: true });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: false });
   const targets = ["/", "/reviews", "/tools", "/booking", "/payment"];
   const viewports = [
     { name: "desktop", width: 1536, height: 960 },
@@ -188,8 +192,10 @@ const visualParity = async () => {
   const captures = [];
   for (const vp of viewports) {
     const context = await browser.newContext({
+      serviceWorkers: "block",
       viewport: { width: vp.width, height: vp.height },
     });
+    await (await import("./lib/test-target-safety.mjs")).guardBrowserContext(context, [BASE_URL]);
     const page = await context.newPage();
     for (const route of targets) {
       await page.goto(`${BASE_URL}${route}`, {
@@ -223,10 +229,12 @@ const visualParity = async () => {
 };
 
 const stressResults = async () => {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext({
+    serviceWorkers: "block",
     viewport: { width: 1536, height: 960 },
   });
+  await (await import("./lib/test-target-safety.mjs")).guardBrowserContext(context, [BASE_URL]);
   const page = await context.newPage();
   const cdp = await context.newCDPSession(page);
 
@@ -307,10 +315,12 @@ const stressResults = async () => {
 };
 
 const a11yCritical = async () => {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext({
+    serviceWorkers: "block",
     viewport: { width: 1536, height: 960 },
   });
+  await (await import("./lib/test-target-safety.mjs")).guardBrowserContext(context, [BASE_URL]);
   const page = await context.newPage();
 
   const checks = [];
@@ -363,7 +373,7 @@ const a11yCritical = async () => {
 };
 
 const businessSmoke = async () => {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: false });
   const checks = [];
 
   const waitForMarker = async (locator, timeout = 3000) => {
@@ -373,8 +383,10 @@ const businessSmoke = async () => {
   };
 
   const bookingPage = await browser.newPage({
+    serviceWorkers: "block",
     viewport: { width: 1536, height: 960 },
   });
+  await (await import("./lib/test-target-safety.mjs")).guardBrowserContext(bookingPage.context(), [BASE_URL]);
   await bookingPage.goto(`${BASE_URL}/booking`, {
     waitUntil: "domcontentloaded",
   });
@@ -392,8 +404,10 @@ const businessSmoke = async () => {
   await bookingPage.close();
 
   const paymentPage = await browser.newPage({
+    serviceWorkers: "block",
     viewport: { width: 1536, height: 960 },
   });
+  await (await import("./lib/test-target-safety.mjs")).guardBrowserContext(paymentPage.context(), [BASE_URL]);
   await paymentPage.goto(`${BASE_URL}/payment`, {
     waitUntil: "domcontentloaded",
   });
@@ -459,8 +473,10 @@ const businessSmoke = async () => {
   await paymentPage.close();
 
   const referralPage = await browser.newPage({
+    serviceWorkers: "block",
     viewport: { width: 1536, height: 960 },
   });
+  await (await import("./lib/test-target-safety.mjs")).guardBrowserContext(referralPage.context(), [BASE_URL]);
   await referralPage.goto(`${BASE_URL}/referrals/login`, {
     waitUntil: "domcontentloaded",
   });
@@ -486,6 +502,10 @@ const businessSmoke = async () => {
 };
 
 async function runAll() {
+  const safety = await import("./lib/test-target-safety.mjs");
+  safety.refuseEnvFiles();
+  BASE_URL = safety.localOrigin(BASE_URL);
+  safety.installNetworkGuard([BASE_URL]);
   fs.mkdirSync(auditDir, { recursive: true });
   captureSeoReport();
   await captureCssIntegrity();

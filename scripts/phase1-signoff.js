@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 const fs = require("fs");
 const path = require("path");
-const { execSync, spawn } = require("child_process");
+const { execFileSync } = require("child_process");
 
 const auditDir = path.join(process.cwd(), "audit");
 const BASE_URL = process.env.BASE_URL;
@@ -10,68 +10,17 @@ if (!BASE_URL) {
   process.exit(1);
 }
 
-const run = (cmd) => {
+const run = (args) => {
   try {
-    const output = execSync(cmd, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
+    const output = execFileSync(process.execPath, args, {
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, CI: "true", BASE_URL },
     });
     return { code: 0, output };
   } catch (err) {
-    return {
-      code: typeof err.status === "number" ? err.status : 1,
-      output: String(err.stdout || err.stderr || err.message || ""),
-    };
+    return { code: typeof err.status === "number" ? err.status : 1,
+      output: String(err.stdout || err.stderr || err.message || "") };
   }
-};
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const waitForServer = async (url, timeoutMs = 90000) => {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const probe = run(`curl -fsS ${url} > /dev/null`);
-    if (probe.code === 0) {
-      return true;
-    }
-    await sleep(1000);
-  }
-  return false;
-};
-
-const runWithServer = async (commands) => {
-  let port = 3001;
-  try {
-    port = Number(new URL(BASE_URL).port || "3001");
-  } catch {
-    port = 3001;
-  }
-
-  const server = spawn("npm", ["run", "start", "--", "--port", String(port)], {
-    stdio: "ignore",
-  });
-
-  const ready = await waitForServer(BASE_URL);
-  if (!ready) {
-    try {
-      process.kill(server.pid, "SIGTERM");
-    } catch {}
-    return commands.map((item) => ({
-      ...item,
-      code: 1,
-      output: "Server did not become ready in time",
-    }));
-  }
-
-  const results = commands.map((item) => ({
-    ...item,
-    ...run(item.cmd),
-  }));
-
-  try {
-    process.kill(server.pid, "SIGTERM");
-  } catch {}
-  return results;
 };
 
 const readJson = (file) => {
@@ -86,31 +35,20 @@ const nav = readJson("phase1-nav-reliability.json");
 const crashes = readJson("phase1-client-crash-log.json");
 const hydration = readJson("phase1-hydration-log.json");
 
-const preChecks = [
-  { name: "build", cmd: `BASE_URL=${BASE_URL} npm run build` },
-  { name: "unit", cmd: `BASE_URL=${BASE_URL} CI=true npm test -- --watchAll=false --runInBand` },
-];
-
-const routeChecks = [
-  { name: "routes", cmd: `BASE_URL=${BASE_URL} npm run test:smoke:routes -- --reporter=line` },
-  { name: "nonjs", cmd: `BASE_URL=${BASE_URL} npm run test:seo:nonjs -- --reporter=line` },
-];
-
-const postChecks = [
-  { name: "seo", cmd: `BASE_URL=${BASE_URL} npm run check:seo` },
-  { name: "budgets", cmd: `BASE_URL=${BASE_URL} npm run check:budgets` },
+const checks = [
+  { name: "routes", args: ["node_modules/@playwright/test/cli.js", "test", "tests/routes-smoke.spec.js", "--reporter=line"] },
+  { name: "nonjs", args: ["node_modules/@playwright/test/cli.js", "test", "tests/nonjs-seo.spec.js", "--reporter=line"] },
+  { name: "seo", args: ["scripts/check-seo.js"] },
+  { name: "budgets", args: ["scripts/check-budgets.js"] },
 ];
 async function main() {
-  const preResults = preChecks.map((item) => ({
-    ...item,
-    ...run(item.cmd),
-  }));
-  const routeResults = await runWithServer(routeChecks);
-  const postResults = postChecks.map((item) => ({
-    ...item,
-    ...run(item.cmd),
-  }));
-  const results = [...preResults, ...routeResults, ...postResults];
+  const safety = await import("./lib/test-target-safety.mjs");
+  safety.refuseEnvFiles();
+  safety.localOrigin(BASE_URL);
+  safety.installNetworkGuard([BASE_URL]);
+  const response = await fetch(BASE_URL);
+  if (!response.ok) throw new Error("An existing isolated server is required for signoff.");
+  const results = checks.map(item => ({ ...item, ...run(item.args) }));
 
   const navPass = Boolean(nav?.summary?.pass);
   const crashPass = Array.isArray(crashes?.errors) ? crashes.errors.length === 0 : false;

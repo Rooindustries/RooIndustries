@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 
-import fs from "node:fs";
 import process from "node:process";
 import { createClient } from "@sanity/client";
-import dotenv from "dotenv";
+import operatorEnvironment from "./lib/operator-environment.cjs";
 import { buildReferralIdentityClaim } from "../src/server/api/ref/referralIdentity.js";
 
 const args = new Set(process.argv.slice(2));
@@ -14,22 +13,19 @@ const valueAfter = (flag) => {
 const apply = args.has("--apply");
 const explicitEnv = valueAfter("--env");
 
-for (const candidate of [explicitEnv, ".env.local", ".vercel/.env.production.local"]) {
-  if (candidate && fs.existsSync(candidate)) {
-    dotenv.config({ path: candidate, override: false, quiet: true });
-  }
-}
+operatorEnvironment.loadOperatorEnvironment(explicitEnv);
 
 const env = (...keys) =>
   keys.map((key) => String(process.env[key] || "").trim()).find(Boolean) || "";
-const projectId = env("SANITY_PROJECT_ID");
-const dataset = env("SANITY_DATASET") || "production";
-const token = env("SANITY_WRITE_TOKEN", "SANITY_READ_TOKEN");
+const projectId = env("SANITY_PRIVATE_PROJECT_ID", "SANITY_PROJECT_ID");
+const dataset = env("SANITY_PRIVATE_DATASET", "SANITY_DATASET");
+const writeToken = env("SANITY_PRIVATE_WRITE_TOKEN", "SANITY_WRITE_TOKEN");
+const token = writeToken || env("SANITY_PRIVATE_READ_TOKEN", "SANITY_READ_TOKEN");
 
-if (!projectId || !token) {
+if (!projectId || !dataset || !token) {
   throw new Error("Sanity project and authenticated token are required.");
 }
-if (apply && !env("SANITY_WRITE_TOKEN")) {
+if (apply && !writeToken) {
   throw new Error("A Sanity write token is required with --apply.");
 }
 if (apply && !explicitEnv) {

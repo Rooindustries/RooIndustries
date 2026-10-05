@@ -1,15 +1,17 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import dotenv from "dotenv";
+import { prepareTestTarget, guardBrowserContext, verifyFixtureOwnership } from "./lib/test-target-safety.mjs";
 import { chromium } from "playwright";
-import { createClient } from "@sanity/client";
 
-dotenv.config({ path: ".env.local" });
+const fixture = prepareTestTarget({ browser: true });
+await verifyFixtureOwnership(fixture);
+const { createClient } = await import("@sanity/client");
 
+const BROWSER_MODE = "launch";
 const OWNER_TZ = "Asia/Kolkata";
 const OWNER_OFFSET_MINUTES = 330;
-const DEFAULT_BASE_URL = "https://www.rooindustries.com";
+const DEFAULT_BASE_URL = fixture.baseUrl;
 const RAW_BASE_URL = String(
   process.env.PREVIEW_SHARE_URL || process.env.BASE_URL || DEFAULT_BASE_URL
 ).trim();
@@ -21,7 +23,7 @@ const BASE_SHARE_TOKEN = String(
     ""
 ).trim();
 const BOOKING_EMAIL = String(
-  process.env.FREE_BOOKING_EMAIL || "serviroo@rooindustries.com"
+  process.env.FREE_BOOKING_EMAIL || "booking@fixture.invalid"
 ).trim();
 const PACKAGE_TITLE = String(
   process.env.FREE_BOOKING_PACKAGE_TITLE || "Performance Vertex Overhaul"
@@ -47,19 +49,6 @@ const KEEP_BOOKING_ARTIFACTS = String(
 )
   .trim()
   .toLowerCase() === "1";
-const BROWSER_MODE = String(process.env.PLAYWRIGHT_BROWSER_MODE || "cdp")
-  .trim()
-  .toLowerCase();
-const CDP_ENDPOINT = String(process.env.CDP_ENDPOINT || "http://localhost:9222")
-  .trim()
-  .replace(/\/$/, "");
-const IMPORT_CDP_COOKIES = String(
-  process.env.IMPORT_CDP_COOKIES === undefined
-    ? "1"
-    : process.env.IMPORT_CDP_COOKIES
-)
-  .trim()
-  .toLowerCase() !== "0";
 const TERMINAL_EMAIL_DISPATCH_STATUSES = new Set([
   "sent",
   "partial",
@@ -68,6 +57,8 @@ const TERMINAL_EMAIL_DISPATCH_STATUSES = new Set([
 ]);
 
 const sanityClient = createClient({
+  apiHost: fixture.sanityApiUrl,
+  useProjectHostname: false,
   projectId:
     process.env.SANITY_PROJECT_ID || process.env.NEXT_PUBLIC_SANITY_PROJECT_ID,
   dataset:
@@ -139,113 +130,6 @@ const readJsonResponse = async (response) => {
     return await response.json();
   } catch {
     return null;
-  }
-};
-
-const normalizeSameSite = (value) => {
-  const normalized = String(value || "").toLowerCase();
-  if (normalized === "strict") return "Strict";
-  if (normalized === "none") return "None";
-  if (normalized === "lax") return "Lax";
-  return undefined;
-};
-
-const sendBrowserCdpCommand = async (method, params = {}) => {
-  const versionResponse = await fetch(`${CDP_ENDPOINT}/json/version`);
-  if (!versionResponse.ok) {
-    throw new Error(`CDP endpoint unavailable at ${CDP_ENDPOINT}.`);
-  }
-
-  const version = await versionResponse.json();
-  const wsUrl = String(version?.webSocketDebuggerUrl || "").trim();
-  if (!wsUrl) {
-    throw new Error("CDP browser websocket URL is missing.");
-  }
-
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(wsUrl);
-    const requestId = 1;
-
-    socket.addEventListener("open", () => {
-      socket.send(JSON.stringify({ id: requestId, method, params }));
-    });
-
-    socket.addEventListener("message", (event) => {
-      let payload;
-      try {
-        payload = JSON.parse(String(event.data || ""));
-      } catch (error) {
-        socket.close();
-        reject(error);
-        return;
-      }
-
-      if (payload.id !== requestId) {
-        return;
-      }
-
-      socket.close();
-      if (payload.error) {
-        reject(
-          new Error(
-            payload.error.message || `${method} failed over the CDP websocket.`
-          )
-        );
-        return;
-      }
-
-      resolve(payload.result || {});
-    });
-
-    socket.addEventListener("error", (event) => {
-      socket.close();
-      reject(new Error(event?.message || `${method} websocket error.`));
-    });
-  });
-};
-
-const exportCookiesFromCdp = async () => {
-  if (!IMPORT_CDP_COOKIES || BROWSER_MODE !== "launch") {
-    return [];
-  }
-
-  try {
-    const result = await sendBrowserCdpCommand("Storage.getCookies");
-    return (Array.isArray(result?.cookies) ? result.cookies : [])
-      .map((cookie) => {
-        const normalized = {
-          name: String(cookie?.name || "").trim(),
-          value: String(cookie?.value || ""),
-          domain: String(cookie?.domain || "").trim(),
-          path: String(cookie?.path || "/"),
-          httpOnly: cookie?.httpOnly === true,
-          secure: cookie?.secure === true,
-        };
-
-        if (!normalized.name || !normalized.domain) {
-          return null;
-        }
-
-        const expires = Number(cookie?.expires);
-        if (Number.isFinite(expires) && expires > 0) {
-          normalized.expires = expires;
-        }
-
-        const sameSite = normalizeSameSite(cookie?.sameSite);
-        if (sameSite) {
-          normalized.sameSite = sameSite;
-        }
-
-        return normalized;
-      })
-      .filter(Boolean);
-  } catch (error) {
-    console.warn(
-      `[cdp-free-booking-email-check] Failed to import CDP cookies: ${
-        error?.message || error
-      }`
-    );
-    return [];
   }
 };
 
@@ -380,15 +264,6 @@ const resolveTargetSlot = async () => {
   throw new Error("No free booking slot found at least 7 days in the future.");
 };
 
-const waitForNewPage = async (context, knownPages) => {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    const next = context.pages().find((page) => !knownPages.has(page));
-    if (next) return next;
-    await delay(100);
-  }
-  throw new Error("Failed to observe the new background target.");
-};
-
 const installPageInstrumentation = async (page) => {
   await page.addInitScript((nextRunId) => {
     window.__automationRunId = nextRunId;
@@ -448,55 +323,14 @@ const installPageInstrumentation = async (page) => {
   }, RUN_ID);
 };
 
+
 const openBackgroundPage = async () => {
-  if (BROWSER_MODE === "launch") {
-    const importedCookies = await exportCookiesFromCdp();
-    const browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext();
-    if (importedCookies.length > 0) {
-      await context.addCookies(importedCookies);
-    }
-    const page = await context.newPage();
-    await installPageInstrumentation(page);
-
-    return {
-      browser,
-      context,
-      browserSession: null,
-      importedCookieCount: importedCookies.length,
-      targetId: "",
-      page,
-    };
-  }
-
-  const versionResponse = await fetch(`${CDP_ENDPOINT}/json/version`);
-  if (!versionResponse.ok) {
-    throw new Error(`CDP endpoint unavailable at ${CDP_ENDPOINT}.`);
-  }
-
-  const browser = await chromium.connectOverCDP(CDP_ENDPOINT);
-  const context = browser.contexts()[0];
-  if (!context) {
-    throw new Error("No Chromium context available over CDP.");
-  }
-
-  const browserSession = await browser.newBrowserCDPSession();
-  const knownPages = new Set(context.pages());
-  const { targetId } = await browserSession.send("Target.createTarget", {
-    url: "about:blank",
-    background: true,
-  });
-  const page = await waitForNewPage(context, knownPages);
+  const browser = await chromium.launch({ headless: false });
+  const context = await browser.newContext({ serviceWorkers: "block" });
+  await guardBrowserContext(context, [fixture.baseUrl, fixture.sanityApiUrl, fixture.paypalApiUrl, fixture.razorpayApiUrl]);
+  const page = await context.newPage();
   await installPageInstrumentation(page);
-
-  return {
-    browser,
-    context,
-    browserSession,
-    importedCookieCount: 0,
-    targetId,
-    page,
-  };
+  return { browser, context, importedCookieCount: 0, page };
 };
 
 const clickDayButton = async (page, dayOfMonth) => {
@@ -868,9 +702,7 @@ const main = async () => {
   const {
     browser,
     context,
-    browserSession,
     importedCookieCount,
-    targetId,
     page,
   } = await openBackgroundPage();
 
@@ -959,14 +791,7 @@ const main = async () => {
       )
     );
   } finally {
-    try {
-      if (browserSession && targetId) {
-        await browserSession.send("Target.closeTarget", { targetId });
-      }
-    } catch {}
-    if (BROWSER_MODE === "launch") {
-      await browser.close();
-    }
+    await browser.close();
   }
 };
 

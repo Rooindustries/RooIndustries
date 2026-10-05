@@ -133,15 +133,36 @@ const removePath = (object, path) => {
   delete cursor[parts.at(-1)];
 };
 
+const revisionConflict = () => {
+  const error = new Error("Document revision conflict.");
+  error.code = "40001";
+  error.status = 409;
+  error.statusCode = 409;
+  return error;
+};
+
+const mutationRevision = (expectedRevision, currentRevision) => {
+  if (expectedRevision === undefined) return currentRevision || "";
+  if (typeof expectedRevision !== "string" || !expectedRevision.trim()) {
+    throw revisionConflict();
+  }
+  return expectedRevision.trim();
+};
+
+const deleteRevision = (options) =>
+  Object.prototype.hasOwnProperty.call(options || {}, "ifRevisionId")
+    ? mutationRevision(options.ifRevisionId ?? null, "")
+    : undefined;
+
 class PatchSpec {
   constructor(id) {
     this.id = String(id || "").trim();
-    this.expectedRevision = "";
+    this.expectedRevision = undefined;
     this.operations = [];
   }
 
   ifRevisionId(revision) {
-    this.expectedRevision = String(revision || "").trim();
+    this.expectedRevision = typeof revision === "string" ? revision.trim() : "";
     return this;
   }
 
@@ -243,7 +264,7 @@ class TransactionBuilder {
     this.operations.push({
       type: "delete",
       id: String(id || "").trim(),
-      expectedRevision: String(options?.ifRevisionId || "").trim(),
+      expectedRevision: deleteRevision(options),
     });
     return this;
   }
@@ -334,6 +355,32 @@ export class SupabaseDocumentClient {
     return [link, ...targets];
   }
 
+  async fetchBookingSettingsDataset(id, selector, params) {
+    const settings = await this.dataset({
+      documentTypes: ["bookingSettings"],
+      ids: [id],
+      limit: 1,
+    });
+    const selection = await evaluate(selector, { dataset: settings, params });
+    const selected = await selection.get();
+    if (!selected) return [];
+    const targetIds = uniqueStrings(
+      (Array.isArray(selected.packageDateSlots) ? selected.packageDateSlots : [])
+        .map((entry) => entry?.package?._ref)
+        .filter((value) => typeof value === "string")
+    );
+    if (!targetIds.length) return [selected];
+    const targets = [];
+    for (let index = 0; index < targetIds.length; index += 1000) {
+      targets.push(...await this.dataset({
+        documentTypes: ["package"],
+        ids: targetIds.slice(index, index + 1000),
+        limit: 1000,
+      }));
+    }
+    return [selected, ...targets];
+  }
+
   async fetch(query, params = {}) {
     const tree = parse(String(query || ""));
     const scope = inferShadowScope({
@@ -351,7 +398,12 @@ export class SupabaseDocumentClient {
     const upgradeLinkQuery = String(query || "").match(
       /^\s*\*\[\s*_type\s*==\s*["']upgradeLink["']\s*&&\s*lower\(slug\.current\)\s*==\s*\$([A-Za-z_][A-Za-z0-9_]*)\s*\]\s*\[\s*0\s*\]\s*\{/
     );
-    const dataset = upgradeLinkQuery
+    const bookingSettingsQuery = String(query || "").match(
+      /^\s*\*\[\s*_id\s*==\s*\$([A-Za-z_][A-Za-z0-9_]*)\s*&&\s*_type\s*==\s*["']bookingSettings["']\s*\]\s*\[\s*0\s*\]\s*\{/
+    );
+    const dataset = bookingSettingsQuery
+      ? await this.fetchBookingSettingsDataset(params[bookingSettingsQuery[1]], tree.base, params)
+      : upgradeLinkQuery
       ? await this.fetchUpgradeLinkDataset(params[upgradeLinkQuery[1]], tree.base, params)
       : recoveryQuery
       ? await fetchRecoveryPaymentDocuments({
@@ -469,6 +521,7 @@ export class SupabaseDocumentClient {
   }
 
   async delete(target, options = {}) {
+    const expectedRevision = deleteRevision(options);
     if (typeof target === "string") {
       const existing = await this.fetch(`*[_id == $id][0]`, { id: target });
       if (!existing) return null;
@@ -481,7 +534,7 @@ export class SupabaseDocumentClient {
           {
             operation: "delete",
             id: target,
-            expected_revision: existing._rev || "",
+            expected_revision: mutationRevision(expectedRevision, existing._rev),
           },
         ],
       });
@@ -499,11 +552,15 @@ export class SupabaseDocumentClient {
       commerceMode: this.commerceOnly,
       cutoverGeneration: this.cutoverGeneration,
       commandId: options?.commandId,
-      mutations: ids.map((id) => ({ operation: "delete", id })),
+      mutations: ids.map((id) => ({
+        operation: "delete", id,
+        ...(expectedRevision === undefined ? {} : { expected_revision: expectedRevision }),
+      })),
     });
   }
 
   async commitPatch(patch, options = {}) {
+    mutationRevision(patch.expectedRevision, "");
     const current = await this.fetch(`*[_id == $id][0]`, { id: patch.id });
     if (!current) {
       const error = new Error("Document not found.");
@@ -519,7 +576,7 @@ export class SupabaseDocumentClient {
         {
           operation: "replace",
           document: applyPatch(current, patch),
-          expected_revision: patch.expectedRevision || current._rev || "",
+          expected_revision: mutationRevision(patch.expectedRevision, current._rev),
         },
       ],
     });
@@ -531,51 +588,85 @@ export class SupabaseDocumentClient {
       .map((operation) => operation.patch?.id || operation.id || operation.document?._id)
       .filter(Boolean);
     const dataset = await this.dataset({ ids: uniqueStrings(operationIds), limit: 1000 });
-    const documents = new Map(dataset.map((document) => [document._id, document]));
+    const originals = new Map(dataset.map((document) => [document._id, document]));
+    const documents = new Map(originals);
     const mutations = [];
+    const pending = new Map();
 
     for (const operation of operations) {
+      const id = operation.patch?.id || operation.id || operation.document?._id;
+      const original = originals.get(id);
+      const current = documents.get(id);
+      const expected = mutationRevision(operation.patch?.expectedRevision ??
+        operation.expectedRevision, original?._rev);
+      if ((operation.patch?.expectedRevision !== undefined ||
+          operation.expectedRevision !== undefined) && expected !== original?._rev) {
+        throw revisionConflict();
+      }
+      const prior = pending.get(id);
       if (operation.type === "patch") {
-        const current = documents.get(operation.patch.id);
         if (!current) throw new Error("Document not found.");
         const next = applyPatch(current, operation.patch);
-        documents.set(operation.patch.id, next);
-        mutations.push({
-          operation: "replace",
-          document: next,
-          expected_revision:
-            operation.patch.expectedRevision || current._rev || "",
-        });
+        documents.set(id, next);
+        if (prior && prior.operation !== "delete") {
+          prior.document = next;
+          if (prior.operation === "create_if_missing") {
+            prior.operation = original ? "replace" : "create";
+            if (original) prior.expected_revision = expected;
+          }
+        } else {
+          const mutation = { operation: "replace", document: next, expected_revision: expected };
+          mutations.push(mutation);
+          pending.set(id, mutation);
+        }
         continue;
       }
       if (operation.type === "delete") {
-        const current = documents.get(operation.id);
-        mutations.push({
-          operation: "delete",
-          id: operation.id,
-          expected_revision:
-            operation.expectedRevision || current?._rev || "",
-        });
-        documents.delete(operation.id);
+        if (!current) throw new Error("Document not found.");
+        if (!original && prior?.operation === "create_if_missing") {
+          prior.operation = "create";
+        }
+        if (prior?.operation === "replace") {
+          mutations.splice(mutations.indexOf(prior), 1);
+        }
+        const mutation = { operation: "delete", id,
+          expected_revision: !original && prior && ["create", "create_if_missing"].includes(prior.operation)
+            ? "" : expected };
+        mutations.push(mutation);
+        pending.set(id, mutation);
+        documents.delete(id);
         continue;
       }
-
-      const document = operation.document;
-      const current = documents.get(document?._id);
-      const mutationOperation =
-        operation.type === "createIfNotExists"
-          ? "create_if_missing"
-          : operation.type === "createOrReplace" && current
-            ? "replace"
-            : "create";
-      mutations.push({
-        operation: mutationOperation,
-        document,
-        ...(mutationOperation === "replace"
-          ? { expected_revision: current?._rev || "" }
-          : {}),
-      });
-      documents.set(document?._id, document);
+      if (operation.type === "create" && current) {
+        const error = new Error("Document already exists.");
+        error.code = "23505";
+        error.status = 409;
+        error.statusCode = 409;
+        throw error;
+      }
+      if (operation.type === "createIfNotExists" && current) {
+        if (!prior) {
+          const mutation = { operation: "create_if_missing", document: operation.document };
+          mutations.push(mutation);
+          pending.set(id, mutation);
+        }
+        continue;
+      }
+      const document = clone(operation.document);
+      if (prior && prior.operation !== "delete") {
+        prior.document = document;
+        if (prior.operation === "create_if_missing") {
+          prior.operation = original ? "replace" : "create";
+          if (original) prior.expected_revision = expected;
+        }
+      } else {
+        const mutation = { operation: operation.type === "createIfNotExists"
+          ? "create_if_missing" : current ? "replace" : "create", document };
+        if (mutation.operation === "replace") mutation.expected_revision = expected;
+        mutations.push(mutation);
+        pending.set(id, mutation);
+      }
+      documents.set(id, document);
     }
 
     const results = await applyShadowMutations({

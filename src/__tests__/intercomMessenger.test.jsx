@@ -2,6 +2,14 @@ import React from "react";
 import { cleanup, render } from "@testing-library/react";
 import IntercomMessenger from "../components/IntercomMessenger";
 
+jest.mock("../lib/productionBrowser", () => {
+  const { isProductionBrowser } = jest.requireActual("../lib/productionBrowser");
+  return {
+    isProductionBrowser: (hostname = "www.rooindustries.com", env = { NODE_ENV: "production", VERCEL_ENV: "production" }) =>
+      isProductionBrowser(hostname, env),
+  };
+});
+
 const mockLocation = { pathname: "/" };
 
 jest.mock("react-router-dom", () => ({

@@ -6,6 +6,8 @@ import React, {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { useDialogFocus } from "../lib/useDialogFocus";
+import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { getPublicContent } from "../lib/publicContentClient";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -488,6 +490,13 @@ export default function BookingForm({ isMobile }) {
   const hasActiveHoldRef = useRef(false);
 
   const [showVertexModal, setShowVertexModal] = useState(false);
+  const planDialogRef = useRef(null);
+  const planCloseRef = useRef(null);
+  const closePlan = useCallback(() => {
+    document.body.classList.remove("is-modal-blur");
+    setShowVertexModal(false);
+  }, []);
+  useDialogFocus({ open: showVertexModal, dialogRef: planDialogRef, initialFocusRef: planCloseRef, onClose: closePlan });
   const [vertexPackage, setVertexPackage] = useState(null);
   const [vertexEssentialsPackage, setVertexEssentialsPackage] = useState(null);
   const [planPackage, setPlanPackage] = useState(null);
@@ -1857,7 +1866,7 @@ export default function BookingForm({ isMobile }) {
     hasActiveHoldRef.current = false;
     setMyHold(null);
     if (clearStorage) {
-      sessionStorage.removeItem(HOLD_STORAGE_KEY);
+      removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);
     }
     setSelectedSlot(null);
     setHoldCountdownMs(null);
@@ -2004,9 +2013,9 @@ export default function BookingForm({ isMobile }) {
         phase: "holding",
       };
       setMyHold(nextHold);
-      sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(nextHold));
+      writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(nextHold));
       const checkoutUpdated = updateStoredCheckoutHold(refreshed);
-      sessionStorage.removeItem(PAYMENT_SESSION_STORAGE_KEY);
+      removeBrowserStorage("sessionStorage", PAYMENT_SESSION_STORAGE_KEY);
       broadcastHold(nextHold);
       setPaymentReleaseStatus(
         checkoutUpdated
@@ -2102,7 +2111,7 @@ export default function BookingForm({ isMobile }) {
       };
 
       setMyHold(newHold);
-      sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(newHold));
+      writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(newHold));
       broadcastHold(newHold);
 
       const expiresIn =
@@ -3072,12 +3081,17 @@ export default function BookingForm({ isMobile }) {
                 initial="hidden"
                 animate="visible"
                 exit="exit"
-                onClick={() => {
-                  document.body.classList.remove("is-modal-blur");
-                  setShowVertexModal(false);
+                onClick={(event) => {
+                  event.stopPropagation();
+                  closePlan();
                 }}
               >
                 <motion.div
+                  ref={planDialogRef}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="booking-plan-title"
+                  tabIndex={-1}
                   variants={modalContainerVariants}
                   // Inherit initial/animate from the parent.
                   className="relative w-full max-w-md bg-panel border border-info-border rounded-2xl shadow-glow-strong p-6 text-center transition-all duration-500 ease-in-out hover:shadow-glow-strong"
@@ -3085,12 +3099,10 @@ export default function BookingForm({ isMobile }) {
                 >
                   <motion.button
                     aria-label="Close"
+                    ref={planCloseRef}
                     variants={itemVariants}
                     className="absolute right-3 top-3 text-info-text hover:text-white transition text-2xl z-10"
-                    onClick={() => {
-                      document.body.classList.remove("is-modal-blur");
-                      setShowVertexModal(false);
-                    }}
+                    onClick={closePlan}
                   >
                     ×
                   </motion.button>
@@ -3103,6 +3115,7 @@ export default function BookingForm({ isMobile }) {
                   </motion.div>
 
                   <motion.h3
+                    id="booking-plan-title"
                     variants={itemVariants}
                     className="text-2xl font-bold text-info-text"
                   >

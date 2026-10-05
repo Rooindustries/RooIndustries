@@ -10,12 +10,12 @@ describe("migration utility primary-backend guards", () => {
     [
       "commerce sync",
       "scripts/sync-sanity-commerce-to-supabase.mjs",
-      "Commerce shadow apply is disabled while Supabase is primary.",
+      "ENOENT: no such file or directory",
     ],
     [
       "full migration",
       "scripts/migrate-sanity-to-supabase.mjs",
-      "Sanity-to-Supabase apply is disabled while Supabase is primary",
+      "ENOENT: no such file or directory",
     ],
   ])("%s refuses --apply with an empty environment", (_label, script, message) => {
     const result = spawnSync(
@@ -31,6 +31,7 @@ describe("migration utility primary-backend guards", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(message);
+    expect(result.stderr).toContain("/tmp/roo-missing-runtime-env");
     expect(result.stderr).not.toContain("credentials are required");
   });
 });

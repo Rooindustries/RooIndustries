@@ -1,3 +1,4 @@
+import { readBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import React, { useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import SupabaseSocialLogin from "./SupabaseSocialLogin";
@@ -140,7 +141,7 @@ export default function RefLogin() {
     };
     checkSession();
 
-    const savedCode = sessionStorage.getItem("refLoginCode");
+    const savedCode = readBrowserStorage("sessionStorage", "refLoginCode");
     if (savedCode) {
       setCode(savedCode);
       setRememberMe(true);
@@ -185,7 +186,7 @@ export default function RefLogin() {
         return;
       }
 
-      sessionStorage.setItem("refLoginCode", data.code || code);
+      writeBrowserStorage("sessionStorage", "refLoginCode", data.code || code);
       if (shouldLinkSocial) {
         clearPendingDiscordChoice();
         const socialLinked = data.discordLinked === true;

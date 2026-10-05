@@ -69,6 +69,7 @@ const requestSanity = async ({
         ...(body ? { "Content-Type": "application/json" } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
+      redirect: "error",
       signal: AbortSignal.timeout(15_000),
     });
   } catch {
@@ -128,6 +129,7 @@ const loadCurrentSanityDocuments = async ({ fetchImpl, token, documentId }) => {
     `https://${GLOBAL_SANITY_PROJECT_ID}.api.sanity.io/${SANITY_API_VERSION}/data/query/${GLOBAL_SANITY_DATASET}`,
   );
   url.searchParams.set("query", "*[_id in $ids]");
+  url.searchParams.set("perspective", "raw");
   url.searchParams.set(
     "$ids",
     JSON.stringify([publishedId, `drafts.${publishedId}`]),

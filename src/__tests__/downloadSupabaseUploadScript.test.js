@@ -1,5 +1,6 @@
 const path = require("node:path");
 const fs = require("node:fs");
+const os = require("node:os");
 const { spawnSync } = require("node:child_process");
 
 const projectRoot = path.resolve(__dirname, "../..");
@@ -9,6 +10,19 @@ const uploadScript = path.join(
 );
 
 describe("download Supabase migration guard", () => {
+  let fixtureDirectory;
+  let selectedEnvironment;
+
+  beforeEach(() => {
+    fixtureDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "roo-upload-catalog-"));
+    selectedEnvironment = path.join(fixtureDirectory, "selected.fixture");
+    fs.writeFileSync(selectedEnvironment, "", { mode: 0o600 });
+  });
+
+  afterEach(() => {
+    fs.unlinkSync(selectedEnvironment);
+    fs.rmdirSync(fixtureDirectory);
+  });
   test("uses Supabase's required resumable upload contract", () => {
     const source = fs.readFileSync(uploadScript, "utf8");
     expect(source).toContain(".storage.supabase.co/storage/v1/upload/resumable");
@@ -21,7 +35,12 @@ describe("download Supabase migration guard", () => {
   });
 
   test("fails before file or network access when catalog basenames differ", () => {
-    const result = spawnSync(process.execPath, [uploadScript, "utilities"], {
+    fs.writeFileSync(selectedEnvironment, `DOWNLOAD_CATALOG_JSON=${JSON.stringify([{
+      slug: "utilities",
+      fileName: "catalog-name.zip",
+      blobPath: "downloads/stored-name.zip",
+    }])}\n`, { mode: 0o600 });
+    const result = spawnSync(process.execPath, [uploadScript, "utilities", "--env", selectedEnvironment], {
       cwd: projectRoot,
       env: {
         ...process.env,
@@ -44,7 +63,7 @@ describe("download Supabase migration guard", () => {
   test("does not allow bucket mutation outside apply mode", () => {
     const result = spawnSync(
       process.execPath,
-      [uploadScript, "utilities", "--raise-bucket-limit"],
+      [uploadScript, "utilities", "--raise-bucket-limit", "--env", selectedEnvironment],
       { cwd: projectRoot, encoding: "utf8" }
     );
 

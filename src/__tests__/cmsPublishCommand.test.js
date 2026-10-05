@@ -98,6 +98,16 @@ describe("Supabase-authoritative CMS command", () => {
 
   test("creates a durable content mutation and returns pending backup state", async () => {
     const client = createClient({ pending: 1 });
+    const runRpc = client.rpc.getMockImplementation();
+    let committed = false;
+    client.rpc.mockImplementation(async (name, args) => {
+      if (name === "roo_document_mutation_mirror_status_for_ids") {
+        return { data: { pending: committed ? 1 : 0, dead_letters: 0 }, error: null };
+      }
+      const result = await runRpc(name, args);
+      if (name === "roo_apply_cms_publish_command") committed = true;
+      return result;
+    });
     const result = await execute({ client });
     expect(result).toMatchObject({
       committed: true,
@@ -140,6 +150,7 @@ describe("Supabase-authoritative CMS command", () => {
 
   test("keeps a committed command successful when mirror status is unavailable", async () => {
     const client = createClient();
+    let committed = false;
     client.rpc.mockImplementation(async (name, args) => {
       if (name === "roo_cms_publish_command_result") {
         return { data: null, error: null };
@@ -148,13 +159,16 @@ describe("Supabase-authoritative CMS command", () => {
         return { data: [], error: null };
       }
       if (name === "roo_apply_cms_publish_command") {
+        committed = true;
         return {
           data: { replayed: false, results: args.p_mutations },
           error: null,
         };
       }
       if (name === "roo_document_mutation_mirror_status_for_ids") {
-        return { data: null, error: { code: "PGRST000" } };
+        return committed
+          ? { data: null, error: { code: "PGRST000" } }
+          : { data: { pending: 0, dead_letters: 0 }, error: null };
       }
       throw new Error(`Unexpected RPC: ${name}`);
     });

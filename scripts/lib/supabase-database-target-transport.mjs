@@ -86,9 +86,9 @@ export const fetchSupabaseDatabaseTarget = async ({
   const keyPair = generateSnapshotTransportKeyPair();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
-  let response;
+  let envelope;
   try {
-    response = await fetchImpl(validateDatabaseTargetTransportUrl(transportUrl), {
+    const response = await fetchImpl(validateDatabaseTargetTransportUrl(transportUrl), {
       method: "POST",
       headers: {
         Authorization: `Bearer ${bearer}`,
@@ -101,14 +101,16 @@ export const fetchSupabaseDatabaseTarget = async ({
         expectedTargets,
       }),
       cache: "no-store",
+      redirect: "error",
       signal: controller.signal,
     });
-  } catch {
+    envelope = await parseResponse(response);
+  } catch (error) {
+    if (error?.code?.startsWith("TOURNEY_")) throw error;
     throw transportError("TOURNEY_DATABASE_TARGET_TRANSPORT_UNAVAILABLE");
   } finally {
     clearTimeout(timeout);
   }
-  const envelope = await parseResponse(response);
   const opened = openSnapshotTransportPayload({
     envelope,
     privateKey: keyPair.privateKey,

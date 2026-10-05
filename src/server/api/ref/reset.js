@@ -76,11 +76,20 @@ export default async function handler(req, res) {
 
     if (useSupabaseCredentialSaga) {
       try {
-        const resumed = await resumeSupabaseCredentialOperation({ operationKey });
+        const resumed = await resumeSupabaseCredentialOperation({
+          operationKey,
+          password: normalizedPassword,
+        });
         if (resumed.resumed) {
           return res.status(200).json({ ok: true, replayed: true });
         }
       } catch (error) {
+        if (String(error?.code || "") === "23505") {
+          return res.status(409).json({
+            ok: false,
+            error: "This reset link was already used with a different password.",
+          });
+        }
         logSafeError("Referral password reset recovery remains pending", error);
         return res.status(503).json({
           ok: false,

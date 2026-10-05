@@ -28,6 +28,20 @@ export const buildCommerceCommandId = ({ mutations, cutoverGeneration = 0 } = {}
 export const hashShadowDocument = (document) =>
   crypto.createHash("sha256").update(stableJson(document)).digest("hex");
 
+export const requireShadowDocumentArray = (documents) => {
+  if (!Array.isArray(documents) || documents.some((document) =>
+    !document || typeof document !== "object" || Array.isArray(document) ||
+    typeof document._id !== "string" || !document._id.trim() ||
+    typeof document._type !== "string" || !document._type.trim())) {
+    const failure = new Error("Shadow document read returned an invalid response.");
+    failure.code = "SUPABASE_DOCUMENT_RESPONSE_INVALID";
+    failure.status = 503;
+    failure.statusCode = 503;
+    throw failure;
+  }
+  return documents;
+};
+
 export const normalizeShadowDocument = (document) => {
   const id = String(document?._id || "").trim();
   const type = String(document?._type || "").trim();
@@ -229,7 +243,7 @@ export const fetchShadowDocuments = async ({
   } else {
     data = requireRpcData(targeted, "targeted shadow fetch");
   }
-  return Array.isArray(data) ? data : [];
+  return requireShadowDocumentArray(data);
 };
 
 export const fetchRecoveryPaymentDocuments = async ({

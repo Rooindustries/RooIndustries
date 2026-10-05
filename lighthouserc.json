@@ -1,9 +1,6 @@
 {
   "ci": {
     "collect": {
-      "startServerCommand": "npm run serve:lighthouse",
-      "startServerReadyPattern": "Ready",
-      "startServerReadyTimeout": 240000,
       "numberOfRuns": 2,
       "settings": {
         "preset": "desktop",
@@ -14,7 +11,8 @@
         "http://127.0.0.1:3001/",
         "http://127.0.0.1:3001/reviews",
         "http://127.0.0.1:3001/tools"
-      ]
+      ],
+      "startServerCommand": "PW_PORT=3001 BASE_URL=http://${ROO_TEST_HOST:-127.0.0.1}:3001 NEXT_DIST_DIR=.next-e2e-lighthouse node scripts/test-tooling-sweep-server.mjs"
     },
     "assert": {
       "assertions": {

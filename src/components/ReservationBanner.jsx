@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   persistBookingPackageSelection,
@@ -131,16 +132,16 @@ export default function ReservationBanner() {
         };
         const utcDate = getUtcDateFromHold(normalizedHold);
         if (!utcDate) {
-          sessionStorage.removeItem(HOLD_STORAGE_KEY);
+          removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);
           setHold(null);
           return;
         }
         normalizedHold.startTimeUTC = utcDate.toISOString();
-        sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
+        writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
         setHold(normalizedHold);
         return;
       }
-      sessionStorage.removeItem(HOLD_STORAGE_KEY);
+      removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);
       setHold(null);
     };
     window.addEventListener("hold-state", handler);
@@ -188,8 +189,8 @@ export default function ReservationBanner() {
     const holdIdToDelete = hold.holdId;
     const holdTokenToDelete = hold.holdToken;
     setHold(null);
-    sessionStorage.removeItem(HOLD_STORAGE_KEY);
-    sessionStorage.removeItem(BOOKING_DRAFT_KEY);
+    removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);
+    removeBrowserStorage("sessionStorage", BOOKING_DRAFT_KEY);
     broadcastHold(null);
     if (redirect) {
       const pathName = location.pathname || "";

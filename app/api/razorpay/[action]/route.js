@@ -12,7 +12,7 @@ const ACTION_HANDLERS = {
 
 async function handle(request, context, methodOverride) {
   const { action } = await context.params;
-  const handler = ACTION_HANDLERS[action];
+  const handler = Object.hasOwn(ACTION_HANDLERS, action) ? ACTION_HANDLERS[action] : null;
 
   if (!handler) {
     return Response.json({ ok: false, error: "Not found" }, { status: 404 });

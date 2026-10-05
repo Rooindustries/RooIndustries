@@ -1,3 +1,8 @@
+import { readBrowserStorage, writeBrowserStorage, removeBrowserStorage } from "./browserStorage";
+
+let memoryToggles = null;
+let enabledOverride = null;
+
 export const PERF_DEBUG_STORAGE_KEY = "roo_perf_debug";
 export const PERF_DEBUG_TOGGLES_KEY = "roo_perf_debug_toggles";
 export const PERF_DEBUG_EVENT = "roo-perf-debug-change";
@@ -45,16 +50,18 @@ const getQueryPerfDebug = () => {
 
 export const isPerfDebugEnabled = () => {
   if (!isBrowser()) return false;
+  if (enabledOverride !== null) return enabledOverride;
   if (getQueryPerfDebug()) {
-    localStorage.setItem(PERF_DEBUG_STORAGE_KEY, "1");
+    writeBrowserStorage("localStorage", PERF_DEBUG_STORAGE_KEY, "1");
     return true;
   }
-  return localStorage.getItem(PERF_DEBUG_STORAGE_KEY) === "1";
+  return readBrowserStorage("localStorage", PERF_DEBUG_STORAGE_KEY) === "1";
 };
 
 export const readPerfDebugToggles = () => {
   if (!isBrowser()) return { ...DEFAULT_TOGGLES };
-  const parsed = parseJson(localStorage.getItem(PERF_DEBUG_TOGGLES_KEY) || "");
+  if (memoryToggles) return { ...memoryToggles };
+  const parsed = parseJson(readBrowserStorage("localStorage", PERF_DEBUG_TOGGLES_KEY) || "");
   return {
     ...DEFAULT_TOGGLES,
     ...(parsed && typeof parsed === "object" ? parsed : {}),
@@ -63,7 +70,8 @@ export const readPerfDebugToggles = () => {
 
 const writePerfDebugToggles = (toggles) => {
   if (!isBrowser()) return;
-  localStorage.setItem(PERF_DEBUG_TOGGLES_KEY, JSON.stringify(toggles));
+  memoryToggles = { ...toggles };
+  writeBrowserStorage("localStorage", PERF_DEBUG_TOGGLES_KEY, JSON.stringify(toggles));
 };
 
 export const dispatchPerfDebugChange = (detail = {}) => {
@@ -98,10 +106,11 @@ export const syncPerfDebugFromEnvironment = () => {
 
 export const setPerfDebugEnabled = (enabled) => {
   if (!isBrowser()) return;
+  enabledOverride = Boolean(enabled);
   if (enabled) {
-    localStorage.setItem(PERF_DEBUG_STORAGE_KEY, "1");
+    writeBrowserStorage("localStorage", PERF_DEBUG_STORAGE_KEY, "1");
   } else {
-    localStorage.removeItem(PERF_DEBUG_STORAGE_KEY);
+    removeBrowserStorage("localStorage", PERF_DEBUG_STORAGE_KEY);
   }
   const toggles = readPerfDebugToggles();
   applyPerfDebugClasses(toggles);

@@ -1,22 +1,13 @@
 import React, { useEffect, useRef, useState, useLayoutEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLowPerformanceMode } from "../lib/performanceMode";
-
-const FOCUSABLE_SELECTOR = [
-  "a[href]",
-  "button:not([disabled])",
-  "input:not([disabled])",
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-  '[tabindex]:not([tabindex="-1"])',
-].join(",");
+import { isTopDialog, useDialogFocus } from "../lib/useDialogFocus";
 
 export default function BookingModal({ open, onClose, children }) {
   const contentRef = useRef(null);
   // Focus trapping and outside-click detection need the unscaled dialog boundary, including the close button.
   const wrapperRef = useRef(null);
   const closeButtonRef = useRef(null);
-  const previousFocusRef = useRef(null);
   const layoutFrameRef = useRef(0);
   const lastLayoutRef = useRef({
     scale: 1,
@@ -153,46 +144,7 @@ export default function BookingModal({ open, onClose, children }) {
     };
   }, [open]);
 
-  useEffect(() => {
-    if (!open || !contentRef.current) return;
-    previousFocusRef.current = document.activeElement;
-    closeButtonRef.current?.focus();
-
-    const handleKeyDown = (e) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose?.();
-        return;
-      }
-      if (e.key !== "Tab") return;
-
-      const trapRoot = wrapperRef.current || contentRef.current;
-      const focusableElements = Array.from(
-        trapRoot?.querySelectorAll(FOCUSABLE_SELECTOR) || []
-      ).filter((element) => element.getAttribute("aria-hidden") !== "true");
-      if (focusableElements.length === 0) return;
-
-      const firstElement = focusableElements[0];
-      const lastElement = focusableElements[focusableElements.length - 1];
-      const focusIsOutside = !trapRoot.contains(document.activeElement);
-      if (e.shiftKey && (document.activeElement === firstElement || focusIsOutside)) {
-        e.preventDefault();
-        lastElement.focus();
-      } else if (
-        !e.shiftKey &&
-        (document.activeElement === lastElement || focusIsOutside)
-      ) {
-        e.preventDefault();
-        firstElement.focus();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      previousFocusRef.current?.focus?.();
-      previousFocusRef.current = null;
-    };
-  }, [open, onClose]);
+  useDialogFocus({ open, dialogRef: wrapperRef, initialFocusRef: closeButtonRef, onClose });
 
   const springTransition = {
     ...(lowPerformanceMode
@@ -211,6 +163,7 @@ export default function BookingModal({ open, onClose, children }) {
   };
 
   const handleGlobalClick = (e) => {
+    if (!isTopDialog(wrapperRef)) return;
     const dialogRoot = wrapperRef.current || contentRef.current;
     if (dialogRoot && dialogRoot.contains(e.target)) {
       return;

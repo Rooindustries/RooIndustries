@@ -11,15 +11,17 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@sanity/client";
 import migrationTargetSafety from "../src/server/supabase/migrationTargetSafety.cjs";
+import { fetchPinnedSanityAsset, validatePinnedSanityAssetUrl } from "./lib/sanity-asset-download.mjs";
 import {
   defaultExportRoot,
   deleteExportPassphrase,
+  discardExportOutput,
   encryptTarDirectory,
   loadPrivateExportEnvironment,
   parseExportArguments,
+  reserveExportOutput,
   stableExportJson,
   storeExportPassphrase,
-  uniqueExportOutputPath,
   verifyEncryptedTarArchive,
 } from "./lib/encrypted-export.mjs";
 
@@ -37,24 +39,8 @@ const sanityTarget = (env) => ({
   dataset: readEnv(env, "SANITY_PRIVATE_DATASET", "SANITY_DATASET") || "production",
 });
 
-const assetUrl = ({ asset, projectId, dataset }) => {
-  let parsed;
-  try {
-    parsed = new URL(String(asset.url || ""));
-  } catch {
-    parsed = null;
-  }
-  const segments = parsed?.pathname.split("/").filter(Boolean) || [];
-  if (
-    !parsed || parsed.protocol !== "https:" || parsed.hostname !== "cdn.sanity.io" ||
-    parsed.port || parsed.username || parsed.password || parsed.search || parsed.hash ||
-    !["images", "files"].includes(segments[0]) ||
-    segments[1] !== projectId || segments[2] !== dataset || segments.length !== 4
-  ) {
-    throw new Error("A Sanity export asset URL is invalid.");
-  }
-  return parsed.toString();
-};
+const assetUrl = ({ asset, projectId, dataset }) =>
+  validatePinnedSanityAssetUrl(String(asset.url || ""), { projectId, dataset });
 
 const collectAssetReferences = (value, references = new Set()) => {
   if (Array.isArray(value)) {
@@ -110,18 +96,14 @@ export const validateSanityExportDocuments = ({ documents, projectId, dataset })
   return { assets, documents: normalized };
 };
 
-const downloadAsset = async ({ asset, directory, fetchImpl }) => {
-  const response = await fetchImpl(asset.url, {
-    headers: { "Accept-Encoding": "identity" },
-    redirect: "follow",
-    signal: AbortSignal.timeout(60 * 60 * 1000),
-  });
+const downloadAsset = async ({ asset, directory, fetchImpl, token }) => {
+  const source = new URL(asset.url);
+  const rawImage = source.pathname.split("/")[1] === "images";
+  if (rawImage) source.searchParams.set("dlRaw", "true");
+  const response = await fetchPinnedSanityAsset({ url: source.toString(),
+    projectId: source.pathname.split("/")[2], dataset: source.pathname.split("/")[3],
+    allowRaw: rawImage, headers: token ? { Authorization: `Bearer ${token}` } : {}, fetchImpl });
   if (!response.ok || !response.body) throw new Error("A Sanity asset could not be downloaded.");
-  assetUrl({
-    asset: { url: response.url || asset.url },
-    projectId: new URL(asset.url).pathname.split("/")[2],
-    dataset: new URL(asset.url).pathname.split("/")[3],
-  });
   const declared = Number(response.headers.get("content-length") || 0);
   if (declared && declared !== asset.expectedBytes) {
     throw new Error("A Sanity asset size changed during export.");
@@ -170,6 +152,7 @@ export const downloadSanityExportAssets = async ({
   directory,
   fetchImpl = fetch,
   concurrency = 3,
+  token = "",
 }) => {
   await fsPromises.mkdir(path.join(directory, "assets"), { recursive: false, mode: 0o700 });
   const results = new Array(assets.length);
@@ -182,12 +165,15 @@ export const downloadSanityExportAssets = async ({
         asset: assets[index],
         directory,
         fetchImpl,
+        token,
       });
     }
   };
-  await Promise.all(
+  const settled = await Promise.allSettled(
     Array.from({ length: Math.min(Math.max(1, concurrency), assets.length || 1) }, worker)
   );
+  const failed = settled.find((result) => result.status === "rejected");
+  if (failed) throw failed.reason;
   return results.sort((left, right) => left.id.localeCompare(right.id));
 };
 
@@ -297,14 +283,16 @@ export const runSanityEncryptedExport = async ({
   const passphrase = crypto.randomBytes(48).toString("base64url");
   const stamp = exportedAt.replace(/[^0-9A-Za-z]/g, "");
   const service = `RooIndustries-Sanity-Snapshot-${stamp}-${crypto.randomBytes(6).toString("hex")}`;
-  const outputPath = uniqueExportOutputPath({
-    prefix: "Sanity complete pre-cutover export",
-    extension: "tar.gz.enc",
-    root: outputRoot,
-    now: new Date(exportedAt),
-  });
+  let reservation;
   let completed = false;
   try {
+    reservation = reserveExportOutput({
+      prefix: "Sanity complete pre-cutover export",
+      extension: "tar.gz.enc",
+      root: outputRoot,
+      now: new Date(exportedAt),
+    });
+    const { outputPath } = reservation;
     const source = validateSanityExportDocuments({
       documents: await fetchAllSanityDocuments(client),
       ...target,
@@ -324,6 +312,7 @@ export const runSanityEncryptedExport = async ({
       assets: source.assets,
       directory: staging,
       fetchImpl,
+      token,
     });
     const manifest = {
       format: "roo-sanity-complete-export-v2",
@@ -346,6 +335,7 @@ export const runSanityEncryptedExport = async ({
       directory: staging,
       outputPath,
       passphrase,
+      reservation,
     });
     const expectedEntries = [
       "",
@@ -381,9 +371,10 @@ export const runSanityEncryptedExport = async ({
       assetChecksumsVerified: true,
     };
   } finally {
+    if (reservation) fs.closeSync(reservation.descriptor);
     await fsPromises.rm(staging, { recursive: true, force: true });
     if (!completed) {
-      await fsPromises.unlink(outputPath).catch(() => {});
+      if (reservation) discardExportOutput(reservation);
       await deleteExportPassphrase({ service, account });
     }
   }

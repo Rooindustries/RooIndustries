@@ -1,6 +1,8 @@
+import bcrypt from "bcryptjs";
 import { createRefWriteClient } from "../api/ref/sanity.js";
 import { createSupabaseAdminClient } from "./adminClient.js";
 import {
+  assertSupabaseCredentialOperationRetry,
   buildCredentialSourceMutation,
   completeSupabaseCredentialMirror,
   getSupabaseCredentialOperation,
@@ -267,27 +269,7 @@ const applySanityCredentialSource = async ({ row, sanityClient, adminClient }) =
 };
 
 const recoverCredentialOperation = async ({ row, adminClient, sanityClient }) => {
-  if (row.source_recovery_blocked) {
-    const error = new Error("Credential source operation requires audited repair.");
-    error.code = "CREDENTIAL_SOURCE_REPAIR_REQUIRED";
-    error.credentialRecoveryRecorded = true;
-    error.retryState = "parked";
-    throw error;
-  }
-  const nextRetryAt = Date.parse(String(row.next_retry_at || ""));
-  if (Number.isFinite(nextRetryAt) && nextRetryAt > Date.now()) {
-    const error = new Error("Credential recovery is waiting for its retry window.");
-    error.code = String(row.last_error_code || "CREDENTIAL_RECOVERY_BACKOFF");
-    error.credentialRecoveryRecorded = true;
-    error.retryState = "backoff";
-    error.nextRetryAt = row.next_retry_at;
-    throw error;
-  }
-  if (!["sanity", "supabase"].includes(row.source_backend)) {
-    const error = new Error("Credential source operation requires audited repair.");
-    error.code = "CREDENTIAL_SOURCE_REPAIR_REQUIRED";
-    throw error;
-  }
+  assertSupabaseCredentialOperationRetry(row);
   if (row.status === "mirrored") return;
   if (row.status === "prepared") {
     const error = new Error(
@@ -320,16 +302,26 @@ const recoverCredentialOperation = async ({ row, adminClient, sanityClient }) =>
 
 export const resumeSupabaseCredentialOperation = async ({
   operationKey,
+  password,
   adminClient = createSupabaseAdminClient(),
   sanityClient = createRefWriteClient({ backendOverride: "sanity" }),
 } = {}) => {
   const row = await getSupabaseCredentialOperation({ operationKey, adminClient });
   if (!row) return { resumed: false };
   if (
+    password !== undefined &&
+    !await bcrypt.compare(String(password), String(row.password_hash || ""))
+  ) {
+    const error = new Error("Credential operation conflicts with the submitted password.");
+    error.code = "23505";
+    throw error;
+  }
+  if (
     row.status === "prepared" &&
     !row.source_recovery_blocked &&
     ["sanity", "supabase"].includes(row.source_backend)
   ) {
+    assertSupabaseCredentialOperationRetry(row);
     return { resumed: false, status: "prepared" };
   }
   await recoverCredentialOperation({ row, adminClient, sanityClient });

@@ -1190,7 +1190,7 @@ p {
     
     <div class="success-box">
         <h4> Is This Safe?</h4>
-        <p>Yes. XMP and EXPO are <strong>factory-tested profiles</strong> created by your RAM manufacturer. PBO is AMD's <strong>official</strong> performance feature. These aren't "hacks"—they're designed features that are just disabled by default. The worst that can happen is your PC restarts and reverts to safe settings automatically.</p>
+        <p>XMP, EXPO and PBO can operate hardware beyond its standard specifications. Stability depends on your CPU, memory, motherboard, firmware and cooling. Instability can cause data loss, and overclocking can damage hardware or affect warranty coverage. Back up important data, check your exact hardware documentation and test stability after each change. <a href="https://www.amd.com/en/legal/claims/gaming-details.html" target="_blank" rel="noopener noreferrer">Read AMD's overclocking and warranty terms</a>.</p>
     </div>
     
     <div class="page-footer">BIOS Mastery Guide</div>
@@ -1280,7 +1280,8 @@ p {
     
     <div class="insight-box">
         <div class="insight-box-title"> How to Switch Between Modes</div>
-        <p><strong>ASUS/MSI/Gigabyte:</strong> Press <span class="key">F7</span> to toggle between EZ and Advanced Mode<br/>
+        <p><strong>ASUS/MSI:</strong> Press <span class="key">F7</span> to toggle between EZ and Advanced Mode<br/>
+        <strong>Gigabyte:</strong> Boards covered by the <a href="https://download.gigabyte.com/FileList/Manual/mb_manual_intel800-bios_e_v2.pdf" target="_blank" rel="noopener noreferrer">Intel 800 Series BIOS guide</a> use <span class="key">F2</span> to switch between Easy and Advanced Mode. Check your exact model and BIOS manual; <span class="key">F7</span> can load optimized defaults for the current submenu.<br/>
         <strong>ASRock:</strong> Press <span class="key">F6</span> to toggle between Easy and Advanced Mode<br/><br/>
         Most BIOS screens show this hotkey at the bottom of the screen.</p>
     </div>
@@ -1341,8 +1342,8 @@ p {
     <p>Check your RAM kit's packaging or product page for the XMP or EXPO logo. Most gaming RAM from G.Skill, Corsair, Kingston, Crucial, TeamGroup, etc. includes XMP/EXPO profiles. If your RAM shows a speed like "DDR5-6000" or "DDR4-3600"—that's the XMP/EXPO speed.</p>
     
     <div class="success-box">
-        <h4> XMP/EXPO is NOT Risky Overclocking</h4>
-        <p>These profiles are <strong>factory-tested by your RAM manufacturer</strong>. They're validated to be stable. The "overclock" is just running your RAM at the speed you paid for. Thousands of users run XMP/EXPO 24/7 without issues. If it doesn't work, your PC restarts and reverts to safe settings.</p>
+        <h4> XMP/EXPO Requires Compatibility and Stability Checks</h4>
+        <p>A RAM kit's tested profile does not guarantee stability on every CPU and motherboard. Check the board's memory compatibility list and the CPU's supported memory specifications. If a profile is unstable, restore the previous settings using your motherboard's documented recovery procedure. Automatic recovery is not guaranteed.</p>
     </div>
     
     <div class="performance-meter">
@@ -1475,7 +1476,7 @@ p {
         <h4>Main BIOS Screen</h4>
         <ol class="step-list">
             <li>Enter BIOS by pressing <span class="key">DEL</span> during startup</li>
-            <li>Gigabyte shows a unified interface (no separate EZ/Advanced)</li>
+            <li>Gigabyte boards covered by the Intel 800 Series BIOS guide have Easy and Advanced Mode. Use <span class="key">F2</span> where your exact model and BIOS manual documents it</li>
             <li>Click <strong>"Advanced Memory Settings"</strong></li>
             <li>Find <strong>"Extreme Memory Profile (X.M.P.)"</strong></li>
             <li>Select <strong>"Profile 1"</strong> from the dropdown</li>
@@ -1598,7 +1599,7 @@ p {
     
     <div class="insight-box">
         <div class="insight-box-title">PC Won't POST After Enabling XMP</div>
-        <p>Wait 30 seconds—memory training can take time on first boot. If nothing after 60 seconds, hold the power button for 10 seconds to force shutdown. Most boards auto-recover after 3 failed boots and reset to defaults. If not, clear CMOS (covered in Part 8).</p>
+        <p>Memory training can take several minutes, depending on the hardware. Follow your motherboard manual's expected training time and diagnostic LEDs before interrupting startup. If training fails, use its documented recovery or clear-CMOS procedure (see Part 8).</p>
     </div>
     
     <div class="insight-box">
@@ -1747,7 +1748,7 @@ p {
         </div>
         <p><strong style="color: var(--accent-red);">Critical AMD issue:</strong> Gigabyte AMD boards will NOT POST with DRAM voltage above 1.43V (AGESA limit), even with High Bandwidth Mode enabled. If your kit needs 1.45V+ and you're on Gigabyte AMD, you may be stuck at lower speeds.</p>
         <p style="margin-top: 8px;"><strong style="color: var(--accent-red);">BIOS freezing:</strong> Gigabyte BIOS on AMD randomly freezes if you make too many changes at once, or after a BSOD or FCLK error. Fix: update BIOS, clear CMOS, full power cycle (unplug 30 seconds).</p>
-        <p style="margin-top: 8px;"><strong style="color: var(--accent-cyan);">Note:</strong> Press <span class="key">F7</span> to toggle Advanced Mode on Gigabyte boards.</p>
+        <p style="margin-top: 8px;"><strong style="color: var(--accent-cyan);">Note:</strong> Gigabyte boards covered by the Intel 800 Series BIOS guide use <span class="key">F2</span> for Easy/Advanced Mode. In that guide, <span class="key">F7</span> loads optimized defaults for the current submenu and can replace pending configuration. Follow your exact model and BIOS manual.</p>
     </div>
     
     <div class="brand-card">
@@ -1807,7 +1808,7 @@ p {
     
     <div class="warning-box">
         <h4> Intel Users: Skip This Section</h4>
-        <p>PBO is AMD-only. Intel uses different technologies (Multi-Core Enhancement, TVB) which are typically enabled by default on gaming motherboards. If you have Intel, proceed to Part 7.</p>
+        <p>PBO is AMD-only. Intel boost and motherboard enhancement settings vary by CPU and board. Use the processor and motherboard documentation for your system. If you have Intel, proceed to Part 7.</p>
     </div>
     
     <h3>Should You Enable PBO?</h3>
@@ -1839,9 +1840,9 @@ p {
     
     <div class="insight-box">
         <div class="insight-box-title"> Auto vs Enabled — Important Difference</div>
-        <p><strong>"Auto"</strong> = PBO is essentially OFF. Your CPU stays within base power limits.<br/>
+        <p><strong>"Auto"</strong> = behavior depends on the motherboard firmware. Check the manual rather than assuming PBO is off.<br/>
         <strong>"Enabled"</strong> = PBO is ON. Your CPU can exceed base limits based on temperature and power headroom.<br/><br/>
-        You MUST select "Enabled" to see any benefit. "Auto" does nothing.</p>
+        Check the firmware documentation before changing this setting, and compare measured performance and stability afterward.</p>
     </div>
     
     <div class="page-footer">BIOS Mastery Guide</div>
@@ -1860,7 +1861,7 @@ p {
     
     <h3>PBO Power Limits (Optional)</h3>
     
-    <p>After enabling PBO, you may see options for power limits. For beginners, leave these on "Auto" or "Motherboard Limits." This allows your motherboard to set appropriate values.</p>
+    <p>Power-limit options vary by motherboard. "Motherboard Limits" can raise limits beyond the processor's defaults. Beginners should retain the processor's documented default limits and avoid raising them without checking cooling, hardware limits and warranty terms.</p>
     
     <table class="data-table">
         <thead>
@@ -1891,7 +1892,7 @@ p {
     
     <div class="insight-box">
         <div class="insight-box-title"> Curve Optimizer (Advanced Users)</div>
-        <p>Curve Optimizer is a PBO sub-feature that adjusts voltage/frequency curves per-core. It can provide significant gains but requires testing and knowledge. <strong>For beginners: skip this entirely.</strong> Just enabling PBO gives you 80% of the benefit with zero risk.</p>
+        <p>Curve Optimizer is a PBO sub-feature that adjusts voltage/frequency curves per-core. It can provide significant gains but requires testing and knowledge. <strong>For beginners: skip this entirely.</strong> PBO still changes power behavior and carries the risks described earlier; any benefit must be measured on your system.</p>
     </div>
     
     <h3>Expected Performance Gains from PBO</h3>
@@ -1937,7 +1938,7 @@ p {
     
     <div class="warning-box">
         <h4>Temperature Considerations</h4>
-        <p>PBO will increase CPU temperatures. AMD Ryzen CPUs are designed to run up to 95°C safely, but lower is always better for longevity. If you see temps consistently above 90°C under load, consider better cooling before using PBO.</p>
+        <p>PBO can increase CPU temperatures. Use your exact processor's published maximum operating temperature, not a universal Ryzen limit. For example, AMD specifies 89°C for the <a href="https://www.amd.com/en/products/processors/desktops/ryzen/7000-series/amd-ryzen-7-7800x3d.html" target="_blank" rel="noopener noreferrer">Ryzen 7 7800X3D</a>. A thermal maximum is not a target; check cooling and stability before tuning.</p>
     </div>
     
     <h3>When PBO Makes Performance Worse</h3>
@@ -2089,32 +2090,32 @@ p {
         <h2 class="section-title">Safety & Recovery</h2>
     </div>
     
-    <p class="lead-text">If something goes wrong, modern motherboards have multiple safety nets. You almost can't brick your system with basic BIOS changes.</p>
+    <p class="lead-text">Recovery features vary by motherboard. Before changing settings, save a working profile, back up important data and locate the recovery instructions for your exact model.</p>
     
     <h3>What Happens If XMP/PBO Causes Issues?</h3>
     
     <p>If your PC doesn't boot after enabling XMP or PBO:</p>
     
     <ol class="step-list">
-        <li><strong>Wait 30 seconds</strong> — your PC may be training memory, especially on first XMP boot</li>
-        <li><strong>The system will auto-recover</strong> — most motherboards reset to safe settings after 3 failed boots</li>
-        <li><strong>You'll boot with default settings</strong> — you can then try a different profile or lower speed</li>
+        <li><strong>Allow memory training to finish</strong> using your motherboard manual's expected time and diagnostic indicators</li>
+        <li><strong>Check the motherboard manual</strong> for automatic recovery behavior and diagnostic LEDs; the number of retries and recovery options vary</li>
+        <li><strong>After recovery succeeds</strong>, verify restored settings and test stability before trying another profile or speed</li>
     </ol>
     
     <div class="success-box">
-        <h4> This Is NOT a Bricked PC</h4>
-        <p>A PC that doesn't boot due to unstable memory settings is NOT bricked. It will automatically recover. The worst case is waiting a few minutes for recovery or manually clearing CMOS (described below).</p>
+        <h4> Diagnose a Failed Boot Before Making More Changes</h4>
+        <p>A failed boot after a memory-setting change often means the settings are unstable. Automatic recovery is not guaranteed. Follow your exact motherboard's recovery instructions, and stop if its diagnostics indicate another fault.</p>
     </div>
     
     <h3>How to Clear CMOS (Reset BIOS to Default)</h3>
     
-    <p>If auto-recovery doesn't work, you can manually reset BIOS:</p>
+    <p>Clear-CMOS methods and timing vary. Identify the correct button, pins or battery procedure in your exact motherboard manual before touching hardware. Do not short unidentified pins. Clearing CMOS resets firmware settings, so record boot, storage and other required settings first. <a href="https://www.asus.com/us/support/faq/1040820/" target="_blank" rel="noopener noreferrer">ASUS's instructions show a two-pin CLRTC example</a>.</p>
     
     <h4>Method 1: CMOS Button (If Available)</h4>
     <ol class="step-list">
         <li>Turn off your PC and unplug the power cable</li>
         <li>Look for a button labeled "CLR CMOS" on your motherboard's rear I/O</li>
-        <li>Hold the button for 5-10 seconds</li>
+        <li>Use the button and hold time specified in your motherboard manual</li>
         <li>Plug power back in and boot — BIOS is reset</li>
     </ol>
     
@@ -2122,7 +2123,7 @@ p {
     <ol class="step-list">
         <li>Turn off your PC and unplug power</li>
         <li>Open your case and find the "CLR CMOS" or "JBAT" jumper on the motherboard</li>
-        <li>Move the jumper from pins 1-2 to pins 2-3 for 10 seconds, then move it back</li>
+        <li>Follow the manual's exact pin layout and timing. Some boards use two pins, while others use a three-pin jumper. Restore any jumper to its original position before powering on</li>
         <li>Boot your PC — BIOS is reset</li>
     </ol>
     
@@ -2130,7 +2131,7 @@ p {
     <ol class="step-list">
         <li>Turn off and unplug your PC</li>
         <li>Find the coin-cell battery on your motherboard (looks like a watch battery)</li>
-        <li>Remove it for 1-2 minutes</li>
+        <li>Follow the manual's battery-removal procedure and wait time; some boards also require a documented clear-pin step</li>
         <li>Reinstall the battery and boot</li>
     </ol>
     
@@ -2166,7 +2167,7 @@ p {
         </tbody>
     </table>
     
-    <p>BIOS updates frequently reset your XMP profiles and can introduce new bugs. If everything is working, leave it alone. Always enable BIOS rollback/flashback before updating so you can revert if needed.</p>
+    <p>BIOS updates frequently reset your XMP profiles and can introduce new bugs. If everything is working, leave it alone. Check whether your exact board supports firmware recovery or rollback, and prepare the manufacturer's documented recovery method before updating.</p>
     
     <div class="danger-box" style="background: linear-gradient(135deg, rgba(255, 77, 106, 0.15) 0%, rgba(255, 77, 106, 0.05) 100%); border: 2px solid var(--accent-red); padding: 20px; margin: 20px 0; border-radius: 8px;">
         <h4 style="font-family: 'Space Mono', monospace; font-size: 12px; color: var(--accent-red); margin: 0 0 12px 0; letter-spacing: 1px;">DANGER ZONE — NEVER TOUCH WITHOUT RESEARCH</h4>
@@ -2237,7 +2238,7 @@ p {
             </tr>
             <tr>
                 <td>Gigabyte</td>
-                <td>Main screen (unified)</td>
+                <td>Easy or Advanced Mode, depending on model and BIOS; <span class="key">F2</span> where documented</td>
                 <td>Tweaker or Advanced Memory Settings</td>
             </tr>
             <tr>
@@ -2260,7 +2261,11 @@ p {
         <tbody>
             <tr>
                 <td><span class="key">F7</span></td>
-                <td>Toggle EZ/Advanced Mode (ASUS, MSI, Gigabyte)</td>
+                <td>Toggle EZ/Advanced Mode (ASUS, MSI). On Gigabyte Intel 800 Series BIOS, F7 loads optimized defaults for the current submenu.</td>
+            </tr>
+            <tr>
+                <td><span class="key">F2</span></td>
+                <td>Toggle Easy/Advanced Mode on Gigabyte boards where the exact model and BIOS manual documents it.</td>
             </tr>
             <tr>
                 <td><span class="key">F6</span></td>

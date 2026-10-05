@@ -1,9 +1,42 @@
-import dotenv from "dotenv";
+import { prepareTestTarget, verifyFixtureOwnership, refuseEnvFiles } from "./lib/test-target-safety.mjs";
 import crypto from "crypto";
-import { createClient } from "@sanity/client";
 import { formatHostDateLabel } from "../src/utils/timezone.js";
 
-dotenv.config({ path: ".env.local" });
+if (process.argv.includes("--local-fixture")) {
+  refuseEnvFiles();
+  const scenarios = [
+    "a2-outside-ownership-paypal-legacy-direct-partial-proof",
+    "a2-outside-ownership-razorpay-legacy-direct-partial-proof",
+    "fix-c-legacy-paypal-no-refund",
+    "fix-c-legacy-razorpay-no-refund",
+    "fix-c-legacy-paypal-sync-failure",
+    "fix-c-legacy-razorpay-sync-failure",
+    "fix-c-legacy-paypal-missing-details",
+    "fix-c-legacy-paypal-reported-total",
+    "fix-c-legacy-paypal-pending-refund",
+    "fix-c-legacy-razorpay-pending-refund",
+    "fix-c-legacy-paypal-payment-sync-failure",
+    "fix-c-legacy-razorpay-payment-sync-failure",
+    "fix-c-legacy-paypal-create-conflict",
+    "fix-c-legacy-razorpay-create-conflict",
+    "fix-c-legacy-paypal-revision-conflict",
+    "fix-c-legacy-razorpay-revision-conflict",
+    "fix-c-legacy-paypal-later-full",
+    "fix-c-legacy-razorpay-later-full"
+];
+  const selection = process.argv.find(value => value.startsWith("--scenario="))?.slice(11).split(",");
+  if (process.argv.slice(2).some(value => value !== "--local-fixture" && !value.startsWith("--scenario=")) ||
+      selection?.some(name => !scenarios.includes(name))) {
+    throw new Error("Local booking fixtures support only the listed legacy --scenario names.");
+  }
+  process.argv.push("--a2");
+  if (!selection) process.argv.push(`--scenario=${scenarios.join(",")}`);
+  process.env.ROO_PAYMENT_PERSISTENCE_ARTIFACT ||= process.env.ROO_BOOKING_FLOWS_ARTIFACT || "test-results/booking-flows-local-fixture.json";
+  await import("./test-payment-persistence-sweep.mjs");
+} else {
+const fixture = prepareTestTarget();
+await verifyFixtureOwnership(fixture);
+const { createClient } = await import("@sanity/client");
 
 const { default: createOrderHandler } =
   await import("../src/server/api/razorpay/createOrder.js");
@@ -15,6 +48,8 @@ const { default: createBookingHandler } =
   await import("../src/server/api/ref/createBooking.js");
 
 const client = createClient({
+  apiHost: fixture.sanityApiUrl,
+  useProjectHostname: false,
   projectId: process.env.SANITY_PROJECT_ID,
   dataset: process.env.SANITY_DATASET || "production",
   apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
@@ -22,8 +57,8 @@ const client = createClient({
   useCdn: false,
 });
 
-const runId = `booking-test-${Date.now()}`;
-const userEmail = process.env.TEST_USER_EMAIL || "nerky@rooindustries.com";
+const runId = fixture.runId;
+const userEmail = process.env.TEST_USER_EMAIL || "booking@fixture.invalid";
 const packageTitle = "Test Package";
 const packagePrice = "$100.00";
 const testCouponCode = process.env.TEST_COUPON_CODE || "";
@@ -272,8 +307,7 @@ const testPayPal = async () => {
       "base64",
     );
     const bases = [
-      "https://api-m.sandbox.paypal.com",
-      "https://api-m.paypal.com",
+      fixture.paypalApiUrl,
     ];
 
     let token = null;
@@ -556,4 +590,7 @@ try {
       results.length - passed
     }.`,
   );
+  if (results.some((result) => !result.ok)) process.exitCode = 1;
+}
+
 }

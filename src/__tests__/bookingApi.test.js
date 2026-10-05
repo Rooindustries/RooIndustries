@@ -23,7 +23,7 @@ const previousCommercePrimary = process.env.COMMERCE_PRIMARY_BACKEND;
 const previousFreeSessionStoreMode =
   process.env.TOURNEY_FREE_SESSION_STORE_MODE;
 
-const mockSendEmail = jest.fn().mockResolvedValue({ error: null });
+const mockSendEmail = jest.fn().mockResolvedValue({ data: { id: "email-fixture" }, error: null });
 const mockFlushCommerceMirror = jest.fn(async () => {
   throw new Error("Sanity mirror unavailable");
 });
@@ -739,7 +739,7 @@ beforeEach(() => {
   resetStore();
 
   mockSendEmail.mockReset();
-  mockSendEmail.mockResolvedValue({ error: null });
+  mockSendEmail.mockResolvedValue({ data: { id: "email-fixture" }, error: null });
   mockFlushCommerceMirror.mockClear();
   mockAssertCommerceStartAllowed.mockClear();
   process.env.OWNER_EMAIL = OWNER_EMAIL;
@@ -1003,6 +1003,7 @@ describe("booking reservation API", () => {
     });
     store.coupons.push({
       _id: "coupon_five",
+      _rev: "coupon_five_fixture_revision",
       _type: "coupon",
       code: "FIVE",
       discountType: "percent",
@@ -1103,6 +1104,7 @@ describe("booking reservation API", () => {
   test("fixed coupons can fully discount the selected package", async () => {
     store.coupons.push({
       _id: "coupon_free_fixed",
+      _rev: "coupon_free_fixed_fixture_revision",
       _type: "coupon",
       code: "FIXEDFREE",
       discountType: "fixed",
@@ -1550,6 +1552,9 @@ describe("booking reservation API", () => {
   test.each([true, false])("Dodo reuses its existing booking when emails succeed: %s", async (emailsSucceed) => {
     const booking = {
       _id: "booking_dodo_existing",
+      grossAmount: 84.99,
+      netAmount: 84.99,
+      _rev: "booking_dodo_existing_fixture_revision",
       _type: "booking",
       status: "captured",
       paymentProvider: "dodo",
@@ -1567,6 +1572,8 @@ describe("booking reservation API", () => {
     store.bookings.push(booking);
     store.paymentRecords.push({
       _id: booking.paymentRecordId,
+      _rev: "dodo_payment_fixture_revision",
+      pricingSnapshot: { grossAmount: 84.99, netAmount: 84.99 },
       _type: "paymentRecord",
       provider: "dodo",
       status: "finalizing",
@@ -1574,14 +1581,14 @@ describe("booking reservation API", () => {
       providerOrderId: booking.dodoCheckoutSessionId,
       providerPaymentId: booking.dodoPaymentId,
     });
-    mockSendEmail.mockResolvedValue({ error: emailsSucceed ? null : { message: "Unavailable" } });
+    mockSendEmail.mockResolvedValue({ data: emailsSucceed ? { id: "email-fixture" } : null, error: emailsSucceed ? null : { message: "Unavailable" } });
     const req = createReq(booking);
     req.internalContext = { paymentFinalizeSource: "reconcile" };
     const res = createRes();
 
     await createBooking(req, res);
 
-    expect(res.statusCode).toBe(emailsSucceed ? 200 : 503);
+    expect({ status: res.statusCode, body: res.body }).toMatchObject({ status: emailsSucceed ? 200 : 503, body: { bookingId: booking._id } });
     expect(res.body).toMatchObject({
       bookingId: booking._id,
       idempotent: true,
@@ -1619,8 +1626,8 @@ describe("booking reservation API", () => {
       }),
     ]);
 
-    expect([first.res.statusCode, second.res.statusCode].sort()).toEqual([200, 202]);
-    expect([first.res.body.idempotent, second.res.body.idempotent]).toContain(true);
+    expect([first.res.statusCode, second.res.statusCode].sort()).toEqual([200, 409]);
+    expect([first.res, second.res].find(response => response.statusCode === 409).body).toEqual({ error: "Booking time changed for this request key." });
     expect(store.bookings).toHaveLength(1);
     expect(store.bookingSlots).toHaveLength(1);
     expect(mockSendEmail).toHaveBeenCalledTimes(2);
@@ -1842,14 +1849,14 @@ describe("booking reservation API", () => {
   });
 
   test.each([true, false])("Dodo full refunds retain tax in recovery amount %s", async recovery => {
-    store.bookings.push({ _id: "booking_tax_full", _type: "booking", status: "captured", netAmount: 99.95, dodoTotalAmount: 125.44 });
+    store.bookings.push({ _id: "booking_tax_full", _rev: "booking_tax_full_fixture_revision", _type: "booking", status: "captured", netAmount: 99.95, dodoTotalAmount: 125.44 });
     await applyBookingRefund({ client: mockSanityClient, paymentRecord: { bookingId: "booking_tax_full", ...(recovery ? { provider: "dodo" } : {}) },
       refund: { full: true, ...(recovery ? { processedAmountInSubunits: 12544 } : {}) } });
     expect(store.bookings[0]).toMatchObject({ status: "refunded", refundedAmount: 125.44 });
   });
 
   test("Dodo partial refunds reduce commission against the tax-inclusive customer charge", async () => {
-    store.bookings.push({ _id: "booking_tax_refund", _type: "booking", status: "captured", netAmount: 99.95, commissionAmount: 10 });
+    store.bookings.push({ _id: "booking_tax_refund", _rev: "booking_tax_refund_fixture_revision", _type: "booking", status: "captured", netAmount: 99.95, commissionAmount: 10 });
     await applyBookingRefund({ client: mockSanityClient, paymentRecord: {
       provider: "dodo", bookingId: "booking_tax_refund", providerPublicData: { taxInclusive: false, totalAmount: 12544 },
     }, refund: { full: false, totalRefundedAmount: 62.72 } });
@@ -2780,7 +2787,9 @@ describe("booking reservation API", () => {
     global.fetch = jest.fn(async () => ({
       ok: true,
       json: async () => ({
+        id: "razorpay_payment_webhook",
         order_id: "razorpay_order_webhook",
+        captured: true,
         currency: "USD",
         amount: 8499,
         status: "captured",

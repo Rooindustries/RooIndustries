@@ -5,7 +5,7 @@ import fsPromises from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { Transform } from "node:stream";
+import { Transform, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import dotenv from "dotenv";
 import { stableSnapshotJson } from "../../src/server/archive/snapshotContract.js";
@@ -105,7 +105,8 @@ export const reserveExportOutput = ({
     const outputPath = path.join(directory, `${prefix} ${stamp}-${nonce}.${extension}`);
     try {
       const descriptor = fs.openSync(outputPath, "wx", 0o600);
-      return { descriptor, outputPath };
+      const identity = fs.fstatSync(descriptor);
+      return { descriptor, outputPath, identity };
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
     }
@@ -113,20 +114,14 @@ export const reserveExportOutput = ({
   throw exportError("A unique export output could not be reserved.", "EXPORT_OUTPUT_COLLISION");
 };
 
-export const uniqueExportOutputPath = ({
-  prefix,
-  extension,
-  root = exportRoot,
-  now = new Date(),
-} = {}) => {
-  const directory = ensureExportRoot(root);
-  const stamp = now.toISOString().replace(/[^0-9A-Za-z]/g, "");
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const nonce = crypto.randomBytes(8).toString("hex");
-    const outputPath = path.join(directory, `${prefix} ${stamp}-${nonce}.${extension}`);
-    if (!fs.existsSync(outputPath)) return outputPath;
+export const discardExportOutput = (reservation) => {
+  const current = fs.lstatSync(reservation.outputPath, { throwIfNoEntry: false });
+  if (
+    current?.isFile() && current.dev === reservation.identity.dev &&
+    current.ino === reservation.identity.ino
+  ) {
+    fs.unlinkSync(reservation.outputPath);
   }
-  throw exportError("A unique export output could not be selected.", "EXPORT_OUTPUT_COLLISION");
 };
 
 export const encryptJsonExport = ({ payload, passphrase }) => {
@@ -198,6 +193,23 @@ const childExit = (child, label) => new Promise((resolve, reject) => {
   });
 });
 
+const stopArchiveChildren = async (children, exits) => {
+  const timers = children.map((child) => {
+    child.stdin?.destroy();
+    child.stdout?.destroy();
+    child.stderr?.destroy();
+    if (child.exitCode !== null || child.signalCode !== null) return null;
+    child.kill("SIGTERM");
+    const timeout = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    }, 1000);
+    timeout.unref();
+    return timeout;
+  });
+  await Promise.allSettled(exits);
+  timers.forEach((timer) => clearTimeout(timer));
+};
+
 const meter = () => {
   const hash = crypto.createHash("sha256");
   let bytes = 0;
@@ -214,7 +226,7 @@ const meter = () => {
   };
 };
 
-export const encryptTarDirectory = async ({ directory, outputPath, passphrase }) => {
+export const encryptTarDirectory = async ({ directory, outputPath, passphrase, reservation }) => {
   const salt = crypto.randomBytes(32);
   const iv = crypto.randomBytes(12);
   const keys = crypto.scryptSync(passphrase, salt, 64);
@@ -224,18 +236,26 @@ export const encryptTarDirectory = async ({ directory, outputPath, passphrase })
   const cipher = crypto.createCipheriv("aes-256-gcm", encryptionKey, iv);
   cipher.setAAD(header);
   const archiveMeter = meter();
+  const ownedOutput = reservation || (() => {
+    const descriptor = fs.openSync(outputPath, "wx", 0o600);
+    return { descriptor, outputPath, identity: fs.fstatSync(descriptor) };
+  })();
   const tar = spawn("tar", ["-cf", "-", "-C", directory, "."], {
     stdio: ["ignore", "pipe", "pipe"],
   });
   const gzip = spawn("gzip", ["-c"], { stdio: ["pipe", "pipe", "pipe"] });
-  const output = fs.createWriteStream(outputPath, { flags: "wx", mode: 0o600 });
-  output.write(header);
+  const exits = [childExit(tar, "Archive creation"), childExit(gzip, "Archive compression")];
+  const output = new Writable({
+    write(chunk, _encoding, callback) {
+      fs.writeFile(ownedOutput.descriptor, chunk, callback);
+    },
+  });
   try {
+    output.write(header);
     await Promise.all([
       pipeline(tar.stdout, gzip.stdin),
       pipeline(gzip.stdout, archiveMeter.stream, cipher, output),
-      childExit(tar, "Archive creation"),
-      childExit(gzip, "Archive compression"),
+      ...exits,
     ]);
     const measured = archiveMeter.result();
     const size = Buffer.alloc(8);
@@ -245,25 +265,24 @@ export const encryptTarDirectory = async ({ directory, outputPath, passphrase })
     const hmac = crypto.createHmac("sha256", authenticationKey)
       .update(authenticated)
       .digest();
-    await fsPromises.appendFile(outputPath, Buffer.concat([
+    fs.writeFileSync(ownedOutput.descriptor, Buffer.concat([
       tag,
       measured.sha256,
       size,
       hmac,
     ]));
-    const handle = await fsPromises.open(outputPath, "r");
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
+    fs.fsyncSync(ownedOutput.descriptor);
     return {
       plaintextBytes: measured.bytes,
       plaintextSha256: measured.sha256.toString("hex"),
     };
   } catch (error) {
-    await fsPromises.unlink(outputPath).catch(() => {});
+    output.destroy();
+    await stopArchiveChildren([tar, gzip], exits);
+    if (!reservation) discardExportOutput(ownedOutput);
     throw error;
+  } finally {
+    if (!reservation) fs.closeSync(ownedOutput.descriptor);
   }
 };
 
@@ -308,6 +327,7 @@ export const verifyEncryptedTarArchive = async ({
   const archiveMeter = meter();
   const gzip = spawn("gzip", ["-dc"], { stdio: ["pipe", "pipe", "pipe"] });
   const tar = spawn("tar", ["-tf", "-"], { stdio: ["pipe", "pipe", "pipe"] });
+  const exits = [childExit(gzip, "Archive decompression"), childExit(tar, "Archive verification")];
   const listing = [];
   let listingBytes = 0;
   tar.stdout.on("data", (chunk) => {
@@ -327,10 +347,10 @@ export const verifyEncryptedTarArchive = async ({
         gzip.stdin
       ),
       pipeline(gzip.stdout, tar.stdin),
-      childExit(gzip, "Archive decompression"),
-      childExit(tar, "Archive verification"),
+      ...exits,
     ]);
   } catch {
+    await stopArchiveChildren([gzip, tar], exits);
     throw exportError("The encrypted archive failed verification.", "EXPORT_ARCHIVE_INVALID");
   }
   if (listingBytes > 8 * 1024 * 1024) {

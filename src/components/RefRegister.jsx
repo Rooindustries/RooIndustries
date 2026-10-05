@@ -1,3 +1,4 @@
+import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import SupabaseSocialLogin from "./SupabaseSocialLogin";
@@ -41,7 +42,7 @@ export default function RefRegister() {
         setSlug(String(draft.slug || ""));
       }
     } catch {
-      sessionStorage.removeItem(REFERRAL_SIGNUP_DRAFT);
+      removeBrowserStorage("sessionStorage", REFERRAL_SIGNUP_DRAFT);
     }
     fetch("/api/auth/identities?flow=referral", { cache: "no-store" })
       .then((response) => response.json())
@@ -57,33 +58,36 @@ export default function RefRegister() {
   }, []);
 
   const saveDraft = () => {
-    sessionStorage.setItem(
-      REFERRAL_SIGNUP_DRAFT,
+    writeBrowserStorage(
+      "sessionStorage", REFERRAL_SIGNUP_DRAFT,
       JSON.stringify({ discordUsername, email, paypalEmail, slug })
     );
   };
   useEffect(() => {
-    if (!slug) {
-      setSlugAvailable(null);
-      return;
-    }
-
+    setSlugAvailable(null);
+    if (!slug) return undefined;
+    let active = true;
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
         const res = await fetch(
           `/api/ref/validateReferral?code=${encodeURIComponent(
             slug.toLowerCase()
-          )}&purpose=registration`
+          )}&purpose=registration`,
+          { signal: controller.signal }
         );
         const data = await res.json();
-        setSlugAvailable(resolveReferralCodeAvailability(res, data));
+        if (active) setSlugAvailable(resolveReferralCodeAvailability(res, data));
       } catch (err) {
         // network or server error: we don't assume taken
-        setSlugAvailable(null);
+        if (active) setSlugAvailable(null);
       }
     }, 500);
-
-    return () => clearTimeout(timer);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [slug]);
 
   async function handleRegister(e) {
@@ -184,7 +188,7 @@ export default function RefRegister() {
       }
 
       if (data.pendingVerification) {
-        sessionStorage.removeItem(REFERRAL_SIGNUP_DRAFT);
+        removeBrowserStorage("sessionStorage", REFERRAL_SIGNUP_DRAFT);
         setPassword("");
         setConfirm("");
         setVerificationPending(true);
@@ -194,7 +198,7 @@ export default function RefRegister() {
       }
 
       showToast("success", "Registered! Redirecting to dashboard...");
-      sessionStorage.removeItem(REFERRAL_SIGNUP_DRAFT);
+      removeBrowserStorage("sessionStorage", REFERRAL_SIGNUP_DRAFT);
       setTimeout(() => nav("/referrals/dashboard"), 900);
     } catch {
       console.error("Referral registration failed");

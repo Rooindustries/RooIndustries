@@ -51,6 +51,7 @@ export default function ReferralCreatorEditor() {
   const selectedIdRef = useRef("");
   const draftRef = useRef(null);
   const draftDirtyRef = useRef(false);
+  const draftVersion = useRef(0);
 
   const selected = creators.find((creator) => creator.creator_id === selectedId) || null;
 
@@ -189,6 +190,7 @@ export default function ReferralCreatorEditor() {
   };
 
   const updateDraft = (field, value) => {
+    draftVersion.current += 1;
     pendingOperation.current = "";
     const nextDraft = { ...draftRef.current, [field]: value };
     replaceDraft(nextDraft, true);
@@ -199,6 +201,7 @@ export default function ReferralCreatorEditor() {
     const creatorId = selected.creator_id;
     const creatorSnapshot = selected;
     const draftSnapshot = { ...draft };
+    const submittedDraftVersion = draftVersion.current;
     const selectionRequestId = latestHistoryRequest.current;
     const saveRequestId = latestSaveRequest.current + 1;
     latestSaveRequest.current = saveRequestId;
@@ -235,7 +238,7 @@ export default function ReferralCreatorEditor() {
         latestHistoryRequest.current === selectionRequestId &&
         latestSaveRequest.current === saveRequestId;
       if (!selectionStillCurrent) return;
-      replaceDraft(createDraft(updated));
+      if (draftVersion.current === submittedDraftVersion) replaceDraft(createDraft(updated));
       pendingOperation.current = "";
       setNotice(
         body.syncPending

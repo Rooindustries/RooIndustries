@@ -70,6 +70,7 @@ export const verifyDownloadToken = ({
 }) => {
   const normalizedToken = normalizeValue(token);
   if (!normalizedToken) return { ok: false, reason: "download_token_missing" };
+  if (normalizedToken.length > 4096) return { ok: false, reason: "download_token_malformed" };
 
   const parts = normalizedToken.split(".");
   if (parts.length !== 2) {
@@ -99,17 +100,23 @@ export const verifyDownloadToken = ({
   }
 
   if (
-    !payload ||
+    !payload || typeof payload !== "object" || Array.isArray(payload) ||
     payload.purpose !== DOWNLOAD_TOKEN_PURPOSE ||
-    !normalizeValue(payload.slug) ||
-    !normalizeValue(payload.fileName) ||
-    !normalizeValue(payload.bookingId) ||
-    !normalizeValue(payload.emailHash)
+    typeof payload.slug !== "string" || !normalizeValue(payload.slug) ||
+    typeof payload.fileName !== "string" || !normalizeValue(payload.fileName) ||
+    typeof payload.bookingId !== "string" || !normalizeValue(payload.bookingId) ||
+    typeof payload.emailHash !== "string" || !/^[0-9a-f]{64}$/.test(payload.emailHash) ||
+    !Number.isSafeInteger(payload.iat) || payload.iat < 0 ||
+    !Number.isSafeInteger(payload.exp) || payload.exp <= payload.iat ||
+    payload.exp - payload.iat > 60 * 60
   ) {
     return { ok: false, reason: "download_token_invalid_claims" };
   }
 
   const nowSeconds = Math.floor(Number(nowMs || Date.now()) / 1000);
+  if (!Number.isSafeInteger(nowSeconds) || payload.iat > nowSeconds + 60) {
+    return { ok: false, reason: "download_token_invalid_claims" };
+  }
   if (nowSeconds >= Number(payload.exp || 0)) {
     return {
       ok: false,

@@ -27,17 +27,6 @@ const REQUIRED_PROD_ENV = [
   "SANITY_WEBHOOK_SECRET",
 ];
 
-const LIVE_ENDPOINTS = [
-  {
-    label: "PayPal",
-    url: "https://www.rooindustries.com/api/payment/webhook/paypal",
-  },
-  {
-    label: "Razorpay",
-    url: "https://www.rooindustries.com/api/payment/webhook/razorpay",
-  },
-];
-
 const exists = (relativePath) => fs.existsSync(path.join(ROOT, relativePath));
 
 const run = async (cmd, args) => {
@@ -68,24 +57,6 @@ const checkGitHistory = async (relativePath) => {
   return true;
 };
 
-const checkVercelEnv = async () => {
-  const result = await run("vercel", ["env", "ls", "production"]);
-  if (!result.ok) {
-    return {
-      ok: false,
-      message: result.stderr || "Unable to query Vercel production env.",
-      present: [],
-    };
-  }
-
-  const present = REQUIRED_PROD_ENV.filter((name) => result.stdout.includes(name));
-  return {
-    ok: true,
-    present,
-    missing: REQUIRED_PROD_ENV.filter((name) => !present.includes(name)),
-  };
-};
-
 const postUnsignedProbe = async (url) => {
   try {
     const response = await fetch(url, {
@@ -96,11 +67,10 @@ const postUnsignedProbe = async (url) => {
       body: "{}",
     });
 
-    const text = (await response.text()).trim();
     return {
       ok: true,
       status: response.status,
-      body: text.slice(0, 240),
+      body: response.ok ? "" : "Probe refused or failed",
     };
   } catch (error) {
     return {
@@ -120,6 +90,14 @@ const printLine = (label, value) => {
 };
 
 const main = async () => {
+  const { localOrigin, refuseEnvFiles, installNetworkGuard } = await import("./lib/test-target-safety.mjs");
+  refuseEnvFiles();
+  const baseURL = localOrigin(process.env.BASE_URL);
+  installNetworkGuard([baseURL]);
+  const endpoints = [
+    { label: "PayPal", url: `${baseURL}/api/payment/webhook/paypal` },
+    { label: "Razorpay", url: `${baseURL}/api/payment/webhook/razorpay` },
+  ];
   console.log("# Payment Webhook Check");
   printLine("Workspace", ROOT);
 
@@ -135,28 +113,26 @@ const main = async () => {
     printLine(relativePath, status);
   }
 
-  printSection("Production env");
-  const envCheck = await checkVercelEnv();
-  if (!envCheck.ok) {
-    printLine("vercel env ls production", `unavailable (${envCheck.message})`);
-  } else {
-    printLine("required vars present", envCheck.present.join(", ") || "none");
-    printLine("required vars missing", envCheck.missing.join(", ") || "none");
-  }
-
-  printSection("Live endpoints");
-  for (const endpoint of LIVE_ENDPOINTS) {
+  printSection("Local credential presence");
+  printLine("required vars present", REQUIRED_PROD_ENV.filter(name => Boolean(process.env[name])).join(", ") || "none");
+  printSection("Explicit local endpoints");
+  let probesPass = true;
+  for (const endpoint of endpoints) {
     const probe = await postUnsignedProbe(endpoint.url);
     if (!probe.ok) {
+      probesPass = false;
       printLine(endpoint.label, `probe failed (${probe.body})`);
       continue;
     }
-    printLine(endpoint.label, `HTTP ${probe.status} ${probe.body}`);
+    if (probe.status !== 401) probesPass = false;
+    printLine(endpoint.label, `HTTP ${probe.status}`);
   }
 
+  if (!probesPass) process.exitCode = 1;
   printSection("Summary");
   const localMissing = LOCAL_PATHS.filter((relativePath) => !exists(relativePath));
   if (localMissing.length > 0) {
+    process.exitCode = 1;
     printLine(
       "deploy safety",
       "current tree is not webhook-safe to deploy without restoring missing webhook source files"

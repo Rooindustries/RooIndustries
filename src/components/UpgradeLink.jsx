@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import useUpgradeEligibility from "../lib/useUpgradeEligibility";
 import { useNavigate, useParams } from "react-router-dom";
 import { getPublicContent } from "../lib/publicContentClient";
 import packageContent from "../lib/packageContent";
@@ -40,7 +41,7 @@ export default function UpgradeLink() {
   const [orderId, setOrderId] = useState("");
   const [orderEmail, setOrderEmail] = useState("");
   const [loading, setLoading] = useState(false);
-  const [upgradeInfo, setUpgradeInfo] = useState(null);
+  const [eligibility, setUpgradeInfo] = useState(null);
   const [error, setError] = useState(null);
 
   const [linkInfo, setLinkInfo] = useState(null);
@@ -109,6 +110,9 @@ export default function UpgradeLink() {
       ? `Enter your Order ID to see the upgrade price for ${linkInfo.targetPackage.title}.`
       : "Enter your Order ID to check your upgrade price.");
 
+  const eligibilityRequest = useUpgradeEligibility({ id: orderId, email: orderEmail, slug: normalizedSlug });
+  const upgradeInfo = eligibilityRequest.matches(eligibility?.requestInput) ? eligibility : null;
+
   async function handleCheckOrder() {
     setError(null);
     setUpgradeInfo(null);
@@ -129,6 +133,7 @@ export default function UpgradeLink() {
       return;
     }
 
+    const snapshot = eligibilityRequest.capture();
     setLoading(true);
     try {
       const res = await fetch("/api/ref/getUpgradeInfo", {
@@ -141,6 +146,7 @@ export default function UpgradeLink() {
         }),
       });
       const data = await res.json();
+      if (!snapshot.isCurrent()) return;
 
       if (!res.ok || !data.ok) {
         setError(
@@ -150,7 +156,7 @@ export default function UpgradeLink() {
         return;
       }
 
-      setUpgradeInfo(data);
+      setUpgradeInfo({ ...data, requestInput: snapshot.input });
       if (!linkInfo && data.upgradeLink) {
         setLinkInfo({
           title: normalizePackageText(data.upgradeLink.title),
@@ -159,15 +165,16 @@ export default function UpgradeLink() {
         });
       }
     } catch {
+      if (!snapshot.isCurrent()) return;
       console.error("Upgrade eligibility check failed");
       setError("Something went wrong while checking your order. Try again.");
     } finally {
-      setLoading(false);
+      if (snapshot.isLatest()) setLoading(false);
     }
   }
 
   function handleProceedToPayment() {
-    if (!upgradeInfo) return;
+    if (!upgradeInfo || !eligibilityRequest.matches(upgradeInfo.requestInput)) return;
 
     const { booking, targetPackage, upgradePrice } = upgradeInfo;
 
@@ -191,7 +198,7 @@ export default function UpgradeLink() {
 
     const bookingData = {
       discord: booking.discord || "",
-      email: orderEmail.trim(),
+      email: upgradeInfo.requestInput.email,
       specs: booking.specs || "",
       mainGame: booking.mainGame || "",
       message: booking.message || "",

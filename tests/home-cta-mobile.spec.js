@@ -1,4 +1,5 @@
 const { test, expect, devices } = require("@playwright/test");
+const evidence = require("./fixtures/home-cta-evidence.cjs");
 
 const BASE_URL = process.env.BASE_URL;
 if (!BASE_URL) {
@@ -44,13 +45,15 @@ const clickAndMeasure = async (page, linkName, hash, selector) => {
     { timeout: 10000 }
   );
 
-  return page.evaluate(() => ({
+  const state = await page.evaluate(() => ({
     ...window.__heroCtaScrollProbe.settled,
     elapsedMs: Math.round(
       window.__heroCtaScrollProbe.settled.settledAt -
         window.__heroCtaScrollProbe.startedAt
     ),
   }));
+  await evidence.record(page, state, selector);
+  return state;
 };
 
 const scrollToTopInstant = async (page) => {
@@ -74,14 +77,14 @@ const scrollToTopInstant = async (page) => {
 test("hero CTAs settle promptly on phone layouts", async ({ page }) => {
   await page.goto(`${BASE_URL}/`, { waitUntil: "load" });
 
-  let state = await clickAndMeasure(page, "Tune My Rig", "#packages", "#packages");
+  let state = await clickAndMeasure(page, "Tune My PC", "#packages", "#packages");
   expect(state.hash).toBe("#packages");
   expect(Math.abs(state.top)).toBeLessThanOrEqual(160);
   expect(state.elapsedMs).toBeLessThanOrEqual(600);
 
   await scrollToTopInstant(page);
 
-  state = await clickAndMeasure(page, "Tune My Rig", "#packages", "#packages");
+  state = await clickAndMeasure(page, "Tune My PC", "#packages", "#packages");
   expect(state.hash).toBe("#packages");
   expect(Math.abs(state.top)).toBeLessThanOrEqual(160);
   expect(state.elapsedMs).toBeLessThanOrEqual(600);
@@ -90,7 +93,7 @@ test("hero CTAs settle promptly on phone layouts", async ({ page }) => {
 
   state = await clickAndMeasure(
     page,
-    "See How It Works",
+    "How It Works",
     "#how-it-works",
     "#how-it-works"
   );
@@ -98,3 +101,12 @@ test("hero CTAs settle promptly on phone layouts", async ({ page }) => {
   expect(Math.abs(state.top)).toBeLessThanOrEqual(160);
   expect(state.elapsedMs).toBeLessThanOrEqual(600);
 });
+
+
+test.beforeEach(async ({ context, page, baseURL, javaScriptEnabled, hasTouch, isMobile, userAgent, browserName }, testInfo) => {
+  const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+  await guardBrowserContext(context, [baseURL]);
+  await evidence.begin(page, testInfo, { baseURL, javaScriptEnabled, hasTouch, isMobile, userAgent, browserName, browserVersion: context.browser().version() });
+});
+
+test.afterEach(async ({ page }, testInfo) => evidence.finish(page, testInfo));

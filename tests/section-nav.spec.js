@@ -1,3 +1,4 @@
+const testHost = process.env.ROO_TEST_HOST || '127.0.0.1';
 const fs = require("fs");
 const path = require("path");
 const { test, expect } = require("@playwright/test");
@@ -15,7 +16,7 @@ try {
 if (
   !testUrl ||
   !["http:", "https:"].includes(testUrl.protocol) ||
-  !["localhost", "127.0.0.1", "[::1]", "100.127.48.111"].includes(testUrl.hostname)
+  !["localhost", "127.0.0.1", "[::1]", testHost].includes(testUrl.hostname)
 ) {
   throw new Error(
     `Unexpected BASE_URL for mission-critical nav suite: ${BASE_URL}`
@@ -60,9 +61,14 @@ const FLOW_ORIGINS = [
     label: "meet-the-team",
     route: "/meet-the-team",
     open: async (page) => {
+      const viewport = page.viewportSize();
+      await page.setViewportSize({ width: 390, height: 844 });
       await page.goto("/", { waitUntil: "domcontentloaded" });
+      await waitForReactHydratedSelector(page, 'button[aria-label="Open menu"]');
+      await page.getByRole("button", { name: "Open menu" }).click();
       await page.getByRole("link", { name: "Meet the Team" }).first().click();
       await page.waitForURL(`${BASE_URL}/meet-the-team`);
+      await page.setViewportSize(viewport);
     },
   },
   {
@@ -146,11 +152,21 @@ const measureOffset = async (page, hash) =>
 const waitForTargetSettle = async (page, hash, timeoutMs) => {
   const start = nowMs();
   let top = null;
+  let lastTop = null;
+  let stableSince = null;
   while (nowMs() - start <= timeoutMs) {
     top = await measureOffset(page, hash);
     if (top !== null && Math.abs(top) <= FINAL_OFFSET_MAX) {
-      return { ok: true, timeToTargetMs: nowMs() - start, top };
+      if (stableSince === null || lastTop === null || Math.abs(top - lastTop) > 1) {
+        stableSince = nowMs();
+      }
+      if (nowMs() - stableSince >= 150) {
+        return { ok: true, timeToTargetMs: nowMs() - start, top };
+      }
+    } else {
+      stableSince = null;
     }
+    lastTop = top;
     await page.waitForTimeout(50);
   }
   return {
@@ -276,7 +292,7 @@ for (const viewportCfg of VIEWPORTS) {
             viewportCfg.settleMaxMs + 1500
           );
 
-          const stableTop = await measureOffset(page, action.hash);
+          const stableTop = settleResult.top;
           await page.waitForTimeout(2000);
           const driftTop = await measureOffset(page, action.hash);
           const driftPx =
@@ -361,7 +377,7 @@ test("in-app route transitions keep browser path synchronized for section links"
       const hashResult = await waitForHash(page, action.hash, 1700);
       const settleResult = await waitForTargetSettle(page, action.hash, 2600);
       const afterUrl = new URL(page.url());
-      const stableTop = await measureOffset(page, action.hash);
+      const stableTop = settleResult.top;
 
       expect(hashResult.ok, `${origin.label} -> ${action.label} hash update`).toBe(
         true
@@ -453,4 +469,10 @@ test.afterAll(async () => {
   expect(navFailures, "navigation reliability failures").toEqual([]);
   expect(crashLog.length, "client crash/hydration errors captured").toBe(0);
   expect(hydrationErrors.length, "hydration mismatch errors captured").toBe(0);
+});
+
+
+test.beforeEach(async ({ context, baseURL }) => {
+  const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+  await guardBrowserContext(context, [baseURL]);
 });

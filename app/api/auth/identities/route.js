@@ -160,6 +160,12 @@ export async function POST(request) {
     const identity = (user.identities || []).find(
       (candidate) => String(candidate?.provider || "").toLowerCase() === provider
     );
+    if (!identity && (account.connected_providers || []).includes(provider)) {
+      return jsonFrom(response, {
+        ok: false,
+        error: "This connection belongs to another sign-in account. Sign in with that account to manage it.",
+      }, 409);
+    }
     if (identity && (user.identities || []).length < 2) {
       return jsonFrom(response, { ok: false, error: "Keep at least one sign-in method connected." }, 409);
     }

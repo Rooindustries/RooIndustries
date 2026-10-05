@@ -2,14 +2,11 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import posixPath from "node:path/posix";
-import dotenv from "dotenv";
+import operatorEnvironment from "./lib/operator-environment.cjs";
 import * as tus from "tus-js-client";
 import { createSupabaseAdminClient } from "../src/server/supabase/adminClient.js";
 import { resolveSupabaseAdminEnv } from "../src/server/supabase/adminClient.js";
 import integrity from "./download-blob-integrity.cjs";
-
-dotenv.config({ path: path.join(process.cwd(), ".env.local") });
-dotenv.config();
 
 const DEFAULT_BUCKET = "optimization-builds-private";
 const DEFAULT_CONTENT_TYPE = "application/zip";
@@ -25,7 +22,7 @@ const fail = (message) => {
 
 const usage = () => fail(
   "Usage: node scripts/upload-download-supabase.mjs <slug> [local-zip-path] " +
-    "[--apply] [--overwrite] [--raise-bucket-limit] [--verify-only]"
+    "--env <private-file> [--apply] [--overwrite] [--raise-bucket-limit] [--verify-only]"
 );
 
 const normalizeSlug = (value) =>
@@ -126,14 +123,18 @@ const parseCatalog = () => {
 
 const readOptions = () => {
   const args = process.argv.slice(2);
+  const envIndex = args.indexOf("--env");
+  operatorEnvironment.loadOperatorEnvironment(envIndex >= 0 ? args[envIndex + 1] : "");
   const supported = new Set([
+    "--env",
     "--apply",
     "--overwrite",
     "--raise-bucket-limit",
     "--verify-only",
   ]);
-  if (args.some((arg) => arg.startsWith("--") && !supported.has(arg))) usage();
-  const positional = args.filter((arg) => !supported.has(arg));
+  const withoutEnv = args.filter((_, index) => envIndex < 0 || index !== envIndex + 1);
+  if (withoutEnv.some((arg) => arg.startsWith("--") && !supported.has(arg))) usage();
+  const positional = withoutEnv.filter((arg) => !supported.has(arg));
   const slug = normalizeSlug(positional[0]);
   if (!slug || positional.length > 2) usage();
 

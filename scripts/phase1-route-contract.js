@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { chromium } = require("playwright");
 
-const BASE_URL = process.env.BASE_URL;
+let BASE_URL = process.env.BASE_URL;
 if (!BASE_URL) {
   console.error("[phase1-route-contract] BASE_URL is required");
   process.exit(1);
@@ -37,8 +37,13 @@ const csvEscape = (value) => {
 };
 
 async function run() {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
+  const safety = await import("./lib/test-target-safety.mjs");
+  safety.refuseEnvFiles();
+  BASE_URL = safety.localOrigin(BASE_URL);
+  safety.installNetworkGuard([BASE_URL]);
+  const browser = await chromium.launch({ headless: false });
+  const page = await browser.newPage({ serviceWorkers: "block" });
+  await (await import("./lib/test-target-safety.mjs")).guardBrowserContext(page.context(), [BASE_URL]);
   const rows = [];
 
   for (const route of routes) {

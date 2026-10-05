@@ -2,7 +2,6 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
-import fsPromises from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -12,6 +11,7 @@ import {
   defaultExportRoot,
   decryptJsonExport,
   deleteExportPassphrase,
+  discardExportOutput,
   encryptJsonExport,
   loadPrivateExportEnvironment,
   parseExportArguments,
@@ -152,7 +152,11 @@ export const runCommerceEncryptedExport = async ({
     const encrypted = encryptJsonExport({ payload, passphrase });
     fs.writeFileSync(reservation.descriptor, encrypted);
     fs.fsyncSync(reservation.descriptor);
-    const decrypted = decryptJsonExport({ encrypted, passphrase });
+    const persisted = fs.readFileSync(reservation.outputPath);
+    if (!persisted.equals(encrypted)) {
+      throw new Error("The encrypted Supabase commerce export failed file readback.");
+    }
+    const decrypted = decryptJsonExport({ encrypted: persisted, passphrase });
     const decryptedValidation = validateCommerceExportSnapshot(decrypted.snapshot);
     if (
       stableExportJson(decrypted) !== stableExportJson(payload) ||
@@ -179,7 +183,7 @@ export const runCommerceEncryptedExport = async ({
   } finally {
     fs.closeSync(reservation.descriptor);
     if (!completed) {
-      await fsPromises.unlink(reservation.outputPath).catch(() => {});
+      discardExportOutput(reservation);
       await deleteExportPassphrase({ service, account });
     }
   }

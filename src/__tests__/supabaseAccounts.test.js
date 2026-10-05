@@ -21,6 +21,7 @@ const creatorAccount = {
   credential_kind: "bcrypt",
   roles: ["customer", "creator"],
   referral_code: "creator",
+  creator_legacy_sanity_id: "referral.creator",
 };
 
 describe("Supabase account compatibility", () => {
@@ -299,7 +300,7 @@ describe("Supabase account compatibility", () => {
     expect(verifyLegacyPassword).toHaveBeenCalledWith({ account, password });
     expect(adminClient.auth.admin.updateUserById).toHaveBeenCalledWith(account.user_id, { password });
     expect(adminClient.rpc.mock.calls.map(([name]) => name)).toEqual([
-      "roo_resolve_account_alias", "roo_complete_credential_migration",
+      "roo_resolve_account_alias", "roo_complete_credential_migration", "roo_resolve_account_alias",
     ]);
     expect(authClient.auth.signInWithPassword).toHaveBeenCalledTimes(2);
   });

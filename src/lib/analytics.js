@@ -1,3 +1,4 @@
+import { isProductionBrowser } from "./productionBrowser";
 import { track } from "@vercel/analytics/react";
 import { salesEventProperties, sanitizeSalesAttribution } from "./salesAttribution";
 
@@ -11,6 +12,7 @@ const ensureAnalyticsQueue = () => {
 
 export const trackEvent = (eventName, data = {}, options = {}) => {
   try {
+    if (!isProductionBrowser()) return false;
     ensureAnalyticsQueue();
     const attribution = Object.hasOwn(options, "attribution")
       ? salesEventProperties(options.attribution)

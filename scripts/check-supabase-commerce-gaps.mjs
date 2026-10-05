@@ -5,7 +5,7 @@ import fs from "node:fs";
 import process from "node:process";
 import { createClient as createSanityClient } from "@sanity/client";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import dotenv from "dotenv";
+import operatorEnvironment from "./lib/operator-environment.cjs";
 import {
   COMMERCE_EPHEMERAL_DOCUMENT_TYPES,
   canonicalizeCommerceParityValue,
@@ -13,11 +13,8 @@ import {
 import { filterActiveBookings } from "../src/server/booking/slotPolicy.js";
 import { SupabaseDocumentClient } from "../src/server/supabase/documentClient.js";
 
-for (const candidate of [".env.local", ".vercel/.env.preview.local"]) {
-  if (fs.existsSync(candidate)) {
-    dotenv.config({ path: candidate, override: false, quiet: true });
-  }
-}
+const envIndex = process.argv.indexOf("--env");
+operatorEnvironment.loadOperatorEnvironment(envIndex >= 0 ? process.argv[envIndex + 1] : "");
 
 const readEnv = (...keys) =>
   keys.map((key) => String(process.env[key] || "").trim()).find(Boolean) || "";

@@ -7,15 +7,33 @@ const { CONTACT_GUIDANCE } = companyContent;
 
 export default function Contact({ initialData = null }) {
   const [contactData, setContactData] = useState(initialData);
+  const [contentFailed, setContentFailed] = useState(false);
   const [copyStatus, setCopyStatus] = useState("idle");
   const copyResetTimeoutRef = useRef(null);
 
-  const [state, handleSubmit] = useForm("mpwybpen");
+  const formId = typeof contactData?.formId === "string" ? contactData.formId.trim() : "";
+  const configReady = Boolean(contactData);
+  const [state, handleSubmit] = useForm(formId || "mpwybpen");
+  const submitConfiguredForm = (event) => {
+    if (!configReady) {
+      event.preventDefault();
+      return;
+    }
+    return handleSubmit(event);
+  };
 
   useEffect(() => {
+    let active = true;
     getPublicContent("contact")
-      .then(setContactData)
-      .catch(console.error);
+      .then((data) => {
+        if (!active) return;
+        setContactData(data || initialData);
+        setContentFailed(!data && !initialData);
+      })
+      .catch(() => {
+        if (active) setContentFailed(!initialData);
+      });
+    return () => { active = false; };
   }, []);
 
   useEffect(
@@ -75,9 +93,9 @@ export default function Contact({ initialData = null }) {
           >
             <path d="M2 4a2 2 0 012-2h16a2 2 0 012 2v1.8l-10 6.25L2 5.8V4zm0 4.2V20a2 2 0 002 2h16a2 2 0 002-2V8.2l-10 6.25L2 8.2z" />
           </svg>
-          <span className="text-lg font-medium">
+          <a href={`mailto:${contactData?.email || "serviroo@rooindustries.com"}`} className="text-lg font-medium">
             {contactData?.email || "serviroo@rooindustries.com"}
-          </span>
+          </a>
         </div>
         <button
           type="button"
@@ -102,13 +120,21 @@ export default function Contact({ initialData = null }) {
         </p>
       ) : null}
 
+      {!configReady ? (
+        <p className="mb-5 w-full max-w-xl text-sm text-ink-muted" role="status">
+          {contentFailed
+            ? "The contact form is temporarily unavailable. Please email us directly using the address above."
+            : "Loading the contact form..."}
+        </p>
+      ) : null}
+
       {state.succeeded ? (
         <div className="w-full max-w-xl p-6 rounded-lg border border-success-border bg-success-soft backdrop-blur-sm text-center text-success-text font-semibold">
           Thank you! Your message has been sent.
         </div>
       ) : (
         <form
-          onSubmit={handleSubmit}
+          onSubmit={submitConfiguredForm}
           className="p-6 rounded-lg w-full max-w-xl space-y-5 border border-line-input bg-surface-card backdrop-blur-sm"
         >
           <div>
@@ -155,7 +181,7 @@ export default function Contact({ initialData = null }) {
 
           <button
             type="submit"
-            disabled={state.submitting}
+            disabled={!configReady || state.submitting}
             className="glow-button w-full text-white font-semibold py-3 rounded transition duration-200 inline-flex items-center justify-center gap-2"
           >
             Send Message

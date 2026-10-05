@@ -16,8 +16,7 @@ jest.mock(
   () => ({
     __esModule: true,
     useLocation: () => mockLocation,
-  }),
-  { virtual: true }
+  })
 );
 
 jest.mock("framer-motion", () => {

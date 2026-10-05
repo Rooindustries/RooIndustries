@@ -1,6 +1,16 @@
-import { readdirSync } from "node:fs";
-import { join, relative, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readdirSync, lstatSync } from "node:fs";
+import { join, relative, resolve, sep } from "node:path";
+
+export function validateDistDir(value, { isolated = false } = {}) {
+  if (typeof value !== "string" || !/^\.next(?:-[a-zA-Z0-9_-]+)?$/.test(value) ||
+      (isolated && !value.startsWith(".next-e2e-"))) throw new Error("[test-target] Invalid isolated build directory.");
+  if (lstatSync(resolve(value), { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error("[test-target] Build directory cannot be a symlink.");
+  return value;
+}
+
+export function getSupabaseAssetOrigin(env = process.env) {
+  return new URL(env.NEXT_PUBLIC_SUPABASE_ASSET_URL || "https://ntezmxzaibrrsgtujgxu.supabase.co").origin;
+}
 
 /** @type {import('next').NextConfig} */
 const isProduction = process.env.NODE_ENV === "production";
@@ -11,9 +21,7 @@ const configuredSupabaseAuthUrl =
   process.env.SUPABASE_URL ||
   DEFAULT_SUPABASE_ASSET_ORIGIN;
 const supabaseAuthOrigin = new URL(configuredSupabaseAuthUrl).origin;
-const supabaseAssetOrigin = new URL(
-  process.env.NEXT_PUBLIC_SUPABASE_ASSET_URL || DEFAULT_SUPABASE_ASSET_ORIGIN
-).origin;
+const supabaseAssetOrigin = getSupabaseAssetOrigin();
 const immutableAssetHeaders = [
   {
     key: "Cache-Control",
@@ -85,7 +93,7 @@ const globalSecurityHeaders = [
 
 const nextConfig = {
   poweredByHeader: false,
-  distDir: process.env.NEXT_DIST_DIR || ".next",
+  distDir: validateDistDir(process.env.NEXT_DIST_DIR || ".next"),
   outputFileTracingRoot: process.cwd(),
   outputFileTracingIncludes: {
     "/api/downloads/file": ["./downloads/**/*"],
@@ -127,7 +135,7 @@ const nextConfig = {
     };
   },
   async headers() {
-    const publicRoot = fileURLToPath(new URL("./public/", import.meta.url));
+    const publicRoot = join(process.cwd(), "public");
     const assets = readdirSync(publicRoot, { recursive: true, withFileTypes: true })
       .filter((entry) => entry.isFile())
       .map((entry) => relative(publicRoot, join(entry.parentPath ?? entry.path, entry.name)).split(sep).join("/"))

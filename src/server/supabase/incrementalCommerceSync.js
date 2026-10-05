@@ -9,6 +9,7 @@ import { resolveSupabaseRuntimePolicy } from "./runtime.js";
 import {
   importCommerceShadowDocuments,
   reconcileCommerceShadowDocuments,
+  requireShadowDocumentArray,
 } from "./shadowStore.js";
 
 const STREAM_NAME = "commerce.sanity-to-supabase.v1";
@@ -43,8 +44,8 @@ const cursorFromDocument = (document) => ({
   id: String(document?._id || ""),
 });
 
-const fetchChangedBatch = ({ client, cursor }) =>
-  client.fetch(
+const fetchChangedBatch = async ({ client, cursor }) =>
+  requireShadowDocumentArray(await client.fetch(
     `*[
       _type in $types &&
       (_updatedAt > $updatedAt || (_updatedAt == $updatedAt && _id > $id))
@@ -54,7 +55,7 @@ const fetchChangedBatch = ({ client, cursor }) =>
       updatedAt: cursor.updatedAt,
       id: cursor.id,
     }
-  );
+  ));
 
 const verifyChangedDocuments = async ({ documents, client }) => {
   if (documents.length < 1) return 0;
@@ -93,7 +94,7 @@ const importChangedDocuments = async ({ sanityClient, supabaseClient, cursor }) 
       client: sanityClient,
       cursor: nextCursor,
     });
-    if (!Array.isArray(documents) || documents.length < 1) {
+    if (documents.length < 1) {
       exhausted = true;
       break;
     }
@@ -119,7 +120,7 @@ const importChangedDocuments = async ({ sanityClient, supabaseClient, cursor }) 
       client: sanityClient,
       cursor: nextCursor,
     });
-    if (Array.isArray(remaining) && remaining.length > 0) {
+    if (remaining.length > 0) {
       const error = new Error("Incremental commerce sync exceeded its batch limit.");
       error.code = "COMMERCE_SYNC_BATCH_LIMIT";
       throw error;
@@ -192,8 +193,14 @@ export const syncSanityCommerceChanges = async ({
     const sourceIds = await source.fetch(`*[_type in $types]._id`, {
       types: COMMERCE_RECONCILABLE_DOCUMENT_TYPES,
     });
+    if (!Array.isArray(sourceIds) || sourceIds.some((id) =>
+      typeof id !== "string" || !id.trim())) {
+      const error = new Error("Commerce source ID inventory is invalid.");
+      error.code = "COMMERCE_SOURCE_IDS_INVALID";
+      throw error;
+    }
     const reconciliation = await reconcileCommerceShadowDocuments({
-      sourceIds: (sourceIds || []).filter(Boolean),
+      sourceIds,
       documentTypes: COMMERCE_RECONCILABLE_DOCUMENT_TYPES,
       snapshotStartedAt,
       client: target,

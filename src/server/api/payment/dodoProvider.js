@@ -100,12 +100,17 @@ export const validateDodoPayment = ({ record, payment }) => {
     return fail("dodo_amount_mismatch");
   }
   const cart = payment.product_cart;
-  if (!Array.isArray(cart) || cart.length !== 1 || cart[0].quantity !== 1 ||
-      cart[0].product_id !== record.providerPublicData?.productId) return fail("dodo_product_mismatch");
+  if (payment.status === "succeeded" &&
+      (!Array.isArray(cart) || cart.length !== 1 || cart[0].quantity !== 1 ||
+      cart[0].product_id !== record.providerPublicData?.productId)) return fail("dodo_product_mismatch");
+  if (!Array.isArray(payment.refunds) || !Array.isArray(payment.disputes)) {
+    return fail("dodo_payment_details_incomplete");
+  }
   return { ok: true };
 };
 
 export const retrieveDodoPayment = (paymentId) => createDodoClient().payments.retrieve(paymentId);
+export const retrieveDodoRefund = (refundId) => createDodoClient().refunds.retrieve(refundId);
 
 export const inspectDodoCheckout = async ({ record }) => {
   try {
@@ -132,6 +137,9 @@ export const verifyDodoCapture = async ({ record, payment: suppliedPayment }) =>
   const validation = validateDodoPayment({ record, payment });
   if (!validation.ok) return validation;
   if (payment.status !== "succeeded") return { ok: false, retryable: true, reason: `dodo_payment_${payment.status || "pending"}` };
+  if (payment.refund_status === "full" || (payment.refund_status === "partial" && !suppliedPayment)) {
+    return { ok: false, captured: true, retryable: true, reason: "dodo_refund_requires_reconciliation" };
+  }
   if ((payment.disputes || []).some((dispute) => !["dispute_won", "dispute_cancelled"].includes(dispute.dispute_status))) {
     return { ok: false, captured: true, retryable: false, reason: "dodo_payment_disputed" };
   }

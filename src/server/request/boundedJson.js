@@ -25,7 +25,13 @@ export const readBeforeDeadline = async ({ promise, deadlineAt, onTimeout }) => 
   }
 };
 
-const readBoundedBody = async (request, maxBytes, maxReadMs) => {
+const cancelBodyReader = (reader) => {
+  try {
+    Promise.resolve(reader.cancel()).catch(() => {});
+  } catch {}
+};
+
+export const readBoundedBody = async (request, maxBytes, maxReadMs) => {
   const deadlineAt = Date.now() + Math.max(1, Number(maxReadMs) || 5_000);
   const declaredLength = Number(
     request?.headers?.get?.("content-length") || 0
@@ -54,13 +60,13 @@ const readBoundedBody = async (request, maxBytes, maxReadMs) => {
       const { done, value } = await readBeforeDeadline({
         promise: reader.read(),
         deadlineAt,
-        onTimeout: () => Promise.resolve(reader.cancel()).catch(() => {}),
+        onTimeout: () => cancelBodyReader(reader),
       });
       if (done) break;
       const chunk = Buffer.from(value);
       totalBytes += chunk.byteLength;
       if (totalBytes > maxBytes) {
-        await reader.cancel().catch(() => {});
+        cancelBodyReader(reader);
         throw bodyError("Request body is too large.", 413);
       }
       chunks.push(chunk);

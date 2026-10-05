@@ -52,6 +52,7 @@ export default async function handler(req, res) {
 
     const creator = await client.fetch(
       `*[_type == "referral" && _id == $id][0]{
+        _rev,
         maxCommissionPercent,
         successfulReferrals,
         bypassUnlock,
@@ -62,6 +63,10 @@ export default async function handler(req, res) {
 
     if (!creator) {
       return res.status(404).json({ ok: false, error: "Creator not found" });
+    }
+
+    if (!creator._rev) {
+      return res.status(409).json({ ok: false, error: "Creator source revision is missing" });
     }
 
     const configuredMax = Number(creator.maxCommissionPercent);
@@ -90,7 +95,7 @@ export default async function handler(req, res) {
     const nextCommission = nextCommissionBasisPoints / 100;
     const nextDiscount = nextDiscountBasisPoints / 100;
 
-    let patch = client.patch(id).set({
+    let patch = client.patch(id).ifRevisionId(creator._rev).set({
       currentCommissionPercent: nextCommission,
       currentDiscountPercent: nextDiscount,
     });

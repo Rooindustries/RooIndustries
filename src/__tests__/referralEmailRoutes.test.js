@@ -97,6 +97,11 @@ const loadRegisterHandler = ({
   const transaction = jest.fn(() => {
     const chain = {
       create: jest.fn(() => chain),
+      patch: jest.fn((_id, configure) => {
+        const patch = { ifRevisionId: jest.fn(() => patch), set: jest.fn(() => patch) };
+        configure(patch);
+        return chain;
+      }),
       delete: jest.fn(() => chain),
       commit: transactionCommit,
     };
@@ -736,7 +741,9 @@ describe("Supabase-primary referral email routes", () => {
     loaded.fetch
       .mockResolvedValueOnce(expired)
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null);
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(expired)
+      .mockResolvedValueOnce([]);
     const response = createResponse();
 
     await loaded.handler(

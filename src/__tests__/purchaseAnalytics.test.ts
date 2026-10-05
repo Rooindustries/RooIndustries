@@ -1,4 +1,5 @@
 const mockTrack = jest.fn();
+jest.mock("../lib/productionBrowser", () => ({ isProductionBrowser: () => true }));
 jest.mock("@vercel/analytics/react", () => ({ track: (...args: unknown[]) => mockTrack(...args) }));
 
 beforeEach(() => { jest.resetModules(); mockTrack.mockReset(); sessionStorage.clear(); window.history.replaceState({}, "", "/payment"); });

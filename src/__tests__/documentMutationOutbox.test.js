@@ -23,7 +23,7 @@ const event = (overrides = {}) => ({
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
 const createSanityClient = ({ current = [], afterCommit = null } = {}) => {
-  const state = { current: current.map(clone), commits: 0, operations: [] };
+  const state = { current: current.map((document) => ({ ...clone(document), _rev: document._rev || "sanity-fixture-revision" })), commits: 0, operations: [] };
   const client = {
     fetch: jest.fn(async () => state.current.map(clone)),
     transaction: jest.fn(() => {
@@ -138,7 +138,7 @@ describe("document mutation mirror outbox", () => {
       }
       if (name === "roo_complete_document_mutation_mirror_event") {
         expect(args.p_lease_id).toEqual(expect.any(String));
-        return { data: { status: "applied" }, error: null };
+        return { data: { event_key: event().event_key, status: "applied" }, error: null };
       }
       if (name === "roo_document_mutation_mirror_backlog") {
         return { data: backlog, error: null };
@@ -209,7 +209,7 @@ describe("document mutation mirror outbox", () => {
         return { data: [queued], error: null };
       }
       if (name === "roo_complete_document_mutation_mirror_event") {
-        return { data: { status: "applied" }, error: null };
+        return { data: { event_key: event().event_key, status: "applied" }, error: null };
       }
       return { data: backlog, error: null };
     });
@@ -249,7 +249,7 @@ describe("document mutation mirror outbox", () => {
         return { data: [queued], error: null };
       }
       if (name === "roo_complete_document_mutation_mirror_event") {
-        return { data: { status: "applied" }, error: null };
+        return { data: { event_key: event().event_key, status: "applied" }, error: null };
       }
       if (name === "roo_document_mutation_mirror_backlog") {
         return { data: { ...backlog, pending: 7 }, error: null };
@@ -292,10 +292,10 @@ describe("document mutation mirror outbox", () => {
           if (successCompletions === 1) {
             return { data: null, error: { code: "ETIMEDOUT" } };
           }
-          return { data: { status: "applied" }, error: null };
+          return { data: { event_key: event().event_key, status: "applied" }, error: null };
         }
         run += 1;
-        return { data: { status: "retry" }, error: null };
+        return { data: { event_key: event().event_key, status: "retry" }, error: null };
       }
       if (name === "roo_document_mutation_mirror_backlog") {
         return { data: backlog, error: null };
@@ -341,7 +341,7 @@ describe("document mutation mirror outbox", () => {
         return { data: [event()], error: null };
       }
       if (name === "roo_complete_document_mutation_mirror_event") {
-        return { data: { status: "applied" }, error: null };
+        return { data: { event_key: event().event_key, status: "applied" }, error: null };
       }
       return { data: backlog, error: null };
     });
@@ -377,7 +377,7 @@ describe("document mutation mirror outbox", () => {
       }
       if (name === "roo_complete_document_mutation_mirror_event") {
         expect(args.p_success).toBe(false);
-        return { data: { status: "retry" }, error: null };
+        return { data: { event_key: event().event_key, status: "retry" }, error: null };
       }
       return { data: { ...backlog, pending: 1 }, error: null };
     });
@@ -405,7 +405,7 @@ describe("document mutation mirror outbox", () => {
       if (name === "roo_complete_document_mutation_mirror_event") {
         expect(args.p_success).toBe(false);
         expect(args.p_error_code).toBe("DOCUMENT_MIRROR_VERIFICATION_FAILED");
-        return { data: { status: "retry" }, error: null };
+        return { data: { event_key: event().event_key, status: "retry" }, error: null };
       }
       return { data: { ...backlog, pending: 1 }, error: null };
     });
@@ -446,7 +446,7 @@ describe("document mutation mirror outbox", () => {
       if (name === "roo_complete_document_mutation_mirror_event") {
         expect(args.p_success).toBe(false);
         expect(args.p_error_code).toBe("DOCUMENT_MIRROR_SEQUENCE_CONFLICT");
-        return { data: { status: "retry" }, error: null };
+        return { data: { event_key: event().event_key, status: "retry" }, error: null };
       }
       return { data: { ...backlog, pending: 1, ready: true }, error: null };
     });
@@ -485,7 +485,7 @@ describe("document mutation mirror outbox", () => {
         return { data: [deleted], error: null };
       }
       if (name === "roo_complete_document_mutation_mirror_event") {
-        return { data: { status: "applied" }, error: null };
+        return { data: { event_key: event().event_key, status: "applied" }, error: null };
       }
       return { data: backlog, error: null };
     });
@@ -540,7 +540,7 @@ describe("document mutation mirror outbox", () => {
         return { data: [referralEvent], error: null };
       }
       if (name === "roo_complete_document_mutation_mirror_event") {
-        return { data: { status: "applied" }, error: null };
+        return { data: { event_key: event().event_key, status: "applied" }, error: null };
       }
       return { data: backlog, error: null };
     });

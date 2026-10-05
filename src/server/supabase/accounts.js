@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import bcrypt from "bcryptjs";
 import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../../lib/passwordPolicy.js";
 import { createSupabaseAdminClient } from "./adminClient.js";
@@ -214,9 +215,32 @@ export const authenticateSupabaseAccount = async ({
     };
   }
 
+  const currentAccount = await resolveSupabaseAccountAlias({
+    identifier,
+    accountScope,
+    adminClient,
+  });
+  const currentRoles = Array.isArray(currentAccount?.roles) ? currentAccount.roles : [];
+  if (
+    !currentAccount ||
+    result.data.user.id !== account.user_id ||
+    currentAccount.user_id !== account.user_id ||
+    currentAccount.principal_id !== account.principal_id ||
+    currentAccount.status !== "active" ||
+    Number(currentAccount.session_version || 1) !== Number(account.session_version || 1) ||
+    (requiredRoles.length > 0 && !requiredRoles.some((role) => currentRoles.includes(role))) ||
+    (requiredRoles.includes("creator") && currentAccount.creator_active === false) ||
+    (accountScope === "tourney" && (
+      currentAccount.tourney_active === false ||
+      currentAccount.credential_version !== account.credential_version
+    ))
+  ) {
+    return { ok: false, reason: "invalid_credentials" };
+  }
+
   return {
     ok: true,
-    account,
+    account: currentAccount,
     user: result.data.user,
     session: result.data.session,
   };
@@ -249,6 +273,14 @@ export const updateSupabaseAccountPassword = async ({
   const normalizedSourceDocumentId = String(sourceDocumentId || "").trim();
   const normalizedSourceRevision = String(sourceRevision || "").trim();
   if (
+    !account.creator_legacy_sanity_id ||
+    account.creator_legacy_sanity_id !== normalizedSourceDocumentId
+  ) {
+    const error = new Error("Credential source does not belong to the creator account.");
+    error.code = "P0002";
+    throw error;
+  }
+  if (
     !["sanity", "supabase"].includes(normalizedSourceBackend) ||
     !normalizedSourceDocumentId ||
     !normalizedSourceRevision ||
@@ -259,19 +291,58 @@ export const updateSupabaseAccountPassword = async ({
   ) {
     throw new Error("Credential source recovery metadata is required.");
   }
+  let preparation = await adminClient.rpc("roo_prepare_credential_operation_v2", {
+    p_operation_key: operationKey,
+    p_user_id: account.user_id,
+    p_password_hash: resolvedHash,
+    p_source_backend: normalizedSourceBackend,
+    p_source_document_id: normalizedSourceDocumentId,
+    p_source_expected_revision: normalizedSourceRevision,
+    p_source_preconditions: sourcePreconditions,
+    p_source_mutation: sourceMutation,
+  });
+  if (preparation.error?.code === "23505") {
+    const previous = await getSupabaseCredentialOperation({ operationKey, adminClient });
+    if (
+      previous?.user_id === account.user_id &&
+      previous.principal_id === account.principal_id &&
+      previous.source_backend === normalizedSourceBackend &&
+      previous.source_document_id === normalizedSourceDocumentId &&
+      previous.source_expected_revision === normalizedSourceRevision &&
+      isDeepStrictEqual(previous.source_preconditions, sourcePreconditions) &&
+      isDeepStrictEqual(previous.source_mutation, {
+        ...sourceMutation,
+        set: {
+          ...sourceMutation.set,
+          creatorPassword: previous.password_hash,
+          passwordChangedAt: previous.source_mutation?.set?.passwordChangedAt,
+        },
+      }) &&
+      ["prepared", "auth_applied", "mirrored"].includes(previous.status) &&
+      await bcrypt.compare(normalizedPassword, String(previous.password_hash || ""))
+    ) {
+      assertSupabaseCredentialOperationRetry(previous);
+      preparation = await adminClient.rpc("roo_prepare_credential_operation_v2", {
+        p_operation_key: operationKey,
+        p_user_id: account.user_id,
+        p_password_hash: previous.password_hash,
+        p_source_backend: previous.source_backend,
+        p_source_document_id: previous.source_document_id,
+        p_source_expected_revision: previous.source_expected_revision,
+        p_source_preconditions: previous.source_preconditions,
+        p_source_mutation: previous.source_mutation,
+      });
+    }
+  }
   const prepared = requireRpcData(
-    await adminClient.rpc("roo_prepare_credential_operation_v2", {
-      p_operation_key: operationKey,
-      p_user_id: account.user_id,
-      p_password_hash: resolvedHash,
-      p_source_backend: normalizedSourceBackend,
-      p_source_document_id: normalizedSourceDocumentId,
-      p_source_expected_revision: normalizedSourceRevision,
-      p_source_preconditions: sourcePreconditions,
-      p_source_mutation: sourceMutation,
-    }),
+    preparation,
     "credential recovery preparation"
   );
+  if (prepared?.idempotent) {
+    assertSupabaseCredentialOperationRetry(
+      await getSupabaseCredentialOperation({ operationKey, adminClient })
+    );
+  }
   const effectiveHash = String(prepared?.password_hash || resolvedHash);
   if (prepared?.status === "prepared") {
     const result = await adminClient.auth.admin.updateUserById(account.user_id, {
@@ -1086,4 +1157,33 @@ export const requireSupabaseBearerUser = async ({
     return { ok: false, status: 403, reason: "email_not_verified" };
   }
   return { ok: true, user, account, verifiedEmail, accessToken: match[1] };
+};
+
+export const assertSupabaseCredentialOperationRetry = (row) => {
+  if (!["prepared", "auth_applied", "mirrored"].includes(row?.status)) {
+    const error = new Error("Credential source operation is not ready.");
+    error.code = "55000";
+    throw error;
+  }
+  if (row.source_recovery_blocked) {
+    const error = new Error("Credential source operation requires audited repair.");
+    error.code = "CREDENTIAL_SOURCE_REPAIR_REQUIRED";
+    error.credentialRecoveryRecorded = true;
+    error.retryState = "parked";
+    throw error;
+  }
+  const nextRetryAt = Date.parse(String(row.next_retry_at || ""));
+  if (Number.isFinite(nextRetryAt) && nextRetryAt > Date.now()) {
+    const error = new Error("Credential recovery is waiting for its retry window.");
+    error.code = String(row.last_error_code || "CREDENTIAL_RECOVERY_BACKOFF");
+    error.credentialRecoveryRecorded = true;
+    error.retryState = "backoff";
+    error.nextRetryAt = row.next_retry_at;
+    throw error;
+  }
+  if (!["sanity", "supabase"].includes(row.source_backend)) {
+    const error = new Error("Credential source operation requires audited repair.");
+    error.code = "CREDENTIAL_SOURCE_REPAIR_REQUIRED";
+    throw error;
+  }
 };

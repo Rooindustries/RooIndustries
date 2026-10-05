@@ -40,3 +40,9 @@ test.describe("Non-JS crawlability", () => {
     });
   }
 });
+
+
+test.beforeEach(async ({ context, baseURL }) => {
+  const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+  await guardBrowserContext(context, [baseURL]);
+});

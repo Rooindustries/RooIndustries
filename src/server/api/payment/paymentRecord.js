@@ -187,7 +187,9 @@ export const buildWebhookReceiptId = ({
   rawBody = "",
 }) =>
   `paymentWebhookReceipt.${normalizeLowerTrim(provider) || "unknown"}.${stableHash(
-    provider === "dodo" && eventId ? eventId : `${eventId || ""}:${eventType || ""}:${rawBody || ""}`,
+    normalizeLowerTrim(provider) === "dodo" && eventId
+      ? String(eventId).trim()
+      : `${eventId || ""}:${eventType || ""}:${rawBody || ""}`,
     40
   )}`;
 

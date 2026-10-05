@@ -1,3 +1,4 @@
+const testHost = process.env.ROO_TEST_HOST || '127.0.0.1';
 const fs = require("fs");
 const path = require("path");
 const { test, expect } = require("@playwright/test");
@@ -15,7 +16,7 @@ try {
 if (
   !testUrl ||
   !["http:", "https:"].includes(testUrl.protocol) ||
-  !["localhost", "127.0.0.1", "[::1]", "100.127.48.111"].includes(testUrl.hostname)
+  !["localhost", "127.0.0.1", "[::1]", testHost].includes(testUrl.hostname)
 ) {
   throw new Error(`Unexpected BASE_URL for nav-chaos suite: ${BASE_URL}`);
 }
@@ -184,9 +185,16 @@ test("latest rapid navbar click wins across section and route transitions", asyn
     await recordFailure(page, "latest-click:benefits-then-faq", "host_drift");
   }
 
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/meet-the-team", { waitUntil: "domcontentloaded" });
-  await clickDesktopTarget(page, "faq");
+  await page.waitForFunction(() => {
+    const button = document.querySelector('button[aria-label="Open menu"]');
+    return button && Object.keys(button).some(key => key.startsWith("__reactProps$"));
+  });
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await page.locator('[data-nav-surface="mobile"][data-nav-target="faq"]').click();
   await page.waitForTimeout(10);
+  await page.getByRole("button", { name: "Open menu" }).click();
   await page.getByRole("link", { name: "Meet the Team" }).first().click();
   await page.waitForTimeout(1200);
   const pathAfterRouteClick = new URL(page.url()).pathname;
@@ -269,4 +277,10 @@ test.afterAll(async () => {
 
   fs.writeFileSync(chaosReportPath, lines.join("\n"));
   expect(failures, "chaos navigation failures").toEqual([]);
+});
+
+
+test.beforeEach(async ({ context, baseURL }) => {
+  const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+  await guardBrowserContext(context, [baseURL]);
 });

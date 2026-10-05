@@ -54,6 +54,7 @@ describe("booking modal backdrop isolation", () => {
   });
 
   test("moves focus into the dialog, traps Tab, and restores focus", () => {
+    jest.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([{ width: 100, height: 40 }]);
     const trigger = document.createElement("button");
     trigger.textContent = "Open booking";
     document.body.appendChild(trigger);
@@ -86,6 +87,7 @@ describe("booking modal backdrop isolation", () => {
     );
     expect(trigger).toHaveFocus();
     trigger.remove();
+    jest.restoreAllMocks();
   });
 
   test("keeps the close control outside the scaled dialog content", () => {
