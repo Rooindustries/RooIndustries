@@ -20,7 +20,7 @@ jest.mock("@formspree/react", () => ({
 describe("Public company content", () => {
   test("requires an explicit target before making endpoint requests", () => {
     const env = { ...process.env };
-    delete env.BASE_URL;
+    env.BASE_URL = "";
     const result = spawnSync(process.execPath, ["--test", "tests/agent-readiness.test.mjs"], {
       cwd: path.join(__dirname, "../.."),
       env,

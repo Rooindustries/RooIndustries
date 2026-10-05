@@ -65,42 +65,38 @@
     />
     <meta name="twitter:image:alt" content="Roo Industries logo" />
 
-    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <link rel="icon" href="/favicon.ico" />
     <link rel="preload" as="image" href="/logo.webp" fetchpriority="low" />
     <link
       rel="preload"
       as="font"
-      href="%PUBLIC_URL%/fonts/roboto-flex-latin-opsz-normal.woff2"
+      href="/fonts/roboto-flex-latin-opsz-normal.woff2"
       type="font/woff2"
       crossorigin
       fetchpriority="high"
     />
-    <link rel="preconnect" href="https://9g42k3ur.api.sanity.io" crossorigin />
-    <link rel="dns-prefetch" href="//9g42k3ur.api.sanity.io" />
-    <link rel="preconnect" href="https://cdn.sanity.io" crossorigin />
-    <link rel="dns-prefetch" href="//cdn.sanity.io" />
 
-    <link rel="icon" type="image/x-icon" href="%PUBLIC_URL%/favicon.ico" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <link
       rel="icon"
       type="image/png"
       sizes="96x96"
-      href="%PUBLIC_URL%/favicon-96x96.png"
+      href="/favicon-96x96.png"
     />
     <link
       rel="icon"
       type="image/png"
       sizes="192x192"
-      href="%PUBLIC_URL%/web-app-manifest-192x192.png"
+      href="/web-app-manifest-192x192.png"
     />
     <link
       rel="icon"
       type="image/png"
       sizes="512x512"
-      href="%PUBLIC_URL%/web-app-manifest-512x512.png"
+      href="/web-app-manifest-512x512.png"
     />
-    <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png" />
-    <link rel="manifest" href="%PUBLIC_URL%/site.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
 
     <title>Roo Industries</title>
 
@@ -110,12 +106,17 @@
     <noscript>You need to turn on JavaScript to run this app.</noscript>
     <div id="root"></div>
 
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-90X0H1801Q"></script>
     <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-      gtag('config', 'G-90X0H1801Q');
+      if (['rooindustries.com', 'www.rooindustries.com'].includes(window.location.hostname)) {
+        const script = document.createElement('script');
+        script.async = true;
+        script.src = 'https://www.googletagmanager.com/gtag/js?id=G-90X0H1801Q';
+        document.head.appendChild(script);
+        window.dataLayer = window.dataLayer || [];
+        window.gtag = function(){window.dataLayer.push(arguments);};
+        window.gtag('js', new Date());
+        window.gtag('config', 'G-90X0H1801Q');
+      }
     </script>
   </body>
 </html>

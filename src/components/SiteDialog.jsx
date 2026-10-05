@@ -4,6 +4,7 @@ import React, { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { useLowPerformanceMode } from "../lib/performanceMode";
+import { isTopDialog, useDialogFocus } from "../lib/useDialogFocus";
 
 const overlayVariants = {
   hidden: { opacity: 0 },
@@ -52,26 +53,10 @@ export default function SiteDialog({
 }) {
   const closeButtonRef = useRef(null);
   const dialogRef = useRef(null);
-  const previousFocusRef = useRef(null);
   const scrollLockRef = useRef(null);
   const lowPerformanceMode = useLowPerformanceMode();
 
-  useEffect(() => {
-    if (!open) return undefined;
-    previousFocusRef.current = document.activeElement;
-    const focusTarget = dismissible
-      ? closeButtonRef.current
-      : dialogRef.current?.querySelector("[data-autofocus], button, input");
-    (focusTarget || dialogRef.current)?.focus();
-    const handleKeyDown = (event) => {
-      if (dismissible && event.key === "Escape") onClose?.();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      previousFocusRef.current?.focus?.();
-    };
-  }, [dismissible, onClose, open]);
+  useDialogFocus({ open, dialogRef, initialFocusRef: closeButtonRef, onClose, dismissible });
 
   useEffect(() => {
     if (!open) return undefined;
@@ -105,7 +90,10 @@ export default function SiteDialog({
           className="glass-overlay low-perf-overlay fixed inset-0 z-[100] flex items-center justify-center px-4"
           exit="exit"
           initial="hidden"
-          onClick={dismissible ? onClose : undefined}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (dismissible && isTopDialog(dialogRef)) onClose?.();
+          }}
           variants={overlayVariants}
         >
           <motion.div

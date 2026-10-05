@@ -54,7 +54,7 @@ export default async function handler(req, res) {
   try {
     const referrals = await readClient.fetch(
       `*[_type == "referral"]{
-        _id, name, slug, xocPayments, vertexPayments,
+        _id, _rev, name, slug, xocPayments, vertexPayments,
         earnedTotal, paidTotal, owedTotal
       }`
     );
@@ -66,6 +66,7 @@ export default async function handler(req, res) {
     const results = [];
 
     for (const referral of referrals) {
+      if (!referral._rev) throw Object.assign(new Error("Referral source revision is missing"), { status: 409 });
       const code = (referral?.slug?.current || '').toLowerCase();
       const earnings = await fetchReferralEarnings({
         client: readClient,
@@ -84,6 +85,7 @@ export default async function handler(req, res) {
       if (changed) {
         await writeClient
           .patch(referral._id)
+          .ifRevisionId(referral._rev)
           .set({
             earnedXoc: earnings.xoc,
             earnedVertex: earnings.vertex,

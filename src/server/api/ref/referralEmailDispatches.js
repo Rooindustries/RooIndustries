@@ -136,12 +136,17 @@ const renderDispatch = ({ dispatch, env = process.env }) => {
   const name = String(dispatch?.delivery_payload?.name || "").slice(0, 200);
   if (!token) throw new Error("Referral email delivery token is missing.");
   const baseUrl = resolveBaseUrl(env);
+  const target = new URL(baseUrl);
+  if (!["https:", "http:"].includes(target.protocol) ||
+      target.username || target.password || target.search || target.hash) {
+    throw new Error("Referral email link target is invalid.");
+  }
   if (kind === "registration_verification") {
     return {
       subject: "Confirm your Roo Industries creator account",
       html: buildReferralVerificationEmailHtml({
         name,
-        verifyLink: `${baseUrl}/referrals/verify#token=${token}`,
+        verifyLink: `${baseUrl}/referrals/verify#token=${encodeURIComponent(token)}`,
       }),
     };
   }
@@ -149,7 +154,7 @@ const renderDispatch = ({ dispatch, env = process.env }) => {
     subject: "Reset your Roo Industries password",
     html: buildResetEmailHtml({
       name,
-      resetLink: `${baseUrl}/referrals/reset#token=${token}`,
+      resetLink: `${baseUrl}/referrals/reset#token=${encodeURIComponent(token)}`,
     }),
   };
 };

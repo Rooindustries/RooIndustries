@@ -72,7 +72,7 @@ export default async function handler(req, res) {
 
     const referral = await readClient.fetch(
       `*[_type == "referral" && _id == $id][0]{
-        _id, name, slug, xocPayments, vertexPayments
+        _id, _rev, name, slug, xocPayments, vertexPayments
       }`,
       {id: referralId}
     );
@@ -81,6 +81,7 @@ export default async function handler(req, res) {
       return res.status(404).json({ok: false, error: 'Referral not found'});
     }
 
+    if (!referral._rev) throw Object.assign(new Error("Referral source revision is missing"), { status: 409 });
     const code = (referral?.slug?.current || '').toLowerCase();
     const earnings = await fetchReferralEarnings({
       client: readClient,
@@ -97,6 +98,7 @@ export default async function handler(req, res) {
 
     await writeClient
       .patch(referralId)
+      .ifRevisionId(referral._rev)
       .set({
         earnedXoc: earnings.xoc,
         earnedVertex: earnings.vertex,

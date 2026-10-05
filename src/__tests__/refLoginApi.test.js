@@ -532,6 +532,7 @@ describe("referral login API", () => {
       sessionVersion: 1,
       credentialVersion: 1,
       issuedAt: expect.any(Number),
+      issuedAtMs: expect.any(Number),
     });
   });
 

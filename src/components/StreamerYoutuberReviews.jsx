@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { urlFor } from "../sanityClient";
+import { getPerfToggleEnabled, isPerfDebugEnabled, PERF_DEBUG_EVENT, PERF_TOGGLE_KEYS } from "../lib/perfDebug";
 import {
   fetchHomeSectionData,
   HOME_SECTION_DATA_KEYS,
@@ -156,6 +157,7 @@ function parseFpsResult(value) {
 function ReviewCard({ review }) {
   const isCreator = Boolean(review.isVip);
   const result = parseFpsResult(review.optimizationResult);
+  const rating = Math.max(1, Math.min(5, Math.round(Number(review.rating) || 5)));
 
   return (
     <article
@@ -204,9 +206,10 @@ function ReviewCard({ review }) {
         )}
         <p
           className="ri-review-champagne-text text-xs font-bold tracking-[0.08em] flex-shrink-0"
-          aria-label={`${review.rating || 5} out of 5 stars`}
+          aria-label={`${rating} out of 5 stars`}
         >
-          ★★★★★
+          <span aria-hidden="true">{"★".repeat(rating)}{"☆".repeat(5 - rating)}</span>
+          <span className="sr-only">{rating} out of 5 stars</span>
         </p>
       </div>
 
@@ -245,6 +248,14 @@ function AutoReviewCarousel({ reviews }) {
 
   useEffect(() => {
     let previousTime = performance.now();
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let paused = false;
+    const updatePause = () => {
+      paused = reducedMotion.matches || (isPerfDebugEnabled() && getPerfToggleEnabled(PERF_TOGGLE_KEYS.PAUSE_REVIEWS_AUTOPLAY));
+    };
+    updatePause();
+    reducedMotion.addEventListener("change", updatePause);
+    window.addEventListener(PERF_DEBUG_EVENT, updatePause);
 
     const tick = () => {
       const time = performance.now();
@@ -254,7 +265,7 @@ function AutoReviewCarousel({ reviews }) {
         const elapsed = Math.min(time - previousTime, 1000);
         previousTime = time;
         const loopWidth = firstGroup.scrollWidth;
-        if (time >= pauseUntilRef.current && loopWidth > 0) {
+        if (!paused && time >= pauseUntilRef.current && loopWidth > 0) {
           viewport.scrollLeft +=
             (AUTO_SCROLL_PIXELS_PER_SECOND * elapsed) / 1000;
           if (viewport.scrollLeft >= loopWidth) {
@@ -265,7 +276,11 @@ function AutoReviewCarousel({ reviews }) {
     };
 
     const intervalId = window.setInterval(tick, 50);
-    return () => window.clearInterval(intervalId);
+    return () => {
+      window.clearInterval(intervalId);
+      reducedMotion.removeEventListener("change", updatePause);
+      window.removeEventListener(PERF_DEBUG_EVENT, updatePause);
+    };
   }, [reviews.length]);
 
   if (!reviews.length) return null;

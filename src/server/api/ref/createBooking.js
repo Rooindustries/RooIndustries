@@ -28,6 +28,7 @@ import providerConfig from "../payment/providerConfig.js";
 import {
   DEFAULT_PAYPAL_CURRENCY,
   DEFAULT_RAZORPAY_CURRENCY,
+  toSubunits,
   getPayPalCredentials,
   resolveRazorpayCredentials,
   verifyPayPalOrder,
@@ -44,9 +45,11 @@ import {
   PAYMENT_STATUS_BOOKED,
   PAYMENT_STATUS_EMAIL_PARTIAL,
   PAYMENT_STATUS_REFUNDED,
+  stableHash,
 } from "../payment/paymentRecord.js";
-import { commitBookingTransaction } from "./bookingCommit.js";
+import { assertBookingReplayMatches, commitBookingTransaction } from "./bookingCommit.js";
 import { reserveCouponUse } from "./couponReservations.js";
+import { applyBookingRefund } from "./bookingRefunds.js";
 import {
   verifyFrozenUpgradeIntent,
   verifyUpgradeIntentToken,
@@ -501,6 +504,7 @@ export default async function handler(req, res) {
       });
     }
 
+    let verifiedPartialRefund = null;
     const deferEmailDispatchRequested = deferEmailsUntilConfirmation === true;
     const syncPaidPaymentRecordForBooking = async ({
       bookingId,
@@ -553,7 +557,8 @@ export default async function handler(req, res) {
           ""
       ).trim();
       const providerPaymentId = String(
-        bookingDoc.razorpayPaymentId || razorpayPaymentId || ""
+        bookingDoc.paymentRefundVerification?.providerPaymentId ||
+          bookingDoc.razorpayPaymentId || razorpayPaymentId || ""
       ).trim();
       const resolvedGrossAmount = Number(
         bookingDoc.grossAmount || toMoney(bookingDoc.packagePrice || packagePrice)
@@ -635,6 +640,11 @@ export default async function handler(req, res) {
             ? `paypal:${providerOrderId}`
             : `razorpay-order:${providerOrderId}`,
         bookingPayload: {
+          ...(existingRecord?.bookingPayload || {}),
+          discord: String(bookingDoc.discord || resolvedDiscord || "").trim(),
+          specs: String(bookingDoc.specs || resolvedSpecs || "").trim(),
+          mainGame: String(bookingDoc.mainGame || resolvedMainGame || "").trim(),
+          message: String(bookingDoc.message || resolvedMessage || "").trim(),
           salesAttribution: sanitizeSalesAttribution(bookingDoc.salesAttribution),
           packageTitle: String(
             bookingDoc.packageTitle || packageTitle || ""
@@ -687,10 +697,10 @@ export default async function handler(req, res) {
           bookingDoc.payerEmail || payerEmail || resolvedEmail || ""
         ).trim(),
         verificationState: String(
-          bookingDoc.paymentVerificationState || ""
+          bookingDoc.paymentVerificationState || existingRecord?.verificationState || ""
         ).trim(),
         verificationWarning: String(
-          bookingDoc.paymentVerificationWarning || ""
+          bookingDoc.paymentVerificationWarning || existingRecord?.verificationWarning || ""
         ).trim(),
         bookingId: normalizedBookingId,
         recoveryReason: "",
@@ -722,10 +732,63 @@ export default async function handler(req, res) {
         updatedAt: now,
       };
 
+      const partialRefund = bookingDoc.paymentRefundVerification;
+      if (partialRefund?.refundStatus === "partial" && partialRefund.provider === normalizedProvider) {
+        const refunds = new Map((existingRecord?.refunds || []).map(refund => [refund.providerRefundId, refund]));
+        for (const refund of partialRefund.refunds) {
+          const previous = refunds.get(refund.id);
+          if (previous && ((previous.providerPaymentId && previous.providerPaymentId !== providerPaymentId) ||
+              (previous.currency && previous.currency !== refund.currency) ||
+              (Number(previous.amountInSubunits || 0) > 0 && previous.amountInSubunits !== refund.amountInSubunits))) {
+            throw Object.assign(new Error("Refund identity does not match stored accounting."), { status: 409 });
+          }
+          refunds.set(refund.id, {
+            ...previous,
+            _key: previous?._key || stableHash(`${normalizedProvider}:${refund.id}`),
+            providerRefundId: refund.id,
+            providerPaymentId,
+            eventType: "provider_refund_snapshot",
+            status: "processed",
+            amount: refund.amountInSubunits / toSubunits(1, refund.currency),
+            amountInSubunits: refund.amountInSubunits,
+            currency: refund.currency,
+            reversed: false,
+            updatedAt: previous?.status === "processed" ? previous.updatedAt || now : now,
+          });
+        }
+        const processed = [...refunds.values()].filter(refund => refund.status === "processed");
+        const missing = partialRefund.refundDetailsMissing === true || !partialRefund.refunds.length;
+        const pending = missing || processed.some(refund => !(bookingDoc.processedRefundIds || []).includes(refund.providerRefundId));
+        Object.assign(doc, {
+          refunds: [...refunds.values()],
+          refundState: "partial",
+          refundCurrency: normalizedProvider === "paypal" ? DEFAULT_PAYPAL_CURRENCY : DEFAULT_RAZORPAY_CURRENCY,
+          refundProcessedAmountInSubunits: processed.reduce((sum, refund) => sum + refund.amountInSubunits, 0),
+          providerRefundStatus: "partial",
+          providerRefundObservedAmountInSubunits: Math.max(Number(existingRecord?.providerRefundObservedAmountInSubunits || 0), partialRefund.amountRefundedInSubunits),
+          providerRefundDetailsMissing: missing,
+          refundRequiresBookingSync: pending,
+          recoveryReason: missing ? "provider_partial_refund_details_missing_owner_review" : pending ? "refund_requires_booking_sync" : "",
+          ...(missing ? { providerRecoveryTerminal: true, reconciliationRecoveryTerminal: true,
+            providerRecoveryTerminalReason: "provider_partial_refund_details_missing_owner_review", nextRecoveryAt: "" } : {}),
+        });
+        if (!doc.events.some(event => event.reason === "provider_partial_refund_observed")) {
+          doc.events = mergePaymentRecordEvents(doc.events, buildPaymentRecordEvent({
+            status: nextStatus, source, reason: "provider_partial_refund_observed",
+            data: { amountRefundedInSubunits: partialRefund.amountRefundedInSubunits, detailMissing: missing },
+          }));
+        }
+      }
+
       const recordSet = { ...doc };
       delete recordSet._id;
       delete recordSet._type;
-      if (isInternalPaymentFinalization) {
+      if (existingRecord?.bookingPayload &&
+          typeof existingRecord.bookingPayload === "object" &&
+          !Array.isArray(existingRecord.bookingPayload)) {
+        delete recordSet.bookingPayload;
+      }
+      if (isInternalPaymentFinalization || existingRecord?._id) {
         // Access tokens and recovery bind to the original checkout pricing.
         delete recordSet.pricingFingerprint;
         delete recordSet.pricingSnapshot;
@@ -754,6 +817,11 @@ export default async function handler(req, res) {
           if (Number(error?.statusCode || error?.status || 0) !== 409) {
             throw error;
           }
+          if (partialRefund?.refundStatus === "partial") {
+            throw Object.assign(new Error("Refund synchronization changed. Please retry."), {
+              status: 409, code: "refund_booking_sync_conflict",
+            });
+          }
         }
         return writeClient.fetch(
           `*[_type == $type && _id == $id][0]`,
@@ -767,6 +835,11 @@ export default async function handler(req, res) {
         const conflict =
           Number(error?.statusCode || error?.status || 0) === 409;
         if (!conflict) throw error;
+        if (partialRefund?.refundStatus === "partial") {
+          throw Object.assign(new Error("Refund synchronization changed. Please retry."), {
+            status: 409, code: "refund_booking_sync_conflict",
+          });
+        }
         const racedRecord = await writeClient.fetch(
           `*[_type == $type && _id == $id][0]`,
           { type: PAYMENT_RECORD_TYPE, id: recordId }
@@ -802,6 +875,58 @@ export default async function handler(req, res) {
         return res
           .status(200)
           .json(buildBookingSuccessResponse({ bookingId, idempotent }));
+      }
+
+      if (idempotent) {
+        const storedBooking = await writeClient.fetch(
+          `*[_type == "booking" && _id == $id][0]{...}`,
+          { id: normalizedBookingId }
+        );
+        if (!storedBooking?._id) {
+          return res.status(409).json({ error: "Stored booking is no longer available." });
+        }
+        assertBookingReplayMatches({
+          booking: storedBooking,
+          partial: true,
+          requested: {
+            email: resolvedEmail,
+            packageTitle,
+            startTimeUTC: resolvedStartTimeUTC,
+            originalOrderId,
+            couponCode,
+            paymentProvider,
+            ...(isInternalPaymentFinalization ? {
+              grossAmount: internalPaymentRecord?.pricingSnapshot?.grossAmount,
+              netAmount: internalPaymentRecord?.pricingSnapshot?.netAmount,
+            } : {}),
+            ...(packagePrice !== undefined ? { grossAmount: toMoney(packagePrice) } : {}),
+            ...(paymentRecordId ? { paymentRecordId } : {}),
+            paypalOrderId,
+            razorpayOrderId,
+            razorpayPaymentId,
+            dodoCheckoutSessionId,
+            dodoPaymentId,
+            ...(referralCode ? { referralCode } : {}),
+            ...(referralId ? { referral: { _ref: referralId } } : {}),
+          },
+        });
+      }
+
+      if (isLegacyPublicCompletion) {
+        const refundBooking = await writeClient.fetch(
+          `*[_type == "booking" && _id == $id][0]{...}`,
+          { id: normalizedBookingId }
+        );
+        if (refundBooking?.paymentRefundVerification?.refundStatus === "partial") {
+          const refundRecord = await syncPaidPaymentRecordForBooking({ bookingId: normalizedBookingId });
+          if (refundRecord?.refundState === "partial" && refundRecord.refundRequiresBookingSync === true) {
+            for (const refund of refundRecord.refunds.filter(entry => entry.status === "processed")) {
+              await applyBookingRefund({ client: writeClient, paymentRecord: refundRecord,
+                refund: { ...refund, id: refund.providerRefundId, full: false,
+                  amount: refund.amountInSubunits / toSubunits(1, refund.currency) } });
+            }
+          }
+        }
       }
 
       const booking = await getBookingForEmailDispatch({
@@ -914,13 +1039,20 @@ export default async function handler(req, res) {
       }
     }
 
+    if (isInternalPaymentFinalization && internalPaymentRecord.bookingId) {
+      return await respondWithStoredBooking({
+        bookingId: internalPaymentRecord.bookingId,
+        idempotent: true,
+      });
+    }
+
     if (paymentProvider === "paypal" && paypalOrderId) {
       const existingByPaypal = await writeClient.fetch(
         `*[_type == "booking" && paypalOrderId == $paypalOrderId][0]{_id}`,
         { paypalOrderId }
       );
       if (existingByPaypal?._id) {
-        return respondWithStoredBooking({
+        return await respondWithStoredBooking({
           bookingId: existingByPaypal._id,
           idempotent: true,
         });
@@ -933,7 +1065,7 @@ export default async function handler(req, res) {
         { razorpayPaymentId }
       );
       if (existingByRazorpay?._id) {
-        return respondWithStoredBooking({
+        return await respondWithStoredBooking({
           bookingId: existingByRazorpay._id,
           idempotent: true,
         });
@@ -948,7 +1080,7 @@ export default async function handler(req, res) {
         { dodoPaymentId, dodoCheckoutSessionId }
       );
       if (existingByDodo?._id) {
-        return respondWithStoredBooking({
+        return await respondWithStoredBooking({
           bookingId: existingByDodo._id,
           idempotent: true,
         });
@@ -1211,6 +1343,12 @@ export default async function handler(req, res) {
             error: "Payment verification failed.",
           });
         }
+        if (isLegacyPublicCompletion && paymentVerification.refundStatus === "partial") {
+          verifiedPartialRefund = { provider: "razorpay", refundStatus: "partial",
+            providerPaymentId: razorpayPaymentId,
+            amountRefundedInSubunits: paymentVerification.amountRefundedInSubunits,
+            refundDetailsMissing: false, refunds: paymentVerification.refunds };
+        }
       }
     }
 
@@ -1245,6 +1383,13 @@ export default async function handler(req, res) {
           return res.status(400).json({
             error: "Payment verification failed.",
           });
+        }
+        if (isLegacyPublicCompletion && paypalVerification.refundStatus === "partial") {
+          verifiedPartialRefund = { provider: "paypal", refundStatus: "partial",
+            providerPaymentId: paypalVerification.providerPaymentId,
+            amountRefundedInSubunits: paypalVerification.amountRefundedInSubunits,
+            refundDetailsMissing: paypalVerification.refundDetailsMissing === true,
+            refunds: paypalVerification.refunds };
         }
         if (paypalVerification.payerEmail) {
           verifiedPayerEmail = paypalVerification.payerEmail;
@@ -1410,6 +1555,7 @@ export default async function handler(req, res) {
       packageTitle,
       packagePrice: resolvedPackagePrice,
       status: normalizedStatus,
+      ...(verifiedPartialRefund ? { paymentRefundVerification: verifiedPartialRefund } : {}),
       paymentProvider,
       ...(paymentProvider === "dodo" ? { paymentVerificationState: internalPaymentRecord.verificationState, dodoTotalAmount } : {}),
       dodoCheckoutSessionId,
@@ -1482,6 +1628,7 @@ export default async function handler(req, res) {
             revision: paymentRecordForLease._rev,
             set: {
               status: PAYMENT_STATUS_BOOKED,
+              bookingId: bookingDocument._id,
               finalizationLeaseId: "",
               finalizationLeaseExpiresAt: "",
               recoveryReason: "",
@@ -1493,7 +1640,7 @@ export default async function handler(req, res) {
         slotReservationState === "reconciled_after_missing_hold",
     });
 
-    return respondWithStoredBooking({
+    return await respondWithStoredBooking({
       bookingId: committed.bookingId,
       idempotent: committed.idempotent,
     });

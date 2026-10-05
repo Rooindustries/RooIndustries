@@ -1,3 +1,4 @@
+import { removeBrowserStorage } from "../lib/browserStorage";
 import React, { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import packageContent from "../lib/packageContent";
@@ -698,7 +699,7 @@ export default function RefDashboard() {
           } catch {
             console.error("Referral logout failed");
           } finally {
-            sessionStorage.removeItem("creatorId");
+            removeBrowserStorage("sessionStorage", "creatorId");
             nav("/referrals/login");
           }
         }}

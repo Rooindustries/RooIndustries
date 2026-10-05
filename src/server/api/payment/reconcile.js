@@ -407,117 +407,115 @@ export default async function handler(req, res) {
   } else {
     result.body.summary.expiredSupabaseHoldCleanup = expiredHoldCleanup.value;
   }
-  if (result.httpStatus === 200) {
-    result.body.summary.incrementalShadowSync = incrementalShadowSync;
-    result.body.summary.emailOnlyRecovery = {};
-    for (const { backend, client } of backendClients) {
-      try {
-        result.body.summary.emailOnlyRecovery[backend] =
-          await reconcileBookingEmailDispatches({ client });
-      } catch (error) {
-        logSafeError(`${backend} email-only reconciliation failed`, error);
-        result.body.summary.emailOnlyRecovery[backend] = { pending: true };
-      }
-    }
-    if (
-      sanityConfigured &&
-      typeof supabaseClient?.reconcileReverseMirror === "function"
-    ) {
-      try {
-        result.body.summary.reverseMirror =
-          await supabaseClient.reconcileReverseMirror({ limit: 25 });
-      } catch (error) {
-        logSafeError("Reverse-mirror reconciliation failed", error);
-        logSanityMirrorEvent({
-          event: "sanity_mirror_lag",
-          reason: "reconciliation_failed",
-          domain: "commerce",
-        });
-        result.body.summary.reverseMirror = { pending: true };
-      }
-    } else if (!sanityConfigured) {
-      result.body.summary.reverseMirror = {
-        skipped: true,
-        reason: "sanity_unconfigured",
-      };
-    }
-    if (supabaseClient?.shadowClient?.rpc) {
-      try {
-        const [metrics, typedGaps] = await Promise.all([
-          supabaseClient.shadowClient.rpc("roo_cleanup_commerce_metrics", {}),
-          supabaseClient.shadowClient.rpc("roo_commerce_typed_gap_summary", {}),
-        ]);
-        if (metrics.error) throw metrics.error;
-        if (typedGaps.error) throw typedGaps.error;
-        result.body.summary.commerceMetricsCleaned = Number(metrics.data || 0);
-        result.body.summary.typedGapSnapshot = typedGaps.data || {};
-      } catch (error) {
-        logSafeError("Commerce reconciliation bookkeeping failed", error);
-        result.body.summary.commerceBookkeepingPending = true;
-      }
-    }
-    if (isSupabaseAdminConfigured()) {
-      try {
-        result.body.summary.credentialRecovery =
-          await reconcileCredentialOperations({ limit: 10 });
-      } catch (error) {
-        logSafeError("Credential recovery reconciliation failed", error);
-        result.body.summary.credentialRecovery = { pending: true };
-      }
-    }
+  result.body.summary.incrementalShadowSync = incrementalShadowSync;
+  result.body.summary.emailOnlyRecovery = {};
+  for (const { backend, client } of backendClients) {
     try {
-      result.body.summary.rateLimitBucketsCleaned =
-        await cleanupExpiredRateLimitBuckets();
+      result.body.summary.emailOnlyRecovery[backend] =
+        await reconcileBookingEmailDispatches({ client });
     } catch (error) {
-      logSafeError("Rate-limit cleanup failed", error);
-      result.body.summary.rateLimitBucketsCleaned = 0;
-      result.body.summary.rateLimitCleanupPending = true;
+      logSafeError(`${backend} email-only reconciliation failed`, error);
+      result.body.summary.emailOnlyRecovery[backend] = { pending: true };
     }
-    if (["1", "true", "yes", "on"].includes(
-      String(process.env.SUPABASE_SOCIAL_AUTH_ENABLED || "").trim().toLowerCase()
-    )) {
-      try {
-        const accountSecurity = await createSupabaseAdminClient().rpc(
-          "roo_reconcile_account_security",
-          {
-            p_guild_id: null,
-          }
-        );
-        if (accountSecurity.error) throw accountSecurity.error;
-        result.body.summary.accountSecurity = accountSecurity.data || {};
-      } catch (error) {
-        logSafeError("Account security reconciliation failed", error);
-        result.body.summary.accountSecurity = { pending: true };
-      }
+  }
+  if (
+    sanityConfigured &&
+    typeof supabaseClient?.reconcileReverseMirror === "function"
+  ) {
+    try {
+      result.body.summary.reverseMirror =
+        await supabaseClient.reconcileReverseMirror({ limit: 25 });
+    } catch (error) {
+      logSafeError("Reverse-mirror reconciliation failed", error);
+      logSanityMirrorEvent({
+        event: "sanity_mirror_lag",
+        reason: "reconciliation_failed",
+        domain: "commerce",
+      });
+      result.body.summary.reverseMirror = { pending: true };
     }
-    if (supabaseConfigured && sanityConfigured) {
-      try {
-        result.body.summary.commerceParity = await refreshCommerceParityIfStale();
-      } catch (error) {
-        logSafeError("Commerce parity refresh failed", error);
-        result.body.summary.commerceParity = { pending: true };
-      }
-    } else {
-      result.body.summary.commerceParity = { supported: false, skipped: true, reason: mirrorSkipReason };
+  } else if (!sanityConfigured) {
+    result.body.summary.reverseMirror = {
+      skipped: true,
+      reason: "sanity_unconfigured",
+    };
+  }
+  if (supabaseClient?.shadowClient?.rpc) {
+    try {
+      const [metrics, typedGaps] = await Promise.all([
+        supabaseClient.shadowClient.rpc("roo_cleanup_commerce_metrics", {}),
+        supabaseClient.shadowClient.rpc("roo_commerce_typed_gap_summary", {}),
+      ]);
+      if (metrics.error) throw metrics.error;
+      if (typedGaps.error) throw typedGaps.error;
+      result.body.summary.commerceMetricsCleaned = Number(metrics.data || 0);
+      result.body.summary.typedGapSnapshot = typedGaps.data || {};
+    } catch (error) {
+      logSafeError("Commerce reconciliation bookkeeping failed", error);
+      result.body.summary.commerceBookkeepingPending = true;
     }
-    if (result.httpStatus === 200 && isSupabaseAdminConfigured()) {
-      try {
-        const checkpoint = await createSupabaseAdminClient().rpc(
-          "roo_record_reconciliation_checkpoint",
-          {
-            p_counters: result.body.summary,
-            p_parity: {
-              incrementalShadowSync,
-              reverseMirror: result.body.summary.reverseMirror || {},
-            },
-          }
-        );
-        if (checkpoint.error) throw checkpoint.error;
-        result.body.summary.reconciliationCheckpoint = checkpoint.data || {};
-      } catch (error) {
-        logSafeError("Reconciliation checkpoint recording failed", error);
-        result.body.summary.reconciliationCheckpointPending = true;
-      }
+  }
+  if (isSupabaseAdminConfigured()) {
+    try {
+      result.body.summary.credentialRecovery =
+        await reconcileCredentialOperations({ limit: 10 });
+    } catch (error) {
+      logSafeError("Credential recovery reconciliation failed", error);
+      result.body.summary.credentialRecovery = { pending: true };
+    }
+  }
+  try {
+    result.body.summary.rateLimitBucketsCleaned =
+      await cleanupExpiredRateLimitBuckets();
+  } catch (error) {
+    logSafeError("Rate-limit cleanup failed", error);
+    result.body.summary.rateLimitBucketsCleaned = 0;
+    result.body.summary.rateLimitCleanupPending = true;
+  }
+  if (["1", "true", "yes", "on"].includes(
+    String(process.env.SUPABASE_SOCIAL_AUTH_ENABLED || "").trim().toLowerCase()
+  )) {
+    try {
+      const accountSecurity = await createSupabaseAdminClient().rpc(
+        "roo_reconcile_account_security",
+        {
+          p_guild_id: null,
+        }
+      );
+      if (accountSecurity.error) throw accountSecurity.error;
+      result.body.summary.accountSecurity = accountSecurity.data || {};
+    } catch (error) {
+      logSafeError("Account security reconciliation failed", error);
+      result.body.summary.accountSecurity = { pending: true };
+    }
+  }
+  if (supabaseConfigured && sanityConfigured) {
+    try {
+      result.body.summary.commerceParity = await refreshCommerceParityIfStale();
+    } catch (error) {
+      logSafeError("Commerce parity refresh failed", error);
+      result.body.summary.commerceParity = { pending: true };
+    }
+  } else {
+    result.body.summary.commerceParity = { supported: false, skipped: true, reason: mirrorSkipReason };
+  }
+  if (isSupabaseAdminConfigured()) {
+    try {
+      const checkpoint = await createSupabaseAdminClient().rpc(
+        "roo_record_reconciliation_checkpoint",
+        {
+          p_counters: result.body.summary,
+          p_parity: {
+            incrementalShadowSync,
+            reverseMirror: result.body.summary.reverseMirror || {},
+          },
+        }
+      );
+      if (checkpoint.error) throw checkpoint.error;
+      result.body.summary.reconciliationCheckpoint = checkpoint.data || {};
+    } catch (error) {
+      logSafeError("Reconciliation checkpoint recording failed", error);
+      result.body.summary.reconciliationCheckpointPending = true;
     }
   }
 

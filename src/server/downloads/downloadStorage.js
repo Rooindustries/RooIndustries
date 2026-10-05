@@ -1,8 +1,13 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
-import { Readable } from "node:stream";
+import crypto from "node:crypto";
+import os from "node:os";
+import path from "node:path";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import {
   hasMatchingDownloadBasename,
+  getDownloadRootDir,
   resolveDownloadFilePath,
 } from "./downloadCatalog.js";
 import { logSafeError } from "../safeErrorLog.js";
@@ -158,11 +163,18 @@ export const verifySupabaseDownloadMetadata = async (
   if (bucketMetadata.public !== false) {
     throw unavailableDownloadError("DOWNLOAD_SUPABASE_BUCKET_PUBLIC");
   }
+  if (bucketMetadata.id !== undefined && bucketMetadata.id !== bucket) {
+    throw unavailableDownloadError("DOWNLOAD_SUPABASE_BUCKET_MISMATCH");
+  }
   const { data: metadata, error } = await client.storage
     .from(bucket)
     .info(pathname);
   if (error || !metadata) {
     throw unavailableDownloadError("DOWNLOAD_SUPABASE_METADATA_UNAVAILABLE");
+  }
+  if ((metadata.name !== undefined && metadata.name !== pathname) ||
+      (metadata.bucketId != null && metadata.bucketId !== bucket)) {
+    throw unavailableDownloadError("DOWNLOAD_SUPABASE_PATH_MISMATCH");
   }
 
   const remoteSize = Number(metadata.size);
@@ -188,11 +200,14 @@ export const verifySupabaseDownloadMetadata = async (
 };
 
 export const isLocalDownloadAvailable = async (download, env = process.env) => {
+  let file;
   try {
-    const stats = await fsp.stat(resolveDownloadFilePath(download, env));
-    return stats.isFile();
+    ({ file } = await openLocalDownload(download, env));
+    return true;
   } catch {
     return false;
+  } finally {
+    await file?.close();
   }
 };
 
@@ -235,22 +250,71 @@ export const isDownloadAvailable = async (download, env = process.env) => {
   return isLocalDownloadAvailable(download, env);
 };
 
-export const streamLocalDownload = async (download, env = process.env) => {
+const openLocalDownload = async (download, env) => {
   const filePath = resolveDownloadFilePath(download, env);
-  const stats = await fsp.stat(filePath);
-  if (!stats.isFile()) {
-    const error = new Error("Download file is not available.");
-    error.status = 404;
+  const root = await fsp.realpath(getDownloadRootDir(env));
+  const resolved = await fsp.realpath(filePath);
+  if (!resolved.startsWith(`${root}${path.sep}`)) throw unavailableDownloadError("DOWNLOAD_LOCAL_PATH_INVALID");
+  const file = await fsp.open(filePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+  try {
+    const opened = await fsp.realpath(`/proc/self/fd/${file.fd}`);
+    if (!opened.startsWith(`${root}${path.sep}`)) throw unavailableDownloadError("DOWNLOAD_LOCAL_PATH_INVALID");
+    const stats = await file.stat();
+    if (!stats.isFile()) throw unavailableDownloadError("DOWNLOAD_LOCAL_FILE_INVALID");
+    const expectedSize = Number(download.sizeBytes || 0);
+    if (expectedSize && (!Number.isSafeInteger(expectedSize) || stats.size !== expectedSize)) {
+      throw unavailableDownloadError("DOWNLOAD_LOCAL_SIZE_MISMATCH");
+    }
+    return { file, stats };
+  } catch (error) {
+    await file.close();
     throw error;
   }
+};
 
-  return {
-    stream: Readable.toWeb(fs.createReadStream(filePath)),
-    contentType: download.contentType || "application/zip",
-    contentLength: stats.size,
-    etag: "",
-    cacheControl: "private, no-store",
+export const streamLocalDownload = async (download, env = process.env) => {
+  const { file, stats } = await openLocalDownload(download, env);
+  let directory;
+  let staged;
+  const cleanup = async () => {
+    await file.close().catch(() => {});
+    if (staged) await fsp.unlink(staged).catch(() => {});
+    if (directory) await fsp.rmdir(directory).catch(() => {});
   };
+  try {
+    let stream;
+    if (download.sha256) {
+      if (!/^[0-9a-f]{64}$/.test(download.sha256)) throw unavailableDownloadError("DOWNLOAD_LOCAL_INTEGRITY_INVALID");
+      directory = await fsp.mkdtemp(path.join(os.tmpdir(), "roo-download-"));
+      staged = path.join(directory, "verified.zip");
+      const hash = crypto.createHash("sha256");
+      let bytes = 0;
+      await pipeline(file.createReadStream({ autoClose: false }), new Transform({
+        transform(chunk, encoding, callback) {
+          bytes += chunk.length;
+          if (bytes > stats.size) return callback(unavailableDownloadError("DOWNLOAD_LOCAL_SIZE_MISMATCH"));
+          hash.update(chunk);
+          callback(null, chunk);
+        },
+      }), fs.createWriteStream(staged, { flags: "wx", mode: 0o600 }));
+      if (bytes !== stats.size || hash.digest("hex") !== download.sha256) throw unavailableDownloadError("DOWNLOAD_LOCAL_HASH_MISMATCH");
+      await file.close();
+      stream = fs.createReadStream(staged);
+    } else {
+      stream = file.createReadStream();
+    }
+    stream.once("close", () => { void cleanup(); });
+    return {
+      stream: Readable.toWeb(stream),
+      contentType: download.contentType || "application/zip",
+      contentLength: stats.size,
+      etag: "",
+      cacheControl: "private, no-store",
+    };
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
 };
 
 export const streamBlobDownload = async (download) => {

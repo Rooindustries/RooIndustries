@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import useUpgradeEligibility from "../lib/useUpgradeEligibility";
 import { useNavigate } from "react-router-dom";
 
 const formatLocalDate = (utcDate, timeZone) => {
@@ -31,10 +32,13 @@ export default function UpgradeXoc() {
   const [orderId, setOrderId] = useState("");
   const [orderEmail, setOrderEmail] = useState("");
   const [loading, setLoading] = useState(false);
-  const [upgradeInfo, setUpgradeInfo] = useState(null);
+  const [eligibility, setUpgradeInfo] = useState(null);
   const [error, setError] = useState(null);
 
   const navigate = useNavigate();
+
+  const eligibilityRequest = useUpgradeEligibility({ id: orderId, email: orderEmail, slug: "" });
+  const upgradeInfo = eligibilityRequest.matches(eligibility?.requestInput) ? eligibility : null;
 
   async function handleCheckOrder() {
     setError(null);
@@ -51,6 +55,7 @@ export default function UpgradeXoc() {
       return;
     }
 
+    const snapshot = eligibilityRequest.capture();
     setLoading(true);
     try {
       const res = await fetch("/api/ref/getUpgradeInfo", {
@@ -59,6 +64,7 @@ export default function UpgradeXoc() {
         body: JSON.stringify({ id: trimmed, email: trimmedEmail }),
       });
       const data = await res.json();
+      if (!snapshot.isCurrent()) return;
 
       if (!res.ok || !data.ok) {
         setError(
@@ -68,17 +74,18 @@ export default function UpgradeXoc() {
         return;
       }
 
-      setUpgradeInfo(data);
+      setUpgradeInfo({ ...data, requestInput: snapshot.input });
     } catch (err) {
+      if (!snapshot.isCurrent()) return;
       console.error("Upgrade check error:", err);
       setError("Something went wrong while checking your order. Try again.");
     } finally {
-      setLoading(false);
+      if (snapshot.isLatest()) setLoading(false);
     }
   }
 
   function handleProceedToPayment() {
-    if (!upgradeInfo) return;
+    if (!upgradeInfo || !eligibilityRequest.matches(upgradeInfo.requestInput)) return;
 
     const { booking, xoc, upgradePrice } = upgradeInfo;
 
@@ -103,7 +110,7 @@ export default function UpgradeXoc() {
 
       const bookingData = {
         discord: booking.discord || "",
-        email: orderEmail.trim(),
+        email: upgradeInfo.requestInput.email,
         specs: booking.specs || "",
         mainGame: booking.mainGame || "",
         message: booking.message || "",

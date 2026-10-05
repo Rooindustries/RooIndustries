@@ -1,3 +1,5 @@
+import { requireShadowDocumentArray } from "./shadowStore.js";
+import { appendSanityMirrorDelete, appendSanityMirrorUpsert, requireSanityMirrorRevision } from "./sanityMirrorMutations.js";
 import {
   isReferralCommerceField,
   pickReferralGeneralFields,
@@ -38,13 +40,13 @@ const listLegacyEligibleIds = async ({ sanityClient, ids }) => {
   if (typeof sanityClient?.fetch !== "function") {
     throw new Error("Sanity mirror reads are unavailable.");
   }
-  const current = await sanityClient.fetch(
+  const current = requireShadowDocumentArray(await sanityClient.fetch(
     `*[_id in $ids]`,
     { ids },
     { perspective: "raw" }
-  );
+  ));
   const currentById = new Map(
-    (Array.isArray(current) ? current : [])
+    current
       .filter((document) => document?._id)
       .map((document) => [String(document._id), document])
   );
@@ -67,7 +69,10 @@ const immutableSanityKeys = new Set([
 ]);
 
 const applyLegacyReferral = ({ transaction, current, document }) => {
-  if (!current) return transaction.createIfNotExists(cleanForSanity(document));
+  if (!current || current._type !== document._type) {
+    return appendSanityMirrorUpsert({ transaction, current,
+      document: cleanForSanity(document) });
+  }
   const set = pickReferralGeneralFields(cleanForSanity(document));
   delete set._id;
   delete set._type;
@@ -79,29 +84,17 @@ const applyLegacyReferral = ({ transaction, current, document }) => {
       !Object.prototype.hasOwnProperty.call(set, key)
   );
   return transaction.patch(document._id, (patch) => {
-    const guarded =
-      current._rev && typeof patch.ifRevisionId === "function"
-        ? patch.ifRevisionId(current._rev)
-        : patch;
+    const guarded = patch.ifRevisionId(requireSanityMirrorRevision(current));
     const setPatch = guarded.set(set);
     return unset.length > 0 ? setPatch.unset(unset) : setPatch;
   });
 };
 
-const applyMirror = async ({ supabaseClient, sanityClient, ids, deleted }) => {
+const applyMirror = async ({ supabaseClient, sanityClient, ids }) => {
   const uniqueIds = [...new Set((ids || []).map(String).filter(Boolean))];
   if (uniqueIds.length < 1) return;
   const eligible = await listLegacyEligibleIds({ sanityClient, ids: uniqueIds });
   if (eligible.eligibleIds.length < 1) return;
-
-  if (deleted) {
-    let transaction = sanityClient.transaction();
-    eligible.eligibleIds.forEach((id) => {
-      transaction = transaction.delete(id);
-    });
-    await transaction.commit();
-    return;
-  }
 
   const documents = await supabaseClient.fetch(`*[_id in $ids]`, {
     ids: eligible.eligibleIds,
@@ -113,10 +106,10 @@ const applyMirror = async ({ supabaseClient, sanityClient, ids, deleted }) => {
   for (const id of eligible.eligibleIds) {
     const document = byId.get(id);
     const current = eligible.currentById.get(id);
-    if (!document) transaction = transaction.delete(id);
+    if (!document) transaction = appendSanityMirrorDelete({ transaction, id, current });
     else if (document._type === "referral") {
       transaction = applyLegacyReferral({ transaction, current, document });
-    } else transaction = transaction.createOrReplace(cleanForSanity(document));
+    } else transaction = appendSanityMirrorUpsert({ transaction, current, document: cleanForSanity(document) });
   }
   await transaction.commit();
 };

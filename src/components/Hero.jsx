@@ -39,8 +39,13 @@ function CtaNoteBalanced({ icon, text }) {
       setIsSplit(el.scrollWidth > el.parentElement.clientWidth);
     };
     check();
+    const observer = new ResizeObserver(check);
+    if (singleRef.current?.parentElement) observer.observe(singleRef.current.parentElement);
     window.addEventListener("resize", check);
-    return () => window.removeEventListener("resize", check);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", check);
+    };
   }, [fullText]);
 
   useEffect(() => {
@@ -50,15 +55,12 @@ function CtaNoteBalanced({ icon, text }) {
       const p2 = line2PRef.current;
       if (!p2) return;
       p2.style.fontSize = "";
-      // Wait for layout
-      requestAnimationFrame(() => {
-        const w1 = textSpan1Ref.current?.getBoundingClientRect().width || 0;
-        const w2 = textSpan2Ref.current?.getBoundingClientRect().width || 0;
-        if (w1 <= 0 || w2 <= 0) return;
-        const base = parseFloat(getComputedStyle(p2).fontSize);
-        // Keep the second line visually balanced without enlarging short copy.
-        p2.style.fontSize = `${Math.min(base, (base * w1) / w2)}px`;
-      });
+      const w1 = textSpan1Ref.current?.getBoundingClientRect().width || 0;
+      const w2 = textSpan2Ref.current?.getBoundingClientRect().width || 0;
+      if (w1 <= 0 || w2 <= 0) return;
+      const base = parseFloat(getComputedStyle(p2).fontSize);
+      // Keep the second line visually balanced without enlarging short copy.
+      p2.style.fontSize = `${Math.min(base, (base * w1) / w2)}px`;
     };
 
     match();
@@ -70,13 +72,12 @@ function CtaNoteBalanced({ icon, text }) {
   if (!fullText) return null;
 
   return (
-    <div className="ri-hero-cta-note mt-3 sm:mt-5 text-center">
-      {!isSplit || !line2Text ? (
-        <p ref={singleRef} className="flex items-center justify-center gap-2 text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap overflow-hidden">
+    <div className="ri-hero-cta-note relative mt-3 sm:mt-5 text-center">
+      <p ref={singleRef} aria-hidden={isSplit && Boolean(line2Text) ? "true" : undefined} className={`flex items-center justify-center gap-2 text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap overflow-hidden ${isSplit && line2Text ? "absolute inset-x-0 invisible pointer-events-none" : ""}`} >
           {icon && <span className="text-ink" aria-hidden="true">{icon}</span>}
           <span className="gold-flair-text">{fullText}</span>
         </p>
-      ) : (
+      {isSplit && line2Text ? (
         <div className="flex flex-col items-center gap-0.5">
           <p className="inline-flex items-center gap-2 text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap">
             {icon && <span className="text-ink" aria-hidden="true">{icon}</span>}
@@ -87,7 +88,7 @@ function CtaNoteBalanced({ icon, text }) {
             <span ref={textSpan2Ref} className="gold-flair-text">{line2Text}</span>
           </p>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

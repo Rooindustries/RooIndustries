@@ -122,7 +122,9 @@ describe("commerce mirror outbox", () => {
         .mockResolvedValueOnce({
           data: [
             {
+              sequence_no: "1",
               event_key: `commerce-mirror:${"a".repeat(64)}`,
+              document_ids: ["booking.one", "hold.one"],
               documents: [
                 {
                   _id: "booking.one",
@@ -146,13 +148,14 @@ describe("commerce mirror outbox", () => {
           ],
           error: null,
         })
-        .mockResolvedValueOnce({ data: { mirrored: true }, error: null })
-        .mockResolvedValueOnce({ data: { pending: 0 }, error: null }),
+        .mockResolvedValueOnce({ data: { event_key: `commerce-mirror:${"a".repeat(64)}`, status: "mirrored" }, error: null })
+        .mockResolvedValueOnce({ data: { pending: 0, dead_letters: 0 }, error: null }),
     };
     const sanity = createSanity({
       documents: [
         {
           _id: "hold.one",
+          _type: "slotHold",
           _rev: "hold-revision",
         },
       ],
@@ -165,9 +168,12 @@ describe("commerce mirror outbox", () => {
         failClosed: true,
       })
     ).resolves.toMatchObject({ supported: true, mirrored: 1, failed: 0 });
-    expect(sanity.operations[0]).toEqual({ operation: "delete", id: "hold.one" });
-    expect(sanity.operations[1]).toMatchObject({
-      operation: "upsert",
+    expect(sanity.operations[0]).toMatchObject({
+      operation: "patch", id: "hold.one", expectedRevision: "hold-revision",
+    });
+    expect(sanity.operations[1]).toEqual({ operation: "delete", id: "hold.one" });
+    expect(sanity.operations[2]).toMatchObject({
+      operation: "create_if_missing",
       document: {
         _id: "booking.one",
         status: "captured",
@@ -190,7 +196,9 @@ describe("commerce mirror outbox", () => {
         .mockResolvedValueOnce({
           data: [
             {
+              sequence_no: "1",
               event_key: `commerce-mirror:${"c".repeat(64)}`,
+              document_ids: ["booking.two"],
               documents: [{ _id: "booking.two", _type: "booking" }],
               deleted_ids: [],
               canonical_hash: "d".repeat(64),
@@ -199,7 +207,7 @@ describe("commerce mirror outbox", () => {
           ],
           error: null,
         })
-        .mockResolvedValueOnce({ data: { mirrored: false }, error: null }),
+        .mockResolvedValueOnce({ data: { event_key: `commerce-mirror:${"c".repeat(64)}`, status: "retry" }, error: null }),
     };
 
     await expect(
@@ -223,7 +231,9 @@ describe("commerce mirror outbox", () => {
         .mockResolvedValueOnce({
           data: [
             {
+              sequence_no: "1",
               event_key: `commerce-mirror:${"4".repeat(64)}`,
+              document_ids: ["hold.replaced"],
               documents: [],
               deleted_ids: ["hold.replaced"],
               delete_guards: {
@@ -239,12 +249,13 @@ describe("commerce mirror outbox", () => {
           ],
           error: null,
         })
-        .mockResolvedValueOnce({ data: { mirrored: false }, error: null }),
+        .mockResolvedValueOnce({ data: { event_key: `commerce-mirror:${"4".repeat(64)}`, status: "retry" }, error: null }),
     };
     const sanity = createSanity({
       documents: [
         {
           _id: "hold.replaced",
+          _type: "slotHold",
           _rev: "new-sanity-revision",
         },
       ],
@@ -275,7 +286,9 @@ describe("commerce mirror outbox", () => {
         .mockResolvedValueOnce({
           data: [
             {
+              sequence_no: "1",
               event_key: `commerce-mirror:${"e".repeat(64)}`,
+              document_ids: ["referral.creator"],
               documents: [
                 {
                   _id: "referral.creator",
@@ -305,8 +318,8 @@ describe("commerce mirror outbox", () => {
           data: [{ _id: "referral.creator", _type: "referral" }],
           error: null,
         })
-        .mockResolvedValueOnce({ data: { mirrored: true }, error: null })
-        .mockResolvedValueOnce({ data: { pending: 0 }, error: null }),
+        .mockResolvedValueOnce({ data: { event_key: `commerce-mirror:${"e".repeat(64)}`, status: "mirrored" }, error: null })
+        .mockResolvedValueOnce({ data: { pending: 0, dead_letters: 0 }, error: null }),
     };
     const sanity = createSanity();
 
@@ -369,8 +382,8 @@ describe("commerce mirror outbox", () => {
           error: null,
         })
         .mockResolvedValueOnce({ data: [], error: null })
-        .mockResolvedValueOnce({ data: { status: "superseded" }, error: null })
-        .mockResolvedValueOnce({ data: { pending: 0 }, error: null }),
+        .mockResolvedValueOnce({ data: { event_key: `commerce-mirror:${"9".repeat(64)}`, status: "superseded" }, error: null })
+        .mockResolvedValueOnce({ data: { pending: 0, dead_letters: 0 }, error: null }),
     };
     const sanity = createSanity();
 
@@ -428,8 +441,8 @@ describe("commerce mirror outbox", () => {
           ],
           error: null,
         })
-        .mockResolvedValueOnce({ data: { mirrored: true }, error: null })
-        .mockResolvedValueOnce({ data: { pending: 0 }, error: null }),
+        .mockResolvedValueOnce({ data: { event_key: `commerce-mirror:${"7".repeat(64)}`, status: "mirrored" }, error: null })
+        .mockResolvedValueOnce({ data: { pending: 0, dead_letters: 0 }, error: null }),
     };
     const sanity = createSanity({
       documents: [
@@ -494,13 +507,14 @@ describe("commerce mirror outbox", () => {
           ],
           error: null,
         })
-        .mockResolvedValueOnce({ data: { status: "superseded" }, error: null })
-        .mockResolvedValueOnce({ data: { pending: 0 }, error: null }),
+        .mockResolvedValueOnce({ data: { event_key: `commerce-mirror:${"8".repeat(64)}`, status: "superseded" }, error: null })
+        .mockResolvedValueOnce({ data: { pending: 0, dead_letters: 0 }, error: null }),
     };
     const sanity = createSanity({
       documents: [
         {
           _id: "booking.sequence",
+          _type: "booking",
           _supabaseSequence: 9,
           _supabaseSequences: { commerce: "9" },
           status: "completed",
@@ -533,6 +547,7 @@ describe("commerce mirror outbox", () => {
         .mockResolvedValueOnce({
           data: [
             {
+              sequence_no: "1",
               event_key: `commerce-mirror:${"1".repeat(64)}`,
               document_ids: ["booking.unrelated"],
               documents: [{ _id: "booking.unrelated", _type: "booking" }],
@@ -541,8 +556,8 @@ describe("commerce mirror outbox", () => {
           ],
           error: null,
         })
-        .mockResolvedValueOnce({ data: { mirrored: false }, error: null })
-        .mockResolvedValueOnce({ data: { pending: 0 }, error: null }),
+        .mockResolvedValueOnce({ data: { event_key: `commerce-mirror:${"1".repeat(64)}`, status: "retry" }, error: null })
+        .mockResolvedValueOnce({ data: { pending: 0, dead_letters: 0 }, error: null }),
     };
 
     await expect(
@@ -566,6 +581,7 @@ describe("commerce mirror outbox", () => {
         .mockResolvedValueOnce({
           data: [
             {
+              sequence_no: "1",
               event_key: `commerce-mirror:${"2".repeat(64)}`,
               document_ids: ["payment.required"],
               documents: [{ _id: "payment.required", _type: "paymentRecord" }],
@@ -574,7 +590,7 @@ describe("commerce mirror outbox", () => {
           ],
           error: null,
         })
-        .mockResolvedValueOnce({ data: { mirrored: false }, error: null }),
+        .mockResolvedValueOnce({ data: { event_key: `commerce-mirror:${"2".repeat(64)}`, status: "retry" }, error: null }),
     };
 
     await expect(

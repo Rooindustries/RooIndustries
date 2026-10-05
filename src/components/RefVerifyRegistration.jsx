@@ -1,3 +1,4 @@
+import { readBrowserStorage, removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -7,8 +8,8 @@ const readVerificationToken = ({ hash }) => {
   if (typeof window === "undefined") return "";
   const fragment = new URLSearchParams(String(hash || "").replace(/^#/, ""));
   const fragmentToken = String(fragment.get("token") || "").trim();
-  if (fragmentToken) window.sessionStorage.setItem(TOKEN_KEY, fragmentToken);
-  return fragmentToken || window.sessionStorage.getItem(TOKEN_KEY) || "";
+  if (fragmentToken) writeBrowserStorage("sessionStorage", TOKEN_KEY, fragmentToken);
+  return fragmentToken || readBrowserStorage("sessionStorage", TOKEN_KEY) || "";
 };
 
 export default function RefVerifyRegistration() {
@@ -58,14 +59,14 @@ export default function RefVerifyRegistration() {
       }))
       .then(({ ok, status, data }) => {
         if (!ok || data.ok !== true) {
-          if (status === 400) window.sessionStorage.removeItem(TOKEN_KEY);
+          if (status === 400) removeBrowserStorage("sessionStorage", TOKEN_KEY);
           setState({
             status: "error",
             message: data.error || "This confirmation link is invalid or expired.",
           });
           return;
         }
-        sessionStorage.removeItem(TOKEN_KEY);
+        removeBrowserStorage("sessionStorage", TOKEN_KEY);
         setState({ status: "success", message: "Email confirmed. Your creator account is ready." });
       })
       .catch(() => {

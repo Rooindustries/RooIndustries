@@ -80,7 +80,8 @@ const assetDescriptor = (asset) => {
   const expectedPath = `/${isImage ? "images" : "files"}/${GLOBAL_SANITY_PROJECT_ID}/${GLOBAL_SANITY_DATASET}/`;
   if (
     parsedUrl.protocol !== "https:" ||
-    parsedUrl.hostname !== "cdn.sanity.io" ||
+    parsedUrl.origin !== "https://cdn.sanity.io" ||
+    parsedUrl.username || parsedUrl.password ||
     !parsedUrl.pathname.startsWith(expectedPath)
   ) {
     throw failure(

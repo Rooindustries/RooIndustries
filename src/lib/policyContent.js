@@ -1,7 +1,7 @@
 const MONEY_BACK_FAQ_QUESTION =
   "Do you offer a money-back guarantee? What is the warranty?";
 const MONEY_BACK_FAQ_ANSWER =
-  "We offer a 3-day Money-Back Guarantee. If a completed optimization produces no repeatable synthetic performance gains, you will be refunded. Performance Vertex Overhaul includes a 30-day warranty, while Performance Vertex Max includes a lifetime warranty with a 24–48 hour turnaround time. Even after the warranty expires, I’ll still try to help and guide you at my discretion. No man left behind!";
+  "We offer a 3-day Money-Back Guarantee. If a completed optimization produces no repeatable synthetic performance gains, you will be refunded. Performance Vertex Overhaul includes a 90-day warranty, while Performance Vertex Max includes a lifetime warranty with a 24–48 hour turnaround time. Even after the warranty expires, I’ll still try to help and guide you at my discretion. No man left behind!";
 const TERMS_LAST_UPDATED = "August 16, 2026";
 const PAYMENTS_AND_REFUNDS_TEXT =
   "All payments for our services must be made in full at the time of purchase. We offer a 3-day Money-Back Guarantee after a completed optimization session: if the service produces no repeatable synthetic performance gains, you will be refunded. Refund requests must be emailed to serviroo@rooindustries.com within 3 days of the service date. Refunds outside this guarantee are not available once the service has been successfully completed. Refunds may take up to 14 working days to appear in your original payment method. Chargebacks or breaches of these terms void the warranty and are not eligible for a refund.";

@@ -2,7 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const BASE_URL = process.env.BASE_URL;
+let BASE_URL = process.env.BASE_URL;
 if (!BASE_URL) {
   console.error("[phase1-api-contract] BASE_URL is required");
   process.exit(1);
@@ -17,6 +17,10 @@ const csvEscape = (value) => {
 };
 
 async function run() {
+  const safety = await import("./lib/test-target-safety.mjs");
+  safety.refuseEnvFiles();
+  BASE_URL = safety.localOrigin(BASE_URL);
+  safety.installNetworkGuard([BASE_URL]);
   const checks = [
     {
       route: "/api/bookingAvailability",

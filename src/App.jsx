@@ -9,6 +9,7 @@ import {
   Navigate,
 } from "react-router-dom";
 import Navbar from "./components/Navbar";
+import { isProductionBrowser } from "./lib/productionBrowser";
 import SalesTelemetry from "./components/SalesTelemetry";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import ReservationBanner from "./components/ReservationBanner";
@@ -20,6 +21,7 @@ import AboutPage from "./legacyPages/About";
 import Packages from "./legacyPages/Packages";
 import Contact from "./legacyPages/Contact";
 import FaqPage from "./legacyPages/Faq";
+import Privacy from "./legacyPages/PrivacyPolicy";
 import {
   consumeRouteTransitionIntent,
   isHomeSectionHash,
@@ -40,7 +42,6 @@ const RefRegister = lazy(() => import("./legacyPages/RefRegister"));
 const RefVerifyRegistration = lazy(() => import("./legacyPages/RefVerifyRegistration"));
 const Benchmarks = lazy(() => import("./legacyPages/Benchmarks"));
 const Terms = lazy(() => import("./legacyPages/Terms"));
-const Privacy = lazy(() => import("./legacyPages/PrivacyPolicy"));
 const Book = lazy(() => import("./legacyPages/Book"));
 const Payment = lazy(() => import("./legacyPages/Payment"));
 const PaymentSuccess = lazy(() => import("./legacyPages/PaymentSuccess"));
@@ -89,9 +90,7 @@ const DeferredTelemetry = () => {
         location.pathname === prefix || location.pathname.startsWith(`${prefix}/`)
     );
     if (protectedPath) return undefined;
-    const host = String(window.location.hostname || "").toLowerCase();
-    const isLocalHost = host === "localhost" || host === "127.0.0.1";
-    if (isLocalHost) return undefined;
+    if (!isProductionBrowser()) return undefined;
 
     if ("requestIdleCallback" in window) {
       const idleId = window.requestIdleCallback(() => setEnabled(true), {
@@ -163,7 +162,7 @@ function AnimatedRoutes({
             )}
           />
           <Route path="/about" element={<AboutPage />} />
-          <Route path="/privacy" element={withRouteSuspense(<Privacy initialData={initialRouteData?.privacy || null} />)} />
+          <Route path="/privacy" element={<Privacy initialData={initialRouteData?.privacy || null} />} />
           <Route path="/terms" element={withRouteSuspense(<Terms />)} />
           <Route
             path="/reviews"

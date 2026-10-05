@@ -1,3 +1,6 @@
+import { requireShadowDocumentArray } from "./shadowStore.js";
+import { requireMirrorCompletion, requireMirrorEvents, requireMirrorStatus } from "./mirrorRpcResponse.js";
+import { appendSanityMirrorDelete, appendSanityMirrorUpsert, requireSanityMirrorRevision } from "./sanityMirrorMutations.js";
 import crypto from "node:crypto";
 import {
   isReferralCommerceField,
@@ -120,7 +123,7 @@ const planDelete = ({ current, document, eventSequence }) => {
   const currentSequence = readMirrorSequence(current, "global");
   if (currentSequence > eventSequence) return { operation: "superseded" };
   if (currentSequence > 0n && currentSequence < eventSequence) {
-    return { operation: "delete", id: document._id };
+    return { operation: "delete", id: document._id, current };
   }
   if (currentSequence === eventSequence && currentSequence > 0n) {
     throw conflict("A deleted Sanity document was recreated at the same mirror sequence.");
@@ -128,7 +131,7 @@ const planDelete = ({ current, document, eventSequence }) => {
   if (canonicalDocument(current) !== canonicalDocument(document)) {
     throw conflict("An untracked Sanity document changed before its delete was mirrored.");
   }
-  return { operation: "delete", id: document._id };
+  return { operation: "delete", id: document._id, current };
 };
 
 const fetchCurrentDocuments = async ({ sanityClient, ids }) => {
@@ -136,11 +139,11 @@ const fetchCurrentDocuments = async ({ sanityClient, ids }) => {
   if (typeof sanityClient?.fetch !== "function") {
     throw new Error("Sanity mirror reads are unavailable.");
   }
-  const current = await sanityClient.fetch(
+  const current = requireShadowDocumentArray(await sanityClient.fetch(
     `*[_id in $ids]`,
     { ids },
     { perspective: "raw" }
-  );
+  ));
   return new Map(
     normalizeDocuments(current).map((document) => [String(document._id), document])
   );
@@ -155,14 +158,23 @@ const planEvent = async ({ sanityClient, event }) => {
   ]);
   const current = await fetchCurrentDocuments({ sanityClient, ids });
   const eventSequence = normalizeMirrorSequence(event?.sequence_no);
-  const operations = [
-    ...deleted.map((document) =>
-      planDelete({ current: current.get(document._id), document, eventSequence })
-    ),
-    ...documents.map((document) =>
-      planUpsert({ current: current.get(document._id), document, eventSequence })
-    ),
-  ];
+  const upserts = new Map(documents.map((document) => [document._id, document]));
+  const replacedTypes = new Set();
+  const operations = [];
+  for (const document of deleted) {
+    const target = current.get(document._id);
+    const replacement = upserts.get(document._id);
+    if (replacement && (!target || target._type === replacement._type)) continue;
+    const deletion = planDelete({ current: target, document, eventSequence });
+    operations.push(deletion);
+    if (replacement && deletion.operation === "delete") replacedTypes.add(document._id);
+  }
+  for (const document of documents) {
+    operations.push(planUpsert({
+      current: replacedTypes.has(document._id) ? null : current.get(document._id),
+      document, eventSequence,
+    }));
+  }
   return operations;
 };
 
@@ -191,13 +203,13 @@ const buildReferralPatch = ({ current, value }) => {
 };
 
 const applyReferralUpsert = ({ transaction, operation }) => {
-  if (!operation.current) return transaction.createIfNotExists(operation.value);
+  if (!operation.current || operation.current._type !== operation.value._type) {
+    return appendSanityMirrorUpsert({ transaction, current: operation.current,
+      document: operation.value });
+  }
   const update = buildReferralPatch(operation);
   return transaction.patch(operation.value._id, (patch) => {
-    const guarded =
-      operation.current._rev && typeof patch.ifRevisionId === "function"
-        ? patch.ifRevisionId(operation.current._rev)
-        : patch;
+    const guarded = patch.ifRevisionId(requireSanityMirrorRevision(operation.current));
     const setPatch = guarded.set(update.set);
     return update.unset.length > 0 ? setPatch.unset(update.unset) : setPatch;
   });
@@ -209,13 +221,13 @@ const applyEvent = async ({ sanityClient, event }) => {
   let mutations = 0;
   for (const operation of operations) {
     if (operation.operation === "delete") {
-      transaction = transaction.delete(operation.id);
+      transaction = appendSanityMirrorDelete({ transaction, id: operation.id, current: operation.current });
       mutations += 1;
     } else if (operation.operation === "upsert") {
       transaction =
         operation.value?._type === "referral"
           ? applyReferralUpsert({ transaction, operation })
-          : transaction.createOrReplace(operation.value);
+          : appendSanityMirrorUpsert({ transaction, current: operation.current, document: operation.value });
       mutations += 1;
     }
   }
@@ -255,7 +267,9 @@ const verifyEvent = async ({ sanityClient, event }) => {
     }
   }
 
+  const upsertIds = new Set(documents.map((document) => document._id));
   for (const document of deleted) {
+    if (upsertIds.has(document._id)) continue;
     const target = current.get(String(document._id));
     if (!target) continue;
     if (readMirrorSequence(target, "global") > eventSequence) continue;
@@ -263,8 +277,8 @@ const verifyEvent = async ({ sanityClient, event }) => {
   }
 };
 
-const completeEvent = async ({ supabaseClient, event, leaseId, success, error }) =>
-  requireRpc(
+const completeEvent = async ({ supabaseClient, event, leaseId, success, error }) => {
+  const value = requireRpc(
     await supabaseClient.rpc("roo_complete_document_mutation_mirror_event", {
       p_event_key: event.event_key,
       p_lease_id: leaseId,
@@ -273,6 +287,9 @@ const completeEvent = async ({ supabaseClient, event, leaseId, success, error })
     }),
     "document mirror completion"
   );
+  return requireMirrorCompletion({ value, eventKey: event.event_key,
+    statuses: success ? ["applied"] : ["applied", "retry", "dead_letter"] });
+};
 
 const emptySummary = () => ({
   supported: true,
@@ -287,18 +304,18 @@ const emptySummary = () => ({
 });
 
 const readRequiredStatus = async ({ supabaseClient, requiredDocumentIds }) =>
-  requireRpc(
+  requireMirrorStatus(requireRpc(
     await supabaseClient.rpc("roo_document_mutation_mirror_status_for_ids", {
       p_document_ids: requiredDocumentIds,
     }),
     "document mirror status"
-  );
+  ));
 
 const readBacklog = async ({ supabaseClient, requiredDocumentIds }) => {
-  const backlog = requireRpc(
+  const backlog = requireMirrorStatus(requireRpc(
     await supabaseClient.rpc("roo_document_mutation_mirror_backlog", {}),
     "document mirror backlog"
-  );
+  ));
   const required = requiredDocumentIds.length > 0
     ? await readRequiredStatus({ supabaseClient, requiredDocumentIds })
     : null;
@@ -306,7 +323,7 @@ const readBacklog = async ({ supabaseClient, requiredDocumentIds }) => {
 };
 
 const claimBatch = async ({ supabaseClient, leaseId, limit, preferredIds }) =>
-  requireRpc(
+  requireMirrorEvents(requireRpc(
     await supabaseClient.rpc("roo_claim_document_mutation_mirror_events", {
       p_lease_id: leaseId,
       p_limit: limit,
@@ -314,7 +331,7 @@ const claimBatch = async ({ supabaseClient, leaseId, limit, preferredIds }) =>
       p_preferred_document_ids: preferredIds.length > 0 ? preferredIds : null,
     }),
     "document mirror claim"
-  );
+  ), "global");
 
 const processEvent = async ({
   supabaseClient,

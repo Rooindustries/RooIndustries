@@ -3,451 +3,143 @@ const { test, expect } = require("@playwright/test");
 test.use({ javaScriptEnabled: true });
 
 const routes = [
-  "/",
-  "/packages",
-  "/reviews",
-  "/tools",
-  "/faq",
-  "/benchmarks",
-  "/booking",
-  "/payment",
-  "/upgrade-xoc",
-  "/downloads/optimizer-pack-v1",
-  "/tourney",
-  "/tourney/bracket",
-  "/tourney/roster",
-  "/tourney/register",
-  "/tourney/login",
-  "/tourney/forgot",
-  "/tourney/reset",
-  "/tourney/manage",
-  "/referrals/login",
-  "/referrals/register",
-  "/referrals/forgot",
-  "/referrals/reset",
+  "/", "/packages", "/reviews", "/tools", "/faq", "/benchmarks",
+  "/booking", "/payment", "/upgrade-xoc", "/downloads/optimizer-pack-v1", "/tourney",
+  "/referrals/login", "/referrals/register", "/referrals/forgot", "/referrals/reset",
 ];
-
-const paymentSmokeData = encodeURIComponent(
-  JSON.stringify({
-    packageTitle: "Performance Vertex Overhaul",
-    packagePrice: "$84.99",
-    startTimeUTC: "2099-01-05T04:30:00.000Z",
-    displayDate: "Monday, January 5, 2099",
-    displayTime: "10:00 AM",
-    localTimeZone: "Asia/Kolkata",
-    slotHoldId: "hold_smoke_test",
-    slotHoldToken: "hold_token_smoke_test",
-    slotHoldExpiresAt: "2099-01-05T05:30:00.000Z",
-  })
-);
-
-const waitForPerformanceProfile = async (page) => {
-  await page.waitForFunction(
-    () => document.documentElement.classList.contains("low-performance-mode"),
-    { timeout: 10000 }
-  );
+const paymentSmokeData = {
+  packageTitle: "Performance Vertex Overhaul",
+  packagePrice: "$84.99",
+  startTimeUTC: "2099-01-05T04:30:00.000Z",
+  displayDate: "Monday, January 5, 2099",
+  displayTime: "10:00 AM",
+  localTimeZone: "Asia/Kolkata",
+  slotHoldId: "hold_smoke_test",
+  slotHoldToken: "hold_token_smoke_test",
+  slotHoldExpiresAt: "2099-01-05T05:30:00.000Z",
 };
+const waitForPerformanceProfile = async (page) => {
+  await page.waitForFunction(() => document.documentElement.classList.contains("low-performance-mode"), null, { timeout: 10000 });
+};
+
+test.beforeEach(async ({ context, baseURL }) => {
+  const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+  await guardBrowserContext(context, [baseURL]);
+});
 
 test.describe("Route smoke", () => {
   for (const route of routes) {
     test(`loads ${route}`, async ({ page }) => {
       const consoleErrors = [];
-      page.on("console", (msg) => {
-        if (msg.type() === "error") {
-          consoleErrors.push(msg.text());
-        }
-      });
-
-      const routeUrl =
-        route === "/payment" ? `/payment?data=${paymentSmokeData}` : route;
-      const response = await page.goto(routeUrl, {
-        waitUntil: "domcontentloaded",
-      });
-      expect(response?.status()).toBeLessThan(400);
-
-      await expect(page.locator("main")).toBeVisible();
-      const title = await page.title();
-      expect(title.length).toBeGreaterThan(8);
-
-      if (route === "/packages" || route === "/upgrade-xoc") {
-        await expect(page.locator("h1")).toHaveCount(1);
-      }
-
-      if (route === "/") {
-        await expect(
-          page.getByRole("heading", {
-            name: "Team captains are set. Registration is closed.",
-          })
-        ).toBeVisible();
-        await expect(
-          page.getByText("The 12-team Overwatch 6v6 Legacy Series draft is July 26")
-        ).toBeVisible();
-        await expect(page.getByText("tournament running August 15-16")).toBeVisible();
-        await expect(
-          page.getByRole("link", { name: "Go to the tournament page" })
-        ).toHaveAttribute("href", "/tourney");
-      }
-
-      if (route === "/booking") {
-        await expect(
-          page.getByText("Select a Date and Time for Your Session")
-        ).toBeVisible();
-      }
-
+      page.on("console", msg => { if (msg.type() === "error") consoleErrors.push(msg.text()); });
       if (route === "/payment") {
-        await expect(
-          page.getByRole("heading", { name: /complete payment/i })
-        ).toBeVisible();
+        await page.addInitScript(data => sessionStorage.setItem("checkout_booking_state", JSON.stringify(data)), paymentSmokeData);
+        await page.route("**/api/payment/providers", request => request.fulfill({ json: { ok: true, providers: { dodo: { enabled: false, mode: "test" }, paypal: { enabled: false }, razorpay: { enabled: false } } } }));
       }
-
+      const response = await page.goto(route, { waitUntil: "domcontentloaded" });
+      expect(response?.status()).toBeLessThan(400);
+      await expect(page.locator("main")).toBeVisible();
+      expect((await page.title()).length).toBeGreaterThan(8);
+      if (route === "/packages" || route === "/upgrade-xoc") await expect(page.locator("h1")).toHaveCount(1);
+      if (route === "/") {
+        await expect(page.getByRole("heading", { name: /More FPS\. Less Input Lag\./ })).toBeVisible();
+        await expect(page.locator(".home-tourney-announcement")).toHaveCount(0);
+        await expect(page.locator("#top").getByRole("link", { name: /tune my pc/i })).toHaveAttribute("href", "/#packages");
+      }
+      if (route === "/booking") await expect(page.getByText("Select a Date and Time for Your Session")).toBeVisible();
+      if (route === "/payment") {
+        await expect(page.getByRole("heading", { name: /complete payment/i })).toBeVisible();
+        await expect(page.getByText("Performance Vertex Overhaul", { exact: true }).first()).toBeVisible();
+        expect(new URL(page.url()).searchParams.has("data")).toBe(false);
+      }
       if (route === "/tourney") {
-        await expect(
-          page.getByRole("heading", { name: /6v6 Legacy Series/i })
-        ).toBeVisible();
-        await expect(
-          page.getByText("Overwatch Creator Tournament", { exact: true })
-        ).toBeVisible();
-        await expect(page.getByText("Tournament access locked")).toHaveCount(0);
-        await expect(
-          page.getByRole("heading", { name: "Important Dates" })
-        ).toBeVisible();
-        await expect(page.getByText("Match windows")).toBeVisible();
-        await expect(page.getByRole("heading", { name: "Bracket" })).toBeVisible();
-        await expect(page.getByText("Bracket access", { exact: true })).toBeVisible();
-        await expect(page.getByText("$2,000 USD for 1st and 2nd place")).toBeVisible();
-        await expect(
-          page
-            .getByText("100% of Roo Industries website revenue from August 1-16, 2026")
-            .first()
-        ).toBeVisible();
-        await expect(
-          page.getByText("3 Logitech G PRO X2 SUPERSTRIKE wireless gaming mice")
-        ).toBeVisible();
-        await expect(page.getByText("32 GB of RAM")).toBeVisible();
-        await expect(
-          page.getByText("July 26, 2026", { exact: true })
-        ).toBeVisible();
-        await expect(page.getByText("Registration closed", { exact: true })).toBeVisible();
-        await expect(page.getByRole("link", { name: "Register" })).toHaveCount(0);
-        await expect(
-          page.getByText("By August 30, 2026")
-        ).toBeVisible();
-        await expect(page.getByText("By October 31, 2026")).toBeVisible();
-        await expect(
-          page.getByRole("heading", { name: "Giveaway Details" })
-        ).toBeVisible();
-        await expect(
-          page.getByText("A qualifying Roo Industries purchase is required")
-        ).toBeVisible();
-        await expect(
-          page.getByRole("img", { name: "GAWS - Geelong Animal Welfare Society" })
-        ).toBeVisible();
-        await expect(
-          page.getByRole("link", { name: "Sign in", exact: true })
-        ).toBeVisible();
+        await expect(page.locator('main[data-tourney-state="results"]')).toBeVisible();
+        await expect(page.getByRole("heading", { name: "6v6 Legacy Series", exact: true })).toBeVisible();
+        await expect(page.getByRole("status")).toContainText("Event complete");
+        await expect(page.getByRole("heading", { name: "Our winners" })).toBeVisible();
+        const podium = page.getByRole("list", { name: "Tournament podium" });
+        await expect(podium.getByRole("listitem")).toHaveCount(3);
+        await expect(podium.getByRole("heading", { name: "GetSkii’d" })).toBeVisible();
+        await expect(podium.getByRole("heading", { name: "Rents Due" })).toBeVisible();
+        await expect(page.locator(".tourney-final-score")).toHaveAttribute("aria-label", "Grand final: GetSkii’d 4, Rents Due 1");
+        await expect(page.getByRole("heading", { name: "Stay Tuned." })).toBeVisible();
+        await expect(page.getByRole("link", { name: /sign in|register/i })).toHaveCount(0);
         await expect(page.getByRole("switch")).toBeVisible();
       }
-
-      if (route === "/tourney/login") {
-        await expect(page.getByRole("heading", { name: "Sign in." })).toBeVisible();
-        await expect(
-          page.getByLabel("Roster name or email")
-        ).toBeVisible();
-        await expect(page.getByLabel("Password")).toBeVisible();
-        await expect(page.getByLabel("Remember me")).toBeVisible();
-        await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
-      }
-
-      if (route === "/tourney/register") {
-        await expect(
-          page.getByRole("heading", {
-            name: "Creator Registration",
-            exact: true,
-          })
-        ).toBeVisible();
-        await expect(
-          page.getByText("This Overwatch tournament is for creators")
-        ).toBeVisible();
-        await expect(
-          page.getByRole("heading", { name: "Creator registration is closed" })
-        ).toBeVisible();
-        await expect(page.getByText("July 26, 2026 at 19:00 UTC")).toBeVisible();
-        await expect(page.getByRole("button", { name: "Submit Registration" })).toHaveCount(0);
-      }
-
       if (route === "/booking" || route === "/payment") {
         await page.waitForTimeout(750);
-        expect(
-          consoleErrors.filter((entry) =>
-            /hydration|getServerSnapshot|react error #418/i.test(entry)
-          )
-        ).toEqual([]);
+        expect(consoleErrors.filter(entry => /hydration|getServerSnapshot|react error #418/i.test(entry))).toEqual([]);
       }
     });
   }
 
-  test("unknown route renders not found", async ({ page }) => {
-    const response = await page.goto("/definitely-not-a-real-route", {
-      waitUntil: "domcontentloaded",
+  for (const route of ["login", "register", "forgot", "reset", "manage"]) {
+    test(`retired tourney ${route} returns 404`, async ({ page }) => {
+      const response = await page.goto(`/tourney/${route}`);
+      expect(response?.status()).toBe(404);
+      await expect(page.locator("body")).toContainText(/not found|404/i);
     });
-
+  }
+  for (const route of ["bracket", "roster"]) {
+    test(`legacy tourney ${route} redirects to results`, async ({ page }) => {
+      const response = await page.goto(`/tourney/${route}`);
+      expect(response?.status()).toBe(200);
+      expect(new URL(page.url()).pathname).toBe("/tourney");
+      await expect(page.locator('main[data-tourney-state="results"]')).toBeVisible();
+    });
+  }
+  test("unknown route renders not found", async ({ page }) => {
+    const response = await page.goto("/definitely-not-a-real-route");
     expect(response?.status()).toBe(404);
     await expect(page.locator("body")).toContainText(/not found|404/i);
   });
-
   test("home desktop exposes the document scrollbar", async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    const response = await page.goto("/", {
-      waitUntil: "domcontentloaded",
-    });
-
-    expect(response?.status()).toBeLessThan(400);
-
+    await page.setViewportSize({ width: 1440, height: 900 }); await page.goto("/");
     const metrics = await page.evaluate(() => {
-      const root = document.documentElement;
-      const rootStyles = getComputedStyle(root);
-      const bodyStyles = getComputedStyle(document.body);
-
-      return {
-        scrollHeight: root.scrollHeight,
-        viewportHeight: window.innerHeight,
-        rootOverflowY: rootStyles.overflowY,
-        bodyOverflowY: bodyStyles.overflowY,
-        rootScrollbarWidth: rootStyles.scrollbarWidth,
-        bodyScrollbarWidth: bodyStyles.scrollbarWidth,
-      };
+      const root = document.documentElement, body = document.body;
+      return { height: root.scrollHeight, viewport: innerHeight, overflow: getComputedStyle(root).overflowY, bodyOverflow: getComputedStyle(body).overflowY, scrollbar: getComputedStyle(root).scrollbarWidth, bodyScrollbar: getComputedStyle(body).scrollbarWidth };
     });
-
-    expect(metrics.scrollHeight).toBeGreaterThan(metrics.viewportHeight);
-    expect(metrics.rootOverflowY).not.toBe("hidden");
-    expect(metrics.bodyOverflowY).not.toBe("hidden");
-    expect(metrics.rootScrollbarWidth).not.toBe("none");
-    expect(metrics.bodyScrollbarWidth).not.toBe("none");
+    expect(metrics.height).toBeGreaterThan(metrics.viewport);
+    for (const value of [metrics.overflow, metrics.bodyOverflow]) expect(value).not.toBe("hidden");
+    for (const value of [metrics.scrollbar, metrics.bodyScrollbar]) expect(value).not.toBe("none");
   });
-
-  test("tourney mobile navbar uses dropdown", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    const response = await page.goto("/tourney", {
-      waitUntil: "domcontentloaded",
-    });
-
-    expect(response?.status()).toBeLessThan(400);
-    await waitForPerformanceProfile(page);
-
-    const nav = page.locator(".tourney-nav");
-    await expect(nav.locator(".tourney-brand-copy")).toBeHidden();
-    await expect(nav.locator(".tourney-links")).toBeHidden();
-    await expect(nav.locator(".tourney-mobile-menu")).toBeVisible();
-    await expect(nav.getByRole("switch")).toBeVisible();
-    await expect(
-      nav.getByRole("link", { name: "Sign in", exact: true })
-    ).toBeVisible();
-    await expect(nav.locator(".tourney-mobile-panel")).toBeHidden();
-
-    const signInBox = await nav
-      .getByRole("link", { name: "Sign in", exact: true })
-      .boundingBox();
-    const triggerBox = await nav.locator(".tourney-mobile-trigger").boundingBox();
-    expect(signInBox?.x ?? 0).toBeLessThan(triggerBox?.x ?? 0);
-
-    await nav.locator(".tourney-mobile-trigger").click();
-    await expect(
-      nav
-        .locator(".tourney-mobile-panel")
-        .getByRole("link", { name: "Register", exact: true })
-    ).toHaveCount(0);
-    await expect(
-      nav
-        .locator(".tourney-mobile-panel")
-        .getByRole("link", { name: "Event Information" })
-    ).toBeVisible();
-    await expect(
-      page
-        .locator(".tourney-hero")
-        .getByRole("link", { name: "Register", exact: true })
-    ).toHaveCount(0);
-    await expect(
-      page.locator(".tourney-hero").getByText("Registration closed", {
-        exact: true,
-      })
-    ).toBeVisible();
-
-    const navBox = await nav.boundingBox();
-    const panelBox = await nav.locator(".tourney-mobile-panel").boundingBox();
-    const navBottom = (navBox?.y ?? 0) + (navBox?.height ?? 0);
-    expect(panelBox?.x ?? -1).toBeLessThanOrEqual(1);
-    expect(panelBox?.width ?? 0).toBeGreaterThanOrEqual(390);
-    expect(panelBox?.y ?? 0).toBeLessThanOrEqual(navBottom + 1);
-    expect(panelBox?.y ?? 0).toBeGreaterThanOrEqual(navBottom - 6);
-
-    const backdropFilter = await nav
-      .locator(".tourney-mobile-panel")
-      .evaluate(
-        (element) =>
-          getComputedStyle(element).backdropFilter ||
-          getComputedStyle(element).webkitBackdropFilter
-      );
-    expect(String(backdropFilter).toLowerCase()).toBe("none");
+  test("completed tourney mobile conversion and podium fit", async ({ page }) => {
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 844 }); await page.goto("/tourney"); await waitForPerformanceProfile(page);
+      await expect(page.locator(".tourney-brand-copy")).toBeHidden();
+      await expect(page.getByRole("link", { name: "Get your PC Optimized" })).toBeVisible();
+      await expect(page.getByRole("switch")).toBeVisible();
+      const metrics = await page.evaluate(() => ({ width: innerWidth, documentWidth: document.documentElement.scrollWidth, boxes: [...document.querySelectorAll(".tourney-podium-finish,.tourney-nav .nav-cta,[role=switch]")].map(node => { const box = node.getBoundingClientRect(); return { left: box.left, right: box.right, width: box.width }; }) }));
+      expect(metrics.documentWidth, `${width}px document overflow`).toBeLessThanOrEqual(width + 1);
+      expect(metrics.boxes).toHaveLength(5);
+      for (const box of metrics.boxes) { expect(box.width).toBeGreaterThan(0); expect(box.left).toBeGreaterThanOrEqual(0); expect(box.right).toBeLessThanOrEqual(width + 1); }
+    }
   });
-
   test("home mobile navbar tagline fits narrow phones", async ({ page }) => {
     for (const width of [320, 340, 360, 375, 390]) {
-      await page.setViewportSize({ width, height: 844 });
-      const response = await page.goto("/", {
-        waitUntil: "domcontentloaded",
-      });
-
-      expect(response?.status()).toBeLessThan(400);
-      await waitForPerformanceProfile(page);
-
+      await page.setViewportSize({ width, height: 844 }); await page.goto("/"); await waitForPerformanceProfile(page);
       const metrics = await page.evaluate(() => {
         const nav = document.querySelector(".site-nav");
-        const tagline = Array.from(nav?.querySelectorAll("div") || []).find(
-          (element) =>
-            element.textContent?.trim() === "Precision Performance Engineering"
-        );
+        const tagline = [...(nav?.querySelectorAll("div") || [])].find(node => node.textContent?.trim() === "Precision Performance Engineering");
         const controls = nav?.querySelector(".nav-cta")?.parentElement;
-        const taglineRect = tagline?.getBoundingClientRect();
-        const controlsRect = controls?.getBoundingClientRect();
-
-        return {
-          width: window.innerWidth,
-          documentWidth: document.documentElement.scrollWidth,
-          taglineOverflow:
-            tagline && tagline.scrollWidth > tagline.clientWidth + 1,
-          taglineRight: taglineRect?.right || 0,
-          controlsRight: controlsRect?.right || 0,
-        };
+        return { width: innerWidth, documentWidth: document.documentElement.scrollWidth, overflow: tagline.scrollWidth > tagline.clientWidth + 1, taglineRight: tagline.getBoundingClientRect().right, controlsRight: controls.getBoundingClientRect().right };
       });
-
-      expect(metrics.taglineOverflow, `${width}px tagline overflow`).toBe(
-        false
-      );
-      expect(metrics.taglineRight, `${width}px tagline right edge`).toBeLessThan(
-        metrics.controlsRight
-      );
-      expect(metrics.controlsRight, `${width}px controls right edge`).toBeLessThanOrEqual(
-        width + 1
-      );
-      expect(metrics.documentWidth, `${width}px document overflow`).toBeLessThanOrEqual(
-        width + 1
-      );
+      expect(metrics.overflow, `${width}px tagline overflow`).toBe(false);
+      expect(metrics.taglineRight).toBeLessThan(metrics.controlsRight);
+      expect(metrics.controlsRight).toBeLessThanOrEqual(width + 1);
+      expect(metrics.documentWidth).toBeLessThanOrEqual(width + 1);
     }
   });
-
-  test("tourney roster rows stretch cleanly on mobile", async ({ page }) => {
-    for (const width of [320, 390]) {
-      await page.setViewportSize({ width, height: 844 });
-      const response = await page.goto("/tourney/roster", {
-        waitUntil: "domcontentloaded",
-      });
-
-      expect(response?.status()).toBeLessThan(400);
-      await waitForPerformanceProfile(page);
-
-      const metrics = await page.evaluate(() => {
-        const sectionBody = document.querySelector(
-          "#hosts .tourney-section-body"
-        );
-        const list = sectionBody?.querySelector(".tourney-roster-list");
-        const row = list?.querySelector(".tourney-roster-player");
-        const identity = row?.querySelector(".tourney-roster-identity");
-        const detail = row?.querySelector(".tourney-roster-detail");
-        const cta = row?.querySelector(".tourney-roster-cta");
-        const bodyRect = sectionBody?.getBoundingClientRect();
-        const listRect = list?.getBoundingClientRect();
-        const rowRect = row?.getBoundingClientRect();
-        const identityRect = identity?.getBoundingClientRect();
-        const detailRect = detail?.getBoundingClientRect();
-        const ctaRect = cta?.getBoundingClientRect();
-        const listStyle = list ? getComputedStyle(list) : null;
-        const rowStyle = row ? getComputedStyle(row) : null;
-        const identityStyle = identity ? getComputedStyle(identity) : null;
-        const detailStyle = detail ? getComputedStyle(detail) : null;
-        const ctaStyle = cta ? getComputedStyle(cta) : null;
-
-        return {
-          width: window.innerWidth,
-          listPaddingLeft: listStyle?.paddingLeft || "",
-          listPaddingInlineStart: listStyle?.paddingInlineStart || "",
-          bodyWidth: bodyRect?.width || 0,
-          listWidth: listRect?.width || 0,
-          rowWidth: rowRect?.width || 0,
-          rowLeft: rowRect?.left || 0,
-          bodyLeft: bodyRect?.left || 0,
-          rowRight: rowRect?.right || 0,
-          bodyRight: bodyRect?.right || 0,
-          identityWidth: identityRect?.width || 0,
-          identityCenter:
-            identityRect ? identityRect.left + identityRect.width / 2 : 0,
-          detailWidth: detailRect?.width || 0,
-          detailCenter: detailRect ? detailRect.left + detailRect.width / 2 : 0,
-          ctaWidth: ctaRect?.width || 0,
-          ctaCenter: ctaRect ? ctaRect.left + ctaRect.width / 2 : 0,
-          rowCenter: rowRect ? rowRect.left + rowRect.width / 2 : 0,
-          rowJustifyItems: rowStyle?.justifyItems || "",
-          identityTextAlign: identityStyle?.textAlign || "",
-          detailTextAlign: detailStyle?.textAlign || "",
-          detailJustifyItems: detailStyle?.justifyItems || "",
-          ctaJustifySelf: ctaStyle?.justifySelf || "",
-        };
-      });
-
-      expect(metrics.listPaddingLeft).toBe("0px");
-      expect(metrics.listPaddingInlineStart).toBe("0px");
-      expect(Math.abs(metrics.listWidth - metrics.bodyWidth)).toBeLessThanOrEqual(
-        1
-      );
-      expect(Math.abs(metrics.rowWidth - metrics.bodyWidth)).toBeLessThanOrEqual(
-        1
-      );
-      expect(Math.abs(metrics.rowLeft - metrics.bodyLeft)).toBeLessThanOrEqual(
-        1
-      );
-      expect(Math.abs(metrics.rowRight - metrics.bodyRight)).toBeLessThanOrEqual(
-        1
-      );
-      expect(metrics.identityWidth).toBeGreaterThan(0);
-      expect(metrics.detailWidth).toBeGreaterThan(0);
-      expect(metrics.ctaWidth).toBeGreaterThan(0);
-      expect(metrics.rowJustifyItems).toBe("center");
-      expect(metrics.identityTextAlign).toBe("center");
-      expect(metrics.detailTextAlign).toBe("center");
-      expect(metrics.detailJustifyItems).toBe("center");
-      expect(metrics.ctaJustifySelf).toBe("center");
-      expect(Math.abs(metrics.identityCenter - metrics.rowCenter)).toBeLessThanOrEqual(
-        1
-      );
-      expect(Math.abs(metrics.detailCenter - metrics.rowCenter)).toBeLessThanOrEqual(
-        1
-      );
-      expect(Math.abs(metrics.ctaCenter - metrics.rowCenter)).toBeLessThanOrEqual(
-        1
-      );
-    }
-  });
-
-  test("tourney theme switch toggles Blackout", async ({ page }) => {
-    const response = await page.goto("/tourney", {
-      waitUntil: "domcontentloaded",
-    });
-
-    expect(response?.status()).toBeLessThan(400);
-    await expect(page.locator(".tourney-page")).toBeVisible();
-
-    const themeSwitch = page.getByRole("switch");
-    await expect(themeSwitch).toBeVisible();
-    await expect(themeSwitch).toHaveAttribute("aria-checked", "false");
-
-    await themeSwitch.click();
-    await expect(themeSwitch).toHaveAttribute("aria-checked", "true");
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-
-    const accent = await page
-      .locator(".tourney-page")
-      .evaluate((element) =>
-        getComputedStyle(element).getPropertyValue("--tourney-accent").trim()
-      );
-    expect(accent.toLowerCase()).toBe("#e8b94a");
+  test("tourney theme switch persists both themes", async ({ page }) => {
+    await page.addInitScript(() => { if (!sessionStorage.getItem("smoke-theme-seeded")) { localStorage.setItem("roo-theme", "default"); sessionStorage.setItem("smoke-theme-seeded", "1"); } });
+    await page.goto("/tourney");
+    const toggle = page.getByRole("switch"); await expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect((await page.locator(".tourney-page").evaluate(node => getComputedStyle(node).getPropertyValue("--tourney-accent").trim())).toLowerCase()).toBe("#22d3ee");
+    await toggle.click(); await expect(toggle).toHaveAttribute("aria-checked", "true"); await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    expect((await page.locator(".tourney-page").evaluate(node => getComputedStyle(node).getPropertyValue("--tourney-accent").trim())).toLowerCase()).toBe("#d4af37");
+    await page.reload(); await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await toggle.click(); await expect(toggle).toHaveAttribute("aria-checked", "false"); await expect(page.locator("html")).toHaveAttribute("data-theme", "default");
+    expect((await page.locator(".tourney-page").evaluate(node => getComputedStyle(node).getPropertyValue("--tourney-accent").trim())).toLowerCase()).toBe("#22d3ee");
+    await page.reload(); await expect(toggle).toHaveAttribute("aria-checked", "false"); await expect(page.locator("html")).toHaveAttribute("data-theme", "default");
   });
 });

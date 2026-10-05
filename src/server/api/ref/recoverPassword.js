@@ -50,33 +50,58 @@ const pendingResponse = (res) => {
   });
 };
 
-const recoveryMethodPresent = (claims) =>
-  (Array.isArray(claims?.amr) ? claims.amr : []).some((entry) => {
+const recentRecoveryMethodPresent = (claims, now) => {
+  const methods = Array.isArray(claims?.amr) ? claims.amr : [];
+  const legacyFormat = methods.every((entry) => typeof entry === "string");
+  return methods.some((entry) => {
     const method = typeof entry === "string" ? entry : entry?.method;
-    return String(method || "").toLowerCase() === "otp";
+    if (!["otp", "recovery"].includes(String(method || "").toLowerCase())) {
+      return false;
+    }
+    const timestamp = legacyFormat ? claims.iat : entry?.timestamp;
+    return (
+      typeof timestamp === "number" &&
+      Number.isFinite(timestamp) &&
+      timestamp >= now - RECOVERY_SESSION_MAX_AGE_SECONDS &&
+      timestamp <= now + 60
+    );
   });
+};
 
 const readRecoveryIdentity = async ({ req, res }) => {
+  const expectedUserId = req.body?.expectedUserId;
+  const expectedSessionId = req.body?.expectedSessionId;
+  if (
+    typeof expectedUserId !== "string" || !expectedUserId ||
+    typeof expectedSessionId !== "string" || !expectedSessionId
+  ) {
+    return null;
+  }
   const sessionClient = createLegacySupabaseSessionClient({ req, res });
-  const userResult = await sessionClient.auth.getUser();
-  if (userResult.error || !userResult.data?.user?.id) return null;
-
   const sessionResult = await sessionClient.auth.getSession();
   const accessToken = String(
     sessionResult.data?.session?.access_token || ""
   ).trim();
   if (sessionResult.error || !accessToken) return null;
 
+  const userResult = await sessionClient.auth.getUser(accessToken);
+  if (userResult.error || !userResult.data?.user?.id) return null;
   const claimsResult = await sessionClient.auth.getClaims(accessToken);
   const claims = claimsResult.data?.claims;
-  const issuedAt = Number(claims?.iat || 0);
+  const issuedAt = claims?.iat;
+  const expiresAt = claims?.exp;
   const now = Math.floor(Date.now() / 1000);
   if (
     claimsResult.error ||
-    String(claims?.sub || "") !== userResult.data.user.id ||
-    !recoveryMethodPresent(claims) ||
+    claims?.sub !== userResult.data.user.id ||
+    expectedUserId !== userResult.data.user.id ||
+    expectedSessionId !== claims?.session_id ||
+    typeof issuedAt !== "number" || !Number.isFinite(issuedAt) ||
+    typeof expiresAt !== "number" || !Number.isFinite(expiresAt) ||
+    expiresAt <= now || expiresAt <= issuedAt ||
     issuedAt < now - RECOVERY_SESSION_MAX_AGE_SECONDS ||
-    issuedAt > now + 60
+    issuedAt > now + 60 ||
+    !recentRecoveryMethodPresent(claims, now)
   ) {
     return null;
   }
@@ -177,7 +202,10 @@ export default async function handler(req, res) {
       .update(recovery.accessToken)
       .digest("hex")}`;
     try {
-      const resumed = await resumeSupabaseCredentialOperation({ operationKey });
+      const resumed = await resumeSupabaseCredentialOperation({
+        operationKey,
+        password: normalizedPassword,
+      });
       if (resumed.resumed) {
         await finishRecoverySession({ req, res });
         return res.status(200).json({
@@ -189,6 +217,12 @@ export default async function handler(req, res) {
         });
       }
     } catch (error) {
+      if (String(error?.code || "") === "23505") {
+        return res.status(409).json({
+          ok: false,
+          error: "This recovery session was already used with a different password.",
+        });
+      }
       logSafeError("Referral recovery password operation remains pending", error);
       return pendingResponse(res);
     }

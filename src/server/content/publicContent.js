@@ -4,7 +4,7 @@ import {
   PUBLIC_CONTENT_RESOURCES,
 } from "../../lib/publicContentQueries";
 import { createSupabaseDocumentClient } from "../supabase/documentClient.js";
-import { enrichSupabaseContentAssets } from "../supabase/assets.js";
+import { clearSupabaseAssetManifestCache, enrichSupabaseContentAssets } from "../supabase/assets.js";
 import { resolveSupabaseRuntimePolicy } from "../supabase/runtime.js";
 import { resolveGlobalSanityReadConfig } from "../cms/globalSanityConfig.js";
 import policyContent from "../../lib/policyContent";
@@ -139,6 +139,7 @@ const loadSupabasePublicContent = async ({ resource, query, params }) => {
     .fetch(query, params)
     .then((data) => enrichSupabaseContentAssets({ data }))
     .then((data) => {
+      if (supabaseContentCache.get(key)?.pending !== pending) return data;
       supabaseContentCache.set(key, {
         data,
         hasData: true,
@@ -148,6 +149,7 @@ const loadSupabasePublicContent = async ({ resource, query, params }) => {
       return data;
     })
     .catch((error) => {
+      if (supabaseContentCache.get(key)?.pending !== pending) throw error;
       if (cached?.hasData && cached.staleUntil > Date.now()) {
         supabaseContentCache.set(key, {
           ...cached,
@@ -166,6 +168,7 @@ const loadSupabasePublicContent = async ({ resource, query, params }) => {
 
 export const clearSupabasePublicContentCache = () => {
   supabaseContentCache.clear();
+  clearSupabaseAssetManifestCache();
 };
 
 export const fetchPublicContent = async ({

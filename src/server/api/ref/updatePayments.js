@@ -261,6 +261,9 @@ export default async function handler(req, res) {
       },
     });
   } catch (err) {
+    if (isRevisionConflict(err)) {
+      return res.status(409).json({ok: false, error: 'Payment data changed while saving. Please try again.'});
+    }
     logSafeError('Referral payment update failed', err);
     return res.status(500).json({ok: false, error: 'Server error'});
   }

@@ -5,7 +5,8 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { createClient } from "@sanity/client";
-import dotenv from "dotenv";
+import operatorEnvironment from "./lib/operator-environment.cjs";
+import { stableSnapshotJson } from "../src/server/archive/snapshotContract.js";
 
 const args = new Set(process.argv.slice(2));
 const valueAfter = (flag) => {
@@ -20,15 +21,7 @@ const confirmedSnapshotPath = valueAfter("--confirmed-snapshot");
 const reconcileUrl = valueAfter("--reconcile-url");
 const explicitEnvPath = valueAfter("--env");
 
-for (const candidate of [
-  explicitEnvPath,
-  ".env.local",
-  ".vercel/.env.production.local",
-]) {
-  if (candidate && fs.existsSync(candidate)) {
-    dotenv.config({ path: candidate, override: false, quiet: true });
-  }
-}
+operatorEnvironment.loadOperatorEnvironment(explicitEnvPath);
 
 const readEnv = (...keys) =>
   keys.map((key) => String(process.env[key] || "").trim()).find(Boolean) || "";
@@ -166,7 +159,7 @@ const writeSnapshot = (documents) => {
   return true;
 };
 
-const verifyConfirmedSnapshot = () => {
+const verifyConfirmedSnapshot = (documents) => {
   if (!confirmedSnapshotPath) return false;
   const source = path.resolve(confirmedSnapshotPath);
   if (!fs.existsSync(source)) {
@@ -193,6 +186,11 @@ const verifyConfirmedSnapshot = () => {
     ageMs > 6 * 60 * 60 * 1000
   ) {
     throw new Error("The confirmed migration snapshot is stale; run a new dry run.");
+  }
+  const captured = [...snapshot.documents].sort((left, right) => String(left?._id).localeCompare(String(right?._id)));
+  const current = [...documents].sort((left, right) => String(left?._id).localeCompare(String(right?._id)));
+  if (stableSnapshotJson(captured) !== stableSnapshotJson(current)) {
+    throw new Error("The current documents differ from the confirmed snapshot; run a new dry run.");
   }
   return true;
 };
@@ -852,7 +850,7 @@ const summarizePlan = (plan) => ({
 const main = async () => {
   const documents = await client.fetch(`*[_type in $types]`, { types: TYPES });
   const snapshotCreated = writeSnapshot(documents);
-  const snapshotConfirmed = verifyConfirmedSnapshot();
+  const snapshotConfirmed = verifyConfirmedSnapshot(documents);
   const byType = (type) => documents.filter((document) => document._type === type);
   const input = {
     bookings: byType("booking"),

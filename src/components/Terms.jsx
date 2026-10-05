@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { normalizePolicyLink } from "../lib/policyLinks";
 import { PortableText } from "@portabletext/react";
 import { getPublicContent } from "../lib/publicContentClient";
 
@@ -60,20 +61,8 @@ export default function Terms() {
                 components={{
                   marks: {
                     link: ({ value, children }) => {
-                      const href = (value?.href || "").toLowerCase();
-                      const isContactLink =
-                        href === "/contact" ||
-                        href.startsWith("/contact?") ||
-                        href.startsWith("/contact#") ||
-                        href.startsWith("/contact/");
-                      const isEmail =
-                        href.includes("rooindustries.com") ||
-                        href.startsWith("mailto") ||
-                        isContactLink;
-
-                      const finalHref = isEmail
-                        ? "mailto:serviroo@rooindustries.com"
-                        : value?.href;
+                      const finalHref = normalizePolicyLink(value?.href);
+                      const isEmail = finalHref.toLowerCase().startsWith("mailto:");
 
                       const linkClasses = isEmail
                         ? "text-accent hover:text-[color:var(--color-link-hover)] underline underline-offset-2 transition-colors"

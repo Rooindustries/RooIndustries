@@ -123,6 +123,10 @@ describe("PayPal capture settlement verification", () => {
       payerEmail: "customer@example.invalid",
       payerId: "payer_status_check",
       providerPaymentId: "paypal_capture_status_check",
+      amountRefundedInSubunits: 0,
+      refundStatus: "",
+      refunds: [],
+      refundDetailsMissing: false,
     });
   });
 });

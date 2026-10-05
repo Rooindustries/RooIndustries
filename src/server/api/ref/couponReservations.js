@@ -27,8 +27,8 @@ const conflict = (message) => {
 
 const patchRevision = (transaction, document, mutate) =>
   transaction.patch(document._id, (patch) => {
-    const guarded = document._rev ? patch.ifRevisionId(document._rev) : patch;
-    return mutate(guarded);
+    if (!document._rev) throw conflict("Coupon source revision is missing.");
+    return mutate(patch.ifRevisionId(document._rev));
   });
 
 const fetchCoupon = async ({ client, couponCode }) =>
@@ -70,6 +70,13 @@ export const prepareCouponReservation = async ({
     existing?.status === COUPON_REDEMPTION_STATUS.RESERVED ||
     existing?.status === COUPON_REDEMPTION_STATUS.CONSUMED
   ) {
+    if (normalize(existing.ownerId) !== normalizedOwnerId ||
+        normalize(existing.coupon?._ref) !== coupon._id ||
+        normalizeCouponCode(existing.couponCode) !== code ||
+        (normalize(existing.bookingId) && normalize(bookingId) && normalize(existing.bookingId) !== normalize(bookingId)) ||
+        normalize(existing.paymentRecordId) !== normalize(paymentRecordId)) {
+      throw conflict("Coupon reservation belongs to another checkout.");
+    }
     return { coupon, redemption: existing, idempotent: true };
   }
 
@@ -168,7 +175,16 @@ export const appendCouponConsumption = ({
   allowReleasedRecovery = false,
 }) => {
   if (!redemption?._id) return transaction;
-  if (redemption.status === COUPON_REDEMPTION_STATUS.CONSUMED) return transaction;
+  if (normalize(redemption.coupon?._ref) !== normalize(coupon?._id) ||
+      (normalize(redemption.bookingId) && normalize(redemption.bookingId) !== normalize(bookingId))) {
+    throw conflict("Coupon reservation belongs to another booking or coupon.");
+  }
+  if (redemption.status === COUPON_REDEMPTION_STATUS.CONSUMED) {
+    if (normalize(redemption.bookingId) !== normalize(bookingId)) {
+      throw conflict("Coupon reservation was already consumed.");
+    }
+    return transaction;
+  }
   if (
     redemption.status === COUPON_REDEMPTION_STATUS.RELEASED &&
     allowReleasedRecovery &&

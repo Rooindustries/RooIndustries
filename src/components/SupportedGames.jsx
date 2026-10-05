@@ -135,7 +135,7 @@ export default function SupportedGames({ initialData = null }) {
             )}
           </div>
 
-          {featuredGames.length > 0 && (
+          {(featuredGames.length > 0 || hasMore) && (
             <div className="scroll-blur-lite rounded-2xl bg-surface-card ring-1 ring-line-soft backdrop-blur-sm p-4 sm:p-5 shadow-surface">
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3 md:gap-4">
                 {featuredGames.map((game, index) => (

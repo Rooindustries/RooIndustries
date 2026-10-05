@@ -65,10 +65,12 @@ const ensureSessionSecret = () => {
 
 const buildSessionToken = (payload, maxAgeSeconds) => {
   ensureSessionSecret();
-  const now = Math.floor(Date.now() / 1000);
+  const issuedAtMs = Date.now();
+  const now = Math.floor(issuedAtMs / 1000);
   const body = {
     v: 2,
     iat: now,
+    iatms: issuedAtMs,
     exp: now + maxAgeSeconds,
     rid: payload.referralId,
     code: payload.code || "",
@@ -164,6 +166,7 @@ export const getReferralSession = (req) => {
         Number(payload.cv) || Number(payload.sv) || 1
       ),
       issuedAt: Math.max(0, Number(payload.iat) || 0),
+      issuedAtMs: Math.max(0, Number(payload.iatms) || 0),
     };
   } catch (error) {
     return null;
@@ -183,6 +186,9 @@ const validateSupabaseReferralSession = async (session) => {
   const account = result.data;
   if (
     account?.creator_legacy_sanity_id !== session.referralId ||
+    !Array.isArray(account.roles) ||
+    !account.roles.includes("creator") ||
+    (session.principalId && account.principal_id !== session.principalId) ||
     (session.code && account.referral_code !== session.code)
   ) {
     return null;
@@ -196,10 +202,12 @@ const validateSupabaseReferralSession = async (session) => {
   };
 };
 
-const changedAfterSessionIssued = (changedAt, issuedAt) => {
+const changedAfterSessionIssued = (changedAt, issuedAt, issuedAtMs = 0) => {
   const changedAtMs = Date.parse(String(changedAt || ""));
   if (!Number.isFinite(changedAtMs) || !issuedAt) return false;
-  return Math.floor(changedAtMs / 1000) > issuedAt;
+  return issuedAtMs
+    ? changedAtMs > issuedAtMs
+    : changedAtMs >= issuedAt * 1000;
 };
 
 const validatePreCutoverSanityReferralSession = async (session) => {
@@ -226,7 +234,7 @@ const validatePreCutoverSanityReferralSession = async (session) => {
     account.registrationStatus !== "active" ||
     account.passwordResetRequired === true ||
     account.passwordLoginEnabled === false ||
-    changedAfterSessionIssued(account.passwordChangedAt, session.issuedAt)
+    changedAfterSessionIssued(account.passwordChangedAt, session.issuedAt, session.issuedAtMs)
   ) {
     return null;
   }
@@ -357,7 +365,7 @@ const validateFallbackAuthoritySession = async (session) => {
     authority.principalId !== session.principalId.toLowerCase() ||
     authority.principalSessionVersion !== session.sessionVersion ||
     authority.credentialVersion !== session.credentialVersion ||
-    changedAfterSessionIssued(authority.credentialChangedAt, session.issuedAt)
+    changedAfterSessionIssued(authority.credentialChangedAt, session.issuedAt, session.issuedAtMs)
   ) {
     return null;
   }

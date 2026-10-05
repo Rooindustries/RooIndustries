@@ -1,3 +1,4 @@
+import { readBoundedBody } from "../server/request/boundedJson.js";
 import { isSameOriginMutation } from "../server/request/sameOrigin.js";
 
 const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
@@ -34,7 +35,7 @@ const getHeaderValue = (store, name) => {
 };
 
 const buildQueryObject = (searchParams) => {
-  const query = {};
+  const query = Object.create(null);
 
   for (const [key, value] of searchParams.entries()) {
     if (!(key in query)) {
@@ -138,37 +139,40 @@ const readRequestBody = async (request) => {
   }
 
   const contentType = String(request.headers.get("content-type") || "").toLowerCase();
-  const declaredLength = Number(request.headers.get("content-length") || 0);
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_REQUEST_BODY_BYTES) {
-    throw new RequestInputError("Request body is too large.", 413, "payload_too_large");
+  const mediaType = contentType.split(";", 1)[0].trim();
+  if (mediaType && mediaType !== "application/json") {
+    throw new RequestInputError(
+      "Content-Type must be application/json.", 415, "unsupported_media_type"
+    );
   }
-
-  if (contentType.includes("application/json")) {
-    const rawBody = await request.text();
-    if (Buffer.byteLength(rawBody, "utf8") > MAX_REQUEST_BODY_BYTES) {
-      throw new RequestInputError("Request body is too large.", 413, "payload_too_large");
-    }
-    if (!rawBody) return { body: {}, rawBody: "" };
-    let body;
-    try {
-      body = JSON.parse(rawBody);
-    } catch {
-      throw new RequestInputError("Malformed JSON body.", 400, "malformed_json");
-    }
-    if (hasDuplicateJsonKeys(rawBody)) {
-      throw new RequestInputError("Duplicate JSON properties are not allowed.");
-    }
-    validateJsonShape(body);
-    return { body, rawBody };
+  let rawBody;
+  try {
+    rawBody = (await readBoundedBody(request, MAX_REQUEST_BODY_BYTES, 5_000)).toString("utf8");
+  } catch (error) {
+    const status = Number(error?.status || 400);
+    throw new RequestInputError(
+      error?.message || "Request body could not be read.",
+      status,
+      status === 413 ? "payload_too_large" : status === 408 ? "request_timeout" : "invalid_request"
+    );
   }
-
-  const text = await request.text();
-  if (!text) return { body: {}, rawBody: "" };
-  throw new RequestInputError(
-    "Content-Type must be application/json.",
-    415,
-    "unsupported_media_type"
-  );
+  if (!rawBody) return { body: {}, rawBody: "" };
+  if (mediaType !== "application/json") {
+    throw new RequestInputError(
+      "Content-Type must be application/json.", 415, "unsupported_media_type"
+    );
+  }
+  let body;
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    throw new RequestInputError("Malformed JSON body.", 400, "malformed_json");
+  }
+  if (hasDuplicateJsonKeys(rawBody)) {
+    throw new RequestInputError("Duplicate JSON properties are not allowed.");
+  }
+  validateJsonShape(body);
+  return { body, rawBody };
 };
 
 const buildResponseHeaders = (headerStore) => {
@@ -186,7 +190,7 @@ const buildResponseHeaders = (headerStore) => {
   return headers;
 };
 
-const createMutableResponse = () => {
+const createMutableResponse = (method) => {
   const headerStore = new Map();
   let statusCode = 200;
   let response = null;
@@ -203,7 +207,7 @@ const createMutableResponse = () => {
       headers.set("content-type", contentType);
     }
 
-    response = new Response(body, { status, headers });
+    response = new Response(method === "HEAD" || [204, 205, 304].includes(status) ? null : body, { status, headers });
     return response;
   };
 
@@ -314,7 +318,7 @@ export const runLegacyApiHandler = async ({
   };
 
   const { apiRes, hasResponse, getResponse, finalizeDefault } =
-    createMutableResponse();
+    createMutableResponse(method);
 
   const result = await handler(req, apiRes);
   if (result instanceof Response) {

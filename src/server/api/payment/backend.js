@@ -7,6 +7,7 @@ import {
   resolveSupabaseRuntimePolicy,
 } from "../../supabase/runtime.js";
 import { verifyPaymentAccessToken } from "./accessToken.js";
+import { getPayPalRefundCaptureId } from "./providerClients.js";
 import { findPaymentRecordByProviderData } from "./paymentRecord.js";
 import { verifyUpgradeIntentToken } from "../ref/upgradeIntentToken.js";
 import sanityConfiguration from "../../supabase/sanityConfiguration.cjs";
@@ -113,7 +114,9 @@ const webhookProviderData = ({ provider, body = {} }) => {
   return {
     providerOrderId: String(related.order_id || "").trim(),
     providerPaymentId: String(
-      related.capture_id || resource.capture_id || resource.id || ""
+      String(body.event_type || "").includes("REFUND")
+        ? getPayPalRefundCaptureId(resource)
+        : related.capture_id || resource.capture_id || resource.id || ""
     ).trim(),
   };
 };

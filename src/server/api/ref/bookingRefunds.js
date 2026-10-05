@@ -7,6 +7,31 @@ import {
   normalizeBookingStatus,
 } from "../../booking/bookingStatus.js";
 import { appendCouponRefund } from "./couponReservations.js";
+import { toSubunits } from "../payment/providerClients.js";
+
+export const resolvePaymentCurrency = (paymentRecord = {}, { booking = {}, refund = {}, fallback = "USD" } = {}) => {
+  const values = [paymentRecord.pricingSnapshot?.currency, paymentRecord.bookingPayload?.currency,
+    paymentRecord.providerPublicData?.currency, paymentRecord.refundCurrency,
+    ...(Array.isArray(paymentRecord.refunds) ? paymentRecord.refunds.map(entry => entry?.currency) : []),
+    booking.currency, booking.bookingPayload?.currency, refund.currency];
+  let currency = "";
+  for (const value of values) {
+    if (value == null || (typeof value === "string" && !value.trim())) continue;
+    if (typeof value !== "string" || !/^[A-Z]{3}$/.test(value.trim().toUpperCase())) {
+      throw Object.assign(new Error("Payment currency is invalid."), { status: 409, code: "payment_currency_invalid" });
+    }
+    const normalized = value.trim().toUpperCase();
+    if (currency && currency !== normalized) {
+      throw Object.assign(new Error("Payment currencies do not agree."), { status: 409, code: "payment_currency_mismatch" });
+    }
+    currency = normalized;
+  }
+  if (currency) return currency;
+  if (typeof fallback !== "string" || !/^[A-Z]{3}$/.test(fallback.trim().toUpperCase())) {
+    throw Object.assign(new Error("Payment currency is invalid."), { status: 409, code: "payment_currency_invalid" });
+  }
+  return fallback.trim().toUpperCase();
+};
 
 const isFullRefund = (refund = {}) => {
   const kind = String(refund.kind || refund.type || "").trim().toLowerCase();
@@ -15,8 +40,8 @@ const isFullRefund = (refund = {}) => {
 
 const patchRevision = (transaction, document, mutate) =>
   transaction.patch(document._id, (patch) => {
-    const guarded = document._rev ? patch.ifRevisionId(document._rev) : patch;
-    return mutate(guarded);
+    if (!document._rev) throw Object.assign(new Error("Refund source revision is missing."), { status: 409, code: "refund_revision_missing" });
+    return mutate(patch.ifRevisionId(document._rev));
   });
 
 const releaseRefundedUpgradeLock = async ({ client, paymentRecord }) => {
@@ -48,6 +73,8 @@ const markPaymentRecordRefunded = async ({ client, paymentRecord, now }) => {
     { id: paymentRecord._id }
   );
   if (!current?._id) return false;
+  if (current.status === "refunded" && current.refundState === "full" &&
+      current.refundRequiresBookingSync === false && !current.recoveryReason) return true;
   let patch = client.patch(current._id);
   if (current._rev && typeof patch.ifRevisionId === "function") {
     patch = patch.ifRevisionId(current._rev);
@@ -71,6 +98,8 @@ const markPaymentRecordRefundPending = async ({ client, paymentRecord, now }) =>
     { id: paymentRecord._id }
   );
   if (!current?._id) return false;
+  if (current.status === "refunded" && current.refundState === "full" &&
+      current.refundRequiresBookingSync === false && !current.recoveryReason) return true;
   let patch = client.patch(current._id);
   if (current._rev && typeof patch.ifRevisionId === "function") {
     patch = patch.ifRevisionId(current._rev);
@@ -108,7 +137,12 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
     });
   }
 
+  if (!booking._rev) {
+    throw Object.assign(new Error("Refund source revision is missing."), { status: 409, code: "refund_revision_missing" });
+  }
+
   const full = isFullRefund(refund);
+  const currency = resolvePaymentCurrency(paymentRecord, { booking, refund });
   const now = new Date().toISOString();
   const refundId = String(refund.id || refund.refundId || refund.eventId || "").trim();
   if (!full && paymentRecord.provider === "dodo") {
@@ -117,7 +151,7 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
       return { bookingId: booking._id, idempotent: true };
     }
     const originalCommission = Number(booking.dodoOriginalCommissionAmount ?? booking.commissionAmount ?? 0);
-    const totalAmount = Number(paymentRecord.providerPublicData?.totalAmount || 0) / 100 || Number(booking.dodoTotalAmount || booking.netAmount || 1);
+    const totalAmount = Number(paymentRecord.providerPublicData?.totalAmount || 0) / toSubunits(1, currency) || Number(booking.dodoTotalAmount || booking.netAmount || 1);
     const remaining = Math.max(0, 1 - refundedAmount / totalAmount);
     let patch = client.patch(booking._id);
     if (booking._rev) patch = patch.ifRevisionId(booking._rev);
@@ -209,6 +243,12 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
     : null;
   const ownsSlot = slotLock?.bookingId === booking._id && slotLock.status !== "released";
   const canRestoreCoupon = redemption?.status === "consumed";
+  if (canRestoreCoupon && String(redemption.bookingId || "").trim() !== booking._id) {
+    throw Object.assign(new Error("Coupon redemption belongs to another booking."), {
+      status: 409,
+      code: "coupon_refund_owner_mismatch",
+    });
+  }
   const referralId = booking.referral?._ref || "";
   const canReverseReferral = !!referralId && booking.referralAccountingApplied !== false;
   const referral = canReverseReferral
@@ -228,7 +268,7 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
       lastRefundId: refundId,
       lastRefundAt: refund.refundedAt || now,
       refundedAmount: Number(refund.amount ||
-        (paymentRecord.provider === "dodo" ? Number(refund.processedAmountInSubunits || 0) / 100 : 0) ||
+        (paymentRecord.provider === "dodo" ? Number(refund.processedAmountInSubunits || 0) / toSubunits(1, currency) : 0) ||
         booking.dodoTotalAmount || booking.netAmount || 0),
       refundAccountingAppliedAt: now,
       slotReleasedAfterRefund: ownsSlot,
@@ -304,7 +344,7 @@ export const applyBookingStatusTransition = async ({
   if (canonicalStatus === "refunded") {
     const paymentRecord = booking.paymentRecordId
       ? await client.fetch(
-          `*[_type == "paymentRecord" && _id == $id][0]{_id,_rev,status,bookingId,startClaimId}`,
+          `*[_type == "paymentRecord" && _id == $id][0]{...}`,
           { id: booking.paymentRecordId }
         )
       : null;

@@ -118,9 +118,9 @@ export const requireRateLimit = async (
           p_max: max,
         }
       );
-      if (error) {
+      if (error || typeof data?.allowed !== "boolean") {
         const failure = new Error("Supabase rate limiting failed.");
-        failure.code = error.code || "SUPABASE_RATE_LIMIT_FAILED";
+        failure.code = error?.code || "SUPABASE_RATE_LIMIT_FAILED";
         throw failure;
       }
       if (data?.allowed === false) {
@@ -219,7 +219,7 @@ export const consumeQuoteRateLimitWithPricing = async (
         p_coupon_code: String(couponCode || "").trim().toLowerCase(),
       }
     );
-    if (error || !data?.rateLimit) {
+    if (error || typeof data?.rateLimit?.allowed !== "boolean") {
       const failure = new Error("Supabase quote protection failed.");
       failure.code = error?.code || "SUPABASE_QUOTE_GUARD_FAILED";
       throw failure;

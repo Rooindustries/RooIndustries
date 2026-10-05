@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 import crypto from "node:crypto";
-import fs from "node:fs";
 import process from "node:process";
 import { createClient as createSanityClient } from "@sanity/client";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import dotenv from "dotenv";
+import operatorEnvironment from "./lib/operator-environment.cjs";
+import { fetchPinnedSanityAsset, validatePinnedSanityAssetUrl } from "./lib/sanity-asset-download.mjs";
 import { resolveSupabaseRuntimePolicy } from "../src/server/supabase/runtime.js";
 import {
   accountRpcPayload,
@@ -27,15 +27,7 @@ const explicitEnv =
   explicitEnvIndex >= 0
     ? String(process.argv[explicitEnvIndex + 1] || "").trim()
     : "";
-for (const candidate of [
-  explicitEnv,
-  ".env.local",
-  ".vercel/.env.preview.local",
-]) {
-  if (candidate && fs.existsSync(candidate)) {
-    dotenv.config({ path: candidate, override: false, quiet: true });
-  }
-}
+operatorEnvironment.loadOperatorEnvironment(explicitEnv);
 
 const hasFlag = (flag) => process.argv.includes(flag);
 const apply = hasFlag("--apply");
@@ -273,10 +265,10 @@ const contentType = (response) =>
 
 const verifySourceAsset = ({ buffer, descriptor, response }) => {
   const remoteLength = Number(response.headers.get("content-length") || 0);
-  const expectedLength = remoteLength || descriptor.expectedBytes;
-  if (buffer.length !== expectedLength) {
+  if (!Number.isSafeInteger(descriptor.expectedBytes) || descriptor.expectedBytes < 0 ||
+      buffer.length !== descriptor.expectedBytes || remoteLength && remoteLength !== descriptor.expectedBytes) {
     throw new Error(
-      `Sanity asset ${descriptor.legacySanityAssetId} has byte-size ${buffer.length}, expected ${expectedLength}.`
+      `Sanity asset ${descriptor.legacySanityAssetId} has byte-size ${buffer.length}, expected ${descriptor.expectedBytes}.`
     );
   }
   const actualSha1 = crypto.createHash("sha1").update(buffer).digest("hex");
@@ -287,13 +279,10 @@ const verifySourceAsset = ({ buffer, descriptor, response }) => {
   const remoteMd5 = String(response.headers.get("x-sanity-md5") || "")
     .trim()
     .toLowerCase();
-  const remoteHashMatches =
-    (remoteSha1 && remoteSha1 === actualSha1) ||
-    (remoteMd5 && remoteMd5 === actualMd5);
-  const documentHashMatches =
-    descriptor.expectedSha1 && descriptor.expectedSha1 === actualSha1;
   if (
-    (remoteSha1 || remoteMd5) ? !remoteHashMatches : !documentHashMatches
+    !/^[0-9a-f]{40}$/.test(descriptor.expectedSha1) ||
+    descriptor.expectedSha1 !== actualSha1 ||
+    remoteSha1 && remoteSha1 !== actualSha1 || remoteMd5 && remoteMd5 !== actualMd5
   ) {
     throw new Error(
       `Sanity asset ${descriptor.legacySanityAssetId} failed its source checksum check.`
@@ -308,15 +297,17 @@ const verifySourceAsset = ({ buffer, descriptor, response }) => {
 };
 
 const fetchRawSanityAsset = async (descriptor) => {
-  const sourceUrl = new URL(descriptor.sourceUrl);
+  const sourceUrl = new URL(validatePinnedSanityAssetUrl(descriptor.sourceUrl, {
+    projectId: sanityProjectId, dataset: sanityDataset,
+  }));
   const headers = { "accept-encoding": "identity" };
   if (descriptor.storageBucket === "site-content-public") {
     sourceUrl.searchParams.set("dlRaw", "true");
     headers.authorization = `Bearer ${sanityToken}`;
   }
-  const response = await fetch(sourceUrl, {
-    redirect: "follow",
-    headers,
+  const response = await fetchPinnedSanityAsset({
+    url: sourceUrl.toString(), projectId: sanityProjectId, dataset: sanityDataset,
+    allowRaw: true, headers,
   });
   if (!response.ok) {
     throw new Error("A Sanity asset could not be downloaded.");
@@ -754,14 +745,14 @@ const main = async () => {
     return;
   }
 
-  const runId = await requireRpc("roo_start_sync_run", {
+  const runId = apply ? await requireRpc("roo_start_sync_run", {
     p_direction: verifyOnly ? "compare" : "sanity_to_supabase",
     p_mode: verifyOnly ? "shadow" : "apply",
     p_source_cursor: documents
       .map((document) => document._updatedAt || "")
       .sort()
       .at(-1) || null,
-  });
+  }) : null;
 
   try {
     let importSummary = null;
@@ -812,10 +803,10 @@ const main = async () => {
       await finishRun(runId, "failed", counters, "Shadow parity failed.");
       throw new Error("Supabase shadow parity failed.");
     }
-    counters.resolvedDrift = await requireRpc(
+    counters.resolvedDrift = apply ? await requireRpc(
       "roo_resolve_verified_drift_findings",
       { p_successful_run_id: runId }
-    );
+    ) : null;
     await finishRun(runId, "completed", counters);
     console.log(JSON.stringify({ ok: true, ...counters }, null, 2));
   } catch (error) {

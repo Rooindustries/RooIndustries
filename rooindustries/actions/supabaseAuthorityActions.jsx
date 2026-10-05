@@ -47,14 +47,15 @@ const asDraftDocument = (document, draftId) => {
   return {...business, _id: draftId}
 }
 
-const deleteDraftAtRevision = async ({client, draftId, revision}) => {
-  const result = await client.delete(
-    {
-      query: '*[_id == $id && _rev == $revision]',
-      params: {id: draftId, revision},
-    },
-    {returnDocuments: false, returnFirst: false},
-  )
+const deleteDraftAtRevision = async ({client, draftId, revision, document}) => {
+  if (!revision) throw new Error('The draft revision is unavailable.')
+  const field = Object.keys(document || {}).find((key) => !key.startsWith('_') && document[key] !== undefined)
+  if (!field) throw new Error('The draft content is unavailable.')
+  const result = await client
+    .transaction()
+    .patch(draftId, {ifRevisionID: revision, set: {[field]: document[field]}})
+    .delete(draftId)
+    .commit({returnDocuments: false, returnFirst: false})
   return Array.isArray(result?.documentIds) && result.documentIds.includes(draftId)
 }
 
@@ -142,6 +143,7 @@ const useAuthorityAction = (props, operation) => {
             client,
             draftId,
             revision: props.draft._rev,
+            document: props.draft,
           })
           if (!deleted) throw new Error('The draft changed before it could be deleted.')
           props.onComplete()
@@ -163,6 +165,7 @@ const useAuthorityAction = (props, operation) => {
             client,
             draftId,
             revision: props.draft._rev,
+            document: props.draft,
           })
           if (!deleted) draftCleanupPending = true
         } catch {

@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 
-import fs from "node:fs";
 import process from "node:process";
 import { createClient as createSanityClient } from "@sanity/client";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import dotenv from "dotenv";
+import operatorEnvironment from "./lib/operator-environment.cjs";
 import {
   COMMERCE_EPHEMERAL_DOCUMENT_TYPES,
   COMMERCE_MIXED_IDENTITY_DOCUMENT_TYPES,
@@ -19,15 +18,7 @@ const explicitEnv =
   explicitEnvIndex >= 0
     ? String(process.argv[explicitEnvIndex + 1] || "").trim()
     : "";
-for (const candidate of [
-  explicitEnv,
-  ".env.local",
-  ".vercel/.env.preview.local",
-]) {
-  if (candidate && fs.existsSync(candidate)) {
-    dotenv.config({ path: candidate, override: false, quiet: true });
-  }
-}
+operatorEnvironment.loadOperatorEnvironment(explicitEnv);
 
 const hasFlag = (flag) => process.argv.includes(flag);
 const apply = hasFlag("--apply");
@@ -268,7 +259,7 @@ const main = async () => {
     return;
   }
 
-  const runId = await requireRpc("roo_start_sync_run", {
+  const runId = apply ? await requireRpc("roo_start_sync_run", {
     p_direction: verifyOnly ? "compare" : "sanity_to_supabase",
     p_mode: verifyOnly ? "shadow" : "apply",
     p_source_cursor:
@@ -276,7 +267,7 @@ const main = async () => {
         .map((document) => document._updatedAt || "")
         .sort()
         .at(-1) || null,
-  });
+  }) : null;
 
   try {
     let importSummary = null;

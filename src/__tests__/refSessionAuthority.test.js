@@ -102,6 +102,7 @@ describe("referral session authority", () => {
     mockResolvePolicy.mockReturnValue({ primaryBackend: "supabase" });
     mockRpc.mockResolvedValue({
       data: {
+        roles: ["creator"],
         creator_legacy_sanity_id: "ref_creator_1",
         referral_code: "creator-code",
         principal_id: principalId,
@@ -142,6 +143,7 @@ describe("referral session authority", () => {
   test("validates a Supabase-origin session against Supabase during the rolling pre-cutover phase", async () => {
     mockRpc.mockResolvedValue({
       data: {
+        roles: ["creator"],
         creator_legacy_sanity_id: "ref_creator_1",
         referral_code: "creator-code",
         principal_id: principalId,

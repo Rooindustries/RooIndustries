@@ -9,6 +9,14 @@ import {
   shouldLoadSeorce,
 } from "../next/AppClientRuntime";
 
+jest.mock("../lib/productionBrowser", () => {
+  const { isProductionBrowser } = jest.requireActual("../lib/productionBrowser");
+  return {
+    isProductionBrowser: (hostname = "www.rooindustries.com", env = { NODE_ENV: "production", VERCEL_ENV: "production" }) =>
+      isProductionBrowser(hostname, env),
+  };
+});
+
 const scriptId = "seorce-runtime-script";
 
 describe("Seorce runtime loading", () => {

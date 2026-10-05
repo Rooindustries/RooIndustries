@@ -45,6 +45,7 @@ describe("referral split updates", () => {
       startsPaused: false,
     });
     const patch = {
+      ifRevisionId: jest.fn(() => patch),
       set: (...args) => {
         mockSet(...args);
         return patch;
@@ -57,6 +58,7 @@ describe("referral split updates", () => {
 
   test("blocks a creator who has not met the referral requirement", async () => {
     mockFetch.mockResolvedValue({
+      _rev: "creator-fixture-revision",
       maxCommissionPercent: 20,
       successfulReferrals: 4,
       bypassUnlock: false,
@@ -73,6 +75,7 @@ describe("referral split updates", () => {
 
   test("allows a bypassed creator and stores exact two-decimal values", async () => {
     mockFetch.mockResolvedValue({
+      _rev: "creator-fixture-revision",
       maxCommissionPercent: 20,
       successfulReferrals: 0,
       bypassUnlock: true,

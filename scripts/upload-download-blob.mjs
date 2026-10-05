@@ -2,19 +2,16 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import posixPath from "node:path/posix";
-import dotenv from "dotenv";
+import operatorEnvironment from "./lib/operator-environment.cjs";
 import { head, put } from "@vercel/blob";
 import integrity from "./download-blob-integrity.cjs";
-
-dotenv.config({ path: path.join(process.cwd(), ".env.local") });
-dotenv.config();
 
 const DEFAULT_CONTENT_TYPE = "application/zip";
 const { assertRemoteBlobMetadata, inspectDownloadArtifact } = integrity;
 
 const usage = () => {
   console.error(
-    "Usage: node scripts/upload-download-blob.mjs <slug> [local-zip-path] [--overwrite] [--verify-only]"
+    "Usage: node scripts/upload-download-blob.mjs <slug> [local-zip-path] [--apply --env <private-file>] [--overwrite] [--verify-only]"
   );
   process.exit(1);
 };
@@ -118,11 +115,17 @@ const parseCatalog = () => {
 };
 
 const args = process.argv.slice(2);
+const envIndex = args.indexOf("--env");
+const envPath = envIndex >= 0 ? args[envIndex + 1] : "";
+const apply = args.includes("--apply");
 const overwrite = args.includes("--overwrite");
 const verifyOnly = args.includes("--verify-only");
-const supportedFlags = new Set(["--overwrite", "--verify-only"]);
-if (args.some((arg) => arg.startsWith("--") && !supportedFlags.has(arg))) usage();
-const positional = args.filter((arg) => !supportedFlags.has(arg));
+const supportedFlags = new Set(["--apply", "--env", "--overwrite", "--verify-only"]);
+const withoutEnv = args.filter((_, index) => envIndex < 0 || index !== envIndex + 1);
+if (withoutEnv.some((arg) => arg.startsWith("--") && !supportedFlags.has(arg))) usage();
+if (apply && verifyOnly || overwrite && !apply) usage();
+if (envPath || apply || envIndex >= 0) operatorEnvironment.loadOperatorEnvironment(envPath);
+const positional = withoutEnv.filter((arg) => !supportedFlags.has(arg));
 const slug = normalizeSlug(positional[0]);
 if (!slug || positional.length > 2) usage();
 
@@ -172,11 +175,12 @@ if (configured?.sha256 && configured.sha256 !== localArtifact.sha256) {
   process.exit(1);
 }
 
-if (verifyOnly) {
+if (verifyOnly || !apply) {
   console.log(
     JSON.stringify(
       {
         ok: true,
+        mode: verifyOnly ? "verified" : "dry-run",
         verifiedOnly: true,
         slug,
         localPath,

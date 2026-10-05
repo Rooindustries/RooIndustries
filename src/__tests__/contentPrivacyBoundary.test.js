@@ -19,6 +19,7 @@ jest.mock("../server/supabase/documentClient", () => ({
 }));
 
 jest.mock("../server/supabase/assets", () => ({
+  clearSupabaseAssetManifestCache: jest.fn(),
   enrichSupabaseContentAssets: (...args) =>
     mockEnrichSupabaseContentAssets(...args),
 }));

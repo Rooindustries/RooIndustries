@@ -35,6 +35,7 @@ const syncPayoutsHandler = require("../server/api/ref/syncPayouts.js").default;
 
 const referral = {
   _id: "referral-1",
+  _rev: "referral-fixture-revision",
   name: "Creator",
   slug: { current: "creator" },
   xocPayments: [],
@@ -62,6 +63,7 @@ const createClients = () => {
   };
   const commit = jest.fn().mockResolvedValue({ _id: referral._id });
   const patch = {
+    ifRevisionId: jest.fn(() => patch),
     set: jest.fn(() => patch),
     commit,
   };

@@ -201,7 +201,7 @@ export const buildMigrationAccounts = (documents) => {
         paypal_email: normalizeEmail(referral.paypalEmail),
         contact_discord: normalize(referral.contactDiscord),
         commission_basis_points: clampInteger(
-          Number(referral.currentCommissionPercent || 10) * 100,
+          Number(referral.currentCommissionPercent ?? 10) * 100,
           0,
           10000,
           1000

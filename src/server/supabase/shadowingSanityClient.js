@@ -10,6 +10,7 @@ import {
   importShadowDocuments,
   projectReferralAccountShadow,
   projectOperationalShadow,
+  requireShadowDocumentArray,
   tombstoneCommerceShadowDocuments,
   tombstoneShadowDocuments,
 } from "./shadowStore.js";
@@ -28,9 +29,9 @@ const mirrorDocuments = async ({
   const event = buildMirrorEvent({ operation, ids: uniqueIds });
 
   try {
-    const sourceDocuments = await sanityClient.fetch(`*[_id in $ids]`, {
+    const sourceDocuments = requireShadowDocumentArray(await sanityClient.fetch(`*[_id in $ids]`, {
       ids: uniqueIds,
-    });
+    }));
     const found = new Set((sourceDocuments || []).map((document) => document._id));
     const importer = commerceOnly
       ? importCommerceShadowDocuments

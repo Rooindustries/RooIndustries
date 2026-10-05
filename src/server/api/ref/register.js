@@ -61,6 +61,32 @@ const isExpiredPendingRegistration = (referral) =>
 
 const removeExpiredPendingRegistration = async (referral) => {
   if (!isExpiredPendingRegistration(referral)) return false;
+  if (!referral._rev) {
+    throw Object.assign(new Error("Registration revision is unavailable."), { statusCode: 409 });
+  }
+  const current = await client.fetch(
+    `*[_type == "referral" && _id == $id][0]`,
+    { id: referral._id }
+  );
+  if (current?._rev !== referral._rev || !isExpiredPendingRegistration(current)) {
+    throw Object.assign(new Error("Registration changed."), { statusCode: 409 });
+  }
+  if ([
+    "successfulReferrals", "xocPayments", "vertexPayments", "earnedXoc",
+    "earnedVertex", "earnedTotal", "paidXoc", "paidVertex", "paidTotal",
+    "owedXoc", "owedVertex", "owedTotal", "notes",
+    "maxCommissionPercent", "currentDiscountPercent", "bypassUnlock",
+  ].some((field) => {
+    const value = current[field];
+    return Array.isArray(value)
+      ? value.length > 0
+      : value !== undefined && value !== null && value !== "" && value !== 0;
+  }) || (
+    current.currentCommissionPercent !== undefined &&
+    current.currentCommissionPercent !== 10
+  ) || (current.isFirstTime !== undefined && current.isFirstTime !== true)) {
+    throw Object.assign(new Error("Registration has retained account data."), { statusCode: 409 });
+  }
   const emailClaimId = buildReferralIdentityClaimId({
     kind: "email",
     value: referral.creatorEmail,
@@ -69,9 +95,29 @@ const removeExpiredPendingRegistration = async (referral) => {
     kind: "slug",
     value: referral.slug?.current,
   });
-  let transaction = client.transaction().delete(referral._id);
-  if (emailClaimId) transaction = transaction.delete(emailClaimId);
-  if (slugClaimId) transaction = transaction.delete(slugClaimId);
+  const claims = await client.fetch(
+    `*[_id in $ids]{_id,_rev,referral}`,
+    { ids: [emailClaimId, slugClaimId].filter(Boolean) }
+  );
+  if (
+    !Array.isArray(claims) ||
+    claims.some((claim) => !claim._rev || claim.referral?._ref !== referral._id)
+  ) {
+    throw Object.assign(new Error("Registration ownership changed."), { statusCode: 409 });
+  }
+  let transaction = client
+    .transaction()
+    .patch(referral._id, (patch) => patch
+      .ifRevisionId(referral._rev)
+      .set({ registrationStatus: "pending_email" }))
+    .delete(referral._id);
+  for (const claim of claims) {
+    transaction = transaction
+      .patch(claim._id, (patch) => patch
+        .ifRevisionId(claim._rev)
+        .set({ referral: claim.referral }))
+      .delete(claim._id);
+  }
   await transaction.commit();
   return true;
 };
@@ -474,7 +520,16 @@ export default async function handler(req, res) {
         expiresAt: verificationExpiresAt,
       });
     } else if (expiredSupabaseRegistration) {
-      await client.transaction().createOrReplace(referral).commit();
+      if (!expiredSupabaseRegistration._rev) {
+        throw Object.assign(new Error("Registration revision is unavailable."), { statusCode: 409 });
+      }
+      const { _id, _type, ...replacement } = referral;
+      await client.transaction().patch(referralId, (patch) => patch
+        .ifRevisionId(expiredSupabaseRegistration._rev)
+        .set(replacement)
+        .unset([...expiredRegistrationScrubFields].filter((field) =>
+          !field.startsWith("_") && !Object.hasOwn(replacement, field))))
+        .commit();
     } else {
       await client
         .transaction()

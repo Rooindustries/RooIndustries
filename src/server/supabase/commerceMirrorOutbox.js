@@ -1,3 +1,5 @@
+import { requireMirrorCompletion, requireMirrorEvents, requireMirrorStatus } from "./mirrorRpcResponse.js";
+import { appendSanityMirrorDelete, appendSanityMirrorUpsert, requireSanityMirrorRevision } from "./sanityMirrorMutations.js";
 import crypto from "node:crypto";
 import {
   pickReferralCommerceFields,
@@ -11,7 +13,7 @@ import {
   readMirrorSequence,
 } from "./mirrorMetadata.js";
 import { logSanityMirrorEvent } from "./mirrorObservability.js";
-import { fetchShadowDocuments } from "./shadowStore.js";
+import { fetchShadowDocuments, requireShadowDocumentArray } from "./shadowStore.js";
 
 const normalizeDocuments = (value) =>
   (Array.isArray(value) ? value : [])
@@ -107,9 +109,10 @@ const guardedDeleteIds = async ({ sanityClient, event }) => {
     error.code = "COMMERCE_MIRROR_DELETE_GUARD_UNAVAILABLE";
     throw error;
   }
-  const currentDocuments = await sanityClient.fetch(
+  const currentDocuments = requireShadowDocumentArray(await sanityClient.fetch(
     `*[_id in $ids]{
       _id,
+      _type,
       _rev,
       _supabaseRevision,
       _supabaseCanonicalHash,
@@ -118,9 +121,9 @@ const guardedDeleteIds = async ({ sanityClient, event }) => {
       _supabaseSequences
     }`,
     { ids: deletedIds }
-  );
+  ));
   const currentById = new Map(
-    (Array.isArray(currentDocuments) ? currentDocuments : [])
+    currentDocuments
       .filter((document) => document?._id)
       .map((document) => [String(document._id), document])
   );
@@ -160,16 +163,16 @@ const guardedDeleteIds = async ({ sanityClient, event }) => {
       throw error;
     }
     return true;
-  });
+  }).map((id) => ({ id, current: currentById.get(id) }));
 };
 
 const fetchMirrorDocuments = async ({ sanityClient, ids }) => {
   if (ids.length < 1) return new Map();
-  const documents = await sanityClient.fetch(
+  const documents = requireShadowDocumentArray(await sanityClient.fetch(
     `*[_id in $ids]`,
     { ids },
     { perspective: "raw" }
-  );
+  ));
   return new Map(
     normalizeDocuments(documents).map((document) => [String(document._id), document])
   );
@@ -233,10 +236,7 @@ const applyReferralAccounting = ({ transaction, current, document, event }) => {
     });
   }
   return transaction.patch(document._id, (patch) => {
-    const guarded =
-      current._rev && typeof patch.ifRevisionId === "function"
-        ? patch.ifRevisionId(current._rev)
-        : patch;
+    const guarded = patch.ifRevisionId(requireSanityMirrorRevision(current));
     const setPatch = guarded.set(update.set);
     return update.unset.length > 0 ? setPatch.unset(update.unset) : setPatch;
   });
@@ -268,7 +268,7 @@ const verifyCommerceProjection = async ({ sanityClient, documents, deletedIds, e
     }
   }
   for (const id of deletedIds) {
-    if (current.has(String(id))) {
+    if (current.has(String(id)) && readMirrorSequence(current.get(String(id)), "commerce") <= eventSequence) {
       const error = new Error("The commerce mirror deletion was not visible.");
       error.code = "COMMERCE_MIRROR_VERIFICATION_FAILED";
       throw error;
@@ -296,13 +296,16 @@ const mirrorEventToSanity = async ({ supabaseClient, sanityClient, event }) => {
   );
   const eligibleDeletes = await guardedDeleteIds({ sanityClient, event });
   let transaction = sanityClient.transaction();
-  for (const id of eligibleDeletes) transaction = transaction.delete(id);
+  for (const deletion of eligibleDeletes) {
+    transaction = appendSanityMirrorDelete({ transaction, ...deletion });
+  }
   for (const document of eligibleDocuments) {
     const current = currentById.get(String(document._id));
     transaction =
       document?._type === "referral"
         ? applyReferralAccounting({ transaction, current, document, event })
-        : transaction.createOrReplace(cleanForSanity({ document, current, event }));
+        : appendSanityMirrorUpsert({ transaction, current,
+          document: cleanForSanity({ document, current, event }) });
   }
   const applied = eligibleDeletes.length + eligibleDocuments.length;
   if (applied > 0) {
@@ -310,7 +313,7 @@ const mirrorEventToSanity = async ({ supabaseClient, sanityClient, event }) => {
     await verifyCommerceProjection({
       sanityClient,
       documents: eligibleDocuments,
-      deletedIds: eligibleDeletes,
+      deletedIds: eligibleDeletes.map((deletion) => deletion.id),
       event,
     });
   }
@@ -350,15 +353,15 @@ export const drainCommerceMirrorOutbox = async ({
     normalizeIds(event?.document_ids).some((id) => requiredIds.includes(id));
   const finish = async () => {
     if (failClosed) {
-      const backlog = requireRpc(
+      const backlog = requireMirrorStatus(requireRpc(
         requiredIds.length > 0
           ? await supabaseClient.rpc("roo_commerce_mirror_status_for_ids", {
               p_document_ids: requiredIds,
             })
           : await supabaseClient.rpc("roo_commerce_mirror_backlog"),
         "commerce mirror backlog check"
-      );
-      if (Number(backlog?.pending || 0) > 0) {
+      ));
+      if (backlog.pending > 0 || backlog.dead_letters > 0) {
         const error = new Error("Commerce fallback mirroring remains pending.");
         error.code = "COMMERCE_MIRROR_PENDING";
         error.status = 503;
@@ -368,18 +371,19 @@ export const drainCommerceMirrorOutbox = async ({
     }
     return summary;
   };
-  for (let batch = 0; batch < maxBatches; batch += 1) {
+  const batches = Math.max(1, Math.min(20, Number(maxBatches) || 4));
+  for (let batch = 0; batch < batches; batch += 1) {
     const leaseId = crypto.randomUUID();
     let events;
     try {
-      events = requireRpc(
+      events = requireMirrorEvents(requireRpc(
         await supabaseClient.rpc("roo_claim_commerce_mirror_events", {
           p_lease_id: leaseId,
           p_limit: Math.max(1, Math.min(100, Number(limit) || 25)),
           p_force: failClosed,
         }),
         "commerce mirror claim"
-      );
+      ), "commerce");
     } catch (error) {
       if (isMissingRpc(error) || Number(error?.status) === 501) {
         if (failClosed) {
@@ -402,7 +406,6 @@ export const drainCommerceMirrorOutbox = async ({
       return summary;
     }
 
-    if (!Array.isArray(events)) return { ...summary, supported: false };
     if (events.length < 1) return finish();
     for (const event of events) {
       summary.attempted += 1;
@@ -413,7 +416,7 @@ export const drainCommerceMirrorOutbox = async ({
           event,
         });
         const superseded = mirrored.applied < 1 && mirrored.superseded > 0;
-        requireRpc(
+        requireMirrorCompletion({ value: requireRpc(
           await supabaseClient.rpc("roo_complete_commerce_mirror_event", {
             p_event_key: event.event_key,
             p_lease_id: leaseId,
@@ -423,7 +426,7 @@ export const drainCommerceMirrorOutbox = async ({
               : null,
           }),
           "commerce mirror completion"
-        );
+        ), eventKey: event.event_key, statuses: ["mirrored", "superseded"] });
         summary.mirrored += superseded ? 0 : 1;
       } catch (error) {
         summary.failed += 1;

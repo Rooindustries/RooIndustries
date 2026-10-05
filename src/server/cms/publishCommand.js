@@ -25,6 +25,10 @@ import { resolveGlobalSanityWriteConfig } from "./globalSanityConfig.js";
 import { assertGlobalCmsWritesAllowed } from "./writeControl.js";
 
 const OPERATIONS = new Set(["delete", "publish", "unpublish"]);
+const COUPON_OPERATIONAL_FIELDS = [
+  "timesUsed", "activeReservations", "redemptionCount",
+  "autoDeactivatedByRedemptionId", "autoDeactivatedAt",
+];
 
 const failure = (message, status, code) => {
   const error = new Error(message);
@@ -47,6 +51,17 @@ const requireRpcData = ({ data, error }, operation) => {
     statusByCode[error.code] || 503,
     error.code || "CMS_DATABASE_FAILED",
   );
+};
+
+const requireMirrorStatus = (response, operation) => {
+  const data = requireRpcData(response, operation);
+  if (!data || typeof data !== "object" || Array.isArray(data) ||
+      !Number.isSafeInteger(data.pending) || data.pending < 0 ||
+      !Number.isSafeInteger(data.dead_letters) || data.dead_letters < 0 ||
+      data.dead_letters > data.pending) {
+    throw failure("The CMS mirror status is unavailable.", 503, "CMS_MIRROR_STATUS_INVALID");
+  }
+  return data;
 };
 
 const readPrivateSanityConfig = (env) => {
@@ -172,6 +187,9 @@ const loadCurrentDocument = async ({ client, command }) => {
       "CMS_DOCUMENT_TYPE_CONFLICT",
     );
   }
+  if (current && !String(current._rev || "").trim()) {
+    throw failure("The CMS authority revision is unavailable.", 409, "CMS_AUTHORITY_REVISION_MISSING");
+  }
   return current;
 };
 
@@ -192,37 +210,44 @@ const buildMutations = ({ command, current }) => {
       },
     ];
   }
+  const document = { ...command.document };
+  if (command.type === "coupon") {
+    for (const field of COUPON_OPERATIONAL_FIELDS) {
+      if (current?.[field] === undefined) delete document[field];
+      else document[field] = current[field];
+    }
+  }
   return [
     current
       ? {
           operation: "replace",
           id: command.documentId,
           expected_revision: current._rev || "",
-          document: command.document,
+          document,
         }
       : {
           operation: "create",
           id: command.documentId,
-          document: command.document,
+          document,
         },
   ];
 };
 
 const readRequiredMirrorStatus = async ({ client, documentId }) =>
-  requireRpcData(
+  requireMirrorStatus(
     await client.rpc("roo_document_mutation_mirror_status_for_ids", {
       p_document_ids: [documentId],
     }),
     "CMS mirror status",
-  ) || {};
+  );
 
 const readRequiredCommerceMirrorStatus = async ({ client, documentId }) =>
-  requireRpcData(
+  requireMirrorStatus(
     await client.rpc("roo_commerce_mirror_status_for_ids", {
       p_document_ids: [documentId],
     }),
     "CMS commerce mirror status",
-  ) || {};
+  );
 
 const trySynchronousMirror = async ({
   client,
@@ -234,14 +259,24 @@ const trySynchronousMirror = async ({
 }) => {
   const config = readPrivateSanityConfig(env);
   if (config) {
-    await drainMirror({
-      supabaseClient: client,
-      sanityClient: sanityClientFactory(config),
-      requiredDocumentIds: [documentId],
-      limit: 5,
-      maxBatches: 2,
-      budgetMs: 8_000,
-    });
+    let timer;
+    try {
+      await Promise.race([
+        drainMirror({
+          supabaseClient: client,
+          sanityClient: sanityClientFactory({ ...config, timeout: 8_000, maxRetries: 0 }),
+          requiredDocumentIds: [documentId],
+          limit: 5,
+          maxBatches: 2,
+          budgetMs: 8_000,
+        }),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(failure("The CMS mirror drain timed out.", 503, "CMS_MIRROR_DRAIN_TIMEOUT")), 8_000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
   return domain === "commerce"
     ? readRequiredCommerceMirrorStatus({ client, documentId })
@@ -319,6 +354,31 @@ export const executeGlobalCmsCommand = async ({
   );
   if (existing?.replayed === true) return finishCommitted(true);
 
+  const current = await loadCurrentDocument({
+    client: supabaseClient,
+    command,
+  });
+  let mirrorStatus = await (domain === "commerce"
+    ? readRequiredCommerceMirrorStatus
+    : readRequiredMirrorStatus)({ client: supabaseClient, documentId: command.documentId });
+  if (mirrorStatus.pending > 0 || mirrorStatus.dead_letters > 0) {
+    try {
+      mirrorStatus = await trySynchronousMirror({
+        client: supabaseClient,
+        documentId: command.documentId,
+        env,
+        sanityClientFactory,
+        drainMirror: domain === "commerce" ? drainCommerceMirror : drainContentMirror,
+        domain,
+      });
+    } catch (error) {
+      logSafeError("CMS fallback mirror remains pending", error);
+      mirrorStatus = await (domain === "commerce" ? readRequiredCommerceMirrorStatus : readRequiredMirrorStatus)({ client: supabaseClient, documentId: command.documentId });
+    }
+    if (mirrorStatus.pending > 0 || mirrorStatus.dead_letters > 0) {
+      throw failure("The CMS authority is still synchronizing to Sanity.", 409, "CMS_AUTHORITY_SYNC_PENDING");
+    }
+  }
   await verifyMutation({
     caller,
     operation: command.operation === "publish" ? "publish" : "delete",
@@ -338,10 +398,6 @@ export const executeGlobalCmsCommand = async ({
           sanityClientFactory,
         })
       : [];
-  const current = await loadCurrentDocument({
-    client: supabaseClient,
-    command,
-  });
   const mutations = buildMutations({ command, current });
   const assetLinks = command.document
     ? collectGlobalCmsAssetLinks(command.document)

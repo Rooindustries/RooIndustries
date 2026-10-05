@@ -18,10 +18,67 @@ const bookingConflict = (message, code = "booking_conflict") => {
   return error;
 };
 
+export const assertBookingReplayMatches = ({ booking, requested, partial = false }) => {
+  const fields = [
+    "email", "packageTitle", "originalOrderId", "couponCode", "paymentRecordId",
+    "paymentProvider", "paypalOrderId", "razorpayOrderId", "razorpayPaymentId",
+    "dodoCheckoutSessionId", "dodoPaymentId", "referralCode",
+  ];
+  for (const field of fields) {
+    if (partial && !Object.hasOwn(requested, field)) continue;
+    const normalizeField = (value) =>
+      ["email", "couponCode", "referralCode"].includes(field)
+        ? normalize(value).toLowerCase()
+        : normalize(value);
+    if (normalizeField(booking[field]) !== normalizeField(requested[field])) {
+      throw bookingConflict("Booking request changed for this payment or request key.", "booking_request_changed");
+    }
+  }
+  if ((!partial || Object.hasOwn(requested, "referral")) &&
+      normalize(booking.referral?._ref) !== normalize(requested.referral?._ref)) {
+    throw bookingConflict("Booking referral changed for this request key.", "booking_request_changed");
+  }
+  const requestedTime = requested.startTimeUTC || requested.originalRequestedStartTimeUTC;
+  if ((!partial || Object.hasOwn(requested, "startTimeUTC") || Object.hasOwn(requested, "originalRequestedStartTimeUTC")) &&
+      normalizeStartTimeUTC(requestedTime) !== normalizeStartTimeUTC(
+    booking.startTimeUTC || booking.originalRequestedStartTimeUTC
+  )) {
+    throw bookingConflict("Booking time changed for this request key.", "booking_request_changed");
+  }
+  for (const field of ["grossAmount", "netAmount"]) {
+    if ((!partial || Object.hasOwn(requested, field)) &&
+        (!Number.isFinite(Number(booking[field])) || !Number.isFinite(Number(requested[field])) ||
+          Number(booking[field]) !== Number(requested[field]))) {
+      throw bookingConflict("Booking price changed for this request key.", "booking_request_changed");
+    }
+  }
+};
+
+const assertBookingHoldMatches = ({ doc, hold, startTimeUTC, allowMissingHold }) => {
+  if (!hold?._id) return;
+  const phase = normalize(hold.phase || "active").toLowerCase();
+  const expiresAt = new Date(hold.expiresAt || "").getTime();
+  const timeMatches = hold.startTimeUTC
+    ? normalizeStartTimeUTC(hold.startTimeUTC) === startTimeUTC
+    : normalize(doc.hostDate) && normalize(doc.hostTime) &&
+      normalize(hold.hostDate) === normalize(doc.hostDate) && normalize(hold.hostTime) === normalize(doc.hostTime);
+  if (
+    !["active", "payment_pending"].includes(phase) ||
+    !Number.isFinite(expiresAt) || (!allowMissingHold && expiresAt <= Date.now()) ||
+    !timeMatches ||
+    (normalize(hold.packageTitle) && normalize(hold.packageTitle) !== normalize(doc.packageTitle)) ||
+    (phase === "payment_pending" && (!normalize(doc.paymentRecordId) || normalize(hold.paymentRecordId) !== normalize(doc.paymentRecordId))) ||
+    normalize(hold.backendOwner || "sanity") !== normalize(doc.backendOwner || "sanity") ||
+    Number(hold.cutoverGeneration || 0) !== Number(doc.cutoverGeneration || 0)
+  ) {
+    throw bookingConflict("The slot reservation no longer matches this booking.", "hold_changed");
+  }
+};
+
 const patchRevision = (transaction, document, mutate) =>
   transaction.patch(document._id, (patch) => {
-    const guarded = document._rev ? patch.ifRevisionId(document._rev) : patch;
-    return mutate(guarded);
+    if (!document._rev) throw bookingConflict("Booking source revision is missing.", "booking_revision_missing");
+    return mutate(patch.ifRevisionId(document._rev));
   });
 
 const commitCommerceTransaction = ({ client, transaction, commandId }) =>
@@ -75,6 +132,7 @@ export const commitBookingTransaction = async ({
     { id: doc._id }
   );
   if (existingBooking?._id) {
+    assertBookingReplayMatches({ booking: existingBooking, requested: doc });
     return { booking: existingBooking, bookingId: existingBooking._id, idempotent: true };
   }
 
@@ -98,6 +156,11 @@ export const commitBookingTransaction = async ({
   }
   if (!hold && slotLockId && !allowMissingHold) {
     throw bookingConflict("The slot reservation is no longer available.", "hold_missing");
+  }
+  assertBookingHoldMatches({ doc, hold, startTimeUTC, allowMissingHold });
+  if (couponReservation?.redemption?._id &&
+      normalize(couponReservation.redemption.ownerId) !== normalize(doc.paymentRecordId || doc._id)) {
+    throw bookingConflict("Coupon reservation belongs to another checkout.", "coupon_reservation_conflict");
   }
 
   const now = new Date().toISOString();
@@ -174,16 +237,15 @@ export const commitBookingTransaction = async ({
   }
 
   if (paymentRecordMutation?.id) {
-    transaction.patch(paymentRecordMutation.id, (patch) => {
-      const guarded = paymentRecordMutation.revision
-        ? patch.ifRevisionId(paymentRecordMutation.revision)
-        : patch;
-      return guarded.set({
+    patchRevision(
+      transaction,
+      { _id: paymentRecordMutation.id, _rev: paymentRecordMutation.revision },
+      (patch) => patch.set({
         ...paymentRecordMutation.set,
         bookingId: doc._id,
         updatedAt: now,
-      });
-    });
+      })
+    );
   }
 
   try {
@@ -199,6 +261,7 @@ export const commitBookingTransaction = async ({
         { id: doc._id }
       );
       if (racedBooking?._id) {
+        assertBookingReplayMatches({ booking: racedBooking, requested: doc });
         return { booking: racedBooking, bookingId: racedBooking._id, idempotent: true };
       }
       throw bookingConflict("Booking state changed during finalization.");
@@ -370,16 +433,15 @@ export const createRequiresRescheduleBooking = async ({
     }
 
     if (paymentRecordMutation?.id) {
-      transaction.patch(paymentRecordMutation.id, (patch) => {
-        const guarded = paymentRecordMutation.revision
-          ? patch.ifRevisionId(paymentRecordMutation.revision)
-          : patch;
-        return guarded.set({
+      patchRevision(
+        transaction,
+        { _id: paymentRecordMutation.id, _rev: paymentRecordMutation.revision },
+        (patch) => patch.set({
           ...paymentRecordMutation.set,
           bookingId: booking._id,
           updatedAt: now,
-        });
-      });
+        })
+      );
     }
 
     await commitCommerceTransaction({
@@ -398,6 +460,7 @@ export const createRequiresRescheduleBooking = async ({
       { id: booking._id }
     );
     if (!resolvedBooking?._id) throw error;
+    assertBookingReplayMatches({ booking: resolvedBooking, requested: booking });
     if (paymentRecordMutation?.id) {
       const linkedPaymentRecord = await client.fetch(
         `*[_type == "paymentRecord" && _id == $id][0]{_id, bookingId}`,

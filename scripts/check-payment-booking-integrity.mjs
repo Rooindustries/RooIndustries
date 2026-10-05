@@ -1,19 +1,14 @@
 #!/usr/bin/env node
 
-import fs from "node:fs";
 import process from "node:process";
 import { createClient } from "@sanity/client";
-import dotenv from "dotenv";
+import operatorEnvironment from "./lib/operator-environment.cjs";
 
 const explicitEnv = (() => {
   const index = process.argv.indexOf("--env");
   return index >= 0 ? String(process.argv[index + 1] || "").trim() : "";
 })();
-for (const candidate of [explicitEnv, ".env.local", ".vercel/.env.production.local"]) {
-  if (candidate && fs.existsSync(candidate)) {
-    dotenv.config({ path: candidate, override: false, quiet: true });
-  }
-}
+operatorEnvironment.loadOperatorEnvironment(explicitEnv);
 
 const env = (...keys) =>
   keys.map((key) => String(process.env[key] || "").trim()).find(Boolean) || "";

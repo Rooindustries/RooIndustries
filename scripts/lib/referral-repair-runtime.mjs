@@ -1,8 +1,6 @@
-import fs from "node:fs";
-import path from "node:path";
 import { createClient as createSanityClient } from "@sanity/client";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import dotenv from "dotenv";
+import operatorEnvironment from "./operator-environment.cjs";
 import { sha256 } from "./supabase-shadow-migration.mjs";
 
 export const argument = (name) => {
@@ -18,26 +16,7 @@ export const argumentsFor = (name) =>
 export const isValidSanityDocumentId = (value) =>
   /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(String(value || ""));
 
-export const loadRepairEnvironment = (envPath) => {
-  if (!envPath) throw new Error("--env must name the exact repair environment file.");
-  const resolved = path.resolve(envPath);
-  const stats = fs.lstatSync(resolved);
-  if (!stats.isFile() || stats.isSymbolicLink()) {
-    throw new Error("The repair environment must be a regular file.");
-  }
-  for (const key of Object.keys(process.env)) {
-    if (
-      key.startsWith("SUPABASE_") ||
-      key.startsWith("NEXT_PUBLIC_SUPABASE_") ||
-      key.startsWith("SANITY_")
-    ) {
-      delete process.env[key];
-    }
-  }
-  const loaded = dotenv.config({ path: resolved, override: true, quiet: true });
-  if (loaded.error) throw loaded.error;
-  return resolved;
-};
+export const loadRepairEnvironment = operatorEnvironment.loadOperatorEnvironment;
 
 export const readEnv = (...keys) =>
   keys.map((key) => String(process.env[key] || "").trim()).find(Boolean) || "";

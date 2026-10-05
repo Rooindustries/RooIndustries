@@ -6,7 +6,7 @@ const originalEnv = { ...process.env };
 const originalFetch = global.fetch;
 const secret = 'whsec_' + Buffer.from('offline-dodo-signature-secret-32bytes').toString('base64');
 const record = () => ({ _id:'paymentRecord.dodo.offline', provider:'dodo', providerOrderId:'cks_offline', pricingSnapshot:{netAmount:84.99}, bookingPayload:{email:'test@example.com'}, providerPublicData:{currency:'USD',productId:'pdt_offline',environment:'test_mode'} });
-const payment = () => ({payment_id:'pay_offline',checkout_session_id:'cks_offline',metadata:{paymentRecordId:record()._id},status:'succeeded',total_amount:8499,currency:'USD',product_cart:[{product_id:'pdt_offline',quantity:1}],refunds:[],customer:{email:'test@example.com'}});
+const payment = () => ({payment_id:'pay_offline',checkout_session_id:'cks_offline',metadata:{paymentRecordId:record()._id},status:'succeeded',total_amount:8499,currency:'USD',product_cart:[{product_id:'pdt_offline',quantity:1}],refunds:[],disputes:[],customer:{email:'test@example.com'}});
 const packageProducts = {
   'Vertex Essentials': 'pdt_essentials',
   'Performance Vertex Overhaul': 'pdt_overhaul',

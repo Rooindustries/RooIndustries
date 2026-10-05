@@ -8,8 +8,17 @@ const createSanityClient = ({ current = [] } = {}) => {
   const operations = [];
   const state = { current: [...current] };
   const transaction = {
-    createOrReplace: jest.fn((document) => {
-      operations.push({ operation: "createOrReplace", document });
+    createIfNotExists: jest.fn((document) => {
+      operations.push({ operation: "createIfNotExists", document });
+      return transaction;
+    }),
+    create: jest.fn((document) => {
+      operations.push({ operation: "create", document });
+      return transaction;
+    }),
+    patch: jest.fn((id, configure) => {
+      const patch = { ifRevisionId: jest.fn(() => patch), set: jest.fn(() => patch), unset: jest.fn(() => patch) };
+      configure(patch);
       return transaction;
     }),
     delete: jest.fn((id) => {
@@ -192,7 +201,7 @@ describe("Supabase to Sanity rollback mirroring", () => {
 
     expect(supabaseClient.fetch).not.toHaveBeenCalled();
     expect(sanityClient.operations).toContainEqual({
-      operation: "createOrReplace",
+      operation: "createIfNotExists",
       document: expect.objectContaining({
         _id: "content.durable",
         _supabaseCanonicalHash: "4".repeat(64),
@@ -344,7 +353,7 @@ describe("Supabase to Sanity rollback mirroring", () => {
 
   test("retries queued rollback mirrors and converges removed documents", async () => {
     const supabaseClient = { fetch: jest.fn().mockResolvedValue([]) };
-    const sanityClient = createSanityClient();
+    const sanityClient = createSanityClient({ current: [{ _id: "hold.removed", _type: "slotHold", _rev: "removed-fixture-revision" }] });
     const recoveryClient = {
       rpc: jest
         .fn()

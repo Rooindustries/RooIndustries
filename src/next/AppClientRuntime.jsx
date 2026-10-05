@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { isProductionBrowser } from "../lib/productionBrowser";
 import { Analytics } from "@vercel/analytics/react";
 import { sanitizeAnalyticsEvent } from "../lib/salesAttribution";
 import { initializePerformanceProfile } from "../lib/performanceProfile";
@@ -9,10 +10,6 @@ const SEORCE_PROJECT_ID = "6a2e76bf3f9dac8c30e27b89";
 const SEORCE_SCRIPT_ID = "seorce-runtime-script";
 // Seorce retries its tracking-config fetch every 90 seconds and logs failures.
 // Keep that third-party loop and production analytics off preview/local hosts.
-const SEORCE_PRODUCTION_HOSTS = new Set([
-  "rooindustries.com",
-  "www.rooindustries.com",
-]);
 const SEORCE_BLOCKED_PREFIXES = [
   "/tourney",
   "/booking",
@@ -33,7 +30,7 @@ export const shouldLoadSeorce = (
   pathname = getPathname(),
   hostname = getHostname()
 ) =>
-  SEORCE_PRODUCTION_HOSTS.has(String(hostname).toLowerCase()) &&
+  isProductionBrowser(hostname) &&
   !SEORCE_BLOCKED_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
   );
@@ -71,6 +68,11 @@ export const loadSeorceScript = ({
 };
 
 export default function AppClientRuntime() {
+  const [analyticsEnabled, setAnalyticsEnabled] = useState(false);
+
+  useEffect(() => {
+    setAnalyticsEnabled(isProductionBrowser());
+  }, []);
   useEffect(() => {
     initializePerformanceProfile();
   }, []);
@@ -89,5 +91,5 @@ export default function AppClientRuntime() {
     };
   }, []);
 
-  return <Analytics beforeSend={sanitizeAnalyticsEvent} />;
+  return analyticsEnabled ? <Analytics beforeSend={sanitizeAnalyticsEvent} /> : null;
 }

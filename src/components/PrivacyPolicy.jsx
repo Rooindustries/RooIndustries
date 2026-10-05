@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { normalizePolicyLink } from "../lib/policyLinks";
 import { PortableText } from "@portabletext/react";
 import { getPublicContent } from "../lib/publicContentClient";
 
@@ -57,20 +58,9 @@ export default function PrivacyPolicy({ initialData = null }) {
               components={{
                 marks: {
                   link: ({ value, children }) => {
-                    const href = (value?.href || "").toLowerCase();
-                    const isContactLink =
-                      href === "/contact" ||
-                      href.startsWith("/contact?") ||
-                      href.startsWith("/contact#") ||
-                      href.startsWith("/contact/");
-                    const isTargetEmail =
-                      href.includes("rooindustries.com") ||
-                      href.startsWith("mailto") ||
-                      isContactLink;
+                    const finalHref = normalizePolicyLink(value?.href);
+                    const isTargetEmail = finalHref.toLowerCase().startsWith("mailto:");
 
-                    const finalHref = isTargetEmail
-                      ? "mailto:serviroo@rooindustries.com"
-                      : value?.href;
                     const linkClasses = isTargetEmail
                       ? "text-accent hover:text-[color:var(--color-link-hover)] underline underline-offset-2 transition-colors"
                       : "underline hover:text-[color:var(--color-link-hover)] transition-colors text-ink-secondary";

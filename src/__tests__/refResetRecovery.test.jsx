@@ -7,13 +7,29 @@ import RefReset from "../components/RefReset";
 const mockExchangeCodeForSession = jest.fn();
 const mockSetSession = jest.fn();
 const mockVerifyOtp = jest.fn();
+const mockGetSession = jest.fn();
+const mockGetUser = jest.fn();
+const mockGetClaims = jest.fn();
 
 jest.mock("../lib/supabaseBrowser", () => ({
+  runSupabaseBrowserRecovery: (_signal, action) => action({
+    auth: {
+      exchangeCodeForSession: (...args) => mockExchangeCodeForSession(...args),
+      setSession: (...args) => mockSetSession(...args),
+      verifyOtp: (...args) => mockVerifyOtp(...args),
+      getSession: (...args) => mockGetSession(...args),
+      getUser: (...args) => mockGetUser(...args),
+      getClaims: (...args) => mockGetClaims(...args),
+    },
+  }),
   getSupabaseBrowserClient: () => ({
     auth: {
       exchangeCodeForSession: (...args) => mockExchangeCodeForSession(...args),
       setSession: (...args) => mockSetSession(...args),
       verifyOtp: (...args) => mockVerifyOtp(...args),
+      getSession: (...args) => mockGetSession(...args),
+      getUser: (...args) => mockGetUser(...args),
+      getClaims: (...args) => mockGetClaims(...args),
     },
   }),
 }));
@@ -31,9 +47,13 @@ describe("referral Supabase recovery", () => {
     window.sessionStorage.clear();
     window.history.replaceState(null, "", "/referrals/reset");
     mockSetSession.mockResolvedValue({
-      data: { session: { user: { id: "creator-user" } } },
+      data: { session: { access_token: "recovery-access", user: { id: "creator-user" } } },
       error: null,
     });
+    mockGetSession.mockResolvedValue({ data: { session: { access_token: "recovery-access", user: { id: "creator-user" } } }, error: null });
+    mockGetUser.mockResolvedValue({ data: { user: { id: "creator-user" } }, error: null });
+    const now = Math.floor(Date.now() / 1000);
+    mockGetClaims.mockResolvedValue({ data: { claims: { sub: "creator-user", session_id: "recovery-session", iat: now, exp: now + 3600, amr: [{ method: "otp", timestamp: now }] } }, error: null });
     mockExchangeCodeForSession.mockResolvedValue({ data: null, error: null });
     mockVerifyOtp.mockResolvedValue({ data: null, error: null });
   });
@@ -113,7 +133,7 @@ describe("referral Supabase recovery", () => {
       expect(global.fetch).toHaveBeenCalledWith("/api/ref/recoverPassword", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: "new-password-123" }),
+        body: JSON.stringify({ password: "new-password-123", expectedUserId: "creator-user", expectedSessionId: "recovery-session" }),
         signal: expect.any(AbortSignal),
       });
     });
@@ -249,6 +269,7 @@ describe("referral Supabase recovery", () => {
     fireEvent.click(screen.getByRole("button", { name: "Update Password" }));
     expect(screen.getByRole("button", { name: "Updating..." })).toBeDisabled();
 
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
     await act(async () => {
       jest.advanceTimersByTime(15_000);
       await Promise.resolve();

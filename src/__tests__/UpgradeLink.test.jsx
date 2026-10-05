@@ -121,17 +121,14 @@ describe("upgrade payment handoff", () => {
   });
 
   test("keeps the non-positive price guard active before payment", async () => {
-    const payload = await submitLookup();
+    await submitLookup(buildUpgradeResponse(0));
     const alertSpy = jest.spyOn(window, "alert").mockImplementation(() => {});
-    payload.upgradePrice = 0;
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Proceed to Payment" })
-    );
+    const proceed = screen.getByRole("button", { name: "Proceed to Payment" });
+    expect(proceed).toBeDisabled();
+    fireEvent.click(proceed);
 
-    expect(alertSpy).toHaveBeenCalledWith(
-      "This order does not require an upgrade payment. Please contact support on Discord."
-    );
+    expect(alertSpy).not.toHaveBeenCalled();
     expect(screen.queryByTestId("payment-navigation-state")).not.toBeInTheDocument();
   });
 

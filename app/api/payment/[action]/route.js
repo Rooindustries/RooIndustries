@@ -32,7 +32,7 @@ const MUTATING_ACTIONS = new Set(["cancel", "finalize", "start"]);
 async function handle(request, context, methodOverride) {
   const startedAt = performance.now();
   const { action } = await context.params;
-  const handler = ACTION_HANDLERS[action];
+  const handler = Object.hasOwn(ACTION_HANDLERS, action) ? ACTION_HANDLERS[action] : null;
   if (!handler) {
     return Response.json({ ok: false, error: "Not found" }, { status: 404 });
   }

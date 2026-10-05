@@ -76,7 +76,11 @@ const recoverPasswordModule = require("../server/api/ref/recoverPassword.js");
 const recoverPassword = recoverPasswordModule.default || recoverPasswordModule;
 
 const createReq = (body = {}) => ({
-  body,
+  body: {
+    expectedUserId: "10000000-0000-4000-8000-000000000001",
+    expectedSessionId: "20000000-0000-4000-8000-000000000001",
+    ...body,
+  },
   headers: { "x-forwarded-for": "203.0.113.42" },
   method: "POST",
 });
@@ -120,6 +124,8 @@ describe("referral authenticated recovery API", () => {
         claims: {
           amr: ["otp"],
           iat: Math.floor(Date.now() / 1000),
+          exp: Math.floor(Date.now() / 1000) + 3600,
+          session_id: "20000000-0000-4000-8000-000000000001",
           sub: "10000000-0000-4000-8000-000000000001",
         },
       },
@@ -220,6 +226,8 @@ describe("referral authenticated recovery API", () => {
         claims: {
           amr: ["password"],
           iat: Math.floor(Date.now() / 1000),
+          exp: Math.floor(Date.now() / 1000) + 3600,
+          session_id: "20000000-0000-4000-8000-000000000001",
           sub: "10000000-0000-4000-8000-000000000001",
         },
       },

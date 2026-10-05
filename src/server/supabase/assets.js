@@ -3,7 +3,7 @@ import { createSupabaseAdminClient } from "./adminClient.js";
 const MANIFEST_TTL_MS = 60 * 1000;
 const PRIVATE_URL_TTL_SECONDS = 15 * 60;
 const ASSET_REFERENCE_PATTERN = /^(?:image|file)-[A-Za-z0-9_.-]{1,240}$/;
-const manifestCache = new Map();
+let manifestCaches = new WeakMap();
 
 const requireData = ({ data, error }, operation) => {
   if (error) {
@@ -36,6 +36,11 @@ const collectReferences = (
 };
 
 const getManifest = async (client, references) => {
+  let manifestCache = manifestCaches.get(client);
+  if (!manifestCache) {
+    manifestCache = new Map();
+    manifestCaches.set(client, manifestCache);
+  }
   const now = Date.now();
   for (const [cachedKey, cachedValue] of manifestCache) {
     if (cachedValue.expiresAt <= now) manifestCache.delete(cachedKey);
@@ -66,10 +71,12 @@ const getManifest = async (client, references) => {
         .map((entry) => [entry.source_url, entry]),
     ),
   };
-  if (manifestCache.size >= 100) {
-    manifestCache.delete(manifestCache.keys().next().value);
+  if (manifestCaches.get(client) === manifestCache) {
+    if (manifestCache.size >= 100) {
+      manifestCache.delete(manifestCache.keys().next().value);
+    }
+    manifestCache.set(key, { value: manifest, expiresAt: now + MANIFEST_TTL_MS });
   }
-  manifestCache.set(key, { value: manifest, expiresAt: now + MANIFEST_TTL_MS });
   return manifest;
 };
 
@@ -173,5 +180,5 @@ export const enrichSupabaseContentAssets = async ({
 };
 
 export const clearSupabaseAssetManifestCache = () => {
-  manifestCache.clear();
+  manifestCaches = new WeakMap();
 };

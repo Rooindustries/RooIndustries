@@ -510,8 +510,13 @@ describe("Supabase document compatibility client", () => {
       .transaction()
       .create({ _id: "payment.retry", _type: "paymentRecord" });
 
+    const rpc = shadowClient.rpc.getMockImplementation();
+    shadowClient.rpc.mockImplementationOnce(rpc).mockImplementationOnce(async () => ({
+      data: null, error: { code: "503", message: "fixture unavailable before commit" },
+    }));
+    await expect(transaction.commit()).rejects.toThrow("Supabase commerce document mutation failed");
+    expect(shadowClient.documents.has("payment.retry")).toBe(false);
     await transaction.commit();
-    await expect(transaction.commit()).rejects.toMatchObject({ status: 409 });
     const commandIds = shadowClient.rpc.mock.calls
       .filter(([name]) => name === "roo_apply_commerce_document_mutations")
       .map(([, args]) => args.p_command_id);
