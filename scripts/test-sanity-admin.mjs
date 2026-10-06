@@ -377,6 +377,54 @@ try {
     assertError(await publish({operation:'replace',type:'benchmark',documentId:source.data.documentId,expectedRevision:raw.data.revision,document:{...raw.data.document,beforeImage:{...rawImage,asset:{...rawImage.asset,_supabaseInternal:'forged'}}}}),400,'CMS_VALIDATION_FAILED');
     observed('D4 imported raw shape limit','Synthetic imported raw source inserted locally; editor retains it unchanged, sidecar covers missing ref, actual enrichment/URL builder/public API emit no vendor URL. No image downloaded from any outside host.');
   });
+  await scenario('public-content-join-limit', async () => {
+    const documents = [
+      { _id: '0-fixture-package', _type: 'package', title: 'Fixture Join Package', price: '$12.34', order: 1 },
+      { _id: 'z-fixture-games', _type: 'supportedGames', title: 'Fixture Supported Games', featuredGames: [
+        { _key: 'game-one', title: 'Fixture Game One' },
+        { _key: 'game-two', title: 'Fixture Game Two' },
+      ] },
+      { _id: 'join-limit-upgrade', _type: 'upgradeLink', title: 'Fixture Upgrade', slug: { _type: 'slug', current: 'fixture-join-limit' }, targetPackage: { _type: 'reference', _ref: '0-fixture-package' } },
+      { _id: '0-fixture-team', _type: 'meetTheTeam', heroTitle: 'Fixture Team' },
+      { _id: '0-fixture-about', _type: 'about', recordTitle: 'Fixture About' },
+    ];
+    const seeded = await fixture.client.rpc('roo_apply_document_mutations', { p_mutations: documents.map(document => ({ operation: 'create', document })) });
+    assert.equal(seeded.error, null);
+    const live = await fixture.sql`select legacy_sanity_id, document_type from migration.source_documents where not tombstoned and legacy_sanity_id in ('0-fixture-package', 'z-fixture-games') order by legacy_sanity_id`;
+    assert.deepEqual(live.map(row => row.legacy_sanity_id), ['0-fixture-package', 'z-fixture-games']);
+    observed('public-content-join-limit live source order', live);
+    const { fetchPublicContent, clearSupabasePublicContentCache } = await import('../src/server/content/publicContent.js');
+    clearSupabasePublicContentCache();
+    fixture.setRequestHook((phase, request) => {
+      if (phase === 'after' && request.path === '/rest/v1/rpc/roo_fetch_shadow_documents_targeted') {
+        observed('public-content-join-limit native read', { status: request.status, documentTypes: request.body.p_document_types, limit: request.body.p_limit, ids: Array.isArray(request.response) ? request.response.map(document => document._id) : null });
+      }
+    });
+    try {
+      const games = await fetchPublicContent({ resource: 'supported-games', searchParams: new URLSearchParams() });
+      observed('public-content-join-limit supported-games', games);
+      const upgrade = await fetchPublicContent({ resource: 'upgrade-link', searchParams: new URLSearchParams({ slug: 'fixture-join-limit' }) });
+      const team = await fetchPublicContent({ resource: 'team', searchParams: new URLSearchParams() });
+      const about = await fetchPublicContent({ resource: 'about', searchParams: new URLSearchParams() });
+      assert.equal(upgrade.title, 'Fixture Upgrade');
+      assert.deepEqual(upgrade.targetPackage, { title: 'Fixture Join Package', price: '$12.34' });
+      assert.equal(team.heroTitle, 'Fixture Team');
+      assert.equal(about.recordTitle, 'Fixture About');
+      observed('public-content-join-limit controls', { upgrade, team, about, passed: true });
+      assert.notEqual(games, null, 'A package sorting first must not hide supportedGames from the public join query');
+      assert.equal(games.title, 'Fixture Supported Games');
+      assert.equal(games.featuredGames.length, 2);
+      assert.deepEqual(games.featuredGames.map(game => game.title), ['Fixture Game One', 'Fixture Game Two']);
+      const response = await publicRoute.GET(new Request(`${fixture.origin}/api/content/supported-games`), { params: Promise.resolve({ resource: 'supported-games' }) });
+      const result = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.data, games);
+      observed('public-content-join-limit public API', { status: response.status, result });
+    } finally {
+      fixture.setRequestHook(null);
+    }
+  });
   if(!artifact.scenarios.length)throw new Error(`Unknown scenario ${selected}`);
   artifact.requests=fixture.requestLog.map(({method,path,rpc})=>({method,path,rpc}));
   artifact.sanityRequests=artifact.requests.filter(row=>/sanity\.io|sanity\.studio/.test(row.path));assert.equal(artifact.sanityRequests.length,0);
