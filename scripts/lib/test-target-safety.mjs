@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
@@ -7,8 +8,19 @@ import { syncBuiltinESMExports } from "node:module";
 import { promisify } from "node:util";
 import { getGlobalDispatcher, setGlobalDispatcher } from "undici";
 
-const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", ...(process.env.ROO_TEST_HOST ? [new URL(`http://${process.env.ROO_TEST_HOST}`).hostname] : [])]);
+const isPrivateTestHost = value => {
+  if (typeof value !== "string" || value !== value.trim()) return false;
+  if (value === "::1") return true;
+  if (isIP(value) !== 4) return false;
+  const [a,b] = value.split(".").map(Number);
+  return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+};
+const isLocalHost = value => value === "localhost" || value === "[::1]" || isPrivateTestHost(value);
 const fail = (message) => { throw new Error(`[test-target] ${message}`); };
+const refuseSanityHost = hostname => {
+  if (/(^|\.)(sanity\.io|apicdn\.sanity\.io|sanity\.studio)$/i.test(hostname.replace(/\.$/, ''))) fail("Sanity hosts are refused.");
+};
+if (process.env.ROO_TEST_HOST && !isPrivateTestHost(process.env.ROO_TEST_HOST)) fail("ROO_TEST_HOST must be a private IP literal.");
 const childGuardImports = new Set([import.meta.url]);
 const childGuardOrigins = [];
 const nonNodeBinaries = new Set(["postgres", "postgrest", "pg_ctl", "initdb", "psql", "pg_config", "git", "mkfifo", "tar", "gzip", "unzip", "python3", "chrome", "chromium", "google-chrome", "google-chrome-stable"]);
@@ -68,7 +80,7 @@ const childOptions = (file, options, method) => {
   for (const name of ["ROO_TEST_HOST", "TOOLING_NETWORK_GUARD", "BASE_URL"]) {
     if (process.env[name] !== undefined && env[name] === undefined) env[name] = process.env[name];
   }
-  if (env.ROO_TEST_HOST && !LOCAL_HOSTS.has(env.ROO_TEST_HOST)) fail("Child host must remain local to the fixture.");
+  if (env.ROO_TEST_HOST && !isPrivateTestHost(env.ROO_TEST_HOST)) fail("Child host must remain local to the fixture.");
   if (process.env.TOOLING_NETWORK_GUARD === "1") env.TOOLING_NETWORK_GUARD = "1";
   if (childGuardOrigins.length) env.ROO_TEST_NETWORK_ORIGINS = serializeChildOrigins();
   else if (process.env.ROO_TEST_NETWORK_ORIGINS !== undefined) env.ROO_TEST_NETWORK_ORIGINS = process.env.ROO_TEST_NETWORK_ORIGINS;
@@ -110,8 +122,9 @@ export function localOrigin(value) {
   if (typeof value !== "string" || value !== value.trim()) fail("Explicit canonical local URL required.");
   let url;
   try { url = new URL(value); } catch { fail("Invalid local URL."); }
+  refuseSanityHost(url.hostname);
   const authority = value.match(/^http:\/\/([^/]+)\/?$/)?.[1];
-  if (url.protocol !== "http:" || !LOCAL_HOSTS.has(url.hostname) || !url.port ||
+  if (url.protocol !== "http:" || !isLocalHost(url.hostname) || !url.port ||
       url.username || url.password || url.search || url.hash || url.pathname !== "/" || authority !== url.host) {
     fail("Only canonical literal local HTTP origins with an explicit port are allowed.");
   }
@@ -130,13 +143,19 @@ export function installNetworkGuard(origins) {
   for (const name of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "NODE_USE_ENV_PROXY"]) {
     if (process.env[name] && process.env[name] !== "0") fail("Proxy transports are refused for local checks.");
   }
-  const allowed = new Set(origins.map(localOrigin));
+  const loopbackHosts = ["127.0.0.1", "localhost", "[::1]"];
+  const loopbackAliases = origin => {
+    const url = new URL(origin);
+    return loopbackHosts.includes(url.hostname) ? loopbackHosts.map(host => `http://${host}:${url.port}`) : [origin];
+  };
+  const allowed = new Set(origins.map(localOrigin).flatMap(loopbackAliases));
   const inheritedOrigins = [...allowed];
   childGuardOrigins.push(inheritedOrigins);
   refreshInheritedGuardEnvironment();
   const check = value => {
     let url;
     try { url = new URL(value); } catch { fail("Invalid request URL."); }
+    refuseSanityHost(url.hostname);
     if (!allowed.has(url.origin) || url.username || url.password) fail("Request destination is outside the local fixture.");
   };
   const originalFetch = globalThis.fetch;
@@ -260,6 +279,10 @@ export async function guardBrowserContext(context, origins) {
     if (request.url() === "https://razorpay.com/assets/razorpay-logo.svg" && request.method() === "GET" && request.resourceType() === "image") {
       record("fulfilled-static-asset", request);
       return route.fulfill({ status: 200, contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1"><rect width="1" height="1" fill="none"/></svg>' });
+    }
+    if (request.url() === "https://www.paypalobjects.com/webstatic/mktg/Logo/pp-logo-100px.png" && request.method() === "GET" && request.resourceType() === "image") {
+      record("fulfilled-static-asset", request);
+      return route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64") });
     }
     record("unexpected-nonlocal-request", request);
     await route.abort("blockedbyclient");

@@ -1,3 +1,5 @@
+import envValue from "./envValue.cjs";
+const { resolveStoreBackend } = envValue;
 import crypto from "node:crypto";
 import { createSupabaseAdminClient } from "./adminClient.js";
 
@@ -259,7 +261,7 @@ export const fetchRecoveryPaymentDocuments = async ({
 } = {}) => {
   const data = requireRpcData(
     await client.rpc("roo_fetch_recovery_payment_documents", {
-      p_backend: backend === "supabase" ? "supabase" : "sanity",
+      p_backend: resolveStoreBackend(backend),
       p_statuses: Array.isArray(statuses) ? statuses : [],
       p_refunded_status: String(refundedStatus || "refunded"),
       p_booked_status: String(bookedStatus || "booked"),

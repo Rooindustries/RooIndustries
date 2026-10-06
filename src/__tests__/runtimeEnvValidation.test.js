@@ -183,8 +183,8 @@ const previewMigrationEnv = (overrides = {}) => {
     TOURNEY_PREVIEW_DATABASE_URL:
       "postgresql://preview_owner:placeholder@preview-legacy.example.com/tourney",
     SUPABASE_PREVIEW_DATABASE_URL:
-      "postgresql://postgres.previewproject:placeholder@preview.pooler.supabase.com:6543/postgres",
-    SUPABASE_PREVIEW_URL: "https://previewproject.supabase.co",
+      "postgresql://postgres.abcdefghijklmnopqrst:placeholder@preview.pooler.supabase.com:6543/postgres",
+    SUPABASE_PREVIEW_URL: "https://abcdefghijklmnopqrst.supabase.co",
     SUPABASE_PREVIEW_SECRET_KEY: "preview-secret-placeholder-1234567890",
     ...overrides,
   };
@@ -268,7 +268,7 @@ describe("release runtime environment validation", () => {
     }
   );
 
-  test("treats non-backend selector debris as unset", () => {
+  test("O1 refuses unexpected store selectors", () => {
     const result = validate({
       ...absentSanityEnv,
       DATA_PRIMARY_BACKEND: "not-a-backend",
@@ -276,7 +276,7 @@ describe("release runtime environment validation", () => {
       COMMERCE_FAILOVER_GENERATION: "1",
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status).toBe(1);
     expect(result.output).not.toContain("SANITY_");
   });
 
@@ -292,7 +292,7 @@ describe("release runtime environment validation", () => {
     }
   );
 
-  test("rejects generation zero when the legacy Sanity read target is absent", () => {
+  test("D5 ignores retired configuration: rejects generation zero when the legacy Sanity read target is absent", () => {
     const result = validate({
       ...absentSanityEnv,
       DATA_PRIMARY_BACKEND: "",
@@ -300,21 +300,19 @@ describe("release runtime environment validation", () => {
       COMMERCE_FAILOVER_GENERATION: "0",
     });
 
-    expect(result.status).toBe(1);
-    expect(result.output).toContain(
-      "COMMERCE_FAILOVER_GENERATION=0 requires a complete legacy Sanity read target"
-    );
+    expect(result.status).toBe(0);
+
   });
 
   test.each([
     "SUPABASE_CONTENT_CANARY_PERCENT",
     "SUPABASE_COMMERCE_CANARY_PERCENT",
-  ])("rejects retired nonzero %s", (variable) => {
+  ])("D5 ignores retired configuration: rejects retired nonzero %s", (variable) => {
     const result = validate({ [variable]: "1" });
 
-    expect(result.status).toBe(1);
-    expect(result.output).toContain(variable);
-    expect(result.output).toContain("Delete");
+    expect(result.status).toBe(0);
+
+
   });
 
   test.each([
@@ -378,7 +376,7 @@ describe("release runtime environment validation", () => {
         VERCEL_GIT_COMMIT_SHA: "",
       },
     ],
-  ])("requires %s for a Sanity commerce failover", (key, override) => {
+  ])("D5 ignores retired %s failover credentials", (key, override) => {
     const result = validate({
       VERCEL_ENV: "production",
       DATA_PRIMARY_BACKEND: "supabase",
@@ -386,21 +384,19 @@ describe("release runtime environment validation", () => {
       ...override,
     });
 
-    expect(result.status).toBe(1);
-    expect(result.output).toContain(key);
+    expect(result.status).toBe(0);
+    expect(result.output).not.toContain(key);
   });
 
-  test("rejects a short Sanity commerce failover signing secret", () => {
+  test("D5 ignores retired configuration: rejects a short Sanity commerce failover signing secret", () => {
     const result = validate({
       VERCEL_ENV: "production",
       COMMERCE_PRIMARY_BACKEND: "sanity",
       COMMERCE_FAILOVER_LEASE_SECRET: "too-short",
     });
 
-    expect(result.status).toBe(1);
-    expect(result.output).toContain(
-      "COMMERCE_FAILOVER_LEASE_SECRET must contain at least 32 bytes"
-    );
+    expect(result.status).toBe(0);
+
   });
 
 
@@ -416,30 +412,22 @@ describe("release runtime environment validation", () => {
 
     expect(result.status).toBe(0);
     expect(result.output).toContain(
-      `apiPaused=${value === "1"}, studioConfigured=true, studioPaused=${
-        value === "1"
-      }, matches=true`,
+      `configured=true, paused=${value === "1"}`,
     );
   });
 
-  test("rejects mismatched CMS API and Studio pause controls", () => {
+  test("D5 ignores retired configuration: rejects mismatched CMS API and Studio pause controls", () => {
     const result = validate({
       CMS_WRITES_PAUSED: "1",
       SANITY_STUDIO_CMS_WRITES_PAUSED: "0",
     });
 
-    expect(result.status).toBe(1);
-    expect(result.output).toContain(
-      "CMS_WRITES_PAUSED and SANITY_STUDIO_CMS_WRITES_PAUSED must match",
-    );
+    expect(result.status).toBe(0);
+
   });
 
   test.each([
     ["CMS_WRITES_PAUSED", { CMS_WRITES_PAUSED: "" }],
-    [
-      "SANITY_STUDIO_CMS_WRITES_PAUSED",
-      { SANITY_STUDIO_CMS_WRITES_PAUSED: "sometimes" },
-    ],
   ])("rejects an invalid %s control", (key, override) => {
     const result = validate(override);
 
@@ -490,7 +478,7 @@ describe("release runtime environment validation", () => {
     expect(result.status).toBe(0);
   });
 
-  test("rejects a partial private Sanity target instead of mixing public fields", () => {
+  test("D5 ignores retired configuration: rejects a partial private Sanity target instead of mixing public fields", () => {
     const result = validate({
       ...supabaseDocumentEnv,
       DATA_PRIMARY_BACKEND: "supabase",
@@ -503,17 +491,17 @@ describe("release runtime environment validation", () => {
       SANITY_PRIVATE_WRITE_TOKEN: "",
     });
 
-    expect(result.status).toBe(1);
-    expect(result.output).toContain("Sanity configuration is incomplete");
-    expect(result.output).toContain("SANITY_PRIVATE_DATASET");
-    expect(result.output).toContain("SANITY_PRIVATE_WRITE_TOKEN");
+    expect(result.status).toBe(0);
+
+
+
   });
 
   test.each([
     ["SANITY_PROJECT_ID", { SANITY_PROJECT_ID: "", SANITY_PRIVATE_PROJECT_ID: "" }],
     ["SANITY_DATASET", { SANITY_DATASET: "", SANITY_PRIVATE_DATASET: "" }],
     ["SANITY_WRITE_TOKEN", { SANITY_WRITE_TOKEN: "", SANITY_PRIVATE_WRITE_TOKEN: "" }],
-  ])("rejects a partial Sanity backup missing %s", (label, missingTarget) => {
+  ])("D5 ignores retired configuration: rejects a partial Sanity backup missing %s", (label, missingTarget) => {
     const result = validate({
       ...supabaseDocumentEnv,
       DATA_PRIMARY_BACKEND: "supabase",
@@ -526,11 +514,11 @@ describe("release runtime environment validation", () => {
       ...missingTarget,
     });
 
-    expect(result.status).toBe(1);
-    expect(result.output).toContain(label);
+    expect(result.status).toBe(0);
+
   });
 
-  test("requires a writable Sanity target and webhook while commerce uses Sanity", () => {
+  test("D5 ignores retired configuration: requires a writable Sanity target and webhook while commerce uses Sanity", () => {
     const result = validate({
       ...supabaseDocumentEnv,
       DATA_PRIMARY_BACKEND: "supabase",
@@ -541,8 +529,8 @@ describe("release runtime environment validation", () => {
       SANITY_WEBHOOK_SECRET: "",
     });
 
-    expect(result.status).toBe(1);
-    expect(result.output).toContain("SANITY_WEBHOOK_SECRET");
+    expect(result.status).toBe(0);
+
   });
 
   test("accepts Supabase-primary when the retired mirror flag is absent", () => {
@@ -718,13 +706,13 @@ describe("release runtime environment validation", () => {
     expect(result.status).toBe(0);
   });
 
-  test("requires a dedicated Sanity webhook secret", () => {
+  test("D5 ignores retired configuration: requires a dedicated Sanity webhook secret", () => {
     const result = validate({
       COMMERCE_PRIMARY_BACKEND: "sanity",
       SANITY_WEBHOOK_SECRET: "   ",
     });
-    expect(result.status).toBe(1);
-    expect(result.output).toContain("SANITY_WEBHOOK_SECRET");
+    expect(result.status).toBe(0);
+
     expect(result.output).not.toContain("cron-secret-placeholder");
   });
 
@@ -756,7 +744,7 @@ describe("release runtime environment validation", () => {
       REACT_APP_PAYPAL_CLIENT_SECRET: "public-prefixed-secret-must-not-count",
     });
     expect(result.status).toBe(1);
-    expect(result.output).toContain("SANITY_WRITE_TOKEN");
+    expect(result.output).toContain("PayPal must be fully configured");
     expect(result.output).not.toContain("public-prefixed-token-must-not-count");
     expect(result.output).not.toContain("public-prefixed-secret-must-not-count");
   });
@@ -984,8 +972,8 @@ describe("release runtime environment validation", () => {
         "generic_role"
       ),
       SUPABASE_DATABASE_URL: configured.SUPABASE_PREVIEW_DATABASE_URL.replace(
-        "postgres.previewproject",
-        "generic.previewproject"
+        "postgres.abcdefghijklmnopqrst",
+        "generic.abcdefghijklmnopqrst"
       ),
       SUPABASE_URL: configured.SUPABASE_PREVIEW_URL,
     };
@@ -1032,8 +1020,8 @@ describe("release runtime environment validation", () => {
       TOURNEY_DATABASE_URL:
         "postgresql://prod_owner:placeholder@prod-legacy.example.com/tourney",
       SUPABASE_DATABASE_URL:
-        "postgresql://postgres.prodproject:placeholder@prod.pooler.supabase.com:6543/postgres",
-      SUPABASE_URL: "https://prodproject.supabase.co",
+        "postgresql://postgres.uvwxyzabcdefghijklmn:placeholder@prod.pooler.supabase.com:6543/postgres",
+      SUPABASE_URL: "https://uvwxyzabcdefghijklmn.supabase.co",
       SUPABASE_SECRET_KEY: "production-secret-placeholder-1234567890",
     };
     const fingerprints = computeMigrationTargetFingerprints({

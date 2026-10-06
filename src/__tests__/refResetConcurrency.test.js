@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 const rawToken = "a".repeat(64);
 const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
 let referral;
+let mockOperation;
 const previousDataPrimary = process.env.DATA_PRIMARY_BACKEND;
 
 const conflict = () =>
@@ -16,7 +17,7 @@ const mockClient = {
     ) {
       return null;
     }
-    return { _id: referral._id, _rev: referral._rev };
+    return { ...referral };
   }),
   patch: jest.fn(() => {
     const operations = { revision: "", set: {}, unset: [] };
@@ -46,8 +47,26 @@ const mockClient = {
   }),
 };
 
-jest.mock("@sanity/client", () => ({
-  createClient: () => mockClient,
+jest.mock("../server/data/documentClient.js", () => ({
+  createDataClient: () => mockClient,
+}));
+
+jest.mock("../server/supabase/accounts.js", () => ({
+  ...jest.requireActual("../server/supabase/accounts.js"),
+  updateSupabaseAccountPassword: jest.fn(async options => {
+    if (mockOperation) throw Object.assign(new Error("Reset already used"), { code: "23505" });
+    mockOperation = options;
+    return { updated: true, operationKey: options.operationKey };
+  }),
+}));
+
+jest.mock("../server/supabase/credentialRecovery.js", () => ({
+  resumeSupabaseCredentialOperation: jest.fn(async () => ({ resumed: false })),
+  reconcileSupabaseCredentialSource: jest.fn(async () => {
+    Object.assign(referral, mockOperation.sourceMutation.set);
+    mockOperation.sourceMutation.unset.forEach(field => delete referral[field]);
+    return { completed: true };
+  }),
 }));
 
 const createRes = () => ({
@@ -79,9 +98,11 @@ describe("referral password reset concurrency", () => {
   });
 
   beforeEach(() => {
+    mockOperation = null;
     referral = {
       _id: "referral.reset-test",
       _rev: "revision-1",
+      creatorEmail: "creator@example.invalid",
       resetTokenHash: tokenHash,
       resetTokenExpiresAt: "2099-01-01T00:00:00.000Z",
     };
@@ -89,7 +110,7 @@ describe("referral password reset concurrency", () => {
     jest.clearAllMocks();
   });
 
-  test("one reset token can change the password only once under concurrency", async () => {
+  test("K1/O1 native saga: one reset token can change the password only once under concurrency", async () => {
     const first = createRes();
     const second = createRes();
     const request = (password) => ({

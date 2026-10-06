@@ -1,5 +1,5 @@
-jest.mock("@sanity/client", () => ({
-  createClient: jest.fn(() => ({
+jest.mock("../server/data/documentClient.js", () => ({
+  createDataClient: jest.fn(() => ({
     getDocument: jest.fn(),
     fetch: jest.fn(),
   })),

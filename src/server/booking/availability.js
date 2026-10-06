@@ -1,6 +1,4 @@
-import { createCommerceReadClient } from "../api/ref/sanity.js";
-import { resolveSupabaseRuntimePolicy } from "../supabase/runtime.js";
-import { isSupabaseAdminConfigured } from "../supabase/adminClient.js";
+import { createCommerceReadClient } from "../api/ref/documentStore.js";
 import {
   filterActiveBookings,
   getBookingSettings,
@@ -57,36 +55,9 @@ const fetchBackendAvailability = async (readClient) => {
 };
 
 export async function getBookingAvailability({ client } = {}) {
-  const policy = resolveSupabaseRuntimePolicy();
-  const primaryBackend = policy.commercePrimaryBackend;
-  const secondaryBackend = primaryBackend === "supabase" ? "sanity" : "supabase";
-  const primaryClient =
-    client || createCommerceReadClient({ backendOverride: primaryBackend });
-  const includeSecondary =
-    !client &&
-    policy.commerceFailoverGeneration < 1 &&
-    (secondaryBackend !== "supabase" || isSupabaseAdminConfigured());
-  const backendReads = [fetchBackendAvailability(primaryClient)];
-  if (includeSecondary) {
-    backendReads.push(
-      Promise.resolve()
-        .then(() =>
-          createCommerceReadClient({ backendOverride: secondaryBackend })
-        )
-        .then(fetchBackendAvailability)
-    );
-  }
-  const [settings, backendSettlements] = await Promise.all([
-    getBookingSettings({ client: primaryClient }),
-    Promise.allSettled(backendReads),
-  ]);
-  const primaryResult = backendSettlements[0];
-  if (primaryResult.status === "rejected") {
-    throw primaryResult.reason;
-  }
-  const backendResults = backendSettlements
-    .filter((result) => result.status === "fulfilled")
-    .map((result) => result.value);
+  const primaryClient = client || createCommerceReadClient({backendOverride:"supabase"});
+  const [settings, occupancy] = await Promise.all([getBookingSettings({client:primaryClient}),fetchBackendAvailability(primaryClient)]);
+  const backendResults = [occupancy];
   const now = Date.now();
   const bookings = backendResults.flatMap((result) => result.bookings || []);
   const holds = backendResults.flatMap((result) => result.holds || []);

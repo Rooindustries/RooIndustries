@@ -113,10 +113,10 @@ describe("referral fallback authority readiness", () => {
         return { data: portClosure(true), error: null };
       }
       if (name === "roo_referral_email_readiness") {
-        return { data: { ready: true }, error: null };
+        return { data: { ready: true, receipts: {ready:true}, assets: {ready:true} }, error: null };
       }
       if (name === "roo_cms_publish_readiness") {
-        return { data: { ready: true }, error: null };
+        return { data: { ready: true, receipts: {ready:true}, assets: {ready:true} }, error: null };
       }
       throw new Error(`Unexpected RPC: ${name}`);
     });
@@ -152,8 +152,6 @@ describe("referral fallback authority readiness", () => {
       ok: true,
       commerceReady: true,
       ready: true,
-      documentMutationMirrorReady: true,
-      referralFallbackAuthorityReady: true,
       portClosure: {
         credentialRecovery: { pending: 0 },
         identityDrift: { missing: 0, stale: 0 },
@@ -182,7 +180,7 @@ describe("referral fallback authority readiness", () => {
         error: null,
       })
       .mockResolvedValueOnce({ data: portClosure(false), error: null })
-      .mockResolvedValueOnce({ data: { ready: true }, error: null });
+      .mockResolvedValueOnce({ data: { ready: true, receipts: {ready:true}, assets: {ready:true} }, error: null });
     const { GET } = await import(
       "../../app/api/admin/commerce-readiness/route.js"
     );
@@ -197,9 +195,6 @@ describe("referral fallback authority readiness", () => {
       commerceReady: true,
       ready: true,
       primaryReady: true,
-      failoverReady: false,
-      documentMutationMirrorReady: true,
-      referralFallbackAuthorityReady: false,
     });
   });
 });

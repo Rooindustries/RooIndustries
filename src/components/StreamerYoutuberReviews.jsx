@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { urlFor } from "../sanityClient";
+import { urlFor } from "../lib/cmsImageUrl";
 import { getPerfToggleEnabled, isPerfDebugEnabled, PERF_DEBUG_EVENT, PERF_TOGGLE_KEYS } from "../lib/perfDebug";
 import {
   fetchHomeSectionData,

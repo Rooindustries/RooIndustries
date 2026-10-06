@@ -1,3 +1,5 @@
+import envValue from "../supabase/envValue.cjs";
+const { resolveStoreBackend } = envValue;
 import crypto from "crypto";
 
 const HOLD_TOKEN_SECRET =
@@ -36,7 +38,7 @@ export const issueHoldToken = ({
     st: startTimeUTC,
     exp: Math.floor(new Date(expiresAt).getTime() / 1000),
     ...(holdNonce ? { n: holdNonce } : {}),
-    be: backend === "supabase" ? "supabase" : "sanity",
+    be: resolveStoreBackend(backend),
     gen: Math.max(0, Number(cutoverGeneration) || 0),
   };
   const encoded = base64UrlEncode(JSON.stringify(payload));
@@ -74,7 +76,7 @@ export const verifyHoldToken = ({
     if (holdId && payload.hid !== holdId) return null;
     if (startTimeUTC && payload.st && payload.st !== startTimeUTC) return null;
     if (holdNonce && payload.n !== holdNonce) return null;
-    if (backend && (payload.be === "supabase" ? "supabase" : "sanity") !== backend) {
+    if (backend && resolveStoreBackend(payload.be) !== resolveStoreBackend(backend)) {
       return null;
     }
     if (
@@ -85,6 +87,7 @@ export const verifyHoldToken = ({
       return null;
     }
     if (!ignoreExpiry && payload.exp <= Math.floor(Date.now() / 1000)) return null;
+    payload.be = resolveStoreBackend(payload.be);
     return payload;
   } catch {
     return null;

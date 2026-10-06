@@ -8,22 +8,9 @@ import {
   sumPayments,
 } from './payoutUtils.js';
 
-const readClient = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || 'production',
-  apiVersion: process.env.SANITY_API_VERSION || '2023-10-01',
-  token: process.env.SANITY_READ_TOKEN || process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-  perspective: 'published',
-}, {domain: 'commerce'});
+const readClient = createClient({}, {domain: 'commerce'});
 
-const writeClient = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || 'production',
-  apiVersion: process.env.SANITY_API_VERSION || '2023-10-01',
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-}, {domain: 'commerce'});
+const writeClient = createClient({}, {domain: 'commerce'});
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -66,6 +53,7 @@ export default async function handler(req, res) {
     const results = [];
 
     for (const referral of referrals) {
+      try {
       if (!referral._rev) throw Object.assign(new Error("Referral source revision is missing"), { status: 409 });
       const code = (referral?.slug?.current || '').toLowerCase();
       const earnings = await fetchReferralEarnings({
@@ -102,6 +90,10 @@ export default async function handler(req, res) {
         results.push({id: referral._id, name: referral.name, updated: true});
       } else {
         results.push({id: referral._id, name: referral.name, updated: false});
+      }
+          } catch (error) {
+        logSafeError('Referral cron item failed',error);
+        results.push({id:referral._id,updated:false,pending:true,errorCode:String(error?.code || 'REFERRAL_SYNC_FAILED').slice(0,128)});
       }
     }
 

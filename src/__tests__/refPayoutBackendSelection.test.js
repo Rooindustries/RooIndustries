@@ -10,7 +10,7 @@ jest.mock("../server/api/ref/auth.js", () => ({
   requireAdminKey: (...args) => mockRequireAdminKey(...args),
 }));
 
-jest.mock("../server/api/ref/sanity.js", () => ({
+jest.mock("../server/api/ref/documentStore.js", () => ({
   createCommerceReadClient: (...args) =>
     mockCreateCommerceReadClient(...args),
   createCommerceWriteClient: (...args) =>

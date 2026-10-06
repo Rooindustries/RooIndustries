@@ -5,7 +5,7 @@ jest.mock("../server/supabase/adminClient.js", () => ({
   createSupabaseAdminClient: () => ({ rpc: mockRpc }),
 }));
 
-jest.mock("../server/api/ref/sanity.js", () => ({
+jest.mock("../server/api/ref/documentStore.js", () => ({
   createRefWriteClient: (...args) => mockCreateRefWriteClient(...args),
 }));
 
@@ -36,6 +36,7 @@ describe("download validation rate-limit authority", () => {
     process.env.DATA_PRIMARY_BACKEND = "sanity";
     process.env.COMMERCE_PRIMARY_BACKEND = "supabase";
     process.env.COMMERCE_CUTOVER_ENABLED = "1";
+    process.env.SUPABASE_CUTOVER_ENABLED = "1";
     process.env.SANITY_REVERSE_MIRROR_WRITES = "1";
     process.env.RATE_LIMIT_HASH_SECRET = "download-rate-limit-test-secret";
     mockRpc.mockResolvedValue({ data: { allowed: true }, error: null });
@@ -46,11 +47,12 @@ describe("download validation rate-limit authority", () => {
     delete process.env.DATA_PRIMARY_BACKEND;
     delete process.env.COMMERCE_PRIMARY_BACKEND;
     delete process.env.COMMERCE_CUTOVER_ENABLED;
+    delete process.env.SUPABASE_CUTOVER_ENABLED;
     delete process.env.SANITY_REVERSE_MIRROR_WRITES;
     delete process.env.RATE_LIMIT_HASH_SECRET;
   });
 
-  test("uses Supabase without loading the global Sanity limiter", async () => {
+  test("O1 uses Supabase with both native production cutover gates", async () => {
     await expect(
       requireRateLimit(createRes(), {
         key: "download-validate:203.0.113.10",

@@ -8,7 +8,7 @@ import { Agent, setGlobalDispatcher } from "undici";
 const fixture = JSON.parse(fs.readFileSync(process.env.OPERATIONS_TEST_MANIFEST, "utf8"));
 const origin = new URL(fixture.origin);
 if (origin.protocol !== "http:" || origin.hostname !== testHost || !origin.port) throw new Error("Invalid operations fixture origin");
-const hosts = new Set(["targeta.api.sanity.io", "targetb.api.sanity.io", "targeta.supabase.co", "targetb.supabase.co"]);
+const hosts = new Set(["targeta.supabase.co", "targetb.supabase.co"]);
 const destination = (input) => {
   const url = new URL(input);
   fs.appendFileSync(fixture.trace, `${JSON.stringify({ host: url.hostname, path: url.pathname, kind: "attempt" })}\n`);
@@ -32,14 +32,6 @@ setGlobalDispatcher({ dispatch(options, handler) {
   return fixtureAgent.dispatch({ ...options, origin: origin.origin, headers }, handler);
 } });
 globalThis.fetch = (input, init) => {
-  const requested = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
-  if (requested.origin === "https://cdn.sanity.io" && /^\/(images|files)\/targetb\/fixtureb\//.test(requested.pathname)) {
-    return nativeFetch(`${origin.origin}/cdn${requested.pathname}${requested.search}`, { ...init, signal: AbortSignal.timeout(15000) }).then((response) => {
-      const actual = new URL(response.url);
-      if (actual.origin === origin.origin) Object.defineProperty(response, "url", { value: `https://cdn.sanity.io${actual.pathname.replace(/^\/cdn/, "")}${actual.search}` });
-      return response;
-    });
-  }
   const url = destination(typeof input === "string" || input instanceof URL ? input : input.url);
   const headers = new Headers(init?.headers || (typeof input === "object" ? input.headers : undefined));
   headers.set("x-operations-fixture-target", url.hostname);

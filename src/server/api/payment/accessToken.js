@@ -1,3 +1,5 @@
+import envValue from "../../supabase/envValue.cjs";
+const { resolveStoreBackend } = envValue;
 import crypto from "crypto";
 
 export const PAYMENT_ACCESS_TOKEN_PURPOSE = "payment-session";
@@ -60,7 +62,7 @@ export const createPaymentAccessToken = ({
     paymentRecordId: normalizeValue(paymentRecordId),
     provider: normalizeValue(provider).toLowerCase(),
     pricingFingerprintHash: hashPaymentFingerprint(pricingFingerprint),
-    backend: normalizeValue(backend).toLowerCase() === "supabase" ? "supabase" : "sanity",
+    backend: resolveStoreBackend(backend),
     cutoverGeneration: Math.max(0, Number(cutoverGeneration) || 0),
     purpose: PAYMENT_ACCESS_TOKEN_PURPOSE,
     iat,
@@ -115,6 +117,7 @@ export const verifyPaymentAccessToken = ({
     return { ok: false, reason: "payment_access_token_invalid_claims" };
   }
 
+  try { payload.backend = resolveStoreBackend(payload.backend); } catch { return { ok: false, reason: "payment_access_token_invalid_backend" }; }
   const nowSeconds = Math.floor(Number(nowMs || Date.now()) / 1000);
   if (nowSeconds >= Number(payload.exp || 0)) {
     return {
@@ -133,18 +136,17 @@ export const isPaymentAccessTokenRecordMatch = ({
   record,
 }) => {
   if (!payload || !record?._id) return false;
-  return (
+  try { return (
     normalizeValue(payload.paymentRecordId) === normalizeValue(record._id) &&
     normalizeValue(payload.provider).toLowerCase() ===
       normalizeValue(record.provider).toLowerCase() &&
     normalizeValue(payload.pricingFingerprintHash) ===
       hashPaymentFingerprint(record.pricingFingerprint) &&
-    (payload.backend === "supabase" ? "supabase" : "sanity") ===
-      (record.backendOwner === "supabase" ? "supabase" : "sanity") &&
+    resolveStoreBackend(payload.backend) === resolveStoreBackend(record.backendOwner) &&
     (payload.cutoverGeneration === undefined ||
       Number(payload.cutoverGeneration) ===
         Math.max(0, Number(record.cutoverGeneration) || 0))
-  );
+  ); } catch { return false; }
 };
 
 export const isWithinPaymentAccessRecoveryWindow = ({

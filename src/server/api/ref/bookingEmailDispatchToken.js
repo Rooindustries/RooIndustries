@@ -1,3 +1,5 @@
+import envValue from "../../supabase/envValue.cjs";
+const { resolveStoreBackend } = envValue;
 import crypto from "crypto";
 
 const DEV_BOOKING_EMAIL_DISPATCH_SECRET =
@@ -56,7 +58,7 @@ export const issueBookingEmailDispatchToken = ({
     v: 2,
     bid: normalizedBookingId,
     email: normalizeEmail(email),
-    be: backend === "supabase" ? "supabase" : "sanity",
+    be: resolveStoreBackend(backend),
     gen: Math.max(0, Number(cutoverGeneration) || 0),
     iat: now,
     exp: now + Math.max(60, Number(expirySeconds) || 0),
@@ -156,12 +158,13 @@ export const verifyBookingEmailDispatchToken = ({
     };
   }
 
-  if (backend && (payload.be === "supabase" ? "supabase" : "sanity") !== backend) {
-    return {
-      ok: false,
-      reason: "booking_email_token_backend_mismatch",
-      payload,
-    };
+  try {
+    payload.be = resolveStoreBackend(payload.be);
+    if (backend && payload.be !== resolveStoreBackend(backend)) {
+      return { ok: false, reason: "booking_email_token_backend_mismatch", payload };
+    }
+  } catch {
+    return { ok: false, reason: "booking_email_token_backend_mismatch", payload };
   }
   if (
     cutoverGeneration !== undefined &&

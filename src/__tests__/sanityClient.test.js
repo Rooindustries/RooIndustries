@@ -1,8 +1,6 @@
-jest.mock("@sanity/image-url", () => ({
-  createImageUrlBuilder: jest.fn(() => ({})),
-}));
 
-import { urlFor } from "../sanityClient";
+
+import { urlFor } from "../lib/cmsImageUrl";
 
 const SUPABASE_ORIGINAL =
   "https://ntezmxzaibrrsgtujgxu.supabase.co/storage/v1/object/public/site-content-public/images/example.png";
@@ -49,10 +47,10 @@ describe("Supabase image URL builder", () => {
     ).toBe(webp);
   });
 
-  test("does not rewrite non-Supabase direct URLs", () => {
+  test("D4 refuses non-Supabase direct URLs", () => {
     const direct = "https://images.example.com/example.png";
     expect(urlFor({ asset: { url: direct } }).width(800).quality(60).url()).toBe(
-      direct
+      null
     );
   });
 });

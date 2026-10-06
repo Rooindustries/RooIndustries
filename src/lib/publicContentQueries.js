@@ -48,7 +48,7 @@ export const PUBLIC_CONTENT_QUERIES = Object.freeze({
   contact: `*[_type == "contact"][0]{title,subtitle,email,formId}`,
   tools: `*[_type == "tool"] | order(sortOrder asc, title asc){
     _id,title,category,shortDescription,downloadMode,downloadUrl,officialSite,
-    downloadNote,
+    downloadNote,downloadFile,
     "iconUrl":coalesce(icon.asset->url,icon.asset._ref),
     "fileUrl":coalesce(downloadFile.asset->url,downloadFile.asset._ref)
   }`,

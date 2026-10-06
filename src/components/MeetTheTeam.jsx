@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { urlFor } from "../sanityClient";
+import { urlFor } from "../lib/cmsImageUrl";
 import { getPublicContent } from "../lib/publicContentClient";
 
 const HEX_CLIP_PATH = "circle(50% at 50% 50%)";

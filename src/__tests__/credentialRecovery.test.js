@@ -182,7 +182,7 @@ describe("credential recovery saga", () => {
     expect(sanity.client.transaction).not.toHaveBeenCalled();
   });
 
-  test("recovers an Auth-applied Supabase reset through the durable mirror exactly once", async () => {
+  test("K1/K2 completes through native SQL exactly once", async () => {
     const sanity = createSanityClient({
       _id: "referral.creator",
       _type: "referral",
@@ -293,13 +293,7 @@ describe("credential recovery saga", () => {
         sanityClient: sanity.client,
       })
     ).resolves.toEqual({ resumed: true, status: "auth_applied" });
-    expect(sanity.state.document).toMatchObject({
-      creatorPassword: passwordHash,
-      _supabaseRevision: "supabase-new",
-      _supabaseSequence: "12",
-    });
-    expect(sanity.state.document.resetTokenHash).toBeUndefined();
-    expect(sanity.state.document.resetTokenExpiresAt).toBeUndefined();
+    expect(sanity.client.transaction).not.toHaveBeenCalled();
     expect(sessionVersion).toBe(2);
     expect(completions).toBe(1);
     expect(adminClient.rpc).toHaveBeenCalledWith(
@@ -324,7 +318,7 @@ describe("credential recovery saga", () => {
     expect(completions).toBe(1);
   });
 
-  test("uses the Sanity revision only for a Sanity-authoritative recovery", async () => {
+  test("O1/K1 routes a legacy source label through native SQL", async () => {
     const sanity = createSanityClient({
       _id: "referral.legacy",
       _type: "referral",
@@ -352,6 +346,7 @@ describe("credential recovery saga", () => {
           listed = true;
           return { data: [row], error: null };
         }
+        if (name === "roo_apply_credential_source_operation_v2") return {data:{source_document_id:row.source_document_id,source_revision:"native-r2"},error:null};
         if (name === "roo_mark_credential_source_applied_v2") {
           expect(args.p_source_revision).toBe("sanity-r1-next");
           return { data: { status: "source_applied" }, error: null };
@@ -372,8 +367,8 @@ describe("credential recovery saga", () => {
       backoff: 0,
       parked: 0,
     });
-    expect(sanity.state.document.resetTokenHash).toBeUndefined();
-    expect(sanity.state.document.creatorPassword).toBe(passwordHash);
+    expect(sanity.client.patch).not.toHaveBeenCalled();
+    expect(adminClient.auth.admin.updateUserById).not.toHaveBeenCalled();
   });
 
   test("keeps a prepared operation pending for the original password request", async () => {
@@ -587,7 +582,7 @@ describe("credential recovery saga", () => {
     expect(sanity.client.patch).not.toHaveBeenCalled();
   });
 
-  test("classifies a source transport failure as transient before recording it", async () => {
+  test("K1 classifies a source transport failure as transient before recording it", async () => {
     const sanity = createSanityClient({
       _id: "referral.transient",
       _type: "referral",
@@ -615,6 +610,7 @@ describe("credential recovery saga", () => {
     };
     const adminClient = {
       rpc: jest.fn(async (name, args) => {
+        if (name === "roo_apply_credential_source_operation_v2") return {data:null,error:{code:"ECONNRESET"}};
         if (name === "roo_list_credential_recovery_v2") {
           return { data: [row], error: null };
         }
@@ -643,11 +639,11 @@ describe("credential recovery saga", () => {
       backoff: 1,
       parked: 0,
     });
-    expect(patch.commit).toHaveBeenCalledTimes(1);
-    expect(adminClient.rpc).toHaveBeenCalledTimes(2);
+    expect(patch.commit).not.toHaveBeenCalled();
+    expect(adminClient.rpc).toHaveBeenCalledTimes(3);
   });
 
-  test("falls back to the v1 recorder when the v2 recorder is missing", async () => {
+  test("K1 falls back to the v1 recorder when the v2 recorder is missing", async () => {
     const sanity = createSanityClient(null);
     const row = {
       operation_key: "credential:reset:recorder-rollout",
@@ -660,6 +656,7 @@ describe("credential recovery saga", () => {
     };
     const adminClient = {
       rpc: jest.fn(async (name, args) => {
+        if (name === "roo_apply_credential_source_operation_v2") return {data:null,error:{code:"CREDENTIAL_SOURCE_DOCUMENT_UNAVAILABLE"}};
         if (name === "roo_list_credential_recovery_v2") {
           return { data: [row], error: null };
         }
@@ -687,10 +684,10 @@ describe("credential recovery saga", () => {
       backoff: 0,
       parked: 0,
     });
-    expect(adminClient.rpc).toHaveBeenCalledTimes(3);
+    expect(adminClient.rpc).toHaveBeenCalledTimes(4);
   });
 
-  test("surfaces an error when the v1 recorder fallback also fails", async () => {
+  test("K1 surfaces an error when the v1 recorder fallback also fails", async () => {
     const row = {
       operation_key: "credential:reset:recorder-fallback-failed",
       status: "auth_applied",
@@ -699,6 +696,7 @@ describe("credential recovery saga", () => {
     };
     const adminClient = {
       rpc: jest.fn(async (name) => {
+        if (name === "roo_apply_credential_source_operation_v2") return {data:null,error:{code:"CREDENTIAL_SOURCE_DOCUMENT_UNAVAILABLE"}};
         if (name === "roo_list_credential_recovery_v2") {
           return { data: [row], error: null };
         }
@@ -718,10 +716,10 @@ describe("credential recovery saga", () => {
         sanityClient: createSanityClient(null).client,
       })
     ).rejects.toMatchObject({ code: "RECORDER_FALLBACK_FAILED" });
-    expect(adminClient.rpc).toHaveBeenCalledTimes(3);
+    expect(adminClient.rpc).toHaveBeenCalledTimes(4);
   });
 
-  test("surfaces a resolved non-missing recorder error without falling back", async () => {
+  test("K1 surfaces a resolved non-missing recorder error without falling back", async () => {
     const row = {
       operation_key: "credential:reset:recorder-write-failed",
       status: "auth_applied",
@@ -730,6 +728,7 @@ describe("credential recovery saga", () => {
     };
     const adminClient = {
       rpc: jest.fn(async (name) => {
+        if (name === "roo_apply_credential_source_operation_v2") return {data:null,error:{code:"CREDENTIAL_SOURCE_DOCUMENT_UNAVAILABLE"}};
         if (name === "roo_list_credential_recovery_v2") {
           return { data: [row], error: null };
         }
@@ -746,10 +745,10 @@ describe("credential recovery saga", () => {
         sanityClient: createSanityClient(null).client,
       })
     ).rejects.toMatchObject({ code: "RECORDER_WRITE_FAILED" });
-    expect(adminClient.rpc).toHaveBeenCalledTimes(2);
+    expect(adminClient.rpc).toHaveBeenCalledTimes(3);
   });
 
-  test("classifies an unavailable Sanity source as transient", async () => {
+  test("K1 classifies an unavailable Sanity source as transient", async () => {
     const sanity = createSanityClient(null);
     const row = {
       operation_key: "credential:reset:missing-source",
@@ -762,6 +761,7 @@ describe("credential recovery saga", () => {
     };
     const adminClient = {
       rpc: jest.fn(async (name, args) => {
+        if (name === "roo_apply_credential_source_operation_v2") return {data:null,error:{code:"CREDENTIAL_SOURCE_DOCUMENT_UNAVAILABLE"}};
         if (name === "roo_list_credential_recovery_v2") {
           return { data: [row], error: null };
         }
@@ -790,7 +790,7 @@ describe("credential recovery saga", () => {
       backoff: 1,
       parked: 0,
     });
-    expect(sanity.client.fetch).toHaveBeenCalledTimes(1);
+    expect(sanity.client.fetch).not.toHaveBeenCalled();
     expect(sanity.client.patch).not.toHaveBeenCalled();
   });
 

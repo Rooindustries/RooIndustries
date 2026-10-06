@@ -6,7 +6,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import postgres from "postgres";
-import { applySqlRetirement, protectedState, readDatabaseRowJson, readRetirementAccountRows, writeVerifiedBackup } from "./retire-tourney-people.mjs";
+import { applySqlRetirement, protectedState, readDatabaseRowJson, readRetirementAccountRows, writeVerifiedBackup } from "../tests/fixtures/retirement-state.mjs";
 
 const migrationUrl = new URL(
   "../supabase/migrations/20260914010000_preserve_retired_tourney_identity_domains.sql",

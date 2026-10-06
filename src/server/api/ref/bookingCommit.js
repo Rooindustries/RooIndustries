@@ -1,3 +1,5 @@
+import envValue from "../../supabase/envValue.cjs";
+const { resolveStoreBackend } = envValue;
 import {
   buildBookingSlotId,
   buildDeterministicBookingId,
@@ -68,7 +70,7 @@ const assertBookingHoldMatches = ({ doc, hold, startTimeUTC, allowMissingHold })
     !timeMatches ||
     (normalize(hold.packageTitle) && normalize(hold.packageTitle) !== normalize(doc.packageTitle)) ||
     (phase === "payment_pending" && (!normalize(doc.paymentRecordId) || normalize(hold.paymentRecordId) !== normalize(doc.paymentRecordId))) ||
-    normalize(hold.backendOwner || "sanity") !== normalize(doc.backendOwner || "sanity") ||
+    resolveStoreBackend(hold.backendOwner) !== resolveStoreBackend(doc.backendOwner) ||
     Number(hold.cutoverGeneration || 0) !== Number(doc.cutoverGeneration || 0)
   ) {
     throw bookingConflict("The slot reservation no longer matches this booking.", "hold_changed");
@@ -125,7 +127,7 @@ export const commitBookingTransaction = async ({
   paymentRecordMutation = null,
   allowMissingHold = false,
 }) => {
-  if (!client) throw new Error("Booking transaction requires a Sanity client.");
+  if (!client) throw new Error("Booking transaction requires a document client.");
   const doc = prepareDeterministicBooking({ booking, idempotencyKey });
   const existingBooking = await client.fetch(
     `*[_type == "booking" && _id == $id][0]{...}`,
@@ -179,7 +181,7 @@ export const commitBookingTransaction = async ({
   if (slotLockId) {
     const lockValues = {
       _type: "bookingSlot",
-      backendOwner: doc.backendOwner === "supabase" ? "supabase" : "sanity",
+      backendOwner: resolveStoreBackend(doc.backendOwner),
       startTimeUTC,
       bookingId: doc._id,
       status: "active",
@@ -297,7 +299,7 @@ export const createRequiresRescheduleBooking = async ({
       paymentRecordId: paymentRecord._id,
       salesAttribution: sanitizeSalesAttribution(payload.salesAttribution),
       backendOwner:
-        paymentRecord.backendOwner === "supabase" ? "supabase" : "sanity",
+        resolveStoreBackend(paymentRecord.backendOwner),
       paymentProvider: paymentRecord.provider,
       ...(paymentRecord.provider === "dodo" ? {
         dodoCheckoutSessionId: paymentRecord.providerOrderId,
@@ -366,7 +368,7 @@ export const createRequiresRescheduleBooking = async ({
     _id: `bookingRecoveryCase.${booking._id.replace(/^booking\./, "")}`,
     _type: "bookingRecoveryCase",
     backendOwner:
-      paymentRecord.backendOwner === "supabase" ? "supabase" : "sanity",
+      resolveStoreBackend(paymentRecord.backendOwner),
     paymentRecordId: paymentRecord._id,
     bookingId: booking._id,
     reason: normalize(reason),

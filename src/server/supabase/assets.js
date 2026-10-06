@@ -1,7 +1,6 @@
 import { createSupabaseAdminClient } from "./adminClient.js";
 
 const MANIFEST_TTL_MS = 60 * 1000;
-const PRIVATE_URL_TTL_SECONDS = 15 * 60;
 const ASSET_REFERENCE_PATTERN = /^(?:image|file)-[A-Za-z0-9_.-]{1,240}$/;
 let manifestCaches = new WeakMap();
 
@@ -111,6 +110,7 @@ const collectEntries = (value, manifest, entries = new Map()) => {
 const resolveUrls = async (entries, client) => {
   const resolved = new Map();
   for (const entry of entries.values()) {
+    if (entry.migration_status !== "verified" || !/^[a-f0-9]{64}$/.test(entry.sha256 || "") || !/^(?:images|builds)\/[A-Za-z0-9_.-]+$/.test(entry.storage_path || "")) continue;
     if (entry.storage_bucket === "site-content-public") {
       const data = client.storage
         .from(entry.storage_bucket)
@@ -119,38 +119,47 @@ const resolveUrls = async (entries, client) => {
       continue;
     }
 
-    const data = requireData(
-      await client.storage
-        .from(entry.storage_bucket)
-        .createSignedUrl(entry.storage_path, PRIVATE_URL_TTL_SECONDS),
-      "private asset signing",
-    );
-    resolved.set(entry.legacy_sanity_asset_id, data.signedUrl);
   }
   return resolved;
 };
 
-const replaceUrls = (value, manifest, resolved) => {
+const missingWarnings = new Set();
+const warnMissing = key => {
+  if (missingWarnings.has(key) || missingWarnings.size >= 1000) return;
+  missingWarnings.add(key);
+  console.warn("CMS asset has no verified Supabase copy.");
+};
+const vendorUrl = value => {
+  try { const host = new URL(value).hostname; return host === "sanity.io" || host.endsWith(".sanity.io") || host.endsWith(".sanity.studio"); } catch { return false; }
+};
+const replaceUrls = (value, manifest, resolved, field = "", assetContext = false) => {
+  assetContext ||= /^(iconUrl|fileUrl|imageUrl|_supabaseUrl)$/.test(field);
   if (Array.isArray(value)) {
-    return value.map((entry) => replaceUrls(entry, manifest, resolved));
+    return value.map((entry) => replaceUrls(entry, manifest, resolved, field, assetContext));
   }
   if (!value || typeof value !== "object") {
     if (typeof value !== "string") return value;
+    if (!assetContext && !vendorUrl(value)) return value;
     const referencedAsset = manifest.byId.get(value);
     if (referencedAsset) {
-      return resolved.get(referencedAsset.legacy_sanity_asset_id) || value;
+      return resolved.get(referencedAsset.legacy_sanity_asset_id) || null;
     }
     const asset = manifest.bySourceUrl.get(value);
-    return asset ? resolved.get(asset.legacy_sanity_asset_id) || value : value;
+    if (asset) return resolved.get(asset.legacy_sanity_asset_id) || null;
+    if (vendorUrl(value) || ASSET_REFERENCE_PATTERN.test(value) || (assetContext && /^https?:\/\//i.test(value))) { warnMissing("unmapped"); return null; }
+    return value;
   }
 
+  assetContext ||= ["image", "file", "sanity.imageAsset", "sanity.fileAsset"].includes(value._type) || ASSET_REFERENCE_PATTERN.test(value._id || "") || ASSET_REFERENCE_PATTERN.test(value._ref || "") || ASSET_REFERENCE_PATTERN.test(value.asset?._ref || "");
   const next = {};
   for (const [key, entry] of Object.entries(value)) {
-    next[key] = key === "_ref" ? entry : replaceUrls(entry, manifest, resolved);
+    next[key] = key === "_ref" ? entry : replaceUrls(entry, manifest, resolved, key, assetContext);
   }
   const reference = String(value?._ref || "").trim();
-  if (reference && resolved.has(reference)) {
-    next._supabaseUrl = resolved.get(reference);
+  if (reference && ASSET_REFERENCE_PATTERN.test(reference)) {
+    delete next._supabaseUrl;
+    if (resolved.has(reference)) next._supabaseUrl = resolved.get(reference);
+    else warnMissing(reference);
   }
   const linkedAsset = manifest.byId.get(
     String(value?.asset?._ref || "").trim(),
@@ -174,7 +183,6 @@ export const enrichSupabaseContentAssets = async ({
   const references = collectReferences(data);
   const manifest = await getManifest(client, references);
   const entries = collectEntries(data, manifest);
-  if (entries.size < 1) return data;
   const resolved = await resolveUrls(entries, client);
   return replaceUrls(data, manifest, resolved);
 };

@@ -45,6 +45,7 @@ const next = path.resolve("node_modules/next/dist/bin/next");
 const fingerprint = createHash("sha256");
 const tracked = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean);
 for (const file of tracked.filter(file => /^(?:src\/|app\/|scripts\/|tests\/fixtures\/|package(?:-lock)?\.json$|next\.config\.mjs$|(?:tailwind|postcss)\.config)/.test(file)).sort()) {
+  if (!fs.existsSync(file)) continue;
   fingerprint.update(file);
   fingerprint.update(fs.readFileSync(file));
 }

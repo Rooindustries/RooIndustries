@@ -64,19 +64,7 @@ export async function POST(request) {
     });
   }
   const policy = resolveSupabaseRuntimePolicy();
-  if (
-    flow === "referral" &&
-    purpose === "change_password" &&
-    policy.primaryBackend === "sanity" &&
-    policy.cutoverEnabled
-  ) {
-    return failedReauth({
-      error:
-        "Password changes are temporarily unavailable during manual authentication failover.",
-      slot,
-      status: 503,
-    });
-  }
+
   const response = NextResponse.json({ ok: true });
   try {
     const identity = await resolveExactDomainIdentity({ flow, request, response });

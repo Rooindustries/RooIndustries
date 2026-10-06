@@ -57,22 +57,10 @@ jest.mock("../server/supabase/orphanIdentityReclaim", () => ({
   reclaimReferralOrphanIdentity: (...args) => mockReclaimOrphanIdentity(...args),
 }));
 
-jest.mock("../server/tourney/discordDesiredState", () => ({
-  queueTourneyDiscordAuthProjection: (...args) => mockQueueDiscordProjection(...args),
-  resolveQueuedTourneyDiscordAuthProjectionAfterFinalizeFailure: (...args) =>
-    mockResolveQueuedDiscordProjection(...args),
-}), { virtual: true });
-
 jest.mock("../server/api/ref/auth", () => ({
   REF_SESSION_COOKIE: "ref_session",
   createReferralSessionCookie: (...args) => mockCreateReferralSessionCookie(...args),
 }));
-
-jest.mock("../server/tourney/auth", () => ({
-  TOURNEY_SESSION_COOKIE: "tourney_session",
-  createTourneySessionToken: (...args) => mockCreateTourneySessionToken(...args),
-  getTourneyCookieOptions: (...args) => mockGetTourneyCookieOptions(...args),
-}), { virtual: true });
 
 const createResponse = (url, init = {}) => {
   const headerValues = new Map([["location", String(url)]]);

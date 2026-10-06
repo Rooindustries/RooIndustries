@@ -1,3 +1,5 @@
+import envValue from "../../supabase/envValue.cjs";
+const { resolveStoreBackend } = envValue;
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
 import { verifyHoldToken } from "../../booking/holdToken.js";
@@ -57,13 +59,7 @@ import {
 
 const { resolvePaymentProviders } = providerConfig;
 
-const defaultWriteClient = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-}, { domain: "commerce" });
+const defaultWriteClient = createClient({}, { domain: "commerce" });
 
 const OWNER_TZ_NAME = "Asia/Kolkata";
 
@@ -314,7 +310,7 @@ export default async function handler(req, res) {
       isInternalPaymentFinalization &&
       req.internalContext?.preserveHistoricalAccounting === true;
     const backendOwner =
-      req.internalContext?.backendOwner === "supabase" ? "supabase" : "sanity";
+      resolveStoreBackend(req.internalContext?.backendOwner);
     const legacyCompletionDeadline = new Date(
       process.env.PAYMENT_LEGACY_COMPLETION_UNTIL || ""
     ).getTime();
@@ -971,7 +967,7 @@ export default async function handler(req, res) {
           email: String(
             patchedBooking.email || patchedBooking.payerEmail || ""
           ).trim(),
-          backend: booking.backendOwner || "sanity",
+          backend: resolveStoreBackend(booking.backendOwner),
           cutoverGeneration: Number(booking.cutoverGeneration || 0),
         });
         await syncPaidPaymentRecordForBooking({
@@ -1403,7 +1399,7 @@ export default async function handler(req, res) {
         holdId: slotHoldId,
         startTimeUTC: holdUtcIso || normalizedStartTimeUTC,
         holdNonce: holdDoc?.holdNonce || "",
-        backend: holdDoc?.backendOwner === "supabase" ? "supabase" : "sanity",
+        backend: resolveStoreBackend(holdDoc?.backendOwner),
         cutoverGeneration: Number(holdDoc?.cutoverGeneration || 0),
       });
       const signedExpiredHoldToken = verifyHoldToken({
@@ -1411,7 +1407,7 @@ export default async function handler(req, res) {
         holdId: slotHoldId,
         startTimeUTC: holdUtcIso || normalizedStartTimeUTC,
         holdNonce: holdDoc?.holdNonce || "",
-        backend: holdDoc?.backendOwner === "supabase" ? "supabase" : "sanity",
+        backend: resolveStoreBackend(holdDoc?.backendOwner),
         cutoverGeneration: Number(holdDoc?.cutoverGeneration || 0),
         ignoreExpiry: true,
       });

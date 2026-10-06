@@ -43,7 +43,7 @@ jest.mock("../server/supabase/accounts.js", () => {
     resolveSupabaseAccountAlias: jest.fn(async () => ({ user_id: "user-one" })),
     updateSupabaseAccountPassword: mockUpdateSupabaseAccountPassword,
     markSupabaseCredentialSourceApplied: mockMarkSupabaseCredentialSourceApplied,
-    completeSupabaseCredentialMirror: mockCompleteSupabaseCredentialMirror,
+    completeSupabaseCredentialOperation: mockCompleteSupabaseCredentialMirror,
   };
 });
 
@@ -198,7 +198,7 @@ describe("referral password change", () => {
     });
   });
 
-  test("checkpoints the Sanity-primary source mutation before completing the mirror", async () => {
+  test("K1 uses the native source RPC with a legacy selector", async () => {
     mockResolvePolicy.mockReturnValue({
       primaryBackend: "sanity",
       cutoverEnabled: false,
@@ -222,26 +222,11 @@ describe("referral password change", () => {
     );
 
     expect(response.statusCode).toBe(200);
-    expect(chain.ifRevisionId).toHaveBeenCalledWith("source-r1");
-    expect(chain.set).toHaveBeenCalledWith(expect.objectContaining({
-      creatorPassword: expect.stringMatching(/^\$2b\$12\$/),
-    }));
-    expect(chain.unset).toHaveBeenCalledWith([
-      "resetToken",
-      "resetTokenHash",
-      "resetTokenExpiresAt",
-      "resetDeliveryToken",
-    ]);
-    expect(mockMarkSupabaseCredentialSourceApplied).toHaveBeenCalledWith({
-      operationKey: "credential:change:reauth-token-hash",
-      sourceRevision: "source-r2",
-    });
-    expect(mockCompleteSupabaseCredentialMirror).toHaveBeenCalledWith({
-      operationKey: "credential:change:reauth-token-hash",
-    });
+    expect(mockPatch).not.toHaveBeenCalled();
+    expect(mockReconcileSupabaseCredentialSource).toHaveBeenCalledWith({operationKey:"credential:change:reauth-token-hash",sourceDocumentId:"referral.creator"});
   });
 
-  test("blocks password changes during manual authentication fallback", async () => {
+  test("O1/K1 legacy labels use native credential application", async () => {
     mockResolvePolicy.mockReturnValue({
       primaryBackend: "sanity",
       cutoverEnabled: true,
@@ -253,8 +238,8 @@ describe("referral password change", () => {
       response
     );
 
-    expect(response.statusCode).toBe(503);
-    expect(mockUpdateSupabaseAccountPassword).not.toHaveBeenCalled();
+    expect(response.statusCode).toBe(200);
+    expect(mockUpdateSupabaseAccountPassword).toHaveBeenCalled();
     expect(mockPatch).not.toHaveBeenCalled();
   });
 

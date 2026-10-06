@@ -1,4 +1,5 @@
 const documents = new Map();
+const mockDispatches = new Map();
 const previousDataPrimary = process.env.DATA_PRIMARY_BACKEND;
 const mockSendVerification = jest.fn();
 const testPassword = `fixture-${"x".repeat(24)}`;
@@ -49,8 +50,8 @@ const mockClient = {
   },
 };
 
-jest.mock("@sanity/client", () => ({
-  createClient: () => mockClient,
+jest.mock("../server/data/documentClient.js", () => ({
+  createDataClient: () => mockClient,
 }));
 
 jest.mock("resend", () => ({
@@ -63,6 +64,30 @@ jest.mock("resend", () => ({
 
 jest.mock("../server/supabase/serverSession", () => ({
   getLegacySupabaseUser: jest.fn(async () => null),
+}));
+
+jest.mock("../server/supabase/accounts.js", () => ({
+  resolveSupabaseCreatorRegistrationConflicts: jest.fn(async () => ({ emailReserved: false, referralCodeReserved: false })),
+  resolveSupabaseAccountByUserId: jest.fn(async () => null),
+  createSupabaseCreatorAccount: jest.fn(),
+}));
+
+jest.mock("../server/api/ref/referralEmailDispatches.js", () => ({
+  enqueueReferralEmailMutation: jest.fn(async input => {
+    let tx = mockClient.transaction();
+    input.mutations.forEach(mutation => { tx = tx.create(mutation.document); });
+    await tx.commit();
+    const key = `dispatch:${input.referralId}`;
+    mockDispatches.set(key, input);
+    return { idempotency_key: key };
+  }),
+  deliverReferralEmailDispatch: jest.fn(async ({ idempotencyKey }) => {
+    const input = mockDispatches.get(idempotencyKey);
+    const result = await mockSendVerification(input, { idempotencyKey });
+    return { sent: result.error ? 0 : 1, pending: result.error ? 1 : 0, deadLetter: 0 };
+  }),
+  requeueReferralEmailDispatch: jest.fn(async ({ referralId }) => ({ requeued: true, status: "pending", idempotency_key: `dispatch:${referralId}` })),
+  isReferralEmailSourceStateConflict: () => false,
 }));
 
 const createRes = () => ({
@@ -104,6 +129,7 @@ describe("referral registration identity claims", () => {
 
   beforeEach(() => {
     documents.clear();
+    mockDispatches.clear();
     mockClient.fetch.mockReset();
     mockClient.fetch.mockResolvedValue(null);
     mockSendVerification.mockReset();
@@ -176,7 +202,7 @@ describe("referral registration identity claims", () => {
     expect(mockSendVerification).not.toHaveBeenCalled();
   });
 
-  test("keeps the committed pending account when email delivery is ambiguous", async () => {
+  test("O1/C2 native email queue keeps the committed pending account when email delivery is ambiguous", async () => {
     mockSendVerification.mockResolvedValue({
       data: null,
       error: new Error("provider unavailable"),
@@ -198,7 +224,8 @@ describe("referral registration identity claims", () => {
       response
     );
 
-    expect(response.statusCode).toBe(503);
+    expect(response.statusCode).toBe(202);
+    expect(response.body.syncPending).toBe(true);
     expect(
       [...documents.values()].filter((document) => document._type === "referral")
     ).toHaveLength(1);
@@ -209,43 +236,22 @@ describe("referral registration identity claims", () => {
     ).toHaveLength(2);
   });
 
-  test("retries the same sealed verification token in Sanity fallback mode", async () => {
-    const request = {
-      method: "POST",
-      headers: { "x-forwarded-for": "203.0.113.92" },
-      body: {
-        discordUsername: "Creator Retry",
-        email: "retry@example.com",
-        paypalEmail: "retry@example.com",
-        slug: "creator-retry",
-        password: testPassword,
-      },
-    };
-    mockSendVerification
-      .mockResolvedValueOnce({ data: null, error: new Error("response timed out") })
-      .mockResolvedValueOnce({ data: { id: "email_fixture" }, error: null });
+  test("O1 native verification queue requeues the same durable dispatch", async () => {
+    const request = { method: "POST", headers: { "x-forwarded-for": "203.0.113.92" }, body: { discordUsername: "Creator Retry", email: "retry@example.com", paypalEmail: "retry@example.com", slug: "creator-retry", password: testPassword } };
+    mockSendVerification.mockResolvedValueOnce({ data: null, error: new Error("response timed out") });
     const first = createRes();
     await register(request, first);
-    const pending = [...documents.values()].find(
-      (document) => document._type === "referral"
-    );
-    expect(first.statusCode).toBe(503);
-    expect(pending.registrationVerificationDeliveryToken).toMatch(/^v1\./);
-    expect(pending.registrationVerificationDeliveryToken).not.toContain(
-      pending.registrationVerificationTokenHash
-    );
-
+    const pending = [...documents.values()].find(document => document._type === "referral");
+    expect(first.statusCode).toBe(202);
+    expect(first.body.syncPending).toBe(true);
+    expect(mockDispatches.size).toBe(1);
+    expect(pending.registrationVerificationDeliveryToken).toBeUndefined();
     mockClient.fetch.mockImplementationOnce(async () => ({ ...pending }));
     const second = createRes();
     await register(request, second);
-
     expect(second.statusCode).toBe(202);
-    expect(mockSendVerification).toHaveBeenCalledTimes(2);
-    expect(mockSendVerification.mock.calls[0][1].idempotencyKey).toBe(
-      mockSendVerification.mock.calls[1][1].idempotencyKey
-    );
-    expect(
-      documents.get(pending._id).registrationVerificationDeliveryToken
-    ).toBeUndefined();
+    expect(mockDispatches.size).toBe(1);
+    expect(mockSendVerification).toHaveBeenCalledTimes(1);
+    expect(require("../server/api/ref/referralEmailDispatches.js").requeueReferralEmailDispatch).toHaveBeenCalledWith({ referralId: pending._id, dispatchKind: "registration_verification" });
   });
 });

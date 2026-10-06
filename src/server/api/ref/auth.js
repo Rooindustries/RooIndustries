@@ -1,3 +1,5 @@
+import envValue from "../../supabase/envValue.cjs";
+const { resolveStoreBackend } = envValue;
 import crypto from "crypto";
 
 export const REF_SESSION_COOKIE = "ref_session";
@@ -74,7 +76,7 @@ const buildSessionToken = (payload, maxAgeSeconds) => {
     exp: now + maxAgeSeconds,
     rid: payload.referralId,
     code: payload.code || "",
-    ab: payload.authBackend === "supabase" ? "supabase" : "sanity",
+    ab: resolveStoreBackend(payload.authBackend),
     pid: payload.principalId || "",
     sv: Math.max(1, Number(payload.sessionVersion) || 1),
     cv: Math.max(
@@ -100,6 +102,7 @@ const decodeSessionToken = (token) => {
   if (!payload?.rid || !payload?.exp) return null;
   const now = Math.floor(Date.now() / 1000);
   if (payload.exp <= now) return null;
+  payload.ab = resolveStoreBackend(payload.ab);
   return payload;
 };
 
@@ -158,7 +161,7 @@ export const getReferralSession = (req) => {
     return {
       referralId: payload.rid,
       code: payload.code || "",
-      authBackend: payload.ab === "supabase" ? "supabase" : "sanity",
+      authBackend: resolveStoreBackend(payload.ab),
       principalId: payload.pid || "",
       sessionVersion: Math.max(1, Number(payload.sv) || 1),
       credentialVersion: Math.max(
@@ -202,198 +205,11 @@ const validateSupabaseReferralSession = async (session) => {
   };
 };
 
-const changedAfterSessionIssued = (changedAt, issuedAt, issuedAtMs = 0) => {
-  const changedAtMs = Date.parse(String(changedAt || ""));
-  if (!Number.isFinite(changedAtMs) || !issuedAt) return false;
-  return issuedAtMs
-    ? changedAtMs > issuedAtMs
-    : changedAtMs >= issuedAt * 1000;
-};
-
-const validatePreCutoverSanityReferralSession = async (session) => {
-  const { createDocumentReadClient } = await import("../../data/documentClient.js");
-  const client = createDocumentReadClient({
-    backendOverride: "sanity",
-    domain: "global",
-  });
-  const account = await client.fetch(
-    `*[_type == "referral" && _id == $id][0]{
-      _id,
-      "code": slug.current,
-      registrationStatus,
-      passwordResetRequired,
-      passwordLoginEnabled,
-      passwordChangedAt
-    }`,
-    { id: session.referralId }
-  );
-  if (
-    account?._id !== session.referralId ||
-    !account.code ||
-    (session.code && account.code !== session.code) ||
-    account.registrationStatus !== "active" ||
-    account.passwordResetRequired === true ||
-    account.passwordLoginEnabled === false ||
-    changedAfterSessionIssued(account.passwordChangedAt, session.issuedAt, session.issuedAtMs)
-  ) {
-    return null;
-  }
-  return { ...session, code: account.code };
-};
-
-const positiveSafeInteger = (value) => {
-  const number = Number(value);
-  return Number.isSafeInteger(number) && number > 0 ? number : 0;
-};
-
-const normalizeFallbackAuthority = (value) => {
-  const authoritySchemaVersion = positiveSafeInteger(value?.authoritySchemaVersion);
-  const principalSessionVersion = positiveSafeInteger(
-    value?.principalSessionVersion
-  );
-  const credentialVersion = positiveSafeInteger(value?.credentialVersion);
-  const authorityVersion = positiveSafeInteger(value?.authorityVersion);
-  const credentialChangedAt = String(value?.credentialChangedAt || "");
-  const principalId = String(value?.principalId || "").trim().toLowerCase();
-  if (
-    authoritySchemaVersion !== 1 ||
-    !String(value?.legacyCreatorId || "").trim() ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
-      principalId
-    ) ||
-    !String(value?.referralCode || "").trim() ||
-    !principalSessionVersion ||
-    !credentialVersion ||
-    !authorityVersion ||
-    !Number.isFinite(Date.parse(credentialChangedAt)) ||
-    typeof value?.creatorActive !== "boolean" ||
-    typeof value?.creatorRolePresent !== "boolean" ||
-    typeof value?.currentRecord !== "boolean" ||
-    !["active", "disabled", "deleted"].includes(value?.principalStatus)
-  ) {
-    return null;
-  }
-  return {
-    authoritySchemaVersion,
-    legacyCreatorId: String(value.legacyCreatorId),
-    principalId,
-    referralCode: String(value.referralCode).trim().toLowerCase(),
-    principalSessionVersion,
-    principalStatus: value.principalStatus,
-    creatorActive: value.creatorActive,
-    creatorRolePresent: value.creatorRolePresent,
-    credentialVersion,
-    credentialChangedAt,
-    currentRecord: value.currentRecord,
-    authorityVersion,
-  };
-};
-
-export const readReferralFallbackAuthority = async ({
-  legacyCreatorId,
-  client = null,
-  env = process.env,
-} = {}) => {
-  const creatorId = String(legacyCreatorId || "").trim();
-  if (!creatorId) return null;
-  let readClient = client;
-  if (!readClient) {
-    const privateProjectId = String(env.SANITY_PRIVATE_PROJECT_ID || "").trim();
-    const privateDataset = String(env.SANITY_PRIVATE_DATASET || "").trim();
-    const privateToken = String(
-      env.SANITY_PRIVATE_READ_TOKEN || env.SANITY_PRIVATE_WRITE_TOKEN || ""
-    ).trim();
-    if (!privateProjectId || !privateDataset || !privateToken) {
-      throw new Error("Private referral fallback authority is not configured.");
-    }
-    const { createDocumentReadClient } = await import(
-      "../../data/documentClient.js"
-    );
-    readClient = createDocumentReadClient({
-      env,
-      backendOverride: "sanity",
-      domain: "global",
-    });
-  }
-  const authority = await readClient.fetch(
-    `*[
-      _type == "referralAuthAuthority"
-      && legacyCreatorId == $legacyCreatorId
-    ][0]{
-      authoritySchemaVersion,
-      legacyCreatorId,
-      principalId,
-      referralCode,
-      principalSessionVersion,
-      principalStatus,
-      creatorActive,
-      creatorRolePresent,
-      credentialVersion,
-      credentialChangedAt,
-      currentRecord,
-      authorityVersion
-    }`,
-    { legacyCreatorId: creatorId }
-  );
-  return normalizeFallbackAuthority(authority);
-};
-
-export const isActiveReferralFallbackAuthority = (
-  authority,
-  { legacyCreatorId = "", referralCode = "" } = {}
-) =>
-  Boolean(
-    authority &&
-      authority.legacyCreatorId === String(legacyCreatorId || "").trim() &&
-      authority.referralCode === String(referralCode || "").trim().toLowerCase() &&
-      authority.principalStatus === "active" &&
-      authority.creatorActive === true &&
-      authority.creatorRolePresent === true &&
-      authority.currentRecord === true
-  );
-
-const validateFallbackAuthoritySession = async (session) => {
-  const authority = await readReferralFallbackAuthority({
-    legacyCreatorId: session.referralId,
-  });
-  if (
-    !isActiveReferralFallbackAuthority(authority, {
-      legacyCreatorId: session.referralId,
-      referralCode: session.code,
-    }) ||
-    !session.principalId ||
-    authority.principalId !== session.principalId.toLowerCase() ||
-    authority.principalSessionVersion !== session.sessionVersion ||
-    authority.credentialVersion !== session.credentialVersion ||
-    changedAfterSessionIssued(authority.credentialChangedAt, session.issuedAt, session.issuedAtMs)
-  ) {
-    return null;
-  }
-  return {
-    ...session,
-    code: authority.referralCode,
-    principalId: authority.principalId,
-    sessionVersion: authority.principalSessionVersion,
-    credentialVersion: authority.credentialVersion,
-  };
-};
-
 export const requireReferralSession = async (req, res) => {
   const session = getReferralSession(req);
   if (session) {
     try {
-      const { resolveSupabaseRuntimePolicy } = await import(
-        "../../supabase/runtime.js"
-      );
-      const policy = resolveSupabaseRuntimePolicy();
-      const manualFallback =
-        policy.primaryBackend === "sanity" && policy.cutoverEnabled;
-      const verified = manualFallback
-        ? await validateFallbackAuthoritySession(session)
-        : session.authBackend === "supabase" ||
-            policy.primaryBackend === "supabase"
-          ? await validateSupabaseReferralSession(session)
-          : await validatePreCutoverSanityReferralSession(session);
+      const verified = await validateSupabaseReferralSession(session);
       if (verified) return verified;
     } catch {
       res.status(503).json({

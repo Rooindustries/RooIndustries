@@ -10,7 +10,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import Services from "../components/Services";
 
-jest.mock("../sanityClient", () => ({ urlFor: jest.fn() }));
+jest.mock("../lib/cmsImageUrl", () => ({ urlFor: jest.fn() }));
 
 const originalIntersectionObserver = global.IntersectionObserver;
 

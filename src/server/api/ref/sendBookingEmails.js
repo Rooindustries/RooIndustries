@@ -4,8 +4,9 @@ import {
   sendBookingEmailsForBooking,
 } from "./bookingEmails.js";
 import { verifyBookingEmailDispatchToken } from "./bookingEmailDispatchToken.js";
-import { createCommerceWriteClient } from "./sanity.js";
-import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
+import { createCommerceWriteClient } from "./documentStore.js";
+import { logSafeError } from "../../safeErrorLog.js";
+
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -48,35 +49,14 @@ export default async function handler(req, res) {
     });
   }
 
-  const policy = resolveSupabaseRuntimePolicy();
-  const tokenBackend = initialToken.payload?.be
-    ? initialToken.payload.be === "supabase"
-      ? "supabase"
-      : "sanity"
-    : "";
-  const backendCandidates = tokenBackend
-    ? [tokenBackend]
-    : [
-        policy.commercePrimaryBackend,
-        policy.commercePrimaryBackend === "supabase" ? "sanity" : "supabase",
-      ];
-  let booking = null;
-  let client = null;
-  for (const backend of backendCandidates) {
-    let candidate = null;
-    let found = null;
-    try {
-      candidate = createCommerceWriteClient({ backendOverride: backend });
-      found = await getBookingForEmailDispatch({ bookingId, client: candidate });
-    } catch (error) {
-      if (backend !== "sanity") continue;
-      found = await getBookingForEmailDispatch({ bookingId });
-    }
-    if (found?._id) {
-      booking = found;
-      client = candidate;
-      break;
-    }
+  let booking;
+  let client;
+  try {
+    client = createCommerceWriteClient();
+    booking = await getBookingForEmailDispatch({ bookingId, client });
+  } catch (error) {
+    logSafeError("Booking email lookup failed", error);
+    return res.status(503).json({ ok: false, error: "Booking email confirmation is temporarily unavailable." });
   }
   if (!booking?._id) {
     return res.status(404).json({
@@ -90,7 +70,7 @@ export default async function handler(req, res) {
     bookingId,
     email: String(booking.email || booking.payerEmail || "").trim(),
     ...(initialToken.payload?.be
-      ? { backend: booking.backendOwner || tokenBackend }
+      ? { backend: booking.backendOwner }
       : {}),
     ...(initialToken.payload?.gen !== undefined
       ? { cutoverGeneration: Number(booking.cutoverGeneration || 0) }

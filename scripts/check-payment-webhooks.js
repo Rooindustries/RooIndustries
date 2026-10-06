@@ -24,7 +24,6 @@ const REQUIRED_PROD_ENV = [
   "PAYPAL_CLIENT_SECRET",
   "RAZORPAY_KEY_ID",
   "RAZORPAY_KEY_SECRET",
-  "SANITY_WEBHOOK_SECRET",
 ];
 
 const exists = (relativePath) => fs.existsSync(path.join(ROOT, relativePath));

@@ -94,16 +94,6 @@ const derivePortClosureBlockers = (portClosure) => {
     }
   };
 
-  requireReady(
-    portClosure?.documentMutationMirror,
-    "portClosure.documentMutationMirror",
-    "document_mutation_mirror_not_ready"
-  );
-  requireReady(
-    portClosure?.referralFallbackAuthority,
-    "portClosure.referralFallbackAuthority",
-    "referral_fallback_authority_not_ready"
-  );
   requireFreshQueue(
     portClosure?.credentialRecovery,
     "portClosure.credentialRecovery",
@@ -149,134 +139,19 @@ const derivePortClosureBlockers = (portClosure) => {
     "portClosure.oauthIntents.terminalOlderThanSevenDays",
     "oauth_intents_cleanup_overdue"
   );
-  const parityAgeSeconds = requiredNumber({
-    source: portClosure,
-    key: "parityAgeSeconds",
-    path: "portClosure.parityAgeSeconds",
-    blockers,
-  });
-  if (parityAgeSeconds !== null && parityAgeSeconds > 900) {
-    add("port_parity_stale");
-  }
   return [...blockers];
 };
 
 const deriveCommerceBlockers = ({ readiness, integrity, databaseControl }) => {
   const blockers = new Set();
   const add = (blocker) => blockers.add(blocker);
-  const mirror = readiness.mirror || {};
-  const integrityMirror = integrity.mirror || {};
-  const lastParity = readiness.last_parity;
-  const parityCompletedAt = Date.parse(String(lastParity?.completed_at || ""));
-  if (
-    !lastParity ||
-    lastParity.status !== "completed" ||
-    !Number.isFinite(parityCompletedAt)
-  ) {
-    add("parity_invalid");
-  } else if (
-    parityCompletedAt > Date.now() + 60_000 ||
-    Date.now() - parityCompletedAt > 15 * 60_000
-  ) {
-    add("parity_stale");
-  }
-  const parity = lastParity?.counters?.parity;
-  const parityFailures = requiredNumber({
-    source: parity,
-    key: "failures",
-    path: "last_parity.counters.parity.failures",
-    blockers,
-    integer: true,
-  });
-  const parityCompared = requiredNumber({
-    source: parity,
-    key: "compared",
-    path: "last_parity.counters.parity.compared",
-    blockers,
-    integer: true,
-  });
-  const parityMirrorPending = requiredNumber({
-    source: parity,
-    key: "mirrorPending",
-    path: "last_parity.counters.parity.mirrorPending",
-    blockers,
-    integer: true,
-  });
-  const parityCapturedWithoutBooking = requiredNumber({
-    source: parity,
-    key: "capturedWithoutBooking",
-    path: "last_parity.counters.parity.capturedWithoutBooking",
-    blockers,
-    integer: true,
-  });
-  if (
-    parity?.ok !== true ||
-    parityFailures !== 0 ||
-    parityCompared === null ||
-    parityCompared < 1 ||
-    parityMirrorPending !== 0 ||
-    parityCapturedWithoutBooking !== 0
-  ) {
-    add("parity_drift");
-  }
-  const checkpoint = readiness.last_mirror_checkpoint;
   if (!["sanity", "supabase"].includes(databaseControl?.primary_backend)) {
     add("readiness_schema_invalid:control.primary_backend");
   }
   if (typeof databaseControl?.starts_paused !== "boolean") {
     add("readiness_schema_invalid:control.starts_paused");
   }
-  const checkpointGeneration = requiredNumber({
-    source: checkpoint,
-    key: "generation",
-    path: "last_mirror_checkpoint.generation",
-    blockers,
-    integer: true,
-  });
-  const controlGeneration = requiredNumber({
-    source: databaseControl,
-    key: "generation",
-    path: "control.generation",
-    blockers,
-    integer: true,
-  });
-  const checkpointAt = Date.parse(String(checkpoint?.mirrored_at || ""));
-  if (!Number.isFinite(checkpointAt) || checkpointAt > Date.now() + 60_000) {
-    add("mirror_checkpoint_invalid");
-  }
-  if (
-    checkpointGeneration !== null &&
-    controlGeneration !== null &&
-    checkpointGeneration !== controlGeneration
-  ) {
-    add("mirror_checkpoint_generation_mismatch");
-  }
-  const mirrorPending = requiredNumber({
-    source: mirror,
-    key: "pending",
-    path: "mirror.pending",
-    blockers,
-    integer: true,
-  });
-  const mirrorDeadLetters = requiredNumber({
-    source: mirror,
-    key: "dead_letters",
-    path: "mirror.dead_letters",
-    blockers,
-    integer: true,
-  });
-  if (mirrorDeadLetters !== null && mirrorDeadLetters > 0) {
-    add("mirror_dead_letters");
-  }
-  if (
-    mirrorPending !== null &&
-    timestampIsOverdue({
-      pending: mirrorPending,
-      oldestAt: mirror.oldest_pending_at,
-    })
-  ) {
-    add("mirror_overdue");
-  }
+  requiredNumber({source: databaseControl, key: "generation", path: "control.generation", blockers, integer: true});
   const capturedWithoutBooking = requiredNumber({
     source: readiness,
     key: "captured_without_booking",
@@ -316,38 +191,6 @@ const deriveCommerceBlockers = ({ readiness, integrity, databaseControl }) => {
       integer: true,
     });
     if (value !== null && value > 0) add(blocker);
-  }
-  const integrityPending = requiredNumber({
-    source: integrityMirror,
-    key: "pending",
-    path: "integrity.mirror.pending",
-    blockers,
-    integer: true,
-  });
-  const integrityDeadLetters = requiredNumber({
-    source: integrityMirror,
-    key: "dead_letters",
-    path: "integrity.mirror.dead_letters",
-    blockers,
-    integer: true,
-  });
-  const integrityOldestAge = requiredNumber({
-    source: integrityMirror,
-    key: "oldest_age_seconds",
-    path: "integrity.mirror.oldest_age_seconds",
-    blockers,
-    integer: true,
-  });
-  if (integrityDeadLetters !== null && integrityDeadLetters > 0) {
-    add("integrity_mirror_dead_letters");
-  }
-  if (
-    integrityPending !== null &&
-    integrityOldestAge !== null &&
-    integrityPending > 0 &&
-    integrityOldestAge > 300
-  ) {
-    add("integrity_mirror_overdue");
   }
   for (const [key, blocker] of [
     ["orphan_claimed_proofs", "orphan_claimed_proofs"],
@@ -390,86 +233,10 @@ const deriveCommerceBlockers = ({ readiness, integrity, databaseControl }) => {
   return [...blockers];
 };
 
-const isCommerceFailoverBlocker = (blocker) =>
-  blocker.startsWith("parity_") ||
-  blocker.startsWith("mirror_") ||
-  blocker.startsWith("integrity_mirror_") ||
-  blocker.startsWith("readiness_schema_invalid:last_parity") ||
-  blocker.startsWith("readiness_schema_invalid:last_mirror_checkpoint") ||
-  blocker.startsWith("readiness_schema_invalid:mirror.") ||
-  blocker.startsWith("readiness_schema_invalid:integrity.mirror.");
-
-const isPortFailoverBlocker = (blocker) =>
-  blocker === "document_mutation_mirror_not_ready" ||
-  blocker === "referral_fallback_authority_not_ready" ||
-  blocker === "port_parity_stale" ||
-  blocker.startsWith(
-    "readiness_schema_invalid:portClosure.documentMutationMirror",
-  ) ||
-  blocker.startsWith(
-    "readiness_schema_invalid:portClosure.referralFallbackAuthority",
-  ) ||
-  blocker.startsWith("readiness_schema_invalid:portClosure.parityAgeSeconds");
-
-const splitBlockers = (blockers, isFailoverBlocker) => ({
-  primary: blockers.filter((blocker) => !isFailoverBlocker(blocker)),
-  failover: blockers.filter(isFailoverBlocker),
-});
-
-const deriveFailoverConfiguration = (policy) => {
-  const status = ["absent", "partial", "complete"].includes(
-    policy.sanityConfigurationStatus,
-  )
-    ? policy.sanityConfigurationStatus
-    : "unknown";
-  if (status !== "complete") {
-    return {
-      ready: false,
-      reason: `sanity_configuration_${status}`,
-      status,
-    };
-  }
-  if (policy.reverseMirrorEnabled !== true) {
-    return {
-      ready: false,
-      reason: "sanity_reverse_mirror_disabled",
-      status,
-    };
-  }
-  return { ready: true, reason: "", status };
-};
-
 const deriveCmsReadiness = ({ cms, cmsControl }) => {
-  const hasComponentReadiness =
-    cms.receipts !== undefined ||
-    cms.assets !== undefined ||
-    cms.content_mirror !== undefined ||
-    cms.commerce_mirror !== undefined;
-  const primaryBackendReady = hasComponentReadiness
-    ? cms.receipts?.ready === true && cms.assets?.ready === true
-    : cms.ready === true;
-  const failoverBackendReady = hasComponentReadiness
-    ? cms.content_mirror?.ready === true && cms.commerce_mirror?.ready === true
-    : cms.ready === true;
-  const primaryBlockers = [
-    ...cmsControl.blockers,
-    ...(primaryBackendReady ? [] : ["cms_primary_readiness_not_ready"]),
-  ];
-  const failoverBlockers = failoverBackendReady
-    ? []
-    : ["cms_failover_mirror_not_ready"];
-  const blockers = [
-    ...cmsControl.blockers,
-    ...(cms.ready === true ? [] : ["cms_publish_readiness_not_ready"]),
-  ];
-  return {
-    blockers,
-    ready: blockers.length === 0,
-    primaryBlockers,
-    primaryReady: primaryBlockers.length === 0,
-    failoverBlockers,
-    failoverReady: failoverBlockers.length === 0,
-  };
+  const ready = cms.receipts?.ready === true && cms.assets?.ready === true;
+  const blockers = [...cmsControl.blockers, ...(ready ? [] : ["cms_publish_readiness_not_ready"])];
+  return { blockers, ready: blockers.length === 0, primaryBlockers: blockers, primaryReady: blockers.length === 0 };
 };
 
 export async function GET(request) {
@@ -516,9 +283,6 @@ export async function GET(request) {
     const integrity = integrityResult.data || {};
     const portClosure = portResult.data || {};
     const cms = cmsResult.data || {};
-    const documentMutationMirror = portClosure.documentMutationMirror || {};
-    const referralFallbackAuthority =
-      portClosure.referralFallbackAuthority || {};
     const referralEmails = referralEmailResult.data || {};
     const databaseControl = integrity.control || {};
     const commerceBlockers = deriveCommerceBlockers({
@@ -527,27 +291,15 @@ export async function GET(request) {
       databaseControl,
     });
     const portClosureBlockers = derivePortClosureBlockers(portClosure);
-    const commerceSplit = splitBlockers(
-      commerceBlockers,
-      isCommerceFailoverBlocker,
-    );
-    const portClosureSplit = splitBlockers(
-      portClosureBlockers,
-      isPortFailoverBlocker,
-    );
     const commerceReady = commerceBlockers.length === 0;
     const portClosureReady = portClosureBlockers.length === 0;
     const cmsControl = resolveGlobalCmsWriteControl(process.env);
     const cmsReadiness = deriveCmsReadiness({ cms, cmsControl });
-    const failoverConfiguration = deriveFailoverConfiguration(policy);
-    const commercePrimaryReady = commerceSplit.primary.length === 0;
-    const commerceFailoverReady = commerceSplit.failover.length === 0;
-    const portClosurePrimaryReady = portClosureSplit.primary.length === 0;
-    const portClosureFailoverReady = portClosureSplit.failover.length === 0;
+    const commercePrimaryReady = commerceReady;
+    const portClosurePrimaryReady = portClosureReady;
     const controlMatchesDeployment =
       databaseControl.primary_backend === policy.commercePrimaryBackend &&
-      Number(databaseControl.generation) ===
-        policy.commerceFailoverGeneration &&
+      Number(databaseControl.generation) === policy.commerceFailoverGeneration &&
       databaseControl.starts_paused === policy.commerceStartsPaused;
     const primaryReady =
       commercePrimaryReady &&
@@ -555,14 +307,6 @@ export async function GET(request) {
       portClosurePrimaryReady &&
       referralEmails.ready === true &&
       cmsReadiness.primaryReady;
-    const failoverChecksReady =
-      commerceFailoverReady &&
-      portClosureFailoverReady &&
-      cmsReadiness.failoverReady;
-    const failoverReady =
-      failoverConfiguration.ready && failoverChecksReady;
-    const failoverReason = failoverConfiguration.reason ||
-      (failoverChecksReady ? "" : "failover_checks_failed");
     return NextResponse.json(
       {
         ok: true,
@@ -570,30 +314,19 @@ export async function GET(request) {
         commerceReady,
         commerceBlockers,
         commercePrimaryReady,
-        commercePrimaryBlockers: commerceSplit.primary,
-        commerceFailoverReady,
-        commerceFailoverBlockers: commerceSplit.failover,
+        commercePrimaryBlockers: commerceBlockers,
         ready: primaryReady,
         primaryReady,
-        failoverReady,
-        failoverReason,
-        failoverConfigurationReady: failoverConfiguration.ready,
-        sanityConfigurationStatus: failoverConfiguration.status,
-        reverseMirrorEnabled: policy.reverseMirrorEnabled === true,
         primaryBackend: policy.commercePrimaryBackend,
         cutoverEnabled: policy.commerceCutoverEnabled,
         startsPaused: policy.commerceStartsPaused,
-        failoverGeneration: policy.commerceFailoverGeneration,
         databaseControl,
         controlMatchesDeployment,
         portClosureReady,
         portClosureBlockers,
         portClosurePrimaryReady,
-        portClosurePrimaryBlockers: portClosureSplit.primary,
-        portClosureFailoverReady,
-        portClosureFailoverBlockers: portClosureSplit.failover,
+        portClosurePrimaryBlockers: portClosureBlockers,
         integrity: {
-          mirror: integrity.mirror || {},
           orphanClaimedProofs: Number(integrity.orphan_claimed_proofs || 0),
           orphanFreeProofs: Number(integrity.orphan_free_proofs || 0),
           commandConflicts: Number(integrity.command_conflicts || 0),
@@ -601,16 +334,11 @@ export async function GET(request) {
             integrity.full_projector_calls_in_commands || 0,
           ),
         },
-        documentMutationMirrorReady: documentMutationMirror.ready === true,
-        referralFallbackAuthorityReady:
-          referralFallbackAuthority.ready === true,
         referralEmailReady: referralEmails.ready === true,
         cmsReady: cmsReadiness.ready,
         cmsBlockers: cmsReadiness.blockers,
         cmsPrimaryReady: cmsReadiness.primaryReady,
         cmsPrimaryBlockers: cmsReadiness.primaryBlockers,
-        cmsFailoverReady: cmsReadiness.failoverReady,
-        cmsFailoverBlockers: cmsReadiness.failoverBlockers,
         cmsControl,
         globalCmsReady: cmsReadiness.ready,
         globalCmsBlockers: cmsReadiness.blockers,

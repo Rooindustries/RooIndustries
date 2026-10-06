@@ -6,13 +6,15 @@ import {
 describe("Supabase content asset URLs", () => {
   beforeEach(() => clearSupabaseAssetManifestCache());
 
-  test("uses public image URLs and short-lived private build URLs", async () => {
+  test("D6/D4 uses verified public images and suppresses private URLs", async () => {
     const manifest = [
       {
         legacy_sanity_asset_id: "image-one",
         source_url: "https://cdn.sanity.io/image-one.png",
         storage_bucket: "site-content-public",
         storage_path: "images/one.png",
+        migration_status: "verified",
+        sha256: "a".repeat(64),
         width: 1200,
         height: 800,
       },
@@ -59,7 +61,7 @@ describe("Supabase content asset URLs", () => {
           aspectRatio: 1.5,
         },
       },
-      download: "https://storage.test/private/builds/one.zip?ttl=900",
+      download: null,
     });
     expect(client.rpc).toHaveBeenCalledWith("roo_asset_manifest_for_refs", {
       p_asset_ids: ["image-one"],
@@ -80,7 +82,7 @@ describe("Supabase content asset URLs", () => {
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
-  test("resolves projected asset IDs when the Supabase dataset has no Sanity asset document", async () => {
+  test("D6/D4 refuses private projected assets in cached public output", async () => {
     const client = {
       rpc: jest.fn().mockResolvedValue({
         data: [
@@ -108,14 +110,12 @@ describe("Supabase content asset URLs", () => {
         client,
       }),
     ).resolves.toEqual({
-      fileUrl: "https://storage.test/tool.zip?ttl=900",
+      fileUrl: null,
     });
     expect(client.rpc).toHaveBeenCalledWith("roo_asset_manifest_for_refs", {
       p_asset_ids: ["file-tool-zip"],
       p_source_urls: [],
     });
-    const storage = client.storage.from.mock.results[0].value;
-    expect(client.storage.from).toHaveBeenCalledWith("optimization-builds-private");
-    expect(storage.createSignedUrl).toHaveBeenCalledWith("builds/tool.zip", 900);
+    expect(client.storage.from).not.toHaveBeenCalled();
   });
 });

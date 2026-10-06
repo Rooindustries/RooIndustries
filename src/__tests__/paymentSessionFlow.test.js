@@ -57,7 +57,7 @@ jest.mock("../server/api/ref/pricing", () => ({
   resolvePaymentQuote: (...args) => mockResolvePaymentQuote(...args),
 }));
 
-jest.mock("../server/api/ref/sanity", () => ({
+jest.mock("../server/api/ref/documentStore", () => ({
   __esModule: true,
   createRefWriteClient: (...args) => mockCreateRefWriteClient(...args),
   createCommerceWriteClient: (...args) => mockCreateCommerceWriteClient(...args),
@@ -313,17 +313,6 @@ const mockClient = {
 
     if (q.includes("lower(status) in $statuses")) {
       return [...store.paymentRecords]
-        .filter((entry) => {
-          const recordGeneration = Math.max(
-            0,
-            Number(entry.cutoverGeneration) || 0
-          );
-          if (recordGeneration < Number(params.currentGeneration || 0)) {
-            return params.backend === params.primaryBackend;
-          }
-          const owner = entry.backendOwner === "supabase" ? "supabase" : "sanity";
-          return owner === params.backend;
-        })
         .filter((entry) => {
           const status = String(entry.status || "").trim().toLowerCase();
           return (
@@ -1410,7 +1399,7 @@ describe("payment session flow", () => {
         body: { status: paymentRecordConstants.PAYMENT_STATUS_STARTED },
       });
       expect(mockCreateCommerceWriteClient).toHaveBeenLastCalledWith({
-        backendOverride: "sanity",
+        backendOverride: "supabase",
       });
 
       mockCreateCommerceWriteClient.mockImplementationOnce(() => mockClient);
@@ -1427,13 +1416,13 @@ describe("payment session flow", () => {
         },
       });
       expect(mockCreateCommerceWriteClient).toHaveBeenLastCalledWith({
-        backendOverride: "sanity",
+        backendOverride: "supabase",
       });
       expect(store.bookings).toHaveLength(1);
     });
   });
 
-  test("cancel uses promoted Sanity for a generation-one Supabase payment", async () => {
+  test("cancel O1 uses Supabase with legacy configured owner for a generation-one Supabase payment", async () => {
     const hold = createHold();
     const started = await startPaymentSession({
       body: {
@@ -1461,7 +1450,7 @@ describe("payment session flow", () => {
         body: { ok: true, cancelled: true },
       });
       expect(mockCreateCommerceWriteClient).toHaveBeenLastCalledWith({
-        backendOverride: "sanity",
+        backendOverride: "supabase",
       });
     });
   });
@@ -1922,7 +1911,7 @@ describe("payment session flow", () => {
     });
   });
 
-  test("reconcile books a captured generation-one payment on promoted Sanity", async () => {
+  test("reconcile books a captured generation-one payment on Supabase with legacy configured owner", async () => {
     const hold = createHold();
     const started = await startPaymentSession({
       body: {
@@ -1964,10 +1953,10 @@ describe("payment session flow", () => {
       });
       expect(store.bookings).toHaveLength(1);
       expect(mockClient.fetch).toHaveBeenCalledWith(
-        expect.stringContaining("coalesce(cutoverGeneration, 0)"),
+        expect.stringContaining("lower(status) in $statuses"),
         expect.objectContaining({
-          backend: "sanity",
-          primaryBackend: "sanity",
+          backend: "supabase",
+          primaryBackend: "supabase",
           currentGeneration: 2,
         })
       );
@@ -3092,7 +3081,7 @@ describe("payment session flow", () => {
       activeGeneration: 2,
     },
   ])(
-    "adopts an in-flight $sourceBackend hold into $activeBackend generation $activeGeneration",
+    "O1/O2 adopts an in-flight $sourceBackend hold into Supabase generation $activeGeneration",
     async ({
       sourceBackend,
       sourceGeneration,
@@ -3126,7 +3115,7 @@ describe("payment session flow", () => {
 
       expect(started.httpStatus).toBe(200);
       expect(getOnlyPaymentRecord()).toMatchObject({
-        backendOwner: activeBackend,
+        backendOwner: "supabase",
         cutoverGeneration: activeGeneration,
       });
       expect(
@@ -3151,7 +3140,7 @@ describe("payment session flow", () => {
       ).toBeNull();
 
       expect(hold).toMatchObject({
-        backendOwner: activeBackend,
+        backendOwner: "supabase",
         cutoverGeneration: activeGeneration,
       });
       const finalized = await finalizePaymentSession({

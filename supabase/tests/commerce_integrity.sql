@@ -288,7 +288,7 @@ begin
   );
   if coalesce((v_cleanup_result->>'expired_holds')::integer, -1) <> 1
     or coalesce((v_cleanup_result->>'removed_slot_claims')::integer, -1) <> 1
-    or coalesce((v_cleanup_result->>'mirror_events_enqueued')::integer, -1) <> 1
+    or coalesce((v_cleanup_result->>'mirror_events_enqueued')::integer, -1) <> 0
   then
     raise exception 'expired Supabase hold cleanup returned invalid counters';
   end if;
@@ -321,8 +321,8 @@ begin
     select count(*)
     from migration.commerce_mirror_outbox mirror
     where mirror.document_ids @> array['slotHold.cleanup-fixture']::text[]
-  ) <> 2 then
-    raise exception 'expired Supabase hold cleanup did not enqueue exactly one new mirror event';
+  ) <> 0 then
+    raise exception 'S1 retired hold cleanup unexpectedly enqueued a mirror event';
   end if;
 
   v_cleanup_replay := public.roo_cleanup_expired_supabase_holds(
@@ -529,16 +529,11 @@ begin
   then
     raise exception 'generation-one referral terms were not projected';
   end if;
-  if not exists (
-    select 1
-    from migration.commerce_mirror_outbox mirror
-    where mirror.event_key = v_referral_event_key
-      and mirror.status = 'pending'
-      and mirror.cutover_generation = v_generation
-      and mirror.document_ids @> array['referral.integrity-fixture']::text[]
-      and mirror.canonical_hash ~ '^[0-9a-f]{64}$'
+  if exists (
+    select 1 from migration.commerce_mirror_outbox mirror
+    where mirror.document_ids @> array['referral.integrity-fixture']::text[]
   ) then
-    raise exception 'generation-one referral mirror event is incomplete';
+    raise exception 'S1 native referral terms unexpectedly enqueued a mirror event';
   end if;
   if not exists (
     select 1

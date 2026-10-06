@@ -1,9 +1,5 @@
 import { createSupabaseAdminClient } from "./adminClient.js";
 import { resolveSupabaseRuntimePolicy } from "./runtime.js";
-import {
-  assertCommerceControlMatchesLease,
-  requireCommerceFailoverLease,
-} from "./commerceFailoverLease.js";
 import envValue from "./envValue.cjs";
 
 const { normalizeBackend } = envValue;
@@ -57,26 +53,6 @@ const assertCommerceAllowed = async ({
   pauseMessage,
 } = {}) => {
   const policy = resolveSupabaseRuntimePolicy(env);
-
-  if (policy.commercePrimaryBackend !== "supabase") {
-    const lease = requireCommerceFailoverLease({ env, policy, nowSeconds });
-    try {
-      const liveControl = await getCommerceControl({ ...(client ? { client } : {}) });
-      assertCommerceControlMatchesLease({ control: liveControl, lease });
-    } catch (error) {
-      if (error?.code !== "COMMERCE_CONTROL_UNAVAILABLE") throw error;
-    }
-    if (lease.startsPaused) {
-      throw unavailable(pauseMessage, "COMMERCE_STARTS_PAUSED");
-    }
-    return {
-      primaryBackend: lease.backend,
-      generation: lease.generation,
-      startsPaused: lease.startsPaused,
-      deploymentId: lease.deploymentId,
-      leaseExpiresAt: lease.expiresAt,
-    };
-  }
 
   if (policy.commerceStartsPaused) {
     throw unavailable(pauseMessage, "COMMERCE_STARTS_PAUSED");

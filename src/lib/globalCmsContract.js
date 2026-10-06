@@ -1,8 +1,6 @@
-export const GLOBAL_SANITY_PROJECT_ID = "9g42k3ur";
-export const GLOBAL_SANITY_DATASET = "production";
-
 const CMS_PAUSE_TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const CMS_PAUSE_FALSE_VALUES = new Set(["0", "false", "no", "off"]);
+export const UPGRADE_LINK_SLUG_PATTERN = /^[A-Za-z0-9-]{1,80}$/;
 
 export const resolveCmsWritePauseFlag = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -105,13 +103,11 @@ export const globalCmsAuthorityDomain = (value) => {
 };
 
 export const publishedDocumentId = (value) => {
-  const id = String(value || "")
-    .trim()
-    .replace(/^drafts\./, "");
+  const id = String(value || "").trim();
   if (
     !DOCUMENT_ID_PATTERN.test(id) ||
     id.includes("..") ||
-    id.startsWith("versions.")
+    /^(drafts|versions)\./.test(id)
   ) {
     throw new Error("The CMS document ID is invalid.");
   }
@@ -173,7 +169,6 @@ export const collectGlobalCmsAssetLinks = (document) => {
       return;
     }
     for (const [key, entry] of Object.entries(value)) {
-      if (key.startsWith("_") && key !== "_ref") continue;
       visit(entry, path ? `${path}.${key}` : key);
     }
   };

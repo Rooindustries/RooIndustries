@@ -204,7 +204,7 @@ export default function Tools() {
 
       {!loading && tools.length === 0 ? (
         <div className="mt-16 text-center text-ink-secondary">
-          No tools configured yet. Add some in Sanity Studio.
+          No tools configured yet. Add tools in the content editor.
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">

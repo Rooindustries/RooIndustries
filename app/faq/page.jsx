@@ -1,6 +1,6 @@
 import RouteRenderer from "@/src/next/RouteRenderer";
 import seo from "@/src/lib/seo";
-import { fetchHomePageData } from "@/src/lib/sanityServer";
+import { fetchHomePageData } from "@/src/lib/contentServer";
 
 export const metadata = seo.getMetadataForPath("/faq");
 

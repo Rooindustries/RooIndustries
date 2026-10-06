@@ -33,7 +33,7 @@ jest.mock("../lib/publicContentClient", () => ({
   getPublicContent: jest.fn(),
 }));
 
-jest.mock("../sanityClient", () => ({
+jest.mock("../lib/cmsImageUrl", () => ({
   urlFor: jest.fn((image) => {
     const builder = {
       format: () => builder,

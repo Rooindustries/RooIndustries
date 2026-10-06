@@ -40,7 +40,7 @@ jest.mock("../server/supabase/accounts.js", () => ({
   buildCredentialSourcePreconditions: ({ document }) => ({
     creatorPassword: document.creatorPassword,
   }),
-  completeSupabaseCredentialMirror: jest.fn(),
+  completeSupabaseCredentialOperation: jest.fn(),
   markSupabaseCredentialSourceApplied: jest.fn(),
   resolveCredentialSourceRevision: ({ document }) => document._supabaseRevision,
   resolveSupabaseAccountByUserId: (...args) => mockResolveAccountByUserId(...args),

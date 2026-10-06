@@ -1,3 +1,5 @@
+import envValue from "../../supabase/envValue.cjs";
+const { resolveStoreBackend } = envValue;
 import { createDodoCheckout, inspectDodoCheckout, retrieveDodoPayment, retrieveDodoRefund, validateDodoPayment, verifyDodoCapture, unwrapDodoWebhook } from "./dodoProvider.js";
 import crypto from "crypto";
 import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
@@ -5,7 +7,7 @@ import { buildSalesReceipt } from "./salesReceipt.ts";
 import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
 import { authorizeCronRequest } from "../cronAuth.js";
 import createBookingHandler from "../ref/createBooking.js";
-import { createCommerceWriteClient } from "../ref/sanity.js";
+import { createCommerceWriteClient } from "../ref/documentStore.js";
 import { resolvePaymentQuote } from "../ref/pricing.js";
 import { resolvePaymentCurrency } from "../ref/bookingRefunds.js";
 import {
@@ -15,25 +17,7 @@ import {
 import { getBookingSettings, isSlotAllowedForPackage } from "../../booking/slotPolicy.js";
 import { issueHoldToken, verifyHoldToken } from "../../booking/holdToken.js";
 import providerConfig from "./providerConfig.js";
-import {
-  createPayPalOrder,
-  createRazorpayOrder,
-  DEFAULT_PAYPAL_CURRENCY,
-  DEFAULT_RAZORPAY_CURRENCY,
-  getPayPalRefundCaptureId,
-  inspectPayPalCapture,
-  inspectPayPalOrder,
-  inspectRazorpayOrder,
-  inspectRazorpayPayment,
-  toMoney,
-  parseMoneySubunits,
-  toSubunits,
-  verifyPayPalOrder,
-  verifyPayPalWebhookSignature,
-  verifyRazorpayPayment,
-  verifyRazorpaySignature,
-  verifyRazorpayWebhookSignature,
-} from "./providerClients.js";
+import { createPayPalOrder, createRazorpayOrder, DEFAULT_PAYPAL_CURRENCY, DEFAULT_RAZORPAY_CURRENCY, getPayPalRefundCaptureId, inspectPayPalCapture, inspectPayPalOrder, inspectRazorpayOrder, inspectRazorpayPayment, parseMoneySubunits, toSubunits, verifyPayPalOrder, verifyPayPalWebhookSignature, verifyRazorpayPayment, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from "./providerClients.js";
 import {
   createPaymentAccessToken,
   isPaymentAccessTokenRecordMatch,
@@ -343,7 +327,7 @@ const assertStartableHold = async ({ client, bookingPayload }) => {
     holdId: bookingPayload.slotHoldId,
     startTimeUTC: holdDoc.startTimeUTC || bookingPayload.startTimeUTC,
     holdNonce: holdDoc.holdNonce || "",
-    backend: holdDoc.backendOwner === "supabase" ? "supabase" : "sanity",
+    backend: resolveStoreBackend(holdDoc.backendOwner),
     cutoverGeneration: Number(holdDoc.cutoverGeneration || 0),
   });
 
@@ -518,7 +502,7 @@ const issuePaymentAccessTokenForRecord = (record = {}) =>
     paymentRecordId: record._id,
     provider: record.provider,
     pricingFingerprint: record.pricingFingerprint,
-    backend: record.backendOwner || "sanity",
+    backend: record.backendOwner,
     cutoverGeneration: Number(record.cutoverGeneration || 0),
     expirySeconds: resolvePaymentAccessTtlSeconds(),
   });
@@ -731,7 +715,7 @@ const mirrorLegacyBookingToPaymentRecord = async ({
   const doc = {
     _id: paymentRecordId,
     _type: PAYMENT_RECORD_TYPE,
-    backendOwner: backendOwner === "supabase" ? "supabase" : "sanity",
+    backendOwner: resolveStoreBackend(backendOwner),
     provider: normalizedProvider,
     status,
     bookingSeedKey,
@@ -1342,7 +1326,7 @@ const preparePaymentProofClaim = async ({
   const claim = {
     _id: claimId,
     _type: PAYMENT_PROOF_CLAIM_TYPE,
-    backendOwner: record.backendOwner === "supabase" ? "supabase" : "sanity",
+    backendOwner: resolveStoreBackend(record.backendOwner),
     paymentRecordId: record._id,
     provider: record.provider,
     providerOrderId: String(providerOrderId || "").trim(),
@@ -1570,7 +1554,7 @@ const claimWebhookReceipt = async ({
         : await client.create({
           _id: receiptId,
           _type: PAYMENT_WEBHOOK_RECEIPT_TYPE,
-          backendOwner: backendOwner === "supabase" ? "supabase" : "sanity",
+          backendOwner: resolveStoreBackend(backendOwner),
           provider, eventId, eventType, createdAt: nowIso(), ...lease,
         });
       return { acquired: true, processed: false, receipt };
@@ -2333,7 +2317,7 @@ const finalizePaymentRecordInternal = async ({
   });
   const result = await invokeCreateBooking(createPayload, {
     documentClient: client,
-    backendOwner: workingRecord.backendOwner || "sanity",
+    backendOwner: workingRecord.backendOwner,
     cutoverGeneration: Number(workingRecord.cutoverGeneration || 0),
     paymentFinalizeSource: normalizedSource,
     paymentProofClaim: proofClaim,
@@ -2384,7 +2368,7 @@ const finalizePaymentRecordInternal = async ({
         break;
       }
       requirePaymentRevision(current);
-      const completionOwned = String(current.backendOwner || "sanity") === String(workingRecord.backendOwner || "sanity") &&
+      const completionOwned = resolveStoreBackend(current.backendOwner) === resolveStoreBackend(workingRecord.backendOwner) &&
         Number(current.cutoverGeneration || 0) === Number(workingRecord.cutoverGeneration || 0) &&
         String(current.bookingId || "").trim() === bookingId &&
         [String(lease.leaseId || ""), ""].includes(String(current.finalizationLeaseId || "").trim()) &&
@@ -2447,7 +2431,7 @@ const finalizePaymentRecordInternal = async ({
     }
 
     if (nextRecord?.bookingId === bookingId && nextRecord.refundState === "partial" && nextRecord.refundRequiresBookingSync === true &&
-        nextRecord.backendOwner === workingRecord.backendOwner && Number(nextRecord.cutoverGeneration || 0) === Number(workingRecord.cutoverGeneration || 0)) {
+        resolveStoreBackend(nextRecord.backendOwner) === resolveStoreBackend(workingRecord.backendOwner) && Number(nextRecord.cutoverGeneration || 0) === Number(workingRecord.cutoverGeneration || 0)) {
       const effects = await applyRefundEffects({ client, record: nextRecord,
         refund: { full: false, processedAmountInSubunits: nextRecord.refundProcessedAmountInSubunits },
         applyBookingRefund: await loadBookingRefundHandler() });
@@ -2799,7 +2783,7 @@ const createOrReusePaymentRecordForStart = async ({
   const doc = {
     _id: paymentRecordId,
     _type: PAYMENT_RECORD_TYPE,
-    backendOwner: backendOwner === "supabase" ? "supabase" : "sanity",
+    backendOwner: resolveStoreBackend(backendOwner),
     cutoverGeneration: Math.max(0, Number(cutoverGeneration) || 0),
     provider,
     status: PAYMENT_STATUS_STARTED,
@@ -2866,7 +2850,7 @@ const createOrReusePaymentRecordForStart = async ({
   const claim = {
     _id: startClaimId,
     _type: isUpgrade ? PAYMENT_UPGRADE_LOCK_TYPE : PAYMENT_START_CLAIM_TYPE,
-    backendOwner: backendOwner === "supabase" ? "supabase" : "sanity",
+    backendOwner: resolveStoreBackend(backendOwner),
     scope: sessionScope,
     paymentRecordId,
     provider,
@@ -2876,7 +2860,7 @@ const createOrReusePaymentRecordForStart = async ({
   };
   const holdPatch = holdDoc?._id
     ? {
-        backendOwner: backendOwner === "supabase" ? "supabase" : "sanity",
+        backendOwner: resolveStoreBackend(backendOwner),
         cutoverGeneration: Math.max(0, Number(cutoverGeneration) || 0),
         phase: HOLD_PHASE_PAYMENT_PENDING,
         paymentRecordId,
@@ -2971,7 +2955,7 @@ const createOrReusePaymentRecordForStart = async ({
 export const startPaymentSession = async ({
   body,
   client = createCommerceWriteClient(),
-  backend = client?.backend === "sanity" ? "sanity" : "supabase",
+  backend = resolveStoreBackend(client?.backend),
   cutoverGeneration = 0,
   prepareCouponReservation = null,
   appendCouponReservation = null,
@@ -3514,7 +3498,7 @@ export const cancelPaymentSession = async ({
       startTimeUTC: hold.startTimeUTC,
       expiresAt,
       holdNonce,
-      backend: record.backendOwner || "sanity",
+      backend: record.backendOwner,
       cutoverGeneration: Number(record.cutoverGeneration || 0),
     });
     const refreshedHold = {
@@ -4130,7 +4114,7 @@ export const getPaymentStatus = async ({
 export const reconcilePaymentSessions = async ({
   req,
   client = createCommerceWriteClient(),
-  backend = client?.backend === "sanity" ? "sanity" : "supabase",
+  backend = resolveStoreBackend(client?.backend),
   createRequiresRescheduleBooking = null,
   applyBookingRefund = null,
   releaseCouponReservation = null,
@@ -4151,7 +4135,7 @@ export const reconcilePaymentSessions = async ({
     Number(policy.commerceFailoverGeneration) || 0
   );
   const primaryBackend =
-    policy.commercePrimaryBackend === "sanity" ? "sanity" : "supabase";
+    resolveStoreBackend(policy.commercePrimaryBackend);
   const dodoEnabled = resolvePaymentProviders()?.dodo?.enabled === true;
   const fetchRecoveryRecords = () => client.fetch(
     `*[_type == $type
@@ -4164,11 +4148,6 @@ export const reconcilePaymentSessions = async ({
         || resourceReleasePending == true
         || (lower(status) == $emailPartialStatus && requiresReschedule == true)
         || (lower(status) in [$emailPartialStatus, $bookedStatus] && emailDispatchRequired == true)
-      )
-      && (
-        (coalesce(cutoverGeneration, 0) < $currentGeneration && $backend == $primaryBackend)
-        || (coalesce(cutoverGeneration, 0) >= $currentGeneration
-          && coalesce(backendOwner, "sanity") == $backend)
       )
       && (
         lower(status) in $statuses
@@ -4190,7 +4169,7 @@ export const reconcilePaymentSessions = async ({
     {
       type: PAYMENT_RECORD_TYPE,
       terminalCurrencyReasons: ["payment_currency_mismatch", "payment_currency_invalid"],
-      backend: backend === "supabase" ? "supabase" : "sanity",
+      backend: resolveStoreBackend(backend),
       dodoEnabled,
       primaryBackend,
       currentGeneration,
@@ -4836,7 +4815,7 @@ const findOrCreateWebhookRecoveryRecord = async ({
     client,
     doc: {
       _id: paymentRecordId,
-      backendOwner: backendOwner === "supabase" ? "supabase" : "sanity",
+      backendOwner: resolveStoreBackend(backendOwner),
       provider,
       status: PAYMENT_STATUS_NEEDS_RECOVERY,
       bookingSeedKey: "",
@@ -5405,7 +5384,7 @@ export const handleRazorpayWebhook = async ({
   req,
   client = createCommerceWriteClient(),
   applyBookingRefund = null,
-  backendOwner = client?.backend === "sanity" ? "sanity" : "supabase",
+  backendOwner = resolveStoreBackend(client?.backend),
 }) => {
   const signature = String(req?.headers?.["x-razorpay-signature"] || "").trim();
   const verified = verifyRazorpayWebhookSignature({
@@ -5517,7 +5496,7 @@ export const handlePayPalWebhook = async ({
   req,
   client = createCommerceWriteClient(),
   applyBookingRefund = null,
-  backendOwner = client?.backend === "sanity" ? "sanity" : "supabase",
+  backendOwner = resolveStoreBackend(client?.backend),
 }) => {
   const verified = await verifyPayPalWebhookSignature({
     rawBody: String(req?.rawBody || ""),

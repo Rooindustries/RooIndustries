@@ -1,7 +1,7 @@
 import {
   createCommerceReadClient,
   createCommerceWriteClient,
-} from './sanity.js';
+} from './documentStore.js';
 import {requireAdminKey} from './auth.js';
 import {logSafeError} from '../../safeErrorLog.js';
 import {assertCommerceWriteAllowed} from '../../supabase/commerceControl.js';

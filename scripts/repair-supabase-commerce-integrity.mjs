@@ -2,10 +2,8 @@
 
 import crypto from "node:crypto";
 import process from "node:process";
-import { createClient as createSanityClient } from "@sanity/client";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import operatorEnvironment from "./lib/operator-environment.cjs";
-import { drainCommerceMirrorOutbox } from "../src/server/supabase/commerceMirrorOutbox.js";
 import { SupabaseDocumentClient } from "../src/server/supabase/documentClient.js";
 
 const argument = (name) => {
@@ -41,19 +39,8 @@ const supabaseSecret = readEnv(
   "SUPABASE_SECRET_KEY",
   "SUPABASE_SERVICE_ROLE_KEY"
 );
-const sanityProjectId = readEnv("SANITY_PRIVATE_PROJECT_ID", "SANITY_PROJECT_ID");
-const sanityDataset =
-  readEnv("SANITY_PRIVATE_DATASET", "SANITY_DATASET") || "production";
-const sanityWriteToken = readEnv(
-  "SANITY_PRIVATE_WRITE_TOKEN",
-  "SANITY_WRITE_TOKEN"
-);
-
 if (!supabaseUrl || !supabaseSecret) {
   throw new Error("Supabase server credentials are required.");
-}
-if (apply && (!sanityProjectId || !sanityWriteToken)) {
-  throw new Error("Sanity write credentials are required to verify fallback mirroring.");
 }
 
 const supabase = createSupabaseClient(supabaseUrl, supabaseSecret, {
@@ -189,25 +176,5 @@ for (const hold of expiredHolds) {
 }
 await transaction.commit({ commandId: `integrity-repair:${digest.slice(0, 48)}` });
 
-const sanity = createSanityClient({
-  projectId: sanityProjectId,
-  dataset: sanityDataset,
-  apiVersion:
-    readEnv("SANITY_PRIVATE_API_VERSION", "SANITY_API_VERSION") || "2023-10-01",
-  token: sanityWriteToken,
-  useCdn: false,
-  perspective: "raw",
-});
-await drainCommerceMirrorOutbox({
-  supabaseClient: supabase,
-  sanityClient: sanity,
-  failClosed: true,
-  requiredDocumentIds: [
-    ...proofRepairs.map((document) => document._id),
-    ...expiredHolds.map((document) => document._id),
-  ],
-  limit: 100,
-  maxBatches: 10,
-});
 
 console.log(JSON.stringify({ ok: true, applied: true, confirmationDigest: digest }));

@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { logSafeError } from "../../../../src/server/safeErrorLog";
 import {
-  flushCreatorTermsMirror,
   getCreatorTermsHistory,
   listCreatorTerms,
   updateCreatorTerms,
@@ -143,12 +142,8 @@ export async function PATCH(request) {
       input,
       cutoverGeneration: policy.commerceFailoverGeneration,
     });
-    const mirror = await flushCreatorTermsMirror({
-      client,
-      legacySanityId: creator?.legacy_sanity_id,
-    });
     return NextResponse.json(
-      { ok: true, creator, ...mirror },
+      { ok: true, creator },
       { headers: noStore }
     );
   } catch (error) {

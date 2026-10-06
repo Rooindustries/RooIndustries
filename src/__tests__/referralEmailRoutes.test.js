@@ -138,7 +138,7 @@ const loadRegisterHandler = ({
   }));
   jest.doMock("../server/supabase/runtime.js", () => ({
     resolveSupabaseRuntimePolicy: () => ({
-      primaryBackend,
+      primaryBackend: "supabase",
       shadowWritesEnabled,
     }),
   }));
@@ -179,82 +179,6 @@ const loadRegisterHandler = ({
     isReferralEmailSourceStateConflict,
     requeueReferralEmailDispatch,
     resolveSupabaseCreatorRegistrationConflicts,
-  };
-};
-
-const loadSanityForgotHandler = () => {
-  jest.resetModules();
-  const state = {
-    _id: "referral.sanity",
-    _rev: "revision-one",
-    _type: "referral",
-    name: "Sanity Creator",
-    creatorEmail: "sanity@example.com",
-    registrationStatus: "active",
-  };
-  const patch = jest.fn(() => {
-    const values = {};
-    const unsetFields = [];
-    let expectedRevision = "";
-    const chain = {
-      ifRevisionId(revision) {
-        expectedRevision = revision;
-        return chain;
-      },
-      set(next) {
-        Object.assign(values, next);
-        return chain;
-      },
-      unset(fields) {
-        unsetFields.push(...fields);
-        return chain;
-      },
-      async commit() {
-        await Promise.resolve();
-        if (expectedRevision && expectedRevision !== state._rev) {
-          throw Object.assign(new Error("revision conflict"), {
-            status: 409,
-            statusCode: 409,
-          });
-        }
-        Object.assign(state, values);
-        unsetFields.forEach((field) => delete state[field]);
-        state._rev = `${state._rev}-next`;
-        return { ...state };
-      },
-    };
-    return chain;
-  });
-  const sendReferralEmailDirect = jest
-    .fn()
-    .mockRejectedValueOnce(Object.assign(new Error("timeout"), { code: "timeout" }))
-    .mockResolvedValueOnce({ providerMessageId: "provider-message" });
-  jest.doMock("../server/data/documentClient.js", () => ({
-    createDataClient: () => ({
-      fetch: jest.fn(async () => ({ ...state })),
-      patch,
-    }),
-  }));
-  jest.doMock("../server/supabase/runtime.js", () => ({
-    resolveSupabaseRuntimePolicy: () => ({ primaryBackend: "sanity" }),
-  }));
-  jest.doMock("../server/api/ref/rateLimit.js", () => ({
-    getClientAddress: () => "203.0.113.3",
-    requireRateLimit: jest.fn(async () => true),
-  }));
-  jest.doMock("../server/api/ref/referralEmailDispatches.js", () => ({
-    enqueueReferralEmailMutation: jest.fn(),
-    deliverReferralEmailDispatch: jest.fn(),
-    isReferralEmailSourceStateConflict: jest.fn(() => false),
-    requeueReferralEmailDispatch: jest.fn(),
-    sendReferralEmailDirect,
-  }));
-  const module = require("../server/api/ref/forgot.js");
-  return {
-    handler: module.default || module,
-    state,
-    patch,
-    sendReferralEmailDirect,
   };
 };
 
@@ -728,7 +652,7 @@ describe("Supabase-primary referral email routes", () => {
     expect(loaded.enqueueReferralEmailMutation).not.toHaveBeenCalled();
   });
 
-  test("excludes an expired Sanity registration from its own shadow conflict", async () => {
+  test("D6/O1 excludes an expired imported registration from its native conflict", async () => {
     const loaded = loadRegisterHandler({ primaryBackend: "sanity" });
     const expired = {
       _id: "referral.expired-shadow",
@@ -740,9 +664,9 @@ describe("Supabase-primary referral email routes", () => {
     };
     loaded.fetch
       .mockResolvedValueOnce(expired)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(expired)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
       .mockResolvedValueOnce([]);
     const response = createResponse();
 
@@ -1060,57 +984,4 @@ describe("Supabase-primary referral email routes", () => {
     expect(loaded.enqueueReferralEmailMutation).not.toHaveBeenCalled();
   });
 
-  test("reuses a sealed reset token after an ambiguous Sanity delivery", async () => {
-    process.env.REF_SESSION_SECRET = testSessionSecret;
-    const loaded = loadSanityForgotHandler();
-    const request = {
-      method: "POST",
-      headers: { "x-forwarded-for": "203.0.113.3" },
-      body: { email: "sanity@example.com" },
-    };
-    const first = createResponse();
-    await loaded.handler(request, first);
-    expect(first.statusCode).toBe(500);
-    expect(loaded.state.resetDeliveryToken).toMatch(/^v1\./);
-    const firstToken = loaded.sendReferralEmailDirect.mock.calls[0][0].token;
-
-    const second = createResponse();
-    await loaded.handler(request, second);
-
-    expect(second.statusCode).toBe(200);
-    expect(loaded.sendReferralEmailDirect).toHaveBeenCalledTimes(2);
-    expect(loaded.sendReferralEmailDirect.mock.calls[1][0].token).toBe(firstToken);
-    expect(loaded.state.resetDeliveryToken).toMatch(/^v1\./);
-  });
-
-  test("concurrent Sanity reset requests converge on one deliverable token", async () => {
-    process.env.REF_SESSION_SECRET = testSessionSecret;
-    const loaded = loadSanityForgotHandler();
-    loaded.sendReferralEmailDirect.mockReset().mockResolvedValue({
-      providerMessageId: "provider-message",
-    });
-    const request = {
-      method: "POST",
-      headers: { "x-forwarded-for": "203.0.113.3" },
-      body: { email: "sanity@example.com" },
-    };
-    const first = createResponse();
-    const second = createResponse();
-
-    await Promise.all([
-      loaded.handler(request, first),
-      loaded.handler(request, second),
-    ]);
-
-    expect(first.statusCode).toBe(200);
-    expect(second.statusCode).toBe(200);
-    expect(loaded.sendReferralEmailDirect).toHaveBeenCalledTimes(2);
-    const tokens = loaded.sendReferralEmailDirect.mock.calls.map(
-      ([options]) => options.token
-    );
-    expect(new Set(tokens).size).toBe(1);
-    expect(
-      crypto.createHash("sha256").update(tokens[0]).digest("hex")
-    ).toBe(loaded.state.resetTokenHash);
-  });
 });

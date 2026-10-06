@@ -1,4 +1,4 @@
-import { createRefReadClient } from "../api/ref/sanity.js";
+import { createRefReadClient } from "../api/ref/documentStore.js";
 import packagePricing from "../../lib/packagePricing.js";
 import {
   isBookingBlockingStatus,
