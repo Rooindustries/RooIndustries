@@ -43,7 +43,7 @@ export const seedContentAdmin = async fixture => {
     return { status: 404, body: { msg: "Unexpected fixture Auth route" } };
   });
   const account = await provisionContentAdmin({ email: CONTENT_ADMIN_EMAIL, password: CONTENT_ADMIN_PASSWORD, adminClient: fixture.client });
-  const again = await provisionContentAdmin({ email: CONTENT_ADMIN_EMAIL, password: CONTENT_ADMIN_PASSWORD, adminClient: fixture.client });
+  const again = await provisionContentAdmin({ email: CONTENT_ADMIN_EMAIL, password: CONTENT_ADMIN_PASSWORD, grantExisting: true, adminClient: fixture.client });
   assert.deepEqual(again, account, "Provisioning is idempotent");
   const adminUser = [...users.values()].find(row => row.email === CONTENT_ADMIN_EMAIL);
   return { ...account, userId: adminUser.id, requests, sessions, users, setLoginReply(value) { loginReply = value; }, setLogoutReply(value) { logoutReply = value; } };

@@ -183,7 +183,13 @@ begin
     if jsonb_array_length(p_assets)>0 then raise exception 'CMS assets must be registered through verification' using errcode='22023'; end if;
   end if;
   if v_operation='delete' then
-    if v_type='coupon' and (coalesce(migration.try_numeric(v_current.payload->>'timesUsed'),0)>0 or coalesce(migration.try_numeric(v_current.payload->>'activeReservations'),0)>0 or coalesce(migration.try_numeric(v_current.payload->>'redemptionCount'),0)>0 or exists(select 1 from migration.source_documents source where not source.tombstoned and source.document_type='couponRedemption' and (source.payload#>>'{coupon,_ref}'=v_id or source.payload->>'couponId'=v_id))) then
+    if v_type='coupon' and (coalesce(migration.try_numeric(v_current.payload->>'timesUsed'),0)>0 or coalesce(migration.try_numeric(v_current.payload->>'activeReservations'),0)>0 or coalesce(migration.try_numeric(v_current.payload->>'redemptionCount'),0)>0) then
+      raise exception 'CMS_REFERENCED' using errcode='23503',detail=jsonb_build_object('reason','This coupon has redemption or reservation history. Keep it for accounting.')::text;
+    end if;
+    if v_type='coupon' and exists(select 1 from migration.source_documents redemption where not redemption.tombstoned and redemption.document_type='couponRedemption' and redemption.payload->'coupon'->>'_ref'=v_id) then
+      raise exception 'CMS_REFERENCED' using errcode='23503',detail=jsonb_build_object('reason','This coupon has redemption history and cannot be deleted.')::text;
+    end if;
+    if v_type='coupon' and exists(select 1 from migration.source_documents redemption where not redemption.tombstoned and redemption.document_type='couponRedemption' and redemption.payload->>'couponId'=v_id) then
       raise exception 'CMS_REFERENCED' using errcode='23503',detail=jsonb_build_object('reason','This coupon has redemption or reservation history. Keep it for accounting.')::text;
     end if;
     -- CMS document types from the publish allowlist above, including legacy references.

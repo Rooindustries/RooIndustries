@@ -59,7 +59,11 @@ export const GET = (request, context) => {
   return handleCmsRequest(request, context, ({ actor, account }) => ({ signedIn: true, actor, email: account?.primary_email || null }), { sessionProbe: true });
 };
 
-export const DELETE = (request, context) => handleCmsRequest(request, context, ({ headers }) => {
+export const DELETE = (request, context) => handleCmsRequest(request, context, async ({ headers, client, account }) => {
+  if (account?.principal_id) {
+    const rotation = await client.rpc("roo_rotate_principal_sessions", { p_principal_id: account.principal_id });
+    if (rotation.error) throw cmsError("Sign-out could not be completed. Please try again.", 503, "ADMIN_SIGNOUT_FAILED");
+  }
   headers["Set-Cookie"] = clearAdminSessionCookie();
   return { signedOut: true };
 });

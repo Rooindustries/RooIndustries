@@ -732,7 +732,7 @@ export default async function handler(req, res) {
       if (partialRefund?.refundStatus === "partial" && partialRefund.provider === normalizedProvider) {
         const currencies = new Set(partialRefund.refunds.map(refund => refund.currency).filter(Boolean));
         if (currencies.size > 1) throw Object.assign(new Error("Refund currencies do not agree."), { status: 409, code: "refund_currency_mismatch" });
-        const refundCurrency = currencies.size ? [...currencies][0] : resolvePaymentCurrency(existingRecord || {}, { booking: bookingDoc, fallback: normalizedProvider === "paypal" ? DEFAULT_PAYPAL_CURRENCY : DEFAULT_RAZORPAY_CURRENCY });
+        const refundCurrency = resolvePaymentCurrency(existingRecord || {}, { booking: bookingDoc, refund: { currency: currencies.size ? [...currencies][0] : undefined }, fallback: normalizedProvider === "paypal" ? DEFAULT_PAYPAL_CURRENCY : DEFAULT_RAZORPAY_CURRENCY });
         const refunds = new Map((existingRecord?.refunds || []).map(refund => [refund.providerRefundId, refund]));
         for (const refund of partialRefund.refunds) {
           const previous = refunds.get(refund.id);
@@ -1649,6 +1649,6 @@ export default async function handler(req, res) {
     logSafeError("Booking creation failed", err);
     return res
       .status(status)
-      .json({ error: status < 500 ? message : "Booking could not be completed." });
+      .json({ error: status < 500 ? message : "Booking could not be completed.", ...(status === 409 && err?.code === "payment_currency_mismatch" ? { code: err.code } : {}) });
   }
 }

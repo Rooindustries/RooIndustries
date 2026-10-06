@@ -13,7 +13,7 @@ const { bootstrapSupabaseNativeAccount, resolveSupabaseAccountByUserId } = await
 const { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } = await import("../src/lib/passwordPolicy.js");
 const { isContentAdministrator } = await import("../src/server/cms/adminSession.js");
 
-export const provisionContentAdmin = async ({ email, password, resetPassword = false, adminClient = createSupabaseAdminClient() }) => {
+export const provisionContentAdmin = async ({ email, password, resetPassword = false, grantExisting = false, adminClient = createSupabaseAdminClient() }) => {
   if (typeof email !== "string" || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("A valid email is required.");
   let user;
   for (let page = 1; ; page++) {
@@ -23,6 +23,7 @@ export const provisionContentAdmin = async ({ email, password, resetPassword = f
     if (user || data.users.length < 1000) break;
   }
   const resetting = Boolean(user && resetPassword);
+  if (user && !resetting && !grantExisting) throw new Error(`An auth user for ${email} already exists (created ${user.created_at}). Re-run with --grant-existing to make that account an administrator with its current password, or --reset-password to set a new one.`);
   if (!user || resetting) {
     const value = typeof password === "function" ? await password() : password;
     if (!isValidNewPassword(value)) throw new Error(NEW_PASSWORD_REQUIREMENT);
@@ -68,7 +69,7 @@ const hiddenPassword = () => new Promise((resolve, reject) => {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const args = process.argv.slice(2);
-    if (args.some(arg => !/^--(?:email|target)=/.test(arg) && arg !== "--reset-password")) throw new Error("Use --email=<address>, --target=local|production and optional --reset-password. Passwords must use CONTENT_ADMIN_PASSWORD or the hidden prompt.");
+    if (args.some(arg => !/^--(?:email|target)=/.test(arg) && !/^--(?:reset-password|grant-existing)$/.test(arg))) throw new Error("Use --email=<address>, --target=local|production and optional --grant-existing or --reset-password. Passwords must use CONTENT_ADMIN_PASSWORD or the hidden prompt.");
     const email = args.find(arg => arg.startsWith("--email="))?.slice(8);
     const target = args.find(arg => arg.startsWith("--target="))?.slice(9) || "local";
     if (!["local", "production"].includes(target)) throw new Error("Target must be local or production.");
@@ -81,6 +82,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       if (answer !== "yes") throw new Error("Provisioning cancelled.");
     }
     const password = () => process.env.CONTENT_ADMIN_PASSWORD || hiddenPassword();
-    process.stdout.write(`${JSON.stringify(await provisionContentAdmin({ email, password, resetPassword: args.includes("--reset-password") }))}\n`);
+    process.stdout.write(`${JSON.stringify(await provisionContentAdmin({ email, password, resetPassword: args.includes("--reset-password"), grantExisting: args.includes("--grant-existing") }))}\n`);
   } catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }
 }

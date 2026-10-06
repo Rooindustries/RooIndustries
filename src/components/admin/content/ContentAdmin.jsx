@@ -320,7 +320,7 @@ export default function ContentAdmin() {
   }, []);
 
   useEffect(() => {
-    if (!session || !working || !dirty || !currentDraftKey) return undefined;
+    if (loadingDocument || !session || !working || !dirty || !currentDraftKey) return undefined;
     const timer = window.setTimeout(() => {
       persistDraft(currentDraftKey, {
         document: working,
@@ -332,7 +332,7 @@ export default function ContentAdmin() {
       });
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [working, dirty, currentDraftKey, session, assets, persistDraft]);
+  }, [working, dirty, currentDraftKey, session, assets, persistDraft, loadingDocument]);
 
   useEffect(() => {
     const workspace = workspaceRef.current;
@@ -781,16 +781,19 @@ export default function ContentAdmin() {
                       type="button"
                       className={styles.secondaryButton}
                       onClick={() => {
-                        const saved = persistDraft(draftKey(session), {
+                        const targetId = conflict.documentId || session.documentId;
+                        const key = session.documentId ? draftKey(session) : draftKey({ documentId: targetId });
+                        const saved = persistDraft(key, {
                           document: working,
                           assets,
                           baseRevision: session.revision,
-                          createIntentId: session.createIntentId,
-                          documentId: session.documentId,
+                          createIntentId: session.documentId ? session.createIntentId : null,
+                          documentId: targetId,
                           type: session.type,
                         });
                         if (!saved && !window.confirm("Your draft could not be saved on this device. Load the latest version and lose your edits?")) return;
-                        openDocument(conflict.documentId || session.documentId);
+                        if (!session.documentId) clearDraft(draftKey(session));
+                        openDocument(targetId);
                       }}
                     >
                       Load latest version

@@ -134,7 +134,6 @@ const collectRuns = (root, original) => {
       if (current.tagName === "A" || current.hasAttribute("data-mark-key")) {
         let key = current.getAttribute("data-mark-key");
         const href = current.getAttribute("href") || "";
-        if (current.tagName === "A" && !SAFE_LINK.test(href)) continue;
         if (!key || !defs.has(key)) {
           key = key || newKey();
           current.setAttribute("data-mark-key", key);
