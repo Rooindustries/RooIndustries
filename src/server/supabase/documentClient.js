@@ -104,7 +104,7 @@ const inferShadowScope = ({ query, params = {}, configuredTypes = null }) => {
     documentTypes: documentTypes.length > 0 ? documentTypes : null,
     ids: uniqueStrings(ids),
     filters,
-    limit: hasUnpushedPredicates({ source, ids, filters })
+    limit: source.includes("->") || hasUnpushedPredicates({ source, ids, filters })
       ? 500
       : inferQueryLimit(source),
   };
