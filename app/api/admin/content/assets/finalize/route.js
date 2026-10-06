@@ -6,4 +6,4 @@ export const preferredRegion = "dub1";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-export const POST = (request, context) => handleCmsRequest(request, context, ({ request, params, body, client, env, signal }) => finalizeCmsUpload({ body, client, env, signal }), { write: true, timeoutMs: 240000 });
+export const POST = (request, context) => handleCmsRequest(request, context, ({ body, client, env, signal, actor }) => finalizeCmsUpload({ body, client, env, signal, actor }), { write: true, timeoutMs: 240000 });

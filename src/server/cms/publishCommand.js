@@ -73,7 +73,7 @@ const committed = (result, id) => {
   clearSupabasePublicContentCache();
   return { committed: true, replayed: result.replayed === true, documentId: id, revision };
 };
-export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = process.env } = {}) => {
+export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = process.env, actor = "admin:key" } = {}) => {
   assertGlobalCmsWritesAllowed(env);
   if (!plain(body)) throw validationError("$", "A JSON content command is required.");
   const allowed = new Set(["operation", "type", "documentId", "document", "expectedRevision", "createIntentId"]);
@@ -96,14 +96,14 @@ export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = proc
     document = Object.fromEntries(Object.entries(body.document).filter(([key]) => !system.has(key) && !(body.type === "coupon" && counters.has(key))));
     if (creating) document = { ...createContentDefaults(body.type), ...document };
   } else if (body.document !== undefined) throw validationError("$.document", "Delete accepts no document.");
-  const material = { actor: "admin:key", operation: body.operation, type: body.type, documentId: id, createIntentId: creating ? body.createIntentId.toLowerCase() : null, expectedRevision: body.expectedRevision || null, document };
+  const material = { actor, operation: body.operation, type: body.type, documentId: id, createIntentId: creating ? body.createIntentId.toLowerCase() : null, expectedRevision: body.expectedRevision || null, document };
   const requestHash = hash(material);
   const commandId = `cms:${requestHash}`;
-  const lookup = { p_command_id: commandId, p_request_hash: requestHash, p_actor: "admin:key" };
+  const lookup = { p_command_id: commandId, p_request_hash: requestHash, p_actor: actor };
   const receipt = rpcData(await supabaseClient.rpc("roo_cms_publish_command_result", lookup), "Receipt lookup");
   if (receipt?.replayed) return committed(receipt, id);
   const current = await loadDocument(supabaseClient, id);
-  if (current && current._type !== body.type) throw cmsError("Document type conflicts with its stored identity.", 409, "CMS_REVISION_CONFLICT", { currentRevision: current._rev });
+  if (current && current._type !== body.type) throw cmsError("Document type conflicts with its stored identity.", 409, "CMS_TYPE_MISMATCH", { currentRevision: current._rev });
   if (document) {
     document = preservedDocument(document, current, schema.fields, requestHash);
     const validation = validateContentDocument(body.type, document, { current });

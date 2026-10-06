@@ -9,7 +9,6 @@ const displayTime = (value) => {
   return Number.isNaN(date.getTime()) ? "Unknown time" : date.toLocaleString();
 };
 
-const OPERATION_LABELS = { replace: "Edited", delete: "Deleted", create: "Created" };
 
 export default function RevisionHistory({ api, documentId, onRestore, onClose }) {
   const [revisions, setRevisions] = useState(null);
@@ -64,10 +63,9 @@ export default function RevisionHistory({ api, documentId, onRestore, onClose })
         {(revisions || []).map((revision) => (
           <li key={revision.revisionId} className={styles.historyEntry}>
             <div>
-              <strong>{OPERATION_LABELS[revision.operation] || revision.operation || "Version"}</strong>
-              <time dateTime={revision.createdAt}>{displayTime(revision.createdAt)}</time>
+              <strong>Before the edit at <time dateTime={revision.createdAt}>{displayTime(revision.createdAt)}</time></strong>
             </div>
-            <span>{revision.actor === "admin:key" ? "Admin" : revision.actor?.startsWith("sanity:") ? "Studio editor" : revision.actor}</span>
+            <span>{revision.actor?.startsWith("admin:") ? "Admin" : revision.actor?.startsWith("sanity:") ? "Studio editor" : revision.actor}</span>
             <button
               type="button"
               className={styles.secondaryButton}

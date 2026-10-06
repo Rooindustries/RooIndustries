@@ -4094,6 +4094,7 @@ drop function roo_create_cms_upload(jsonb);
 drop function roo_expired_cms_uploads(integer);
 drop function roo_find_verified_cms_asset(text,text,text);
 drop function roo_get_cms_upload(uuid);
+drop function roo_grant_account_role(uuid,text);
 drop function roo_mark_cms_upload_staging_cleaned(uuid);
 drop function roo_record_cms_upload_failure(uuid,text);
 drop function roo_refuse_cms_upload(uuid,text);

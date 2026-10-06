@@ -157,7 +157,7 @@ export const fetchPublicContent = async ({
   resource,
   searchParams,
 }) => {
-  const query = PUBLIC_CONTENT_QUERIES[resource];
+  const query = Object.hasOwn(PUBLIC_CONTENT_QUERIES, resource) ? PUBLIC_CONTENT_QUERIES[resource] : null;
   if (!query) {
     const error = new Error("Public content resource was not found.");
     error.status = 404;

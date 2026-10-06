@@ -65,7 +65,7 @@ const hasUnpushedPredicates = ({ source, ids, filters }) => {
   return /==|!=|<=|>=|<|>|\bin\b/.test(stripped);
 };
 
-const inferShadowScope = ({ query, params = {}, configuredTypes = null }) => {
+export const inferShadowScope = ({ query, params = {}, configuredTypes = null }) => {
   const source = String(query || "");
   const literalTypes = inferLiteralTypes(source);
   const paramType = source.match(/_type\s*==\s*\$([A-Za-z_][A-Za-z0-9_]*)/);
@@ -100,13 +100,18 @@ const inferShadowScope = ({ query, params = {}, configuredTypes = null }) => {
       filters.push({ path, op, value: params[param] });
     }
   }
+  const capped = (source.match(/\*\s*\[/g) || []).length > 1 || source.includes("->") || hasUnpushedPredicates({ source, ids, filters });
+  const pinnedIds = [];
+  for (const match of source.matchAll(/_id\s*==\s*(?:["']([^"']+)["']|\$([A-Za-z_][A-Za-z0-9_]*))/g)) {
+    pinnedIds.push(match[1] || params[match[2]]);
+  }
   return {
     documentTypes: documentTypes.length > 0 ? documentTypes : null,
     ids: uniqueStrings(ids),
     filters,
-    limit: source.includes("->") || hasUnpushedPredicates({ source, ids, filters })
-      ? 500
-      : inferQueryLimit(source),
+    limit: capped ? 1000 : inferQueryLimit(source),
+    capped,
+    pinnedIds: uniqueStrings(pinnedIds),
   };
 };
 
@@ -312,7 +317,7 @@ export class SupabaseDocumentClient {
       error.statusCode = 503;
       throw error;
     }
-    const documents = await fetchShadowDocuments({
+    let documents = await fetchShadowDocuments({
       client: this.shadowClient,
       documentTypes: scope.documentTypes || this.documentTypes,
       ids: scope.ids,
@@ -320,6 +325,19 @@ export class SupabaseDocumentClient {
       limit: scope.limit,
       allowLegacyFallback: this.allowLegacyFallback,
     });
+    if (scope.capped && documents.length >= scope.limit) {
+      console.error("Shadow document read hit its cap; results may be incomplete. Owner attention is required.", { code: "SHADOW_READ_CAPPED", documentTypes: scope.documentTypes, limit: scope.limit });
+    }
+    if (scope.capped && scope.pinnedIds.length) {
+      const pinned = await fetchShadowDocuments({
+        client: this.shadowClient,
+        documentTypes: scope.documentTypes || this.documentTypes,
+        ids: scope.pinnedIds,
+        limit: scope.pinnedIds.length,
+        allowLegacyFallback: this.allowLegacyFallback,
+      });
+      documents = [...new Map([...documents, ...pinned].map(document => [document._id, document])).values()];
+    }
     if (
       this.commerceOnly &&
       Buffer.byteLength(JSON.stringify(documents), "utf8") >

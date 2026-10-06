@@ -10,7 +10,7 @@ export class AdminApiError extends Error {
 
 const NETWORK_ERROR = "The admin service could not be reached. Check your connection and try again.";
 
-export const createAdminApi = (adminKey) => {
+export const createAdminApi = () => {
   const request = async (path, { method = "GET", body, signal } = {}) => {
     let response;
     try {
@@ -19,7 +19,6 @@ export const createAdminApi = (adminKey) => {
         signal,
         cache: "no-store",
         headers: {
-          "x-admin-key": adminKey,
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -40,6 +39,9 @@ export const createAdminApi = (adminKey) => {
   };
 
   return {
+    getSession: () => request("/api/admin/content/session"),
+    signIn: (body) => request("/api/admin/content/session", { method: "POST", body }),
+    signOut: () => request("/api/admin/content/session", { method: "DELETE" }),
     listDocuments: (type, options) =>
       request(`/api/admin/content/documents?type=${encodeURIComponent(type)}`, options),
     getDocument: (id, options) =>

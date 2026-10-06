@@ -1,3 +1,4 @@
+import { isValidPublishLink } from "../../../lib/cms/contentSchema";
 import { newKey, stableJson } from "./documentPaths";
 
 export const BLOCK_STYLES = [
@@ -39,7 +40,7 @@ const TAG_DECORATORS = {
 
 const DECORATOR_ORDER = ["strong", "em", "underline", "strike-through", "code"];
 
-export const SAFE_LINK = /^(https?:\/\/|mailto:|tel:|\/|#)/i;
+export const SAFE_LINK = { test: isValidPublishLink };
 
 export const emptyBlock = (template = {}) => ({
   _type: "block",

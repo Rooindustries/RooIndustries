@@ -6,6 +6,7 @@ import { assertGlobalCmsWritesAllowed } from "./writeControl.js";
 import { clearSupabaseAssetManifestCache } from "../supabase/assets.js";
 import { validManifest } from "./documents.js";
 
+export const CMS_STORAGE_TRANSFER_TIMEOUT_MS = 240000;
 export const CMS_UPLOAD_LIMITS = Object.freeze({ image: 20 * 1024 * 1024, file: 64 * 1024 * 1024 });
 const imageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/svg+xml"]);
 const fileTypes = new Set(["application/zip", "application/x-zip-compressed", "application/octet-stream", "application/vnd.microsoft.portable-executable", "application/x-msdownload"]);
@@ -44,14 +45,14 @@ const cleanupExpiredUploads = async (client) => {
     }
   } catch { console.error("CMS expired staging cleanup needs owner attention", { code: "ASSET_STAGING_CLEANUP_FAILED" }); }
 };
-export const issueCmsUpload = async ({ body, client, env = process.env, now = Date.now } = {}) => {
+export const issueCmsUpload = async ({ body, client, env = process.env, actor = "admin:key", now = Date.now } = {}) => {
   assertGlobalCmsWritesAllowed(env);
   const input = declaration(body);
   await cleanupExpiredUploads(client);
   const prefix = `${input.kind}-${input.sha1}-`;
   const candidates = rpcData(await client.rpc("roo_find_verified_cms_asset", { p_kind: input.kind, p_sha1: input.sha1, p_sha256: input.sha256 }), "Verified asset lookup");
   for (const existing of candidates || []) {
-    if (!validManifest(existing) || !existing.legacy_sanity_asset_id.startsWith(prefix) || existing.sha256 !== input.sha256 || Number(existing.byte_size) !== input.byteSize || (input.width !== undefined && input.width !== existing.width) || (input.height !== undefined && input.height !== existing.height)) continue;
+    if (!validManifest(existing) || !existing.legacy_sanity_asset_id.startsWith(prefix) || existing.sha256 !== input.sha256 || Number(existing.byte_size) !== input.byteSize) continue;
     const detected = { extension: existing.legacy_sanity_asset_id.split("-").at(-1), mimeType: existing.mime_type };
     if (!mimeAgrees(input.mimeType, detected)) continue;
     const assetId = existing.legacy_sanity_asset_id;
@@ -61,8 +62,8 @@ export const issueCmsUpload = async ({ body, client, env = process.env, now = Da
   }
   const uploadId = crypto.randomUUID();
   const expiresAt = new Date(now() + 2 * 60 * 60 * 1000).toISOString();
-  const row = rpcData(await client.rpc("roo_create_cms_upload", { p_upload: { uploadId, actor: "admin:key", kind: input.kind, fileName: input.fileName, byteSize: input.byteSize, sha1: input.sha1, sha256: input.sha256, mimeType: input.mimeType, width: input.width || null, height: input.height || null, expiresAt } }), "Upload issuance");
-  if (row?.upload_id !== uploadId || row.staging_bucket !== "cms-upload-staging" || row.staging_path !== `uploads/${uploadId}` || row.actor !== "admin:key" || row.declared_sha1 !== input.sha1 || row.declared_sha256 !== input.sha256 || Number(row.declared_byte_size) !== input.byteSize || row.declared_mime_type !== input.mimeType || row.kind !== input.kind || row.file_name !== input.fileName || row.declared_width !== (input.width || null) || row.declared_height !== (input.height || null) || Date.parse(row.expires_at) !== Date.parse(expiresAt) || row.status !== "issued") throw cmsError("The durable upload declaration disagrees with its request.", 503, "ASSET_UPLOAD_STATE_INVALID");
+  const row = rpcData(await client.rpc("roo_create_cms_upload", { p_upload: { uploadId, actor, kind: input.kind, fileName: input.fileName, byteSize: input.byteSize, sha1: input.sha1, sha256: input.sha256, mimeType: input.mimeType, width: input.width || null, height: input.height || null, expiresAt } }), "Upload issuance");
+  if (row?.upload_id !== uploadId || row.staging_bucket !== "cms-upload-staging" || row.staging_path !== `uploads/${uploadId}` || row.actor !== actor || row.declared_sha1 !== input.sha1 || row.declared_sha256 !== input.sha256 || Number(row.declared_byte_size) !== input.byteSize || row.declared_mime_type !== input.mimeType || row.kind !== input.kind || row.file_name !== input.fileName || row.declared_width !== (input.width || null) || row.declared_height !== (input.height || null) || Date.parse(row.expires_at) !== Date.parse(expiresAt) || row.status !== "issued") throw cmsError("The durable upload declaration disagrees with its request.", 503, "ASSET_UPLOAD_STATE_INVALID");
   const signed = storageData(await client.storage.from(row.staging_bucket).createSignedUploadUrl(row.staging_path, { upsert: false }), "Upload signing");
   if (signed.path !== row.staging_path || typeof signed.signedUrl !== "string" || typeof signed.token !== "string") throw cmsError("The storage signature disagrees with the recorded path.", 503, "ASSET_UPLOAD_STATE_INVALID");
   const signedTarget = new URL(signed.signedUrl);
@@ -108,7 +109,7 @@ const detectBytes = async (bytes, signal) => {
   else if (/^GIF8[79]a$/.test(bytes.subarray(0, 6).toString("ascii"))) format = "gif";
   else if (bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP") format = "webp";
   else if (bytes.subarray(4, 8).toString("ascii") === "ftyp" && /avif|avis/.test(bytes.subarray(8, 64).toString("ascii"))) format = "heif";
-  else if (/^\s*(?:<\?xml[^?]*\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg(?:\s|>)/i.test(bytes.subarray(0, 65536).toString("utf8"))) format = "svg";
+  else if (/^\s*(?:<\?xml[^?]*\?>\s*)?(?:(?:<!--[\s\S]*?-->|<!DOCTYPE\s+svg\b[^>\[]*>)\s*)*<svg(?:\s|>)/i.test(bytes.subarray(0, 65536).toString("utf8"))) format = "svg";
   else if (bytes.subarray(0, 4).equals(Buffer.from([80,75,3,4])) || bytes.subarray(0, 4).equals(Buffer.from([80,75,5,6]))) return { kind: "file", extension: "zip", mimeType: "application/zip", width: null, height: null };
   else if (bytes[0] === 77 && bytes[1] === 90 && bytes.length >= 64) {
     const offset = bytes.readUInt32LE(60);
@@ -128,18 +129,19 @@ const removeStaging = async (client, row) => {
   if (result.error && !missing(result.error)) console.error("CMS staging cleanup unavailable", { code: "ASSET_STAGING_CLEANUP_FAILED" });
   return !result.error || missing(result.error);
 };
-const finalizeUpload = async ({ body, client, env = process.env, signal, now = Date.now } = {}) => {
+const finalizeUpload = async ({ body, client, env = process.env, actor = "admin:key", signal, now = Date.now } = {}) => {
   assertGlobalCmsWritesAllowed(env);
   signal = AbortSignal.any([AbortSignal.timeout(210000), ...(signal ? [signal] : [])]);
   if (!body || Object.keys(body).length !== 1 || typeof body.uploadId !== "string" || !uuidPattern.test(body.uploadId)) throw validationError("$.uploadId", "The recorded upload UUID is required.");
   const row = rpcData(await client.rpc("roo_get_cms_upload", { p_upload_id: body.uploadId }), "Upload lookup");
-  if (!row || row.actor !== "admin:key" || row.upload_id !== body.uploadId || row.staging_bucket !== "cms-upload-staging" || row.staging_path !== `uploads/${body.uploadId}` || !["image", "file"].includes(row.kind)) throw verifyFailure("The recorded upload identity is invalid.");
+  if (!row || row.actor !== actor || row.upload_id !== body.uploadId || row.staging_bucket !== "cms-upload-staging" || row.staging_path !== `uploads/${body.uploadId}` || !["image", "file"].includes(row.kind)) throw verifyFailure("The recorded upload identity is invalid.");
   if (row.status === "completed") { await removeStaging(client, row); return row.result; }
   if (row.status !== "issued" || !Number.isFinite(Date.parse(row.expires_at)) || Date.parse(row.expires_at) <= now()) throw verifyFailure("The upload has expired or was refused.");
   const maxBytes = CMS_UPLOAD_LIMITS[row.kind];
+  const transferClient = createSupabaseAdminClient({ env, signal, storageTransferTimeoutMs: CMS_STORAGE_TRANSFER_TIMEOUT_MS });
   let upload, detected;
   try {
-    upload = await readBytes(client, row.staging_bucket, row.staging_path, maxBytes, signal);
+    upload = await readBytes(transferClient, row.staging_bucket, row.staging_path, maxBytes, signal);
     detected = await detectBytes(upload.bytes, signal);
     if (upload.byteSize !== Number(row.declared_byte_size) || upload.sha1 !== row.declared_sha1 || upload.sha256 !== row.declared_sha256 || detected.kind !== row.kind || !mimeAgrees(row.declared_mime_type, detected) || upload.storedMimeType !== row.declared_mime_type || (row.declared_width !== null && row.declared_width !== undefined && Number(row.declared_width) !== detected.width) || (row.declared_height !== null && row.declared_height !== undefined && Number(row.declared_height) !== detected.height)) throw verifyFailure("Stored bytes disagree with the upload declaration.");
   } catch (error) {
@@ -150,7 +152,10 @@ const finalizeUpload = async ({ body, client, env = process.env, signal, now = D
     throw error;
   }
   const { width, height, mimeType, extension } = detected;
-  const assetId = row.kind === "image" ? `image-${upload.sha1}-${width}x${height}-${extension}` : `file-${upload.sha1}-${extension}`;
+  const candidates = rpcData(await client.rpc("roo_find_verified_cms_asset", { p_kind: row.kind, p_sha1: upload.sha1, p_sha256: upload.sha256 }), "Verified asset lookup");
+  const registered = (candidates || []).find(candidate => validManifest(candidate) && candidate.legacy_sanity_asset_id.startsWith(`${row.kind}-${upload.sha1}-`) && candidate.sha256 === upload.sha256 && Number(candidate.byte_size) === upload.byteSize && candidate.mime_type === mimeType);
+  const assetId = registered?.legacy_sanity_asset_id || (row.kind === "image" ? `image-${upload.sha1}-${width}x${height}-${extension}` : `file-${upload.sha1}-${extension}`);
+  const dimensions = registered ? { width: registered.width, height: registered.height } : { width, height };
   const bucket = row.kind === "image" ? "site-content-public" : "optimization-builds-private";
   const path = `${row.kind === "image" ? "images" : "builds"}/${upload.sha1}.${extension}`;
   let reused = false;
@@ -158,12 +163,12 @@ const finalizeUpload = async ({ body, client, env = process.env, signal, now = D
   if (existing.error && !missing(existing.error)) storageData(existing, "Final object lookup");
   if (!existing.error) reused = true;
   if (!reused) {
-    const promotion = await client.storage.from(bucket).upload(path, upload.bytes, { contentType: mimeType, upsert: false });
+    const promotion = await transferClient.storage.from(bucket).upload(path, upload.bytes, { contentType: mimeType, upsert: false });
     if (promotion.error && logicalStatus(promotion.error) !== 409) storageData(promotion, "Asset promotion");
     if (promotion.error) reused = true;
   }
   try {
-    const final = await readBytes(client, bucket, path, maxBytes, signal);
+    const final = await readBytes(transferClient, bucket, path, maxBytes, signal);
     const finalType = await detectBytes(final.bytes, signal);
     if (final.sha256 !== upload.sha256 || final.sha1 !== upload.sha1 || final.byteSize !== upload.byteSize || final.storedMimeType !== mimeType || JSON.stringify(finalType) !== JSON.stringify(detected)) throw verifyFailure("Final bytes disagree.");
   } catch (error) {
@@ -173,8 +178,8 @@ const finalizeUpload = async ({ body, client, env = process.env, signal, now = D
     throw verifyFailure("The immutable final asset disagrees with these bytes. Owner attention is required.");
   }
   const url = row.kind === "image" ? client.storage.from(bucket).getPublicUrl(path).data.publicUrl : null;
-  const manifest = { legacy_sanity_asset_id: assetId, asset_kind: row.kind, storage_bucket: bucket, storage_path: path, source_url: url || `storage://${bucket}/${path}`, mime_type: mimeType, byte_size: upload.byteSize, sha256: upload.sha256, width, height, migration_status: "verified", verified_at: new Date(now()).toISOString(), metadata: {} };
-  const assetDocument = { _id: assetId, _type: `sanity.${row.kind}Asset`, ...(url ? { url } : {}), sha1hash: upload.sha1, size: upload.byteSize, mimeType, extension, metadata: row.kind === "image" ? { dimensions: { width, height, aspectRatio: width / height } } : {} };
+  const manifest = { legacy_sanity_asset_id: assetId, asset_kind: row.kind, storage_bucket: bucket, storage_path: path, source_url: url || `storage://${bucket}/${path}`, mime_type: mimeType, byte_size: upload.byteSize, sha256: upload.sha256, ...dimensions, migration_status: "verified", verified_at: new Date(now()).toISOString(), metadata: {} };
+  const assetDocument = { _id: assetId, _type: `sanity.${row.kind}Asset`, ...(url ? { url } : {}), sha1hash: upload.sha1, size: upload.byteSize, mimeType, extension, metadata: row.kind === "image" ? { dimensions: { ...dimensions, aspectRatio: dimensions.width / dimensions.height } } : {} };
   const registration = await client.rpc("roo_register_verified_cms_asset", { p_asset: manifest, p_asset_document: assetDocument });
   if (registration.error?.message?.includes("CMS_ASSET_SOURCE_COLLISION")) {
     console.error("CMS verified asset source mismatch", { code: "CMS_ASSET_SOURCE_COLLISION" });
@@ -188,7 +193,7 @@ const finalizeUpload = async ({ body, client, env = process.env, signal, now = D
     throw verifyFailure("The verified asset registry disagrees with these bytes. Owner attention is required.");
   }
   rpcData(registration, "Verified asset registration");
-  const result = { asset: { _type: "reference", _ref: assetId }, assetId, url, width, height, mimeType, byteSize: upload.byteSize, sha256: upload.sha256, reused };
+  const result = { asset: { _type: "reference", _ref: assetId }, assetId, url, ...dimensions, mimeType, byteSize: upload.byteSize, sha256: upload.sha256, reused };
   const completed = await client.rpc("roo_complete_cms_upload", { p_upload_id: row.upload_id, p_result: result });
   let saved;
   if (completed.error?.code === "23505") {

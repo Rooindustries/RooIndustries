@@ -24,10 +24,12 @@ export const pathLabel = (path) =>
     return label ? `${label}.${segment}` : segment;
   }, "");
 
-const normalizeErrorPath = (path) => {
+export const normalizeErrorPath = (path) => {
   if (Array.isArray(path)) return pathLabel(path);
   return String(path || "")
     .replace(/\[_key\s*==\s*["']([^"']+)["']\]/g, "[key:$1]")
+    .replace(/\.(\d+)(?=\.|\[|$)/g, "[$1]")
+    .replace(/^\$\.?/, "")
     .replace(/^\./, "");
 };
 
@@ -125,4 +127,24 @@ export const resolveStablePath = (document, stablePath) => {
     }
   }
   return path;
+};
+
+export const contentErrorLabel = (type, rawPath) => {
+  const path = normalizeErrorPath(rawPath);
+  if (!path) return "Document";
+  const parts = path.match(/[^.[\]]+|\[\d+\]/g) || [];
+  let fields = type?.fields || [];
+  const labels = [];
+  for (let index = 0; index < parts.length; index++) {
+    const part = parts[index];
+    if (part === "markDefs" && /^\[\d+\]$/.test(parts[index + 1] || "")) {
+      const link = Number(parts[++index].slice(1, -1)) + 1;
+      return `Link ${link} in ${labels.join(" › ")}`;
+    }
+    if (/^\[\d+\]$/.test(part)) { labels.push(`Item ${Number(part.slice(1, -1)) + 1}`); continue; }
+    const field = fields.find(entry => entry.name === part);
+    labels.push(field?.title || part);
+    fields = field?.fields || field?.of?.find(entry => entry.fields)?.fields || [];
+  }
+  return labels.join(" › ");
 };

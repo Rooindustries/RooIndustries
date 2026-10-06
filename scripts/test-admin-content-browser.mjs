@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { chromium } from 'playwright';
 import { start } from './lib/storage-fixture.mjs';
+import { seedContentAdmin, CONTENT_ADMIN_EMAIL, CONTENT_ADMIN_PASSWORD } from './lib/content-admin-fixture.mjs';
 
 const root = path.resolve('.');
 registerHooks({ resolve(specifier, context, next) {
@@ -49,7 +50,7 @@ try {
   const expectedFiles = fs.readdirSync('supabase/migrations').filter(file => file.endsWith('.sql')).sort();
   assert.deepEqual(fixture.manifest.map(row => path.basename(row.file)).sort(), expectedFiles, 'Full migration chain required');
   const env = {
-    REF_ADMIN_KEY: adminKey, CMS_WRITES_PAUSED: '0', RATE_LIMIT_HASH_SECRET: 'synthetic-rate-limit',
+    REF_ADMIN_KEY: adminKey, REF_SESSION_SECRET:'synthetic-content-session-secret', CMS_WRITES_PAUSED: '0', RATE_LIMIT_HASH_SECRET: 'synthetic-rate-limit',
     SUPABASE_URL: fixture.origin, NEXT_PUBLIC_SUPABASE_URL: fixture.origin, NEXT_PUBLIC_SUPABASE_ASSET_URL: fixture.origin,
     SUPABASE_SERVICE_ROLE_KEY: fixture.token, SUPABASE_SECRET_KEY: fixture.token, NEXT_PUBLIC_SUPABASE_ANON_KEY: fixture.anonKey,
     DATA_PRIMARY_BACKEND: 'supabase', COMMERCE_PRIMARY_BACKEND: 'supabase', COMMERCE_FAILOVER_GENERATION: '1',
@@ -58,6 +59,7 @@ try {
   Object.assign(process.env, env);
   await fixture.sql`update migration.commerce_control set generation = 1 where singleton`;
 
+  await seedContentAdmin(fixture);
   const modules = {};
   for (const name of ['documents', 'documents/[id]', 'publish']) modules[name] = await import(`../app/api/admin/content/${name}/route.js`);
   const call = async (name, body, params = {}) => {
@@ -110,12 +112,14 @@ try {
     await new Promise(resolve => setTimeout(resolve, 200));
   }
 
-  browser = await chromium.launch({ headless: false, args: ['--ozone-platform=x11'], handleSIGINT: !hold, handleSIGTERM: !hold });
+  browser = await chromium.launch({ headless: false, ...(process.env.ADMIN_UI_CHROMIUM_PATH ? {executablePath:process.env.ADMIN_UI_CHROMIUM_PATH} : {}), args: ['--ozone-platform=x11', '--gtk-version=3', '--disable-gpu'], handleSIGINT: !hold, handleSIGTERM: !hold });
   const allowed = new Set([nextOrigin, fixture.origin]);
+  let contextAddress=1;
   const guard = async context => {
-    await context.route('**/*', route => {
+    const address='127.0.90.'+(contextAddress++);
+    await context.route('**/*', async route => {
       const url = new URL(route.request().url());
-      if (allowed.has(url.origin) && !url.username) return route.continue();
+      if (allowed.has(url.origin) && !url.username) return route.continue({headers:{...await route.request().allHeaders(),'x-forwarded-for':address}});
       const entry = { url: `${url.origin}${url.pathname}`, method: route.request().method() };
       if (/(^|\.)(sanity\.io|sanity\.studio)$/i.test(url.hostname)) artifact.browserRequests.sanity.push(entry);
       else artifact.browserRequests.blocked.push(entry);
@@ -138,8 +142,8 @@ try {
   const shot = name => page.screenshot({ path: path.join(outDir, `${name}.png`), fullPage: false });
   const unlock = async (target = page) => {
     await target.goto(`${nextOrigin}/admin/content`, { timeout: 240000, waitUntil: 'load' });
-    await target.getByLabel('Admin key').fill(adminKey);
-    await target.getByRole('button', { name: 'Open editor' }).click();
+    const state=await target.evaluate(()=>fetch('/api/admin/content/session',{cache:'no-store'}).then(response=>response.json()));
+    if(state.data?.signedIn!==true) {await target.getByLabel('Email',{exact:true}).fill(CONTENT_ADMIN_EMAIL);await target.getByLabel('Password',{exact:true}).fill(CONTENT_ADMIN_PASSWORD);await target.getByRole('button',{name:'Sign in',exact:true}).click();}
     await target.getByRole('navigation', { name: 'Content types' }).waitFor({ timeout: 60000 });
   };
   const openType = async (title, target = page) => {
@@ -161,12 +165,14 @@ try {
     await page.goto(`${nextOrigin}/admin/content`, { timeout: 240000, waitUntil: 'load' });
     const robots = await page.locator('meta[name="robots"]').getAttribute('content');
     assert.match(robots, /noindex/);
-    await page.getByLabel('Admin key').fill('wrong-key');
-    await page.getByRole('button', { name: 'Open editor' }).click();
-    await page.getByText('That admin key was not accepted.').waitFor();
+    for(let i=0;i<8;i++){await page.reload();await page.getByLabel('Email',{exact:true}).waitFor();assert.deepEqual((await page.getByRole('alert').allTextContents()).map(text=>text.trim()).filter(Boolean),[]);}artifact.signedOutProbeReloads=8;
+    await page.getByLabel('Email',{exact:true}).fill(CONTENT_ADMIN_EMAIL);
+    await page.getByLabel('Password',{exact:true}).fill('wrong-password');
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await page.getByText('Email or password was not accepted.').waitFor();
     await shot('desktop-gate');
-    await page.getByLabel('Admin key').fill(adminKey);
-    await page.getByRole('button', { name: 'Open editor' }).click();
+    await page.getByLabel('Password',{exact:true}).fill(CONTENT_ADMIN_PASSWORD);
+    await page.getByRole('button', { name: 'Sign in' }).click();
     await page.getByRole('navigation', { name: 'Content types' }).waitFor({ timeout: 60000 });
     await shot('desktop-workspace');
   });
@@ -311,7 +317,7 @@ try {
     await entries.first().waitFor({ timeout: 30000 });
     await shot('desktop-history');
     await entries.last().getByRole('button', { name: 'Load this version' }).click();
-    await page.getByText(/Loaded the version from/).waitFor();
+    await page.getByText(/Loaded the version that was live before/).waitFor();
     await publishAndWait();
     const after = (await detail(ids.hero)).document;
     assert.equal(after.ctaPrimaryText, 'Book now');
@@ -325,8 +331,7 @@ try {
     await page.waitForTimeout(900);
     artifact.draftKeysBeforeReload = await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('roo-content-draft:')));
     await page.reload({ waitUntil: 'load' });
-    await page.getByLabel('Admin key').fill(adminKey);
-    await page.getByRole('button', { name: 'Open editor' }).click();
+    await page.getByRole('navigation',{name:'Content types'}).waitFor({timeout:60000});
     await openType('Hero Section');
     await page.getByText(/Unpublished changes from .* are saved on this device/).waitFor({ timeout: 30000 });
     await page.getByRole('button', { name: 'Restore my changes' }).click();
@@ -468,7 +473,7 @@ try {
     await page.route('**/api/admin/content/documents?type=benchmark', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'Content service is temporarily unavailable.', code: 'CMS_UNAVAILABLE' }) }));
     await openType('Benchmark');
     await page.getByText('Content service is temporarily unavailable.').waitFor({ timeout: 30000 });
-    assert.equal(await page.getByLabel('Admin key').count(), 0, 'An outage must not lock the editor');
+    assert.equal(await page.getByLabel('Email',{exact:true}).count(), 0, 'An outage must not lock the editor');
     assert.equal(await page.getByRole('navigation', { name: 'Content types' }).isVisible(), true);
     await page.unroute('**/api/admin/content/documents?type=benchmark');
   });
@@ -536,10 +541,11 @@ try {
           await save(name);
         }
         await view.goto(`${nextOrigin}/admin/content`, { timeout: 240000, waitUntil: 'load' });
-        await view.getByLabel('Admin key').waitFor();
+        await view.getByLabel('Email',{exact:true}).waitFor();
         await save('admin-gate');
-        await view.getByLabel('Admin key').fill('wrong-key');
-        await view.getByRole('button', { name: 'Open editor' }).click();
+        await view.getByLabel('Email',{exact:true}).fill(CONTENT_ADMIN_EMAIL);
+        await view.getByLabel('Password',{exact:true}).fill('wrong-password');
+        await view.getByRole('button', { name: 'Sign in' }).click();
         await view.getByRole('alert').first().waitFor({ timeout: 30000 }).catch(() => {});
         await save('admin-gate-error');
         await unlock(view);
@@ -583,6 +589,62 @@ try {
     artifact.themeScreens = shots;
   }, { explicitOnly: true });
 
+  await scenario('history-restore-confirms-discard', async () => {
+    await unlock();
+    const before=await detail(ids.hero);assert.equal((await call('publish',{operation:'replace',type:'hero',documentId:ids.hero,expectedRevision:before.revision,document:{...before.document,tagline:'Revision target'}})).ok,true);
+    await openType('Hero Section');await page.getByLabel(/^Tagline/).fill('Exact unsaved edit');
+    await page.getByRole('button',{name:'History',exact:true}).click();
+    const load=page.getByRole('complementary',{name:'Version history'}).getByRole('button',{name:'Load this version'}).first();await load.waitFor();
+    const draftStorageKey='roo-content-draft:v1:doc:'+ids.hero,dialogMessages=[];page.removeAllListeners('dialog');let dialogs=0;page.once('dialog',dialog=>{dialogs++;dialogMessages.push(dialog.message());void dialog.dismiss();});await load.click();await page.waitForTimeout(600);
+    assert.equal(dialogs,1,'Restore must confirm discarding dirty edits');assert.equal(dialogMessages[0],'Replace your unpublished changes with this version? They will be lost.');assert.equal(await page.getByLabel(/^Tagline/).inputValue(),'Exact unsaved edit');assert.equal(JSON.parse(await page.evaluate(key=>localStorage.getItem(key),draftStorageKey)).document.tagline,'Exact unsaved edit');const actorLabels=await page.getByRole('complementary',{name:'Version history'}).getByRole('listitem').locator('span').allTextContents();assert.ok(actorLabels.every(label=>label==='Admin'),JSON.stringify(actorLabels));
+    page.removeAllListeners('dialog');page.once('dialog',dialog=>{dialogMessages.push(dialog.message());void dialog.accept();});await load.click();await page.getByText(/Loaded the version/).waitFor();assert.equal(await page.getByLabel(/^Tagline/).inputValue(),before.document.tagline);await page.waitForFunction(({key,tagline})=>JSON.parse(localStorage.getItem(key)||'null')?.document?.tagline===tagline,{key:draftStorageKey,tagline:before.document.tagline});assert.equal(dialogMessages[1],dialogMessages[0]);artifact.restoreDraft={key:draftStorageKey,restoredTagline:before.document.tagline,dialogMessages,actorLabels};page.on('dialog',dialog=>dialog.accept());await shot('history-restore-confirms-discard');
+  });
+  await scenario('login-wrong-password-and-signout', async () => {
+    await unlock();await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.getByLabel('Email',{exact:true}).waitFor();
+    await page.getByLabel('Email',{exact:true}).fill(CONTENT_ADMIN_EMAIL);await page.getByLabel('Password',{exact:true}).fill('wrong-password');await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByText('Email or password was not accepted.',{exact:true}).waitFor();
+    await page.getByLabel('Password',{exact:true}).fill(CONTENT_ADMIN_PASSWORD);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('navigation',{name:'Content types'}).waitFor();
+    await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.getByLabel('Email',{exact:true}).waitFor();assert.deepEqual(await page.evaluate(()=>fetch('/api/admin/content/session',{cache:'no-store'}).then(response=>response.json())),{ok:true,data:{signedIn:false}});await page.reload();await page.getByLabel('Email',{exact:true}).waitFor();await shot('password-signout');
+  });
+  await scenario('terms-code-owned-banner', async () => {
+    await unlock();await openType('Terms and Conditions');await page.getByText('The Payments & refunds and Cancellations sections, the Terms last-updated date and the money-back FAQ answer are managed in code and ignore edits here.',{exact:true}).waitFor();assert.equal(await page.getByRole('navigation',{name:'Content types'}).getByRole('button',{name:'Footer',exact:true}).count(),0);await shot('terms-code-owned-banner');
+  });
+  await scenario('draft-quota-notice', async () => {
+    await unlock();await openType('Hero Section');await page.evaluate(()=>{window.__originalStorageSetItem=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key.startsWith('roo-content-draft:'))throw new DOMException('Quota full','QuotaExceededError');return window.__originalStorageSetItem.call(this,key,value);};});
+    await page.getByLabel(/^Tagline/).fill('Quota edit continues');await page.getByText('Your draft could not be saved in this browser.',{exact:true}).waitFor();await page.getByLabel(/^Tagline/).fill('Quota edit still continues');assert.equal(await page.getByLabel(/^Tagline/).inputValue(),'Quota edit still continues');const current=await detail(ids.hero);assert.equal((await call('publish',{operation:'replace',type:'hero',documentId:ids.hero,expectedRevision:current.revision,document:{...current.document,tagline:'Concurrent quota version'}})).ok,true);await page.getByRole('button',{name:'Publish',exact:true}).click();await page.getByRole('button',{name:'Load latest version',exact:true}).waitFor();page.removeAllListeners('dialog');let confirmation;page.once('dialog',dialog=>{confirmation=dialog.message();void dialog.dismiss();});await page.getByRole('button',{name:'Load latest version',exact:true}).click();await page.waitForTimeout(300);assert.equal(confirmation,'Your draft could not be saved on this device. Load the latest version and lose your edits?');assert.equal(await page.getByLabel(/^Tagline/).inputValue(),'Quota edit still continues');artifact.quotaConflict={confirmation,dismissKeepsEdit:true};page.on('dialog',dialog=>dialog.accept());await shot('draft-quota-notice');await page.evaluate(()=>{Storage.prototype.setItem=window.__originalStorageSetItem;});
+  });
+  await scenario('link-rule-agreement', async () => {
+    await unlock();await openType('Terms and Conditions');await page.getByRole('button',{name:'Seed payments',exact:true}).click();const editable=page.getByRole('textbox',{name:/paragraph 1$/}).first();await editable.focus();
+    page.removeAllListeners('dialog');const messages=[];page.on('dialog',dialog=>{messages.push({type:dialog.type(),message:dialog.message()});void dialog.accept(dialog.type()==='prompt'?'#anchor':undefined);});await page.getByRole('button',{name:'Add link',exact:true}).first().click();await page.waitForTimeout(300);assert.ok(messages.some(message=>message.type==='alert'&&/single \/|HTTP/.test(message.message)));assert.equal(await editable.locator('a').count(),0);page.removeAllListeners('dialog');page.on('dialog',dialog=>dialog.accept());
+    await editable.evaluate(element=>{element.focus();const range=document.createRange();range.selectNodeContents(element);range.collapse(false);const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);const data=new DataTransfer();data.setData('text/html','<a href="javascript:alert(1)">x</a>');data.setData('text/plain','x');element.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:data}));document.execCommand('insertHTML',false,'<a href="javascript:alert(1)">x</a>');element.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertFromPaste'}));});await page.getByLabel(/^Main Title/).focus();const pasteKey='roo-content-draft:v1:doc:'+ids.terms;await page.waitForFunction(key=>JSON.parse(localStorage.getItem(key)||'null')?.document?.sections?.[0]?.content?.[0]?.children?.map(span=>span.text).join('').includes('xx'),pasteKey);const pasted=JSON.parse(await page.evaluate(key=>localStorage.getItem(key),pasteKey)).document.sections[0].content[0];const existingAnchor=pasted.markDefs.find(mark=>mark.href==='javascript:alert(1)');assert.ok(existingAnchor);assert.ok(pasted.children.some(span=>span.text.includes('x')&&span.marks.includes(existingAnchor._key)));assert.equal(await editable.locator('a[href="javascript:alert(1)"]').count(),1);const beforeInvalid=await detail(ids.terms);await page.getByRole('button',{name:'Publish',exact:true}).click();await page.getByText(/Link 1 in Sections.*Content/).waitFor();assert.deepEqual(await detail(ids.terms),beforeInvalid);artifact.existingJavascriptAnchor={preserved:true,publishRefused:true,markDefs:pasted.markDefs};
+    const doc=await detail(ids.terms),section=doc.document.sections[0],content=section.content[0],legacy={...content,markDefs:[{_key:'legacy-link',_type:'link',href:'//host'}],children:content.children.map(span=>({...span,marks:['legacy-link']}))};const next={...doc.document,sections:[{...section,content:[legacy,...section.content.slice(1)]},...doc.document.sections.slice(1)]};
+    assert.equal((await fixture.client.rpc('roo_apply_document_mutations',{p_mutations:[{operation:'replace',id:ids.terms,document:next}]})).error,null);await page.reload();await page.getByRole('navigation',{name:'Content types'}).waitFor();await openType('Terms and Conditions');await page.getByLabel(/^Main Title/).fill('Legacy link validation');await page.getByRole('button',{name:'Publish',exact:true}).click();await page.getByText(/Link 1 in Sections.*Content/).waitFor();await shot('link-rule-agreement');
+  });
+  await scenario('legacy-anchor-survives-edit', async () => {
+    const original=(await fixture.sql`select payload,source_revision,source_hash from migration.source_documents where legacy_sanity_id=${ids.terms}`)[0];
+    const marked={_key:'legacy-faq-link',_type:'link',href:'#faq'},legacyBlock={_key:'legacy-anchor-block',_type:'block',style:'normal',markDefs:[marked],children:[{_key:'linked-span',_type:'span',text:'FAQ link',marks:[marked._key]},{_key:'plain-span',_type:'span',text:' ordinary text',marks:[]}]},legacy={...original.payload,sections:[{_key:'legacy-anchor-section',_type:'object',heading:'Legacy anchor section',content:[legacyBlock]}]};
+    try {
+      await fixture.sql`update migration.source_documents set payload=${fixture.sql.json(legacy)} where legacy_sanity_id=${ids.terms}`;
+      await unlock();await page.evaluate(key=>localStorage.removeItem(key),'roo-content-draft:v1:doc:'+ids.terms);await openType('Terms and Conditions');await page.getByRole('button',{name:'Legacy anchor section',exact:true}).click();
+      const editable=page.getByRole('textbox',{name:/paragraph 1$/}).first();await editable.locator('a[href="#faq"]').waitFor();await editable.focus();await page.keyboard.press('End');await page.keyboard.type(' changed text');await page.getByLabel(/^Main Title/).focus();
+      const key='roo-content-draft:v1:doc:'+ids.terms;await page.waitForFunction(key=>JSON.parse(localStorage.getItem(key)||'null')?.document?.sections?.[0]?.content?.[0]?.children?.map(span=>span.text).join('').includes('changed text'),key);
+      const working=JSON.parse(await page.evaluate(key=>localStorage.getItem(key),key)).document,retained=working.sections[0].content[0];assert.deepEqual(retained.markDefs,[marked]);assert.ok(retained.children.some(span=>span.text==='FAQ link'&&span.marks.includes(marked._key)));assert.equal(await editable.locator('a[href="#faq"]').count(),1);
+      const before=(await fixture.sql`select payload,source_revision,tombstoned from migration.source_documents where legacy_sanity_id=${ids.terms}`)[0];await page.getByRole('button',{name:'Publish',exact:true}).click();await page.getByText(/Link 1 in Sections.*Content.*A link with a supported URL is required/).waitFor();const refused=await page.evaluate(async body=>{const response=await fetch('/api/admin/content/publish',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});return{status:response.status,...await response.json()};},{operation:'replace',type:'terms',documentId:ids.terms,expectedRevision:before.source_revision,document:working});assert.equal(refused.status,400);assert.equal(refused.code,'CMS_VALIDATION_FAILED');const after=(await fixture.sql`select payload,source_revision,tombstoned from migration.source_documents where legacy_sanity_id=${ids.terms}`)[0];assert.deepEqual(after,before);artifact.legacyAnchor={href:marked.href,working:retained,publish:refused,clientValidationBeforeHttp:true,storedBefore:before,storedAfter:after,unchanged:true};await shot('legacy-anchor-survives-edit');
+    } finally {
+      await fixture.sql`update migration.source_documents set payload=${fixture.sql.json(original.payload)},source_revision=${original.source_revision},source_hash=${original.source_hash} where legacy_sanity_id=${ids.terms}`;await page.evaluate(key=>localStorage.removeItem(key),'roo-content-draft:v1:doc:'+ids.terms);
+    }
+  });
+  await scenario('create-intent-load-latest', async () => {
+    await unlock();await openType('Benchmark');await page.getByRole('button',{name:'New',exact:true}).click();await page.getByLabel(/^Benchmark Name/).fill('Committed create intent');
+    await page.evaluate(()=>{const original=window.fetch;let first=true;window.__createIntentOriginalFetch=original;window.fetch=async(input,init)=>{const response=await original(input,init);if(first&&String(input).endsWith('/api/admin/content/publish')&&init?.method==='POST'){first=false;window.__createIntentHttpStatus=response.status;window.__createIntentId=JSON.parse(init.body).createIntentId;window.__createdDocument=(await response.clone().json()).data;return new Response(JSON.stringify({ok:false,error:'Synthetic lost response',code:'CMS_UNAVAILABLE'}),{status:503,headers:{'content-type':'application/json'}});}return response;};});
+    await page.getByRole('button',{name:'Publish',exact:true}).click();await page.getByText(/Synthetic lost response/).waitFor();await page.getByLabel(/^Benchmark Name/).fill('Changed create intent');await page.getByRole('button',{name:'Publish',exact:true}).click();await page.getByRole('button',{name:'Load latest version',exact:true}).waitFor();
+    const committed=await page.evaluate(()=>window.__createdDocument),intent=await page.evaluate(()=>window.__createIntentId),oldKey='roo-content-draft:v1:new:benchmark:'+intent,documentKey='roo-content-draft:v1:doc:'+committed.documentId,slowDocument=nextOrigin+'/api/admin/content/documents/'+committed.documentId;
+    await page.route(slowDocument,async route=>{await new Promise(resolve=>setTimeout(resolve,1000));await route.fallback();});await page.getByLabel(/^Benchmark Name/).fill('Later edit kept for recovery');await page.getByRole('button',{name:'Load latest version',exact:true}).click();await page.getByRole('button',{name:'Restore my changes',exact:true}).waitFor();await page.unroute(slowDocument);
+    assert.equal(await page.getByLabel(/^Benchmark Name/).inputValue(),'Committed create intent');const saved=JSON.parse(await page.evaluate(key=>localStorage.getItem(key),documentKey));assert.equal(saved.document.title,'Later edit kept for recovery');assert.equal(saved.documentId,committed.documentId);assert.equal(saved.createIntentId,null);assert.equal(saved.baseRevision,null);assert.equal(await page.evaluate(key=>localStorage.getItem(key),oldKey),null);await page.getByText('This document was published again since then. Restoring puts your older edits over the latest version.',{exact:true}).waitFor();
+    await page.getByRole('button',{name:'Restore my changes',exact:true}).click();assert.equal(await page.getByLabel(/^Benchmark Name/).inputValue(),'Later edit kept for recovery');const replaceResponse=page.waitForResponse(response=>response.url().endsWith('/api/admin/content/publish')&&response.request().method()==='POST');await publishAndWait();const replaced=await replaceResponse;assert.equal(replaced.request().postDataJSON().operation,'replace');assert.equal((await detail(committed.documentId)).document.title,'Later edit kept for recovery');assert.equal(await page.evaluate(key=>localStorage.getItem(key),oldKey),null);const newDrafts=await page.evaluate(()=>Object.keys(localStorage).filter(key=>key.startsWith('roo-content-draft:v1:new:benchmark:')).map(key=>JSON.parse(localStorage.getItem(key))));assert.ok(!newDrafts.some(draft=>draft.createIntentId===intent));artifact.createIntentRecovery={documentId:committed.documentId,intent,saved,recoveredTitle:'Later edit kept for recovery',publishedOperation:'replace',oldDraftAbsent:true,newDraftIntents:newDrafts.map(draft=>draft.createIntentId),documentLoadDelayMs:1000};artifact.createIntentLostResponseHttpStatus=await page.evaluate(()=>{window.fetch=window.__createIntentOriginalFetch;return window.__createIntentHttpStatus;});assert.equal(artifact.createIntentLostResponseHttpStatus,200);await shot('create-intent-load-latest');
+  });
+  await scenario('password-gate-themes', async () => {
+    for(const theme of ['default','dark']) {const themed=await browser.newContext({viewport:{width:1440,height:1000}});await guard(themed);await themed.addInitScript(theme=>localStorage.setItem('roo-theme',theme),theme);const view=await themed.newPage();watch(view);await view.goto(nextOrigin+'/admin/content');await view.getByLabel('Email',{exact:true}).waitFor();await view.screenshot({path:path.join(outDir,'password-gate-'+theme+'.png')});await unlock(view);await view.screenshot({path:path.join(outDir,'password-editor-'+theme+'.png')});assert.ok(await view.evaluate(()=>document.scrollingElement.scrollWidth<=window.innerWidth));await themed.close();}
+  });
   if (hold) {
     console.log(JSON.stringify({ holding: nextOrigin, fixture: fixture.origin, pid: process.pid }));
     await new Promise(resolve => { process.once('SIGINT', resolve); process.once('SIGTERM', resolve); });
