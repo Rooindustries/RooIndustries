@@ -15,7 +15,7 @@
 /test-results
 /playwright-report
 /output
-/audit/payment-email-smoke/
+/audit/
 
 # misc
 .env*
@@ -38,6 +38,8 @@ yarn-error.log*
 
 # Documentation stays local and is never published.
 *.md
+!/AGENTS.md
+!/CLAUDE.md
 
 # Local-only tooling: probe scripts and bytecode caches.
 .local-probes/

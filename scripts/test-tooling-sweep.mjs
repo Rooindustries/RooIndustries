@@ -186,7 +186,7 @@ await run("playwright-command-safety", () => {
 await run("browser-cleanup-exact-ownership", () => {
   const source = fs.readFileSync(path.join(root, "scripts/phase1-browser-hygiene.js"), "utf8");
   const profile = "/tmp/roo-tooling-safety-proof";
-  const ps = `100 1 chromium --user-data-dir=${profile}\n101 1 chromium --user-data-dir=/tmp/playwright_chromium-another-current-task\n102 1 chromium --user-data-dir=${profile}-other\n103 1 chromium --user-data-dir=/home/serviroo/.config/google-chrome`;
+  const ps = `100 1 chromium --user-data-dir=${profile}\n101 1 chromium --user-data-dir=/tmp/playwright_chromium-another-current-task\n102 1 chromium --user-data-dir=${profile}-other\n103 1 chromium --user-data-dir=/home/fixture/.config/google-chrome`;
   const evaluate = (ownership, startTime = "1000", realProfile = profile) => {
     const killed = [], output = [];
     let statReads = 0;

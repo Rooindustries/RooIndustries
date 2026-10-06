@@ -61,6 +61,7 @@
     "test:referral-email:postgres17": "node scripts/test-referral-email-dispatch-postgres.mjs",
     "test:referral-integrity:postgres17": "node scripts/test-referral-integrity-hardening-postgres.mjs",
     "test:account-domain:postgres17": "node scripts/test-account-domain-identity-postgres.mjs",
+    "test:commerce-readiness:postgres17": "node scripts/test-commerce-readiness-postgres.mjs",
     "repair:supabase:commerce:dry-run": "node scripts/repair-supabase-commerce-integrity.mjs",
     "repair:supabase:commerce:apply": "node scripts/repair-supabase-commerce-integrity.mjs --apply",
     "repair:referral-accounting:dry-run": "node scripts/repair-referral-accounting.mjs",
