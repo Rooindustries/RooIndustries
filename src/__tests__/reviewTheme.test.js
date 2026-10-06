@@ -21,11 +21,11 @@ describe("review carousel design", () => {
     expect(componentSource).toContain("function AutoReviewCarousel");
     expect(componentSource).toContain("ri-reviews-auto-track");
     expect(componentSource).toContain("w-[320px] sm:w-[360px] min-h-[184px]");
-    expect(componentSource).toContain("[0, 1].map");
+    expect(componentSource).toContain("Array.from({ length: groupCount }");
     expect(componentSource).toContain("“{review.text}”");
-    expect(componentSource).toContain("AUTO_SCROLL_PIXELS_PER_SECOND = 20");
-    expect(componentSource).toContain("window.setInterval(tick, 50)");
-    expect(componentSource).toContain("viewport.scrollLeft +=");
+    expect(componentSource).toContain("AUTO_SCROLL_PIXELS_PER_SECOND = 24");
+    expect(componentSource).toContain("window.requestAnimationFrame(frame)");
+    expect(componentSource).toContain("viewport.scrollLeft = motion.position");
     expect(componentSource).toContain("onPointerDown={onPointerDown}");
     expect(componentSource).toContain("Scroll reviews left");
     expect(componentSource).toContain("Scroll reviews right");

@@ -11,10 +11,12 @@ export async function createToolingContentFixture({ origin, artifact }) {
   const content = resource => reused.content(resource, target);
   const document = (type, data, id = `tooling-${type}`) => ({ ...data, _type: type, _id: id, _rev: 'tooling-fixture-v1', _createdAt: '2026-01-01T00:00:00Z', _updatedAt: '2026-01-01T00:00:00Z' });
   const paragraph = 'This is synthetic privacy content for an isolated local Roo Industries application test. The fixture describes how example contact details, booking preferences, and browser settings may be represented on a policy page. All names and addresses in this fixture are invented. This content is used only to verify server rendering, heading structure, paragraph visibility, content negotiation, and client hydration. It does not describe an actual customer, a live account, or a production data collection practice. No real messages, payments, credentials, or account changes are performed by this fixture. A reader can use the local contact route to inspect the application navigation without sending a message.';
+  const reviews = content('reviews');
+  if (process.env.TOOLING_REVIEW_COUNT) reviews.reviews = reviews.reviews.slice(0, Number(process.env.TOOLING_REVIEW_COUNT));
   const policy = title => ({ title, sections: [{ heading: 'Synthetic local information', content: [{ _type: 'block', _key: 'privacy-body', style: 'normal', markDefs: [], children: [{ _type: 'span', _key: 'privacy-span', text: paragraph, marks: [] }] }] }] });
   const documents = [
     ...content('packages-list').map((pkg, index) => document('package', { ...pkg, price: index === 1 ? '$149.95' : pkg.price, order: index }, `tooling-package-${index}`)),
-    document('proReviewsCarousel', content('reviews')),
+    document('proReviewsCarousel', reviews),
     document('supportedGames', content('supported-games')),
     document('faqSettings', content('faq-settings')),
     document('faqSection', { questions: [...content('faq-questions'), ...Array.from({ length: 12 }, (_, index) => ({ _key: `tooling-question-${index}`, question: `Synthetic local question ${index + 1}`, answer: `This synthetic answer verifies that question ${index + 1} appears in the server-rendered FAQ without requiring a browser content request.` }))] }, 'faq'),
