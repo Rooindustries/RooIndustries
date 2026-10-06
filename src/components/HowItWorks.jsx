@@ -34,7 +34,7 @@ export default function HowItWorks({ initialData = null }) {
     }
     fetchHomeSectionData(HOME_SECTION_DATA_KEYS.howItWorks)
       .then((res) => { if (res) setData(res); })
-      .catch((err) => console.error("Sanity fetch error:", err));
+      .catch((err) => console.error("CMS fetch error:", err));
   }, [initialData]);
 
   useEffect(() => {

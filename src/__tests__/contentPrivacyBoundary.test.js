@@ -9,8 +9,8 @@ const mockCreateSupabaseDocumentClient = jest.fn(() => ({
 }));
 const mockEnrichSupabaseContentAssets = jest.fn(async ({ data }) => data);
 
-jest.mock("@sanity/client", () => ({
-  createClient: (...args) => mockCreateClient(...args),
+jest.mock("../server/data/documentClient.js", () => ({
+  createDataClient: (...args) => mockCreateClient(...args),
 }));
 
 jest.mock("../server/supabase/documentClient", () => ({
@@ -60,21 +60,19 @@ describe("public content privacy boundary", () => {
 
   test("uses a fixed server projection and never accepts caller GROQ", async () => {
     const { fetchPublicContent } = require("../server/content/publicContent");
+    mockSupabaseFetch.mockResolvedValueOnce({title:"Public copy"});
     const data = await fetchPublicContent({
       resource: "hero",
       searchParams: new URLSearchParams(),
     });
 
     expect(data).toEqual({ title: "Public copy" });
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(mockFetch.mock.calls[0][0]).toContain('_type == "hero"');
-    expect(mockFetch.mock.calls[0][0]).not.toContain("booking");
-    expect(mockFetch.mock.calls[0][1]).toEqual({});
-    expect(mockCreateClient.mock.calls[0][0]).toMatchObject({
-      token: "server-only-read-token",
-      useCdn: false,
-      perspective: "published",
-    });
+    expect(mockSupabaseFetch).toHaveBeenCalledTimes(1);
+    expect(mockSupabaseFetch.mock.calls[0][0]).toContain('_type == "hero"');
+    expect(mockSupabaseFetch.mock.calls[0][0]).not.toContain("booking");
+    expect(mockSupabaseFetch.mock.calls[0][1]).toEqual({});
+    expect(mockCreateClient).not.toHaveBeenCalled();
+
     await expect(
       fetchPublicContent({
         resource: "hero",
@@ -83,7 +81,7 @@ describe("public content privacy boundary", () => {
         ),
       }),
     ).rejects.toThrow(/unsupported content parameter/i);
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockSupabaseFetch).toHaveBeenCalledTimes(1);
   });
 
   test("rejects unknown resources and non-allowlisted package parameters", async () => {
@@ -107,7 +105,7 @@ describe("public content privacy boundary", () => {
     delete process.env.SANITY_READ_TOKEN;
     delete process.env.SANITY_PRIVATE_READ_TOKEN;
     delete process.env.SANITY_WRITE_TOKEN;
-    mockFetch.mockRejectedValueOnce(new Error("Sanity unavailable"));
+    mockSupabaseFetch.mockRejectedValueOnce(new Error("Supabase unavailable"));
     const route = require("../../app/api/content/[resource]/route");
     const response = await route.GET(
       new Request("https://example.com/api/content/hero"),
@@ -181,15 +179,7 @@ describe("public content privacy boundary", () => {
     now.mockRestore();
   });
 
-  test("the arbitrary Sanity proxy is permanently gone", async () => {
-    const route = require("../../app/api/sanity/[...path]/route");
-    const getResponse = await route.GET();
-    const postResponse = await route.POST();
-    expect(getResponse.status).toBe(410);
-    expect(postResponse.status).toBe(410);
-    await expect(getResponse.json()).resolves.toMatchObject({ ok: false });
-    expect(getResponse.headers.get("cache-control")).toMatch(/no-store/);
-  });
+  ;
 
   test("checkout browser modules contain no persistent customer or payment storage", () => {
     const files = [
@@ -256,11 +246,11 @@ describe("public content privacy boundary", () => {
     expect(imagePolicy).not.toContain("https://*.supabase.co");
   });
 
-  test("public marketing content does not require a paid Sanity read token", async () => {
+  test("D1 public marketing reads only Supabase", async () => {
     delete process.env.SANITY_READ_TOKEN;
     delete process.env.SANITY_PRIVATE_READ_TOKEN;
     delete process.env.SANITY_WRITE_TOKEN;
-    mockFetch.mockResolvedValueOnce({ headingLine1: "More FPS." });
+    mockSupabaseFetch.mockResolvedValueOnce({ headingLine1: "More FPS." });
 
     const { fetchPublicContent } = require("../server/content/publicContent");
     const result = await fetchPublicContent({
@@ -269,75 +259,12 @@ describe("public content privacy boundary", () => {
     });
 
     expect(result).toEqual({ headingLine1: "More FPS." });
-    expect(mockCreateClient).toHaveBeenLastCalledWith({
-      projectId: "project-test",
-      dataset: "production",
-      apiVersion: "2026-07-01",
-      useCdn: true,
-      perspective: "published",
-    });
-  });
-
-  test("manual fallback reads the complete global private tuple instead of a stale public dataset", async () => {
-    process.env.SANITY_PROJECT_ID = "stale-public-project";
-    process.env.SANITY_DATASET = "stale-public-dataset";
-    process.env.SANITY_READ_TOKEN = "stale-public-token";
-    process.env.SANITY_PRIVATE_PROJECT_ID = "9g42k3ur";
-    process.env.SANITY_PRIVATE_DATASET = "production";
-    process.env.SANITY_PRIVATE_API_VERSION = "2026-07-15";
-    process.env.SANITY_PRIVATE_READ_TOKEN = "private-global-token";
-
-    const { fetchPublicContent } = require("../server/content/publicContent");
-    await fetchPublicContent({
-      resource: "hero",
-      searchParams: new URLSearchParams(),
-      backend: "sanity",
-    });
-
-    expect(mockCreateClient).toHaveBeenLastCalledWith({
-      projectId: "9g42k3ur",
-      dataset: "production",
-      apiVersion: "2026-07-15",
-      token: "private-global-token",
-      useCdn: false,
-      perspective: "published",
-    });
-  });
-
-  test("does not synthesize a Sanity target from partial server and public tuples", async () => {
-    process.env.SANITY_PROJECT_ID = "server-project";
-    delete process.env.SANITY_DATASET;
-    delete process.env.NEXT_PUBLIC_SANITY_PROJECT_ID;
-    process.env.NEXT_PUBLIC_SANITY_DATASET = "public-dataset";
-
-    const { fetchPublicContent } = require("../server/content/publicContent");
-    await expect(
-      fetchPublicContent({
-        resource: "hero",
-        searchParams: new URLSearchParams(),
-        backend: "sanity",
-      }),
-    ).rejects.toThrow("not configured");
     expect(mockCreateClient).not.toHaveBeenCalled();
   });
 
-  test("production fallback rejects complete but wrong Sanity targets", async () => {
-    process.env.NODE_ENV = "production";
-    process.env.VERCEL_ENV = "production";
-    process.env.SANITY_PROJECT_ID = "wrong-server-project";
-    process.env.SANITY_DATASET = "wrong-server-dataset";
-    process.env.SANITY_READ_TOKEN = "wrong-server-token";
-    process.env.NEXT_PUBLIC_SANITY_PROJECT_ID = "wrong-public-project";
-    process.env.NEXT_PUBLIC_SANITY_DATASET = "wrong-public-dataset";
+  ;
 
-    const { fetchPublicContent } = require("../server/content/publicContent");
-    await expect(
-      fetchPublicContent({
-        resource: "hero",
-        searchParams: new URLSearchParams(),
-        backend: "sanity",
-      }),
-    ).rejects.toThrow("not configured");
-    expect(mockCreateClient).not.toHaveBeenCalled();
-  });
+  ;
+
+  ;
 });

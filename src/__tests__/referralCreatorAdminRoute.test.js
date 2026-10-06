@@ -115,7 +115,7 @@ describe("referral creator admin route", () => {
     });
   });
 
-  test("updates Supabase before attempting the Sanity fallback mirror", async () => {
+  test("D6/C2 updates the native terms without a mirror wait", async () => {
     const body = { creatorId: "10000000-0000-4000-8000-000000000001" };
     const response = await PATCH(request({ body }));
     expect(response.status).toBe(200);
@@ -124,13 +124,7 @@ describe("referral creator admin route", () => {
       input: body,
       cutoverGeneration: 1,
     });
-    expect(mockFlush).toHaveBeenCalledWith({
-      client: mockClient,
-      legacySanityId: "referral.creator",
-    });
-    expect(mockUpdate.mock.invocationCallOrder[0]).toBeLessThan(
-      mockFlush.mock.invocationCallOrder[0]
-    );
+    expect(mockFlush).not.toHaveBeenCalled();
   });
 
   test("maps optimistic concurrency conflicts to a reload response", async () => {

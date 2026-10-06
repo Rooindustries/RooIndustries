@@ -3,25 +3,13 @@ import crypto from "crypto";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
-import {
-  deliverReferralEmailDispatch,
-  enqueueReferralEmailMutation,
-  isReferralEmailSourceStateConflict,
-  requeueReferralEmailDispatch,
-  sendReferralEmailDirect,
-} from "./referralEmailDispatches.js";
+import { deliverReferralEmailDispatch, enqueueReferralEmailMutation, isReferralEmailSourceStateConflict, requeueReferralEmailDispatch } from "./referralEmailDispatches.js";
 import {
   sealReferralEmailToken,
   unsealReferralEmailToken,
 } from "./referralEmailTokenSeal.js";
 
-const client = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-}, { allowLegacyFallback: false });
+const client = createClient({}, { allowLegacyFallback: false });
 
 const recoverResetToken = (referral) => {
   try {
@@ -41,50 +29,7 @@ const isRevisionConflict = (error) =>
 const readReferralById = (id) =>
   client.fetch(`*[_type == "referral" && _id == $id][0]`, { id });
 
-const ensureSanityResetToken = async (initialReferral) => {
-  let referral = initialReferral;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const recovered = recoverResetToken(referral);
-    if (recovered) {
-      return {
-        referral,
-        resetToken: recovered,
-        resetTokenExpiresAt: referral.resetTokenExpiresAt,
-      };
-    }
 
-    const resetToken = crypto.randomBytes(32).toString("hex");
-    const resetTokenHash = crypto
-      .createHash("sha256")
-      .update(resetToken)
-      .digest("hex");
-    const resetTokenExpiresAt = new Date(
-      Date.now() + 60 * 60 * 1000
-    ).toISOString();
-    let patch = client.patch(referral._id);
-    if (referral._rev && typeof patch.ifRevisionId === "function") {
-      patch = patch.ifRevisionId(referral._rev);
-    }
-    try {
-      const committed = await patch
-        .set({
-          resetTokenHash,
-          resetTokenExpiresAt,
-          resetDeliveryToken: sealReferralEmailToken(resetToken),
-        })
-        .unset(["resetToken"])
-        .commit({ visibility: "sync" });
-      return { referral: committed || referral, resetToken, resetTokenExpiresAt };
-    } catch (error) {
-      if (!isRevisionConflict(error)) throw error;
-      referral = await readReferralById(referral._id);
-      if (!referral?._id) throw error;
-    }
-  }
-  const error = new Error("Reset token changed concurrently.");
-  error.code = "RESET_TOKEN_CONFLICT";
-  throw error;
-};
 
 const isMutationConflict = (error) =>
   isRevisionConflict(error) ||
@@ -179,13 +124,7 @@ export default async function handler(req, res) {
     }
 
     const policy = resolveSupabaseRuntimePolicy();
-    if (policy.primaryBackend === "sanity" && policy.cutoverEnabled === true) {
-      return res.status(503).json({
-        ok: false,
-        error:
-          "Password reset emails are temporarily unavailable during manual authentication failover.",
-      });
-    }
+
 
     const referral = await client.fetch(
       `*[_type == "referral" && registrationStatus != "pending_email" && creatorEmail == $email][0]`,
@@ -198,7 +137,7 @@ export default async function handler(req, res) {
         .json({ ok: true, message: "If email exists, link sent." });
     }
 
-    if (policy.primaryBackend === "supabase") {
+    {
       const { dispatch } = await enqueueSupabaseReset({
         initialReferral: referral,
         recipientEmail: normalizedEmail,
@@ -257,25 +196,7 @@ export default async function handler(req, res) {
         message: "Reset link sent",
         ...(syncPending ? { syncPending: true } : {}),
       });
-    }
-
-    const sanityToken = await ensureSanityResetToken(referral);
-    const resetToken = sanityToken.resetToken;
-
-    try {
-      await sendReferralEmailDirect({
-        dispatchKind: "password_reset",
-        referralId: referral._id,
-        recipientEmail: normalizedEmail,
-        token: resetToken,
-        name: referral.name,
-      });
-    } catch (error) {
-      logSafeError("Referral reset email failed", error);
-      return res.status(500).json({ ok: false, error: "Failed to send email" });
-    }
-    return res.status(200).json({ ok: true, message: "Reset link sent" });
-  } catch (err) {
+    }} catch (err) {
     if (
       err?.code === "RESET_TOKEN_CONFLICT" ||
       isReferralEmailSourceStateConflict(err)

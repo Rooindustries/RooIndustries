@@ -29,27 +29,15 @@ try {
  let serial=0;
  const seed=async()=>documents.create({_id:`commerce.referral.${++serial}`,_type:'referral',slug:{current:`commerce-${serial}`},registrationStatus:'active',xocPayments:[],vertexPayments:[]});
  const read=id=>documents.getDocument(id);
- await check('partial-native-control-cannot-authorize-stale-lease',async()=>{
-  const {issueCommerceFailoverLease}=await import('../src/server/supabase/commerceFailoverLease.js');
-  const {assertCommerceWriteAllowed}=await import('../src/server/supabase/commerceControl.js');
-  const secret='fixture-commerce-failover-lease-secret';const deploymentId='fixture-commerce-deployment';
-  await fixture.sql`update migration.commerce_control set primary_backend='sanity',generation=2,starts_paused=false`;
-  const env={NODE_ENV:'test',VERCEL_ENV:'development',DATA_PRIMARY_BACKEND:'sanity',COMMERCE_PRIMARY_BACKEND:'sanity',COMMERCE_FAILOVER_GENERATION:'0',COMMERCE_DEPLOYMENT_ID:deploymentId,COMMERCE_FAILOVER_LEASE_SECRET:secret,COMMERCE_FAILOVER_LEASE:issueCommerceFailoverLease({backend:'sanity',generation:0,startsPaused:false,deploymentId,secret})};
-  const partial={async rpc(name,parameters){const result=await fixture.client.rpc(name,parameters);if(result.error||name!=='roo_commerce_control')return result;assert.equal(result.data.generation,2);const {generation,...data}=result.data;return{...result,data};}};
-  try{await assert.rejects(assertCommerceWriteAllowed({env,client:partial}),error=>error.statusCode===503);}
-  finally{await fixture.sql`update migration.commerce_control set primary_backend='supabase',generation=0,starts_paused=false`;}
-  return{actualNativeGeneration:2,refusedSignedGeneration:0,scope:'only successful RPC response field is omitted; signed lease and database control are actual code/SQL'};
+ await check('partial-native-control-cannot-authorize-generation',async()=>{
+  const {getCommerceControl}=await import('../src/server/supabase/commerceControl.js');
+  await assert.rejects(getCommerceControl({client:{rpc:async()=>({data:{primary_backend:'supabase',starts_paused:false},error:null})}}),error=>error.code==='COMMERCE_CONTROL_INVALID');
+  return{missingGenerationRefused:true,rule:'O1/B1 retired vendor failover leases are replaced by native control authority'};
  });
- await check('partial-native-pause-cannot-authorize-unpaused-lease',async()=>{
-  const {issueCommerceFailoverLease}=await import('../src/server/supabase/commerceFailoverLease.js');
-  const {assertCommerceWriteAllowed}=await import('../src/server/supabase/commerceControl.js');
-  const secret='fixture-commerce-failover-lease-secret';const deploymentId='fixture-commerce-deployment';
-  await fixture.sql`update migration.commerce_control set primary_backend='sanity',generation=0,starts_paused=true`;
-  const env={NODE_ENV:'test',VERCEL_ENV:'development',DATA_PRIMARY_BACKEND:'sanity',COMMERCE_PRIMARY_BACKEND:'sanity',COMMERCE_FAILOVER_GENERATION:'0',COMMERCE_DEPLOYMENT_ID:deploymentId,COMMERCE_FAILOVER_LEASE_SECRET:secret,COMMERCE_FAILOVER_LEASE:issueCommerceFailoverLease({backend:'sanity',generation:0,startsPaused:false,deploymentId,secret})};
-  const partial={async rpc(name,parameters){const result=await fixture.client.rpc(name,parameters);if(result.error||name!=='roo_commerce_control')return result;assert.equal(result.data.starts_paused,true);const {starts_paused,...data}=result.data;return{...result,data};}};
-  try{await assert.rejects(assertCommerceWriteAllowed({env,client:partial}),error=>error.code==='COMMERCE_CONTROL_INVALID');}
-  finally{await fixture.sql`update migration.commerce_control set primary_backend='supabase',generation=0,starts_paused=false`;}
-  return{actualNativePause:true,refusedSignedPause:false};
+ await check('partial-native-control-cannot-authorize-pause',async()=>{
+  const {getCommerceControl}=await import('../src/server/supabase/commerceControl.js');
+  await assert.rejects(getCommerceControl({client:{rpc:async()=>({data:{primary_backend:'supabase',generation:0},error:null})}}),error=>error.code==='COMMERCE_CONTROL_INVALID');
+  return{missingPauseRefused:true,rule:'O1/B1'};
  });
  await check('explicit-missing-revision-concurrent-payments-5-plus-1',async()=>{
   const referral=await seed();await fixture.sql`update migration.source_documents set source_revision=null,payload=payload-'_rev' where legacy_sanity_id=${referral._id}`;

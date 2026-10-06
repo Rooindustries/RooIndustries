@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { urlFor } from "../sanityClient";
+import { urlFor } from "../lib/cmsImageUrl";
 import { getPublicContent } from "../lib/publicContentClient";
 import ImageZoomModal from "../components/ImageZoomModal";
 

@@ -10,13 +10,7 @@ import { logSafeError } from "../../safeErrorLog.js";
 import { setReferralSessionCookie } from "./auth.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 
-const client = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-}, { allowLegacyFallback: false });
+const client = createClient({}, { allowLegacyFallback: false });
 
 const isVerificationSourceConflict = (error) => {
   if (String(error?.code || "") === "40001") return true;

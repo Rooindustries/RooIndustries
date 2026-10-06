@@ -71,11 +71,11 @@ const freePort = async () => {
   return port;
 };
 
-export const createSweepPostgresFixture = async ({ commerceRepairMigration = true } = {}) => {
+export const createSweepPostgresFixture = async ({ commerceRepairMigration = true, fullMigrationChain = false, beforeMigrations, pgBin: requestedPgBin, postgrestBin: requestedPostgrestBin, libraryPath } = {}) => {
   assert.equal(process.env.ROO_TEST_POSTGRES_HOST || host, host);
-  const pgBin = process.env.PG_BIN || '/tmp/roo-codebase-pg17-g298z680/runtime/usr/lib/postgresql/17/bin';
-  const postgrestBin = process.env.POSTGREST_BIN || '/tmp/roo-codebase-postgrest-7jy76uf_/postgrest';
-  const env = {...process.env, LC_ALL: 'C', LD_LIBRARY_PATH: process.env.LD_LIBRARY_PATH || '/tmp/roo-codebase-pg17-g298z680/runtime/usr/lib/x86_64-linux-gnu'};
+  const pgBin = requestedPgBin || process.env.PG_BIN || '/tmp/roo-request-pg17/runtime/usr/lib/postgresql/17/bin';
+  const postgrestBin = requestedPostgrestBin || process.env.POSTGREST_BIN || '/tmp/roo-request-postgrest/postgrest';
+  const env = {...process.env, LC_ALL: 'C', LD_LIBRARY_PATH: libraryPath || process.env.LD_LIBRARY_PATH || '/tmp/roo-request-pg17/runtime/usr/lib/x86_64-linux-gnu'};
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'roo-persistence-sweep-'));
   const dataDir = path.join(scratch, 'data');
   const pgPort = await freePort();
@@ -85,9 +85,7 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
     if (result.status !== 0) throw new Error(`${path.basename(binary)} failed: ${result.stderr || result.stdout}`);
     return result.stdout.trim();
   };
-  const postgresVersion = run(path.join(pgBin,'postgres'),['--version']);
-  assert.match(postgresVersion,/PostgreSQL\) 17\./);
-  const postgrestVersion = run(postgrestBin,['--version']);
+  let postgresVersion, postgrestVersion;
   const manifest = [];
   const requestLog = [];
   let sql;
@@ -104,18 +102,31 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
     if (started) {run(path.join(pgBin,'pg_ctl'),['-D',dataDir,'-m','fast','-w','stop']);started=false;}
   };
   try {
-    run(path.join(pgBin,'initdb'),['-D',dataDir,'--auth=trust','--no-locale']);
+    postgresVersion = run(path.join(pgBin,'postgres'),['--version']);
+    assert.match(postgresVersion,/PostgreSQL\) 17\./);
+    postgrestVersion = run(postgrestBin,['--version']);
+    run(path.join(pgBin,'initdb'),['-D',dataDir,'--auth=trust','--no-locale',...(fullMigrationChain ? ['--encoding=UTF8'] : [])]);
     fs.appendFileSync(path.join(dataDir,'pg_hba.conf'),'\nhost all all samehost trust\n');
     run(path.join(pgBin,'pg_ctl'),['-D',dataDir,'-l',path.join(scratch,'postgres.log'),'-o',`-p ${pgPort} -h ${host} -k ${scratch}`,'-w','start']);
     started=true;
     sql=postgres({host,port:pgPort,database:'postgres',max:8,prepare:false,onnotice(notice){fs.appendFileSync(path.join(scratch,'schema-notices.log'),`${notice.message}\n`);}});
+    let migrationConnection;
     const apply = async (name, text = readMigration(name), selection = 'complete migration') => {
-      try {await sql.unsafe(text);} catch (error) {throw new Error(`Schema closure ${name} (${selection}): ${error.message}`,{cause:error});}
+      try {await (migrationConnection || sql).unsafe(text);} catch (error) {throw new Error(`Schema closure ${name} (${selection}): ${error.message}`,{cause:error});}
       const output=path.join(scratch,`applied-${manifest.length}.sql`);
       fs.writeFileSync(output,text);
       manifest.push({file:`supabase/migrations/${name}`,selection,sha256:crypto.createHash('sha256').update(text).digest('hex'),appliedSql:output});
     };
-    await sql.unsafe(bootstrap.replace("select nullif(current_setting('request.jwt.claims',true),'')::jsonb->>'sub'", "select (nullif(current_setting('request.jwt.claims',true),'')::jsonb->>'sub')::uuid"));
+    const selectedBootstrap = fullMigrationChain ? fs.readFileSync(path.join(root, 'scripts/fixtures/sanity-sql/platform-bootstrap.sql'), 'utf8') : bootstrap;
+    const bootstrapSql = beforeMigrations ? selectedBootstrap.replace(/^create table storage\.(buckets|objects).*;$/gm, '') : selectedBootstrap;
+    await sql.unsafe(bootstrapSql.replace("select nullif(current_setting('request.jwt.claims',true),'')::jsonb->>'sub'", "select (nullif(current_setting('request.jwt.claims',true),'')::jsonb->>'sub')::uuid"));
+    if (beforeMigrations) await beforeMigrations({sql,scratch,host,pgPort,restPort,jwtSecret,databaseUrl:`postgres://${os.userInfo().username}@${host}:${pgPort}/postgres`});
+    if (fullMigrationChain) {
+      migrationConnection = await sql.reserve();
+      try {
+        for (const name of fs.readdirSync(migrationDir).filter(name => name.endsWith('.sql')).sort()) await apply(name);
+      } finally { migrationConnection.release(); migrationConnection = null; }
+    } else {
     for(const name of [
       '20260710205423_create_identity_and_licensing_foundation.sql',
       '20260710205604_create_commerce_shadow_foundation.sql',
@@ -165,8 +176,9 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
     await apply('20260910100000_filter_dodo_recovery_candidates.sql');
     await apply('20260910110000_recover_dodo_partial_refunds.sql');
     if (commerceRepairMigration) await apply('20261005000000_terminalize_unknown_booking_email_delivery.sql');
+    }
     await sql.unsafe("update migration.commerce_control set primary_backend='supabase',generation=0,starts_paused=false");
-    await sql.unsafe('grant usage on schema public,accounts,commerce,licensing,cms,migration,ops to service_role; grant execute on all functions in schema public,accounts,migration to service_role; grant all on all tables in schema public,accounts,commerce,licensing,cms,migration,ops to service_role; grant usage,select on all sequences in schema accounts,commerce,migration to service_role;');
+    if (!fullMigrationChain) await sql.unsafe('grant usage on schema public,accounts,commerce,licensing,cms,migration,ops to service_role; grant execute on all functions in schema public,accounts,migration to service_role; grant all on all tables in schema public,accounts,commerce,licensing,cms,migration,ops to service_role; grant usage,select on all sequences in schema accounts,commerce,migration to service_role;');
     const restLog=fs.openSync(path.join(scratch,'postgrest.log'),'a');
     restProcess=spawn(postgrestBin,[],{env:{...env,PGRST_DB_URI:`postgres://${os.userInfo().username}@${host}:${pgPort}/postgres`,PGRST_DB_SCHEMAS:'public',PGRST_DB_ANON_ROLE:'anon',PGRST_JWT_SECRET:jwtSecret,PGRST_SERVER_HOST:host,PGRST_SERVER_PORT:String(restPort)},stdio:['ignore',restLog,restLog]});
     fs.closeSync(restLog);
@@ -209,6 +221,6 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
     const payload=Buffer.from(JSON.stringify({role:'service_role',iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+3600})).toString('base64url');
     const token=`${header}.${payload}.${crypto.createHmac('sha256',jwtSecret).update(`${header}.${payload}`).digest('base64url')}`;
     const client=createClient(origin,token,{auth:{autoRefreshToken:false,persistSession:false,detectSessionInUrl:false}});
-    return {sql,client,origin,token,scratch,manifest,requestLog,postgresVersion,postgrestVersion,stop,apply,setRequestHook(fn){requestHook=fn;},setAuthHandler(fn){authHandler=fn;},setProviderHandler(fn){providerHandler=fn;}};
+    return {sql,client,origin,token,scratch,manifest,requestLog,postgresVersion,postgrestVersion,postgrestUrl:`http://${host}:${restPort}`,pgPort,restPort,postgrestPid:restProcess.pid,stop,apply,setRequestHook(fn){requestHook=fn;},setAuthHandler(fn){authHandler=fn;},setProviderHandler(fn){providerHandler=fn;}};
   } catch(error) {await stop();throw Object.assign(error,{scratch,manifest});}
 };

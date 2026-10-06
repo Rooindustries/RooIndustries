@@ -15,7 +15,7 @@ const loadRouteRenderer = async () => {
     __esModule: true,
     default: SeoFallback,
   }));
-  jest.doMock("../lib/sanityServer.js", () => ({
+  jest.doMock("../lib/contentServer.js", () => ({
     __esModule: true,
     default: {
       fetchHomePageData,

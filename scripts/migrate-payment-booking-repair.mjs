@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { createClient } from "@sanity/client";
+import { createDocumentWriteClient } from "../src/server/data/documentClient.js";
 import operatorEnvironment from "./lib/operator-environment.cjs";
 import { stableSnapshotJson } from "../src/server/archive/snapshotContract.js";
 
@@ -26,44 +26,9 @@ operatorEnvironment.loadOperatorEnvironment(explicitEnvPath);
 const readEnv = (...keys) =>
   keys.map((key) => String(process.env[key] || "").trim()).find(Boolean) || "";
 
-const projectId = readEnv("SANITY_PRIVATE_PROJECT_ID", "SANITY_PROJECT_ID");
-const dataset = readEnv("SANITY_PRIVATE_DATASET", "SANITY_DATASET") || "production";
-const apiVersion =
-  readEnv("SANITY_PRIVATE_API_VERSION", "SANITY_API_VERSION") || "2023-10-01";
-const token = readEnv(
-  "SANITY_PRIVATE_WRITE_TOKEN",
-  "SANITY_WRITE_TOKEN",
-  "SANITY_PRIVATE_READ_TOKEN",
-  "SANITY_READ_TOKEN"
-);
-
-if (!projectId || !token) {
-  throw new Error("Sanity project and token environment variables are required.");
-}
-if (apply && !readEnv("SANITY_PRIVATE_WRITE_TOKEN", "SANITY_WRITE_TOKEN")) {
-  throw new Error("A Sanity write token is required with --apply.");
-}
-if (apply && !explicitEnvPath) {
-  throw new Error("--apply requires an explicit --env file.");
-}
-if (apply && !inspectProviders) {
-  throw new Error("--apply requires --inspect-providers.");
-}
-if (apply && !reconcileUrl) {
-  throw new Error("--apply requires --reconcile-url.");
-}
-if (apply && !confirmedSnapshotPath) {
-  throw new Error("--apply requires --confirmed-snapshot from the production dry run.");
-}
-
-const client = createClient({
-  projectId,
-  dataset,
-  apiVersion,
-  token,
-  useCdn: false,
-  perspective: "published",
-});
+const selectedSupabaseUrl = readEnv("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL");
+if (!selectedSupabaseUrl) throw new Error("Supabase URL is required in the selected environment.");
+const supabaseOrigin = new URL(selectedSupabaseUrl).origin;
 
 const now = new Date();
 const nowIso = now.toISOString();
@@ -136,6 +101,14 @@ const TYPES = [
   "bookingRecoveryCase",
 ];
 
+const client = createDocumentWriteClient({domain: "commerce", documentTypes: TYPES});
+
+const readDocuments = async () => {
+  const documents = await client.fetch(`*[_type in $types]`, { types: TYPES });
+  if (!Array.isArray(documents) || documents.length >= 500) throw new Error("The bounded document scan cannot establish a complete repair inventory; use an audited complete capture.");
+  return documents;
+};
+
 const writeSnapshot = (documents) => {
   if (!snapshotPath) return false;
   const destination = path.resolve(snapshotPath);
@@ -146,8 +119,8 @@ const writeSnapshot = (documents) => {
   fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
   const payload = {
     generatedAt: nowIso,
-    projectId,
-    dataset,
+    backend: "supabase",
+    supabaseOrigin,
     documentCount: documents.length,
     documentDigest: digestDocuments(documents),
     documents,
@@ -166,8 +139,8 @@ const verifyConfirmedSnapshot = (documents) => {
     throw new Error("The confirmed migration snapshot does not exist.");
   }
   const snapshot = JSON.parse(fs.readFileSync(source, "utf8"));
-  if (snapshot.projectId !== projectId || snapshot.dataset !== dataset) {
-    throw new Error("The confirmed snapshot targets a different Sanity dataset.");
+  if (snapshot.backend !== "supabase" || snapshot.supabaseOrigin !== supabaseOrigin) {
+    throw new Error("The confirmed snapshot targets a different Supabase origin.");
   }
   if (!Array.isArray(snapshot.documents) || !snapshot.generatedAt) {
     throw new Error("The confirmed migration snapshot is invalid.");
@@ -848,7 +821,7 @@ const summarizePlan = (plan) => ({
 });
 
 const main = async () => {
-  const documents = await client.fetch(`*[_type in $types]`, { types: TYPES });
+  const documents = await readDocuments();
   const snapshotCreated = writeSnapshot(documents);
   const snapshotConfirmed = verifyConfirmedSnapshot(documents);
   const byType = (type) => documents.filter((document) => document._type === type);
@@ -877,7 +850,7 @@ const main = async () => {
 
   let after = null;
   if (apply) {
-    const refreshed = await client.fetch(`*[_type in $types]`, { types: TYPES });
+    const refreshed = await readDocuments();
     const followUpPlan = buildPlan({
       bookings: refreshed.filter((doc) => doc._type === "booking"),
       payments: refreshed.filter((doc) => doc._type === "paymentRecord"),
@@ -890,7 +863,7 @@ const main = async () => {
       throw new Error("Migration produced conflicting booking slots or payment proofs.");
     }
     await applyPlan(followUpPlan);
-    const finalDocuments = await client.fetch(`*[_type in $types]`, { types: TYPES });
+    const finalDocuments = await readDocuments();
     after = summarizePlan(buildPlan({
       bookings: finalDocuments.filter((doc) => doc._type === "booking"),
       payments: finalDocuments.filter((doc) => doc._type === "paymentRecord"),
@@ -906,7 +879,8 @@ const main = async () => {
       {
         ok: true,
         mode: apply ? "apply" : "dry-run",
-        dataset,
+        backend: "supabase",
+        supabaseOrigin,
         snapshotCreated,
         snapshotConfirmed,
         documentsScanned: documents.length,

@@ -5,26 +5,13 @@ import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../../../lib/passw
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
-import {
-  buildCredentialSourcePreconditions,
-  buildCredentialSourceMutation,
-  completeSupabaseCredentialMirror,
-  markSupabaseCredentialSourceApplied,
-  resolveCredentialSourceRevision,
-  updateSupabaseAccountPassword,
-} from "../../supabase/accounts.js";
+import { buildCredentialSourcePreconditions, buildCredentialSourceMutation, resolveCredentialSourceRevision, updateSupabaseAccountPassword } from "../../supabase/accounts.js";
 import {
   reconcileSupabaseCredentialSource,
   resumeSupabaseCredentialOperation,
 } from "../../supabase/credentialRecovery.js";
 
-const client = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-}, { allowLegacyFallback: false });
+const client = createClient({}, { allowLegacyFallback: false });
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -62,19 +49,11 @@ export default async function handler(req, res) {
       .digest("hex");
     const policy = resolveSupabaseRuntimePolicy();
     const operationKey = `credential:reset:${tokenHash}`;
-    const manualFallback =
-      policy.primaryBackend === "sanity" && policy.cutoverEnabled === true;
-    if (manualFallback) {
-      return res.status(503).json({
-        ok: false,
-        error:
-          "Password resets are temporarily unavailable during manual authentication failover. Existing reset links are unchanged.",
-      });
-    }
-    const useSupabaseCredentialSaga =
-      policy.primaryBackend === "supabase" || policy.shadowWritesEnabled;
 
-    if (useSupabaseCredentialSaga) {
+
+
+
+    {
       try {
         const resumed = await resumeSupabaseCredentialOperation({
           operationKey,
@@ -126,7 +105,7 @@ export default async function handler(req, res) {
     });
     let credentialOperation = null;
 
-    if (useSupabaseCredentialSaga) {
+    {
       try {
         credentialOperation = await updateSupabaseAccountPassword({
           identifier: referral.creatorEmail || referral.slug?.current,
@@ -157,33 +136,10 @@ export default async function handler(req, res) {
     }
 
     try {
-      if (credentialOperation?.updated && sourceBackend === "supabase") {
-        await reconcileSupabaseCredentialSource({
-          operationKey: credentialOperation.operationKey,
-          sourceDocumentId: referral._id,
-        });
-      } else {
-        const committedMutation =
-          credentialOperation?.sourceMutation || sourceMutation;
-        let patch = client.patch(referral._id);
-        if (referral._rev && typeof patch.ifRevisionId === "function") {
-          patch = patch.ifRevisionId(referral._rev);
-        }
-        const committed = await patch
-          .set(committedMutation.set)
-          .unset(committedMutation.unset)
-          .commit({ visibility: "sync" });
-
-        if (credentialOperation?.updated) {
-          await markSupabaseCredentialSourceApplied({
-            operationKey: credentialOperation.operationKey,
-            sourceRevision: committed?._rev || referral._rev,
-          });
-          await completeSupabaseCredentialMirror({
-            operationKey: credentialOperation.operationKey,
-          });
-        }
-      }
+      await reconcileSupabaseCredentialSource({
+        operationKey: credentialOperation.operationKey,
+        sourceDocumentId: referral._id,
+      });
     } catch (error) {
       logSafeError("Referral password source update pending", error);
       if (Number(error?.statusCode || error?.status || 0) === 409) {

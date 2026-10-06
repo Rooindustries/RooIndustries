@@ -5,7 +5,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import Services from "../components/Services";
 
-jest.mock("../sanityClient", () => ({
+jest.mock("../lib/cmsImageUrl", () => ({
   urlFor: jest.fn(() => ({
     width() {
       return this;

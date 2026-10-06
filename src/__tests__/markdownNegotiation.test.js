@@ -4,9 +4,9 @@ import { NextRequest } from "next/server";
 import { middleware } from "../../middleware";
 import { GET as getMarkdown } from "../../app/markdown/route";
 import { GET as getMissing } from "../../app/markdown-not-found/route";
-import sanityServer from "../lib/sanityServer";
+import sanityServer from "../lib/contentServer";
 
-jest.mock("../lib/sanityServer", () => ({ fetchPrivacyPolicy: jest.fn() }));
+jest.mock("../lib/contentServer", () => ({ fetchPrivacyPolicy: jest.fn() }));
 
 const request = (pathname, accept, options = {}) => new NextRequest(
   `https://www.rooindustries.com${pathname}`,

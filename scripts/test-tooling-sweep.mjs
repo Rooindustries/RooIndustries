@@ -48,7 +48,7 @@ const child = (script, env = {}, cwd = root) => spawnSync(process.execPath, ["--
 const fixture = { version: 1, runId: "safety-proof", baseUrl: `http://${testHost}:45991`, sanityApiUrl: `http://${testHost}:45992`, paypalApiUrl: `http://${testHost}:45993`, razorpayApiUrl: `http://${testHost}:45994` };
 const fixturePath = path.join(scratch, "fixture.json");
 fs.writeFileSync(fixturePath, JSON.stringify(fixture));
-const scripts = ["test-booking-flows.mjs", "cdp-free-booking-email-check.mjs", "cdp-paid-checkout-proof.mjs"];
+const scripts = ["test-booking-flows.mjs"];
 
 await run('child-guard-inheritance', async () => {
   let requests = 0;
@@ -293,42 +293,6 @@ await run("operator-local-http", async () => {
   assert.equal(requests.length, 5);
   return { actualCommandProcesses: 2, localRequests: requests, productionRequests: 0, standIn: "provider response and webhook refusal from local HTTP sink; no provider authorization claim" };
 });
-await run("fixture-ownership-and-real-sanity-client", async () => {
-  const safety = await import("./lib/test-target-safety.mjs");
-  let origin, markerRun = "safety-proof";
-  const requests = [];
-  const server = http.createServer((req, res) => {
-    requests.push(req.url);
-    res.setHeader("Content-Type", "application/json");
-    if (req.url === "/.well-known/roo-test-fixture") res.end(JSON.stringify({ version: 1, runId: markerRun, isolated: true, origins: [origin] }));
-    else if (req.url.includes("redirect")) { res.writeHead(302, { Location: "https://outside.fixture.invalid/api/payment/start" }); res.end(); }
-    else res.end(JSON.stringify({ result: [{ _id: "fixture.document", title: "Local fixture" }] }));
-  });
-  await new Promise(resolve => server.listen(0, testHost, resolve));
-  origin = `http://${testHost}:${server.address().port}`;
-  const target = { ...fixture, baseUrl: origin, sanityApiUrl: origin, paypalApiUrl: origin, razorpayApiUrl: origin };
-  const restore = safety.installNetworkGuard([origin]);
-  try {
-    markerRun = "another-current-task";
-    await assert.rejects(safety.verifyFixtureOwnership(target), /test-target/);
-    markerRun = "safety-proof";
-    await safety.verifyFixtureOwnership(target);
-    const { createClient } = await import("@sanity/client");
-    const client = createClient({ projectId: "toolingfixture", dataset: "test-safety-proof", apiVersion: "2023-10-01", apiHost: origin, useProjectHostname: false, useCdn: false, maxRetries: 0 });
-    const documents = await client.fetch('*[_type == "fixture"]');
-    assert.equal(documents[0]._id, "fixture.document");
-    let denied = false;
-    try { await client.fetch('*[_type == "redirect"]'); }
-    catch (error) { denied = true; assert.match(error.message, /test-target/); }
-    assert.equal(denied, true, JSON.stringify(requests));
-    restore();
-    const lateGuardRestore = safety.installNetworkGuard([origin]);
-    try { await assert.rejects(client.fetch('*[_type == "redirect"]'), /test-target/); }
-    finally { lateGuardRestore(); }
-  } finally { restore(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
-  assert.equal(requests.length, 5);
-  return { requests, otherRunRefusedBeforeMutation: true, realSdkRedirectRefused: true, guardedAfterSdkImportAlsoRefused: true, sdkImportedAfterGuard: true, actualSanitySdkExercised: true, liveSanityProof: false, standIn: "local HTTP marker and query response; no transactions/persistence asserted" };
-});
 await run('fix-b-config', async () => {
   const program = `import assert from 'node:assert/strict';import fs from 'node:fs';import {registerHooks} from 'node:module';registerHooks({resolve(specifier,context,nextResolve){if(specifier==='undici')throw Error('UNDICI_UNAVAILABLE');return nextResolve(specifier,context);}});const {default:config,getSupabaseAssetOrigin,validateDistDir}=await import('./next.config.mjs');const origin=getSupabaseAssetOrigin();const headers=await config.headers();const csp=headers[0].headers.find(h=>h.key==='Content-Security-Policy').value;assert.ok(csp.includes(origin));assert.ok(fs.readFileSync('app/layout.jsx','utf8').includes('const SUPABASE_ASSET_ORIGIN = getSupabaseAssetOrigin();'));for(const dist of ['../other','.next;touch nope'])assert.throws(()=>validateDistDir(dist));console.log(JSON.stringify({origin,undiciUnavailable:true,dist:config.distDir,sharedLayoutHelper:true}));`;
   const cases=[];
@@ -348,113 +312,24 @@ await run('fix-b-config', async () => {
   const scripts=JSON.parse(fs.readFileSync('package.json','utf8')).scripts;assert.ok(scripts['audit:lighthouse'].includes('${ROO_TEST_HOST:-127.0.0.1}'));assert.ok(Object.values(scripts).every(script=>!script.includes('100.127.48.111')));
   return {cases,loopbackAllowlist:['127.0.0.1','localhost','[::1]'],lighthouseDefault:lighthouse.ci.collect.url,lighthouseEnvScript:scripts['audit:lighthouse'],missingRehearsalArguments:{exit:missing.status,stderr:missing.stderr},productionRequests:0};
 });
-await run('fix-b-studio', async () => {
-  const source=fs.readFileSync('rooindustries/actions/supabaseAuthorityActions.jsx','utf8');
-  const body=source.slice(source.indexOf('const deleteDraftAtRevision ='),source.indexOf('const resolvePublishedId ='));
-  const cleanup=new Function(body+';return deleteDraftAtRevision;')();
-  const cases=[];
-  let handlerError;
-  const server=http.createServer(async(req,res)=>{
-    try {const chunks=[];for await(const chunk of req)chunks.push(chunk);const request=JSON.parse(Buffer.concat(chunks));cases.push({path:req.url,request});
-      assert.equal(request.mutations[0].patch.ifRevisionID,'r1');assert.deepEqual(request.mutations[0].patch.set,{title:'Fixture'});assert.deepEqual(request.mutations[1],{delete:{id:'drafts.fixture'}});
-      res.setHeader('content-type','application/json');res.end(JSON.stringify({transactionId:'fixture-transaction',results:[{id:'drafts.fixture',operation:'update'},{id:'drafts.fixture',operation:'delete'}]}));
-    } catch(error){handlerError=error;res.writeHead(500);res.end(JSON.stringify({error:{description:error.message}}));}
-  });
-  await new Promise(resolve=>server.listen(0,testHost,resolve));
-  const origin=`http://${testHost}:${server.address().port}`;
-  const {installNetworkGuard}=await import('./lib/test-target-safety.mjs');
-  const restore=installNetworkGuard([origin]);
+await run('native-cms-and-download-token', async () => {
+  const result=spawnSync(process.execPath,['scripts/test-sanity-admin.mjs','--scenario=create-replay-lost-response-revisions'],{cwd:root,encoding:'utf8',timeout:120000,env:{PATH:process.env.PATH,HOME:process.env.HOME,NODE_ENV:'test',ROO_TEST_HOST:testHost}});
+  assert.equal(result.status,0,result.stderr+result.stdout);
+  const proof=JSON.parse(fs.readFileSync('test-results/sanity-admin/create-replay-lost-response-revisions.json','utf8'));
+  assert.equal(proof.passed,true);assert.equal(proof.cleanup.stopped,true);
+  const saved=process.env.DOWNLOAD_TOKEN_SECRET;process.env.DOWNLOAD_TOKEN_SECRET='synthetic-tooling-download-secret';
   try {
-    const {createClient}=await import('@sanity/client');
-    const client=createClient({projectId:'fixture',dataset:'test-fixture',apiVersion:'2026-07-01',apiHost:origin,useProjectHostname:false,useCdn:false,maxRetries:0});
-    assert.equal(await cleanup({client,draftId:'drafts.fixture',revision:'r1',document:{_id:'drafts.fixture',_rev:'r1',_type:'hero',title:'Fixture'}}),true);
-    await assert.rejects(cleanup({client,draftId:'drafts.fixture',revision:'',document:{title:'Fixture'}}),/revision/);
-    await assert.rejects(cleanup({client,draftId:'drafts.fixture',revision:'r1',document:{_id:'drafts.fixture',_type:'hero',title:undefined}}),/content/);
-    assert.equal(handlerError,undefined);assert.equal(cases.length,1);
-    return {cases,localHttpRequests:cases.length,externalRequests:0,standIn:'Actual checked-in cleanup function plus installed Sanity SDK and synthetic local mutation HTTP. Actual Content Lake atomicity/search/locks are unproved.',docs:'https://www.sanity.io/docs/content-lake/transactions'};
-  } finally {restore();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
-});
-await run('fix-b-runtime', async () => {
-  const {registerHooks} = await import('node:module');
-  const {fileURLToPath} = await import('node:url');
-  const beforeSource = process.argv.includes('--fix-b-before') ? JSON.parse(fs.readFileSync('test-results/fix-b-before-source.json','utf8')) : {};
-  const hooks = registerHooks({load(url,context,nextLoad) {const name=Object.keys(beforeSource).find(name=>url===new URL('../'+name,import.meta.url).href);if(name)return {format:'module',source:beforeSource[name].source,shortCircuit:true};return nextLoad(url,context);},resolve(specifier,context,nextResolve) {
-    if (specifier.startsWith('@/')) specifier = new URL('../'+specifier.slice(2),import.meta.url).href;
-    try {return nextResolve(specifier,context);} catch(error) {
-      if (!specifier.startsWith('.') && !specifier.startsWith('file:')) throw error;
-      for (const suffix of ['.js','/index.js']) {const candidate=new URL(specifier+suffix,context.parentURL);if(fs.existsSync(fileURLToPath(candidate)))return nextResolve(candidate.href,context);}
-      throw error;
-    }
-  }});
-  const savedEnv = {...process.env};
-  for (const key of Object.keys(process.env)) if (/^(SANITY|SUPABASE|NEXT_PUBLIC_|REACT_APP_|DOWNLOAD_|BLOB_|RESEND|VERCEL_|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|http_proxy|https_proxy|all_proxy|NODE_USE_ENV_PROXY)/.test(key)) delete process.env[key];
-  Object.assign(process.env,{NODE_ENV:'test',DATA_PRIMARY_BACKEND:'supabase',COMMERCE_PRIMARY_BACKEND:'supabase',CMS_WRITES_PAUSED:'false',SANITY_STUDIO_CMS_WRITES_PAUSED:'false',DOWNLOAD_TOKEN_SECRET:'fixture-download-secret'});
-  const originalFetch = globalThis.fetch;
-  let native; const origins=new Set();
-  globalThis.fetch = (input,init) => {const url=new URL(typeof input==='string'||input instanceof URL?String(input):input.url);assert.equal(url.protocol,'http:');assert.equal(url.hostname,process.env.ROO_TEST_HOST||'127.0.0.1');if(!native&&url.pathname==='/')origins.add(url.origin);assert.ok(!native||url.origin===native.origin||origins.has(url.origin));return originalFetch(input,{...init,redirect:'error',signal:AbortSignal.timeout(15000)});};
-  const cases=[]; const failures=[];
-  const verify=fn=>{try{fn();}catch(error){failures.push(error.message);}};
-  try {
-    const {createSweepPostgresFixture}=await import('./lib/sweep-postgres-fixture.mjs');
-    native=await createSweepPostgresFixture();
-    await native.apply('20260715120000_add_global_cms_publish_authority.sql');
-    await native.sql`notify pgrst,'reload schema'`;
-    for(let attempt=0;attempt<100;attempt++){const ready=await native.client.rpc('roo_cms_publish_command_result',{p_command_id:'cms:'+'0'.repeat(64),p_request_hash:'0'.repeat(64),p_actor:'sanity:fixture-editor'});if(ready.error?.code!=='PGRST202')break;assert.ok(attempt<99);await new Promise(resolve=>setTimeout(resolve,50));}
-    Object.assign(process.env,{SUPABASE_URL:native.origin,SUPABASE_SERVICE_ROLE_KEY:native.token});
-    const {executeGlobalCmsCommand}=await import('../src/server/cms/publishCommand.js');
-    const {createSupabaseDocumentClient}=await import('../src/server/supabase/documentClient.js');
     const {createDownloadToken,verifyDownloadToken}=await import('../src/server/downloads/downloadToken.js');
-    for (const skew of [1,60,61]) {
-      const now=1760000000000;
-      const token=createDownloadToken({slug:'fixture',fileName:'fixture.zip',bookingId:'fixture-booking',email:'fixture@example.invalid',issuedAtMs:now+skew*1000});
-      const response=verifyDownloadToken({token,nowMs:now});cases.push({name:`token-future-${skew}`,response});
-      verify(()=>assert.equal(response.ok,skew<=60));
-      if(skew>60)assert.equal(response.reason,'download_token_invalid_claims');
-      assert.equal(verifyDownloadToken({token,nowMs:now+(skew+600)*1000}).reason,'download_token_expired');
+    const now=Date.now();const cases=[];
+    for(const skew of [60,61]) {
+      const token=createDownloadToken({slug:'utilities',fileName:'fixture.zip',bookingId:'native-fixture',email:'fixture@fixture.invalid',issuedAtMs:now+skew*1000});
+      const response=verifyDownloadToken({token,nowMs:now});assert.equal(response.ok,skew<=60);if(skew>60)assert.equal(response.reason,'download_token_invalid_claims');
+      assert.equal(verifyDownloadToken({token,nowMs:now+(skew+600)*1000}).reason,'download_token_expired');cases.push({skew,accepted:response.ok});
     }
-    for (const type of ['hero','package']) for (const order of ['pending-drains','already-drained','still-pending','drain-throws','drain-timeout','drain-concurrent-writer']) {
-      const documents=createSupabaseDocumentClient({shadowClient:native.client,commerceOnly:type==='package'});
-      const id=`fix-b.${type}.${order}`;
-      const document={_id:id,_type:type,title:'Fixture',headingLine1:'one',price:99};
-      const table=type==='package'?'migration.commerce_mirror_outbox':'migration.document_mutation_mirror_outbox';
-      const finish=()=>native.sql.unsafe(`update ${table} set status='${type==='package'?'mirrored':'applied'}',${type==='package'?'mirrored_at':'applied_at'}=now() where document_ids @> array[$1]::text[]`,[id]);
-      const env={...process.env};
-      const body=(revision,value)=>({projectId:'9g42k3ur',dataset:'production',operation:'publish',type,documentId:id,sourceRevision:revision,document:{...document,headingLine1:value},assetManifest:[]});
-      const identifyCaller=async()=>({actor:'sanity:fixture-editor',token:'fixture-editor-token'});
-      const verifyMutation=async()=>{};
-      const prepareAssets=async()=>[];
-      if(type==='package')await executeGlobalCmsCommand({body:body('seed','initial'),supabaseClient:native.client,env,identifyCaller,verifyMutation,prepareAssets});
-      else await documents.create(document);
-      await finish();
-      const first=await executeGlobalCmsCommand({body:body('r1','one'),supabaseClient:native.client,env,identifyCaller,verifyMutation,prepareAssets});
-      assert.equal(first.syncPending,true);
-      if(order==='already-drained')await finish();
-      let drains=0, releaseDrain, newer;
-      const drainStarted=Date.now();
-      const drain=async options=>{drains++;assert.deepEqual(options.requiredDocumentIds,[id]);assert.equal(options.limit,5);assert.equal(options.maxBatches,2);assert.equal(options.budgetMs,8000);if(order==='drain-throws')throw new Error('Synthetic mirror unavailable');if(order==='drain-timeout'){await new Promise(resolve=>{releaseDrain=resolve;});await finish();}if(order==='pending-drains'||order==='already-drained')await finish();
-        if(order==='drain-concurrent-writer') {
-          await finish();
-          const result=await executeGlobalCmsCommand({body:body('r3','newer'),supabaseClient:native.client,env,identifyCaller,verifyMutation,prepareAssets,sanityClientFactory:()=>({}),drainContentMirror:finish,drainCommerceMirror:finish});
-          assert.equal(result.committed,true);
-          newer=(await native.sql`select to_jsonb(s) row from migration.source_documents s where legacy_sanity_id=${id}`)[0].row;
-        }
-      };
-      Object.assign(env,{SANITY_PRIVATE_PROJECT_ID:'9g42k3ur',SANITY_PRIVATE_DATASET:'production',SANITY_PRIVATE_WRITE_TOKEN:'fixture-only-token'});
-      const before=(await native.sql`select to_jsonb(s) row from migration.source_documents s where legacy_sanity_id=${id}`)[0].row;
-      let response;
-      try {response=await executeGlobalCmsCommand({body:body('r2','two'),supabaseClient:native.client,env,identifyCaller,verifyMutation,prepareAssets,sanityClientFactory:()=>({}),drainContentMirror:drain,drainCommerceMirror:drain});} catch(error) {response={status:error.status,code:error.code};}
-      const after=(await native.sql`select to_jsonb(s) row from migration.source_documents s where legacy_sanity_id=${id}`)[0].row;
-      const elapsedMs=Date.now()-drainStarted;
-      if(releaseDrain){releaseDrain();await new Promise(resolve=>setTimeout(resolve,100));assert.deepEqual((await native.sql`select to_jsonb(s) row from migration.source_documents s where legacy_sanity_id=${id}`)[0].row,before);}
-      cases.push({name:`second-publish-${type}-${order}`,drains,first,response,before,newer,after,elapsedMs,lateDrainSourceUnchanged:order==='drain-timeout'});
-      verify(()=>{if(order==='still-pending'||order==='drain-throws'||order==='drain-timeout') {if(order==='drain-timeout'&&!process.argv.includes('--fix-b-before'))assert.ok(elapsedMs>=7900&&elapsedMs<12000);assert.equal(response.status,409);assert.equal(response.code,'CMS_AUTHORITY_SYNC_PENDING');assert.deepEqual(after,before);assert.equal(drains,1);}
-      else if(order==='drain-concurrent-writer'){assert.equal(response.status,409);assert.equal(response.code,'40001');assert.equal(drains,1);assert.deepEqual(after,newer);assert.equal(after.payload.headingLine1,'newer');}
-      else {assert.equal(response.committed,true);assert.equal(after.payload.headingLine1,'two');assert.equal(drains,order==='pending-drains'?2:1);}});
-    }
-    if(failures.length)throw Object.assign(new Error(failures.join('\n')),{evidence:{cases,scratch:native.scratch}});
-    return {cases,scratch:native.scratch,postgres:native.postgresVersion,postgrest:native.postgrestVersion,productionRequests:0,standIn:'Actual publishCommand and token code with PostgreSQL17/PostgREST16.4; synchronous Sanity drain is a documented local adapter that changes only the requested native outbox event. No live Content Lake/Auth proof.'};
-  } finally {if(native)await native.stop();globalThis.fetch=originalFetch;hooks.deregister();for(const key of Object.keys(process.env))if(!(key in savedEnv))delete process.env[key];Object.assign(process.env,savedEnv);}
+    return {rule:'D6/P4 native command receipt/revision checks replace retired mirror waits',nativeArtifact:'test-results/sanity-admin/create-replay-lost-response-revisions.json',migrations:proof.migrations.length,cases,productionRequests:0};
+  } finally {if(saved===undefined)delete process.env.DOWNLOAD_TOKEN_SECRET;else process.env.DOWNLOAD_TOKEN_SECRET=saved;}
 });
+
 fs.mkdirSync(path.dirname(artifact), { recursive: true });
 fs.writeFileSync(artifact, JSON.stringify({ passed: rows.length > 0 && rows.every(row => row.passed), rows }, null, 2) + "\n");
 console.log(JSON.stringify({ artifact, passed: rows.filter(row => row.passed).length, total: rows.length }));

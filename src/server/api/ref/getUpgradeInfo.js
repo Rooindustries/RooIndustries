@@ -9,6 +9,7 @@ import packagePricing from "../../../lib/packagePricing.js";
 import { issueUpgradeIntentToken } from "./upgradeIntentToken.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { assertCommerceStartAllowed } from "../../supabase/commerceControl.js";
+import { UPGRADE_LINK_SLUG_PATTERN } from "../../../lib/globalCmsContract.js";
 
 const { normalizePackageText } = packageContent;
 const {
@@ -17,21 +18,15 @@ const {
   getPackageTitleAliases,
 } = packagePricing;
 
-const client = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-}, { domain: "commerce" });
+const client = createClient({}, { domain: "commerce" });
 
 const parseMoney = (value) =>
   parseFloat(String(value || "").replace(/[^0-9.]/g, "")) || 0;
 
 const normalizeSlug = (value) => {
   if (!value) return "";
-  if (Array.isArray(value)) return String(value[0] || "").toLowerCase();
-  return String(value || "").toLowerCase();
+  if (Array.isArray(value)) return String(value[0] || "").trim().toLowerCase();
+  return String(value || "").trim().toLowerCase();
 };
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
@@ -232,6 +227,7 @@ export default async function handler(req, res) {
     let targetPackage = null;
 
     const normalizedSlug = normalizeSlug(slug);
+    if (normalizedSlug && !UPGRADE_LINK_SLUG_PATTERN.test(normalizedSlug)) return res.status(400).json({ ok: false, error: "A valid upgrade slug is required." });
 
     if (normalizedSlug) {
       upgradeLink = await client.fetch(

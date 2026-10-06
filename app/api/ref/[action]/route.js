@@ -19,7 +19,6 @@ import updateSplit from "../../../../src/server/api/ref/updateSplit.js";
 import validateCoupon from "../../../../src/server/api/ref/validateCoupon.js";
 import validateReferral from "../../../../src/server/api/ref/validateReferral.js";
 import verifyRegistration from "../../../../src/server/api/ref/verifyRegistration.js";
-import webhookSync from "../../../../src/server/api/ref/webhookSync.js";
 import { runLegacyApiHandler } from "../../../../src/lib/nextApiAdapter";
 import { after } from "next/server";
 import { recordCommerceResponseMetric } from "../../../../src/server/supabase/commerceMetrics";
@@ -49,7 +48,6 @@ const ACTION_HANDLERS = {
   validateCoupon,
   validateReferral,
   verifyRegistration,
-  webhookSync,
 };
 
 const COMMERCE_ACTIONS = new Set([
@@ -64,7 +62,6 @@ const COMMERCE_ACTIONS = new Set([
   "updateSplit",
   "validateCoupon",
   "validateReferral",
-  "webhookSync",
 ]);
 
 async function handle(request, context, methodOverride) {

@@ -240,11 +240,7 @@ export default function ReferralCreatorEditor() {
       if (!selectionStillCurrent) return;
       if (draftVersion.current === submittedDraftVersion) replaceDraft(createDraft(updated));
       pendingOperation.current = "";
-      setNotice(
-        body.syncPending
-          ? "Saved in Supabase. Sanity fallback sync is queued."
-          : "Saved in Supabase and synchronized to the Sanity fallback."
-      );
+      setNotice("Saved in Supabase.");
       try {
         const refreshed = await request(
           `/api/admin/referral-creators?creatorId=${encodeURIComponent(updated.creator_id)}`

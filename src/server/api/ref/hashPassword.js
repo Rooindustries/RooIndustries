@@ -6,15 +6,7 @@ import {
   requireReferralSession,
 } from "./auth.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
-import {
-  buildCredentialSourcePreconditions,
-  buildCredentialSourceMutation,
-  completeSupabaseCredentialMirror,
-  markSupabaseCredentialSourceApplied,
-  resolveCredentialSourceRevision,
-  resolveSupabaseAccountAlias,
-  updateSupabaseAccountPassword,
-} from "../../supabase/accounts.js";
+import { buildCredentialSourcePreconditions, buildCredentialSourceMutation, resolveCredentialSourceRevision, resolveSupabaseAccountAlias, updateSupabaseAccountPassword } from "../../supabase/accounts.js";
 import { createSupabaseAdminClient } from "../../supabase/adminClient.js";
 import { reconcileSupabaseCredentialSource } from "../../supabase/credentialRecovery.js";
 import { clearLegacySupabaseSession } from "../../supabase/serverSession.js";
@@ -22,13 +14,7 @@ import { hashReauthToken, readReauthToken } from "../../supabase/reauth.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 import { logSafeError } from "../../safeErrorLog.js";
 
-const client = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET,
-  apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-}, { allowLegacyFallback: false });
+const client = createClient({}, { allowLegacyFallback: false });
 
 const PASSWORD_PENDING_MESSAGE =
   "Your password change is saving. It will finish in a moment.";
@@ -48,13 +34,7 @@ export default async function handler(req, res) {
     const session = await requireReferralSession(req, res);
     if (!session) return;
     const policy = resolveSupabaseRuntimePolicy();
-    if (policy.primaryBackend === "sanity" && policy.cutoverEnabled) {
-      return res.status(503).json({
-        ok: false,
-        error:
-          "Password changes are temporarily unavailable during manual authentication failover.",
-      });
-    }
+
     const creatorId = session.referralId;
     if (
       !(await requireRateLimit(res, {
@@ -153,28 +133,10 @@ export default async function handler(req, res) {
     }
 
     try {
-      if (sourceBackend === "supabase") {
+      {
         await reconcileSupabaseCredentialSource({
           operationKey: credentialOperation.operationKey,
           sourceDocumentId: referral._id,
-        });
-      } else {
-        const committedMutation = credentialOperation.sourceMutation || sourceMutation;
-        let finalPatch = client.patch(creatorId);
-        if (referral._rev && typeof finalPatch.ifRevisionId === "function") {
-          finalPatch = finalPatch.ifRevisionId(referral._rev);
-        }
-        finalPatch = finalPatch.set(committedMutation.set);
-        if (Array.isArray(committedMutation.unset) && committedMutation.unset.length) {
-          finalPatch = finalPatch.unset(committedMutation.unset);
-        }
-        const committed = await finalPatch.commit({ visibility: "sync" });
-        await markSupabaseCredentialSourceApplied({
-          operationKey: credentialOperation.operationKey,
-          sourceRevision: committed?._rev || referral._rev,
-        });
-        await completeSupabaseCredentialMirror({
-          operationKey: credentialOperation.operationKey,
         });
       }
     } catch (error) {

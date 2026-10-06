@@ -3,7 +3,6 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { createRequire } from 'node:module';
 import { uiRepairsFixture } from '../tests/fixtures/ui-repairs-server.mjs';
 import { uiFinishFixture } from '../tests/fixtures/ui-finish-server.mjs';
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from './lib/test-target-safety.mjs';
@@ -17,8 +16,6 @@ const base = localOrigin(`http://${host}:${port}`);
 const upstream = localOrigin(`http://${host}:${nextPort}`);
 installNetworkGuard([base, upstream]);
 const dist = validateDistDir(process.env.NEXT_DIST_DIR || '.next-e2e-ui-sweep', { isolated: true });
-const requireStudio = createRequire(path.resolve('rooindustries/package.json'));
-const purifyPath = path.join(path.dirname(requireStudio.resolve('dompurify')), 'purify.js');
 const artifact = path.resolve(process.env.UI_ARTIFACT || 'test-results/ui-sweep.json');
 let state = { scenario: '', mode: 'valid', calls: [] };
 let pendingOld;
@@ -60,8 +57,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/__ui/evidence' && req.method === 'POST') {
       const body = await read(req); fs.mkdirSync(path.dirname(artifact), { recursive: true }); fs.writeFileSync(artifact, JSON.stringify(body, null, 2)); return json(res, { saved: artifact });
     }
-    if (url.pathname === '/__ui') { res.setHeader('Content-Type', 'text/html'); return res.end('<!doctype html><title>Roo UI isolated scenarios</title><main><h1>UI scenarios</h1><pre id="results"></pre><iframe id="app" title="Actual application" style="width:100%;height:850px;border:0"></iframe></main><script src="/__ui/purify.js"></script><script type="module" src="/__ui/runner.js"></script>'); }
-    if (url.pathname === '/__ui/purify.js') { res.setHeader('Content-Type', 'text/javascript'); return res.end(fs.readFileSync(purifyPath)); }
+    if (url.pathname === '/__ui') { res.setHeader('Content-Type', 'text/html'); return res.end('<!doctype html><title>Roo UI isolated scenarios</title><main><h1>UI scenarios</h1><pre id="results"></pre><iframe id="app" title="Actual application" style="width:100%;height:850px;border:0"></iframe></main><script type="module" src="/__ui/runner.js"></script>'); }
     if (url.pathname === '/__ui/runner.js') { res.setHeader('Content-Type', 'text/javascript'); return res.end(fs.readFileSync('tests/fixtures/ui-sweep-browser.mjs')); }
     if (url.pathname === '/__ui/productionBrowser.js') { res.setHeader('Content-Type', 'text/javascript'); return res.end(fs.readFileSync('src/lib/productionBrowser.js', 'utf8')); }
     if (url.pathname.startsWith('/auth/v1/')) {

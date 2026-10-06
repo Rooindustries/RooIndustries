@@ -1,5 +1,5 @@
 import markdownContent from "@/src/lib/markdownContent";
-import sanityServer from "@/src/lib/sanityServer";
+import contentServer from "@/src/lib/contentServer";
 
 const { MARKDOWN_PATHS, MARKDOWN_VARY, NOT_FOUND_MARKDOWN, buildPageMarkdown } = markdownContent;
 
@@ -18,7 +18,7 @@ export async function GET(request) {
   let privacy = null;
   if (pathname === "/privacy") {
     try {
-      privacy = await sanityServer.fetchPrivacyPolicy();
+      privacy = await contentServer.fetchPrivacyPolicy();
     } catch {
       return new Response("# Privacy policy temporarily unavailable\n\nPlease try again or contact serviroo@rooindustries.com.\n", { status: 503, headers });
     }

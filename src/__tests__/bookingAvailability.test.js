@@ -8,13 +8,13 @@ jest.mock("../server/booking/slotPolicy.js", () => ({
   filterActiveBookings: jest.fn(),
 }));
 
-jest.mock("../server/api/ref/sanity.js", () => ({
+jest.mock("../server/api/ref/documentStore.js", () => ({
   createRefReadClient: jest.fn(),
   createCommerceReadClient: jest.fn(),
 }));
 
 import { getBookingAvailability } from "../server/booking/availability.js";
-import { createCommerceReadClient } from "../server/api/ref/sanity.js";
+import { createCommerceReadClient } from "../server/api/ref/documentStore.js";
 
 describe("getBookingAvailability", () => {
   beforeEach(() => {
@@ -116,7 +116,7 @@ describe("getBookingAvailability", () => {
     ]);
   });
 
-  test("does not contact Sanity after the generation-one Supabase cutover", async () => {
+  test("B1 reads only Supabase at generation one", async () => {
     process.env.COMMERCE_PRIMARY_BACKEND = "supabase";
     process.env.COMMERCE_CUTOVER_ENABLED = "1";
     process.env.COMMERCE_FAILOVER_GENERATION = "1";
@@ -144,7 +144,7 @@ describe("getBookingAvailability", () => {
     });
   });
 
-  test("does not contact Supabase during a generation-two Sanity failover", async () => {
+  test("O1/B1 legacy configured owner reads only Supabase at generation two", async () => {
     process.env.COMMERCE_PRIMARY_BACKEND = "sanity";
     process.env.COMMERCE_CUTOVER_ENABLED = "1";
     process.env.COMMERCE_FAILOVER_GENERATION = "2";
@@ -156,8 +156,8 @@ describe("getBookingAvailability", () => {
       }),
     };
     createCommerceReadClient.mockImplementation(({ backendOverride }) => {
-      if (backendOverride !== "sanity") {
-        throw new Error("Supabase must not be contacted.");
+      if (backendOverride !== "supabase") {
+        throw new Error("Unexpected backend.");
       }
       return sanityClient;
     });
@@ -167,11 +167,11 @@ describe("getBookingAvailability", () => {
     });
     expect(createCommerceReadClient).toHaveBeenCalledTimes(1);
     expect(createCommerceReadClient).toHaveBeenCalledWith({
-      backendOverride: "sanity",
+      backendOverride: "supabase",
     });
   });
 
-  test("keeps the Sanity occupancy barrier before generation one", async () => {
+  test("B1 reads only Supabase before generation one", async () => {
     process.env.COMMERCE_PRIMARY_BACKEND = "supabase";
     process.env.COMMERCE_CUTOVER_ENABLED = "1";
     process.env.COMMERCE_FAILOVER_GENERATION = "0";
@@ -202,21 +202,13 @@ describe("getBookingAvailability", () => {
       ({ backendOverride }) => clients[backendOverride]
     );
 
-    await expect(getBookingAvailability()).resolves.toMatchObject({
-      bookedSlots: [
-        { startTimeUTC: "2099-01-05T04:30:00.000Z", isHold: false },
-      ],
-    });
-    expect(createCommerceReadClient).toHaveBeenCalledTimes(2);
-    expect(createCommerceReadClient).toHaveBeenCalledWith({
-      backendOverride: "supabase",
-    });
-    expect(createCommerceReadClient).toHaveBeenCalledWith({
-      backendOverride: "sanity",
-    });
+    await expect(getBookingAvailability()).resolves.toMatchObject({ bookedSlots: [] });
+    expect(createCommerceReadClient).toHaveBeenCalledTimes(1);
+    expect(createCommerceReadClient).toHaveBeenCalledWith({ backendOverride: "supabase" });
+    expect(clients.sanity.fetchAvailability).not.toHaveBeenCalled();
   });
 
-  test("uses primary availability when the secondary backend is unavailable", async () => {
+  test("B1 ignores retired secondary availability", async () => {
     process.env.COMMERCE_PRIMARY_BACKEND = "supabase";
     process.env.COMMERCE_CUTOVER_ENABLED = "1";
     process.env.COMMERCE_FAILOVER_GENERATION = "0";
@@ -251,7 +243,7 @@ describe("getBookingAvailability", () => {
       ],
     });
     expect(clients.supabase.fetchAvailability).toHaveBeenCalledTimes(1);
-    expect(clients.sanity.fetchAvailability).toHaveBeenCalledTimes(1);
+    expect(clients.sanity.fetchAvailability).not.toHaveBeenCalled();
   });
 
   test("still fails when the authoritative primary read is unavailable", async () => {

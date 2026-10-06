@@ -1,3 +1,4 @@
+import { createSupabaseAdminFetch } from "./adminClient.js";
 import { createServerClient } from "@supabase/ssr";
 import { resolveSupabaseAuthEnv } from "./authClient.js";
 
@@ -69,6 +70,7 @@ const createCookieClient = ({
   const cookieOptions = getSupabaseSessionCookieOptions(env);
   return createServerClient(url, publishableKey, {
     cookieOptions,
+    global: { fetch: createSupabaseAdminFetch() },
     cookies: {
       getAll: () => parseCookies(cookieHeader),
       setAll: (cookies, headers = {}) => {

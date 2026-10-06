@@ -156,16 +156,6 @@ async function run() {
         /application\/json/i.test(response.headers.get("content-type") || "") &&
         typeof body?.ok === "boolean",
     },
-    {
-      route: "/api/ref/webhookSync",
-      method: "POST",
-      body: {},
-      expect: (response, body, hostDrift) =>
-        response.status !== 404 &&
-        !hostDrift &&
-        /application\/json/i.test(response.headers.get("content-type") || "") &&
-        typeof body?.ok === "boolean",
-    },
   ];
 
   const rows = [];

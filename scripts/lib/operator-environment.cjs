@@ -3,7 +3,7 @@ const path = require("node:path");
 const dotenv = require("dotenv");
 
 const prefixes = [
-  "SANITY_", "NEXT_PUBLIC_SANITY_", "SUPABASE_", "NEXT_PUBLIC_SUPABASE_",
+  "SUPABASE_", "NEXT_PUBLIC_SUPABASE_",
   "PAYPAL_", "NEXT_PUBLIC_PAYPAL_", "RAZORPAY_", "DODO_", "DOWNLOAD_",
   "BLOB_", "TOURNEY_", "COMMERCE_", "DATA_", "REFERRAL_",
   "VERCEL_BLOB_", "NEXT_PUBLIC_VERCEL_BLOB_",
@@ -29,9 +29,6 @@ const loadOperatorEnvironment = (envPath, { env = process.env } = {}) => {
   for (const [key, value] of Object.entries(parsed)) {
     if (prefixes.some((prefix) => key.startsWith(prefix)) || exactKeys.has(key)) env[key] = value;
   }
-  const project = ["SANITY_PRIVATE_PROJECT_ID", "SANITY_PROJECT_ID"].some((key) => String(env[key] || "").trim());
-  const dataset = ["SANITY_PRIVATE_DATASET", "SANITY_DATASET"].some((key) => String(env[key] || "").trim());
-  if (project && !dataset) throw new Error("The selected Sanity environment must name its dataset explicitly.");
   return resolved;
 };
 

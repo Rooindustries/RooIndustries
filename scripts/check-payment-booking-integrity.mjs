@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import process from "node:process";
-import { createClient } from "@sanity/client";
+import { createDocumentWriteClient } from "../src/server/data/documentClient.js";
 import operatorEnvironment from "./lib/operator-environment.cjs";
 
 const explicitEnv = (() => {
@@ -12,25 +12,7 @@ operatorEnvironment.loadOperatorEnvironment(explicitEnv);
 
 const env = (...keys) =>
   keys.map((key) => String(process.env[key] || "").trim()).find(Boolean) || "";
-const projectId = env("SANITY_PRIVATE_PROJECT_ID", "SANITY_PROJECT_ID");
-const dataset = env("SANITY_PRIVATE_DATASET", "SANITY_DATASET") || "production";
-const token = env(
-  "SANITY_PRIVATE_READ_TOKEN",
-  "SANITY_READ_TOKEN",
-  "SANITY_PRIVATE_WRITE_TOKEN",
-  "SANITY_WRITE_TOKEN"
-);
-if (!projectId || !token) throw new Error("Sanity read credentials are required.");
-
-const client = createClient({
-  projectId,
-  dataset,
-  apiVersion:
-    env("SANITY_PRIVATE_API_VERSION", "SANITY_API_VERSION") || "2023-10-01",
-  token,
-  useCdn: false,
-  perspective: "published",
-});
+const client = createDocumentWriteClient({domain: "commerce"});
 
 const normalize = (value) => String(value || "").trim();
 const lower = (value) => normalize(value).toLowerCase();
@@ -47,6 +29,7 @@ const main = async () => {
   const documents = await client.fetch(
     `*[_type in ["booking", "bookingSlot", "slotHold", "paymentRecord", "paymentProofClaim", "coupon", "couponRedemption", "bookingRecoveryCase", "paymentRecoveryCase"]]`
   );
+  if (!Array.isArray(documents) || documents.length >= 500) throw new Error("The bounded document scan cannot establish complete integrity counts.");
   const byType = (type) => documents.filter((document) => document._type === type);
   const bookings = byType("booking");
   const locks = byType("bookingSlot");
@@ -172,7 +155,8 @@ const main = async () => {
     JSON.stringify(
       {
         ok,
-        dataset,
+        backend: "supabase",
+        supabaseOrigin: new URL(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL).origin,
         counts: {
           bookings: bookings.length,
           paymentRecords: payments.length,

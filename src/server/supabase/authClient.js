@@ -1,3 +1,4 @@
+import { createSupabaseAdminFetch } from "./adminClient.js";
 import { createClient } from "@supabase/supabase-js";
 
 const readFirst = (env, keys) =>
@@ -23,7 +24,7 @@ export const resolveSupabaseAuthEnv = (env = process.env) => {
   return { url, publishableKey };
 };
 
-export const createSupabaseAuthClient = ({ env = process.env } = {}) => {
+export const createSupabaseAuthClient = ({ env = process.env, signal } = {}) => {
   const { url, publishableKey } = resolveSupabaseAuthEnv(env);
   return createClient(url, publishableKey, {
     auth: {
@@ -32,6 +33,7 @@ export const createSupabaseAuthClient = ({ env = process.env } = {}) => {
       persistSession: false,
     },
     global: {
+      fetch: createSupabaseAdminFetch({signal}),
       headers: { "X-Client-Info": "roo-industries-auth-server" },
     },
   });

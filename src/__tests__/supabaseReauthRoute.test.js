@@ -172,7 +172,7 @@ describe("Supabase reauthentication route", () => {
     expect(mockResolveExactDomainIdentity).not.toHaveBeenCalled();
   });
 
-  test("gates referral password changes before Supabase Auth during manual failover", async () => {
+  test("D6/O1 reauthenticates legacy deployment labels through native Auth", async () => {
     const previousPrimary = process.env.DATA_PRIMARY_BACKEND;
     const previousCutover = process.env.SUPABASE_CUTOVER_ENABLED;
     process.env.DATA_PRIMARY_BACKEND = "sanity";
@@ -185,13 +185,10 @@ describe("Supabase reauthentication route", () => {
           purpose: "change_password",
         })
       );
-      expect(response.status).toBe(503);
-      await expect(response.json()).resolves.toMatchObject({
-        error: expect.stringContaining("manual authentication failover"),
-      });
-      expect(mockResolveExactDomainIdentity).not.toHaveBeenCalled();
-      expect(mockSignInWithPassword).not.toHaveBeenCalled();
-      expect(mockRpc).not.toHaveBeenCalled();
+      expect(response.status).toBe(200);
+      expect(mockResolveExactDomainIdentity).toHaveBeenCalled();
+      expect(mockSignInWithPassword).toHaveBeenCalled();
+      expect(mockRpc).toHaveBeenCalled();
     } finally {
       if (previousPrimary === undefined) delete process.env.DATA_PRIMARY_BACKEND;
       else process.env.DATA_PRIMARY_BACKEND = previousPrimary;

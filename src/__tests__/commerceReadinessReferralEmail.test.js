@@ -138,7 +138,7 @@ describe("commerce readiness referral email metrics", () => {
         };
       }
       if (name === "roo_cms_publish_readiness") {
-        return { data: { ready: true }, error: null };
+        return { data: { ready: true, receipts: {ready:true}, assets: {ready:true} }, error: null };
       }
       throw new Error(`Unexpected RPC ${name}`);
     });

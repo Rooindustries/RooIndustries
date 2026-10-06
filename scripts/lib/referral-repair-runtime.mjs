@@ -1,4 +1,4 @@
-import { createClient as createSanityClient } from "@sanity/client";
+import { createDocumentWriteClient } from "../../src/server/data/documentClient.js";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import operatorEnvironment from "./operator-environment.cjs";
 import { sha256 } from "./supabase-shadow-migration.mjs";
@@ -43,35 +43,7 @@ export const createRepairSupabaseClient = (clientInfo) => {
   });
 };
 
-export const createRepairSanityClient = ({ requireWrite = false } = {}) => {
-  const projectId = readEnv("SANITY_PRIVATE_PROJECT_ID", "SANITY_PROJECT_ID");
-  const dataset = readEnv("SANITY_PRIVATE_DATASET", "SANITY_DATASET") || "production";
-  const token = requireWrite
-    ? readEnv("SANITY_PRIVATE_WRITE_TOKEN", "SANITY_WRITE_TOKEN")
-    : readEnv(
-        "SANITY_PRIVATE_READ_TOKEN",
-        "SANITY_PRIVATE_WRITE_TOKEN",
-        "SANITY_READ_TOKEN",
-        "SANITY_WRITE_TOKEN"
-      );
-  if (!projectId || !token) {
-    throw new Error(
-      requireWrite
-        ? "Sanity write credentials are required."
-        : "Sanity read credentials are required."
-    );
-  }
-  return createSanityClient({
-    projectId,
-    dataset,
-    apiVersion:
-      readEnv("SANITY_PRIVATE_API_VERSION", "SANITY_API_VERSION") ||
-      "2023-10-01",
-    token,
-    useCdn: false,
-    perspective: "raw",
-  });
-};
+export const createRepairDocumentClient = () => createDocumentWriteClient();
 
 export const requireRpc = async (client, name, parameters = {}) => {
   const { data, error } = await client.rpc(name, parameters);

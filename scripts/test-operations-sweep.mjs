@@ -18,11 +18,7 @@ const scenario = process.argv.find((arg) => arg.startsWith("--scenario="))?.spli
 const stage = process.argv.find((arg) => arg.startsWith("--stage="))?.split("=")[1] || "final";
 const selected = process.argv.find((arg) => arg.startsWith("--only="))?.split("=")[1];
 const names = [
-  "archive-existing-output", "archive-child-failure", "sanity-before-encryption-collision",
-  "sanity-encryption-collision", "asset-cross-origin-redirect", "asset-same-target-redirect",
-  "asset-redirect-loop", "asset-checksum-mismatch", "archive-roundtrip-tampering",
-  "asset-raw-image-originals",
-  "asset-workers-settle-before-failure", "export-reservation-staging-cleanup",
+  "archive-existing-output", "archive-child-failure", "archive-roundtrip-tampering",
   "commerce-export-disk-readback", "database-transport-cross-origin-redirect", "database-transport-body-deadline", "lighthouse-cli-startup",
 ];
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
@@ -42,7 +38,7 @@ const run = (command, args, options = {}) => new Promise((resolve, reject) => {
 if (!scenario) {
   const results = [];
   for (const name of names.filter((name) => !selected || selected.split(",").includes(name))) {
-    const result = await run(process.execPath, [self, `--scenario=${name}`, `--stage=${stage}`, ...(process.argv.includes("--baseline-export") ? ["--baseline-export"] : [])]);
+    const result = await run(process.execPath, [self, `--scenario=${name}`, `--stage=${stage}`]);
     let parsed;
     try { parsed = JSON.parse(result.stdout); }
     catch { parsed = { name, ok: false, error: result.stderr || result.stdout }; }
@@ -87,45 +83,13 @@ if (!scenario) {
     return `http://${testHost}:${server.address().port}`;
   };
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (input, init) => {
-    const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
-    if (url.hostname !== "opsfixture.api.sanity.io" || !sdkOrigin) throw new Error("Outbound fetch forbidden by operations fixture");
-    const destination = `${sdkOrigin}${url.pathname}${url.search}`;
-    return originalFetch(typeof input === "object" && !(input instanceof URL) ? new Request(destination, input) : destination, init);
-  };
-  const originalRequest = http.request;
-  let sdkOrigin = "";
-  const request = (input, options, callback) => {
-    const settings = typeof input === "object" && !(input instanceof URL) ? input : options || {};
-    const cb = typeof options === "function" ? options : callback;
-    const url = typeof input === "string" || input instanceof URL ? new URL(input)
-      : new URL(`${settings.protocol || "https:"}//${settings.hostname || settings.host}${settings.path || "/"}`);
-    if (url.hostname !== "opsfixture.api.sanity.io" || !sdkOrigin) throw new Error("Outbound native HTTP forbidden by operations fixture");
-    const mapped = new URL(sdkOrigin);
-    return originalRequest({ ...settings, protocol: "http:", hostname: mapped.hostname,
-      host: mapped.hostname, port: mapped.port, agent: undefined, path: `${url.pathname}${url.search}` }, cb);
-  };
-  http.request = request;
-  https.request = request;
-  http.get = https.get = (...args) => { const req = request(...args); req.end(); return req; };
+  const refuse = () => { throw new Error("Unexpected network call outside injected local fixture transport"); };
+  globalThis.fetch = refuse;
+  http.request = https.request = http.get = https.get = refuse;
   syncBuiltinESMExports();
   let ok = false, error = "";
   try {
     const archive = await import("./lib/encrypted-export.mjs");
-    let sanityModule = new URL("./export-sanity-encrypted.mjs", import.meta.url).href;
-    if (process.argv.includes("--baseline-export")) {
-      const baselineRoot = path.join(temp, "baseline");
-      await fsPromises.mkdir(path.join(baselineRoot, "scripts/lib"), { recursive: true });
-      for (const name of ["node_modules", "src"]) await fsPromises.symlink(path.join(root, name), path.join(baselineRoot, name));
-      await fsPromises.symlink(path.join(root, "scripts/lib/keychain-secret.mjs"), path.join(baselineRoot, "scripts/lib/keychain-secret.mjs"));
-      for (const name of ["scripts/export-sanity-encrypted.mjs", "scripts/lib/encrypted-export.mjs"]) {
-        const before = childProcess.spawnSync("git", ["show", `HEAD:${name}`], { cwd: root, env: safeEnv(), encoding: "utf8" });
-        assert.equal(before.status, 0);
-        await fsPromises.writeFile(path.join(baselineRoot, name), before.stdout);
-      }
-      sanityModule = new URL(`file://${path.join(baselineRoot, "scripts/export-sanity-encrypted.mjs")}`).href;
-    }
-    const sanity = await import(sanityModule);
     if (scenario === "archive-existing-output") {
       const directory = path.join(temp, "source");
       await fsPromises.mkdir(directory);
@@ -154,149 +118,6 @@ if (!scenario) {
       assert(caught);
       assert.equal(observations.liveChildrenAtReturn.length, 0);
       assert.equal(observations.outputExists, false);
-    } else if (scenario.startsWith("sanity-")) {
-      const failureBeforeEncryption = scenario === "sanity-before-encryption-collision";
-      sdkOrigin = await serve((_req, res) => {
-        observations.sdkRequests = (observations.sdkRequests || 0) + 1;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ result: failureBeforeEncryption ? [{ _id: "invalid-fixture-document" }] : [] }));
-      });
-      const outputRoot = path.join(temp, "output");
-      const previous = Buffer.from("prior synthetic export must survive selection/create/failure");
-      const incumbents = [];
-      const existsSync = fs.existsSync, openSync = fs.openSync;
-      const occupy = (target) => {
-        if (!String(target).startsWith(`${outputRoot}/`) || !String(target).endsWith(".enc") || incumbents.length) return;
-        incumbents.push(target);
-        fs.writeFileSync(target, previous, { flag: "wx", mode: 0o600 });
-      };
-      fs.existsSync = (target) => {
-        const existed = existsSync(target);
-        if (!existed) occupy(target);
-        return existed;
-      };
-      fs.openSync = (target, flags, ...rest) => {
-        if (flags === "wx") occupy(target);
-        return openSync(target, flags, ...rest);
-      };
-      const targetSafety = (await import("../src/server/supabase/migrationTargetSafety.cjs")).default;
-      const envPath = path.join(temp, "private-fixture.env");
-      const fingerprint = targetSafety.computeTourneyCutoverSanityTargetFingerprint({ projectId: "opsfixture", dataset: "fixture" });
-      await fsPromises.writeFile(envPath, `SANITY_PRIVATE_PROJECT_ID=opsfixture\nSANITY_PRIVATE_DATASET=fixture\nSANITY_PRIVATE_READ_TOKEN=fixture-only\nSANITY_EXPORT_EXPECTED_FINGERPRINT=${fingerprint}\n`, { mode: 0o600 });
-      let caught, result;
-      try { result = await sanity.runSanityEncryptedExport({ argv: ["--env", envPath], env: {}, outputRoot }); }
-      catch (cause) { caught = cause; }
-      fs.existsSync = existsSync;
-      fs.openSync = openSync;
-      observations.beforeSha256 = sha256(previous);
-      observations.incumbents = incumbents.map((target) => ({ exists: existsSync(target), sha256: existsSync(target) ? sha256(fs.readFileSync(target)) : null }));
-      observations.exportSuccess = result?.ok === true;
-      observations.errorCode = caught?.code || (caught ? "rejected" : null);
-      observations.errorMessage = caught?.message;
-      assert.equal(incumbents.length, 1);
-      assert(observations.incumbents.every((row) => row.sha256 === observations.beforeSha256));
-      if (failureBeforeEncryption) assert(caught);
-    } else if (scenario === "asset-workers-settle-before-failure") {
-      const bytes = Buffer.from("synthetic delayed asset bytes");
-      let delayedFinished = false;
-      const origin = await serve((req, res) => {
-        res.setHeader("Content-Length", String(bytes.length));
-        if (req.url.endsWith("slow.txt")) setTimeout(() => { delayedFinished = true; res.end(bytes); }, 300);
-        else res.end(bytes);
-      });
-      const assets = ["fast", "slow"].map((name) => ({ id: `file-${name}`, extension: "txt", expectedBytes: bytes.length,
-        expectedSha1: crypto.createHash("sha1").update(name === "fast" ? "wrong exact checksum" : bytes).digest("hex"),
-        mimeType: "text/plain", url: `https://cdn.sanity.io/files/opsfixture/fixture/${name}.txt` }));
-      let caught;
-      try { await sanity.downloadSanityExportAssets({ assets, directory: temp, concurrency: 2,
-        fetchImpl: async (url, init) => {
-          const parsed = new URL(url);
-          assert.equal(parsed.origin, "https://cdn.sanity.io");
-          const response = await originalFetch(`${origin}${parsed.pathname}`, init);
-          Object.defineProperty(response, "url", { value: url });
-          return response;
-        } }); }
-      catch (cause) { caught = cause; }
-      observations.delayedFinishedAtReturn = delayedFinished;
-      observations.rejected = Boolean(caught);
-      assert(caught);
-      assert.equal(delayedFinished, true);
-    } else if (scenario === "export-reservation-staging-cleanup") {
-      const mkdtemp = fsPromises.mkdtemp;
-      let staging;
-      fsPromises.mkdtemp = async (...args) => { staging = await mkdtemp(...args); return staging; };
-      const outputRoot = path.join(temp, "occupied-output-root");
-      const previous = Buffer.from("exact prior synthetic output-root bytes");
-      await fsPromises.writeFile(outputRoot, previous, { mode: 0o600 });
-      const targetSafety = (await import("../src/server/supabase/migrationTargetSafety.cjs")).default;
-      const envPath = path.join(temp, "private-fixture.env");
-      const fingerprint = targetSafety.computeTourneyCutoverSanityTargetFingerprint({ projectId: "opsfixture", dataset: "fixture" });
-      await fsPromises.writeFile(envPath, `SANITY_PRIVATE_PROJECT_ID=opsfixture\nSANITY_PRIVATE_DATASET=fixture\nSANITY_PRIVATE_READ_TOKEN=fixture-only\nSANITY_EXPORT_EXPECTED_FINGERPRINT=${fingerprint}\n`, { mode: 0o600 });
-      let caught;
-      try { await sanity.runSanityEncryptedExport({ argv: ["--env", envPath], env: {}, outputRoot }); }
-      catch (cause) { caught = cause; }
-      fsPromises.mkdtemp = mkdtemp;
-      observations.stagingRemains = Boolean(staging && fs.existsSync(staging));
-      observations.rootSha256 = sha256(await fsPromises.readFile(outputRoot));
-      if (staging) await fsPromises.rm(staging, { recursive: true, force: true });
-      assert(caught);
-      assert.equal(observations.rootSha256, sha256(previous));
-      assert.equal(observations.stagingRemains, false);
-    } else if (scenario.startsWith("asset-")) {
-      const bytes = Buffer.from("synthetic sanity asset bytes");
-      const rawImage = scenario === "asset-raw-image-originals";
-      const sourceUrl = `https://cdn.sanity.io/${rawImage ? "images" : "files"}/opsfixture/fixture/asset.txt`;
-      let secondCount = 0, firstCount = 0;
-      const second = await serve((_req, res) => { secondCount += 1; res.end(bytes); });
-      let first;
-      first = await serve((req, res) => {
-        firstCount += 1;
-        if (rawImage) {
-          const requestUrl = new URL(req.url, first);
-          observations.authenticated = req.headers.authorization === "Bearer fixture-only";
-          observations.rawRequested = requestUrl.searchParams.get("dlRaw") === "true";
-          res.end(observations.authenticated && observations.rawRequested ? bytes : Buffer.from("optimized bytes"));
-        } else if (scenario === "asset-cross-origin-redirect") { res.writeHead(302, { Location: `${second}/stolen` }); res.end(); }
-        else if (scenario === "asset-redirect-loop" || req.url.endsWith("/asset.txt") && scenario === "asset-same-target-redirect") {
-          res.writeHead(302, { Location: `${first}/files/opsfixture/fixture/${scenario === "asset-redirect-loop" ? "asset.txt" : "final.txt"}` }); res.end();
-        } else { res.setHeader("Content-Length", String(bytes.length)); res.end(bytes); }
-      });
-      const fetchImpl = async (url, init) => {
-        const parsed = new URL(url);
-        assert.equal(parsed.origin, "https://cdn.sanity.io");
-        assert(parsed.pathname.startsWith(`/${rawImage ? "images" : "files"}/opsfixture/fixture/`));
-        const response = await originalFetch(`${first}${parsed.pathname}${parsed.search}`, init);
-        const actualUrl = new URL(response.url);
-        if (actualUrl.origin === first) {
-          Object.defineProperty(response, "url", { value: `https://cdn.sanity.io${actualUrl.pathname}${actualUrl.search}` });
-          const location = response.headers.get("location");
-          if (location && new URL(location, first).origin === first) {
-            const headers = new Headers(response.headers);
-            headers.set("location", `https://cdn.sanity.io${new URL(location, first).pathname}`);
-            Object.defineProperty(response, "headers", { value: headers });
-          }
-        }
-        return response;
-      };
-      const expectedSha1 = crypto.createHash("sha1").update(scenario === "asset-checksum-mismatch" ? "changed source" : bytes).digest("hex");
-      let caught, assets;
-      try { assets = await sanity.downloadSanityExportAssets({ assets: [{ id: "file-fixture-txt", extension: "txt", expectedBytes: bytes.length, expectedSha1, mimeType: "text/plain", url: sourceUrl }], directory: temp, fetchImpl, token: rawImage ? "fixture-only" : "" }); }
-      catch (cause) { caught = cause; }
-      observations.firstOriginRequests = firstCount;
-      observations.secondOriginRequests = secondCount;
-      observations.rejected = Boolean(caught);
-      observations.files = await fsPromises.readdir(path.join(temp, "assets"));
-      if (scenario === "asset-same-target-redirect" || rawImage) {
-        assert.ifError(caught);
-        assert.equal(firstCount, rawImage ? 1 : 2);
-        assert.equal(assets[0].archiveSha256, sha256(bytes));
-        assert.deepEqual(await fsPromises.readFile(path.join(temp, assets[0].relativePath)), bytes);
-      } else {
-        assert(caught);
-        assert.equal(secondCount, 0);
-        assert.equal(observations.files.length, 0);
-        if (scenario === "asset-redirect-loop") assert(firstCount <= 6);
-      }
     } else if (scenario === "archive-roundtrip-tampering") {
       const directory = path.join(temp, "source");
       await fsPromises.mkdir(directory);

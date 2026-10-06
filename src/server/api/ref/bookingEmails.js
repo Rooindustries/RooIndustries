@@ -8,13 +8,7 @@ import {
   listEmailDispatchRecoveryBookingIds,
 } from "../../supabase/emailDispatchLedger.js";
 
-const writeClient = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-}, { domain: "commerce" });
+const writeClient = createClient({}, { domain: "commerce" });
 
 const DELIVERY_UNKNOWN_REASONS = new Set([
   "email_delivery_unknown", "historical_delivery_unknown", "delivery_unknown", "historical_unknown",

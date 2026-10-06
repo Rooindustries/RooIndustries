@@ -1,3 +1,5 @@
+import envValue from "./envValue.cjs";
+const { resolveStoreBackend } = envValue;
 import crypto from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import bcrypt from "bcryptjs";
@@ -269,7 +271,7 @@ export const updateSupabaseAccountPassword = async ({
   const account = await resolveSupabaseAccountAlias({ identifier, adminClient });
   if (!account?.user_id) return { updated: false };
   const resolvedHash = importedHash || (await bcrypt.hash(normalizedPassword, 12));
-  const normalizedSourceBackend = String(sourceBackend || "").trim().toLowerCase();
+  const normalizedSourceBackend = resolveStoreBackend(sourceBackend);
   const normalizedSourceDocumentId = String(sourceDocumentId || "").trim();
   const normalizedSourceRevision = String(sourceRevision || "").trim();
   if (
@@ -306,7 +308,7 @@ export const updateSupabaseAccountPassword = async ({
     if (
       previous?.user_id === account.user_id &&
       previous.principal_id === account.principal_id &&
-      previous.source_backend === normalizedSourceBackend &&
+      resolveStoreBackend(previous.source_backend) === normalizedSourceBackend &&
       previous.source_document_id === normalizedSourceDocumentId &&
       previous.source_expected_revision === normalizedSourceRevision &&
       isDeepStrictEqual(previous.source_preconditions, sourcePreconditions) &&
@@ -321,12 +323,12 @@ export const updateSupabaseAccountPassword = async ({
       ["prepared", "auth_applied", "mirrored"].includes(previous.status) &&
       await bcrypt.compare(normalizedPassword, String(previous.password_hash || ""))
     ) {
-      assertSupabaseCredentialOperationRetry(previous);
+      assertSupabaseCredentialOperationRetry(previous, { allowPreparedPlaintextRetry: true });
       preparation = await adminClient.rpc("roo_prepare_credential_operation_v2", {
         p_operation_key: operationKey,
         p_user_id: account.user_id,
         p_password_hash: previous.password_hash,
-        p_source_backend: previous.source_backend,
+        p_source_backend: resolveStoreBackend(previous.source_backend),
         p_source_document_id: previous.source_document_id,
         p_source_expected_revision: previous.source_expected_revision,
         p_source_preconditions: previous.source_preconditions,
@@ -338,25 +340,27 @@ export const updateSupabaseAccountPassword = async ({
     preparation,
     "credential recovery preparation"
   );
-  if (prepared?.idempotent) {
+  if (prepared?.idempotent && prepared.status !== "prepared") {
     assertSupabaseCredentialOperationRetry(
       await getSupabaseCredentialOperation({ operationKey, adminClient })
     );
   }
   const effectiveHash = String(prepared?.password_hash || resolvedHash);
   if (prepared?.status === "prepared") {
-    const result = await adminClient.auth.admin.updateUserById(account.user_id, {
-      password: normalizedPassword,
-    });
-    if (result.error) throw new Error("Supabase password update failed.");
-    requireRpcData(
-      await adminClient.rpc("roo_mark_credential_operation_v2", {
-        p_operation_key: operationKey,
-        p_status: "auth_applied",
-        p_error_code: null,
-      }),
-      "credential recovery checkpoint"
-    );
+    if (!prepared.idempotent || !await checkpointPreparedCredentialOperation({ operationKey, password: normalizedPassword, adminClient })) {
+      const result = await adminClient.auth.admin.updateUserById(account.user_id, {
+        password: normalizedPassword,
+      });
+      if (result.error) throw new Error("Supabase password update failed.");
+      requireRpcData(
+        await adminClient.rpc("roo_mark_credential_operation_v2", {
+          p_operation_key: operationKey,
+          p_status: "auth_applied",
+          p_error_code: null,
+        }),
+        "credential recovery checkpoint"
+      );
+    }
   }
   return {
     updated: true,
@@ -369,6 +373,27 @@ export const updateSupabaseAccountPassword = async ({
     sourcePreconditions: prepared?.source_preconditions || sourcePreconditions,
     sourceMutation: prepared?.source_mutation || sourceMutation,
   };
+};
+
+export const checkpointPreparedCredentialOperation = async ({ operationKey, password, adminClient }) => {
+  const row = await getSupabaseCredentialOperation({ operationKey, adminClient });
+  if (!/^\$2[aby]\$(0[4-9]|1[0-5])\$/.test(String(row.password_hash || "")) || !await bcrypt.compare(String(password), String(row.password_hash || ""))) {
+    const error = new Error("Credential operation conflicts with the submitted password.");
+    error.code = "23505";
+    throw error;
+  }
+  assertSupabaseCredentialOperationRetry(row, { allowPreparedPlaintextRetry: true });
+  const checked = requireRpcData(await adminClient.rpc("roo_resume_prepared_credential_operation", { p_operation_key: operationKey }), "prepared credential verification");
+  if (checked?.resumed || ["auth_applied", "mirrored"].includes(checked?.status)) return true;
+  if (checked?.status !== "prepared") {
+    const error = new Error("Credential source operation requires audited repair.");
+    error.code = "CREDENTIAL_SOURCE_REPAIR_REQUIRED";
+    throw error;
+  }
+  const authHash = String(checked.auth_password_hash || "");
+  if (!/^\$2[aby]\$(0[4-9]|1[0-5])\$/.test(authHash) || !await bcrypt.compare(String(password), authHash)) return false;
+  requireRpcData(await adminClient.rpc("roo_mark_credential_operation_v2", { p_operation_key: operationKey, p_status: "auth_applied", p_error_code: null }), "credential recovery checkpoint");
+  return true;
 };
 
 export const getSupabaseCredentialOperation = async ({
@@ -427,7 +452,7 @@ export const resolveCredentialSourceRevision = ({
   document,
   sourceBackend,
 } = {}) => {
-  if (String(sourceBackend || "").trim().toLowerCase() === "supabase") {
+  if (resolveStoreBackend(sourceBackend) === "supabase") {
     return String(document?._supabaseRevision || document?._rev || "").trim();
   }
   return String(document?._rev || "").trim();
@@ -449,7 +474,7 @@ export const markSupabaseCredentialSourceApplied = async ({
     "CREDENTIAL_SOURCE_REPAIR_REQUIRED"
   );
 
-export const completeSupabaseCredentialMirror = async ({
+export const completeSupabaseCredentialOperation = async ({
   operationKey,
   adminClient = createSupabaseAdminClient(),
 } = {}) => {
@@ -1159,13 +1184,14 @@ export const requireSupabaseBearerUser = async ({
   return { ok: true, user, account, verifiedEmail, accessToken: match[1] };
 };
 
-export const assertSupabaseCredentialOperationRetry = (row) => {
+export const assertSupabaseCredentialOperationRetry = (row, { allowPreparedPlaintextRetry = false } = {}) => {
+  const plaintextRetry = allowPreparedPlaintextRetry && row?.status === "prepared" && row.last_error_code === "CREDENTIAL_AUTH_PLAINTEXT_REQUIRED";
   if (!["prepared", "auth_applied", "mirrored"].includes(row?.status)) {
     const error = new Error("Credential source operation is not ready.");
     error.code = "55000";
     throw error;
   }
-  if (row.source_recovery_blocked) {
+  if (row.source_recovery_blocked && !plaintextRetry) {
     const error = new Error("Credential source operation requires audited repair.");
     error.code = "CREDENTIAL_SOURCE_REPAIR_REQUIRED";
     error.credentialRecoveryRecorded = true;
@@ -1173,7 +1199,7 @@ export const assertSupabaseCredentialOperationRetry = (row) => {
     throw error;
   }
   const nextRetryAt = Date.parse(String(row.next_retry_at || ""));
-  if (Number.isFinite(nextRetryAt) && nextRetryAt > Date.now()) {
+  if (!plaintextRetry && Number.isFinite(nextRetryAt) && nextRetryAt > Date.now()) {
     const error = new Error("Credential recovery is waiting for its retry window.");
     error.code = String(row.last_error_code || "CREDENTIAL_RECOVERY_BACKOFF");
     error.credentialRecoveryRecorded = true;
@@ -1181,7 +1207,7 @@ export const assertSupabaseCredentialOperationRetry = (row) => {
     error.nextRetryAt = row.next_retry_at;
     throw error;
   }
-  if (!["sanity", "supabase"].includes(row.source_backend)) {
+  try { resolveStoreBackend(row.source_backend); } catch {
     const error = new Error("Credential source operation requires audited repair.");
     error.code = "CREDENTIAL_SOURCE_REPAIR_REQUIRED";
     throw error;

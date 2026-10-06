@@ -1,7 +1,4 @@
-import {
-  createCommerceReadClient,
-  createCommerceWriteClient,
-} from "../api/ref/sanity.js";
+import { createCommerceWriteClient } from "../api/ref/documentStore.js";
 import crypto from "crypto";
 import { issueHoldToken, verifyHoldToken } from "./holdToken.js";
 import { selectHoldAuthority } from "./holdAuthority.js";
@@ -19,14 +16,10 @@ import {
 import { getClientAddress, requireRateLimit } from "../api/ref/rateLimit.js";
 import { logSafeError } from "../safeErrorLog.js";
 import { resolveSupabaseRuntimePolicy } from "../supabase/runtime.js";
-import { isSupabaseAdminConfigured } from "../supabase/adminClient.js";
 import { assertCommerceStartAllowed } from "../supabase/commerceControl.js";
 
 const createHoldClient = (backendOverride) =>
   createCommerceWriteClient({ backendOverride });
-const createHoldReadClient = (backendOverride) =>
-  createCommerceReadClient({ backendOverride });
-
 export const HOLD_DURATION_MS = 20 * 60 * 1000;
 
 const isConflict = (error) =>
@@ -52,54 +45,6 @@ const hasBlockingBooking = (bookings) =>
       !String(booking?.originalOrderId || "").trim() &&
       isBookingBlockingStatus(booking?.status)
   );
-
-export const isSameSupabaseOwnedHold = ({ current, mirror }) => {
-  if (!current?._id || mirror?._id !== current._id) return false;
-  if (
-    String(current.backendOwner || "").trim().toLowerCase() !== "supabase" ||
-    String(mirror.backendOwner || "").trim().toLowerCase() !== "supabase"
-  ) {
-    return false;
-  }
-  return (
-    String(mirror.startTimeUTC || "") === String(current.startTimeUTC || "") &&
-    Number(mirror.cutoverGeneration || 0) ===
-      Number(current.cutoverGeneration || 0)
-  );
-};
-
-export const fetchOtherBackendSlotState = async ({
-  backend,
-  holdId,
-  slotLockId,
-  startTimeUTC,
-}) => {
-  const policy = resolveSupabaseRuntimePolicy();
-  if (
-    backend === policy.commercePrimaryBackend &&
-    policy.commerceFailoverGeneration >= 1
-  ) {
-    return { hold: null, slotLock: null, bookings: [] };
-  }
-  const otherBackend = backend === "supabase" ? "sanity" : "supabase";
-  if (otherBackend === "supabase" && !isSupabaseAdminConfigured()) {
-    return { hold: null, slotLock: null, bookings: [] };
-  }
-  const otherClient = createHoldReadClient(otherBackend);
-  const [hold, slotLock, bookings] = await Promise.all([
-    otherClient.fetch(`*[_type == "slotHold" && _id == $id][0]`, {
-      id: holdId,
-    }),
-    otherClient.fetch(`*[_type == "bookingSlot" && _id == $id][0]`, {
-      id: slotLockId,
-    }),
-    otherClient.fetch(
-      `*[_type == "booking" && startTimeUTC == $startTimeUTC]{_id,status,originalOrderId}`,
-      { startTimeUTC }
-    ),
-  ]);
-  return { hold, slotLock, bookings };
-};
 
 const patchAtRevision = async (client, document, values, options = {}) => {
   let patch = client.patch(document._id);
@@ -196,7 +141,7 @@ const releasePreviousHold = async ({
       startTimeUTC: previousHold.startTimeUTC,
       holdNonce: previousHold.holdNonce || "",
       backend:
-        previousHold.backendOwner === "supabase" ? "supabase" : "sanity",
+        previousHold.backendOwner,
       cutoverGeneration: Number(previousHold.cutoverGeneration || 0),
     });
     if (!validToken) return;
@@ -210,7 +155,7 @@ const releasePreviousHold = async ({
         expiresAt: releasedAt,
         holdNonce: crypto.randomUUID(),
       },
-      previousBackend === "supabase" ? { deferMirror: true } : {}
+      {}
     );
   } catch {
     // Moving to a new slot must not fail because a stale previous hold changed.
@@ -271,7 +216,7 @@ export default async function handler(req, res) {
   const cutoverGeneration = commerceControl.generation;
   const client = createHoldClient(backend);
   const holdMutationOptions =
-    backend === "supabase" ? { deferMirror: true } : {};
+    {};
 
   try {
     const settings = await getBookingSettings({ client });
@@ -300,7 +245,7 @@ export default async function handler(req, res) {
         startTimeUTC: previousHold.startTimeUTC,
         holdNonce: previousHold.holdNonce || "",
         backend:
-          previousHold.backendOwner === "supabase" ? "supabase" : "sanity",
+          previousHold.backendOwner,
         cutoverGeneration: Number(previousHold.cutoverGeneration || 0),
       });
       if (
@@ -361,38 +306,7 @@ export default async function handler(req, res) {
 
     const now = Date.now();
     const expiresAt = new Date(now + HOLD_DURATION_MS).toISOString();
-    const otherBackendStatePromise = fetchOtherBackendSlotState({
-      backend,
-      holdId,
-      slotLockId,
-      startTimeUTC: normalizedStartTimeUTC,
-    });
-    const fetchHold = () =>
-      client.fetch(`*[_type == "slotHold" && _id == $id][0]`, { id: holdId });
-    const existingHold = await fetchHold();
-    const otherBackendState = await otherBackendStatePromise;
-    const mirroredSameHold =
-      existingHold?._id &&
-      otherBackendState.hold?._id === existingHold._id &&
-      ((String(otherBackendState.hold.holdNonce || "") ===
-        String(existingHold.holdNonce || "") &&
-        String(otherBackendState.hold.expiresAt || "") ===
-          String(existingHold.expiresAt || "")) ||
-        isSameSupabaseOwnedHold({
-          current: existingHold,
-          mirror: otherBackendState.hold,
-        }));
-    if (
-      (otherBackendState.slotLock &&
-        otherBackendState.slotLock.status !== "released") ||
-      hasBlockingBooking(otherBackendState.bookings) ||
-      (isHoldActive(otherBackendState.hold, now) && !mirroredSameHold)
-    ) {
-      return res.status(409).json({
-        ok: false,
-        message: "This slot is already reserved or booked.",
-      });
-    }
+    const existingHold = await client.fetch(`*[_type == "slotHold" && _id == $id][0]`,{id:holdId});
 
     // The booking can be reactivated after the first availability read. Recheck
     // after reading the deterministic hold barrier; from this point onward, its
@@ -434,7 +348,7 @@ export default async function handler(req, res) {
           startTimeUTC: existingHold.startTimeUTC || normalizedStartTimeUTC,
           holdNonce: existingHold.holdNonce || "",
           backend:
-            existingHold.backendOwner === "supabase" ? "supabase" : "sanity",
+            existingHold.backendOwner,
           cutoverGeneration: Number(existingHold.cutoverGeneration || 0),
         });
       if (!mayRefresh) {

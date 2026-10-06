@@ -58,6 +58,7 @@ export const createSupabaseAdminFetch = ({
       : init.signal || signal,
   });
   return async (input, init = {}) => {
+    init = {...init,signal:AbortSignal.any([AbortSignal.timeout(30000),signal,init.signal].filter(Boolean))};
     const retryInput =
       typeof Request !== "undefined" && input instanceof Request
         ? input.clone()

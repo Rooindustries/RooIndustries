@@ -10,7 +10,7 @@ const mockIsSlotAllowedForPackage = jest.fn(() => ({
   hostTime: "10:00 AM",
 }));
 
-jest.mock("../server/api/ref/sanity.js", () => ({
+jest.mock("../server/api/ref/documentStore.js", () => ({
   createCommerceWriteClient: (...args) =>
     mockCreateCommerceWriteClient(...args),
   createCommerceReadClient: (...args) =>
@@ -46,7 +46,6 @@ jest.mock("../server/booking/slotPolicy.js", () => ({
 
 const holdSlotModule = require("../server/booking/holdSlot.js");
 const holdSlot = holdSlotModule.default || holdSlotModule;
-const { fetchOtherBackendSlotState } = holdSlotModule;
 const releaseHoldModule = require("../server/booking/releaseHold.js");
 const releaseHold = releaseHoldModule.default || releaseHoldModule;
 const { issueHoldToken } = require("../server/booking/holdToken.js");
@@ -141,11 +140,11 @@ const configureGenerationTwoSanity = (client) => {
   process.env.COMMERCE_FAILOVER_GENERATION = "2";
   mockAssertCommerceStartAllowed.mockResolvedValue({ generation: 2 });
   mockCreateCommerceWriteClient.mockImplementation(({ backendOverride }) => {
-    if (backendOverride === "supabase") throw new Error("Supabase unavailable");
+    if (backendOverride !== "supabase") throw new Error("Unexpected store backend");
     return client;
   });
   mockCreateDataClient.mockImplementation((_config, { backendOverride }) => {
-    if (backendOverride === "supabase") throw new Error("Supabase unavailable");
+    if (backendOverride !== "supabase") throw new Error("Unexpected store backend");
     return client;
   });
 };
@@ -174,47 +173,9 @@ describe("booking hold backend isolation", () => {
     clearEnvironment();
   });
 
-  test("does not read Sanity after the generation-one Supabase cutover", async () => {
-    const existingHold = { _id: "hold-1" };
-    const client = createSupabaseClient({ existingHold });
-    configureGenerationOne(client);
+  ;
 
-    await expect(
-      fetchOtherBackendSlotState({
-        backend: "supabase",
-        holdId: "hold-1",
-        slotLockId: "slot-1",
-        startTimeUTC: "2099-01-05T04:30:00.000Z",
-      })
-    ).resolves.toEqual({ hold: null, slotLock: null, bookings: [] });
-    expect(mockCreateCommerceWriteClient).not.toHaveBeenCalled();
-    expect(mockCreateCommerceReadClient).not.toHaveBeenCalled();
-  });
-
-  test("uses the read factory for the generation-zero secondary occupancy check", async () => {
-    const otherClient = {
-      fetch: jest.fn()
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce([]),
-    };
-    process.env.DATA_PRIMARY_BACKEND = "supabase";
-    process.env.COMMERCE_PRIMARY_BACKEND = "supabase";
-    process.env.COMMERCE_FAILOVER_GENERATION = "0";
-    mockCreateCommerceReadClient.mockReturnValue(otherClient);
-
-    await expect(fetchOtherBackendSlotState({
-      backend: "supabase",
-      holdId: "hold-1",
-      slotLockId: "slot-1",
-      startTimeUTC: "2099-01-05T04:30:00.000Z",
-    })).resolves.toEqual({ hold: null, slotLock: null, bookings: [] });
-
-    expect(mockCreateCommerceReadClient).toHaveBeenCalledWith({
-      backendOverride: "sanity",
-    });
-    expect(mockCreateCommerceWriteClient).not.toHaveBeenCalled();
-  });
+  ;
 
   test("creates a generation-one Supabase hold with zero Sanity environment", async () => {
     const client = createSupabaseClient({ existingHold: null });
@@ -344,16 +305,16 @@ describe("booking hold backend isolation", () => {
     }
   );
 
-  test("selects the configured Sanity authority after manual failover", () => {
+  test("B1/O2 selects the Supabase for legacy authority labels", () => {
     expect(
       selectHoldAuthority({
         tokenPayload: { hid: "hold-1", be: "supabase", gen: 1 },
         policy: {
-          commercePrimaryBackend: "sanity",
+          commercePrimaryBackend: "supabase",
           commerceFailoverGeneration: 2,
         },
       })
-    ).toBe("sanity");
+    ).toBe("supabase");
   });
 
   test.each(["", "  "])(
@@ -375,7 +336,7 @@ describe("booking hold backend isolation", () => {
     expect(selectHoldAuthority()).toBe("supabase");
   });
 
-  test("refreshes a Supabase hold only through Sanity after manual failover", async () => {
+  test("B1/O2 refreshes a Supabase hold in Supabase with legacy selectors", async () => {
     const startTimeUTC = "2099-01-05T04:30:00.000Z";
     const holdId = buildSlotHoldId(startTimeUTC);
     const existingHold = {
@@ -417,18 +378,16 @@ describe("booking hold backend isolation", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toMatchObject({
-      backend: "sanity",
+      backend: "supabase",
       cutoverGeneration: 2,
     });
     expect(mockCreateCommerceWriteClient).toHaveBeenCalledWith({
-      backendOverride: "sanity",
-    });
-    expect(mockCreateCommerceWriteClient).not.toHaveBeenCalledWith({
       backendOverride: "supabase",
     });
+
   });
 
-  test("releases a Supabase hold only through Sanity after manual failover", async () => {
+  test("B1/O2 releases a Supabase hold in Supabase with legacy selectors", async () => {
     const startTimeUTC = "2099-01-05T04:30:00.000Z";
     const holdId = buildSlotHoldId(startTimeUTC);
     const existingHold = {
@@ -465,11 +424,8 @@ describe("booking hold backend isolation", () => {
     expect(response.statusCode).toBe(200);
     expect(mockCreateDataClient).toHaveBeenCalledWith(
       expect.any(Object),
-      expect.objectContaining({ backendOverride: "sanity" })
-    );
-    expect(mockCreateDataClient).not.toHaveBeenCalledWith(
-      expect.any(Object),
       expect.objectContaining({ backendOverride: "supabase" })
     );
+
   });
 });

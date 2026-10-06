@@ -4,16 +4,8 @@ import { logSafeError } from "../../safeErrorLog.js";
 import { resolveSupabaseCreatorRegistrationConflicts } from "../../supabase/accounts.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 
-const sanityConfig = {
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  token: process.env.SANITY_READ_TOKEN || process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-  perspective: "published",
-};
-const readClient = createClient(sanityConfig, { domain: "commerce" });
-const registrationReadClient = createClient(sanityConfig, {
+const readClient = createClient({}, { domain: "commerce" });
+const registrationReadClient = createClient({}, {
   domain: "global",
   allowLegacyFallback: false,
 });
@@ -39,13 +31,6 @@ export default async function handler(req, res) {
       return;
     }
 
-    if (!readClient.config().projectId || !readClient.config().dataset) {
-      logSafeError("Referral storage configuration missing", {
-        code: "sanity_config_missing",
-        status: 500,
-      });
-      return res.status(500).json({ ok: false, error: "Server misconfigured" });
-    }
 
     if (!code)
       return res.status(400).json({ ok: false, error: "Missing code" });
@@ -59,7 +44,7 @@ export default async function handler(req, res) {
       }
       const policy = resolveSupabaseRuntimePolicy();
       const supabaseConflicts =
-        policy.shadowWritesEnabled || policy.primaryBackend === "supabase"
+        policy.primaryBackend === "supabase"
           ? resolveSupabaseCreatorRegistrationConflicts({ referralCode: code })
           : Promise.resolve({ referralCodeReserved: false });
       let existingReferral;

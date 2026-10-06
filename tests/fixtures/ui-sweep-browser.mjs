@@ -137,15 +137,6 @@ if (!requested || requested === 'extra' || requested === 'registration') {
     return { controls: buttons.map(node => node.textContent.trim()), bothBoundariesContained: true, standIn: 'actual DOM KeyboardEvent exercises boundary listener; browser default key behavior separately inspected in T3' };
   });
 }
-if (!requested || requested === 'dompurify') await run('dompurify-detached-img-browser', async () => {
-  const root = document.createElement('div'); root.id = 'root'; root.innerHTML = '<section id="wrap"><img onerror="bad()"></section>'; document.body.append(root);
-  const img = root.querySelector('img'); let executions = 0; window.bad = () => executions++;
-  DOMPurify.addHook('afterSanitizeElements', node => { if (node.id === 'wrap') node.remove(); });
-  DOMPurify.sanitize(root, { IN_PLACE: true }); DOMPurify.removeAllHooks();
-  assert(!img.hasAttribute('onerror'), 'Detached handler retained.'); img.dispatchEvent(new Event('error')); await delay(20);
-  assert(executions === 0, 'Detached marker handler executed.'); assert(!img.isConnected, 'Wrapper hook did not detach image.'); root.remove(); delete window.bad;
-  return { version: DOMPurify.version, retainedHandler: false, executions, browser: navigator.userAgent, standIn: 'none; actual maintained DOMPurify in actual browser DOM' };
-});
 if (!requested || requested === 'bios') await run('bios-guide-hardware-specific-recovery', async () => {
   await load('/BIOSGuide/index.html'); const doc = frame.contentDocument;
   assert(!doc.body.textContent.includes('Move the jumper from pins 1-2 to pins 2-3'), 'Universal three-pin reset instruction remains.');

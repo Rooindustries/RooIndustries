@@ -2,7 +2,7 @@ import {
   authenticateSupabaseAccount,
   buildCredentialSourcePreconditions,
   buildTourneyPlayerAuthEmail,
-  completeSupabaseCredentialMirror,
+  completeSupabaseCredentialOperation,
   createSupabaseCreatorAccount,
   createVerifiedSupabaseBrowserSession,
   requireSupabaseBearerUser,
@@ -502,7 +502,7 @@ describe("Supabase account compatibility", () => {
       }),
     };
     await expect(
-      completeSupabaseCredentialMirror({
+      completeSupabaseCredentialOperation({
         operationKey: "credential:test",
         adminClient,
       })
@@ -528,7 +528,7 @@ describe("Supabase account compatibility", () => {
     };
 
     await expect(
-      completeSupabaseCredentialMirror({
+      completeSupabaseCredentialOperation({
         operationKey: "credential:parked",
         adminClient,
       })

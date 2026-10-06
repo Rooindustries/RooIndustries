@@ -1,17 +1,15 @@
-import { createClient as createSanityClient } from "@sanity/client";
+import { stableToolDownloadLinks } from "../cms/toolDownload.js";
 import {
   PUBLIC_CONTENT_QUERIES,
   PUBLIC_CONTENT_RESOURCES,
 } from "../../lib/publicContentQueries";
 import { createSupabaseDocumentClient } from "../supabase/documentClient.js";
 import { clearSupabaseAssetManifestCache, enrichSupabaseContentAssets } from "../supabase/assets.js";
-import { resolveSupabaseRuntimePolicy } from "../supabase/runtime.js";
-import { resolveGlobalSanityReadConfig } from "../cms/globalSanityConfig.js";
 import policyContent from "../../lib/policyContent";
+import { UPGRADE_LINK_SLUG_PATTERN } from "../../lib/globalCmsContract.js";
 
 const { applyPublicPolicyOverrides } = policyContent;
 
-const DEFAULT_API_VERSION = "2026-06-09";
 const SUPABASE_CONTENT_CACHE_TTL_MS = 60 * 1000;
 const SUPABASE_CONTENT_STALE_TTL_MS = 10 * 60 * 1000;
 const SUPABASE_CONTENT_RETRY_TTL_MS = 5 * 1000;
@@ -42,30 +40,15 @@ const DOCUMENT_TYPES_BY_RESOURCE = Object.freeze({
 });
 const ASSET_DEREFERENCE_RESOURCES = new Set(["tools"]);
 
-const createPublicContentClient = ({ backend, resource }) => {
-  if (backend === "supabase") {
-    const assetDocumentTypes = ASSET_DEREFERENCE_RESOURCES.has(resource)
-      ? ["sanity.imageAsset", "sanity.fileAsset"]
-      : [];
-    return createSupabaseDocumentClient({
-      documentTypes: [
-        ...(DOCUMENT_TYPES_BY_RESOURCE[resource] || []),
-        ...assetDocumentTypes,
-      ],
-    });
-  }
-
-  const config = resolveGlobalSanityReadConfig(process.env);
-  if (!config) {
-    throw new Error("Sanity public content access is not configured.");
-  }
-  const { token, ...target } = config;
-  return createSanityClient({
-    ...target,
-    apiVersion: config.apiVersion || DEFAULT_API_VERSION,
-    ...(token ? { token } : {}),
-    useCdn: !token,
-    perspective: "published",
+const createPublicContentClient = ({ resource }) => {
+  const assetDocumentTypes = ASSET_DEREFERENCE_RESOURCES.has(resource)
+    ? ["sanity.imageAsset", "sanity.fileAsset"]
+    : [];
+  return createSupabaseDocumentClient({
+    documentTypes: [
+      ...(DOCUMENT_TYPES_BY_RESOURCE[resource] || []),
+      ...assetDocumentTypes,
+    ],
   });
 };
 
@@ -88,7 +71,7 @@ const parseSlug = (searchParams) => {
   const slug = String(searchParams.get("slug") || "")
     .trim()
     .toLowerCase();
-  if (!/^[a-z0-9-]{1,80}$/.test(slug)) {
+  if (!UPGRADE_LINK_SLUG_PATTERN.test(slug)) {
     const error = new Error("A valid upgrade slug is required.");
     error.status = 400;
     throw error;
@@ -123,7 +106,6 @@ const validateAllowedParameters = (resource, searchParams) => {
 const loadSupabasePublicContent = async ({ resource, query, params }) => {
   if (Object.keys(params).length > 0) {
     const data = await createPublicContentClient({
-      backend: "supabase",
       resource,
     }).fetch(query, params);
     return enrichSupabaseContentAssets({ data });
@@ -135,7 +117,7 @@ const loadSupabasePublicContent = async ({ resource, query, params }) => {
   if (cached?.hasData && cached.expiresAt > now) return cached.data;
   if (cached?.pending) return cached.pending;
 
-  const pending = createPublicContentClient({ backend: "supabase", resource })
+  const pending = createPublicContentClient({ resource })
     .fetch(query, params)
     .then((data) => enrichSupabaseContentAssets({ data }))
     .then((data) => {
@@ -174,7 +156,6 @@ export const clearSupabasePublicContentCache = () => {
 export const fetchPublicContent = async ({
   resource,
   searchParams,
-  backend = "",
 }) => {
   const query = PUBLIC_CONTENT_QUERIES[resource];
   if (!query) {
@@ -190,20 +171,6 @@ export const fetchPublicContent = async ({
       : resource === "upgrade-link"
         ? { slug: parseSlug(searchParams) }
         : {};
-  const selectedBackend =
-    backend === "sanity" || backend === "supabase"
-      ? backend
-      : resolveSupabaseRuntimePolicy().primaryBackend;
-  if (selectedBackend === "supabase") {
-    const data = await loadSupabasePublicContent({ resource, query, params });
-    return applyPublicPolicyOverrides(resource, data);
-  }
-  const data = await createPublicContentClient({
-    backend: selectedBackend,
-    resource,
-  }).fetch(
-    query,
-    params
-  );
-  return applyPublicPolicyOverrides(resource, data);
+  const data = await loadSupabasePublicContent({ resource, query, params });
+  return applyPublicPolicyOverrides(resource, resource === "tools" ? stableToolDownloadLinks(data) : data);
 };

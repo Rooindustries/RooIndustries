@@ -8,7 +8,7 @@ jest.mock("../server/supabase/runtime.js", () => ({
   resolveSupabaseRuntimePolicy: () => ({ primaryBackend: "supabase" }),
 }));
 
-const { fetchFaqQuestions, fetchHomePageData, fetchPrivacyPolicy } = require("../lib/sanityServer.js");
+const { fetchFaqQuestions, fetchHomePageData, fetchPrivacyPolicy } = require("../lib/contentServer.js");
 
 describe("server-rendered public content authority", () => {
   beforeEach(() => {
@@ -89,7 +89,7 @@ describe("server-rendered public content authority", () => {
         throw new Error("backend unavailable");
       },
     }));
-    const isolated = require("../lib/sanityServer.js");
+    const isolated = require("../lib/contentServer.js");
 
     await expect(isolated.fetchHomePageData()).resolves.toMatchObject({
       packagesList: [],

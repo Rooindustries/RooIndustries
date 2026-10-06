@@ -87,18 +87,6 @@ export class CommerceStore {
       : { projectId: this.backend, dataset: "commerce" };
   }
 
-  flushCommerceMirror(options) {
-    return typeof this.client.flushCommerceMirror === "function"
-      ? this.client.flushCommerceMirror(options)
-      : Promise.resolve({ supported: false, attempted: 0, mirrored: 0, failed: 0 });
-  }
-
-  reconcileReverseMirror(options) {
-    return typeof this.client.reconcileReverseMirror === "function"
-      ? this.client.reconcileReverseMirror(options)
-      : Promise.resolve({ supported: false });
-  }
-
   get shadowClient() {
     return this.client.shadowClient || null;
   }

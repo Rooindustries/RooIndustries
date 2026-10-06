@@ -23,9 +23,6 @@ const {
 const {
   buildPostgresConnectionEnv,
 } = require("./lib/postgres-connection-target.cjs");
-const {
-  inspectSanityConfiguration,
-} = require("../src/server/supabase/sanityConfiguration.cjs");
 const vercelEnv = readEnvValue(process.env, "VERCEL_ENV").toLowerCase();
 const hasExplicitVercelEnv = vercelEnv.length > 0;
 const isCi = readEnvValue(process.env, "CI").toLowerCase() === "true";
@@ -323,28 +320,12 @@ if ([...dodoKeys, "DODO_PAYMENTS_PRODUCT_ID", "DODO_PAYMENTS_PRODUCT_IDS"].some(
 const supabaseConsistencyFailures = [];
 const downloadConsistencyFailures = [];
 const cmsWritePause = readExplicitBoolean("CMS_WRITES_PAUSED");
-const studioCmsWritePause = readExplicitBoolean(
-  "SANITY_STUDIO_CMS_WRITES_PAUSED"
-);
 if (!cmsWritePause.configured) {
   supabaseConsistencyFailures.push(
     "CMS_WRITES_PAUSED must be an explicit boolean value."
   );
 }
-if (!studioCmsWritePause.configured) {
-  supabaseConsistencyFailures.push(
-    "SANITY_STUDIO_CMS_WRITES_PAUSED must be an explicit boolean value."
-  );
-}
-if (
-  cmsWritePause.configured &&
-  studioCmsWritePause.configured &&
-  cmsWritePause.value !== studioCmsWritePause.value
-) {
-  supabaseConsistencyFailures.push(
-    "CMS_WRITES_PAUSED and SANITY_STUDIO_CMS_WRITES_PAUSED must match."
-  );
-}
+
 const compatibilityDeadlines = [
   ["PAYMENT_LEGACY_COMPLETION_UNTIL", 60 * 60 * 1000],
   ["PAYMENT_LEGACY_CHECKOUT_UNTIL", 60 * 60 * 1000],
@@ -465,12 +446,6 @@ const commercePrimaryBackend = normalizeBackend(
 
 
 
-const contentCanaryPercent = numericPercent("SUPABASE_CONTENT_CANARY_PERCENT");
-const commerceCanaryPercent = numericPercent("SUPABASE_COMMERCE_CANARY_PERCENT");
-const authCanaryConfigured = Boolean(
-  getFirstValue(["SUPABASE_AUTH_CANARY_ACCOUNTS"])
-);
-const shadowWritesEnabled = isEnabled("SUPABASE_SHADOW_WRITES");
 const cutoverEnabled = isEnabled("SUPABASE_CUTOVER_ENABLED");
 const commerceCutoverEnabled = isEnabled("COMMERCE_CUTOVER_ENABLED");
 const commerceFailoverGeneration =
@@ -517,59 +492,7 @@ if (
     "DOWNLOAD_STORAGE_BACKEND must be blob, local, or supabase."
   );
 }
-const sanityPrimaryRequired =
-  primaryBackend === "sanity" || commercePrimaryBackend === "sanity";
-const sanityConfiguration = inspectSanityConfiguration(process.env);
-if (sanityConfiguration.status === "partial") {
-  supabaseConsistencyFailures.push(
-    `Sanity configuration is incomplete: ${sanityConfiguration.missing.join(
-      ", "
-    )}. Configure a complete writable backup or delete the partial SANITY_* target variables.`
-  );
-}
-const sanityRequiredChecks = [
-  ...(sanityPrimaryRequired
-    ? [
-        {
-          keys: [sanityConfiguration.keys.projectId],
-          label: "SANITY_PROJECT_ID",
-        },
-        {
-          keys: [sanityConfiguration.keys.dataset],
-          label: "SANITY_DATASET",
-        },
-        {
-          keys: [sanityConfiguration.keys.writeToken],
-          label: "SANITY_WRITE_TOKEN",
-        },
-      ]
-    : []),
-  ...(commercePrimaryBackend === "sanity"
-    ? [
-        {
-          keys: ["SANITY_WEBHOOK_SECRET"],
-          label: "SANITY_WEBHOOK_SECRET",
-        },
-        {
-          keys: ["COMMERCE_FAILOVER_LEASE"],
-          label: "COMMERCE_FAILOVER_LEASE",
-        },
-        {
-          keys: ["COMMERCE_FAILOVER_LEASE_SECRET"],
-          label: "COMMERCE_FAILOVER_LEASE_SECRET",
-        },
-        {
-          keys: [
-            "COMMERCE_DEPLOYMENT_ID",
-            "VERCEL_DEPLOYMENT_ID",
-            "VERCEL_GIT_COMMIT_SHA",
-          ],
-          label: "COMMERCE_DEPLOYMENT_ID (or Vercel deployment identity)",
-        },
-      ]
-    : []),
-];
-const missing = [...requiredChecks, ...sanityRequiredChecks]
+const missing = requiredChecks
   .filter((check) => !hasAny(check.keys))
   .map((check) => check.label);
 
@@ -592,7 +515,7 @@ const requireRuntimeKey = (key) => {
 const migrationEndpointEnabled = isEnabled(
   "SUPABASE_MIGRATION_ENDPOINT_ENABLED"
 );
-const anySupabaseRuntimeEnabled = primaryBackend === "supabase" || commercePrimaryBackend === "supabase" || contentCanaryPercent > 0 || commerceCanaryPercent > 0 || authCanaryConfigured || shadowWritesEnabled || socialAuthEnabled || licensingEnabled || supabaseDownloadsEnabled;
+const anySupabaseRuntimeEnabled = true;
 
 
 if (!/^[0-9]+$/.test(commerceFailoverGeneration)) {
@@ -600,54 +523,6 @@ if (!/^[0-9]+$/.test(commerceFailoverGeneration)) {
     "COMMERCE_FAILOVER_GENERATION must be a non-negative integer."
   );
 }
-if (commercePrimaryBackend === "sanity") {
-  const lease = getFirstValue(["COMMERCE_FAILOVER_LEASE"]);
-  const leaseSecret = getFirstValue(["COMMERCE_FAILOVER_LEASE_SECRET"]);
-  const deploymentIdentity = getFirstValue([
-    "COMMERCE_DEPLOYMENT_ID",
-    "VERCEL_DEPLOYMENT_ID",
-    "VERCEL_GIT_COMMIT_SHA",
-  ]);
-  if (leaseSecret && Buffer.byteLength(leaseSecret, "utf8") < 32) {
-    supabaseConsistencyFailures.push(
-      "COMMERCE_FAILOVER_LEASE_SECRET must contain at least 32 bytes."
-    );
-  }
-  if (lease && !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(lease)) {
-    supabaseConsistencyFailures.push(
-      "COMMERCE_FAILOVER_LEASE must use the signed two-part lease format."
-    );
-  }
-  if (deploymentIdentity && (
-    deploymentIdentity.length > 200 || /[\x00-\x1f\x7f]/.test(deploymentIdentity)
-  )) {
-    supabaseConsistencyFailures.push(
-      "The commerce deployment identity is invalid."
-    );
-  }
-}
-
-if (
-  commerceFailoverGeneration === "0" &&
-  !sanityConfiguration.readConfigured
-) {
-  supabaseConsistencyFailures.push(
-    "COMMERCE_FAILOVER_GENERATION=0 requires a complete legacy Sanity read target for the dual-backend occupancy check. Pin the active generation (1 or higher) or configure Sanity."
-  );
-}
-const obsoleteCanaryVariables = [
-  ...(contentCanaryPercent > 0 ? ["SUPABASE_CONTENT_CANARY_PERCENT"] : []),
-  ...(commerceCanaryPercent > 0 ? ["SUPABASE_COMMERCE_CANARY_PERCENT"] : []),
-];
-if (obsoleteCanaryVariables.length > 0) {
-  supabaseConsistencyFailures.push(
-    `Supabase is primary; nonzero canary percentages are obsolete. Delete ${obsoleteCanaryVariables.join(
-      ", "
-    )}.`
-  );
-}
-
-
 // Migrations 20260726160000 and 20260726160500 retired Neon's capture triggers and
 // contracts. Re-enabling the mirror restores parity connections and egress, not
 // replication; reject it even when a legacy database URL remains configured.
@@ -812,13 +687,7 @@ if (providerConsistencyWarnings.length > 0) {
   console.warn(`[env] ${providerConsistencyWarnings.join("\n[env] ")}`);
 }
 
-console.log(
-  `[env] CMS write control: apiConfigured=${cmsWritePause.configured}, apiPaused=${cmsWritePause.value}, studioConfigured=${studioCmsWritePause.configured}, studioPaused=${studioCmsWritePause.value}, matches=${
-    cmsWritePause.configured &&
-    studioCmsWritePause.configured &&
-    cmsWritePause.value === studioCmsWritePause.value
-  }`
-);
+console.log(`[env] CMS write control: configured=${cmsWritePause.configured}, paused=${cmsWritePause.value}`);
 console.log(
   `[env] Payment runtime: runtime=${paymentRuntimePolicy.runtime}, previewPaymentsEnabled=${previewPaymentsEnabled}, livePaymentsEnabled=${livePaymentsEnabled}, razorpayEnabled=${paymentProviders.razorpay.enabled}, paypalEnabled=${paymentProviders.paypal.enabled}`
 );

@@ -1,7 +1,5 @@
 import {
-  deterministicCanaryBucket,
   resolveSupabaseRuntimePolicy,
-  selectCanaryBackend,
 } from "../server/supabase/runtime";
 import {
   buildCommerceCommandId,
@@ -118,9 +116,6 @@ describe("Supabase runtime policy", () => {
     expect(resolveSupabaseRuntimePolicy({ NODE_ENV: "test" })).toMatchObject({
       primaryBackend: "supabase",
       commercePrimaryBackend: "supabase",
-      shadowWritesEnabled: false,
-      contentCanaryPercentage: 0,
-      commerceCanaryPercentage: 0,
     });
   });
 
@@ -133,13 +128,7 @@ describe("Supabase runtime policy", () => {
     ).toThrow(/SUPABASE_CUTOVER_ENABLED/);
   });
 
-  test("canary assignment is deterministic", () => {
-    expect(deterministicCanaryBucket("same-key")).toBe(
-      deterministicCanaryBucket("same-key")
-    );
-    expect(selectCanaryBackend({ key: "x", percentage: 100 })).toBe("supabase");
-    expect(selectCanaryBackend({ key: "x", percentage: 0 })).toBe("sanity");
-  });
+
 });
 
 describe("Supabase shadow document utilities", () => {

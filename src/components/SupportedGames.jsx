@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
-import { urlFor } from "../sanityClient";
+import { urlFor } from "../lib/cmsImageUrl";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 
 function GameCard({ game, index }) {
@@ -105,13 +105,13 @@ export default function SupportedGames({ initialData = null }) {
             transform: translateY(0);
           }
         }
-        
+
         .game-card {
           animation: fadeInUp 0.5s ease-out both;
         }
-        
+
         .expand-section {
-          transition: max-height 0.7s cubic-bezier(0.4, 0, 0.2, 1), 
+          transition: max-height 0.7s cubic-bezier(0.4, 0, 0.2, 1),
                       opacity 0.5s ease-out,
                       margin-top 0.5s ease-out;
         }

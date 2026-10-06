@@ -1,4 +1,4 @@
-import {createCommerceReadClient} from './sanity.js';
+import {createCommerceReadClient} from './documentStore.js';
 import {requireReferralSession} from './auth.js';
 import {logSafeError} from '../../safeErrorLog.js';
 import {

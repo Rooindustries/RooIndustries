@@ -6,7 +6,7 @@ import {
 import { issueHoldToken } from "../server/booking/holdToken";
 import { issueUpgradeIntentToken } from "../server/api/ref/upgradeIntentToken";
 
-describe("payment backend pinning", () => {
+describe("O1/O2 Supabase backend interpretation", () => {
   const originalSecret = process.env.UPGRADE_INTENT_SECRET;
 
   beforeAll(() => {
@@ -62,7 +62,7 @@ describe("payment backend pinning", () => {
           SUPABASE_COMMERCE_CANARY_PERCENT: "0",
         },
       })
-    ).toBe("sanity");
+    ).toBe("supabase");
   });
 
   test("never canaries new payment writes onto a second backend", () => {
@@ -79,7 +79,7 @@ describe("payment backend pinning", () => {
           SANITY_REVERSE_MIRROR_WRITES: "1",
         },
       })
-    ).toBe("sanity");
+    ).toBe("supabase");
   });
 
   test("routes a generation-one start to Supabase despite a legacy Sanity hold", () => {
@@ -152,7 +152,7 @@ describe("payment backend pinning", () => {
         COMMERCE_PRIMARY_BACKEND: "sanity",
         COMMERCE_FAILOVER_GENERATION: "2",
       },
-    })).toBe("sanity");
+    })).toBe("supabase");
   });
 
   test("promotes generation-one payment capabilities to generation-two Sanity", () => {
@@ -163,7 +163,7 @@ describe("payment backend pinning", () => {
         commercePrimaryBackend: "sanity",
         commerceFailoverGeneration: 2,
       },
-    })).toBe("sanity");
+    })).toBe("supabase");
   });
 
   test.each(["", "  ", "not-a-backend"])(
@@ -231,8 +231,8 @@ describe("payment backend pinning", () => {
         COMMERCE_FAILOVER_GENERATION: "2",
       },
       createReadClient,
-    })).resolves.toBe("sanity");
+    })).resolves.toBe("supabase");
     expect(createReadClient).toHaveBeenCalledTimes(1);
-    expect(createReadClient).toHaveBeenCalledWith("sanity");
+    expect(createReadClient).toHaveBeenCalledWith("supabase");
   });
 });

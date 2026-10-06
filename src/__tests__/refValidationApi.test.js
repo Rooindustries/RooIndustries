@@ -217,7 +217,7 @@ describe("referral validation API", () => {
     });
   });
 
-  test("returns an explicit registration availability result in Sanity-only mode", async () => {
+  test("D6/O1 checks native registration availability with legacy deployment labels", async () => {
     mockFetch.mockResolvedValue(null);
     const module = require("../server/api/ref/validateReferral");
     const handler = module.default || module;
@@ -239,7 +239,7 @@ describe("referral validation API", () => {
       reason: "available",
     });
     expect(String(mockFetch.mock.calls[0][0])).toContain("registrationStatus");
-    expect(mockResolveRegistrationConflicts).not.toHaveBeenCalled();
+    expect(mockResolveRegistrationConflicts).toHaveBeenCalledWith({referralCode:"available-code"});
   });
 
   test("fails closed when the shadow reservation lookup is unavailable", async () => {

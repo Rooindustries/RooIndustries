@@ -1,3 +1,5 @@
+import envValue from "../../supabase/envValue.cjs";
+const { resolveStoreBackend } = envValue;
 import crypto from "crypto";
 
 const secret = () =>
@@ -39,7 +41,7 @@ export const issueUpgradeIntentToken = ({
     iat: issuedAt,
     exp: Math.floor(new Date(expiresAt).getTime() / 1000),
     n: crypto.randomUUID(),
-    be: backend === "supabase" ? "supabase" : "sanity",
+    be: resolveStoreBackend(backend),
     gen: Math.max(0, Number(cutoverGeneration) || 0),
   };
   if (!Number.isFinite(payload.exp) || payload.exp <= issuedAt) {
@@ -87,7 +89,7 @@ export const verifyUpgradeIntentToken = ({
     if (payload.bid !== normalizedBookingId) return null;
     if (payload.emh !== digestEmail(normalizedEmail)) return null;
     if (payload.pkg !== normalizedPackage) return null;
-    if (backend && (payload.be === "supabase" ? "supabase" : "sanity") !== backend) {
+    if (backend && resolveStoreBackend(payload.be) !== resolveStoreBackend(backend)) {
       return null;
     }
     if (
@@ -97,6 +99,7 @@ export const verifyUpgradeIntentToken = ({
     ) {
       return null;
     }
+    payload.be = resolveStoreBackend(payload.be);
     return payload;
   } catch {
     return null;
@@ -112,7 +115,7 @@ export const freezeUpgradeIntent = ({ payload, verifiedAt = new Date().toISOStri
     bookingId: String(payload.bid).trim(),
     emailHash: String(payload.emh).trim(),
     targetPackage: String(payload.pkg).trim(),
-    backend: payload.be === "supabase" ? "supabase" : "sanity",
+    backend: resolveStoreBackend(payload.be),
     cutoverGeneration: Math.max(0, Number(payload.gen) || 0),
     tokenIssuedAt: Number(payload.iat || 0)
       ? new Date(Number(payload.iat) * 1000).toISOString()

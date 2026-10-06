@@ -36,7 +36,7 @@ if (process.argv.includes("--local-fixture")) {
 } else {
 const fixture = prepareTestTarget();
 await verifyFixtureOwnership(fixture);
-const { createClient } = await import("@sanity/client");
+const { createSupabaseDocumentClient } = await import("../src/server/supabase/documentClient.js");
 
 const { default: createOrderHandler } =
   await import("../src/server/api/razorpay/createOrder.js");
@@ -47,15 +47,7 @@ const { default: holdSlotHandler } =
 const { default: createBookingHandler } =
   await import("../src/server/api/ref/createBooking.js");
 
-const client = createClient({
-  apiHost: fixture.sanityApiUrl,
-  useProjectHostname: false,
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-});
+const client = createSupabaseDocumentClient({ domain: 'commerce' });
 
 const runId = fixture.runId;
 const userEmail = process.env.TEST_USER_EMAIL || "booking@fixture.invalid";

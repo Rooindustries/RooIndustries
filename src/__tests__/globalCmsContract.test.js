@@ -8,7 +8,7 @@ import {
 } from "../lib/globalCmsContract";
 
 describe("global CMS authority contract", () => {
-  test("assigns every Studio-controlled type to one explicit domain", () => {
+  test("D6 assigns every CMS-controlled type to one explicit domain", () => {
     expect(globalCmsAuthorityDomain("footer")).toBe("content");
     expect(globalCmsAuthorityDomain("siteSettings")).toBe("content");
     for (const type of GLOBAL_COMMERCE_CONTENT_TYPES) {
@@ -28,7 +28,7 @@ describe("global CMS authority contract", () => {
     expect(
       normalizeGlobalCmsDocument({
         document: {
-          _id: "drafts.package.alpha",
+          _id: "package.alpha",
           _type: "package",
           _rev: "source",
           _updatedAt: "ignored",

@@ -1,4 +1,3 @@
-import { createDocumentWriteClient } from "../data/documentClient.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -126,34 +125,4 @@ export const updateCreatorTerms = async ({ client, input, cutoverGeneration }) =
     }),
     "Creator terms update"
   );
-};
-
-export const flushCreatorTermsMirror = async ({ client, legacySanityId }) => {
-  const documentId = String(legacySanityId || "").trim();
-  if (!documentId) return { syncPending: true };
-  try {
-    const writeClient = createDocumentWriteClient({
-      backendOverride: "supabase",
-      domain: "commerce",
-      supabaseClient: client,
-    });
-    if (typeof writeClient.flushCommerceMirror !== "function") {
-      return { syncPending: true };
-    }
-    await writeClient.flushCommerceMirror({
-      failClosed: false,
-      requiredDocumentIds: [documentId],
-      limit: 25,
-      maxBatches: 2,
-    });
-    const status = requireRpc(
-      await client.rpc("roo_commerce_mirror_status_for_ids", {
-        p_document_ids: [documentId],
-      }),
-      "Creator mirror status"
-    );
-    return { syncPending: Number(status?.pending || 0) > 0 };
-  } catch {
-    return { syncPending: true };
-  }
 };

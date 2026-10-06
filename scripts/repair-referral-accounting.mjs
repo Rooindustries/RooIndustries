@@ -1,14 +1,12 @@
 #!/usr/bin/env node
 
 import process from "node:process";
-import { drainCommerceMirrorOutbox } from "../src/server/supabase/commerceMirrorOutbox.js";
 import { SupabaseDocumentClient } from "../src/server/supabase/documentClient.js";
 import { stableJson } from "./lib/supabase-shadow-migration.mjs";
 import {
   argument,
   assertPausedCommerceControl,
   buildConfirmationDigest,
-  createRepairSanityClient,
   createRepairSupabaseClient,
   isValidSanityDocumentId,
   loadRepairEnvironment,
@@ -228,7 +226,6 @@ if (confirmedDigest !== digest) {
 }
 if (applicable.length < 1) process.exit(0);
 
-const sanity = createRepairSanityClient({ requireWrite: true });
 let transaction = documents.transaction();
 for (const repair of applicable) {
   const patch = Object.fromEntries(
@@ -242,14 +239,6 @@ await transaction.commit({
   commandId: `referral-accounting-repair:${digest.slice(0, 48)}`,
 });
 
-await drainCommerceMirrorOutbox({
-  supabaseClient: supabase,
-  sanityClient: sanity,
-  failClosed: true,
-  requiredDocumentIds: applicable.map((repair) => repair.referralId),
-  limit: 100,
-  maxBatches: 10,
-});
 
 for (const repair of applicable) {
   const current = await documents.getDocument(repair.referralId);

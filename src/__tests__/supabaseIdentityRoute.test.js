@@ -72,11 +72,6 @@ jest.mock("../server/supabase/orphanIdentityReclaim", () => ({
   readReferralOrphanReclaim: () => null,
 }));
 
-jest.mock("../server/tourney/discordDesiredState", () => ({
-  queueTourneyDiscordIdentityUnlinkProjection: (...args) =>
-    mockQueueIdentityUnlink(...args),
-}), { virtual: true });
-
 const route = require("../../app/api/auth/identities/route.js");
 
 const user = {

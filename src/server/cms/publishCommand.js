@@ -1,417 +1,116 @@
 import crypto from "node:crypto";
-import { createClient as createSanityClient } from "@sanity/client";
-import {
-  GLOBAL_SANITY_DATASET,
-  GLOBAL_SANITY_PROJECT_ID,
-  collectGlobalCmsAssetLinks,
-  globalCmsAuthorityDomain,
-  isGlobalCmsEditableType,
-  normalizeGlobalCmsAssetManifest,
-  normalizeGlobalCmsDocument,
-  publishedDocumentId,
-  stableCmsJson,
-} from "../../lib/globalCmsContract.js";
+import { validateContentDocument, createContentDefaults } from "../../lib/cms/contentSchema.js";
+import { stableCmsJson } from "../../lib/globalCmsContract.js";
 import { clearSupabasePublicContentCache } from "../content/publicContent.js";
-import { logSafeError } from "../safeErrorLog.js";
-import { drainDocumentMutationOutbox } from "../supabase/documentMutationOutbox.js";
-import { drainCommerceMirrorOutbox } from "../supabase/commerceMirrorOutbox.js";
-import { fetchShadowDocuments } from "../supabase/shadowStore.js";
-import { prepareGlobalCmsAssets } from "./assets.js";
-import {
-  identifyGlobalCmsUser,
-  verifyGlobalCmsMutation,
-} from "./sanityAuthorization.js";
-import { resolveGlobalSanityWriteConfig } from "./globalSanityConfig.js";
+import { contentType, documentId, loadDocument } from "./documents.js";
+import { cmsError, rpcData, validationError } from "./errors.js";
 import { assertGlobalCmsWritesAllowed } from "./writeControl.js";
 
-const OPERATIONS = new Set(["delete", "publish", "unpublish"]);
-const COUPON_OPERATIONAL_FIELDS = [
-  "timesUsed", "activeReservations", "redemptionCount",
-  "autoDeactivatedByRedemptionId", "autoDeactivatedAt",
-];
-
-const failure = (message, status, code) => {
-  const error = new Error(message);
-  error.status = status;
-  error.statusCode = status;
-  error.code = code;
-  return error;
+const counters = new Set(["timesUsed", "activeReservations", "redemptionCount", "autoDeactivatedByRedemptionId", "autoDeactivatedAt"]);
+const system = new Set(["_id", "_type", "_rev", "_createdAt", "_updatedAt", "_createdBy", "_originalId", "_system"]);
+const hash = value => crypto.createHash("sha256").update(stableCmsJson(value)).digest("hex");
+const uuid = value => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+export const createIntentDocumentId = intent => {
+  const bytes = crypto.createHash("sha256").update(`cms-create:${intent.toLowerCase()}`).digest().subarray(0, 16);
+  bytes[6] = (bytes[6] & 15) | 80;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 };
-
-const requireRpcData = ({ data, error }, operation) => {
-  if (!error) return data;
-  const statusByCode = {
-    22023: 400,
-    23505: 409,
-    40001: 409,
-    P0002: 404,
-  };
-  throw failure(
-    `Supabase ${operation} failed.`,
-    statusByCode[error.code] || 503,
-    error.code || "CMS_DATABASE_FAILED",
-  );
-};
-
-const requireMirrorStatus = (response, operation) => {
-  const data = requireRpcData(response, operation);
-  if (!data || typeof data !== "object" || Array.isArray(data) ||
-      !Number.isSafeInteger(data.pending) || data.pending < 0 ||
-      !Number.isSafeInteger(data.dead_letters) || data.dead_letters < 0 ||
-      data.dead_letters > data.pending) {
-    throw failure("The CMS mirror status is unavailable.", 503, "CMS_MIRROR_STATUS_INVALID");
-  }
-  return data;
-};
-
-const readPrivateSanityConfig = (env) => {
-  const target = resolveGlobalSanityWriteConfig(env);
-  if (!target) return null;
-  return {
-    projectId: target.projectId,
-    dataset: target.dataset,
-    token: target.token,
-    apiVersion: target.apiVersion || "2026-07-01",
-    useCdn: false,
-    perspective: "raw",
-  };
-};
-
-const asClientValidation = (callback, code) => {
-  try {
-    return callback();
-  } catch (error) {
-    throw failure(
-      error instanceof Error ? error.message : "The CMS command is invalid.",
-      400,
-      code,
-    );
+const plain = value => value !== null && typeof value === "object" && !Array.isArray(value);
+const refuseEnrichment = (value, path = "$", depth = 0) => {
+  if (depth > 20) throw validationError(path, "Content exceeds the structural limit.");
+  if (Array.isArray(value)) { if (value.length > 1000) throw validationError(path, "At most 1000 items are supported."); value.forEach((item, i) => refuseEnrichment(item, `${path}[${i}]`, depth + 1)); }
+  else if (plain(value)) for (const [key, item] of Object.entries(value)) {
+    if (key.startsWith("_supabase")) throw validationError(`${path}.${key}`, "Runtime asset enrichment cannot be published.");
+    if (["__proto__", "constructor", "prototype"].includes(key)) throw validationError(`${path}.${key}`, "Reserved field.");
+    refuseEnrichment(item, `${path}.${key}`, depth + 1);
   }
 };
-
-const parseRequest = (body) => {
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    throw failure("A CMS command is required.", 400, "CMS_COMMAND_INVALID");
-  }
-  if (
-    String(body.projectId || "") !== GLOBAL_SANITY_PROJECT_ID ||
-    String(body.dataset || "") !== GLOBAL_SANITY_DATASET
-  ) {
-    throw failure(
-      "The CMS command target is invalid.",
-      400,
-      "CMS_TARGET_INVALID",
-    );
-  }
-  const operation = String(body.operation || "")
-    .trim()
-    .toLowerCase();
-  const type = String(body.type || body.document?._type || "").trim();
-  if (!OPERATIONS.has(operation) || !isGlobalCmsEditableType(type)) {
-    throw failure(
-      "The CMS command is not supported.",
-      400,
-      "CMS_COMMAND_UNSUPPORTED",
-    );
-  }
-  const documentId = asClientValidation(
-    () => publishedDocumentId(body.documentId || body.document?._id),
-    "CMS_DOCUMENT_ID_INVALID",
-  );
-  const sourceRevision = String(body.sourceRevision || "").trim();
-  if (sourceRevision.length > 128) {
-    throw failure(
-      "The CMS source revision is invalid.",
-      400,
-      "CMS_REVISION_INVALID",
-    );
-  }
-  if (body.assetManifest !== undefined && !Array.isArray(body.assetManifest)) {
-    throw failure(
-      "The CMS asset manifest is invalid.",
-      400,
-      "CMS_ASSET_MANIFEST_INVALID",
-    );
-  }
-  if (operation !== "publish") {
-    if (Array.isArray(body.assetManifest) && body.assetManifest.length > 0) {
-      throw failure(
-        "Delete commands cannot include assets.",
-        400,
-        "CMS_ASSET_UNEXPECTED",
-      );
+const mergeStoredExtras = (value, current, known) => {
+  if (!plain(value)) return value;
+  const output = { ...value };
+  for (const [key, item] of Object.entries(current || {})) if (!known.has(key) && !key.startsWith("_supabase") && output[key] === undefined) output[key] = item;
+  return output;
+};
+const preserveBlock = (value, current) => {
+  const block = mergeStoredExtras(value, current, new Set(["style", "listItem", "level", "children", "markDefs"]));
+  for (const [name, known] of [["children", ["text", "marks"]], ["markDefs", ["href"]]]) if (Array.isArray(block[name])) block[name] = block[name].map(item => mergeStoredExtras(item, current?.[name]?.find(old => old?._key === item?._key), new Set(known)));
+  return block;
+};
+const preservedDocument = (input, current, fields, seed, path = "$", root = true) => {
+  if (!plain(input)) return input;
+  const output = { ...input };
+  const known = new Set(fields.map(field => field.name));
+  for (const [key, value] of Object.entries(current || {})) if (!known.has(key) && !(root && system.has(key)) && !key.startsWith("_supabase") && output[key] === undefined) output[key] = value;
+  for (const field of fields) {
+    if (field.readOnly) { delete output[field.name]; continue; }
+    const value = output[field.name];
+    const prior = current?.[field.name];
+    if (field.type === "object" && plain(value)) output[field.name] = preservedDocument(value, prior, field.fields || [], seed, `${path}.${field.name}`, false);
+    if (["image", "file", "reference", "slug"].includes(field.type) && plain(value)) {
+      const known = new Set(field.type === "reference" ? ["_ref", "_weak"] : field.type === "slug" ? ["current"] : ["asset", "crop", "hotspot"]);
+      output[field.name] = mergeStoredExtras(value, prior, known);
+      if (value.asset) output[field.name].asset = mergeStoredExtras(value.asset, prior?.asset, new Set(["_ref", "_weak"]));
+      if (value.crop) output[field.name].crop = mergeStoredExtras(value.crop, prior?.crop, new Set(["top", "bottom", "left", "right"]));
+      if (value.hotspot) output[field.name].hotspot = mergeStoredExtras(value.hotspot, prior?.hotspot, new Set(["x", "y", "width", "height"]));
     }
-    return {
-      operation,
-      type,
-      documentId,
-      sourceRevision,
-      document: null,
-      assetManifest: [],
-    };
+    if (field.type === "array" && Array.isArray(value)) output[field.name] = value.map((item, index) => {
+      if (!plain(item)) return item;
+      const previous = item._key ? prior?.find?.(entry => entry?._key === item._key) : prior?.[index];
+      const candidate = field.of?.find(type => type.name === item._type || type.type === item._type) || field.of?.[0];
+      const next = candidate?.type === "object" ? preservedDocument(item, previous, candidate.fields || [], seed, `${path}.${field.name}[${index}]`, false) : candidate?.type === "block" ? preserveBlock(item, previous) : mergeStoredExtras(item, previous, new Set(["_ref", "_weak"]));
+      if (!next._key && stableCmsJson(item) !== stableCmsJson(previous)) next._key = hash({ seed, path: `${path}.${field.name}[${index}]`, item }).slice(0, 20);
+      return next;
+    });
   }
-  const document = asClientValidation(
-    () => normalizeGlobalCmsDocument({
-      document: body.document,
-      id: documentId,
-      type,
-    }),
-    "CMS_DOCUMENT_INVALID",
-  );
-  return {
-    operation,
-    type,
-    documentId,
-    sourceRevision,
-    document,
-    assetManifest: normalizeGlobalCmsAssetManifest(body.assetManifest),
-  };
+  return output;
 };
-
-const hashCommand = (value) =>
-  crypto.createHash("sha256").update(stableCmsJson(value)).digest("hex");
-
-const loadCurrentDocument = async ({ client, command }) => {
-  const documents = await fetchShadowDocuments({
-    client,
-    documentTypes: [command.type],
-    ids: [command.documentId],
-    limit: 1,
-    allowLegacyFallback: false,
-  });
-  const current = documents[0] || null;
-  if (current && current._type !== command.type) {
-    throw failure(
-      "The CMS document type changed.",
-      409,
-      "CMS_DOCUMENT_TYPE_CONFLICT",
-    );
-  }
-  if (current && !String(current._rev || "").trim()) {
-    throw failure("The CMS authority revision is unavailable.", 409, "CMS_AUTHORITY_REVISION_MISSING");
-  }
-  return current;
+const committed = (result, id) => {
+  const record = result?.results?.find?.(entry => entry?._id === id || entry?.id === id) || result?.results?.[0];
+  const revision = record?._rev || record?.document?._rev;
+  if (!revision || typeof revision !== "string") throw cmsError("The committed receipt is missing its revision. Retry the same request.", 503, "CMS_RECEIPT_INVALID");
+  clearSupabasePublicContentCache();
+  return { committed: true, replayed: result.replayed === true, documentId: id, revision };
 };
-
-const buildMutations = ({ command, current }) => {
-  if (command.operation !== "publish") {
-    if (!current) {
-      throw failure(
-        "The CMS authority is missing the document to delete.",
-        409,
-        "CMS_AUTHORITY_MISSING",
-      );
-    }
-    return [
-      {
-        operation: "delete",
-        id: command.documentId,
-        expected_revision: current._rev || "",
-      },
-    ];
-  }
-  const document = { ...command.document };
-  if (command.type === "coupon") {
-    for (const field of COUPON_OPERATIONAL_FIELDS) {
-      if (current?.[field] === undefined) delete document[field];
-      else document[field] = current[field];
-    }
-  }
-  return [
-    current
-      ? {
-          operation: "replace",
-          id: command.documentId,
-          expected_revision: current._rev || "",
-          document,
-        }
-      : {
-          operation: "create",
-          id: command.documentId,
-          document,
-        },
-  ];
-};
-
-const readRequiredMirrorStatus = async ({ client, documentId }) =>
-  requireMirrorStatus(
-    await client.rpc("roo_document_mutation_mirror_status_for_ids", {
-      p_document_ids: [documentId],
-    }),
-    "CMS mirror status",
-  );
-
-const readRequiredCommerceMirrorStatus = async ({ client, documentId }) =>
-  requireMirrorStatus(
-    await client.rpc("roo_commerce_mirror_status_for_ids", {
-      p_document_ids: [documentId],
-    }),
-    "CMS commerce mirror status",
-  );
-
-const trySynchronousMirror = async ({
-  client,
-  documentId,
-  env,
-  sanityClientFactory,
-  drainMirror,
-  domain,
-}) => {
-  const config = readPrivateSanityConfig(env);
-  if (config) {
-    let timer;
-    try {
-      await Promise.race([
-        drainMirror({
-          supabaseClient: client,
-          sanityClient: sanityClientFactory({ ...config, timeout: 8_000, maxRetries: 0 }),
-          requiredDocumentIds: [documentId],
-          limit: 5,
-          maxBatches: 2,
-          budgetMs: 8_000,
-        }),
-        new Promise((_, reject) => {
-          timer = setTimeout(() => reject(failure("The CMS mirror drain timed out.", 503, "CMS_MIRROR_DRAIN_TIMEOUT")), 8_000);
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  return domain === "commerce"
-    ? readRequiredCommerceMirrorStatus({ client, documentId })
-    : readRequiredMirrorStatus({ client, documentId });
-};
-
-export const executeGlobalCmsCommand = async ({
-  body,
-  authorization,
-  supabaseClient,
-  env = process.env,
-  fetchImpl = fetch,
-  sanityClientFactory = createSanityClient,
-  identifyCaller = identifyGlobalCmsUser,
-  verifyMutation = verifyGlobalCmsMutation,
-  prepareAssets = prepareGlobalCmsAssets,
-  drainContentMirror = drainDocumentMutationOutbox,
-  drainCommerceMirror = drainCommerceMirrorOutbox,
-} = {}) => {
+export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = process.env } = {}) => {
   assertGlobalCmsWritesAllowed(env);
-  const command = parseRequest(body);
-  const domain = globalCmsAuthorityDomain(command.type);
-  const caller = await identifyCaller({
-    authorization,
-    fetchImpl,
-  });
-  const requestMaterial = {
-    actor: caller.actor,
-    assetManifest: command.assetManifest,
-    document: command.document,
-    documentId: command.documentId,
-    operation: command.operation,
-    projectId: GLOBAL_SANITY_PROJECT_ID,
-    dataset: GLOBAL_SANITY_DATASET,
-    sourceRevision: command.sourceRevision,
-    type: command.type,
-  };
-  const requestHash = hashCommand(requestMaterial);
+  if (!plain(body)) throw validationError("$", "A JSON content command is required.");
+  const allowed = new Set(["operation", "type", "documentId", "document", "expectedRevision", "createIntentId"]);
+  for (const key of Object.keys(body)) if (!allowed.has(key)) throw validationError(`$.${key}`, "Unsupported command field.");
+  if (!["create", "replace", "delete"].includes(body.operation)) throw validationError("$.operation", "Choose create, replace or delete.");
+  const schema = contentType(body.type);
+  const creating = body.operation === "create";
+  if (creating && !uuid(body.createIntentId)) throw validationError("$.createIntentId", "A stable create-intent UUID is required.");
+  if (creating && body.expectedRevision !== undefined) throw validationError("$.expectedRevision", "Create cannot supply a loaded revision.");
+  if (!creating && body.createIntentId !== undefined) throw validationError("$.createIntentId", "Create intent applies only to create.");
+  const id = creating ? schema.fixedId || createIntentDocumentId(body.createIntentId) : documentId(body.documentId);
+  if (creating && body.documentId !== undefined && body.documentId !== id) throw validationError("$.documentId", "The server derives the new identity from the create intent.");
+  if (body.expectedRevision !== undefined && (typeof body.expectedRevision !== "string" || body.expectedRevision.length > 128)) throw validationError("$.expectedRevision", "A loaded revision is required.");
+  let document = null;
+  if (body.operation !== "delete") {
+    if (!plain(body.document)) throw validationError("$.document", "A document is required.");
+    refuseEnrichment(body.document);
+    if (body.document._type !== undefined && body.document._type !== body.type) throw validationError("$._type", "Document type does not match.");
+    if (body.document._id !== undefined && body.document._id !== id) throw validationError("$._id", "Document identity does not match.");
+    document = Object.fromEntries(Object.entries(body.document).filter(([key]) => !system.has(key) && !(body.type === "coupon" && counters.has(key))));
+    if (creating) document = { ...createContentDefaults(body.type), ...document };
+  } else if (body.document !== undefined) throw validationError("$.document", "Delete accepts no document.");
+  const material = { actor: "admin:key", operation: body.operation, type: body.type, documentId: id, createIntentId: creating ? body.createIntentId.toLowerCase() : null, expectedRevision: body.expectedRevision || null, document };
+  const requestHash = hash(material);
   const commandId = `cms:${requestHash}`;
-  const finishCommitted = async (replayed) => {
-    clearSupabasePublicContentCache();
-    let syncPending = true;
-    try {
-      const mirrorStatus = await trySynchronousMirror({
-        client: supabaseClient,
-        documentId: command.documentId,
-        env,
-        sanityClientFactory,
-        drainMirror:
-          domain === "commerce" ? drainCommerceMirror : drainContentMirror,
-        domain,
-      });
-      syncPending =
-        Number(mirrorStatus?.pending || 0) > 0 ||
-        Number(mirrorStatus?.dead_letters || 0) > 0;
-    } catch (error) {
-      logSafeError("CMS fallback mirror remains pending", error);
-    }
-    return {
-      commandId,
-      committed: true,
-      documentId: command.documentId,
-      operation: command.operation,
-      replayed,
-      syncPending,
-    };
-  };
-  const existing = requireRpcData(
-    await supabaseClient.rpc("roo_cms_publish_command_result", {
-      p_command_id: commandId,
-      p_request_hash: requestHash,
-      p_actor: caller.actor,
-    }),
-    "CMS receipt lookup",
-  );
-  if (existing?.replayed === true) return finishCommitted(true);
-
-  const current = await loadCurrentDocument({
-    client: supabaseClient,
-    command,
-  });
-  let mirrorStatus = await (domain === "commerce"
-    ? readRequiredCommerceMirrorStatus
-    : readRequiredMirrorStatus)({ client: supabaseClient, documentId: command.documentId });
-  if (mirrorStatus.pending > 0 || mirrorStatus.dead_letters > 0) {
-    try {
-      mirrorStatus = await trySynchronousMirror({
-        client: supabaseClient,
-        documentId: command.documentId,
-        env,
-        sanityClientFactory,
-        drainMirror: domain === "commerce" ? drainCommerceMirror : drainContentMirror,
-        domain,
-      });
-    } catch (error) {
-      logSafeError("CMS fallback mirror remains pending", error);
-      mirrorStatus = await (domain === "commerce" ? readRequiredCommerceMirrorStatus : readRequiredMirrorStatus)({ client: supabaseClient, documentId: command.documentId });
-    }
-    if (mirrorStatus.pending > 0 || mirrorStatus.dead_letters > 0) {
-      throw failure("The CMS authority is still synchronizing to Sanity.", 409, "CMS_AUTHORITY_SYNC_PENDING");
-    }
+  const lookup = { p_command_id: commandId, p_request_hash: requestHash, p_actor: "admin:key" };
+  const receipt = rpcData(await supabaseClient.rpc("roo_cms_publish_command_result", lookup), "Receipt lookup");
+  if (receipt?.replayed) return committed(receipt, id);
+  const current = await loadDocument(supabaseClient, id);
+  if (current && current._type !== body.type) throw cmsError("Document type conflicts with its stored identity.", 409, "CMS_REVISION_CONFLICT", { currentRevision: current._rev });
+  if (document) {
+    document = preservedDocument(document, current, schema.fields, requestHash);
+    const validation = validateContentDocument(body.type, document, { current });
+    if (!validation.ok) throw cmsError("Content validation failed.", 400, "CMS_VALIDATION_FAILED", validation.errors);
+    document = { ...document, _id: id, _type: body.type };
   }
-  await verifyMutation({
-    caller,
-    operation: command.operation === "publish" ? "publish" : "delete",
-    documentId: command.documentId,
-    document: command.document,
-    sourceRevision: command.sourceRevision,
-    fetchImpl,
-  });
-  const assets =
-    command.operation === "publish"
-      ? await prepareAssets({
-          document: command.document,
-          suppliedManifest: command.assetManifest,
-          token: caller.token,
-          supabaseClient,
-          fetchImpl,
-          sanityClientFactory,
-        })
-      : [];
-  const mutations = buildMutations({ command, current });
-  const assetLinks = command.document
-    ? collectGlobalCmsAssetLinks(command.document)
-    : [];
-  const result = requireRpcData(
-    await supabaseClient.rpc("roo_apply_cms_publish_command", {
-      p_command_id: commandId,
-      p_request_hash: requestHash,
-      p_actor: caller.actor,
-      p_mutations: mutations,
-      p_assets: assets,
-      p_asset_links: assetLinks,
-    }),
-    "CMS publish command",
-  );
-  return finishCommitted(result?.replayed === true);
+  const mutation = { operation: body.operation, id, ...(document ? { document } : {}), ...(!creating ? { expected_revision: body.expectedRevision || "" } : {}) };
+  const result = rpcData(await supabaseClient.rpc("roo_apply_cms_publish_command", { ...lookup, p_mutations: [mutation], p_assets: [], p_asset_links: [] }), "Content publish");
+  return committed(result, id);
 };

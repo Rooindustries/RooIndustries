@@ -1,8 +1,5 @@
 import { fetchPublicContent } from "@/src/server/content/publicContent";
-import {
-  selectContentBackend,
-  serializeContentAssignmentCookie,
-} from "@/src/server/supabase/backendSelection";
+
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,37 +13,22 @@ export async function GET(request, context) {
   try {
     const params = await context.params;
     const resource = String(params?.resource || "").trim();
-    const selection = selectContentBackend({
-      cookieHeader: request.headers.get("cookie") || "",
-    });
     const data = await fetchPublicContent({
       resource,
       searchParams: new URL(request.url).searchParams,
-      backend: selection.backend,
     });
     const response = Response.json(
       { ok: true, data },
       {
         status: 200,
         headers: {
-          "Cache-Control": selection.canaryActive
-            ? "private, no-store"
-            : PUBLIC_BROWSER_CACHE,
-          ...(!selection.canaryActive
-            ? { "Vercel-CDN-Cache-Control": PUBLIC_VERCEL_CACHE }
-            : {}),
+          "Cache-Control": PUBLIC_BROWSER_CACHE,
+          "Vercel-CDN-Cache-Control": PUBLIC_VERCEL_CACHE,
           "X-Content-Type-Options": "nosniff",
-          "X-Roo-Content-Backend": selection.backend,
-          ...(selection.canaryActive ? { Vary: "Cookie" } : {}),
+          "X-Roo-Content-Backend": "supabase",
         },
       }
     );
-    const assignmentCookie = serializeContentAssignmentCookie({
-      value: selection.assignmentCookie,
-    });
-    if (assignmentCookie) {
-      response.headers.append("Set-Cookie", assignmentCookie);
-    }
     return response;
   } catch (error) {
     const requestedStatus = Number(error?.status || error?.statusCode || 0);

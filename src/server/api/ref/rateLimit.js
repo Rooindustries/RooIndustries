@@ -9,6 +9,7 @@ const TEST_BUCKETS =
   (globalThis.__rooRateLimitBuckets = new Map());
 const MAX_RETRIES = 5;
 const COMMERCE_KEY_PREFIXES = [
+  "admin-content-key:",
   "payment-start:",
   "payment-quote:",
   "hold-slot:",
@@ -25,7 +26,7 @@ const isCommerceKey = (key) =>
   COMMERCE_KEY_PREFIXES.some((prefix) => String(key || "").startsWith(prefix));
 
 const loadWriteClient = async () => {
-  const { createRefWriteClient } = await import("./sanity.js");
+  const { createRefWriteClient } = await import("./documentStore.js");
   return createRefWriteClient();
 };
 
@@ -195,9 +196,7 @@ export const consumeQuoteRateLimitWithPricing = async (
   }
 
   const policy = resolveSupabaseRuntimePolicy();
-  if (policy.commercePrimaryBackend !== "supabase") {
-    return { handled: false };
-  }
+
 
   const windowStart = Math.floor(now / windowMs) * windowMs;
   const resetAtMs = windowStart + windowMs;

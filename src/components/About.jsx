@@ -71,12 +71,12 @@ export default function About({ initialData = null, compact = false }) {
   const recordDetailsRaw = Array.isArray(aboutData.recordDetails)
     ? aboutData.recordDetails
     : [];
-  const recordDetailsSanity = recordDetailsRaw.filter(
+  const recordDetailsSource = recordDetailsRaw.filter(
     (item) => item && (item.label || item.value || item.sub)
   );
   const recordDetails =
-    recordDetailsSanity.length > 0
-      ? recordDetailsSanity
+    recordDetailsSource.length > 0
+      ? recordDetailsSource
       : recordDetailsFallback;
   const leaderboardHref =
     aboutData.recordLink && typeof aboutData.recordLink === "string"

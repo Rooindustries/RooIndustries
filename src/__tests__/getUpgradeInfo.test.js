@@ -10,8 +10,8 @@ const mockCreateClient = jest.fn(() => ({
 }));
 const mockAssertCommerceStartAllowed = jest.fn();
 
-jest.mock("@sanity/client", () => ({
-  createClient: (...args) => mockCreateClient(...args),
+jest.mock("../server/data/documentClient.js", () => ({
+  createDataClient: (...args) => mockCreateClient(...args),
 }));
 
 jest.mock("dotenv", () => ({

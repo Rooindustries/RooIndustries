@@ -5,13 +5,10 @@ const mockRequireAdminKey = jest.fn();
 const mockFetchReferralEarnings = jest.fn();
 
 jest.mock("../server/data/documentClient.js", () => ({
-  createDataClient: (config) =>
-    config.perspective
-      ? { fetch: (...args) => mockReadFetch(...args) }
-      : {
-          fetch: (...args) => mockWriteFetch(...args),
-          patch: (...args) => mockPatch(...args),
-        },
+  createDataClient: () => ({
+    fetch: (...args) => String(args[0]).includes('"package"') ? mockReadFetch(...args) : mockWriteFetch(...args),
+    patch: (...args) => mockPatch(...args),
+  }),
 }));
 
 jest.mock("../server/api/ref/auth.js", () => ({
@@ -53,7 +50,7 @@ const referral = (revision, xocPayments = []) => ({
 const revisionConflict = () =>
   Object.assign(new Error("Revision changed"), { statusCode: 409 });
 
-describe("referral payment update concurrency", () => {
+describe("D6/O1 native referral payment update concurrency", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockRequireAdminKey.mockReturnValue(true);
