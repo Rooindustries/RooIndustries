@@ -88,7 +88,7 @@ describe("download access", () => {
     expect(result.status).toBe(404);
     expect(result.body).toEqual({
       ok: false,
-      error: "No paid booking found with that Order ID.",
+      error: "No paid booking found with that Order ID and email. Use the Order ID from your Roo Industries confirmation email (it starts with \"booking.\") and the email you booked with.",
     });
   });
 
@@ -106,7 +106,7 @@ describe("download access", () => {
     expect(result.status).toBe(404);
     expect(result.body).toEqual({
       ok: false,
-      error: "No paid booking found with that Order ID.",
+      error: "No paid booking found with that Order ID and email. Use the Order ID from your Roo Industries confirmation email (it starts with \"booking.\") and the email you booked with.",
     });
   });
 

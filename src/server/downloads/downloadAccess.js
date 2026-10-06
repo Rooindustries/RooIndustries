@@ -1,6 +1,7 @@
 import { createDocumentReadClient } from "../data/documentClient.js";
 import {
   resolveBookingFromSubmittedOrderId,
+  submittedOrderIdMatchesBooking,
   isBookingDocument,
 } from "../api/ref/orderResolver.js";
 import {
@@ -21,6 +22,37 @@ const normalizeText = (value) =>
 export const createDownloadDataClient = (env = process.env) =>
   createDocumentReadClient({ env, domain: "commerce" });
 
+export const NO_PAID_BOOKING_ERROR =
+  'No paid booking found with that Order ID and email. Use the Order ID from your Roo Industries confirmation email (it starts with "booking.") and the email you booked with.';
+
+const asDocumentList = (value) =>
+  Array.isArray(value) ? value : value ? [value] : [];
+
+export const findPaidBookingsByEmail = async ({ client, email }) => {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail || !client) return [];
+  const results = await Promise.all(
+    ["email", "payerEmail"].map((field) =>
+      client.fetch(`*[_type == "booking" && lower(${field}) == $email]`, {
+        email: normalizedEmail,
+      })
+    )
+  );
+  const bookings = new Map();
+  for (const list of results) {
+    for (const document of asDocumentList(list)) {
+      if (
+        isBookingDocument(document) &&
+        isPaidBookingStatus(document.status) &&
+        !bookings.has(document._id)
+      ) {
+        bookings.set(document._id, document);
+      }
+    }
+  }
+  return [...bookings.values()];
+};
+
 export const isPaidBookingStatus = (status = "") => {
   const normalized = String(status || "").trim().toLowerCase();
   return normalized === "captured" || normalized === "completed";
@@ -31,7 +63,7 @@ export const validateBookingForDownload = ({ booking, email, download }) => {
     return {
       ok: false,
       status: 404,
-      error: "No paid booking found with that Order ID.",
+      error: NO_PAID_BOOKING_ERROR,
     };
   }
 
@@ -44,7 +76,7 @@ export const validateBookingForDownload = ({ booking, email, download }) => {
     return {
       ok: false,
       status: 404,
-      error: "No paid booking found with that Order ID.",
+      error: NO_PAID_BOOKING_ERROR,
     };
   }
 
@@ -165,15 +197,33 @@ export const validateDownloadAccess = async ({
     };
   }
 
-  const booking = await resolveBookingFromSubmittedOrderId({
+  let booking = await resolveBookingFromSubmittedOrderId({
     id: normalizedOrderId,
     client,
   });
-  const bookingValidation = validateBookingForDownload({
+  let bookingValidation = validateBookingForDownload({
     booking,
     email: normalizedEmail,
     download,
   });
+
+  if (!bookingValidation.ok && bookingValidation.status === 404) {
+    const emailBookings = await findPaidBookingsByEmail({
+      client,
+      email: normalizedEmail,
+    });
+    const matchedByEmail = emailBookings.find((candidate) =>
+      submittedOrderIdMatchesBooking(normalizedOrderId, candidate)
+    );
+    if (matchedByEmail) {
+      booking = matchedByEmail;
+      bookingValidation = validateBookingForDownload({
+        booking,
+        email: normalizedEmail,
+        download,
+      });
+    }
+  }
 
   if (!bookingValidation.ok) {
     return {
