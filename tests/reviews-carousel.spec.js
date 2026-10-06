@@ -564,6 +564,82 @@ test.describe("review carousel", () => {
     expectInfinite(forward);
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.innerWidth);
   });
+
+  test("idle-frames-offscreen", async ({ page }) => {
+    await page.addInitScript(() => {
+      const requestFrame = window.requestAnimationFrame.bind(window);
+      window.__rafCount = 0;
+      window.requestAnimationFrame = (callback) => {
+        window.__rafCount += 1;
+        return requestFrame(callback);
+      };
+    });
+    const region = await openCarousel(page);
+    await page.waitForTimeout(500);
+    const rafCount = () => page.evaluate(() => window.__rafCount);
+    const scrollLeft = () => region.evaluate((el) => el.scrollLeft);
+    const placement = () =>
+      region.evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom, innerHeight: window.innerHeight, scrollY: window.scrollY };
+      });
+
+    const visibleStart = await rafCount();
+    const visibleScrollStart = await scrollLeft();
+    await page.waitForTimeout(1000);
+    const visibleRate = (await rafCount()) - visibleStart;
+    const visibleScrollEnd = await scrollLeft();
+
+    await page.evaluate(() => window.scrollTo({ top: document.scrollingElement.scrollHeight, behavior: "instant" }));
+    const hiddenPlacement = await placement();
+    const fullyHidden = hiddenPlacement.bottom <= 0 || hiddenPlacement.top >= hiddenPlacement.innerHeight;
+    await page.waitForTimeout(400);
+    const hiddenStart = await rafCount();
+    const hiddenScrollStart = await scrollLeft();
+    await page.waitForTimeout(1000);
+    const hiddenRate = (await rafCount()) - hiddenStart;
+    const hiddenScrollEnd = await scrollLeft();
+
+    await region.evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" }));
+    const shownPlacement = await placement();
+    const { groupWidth } = await probe(page, "state");
+    const resumeStart = await scrollLeft();
+    const shownAt = Date.now();
+    let resumedMs = null;
+    let resumedDelta = 0;
+    while (Date.now() - shownAt <= 2000) {
+      const delta = (await scrollLeft()) - resumeStart;
+      resumedDelta = delta - Math.round(delta / groupWidth) * groupWidth;
+      if (resumedDelta >= 5) {
+        resumedMs = Date.now() - shownAt;
+        break;
+      }
+      await page.waitForTimeout(50);
+    }
+
+    const result = {
+      visibleRate,
+      visibleScrollStart: round(visibleScrollStart),
+      visibleScrollEnd: round(visibleScrollEnd),
+      hiddenPlacement: Object.fromEntries(Object.entries(hiddenPlacement).map(([key, value]) => [key, round(value)])),
+      fullyHidden,
+      hiddenRate,
+      hiddenScrollStart: round(hiddenScrollStart),
+      hiddenScrollEnd: round(hiddenScrollEnd),
+      shownPlacement: Object.fromEntries(Object.entries(shownPlacement).map(([key, value]) => [key, round(value)])),
+      groupWidth,
+      resumeStartScrollLeft: round(resumeStart),
+      resumedDeltaPx: round(resumedDelta),
+      resumedAfterMs: resumedMs,
+    };
+    writeEvidence("idle-frames-offscreen", result);
+    expect(visibleRate).toBeGreaterThanOrEqual(50);
+    expect(fullyHidden).toBe(true);
+    expect(hiddenRate).toBeLessThanOrEqual(10);
+    expect(hiddenScrollEnd).toBe(hiddenScrollStart);
+    expect(resumedMs).not.toBeNull();
+    expect(resumedDelta).toBeGreaterThanOrEqual(5);
+  });
 });
 
 test.describe("review carousel with two reviews", () => {

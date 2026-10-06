@@ -288,6 +288,7 @@ function AutoReviewCarousel({ reviews }) {
     touching: false,
     wheelAt: -Infinity,
     interactedAt: -Infinity,
+    wake: null,
   });
   const [groupCount, setGroupCount] = useState(1);
 
@@ -330,8 +331,49 @@ function AutoReviewCarousel({ reviews }) {
     const motion = motionRef.current;
     let paused = false;
     let visible = true;
+    let previousTime = 0;
+    let frameId = 0;
+    const needsFrames = () => Boolean(motion.arrow) || (visible && !paused);
+
+    const frame = (time) => {
+      frameId = 0;
+      const elapsed = Math.min(Math.max(time - previousTime, 0), MAX_FRAME_MS);
+      previousTime = time;
+      const { groupWidth, arrow } = motion;
+      if (groupWidth) {
+        let position = readReviewScroll(viewport, motion);
+        if (arrow) {
+          arrow.startedAt ??= time;
+          const progress = Math.min(1, (time - arrow.startedAt) / ARROW_SCROLL_MS);
+          position = arrow.from + (arrow.to - arrow.from) * easeInOut(progress);
+          if (progress === 1) motion.arrow = null;
+        }
+        if (arrow || motion.drag || motion.touching || time - motion.wheelAt < WHEEL_ACTIVE_MS) {
+          motion.interactedAt = time;
+        } else if (!paused && visible) {
+          const idle = time - motion.interactedAt - AUTO_SCROLL_RESUME_DELAY_MS;
+          if (idle > 0) {
+            position +=
+              (AUTO_SCROLL_PIXELS_PER_SECOND * easeOut(Math.min(1, idle / AUTO_SCROLL_RAMP_MS)) * elapsed) /
+              1000;
+          }
+        }
+        if (position !== motion.position || position < groupWidth || position >= groupWidth * 2) {
+          commitReviewScroll(viewport, motion, position);
+        }
+      }
+      if (needsFrames()) frameId = window.requestAnimationFrame(frame);
+    };
+    const wake = () => {
+      if (frameId || !needsFrames()) return;
+      previousTime = performance.now();
+      frameId = window.requestAnimationFrame(frame);
+    };
+    motion.wake = wake;
+
     const updatePause = () => {
       paused = isPerfDebugEnabled() && getPerfToggleEnabled(PERF_TOGGLE_KEYS.PAUSE_REVIEWS_AUTOPLAY);
+      wake();
     };
     updatePause();
     window.addEventListener(PERF_DEBUG_EVENT, updatePause);
@@ -341,6 +383,7 @@ function AutoReviewCarousel({ reviews }) {
         ? null
         : new IntersectionObserver((entries) => {
             visible = entries[entries.length - 1].isIntersecting;
+            wake();
           });
     visibilityObserver?.observe(viewport);
 
@@ -358,39 +401,9 @@ function AutoReviewCarousel({ reviews }) {
     };
     viewport.addEventListener("scroll", onScroll, { passive: true });
 
-    let previousTime = performance.now();
-    let frameId = 0;
-    const frame = (time) => {
-      frameId = window.requestAnimationFrame(frame);
-      const elapsed = Math.min(Math.max(time - previousTime, 0), MAX_FRAME_MS);
-      previousTime = time;
-      const { groupWidth, arrow } = motion;
-      if (!groupWidth) return;
-      let position = readReviewScroll(viewport, motion);
-      if (arrow) {
-        arrow.startedAt ??= time;
-        const progress = Math.min(1, (time - arrow.startedAt) / ARROW_SCROLL_MS);
-        position = arrow.from + (arrow.to - arrow.from) * easeInOut(progress);
-        if (progress === 1) motion.arrow = null;
-      }
-      if (arrow || motion.drag || motion.touching || time - motion.wheelAt < WHEEL_ACTIVE_MS) {
-        motion.interactedAt = time;
-      } else if (!paused && visible) {
-        const idle = time - motion.interactedAt - AUTO_SCROLL_RESUME_DELAY_MS;
-        if (idle > 0) {
-          position +=
-            (AUTO_SCROLL_PIXELS_PER_SECOND * easeOut(Math.min(1, idle / AUTO_SCROLL_RAMP_MS)) * elapsed) /
-            1000;
-        }
-      }
-      if (position !== motion.position || position < groupWidth || position >= groupWidth * 2) {
-        commitReviewScroll(viewport, motion, position);
-      }
-    };
-    frameId = window.requestAnimationFrame(frame);
-
     return () => {
-      window.cancelAnimationFrame(frameId);
+      if (frameId) window.cancelAnimationFrame(frameId);
+      motion.wake = null;
       viewport.removeEventListener("scroll", onScroll);
       visibilityObserver?.disconnect();
       window.removeEventListener(PERF_DEBUG_EVENT, updatePause);
@@ -425,6 +438,7 @@ function AutoReviewCarousel({ reviews }) {
       return;
     }
     motion.arrow = { from: position, to: target, startedAt: null };
+    motion.wake?.();
   };
 
   const onWheel = (event) => {
