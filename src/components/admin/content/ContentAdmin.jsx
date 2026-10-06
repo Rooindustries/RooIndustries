@@ -27,7 +27,7 @@ import { AdminApiError, createAdminApi } from "./adminApi";
 import { EditorContext, ObjectFields } from "./FieldInput";
 import RevisionHistory from "./RevisionHistory";
 import { clearDraft, draftKey, listNewDrafts, readDraft, saveDraft } from "./draftStore";
-import { getIn, indexErrors, newUuid, resolveStablePath, setIn, stableJson, toStablePath } from "./documentPaths";
+import { contentErrorLabel, getIn, indexErrors, newUuid, resolveStablePath, setIn, stableJson, toStablePath } from "./documentPaths";
 
 const GROUPS = [
   { id: "site", title: "Site content" },
@@ -48,22 +48,16 @@ const documentTitle = (type, document, fallback = "Untitled") => {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 };
 
-const errorLabel = (type, rawPath) => {
-  const path = String(rawPath || "").replace(/^\$\.?/, "");
-  if (!path) return "Document";
-  const [head, ...rest] = path.split(/(?=[.[])/);
-  const field = type?.fields?.find((entry) => entry.name === head);
-  return [field?.title || head, rest.join("").replace(/^\./, "")].filter(Boolean).join(" › ");
-};
-
 const PUBLISH_NOTICE = "Published. The live site picks this up within a few minutes (page and CDN caches).";
 
 export default function ContentAdmin() {
-  const [adminKey, setAdminKey] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [draftError, setDraftError] = useState("");
   const [unlocked, setUnlocked] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [gateError, setGateError] = useState("");
-  const api = useMemo(() => createAdminApi(adminKey), [adminKey]);
+  const api = useMemo(() => createAdminApi(), []);
 
   const [typeName, setTypeName] = useState("");
   const [lists, setLists] = useState({});
@@ -105,7 +99,7 @@ export default function ContentAdmin() {
       setGateError(
         error.code === "ADMIN_NOT_CONFIGURED"
           ? "The content admin is not configured on this deployment."
-          : "The admin key was not accepted. Enter it again."
+          : "Your session ended. Sign in again."
       );
       return true;
     }
@@ -293,12 +287,13 @@ export default function ContentAdmin() {
     setUnlocking(true);
     setGateError("");
     try {
-      await api.listDocuments(CONTENT_TYPES[0].name);
+      await api.signIn({ email, password });
+      setPassword("");
       setUnlocked(true);
     } catch (error) {
       setGateError(
         error instanceof AdminApiError && error.status === 401
-          ? "That admin key was not accepted."
+          ? "Email or password was not accepted."
           : error instanceof AdminApiError && error.code === "ADMIN_NOT_CONFIGURED"
             ? "The content admin is not configured on this deployment."
             : error instanceof AdminApiError && error.status === 429
@@ -311,9 +306,23 @@ export default function ContentAdmin() {
   };
 
   useEffect(() => {
+    let active = true;
+    api.getSession().then(data => { if (active && data.signedIn) setUnlocked(true); }).catch(error => {
+      if (active && error.status !== 401) setGateError(error.code === "ADMIN_NOT_CONFIGURED" ? "The content admin is not configured on this deployment." : error.message);
+    });
+    return () => { active = false; };
+  }, [api]);
+
+  const persistDraft = useCallback((key, draft) => {
+    const saved = saveDraft(key, draft);
+    setDraftError(saved ? "" : "Your draft could not be saved in this browser.");
+    return saved;
+  }, []);
+
+  useEffect(() => {
     if (!session || !working || !dirty || !currentDraftKey) return undefined;
     const timer = window.setTimeout(() => {
-      saveDraft(currentDraftKey, {
+      persistDraft(currentDraftKey, {
         document: working,
         assets,
         baseRevision: session.revision,
@@ -323,7 +332,7 @@ export default function ContentAdmin() {
       });
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [working, dirty, currentDraftKey, session, assets]);
+  }, [working, dirty, currentDraftKey, session, assets, persistDraft]);
 
   useEffect(() => {
     const workspace = workspaceRef.current;
@@ -403,8 +412,8 @@ export default function ContentAdmin() {
       if (error.code === "CMS_VALIDATION_FAILED" && Array.isArray(error.details)) {
         setErrors(error.details);
         setBanner({ tone: "error", text: "The server refused some fields. Fix them and publish again.", summary: true });
-      } else if (error.code === "CMS_REVISION_CONFLICT") {
-        setConflict({ currentRevision: error.details?.currentRevision || null });
+      } else if (["CMS_REVISION_CONFLICT", "CMS_CREATE_INTENT_CONFLICT"].includes(error.code)) {
+        setConflict({ currentRevision: error.details?.currentRevision || null, documentId: error.details?.documentId || session.documentId });
       } else if (error.code === "CMS_SINGLETON_EXISTS") {
         setBanner({ tone: "error", text: "This section already exists. Reload the list and edit the existing one." });
       } else if (error.code === "CMS_WRITES_PAUSED") {
@@ -443,12 +452,12 @@ export default function ContentAdmin() {
         const referencedBy = Array.isArray(error.details?.referencedBy) ? error.details.referencedBy : [];
         setBanner({
           tone: "error",
-          text: `This is still used by ${referencedBy.length || "other"} document${referencedBy.length === 1 ? "" : "s"}: ${referencedBy
+          text: error.details?.reason || `This is still used by ${referencedBy.length || "other"} document${referencedBy.length === 1 ? "" : "s"}: ${referencedBy
             .map((entry) => entry.title || entry._id)
             .join(", ")}. Remove those references first.`,
         });
-      } else if (error.code === "CMS_REVISION_CONFLICT") {
-        setConflict({ currentRevision: error.details?.currentRevision || null });
+      } else if (["CMS_REVISION_CONFLICT", "CMS_CREATE_INTENT_CONFLICT"].includes(error.code)) {
+        setConflict({ currentRevision: error.details?.currentRevision || null, documentId: error.details?.documentId || session.documentId });
       } else {
         setBanner({ tone: "error", text: error.message });
       }
@@ -458,17 +467,20 @@ export default function ContentAdmin() {
   };
 
   const restoreRevision = ({ document, assets: revisionAssets, revision }) => {
+    if (dirty && !window.confirm("Replace your unpublished changes with this version? They will be lost.")) return;
+    if (currentDraftKey) clearDraft(currentDraftKey);
     setWorking({ ...document, _id: session.baseline?._id ?? document._id, _type: session.type });
     setAssets((current) => ({ ...current, ...revisionAssets }));
     setLoadVersion((version) => version + 1);
     setHistoryOpen(false);
-    setNotice(`Loaded the version from ${displayTime(revision.createdAt)}. Publish to make it live again.`);
+    setNotice(`Loaded the version that was live before ${displayTime(revision.createdAt)}. Publish to make it live again.`);
   };
 
-  const lock = () => {
+  const lock = async () => {
     if (!confirmDiscard()) return;
+    try { await api.signOut(); } catch (error) { if (!handleAuthFailure(error)) { setBanner({ tone: "error", text: error.message }); return; } }
     setUnlocked(false);
-    setAdminKey("");
+    setPassword("");
     setSession(null);
     setWorking(null);
     setLists({});
@@ -486,20 +498,15 @@ export default function ContentAdmin() {
           <p className={styles.eyebrow}>Private admin</p>
           <h1>Site content</h1>
           <p className={styles.intro}>
-            Enter the admin key to edit packages, pages, FAQ, reviews, tools, coupons and policies.
+            Sign in to edit packages, pages, FAQ, reviews, tools, coupons and policies.
           </p>
           <form className={styles.accessForm} onSubmit={unlock}>
-            <label htmlFor="content-admin-key">Admin key</label>
-            <input
-              id="content-admin-key"
-              type="password"
-              autoComplete="off"
-              value={adminKey}
-              onChange={(event) => setAdminKey(event.target.value)}
-              required
-            />
-            <button type="submit" className={styles.primaryButton} disabled={unlocking || !adminKey.trim()}>
-              {unlocking ? "Opening…" : "Open editor"}
+            <label htmlFor="content-admin-email">Email</label>
+            <input id="content-admin-email" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} maxLength={254} required />
+            <label htmlFor="content-admin-password">Password</label>
+            <input id="content-admin-password" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} maxLength={128} required />
+            <button type="submit" className={styles.primaryButton} disabled={unlocking || !email.trim() || !password}>
+              {unlocking ? "Signing in…" : "Sign in"}
             </button>
           </form>
           {gateError ? <p className={styles.error} role="alert">{gateError}</p> : null}
@@ -529,10 +536,12 @@ export default function ContentAdmin() {
           <p className={styles.intro}>Edit what the site shows. Every publish is checked, versioned and goes straight to Supabase.</p>
         </div>
         <button type="button" className={styles.secondaryButton} onClick={lock}>
-          <Lock size={16} aria-hidden="true" /> Lock
+          <Lock size={16} aria-hidden="true" /> Sign out
         </button>
       </header>
 
+      {draftError ? <p className={styles.error} role="alert">{draftError}</p> : null}
+      {["terms", "faqSection"].includes(typeName) ? <p className={styles.notice}>The Payments &amp; refunds and Cancellations sections, the Terms last-updated date and the money-back FAQ answer are managed in code and ignore edits here.</p> : null}
       {notice ? (
         <p className={styles.notice} role="status"><Check size={17} aria-hidden="true" />{notice}</p>
       ) : null}
@@ -540,7 +549,7 @@ export default function ContentAdmin() {
       <div ref={workspaceRef} className={styles.workspace} data-pane={pane} data-singleton={!type || type.singleton ? "true" : "false"}>
         <nav className={styles.typePanel} aria-label="Content types">
           {GROUPS.map((group) => {
-            const types = CONTENT_TYPES.filter((entry) => entry.group === group.id);
+            const types = CONTENT_TYPES.filter((entry) => entry.group === group.id && !["footer", "siteSettings"].includes(entry.name));
             if (types.length === 0) return null;
             return (
               <div key={group.id} className={styles.typeGroup}>
@@ -767,12 +776,12 @@ export default function ContentAdmin() {
                   <AlertTriangle size={18} aria-hidden="true" />
                   <div>
                     <strong>Someone published a newer version while you were editing.</strong>
-                    <p>Nothing was overwritten. Your edits are saved on this device. Load the latest version, then restore your changes if you still want them.</p>
+                    <p>Nothing was overwritten. Load the latest version, then restore your saved draft if you still want those changes.</p>
                     <button
                       type="button"
                       className={styles.secondaryButton}
                       onClick={() => {
-                        saveDraft(draftKey(session), {
+                        const saved = persistDraft(draftKey(session), {
                           document: working,
                           assets,
                           baseRevision: session.revision,
@@ -780,7 +789,8 @@ export default function ContentAdmin() {
                           documentId: session.documentId,
                           type: session.type,
                         });
-                        openDocument(session.documentId);
+                        if (!saved && !window.confirm("Your draft could not be saved on this device. Load the latest version and lose your edits?")) return;
+                        openDocument(conflict.documentId || session.documentId);
                       }}
                     >
                       Load latest version
@@ -800,7 +810,7 @@ export default function ContentAdmin() {
                   <ul>
                     {errors.slice(0, 12).map((error, index) => (
                       <li key={index}>
-                        <strong>{errorLabel(type, error.path)}:</strong> {error.message}
+                        <strong>{contentErrorLabel(type, error.path)}:</strong> {error.message}
                       </li>
                     ))}
                   </ul>

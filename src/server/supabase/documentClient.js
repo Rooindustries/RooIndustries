@@ -65,7 +65,7 @@ const hasUnpushedPredicates = ({ source, ids, filters }) => {
   return /==|!=|<=|>=|<|>|\bin\b/.test(stripped);
 };
 
-const inferShadowScope = ({ query, params = {}, configuredTypes = null }) => {
+export const inferShadowScope = ({ query, params = {}, configuredTypes = null }) => {
   const source = String(query || "");
   const literalTypes = inferLiteralTypes(source);
   const paramType = source.match(/_type\s*==\s*\$([A-Za-z_][A-Za-z0-9_]*)/);
@@ -104,7 +104,7 @@ const inferShadowScope = ({ query, params = {}, configuredTypes = null }) => {
     documentTypes: documentTypes.length > 0 ? documentTypes : null,
     ids: uniqueStrings(ids),
     filters,
-    limit: source.includes("->") || hasUnpushedPredicates({ source, ids, filters })
+    limit: (source.match(/\*\s*\[/g) || []).length > 1 || source.includes("->") || hasUnpushedPredicates({ source, ids, filters })
       ? 500
       : inferQueryLimit(source),
   };

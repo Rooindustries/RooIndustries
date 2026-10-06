@@ -250,7 +250,7 @@ export default function PortableTextInput({ value, onChange, label, readOnly = f
     if (href == null) return;
     const trimmed = href.trim();
     if (!SAFE_LINK.test(trimmed)) {
-      window.alert("Use a link that starts with https://, http://, mailto:, tel:, / or #.");
+      window.alert("Use an HTTP, HTTPS, mailto or tel link, or a site path beginning with a single /.");
       return;
     }
     applyToActive(() => runCommand("createLink", trimmed));

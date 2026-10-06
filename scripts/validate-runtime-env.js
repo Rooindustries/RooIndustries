@@ -428,6 +428,13 @@ if (
   }
 }
 
+for (const name of ["DATA_PRIMARY_BACKEND", "COMMERCE_PRIMARY_BACKEND"]) {
+  const value = String(process.env[name] || "").trim().toLowerCase();
+  if (!["", "supabase", "sanity"].includes(value)) {
+    console.error(`${name} must be empty, supabase or sanity.`);
+    process.exit(1);
+  }
+}
 const primaryBackend = normalizeBackend(
   getFirstValue(["DATA_PRIMARY_BACKEND"]),
   "supabase"

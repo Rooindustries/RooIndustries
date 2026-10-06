@@ -51,7 +51,7 @@ import {
 } from "../payment/paymentRecord.js";
 import { assertBookingReplayMatches, commitBookingTransaction } from "./bookingCommit.js";
 import { reserveCouponUse } from "./couponReservations.js";
-import { applyBookingRefund } from "./bookingRefunds.js";
+import { applyBookingRefund, resolvePaymentCurrency } from "./bookingRefunds.js";
 import {
   verifyFrozenUpgradeIntent,
   verifyUpgradeIntentToken,
@@ -730,6 +730,9 @@ export default async function handler(req, res) {
 
       const partialRefund = bookingDoc.paymentRefundVerification;
       if (partialRefund?.refundStatus === "partial" && partialRefund.provider === normalizedProvider) {
+        const currencies = new Set(partialRefund.refunds.map(refund => refund.currency).filter(Boolean));
+        if (currencies.size > 1) throw Object.assign(new Error("Refund currencies do not agree."), { status: 409, code: "refund_currency_mismatch" });
+        const refundCurrency = currencies.size ? [...currencies][0] : resolvePaymentCurrency(existingRecord || {}, { booking: bookingDoc, fallback: normalizedProvider === "paypal" ? DEFAULT_PAYPAL_CURRENCY : DEFAULT_RAZORPAY_CURRENCY });
         const refunds = new Map((existingRecord?.refunds || []).map(refund => [refund.providerRefundId, refund]));
         for (const refund of partialRefund.refunds) {
           const previous = refunds.get(refund.id);
@@ -758,7 +761,7 @@ export default async function handler(req, res) {
         Object.assign(doc, {
           refunds: [...refunds.values()],
           refundState: "partial",
-          refundCurrency: normalizedProvider === "paypal" ? DEFAULT_PAYPAL_CURRENCY : DEFAULT_RAZORPAY_CURRENCY,
+          refundCurrency,
           refundProcessedAmountInSubunits: processed.reduce((sum, refund) => sum + refund.amountInSubunits, 0),
           providerRefundStatus: "partial",
           providerRefundObservedAmountInSubunits: Math.max(Number(existingRecord?.providerRefundObservedAmountInSubunits || 0), partialRefund.amountRefundedInSubunits),

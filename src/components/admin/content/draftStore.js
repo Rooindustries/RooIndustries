@@ -13,7 +13,9 @@ export const draftKey = ({ documentId, type, createIntentId }) =>
 
 export const saveDraft = (key, draft) => {
   try {
-    storage()?.setItem(key, JSON.stringify({ ...draft, savedAt: new Date().toISOString() }));
+    const store = storage();
+    if (!store) return false;
+    store.setItem(key, JSON.stringify({ ...draft, savedAt: new Date().toISOString() }));
     return true;
   } catch {
     return false;

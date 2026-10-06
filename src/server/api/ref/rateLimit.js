@@ -10,6 +10,7 @@ const TEST_BUCKETS =
 const MAX_RETRIES = 5;
 const COMMERCE_KEY_PREFIXES = [
   "admin-content-key:",
+  "admin-content-login:",
   "payment-start:",
   "payment-quote:",
   "hold-slot:",

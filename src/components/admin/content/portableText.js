@@ -1,3 +1,4 @@
+import { isValidPublishLink } from "../../../lib/cms/contentSchema";
 import { newKey, stableJson } from "./documentPaths";
 
 export const BLOCK_STYLES = [
@@ -39,7 +40,7 @@ const TAG_DECORATORS = {
 
 const DECORATOR_ORDER = ["strong", "em", "underline", "strike-through", "code"];
 
-export const SAFE_LINK = /^(https?:\/\/|mailto:|tel:|\/|#)/i;
+export const SAFE_LINK = { test: isValidPublishLink };
 
 export const emptyBlock = (template = {}) => ({
   _type: "block",
@@ -133,6 +134,7 @@ const collectRuns = (root, original) => {
       if (current.tagName === "A" || current.hasAttribute("data-mark-key")) {
         let key = current.getAttribute("data-mark-key");
         const href = current.getAttribute("href") || "";
+        if (current.tagName === "A" && !SAFE_LINK.test(href)) continue;
         if (!key || !defs.has(key)) {
           key = key || newKey();
           current.setAttribute("data-mark-key", key);

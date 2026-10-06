@@ -2524,6 +2524,8 @@ const validUrl = (value, schemes, relative = false) => {
   try { const url = new URL(value); return schemes.includes(url.protocol.slice(0, -1)) && !url.username && !url.password; } catch { return false; }
 };
 
+export const isValidPublishLink = value => validUrl(value, ["http", "https", "mailto", "tel"], true);
+
 export const validateContentDocument = (typeName, document, { current } = {}) => {
   const errors = [];
   const fail = (path, message) => { if (errors.length < 100) errors.push({ path, message }); };
@@ -2583,7 +2585,7 @@ export const validateContentDocument = (typeName, document, { current } = {}) =>
       if (definitionKeys.has(mark._key)) fail(p, "Annotation keys must be unique.");
       definitionKeys.add(mark._key);
       unknown(mark, new Set(["href"]), previous?.markDefs?.find(x => x._key === mark._key), p);
-      if (mark._type !== "link" || !validUrl(mark.href, ["http", "https", "mailto", "tel"], true)) fail(p, "A link with a supported URL is required.");
+      if (mark._type !== "link" || !isValidPublishLink(mark.href)) fail(p, "A link with a supported URL is required.");
     });
     const childKeys = new Set();
     value.children.forEach((span, i) => {

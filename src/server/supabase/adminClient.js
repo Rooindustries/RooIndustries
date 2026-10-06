@@ -50,6 +50,7 @@ const postgrestErrorCode = async (response) => {
 export const createSupabaseAdminFetch = ({
   signal,
   fetchImpl = fetch,
+  storageTransferTimeoutMs = 30000,
 } = {}) => {
   const request = (input, init = {}) => fetchImpl(input, {
     ...init,
@@ -58,7 +59,9 @@ export const createSupabaseAdminFetch = ({
       : init.signal || signal,
   });
   return async (input, init = {}) => {
-    init = {...init,signal:AbortSignal.any([AbortSignal.timeout(30000),signal,init.signal].filter(Boolean))};
+    const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+    const transfer = url.pathname.startsWith("/storage/v1/object/");
+    init = {...init,signal:AbortSignal.any([AbortSignal.timeout(transfer ? storageTransferTimeoutMs : 30000),signal,init.signal].filter(Boolean))};
     const retryInput =
       typeof Request !== "undefined" && input instanceof Request
         ? input.clone()
@@ -75,10 +78,10 @@ export const createSupabaseAdminFetch = ({
   };
 };
 
-export const createSupabaseAdminClient = ({ env = process.env, signal } = {}) => {
+export const createSupabaseAdminClient = ({ env = process.env, signal, storageTransferTimeoutMs = 30000 } = {}) => {
   const { url, secretKey } = resolveSupabaseAdminEnv(env);
   if (
-    !signal &&
+    !signal && storageTransferTimeoutMs === 30000 &&
     env === process.env &&
     cachedClient &&
     cachedUrl === url &&
@@ -96,11 +99,11 @@ export const createSupabaseAdminClient = ({ env = process.env, signal } = {}) =>
     db: { schema: "public" },
     global: {
       headers: { "X-Client-Info": "roo-industries-server" },
-      fetch: createSupabaseAdminFetch({ signal }),
+      fetch: createSupabaseAdminFetch({ signal, storageTransferTimeoutMs }),
     },
   });
 
-  if (!signal && env === process.env) {
+  if (!signal && storageTransferTimeoutMs === 30000 && env === process.env) {
     cachedClient = client;
     cachedUrl = url;
     cachedSecretKey = secretKey;
