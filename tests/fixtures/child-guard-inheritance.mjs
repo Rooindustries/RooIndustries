@@ -181,7 +181,8 @@ if (!process.argv.includes('--parent')) {
     try { assert.throws(execute, /test-target/); rows.push({ name, passed: true }); }
     catch (error) { rows.push({ name, passed: false, error: error.message }); }
   }
-  const alternateNode = ['/home/serviroo/.hermes/node/bin/node', '/home/serviroo/.nvm/versions/node/v22.22.0/bin/node'].find(binary => fs.existsSync(binary) && fs.realpathSync(binary) !== fs.realpathSync(process.execPath));
+  const candidateNode = process.env.ROO_TEST_ALTERNATE_NODE;
+  const alternateNode = candidateNode && fs.existsSync(candidateNode) && fs.realpathSync(candidateNode) !== fs.realpathSync(process.execPath) ? candidateNode : undefined;
   if (alternateNode) {
     const alternateAlias = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'roo-child-alternate-node-')), 'python3');
     try { fs.linkSync(alternateNode, alternateAlias); } catch (error) { if (error.code !== 'EXDEV') throw error; fs.copyFileSync(alternateNode, alternateAlias); }
