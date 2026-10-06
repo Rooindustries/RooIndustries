@@ -1,6 +1,11 @@
 const cleanId = (value) => String(value || "").trim();
 
-const GENERIC_ID_PREFIX = /^(?:booking|order|pay|cks|paymentrecord)[._-]?$/i;
+const GENERIC_ID_PREFIX =
+  /^(?:(?:booking|order|pay|cks|paymentrecord|session)[._-]+)+/i;
+const MIN_PARTIAL_ID_LENGTH = 8;
+
+const identifierCore = (value) =>
+  String(value || "").toLowerCase().replace(GENERIC_ID_PREFIX, "");
 
 export const BOOKING_IDENTIFIER_FIELDS = [
   "orderId",
@@ -31,13 +36,17 @@ export const bookingIdentifierValues = (booking) =>
 
 export const submittedOrderIdMatchesBooking = (submitted, booking) => {
   const needle = normalizeSubmittedOrderId(submitted).toLowerCase();
-  if (!needle || GENERIC_ID_PREFIX.test(needle)) return false;
-  return bookingIdentifierValues(booking).some(
-    (value) =>
+  const core = identifierCore(needle);
+  if (core.length < MIN_PARTIAL_ID_LENGTH) return false;
+  return bookingIdentifierValues(booking).some((value) => {
+    const valueCore = identifierCore(value);
+    return (
       value === needle ||
-      (needle.length >= 8 && value.includes(needle)) ||
-      (value.length >= 8 && needle.includes(value))
-  );
+      valueCore === core ||
+      valueCore.includes(core) ||
+      (valueCore.length >= MIN_PARTIAL_ID_LENGTH && core.includes(valueCore))
+    );
+  });
 };
 
 export const isBookingDocument = (doc) => doc?._type === "booking" && !!doc?._id;

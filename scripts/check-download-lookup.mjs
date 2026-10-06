@@ -26,24 +26,29 @@ if (!booking) {
 }
 
 const ids = [
-  booking._id,
-  booking.orderId,
-  booking.dodoPaymentId,
-  booking.dodoCheckoutSessionId,
-  booking.paypalOrderId,
-  booking.razorpayOrderId,
-  booking.razorpayPaymentId,
-].filter(Boolean);
+  "_id",
+  "orderId",
+  "dodoPaymentId",
+  "dodoCheckoutSessionId",
+  "paypalOrderId",
+  "razorpayOrderId",
+  "razorpayPaymentId",
+]
+  .map((field) => [field, booking[field]])
+  .filter(([, value]) => value);
 const bare = booking._id.replace(/^booking[._]/, "");
 
 const cases = [
-  ...ids.map((id) => ({ label: `exact ${id}`, orderId: id, email, expect: 200 })),
-  ...ids.map((id) => ({ label: `lowercase ${id}`, orderId: id.toLowerCase(), email, expect: 200 })),
+  ...ids.map(([field, id]) => ({ label: `exact ${field}`, orderId: id, email, expect: 200 })),
+  ...ids.map(([field, id]) => ({ label: `lowercase ${field}`, orderId: id.toLowerCase(), email, expect: 200 })),
   { label: "uppercase email", orderId: booking._id, email: email.toUpperCase(), expect: 200 },
   { label: "labelled Order ID", orderId: `Order ID: ${booking._id}.`, email, expect: 200 },
   { label: "quoted with spaces", orderId: ` "${booking._id} " `, email, expect: 200 },
   { label: "id without booking prefix", orderId: bare, email, expect: 200 },
   { label: "last 12 chars with email", orderId: booking._id.slice(-12), email, expect: 200 },
+  { label: "guessable prefix booking.0 with email", orderId: `booking.${bare[0]}`, email, expect: 404, errorIncludes: "No paid booking found" },
+  { label: "seven-char fragment with email", orderId: `booking.${bare.slice(0, 7)}`, email, expect: 404, errorIncludes: "No paid booking found" },
+  { label: "bare generic prefix with email", orderId: "booking.", email, expect: 404, errorIncludes: "No paid booking found" },
   { label: "foreign id with email", orderId: "INV-0000-FOREIGN", email, expect: 404, errorIncludes: "No paid booking found" },
   { label: "right id wrong email", orderId: booking._id, email: "nobody@example.invalid", expect: 404, errorIncludes: "No paid booking found" },
   { label: "unknown id unknown email", orderId: "nothing-here-123", email: "nobody@example.invalid", expect: 404, errorIncludes: "No paid booking found" },
@@ -72,10 +77,9 @@ for (const testCase of cases) {
 const artifact = {
   checkedAt: new Date().toISOString(),
   slug,
-  bookingId: booking._id,
   passed: results.length - failed,
   failed,
-  results: results.map(({ email: _email, ...rest }) => rest),
+  results: results.map(({ label, expect, status, ok }) => ({ label, expect, status, ok })),
 };
 fs.mkdirSync("output", { recursive: true });
 fs.writeFileSync("output/download-lookup-check.json", JSON.stringify(artifact, null, 2));
