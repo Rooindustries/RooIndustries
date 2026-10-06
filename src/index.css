@@ -2906,6 +2906,7 @@ html.perf-reduced-motion-mode {
 .ri-reviews-viewport {
   scrollbar-width: none;
   -ms-overflow-style: none;
+  overscroll-behavior-x: contain;
 }
 
 .ri-review-champagne-text {

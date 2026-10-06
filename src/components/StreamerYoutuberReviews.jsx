@@ -10,7 +10,41 @@ import {
 const titleClass =
   "text-[28px] sm:text-[32px] md:text-[36px] leading-tight font-extrabold text-center tracking-tight " +
   "text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]";
-const AUTO_SCROLL_PIXELS_PER_SECOND = 20;
+const AUTO_SCROLL_PIXELS_PER_SECOND = 24;
+const AUTO_SCROLL_RESUME_DELAY_MS = 1500;
+const AUTO_SCROLL_RAMP_MS = 900;
+const WHEEL_ACTIVE_MS = 150;
+const ARROW_SCROLL_MS = 450;
+const MAX_FRAME_MS = 100;
+const REVIEW_CARD_GAP = 16;
+const MIN_REVIEW_GROUPS = 3;
+
+const getReviewKey = (review) => review._id || review.name || "review";
+const easeInOut = (progress) =>
+  progress < 0.5 ? 2 * progress * progress : 1 - (2 - 2 * progress) ** 2 / 2;
+const easeOut = (progress) => 1 - (1 - progress) ** 3;
+
+const readReviewScroll = (viewport, motion) => {
+  if (Math.abs(viewport.scrollLeft - motion.written) >= 1) {
+    motion.position = viewport.scrollLeft;
+  }
+  return motion.position;
+};
+
+const commitReviewScroll = (viewport, motion, position) => {
+  const { groupWidth } = motion;
+  const shift = groupWidth > 0 ? -Math.floor((position - groupWidth) / groupWidth) * groupWidth : 0;
+  if (shift) {
+    if (motion.drag) motion.drag.startScrollLeft += shift;
+    if (motion.arrow) {
+      motion.arrow.from += shift;
+      motion.arrow.to += shift;
+    }
+  }
+  motion.position = position + shift;
+  viewport.scrollLeft = motion.position;
+  motion.written = viewport.scrollLeft;
+};
 
 const getReviewAvatarUrl = (pfp) => {
   const optimized = urlFor(pfp)
@@ -154,13 +188,15 @@ function parseFpsResult(value) {
   };
 }
 
-function ReviewCard({ review }) {
+function ReviewCard({ review, groupIndex }) {
   const isCreator = Boolean(review.isVip);
   const result = parseFpsResult(review.optimizationResult);
   const rating = Math.max(1, Math.min(5, Math.round(Number(review.rating) || 5)));
 
   return (
     <article
+      data-review-id={getReviewKey(review)}
+      data-group-index={groupIndex}
       className={`ri-review-card ${
         isCreator ? "ri-review-card-creator" : "ri-review-card-standard"
       } flex flex-col w-[320px] sm:w-[360px] min-h-[184px] p-3 rounded-xl text-left flex-shrink-0`}
@@ -243,42 +279,133 @@ function ReviewCard({ review }) {
 function AutoReviewCarousel({ reviews }) {
   const viewportRef = useRef(null);
   const firstGroupRef = useRef(null);
-  const pauseUntilRef = useRef(0);
-  const dragRef = useRef(null);
+  const motionRef = useRef({
+    groupWidth: 0,
+    position: 0,
+    written: 0,
+    drag: null,
+    arrow: null,
+    touching: false,
+    wheelAt: -Infinity,
+    interactedAt: -Infinity,
+    wake: null,
+  });
+  const [groupCount, setGroupCount] = useState(1);
 
   useEffect(() => {
-    let previousTime = performance.now();
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-    let paused = false;
-    const updatePause = () => {
-      paused = reducedMotion.matches || (isPerfDebugEnabled() && getPerfToggleEnabled(PERF_TOGGLE_KEYS.PAUSE_REVIEWS_AUTOPLAY));
-    };
-    updatePause();
-    reducedMotion.addEventListener("change", updatePause);
-    window.addEventListener(PERF_DEBUG_EVENT, updatePause);
+    const viewport = viewportRef.current;
+    const firstGroup = firstGroupRef.current;
+    if (!viewport || !firstGroup) return undefined;
+    const motion = motionRef.current;
 
-    const tick = () => {
-      const time = performance.now();
-      const viewport = viewportRef.current;
-      const firstGroup = firstGroupRef.current;
-      if (viewport && firstGroup) {
-        const elapsed = Math.min(time - previousTime, 1000);
-        previousTime = time;
-        const loopWidth = firstGroup.scrollWidth;
-        if (!paused && time >= pauseUntilRef.current && loopWidth > 0) {
-          viewport.scrollLeft +=
-            (AUTO_SCROLL_PIXELS_PER_SECOND * elapsed) / 1000;
-          if (viewport.scrollLeft >= loopWidth) {
-            viewport.scrollLeft -= loopWidth;
-          }
-        }
+    const measure = () => {
+      const groupWidth = firstGroup.scrollWidth;
+      if (!groupWidth) return;
+      const neededGroups = Math.max(
+        MIN_REVIEW_GROUPS,
+        Math.ceil((2 * viewport.clientWidth) / groupWidth) + 2
+      );
+      if (neededGroups !== groupCount) {
+        motion.groupWidth = 0;
+        setGroupCount(neededGroups);
+        return;
+      }
+      if (motion.groupWidth !== groupWidth) {
+        const position = motion.groupWidth ? readReviewScroll(viewport, motion) : viewport.scrollLeft;
+        motion.groupWidth = groupWidth;
+        commitReviewScroll(viewport, motion, position);
       }
     };
 
-    const intervalId = window.setInterval(tick, 50);
+    measure();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    observer.observe(firstGroup);
+    return () => observer.disconnect();
+  }, [groupCount, reviews.length]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return undefined;
+    const motion = motionRef.current;
+    let paused = false;
+    let visible = true;
+    let previousTime = 0;
+    let frameId = 0;
+    const needsFrames = () => Boolean(motion.arrow) || (visible && !paused);
+
+    const frame = (time) => {
+      frameId = 0;
+      const elapsed = Math.min(Math.max(time - previousTime, 0), MAX_FRAME_MS);
+      previousTime = time;
+      const { groupWidth, arrow } = motion;
+      if (groupWidth) {
+        let position = readReviewScroll(viewport, motion);
+        if (arrow) {
+          arrow.startedAt ??= time;
+          const progress = Math.min(1, (time - arrow.startedAt) / ARROW_SCROLL_MS);
+          position = arrow.from + (arrow.to - arrow.from) * easeInOut(progress);
+          if (progress === 1) motion.arrow = null;
+        }
+        if (arrow || motion.drag || motion.touching || time - motion.wheelAt < WHEEL_ACTIVE_MS) {
+          motion.interactedAt = time;
+        } else if (!paused && visible) {
+          const idle = time - motion.interactedAt - AUTO_SCROLL_RESUME_DELAY_MS;
+          if (idle > 0) {
+            position +=
+              (AUTO_SCROLL_PIXELS_PER_SECOND * easeOut(Math.min(1, idle / AUTO_SCROLL_RAMP_MS)) * elapsed) /
+              1000;
+          }
+        }
+        if (position !== motion.position || position < groupWidth || position >= groupWidth * 2) {
+          commitReviewScroll(viewport, motion, position);
+        }
+      }
+      if (needsFrames()) frameId = window.requestAnimationFrame(frame);
+    };
+    const wake = () => {
+      if (frameId || !needsFrames()) return;
+      previousTime = performance.now();
+      frameId = window.requestAnimationFrame(frame);
+    };
+    motion.wake = wake;
+
+    const updatePause = () => {
+      paused = isPerfDebugEnabled() && getPerfToggleEnabled(PERF_TOGGLE_KEYS.PAUSE_REVIEWS_AUTOPLAY);
+      wake();
+    };
+    updatePause();
+    window.addEventListener(PERF_DEBUG_EVENT, updatePause);
+
+    const visibilityObserver =
+      typeof IntersectionObserver === "undefined"
+        ? null
+        : new IntersectionObserver((entries) => {
+            visible = entries[entries.length - 1].isIntersecting;
+            wake();
+          });
+    visibilityObserver?.observe(viewport);
+
+    const onScroll = () => {
+      const { groupWidth } = motion;
+      if (!groupWidth) return;
+      if (Math.abs(viewport.scrollLeft - motion.written) >= 1) {
+        motion.interactedAt = performance.now();
+        motion.arrow = null;
+      }
+      const position = readReviewScroll(viewport, motion);
+      if (position < groupWidth || position >= groupWidth * 2) {
+        commitReviewScroll(viewport, motion, position);
+      }
+    };
+    viewport.addEventListener("scroll", onScroll, { passive: true });
+
     return () => {
-      window.clearInterval(intervalId);
-      reducedMotion.removeEventListener("change", updatePause);
+      if (frameId) window.cancelAnimationFrame(frameId);
+      motion.wake = null;
+      viewport.removeEventListener("scroll", onScroll);
+      visibilityObserver?.disconnect();
       window.removeEventListener(PERF_DEBUG_EVENT, updatePause);
     };
   }, [reviews.length]);
@@ -290,43 +417,72 @@ function AutoReviewCarousel({ reviews }) {
     ...reviews.filter((review) => !review.isVip),
   ];
 
-  const pauseAutoScroll = (milliseconds = 2400) => {
-    pauseUntilRef.current = performance.now() + milliseconds;
+  const markInteraction = () => {
+    const motion = motionRef.current;
+    motion.interactedAt = performance.now();
+    motion.arrow = null;
+    return motion;
   };
 
   const scrollReviews = (direction) => {
     const viewport = viewportRef.current;
-    if (!viewport) return;
-    pauseAutoScroll();
-    viewport.scrollBy({
-      left: direction * Math.min(376, viewport.clientWidth * 0.8),
-      behavior: "auto",
-    });
+    const card = firstGroupRef.current?.firstElementChild;
+    if (!viewport || !card) return;
+    const motion = motionRef.current;
+    const position = readReviewScroll(viewport, motion);
+    const target = (motion.arrow?.to ?? position) + direction * (card.offsetWidth + REVIEW_CARD_GAP);
+    motion.interactedAt = performance.now();
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      motion.arrow = null;
+      commitReviewScroll(viewport, motion, target);
+      return;
+    }
+    motion.arrow = { from: position, to: target, startedAt: null };
+    motion.wake?.();
+  };
+
+  const onWheel = (event) => {
+    if (!event.deltaX && !event.shiftKey) return;
+    markInteraction().wheelAt = performance.now();
+  };
+
+  const onTouchStart = () => {
+    markInteraction().touching = true;
+  };
+
+  const onTouchEnd = () => {
+    markInteraction().touching = false;
   };
 
   const onPointerDown = (event) => {
-    if (event.pointerType !== "mouse" || !viewportRef.current) return;
-    pauseAutoScroll(10000);
-    dragRef.current = {
+    const viewport = viewportRef.current;
+    if (event.pointerType !== "mouse" || event.button !== 0 || !viewport) return;
+    const motion = markInteraction();
+    motion.drag = {
       pointerId: event.pointerId,
       startX: event.clientX,
-      startScrollLeft: viewportRef.current.scrollLeft,
+      startScrollLeft: readReviewScroll(viewport, motion),
     };
-    viewportRef.current.setPointerCapture(event.pointerId);
+    viewport.setPointerCapture(event.pointerId);
   };
 
   const onPointerMove = (event) => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId || !viewportRef.current) return;
-    viewportRef.current.scrollLeft =
-      drag.startScrollLeft - (event.clientX - drag.startX);
+    const viewport = viewportRef.current;
+    const drag = motionRef.current.drag;
+    if (!drag || drag.pointerId !== event.pointerId || !viewport) return;
+    commitReviewScroll(
+      viewport,
+      motionRef.current,
+      drag.startScrollLeft - (event.clientX - drag.startX)
+    );
   };
 
   const onPointerUp = (event) => {
-    if (dragRef.current?.pointerId !== event.pointerId) return;
-    dragRef.current = null;
-    pauseAutoScroll();
-    viewportRef.current?.releasePointerCapture(event.pointerId);
+    if (motionRef.current.drag?.pointerId !== event.pointerId) return;
+    markInteraction().drag = null;
+    if (viewportRef.current?.hasPointerCapture(event.pointerId)) {
+      viewportRef.current.releasePointerCapture(event.pointerId);
+    }
   };
 
   return (
@@ -336,26 +492,29 @@ function AutoReviewCarousel({ reviews }) {
         className="ri-reviews-viewport w-full overflow-x-auto overflow-y-hidden cursor-grab active:cursor-grabbing select-none"
         role="region"
         aria-label="Player reviews"
-        onWheel={() => pauseAutoScroll()}
-        onTouchStart={() => pauseAutoScroll(10000)}
-        onTouchEnd={() => pauseAutoScroll()}
+        onWheel={onWheel}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        onLostPointerCapture={onPointerUp}
       >
         <div className="ri-reviews-auto-track flex w-max items-stretch">
-        {[0, 1].map((groupIndex) => (
+        {Array.from({ length: groupCount }, (_, groupIndex) => (
           <div
             key={groupIndex}
             ref={groupIndex === 0 ? firstGroupRef : undefined}
             className="flex items-stretch gap-4 pr-4"
-            aria-hidden={groupIndex === 1 ? "true" : undefined}
+            aria-hidden={groupIndex > 0 ? "true" : undefined}
           >
             {orderedReviews.map((review, reviewIndex) => (
               <ReviewCard
-                key={`${review._id || review.name || "review"}-${reviewIndex}`}
+                key={`${getReviewKey(review)}-${reviewIndex}`}
                 review={review}
+                groupIndex={groupIndex}
               />
             ))}
           </div>
