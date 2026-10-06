@@ -1,0 +1,6 @@
+{
+  "effort": "auto",
+  "autoReview": ["open"],
+  "commentTypes": ["logic", "syntax"],
+  "ignorePatterns": "package-lock.json\nscripts/fixtures/**\nsupabase/release/**/rollback-captured-*.sql\ntest-results/**\n**/*.snap"
+}
