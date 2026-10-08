@@ -18,8 +18,9 @@ const legacyVendorEnvironment=process.argv.includes('--leftover-vendor-env');
 const sourceText=name=>fs.readFileSync(path.join(process.cwd(),name),'utf8');
 const a1Mode=process.argv.includes('--a1')||process.argv.some(v=>v.startsWith('--scenario=')&&v.includes('a1-'));
 const restores=[];
-for(const key of Object.keys(process.env))if(/^(SANITY|SUPABASE|PAYPAL|RAZORPAY|DODO|REACT_APP_|NEXT_PUBLIC_|ALLOW_LIVE_|RESEND|BOOKING_EMAIL|DATA_|COMMERCE_|VERCEL_ENV|REF_SESSION|CRON_|RATE_LIMIT_|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|http_proxy|https_proxy|all_proxy|NODE_USE_ENV_PROXY)/.test(key))delete process.env[key];
-if(a1Mode||process.argv.includes('--a2'))Object.assign(process.env,{RESEND_API_KEY:'re_fixture',FROM_EMAIL:'noreply@example.invalid',OWNER_EMAIL:'owner@example.invalid'});
+for(const key of Object.keys(process.env))if(/^(SANITY|SUPABASE|PAYPAL|RAZORPAY|DODO|REACT_APP_|NEXT_PUBLIC_|ALLOW_LIVE_|RESEND|BOOKING_EMAIL|FROM_EMAIL|OWNER_EMAIL|DATA_|COMMERCE_|VERCEL_ENV|REF_SESSION|CRON_|RATE_LIMIT_|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|http_proxy|https_proxy|all_proxy|NODE_USE_ENV_PROXY)/.test(key))delete process.env[key];
+process.env.RESEND_API_KEY='re_fixture';
+if(a1Mode||process.argv.includes('--a2'))Object.assign(process.env,{FROM_EMAIL:'noreply@example.invalid',OWNER_EMAIL:'owner@example.invalid'});
 Object.assign(process.env,{NODE_ENV:'test',VERCEL_ENV:'development',DATA_PRIMARY_BACKEND:'supabase',COMMERCE_PRIMARY_BACKEND:'supabase',COMMERCE_FAILOVER_GENERATION:'0',PAYPAL_ENV:'sandbox',PAYPAL_CLIENT_ID:'fixture-client',PAYPAL_CLIENT_SECRET:'fixture-secret',PAYPAL_WEBHOOK_ID:'fixture-webhook',RAZORPAY_KEY_ID:'rzp_test_fixture',RAZORPAY_KEY_SECRET:'fixture-secret',RAZORPAY_WEBHOOK_SECRET:'fixture-webhook-secret',PAYMENT_SESSION_SECRET:'fixture-session-secret',REF_SESSION_SECRET:'fixture-ref-session-secret',CRON_SECRET:'fixture-cron',DODO_PAYMENTS_ENVIRONMENT:'test_mode',DODO_PAYMENTS_API_KEY:'fixture-dodo',DODO_PAYMENTS_WEBHOOK_KEY:`whsec_${Buffer.from('fixture-dodo-secret').toString('base64')}`,DODO_PAYMENTS_PRODUCT_ID:'pdt_fixture',DODO_PAYMENTS_RETURN_URL:'https://example.invalid/checkout'});
 if(legacyVendorEnvironment)Object.assign(process.env,{SANITY_PROJECT_ID:'synthetic-ignored',SANITY_DATASET:'production',SANITY_READ_TOKEN:'synthetic-ignored-read',SANITY_WRITE_TOKEN:'synthetic-ignored-write',SANITY_API_VERSION:'2023-10-01',NEXT_PUBLIC_SANITY_PROJECT_ID:'synthetic-ignored',NEXT_PUBLIC_SANITY_DATASET:'synthetic-ignored',SANITY_PRIVATE_API_VERSION:'synthetic-ignored',SANITY_PRIVATE_DATASET:'synthetic-ignored',SANITY_PRIVATE_PROJECT_ID:'synthetic-ignored',SANITY_PRIVATE_READ_TOKEN:'synthetic-ignored',SANITY_PRIVATE_WRITE_TOKEN:'synthetic-ignored',SANITY_USER_API_VERSION:'synthetic-ignored',SANITY_WEBHOOK_SECRET:'synthetic-ignored',SANITY_REVERSE_MIRROR_WRITES:'1',SANITY_STUDIO_CMS_WRITES_PAUSED:'1'});
 if(process.argv.includes('--currency-config'))Object.assign(process.env,{PAYPAL_CURRENCY:'EUR',RAZORPAY_CURRENCY:'KWD'});
@@ -35,13 +36,15 @@ registerHooks({resolve(specifier,context,nextResolve){try{return nextResolve(spe
 const only=process.argv.find(v=>v.startsWith('--scenario='))?.slice(11).split(',');
 const a2Mode=process.argv.includes('--a2');
 const currencyMode=process.argv.includes('--currency-config');
-const supportedScenario=name=>(!name.startsWith('a1-')||a1Mode)&&
+const recoveryMode = process.argv.includes('--recovery');
+const supportedScenario=name=>(!recoveryMode || name.startsWith('recovery-')) &&
+  (!name.startsWith('a1-')||a1Mode)&&
   (!/^(a2-|fix-c-legacy-)/.test(name)||a2Mode)&&
   (!name.startsWith('currency-configured-')||currencyMode)&&
   (!name.startsWith('gate-')||a2Mode);
 if(only?.some(name=>!supportedScenario(name)))throw new Error('Selected fixture group requires --a1, --a2, or --currency-config; use the documented matching flag.');
 const artifact=path.resolve(process.env.ROO_PAYMENT_PERSISTENCE_ARTIFACT||'test-results/payment-persistence-sweep.json');
-const evidence={checkedAt:new Date().toISOString(),productionRequests:0,scenarios:[],standIns:[{boundary:'Provider HTTP',scope:'Synthetic PayPal/Razorpay/Dodo response shapes and held requests/disconnects through actual provider clients and Dodo SDK; no live API.'},{boundary:'Clock',scope:'For takeover cases Date.now advances91000ms inside this isolated process; stored90s lease timestamps and actual native projection remain real. PostgreSQL clock is not changed.'},{boundary:'Auth HTTP',scope:'Synthetic signed user response; actual installed SSR/AuthSDK selects submitted cookies and actual account/domain SQL evaluates identity. Hosted GoTrue excluded.'},{boundary:'Local infrastructure/grants',scope:'Shared fixture bootstrap auth/storage tables and expanded service_role grants. Actual repository account/commerce/migration SQL; hosted RLS and migration ledger excluded.'}],limits:['No Sanity query engine, hosted GoTrue/RLS, provider services, UI/browser, production Next server or full build.']};
+const evidence={checkedAt:new Date().toISOString(),productionRequests:0,scenarios:[],standIns:[{boundary:'Provider HTTP',scope:'Synthetic PayPal/Razorpay/Dodo response shapes and held requests/disconnects through actual provider clients and Dodo SDK; no live API.'},{boundary:'Coupon dependency failure',scope:'The release case throws through an injected callback; release-stored reruns the boundary through the real coupon release module against a missing revision in PostgreSQL.'},{boundary:'Clock',scope:'For takeover cases Date.now advances91000ms inside this isolated process; stored90s lease timestamps and actual native projection remain real. PostgreSQL clock is not changed.'},{boundary:'Auth HTTP',scope:'Synthetic signed user response; actual installed SSR/AuthSDK selects submitted cookies and actual account/domain SQL evaluates identity. Hosted GoTrue excluded.'},{boundary:'Local infrastructure/grants',scope:'Shared fixture bootstrap auth/storage tables and expanded service_role grants. Actual repository account/commerce/migration SQL; hosted RLS and migration ledger excluded.'}],limits:['No Sanity query engine, hosted GoTrue/RLS, provider services, UI/browser, production Next server or full build.']};
 let fixture,server,origin,commerce,documents,flow,access,sql,providers,a1Ui;
 evidence.sourceEdition='current source';
 let razorpayRefunds=[];
@@ -108,7 +111,36 @@ const a1RebuildProof=async(name)=>{
   for(const rebuilt of Object.values(rebuilds))assert.deepEqual(rebuilt,incremental);
   return{incremental,...rebuilds,ignoredFields:['imported_at','updated_at'],sourceFinancialAndEmailFieldsIdentical:true};
 };
-const run=async(name,fn)=>{if(!supportedScenario(name)||(only&&!only.includes(name)))return;const start=originalNow();let proof;try{await reset();proof=await fn();if(/^a1-.*(?:-client-(?:cron|webhook)|-uppercase-referral-preserved-payload-(?:cron|webhook)|-email-failure-completion-and-retry)$/.test(name))proof.fullProjectionProof=await a1RebuildProof(name);evidence.scenarios.push({name,passed:true,durationMs:originalNow()-start,proof,persisted:await snapshot({receipts:true}),providerRequests:[...providerRequests]});}catch(error){evidence.scenarios.push({name,passed:false,durationMs:originalNow()-start,error:error.message,code:error.code,stack:error.stack,proof,providerRequests:[...providerRequests],persisted:await snapshot({receipts:true}).catch(()=>null)});}finally{Date.now=originalNow;providerHook=null;fixture.setRequestHook(null);}};
+const run = async (name, fn) => {
+  if (!supportedScenario(name) || (only && !only.includes(name))) return;
+  const emailSettings = { FROM_EMAIL: process.env.FROM_EMAIL, OWNER_EMAIL: process.env.OWNER_EMAIL };
+  if (name.startsWith('recovery-')) {
+    Object.assign(process.env, { FROM_EMAIL: 'noreply@example.invalid', OWNER_EMAIL: 'owner@example.invalid' });
+  }
+  const start = originalNow();
+  let proof;
+  try {
+    await reset();
+    proof = await fn();
+    if (/^a1-.*(?:-client-(?:cron|webhook)|-uppercase-referral-preserved-payload-(?:cron|webhook)|-email-failure-completion-and-retry)$/.test(name)) {
+      proof.fullProjectionProof = await a1RebuildProof(name);
+    }
+    evidence.scenarios.push({ name, passed: true, durationMs: originalNow() - start, proof,
+      persisted: await snapshot({ receipts: true }), providerRequests: [...providerRequests] });
+  } catch (error) {
+    evidence.scenarios.push({ name, passed: false, durationMs: originalNow() - start,
+      error: error.message, code: error.code, stack: error.stack, proof,
+      providerRequests: [...providerRequests], persisted: await snapshot({ receipts: true }).catch(() => null) });
+  } finally {
+    for (const [key, value] of Object.entries(emailSettings)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    Date.now = originalNow;
+    providerHook = null;
+    fixture.setRequestHook(null);
+  }
+};
 
 try{
 
@@ -145,7 +177,10 @@ try{
     res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(body));
   }catch(error){if(!res.destroyed){res.writeHead(500,{'content-type':'application/json'});res.end(JSON.stringify({fixtureError:error.message}));}}});
   server.listen(0,host);await once(server,'listening');origin=`http://${host}:${server.address().port}`;
-  const {createSweepPostgresFixture}=await import('./lib/sweep-postgres-fixture.mjs');fixture=fullChain?await (await import('./lib/storage-fixture.mjs')).start({fullMigrationChain:true,additionalOrigins:[origin]}):await createSweepPostgresFixture();sql=fixture.sql;if(!fullChain)await fixture.apply('20261005000500_project_booking_payment_currency_subunits.sql');
+  const { createSweepPostgresFixture } = await import('./lib/sweep-postgres-fixture.mjs');
+  fixture = await createSweepPostgresFixture({ fullMigrationChain: fullChain });
+  sql = fixture.sql;
+  if (!fullChain) await fixture.apply('20261005000500_project_booking_payment_currency_subunits.sql');
   const providerOrigins=new Set(['https://api-m.sandbox.paypal.com','https://api.razorpay.com','https://test.dodopayments.com','https://api.resend.com']);
   globalThis.fetch=(input,init)=>{const url=new URL(typeof input==='string'||input instanceof URL?String(input):input.url);let target;
     if([fixture.origin,origin].includes(url.origin))target=url.href;else if(providerOrigins.has(url.origin))target=`${origin}${url.pathname}${url.search}`;else{blockedNetwork++;throw new Error(`Nonlocal destination blocked ${url.origin}`);}return originalFetch(target,{...init,redirect:'error',signal:init?.signal||AbortSignal.timeout(30000)});};
@@ -256,6 +291,148 @@ try{
     return{input,quote,started,id:payment._id,proof};
   };
   const a1Hook=async provider=>requestFlow(provider,{req:provider==='paypal'?paypalReq('PAYMENT.CAPTURE.COMPLETED',{id:'capture-fixture',supplementary_data:{related_ids:{order_id:'order-fixture'}}}):provider==='razorpay'?razorReq('payment.captured',{payment:{entity:razorpayPayment}}):dodoReq()});
+  for (const mode of ['complete', 'partial', 'missing-details']) await run(`recovery-reschedule-created-${mode}`, async () => {
+    const checkout = await a1Start();
+    const missing = mode === 'missing-details';
+    await commerce.patch(checkout.id).set({
+      status: 'abandoned', verificationState: 'server_verified',
+      recoveryAttemptCount: 11, recoveryFailureCount: 11, reconciliationRecoveryTerminal: true,
+      providerRefundDetailsMissing: missing, nextRecoveryAt: '9999-12-31T23:59:59.999Z',
+    }).commit();
+    emailFailure = mode === 'partial';
+    const result = await a1Hook('paypal');
+    const saved = (await row(checkout.id)).payload;
+    assert.equal(saved.requiresReschedule, true, JSON.stringify({ result, saved }));
+    assert.ok(saved.bookingId);
+    assert.equal(saved.status, mode === 'partial' ? 'email_partial' : 'booked');
+    assert.equal(saved.recoveryFailureCount, 0);
+    assert.equal(saved.reconciliationRecoveryTerminal, missing);
+    return { mode, result, saved, actualRescheduleBookingAndEmail: true };
+  });
+  for (const kind of ['reschedule', 'dodo-email', 'normalized-email']) for (const missing of [false, true]) {
+    await run(`recovery-completed-${kind}-${missing ? 'missing-details' : 'clear'}`, async () => {
+      const reschedule = kind === 'reschedule';
+      const normalized = kind === 'normalized-email';
+      await seed(kind === 'dodo-email' ? 'dodo' : 'paypal', normalized ? 'booked' : 'email_partial', {
+        booking: {
+          paymentRecordId: recordId,
+          recoveryClientNotifiedAt: '2026-01-01T00:00:00.000Z', recoveryOwnerNotifiedAt: '2026-01-01T00:00:00.000Z',
+          emailDispatchClientSentAt: '2026-01-01T00:00:00.000Z', emailDispatchOwnerSentAt: '2026-01-01T00:00:00.000Z',
+        },
+        record: {
+          requiresReschedule: reschedule, recoveryNotificationRequired: reschedule,
+          emailDispatchRequired: !reschedule, emailDispatch: { allSent: normalized },
+          recoveryAttemptCount: 11, recoveryFailureCount: 11, reconciliationRecoveryTerminal: false,
+          providerRefundDetailsMissing: missing, nextRecoveryAt: '',
+        },
+      });
+      const result = await requestFlow('reconcile');
+      const saved = await record();
+      assert.equal(saved.status, 'booked', JSON.stringify({ result, saved }));
+      assert.equal(saved.recoveryFailureCount, 0);
+      assert.equal(saved.reconciliationRecoveryTerminal, missing);
+      let failedRefund;
+      if (reschedule && !missing) {
+        await commerce.patch(recordId).set({ status: 'refunded', refundState: 'full', refundRequiresBookingSync: true,
+          refundProcessedAmountInSubunits: 999, refundCurrency: 'USD', nextRecoveryAt: '' }).commit();
+        await sql.unsafe(`create or replace function public.payment_notification_failure_fixture() returns trigger language plpgsql as $$
+          begin
+            if new.legacy_sanity_id = 'booking.fixture' then raise exception 'Synthetic refund storage failure'; end if;
+            return new;
+          end $$;
+          create trigger payment_notification_failure_fixture before update on migration.source_documents
+          for each row execute function public.payment_notification_failure_fixture();`);
+        try {
+          await requestFlow('reconcile');
+          failedRefund = await record();
+          assert.equal(failedRefund.recoveryFailureCount, 1);
+          assert.equal(failedRefund.reconciliationRecoveryTerminal, false);
+        } finally {
+          await sql.unsafe('drop trigger payment_notification_failure_fixture on migration.source_documents');
+        }
+        const when = new originalDate(failedRefund.nextRecoveryAt).getTime() + 1;
+        globalThis.Date = class extends originalDate {
+          constructor(...args) { super(...(args.length ? args : [when])); }
+          static now() { return when; }
+        };
+        const recovered = await requestFlow('reconcile');
+        assert.equal(recovered.body.summary.refundsSynced, 1);
+        assert.equal((await record()).refundRequiresBookingSync, false);
+        assert.equal((await row(bookingId)).payload.status, 'refunded');
+      }
+      return { kind, missing, result, saved, failedRefund, actualNotificationModules: true };
+    });
+  }
+  await run('recovery-failed-reschedule-notification-retains-streak', async () => {
+    await seed('paypal', 'email_partial', { record: {
+      requiresReschedule: true, recoveryNotificationRequired: true, emailDispatchRequired: false,
+      recoveryAttemptCount: 11, recoveryFailureCount: 11, nextRecoveryAt: '',
+    } });
+    await removeRevision(bookingId, 'absent');
+    const result = await requestFlow('reconcile');
+    const saved = await record();
+    assert.equal(saved.status, 'email_partial');
+    assert.equal(saved.recoveryFailureCount, 11);
+    return { result, saved, actualMissingRevisionNotificationFailure: true };
+  });
+  for (const scenario of ['paypal', 'razorpay', 'dodo', 'dodo-won', 'dodo-cancelled']) await run(`recovery-new-capture-after-exhaustion-${scenario}`, async () => {
+    const provider = scenario.split('-')[0];
+    const resolvedDispute = scenario.includes('-');
+    const checkout = await a1Start(provider);
+    await commerce.patch(checkout.id).set({
+      recoveryAttemptCount: 12, recoveryFailureCount: 12, reconciliationRecoveryTerminal: true,
+      nextRecoveryAt: '9999-12-31T23:59:59.999Z',
+      ...(resolvedDispute ? { dodoDisputeActive: true, verificationState: 'disputed' } : {}),
+    }).commit();
+    if (resolvedDispute) dodoPayment.disputes = [{
+      amount: '9.99', business_id: 'business-fixture', created_at: '2026-01-01T00:00:00.000Z',
+      currency: 'USD', dispute_id: 'dispute-fixture', dispute_stage: 'dispute',
+      dispute_status: scenario.endsWith('won') ? 'dispute_won' : 'dispute_cancelled', payment_id: 'payment-fixture',
+    }];
+    await sql.unsafe(`create or replace function public.payment_capture_failure_fixture() returns trigger language plpgsql as $$
+      begin
+        if new.document_type = 'booking' then raise exception 'Synthetic booking storage failure'; end if;
+        return new;
+      end $$;
+      create trigger payment_capture_failure_fixture before insert or update on migration.source_documents
+      for each row execute function public.payment_capture_failure_fixture();`);
+    let first, pending, duplicate;
+    try {
+      first = await a1Hook(provider);
+      pending = (await row(checkout.id)).payload;
+      assert.equal(pending.verificationState, 'server_verified');
+      assert.equal(pending.bookingId, '');
+      assert.equal(pending.recoveryFailureCount, 1);
+      assert.equal(pending.reconciliationRecoveryTerminal, false);
+      assert.ok(new originalDate(pending.nextRecoveryAt).getTime() < Date.UTC(9999, 0, 1));
+      if (provider === 'paypal') {
+        await requestFlow('paypal', { req: paypalReq('PAYMENT.CAPTURE.COMPLETED', {
+          id: 'capture-fixture', supplementary_data: { related_ids: { order_id: 'order-fixture' } },
+        }, 'duplicate-capture-event') });
+        duplicate = (await row(checkout.id)).payload;
+        assert.equal(duplicate.recoveryFailureCount, 2);
+      }
+      if (resolvedDispute) {
+        await requestFlow('finalize', { paymentAccessToken: tokenFor(pending), body: {} });
+        duplicate = (await row(checkout.id)).payload;
+        assert.equal(duplicate.recoveryFailureCount, 2);
+      }
+    } finally {
+      await sql.unsafe('drop trigger payment_capture_failure_fixture on migration.source_documents');
+    }
+    const when = new originalDate((duplicate || pending).nextRecoveryAt).getTime() + 1;
+    globalThis.Date = class extends originalDate {
+      constructor(...args) { super(...(args.length ? args : [when])); }
+      static now() { return when; }
+    };
+    const recovered = await requestFlow('reconcile');
+    const saved = (await row(checkout.id)).payload;
+    assert.ok(['booked', 'email_partial'].includes(saved.status), JSON.stringify({ recovered, saved }));
+    assert.ok(saved.bookingId);
+    assert.equal((await row(saved.bookingId)).payload.paymentRecordId, checkout.id);
+    assert.equal(saved.reconciliationRecoveryTerminal, false);
+    return { scenario, provider, first, pending, duplicate, recovered, saved, realPostgresFailure: true };
+  });
   for (const committed of [false, true]) await run(`gate-dodo-prebooking-partial-cron-${committed ? 'committed-refund' : 'fresh-observation'}`, async () => {
     const checkout = await a1Start('dodo', 'referral');
     const initial = (await row(checkout.id)).payload;
@@ -647,7 +824,7 @@ try{
     const response=await fetch(`${origin}/reconcile-route`,{method:'POST'}),body=await response.json(),proofPath=`${artifact}.route-failure.json`;
     fs.writeFileSync(proofPath,JSON.stringify({status:response.status,body,requestLog:fixture.requestLog},null,2));
     assert.equal(failed,true);assert.equal(response.status,503,JSON.stringify(body));assert.equal(body.ok,false);
-    for(const key of ['emailOnlyRecovery','credentialRecovery','rateLimitBucketsCleaned','commerceParity','reconciliationCheckpoint'])assert.ok(Object.hasOwn(body.summary,key)||Object.hasOwn(body.summary,`${key}Pending`),`Independent duty missing: ${key}`);
+    for(const key of ['emailOnlyRecovery','credentialRecovery','rateLimitBucketsCleaned','commerceMetricsCleaned','typedGapSnapshot','reconciliationCheckpoint'])assert.ok(Object.hasOwn(body.summary,key)||Object.hasOwn(body.summary,`${key}Pending`),`Independent duty missing: ${key}`);
     assert.ok(fixture.requestLog.some(r=>r.rpc==='roo_list_email_dispatch_recovery_bookings'));return{proofPath,primaryFailureStillReported:true,independentDutyResults:body.summary};
   });
   for(const kind of ['confirmation','reschedule','dodo-cron','reschedule-cron'])await run(`a1-terminal-email-${kind}-25h-three-calls-rebuild`,async()=>{
@@ -897,17 +1074,382 @@ try{
     const r=await seed('dodo',action==='reconcile'?'finalizing':'started',{record:{bookingId:'',emailDispatchRequired:false,createdAt:new Date(originalNow()-600000).toISOString(),finalizationLeaseExpiresAt:''}});dodoPayment.refund_status='full';const before=await snapshot({receipts:true});const beforeBooking=(await row(bookingId)).payload;const beforeClaims=await sql`select * from commerce.payment_proof_claims`;const result=await requestFlow(action,action==='reconcile'?{}:{paymentAccessToken:tokenFor(r),body:{}});if(action==='reconcile')assert.equal(result.status,200);const saved=await record();assert.notEqual(saved.verificationState,'server_verified');assert.notEqual(saved.status,'booked');assert.notEqual(saved.status,'email_partial');assert.deepEqual((await row(bookingId)).payload,beforeBooking);assert.deepEqual(await sql`select * from commerce.payment_proof_claims`,beforeClaims);const [typed]=await sql`select payment.status,payment.finalization_lease_id,payment.source_revision,source.payload->>'verificationState' as source_verification_state from commerce.payment_records payment join migration.source_documents source using(legacy_sanity_id) where payment.legacy_sanity_id=${recordId}`;assert.notEqual(typed.source_verification_state,'server_verified');const after=await snapshot({receipts:true});
     if(action==='finalize')assert.deepEqual(after,before);else{
       const omit=(value,fields)=>Object.fromEntries(Object.entries(value).filter(([key])=>!fields.includes(key)));
-      const allowedSource=['_rev','_updatedAt','updatedAt','status','finalizationLeaseId','finalizationLeaseExpiresAt','attemptCount','lastAttemptAt','source','events','recoveryReason','recoveryAttemptCount','nextRecoveryAt'];
+      const allowedSource=['_rev','_updatedAt','updatedAt','status','finalizationLeaseId','finalizationLeaseExpiresAt','attemptCount','lastAttemptAt','source','events','recoveryReason','recoveryAttemptCount','recoveryFailureCount','reconciliationRecoveryTerminal','nextRecoveryAt'];
       const prior=before.source.find(s=>s.legacy_sanity_id===recordId),next=after.source.find(s=>s.legacy_sanity_id===recordId);assert.deepEqual(omit(next.payload,allowedSource),omit(prior.payload,allowedSource));assert.deepEqual(after.source.filter(s=>s.legacy_sanity_id!==recordId),before.source.filter(s=>s.legacy_sanity_id!==recordId));
       const allowedTyped=['status','quote_fingerprint','recovery_attempt_count','next_recovery_at','source_revision','source_hash','source_updated_at','updated_at','imported_at'];assert.deepEqual(omit(after.tables.payment_records[0].row,allowedTyped),omit(before.tables.payment_records[0].row,allowedTyped));assert.equal(before.tables.payment_records[0].row.quote_fingerprint,`legacy:${before.tables.payment_records[0].row.source_hash}`);assert.equal(after.tables.payment_records[0].row.quote_fingerprint,`legacy:${after.tables.payment_records[0].row.source_hash}`);
       for(const name of ['bookings','refunds','payment_start_claims','payment_proof_claims','payment_upgrade_locks','slot_holds','slot_claims','document_outbox','webhook_receipts'])assert.deepEqual(after.tables[name],before.tables[name]);
       for(const priorRow of before.tables.commerce_outbox)assert.deepEqual(after.tables.commerce_outbox.find(r=>r.row.id===priorRow.row.id),priorRow);
-      const newOutbox=after.tables.commerce_outbox.filter(r=>!before.tables.commerce_outbox.some(p=>p.row.id===r.row.id));assert.ok(newOutbox.length);for(const {row:outbox} of newOutbox){assert.deepEqual(outbox.deleted_ids,[]);assert.equal(outbox.documents.length,1);assert.equal(outbox.documents[0]._id,recordId);assert.notEqual(outbox.documents[0].verificationState,'server_verified');}
+      const newOutbox=after.tables.commerce_outbox.filter(r=>!before.tables.commerce_outbox.some(p=>p.row.id===r.row.id));if(fullChain)assert.equal(newOutbox.length,0);else assert.ok(newOutbox.length);for(const {row:outbox} of newOutbox){assert.deepEqual(outbox.deleted_ids,[]);assert.equal(outbox.documents.length,1);assert.equal(outbox.documents[0]._id,recordId);assert.notEqual(outbox.documents[0].verificationState,'server_verified');}
+      assert.equal(saved.recoveryFailureCount,1);assert.equal(saved.reconciliationRecoveryTerminal,false);
       assert.equal(saved.status,'needs_recovery');assert.equal(saved.recoveryReason,'dodo_refund_requires_reconciliation');assert.ok(saved.events.every(e=>!['provider_capture_verified','refund_full'].includes(e.reason)));
     }return{httpStatus:result.status,status:saved.status,typed,noBookingGrant:true,claimsUnchanged:true,fullPersistenceUnchanged:action==='finalize',allowedRecoveryDiagnosticsOnly:action!=='finalize',sourceAndTypedFinancialStateAndResourcesUnchanged:true,typedLegacyQuoteFingerprintFollowsSourceHash:true};
   });
   await run('dodo-optional-refund-fields-retrieve-detail',async()=>{await seed('dodo');dodoPayment.refund_status='full';dodoPayment.refunds=[{...dodoRefund,amount:null,currency:null}];const req=dodoReq();assert.equal((await requestFlow('dodo',{req})).status,200);const proof=await assertRefund();assert.ok(providerRequests.some(r=>r.path==='/refunds/refund-fixture'));const before=await snapshot();assert.equal((await requestFlow('dodo',{req})).status,200);assert.deepEqual(await snapshot(),before);return{...proof,actualDodoRefundGet:true,idempotentReplay:true};});
   await run('dodo-optional-refund-fields-bounded-manual-recovery',async()=>{await seed('dodo');dodoRefund.amount=null;dodoRefund.currency=null;dodoRefund.is_partial=true;dodoPayment.refund_status='partial';dodoPayment.refunds=[dodoRefund];const req=dodoReq(),beforeBooking=(await row(bookingId)).payload;assert.equal((await requestFlow('dodo',{req})).status,200);let saved=await record();assert.equal(saved.providerRecoveryTerminal,true);assert.equal(saved.recoveryReason,'dodo_refund_details_incomplete');assert.equal(saved.refundProcessedAmountInSubunits,undefined);assert.deepEqual((await row(bookingId)).payload,beforeBooking);const before=await snapshot();const requestsBefore=providerRequests.filter(r=>r.path==='/refunds/refund-fixture').length;assert.equal((await requestFlow('dodo',{req})).status,200);assert.equal((await requestFlow('reconcile')).status,200);saved=await record();assert.equal(saved.providerRecoveryTerminal,true);assert.deepEqual(await snapshot(),before);assert.equal(providerRequests.filter(r=>r.path==='/refunds/refund-fixture').length,requestsBefore);const [typed]=await sql`select payment.status,payment.next_recovery_at,payment.source_revision,source.payload->>'recoveryReason' as source_recovery_reason,(source.payload->>'providerRecoveryTerminal')::boolean as source_provider_recovery_terminal,source.payload->>'providerRecoveryTerminalReason' as source_provider_recovery_terminal_reason from commerce.payment_records payment join migration.source_documents source using(legacy_sanity_id) where payment.legacy_sanity_id=${recordId}`;assert.equal(typed.source_provider_recovery_terminal,true);assert.equal(typed.next_recovery_at,null);return{bound:'one authoritative detail lookup then immediate terminal/manual state; no scheduled retry',typed,retainedPaymentAndBooking:true,ownerAlert:'sanitized actual logSafeError console event retained in run log'};});
+
+  for (const stage of ['headers', 'body']) await run(`recovery-provider-timeout-${stage}`, async () => {
+    const pending = new Set();
+    providerHook = async (request, req, res) => {
+      if (request.path === '/v1/oauth2/token') return false;
+      if (stage === 'body') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.write('{');
+      }
+      pending.add(res);
+      return true;
+    };
+    const began = originalNow();
+    let timer;
+    try {
+      const results = await Promise.race([
+        Promise.all([
+          providers.inspectPayPalOrder({ orderId: 'order-fixture' }),
+          providers.inspectPayPalCapture({ paymentId: 'capture-fixture' }),
+          providers.inspectRazorpayOrder({ orderId: 'order-fixture' }),
+          providers.inspectRazorpayPayment({ paymentId: 'payment-fixture' }),
+        ]),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Provider request exceeded its 8-second deadline')), 11000);
+        }),
+      ]);
+      assert.ok(results.every(result => result.state === 'unavailable'), JSON.stringify(results));
+      assert.ok(originalNow() - began < 11000);
+      return { stage, elapsedMs: originalNow() - began, results };
+    } finally {
+      clearTimeout(timer);
+      for (const response of pending) response.destroy();
+    }
+  });
+
+  for (const mode of ['timeout', 'malformed', 'missing', 'invalid']) await run(`recovery-webhook-verification-body-${mode}`, async () => {
+    await seed();
+    const pending = new Set();
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v1/notifications/verify-webhook-signature') return false;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      if (mode === 'timeout') { res.write('{'); pending.add(res); }
+      else res.end(mode === 'malformed' ? '{' : JSON.stringify(mode === 'missing' ? {} : { verification_status: 'FAILURE' }));
+      return true;
+    };
+    const before = await snapshot({ receipts: true });
+    const began = originalNow();
+    try {
+      const result = await requestFlow('paypal', { req: paypalReq('PAYMENT.CAPTURE.COMPLETED', {
+        id: 'capture-fixture', supplementary_data: { related_ids: { order_id: 'order-fixture' } },
+      }) });
+      assert.equal(result.status, mode === 'invalid' ? 401 : 503);
+      assert.deepEqual(await snapshot({ receipts: true }), before);
+      assert.ok(originalNow() - began < 11000);
+      return { mode, result, elapsedMs: originalNow() - began, noMutation: true };
+    } finally {
+      for (const response of pending) response.destroy();
+    }
+  });
+
+  for (const provider of ['paypal', 'razorpay', 'dodo']) for (const status of ['started', 'needs_recovery', 'finalizing']) {
+    await run(`recovery-terminal-public-status-${provider}-${status}`, async () => {
+      const payment = await seed(provider, status, { record: {
+        recoveryAttemptCount: 12, recoveryFailureCount: 12, reconciliationRecoveryTerminal: true,
+        nextRecoveryAt: '9999-12-31T23:59:59.999Z',
+      } });
+      const before = await snapshot();
+      const result = await flow.getPaymentStatus({ client: commerce, paymentAccessToken: tokenFor(payment) });
+      assert.equal(result.httpStatus, 200);
+      assert.match(result.body.recoveryReason, /manual review.*contact Roo Industries/i);
+      assert.equal(result.body.nextRecoveryAt, '');
+      assert.deepEqual(await snapshot(), before);
+      return { result, noMutation: true };
+    });
+  }
+
+  for (const terminal of ['absent', 'false']) for (const nextRecoveryAt of ['', '2099-02-01T00:00:00.000Z']) {
+    await run(`recovery-public-status-${terminal}-${nextRecoveryAt ? 'scheduled' : 'unscheduled'}`, async () => {
+      const confirmation = 'Payment confirmation is taking longer than expected. Please keep this session and try the status check again shortly.';
+      const states = [
+        { status: 'started', message: '' },
+        { status: 'booked', message: '' },
+        { status: 'needs_recovery', message: confirmation },
+        { status: 'finalizing', message: confirmation },
+        { status: 'refunded', message: 'This payment has been refunded.' },
+        { status: 'abandoned', message: 'This payment session was released and is no longer payable.' },
+        { status: 'failed', message: 'Payment could not be completed.' },
+        { status: 'booked', requiresReschedule: true, message: 'Your payment is safe, but the original time needs to be rescheduled. Roo Industries will contact you.' },
+        { status: 'booked', dodoDisputeActive: true, message: 'This payment is under dispute. Please contact Roo Industries before proceeding.' },
+      ];
+      const payment = await seed('paypal', 'started', { record: {
+        nextRecoveryAt, ...(terminal === 'false' ? { reconciliationRecoveryTerminal: false } : {}),
+      } });
+      const results = [];
+      for (const { message, ...state } of states) {
+        await commerce.patch(payment._id).set({ requiresReschedule: false, dodoDisputeActive: false, ...state }).commit();
+        const before = await snapshot();
+        const result = await flow.getPaymentStatus({ client: commerce, paymentAccessToken: tokenFor(payment) });
+        assert.equal(result.httpStatus, 200);
+        assert.equal(result.body.recoveryReason, message);
+        assert.equal(result.body.nextRecoveryAt, nextRecoveryAt);
+        assert.deepEqual(await snapshot(), before);
+        results.push({ state, result });
+      }
+      return { terminal, nextRecoveryAt, results, readOnly: true };
+    });
+  }
+
+  for (const kind of ['provider', 'refund', 'release', 'release-stored']) await run(`recovery-returned-${kind}-failure-bound`, async () => {
+    const old = new Date(originalNow() - 3600000).toISOString();
+    await seed('paypal', kind === 'refund' ? 'refunded' : kind.startsWith('release') ? 'abandoned' : 'started', {
+      record: {
+        createdAt: old, updatedAt: old, lastAttemptAt: old, nextRecoveryAt: '',
+        recoveryAttemptCount: 11, recoveryFailureCount: 11, emailDispatchRequired: false,
+        ...(kind === 'refund' ? {
+          bookingId: 'booking.missing', refundState: 'full', refundRequiresBookingSync: true,
+          refundProcessedAmountInSubunits: 999,
+        } : {}),
+        ...(kind.startsWith('release') ? {
+          resourceReleasePending: true, resourceReleaseTargetStatus: 'abandoned',
+          couponReservationId: 'couponReservation.fixture',
+        } : {}),
+      },
+    });
+    if (kind === 'provider') {
+      providerHook = async (request, req, res) => {
+        if (request.path !== '/v2/checkout/orders/order-fixture') return false;
+        res.writeHead(503, { 'content-type': 'application/json' });
+        res.end('{}');
+        return true;
+      };
+    }
+    const args = {
+      client: commerce,
+      req: { headers: { authorization: 'Bearer fixture-cron' } },
+      ...(kind === 'release' ? {
+        releaseCouponReservation: async () => { throw new Error('Synthetic coupon dependency unavailable'); },
+      } : {}),
+    };
+    if (kind === 'release-stored') {
+      await commerce.create({
+        _id: 'couponReservation.fixture', _type: 'couponRedemption',
+        status: 'reserved', backendOwner: 'supabase', cutoverGeneration: 0,
+      });
+      await removeRevision('couponReservation.fixture', 'null');
+    }
+    const beforeBooking = (await row(bookingId)).payload;
+    const unrelated = commerce.transaction();
+    for (let index = 0; index < 75; index += 1) {
+      unrelated.create({
+        _id: `paymentRecord.settled-${index}`, _type: 'paymentRecord', provider: 'paypal',
+        backendOwner: 'supabase', status: 'booked', emailDispatchRequired: false,
+      });
+    }
+    await unrelated.commit();
+    const first = await flow.reconcilePaymentSessions(args);
+    assert.equal(first.httpStatus, 200);
+    const saved = await record();
+    assert.equal(saved.recoveryAttemptCount, 12);
+    assert.equal(saved.reconciliationRecoveryTerminal, true);
+    assert.equal(saved.nextRecoveryAt, '9999-12-31T23:59:59.999Z');
+    assert.deepEqual((await row(bookingId)).payload, beforeBooking);
+    const before = await snapshot({ receipts: true });
+    const next = await flow.reconcilePaymentSessions(args);
+    assert.equal(next.body.summary.scanned, 0);
+    assert.deepEqual(await snapshot({ receipts: true }), before);
+    const [typed] = await sql`select status, next_recovery_at from commerce.payment_records where legacy_sanity_id=${recordId}`;
+    assert.equal(new Date(typed.next_recovery_at).toISOString(), saved.nextRecoveryAt);
+    return { kind, first, next, saved, typed, productionCouponRelease: kind === 'release-stored' };
+  });
+
+  await run('recovery-webhook-after-exhaustion', async () => {
+    await seed('paypal', 'needs_recovery', {
+      booking: {
+        paymentRecordId: recordId,
+        emailDispatchClientSentAt: '2026-01-01T00:00:00.000Z',
+        emailDispatchOwnerSentAt: '2026-01-01T00:00:00.000Z',
+      },
+      record: {
+        recoveryAttemptCount: 12, recoveryFailureCount: 12, reconciliationRecoveryTerminal: true,
+        nextRecoveryAt: '9999-12-31T23:59:59.999Z',
+      },
+    });
+    const result = await requestFlow('paypal', { req: paypalReq('PAYMENT.CAPTURE.REFUNDED', {
+      id: 'refund-fixture', status: 'COMPLETED', amount: { value: '9.99', currency_code: 'USD' },
+      supplementary_data: { related_ids: { order_id: 'order-fixture', capture_id: 'capture-fixture' } },
+    }) });
+    assert.equal(result.status, 200, JSON.stringify(result));
+    const saved = await record();
+    assert.equal(saved.status, 'refunded');
+    assert.equal(saved.reconciliationRecoveryTerminal, false);
+    assert.equal(saved.recoveryAttemptCount, 0);
+    assert.equal(saved.recoveryFailureCount, 0);
+    assert.equal(saved.nextRecoveryAt, '');
+    return { result, saved };
+  });
+
+  for (const scenario of ['paypal-full', 'paypal-partial', 'razorpay-full', 'dodo-full', 'paypal-unbooked', 'paypal-verified']) {
+    await run(`recovery-new-refund-after-exhaustion-${scenario}`, async () => {
+      const provider = scenario.split('-')[0];
+      const partial = scenario.endsWith('partial');
+      const unbooked = scenario.endsWith('unbooked');
+      const verified = scenario.endsWith('verified');
+      const amount = partial ? 499 : 999;
+      await seed(provider, 'needs_recovery', { record: {
+        ...(unbooked ? { bookingId: '', holdSnapshot: { slotHoldId: 'slotHold.fixture' } } : {}),
+        recoveryAttemptCount: 12, recoveryFailureCount: 12, reconciliationRecoveryTerminal: true,
+        nextRecoveryAt: '9999-12-31T23:59:59.999Z',
+      } });
+      if (unbooked) await commerce.create({
+        _id: 'slotHold.fixture', _type: 'slotHold', backendOwner: 'supabase', cutoverGeneration: 0,
+        startTimeUTC: '2099-01-01T10:00:00.000Z', packageTitle: 'Vertex Essentials',
+        phase: 'holding', paymentRecordId: recordId, paymentProvider: provider,
+        holdNonce: 'refund-recovery', expiresAt: '2099-01-01T10:00:00.000Z',
+      });
+      if (unbooked) await commerce.patch('slotHold.fixture').set({ phase: 'payment_pending' }).commit();
+      const blockedId = unbooked ? 'slotHold.fixture' : bookingId;
+      await sql.unsafe(`create or replace function public.payment_refund_failure_fixture() returns trigger language plpgsql as $$
+        begin
+          if new.legacy_sanity_id = '${blockedId}' then raise exception 'Synthetic refund storage failure'; end if;
+          return new;
+        end $$;
+        create trigger payment_refund_failure_fixture before update on migration.source_documents
+        for each row execute function public.payment_refund_failure_fixture();`);
+      const refundEvent = () => {
+        if (provider === 'razorpay') return razorReq('refund.processed', { refund: { entity: {
+          id: 'refund-fixture', payment_id: 'payment-fixture', amount, currency: 'USD', status: 'processed',
+        } } });
+        if (provider === 'dodo') {
+          dodoPayment.refund_status = 'full';
+          dodoPayment.refunds = [{ ...dodoRefund }];
+          return dodoReq();
+        }
+        if (verified) {
+          paypalOrder.purchase_units[0].payments.captures[0].status = 'REFUNDED';
+          return paypalReq('PAYMENT.CAPTURE.COMPLETED', {
+            id: 'capture-fixture', supplementary_data: { related_ids: { order_id: 'order-fixture' } },
+          });
+        }
+        return paypalReq('PAYMENT.CAPTURE.REFUNDED', {
+          id: 'refund-fixture', status: 'COMPLETED', amount: { value: partial ? '4.99' : '9.99', currency_code: 'USD' },
+          supplementary_data: { related_ids: { order_id: 'order-fixture', capture_id: 'capture-fixture' } },
+        });
+      };
+      const before = (await row(blockedId)).payload;
+      let first, pending, recovered;
+      try {
+        first = await requestFlow(provider, { req: refundEvent() });
+        pending = await record();
+        assert.equal(pending.refundRequiresBookingSync, true);
+        assert.deepEqual((await row(blockedId)).payload, before);
+        assert.equal(pending.reconciliationRecoveryTerminal, false);
+        assert.equal(pending.recoveryFailureCount, 0);
+        assert.equal(pending.nextRecoveryAt, '');
+      } finally {
+        await sql.unsafe('drop trigger payment_refund_failure_fixture on migration.source_documents');
+      }
+      recovered = await requestFlow('reconcile');
+      const saved = await record();
+      assert.equal(recovered.status, 200, JSON.stringify(recovered));
+      assert.equal(recovered.body.summary.refundsSynced, 1);
+      assert.equal(saved.refundRequiresBookingSync, false);
+      assert.equal(saved.reconciliationRecoveryTerminal, false);
+      assert.equal(saved.recoveryFailureCount, 0);
+      if (unbooked) assert.equal((await row(blockedId)).payload.phase, 'released');
+      else assert.equal((await row(bookingId)).payload.refundedAmount, partial ? 4.99 : 9.99);
+      return { scenario, first, pending, recovered, saved, realPostgresFailure: true };
+    });
+  }
+
+  await run('recovery-duplicate-refund-keeps-failure-bound', async () => {
+    await seed('paypal', 'needs_recovery', { record: {
+      recoveryAttemptCount: 12, recoveryFailureCount: 12, reconciliationRecoveryTerminal: true,
+      nextRecoveryAt: '9999-12-31T23:59:59.999Z',
+    } });
+    await sql.unsafe(`create or replace function public.payment_refund_failure_fixture() returns trigger language plpgsql as $$
+      begin
+        if new.legacy_sanity_id = 'booking.fixture' then raise exception 'Synthetic refund storage failure'; end if;
+        return new;
+      end $$;
+      create trigger payment_refund_failure_fixture before update on migration.source_documents
+      for each row execute function public.payment_refund_failure_fixture();`);
+    const refundEvent = id => paypalReq('PAYMENT.CAPTURE.REFUNDED', {
+      id: 'refund-fixture', status: 'COMPLETED', amount: { value: '9.99', currency_code: 'USD' },
+      supplementary_data: { related_ids: { order_id: 'order-fixture', capture_id: 'capture-fixture' } },
+    }, id);
+    const attempts = [];
+    try {
+      await requestFlow('paypal', { req: refundEvent('new-refund-event') });
+      assert.equal((await record()).recoveryFailureCount, 0);
+      for (let index = 0; index < 12; index += 1) {
+        const current = await record();
+        const when = current.nextRecoveryAt ? new originalDate(current.nextRecoveryAt).getTime() + 1 : originalNow();
+        globalThis.Date = class extends originalDate {
+          constructor(...args) { super(...(args.length ? args : [when])); }
+          static now() { return when; }
+        };
+        const result = await requestFlow('reconcile');
+        assert.equal(result.status, 200, JSON.stringify(result));
+        attempts.push((await record()).recoveryFailureCount);
+      }
+      const exhausted = await record();
+      assert.equal(exhausted.reconciliationRecoveryTerminal, true);
+      assert.deepEqual(attempts, Array.from({ length: 12 }, (_, index) => index + 1));
+      await requestFlow('paypal', { req: refundEvent('duplicate-refund-event') });
+      const duplicate = await record();
+      assert.equal(duplicate.recoveryFailureCount, 12);
+      assert.equal(duplicate.reconciliationRecoveryTerminal, true);
+      assert.equal(duplicate.nextRecoveryAt, exhausted.nextRecoveryAt);
+      assert.equal((await requestFlow('reconcile')).body.summary.scanned, 0);
+      return { attempts, exhausted, duplicate, realPostgresFailure: true };
+    } finally {
+      globalThis.Date = originalDate;
+      await sql.unsafe('drop trigger payment_refund_failure_fixture on migration.source_documents');
+    }
+  });
+
+  for (const count of [null, -100, 'corrupt', 2.8]) await run(`recovery-invalid-counter-${String(count)}`, async () => {
+    const old = new Date(originalNow() - 3600000).toISOString();
+    await seed('paypal', 'started', { record: {
+      createdAt: old, updatedAt: old, lastAttemptAt: old, nextRecoveryAt: '',
+      recoveryAttemptCount: count, recoveryFailureCount: count, emailDispatchRequired: false,
+    } });
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v2/checkout/orders/order-fixture') return false;
+      res.writeHead(503, { 'content-type': 'application/json' });
+      res.end('{}');
+      return true;
+    };
+    const result = await requestFlow('reconcile');
+    const saved = await record();
+    assert.equal(result.status, 200);
+    assert.equal(saved.recoveryAttemptCount, count === 2.8 ? 3 : 1);
+    assert.notEqual(saved.reconciliationRecoveryTerminal, true);
+    return { result, saved };
+  });
+
+  await run('recovery-pending-payment-remains-retryable', async () => {
+    const old = new Date(originalNow() - 3600000).toISOString();
+    await seed('paypal', 'started', { record: {
+      createdAt: old, updatedAt: old, nextRecoveryAt: '', recoveryAttemptCount: 12,
+      providerPaymentId: '', emailDispatchRequired: false,
+    } });
+    paypalOrder.status = 'APPROVED';
+    paypalOrder.purchase_units[0].payments = { captures: [] };
+    const result = await requestFlow('reconcile');
+    const saved = await record();
+    assert.equal(result.status, 200);
+    assert.notEqual(saved.reconciliationRecoveryTerminal, true);
+    assert.equal(saved.status, 'started');
+    assert.ok(new Date(saved.nextRecoveryAt).getTime() < Date.UTC(9999, 0, 1));
+    return { result, saved };
+  });
+
+  await run('recovery-dodo-requested-payment-binding', async () => {
+    const paymentRecord = await seed('dodo', 'started', { record: { providerPaymentId: '', bookingId: '' } });
+    dodoPayment.payment_id = 'other-payment';
+    const before = await snapshot({ receipts: true });
+    const result = await requestFlow('finalize', { paymentAccessToken: tokenFor(paymentRecord), body: {} });
+    assert.equal(result.status, 409);
+    assert.equal(result.body.code, 'dodo_payment_binding_mismatch');
+    assert.deepEqual(await snapshot({ receipts: true }), before);
+    return { result, requested: 'payment-fixture', received: 'other-payment' };
+  });
 
   assert.ok(evidence.scenarios.length,'Unknown named scenario');if(only)assert.equal(evidence.scenarios.length,new Set(only).size,'Unknown selected payment scenario');assert.equal(blockedNetwork,0);
   evidence.modules=Object.fromEntries(['@supabase/supabase-js','@supabase/ssr','postgres','dodopayments'].map(name=>[name,JSON.parse(fs.readFileSync(path.join(process.cwd(),'node_modules',name,'package.json'),'utf8')).version]));

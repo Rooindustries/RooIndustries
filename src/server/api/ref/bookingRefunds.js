@@ -74,7 +74,9 @@ const markPaymentRecordRefunded = async ({ client, paymentRecord, now }) => {
   );
   if (!current?._id) return false;
   if (current.status === "refunded" && current.refundState === "full" &&
-      current.refundRequiresBookingSync === false && !current.recoveryReason) return true;
+      current.refundRequiresBookingSync === false && !current.recoveryReason &&
+      !current.recoveryAttemptCount && !current.recoveryFailureCount &&
+      current.reconciliationRecoveryTerminal !== true && !current.nextRecoveryAt) return true;
   let patch = client.patch(current._id);
   if (current._rev && typeof patch.ifRevisionId === "function") {
     patch = patch.ifRevisionId(current._rev);
@@ -85,6 +87,10 @@ const markPaymentRecordRefunded = async ({ client, paymentRecord, now }) => {
       refundState: "full",
       refundRequiresBookingSync: false,
       recoveryReason: "",
+      recoveryAttemptCount: 0,
+      recoveryFailureCount: 0,
+      reconciliationRecoveryTerminal: false,
+      nextRecoveryAt: "",
       updatedAt: now,
     })
     .commit();

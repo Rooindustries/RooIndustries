@@ -119,6 +119,9 @@ export const inspectDodoCheckout = async ({ record }) => {
     if (session.id !== record.providerOrderId) return { state: "unavailable", retryable: false, reason: "dodo_session_mismatch" };
     if (!session.payment_id) return { state: "unpaid" };
     const payment = await client.payments.retrieve(session.payment_id);
+    if (payment.payment_id !== session.payment_id) {
+      return { state: "unavailable", retryable: false, reason: "dodo_payment_binding_mismatch" };
+    }
     const validation = validateDodoPayment({ record, payment });
     if (!validation.ok) return { state: "unavailable", ...validation };
     const state = payment.status === "succeeded" ? "captured"
