@@ -1132,6 +1132,38 @@ try{
     });
   }
 
+  for (const terminal of ['absent', 'false']) for (const nextRecoveryAt of ['', '2099-02-01T00:00:00.000Z']) {
+    await run(`recovery-public-status-${terminal}-${nextRecoveryAt ? 'scheduled' : 'unscheduled'}`, async () => {
+      const confirmation = 'Payment confirmation is taking longer than expected. Please keep this session and try the status check again shortly.';
+      const states = [
+        { status: 'started', message: '' },
+        { status: 'booked', message: '' },
+        { status: 'needs_recovery', message: confirmation },
+        { status: 'finalizing', message: confirmation },
+        { status: 'refunded', message: 'This payment has been refunded.' },
+        { status: 'abandoned', message: 'This payment session was released and is no longer payable.' },
+        { status: 'failed', message: 'Payment could not be completed.' },
+        { status: 'booked', requiresReschedule: true, message: 'Your payment is safe, but the original time needs to be rescheduled. Roo Industries will contact you.' },
+        { status: 'booked', dodoDisputeActive: true, message: 'This payment is under dispute. Please contact Roo Industries before proceeding.' },
+      ];
+      const payment = await seed('paypal', 'started', { record: {
+        nextRecoveryAt, ...(terminal === 'false' ? { reconciliationRecoveryTerminal: false } : {}),
+      } });
+      const results = [];
+      for (const { message, ...state } of states) {
+        await commerce.patch(payment._id).set({ requiresReschedule: false, dodoDisputeActive: false, ...state }).commit();
+        const before = await snapshot();
+        const result = await flow.getPaymentStatus({ client: commerce, paymentAccessToken: tokenFor(payment) });
+        assert.equal(result.httpStatus, 200);
+        assert.equal(result.body.recoveryReason, message);
+        assert.equal(result.body.nextRecoveryAt, nextRecoveryAt);
+        assert.deepEqual(await snapshot(), before);
+        results.push({ state, result });
+      }
+      return { terminal, nextRecoveryAt, results, readOnly: true };
+    });
+  }
+
   for (const kind of ['provider', 'refund', 'release', 'release-stored']) await run(`recovery-returned-${kind}-failure-bound`, async () => {
     const old = new Date(originalNow() - 3600000).toISOString();
     await seed('paypal', kind === 'refund' ? 'refunded' : kind.startsWith('release') ? 'abandoned' : 'started', {
