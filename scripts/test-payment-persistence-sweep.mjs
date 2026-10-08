@@ -261,6 +261,90 @@ try{
     return{input,quote,started,id:payment._id,proof};
   };
   const a1Hook=async provider=>requestFlow(provider,{req:provider==='paypal'?paypalReq('PAYMENT.CAPTURE.COMPLETED',{id:'capture-fixture',supplementary_data:{related_ids:{order_id:'order-fixture'}}}):provider==='razorpay'?razorReq('payment.captured',{payment:{entity:razorpayPayment}}):dodoReq()});
+  for (const mode of ['complete', 'partial', 'missing-details']) await run(`recovery-reschedule-created-${mode}`, async () => {
+    const checkout = await a1Start();
+    const missing = mode === 'missing-details';
+    await commerce.patch(checkout.id).set({
+      status: 'abandoned', verificationState: 'server_verified',
+      recoveryAttemptCount: 11, recoveryFailureCount: 11, reconciliationRecoveryTerminal: true,
+      providerRefundDetailsMissing: missing, nextRecoveryAt: '9999-12-31T23:59:59.999Z',
+    }).commit();
+    emailFailure = mode === 'partial';
+    const result = await a1Hook('paypal');
+    const saved = (await row(checkout.id)).payload;
+    assert.equal(saved.requiresReschedule, true, JSON.stringify({ result, saved }));
+    assert.ok(saved.bookingId);
+    assert.equal(saved.status, mode === 'partial' ? 'email_partial' : 'booked');
+    assert.equal(saved.recoveryFailureCount, 0);
+    assert.equal(saved.reconciliationRecoveryTerminal, missing);
+    return { mode, result, saved, actualRescheduleBookingAndEmail: true };
+  });
+  for (const kind of ['reschedule', 'dodo-email', 'normalized-email']) for (const missing of [false, true]) {
+    await run(`recovery-completed-${kind}-${missing ? 'missing-details' : 'clear'}`, async () => {
+      const reschedule = kind === 'reschedule';
+      const normalized = kind === 'normalized-email';
+      await seed(kind === 'dodo-email' ? 'dodo' : 'paypal', normalized ? 'booked' : 'email_partial', {
+        booking: {
+          paymentRecordId: recordId,
+          recoveryClientNotifiedAt: '2026-01-01T00:00:00.000Z', recoveryOwnerNotifiedAt: '2026-01-01T00:00:00.000Z',
+          emailDispatchClientSentAt: '2026-01-01T00:00:00.000Z', emailDispatchOwnerSentAt: '2026-01-01T00:00:00.000Z',
+        },
+        record: {
+          requiresReschedule: reschedule, recoveryNotificationRequired: reschedule,
+          emailDispatchRequired: !reschedule, emailDispatch: { allSent: normalized },
+          recoveryAttemptCount: 11, recoveryFailureCount: 11, reconciliationRecoveryTerminal: false,
+          providerRefundDetailsMissing: missing, nextRecoveryAt: '',
+        },
+      });
+      const result = await requestFlow('reconcile');
+      const saved = await record();
+      assert.equal(saved.status, 'booked', JSON.stringify({ result, saved }));
+      assert.equal(saved.recoveryFailureCount, 0);
+      assert.equal(saved.reconciliationRecoveryTerminal, missing);
+      let failedRefund;
+      if (reschedule && !missing) {
+        await commerce.patch(recordId).set({ status: 'refunded', refundState: 'full', refundRequiresBookingSync: true,
+          refundProcessedAmountInSubunits: 999, refundCurrency: 'USD', nextRecoveryAt: '' }).commit();
+        await sql.unsafe(`create or replace function public.payment_notification_failure_fixture() returns trigger language plpgsql as $$
+          begin
+            if new.legacy_sanity_id = 'booking.fixture' then raise exception 'Synthetic refund storage failure'; end if;
+            return new;
+          end $$;
+          create trigger payment_notification_failure_fixture before update on migration.source_documents
+          for each row execute function public.payment_notification_failure_fixture();`);
+        try {
+          await requestFlow('reconcile');
+          failedRefund = await record();
+          assert.equal(failedRefund.recoveryFailureCount, 1);
+          assert.equal(failedRefund.reconciliationRecoveryTerminal, false);
+        } finally {
+          await sql.unsafe('drop trigger payment_notification_failure_fixture on migration.source_documents');
+        }
+        const when = new originalDate(failedRefund.nextRecoveryAt).getTime() + 1;
+        globalThis.Date = class extends originalDate {
+          constructor(...args) { super(...(args.length ? args : [when])); }
+          static now() { return when; }
+        };
+        const recovered = await requestFlow('reconcile');
+        assert.equal(recovered.body.summary.refundsSynced, 1);
+        assert.equal((await record()).refundRequiresBookingSync, false);
+        assert.equal((await row(bookingId)).payload.status, 'refunded');
+      }
+      return { kind, missing, result, saved, failedRefund, actualNotificationModules: true };
+    });
+  }
+  await run('recovery-failed-reschedule-notification-retains-streak', async () => {
+    await seed('paypal', 'email_partial', { record: {
+      requiresReschedule: true, recoveryNotificationRequired: true, emailDispatchRequired: false,
+      recoveryAttemptCount: 11, recoveryFailureCount: 11, nextRecoveryAt: '',
+    } });
+    await removeRevision(bookingId, 'absent');
+    const result = await requestFlow('reconcile');
+    const saved = await record();
+    assert.equal(saved.status, 'email_partial');
+    assert.equal(saved.recoveryFailureCount, 11);
+    return { result, saved, actualMissingRevisionNotificationFailure: true };
+  });
   for (const scenario of ['paypal', 'razorpay', 'dodo', 'dodo-won', 'dodo-cancelled']) await run(`recovery-new-capture-after-exhaustion-${scenario}`, async () => {
     const provider = scenario.split('-')[0];
     const resolvedDispute = scenario.includes('-');

@@ -99,6 +99,11 @@ const buildRecoveryFailureState = (record) => {
   };
 };
 
+const buildRecoveryCompletionState = (record) => ({
+  recoveryFailureCount: 0,
+  reconciliationRecoveryTerminal: record.providerRefundDetailsMissing === true,
+});
+
 const logRecoveryExhaustion = (record, values) => {
   if (values.reconciliationRecoveryTerminal === true &&
       values.recoveryFailureCount === 12 && record.reconciliationRecoveryTerminal !== true) {
@@ -2432,7 +2437,7 @@ const finalizePaymentRecordInternal = async ({
             recoveryReason: current.providerRefundDetailsMissing === true ? "provider_partial_refund_details_missing_owner_review"
               : completionUnknown ? "booking_email_delivery_review_required" : "",
             recoveryAttemptCount: 0,
-            recoveryFailureCount: 0,
+            ...buildRecoveryCompletionState(current),
             nextRecoveryAt: "",
             finalizationLeaseId: "",
             finalizationLeaseExpiresAt: "",
@@ -2442,7 +2447,6 @@ const finalizePaymentRecordInternal = async ({
             ).trim(),
             emailDispatchRequired: completionStatus === PAYMENT_STATUS_EMAIL_PARTIAL,
             emailDeliveryReviewRequired: completionUnknown,
-            reconciliationRecoveryTerminal: current.providerRefundDetailsMissing === true,
             verificationState: String(
               bookingDoc?.paymentVerificationState || workingRecord.verificationState || ""
             ).trim(),
@@ -3880,6 +3884,7 @@ const recoverCapturedPaymentAsReschedule = async ({
     recoveryNotificationRequired: true,
     emailDispatchRequired: false,
     recoveryAttemptCount,
+    ...buildRecoveryCompletionState(record),
     resourceReleasePending: false,
     resourceReleaseTargetStatus: "",
     resourceReleaseReason: "",
@@ -4023,6 +4028,7 @@ const recoverCapturedPaymentAsReschedule = async ({
         emailDispatchRequired: false,
         recoveryNotification: normalizeObject(notification),
         recoveryAttemptCount,
+        ...buildRecoveryCompletionState(current),
         finalizationLeaseId: "",
         finalizationLeaseExpiresAt: "",
         nextRecoveryAt: notificationComplete || deliveryUnknown
@@ -4092,6 +4098,7 @@ const retryRescheduleNotification = async ({
         emailDispatchRequired: false,
         recoveryNotification: normalizeObject(notification),
         recoveryAttemptCount,
+        ...(complete || deliveryUnknown ? buildRecoveryCompletionState(current) : {}),
         nextRecoveryAt: complete || deliveryUnknown
           ? ""
           : getNextPaymentRecoveryAt(recoveryAttemptCount),
@@ -4248,6 +4255,7 @@ export const reconcilePaymentSessions = async ({
         await patchPaymentRecord({ client, record: current, set: {
           emailDispatchRequired: false,
           recoveryAttemptCount: 0,
+          ...buildRecoveryCompletionState(current),
           nextRecoveryAt: "",
         }, event: buildPaymentRecordEvent({ status: PAYMENT_STATUS_BOOKED, source: "reconcile",
           reason: "completed_email_recovery_normalized" }) });
@@ -4507,6 +4515,7 @@ export const reconcilePaymentSessions = async ({
             emailDispatchToken: complete ? "" : record.emailDispatchToken || "",
             ...(emailed.body?.emailDispatch ? { emailDispatch: emailed.body.emailDispatch } : {}),
             recoveryAttemptCount,
+            ...(complete || deliveryUnknown ? buildRecoveryCompletionState(record) : {}),
             recoveryReason: deliveryUnknown ? "booking_email_delivery_review_required" : complete ? "" : "booking_email_retry_pending",
             nextRecoveryAt: complete || deliveryUnknown ? "" : getNextPaymentRecoveryAt(recoveryAttemptCount),
           } });
