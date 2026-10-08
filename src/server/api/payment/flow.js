@@ -434,6 +434,9 @@ const buildRecordPricingFingerprint = ({
 
 const getPublicRecoveryMessage = (record = {}) => {
   const status = String(record.status || "").trim().toLowerCase();
+  if (record.reconciliationRecoveryTerminal === true) {
+    return "This payment requires manual review. Please contact Roo Industries.";
+  }
   if (status === PAYMENT_STATUS_REFUNDED) {
     return "This payment has been refunded.";
   }
@@ -500,7 +503,9 @@ const buildPublicStatusBody = (record = {}) => ({
   provider: String(record.provider || "").trim(),
   bookingId: String(record.bookingId || "").trim(),
   recoveryReason: getPublicRecoveryMessage(record),
-  nextRecoveryAt: String(record.nextRecoveryAt || "").trim(),
+  nextRecoveryAt: record.reconciliationRecoveryTerminal === true
+    ? ""
+    : String(record.nextRecoveryAt || "").trim(),
   sessionExpiresAt: String(
     record?.holdSnapshot?.slotHoldExpiresAt || record.sessionExpiresAt || ""
   ).trim(),
@@ -2256,6 +2261,12 @@ const finalizePaymentRecordInternal = async ({
             ? String(workingRecord.verificationState || "").trim()
             : "server_verified",
         verificationWarning: "",
+        ...(workingRecord.provider !== "free" && workingRecord.verificationState !== "server_verified" ? {
+          recoveryAttemptCount: 0,
+          recoveryFailureCount: 0,
+          reconciliationRecoveryTerminal: false,
+          nextRecoveryAt: "",
+        } : {}),
         paymentProofClaimId: String(proofClaim?._id || "").trim(),
         ...(workingRecord.provider === "dodo" && Number.isSafeInteger(verification.totalAmount) ? {
           providerPublicData: { ...workingRecord.providerPublicData, totalAmount: verification.totalAmount },
@@ -4976,6 +4987,14 @@ const buildRefundMutation = ({
     : processedAmount > 0
     ? "partial"
     : normalizedStatus;
+  const refundRequiresBookingSync = isFullRefund
+    ? wasFullRefund
+      ? record.refundRequiresBookingSync === true
+      : true
+    : refundState === "partial" && (record.refundRequiresBookingSync === true ||
+      (nextRefund.status === "processed" && previousRefund?.status !== "processed"));
+  const newRefundWork = refundRequiresBookingSync &&
+    nextRefund.status === "processed" && previousRefund?.status !== "processed";
   return {
     isFullRefund,
     nextRefund,
@@ -4999,12 +5018,13 @@ const buildRefundMutation = ({
             },
           }
         : {}),
-      refundRequiresBookingSync: isFullRefund
-        ? wasFullRefund
-          ? record.refundRequiresBookingSync === true
-          : true
-        : refundState === "partial" && (record.refundRequiresBookingSync === true ||
-          (nextRefund.status === "processed" && previousRefund?.status !== "processed")),
+      refundRequiresBookingSync,
+      ...(newRefundWork ? {
+        recoveryAttemptCount: 0,
+        recoveryFailureCount: 0,
+        reconciliationRecoveryTerminal: false,
+        nextRecoveryAt: "",
+      } : {}),
       ...(isFullRefund
         ? {
             status: PAYMENT_STATUS_REFUNDED,
@@ -5390,7 +5410,13 @@ const recordVerifiedPartialRefunds = async ({ client, record, verification, sour
 };
 
 const recordVerifiedFullRefund = async ({ client, record, verification, source }) => {
+  const newRefundWork = record.refundState !== "full" ||
+    Number(record.refundProcessedAmountInSubunits) !== verification.amountRefundedInSubunits ||
+    record.providerRefundDetailsMissing === true;
   record = await patchPaymentRecord({ client, record, set: {
+    ...(newRefundWork ? {
+      recoveryAttemptCount: 0, recoveryFailureCount: 0, reconciliationRecoveryTerminal: false,
+    } : {}),
     status: PAYMENT_STATUS_REFUNDED, refundState: "full", providerRefundStatus: "full",
     ...(record.providerRefundDetailsMissing === true ? { providerRefundDetailsMissing: false,
       ...(record.providerRecoveryTerminalReason === "provider_partial_refund_details_missing_owner_review"
@@ -5727,6 +5753,11 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
         return guarded.set({
           dodoDisputeActive: disputed,
           dodoDisputes,
+          ...(record.dodoDisputeActive === true && !disputed ? {
+            recoveryAttemptCount: 0,
+            recoveryFailureCount: 0,
+            reconciliationRecoveryTerminal: false,
+          } : {}),
           providerRecoveryTerminal: !!terminalDispute,
           providerRecoveryTerminalReason: terminalReason,
           verificationState: disputed ? "disputed" : "server_verified",

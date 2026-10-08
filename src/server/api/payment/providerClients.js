@@ -925,7 +925,12 @@ export const verifyPayPalWebhookSignature = async ({
     );
   } catch { return { ok: false, retryable: true, reason: "paypal_webhook_verify_exception" }; }
 
-  const data = await response.json().catch(() => ({}));
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    return { ok: false, retryable: true, reason: "paypal_webhook_verify_exception" };
+  }
   if (!response.ok) {
     return { ok: false, retryable: [401, 403, 429].includes(response.status) || response.status >= 500,
       reason: `paypal_webhook_verify_failed_${response.status}` };
@@ -934,8 +939,11 @@ export const verifyPayPalWebhookSignature = async ({
   const verificationStatus = String(
     data?.verification_status || ""
   ).trim().toUpperCase();
-  if (verificationStatus !== "SUCCESS") {
+  if (verificationStatus === "FAILURE") {
     return { ok: false, reason: "paypal_webhook_signature_invalid" };
+  }
+  if (verificationStatus !== "SUCCESS") {
+    return { ok: false, retryable: true, reason: "paypal_webhook_verify_response_invalid" };
   }
 
   return { ok: true };

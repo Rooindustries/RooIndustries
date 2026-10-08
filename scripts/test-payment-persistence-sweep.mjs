@@ -261,6 +261,64 @@ try{
     return{input,quote,started,id:payment._id,proof};
   };
   const a1Hook=async provider=>requestFlow(provider,{req:provider==='paypal'?paypalReq('PAYMENT.CAPTURE.COMPLETED',{id:'capture-fixture',supplementary_data:{related_ids:{order_id:'order-fixture'}}}):provider==='razorpay'?razorReq('payment.captured',{payment:{entity:razorpayPayment}}):dodoReq()});
+  for (const scenario of ['paypal', 'razorpay', 'dodo', 'dodo-won', 'dodo-cancelled']) await run(`recovery-new-capture-after-exhaustion-${scenario}`, async () => {
+    const provider = scenario.split('-')[0];
+    const resolvedDispute = scenario.includes('-');
+    const checkout = await a1Start(provider);
+    await commerce.patch(checkout.id).set({
+      recoveryAttemptCount: 12, recoveryFailureCount: 12, reconciliationRecoveryTerminal: true,
+      nextRecoveryAt: '9999-12-31T23:59:59.999Z',
+      ...(resolvedDispute ? { dodoDisputeActive: true, verificationState: 'disputed' } : {}),
+    }).commit();
+    if (resolvedDispute) dodoPayment.disputes = [{
+      amount: '9.99', business_id: 'business-fixture', created_at: '2026-01-01T00:00:00.000Z',
+      currency: 'USD', dispute_id: 'dispute-fixture', dispute_stage: 'dispute',
+      dispute_status: scenario.endsWith('won') ? 'dispute_won' : 'dispute_cancelled', payment_id: 'payment-fixture',
+    }];
+    await sql.unsafe(`create or replace function public.payment_capture_failure_fixture() returns trigger language plpgsql as $$
+      begin
+        if new.document_type = 'booking' then raise exception 'Synthetic booking storage failure'; end if;
+        return new;
+      end $$;
+      create trigger payment_capture_failure_fixture before insert or update on migration.source_documents
+      for each row execute function public.payment_capture_failure_fixture();`);
+    let first, pending, duplicate;
+    try {
+      first = await a1Hook(provider);
+      pending = (await row(checkout.id)).payload;
+      assert.equal(pending.verificationState, 'server_verified');
+      assert.equal(pending.bookingId, '');
+      assert.equal(pending.recoveryFailureCount, 1);
+      assert.equal(pending.reconciliationRecoveryTerminal, false);
+      assert.ok(new originalDate(pending.nextRecoveryAt).getTime() < Date.UTC(9999, 0, 1));
+      if (provider === 'paypal') {
+        await requestFlow('paypal', { req: paypalReq('PAYMENT.CAPTURE.COMPLETED', {
+          id: 'capture-fixture', supplementary_data: { related_ids: { order_id: 'order-fixture' } },
+        }, 'duplicate-capture-event') });
+        duplicate = (await row(checkout.id)).payload;
+        assert.equal(duplicate.recoveryFailureCount, 2);
+      }
+      if (resolvedDispute) {
+        await requestFlow('finalize', { paymentAccessToken: tokenFor(pending), body: {} });
+        duplicate = (await row(checkout.id)).payload;
+        assert.equal(duplicate.recoveryFailureCount, 2);
+      }
+    } finally {
+      await sql.unsafe('drop trigger payment_capture_failure_fixture on migration.source_documents');
+    }
+    const when = new originalDate((duplicate || pending).nextRecoveryAt).getTime() + 1;
+    globalThis.Date = class extends originalDate {
+      constructor(...args) { super(...(args.length ? args : [when])); }
+      static now() { return when; }
+    };
+    const recovered = await requestFlow('reconcile');
+    const saved = (await row(checkout.id)).payload;
+    assert.ok(['booked', 'email_partial'].includes(saved.status), JSON.stringify({ recovered, saved }));
+    assert.ok(saved.bookingId);
+    assert.equal((await row(saved.bookingId)).payload.paymentRecordId, checkout.id);
+    assert.equal(saved.reconciliationRecoveryTerminal, false);
+    return { scenario, provider, first, pending, duplicate, recovered, saved, realPostgresFailure: true };
+  });
   for (const committed of [false, true]) await run(`gate-dodo-prebooking-partial-cron-${committed ? 'committed-refund' : 'fresh-observation'}`, async () => {
     const checkout = await a1Start('dodo', 'referral');
     const initial = (await row(checkout.id)).payload;
@@ -949,6 +1007,47 @@ try{
     }
   });
 
+  for (const mode of ['timeout', 'malformed', 'missing', 'invalid']) await run(`recovery-webhook-verification-body-${mode}`, async () => {
+    await seed();
+    const pending = new Set();
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v1/notifications/verify-webhook-signature') return false;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      if (mode === 'timeout') { res.write('{'); pending.add(res); }
+      else res.end(mode === 'malformed' ? '{' : JSON.stringify(mode === 'missing' ? {} : { verification_status: 'FAILURE' }));
+      return true;
+    };
+    const before = await snapshot({ receipts: true });
+    const began = originalNow();
+    try {
+      const result = await requestFlow('paypal', { req: paypalReq('PAYMENT.CAPTURE.COMPLETED', {
+        id: 'capture-fixture', supplementary_data: { related_ids: { order_id: 'order-fixture' } },
+      }) });
+      assert.equal(result.status, mode === 'invalid' ? 401 : 503);
+      assert.deepEqual(await snapshot({ receipts: true }), before);
+      assert.ok(originalNow() - began < 11000);
+      return { mode, result, elapsedMs: originalNow() - began, noMutation: true };
+    } finally {
+      for (const response of pending) response.destroy();
+    }
+  });
+
+  for (const provider of ['paypal', 'razorpay', 'dodo']) for (const status of ['started', 'needs_recovery', 'finalizing']) {
+    await run(`recovery-terminal-public-status-${provider}-${status}`, async () => {
+      const payment = await seed(provider, status, { record: {
+        recoveryAttemptCount: 12, recoveryFailureCount: 12, reconciliationRecoveryTerminal: true,
+        nextRecoveryAt: '9999-12-31T23:59:59.999Z',
+      } });
+      const before = await snapshot();
+      const result = await flow.getPaymentStatus({ client: commerce, paymentAccessToken: tokenFor(payment) });
+      assert.equal(result.httpStatus, 200);
+      assert.match(result.body.recoveryReason, /manual review.*contact Roo Industries/i);
+      assert.equal(result.body.nextRecoveryAt, '');
+      assert.deepEqual(await snapshot(), before);
+      return { result, noMutation: true };
+    });
+  }
+
   for (const kind of ['provider', 'refund', 'release', 'release-stored']) await run(`recovery-returned-${kind}-failure-bound`, async () => {
     const old = new Date(originalNow() - 3600000).toISOString();
     await seed('paypal', kind === 'refund' ? 'refunded' : kind.startsWith('release') ? 'abandoned' : 'started', {
@@ -1036,6 +1135,126 @@ try{
     assert.equal(saved.recoveryFailureCount, 0);
     assert.equal(saved.nextRecoveryAt, '');
     return { result, saved };
+  });
+
+  for (const scenario of ['paypal-full', 'paypal-partial', 'razorpay-full', 'dodo-full', 'paypal-unbooked', 'paypal-verified']) {
+    await run(`recovery-new-refund-after-exhaustion-${scenario}`, async () => {
+      const provider = scenario.split('-')[0];
+      const partial = scenario.endsWith('partial');
+      const unbooked = scenario.endsWith('unbooked');
+      const verified = scenario.endsWith('verified');
+      const amount = partial ? 499 : 999;
+      await seed(provider, 'needs_recovery', { record: {
+        ...(unbooked ? { bookingId: '', holdSnapshot: { slotHoldId: 'slotHold.fixture' } } : {}),
+        recoveryAttemptCount: 12, recoveryFailureCount: 12, reconciliationRecoveryTerminal: true,
+        nextRecoveryAt: '9999-12-31T23:59:59.999Z',
+      } });
+      if (unbooked) await commerce.create({
+        _id: 'slotHold.fixture', _type: 'slotHold', backendOwner: 'supabase', cutoverGeneration: 0,
+        startTimeUTC: '2099-01-01T10:00:00.000Z', packageTitle: 'Vertex Essentials',
+        phase: 'holding', paymentRecordId: recordId, paymentProvider: provider,
+        holdNonce: 'refund-recovery', expiresAt: '2099-01-01T10:00:00.000Z',
+      });
+      if (unbooked) await commerce.patch('slotHold.fixture').set({ phase: 'payment_pending' }).commit();
+      const blockedId = unbooked ? 'slotHold.fixture' : bookingId;
+      await sql.unsafe(`create or replace function public.payment_refund_failure_fixture() returns trigger language plpgsql as $$
+        begin
+          if new.legacy_sanity_id = '${blockedId}' then raise exception 'Synthetic refund storage failure'; end if;
+          return new;
+        end $$;
+        create trigger payment_refund_failure_fixture before update on migration.source_documents
+        for each row execute function public.payment_refund_failure_fixture();`);
+      const refundEvent = () => {
+        if (provider === 'razorpay') return razorReq('refund.processed', { refund: { entity: {
+          id: 'refund-fixture', payment_id: 'payment-fixture', amount, currency: 'USD', status: 'processed',
+        } } });
+        if (provider === 'dodo') {
+          dodoPayment.refund_status = 'full';
+          dodoPayment.refunds = [{ ...dodoRefund }];
+          return dodoReq();
+        }
+        if (verified) {
+          paypalOrder.purchase_units[0].payments.captures[0].status = 'REFUNDED';
+          return paypalReq('PAYMENT.CAPTURE.COMPLETED', {
+            id: 'capture-fixture', supplementary_data: { related_ids: { order_id: 'order-fixture' } },
+          });
+        }
+        return paypalReq('PAYMENT.CAPTURE.REFUNDED', {
+          id: 'refund-fixture', status: 'COMPLETED', amount: { value: partial ? '4.99' : '9.99', currency_code: 'USD' },
+          supplementary_data: { related_ids: { order_id: 'order-fixture', capture_id: 'capture-fixture' } },
+        });
+      };
+      const before = (await row(blockedId)).payload;
+      let first, pending, recovered;
+      try {
+        first = await requestFlow(provider, { req: refundEvent() });
+        pending = await record();
+        assert.equal(pending.refundRequiresBookingSync, true);
+        assert.deepEqual((await row(blockedId)).payload, before);
+        assert.equal(pending.reconciliationRecoveryTerminal, false);
+        assert.equal(pending.recoveryFailureCount, 0);
+        assert.equal(pending.nextRecoveryAt, '');
+      } finally {
+        await sql.unsafe('drop trigger payment_refund_failure_fixture on migration.source_documents');
+      }
+      recovered = await requestFlow('reconcile');
+      const saved = await record();
+      assert.equal(recovered.status, 200, JSON.stringify(recovered));
+      assert.equal(recovered.body.summary.refundsSynced, 1);
+      assert.equal(saved.refundRequiresBookingSync, false);
+      assert.equal(saved.reconciliationRecoveryTerminal, false);
+      assert.equal(saved.recoveryFailureCount, 0);
+      if (unbooked) assert.equal((await row(blockedId)).payload.phase, 'released');
+      else assert.equal((await row(bookingId)).payload.refundedAmount, partial ? 4.99 : 9.99);
+      return { scenario, first, pending, recovered, saved, realPostgresFailure: true };
+    });
+  }
+
+  await run('recovery-duplicate-refund-keeps-failure-bound', async () => {
+    await seed('paypal', 'needs_recovery', { record: {
+      recoveryAttemptCount: 12, recoveryFailureCount: 12, reconciliationRecoveryTerminal: true,
+      nextRecoveryAt: '9999-12-31T23:59:59.999Z',
+    } });
+    await sql.unsafe(`create or replace function public.payment_refund_failure_fixture() returns trigger language plpgsql as $$
+      begin
+        if new.legacy_sanity_id = 'booking.fixture' then raise exception 'Synthetic refund storage failure'; end if;
+        return new;
+      end $$;
+      create trigger payment_refund_failure_fixture before update on migration.source_documents
+      for each row execute function public.payment_refund_failure_fixture();`);
+    const refundEvent = id => paypalReq('PAYMENT.CAPTURE.REFUNDED', {
+      id: 'refund-fixture', status: 'COMPLETED', amount: { value: '9.99', currency_code: 'USD' },
+      supplementary_data: { related_ids: { order_id: 'order-fixture', capture_id: 'capture-fixture' } },
+    }, id);
+    const attempts = [];
+    try {
+      await requestFlow('paypal', { req: refundEvent('new-refund-event') });
+      assert.equal((await record()).recoveryFailureCount, 0);
+      for (let index = 0; index < 12; index += 1) {
+        const current = await record();
+        const when = current.nextRecoveryAt ? new originalDate(current.nextRecoveryAt).getTime() + 1 : originalNow();
+        globalThis.Date = class extends originalDate {
+          constructor(...args) { super(...(args.length ? args : [when])); }
+          static now() { return when; }
+        };
+        const result = await requestFlow('reconcile');
+        assert.equal(result.status, 200, JSON.stringify(result));
+        attempts.push((await record()).recoveryFailureCount);
+      }
+      const exhausted = await record();
+      assert.equal(exhausted.reconciliationRecoveryTerminal, true);
+      assert.deepEqual(attempts, Array.from({ length: 12 }, (_, index) => index + 1));
+      await requestFlow('paypal', { req: refundEvent('duplicate-refund-event') });
+      const duplicate = await record();
+      assert.equal(duplicate.recoveryFailureCount, 12);
+      assert.equal(duplicate.reconciliationRecoveryTerminal, true);
+      assert.equal(duplicate.nextRecoveryAt, exhausted.nextRecoveryAt);
+      assert.equal((await requestFlow('reconcile')).body.summary.scanned, 0);
+      return { attempts, exhausted, duplicate, realPostgresFailure: true };
+    } finally {
+      globalThis.Date = originalDate;
+      await sql.unsafe('drop trigger payment_refund_failure_fixture on migration.source_documents');
+    }
   });
 
   for (const count of [null, -100, 'corrupt', 2.8]) await run(`recovery-invalid-counter-${String(count)}`, async () => {
