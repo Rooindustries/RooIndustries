@@ -18,8 +18,9 @@ const legacyVendorEnvironment=process.argv.includes('--leftover-vendor-env');
 const sourceText=name=>fs.readFileSync(path.join(process.cwd(),name),'utf8');
 const a1Mode=process.argv.includes('--a1')||process.argv.some(v=>v.startsWith('--scenario=')&&v.includes('a1-'));
 const restores=[];
-for(const key of Object.keys(process.env))if(/^(SANITY|SUPABASE|PAYPAL|RAZORPAY|DODO|REACT_APP_|NEXT_PUBLIC_|ALLOW_LIVE_|RESEND|BOOKING_EMAIL|DATA_|COMMERCE_|VERCEL_ENV|REF_SESSION|CRON_|RATE_LIMIT_|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|http_proxy|https_proxy|all_proxy|NODE_USE_ENV_PROXY)/.test(key))delete process.env[key];
-if(a1Mode||process.argv.includes('--a2'))Object.assign(process.env,{RESEND_API_KEY:'re_fixture',FROM_EMAIL:'noreply@example.invalid',OWNER_EMAIL:'owner@example.invalid'});
+for(const key of Object.keys(process.env))if(/^(SANITY|SUPABASE|PAYPAL|RAZORPAY|DODO|REACT_APP_|NEXT_PUBLIC_|ALLOW_LIVE_|RESEND|BOOKING_EMAIL|FROM_EMAIL|OWNER_EMAIL|DATA_|COMMERCE_|VERCEL_ENV|REF_SESSION|CRON_|RATE_LIMIT_|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|http_proxy|https_proxy|all_proxy|NODE_USE_ENV_PROXY)/.test(key))delete process.env[key];
+process.env.RESEND_API_KEY='re_fixture';
+if(a1Mode||process.argv.includes('--a2'))Object.assign(process.env,{FROM_EMAIL:'noreply@example.invalid',OWNER_EMAIL:'owner@example.invalid'});
 Object.assign(process.env,{NODE_ENV:'test',VERCEL_ENV:'development',DATA_PRIMARY_BACKEND:'supabase',COMMERCE_PRIMARY_BACKEND:'supabase',COMMERCE_FAILOVER_GENERATION:'0',PAYPAL_ENV:'sandbox',PAYPAL_CLIENT_ID:'fixture-client',PAYPAL_CLIENT_SECRET:'fixture-secret',PAYPAL_WEBHOOK_ID:'fixture-webhook',RAZORPAY_KEY_ID:'rzp_test_fixture',RAZORPAY_KEY_SECRET:'fixture-secret',RAZORPAY_WEBHOOK_SECRET:'fixture-webhook-secret',PAYMENT_SESSION_SECRET:'fixture-session-secret',REF_SESSION_SECRET:'fixture-ref-session-secret',CRON_SECRET:'fixture-cron',DODO_PAYMENTS_ENVIRONMENT:'test_mode',DODO_PAYMENTS_API_KEY:'fixture-dodo',DODO_PAYMENTS_WEBHOOK_KEY:`whsec_${Buffer.from('fixture-dodo-secret').toString('base64')}`,DODO_PAYMENTS_PRODUCT_ID:'pdt_fixture',DODO_PAYMENTS_RETURN_URL:'https://example.invalid/checkout'});
 if(legacyVendorEnvironment)Object.assign(process.env,{SANITY_PROJECT_ID:'synthetic-ignored',SANITY_DATASET:'production',SANITY_READ_TOKEN:'synthetic-ignored-read',SANITY_WRITE_TOKEN:'synthetic-ignored-write',SANITY_API_VERSION:'2023-10-01',NEXT_PUBLIC_SANITY_PROJECT_ID:'synthetic-ignored',NEXT_PUBLIC_SANITY_DATASET:'synthetic-ignored',SANITY_PRIVATE_API_VERSION:'synthetic-ignored',SANITY_PRIVATE_DATASET:'synthetic-ignored',SANITY_PRIVATE_PROJECT_ID:'synthetic-ignored',SANITY_PRIVATE_READ_TOKEN:'synthetic-ignored',SANITY_PRIVATE_WRITE_TOKEN:'synthetic-ignored',SANITY_USER_API_VERSION:'synthetic-ignored',SANITY_WEBHOOK_SECRET:'synthetic-ignored',SANITY_REVERSE_MIRROR_WRITES:'1',SANITY_STUDIO_CMS_WRITES_PAUSED:'1'});
 if(process.argv.includes('--currency-config'))Object.assign(process.env,{PAYPAL_CURRENCY:'EUR',RAZORPAY_CURRENCY:'KWD'});
@@ -110,7 +111,36 @@ const a1RebuildProof=async(name)=>{
   for(const rebuilt of Object.values(rebuilds))assert.deepEqual(rebuilt,incremental);
   return{incremental,...rebuilds,ignoredFields:['imported_at','updated_at'],sourceFinancialAndEmailFieldsIdentical:true};
 };
-const run=async(name,fn)=>{if(!supportedScenario(name)||(only&&!only.includes(name)))return;const start=originalNow();let proof;try{await reset();proof=await fn();if(/^a1-.*(?:-client-(?:cron|webhook)|-uppercase-referral-preserved-payload-(?:cron|webhook)|-email-failure-completion-and-retry)$/.test(name))proof.fullProjectionProof=await a1RebuildProof(name);evidence.scenarios.push({name,passed:true,durationMs:originalNow()-start,proof,persisted:await snapshot({receipts:true}),providerRequests:[...providerRequests]});}catch(error){evidence.scenarios.push({name,passed:false,durationMs:originalNow()-start,error:error.message,code:error.code,stack:error.stack,proof,providerRequests:[...providerRequests],persisted:await snapshot({receipts:true}).catch(()=>null)});}finally{Date.now=originalNow;providerHook=null;fixture.setRequestHook(null);}};
+const run = async (name, fn) => {
+  if (!supportedScenario(name) || (only && !only.includes(name))) return;
+  const emailSettings = { FROM_EMAIL: process.env.FROM_EMAIL, OWNER_EMAIL: process.env.OWNER_EMAIL };
+  if (name.startsWith('recovery-')) {
+    Object.assign(process.env, { FROM_EMAIL: 'noreply@example.invalid', OWNER_EMAIL: 'owner@example.invalid' });
+  }
+  const start = originalNow();
+  let proof;
+  try {
+    await reset();
+    proof = await fn();
+    if (/^a1-.*(?:-client-(?:cron|webhook)|-uppercase-referral-preserved-payload-(?:cron|webhook)|-email-failure-completion-and-retry)$/.test(name)) {
+      proof.fullProjectionProof = await a1RebuildProof(name);
+    }
+    evidence.scenarios.push({ name, passed: true, durationMs: originalNow() - start, proof,
+      persisted: await snapshot({ receipts: true }), providerRequests: [...providerRequests] });
+  } catch (error) {
+    evidence.scenarios.push({ name, passed: false, durationMs: originalNow() - start,
+      error: error.message, code: error.code, stack: error.stack, proof,
+      providerRequests: [...providerRequests], persisted: await snapshot({ receipts: true }).catch(() => null) });
+  } finally {
+    for (const [key, value] of Object.entries(emailSettings)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    Date.now = originalNow;
+    providerHook = null;
+    fixture.setRequestHook(null);
+  }
+};
 
 try{
 
