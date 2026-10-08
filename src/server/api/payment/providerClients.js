@@ -121,6 +121,7 @@ export const inspectRazorpayOrderByReceipt = async ({
     response = await fetch(
       `https://api.razorpay.com/v1/orders?receipt=${encodeURIComponent(receipt)}&count=10`,
       {
+        signal: AbortSignal.timeout(8000),
         headers: {
           Authorization: getRazorpayAuthorization(credentials),
         },
@@ -136,7 +137,8 @@ export const inspectRazorpayOrderByReceipt = async ({
     };
   }
 
-  const payload = await response.json().catch(() => ({}));
+  const payload = await response.json().catch(() => null);
+  if (!payload) return { state: "unavailable", reason: "razorpay_receipt_lookup_exception" };
   const expectedAmount = toSubunits(amount, currency);
   const order = (Array.isArray(payload?.items) ? payload.items : []).find(
     (entry) =>
@@ -225,6 +227,7 @@ export const createRazorpayOrder = async ({
   try {
     upstream = await fetch("https://api.razorpay.com/v1/orders", {
       method: "POST",
+      signal: AbortSignal.timeout(8000),
       headers: {
         Authorization: getRazorpayAuthorization(credentials),
         "Content-Type": "application/json",
@@ -292,13 +295,13 @@ export const inspectRazorpayOrder = async ({ orderId }) => {
   try {
     const response = await fetch(
       `https://api.razorpay.com/v1/orders/${encodeURIComponent(orderId)}/payments`,
-      { headers: { Authorization: getRazorpayAuthorization(credentials) } }
+      { headers: { Authorization: getRazorpayAuthorization(credentials) }, signal: AbortSignal.timeout(8000) }
     );
     if (!response.ok) {
       return { state: "unavailable", reason: `razorpay_lookup_failed_${response.status}` };
     }
 
-    const payload = await response.json().catch(() => ({}));
+    const payload = await response.json();
     const payments = Array.isArray(payload?.items) ? payload.items : [];
     const captured = payments.find(
       (entry) => ["captured", "refunded"].includes(String(entry?.status || "").trim().toLowerCase())
@@ -343,7 +346,7 @@ export const inspectRazorpayPayment = async ({ paymentId }) => {
   try {
     const response = await fetch(
       `https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`,
-      { headers: { Authorization: getRazorpayAuthorization(credentials) } }
+      { headers: { Authorization: getRazorpayAuthorization(credentials) }, signal: AbortSignal.timeout(8000) }
     );
     if (!response.ok) {
       return {
@@ -351,7 +354,7 @@ export const inspectRazorpayPayment = async ({ paymentId }) => {
         reason: `razorpay_payment_lookup_failed_${response.status}`,
       };
     }
-    const payment = await response.json().catch(() => ({}));
+    const payment = await response.json();
     if (String(payment?.id || "").trim() !== String(paymentId).trim()) {
       return { state: "unavailable", reason: "razorpay_payment_id_mismatch" };
     }
@@ -397,6 +400,7 @@ export const verifyRazorpayPayment = async ({
     const response = await fetch(
       `https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`,
       {
+        signal: AbortSignal.timeout(8000),
         headers: {
           Authorization: `Basic ${basic}`,
         },
@@ -410,7 +414,7 @@ export const verifyRazorpayPayment = async ({
       return { ok: false, reason: `razorpay_lookup_failed_${response.status}` };
     }
 
-    const payment = await response.json().catch(() => ({}));
+    const payment = await response.json();
     const status = String(payment?.status || "").trim().toLowerCase();
     const paidAmount = payment?.amount;
     const expectedSubunits = parseMoneySubunits(expectedAmount, expectedCurrency);
@@ -518,6 +522,7 @@ export const getPayPalToken = async () => {
   try {
     const response = await fetch(`${getPayPalBaseUrl(runtimePolicy)}/v1/oauth2/token`, {
       method: "POST",
+      signal: AbortSignal.timeout(8000),
       headers: {
         Authorization: `Basic ${basic}`,
         "Content-Type": "application/x-www-form-urlencoded",
@@ -572,6 +577,7 @@ export const createPayPalOrder = async ({
 
   const response = await fetch(`${getPayPalBaseUrl()}/v2/checkout/orders`, {
     method: "POST",
+    signal: AbortSignal.timeout(8000),
     headers: {
       Authorization: `Bearer ${tokenResult.token}`,
       "Content-Type": "application/json",
@@ -668,12 +674,12 @@ export const inspectPayPalOrder = async ({ orderId }) => {
   try {
     const response = await fetch(
       `${getPayPalBaseUrl()}/v2/checkout/orders/${encodeURIComponent(orderId)}`,
-      { headers: { Authorization: `Bearer ${tokenResult.token}` } }
+      { headers: { Authorization: `Bearer ${tokenResult.token}` }, signal: AbortSignal.timeout(8000) }
     );
     if (!response.ok) {
       return { state: "unavailable", reason: `paypal_lookup_failed_${response.status}` };
     }
-    const details = await response.json().catch(() => ({}));
+    const details = await response.json();
     if (String(details?.id || "").trim() !== String(orderId).trim()) {
       return { state: "unavailable", reason: "paypal_order_mismatch" };
     }
@@ -698,6 +704,7 @@ export const verifyPayPalOrder = async ({
     const response = await fetch(
       `${getPayPalBaseUrl()}/v2/checkout/orders/${encodeURIComponent(orderId)}`,
       {
+        signal: AbortSignal.timeout(8000),
         headers: {
           Authorization: `Bearer ${tokenResult.token}`,
         },
@@ -711,7 +718,7 @@ export const verifyPayPalOrder = async ({
       return { ok: false, reason: `paypal_lookup_failed_${response.status}` };
     }
 
-    const details = await response.json().catch(() => ({}));
+    const details = await response.json();
     if (String(details?.id || "").trim() !== String(orderId || "").trim()) {
       return { ok: false, reason: "paypal_order_mismatch" };
     }
@@ -827,10 +834,11 @@ export const inspectPayPalCapture = async ({ paymentId }) => {
   if (!tokenResult.ok) return { state: "unavailable", reason: tokenResult.reason };
   try {
     const response = await fetch(`${getPayPalBaseUrl()}/v2/payments/captures/${encodeURIComponent(paymentId)}`, {
+      signal: AbortSignal.timeout(8000),
       headers: { Authorization: `Bearer ${tokenResult.token}` },
     });
     if (!response.ok) return { state: "unavailable", reason: `paypal_capture_lookup_failed_${response.status}` };
-    const capture = await response.json().catch(() => ({}));
+    const capture = await response.json();
     if (String(capture.id || "").trim() !== String(paymentId).trim()) {
       return { state: "unavailable", reason: "paypal_payment_id_mismatch" };
     }
@@ -899,6 +907,7 @@ export const verifyPayPalWebhookSignature = async ({
       `${getPayPalBaseUrl()}/v1/notifications/verify-webhook-signature`,
       {
         method: "POST",
+        signal: AbortSignal.timeout(8000),
         headers: {
           Authorization: `Bearer ${tokenResult.token}`,
           "Content-Type": "application/json",

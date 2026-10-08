@@ -83,6 +83,31 @@ const normalizeObject = (value) =>
 
 const nowIso = () => new Date().toISOString();
 
+const buildRecoveryFailureState = (record) => {
+  const normalizeCount = (value) => {
+    const count = Number(value);
+    return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+  };
+  const recoveryAttemptCount = Math.min(12, normalizeCount(record.recoveryAttemptCount) + 1);
+  const recoveryFailureCount = Math.min(12, normalizeCount(record.recoveryFailureCount) + 1);
+  const stopped = recoveryFailureCount >= 12;
+  return {
+    recoveryAttemptCount,
+    recoveryFailureCount,
+    reconciliationRecoveryTerminal: stopped,
+    nextRecoveryAt: stopped ? "9999-12-31T23:59:59.999Z" : getNextPaymentRecoveryAt(recoveryFailureCount),
+  };
+};
+
+const logRecoveryExhaustion = (record, values) => {
+  if (values.reconciliationRecoveryTerminal === true &&
+      values.recoveryFailureCount === 12 && record.reconciliationRecoveryTerminal !== true) {
+    logSafeError(`Payment recovery requires owner review: ${record._id}`, Object.assign(new Error(), {
+      code: "payment_recovery_attempts_exhausted",
+    }));
+  }
+};
+
 const getFutureIso = (seconds) =>
   new Date(Date.now() + Math.max(1, Number(seconds) || 1) * 1000).toISOString();
 
@@ -1086,6 +1111,11 @@ const completeRefundBookingSync = async ({ client, record, sync = null }) => {
         recoveryReason: record.providerRecoveryTerminal === true || record.providerRefundDetailsMissing === true
           ? record.providerRecoveryTerminalReason || record.recoveryReason || "" : "",
         nextRecoveryAt: "",
+        ...(record.providerRefundDetailsMissing !== true ? {
+          recoveryAttemptCount: 0,
+          recoveryFailureCount: 0,
+          reconciliationRecoveryTerminal: false,
+        } : {}),
         ...(sync ? { refundBookingSync: normalizeObject(sync) } : {}),
       },
     });
@@ -1127,10 +1157,12 @@ const patchPaymentRecord = async ({
       .patch(holdRelease.holdDoc._id, (patch) =>
         guardPaymentRevision(patch, holdRelease.holdDoc).set(holdRelease.set))
       .commit();
+    logRecoveryExhaustion(record, values);
     return getPaymentRecordById(client, record._id);
   }
   const patch = guardPaymentRevision(client.patch(record._id), record).set(values);
   const committed = await patch.commit();
+  logRecoveryExhaustion(record, values);
 
   return {
     ...record,
@@ -1801,7 +1833,6 @@ const markRetryableFinalizeFailure = async ({
       response: buildPublicStatusBody(current),
     };
   }
-  const recoveryAttemptCount = Number(current.recoveryAttemptCount || 0) + 1;
   await requirePaymentResourceRevisions({ client, record: current });
   let nextRecord;
   try {
@@ -1812,8 +1843,7 @@ const markRetryableFinalizeFailure = async ({
       set: {
         status: PAYMENT_STATUS_NEEDS_RECOVERY,
         recoveryReason: reason,
-        recoveryAttemptCount,
-        nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
+        ...buildRecoveryFailureState(current),
         finalizationLeaseId: "",
         finalizationLeaseExpiresAt: "",
         source,
@@ -1951,15 +1981,13 @@ const markTerminalFinalizeFailure = async ({
     reason,
   });
   if (!release.ok) {
-    const recoveryAttemptCount = Number(stagedRecord.recoveryAttemptCount || 0) + 1;
     const pendingRecord = await patchPaymentRecord({
       client,
       record: stagedRecord,
       set: {
         status: PAYMENT_STATUS_NEEDS_RECOVERY,
         recoveryReason: "resource_release_pending",
-        recoveryAttemptCount,
-        nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
+        ...buildRecoveryFailureState(stagedRecord),
         resourceReleasePending: true,
         resourceReleaseTargetStatus: PAYMENT_STATUS_FAILED,
         resourceReleaseReason: reason,
@@ -1991,6 +2019,8 @@ const markTerminalFinalizeFailure = async ({
       resourceReleasePending: false,
       resourceReleaseTargetStatus: "",
       resourceReleaseReason: "",
+      recoveryFailureCount: 0,
+      reconciliationRecoveryTerminal: false,
       finalizationLeaseId: "",
       finalizationLeaseExpiresAt: "",
     },
@@ -2391,6 +2421,7 @@ const finalizePaymentRecordInternal = async ({
             recoveryReason: current.providerRefundDetailsMissing === true ? "provider_partial_refund_details_missing_owner_review"
               : completionUnknown ? "booking_email_delivery_review_required" : "",
             recoveryAttemptCount: 0,
+            recoveryFailureCount: 0,
             nextRecoveryAt: "",
             finalizationLeaseId: "",
             finalizationLeaseExpiresAt: "",
@@ -2563,7 +2594,6 @@ const abandonStartedPaymentRecord = async ({
     releaseCouponReservation,
   });
   if (!release.ok) {
-    const recoveryAttemptCount = Number(stagedRecord.recoveryAttemptCount || 0) + 1;
     let pendingRecord;
     try {
       pendingRecord = await patchPaymentRecord({
@@ -2572,8 +2602,7 @@ const abandonStartedPaymentRecord = async ({
         set: {
           status: PAYMENT_STATUS_ABANDONED,
           recoveryReason: "resource_release_pending",
-          recoveryAttemptCount,
-          nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
+          ...buildRecoveryFailureState(stagedRecord),
           resourceReleasePending: true,
           resourceReleaseTargetStatus: PAYMENT_STATUS_ABANDONED,
           resourceReleaseReason: reason,
@@ -2611,6 +2640,8 @@ const abandonStartedPaymentRecord = async ({
         resourceReleasePending: false,
         resourceReleaseTargetStatus: "",
         resourceReleaseReason: "",
+        recoveryFailureCount: 0,
+        reconciliationRecoveryTerminal: false,
         lateCaptureWatchUntil: shouldWatchForLateCapture
           ? getFutureIso(LATE_CAPTURE_WATCH_HOURS * 60 * 60)
           : "",
@@ -2923,7 +2954,6 @@ const createOrReusePaymentRecordForStart = async ({
       error.status = Number(error?.status) >= 400 ? Number(error.status) : 503;
       throw error;
     }
-    const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
     await patchPaymentRecord({
       client,
       record,
@@ -2931,8 +2961,7 @@ const createOrReusePaymentRecordForStart = async ({
         status: PAYMENT_STATUS_NEEDS_RECOVERY,
         orderState: "creation_ambiguous",
         recoveryReason: "provider_order_creation_ambiguous",
-        recoveryAttemptCount,
-        nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
+        ...buildRecoveryFailureState(record),
         orderCreationLeaseId: "",
         orderCreationLeaseExpiresAt: "",
       },
@@ -3633,6 +3662,7 @@ const scheduleProviderRecoveryCheck = async ({
   client,
   record,
   reason,
+  failed = false,
 }) => {
   const operation = await currentPaymentOperation({ client, record });
   if (!operation.owned) return operation.record;
@@ -3648,6 +3678,10 @@ const scheduleProviderRecoveryCheck = async ({
         recoveryAttemptCount,
         lastAttemptAt: nowIso(),
         nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
+        ...(failed ? buildRecoveryFailureState(record) : {
+          recoveryFailureCount: 0,
+          reconciliationRecoveryTerminal: false,
+        }),
         source: "reconcile",
       },
       event: buildPaymentRecordEvent({
@@ -4316,14 +4350,12 @@ export const reconcilePaymentSessions = async ({
             summary.recovery += 1;
             continue;
           }
-          const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
           await patchPaymentRecord({
             client,
             record,
             set: {
               recoveryReason: sideEffects.reason || "refund_side_effect_pending",
-              recoveryAttemptCount,
-              nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
+              ...buildRecoveryFailureState(record),
             },
           });
           summary.recovery += 1;
@@ -4397,6 +4429,7 @@ export const reconcilePaymentSessions = async ({
           await scheduleProviderRecoveryCheck({
             client,
             record,
+            failed: inspection.state === "unavailable",
             reason:
               inspection.state === "unavailable"
                 ? inspection.reason || "abandoned_provider_status_unavailable"
@@ -4737,17 +4770,12 @@ export const reconcilePaymentSessions = async ({
               current.status !== PAYMENT_STATUS_NEEDS_RECOVERY &&
               !shouldRetryEmailPartialDispatch({ record: current, source: "reconcile" }) &&
               current.resourceReleasePending !== true && current.refundRequiresBookingSync !== true)) break;
-          const storedAttempts = Number(current.recoveryAttemptCount || 0);
-          const priorAttempts = Number.isFinite(storedAttempts) ? Math.max(0, Math.floor(storedAttempts)) : 0;
-          const recoveryAttemptCount = Math.min(12, priorAttempts + 1);
-          const stopped = recoveryAttemptCount >= 12;
+          const retry = buildRecoveryFailureState(current);
           await patchPaymentRecord({ client, record: current, set: {
-            recoveryAttemptCount,
+            ...retry,
             recoveryReason: getSafeErrorCode(error, "payment_reconciliation_record_failed"),
-            reconciliationRecoveryTerminal: stopped,
-            nextRecoveryAt: stopped ? "9999-12-31T23:59:59.999Z" : getNextPaymentRecoveryAt(recoveryAttemptCount),
           }, event: buildPaymentRecordEvent({ status: current.status, source: "reconcile",
-            reason: stopped ? "payment_reconciliation_owner_review_required" : "payment_reconciliation_record_failed" }) });
+            reason: retry.reconciliationRecoveryTerminal ? "payment_reconciliation_owner_review_required" : "payment_reconciliation_record_failed" }) });
           break;
         } catch (recoveryError) {
           if (isConflictError(recoveryError) && attempt < 4) continue;

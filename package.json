@@ -45,6 +45,7 @@
     "prebuild": "node scripts/validate-runtime-env.js && node scripts/generate-sitemap.js && node scripts/generate-robots.js",
     "build": "next build",
     "test": "jest",
+    "test:payment-recovery:postgres17": "node scripts/test-payment-persistence-sweep.mjs --recovery --full-chain",
     "test:agent-readiness": "node --test tests/agent-readiness.test.mjs",
     "check:payment:runtime": "node scripts/diagnose-payment-runtime.js",
     "check:payment:webhooks": "node scripts/check-payment-webhooks.js",
