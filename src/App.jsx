@@ -29,6 +29,7 @@ import {
 } from "./lib/sectionNavigation";
 import { sanitizeBrowserSearch } from "./lib/browserSearch";
 import { prefetchHomeSectionData } from "./lib/homeSectionData";
+import { whenUserInteracts } from "./lib/firstInteraction";
 import { migrateCheckoutStorageToSession } from "./lib/checkoutStorage";
 
 const Reviews = lazy(() => import("./legacyPages/Reviews"));
@@ -394,23 +395,32 @@ export function AppContent({
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     let cancelled = false;
+    let cancelScheduled = () => {};
     const runPrefetch = () => {
       if (cancelled) return;
       prefetchHomeSectionData().catch(() => {});
     };
 
-    if ("requestIdleCallback" in window) {
-      const id = window.requestIdleCallback(runPrefetch, { timeout: 1200 });
-      return () => {
-        cancelled = true;
-        window.cancelIdleCallback?.(id);
-      };
+    const schedulePrefetch = () => {
+      if (cancelled) return;
+      if ("requestIdleCallback" in window) {
+        const id = window.requestIdleCallback(runPrefetch, { timeout: 1200 });
+        cancelScheduled = () => window.cancelIdleCallback?.(id);
+        return;
+      }
+      const timeoutId = window.setTimeout(runPrefetch, 200);
+      cancelScheduled = () => window.clearTimeout(timeoutId);
+    };
+
+    if (initialHomeData) {
+      whenUserInteracts().then(schedulePrefetch);
+    } else {
+      schedulePrefetch();
     }
 
-    const timeoutId = window.setTimeout(runPrefetch, 200);
     return () => {
       cancelled = true;
-      window.clearTimeout(timeoutId);
+      cancelScheduled();
     };
   }, []);
 

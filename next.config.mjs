@@ -145,6 +145,22 @@ const nextConfig = {
         source: '/:path*',
         headers: globalSecurityHeaders,
       },
+      {
+        source: "/",
+        missing: [
+          { type: "header", key: "rsc" },
+          { type: "header", key: "next-router-prefetch" },
+          { type: "header", key: "next-router-state-tree" },
+          { type: "header", key: "next-router-segment-prefetch" },
+          { type: "header", key: "next-action" },
+        ],
+        headers: [
+          {
+            key: "Vercel-CDN-Cache-Control",
+            value: "s-maxage=60, stale-while-revalidate=86400, stale-if-error=86400",
+          },
+        ],
+      },
       ...assets.map((asset) => ({
         source: `/${asset.replace(/[.*+?^${}()|[\]\\:]/g, "\\$&")}`,
         headers: assetCacheHeaders,

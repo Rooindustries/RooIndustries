@@ -1,0 +1,52 @@
+{
+  "ci": {
+    "collect": {
+      "numberOfRuns": 3,
+      "settings": {
+        "formFactor": "mobile",
+        "throttlingMethod": "simulate",
+        "onlyCategories": [
+          "performance"
+        ]
+      },
+      "url": [
+        "http://127.0.0.1:3001/"
+      ],
+      "startServerCommand": "PW_PORT=3001 BASE_URL=http://${ROO_TEST_HOST:-127.0.0.1}:3001 NEXT_DIST_DIR=.next-e2e-lighthouse node scripts/test-tooling-sweep-server.mjs"
+    },
+    "assert": {
+      "assertions": {
+        "first-contentful-paint": [
+          "error",
+          {
+            "maxNumericValue": 1800
+          }
+        ],
+        "largest-contentful-paint": [
+          "error",
+          {
+            "maxNumericValue": 4000
+          }
+        ],
+        "total-blocking-time": [
+          "error",
+          {
+            "maxNumericValue": 200
+          }
+        ],
+        "cumulative-layout-shift": [
+          "error",
+          {
+            "maxNumericValue": 0.1
+          }
+        ],
+        "total-byte-weight": [
+          "error",
+          {
+            "maxNumericValue": 800000
+          }
+        ]
+      }
+    }
+  }
+}

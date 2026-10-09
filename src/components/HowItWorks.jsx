@@ -119,11 +119,10 @@ export default function HowItWorks({ initialData = null }) {
         <video
           ref={videoRef}
           className="absolute inset-0 w-full h-full object-cover"
-          autoPlay
           loop
           muted
           playsInline
-          preload="metadata"
+          preload="none"
           fetchPriority="low"
           poster={poster}
         >

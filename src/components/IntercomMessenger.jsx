@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { isProductionBrowser } from "../lib/productionBrowser";
+import { whenUserInteracts } from "../lib/firstInteraction";
 
 const INTERCOM_APP_ID =
   process.env.NEXT_PUBLIC_INTERCOM_APP_ID ||
@@ -74,7 +75,7 @@ const bootOrUpdateIntercom = (settings) => {
   window.__rooIntercomBooted = true;
 };
 
-const loadIntercom = (settings) => {
+const loadIntercom = (settings, canInject) => {
   window.intercomSettings = settings;
 
   if (typeof window.Intercom !== "function") {
@@ -83,6 +84,19 @@ const loadIntercom = (settings) => {
 
   bootOrUpdateIntercom(settings);
 
+  whenUserInteracts().then(() => {
+    const inject = () => {
+      if (canInject()) injectIntercomScript();
+    };
+    if ("requestIdleCallback" in window) {
+      window.requestIdleCallback(inject, { timeout: 2000 });
+    } else {
+      window.setTimeout(inject, 200);
+    }
+  });
+};
+
+const injectIntercomScript = () => {
   if (document.getElementById(INTERCOM_SCRIPT_ID)) {
     return;
   }
@@ -119,7 +133,7 @@ function IntercomMessenger({ disabledRoutes = [], disabled = false }) {
       return;
     }
 
-    loadIntercom(createIntercomSettings());
+    loadIntercom(createIntercomSettings(), () => !isDisabledRef.current);
 
     return () => {
       if (typeof window.Intercom === "function") {
@@ -144,7 +158,7 @@ function IntercomMessenger({ disabledRoutes = [], disabled = false }) {
     }
 
     if (!isDisabled) {
-      loadIntercom(settings);
+      loadIntercom(settings, () => !isDisabledRef.current);
     }
   }, [isDisabled, pathname]);
 

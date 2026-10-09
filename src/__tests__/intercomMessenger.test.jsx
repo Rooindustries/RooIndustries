@@ -1,6 +1,7 @@
 import React from "react";
-import { cleanup, render } from "@testing-library/react";
-import IntercomMessenger from "../components/IntercomMessenger";
+import { cleanup, render, waitFor } from "@testing-library/react";
+
+let IntercomMessenger;
 
 jest.mock("../lib/productionBrowser", () => {
   const { isProductionBrowser } = jest.requireActual("../lib/productionBrowser");
@@ -20,6 +21,9 @@ const disabledRoutes = ["/booking", "/payment"];
 
 describe("IntercomMessenger checkout visibility", () => {
   beforeEach(() => {
+    jest.resetModules();
+    jest.doMock("react", () => React);
+    IntercomMessenger = require("../components/IntercomMessenger").default;
     mockLocation.pathname = "/";
     document.getElementById("intercom-embed-script")?.remove();
     delete window.Intercom;
@@ -43,21 +47,23 @@ describe("IntercomMessenger checkout visibility", () => {
     }
   );
 
-  test("loads Intercom on the homepage", () => {
+  test("loads Intercom on the homepage", async () => {
     render(<IntercomMessenger disabledRoutes={disabledRoutes} />);
 
-    expect(document.getElementById("intercom-embed-script")).not.toBeNull();
+    window.dispatchEvent(new Event("pointerdown"));
+    await waitFor(() => expect(document.getElementById("intercom-embed-script")).not.toBeNull());
     expect(window.intercomSettings).toEqual(
       expect.objectContaining({ hide_default_launcher: false })
     );
   });
 
-  test("hides and restores Intercom with the checkout overlay signal", () => {
+  test("hides and restores Intercom with the checkout overlay signal", async () => {
     const { rerender } = render(
       <IntercomMessenger disabledRoutes={disabledRoutes} disabled={false} />
     );
 
-    expect(document.getElementById("intercom-embed-script")).not.toBeNull();
+    window.dispatchEvent(new Event("pointerdown"));
+    await waitFor(() => expect(document.getElementById("intercom-embed-script")).not.toBeNull());
 
     rerender(<IntercomMessenger disabledRoutes={disabledRoutes} disabled />);
 
