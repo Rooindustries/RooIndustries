@@ -7,22 +7,28 @@ test.beforeEach(async ({ context, baseURL }) => {
   await guardBrowserContext(context, [baseURL]);
 });
 
-test("privacy Markdown preserves PortableText paragraphs and line breaks", async ({ page, request }) => {
+test("privacy Markdown preserves PortableText line breaks", async ({ page, request }) => {
   const response = await request.get("/markdown?path=/privacy");
   expect(response.status()).toBe(200);
   const markdown = await response.text();
   expect(markdown).toContain([
     "## Synthetic line breaks",
     "",
-    "Synthetic first line\\:",
-    "",
+    "Synthetic first line\\:\\",
+    "\\",
     "\\- Synthetic item one\\",
-    "\\- Synthetic item two",
-    "",
+    "\\- Synthetic item two\\",
+    "\\",
     "Synthetic closing line \\&copy\\;\\.",
     "",
     "- List line one\\",
     "  List line two",
+    "",
+    "\\",
+    "Leading break\\",
+    "\\",
+    "\\",
+    "Three breaks carriage return",
   ].join("\n"));
 
   await page.goto("/privacy");
@@ -30,12 +36,15 @@ test("privacy Markdown preserves PortableText paragraphs and line breaks", async
     has: page.getByRole("heading", { name: "Synthetic line breaks", exact: true }),
   }).last();
   await expect(section.getByRole("heading", { name: "Synthetic line breaks", exact: true })).toBeVisible();
-  await expect(section.locator("p br")).toHaveCount(5);
+  await expect(section.locator("p")).toHaveCount(2);
+  await expect(section.locator("p").nth(0).locator("br")).toHaveCount(5);
+  await expect(section.locator("p").nth(1).locator("br")).toHaveCount(5);
   await expect(section.locator("li br")).toHaveCount(1);
-  await expect(section.locator("br")).toHaveCount(6);
-  expect(await section.locator("p").textContent()).toBe(
+  await expect(section.locator("br")).toHaveCount(11);
+  expect(await section.locator("p").nth(0).textContent()).toBe(
     "Synthetic first line:- Synthetic item one- Synthetic item twoSynthetic closing line &copy;."
   );
+  await expect(section.locator("p").nth(1)).toHaveText("Leading breakThree breaks carriage return");
   expect(await section.locator("li").textContent()).toBe("List line oneList line two");
   await test.info().attach("privacy-markdown", { body: markdown, contentType: "text/markdown" });
   await test.info().attach("privacy-line-breaks-html", {

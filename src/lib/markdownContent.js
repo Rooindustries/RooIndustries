@@ -15,15 +15,11 @@ const RECOVERY_LINKS = [
 const links = (items) => items.map(([title, path]) => `- [${title}](${SITE_URL}${path})`).join("\n");
 const escapeMarkdown = (text = "") =>
   String(text).replace(/\s+/g, " ").trim().replace(/[!-/:-@[-`{-~]/g, "\\$&");
-const escapeMarkdownBlock = (text = "") =>
-  String(text)
-    .split(/\r\n|\r|\n/)
-    .map(escapeMarkdown)
-    .join("\n")
-    .split(/\n{2,}/)
-    .map((paragraph) => paragraph.split("\n").filter(Boolean).join("\\\n"))
-    .filter(Boolean)
-    .join("\n\n");
+const escapeMarkdownBlock = (text = "") => {
+  const lines = String(text).split("\n").map(escapeMarkdown);
+  while (lines.length && !lines[lines.length - 1]) lines.pop();
+  return lines.join("\\\n");
+};
 
 function buildPageMarkdown(pathname, privacy = null, hero = HOME_COPY.hero) {
   const { services, howItWorks } = HOME_COPY;

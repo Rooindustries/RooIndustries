@@ -34,6 +34,13 @@ export async function createToolingContentFixture({ origin, artifact }) {
         markDefs: [],
         children: [{ _type: 'span', _key: 'privacy-list-line-breaks-span', text: 'List line one\nList line two', marks: [] }],
       },
+      {
+        _type: 'block',
+        _key: 'privacy-lf-line-breaks',
+        style: 'normal',
+        markDefs: [],
+        children: [{ _type: 'span', _key: 'privacy-lf-line-breaks-span', text: '\nLeading break\n\n\nThree breaks\rcarriage return\n', marks: [] }],
+      },
     ],
   });
   const documents = [
