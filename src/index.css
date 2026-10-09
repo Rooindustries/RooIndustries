@@ -484,6 +484,12 @@ html {
   -webkit-font-smoothing: antialiased;
 }
 
+@media (scripting: none) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
 html,
 body {
   overflow-x: hidden;
