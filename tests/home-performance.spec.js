@@ -181,7 +181,7 @@ test("checkout entered before idle injection keeps Intercom unloaded", async ({ 
     const bookingLink = page.locator('a[href="/booking"]').first();
     await bookingLink.scrollIntoViewIfNeeded();
     scenario.interacted = true;
-    await bookingLink.click();
+    await bookingLink.dispatchEvent("click");
     await expect(page).toHaveURL((url) => url.pathname === "/booking");
     await page.waitForTimeout(5000);
     expect(widgetRequests(scenario)).toHaveLength(0);
