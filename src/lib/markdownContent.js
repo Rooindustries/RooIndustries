@@ -17,8 +17,12 @@ const escapeMarkdown = (text = "") =>
   String(text).replace(/\s+/g, " ").trim().replace(/[!-/:-@[-`{-~]/g, "\\$&");
 const escapeMarkdownBlock = (text = "") => {
   const lines = String(text).split("\n").map(escapeMarkdown);
-  while (lines.length && !lines[lines.length - 1]) lines.pop();
-  return lines.join("\\\n");
+  let trailingBreaks = "";
+  while (lines.length > 1 && !lines[lines.length - 1]) {
+    lines.pop();
+    trailingBreaks += "<br>";
+  }
+  return lines.join("\\\n") + trailingBreaks;
 };
 
 function buildPageMarkdown(pathname, privacy = null, hero = HOME_COPY.hero) {

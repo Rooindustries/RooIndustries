@@ -28,7 +28,7 @@ test("privacy Markdown preserves PortableText line breaks", async ({ page, reque
     "Leading break\\",
     "\\",
     "\\",
-    "Three breaks carriage return",
+    "Three breaks carriage return<br><br>",
   ].join("\n"));
 
   await page.goto("/privacy");
@@ -38,9 +38,9 @@ test("privacy Markdown preserves PortableText line breaks", async ({ page, reque
   await expect(section.getByRole("heading", { name: "Synthetic line breaks", exact: true })).toBeVisible();
   await expect(section.locator("p")).toHaveCount(2);
   await expect(section.locator("p").nth(0).locator("br")).toHaveCount(5);
-  await expect(section.locator("p").nth(1).locator("br")).toHaveCount(5);
+  await expect(section.locator("p").nth(1).locator("br")).toHaveCount(6);
   await expect(section.locator("li br")).toHaveCount(1);
-  await expect(section.locator("br")).toHaveCount(11);
+  await expect(section.locator("br")).toHaveCount(12);
   expect(await section.locator("p").nth(0).textContent()).toBe(
     "Synthetic first line:- Synthetic item one- Synthetic item twoSynthetic closing line &copy;."
   );
