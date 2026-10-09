@@ -173,6 +173,22 @@ test("click-only activation loads Intercom", async ({ browser, baseURL }, testIn
   });
 });
 
+test("checkout entered before idle injection keeps Intercom unloaded", async ({ browser, baseURL }, testInfo) => {
+  await withScenario(browser, testInfo, baseURL, { viewport: { width: 1366, height: 768 } }, async ({ page, scenario, navigate }) => {
+    await navigate();
+    await page.waitForTimeout(4000);
+    expect(widgetRequests(scenario)).toHaveLength(0);
+    const bookingLink = page.locator('a[href="/booking"]').first();
+    await bookingLink.scrollIntoViewIfNeeded();
+    scenario.interacted = true;
+    await bookingLink.click();
+    await expect(page).toHaveURL((url) => url.pathname === "/booking");
+    await page.waitForTimeout(5000);
+    expect(widgetRequests(scenario)).toHaveLength(0);
+    await expect(page.locator("#intercom-embed-script")).toHaveCount(0);
+  });
+});
+
 test("booking keeps Intercom disabled after interaction", async ({ browser, baseURL }, testInfo) => {
   await withScenario(browser, testInfo, baseURL, { viewport: { width: 1366, height: 768 } }, async ({ page, scenario, navigate, interact }) => {
     await navigate("/booking");
@@ -198,7 +214,7 @@ test("How It Works videos load and play near the viewport and pause away", async
     await interact();
     await page.locator("#how-it-works").scrollIntoViewIfNeeded();
     await expect.poll(() => videoRequests(scenario).length, { timeout: 8000 }).toBeGreaterThan(0);
-    await expect.poll(() => page.locator("#how-it-works video").evaluateAll((videos) => videos.some((video) => !video.paused)), { timeout: 8000 }).toBe(true);
+    await expect.poll(() => page.locator("#how-it-works video").evaluateAll((videos) => videos.some((video) => video.currentTime > 0.25)), { timeout: 8000 }).toBe(true);
     await page.screenshot({ path: path.join(artifactDir, "mobile-videos.png") });
     await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
     await expect.poll(() => page.locator("#how-it-works video").evaluateAll((videos) => videos.length > 0 && videos.every((video) => video.paused)), { timeout: 3000 }).toBe(true);

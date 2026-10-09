@@ -118,6 +118,7 @@ const injectIntercomScript = () => {
 function IntercomMessenger({ disabledRoutes = [], disabled = false }) {
   const location = useLocation();
   const isDisabledRef = useRef(false);
+  const isMountedRef = useRef(false);
   const pathname = location.pathname || "/";
   const isDisabled =
     Boolean(disabled) || isRouteDisabled(pathname, disabledRoutes);
@@ -125,11 +126,15 @@ function IntercomMessenger({ disabledRoutes = [], disabled = false }) {
   isDisabledRef.current = isDisabled;
 
   useEffect(() => {
+    isMountedRef.current = true;
     if (typeof window === "undefined" || typeof document === "undefined" || !isProductionBrowser()) {
-      return;
+      return () => {
+        isMountedRef.current = false;
+      };
     }
 
     return () => {
+      isMountedRef.current = false;
       if (typeof window.Intercom === "function") {
         window.Intercom("update", createIntercomSettings({ hideLauncher: true }));
         window.Intercom("hide");
@@ -152,7 +157,7 @@ function IntercomMessenger({ disabledRoutes = [], disabled = false }) {
     }
 
     if (!isDisabled) {
-      loadIntercom(settings, () => !isDisabledRef.current);
+      loadIntercom(settings, () => isMountedRef.current && !isDisabledRef.current);
     }
   }, [isDisabled, pathname]);
 
