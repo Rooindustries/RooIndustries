@@ -4,7 +4,7 @@ const { HOME_COPY } = require("../src/lib/homeCopy");
 
 const artifactDir = path.resolve("test-results/home-hero-cms");
 const fixtureDescription =
-  "Synthetic hero description served by the local content fixture.";
+  "Synthetic hero description served by the local content fixture. ========================";
 const fixtureSubtext = "Synthetic hero subtext with *literal* asterisks.";
 const isHeroRequest = (request) =>
   new URL(request.url()).pathname === "/api/content/hero";
@@ -30,13 +30,49 @@ test("renders CMS hero in server HTML without JavaScript", async ({ page }) => {
   for (const [name, viewport] of [
     ["desktop", { width: 1440, height: 900 }],
     ["mobile", { width: 390, height: 844 }],
+    ["mobile-360", { width: 360, height: 780 }],
   ]) {
     await page.setViewportSize(viewport);
     await page.goto("/");
     await expectFixtureHero(page);
+    const nodes = await page.locator('script[type="application/ld+json"]').evaluateAll((scripts) =>
+      scripts.flatMap((script) => {
+        const data = JSON.parse(script.textContent);
+        return data["@graph"] || [data];
+      })
+    );
+    expect(nodes.find((node) => node["@type"] === "WebPage")?.headline)
+      .toBe("Fixture Hero Heading One Fixture Hero Heading Two");
     await page.locator("#top").screenshot({
       path: path.join(artifactDir, `ssr-${name}.png`),
     });
+    if (viewport.width <= 390) {
+      const bounds = await page.locator("#top h1 > span, .ri-hero-cta-note p:visible").evaluateAll((elements) =>
+        elements.map((element) => {
+          const rect = element.getBoundingClientRect();
+          return {
+            text: element.textContent,
+            scrollWidth: element.scrollWidth,
+            clientWidth: element.clientWidth,
+            left: rect.left,
+            right: rect.right,
+            innerWidth: window.innerWidth,
+            whiteSpace: getComputedStyle(element).whiteSpace,
+          };
+        })
+      );
+      await test.info().attach(`hero-bounds-${viewport.width}`, {
+        body: JSON.stringify(bounds, null, 2),
+        contentType: "application/json",
+      });
+      expect(bounds).toHaveLength(3);
+      for (const element of bounds) {
+        expect.soft(element.scrollWidth, element.text).toBeLessThanOrEqual(element.clientWidth + 1);
+        expect.soft(element.left, element.text).toBeGreaterThanOrEqual(-1);
+        expect.soft(element.right, element.text).toBeLessThanOrEqual(element.innerWidth + 1);
+        expect.soft(element.whiteSpace, element.text).toBe("normal");
+      }
+    }
   }
 });
 
@@ -45,9 +81,11 @@ test("Markdown uses the same CMS hero copy", async ({ request }) => {
   expect(response.status()).toBe(200);
   const body = await response.text();
   expect(body).toContain("# Fixture Hero Heading One Fixture Hero Heading Two");
-  expect(body).toContain("Synthetic hero description served by the local content fixture\\.");
+  expect(body).toContain("Synthetic hero description served by the local content fixture\\. ========================");
   expect(body).toContain("Synthetic hero subtext with \\*literal\\* asterisks\\.");
   expect(body).not.toContain("with *literal*");
+  expect(body).not.toMatch(/^=+$/m);
+  expect(body.match(/^# /gm)).toHaveLength(1);
 });
 
 test.describe("hydrated hero", () => {
@@ -77,6 +115,10 @@ test.describe("hydrated hero", () => {
       document.documentElement.classList.contains("low-performance-mode")
     );
     await expectFixtureHero(page);
+    const headingWhiteSpace = await page.locator("#top h1 > span").evaluateAll((elements) =>
+      elements.map((element) => getComputedStyle(element).whiteSpace)
+    );
+    expect(headingWhiteSpace).toEqual(["nowrap", "nowrap"]);
     expect(heroRequests).toEqual([]);
     expect(pageErrors).toEqual([]);
     expect(consoleErrors.filter((message) =>

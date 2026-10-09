@@ -175,7 +175,6 @@ export default function Hero({ initialData = null }) {
   const heroHeadingStyle = {
     fontSize: "clamp(1.75rem, 0.5rem + 5vw, 3.75rem)",
     lineHeight: 1.08,
-    whiteSpace: "nowrap",
   };
 
   const line1Ref = useRef(null);
@@ -246,7 +245,7 @@ export default function Hero({ initialData = null }) {
             {headingLine1 && (
               <span
                 ref={line1Ref}
-                className="text-metal-display block w-full text-center text-ink"
+                className="ri-hero-heading-line text-metal-display block w-full text-center text-ink"
                 style={heroHeadingStyle}
               >
                 {renderHeadingLine1(headingLine1)}
@@ -256,7 +255,7 @@ export default function Hero({ initialData = null }) {
             {headingLine2 && (
               <span
                 ref={line2Ref}
-                className={`block w-full text-center ${headingLine2BaseClass}`}
+                className={`ri-hero-heading-line block w-full text-center ${headingLine2BaseClass}`}
                 style={heroHeadingStyle}
               >
                 {renderWithGlow110(headingLine2)}

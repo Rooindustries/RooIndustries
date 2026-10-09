@@ -1,4 +1,5 @@
 const { NOINDEX_ROUTES } = require("./routes");
+const { HOME_COPY } = require("./homeCopy");
 
 const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || "https://www.rooindustries.com").replace(/\/$/, "");
 
@@ -271,7 +272,7 @@ const buildOrganizationJsonLd = () => ({
   },
 });
 
-const buildHomePageJsonLd = () => ({
+const buildHomePageJsonLd = (hero = HOME_COPY.hero) => ({
   "@context": "https://schema.org",
   "@graph": [
     {
@@ -288,7 +289,7 @@ const buildHomePageJsonLd = () => ({
       "@id": `${siteUrl}/#webpage`,
       url: siteUrl,
       name: "Roo Industries | PC Game Optimization",
-      headline: "More FPS. Less Input Lag. Tuned For Ranked Games.",
+      headline: `${hero.headingLine1} ${hero.headingLine2}`,
       description:
         "Roo Industries tunes BIOS, Windows, memory, GPU, and game settings around the games players actually play for smoother ranked games, higher FPS, lower input lag, and cleaner frametimes.",
       isPartOf: {
