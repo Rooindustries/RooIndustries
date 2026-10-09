@@ -2,13 +2,6 @@ const { test, expect, devices } = require("@playwright/test");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const BASE_URL = process.env.BASE_URL;
-if (!BASE_URL) throw new Error("BASE_URL is required for home performance tests.");
-const target = new URL(BASE_URL);
-if (target.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(target.hostname)) {
-  throw new Error("Home performance tests require a local fixture server.");
-}
-
 const productionOrigin = "https://www.rooindustries.com";
 const homeSectionPaths = new Set([
   "/api/content/reviews",
@@ -22,11 +15,12 @@ const homeSectionPaths = new Set([
   "/api/content/faq-questions",
 ]);
 const artifactDir = path.resolve("test-results/home-performance");
-const summary = { baseUrl: BASE_URL, scenarios: [] };
+const summary = { baseUrl: null, scenarios: [] };
 const persistSummary = () => {
   fs.mkdirSync(artifactDir, { recursive: true });
   const filename = path.join(artifactDir, "summary.json");
-  const persisted = fs.existsSync(filename) ? JSON.parse(fs.readFileSync(filename, "utf8")) : { baseUrl: BASE_URL, scenarios: [] };
+  const persisted = fs.existsSync(filename) ? JSON.parse(fs.readFileSync(filename, "utf8")) : { baseUrl: summary.baseUrl, scenarios: [] };
+  persisted.baseUrl = summary.baseUrl;
   for (const scenario of summary.scenarios) {
     const index = persisted.scenarios.findIndex((entry) => entry.name === scenario.name);
     if (index === -1) persisted.scenarios.push(scenario);
@@ -43,7 +37,12 @@ test.beforeAll(({}, testInfo) => {
   }
 });
 
-const withScenario = async (browser, testInfo, options, run) => {
+const withScenario = async (browser, testInfo, baseURL, options, run) => {
+  const target = new URL(baseURL);
+  if (target.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]", process.env.ROO_TEST_HOST].includes(target.hostname)) {
+    throw new Error("Home performance tests require a local fixture server.");
+  }
+  summary.baseUrl = baseURL;
   const context = await browser.newContext({
     javaScriptEnabled: true,
     serviceWorkers: "block",
@@ -135,8 +134,8 @@ for (const [name, options] of [
   ["desktop", { viewport: { width: 1366, height: 768 } }],
   ["mobile", devices["Pixel 7"]],
 ]) {
-  test(`${name} home waits for interaction and loads the logo after load`, async ({ browser }, testInfo) => {
-    await withScenario(browser, testInfo, options, async ({ page, scenario, navigate, interact }) => {
+  test(`${name} home waits for interaction and loads the logo after load`, async ({ browser, baseURL }, testInfo) => {
+    await withScenario(browser, testInfo, baseURL, options, async ({ page, scenario, navigate, interact }) => {
       await navigate();
       await page.waitForTimeout(4000);
       scenario.quietScrollY = await page.evaluate(() => window.scrollY);
@@ -162,8 +161,8 @@ for (const [name, options] of [
   });
 }
 
-test("click-only activation loads Intercom", async ({ browser }, testInfo) => {
-  await withScenario(browser, testInfo, { viewport: { width: 1366, height: 768 } }, async ({ page, scenario, navigate }) => {
+test("click-only activation loads Intercom", async ({ browser, baseURL }, testInfo) => {
+  await withScenario(browser, testInfo, baseURL, { viewport: { width: 1366, height: 768 } }, async ({ page, scenario, navigate }) => {
     await navigate();
     await page.waitForTimeout(4000);
     expect(widgetRequests(scenario)).toHaveLength(0);
@@ -174,8 +173,8 @@ test("click-only activation loads Intercom", async ({ browser }, testInfo) => {
   });
 });
 
-test("booking keeps Intercom disabled after interaction", async ({ browser }, testInfo) => {
-  await withScenario(browser, testInfo, { viewport: { width: 1366, height: 768 } }, async ({ page, scenario, navigate, interact }) => {
+test("booking keeps Intercom disabled after interaction", async ({ browser, baseURL }, testInfo) => {
+  await withScenario(browser, testInfo, baseURL, { viewport: { width: 1366, height: 768 } }, async ({ page, scenario, navigate, interact }) => {
     await navigate("/booking");
     await interact();
     await page.mouse.wheel(0, 400);
@@ -185,16 +184,16 @@ test("booking keeps Intercom disabled after interaction", async ({ browser }, te
   });
 });
 
-test("reduced motion keeps the animated logo unloaded", async ({ browser }, testInfo) => {
-  await withScenario(browser, testInfo, { reducedMotion: "reduce" }, async ({ page, scenario, navigate }) => {
+test("reduced motion keeps the animated logo unloaded", async ({ browser, baseURL }, testInfo) => {
+  await withScenario(browser, testInfo, baseURL, { reducedMotion: "reduce" }, async ({ page, scenario, navigate }) => {
     await navigate();
     await page.waitForTimeout(4000);
     expect(scenario.requests.filter(({ url }) => new URL(url).pathname === "/logo-animated-small.webp")).toHaveLength(0);
   });
 });
 
-test("How It Works videos load and play near the viewport and pause away", async ({ browser }, testInfo) => {
-  await withScenario(browser, testInfo, devices["Pixel 7"], async ({ page, scenario, navigate, interact }) => {
+test("How It Works videos load and play near the viewport and pause away", async ({ browser, baseURL }, testInfo) => {
+  await withScenario(browser, testInfo, baseURL, devices["Pixel 7"], async ({ page, scenario, navigate, interact }) => {
     await navigate();
     await interact();
     await page.locator("#how-it-works").scrollIntoViewIfNeeded();
