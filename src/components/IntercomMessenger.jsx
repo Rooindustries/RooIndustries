@@ -123,8 +123,6 @@ function IntercomMessenger({ disabledRoutes = [], disabled = false }) {
   const isDisabled =
     Boolean(disabled) || isRouteDisabled(pathname, disabledRoutes);
 
-  isDisabledRef.current = isDisabled;
-
   useEffect(() => {
     isMountedRef.current = true;
     if (typeof window === "undefined" || typeof document === "undefined" || !isProductionBrowser()) {
@@ -143,6 +141,7 @@ function IntercomMessenger({ disabledRoutes = [], disabled = false }) {
   }, []);
 
   useEffect(() => {
+    isDisabledRef.current = isDisabled;
     if (typeof window === "undefined" || typeof document === "undefined" || !isProductionBrowser()) {
       return;
     }
