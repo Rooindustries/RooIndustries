@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { isProductionBrowser } from "../lib/productionBrowser";
 import { whenUserInteracts } from "../lib/firstInteraction";
@@ -9,6 +9,8 @@ const INTERCOM_APP_ID =
   "xvd1alq5";
 const INTERCOM_SCRIPT_ID = "intercom-embed-script";
 const INTERCOM_SRC = `https://widget.intercom.io/widget/${INTERCOM_APP_ID}`;
+const useIsomorphicLayoutEffect =
+  typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 const normalizePath = (path) => {
   if (typeof path !== "string") return "";
@@ -123,16 +125,23 @@ function IntercomMessenger({ disabledRoutes = [], disabled = false }) {
   const isDisabled =
     Boolean(disabled) || isRouteDisabled(pathname, disabledRoutes);
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useIsomorphicLayoutEffect(() => {
+    isDisabledRef.current = isDisabled;
+  }, [isDisabled]);
+
+  useEffect(() => {
     if (typeof window === "undefined" || typeof document === "undefined" || !isProductionBrowser()) {
-      return () => {
-        isMountedRef.current = false;
-      };
+      return;
     }
 
     return () => {
-      isMountedRef.current = false;
       if (typeof window.Intercom === "function") {
         window.Intercom("update", createIntercomSettings({ hideLauncher: true }));
         window.Intercom("hide");
@@ -141,7 +150,6 @@ function IntercomMessenger({ disabledRoutes = [], disabled = false }) {
   }, []);
 
   useEffect(() => {
-    isDisabledRef.current = isDisabled;
     if (typeof window === "undefined" || typeof document === "undefined" || !isProductionBrowser()) {
       return;
     }
