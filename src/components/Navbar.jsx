@@ -308,10 +308,27 @@ export default function Navbar({ routeShell = "browser" }) {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (canAnimateLogo()) {
-      setSmallLogoMode("animated");
+    if (typeof window === "undefined" || !canAnimateLogo()) return undefined;
+    let idleId = null;
+    let timeoutId = null;
+    const enableAnimatedLogo = () => setSmallLogoMode("animated");
+    const scheduleAnimatedLogo = () => {
+      if ("requestIdleCallback" in window) {
+        idleId = window.requestIdleCallback(enableAnimatedLogo, { timeout: 3000 });
+      } else {
+        timeoutId = window.setTimeout(enableAnimatedLogo, 1000);
+      }
+    };
+    if (document.readyState === "complete") {
+      scheduleAnimatedLogo();
+    } else {
+      window.addEventListener("load", scheduleAnimatedLogo, { once: true });
     }
+    return () => {
+      window.removeEventListener("load", scheduleAnimatedLogo);
+      if (idleId !== null) window.cancelIdleCallback?.(idleId);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
   }, []);
 
   useEffect(() => {
@@ -546,7 +563,7 @@ export default function Navbar({ routeShell = "browser" }) {
                 />
                 {smallLogoMode === "animated" && (
                   <img
-                    src="/logo-animated-small.apng"
+                    src="/logo-animated-small.webp"
                     alt=""
                     className={`absolute inset-0 ${smallLogoAnimatedClassName}`}
                     aria-hidden="true"
@@ -587,7 +604,7 @@ export default function Navbar({ routeShell = "browser" }) {
                 />
                 {smallLogoMode === "animated" && (
                   <img
-                    src="/logo-animated-small.apng"
+                    src="/logo-animated-small.webp"
                     alt=""
                     className="absolute inset-0 h-8 w-8 rounded-lg object-contain drop-shadow-none transition-opacity duration-500 min-[360px]:h-10 min-[360px]:w-10 sm:h-12 sm:w-12 sm:rounded-xl"
                     aria-hidden="true"

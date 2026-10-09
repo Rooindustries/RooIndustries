@@ -47,6 +47,7 @@
     "test": "jest",
     "test:payment-recovery:postgres17": "node scripts/test-payment-persistence-sweep.mjs --recovery --full-chain",
     "test:agent-readiness": "node --test tests/agent-readiness.test.mjs",
+    "test:perf:home": "playwright test tests/home-performance.spec.js --project=chromium",
     "check:payment:runtime": "node scripts/diagnose-payment-runtime.js",
     "check:payment:webhooks": "node scripts/check-payment-webhooks.js",
     "check:payment:stack": "node scripts/check-payment-stack.mjs",
@@ -92,7 +93,8 @@
     "test:referral-orphan-prerequisites:postgres17": "node scripts/test-referral-orphan-prerequisites-postgres.mjs",
     "test:tooling:safety": "node scripts/test-tooling-sweep.mjs",
     "test:tooling:dependencies": "node scripts/test-tooling-sweep-dependencies.mjs",
-    "audit:lighthouse": "lhci autorun --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/ --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/reviews --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/tools"
+    "audit:lighthouse": "lhci autorun --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/ --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/reviews --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/tools",
+    "audit:lighthouse:mobile": "lhci autorun --config=lighthouserc.mobile.json --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/"
   },
   "eslintConfig": {
     "extends": [

@@ -1,6 +1,8 @@
-import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Hero from "../components/Hero";
 import Services from "../components/Services";
+import Packages from "../components/Packages";
+import Faq from "../components/Faq";
 import { Link, useLocation } from "react-router-dom";
 import {
   HOME_SECTION_PREFETCH_BY_HASH,
@@ -18,12 +20,6 @@ import HowItWorks from "../components/HowItWorks";
 import ReferralBox from "../components/ReferralBox";
 import SupportedGames from "../components/SupportedGames";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
-
-// DeferredSection delays rendering; lazy() also delays downloading and parsing these motion-heavy sections.
-const loadPackages = () => import("../components/Packages");
-const loadFaq = () => import("../components/Faq");
-const Packages = lazy(loadPackages);
-const Faq = lazy(loadFaq);
 
 function DeferredSection({
   children,
@@ -137,7 +133,6 @@ export default function Home({ initialData = null }) {
           ...(HOME_SECTION_PREFETCH_BY_HASH["#how-it-works"] || []),
         ])
       );
-      loadPackages().catch(() => {});
       prefetchHomeSectionData(warmKeys).catch(() => {});
     };
 
@@ -167,14 +162,12 @@ export default function Home({ initialData = null }) {
           rootMargin="300px 0px"
           eager={eagerAll}
         >
-          <Suspense fallback={<div data-section-placeholder="" className="min-h-[620px]" />}>
-            <div className="deferred-section-content" style={sectionContentStyle}>
-              <Packages
-                initialPackages={initialData?.packagesList || null}
-                initialSectionCopy={initialData?.packagesSettings || null}
-              />
-            </div>
-          </Suspense>
+          <div className="deferred-section-content" style={sectionContentStyle}>
+            <Packages
+              initialPackages={initialData?.packagesList || null}
+              initialSectionCopy={initialData?.packagesSettings || null}
+            />
+          </div>
         </DeferredSection>
       </section>
       <section
@@ -219,15 +212,13 @@ export default function Home({ initialData = null }) {
           rootMargin="220px 0px"
           eager={eagerAll}
         >
-          <Suspense fallback={<div data-section-placeholder="" className="min-h-[380px]" />}>
-            <div className="deferred-section-content" style={sectionContentStyle}>
-              <Faq
-                compact
-                initialFaqCopy={initialData?.faqSettings || null}
-                initialQuestions={initialData?.faqQuestions || null}
-              />
-            </div>
-          </Suspense>
+          <div className="deferred-section-content" style={sectionContentStyle}>
+            <Faq
+              compact
+              initialFaqCopy={initialData?.faqSettings || null}
+              initialQuestions={initialData?.faqQuestions || null}
+            />
+          </div>
         </DeferredSection>
       </section>
       <DeferredSection

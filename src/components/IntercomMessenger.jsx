@@ -1,6 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { isProductionBrowser } from "../lib/productionBrowser";
+import { whenUserInteracts } from "../lib/firstInteraction";
 
 const INTERCOM_APP_ID =
   process.env.NEXT_PUBLIC_INTERCOM_APP_ID ||
@@ -8,6 +9,8 @@ const INTERCOM_APP_ID =
   "xvd1alq5";
 const INTERCOM_SCRIPT_ID = "intercom-embed-script";
 const INTERCOM_SRC = `https://widget.intercom.io/widget/${INTERCOM_APP_ID}`;
+const useIsomorphicLayoutEffect =
+  typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 const normalizePath = (path) => {
   if (typeof path !== "string") return "";
@@ -74,7 +77,7 @@ const bootOrUpdateIntercom = (settings) => {
   window.__rooIntercomBooted = true;
 };
 
-const loadIntercom = (settings) => {
+const loadIntercom = (settings, canInject) => {
   window.intercomSettings = settings;
 
   if (typeof window.Intercom !== "function") {
@@ -83,6 +86,19 @@ const loadIntercom = (settings) => {
 
   bootOrUpdateIntercom(settings);
 
+  whenUserInteracts().then(() => {
+    const inject = () => {
+      if (canInject()) injectIntercomScript();
+    };
+    if ("requestIdleCallback" in window) {
+      window.requestIdleCallback(inject, { timeout: 2000 });
+    } else {
+      window.setTimeout(inject, 200);
+    }
+  });
+};
+
+const injectIntercomScript = () => {
   if (document.getElementById(INTERCOM_SCRIPT_ID)) {
     return;
   }
@@ -104,22 +120,26 @@ const loadIntercom = (settings) => {
 function IntercomMessenger({ disabledRoutes = [], disabled = false }) {
   const location = useLocation();
   const isDisabledRef = useRef(false);
+  const isMountedRef = useRef(false);
   const pathname = location.pathname || "/";
   const isDisabled =
     Boolean(disabled) || isRouteDisabled(pathname, disabledRoutes);
 
-  isDisabledRef.current = isDisabled;
+  useIsomorphicLayoutEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useIsomorphicLayoutEffect(() => {
+    isDisabledRef.current = isDisabled;
+  }, [isDisabled]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof document === "undefined" || !isProductionBrowser()) {
       return;
     }
-
-    if (isDisabledRef.current) {
-      return;
-    }
-
-    loadIntercom(createIntercomSettings());
 
     return () => {
       if (typeof window.Intercom === "function") {
@@ -144,7 +164,7 @@ function IntercomMessenger({ disabledRoutes = [], disabled = false }) {
     }
 
     if (!isDisabled) {
-      loadIntercom(settings);
+      loadIntercom(settings, () => isMountedRef.current && !isDisabledRef.current);
     }
   }, [isDisabled, pathname]);
 
