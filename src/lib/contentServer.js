@@ -1,4 +1,4 @@
-const { applyHomePageCopyOverrides } = require("./homeCopy");
+const { applyHomePageCopyOverrides, resolveHeroCopy } = require("./homeCopy");
 const { buildPackageOffers, normalizeFaqQuestions } = require("./packageContent");
 
 const createPublicContentFetcher = async () => {
@@ -54,6 +54,7 @@ async function fetchHomePageData() {
   };
 
   const [
+    hero,
     reviews,
     about,
     services,
@@ -64,6 +65,7 @@ async function fetchHomePageData() {
     faqSettings,
     faqQuestions,
   ] = await Promise.all([
+    safeFetch("hero", null),
     safeFetch("reviews", null),
     safeFetch("about", null),
     safeFetch("services", null),
@@ -76,6 +78,7 @@ async function fetchHomePageData() {
   ]);
 
   return applyHomePageCopyOverrides({
+    hero: resolveHeroCopy(hero),
     reviews,
     about,
     services,
@@ -88,6 +91,16 @@ async function fetchHomePageData() {
       Array.isArray(faqQuestions) ? faqQuestions : []
     ),
   });
+}
+
+async function fetchHeroCopy() {
+  try {
+    const fetchContent = await createPublicContentFetcher();
+    return resolveHeroCopy(await fetchContent("hero"));
+  } catch {
+    console.warn("[content] hero fetch failed");
+    return resolveHeroCopy(null);
+  }
 }
 
 async function fetchPrivacyPolicy() {
@@ -103,4 +116,5 @@ module.exports = {
   fetchPrivacyPolicy,
   fetchFaqQuestions,
   fetchHomePageData,
+  fetchHeroCopy,
 };

@@ -6,7 +6,10 @@ import { GET as getMarkdown } from "../../app/markdown/route";
 import { GET as getMissing } from "../../app/markdown-not-found/route";
 import sanityServer from "../lib/contentServer";
 
-jest.mock("../lib/contentServer", () => ({ fetchPrivacyPolicy: jest.fn() }));
+jest.mock("../lib/contentServer", () => ({
+  fetchPrivacyPolicy: jest.fn(),
+  fetchHeroCopy: jest.fn().mockResolvedValue(undefined),
+}));
 
 const request = (pathname, accept, options = {}) => new NextRequest(
   `https://www.rooindustries.com${pathname}`,

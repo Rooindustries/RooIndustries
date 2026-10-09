@@ -1,12 +1,12 @@
 const HOME_COPY = {
   hero: {
     tagline: "",
-    headingLine1: "More FPS. Less Input Lag.",
-    headingLine2: "Tuned For Ranked Games.",
+    headingLine1: "Why Pay $400 For RAM?",
+    headingLine2: "Tune Yours For $99.95.",
     description:
-      "Your PC should feel as fast as you play. Get higher FPS, steadier 1% lows, and cleaner mouse response in the games you actually grind.",
+      "A 32GB DDR5 kit that was around $100 in early 2025 costs $400 now. You probably don't need a new one. We'll tune the RAM you have, and the rest of your PC, for more FPS and steadier 1% lows.",
     subtext:
-      "One remote session. Real before-and-after results. No new hardware needed.",
+      "One remote session. Before-and-after benchmarks so you see exactly what changed.",
     ctaPrimaryText: "Tune My PC",
     ctaSecondaryText: "How It Works",
     ctaNote:
@@ -152,10 +152,22 @@ const keyed = (sourceItems = [], canonicalItems = []) =>
     _key: sourceItems[index]?._key || item._key || `copy-${index}`,
   }));
 
-const applyHeroCopyOverride = (value = {}) => ({
-  ...value,
-  ...HOME_COPY.hero,
-});
+const resolveHeroCopy = (value) =>
+  Object.fromEntries(
+    Object.entries(HOME_COPY.hero).map(([key, fallback]) => {
+      const candidate = value?.[key];
+      if (Array.isArray(fallback)) {
+        const items = Array.isArray(candidate)
+          ? candidate.filter((item) => typeof item === "string" && item.trim())
+          : [];
+        return [key, items.length ? items : fallback];
+      }
+      return [
+        key,
+        typeof candidate === "string" && candidate.trim() ? candidate : fallback,
+      ];
+    })
+  );
 
 const applyHomeSectionCopyOverride = (key, value) => {
   if (key === "reviews") {
@@ -236,7 +248,7 @@ const applyHomePageCopyOverrides = (homeData = {}) => ({
 module.exports = {
   HOME_COPY,
   OVERWATCH_CREATOR_BENCHMARK,
-  applyHeroCopyOverride,
+  resolveHeroCopy,
   applyHomePageCopyOverrides,
   applyHomeSectionCopyOverride,
   withOverwatchCreatorBenchmark,

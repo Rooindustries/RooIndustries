@@ -23,7 +23,8 @@ export async function GET(request) {
       return new Response("# Privacy policy temporarily unavailable\n\nPlease try again or contact serviroo@rooindustries.com.\n", { status: 503, headers });
     }
   }
-  const body = buildPageMarkdown(pathname, privacy);
+  const hero = pathname === "/" ? await contentServer.fetchHeroCopy() : undefined;
+  const body = buildPageMarkdown(pathname, privacy, hero);
   return new Response(body || "# Content temporarily unavailable\n", {
     status: body ? 200 : 503,
     headers,

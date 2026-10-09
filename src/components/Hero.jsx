@@ -5,9 +5,7 @@ import homeCopy from "../lib/homeCopy";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import { trackEvent } from "../lib/analytics";
 
-const { HOME_COPY, applyHeroCopyOverride } = homeCopy;
-const fallbackHeroData = HOME_COPY.hero;
-const enableLiveHeroContent = false;
+const { resolveHeroCopy } = homeCopy;
 
 const normalizeText = (s = "") =>
   String(s)
@@ -93,8 +91,9 @@ function CtaNoteBalanced({ icon, text }) {
   );
 }
 
-export default function Hero() {
-  const [heroData, setHeroData] = useState(fallbackHeroData);
+export default function Hero({ initialData = null }) {
+  const [fetchedHero, setFetchedHero] = useState(null);
+  const heroData = resolveHeroCopy(initialData || fetchedHero);
   const handleHomeSectionLink = useHomeSectionLinkHandler();
 
   const handleHeroCta = (event, hash, cta) => {
@@ -103,32 +102,27 @@ export default function Hero() {
   };
 
   useEffect(() => {
-    if (!enableLiveHeroContent) return;
-
+    if (initialData) return undefined;
+    let cancelled = false;
     getPublicContent("hero")
       .then((data) => {
-        if (!data || typeof data !== "object") return;
-        setHeroData((prev) => applyHeroCopyOverride({ ...prev, ...data }));
+        if (!cancelled) setFetchedHero(data);
       })
       .catch(() => {});
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [initialData]);
 
-  const tagline = heroData?.tagline || fallbackHeroData.tagline;
-  const headingLine1 =
-    heroData?.headingData1 ||
-    heroData?.headingLine1 ||
-    fallbackHeroData.headingLine1;
-  const headingLine2 = heroData?.headingLine2 || fallbackHeroData.headingLine2;
-  const description = heroData?.description || fallbackHeroData.description;
-  const subtext = heroData?.subtext || fallbackHeroData.subtext;
-  const bullets = Array.isArray(heroData?.bullets)
-    ? heroData.bullets.filter(Boolean)
-    : fallbackHeroData.bullets;
-  const primaryCtaText =
-    heroData?.ctaPrimaryText || fallbackHeroData.ctaPrimaryText;
-  const secondaryCtaText =
-    heroData?.ctaSecondaryText || fallbackHeroData.ctaSecondaryText;
-  const ctaNote = heroData?.ctaNote || fallbackHeroData.ctaNote;
+  const {
+    headingLine1,
+    headingLine2,
+    description,
+    subtext,
+    ctaPrimaryText: primaryCtaText,
+    ctaSecondaryText: secondaryCtaText,
+    ctaNote,
+  } = heroData;
 
   const headingLine2BaseClass = "text-gradient-display";
 

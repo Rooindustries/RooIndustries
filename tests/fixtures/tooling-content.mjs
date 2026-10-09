@@ -15,6 +15,19 @@ export async function createToolingContentFixture({ origin, artifact }) {
   if (process.env.TOOLING_REVIEW_COUNT) reviews.reviews = reviews.reviews.slice(0, Number(process.env.TOOLING_REVIEW_COUNT));
   const policy = title => ({ title, sections: [{ heading: 'Synthetic local information', content: [{ _type: 'block', _key: 'privacy-body', style: 'normal', markDefs: [], children: [{ _type: 'span', _key: 'privacy-span', text: paragraph, marks: [] }] }] }] });
   const documents = [
+    document('hero', {
+      tagline: '',
+      headingLine1: 'Fixture Hero Heading One',
+      headingLine2: 'Fixture Hero Heading Two',
+      description: 'Synthetic hero description served by the local content fixture.',
+      subtext: 'Synthetic hero subtext with *literal* asterisks.',
+      ctaPrimaryText: 'Tune My PC',
+      ctaSecondaryText: 'How It Works',
+      ctaNote: 'Fixture note one · Fixture note two',
+      headingData1: 'Legacy Field Must Not Render',
+      ctaNoteIcon: 'X',
+      bullets: ['Fixture bullet'],
+    }),
     ...content('packages-list').map((pkg, index) => document('package', { ...pkg, price: index === 1 ? '$149.95' : pkg.price, order: index }, `tooling-package-${index}`)),
     document('proReviewsCarousel', reviews),
     document('supportedGames', content('supported-games')),
