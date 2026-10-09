@@ -5,7 +5,7 @@ const { HOME_COPY } = require("../src/lib/homeCopy");
 const artifactDir = path.resolve("test-results/home-hero-cms");
 const fixtureDescription =
   "Synthetic hero description served by the local content fixture. ========================";
-const fixtureSubtext = "Synthetic hero subtext with *literal* asterisks.";
+const fixtureSubtext = "1) Synthetic hero subtext with *literal* asterisks &amp; :fire: $5.";
 const isHeroRequest = (request) =>
   new URL(request.url()).pathname === "/api/content/hero";
 
@@ -81,8 +81,8 @@ test("Markdown uses the same CMS hero copy", async ({ request }) => {
   expect(response.status()).toBe(200);
   const body = await response.text();
   expect(body).toContain("# Fixture Hero Heading One Fixture Hero Heading Two");
-  expect(body).toContain("Synthetic hero description served by the local content fixture\\. ========================");
-  expect(body).toContain("Synthetic hero subtext with \\*literal\\* asterisks\\.");
+  expect(body).toContain("Synthetic hero description served by the local content fixture\\. \\=\\=\\=\\=\\=\\=\\=\\=\\=\\=\\=\\=\\=\\=\\=\\=\\=\\=\\=\\=\\=\\=\\=\\=");
+  expect(body).toContain("1\\) Synthetic hero subtext with \\*literal\\* asterisks \\&amp\\; \\:fire\\: \\$5\\.");
   expect(body).not.toContain("with *literal*");
   expect(body).not.toMatch(/^=+$/m);
   expect(body.match(/^# /gm)).toHaveLength(1);

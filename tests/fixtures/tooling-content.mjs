@@ -20,7 +20,7 @@ export async function createToolingContentFixture({ origin, artifact }) {
       headingLine1: 'Fixture Hero Heading One',
       headingLine2: 'Fixture Hero Heading Two',
       description: 'Synthetic hero description served by the local content fixture.\n========================',
-      subtext: 'Synthetic hero subtext with *literal* asterisks.',
+      subtext: '1) Synthetic hero subtext with *literal* asterisks &amp; :fire: $5.',
       ctaPrimaryText: 'Tune My PC',
       ctaSecondaryText: 'How It Works',
       ctaNote: 'Fixture note one with extra words · Fixture note two with extra words',

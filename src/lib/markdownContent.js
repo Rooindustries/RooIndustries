@@ -13,17 +13,17 @@ const RECOVERY_LINKS = [
 ];
 
 const links = (items) => items.map(([title, path]) => `- [${title}](${SITE_URL}${path})`).join("\n");
-const escapeMarkdown = (text = "") => String(text).replace(/([\\`*_{}\[\]<>#+.!|~-])/g, "\\$1");
-const inlineMarkdown = (text = "") => escapeMarkdown(String(text).replace(/\s+/g, " ").trim());
+const escapeMarkdown = (text = "") =>
+  String(text).replace(/\s+/g, " ").trim().replace(/[!-/:-@[-`{-~]/g, "\\$&");
 
 function buildPageMarkdown(pathname, privacy = null, hero = HOME_COPY.hero) {
   const { services, howItWorks } = HOME_COPY;
   switch (pathname) {
     case "/":
       return [
-        `# ${inlineMarkdown(hero.headingLine1)} ${inlineMarkdown(hero.headingLine2)}`,
-        inlineMarkdown(hero.description),
-        inlineMarkdown(hero.subtext),
+        `# ${escapeMarkdown(hero.headingLine1)} ${escapeMarkdown(hero.headingLine2)}`,
+        escapeMarkdown(hero.description),
+        escapeMarkdown(hero.subtext),
         `## ${services.heading}`,
         services.subheading,
         ...services.cards.map((card) => `- **${card.title}**: ${card.description}`),
