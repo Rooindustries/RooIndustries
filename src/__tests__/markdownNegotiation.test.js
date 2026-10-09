@@ -39,7 +39,7 @@ describe("Markdown content negotiation", () => {
     } else {
       expect(response.headers.get("x-middleware-next")).toBe("1");
       expect(response.headers.get("cdn-cache-control")).toBe("no-store");
-      expect(response.headers.get("vercel-cdn-cache-control")).toBeNull();
+      expect(response.headers.get("vercel-cdn-cache-control")).toBe("no-store");
     }
   });
 

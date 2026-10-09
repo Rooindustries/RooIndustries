@@ -412,7 +412,7 @@ export function AppContent({
       cancelScheduled = () => window.clearTimeout(timeoutId);
     };
 
-    if (initialHomeData) {
+    if (initialHomeData && location.pathname === "/") {
       whenUserInteracts().then(schedulePrefetch);
     } else {
       schedulePrefetch();

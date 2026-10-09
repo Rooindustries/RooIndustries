@@ -98,9 +98,7 @@ export function middleware(req) {
   }
   if (MARKDOWN_PATHS.includes(pathname)) {
     response.headers.set("CDN-Cache-Control", "no-store");
-    if (pathname !== "/") {
-      response.headers.set("Vercel-CDN-Cache-Control", "no-store");
-    }
+    response.headers.set("Vercel-CDN-Cache-Control", "no-store");
   }
   return response;
 }

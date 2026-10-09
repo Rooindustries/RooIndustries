@@ -1,4 +1,4 @@
-const INTERACTION_EVENTS = ["pointerdown", "pointermove", "keydown", "touchstart", "wheel"];
+const INTERACTION_EVENTS = ["pointerdown", "pointermove", "keydown", "touchstart", "wheel", "click"];
 const LISTENER_OPTIONS = { capture: true, passive: true };
 let interactionPromise = null;
 

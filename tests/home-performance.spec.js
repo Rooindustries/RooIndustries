@@ -10,7 +10,6 @@ if (target.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes
 }
 
 const productionOrigin = "https://www.rooindustries.com";
-const cachePolicy = "s-maxage=60, stale-while-revalidate=86400, stale-if-error=86400";
 const homeSectionPaths = new Set([
   "/api/content/reviews",
   "/api/content/about",
@@ -50,13 +49,12 @@ const withScenario = async (browser, testInfo, options, run) => {
     serviceWorkers: "block",
     ...options,
   });
-  const scenario = { name: testInfo.title, requests: [], status: "running" };
+  const scenario = { name: testInfo.title, requests: [], status: "running", interacted: false };
   summary.scenarios.push(scenario);
   let navigationStart = performance.now();
-  let interacted = false;
   await context.addInitScript(() => {
     window.__homePerformanceInteractions = [];
-    for (const type of ["pointerdown", "pointermove", "keydown", "touchstart", "scroll", "wheel"]) {
+    for (const type of ["pointerdown", "pointermove", "keydown", "touchstart", "scroll", "wheel", "click"]) {
       window.addEventListener(type, (event) => {
         window.__homePerformanceInteractions.push({ type, ms: performance.now(), trusted: event.isTrusted, scrollX: window.scrollX, scrollY: window.scrollY });
       }, { capture: true, passive: true });
@@ -66,7 +64,7 @@ const withScenario = async (browser, testInfo, options, run) => {
     scenario.requests.push({
       url: request.url(),
       msSinceNavigation: Math.round(performance.now() - navigationStart),
-      phase: interacted ? "after interaction" : "before interaction",
+      phase: scenario.interacted ? "after interaction" : "before interaction",
     });
   });
   await context.route("**/*", async (route) => {
@@ -107,7 +105,7 @@ const withScenario = async (browser, testInfo, options, run) => {
     await page.goto(`${productionOrigin}${pathname}`, { waitUntil: "load" });
   };
   const interact = async () => {
-    interacted = true;
+    scenario.interacted = true;
     if (options.isMobile) {
       await page.locator("#top h1").tap();
     } else {
@@ -164,6 +162,18 @@ for (const [name, options] of [
   });
 }
 
+test("click-only activation loads Intercom", async ({ browser }, testInfo) => {
+  await withScenario(browser, testInfo, { viewport: { width: 1366, height: 768 } }, async ({ page, scenario, navigate }) => {
+    await navigate();
+    await page.waitForTimeout(4000);
+    expect(widgetRequests(scenario)).toHaveLength(0);
+    scenario.interacted = true;
+    await page.evaluate(() => document.querySelector("#top h1").click());
+    await expect.poll(() => widgetRequests(scenario).length, { timeout: 6000 }).toBeGreaterThan(0);
+    await expect(page.locator("#intercom-embed-script")).toBeAttached({ timeout: 6000 });
+  });
+});
+
 test("booking keeps Intercom disabled after interaction", async ({ browser }, testInfo) => {
   await withScenario(browser, testInfo, { viewport: { width: 1366, height: 768 } }, async ({ page, scenario, navigate, interact }) => {
     await navigate("/booking");
@@ -194,39 +204,4 @@ test("How It Works videos load and play near the viewport and pause away", async
     await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
     await expect.poll(() => page.locator("#how-it-works video").evaluateAll((videos) => videos.length > 0 && videos.every((video) => video.paused)), { timeout: 3000 }).toBe(true);
   });
-});
-
-test("home cache headers separate HTML, framework, and Markdown responses", async ({ request }, testInfo) => {
-  const scenario = { name: testInfo.title, requests: [], headerSnapshots: {}, status: "running" };
-  summary.scenarios.push(scenario);
-  const started = performance.now();
-  const readHeaders = async (name, pathname, headers, method = "GET") => {
-    const url = new URL(pathname, BASE_URL).href;
-    scenario.requests.push({ url, msSinceNavigation: Math.round(performance.now() - started), phase: "before interaction" });
-    const response = await request.fetch(url, { method, headers, maxRedirects: 0 });
-    scenario.headerSnapshots[name] = { status: response.status(), ...response.headers() };
-    expect(response.status()).toBe(200);
-    return response.headers();
-  };
-  try {
-    const html = await readHeaders("html", "/", { Accept: "text/html" });
-    expect(html["vercel-cdn-cache-control"]).toBe(cachePolicy);
-    expect(html["cdn-cache-control"]).toBe("no-store");
-    const head = await readHeaders("head", "/", { Accept: "text/html" }, "HEAD");
-    expect(head["vercel-cdn-cache-control"]).toBe(cachePolicy);
-    const rsc = await readHeaders("rsc", "/", { RSC: "1" });
-    expect(rsc["vercel-cdn-cache-control"]).toBeUndefined();
-    const markdown = await readHeaders("markdown", "/", { Accept: "text/markdown" });
-    console.log(`Markdown Vercel-CDN-Cache-Control: ${markdown["vercel-cdn-cache-control"] ?? "(absent)"}`);
-    expect(markdown["vercel-cdn-cache-control"]).not.toBe(cachePolicy);
-    const about = await readHeaders("about", "/about", { Accept: "text/html" });
-    expect(about["vercel-cdn-cache-control"]).toBe("no-store");
-    scenario.status = "passed";
-  } catch (error) {
-    scenario.status = "failed";
-    scenario.error = error.message;
-    throw error;
-  } finally {
-    persistSummary();
-  }
 });

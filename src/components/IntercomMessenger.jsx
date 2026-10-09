@@ -129,12 +129,6 @@ function IntercomMessenger({ disabledRoutes = [], disabled = false }) {
       return;
     }
 
-    if (isDisabledRef.current) {
-      return;
-    }
-
-    loadIntercom(createIntercomSettings(), () => !isDisabledRef.current);
-
     return () => {
       if (typeof window.Intercom === "function") {
         window.Intercom("update", createIntercomSettings({ hideLauncher: true }));

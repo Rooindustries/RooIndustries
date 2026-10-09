@@ -55,6 +55,10 @@
       "source": "/",
       "headers": [
         {
+          "key": "x-vercel-cdn-cache-control",
+          "value": "s-maxage=60, stale-while-revalidate=300"
+        },
+        {
           "key": "Link",
           "value": "</fonts/manrope-latin-variable.woff2>; rel=preload; as=font; type=font/woff2; crossorigin, </favicon-96x96.png>; rel=preload; as=image"
         }
