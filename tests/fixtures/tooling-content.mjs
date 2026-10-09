@@ -14,6 +14,28 @@ export async function createToolingContentFixture({ origin, artifact }) {
   const reviews = content('reviews');
   if (process.env.TOOLING_REVIEW_COUNT) reviews.reviews = reviews.reviews.slice(0, Number(process.env.TOOLING_REVIEW_COUNT));
   const policy = title => ({ title, sections: [{ heading: 'Synthetic local information', content: [{ _type: 'block', _key: 'privacy-body', style: 'normal', markDefs: [], children: [{ _type: 'span', _key: 'privacy-span', text: paragraph, marks: [] }] }] }] });
+  const privacy = policy('Privacy Policy');
+  privacy.sections.push({
+    heading: 'Synthetic line breaks',
+    content: [
+      {
+        _type: 'block',
+        _key: 'privacy-line-breaks',
+        style: 'normal',
+        markDefs: [],
+        children: [{ _type: 'span', _key: 'privacy-line-breaks-span', text: 'Synthetic first line:\n\n- Synthetic item one\n- Synthetic item two\n\nSynthetic closing line &copy;.', marks: [] }],
+      },
+      {
+        _type: 'block',
+        _key: 'privacy-list-line-breaks',
+        style: 'normal',
+        listItem: 'bullet',
+        level: 1,
+        markDefs: [],
+        children: [{ _type: 'span', _key: 'privacy-list-line-breaks-span', text: 'List line one\nList line two', marks: [] }],
+      },
+    ],
+  });
   const documents = [
     document('hero', {
       tagline: '',
@@ -33,7 +55,7 @@ export async function createToolingContentFixture({ origin, artifact }) {
     document('supportedGames', content('supported-games')),
     document('faqSettings', content('faq-settings')),
     document('faqSection', { questions: [...content('faq-questions'), ...Array.from({ length: 12 }, (_, index) => ({ _key: `tooling-question-${index}`, question: `Synthetic local question ${index + 1}`, answer: `This synthetic answer verifies that question ${index + 1} appears in the server-rendered FAQ without requiring a browser content request.` }))] }, 'faq'),
-    document('privacyPolicy', policy('Privacy Policy')),
+    document('privacyPolicy', privacy),
     document('terms', policy('Terms of Service')),
     document('contact', { title: 'Get In Touch', formId: '' }),
     document('about', { recordTitle: 'Synthetic local results', recordSubtitle: 'Local fixture content', recordDetails: [] }),

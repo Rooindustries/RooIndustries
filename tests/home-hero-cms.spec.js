@@ -51,6 +51,7 @@ test("renders CMS hero in server HTML without JavaScript", async ({ page }) => {
         elements.map((element) => {
           const rect = element.getBoundingClientRect();
           return {
+            kind: element.matches("h1 > span") ? "heading" : "note",
             text: element.textContent,
             scrollWidth: element.scrollWidth,
             clientWidth: element.clientWidth,
@@ -65,7 +66,8 @@ test("renders CMS hero in server HTML without JavaScript", async ({ page }) => {
         body: JSON.stringify(bounds, null, 2),
         contentType: "application/json",
       });
-      expect(bounds).toHaveLength(3);
+      expect(bounds.filter((element) => element.kind === "heading")).toHaveLength(2);
+      expect(bounds.filter((element) => element.kind === "note").length).toBeGreaterThanOrEqual(1);
       for (const element of bounds) {
         expect.soft(element.scrollWidth, element.text).toBeLessThanOrEqual(element.clientWidth + 1);
         expect.soft(element.left, element.text).toBeGreaterThanOrEqual(-1);

@@ -15,6 +15,15 @@ const RECOVERY_LINKS = [
 const links = (items) => items.map(([title, path]) => `- [${title}](${SITE_URL}${path})`).join("\n");
 const escapeMarkdown = (text = "") =>
   String(text).replace(/\s+/g, " ").trim().replace(/[!-/:-@[-`{-~]/g, "\\$&");
+const escapeMarkdownBlock = (text = "") =>
+  String(text)
+    .split(/\r\n|\r|\n/)
+    .map(escapeMarkdown)
+    .join("\n")
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.split("\n").filter(Boolean).join("\\\n"))
+    .filter(Boolean)
+    .join("\n\n");
 
 function buildPageMarkdown(pathname, privacy = null, hero = HOME_COPY.hero) {
   const { services, howItWorks } = HOME_COPY;
@@ -44,8 +53,8 @@ function buildPageMarkdown(pathname, privacy = null, hero = HOME_COPY.hero) {
         ...privacy.sections.flatMap((section) => [
           ...(section.heading ? [`## ${escapeMarkdown(section.heading)}`] : []),
           ...(section.content || []).filter((block) => block._type === "block").map((block) => {
-            const text = escapeMarkdown((block.children || []).map((span) => span.text || "").join(""));
-            return block.listItem ? `- ${text}` : text;
+            const text = escapeMarkdownBlock((block.children || []).map((span) => span.text || "").join(""));
+            return block.listItem ? `- ${text.replace(/\n/g, "\n  ")}` : text;
           }),
         ]),
         ...(privacy.lastUpdated ? [`Last updated: ${escapeMarkdown(privacy.lastUpdated)}`] : []),
