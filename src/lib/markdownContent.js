@@ -13,16 +13,26 @@ const RECOVERY_LINKS = [
 ];
 
 const links = (items) => items.map(([title, path]) => `- [${title}](${SITE_URL}${path})`).join("\n");
-const escapeMarkdown = (text = "") => String(text).replace(/([\\`*_{}\[\]<>#+.!|~-])/g, "\\$1");
+const escapeMarkdown = (text = "") =>
+  String(text).replace(/\s+/g, " ").trim().replace(/[!-/:-@[-`{-~]/g, "\\$&");
+const escapeMarkdownBlock = (text = "") => {
+  const lines = String(text).split("\n").map(escapeMarkdown);
+  let trailingBreaks = "";
+  while (lines.length > 1 && !lines[lines.length - 1]) {
+    lines.pop();
+    trailingBreaks += "<br>";
+  }
+  return lines.join("\\\n") + trailingBreaks;
+};
 
-function buildPageMarkdown(pathname, privacy = null) {
-  const { hero, services, howItWorks } = HOME_COPY;
+function buildPageMarkdown(pathname, privacy = null, hero = HOME_COPY.hero) {
+  const { services, howItWorks } = HOME_COPY;
   switch (pathname) {
     case "/":
       return [
-        `# ${hero.headingLine1} ${hero.headingLine2}`,
-        hero.description,
-        hero.subtext,
+        `# ${escapeMarkdown(hero.headingLine1)} ${escapeMarkdown(hero.headingLine2)}`,
+        escapeMarkdown(hero.description),
+        escapeMarkdown(hero.subtext),
         `## ${services.heading}`,
         services.subheading,
         ...services.cards.map((card) => `- **${card.title}**: ${card.description}`),
@@ -43,8 +53,8 @@ function buildPageMarkdown(pathname, privacy = null) {
         ...privacy.sections.flatMap((section) => [
           ...(section.heading ? [`## ${escapeMarkdown(section.heading)}`] : []),
           ...(section.content || []).filter((block) => block._type === "block").map((block) => {
-            const text = escapeMarkdown((block.children || []).map((span) => span.text || "").join(""));
-            return block.listItem ? `- ${text}` : text;
+            const text = escapeMarkdownBlock((block.children || []).map((span) => span.text || "").join(""));
+            return block.listItem ? `- ${text.replace(/\n/g, "\n  ")}` : text;
           }),
         ]),
         ...(privacy.lastUpdated ? [`Last updated: ${escapeMarkdown(privacy.lastUpdated)}`] : []),

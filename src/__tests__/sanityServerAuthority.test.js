@@ -45,6 +45,7 @@ describe("server-rendered public content authority", () => {
 
     expect(calls.map(({ resource }) => resource).sort()).toEqual(
       [
+        "hero",
         "reviews",
         "about",
         "services",

@@ -158,7 +158,7 @@ if (!requested || requested === 'routes') {
     return { status: response.status, externalRedirectFollowed: false };
   });
   await run('local-home-telemetry-isolation', async () => {
-    clear(); await load('/'); await wait(() => frame.contentDocument.body.textContent.includes('More FPS. Less Input Lag.'), 'Current conversion homepage absent.'); await delay(6500);
+    clear(); await load('/'); await wait(() => frame.contentDocument.body.textContent.includes('Why Pay $400 For RAM?'), 'Current conversion homepage absent.'); await delay(6500);
     const doc = frame.contentDocument;
     assert(!doc.querySelector('#intercom-embed-script,script[src*="/_vercel/"],script[src*="vercel-scripts.com"],#seorce-runtime-script'), 'Production telemetry initialized locally.');
     assert(!doc.querySelector('link[rel="preconnect"][href*="supabase.co"]'), 'Production preconnect ignores fixture asset origin.');

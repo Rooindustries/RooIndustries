@@ -372,11 +372,11 @@ test.describe("review carousel", () => {
         const card = await probe(page, "cardAt", x, y);
         const scrollLeft = (await probe(page, "state")).scrollLeft;
         steps.push({ step: index, pointerX: x, scrollLeft: round(scrollLeft), id: card?.id, group: card?.group, offset: round(card?.offset ?? NaN) });
-        if (index === 10) await region.screenshot({ path: path.join(EVIDENCE_DIR, "drag-across-wrap-mid.png") });
       }
       const recording = probe(page, "record", 3500);
       await page.waitForTimeout(50);
       await page.mouse.up();
+      await region.screenshot({ path: path.join(EVIDENCE_DIR, "drag-across-wrap-released.png") });
       const resume = await recording;
       const points = unwrap(resume.samples, resume.groupWidth);
       const upAt = resume.events.find((event) => event.type === "pointerup").t;

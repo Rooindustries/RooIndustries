@@ -42,7 +42,7 @@ test.describe("Route smoke", () => {
       expect((await page.title()).length).toBeGreaterThan(8);
       if (route === "/packages" || route === "/upgrade-xoc") await expect(page.locator("h1")).toHaveCount(1);
       if (route === "/") {
-        await expect(page.getByRole("heading", { name: /More FPS\. Less Input Lag\./ })).toBeVisible();
+        await expect(page.getByRole("heading", { name: /Fixture Hero Heading One/ })).toBeVisible();
         await expect(page.locator(".home-tourney-announcement")).toHaveCount(0);
         await expect(page.locator("#top").getByRole("link", { name: /tune my pc/i })).toHaveAttribute("href", "/#packages");
       }

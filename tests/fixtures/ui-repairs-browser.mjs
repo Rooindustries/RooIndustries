@@ -105,7 +105,7 @@ await run('navbar-focus', async () => {
   doc().querySelector('[aria-controls="mobile-proof-menu"]').click(); await delay(350); assert(!doc().querySelector('#mobile-proof-menu').inert, 'Open Proof remains inert'); return { closedMainInert: true, closedSubmenusInert: true, openProofUsable: true, nativeTabProof: 'separate T3 key presses required' };
 });
 for (const denial of ['property', 'getItem', 'setItem', 'removeItem']) await run(`storage-home-${denial}`, async () => {
-  await load('/?perfdebug=1', { denial }); await wait(() => text().includes('More FPS. Less Input Lag.'), 'Storage denial broke home'); await delay(300); assert(!win().__uiErrors.length, `Storage errors: ${win().__uiErrors}`);
+  await load('/?perfdebug=1', { denial }); await wait(() => text().includes('Why Pay $400 For RAM?'), 'Storage denial broke home'); await delay(300); assert(!win().__uiErrors.length, `Storage errors: ${win().__uiErrors}`);
   const label = [...doc().querySelectorAll('label')].find(n => n.textContent.includes('Pause reviews autoplay')); assert(label, 'Debug overlay absent on query'); label.querySelector('input').click(); await delay(100); assert(!win().__uiErrors.length, `Toggle storage failure escapes: ${win().__uiErrors}`); if (denial === 'removeItem') { await click('Hide'); await wait(() => !text().includes('Pause reviews autoplay'), 'Hide/remove denied did not preserve in-memory action'); assert(!win().__uiErrors.length, 'Remove storage failure escaped'); } return { denial, homeUsable: true };
 });
 for (const denial of ['property', 'getItem', 'setItem']) await run(`storage-login-${denial}`, async () => {

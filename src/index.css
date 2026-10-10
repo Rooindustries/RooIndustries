@@ -484,6 +484,22 @@ html {
   -webkit-font-smoothing: antialiased;
 }
 
+.ri-hero-heading-line {
+  white-space: nowrap;
+}
+
+@media (scripting: none) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .ri-hero-heading-line,
+  .ri-hero-cta-note p {
+    white-space: normal;
+    text-wrap: balance;
+  }
+}
+
 html,
 body {
   overflow-x: hidden;

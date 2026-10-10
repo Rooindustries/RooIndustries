@@ -7,8 +7,10 @@ const {
 
 describe("homepage conversion content", () => {
   test("speaks to gamers and replaces the old hall-of-fame hero note", () => {
-    expect(HOME_COPY.hero.description).toContain("games you actually grind");
-    expect(HOME_COPY.hero.subtext).toContain("No new hardware needed");
+    expect(HOME_COPY.hero.headingLine1).toBe("Why Pay $400 For RAM?");
+    expect(HOME_COPY.hero.headingLine2).toBe("Tune Yours For $99.95.");
+    expect(HOME_COPY.hero.description).toContain("You probably don't need a new one");
+    expect(HOME_COPY.hero.subtext).toContain("Before-and-after benchmarks");
     expect(HOME_COPY.hero.ctaNote).toBe(
       "Same-day sessions available · Money-back guarantee · Lifetime warranty"
     );

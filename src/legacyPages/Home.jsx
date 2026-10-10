@@ -142,7 +142,7 @@ export default function Home({ initialData = null }) {
 
   return (
     <>
-      <Hero />
+      <Hero initialData={initialData?.hero || null} />
       <DeferredSection
         fallbackClassName="min-h-[510px]"
         rootMargin="160px 0px"
