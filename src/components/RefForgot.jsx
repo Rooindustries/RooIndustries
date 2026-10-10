@@ -61,10 +61,11 @@ export default function RefForgot() {
                   rounded-2xl p-8 space-y-6"
       >
         <div>
-          <label className="text-accent text-sm font-semibold">
+          <label htmlFor="ref-forgot-email" className="text-accent text-sm font-semibold">
             Creator Email
           </label>
           <input
+            id="ref-forgot-email"
             type="email"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl
                        outline-none focus:border-info-border transition text-base text-ink"
