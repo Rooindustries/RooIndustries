@@ -286,7 +286,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       const { localOrigin, refuseEnvFiles } = await import("../scripts/lib/test-target-safety.mjs");
       refuseEnvFiles(root);
       localOrigin(baseURL);
-      const dist = process.env.NEXT_DIST_DIR || testInfo.config.webServer?.env?.NEXT_DIST_DIR;
+      const dist = process.env.NEXT_DIST_DIR || testInfo.config.metadata.toolingDistDir;
       expect(dist, "Guarded fixture build directory").toBeTruthy();
       const manifest = JSON.parse(fs.readFileSync(path.join(root, dist, "tooling-build.json"), "utf8"));
       expect(manifest.version).toBe(1);

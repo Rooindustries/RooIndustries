@@ -33,6 +33,7 @@ if (!shouldUseExternalServer && !internalDistDir.startsWith(".next-e2e-")) throw
 
 module.exports = defineConfig({
   testDir: "./tests",
+  metadata: { toolingDistDir: internalDistDir },
   timeout: 120000,
   expect: {
     timeout: 10000,
