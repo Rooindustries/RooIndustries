@@ -68,7 +68,7 @@ function DeferredSection({
   );
 }
 
-export default function Home({ initialData = null }) {
+export default function Home({ initialData = null, heroHeadingTag = "h1" }) {
   const location = useLocation();
   const isLowPerf = useLowPerformanceMode();
   const handleHomeSectionLink = useHomeSectionLinkHandler();
@@ -142,7 +142,7 @@ export default function Home({ initialData = null }) {
 
   return (
     <>
-      <Hero initialData={initialData?.hero || null} />
+      <Hero initialData={initialData?.hero || null} headingTag={heroHeadingTag} />
       <DeferredSection
         fallbackClassName="min-h-[510px]"
         rootMargin="160px 0px"

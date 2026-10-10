@@ -91,7 +91,8 @@ function CtaNoteBalanced({ icon, text }) {
   );
 }
 
-export default function Hero({ initialData = null }) {
+export default function Hero({ initialData = null, headingTag = "h1" }) {
+  const Heading = headingTag;
   const [fetchedHero, setFetchedHero] = useState(null);
   const heroData = resolveHeroCopy(initialData || fetchedHero);
   const handleHomeSectionLink = useHomeSectionLinkHandler();
@@ -241,7 +242,7 @@ export default function Hero({ initialData = null }) {
     <header id="top" className="py-16 flex justify-center">
       <section className="mx-auto max-w-4xl px-6 text-center w-full">
         <div className="w-full">
-          <h1 className="font-extrabold tracking-tight text-center">
+          <Heading className="font-extrabold tracking-tight text-center">
             {headingLine1 && (
               <span
                 ref={line1Ref}
@@ -261,7 +262,7 @@ export default function Hero({ initialData = null }) {
                 {renderWithGlow110(headingLine2)}
               </span>
             )}
-          </h1>
+          </Heading>
         </div>
 
         <div className="min-h-[36px] sm:min-h-[60px]">
