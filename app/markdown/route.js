@@ -4,7 +4,10 @@ import contentServer from "@/src/lib/contentServer";
 const { MARKDOWN_PATHS, MARKDOWN_VARY, NOT_FOUND_MARKDOWN, buildPageMarkdown } = markdownContent;
 
 export async function GET(request) {
-  const pathname = new URL(request.url).searchParams.get("path") || "/";
+  const url = new URL(request.url);
+  const pathname = MARKDOWN_PATHS.includes(url.pathname)
+    ? url.pathname
+    : url.searchParams.get("path") || "/";
   const headers = {
     "Content-Type": "text/markdown; charset=utf-8",
     "Vary": MARKDOWN_VARY,

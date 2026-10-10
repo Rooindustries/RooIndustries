@@ -42,6 +42,7 @@ const env = {
   NODE_OPTIONS: `--import=${fileURLToPath(new URL("./lib/test-target-safety.mjs", import.meta.url))}`,
 };
 const next = path.resolve("node_modules/next/dist/bin/next");
+const development = process.env.TOOLING_DEV_SERVER === "1";
 const fingerprint = createHash("sha256");
 const tracked = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean);
 for (const file of tracked.filter(file => /^(?:src\/|app\/|scripts\/|tests\/fixtures\/|package(?:-lock)?\.json$|next\.config\.mjs$|(?:tailwind|postcss)\.config)/.test(file)).sort()) {
@@ -63,7 +64,9 @@ for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => {
   active?.kill(signal);
   process.exitCode = 1;
 });
-if (fs.existsSync(path.join(dist, "BUILD_ID"))) {
+if (development) {
+  if (fs.existsSync(path.join(dist, "BUILD_ID"))) throw new Error("Development server cannot reuse a production build.");
+} else if (fs.existsSync(path.join(dist, "BUILD_ID"))) {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   if (manifest.version !== 1 || manifest.sourceHash !== sourceHash || manifest.baseURL !== baseURL || manifest.contentURL !== contentURL) throw new Error("Isolated build ownership or source fingerprint differs; choose a fresh NEXT_DIST_DIR.");
 } else {
@@ -71,10 +74,14 @@ if (fs.existsSync(path.join(dist, "BUILD_ID"))) {
 }
 const fixture = await createToolingContentFixture({ origin: contentURL, artifact: process.env.TOOLING_CONTENT_ARTIFACT });
 try {
+if (development) {
+  await execute([next, "dev", "--hostname", testHost, "--port", target.port]);
+} else {
 if (!fs.existsSync(path.join(dist, "BUILD_ID"))) {
   await execute(["scripts/validate-runtime-env.js"]);
   await execute([next, "build"]);
   fs.writeFileSync(manifestPath, JSON.stringify({ version: 1, sourceHash, baseURL, contentURL, contentSha256: fixture.evidence.contentSha256 }));
 }
 await execute([next, "start", "--hostname", testHost, "--port", target.port]);
+}
 } finally { await fixture.close(); }
