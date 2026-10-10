@@ -860,6 +860,95 @@ p {
 .comparison-item {
     page-break-inside: avoid !important;
 }
+@media screen {
+    :root {
+        --text-muted: #7e7e8e;
+    }
+}
+
+@media screen and (max-width: 816px) {
+    .page {
+        width: 100%;
+        min-height: 0;
+        padding: 72px 20px 80px !important;
+        overflow-wrap: anywhere;
+    }
+
+    .page-header,
+    .page-number {
+        right: 20px;
+    }
+
+    .page-footer {
+        left: 20px;
+    }
+
+    .cover-page {
+        min-height: 100svh;
+        padding: 64px 20px 80px !important;
+    }
+
+    .cover-title {
+        font-size: clamp(32px, 8.5vw, 52px);
+    }
+
+    .cover-badge {
+        max-width: 100%;
+        letter-spacing: 2px;
+    }
+
+    .cover-stats,
+    .cover-brands {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 16px;
+    }
+
+    .cover-brands {
+        padding: 16px;
+    }
+
+    .comparison-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .quick-ref {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .data-table {
+        table-layout: fixed;
+    }
+
+    .data-table th,
+    .data-table td {
+        padding: 10px 6px;
+        overflow-wrap: anywhere;
+    }
+
+    .bios-path {
+        overflow-wrap: anywhere;
+    }
+
+    .bios-path .arrow {
+        margin: 0 4px;
+    }
+
+    .meter-comparison {
+        gap: 16px !important;
+        flex-wrap: wrap;
+    }
+
+    .ram-slots {
+        gap: 8px !important;
+    }
+
+    .ram-slots > div {
+        flex: 1;
+        min-width: 0;
+        max-width: 65px;
+    }
+}
 </style>
 </head>
 <body>
@@ -1348,7 +1437,7 @@ p {
     
     <div class="performance-meter">
         <div class="meter-title">Typical RAM Performance Before/After XMP</div>
-        <div style="display: flex; justify-content: center; gap: 60px;">
+        <div class="meter-comparison" style="display: flex; justify-content: center; gap: 60px;">
             <div>
                 <div class="meter-value">2133</div>
                 <div class="meter-label">MHz (Default)</div>
@@ -1659,7 +1748,7 @@ p {
     
     <div style="background: var(--bg-card); border: 1px solid var(--border-gold); border-radius: 8px; padding: 25px; margin: 20px 0; text-align: center;">
         <p style="font-family: 'Space Mono', monospace; font-size: 11px; margin-bottom: 15px; color: var(--text-muted);">[CPU SOCKET THIS SIDE]</p>
-        <div style="display: flex; justify-content: center; gap: 12px; margin-bottom: 15px;">
+        <div class="ram-slots" style="display: flex; justify-content: center; gap: 12px; margin-bottom: 15px;">
             <div style="width: 65px; height: 80px; background: var(--bg-tertiary); border: 2px dashed var(--text-muted); border-radius: 4px; display: flex; align-items: center; justify-content: center; flex-direction: column;"><span style="font-family: 'Space Mono', monospace; font-size: 10px; color: var(--text-muted);">Slot 1</span><span style="font-size: 9px; color: var(--accent-red);">EMPTY</span></div>
             <div style="width: 65px; height: 80px; background: var(--accent-gold-dim); border: 2px solid var(--accent-gold); border-radius: 4px; display: flex; align-items: center; justify-content: center; flex-direction: column;"><span style="font-family: 'Space Mono', monospace; font-size: 10px; color: var(--accent-gold);">Slot 2</span><span style="font-size: 9px; color: var(--accent-gold);">RAM</span></div>
             <div style="width: 65px; height: 80px; background: var(--bg-tertiary); border: 2px dashed var(--text-muted); border-radius: 4px; display: flex; align-items: center; justify-content: center; flex-direction: column;"><span style="font-family: 'Space Mono', monospace; font-size: 10px; color: var(--text-muted);">Slot 3</span><span style="font-size: 9px; color: var(--accent-red);">EMPTY</span></div>
@@ -2289,12 +2378,12 @@ p {
     <h3>Checklist: Minimum Optimization</h3>
     
     <div style="background: var(--bg-card); border: 1px solid var(--border-gold); border-radius: 8px; padding: 20px; margin-top: 15px;">
-        <p style="font-size: 12px; margin-bottom: 10px;"><input type="checkbox" style="margin-right: 8px;"/> Benchmark BEFORE making changes (3DMark, CPU-Z)</p>
-        <p style="font-size: 12px; margin-bottom: 10px;"><input type="checkbox" style="margin-right: 8px;"/> Enable XMP/EXPO for full RAM speed</p>
-        <p style="font-size: 12px; margin-bottom: 10px;"><input type="checkbox" style="margin-right: 8px;"/> Enable PBO (AMD) or verify Turbo Boost (Intel)</p>
-        <p style="font-size: 12px; margin-bottom: 10px;"><input type="checkbox" style="margin-right: 8px;"/> Verify Resizable BAR is enabled</p>
-        <p style="font-size: 12px; margin-bottom: 10px;"><input type="checkbox" style="margin-right: 8px;"/> Save a BIOS profile for future recovery</p>
-        <p style="font-size: 12px; margin-bottom: 0;"><input type="checkbox" style="margin-right: 8px;"/> Benchmark AFTER and compare results!</p>
+        <p style="font-size: 12px; margin-bottom: 10px;"><label><input type="checkbox" style="margin-right: 8px;"/> Benchmark BEFORE making changes (3DMark, CPU-Z)</label></p>
+        <p style="font-size: 12px; margin-bottom: 10px;"><label><input type="checkbox" style="margin-right: 8px;"/> Enable XMP/EXPO for full RAM speed</label></p>
+        <p style="font-size: 12px; margin-bottom: 10px;"><label><input type="checkbox" style="margin-right: 8px;"/> Enable PBO (AMD) or verify Turbo Boost (Intel)</label></p>
+        <p style="font-size: 12px; margin-bottom: 10px;"><label><input type="checkbox" style="margin-right: 8px;"/> Verify Resizable BAR is enabled</label></p>
+        <p style="font-size: 12px; margin-bottom: 10px;"><label><input type="checkbox" style="margin-right: 8px;"/> Save a BIOS profile for future recovery</label></p>
+        <p style="font-size: 12px; margin-bottom: 0;"><label><input type="checkbox" style="margin-right: 8px;"/> Benchmark AFTER and compare results!</label></p>
     </div>
     
     <div class="page-footer">BIOS Mastery Guide</div>
