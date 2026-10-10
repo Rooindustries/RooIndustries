@@ -89,9 +89,11 @@ const variants = {
 
 export default function FaqSection({
   compact = false,
+  headingTag = "h2",
   initialFaqCopy = null,
   initialQuestions = null,
 }) {
+  const Heading = headingTag;
   const location = useLocation();
   const [activeHash, setActiveHash] = useState(() =>
     (location.hash || "").replace(/^#/, "")
@@ -269,9 +271,9 @@ export default function FaqSection({
           <span className="ri-faq-eyebrow inline-flex items-center gap-2 px-4 py-1 rounded-full bg-info-soft border border-info-border text-xs sm:text-sm font-semibold uppercase tracking-wide text-info-text shadow-info-soft">
             {eyebrowText}
           </span>
-          <h2 className="ri-faq-heading mt-4 text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_20px_rgba(56,189,248,0.35)]">
+          <Heading className="ri-faq-heading mt-4 text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_20px_rgba(56,189,248,0.35)]">
             {headingText}
-          </h2>
+          </Heading>
           <p className="mt-3 text-ink-secondary text-sm sm:text-base">
             {subtitleText}
           </p>
