@@ -1,4 +1,5 @@
 import { localOrigin } from '../../scripts/lib/test-target-safety.mjs';
+import { createHmac } from 'node:crypto';
 
 export const apiRouteSecrets = {
   REF_SESSION_SECRET: 'fixture-only-referral-session-secret',
@@ -7,6 +8,22 @@ export const apiRouteSecrets = {
 };
 
 export const referralEmail = 'creator@fixture.invalid';
+
+export function referralSessionCookie(overrides = {}) {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = Buffer.from(JSON.stringify({
+    v: 2,
+    rid: 'tooling-referral',
+    code: 'fixture-creator',
+    pid: 'fixture-principal',
+    sv: 1,
+    ab: 'supabase',
+    iat: now,
+    exp: now + 3600,
+    ...overrides,
+  })).toString('base64url');
+  return `${payload}.${createHmac('sha256', apiRouteSecrets.REF_SESSION_SECRET).update(payload).digest('base64url')}`;
+}
 
 export function apiFixtureOrigin(baseURL) {
   const target = new URL(localOrigin(baseURL));

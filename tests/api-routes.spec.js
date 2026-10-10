@@ -137,3 +137,70 @@ test.describe("canonical Markdown", () => {
     }
   });
 });
+
+test.describe("referral session status", () => {
+  for (const session of ["unavailable", "network_error", "malformed_response"]) {
+    test(`${session} preserves the account-verification outage response`, async ({ baseURL }, testInfo) => {
+      await apiFixture.configureApiFixture(baseURL, { reset: true, session });
+      const response = await apiFixture.requestRoute(baseURL, "/api/ref/sessionStatus", {
+        headers: { Cookie: `ref_session=${apiFixture.referralSessionCookie()}` },
+      });
+      const body = await response.json();
+      await testInfo.attach("session-status", { body: JSON.stringify({ session, status: response.status, body }), contentType: "application/json" });
+      expect(response.status).toBe(503);
+      expect(body).toEqual({ ok: false, error: "Account verification is temporarily unavailable." });
+      expect(response.headers.get("cache-control")).toContain("no-store");
+      expect(response.headers.get("set-cookie")).toBeNull();
+    });
+  }
+
+  test("absent, expired, malformed and bad-signature cookies stay anonymous during an outage", async ({ baseURL }) => {
+    await apiFixture.configureApiFixture(baseURL, { reset: true, session: "unavailable" });
+    for (const cookie of ["", "ref_session=malformed", "ref_session=%GG", `ref_session=${apiFixture.referralSessionCookie({ exp: 1 })}`, `ref_session=${apiFixture.referralSessionCookie()}invalid`]) {
+      const response = await apiFixture.requestRoute(baseURL, "/api/ref/sessionStatus", { headers: { Cookie: cookie } });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, authenticated: false });
+    }
+    const state = await apiFixture.readApiFixture(baseURL);
+    expect(state.requests.some(call => call.path.endsWith("/roo_validate_referral_session"))).toBe(false);
+  });
+
+  for (const session of ["valid", "inactive", "deleted", "revoked", "no_role", "principal_mismatch", "code_mismatch", "referral_mismatch"]) {
+    test(`${session} keeps the existing authentication result`, async ({ baseURL }) => {
+      await apiFixture.configureApiFixture(baseURL, { reset: true, session });
+      const response = await apiFixture.requestRoute(baseURL, "/api/ref/sessionStatus", {
+        headers: { Cookie: `ref_session=${apiFixture.referralSessionCookie()}` },
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, authenticated: session === "valid" });
+    });
+  }
+
+  test.describe("login page", () => {
+    test.use({ javaScriptEnabled: true });
+    test("keeps remembered login state and the cookie when verification is unavailable", async ({ page, context, baseURL }, testInfo) => {
+      await apiFixture.configureApiFixture(baseURL, { reset: true, session: "unavailable" });
+      const cookie = apiFixture.referralSessionCookie();
+      await context.addCookies([{ name: "ref_session", value: cookie, url: baseURL, httpOnly: true, sameSite: "Lax" }]);
+      await page.addInitScript(() => sessionStorage.setItem("refLoginCode", "fixture-creator"));
+      const requests = [];
+      page.on("request", request => requests.push({ url: request.url(), method: request.method() }));
+      const responsePromise = page.waitForResponse(response => response.url().endsWith("/api/ref/sessionStatus"));
+      await page.goto("/referrals/login");
+      const response = await responsePromise;
+      expect(response.status()).toBe(503);
+      await expect(page.locator("#ref-login-identifier")).toHaveValue("fixture-creator");
+      await expect(page.locator("#ref-login-remember")).toBeChecked();
+      await page.locator("#ref-login-password").fill("Synthetic-password1!");
+      await expect(page.getByRole("button", { name: "Login", exact: true })).toBeEnabled();
+      await expect(page).toHaveURL(`${baseURL}/referrals/login`);
+      expect((await context.cookies()).find(row => row.name === "ref_session")?.value).toBe(cookie);
+      expect(requests.some(row => row.url.includes("/api/ref/logout"))).toBe(false);
+      await testInfo.attach("login-session-state", {
+        body: JSON.stringify({ status: response.status(), url: page.url(), rememberedCode: await page.locator("#ref-login-identifier").inputValue(), cookiePreserved: true, requests }),
+        contentType: "application/json",
+      });
+      await page.screenshot({ path: "test-results/api-routes/login-outage.png" });
+    });
+  });
+});

@@ -84,6 +84,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
   const initialDocuments = structuredClone(documents);
   const dispatches = new Map();
   let delivery = 'completed';
+  let session = 'valid';
   let revision = 0;
   const mutate = mutations => {
     if (!Array.isArray(mutations) || !mutations.length) throw new Error('Missing fixture mutations.');
@@ -121,14 +122,19 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
             dispatches.clear();
             evidence.requests.length = 0;
             delivery = 'completed';
+            session = 'valid';
           }
           if (body.delivery !== undefined) {
             if (!['completed', 'pending', 'queued', 'failed', 'dead_letter', 'source_conflict', 'token_conflict', 'enqueue_failed', 'lookup_failed', 'requeue_failed'].includes(body.delivery)) throw new Error('Invalid fixture delivery state.');
             delivery = body.delivery;
           }
+          if (body.session !== undefined) {
+            if (!['valid', 'unavailable', 'network_error', 'malformed_response', 'inactive', 'deleted', 'revoked', 'no_role', 'principal_mismatch', 'code_mismatch', 'referral_mismatch'].includes(body.session)) throw new Error('Invalid fixture session state.');
+            session = body.session;
+          }
         }
         call.status = 200;
-        json(res, 200, { delivery, documents, requests: evidence.requests });
+        json(res, 200, { delivery, session, documents, requests: evidence.requests });
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_fetch_shadow_documents_targeted') {
         const scopedIds = apiRoutes && body.p_document_types === null && Array.isArray(body.p_ids) && body.p_ids.length > 0;
         if ((!scopedIds && (!Array.isArray(body.p_document_types) || !body.p_document_types.length)) || !Array.isArray(body.p_filters) || !Number.isInteger(body.p_limit) || body.p_limit < 1 || body.p_limit > 1000 || body.p_ids !== null && !Array.isArray(body.p_ids)) throw new Error('Invalid fixture read scope.');
@@ -143,6 +149,26 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         call.status = 200; json(res, 200, []);
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_fetch_commerce_availability') {
         call.status = 200; json(res, 200, { bookings: [], holds: [], slotLocks: [] });
+      } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_validate_referral_session') {
+        if (session === 'unavailable') throw Object.assign(new Error('Synthetic account verification outage.'), { status: 503, code: 'FIXTURE_ACCOUNT_UNAVAILABLE' });
+        if (session === 'network_error') {
+          call.status = 0;
+          req.socket.destroy();
+        } else if (session === 'malformed_response') {
+          call.status = 200;
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end('{invalid-json');
+        } else {
+          call.status = 200;
+          const rejected = ['inactive', 'deleted', 'revoked'].includes(session) || body.p_creator_legacy_id !== 'tooling-referral' || body.p_session_version !== 1;
+          json(res, 200, rejected ? null : {
+            creator_legacy_sanity_id: session === 'referral_mismatch' ? 'different-referral' : 'tooling-referral',
+            principal_id: session === 'principal_mismatch' ? 'different-principal' : 'fixture-principal',
+            referral_code: session === 'code_mismatch' ? 'different-code' : 'fixture-creator',
+            session_version: 1,
+            roles: session === 'no_role' ? [] : ['creator'],
+          });
+        }
       } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_apply_document_mutations') {
         const results = mutate(body.p_mutations);
         call.status = 200;
