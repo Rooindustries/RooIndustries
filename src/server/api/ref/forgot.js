@@ -35,12 +35,12 @@ const isMutationConflict = (error) =>
   isRevisionConflict(error) ||
   ["23505", "40001"].includes(String(error?.code || ""));
 
-const respondToResetConflict = (res) =>
-  res.status(503).json({
-    ok: false,
-    retryable: true,
-    error: "Password reset is temporarily unavailable. Please try again.",
-  });
+const respondToResetConflict = (res) => {
+  logSafeError("Referral reset source conflict", Object.assign(
+    new Error("Referral reset source changed."), { code: "RESET_TOKEN_CONFLICT" }
+  ));
+  return res.status(200).json({ ok: true, message: "If email exists, link sent." });
+};
 
 const enqueueSupabaseReset = async ({ initialReferral, recipientEmail }) => {
   let referral = initialReferral;
@@ -97,6 +97,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
+  let accountFound = false;
   try {
     const { email } = req.body;
 
@@ -109,7 +110,7 @@ export default async function handler(req, res) {
       normalizedEmail.length > 254 ||
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
     ) {
-      return res.status(200).json({ ok: true, message: "If email exists, link sent." });
+      return res.status(400).json({ ok: false, error: "Invalid email" });
     }
     const clientAddress = getClientAddress(req);
 
@@ -136,13 +137,13 @@ export default async function handler(req, res) {
         .status(200)
         .json({ ok: true, message: "If email exists, link sent." });
     }
+    accountFound = true;
 
     {
       const { dispatch } = await enqueueSupabaseReset({
         initialReferral: referral,
         recipientEmail: normalizedEmail,
       });
-      let syncPending = false;
       try {
         const delivery = await deliverReferralEmailDispatch({
           idempotencyKey: dispatch?.idempotency_key,
@@ -183,18 +184,20 @@ export default async function handler(req, res) {
             });
           }
         }
-        syncPending = delivery.sent !== 1;
+        if (delivery.sent !== 1) {
+          logSafeError("Referral reset email delivery remains pending", Object.assign(
+            new Error("Referral reset delivery is pending."), { code: "email_delivery_pending" }
+          ));
+        }
       } catch (error) {
         if (isReferralEmailSourceStateConflict(error)) {
           return respondToResetConflict(res);
         }
         logSafeError("Referral reset email delivery remains pending", error);
-        syncPending = true;
       }
       return res.status(200).json({
         ok: true,
-        message: "Reset link sent",
-        ...(syncPending ? { syncPending: true } : {}),
+        message: "If email exists, link sent.",
       });
     }} catch (err) {
     if (
@@ -205,6 +208,9 @@ export default async function handler(req, res) {
       return respondToResetConflict(res);
     }
     logSafeError("Referral forgot-password failed", err);
+    if (accountFound) {
+      return res.status(200).json({ ok: true, message: "If email exists, link sent." });
+    }
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 }

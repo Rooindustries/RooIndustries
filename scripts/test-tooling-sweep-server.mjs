@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
 import { createToolingContentFixture } from "../tests/fixtures/tooling-content.mjs";
+import { apiRouteSecrets } from "../tests/fixtures/api-routes.mjs";
 
 refuseEnvFiles();
 const dist = validateDistDir(process.env.NEXT_DIST_DIR, { isolated: true });
@@ -17,6 +18,7 @@ const contentPort = Number(process.env.TOOLING_CONTENT_PORT || Number(target.por
 if (!Number.isInteger(contentPort) || contentPort < 1024 || contentPort > 65535 || contentPort === Number(target.port)) throw new Error("Invalid local content fixture port.");
 const contentURL = localOrigin(`http://${testHost}:${contentPort}`);
 installNetworkGuard([baseURL, contentURL]);
+const apiRoutes = process.env.TOOLING_API_ROUTES === "1";
 const env = {
   PATH: process.env.PATH,
   HOME: process.env.HOME,
@@ -33,7 +35,8 @@ const env = {
   SUPABASE_SECRET_KEY: "fixture-only-tooling-server-secret-key",
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "fixture-only-tooling-browser-publishable-key",
   ALLOW_LIVE_PAYMENTS: "0",
-  SALES_PREVIEW_READ_ONLY: "1",
+  SALES_PREVIEW_READ_ONLY: apiRoutes ? "0" : "1",
+  ...(apiRoutes ? apiRouteSecrets : {}),
   NEXT_TELEMETRY_DISABLED: "1",
   BASE_URL: baseURL,
   ROO_TEST_HOST: testHost,
@@ -72,7 +75,7 @@ if (development) {
 } else {
   if (fs.existsSync(dist)) throw new Error("Incomplete isolated build exists; choose a fresh NEXT_DIST_DIR.");
 }
-const fixture = await createToolingContentFixture({ origin: contentURL, artifact: process.env.TOOLING_CONTENT_ARTIFACT });
+const fixture = await createToolingContentFixture({ origin: contentURL, artifact: process.env.TOOLING_CONTENT_ARTIFACT, apiRoutes });
 try {
 if (development) {
   await execute([next, "dev", "--hostname", testHost, "--port", target.port]);

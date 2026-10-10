@@ -213,8 +213,7 @@ describe("Supabase-primary referral email routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({
       ok: true,
-      message: "Reset link sent",
-      syncPending: true,
+      message: "If email exists, link sent.",
     });
     expect(loaded.enqueueReferralEmailMutation).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -240,7 +239,7 @@ describe("Supabase-primary referral email routes", () => {
     });
   });
 
-  test("requeues a dead-lettered reset before reporting pending delivery", async () => {
+  test("requeues a dead-lettered reset before acknowledging the request", async () => {
     const loaded = loadForgotHandler();
     loaded.deliverReferralEmailDispatch.mockResolvedValue({
       claimed: false,
@@ -261,8 +260,7 @@ describe("Supabase-primary referral email routes", () => {
 
     expect(response.body).toEqual({
       ok: true,
-      message: "Reset link sent",
-      syncPending: true,
+      message: "If email exists, link sent.",
     });
     expect(loaded.requeueReferralEmailDispatch).toHaveBeenCalledWith({
       referralId: "referral.creator",
@@ -302,7 +300,7 @@ describe("Supabase-primary referral email routes", () => {
     });
   });
 
-  test("returns a retryable reset response when the dispatch source changes", async () => {
+  test("acknowledges a reset generically when the dispatch source changes", async () => {
     const loaded = loadForgotHandler();
     loaded.deliverReferralEmailDispatch.mockResolvedValue({
       claimed: false,
@@ -322,11 +320,10 @@ describe("Supabase-primary referral email routes", () => {
       response
     );
 
-    expect(response.statusCode).toBe(503);
+    expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({
-      ok: false,
-      retryable: true,
-      error: "Password reset is temporarily unavailable. Please try again.",
+      ok: true,
+      message: "If email exists, link sent.",
     });
     expect(loaded.requeueReferralEmailDispatch).not.toHaveBeenCalled();
   });
@@ -347,8 +344,8 @@ describe("Supabase-primary referral email routes", () => {
       response
     );
 
-    expect(response.statusCode).toBe(503);
-    expect(response.body).toMatchObject({ ok: false, retryable: true });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({ ok: true, message: "If email exists, link sent." });
     expect(loaded.enqueueReferralEmailMutation).toHaveBeenCalledTimes(3);
     expect(loaded.deliverReferralEmailDispatch).not.toHaveBeenCalled();
   });
