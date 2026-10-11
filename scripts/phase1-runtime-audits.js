@@ -480,6 +480,14 @@ const businessSmoke = async () => {
   await referralPage.goto(`${BASE_URL}/referrals/login`, {
     waitUntil: "domcontentloaded",
   });
+  await referralPage.waitForFunction(
+    () =>
+      window.history.state?.__rooLegacy === true &&
+      document.body.innerText.trim() !== "Loading..." &&
+      document.querySelector("main")?.innerText.trim() !== "Loading...",
+    null,
+    { timeout: 15000 }
+  );
   checks.push({
     check: "referral_login_renders",
     pass: (await referralPage.locator("text=Referral").count()) >= 1,
