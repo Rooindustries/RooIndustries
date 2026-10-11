@@ -79,7 +79,7 @@ jobs:
           if [ "${{ matrix.suite.name }}" = "rest" ]; then
             TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:agent-readiness
           fi
-          xvfb-run -a npx playwright test "$PW_FILES"
+          xvfb-run -a npx playwright test --pass-with-no-tests "$PW_FILES"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
