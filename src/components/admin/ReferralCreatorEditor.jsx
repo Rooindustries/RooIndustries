@@ -302,12 +302,12 @@ export default function ReferralCreatorEditor() {
         latestHistoryRequest.current === selectionRequestId &&
         latestSaveRequest.current === saveRequestId;
       if (!selectionStillCurrent) return;
+      draftBaseVersion.current = updated.terms_version;
       if (draftVersion.current === submittedDraftVersion) {
-        draftBaseVersion.current = updated.terms_version;
         replaceDraft(createDraft(updated));
         if (!clearReferralDrafts(creatorId)) setError("Saved in Supabase, but the local draft could not be cleared in this browser.");
       } else {
-        setDraftConflict({ baseVersion: expectedVersion });
+        persistDraft();
       }
       pendingOperation.current = "";
       setNotice("Saved in Supabase.");

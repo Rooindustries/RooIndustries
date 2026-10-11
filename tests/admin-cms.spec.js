@@ -333,6 +333,49 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       } finally { await pending.release(); }
     });
 
+    test("Bugbot newer referral edits rebase after an in-flight save", async ({ page, request }, testInfo) => {
+      const creator = (await creators(request))[2];
+      await openReferrals(page); await selectCreator(page, creator);
+      await page.getByLabel("Creator commission percentage").fill("9.75");
+      await page.getByLabel("Customer discount percentage").fill("5.25");
+      await page.getByLabel("Reason for change").fill("First save snapshot");
+      const pending = await hold(page, "**/api/admin/referral-creators", { method: "PATCH" });
+      await page.getByRole("button", { name: "Save creator settings", exact: true }).click();
+      const response = await pending.arrived;
+      try {
+        const saved = (await response.json()).creator;
+        const reason = `Newer edits café 日本語 🦘 ${viewport.width}`;
+        await page.getByLabel("Creator commission percentage").fill("8.75");
+        await page.getByLabel("Customer discount percentage").fill("6.25");
+        await page.getByLabel("Reason for change").fill(reason);
+        await pending.release();
+        await expect(page.getByRole("status")).toContainText("Saved in Supabase");
+        await expect(page.getByLabel("Creator commission percentage")).toBeEnabled();
+        await expect(page.getByLabel("Creator commission percentage")).toHaveValue("8.75");
+        await expect(page.getByLabel("Reason for change")).toHaveValue(reason);
+        await expect(page.getByRole("alert").filter({ hasText: /draft.*conflict|conflict.*draft/i })).toHaveCount(0);
+        const drafts = await page.evaluate(() => Object.entries(localStorage).filter(([key]) => key.startsWith("roo-referral-draft:")).map(([key, value]) => ({ key, ...JSON.parse(value) })));
+        expect(drafts).toHaveLength(1);
+        expect(drafts[0]).toMatchObject({ baseVersion: saved.terms_version, draft: { commissionPercent: "8.75", discountPercent: "6.25", reason } });
+        page.on("dialog", dialog => dialog.accept());
+        await page.reload();
+        await page.getByLabel("Admin key", { exact: true }).fill(ADMIN_KEY);
+        await page.getByRole("button", { name: "Open editor", exact: true }).click();
+        await selectCreator(page, creator);
+        await expect(page.getByRole("status")).toContainText("Recovered your unpublished creator draft");
+        await expect(page.getByLabel("Creator commission percentage")).toBeEnabled();
+        await expect(page.getByLabel("Creator commission percentage")).toHaveValue("8.75");
+        await expect(page.getByLabel("Reason for change")).toHaveValue(reason);
+        await page.getByLabel("Reason for change").fill(`${reason} still editable`);
+        await page.getByRole("button", { name: "Save creator settings", exact: true }).click();
+        await expect(page.getByLabel("Reason for change")).toHaveValue("");
+        const stored = (await creators(request)).find(item => item.creator_id === creator.creator_id);
+        expect(stored).toMatchObject({ terms_version: saved.terms_version + 1, commission_basis_points: 875, discount_basis_points: 625 });
+        expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-referral-draft:")))).toEqual([]);
+        await evidence(page, testInfo, { creatorId: creator.creator_id, savedVersion: saved.terms_version, drafts, stored });
+      } finally { await pending.release(); }
+    });
+
     test("#11 validation errors describe the actual input with stable ids", async ({ page }, testInfo) => {
       await login(page); await choose(page, "Tool");
       await page.getByRole("region", { name: "Tool list" }).getByRole("button", { name: "New", exact: true }).click();

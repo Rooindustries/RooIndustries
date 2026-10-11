@@ -30,7 +30,11 @@ export const readReferralDraft = (creator) => {
 
 export const saveReferralDraft = (creatorId, baseVersion, draft) => {
   try {
-    window.localStorage.setItem(key(creatorId, baseVersion), JSON.stringify({ schema: 1, creatorId, baseVersion, draft, savedAt: new Date().toISOString() }));
+    const store = window.localStorage;
+    const savedKey = key(creatorId, baseVersion);
+    store.setItem(savedKey, JSON.stringify({ schema: 1, creatorId, baseVersion, draft, savedAt: new Date().toISOString() }));
+    const previousKeys = Array.from({ length: store.length }, (_, index) => store.key(index)).filter(storedKey => storedKey !== savedKey && storedKey?.startsWith(creatorPrefix(creatorId)));
+    previousKeys.forEach(storedKey => store.removeItem(storedKey));
     return true;
   } catch {
     return false;
