@@ -25,6 +25,7 @@ const NOINDEX_ROUTES = [
   "/referrals/reset",
   "/referrals/login",
   "/referrals/register",
+  "/referrals/verify",
 ];
 
 const STATIC_ROUTES = [...INDEXABLE_ROUTES];

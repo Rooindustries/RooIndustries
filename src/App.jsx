@@ -140,6 +140,7 @@ function AnimatedRoutes({
   routeKey,
   initialHomeData,
   initialRouteData,
+  heroHeadingTag,
 }) {
   const baseLocation = useLocation();
   const location = routesLocation || baseLocation;
@@ -148,7 +149,7 @@ function AnimatedRoutes({
   return (
     <div key={motionKey} className="w-full flex flex-col flex-1">
         <Routes location={location}>
-          <Route path="/" element={<Home initialData={initialHomeData} />} />
+          <Route path="/" element={<Home initialData={initialHomeData} heroHeadingTag={heroHeadingTag} />} />
           <Route
             path="/packages"
             element={<Packages initialData={initialRouteData?.packages || null} />}
@@ -593,6 +594,7 @@ export function AppContent({
             routeKey={routesKey}
             initialHomeData={initialHomeData}
             initialRouteData={initialRouteData}
+            heroHeadingTag={isPaymentSuccessRoute || isThankYouRoute ? "h2" : "h1"}
           />
         </main>
       </div>

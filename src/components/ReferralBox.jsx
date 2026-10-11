@@ -73,7 +73,9 @@ export default function ReferralBox() {
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto md:flex-initial sm:items-stretch">
+        <label htmlFor="referral-email" className="sr-only">Email</label>
         <input
+          id="referral-email"
           type="email"
           placeholder={content.emailPlaceholder}
           value={email}

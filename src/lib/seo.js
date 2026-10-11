@@ -116,6 +116,12 @@ const routeMeta = {
       "Create your Roo Industries referral partner account to get a unique tracking link, monitor conversions, and earn rewards for qualified customer referrals.",
     noindex: true,
   },
+  "/referrals/verify": {
+    title: "Confirm Creator Account | Roo Industries",
+    description:
+      "Confirm your Roo Industries creator account email to finish referral registration and return securely to the referral partner sign-in page.",
+    noindex: true,
+  },
   "/referrals/dashboard": {
     title: "Referral Earnings Dashboard | Roo Industries Partner Portal",
     description:
