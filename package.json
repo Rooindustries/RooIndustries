@@ -26,7 +26,7 @@
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.545.0",
     "negotiator": "^0.6.4",
-    "next": "15.5.24",
+    "next": "15.5.27",
     "postgres": "^3.4.9",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -37,7 +37,7 @@
     "resend": "6.17.2",
     "uuid": "11.1.1",
     "web-vitals": "^2.1.4",
-    "sharp": "0.35.4"
+    "sharp": "0.35.5"
   },
   "scripts": {
     "dev": "next dev",
@@ -119,8 +119,8 @@
     "@playwright/test": "^1.55.0",
     "autoprefixer": "^10.4.21",
     "cross-env": "^7.0.3",
-    "jest": "30.2.0",
-    "jest-environment-jsdom": "30.2.0",
+    "jest": "30.3.0",
+    "jest-environment-jsdom": "30.3.0",
     "postcss": "8.5.23",
     "tailwindcss": "^3.4.18",
     "tus-js-client": "^4.3.1"
@@ -133,6 +133,6 @@
     "picomatch": "2.3.2",
     "tmp": "0.2.7",
     "uuid": "11.1.1",
-    "sharp": "0.35.4"
+    "sharp": "0.35.5"
   }
 }
