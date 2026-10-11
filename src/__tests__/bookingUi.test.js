@@ -576,7 +576,7 @@ describe("booking calendar UI", () => {
     );
   });
 
-  test("continues with a new hold after the previous release times out", async () => {
+  test("keeps the original hold when release times out during a slot switch", async () => {
     const controllers = [];
     abortTimeoutSpy = jest
       .spyOn(AbortSignal, "timeout")
@@ -627,6 +627,7 @@ describe("booking calendar UI", () => {
     await userEvent.click(
       await screen.findByRole("button", { name: replacementTime })
     );
+    const originalHold = JSON.parse(sessionStorage.getItem("my_slot_hold"));
     await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
 
     await waitFor(() => {
@@ -641,13 +642,13 @@ describe("booking calendar UI", () => {
       await Promise.resolve();
     });
 
-    expect(await screen.findByLabelText("Discord username")).toBeInTheDocument();
+    expect(await screen.findByText(/could not release.*try again/i)).toBeInTheDocument();
+    expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toEqual(originalHold);
     expect(
       global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot")
-    ).toHaveLength(1);
-    expect(abortTimeoutSpy).toHaveBeenCalledTimes(2);
+    ).toHaveLength(0);
+    expect(abortTimeoutSpy).toHaveBeenCalledTimes(1);
     expect(abortTimeoutSpy).toHaveBeenNthCalledWith(1, 8_000);
-    expect(abortTimeoutSpy).toHaveBeenNthCalledWith(2, 8_000);
   });
 
   test("re-enables payment release after the cancel request times out", async () => {

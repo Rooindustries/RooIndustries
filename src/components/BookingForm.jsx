@@ -530,6 +530,9 @@ export default function BookingForm({ isMobile }) {
   const prevPackageDataRef = useRef(selectedPackage);
   const [draftLoading, setDraftLoading] = useState(true);
   const [myHold, setMyHold] = useState(null);
+  const currentHoldRef = useRef(myHold);
+  currentHoldRef.current = myHold;
+  const releaseInFlightRef = useRef(false);
   const isPaymentPendingHold =
     String(myHold?.phase || "").trim().toLowerCase() === "payment_pending";
   const [lockingSlot, setLockingSlot] = useState(false);
@@ -1864,6 +1867,7 @@ export default function BookingForm({ isMobile }) {
 
   const clearHoldState = (resetStep = true, clearStorage = true) => {
     hasActiveHoldRef.current = false;
+    currentHoldRef.current = null;
     setMyHold(null);
     if (clearStorage) {
       removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);
@@ -1939,23 +1943,27 @@ export default function BookingForm({ isMobile }) {
     broadcastHold(updated);
   };
 
-  // Release the hold optimistically.
   const releaseHold = async (resetStep = true) => {
-    if (!myHold) return;
+    if (!myHold) return true;
     if (isPaymentPendingHold) {
       setErrorStep2(
         "Your payment session is already in progress. Return to payment to finish it."
       );
-      return;
+      return false;
     }
 
     const holdIdToDelete = myHold.holdId;
     const holdTokenToDelete = myHold.holdToken;
-
-    clearHoldState(resetStep);
+    const hasExpired = () => new Date(myHold.expiresAt).getTime() <= Date.now();
+    const isCurrentHold = () =>
+      currentHoldRef.current?.holdId === holdIdToDelete &&
+      currentHoldRef.current?.holdToken === holdTokenToDelete;
+    if (hasExpired()) clearHoldState(resetStep);
+    if (releaseInFlightRef.current) return hasExpired();
+    releaseInFlightRef.current = true;
 
     try {
-      await fetch("/api/releaseHold", {
+      const response = await fetch("/api/releaseHold", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1964,8 +1972,25 @@ export default function BookingForm({ isMobile }) {
         }),
         signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
       });
+      if (!response.ok) throw new Error("Release failed.");
+      if (isCurrentHold()) clearHoldState(resetStep);
+      setErrorStep1("");
+      setErrorStep2("");
+      return true;
     } catch {
       console.error("Failed to release hold on server");
+      if (hasExpired()) {
+        if (isCurrentHold()) clearHoldState(resetStep);
+        return true;
+      }
+      if (isCurrentHold()) {
+        const message = "Could not release your slot. Your reservation and details are saved. Please try again.";
+        setErrorStep1(message);
+        setErrorStep2(message);
+      }
+      return false;
+    } finally {
+      releaseInFlightRef.current = false;
     }
   };
 
@@ -2068,7 +2093,10 @@ export default function BookingForm({ isMobile }) {
     if (myHold && !isSameAsExisting) {
       previousHoldId = myHold.holdId || null;
       previousHoldToken = myHold.holdToken || null;
-      await releaseHold(false);
+      if (!(await releaseHold(false))) {
+        setLockingSlot(false);
+        return;
+      }
     }
 
     try {
