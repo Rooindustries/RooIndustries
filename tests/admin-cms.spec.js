@@ -251,6 +251,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       const next = page.waitForRequest(request => new URL(request.url()).pathname === "/api/admin/referral-creators" && new URL(request.url()).searchParams.get("offset") !== "0" && !new URL(request.url()).searchParams.has("creatorId"));
       await page.getByRole("button", { name: "Load more creators", exact: true }).click();
       const offset = new URL((await next).url()).searchParams.get("offset");
+      await expect(page.locator("aside button")).toHaveCount(55);
       await expect(page.getByRole("button", { name: "Load more creators", exact: true })).toHaveCount(0);
       const displayed = await page.locator("aside button").allTextContents();
       expect(server.filter(creator => !displayed.some(text => text.includes(creator.referral_code)))).toEqual([]);

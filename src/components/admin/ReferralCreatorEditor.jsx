@@ -42,6 +42,7 @@ export default function ReferralCreatorEditor() {
   const [notice, setNotice] = useState("");
   const [unlocked, setUnlocked] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  const [nextOffset, setNextOffset] = useState(0);
   const pendingOperation = useRef("");
   const latestCreatorRequest = useRef(0);
   const latestHistoryRequest = useRef(0);
@@ -104,6 +105,9 @@ export default function ReferralCreatorEditor() {
       const body = await request(`/api/admin/referral-creators?${parameters}`);
       if (requestId !== latestCreatorRequest.current) return;
       const page = Array.isArray(body.creators) ? body.creators : [];
+      if (body.hasMore === true && (!Number.isSafeInteger(body.nextOffset) || body.nextOffset <= offset || body.nextOffset > 1_000_000)) {
+        throw new Error("The creator page cursor is invalid. Refresh the list and try again.");
+      }
       const existingCreators = creatorsRef.current;
       let nextCreators = append
         ? [...new Map(
@@ -132,6 +136,7 @@ export default function ReferralCreatorEditor() {
         setHistory([]);
       }
       setHasMore(body.hasMore === true);
+      setNextOffset(Number.isSafeInteger(body.nextOffset) ? body.nextOffset : 0);
       lastLoadedSearch.current = normalizedSearch;
       setUnlocked(true);
     } catch (loadError) {
@@ -366,11 +371,11 @@ export default function ReferralCreatorEditor() {
               <button
                 className={styles.loadMore}
                 onClick={() => loadCreators({
-                  search: query,
-                  offset: creators.length,
+                  search: lastLoadedSearch.current,
+                  offset: nextOffset,
                   append: true,
                 })}
-                disabled={loading}
+                disabled={loading || query.trim() !== lastLoadedSearch.current}
               >
                 {loading ? "Loading…" : "Load more creators"}
               </button>
