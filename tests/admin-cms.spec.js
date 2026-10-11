@@ -615,3 +615,25 @@ test("referral drafts in two tabs preserve both terms versions", async ({ page, 
   await evidence(other, testInfo, { creatorId: creator.creator_id, oldVersion: creator.terms_version, newVersion: newer.terms_version, stored });
   await other.close();
 });
+
+test("content fixture reset removes created documents and preserves referrals", async ({ page, request, baseURL }, testInfo) => {
+  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  expect((await request.post(`${control}/reset-content`)).ok()).toBe(true);
+  const original = await cms(request, `/api/admin/content/documents/${HERO_ID}`);
+  const baseline = await cms(request, "/api/admin/content/documents?type=benchmark");
+  const referralSnapshot = await creators(request);
+  const receipt = await cms(request, "/api/admin/content/publish", {
+    operation: "create", type: "benchmark", createIntentId: require("node:crypto").randomUUID(), document: { title: "Created after the content baseline", sortOrder: 77 },
+  });
+  await cms(request, "/api/admin/content/publish", { operation: "replace", type: "hero", documentId: HERO_ID, expectedRevision: original.revision, document: { ...original.document, description: "Changed after the content baseline" } });
+  const deletedId = baseline.documents[0]._id;
+  await cms(request, "/api/admin/content/publish", { operation: "delete", type: "benchmark", documentId: deletedId, expectedRevision: baseline.documents[0].revision });
+  expect((await request.post(`${control}/reset-content`)).ok()).toBe(true);
+  const reset = await cms(request, "/api/admin/content/documents?type=benchmark");
+  expect(reset.documents.map(document => document._id).sort()).toEqual(baseline.documents.map(document => document._id).sort());
+  expect((await request.get(`/api/admin/content/documents/${receipt.documentId}`, { headers: { "x-admin-key": ADMIN_KEY } })).status()).toBe(404);
+  expect((await cms(request, `/api/admin/content/documents/${HERO_ID}`)).document.description).toBe(original.document.description);
+  expect(await creators(request)).toEqual(referralSnapshot);
+  await login(page); await choose(page, "Benchmark");
+  await evidence(page, testInfo, { createdId: receipt.documentId, restoredId: deletedId, benchmarkIds: reset.documents.map(document => document._id), referralCount: referralSnapshot.length });
+});

@@ -109,8 +109,16 @@ try {
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(marker)); return;
     }
     if (request.method === "POST" && request.url === "/reset-content") {
+      const current = await fixture.sql`select legacy_sanity_id from migration.source_documents where document_type=any(${CONTENT_TYPES.map(type => type.name)}::text[]) and not tombstoned`;
+      const currentIds = new Set(current.map(document => document.legacy_sanity_id));
+      const baselineIds = new Set(documents.map(document => document._id));
+      for (const document of current) {
+        if (baselineIds.has(document.legacy_sanity_id)) continue;
+        const result = await fixture.client.rpc("roo_apply_document_mutations", { p_mutations: [{ operation: "delete", id: document.legacy_sanity_id }] });
+        if (result.error) { response.writeHead(500); response.end("Fixture reset failed."); return; }
+      }
       for (const document of documents) {
-        const result = await fixture.client.rpc("roo_apply_document_mutations", { p_mutations: [{ operation: "replace", id: document._id, document }] });
+        const result = await fixture.client.rpc("roo_apply_document_mutations", { p_mutations: [{ operation: currentIds.has(document._id) ? "replace" : "create", id: document._id, document }] });
         if (result.error) { response.writeHead(500); response.end("Fixture reset failed."); return; }
       }
       response.writeHead(200); response.end("ok"); return;
