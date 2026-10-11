@@ -9,6 +9,9 @@ import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } fro
 import { createToolingContentFixture } from "../tests/fixtures/tooling-content.mjs";
 import { apiRouteSecrets } from "../tests/fixtures/api-routes.mjs";
 
+if (process.env.ROO_ADMIN_FIXTURE === "1") {
+  await import("./test-admin-server.mjs");
+} else {
 refuseEnvFiles();
 const dist = validateDistDir(process.env.NEXT_DIST_DIR, { isolated: true });
 const baseURL = localOrigin(process.env.BASE_URL);
@@ -97,3 +100,5 @@ try {
 } catch (error) {
   if (!stopping) throw error;
 } finally { await fixture.close(); }
+
+}

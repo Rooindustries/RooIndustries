@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { History, RotateCcw, X } from "lucide-react";
 import styles from "./ContentAdmin.module.css";
 
@@ -10,36 +10,42 @@ const displayTime = (value) => {
 };
 
 
-export default function RevisionHistory({ api, documentId, onRestore, onClose }) {
+export default function RevisionHistory({ api, documentId, selectionGeneration, isCurrentSelection, onRestore, onClose }) {
   const [revisions, setRevisions] = useState(null);
   const [error, setError] = useState("");
   const [loadingId, setLoadingId] = useState("");
+  const active = useRef(false);
 
   useEffect(() => {
-    let active = true;
+    let current = true;
+    active.current = true;
+    setRevisions(null);
+    setError("");
     api
       .listRevisions(documentId)
       .then((data) => {
-        if (active) setRevisions(Array.isArray(data?.revisions) ? data.revisions : []);
+        if (current && isCurrentSelection(selectionGeneration)) setRevisions(Array.isArray(data?.revisions) ? data.revisions : []);
       })
       .catch((loadError) => {
-        if (active) setError(loadError.message);
+        if (current && isCurrentSelection(selectionGeneration)) setError(loadError.message);
       });
     return () => {
-      active = false;
+      current = false;
+      active.current = false;
     };
-  }, [api, documentId]);
+  }, [api, documentId, selectionGeneration, isCurrentSelection]);
 
   const restore = async (revision) => {
     setLoadingId(revision.revisionId);
     setError("");
     try {
       const data = await api.getRevision(documentId, revision.revisionId);
-      onRestore({ document: data.document, assets: data.assets || {}, revision });
+      if (!active.current || !isCurrentSelection(selectionGeneration)) return;
+      onRestore({ document: data.document, assets: data.assets || {}, revision, documentId, selectionGeneration });
     } catch (restoreError) {
-      setError(restoreError.message);
+      if (active.current && isCurrentSelection(selectionGeneration)) setError(restoreError.message);
     } finally {
-      setLoadingId("");
+      if (active.current && isCurrentSelection(selectionGeneration)) setLoadingId("");
     }
   };
 

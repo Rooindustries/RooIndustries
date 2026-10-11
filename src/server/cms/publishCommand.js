@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { validateContentDocument, createContentDefaults } from "../../lib/cms/contentSchema.js";
 import { stableCmsJson } from "../../lib/globalCmsContract.js";
 import { clearSupabasePublicContentCache } from "../content/publicContent.js";
-import { contentType, documentId, loadDocument } from "./documents.js";
+import { contentType, documentId, getContentDocument, loadDocument } from "./documents.js";
 import { cmsError, rpcData, validationError } from "./errors.js";
 import { assertGlobalCmsWritesAllowed } from "./writeControl.js";
 
@@ -16,6 +16,12 @@ export const createIntentDocumentId = intent => {
   bytes[8] = (bytes[8] & 63) | 128;
   const hex = bytes.toString("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
+export const getCreateIntentDocument = async ({ type, createIntentId, client }) => {
+  const schema = contentType(type);
+  if (!uuid(createIntentId)) throw validationError("$.createIntentId", "A stable create-intent UUID is required.");
+  const id = schema.fixedId || createIntentDocumentId(createIntentId);
+  return { ...(await getContentDocument(client, id)), documentId: id };
 };
 const plain = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const refuseEnrichment = (value, path = "$", depth = 0) => {

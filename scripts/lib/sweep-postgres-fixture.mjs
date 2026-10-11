@@ -80,7 +80,7 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'roo-persistence-sweep-'));
   const dataDir = path.join(scratch, 'data');
   const pgPort = await freePort(ports.postgres);
-  const restPort = await freePort(ports.rest);
+  const restPort = await freePort(ports.rest ?? ports.postgrest);
   assert.notEqual(pgPort, restPort, 'Fixture ports must differ');
   const run = (binary, args) => {
     const result = spawnSync(binary, args, {env, encoding:'utf8',timeout:60000,maxBuffer:16*1024*1024});
