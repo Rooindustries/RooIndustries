@@ -44,11 +44,16 @@ for (const [route, resource, heading] of [
   for (const [width, height, loads] of [[1440, 900, 5], [390, 844, 1]]) {
     for (let run = 1; run <= loads; run += 1) {
       test(`${route} stays stable at ${width}px, load ${run}`, async ({ page }, testInfo) => {
-        const delay = run % 2 === 0 ? 600 : 0;
+        const serverDelayed = process.env.TOOLING_CLS_RESPONSE === "delayed";
+        const delay = process.env.TOOLING_CLS_RESPONSE === "failed" ? 600 : 0;
+        let clientDelayCount = 0;
         let loadingLayout = null;
         await page.setViewportSize({ width, height });
         await page.route(`**/api/content/${resource}`, async (request) => {
-          if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+          if (delay) {
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            clientDelayCount += 1;
+          }
           loadingLayout = await page.locator("#main-content").evaluate((main) => ({
             time: performance.now(),
             section: main.querySelector("section")?.getBoundingClientRect().toJSON(),
@@ -57,6 +62,7 @@ for (const [route, resource, heading] of [
           }));
           await request.fallback();
         });
+        const navigationStartedAt = Date.now();
         const response = await page.goto(route, { waitUntil: "load" });
         expect(response.status()).toBe(200);
         await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
@@ -74,8 +80,25 @@ for (const [route, resource, heading] of [
           section: document.querySelector("#main-content section")?.getBoundingClientRect().toJSON(),
           footer: document.querySelector("#main-content footer")?.getBoundingClientRect().toJSON(),
         }));
+        let serverRequests = [];
+        if (serverDelayed) {
+          expect(process.env.TOOLING_CONTENT_ARTIFACT).toBeTruthy();
+          const fixture = JSON.parse(await fs.readFile(process.env.TOOLING_CONTENT_ARTIFACT, "utf8"));
+          const documentType = route === "/tools" ? "tool" : "review";
+          serverRequests = fixture.requests.filter((entry) => entry.body?.p_document_types?.includes(documentType));
+          expect(serverRequests.length).toBeGreaterThan(0);
+          if (width === 1440 && run === 1) {
+            expect(serverRequests.some(entry => entry.receivedAt >= navigationStartedAt)).toBe(true);
+          }
+          for (const entry of serverRequests) {
+            expect(entry.delayMs).toBe(650);
+            expect(entry.respondedAt - entry.receivedAt).toBeGreaterThanOrEqual(650);
+            expect(entry.status).toBe(200);
+          }
+        }
+        if (delay) expect(clientDelayCount).toBeGreaterThan(0);
         const artifact = testInfo.outputPath("layout-shift.json");
-        await fs.writeFile(artifact, `${JSON.stringify({ route, width, height, run, delay, loadingLayout, ...measurement }, null, 2)}\n`);
+        await fs.writeFile(artifact, `${JSON.stringify({ route, width, height, run, delay, clientDelayCount, serverDelayed, serverRequests, loadingLayout, ...measurement }, null, 2)}\n`);
         await testInfo.attach("layout-shift", { path: artifact, contentType: "application/json" });
         if (run === 1) await page.screenshot({ path: testInfo.outputPath("settled.png"), animations: "disabled" });
         expect(measurement.supported).toBe(true);

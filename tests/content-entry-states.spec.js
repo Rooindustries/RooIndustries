@@ -23,6 +23,12 @@ for (const [route, resource, heading] of [
       }, resource);
       expect(api.status).toBe(503);
       expect(api.body.ok).toBe(false);
+      let clientDelayCount = 0;
+      await page.route(`**/api/content/${resource}`, async (request) => {
+        await new Promise(resolve => setTimeout(resolve, 600));
+        clientDelayCount += 1;
+        await request.fallback();
+      });
       const clientResponses = [];
       page.on("response", (response) => {
         if (new URL(response.url()).pathname === `/api/content/${resource}`) clientResponses.push(response.status());
@@ -33,6 +39,7 @@ for (const [route, resource, heading] of [
       await expect(page.locator("nav").first()).toBeVisible();
       await expect(page.locator("footer")).toBeVisible();
       await expect.poll(() => clientResponses).toEqual([503]);
+      expect(clientDelayCount).toBe(1);
       await expect(page.locator("#main-content section [aria-hidden='true']")).toHaveCount(0);
       if (route === "/tools") {
         await expect(page.getByText("No tools configured yet. Add tools in the content editor.")).toBeVisible();
@@ -43,19 +50,18 @@ for (const [route, resource, heading] of [
       await expect(page.getByRole("heading", { name: "We couldn’t load this page." })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Reload page" })).toHaveCount(0);
       const artifact = testInfo.outputPath("content-state.json");
-      await fs.writeFile(artifact, `${JSON.stringify({ route, apiStatus: api.status, pageStatus: response.status(), clientResponses, headingVisible: true, footerVisible: true, failureStateVisible: true, errorVisible: false }, null, 2)}\n`);
+      await fs.writeFile(artifact, `${JSON.stringify({ route, apiStatus: api.status, pageStatus: response.status(), clientResponses, clientDelayCount, headingVisible: true, footerVisible: true, failureStateVisible: true, errorVisible: false }, null, 2)}\n`);
       await testInfo.attach("content-state", { path: artifact, contentType: "application/json" });
       await page.screenshot({ path: testInfo.outputPath("server-fallback.png"), animations: "disabled" });
     });
     continue;
   }
 
-  for (const responseState of ["success", "delayed", "failed"]) {
+  for (const responseState of [process.env.TOOLING_CLS_RESPONSE === "delayed" ? "delayed" : "success", "failed"]) {
     test(`${route} supports client navigation with ${responseState} content`, async ({ page }, testInfo) => {
       const requests = [];
       await page.route(`**/api/content/${resource}`, async (request) => {
         requests.push(request.request().url());
-        if (responseState === "delayed") await new Promise(resolve => setTimeout(resolve, 650));
         if (responseState === "failed") {
           await request.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ ok: false, error: "Synthetic content is unavailable." }) });
         } else {
@@ -83,8 +89,21 @@ for (const [route, resource, heading] of [
       } else {
         await expect(page.locator("main section figure img")).toHaveCount(populated ? 2 : 0);
       }
+      let serverRequests = [];
+      if (responseState === "delayed") {
+        expect(process.env.TOOLING_CONTENT_ARTIFACT).toBeTruthy();
+        const fixture = JSON.parse(await fs.readFile(process.env.TOOLING_CONTENT_ARTIFACT, "utf8"));
+        const documentType = route === "/tools" ? "tool" : "review";
+        serverRequests = fixture.requests.filter((entry) => entry.body?.p_document_types?.includes(documentType));
+        expect(serverRequests.length).toBeGreaterThan(0);
+        for (const entry of serverRequests) {
+          expect(entry.delayMs).toBe(650);
+          expect(entry.respondedAt - entry.receivedAt).toBeGreaterThanOrEqual(650);
+          expect(entry.status).toBe(200);
+        }
+      }
       const artifact = testInfo.outputPath("content-state.json");
-      await fs.writeFile(artifact, `${JSON.stringify({ route, responseState, requests, populated, sameDocument: true }, null, 2)}\n`);
+      await fs.writeFile(artifact, `${JSON.stringify({ route, responseState, requests, serverRequests, populated, sameDocument: true }, null, 2)}\n`);
       await testInfo.attach("content-state", { path: artifact, contentType: "application/json" });
       await page.screenshot({ path: testInfo.outputPath("client-navigation.png"), animations: "disabled" });
     });

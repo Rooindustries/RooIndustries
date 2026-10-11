@@ -101,12 +101,16 @@ export async function createToolingContentFixture({ origin, artifact }) {
       let raw = '';
       for await (const chunk of req) { raw += chunk; if (Buffer.byteLength(raw) > 131072) throw new Error('Fixture body is too large.'); }
       const body = raw ? JSON.parse(raw) : {};
-      const call = { method: req.method, path: url.pathname, body, status: 503, rows: 0 };
+      const call = { method: req.method, path: url.pathname, body, status: 503, rows: 0, receivedAt: Date.now(), delayMs: 0 };
+      res.once('finish', () => { call.respondedAt = Date.now(); persist(); });
       evidence.requests.push(call);
       if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_fetch_shadow_documents_targeted') {
         if (!Array.isArray(body.p_document_types) || !body.p_document_types.length || !Array.isArray(body.p_filters) || !Number.isInteger(body.p_limit) || body.p_limit < 1 || body.p_limit > 1000 || body.p_ids !== null && !Array.isArray(body.p_ids)) throw new Error('Invalid fixture read scope.');
         if (body.p_document_types.some(type => type === 'tool' || type === 'review')) {
-          if (process.env.TOOLING_CLS_RESPONSE === 'delayed') await new Promise(resolve => setTimeout(resolve, 650));
+          if (process.env.TOOLING_CLS_RESPONSE === 'delayed') {
+            call.delayMs = 650;
+            await new Promise(resolve => setTimeout(resolve, call.delayMs));
+          }
           if (process.env.TOOLING_CLS_RESPONSE === 'failed') {
             call.status = 503;
             json(res, 503, { code: 'FIXTURE_CONTENT_UNAVAILABLE', message: 'Synthetic content is unavailable.' });
