@@ -47,5 +47,16 @@ for (const [name, viewport] of [
       await reviews.screenshot({ path: testInfo.outputPath("keyboard-reviews.png") });
     });
 
+    test("footer navigation has a distinct landmark name", async ({ page }, testInfo) => {
+      await page.goto("/packages", { waitUntil: "networkidle" });
+      const footer = page.locator("footer").last();
+      const navigation = footer.getByRole("navigation", { name: "Footer", exact: true });
+      await expect(navigation).toBeVisible();
+      await expect(navigation.getByRole("link", { name: "Packages", exact: true })).toHaveAttribute("href", "/packages");
+      await expect(page.getByRole("navigation", { name: "Footer", exact: true })).toHaveCount(1);
+
+      await footer.screenshot({ path: testInfo.outputPath("footer-landmark.png") });
+    });
+
   });
 }
