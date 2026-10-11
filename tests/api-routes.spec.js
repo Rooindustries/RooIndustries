@@ -3,6 +3,8 @@ const { MARKDOWN_PATHS, MARKDOWN_VARY } = require("../src/lib/markdownContent");
 let apiFixture;
 let restoreNetworkGuard;
 
+test.skip(process.env.TOOLING_API_ROUTES !== "1", "Select the writable fixture with npm run test:api:routes.");
+
 test.beforeAll(async ({ baseURL }) => {
   const { installNetworkGuard } = await import("../scripts/lib/test-target-safety.mjs");
   apiFixture = await import("./fixtures/api-routes.mjs");

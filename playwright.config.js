@@ -29,10 +29,12 @@ if (target.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]", new URL(
     !target.port || target.username || target.password || target.pathname !== "/" || target.search || target.hash ||
     ![target.origin, `${target.origin}/`].includes(baseURL)) throw new Error("Explicit canonical local BASE_URL required.");
 const shouldUseExternalServer = Boolean(process.env.BASE_URL);
+process.env.BASE_URL = baseURL;
 if (!shouldUseExternalServer && !internalDistDir.startsWith(".next-e2e-")) throw new Error("Isolated Playwright build directory required.");
 
 module.exports = defineConfig({
   testDir: "./tests",
+  testMatch: "**/*.spec.js",
   timeout: 120000,
   expect: {
     timeout: 10000,

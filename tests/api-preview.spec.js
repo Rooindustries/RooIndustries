@@ -2,6 +2,8 @@ const { test, expect } = require("@playwright/test");
 let requestRoute;
 let restoreGuard;
 
+test.skip(process.env.TOOLING_API_ROUTES !== "0", "Select the read-only fixture with npm run test:api:preview.");
+
 test.beforeAll(async ({ baseURL }) => {
   const { installNetworkGuard, refuseEnvFiles } = await import("../scripts/lib/test-target-safety.mjs");
   refuseEnvFiles();
