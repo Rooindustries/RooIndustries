@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { fetchJsonWithTimeout } from "../lib/clientRequest";
 import useUpgradeEligibility from "../lib/useUpgradeEligibility";
 import { useNavigate } from "react-router-dom";
 
@@ -34,6 +35,8 @@ export default function UpgradeXoc() {
   const [loading, setLoading] = useState(false);
   const [eligibility, setUpgradeInfo] = useState(null);
   const [error, setError] = useState(null);
+  const eligibilityAbortRef = useRef(null);
+  useEffect(() => () => eligibilityAbortRef.current?.abort(), []);
 
   const navigate = useNavigate();
 
@@ -56,14 +59,17 @@ export default function UpgradeXoc() {
     }
 
     const snapshot = eligibilityRequest.capture();
+    eligibilityAbortRef.current?.abort();
+    const controller = new AbortController();
+    eligibilityAbortRef.current = controller;
     setLoading(true);
     try {
-      const res = await fetch("/api/ref/getUpgradeInfo", {
+      const { response: res, data } = await fetchJsonWithTimeout("/api/ref/getUpgradeInfo", {
+        signal: controller.signal,
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: trimmed, email: trimmedEmail }),
       });
-      const data = await res.json();
       if (!snapshot.isCurrent()) return;
 
       if (!res.ok || !data.ok) {
@@ -80,6 +86,7 @@ export default function UpgradeXoc() {
       console.error("Upgrade check error:", err);
       setError("Something went wrong while checking your order. Try again.");
     } finally {
+      if (eligibilityAbortRef.current === controller) eligibilityAbortRef.current = null;
       if (snapshot.isLatest()) setLoading(false);
     }
   }

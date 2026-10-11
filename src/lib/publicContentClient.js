@@ -13,11 +13,12 @@ const buildPublicContentUrl = (resource, params = {}) => {
   return `${url.pathname}${url.search}`;
 };
 
-export const getPublicContent = async (resource, params = {}) => {
+export const getPublicContent = async (resource, params = {}, options = {}) => {
   const response = await fetch(buildPublicContentUrl(resource, params), {
     method: "GET",
     credentials: "same-origin",
     headers: { Accept: "application/json" },
+    ...(options.signal ? { signal: options.signal } : {}),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body?.ok !== true) {

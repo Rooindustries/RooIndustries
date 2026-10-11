@@ -9,6 +9,7 @@ import { createPortal } from "react-dom";
 import { useDialogFocus } from "../lib/useDialogFocus";
 import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { getPublicContent } from "../lib/publicContentClient";
+import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
@@ -25,6 +26,7 @@ import {
 } from "../lib/checkoutStorage";
 import {
   calculateCheckoutDiscounts,
+  CODE_VALIDATION_UNAVAILABLE_MESSAGE,
   resolveCheckoutCode,
   sanitizeCouponForCheckout,
   sanitizeReferralForCheckout,
@@ -32,6 +34,7 @@ import {
 } from "../lib/checkoutCodes";
 import { trackEvent } from "../lib/analytics";
 import { captureSalesAttribution } from "../lib/salesAttribution";
+import { isValidEmail } from "../lib/emailValidation";
 
 const { applyPackageContentOverrides, getPackageFeatureItems } = packageContent;
 const {
@@ -55,7 +58,7 @@ const BOOKING_CONFIRMATION_STORAGE_KEY = "booking_confirmation_state";
 const SESSION_STATE_KEY = "booking_modal_state";
 const REFERRAL_STORAGE_KEY = "referral_session";
 const INVALID_CHECKOUT_CODE_MESSAGE = "Invalid referral or coupon code.";
-const BOOKING_FETCH_TIMEOUT_MS = 8000;
+const BOOKING_FETCH_TIMEOUT_MS = CLIENT_REQUEST_TIMEOUT_MS;
 const AVAILABILITY_REFRESH_INTERVAL_MS = 60_000;
 const AVAILABILITY_REFRESH_DEBOUNCE_MS = 5_000;
 const REASSURANCE_COPY =
@@ -75,6 +78,15 @@ const STEP_PROGRESS_LABELS = {
 };
 const STEP_PROGRESS_WIDTHS = { 1: "33%", 2: "67%", 3: "100%" };
 const STEP_PROGRESS_PERCENTS = { 1: 33, 2: 67, 3: 100 };
+const classifyHoldResponse = ({ endpoint, status, ok, code, networkError = false, expired = false }) => {
+  if (expired) return "clear";
+  if (networkError) return "keep";
+  if (endpoint === "release" && status === 409) return "keep";
+  if (endpoint === "hold" && status === 409 && code === "hold_payment_in_progress") return "keep";
+  if (status >= 400 && status < 500 && ![408, 425, 429].includes(status)) return "clear";
+  if (status >= 200 && status < 300 && ok) return endpoint === "release" ? "clear" : "replace";
+  return "keep";
+};
 const createFreshForm = () => ({
   discord: "",
   email: "",
@@ -129,6 +141,12 @@ const createLocalSlotFormatters = (timeZone) => {
         hour: "numeric",
         minute: "2-digit",
       }),
+      timeWithZone: new Intl.DateTimeFormat(undefined, {
+        ...options,
+        hour: "numeric",
+        minute: "2-digit",
+        timeZoneName: "short",
+      }),
       date: new Intl.DateTimeFormat("en-US", {
         ...options,
         year: "numeric",
@@ -147,6 +165,24 @@ const formatLocalTime = (utcDate, formatter) => {
   } catch {
     return utcDate.toISOString();
   }
+};
+
+const disambiguateSlotLabels = (slots, formatters) => {
+  const labels = slots.map((slot) => formatLocalTime(slot.utcStart, formatters.time));
+  const counts = new Map();
+  labels.forEach((label) => counts.set(label, (counts.get(label) || 0) + 1));
+  return slots.map((slot, index) => ({
+    ...slot,
+    localLabel: counts.get(labels[index]) > 1
+      ? formatLocalTime(slot.utcStart, formatters.timeWithZone)
+      : labels[index],
+  }));
+};
+
+const getSlotLocalLabel = (utcDate, slotMap, formatters) => {
+  const dateKey = getLocalDateKey(utcDate, formatters.date);
+  return slotMap?.[dateKey]?.find((slot) => slot.slotId === utcDate.toISOString())?.localLabel ||
+    formatLocalTime(utcDate, formatters.time);
 };
 
 const formatLocalDate = (utcDate, timeZone) => {
@@ -460,6 +496,11 @@ export default function BookingForm({ isMobile }) {
   const [loading, setLoading] = useState(false);
   const [errorStep1, setErrorStep1] = useState("");
   const [errorStep2, setErrorStep2] = useState("");
+  const [emailError, setEmailError] = useState("");
+  const emailInputRef = useRef(null);
+  useEffect(() => {
+    if (emailError && step === 2) emailInputRef.current?.focus();
+  }, [emailError, step]);
 
   const [userTimeZone, setUserTimeZone] = useState("UTC");
   const localSlotFormatters = useMemo(
@@ -530,8 +571,16 @@ export default function BookingForm({ isMobile }) {
   const prevPackageDataRef = useRef(selectedPackage);
   const [draftLoading, setDraftLoading] = useState(true);
   const [myHold, setMyHold] = useState(null);
+  const currentHoldRef = useRef(myHold);
+  currentHoldRef.current = myHold;
+  const releaseInFlightRef = useRef(false);
   const isPaymentPendingHold =
     String(myHold?.phase || "").trim().toLowerCase() === "payment_pending";
+  const checkoutBooking = readStoredCheckoutBooking();
+  const hasMatchingCheckoutBooking =
+    myHold && checkoutBooking?.slotHoldId === myHold.holdId &&
+    checkoutBooking?.slotHoldToken === myHold.holdToken;
+  const paymentInOtherTab = myHold?.paymentStartedElsewhere && !hasMatchingCheckoutBooking;
   const [lockingSlot, setLockingSlot] = useState(false);
   const [holdCountdownMs, setHoldCountdownMs] = useState(null);
   const [releasingPayment, setReleasingPayment] = useState(false);
@@ -723,6 +772,7 @@ export default function BookingForm({ isMobile }) {
             packagePrice: parsed.packagePrice,
             packageTag: parsed.packageTag,
             phase: parsed.phase || "",
+            ...(parsed.paymentStartedElsewhere ? { paymentStartedElsewhere: true } : {}),
           };
           const utcDate = getUtcDateFromHold(normalizedHold);
           if (!utcDate) {
@@ -886,6 +936,12 @@ export default function BookingForm({ isMobile }) {
       return "Please fill out all required fields.";
     }
 
+    if (!isValidEmail(form.email.trim())) {
+      setEmailError("Please enter a valid email address.");
+      emailInputRef.current?.focus();
+      return "Please enter a valid email address.";
+    }
+    setEmailError("");
     return "";
   };
 
@@ -931,7 +987,9 @@ export default function BookingForm({ isMobile }) {
       const hostDate = new Date(hostDateKey);
       if (Number.isNaN(hostDate.getTime())) return;
 
-      (minutes || []).forEach((minute) => {
+      const allowedMinutes = new Set((minutes || []).filter(Number.isFinite));
+      const visibleMinutes = new Set([...allowedMinutes, ...Array.from({ length: 24 }, (_, hour) => hour * 60)]);
+      visibleMinutes.forEach((minute) => {
         if (!Number.isFinite(minute)) return;
         const utcStart = getUtcFromHostLocal(
           hostDate.getFullYear(),
@@ -948,14 +1006,16 @@ export default function BookingForm({ isMobile }) {
         const localLabel = formatLocalTime(utcStart, localSlotFormatters.time);
 
         const list = map[localDateKey] || [];
-        list.push({ slotId, utcStart, localLabel });
+        list.push({ slotId, utcStart, localLabel, isAllowed: allowedMinutes.has(minute) });
         map[localDateKey] = list;
       });
     });
 
-    Object.values(map).forEach((list) =>
-      list.sort((a, b) => a.utcStart - b.utcStart)
-    );
+    Object.entries(map).forEach(([key, list]) => {
+      map[key] = disambiguateSlotLabels(list, localSlotFormatters)
+        .filter((slot) => slot.isAllowed)
+        .sort((a, b) => a.utcStart - b.utcStart);
+    });
 
     return map;
   }, [dateSlotMap, localSlotFormatters]);
@@ -1388,7 +1448,7 @@ export default function BookingForm({ isMobile }) {
 
     const allSlots = [...availableSlots, ...unavailableSlots];
     allSlots.sort((a, b) => a.utcStart - b.utcStart);
-    return allSlots;
+    return disambiguateSlotLabels(allSlots, localSlotFormatters);
   }, [settings, selectedDate, localSlotMap, dateSlotMap, myHold, localSlotFormatters]);
 
   const getDaySlotInfo = (dateObj) => {
@@ -1446,16 +1506,12 @@ export default function BookingForm({ isMobile }) {
     if (settings && !selectedDate) {
       if (!localSlotMap) return;
 
-      const nextDate = Object.keys(localSlotMap)
-        .map((key) => new Date(key))
-        .filter((d) => !Number.isNaN(d.getTime()) && d >= startOfToday)
-        .sort((a, b) => a - b)[0];
-      const initialDate = nextDate ? new Date(nextDate) : new Date(startOfToday);
+      const initialDate = new Date(earliestAvailableSlot?.localDate || startOfToday);
       initialDate.setHours(0, 0, 0, 0);
       setSelectedDate(initialDate);
       setMonth(new Date(initialDate.getFullYear(), initialDate.getMonth(), 1));
     }
-  }, [settings, selectedDate, localSlotMap, startOfToday]);
+  }, [settings, selectedDate, localSlotMap, earliestAvailableSlot, startOfToday]);
 
   const handleChange = (e) => {
     if (isPaymentPendingHold) return;
@@ -1519,8 +1575,8 @@ export default function BookingForm({ isMobile }) {
     if (!myHold) return "";
     const utcDate = getUtcDateFromHold(myHold);
     if (!utcDate) return "";
-    return formatLocalTime(utcDate, localSlotFormatters.time);
-  }, [myHold, localSlotFormatters]);
+    return getSlotLocalLabel(utcDate, localSlotMap, localSlotFormatters);
+  }, [myHold, localSlotMap, localSlotFormatters]);
   const hasActiveHold =
     !!myHold &&
     holdCountdownMs !== null &&
@@ -1532,9 +1588,9 @@ export default function BookingForm({ isMobile }) {
     if (Number.isNaN(utcStart.getTime())) return "";
     const dateLabel = formatShortLocalDate(utcStart, userTimeZone);
     const timeLabel =
-      formatLocalTime(utcStart, localSlotFormatters.time) || selectedSlot.localLabel;
+      getSlotLocalLabel(utcStart, localSlotMap, localSlotFormatters) || selectedSlot.localLabel;
     return `${dateLabel} · ${timeLabel} (${userTimeZone})`;
-  }, [selectedSlot, userTimeZone, localSlotFormatters]);
+  }, [selectedSlot, userTimeZone, localSlotMap, localSlotFormatters]);
   const reviewBaseAmount = Math.max(0, toMoney(selectedPackage.price));
   const reviewDiscounts = useMemo(
     () =>
@@ -1680,9 +1736,17 @@ export default function BookingForm({ isMobile }) {
       let nextCoupon = null;
       let nextDismissedCode = restoredCodeCandidates.dismissedCode || "";
       let invalidCodeFound = false;
+      let unavailableCode = "";
 
       const applyResult = (result, sourceType, sourceCode) => {
         if (!result?.ok) {
+          if (result?.unavailable) {
+            unavailableCode = sourceCode;
+            if (sourceType === "referral") {
+              autoReferralAttemptRef.current = `${selectedPackage.title}:${sourceCode.toLowerCase()}`;
+            }
+            return;
+          }
           invalidCodeFound = true;
           if (sourceType === "referral") {
             nextDismissedCode = sourceCode;
@@ -1739,17 +1803,20 @@ export default function BookingForm({ isMobile }) {
       setAppliedReferral(nextReferral);
       setAppliedCoupon(nextCoupon);
       setDismissedReferralCode(nextDismissedCode);
-      storeReferralSession(nextReferral?.code || "");
-      persistCheckoutCodes({
-        referral: nextReferral,
-        coupon: nextCoupon,
-        dismissedCode: nextDismissedCode,
-      });
+      if (!unavailableCode) {
+        storeReferralSession(nextReferral?.code || "");
+        persistCheckoutCodes({
+          referral: nextReferral,
+          coupon: nextCoupon,
+          dismissedCode: nextDismissedCode,
+        });
+      }
       setRestoredCodeCandidates(null);
 
-      if (invalidCodeFound) {
+      if (unavailableCode || invalidCodeFound) {
         setCodeEntryOpen(true);
-        setCodeError(INVALID_CHECKOUT_CODE_MESSAGE);
+        if (unavailableCode) setCodeInput(unavailableCode);
+        setCodeError(unavailableCode ? CODE_VALIDATION_UNAVAILABLE_MESSAGE : INVALID_CHECKOUT_CODE_MESSAGE);
       }
     };
 
@@ -1801,16 +1868,18 @@ export default function BookingForm({ isMobile }) {
         if (!active || !hasActiveHoldRef.current) return;
         if (!result?.ok) {
           const nextCoupon = sanitizeCouponForCheckout(appliedCoupon);
-          setDismissedReferralCode(autoCode);
-          storeReferralSession("");
-          persistCheckoutCodes({
-            referral: null,
-            coupon: nextCoupon,
-            dismissedCode: autoCode,
-          });
+          if (!result?.unavailable) {
+            setDismissedReferralCode(autoCode);
+            storeReferralSession("");
+            persistCheckoutCodes({
+              referral: null,
+              coupon: nextCoupon,
+              dismissedCode: autoCode,
+            });
+          }
           setCodeEntryOpen(true);
-          setCodeInput("");
-          setCodeError(INVALID_CHECKOUT_CODE_MESSAGE);
+          setCodeInput(result?.unavailable ? autoCode : "");
+          setCodeError(result?.unavailable ? CODE_VALIDATION_UNAVAILABLE_MESSAGE : INVALID_CHECKOUT_CODE_MESSAGE);
           return;
         }
         if (result.type === "coupon") {
@@ -1863,7 +1932,9 @@ export default function BookingForm({ isMobile }) {
   ]);
 
   const clearHoldState = (resetStep = true, clearStorage = true) => {
+    setEmailError("");
     hasActiveHoldRef.current = false;
+    currentHoldRef.current = null;
     setMyHold(null);
     if (clearStorage) {
       removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);
@@ -1922,40 +1993,31 @@ export default function BookingForm({ isMobile }) {
     });
   };
 
-  const updateHoldPackage = (pkg) => {
-    if (!myHold || isPaymentPendingHold) return;
-    const updated = {
-      ...myHold,
-      packageTitle: pkg?.title || myHold.packageTitle,
-      packagePrice: pkg?.price || myHold.packagePrice,
-      packageTag: pkg?.tag || myHold.packageTag,
-    };
-    setMyHold(updated);
-    try {
-      sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(updated));
-    } catch {
-      console.error("Failed to persist updated hold");
-    }
-    broadcastHold(updated);
-  };
-
-  // Release the hold optimistically.
-  const releaseHold = async (resetStep = true) => {
-    if (!myHold) return;
+  const releaseHold = async (resetStep = true, { suppressError = false } = {}) => {
+    if (!myHold) return true;
     if (isPaymentPendingHold) {
       setErrorStep2(
         "Your payment session is already in progress. Return to payment to finish it."
       );
-      return;
+      return false;
     }
 
     const holdIdToDelete = myHold.holdId;
     const holdTokenToDelete = myHold.holdToken;
+    const hasExpired = () => new Date(myHold.expiresAt).getTime() <= Date.now();
+    const isCurrentHold = () =>
+      currentHoldRef.current?.holdId === holdIdToDelete &&
+      currentHoldRef.current?.holdToken === holdTokenToDelete;
+    if (classifyHoldResponse({ endpoint: "release", expired: hasExpired() }) === "clear") {
+      clearHoldState(resetStep);
+    }
+    if (releaseInFlightRef.current) return hasExpired();
+    releaseInFlightRef.current = true;
 
-    clearHoldState(resetStep);
-
+    let outcome;
+    let serverMessage = "";
     try {
-      await fetch("/api/releaseHold", {
+      const response = await fetch("/api/releaseHold", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1964,9 +2026,33 @@ export default function BookingForm({ isMobile }) {
         }),
         signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
       });
+      const data = await response.json();
+      const message = data?.message || data?.error;
+      if (response.status === 409 && typeof message === "string") serverMessage = message;
+      outcome = classifyHoldResponse({
+        endpoint: "release",
+        status: response.status,
+        ok: response.ok && data?.ok === true,
+        expired: hasExpired(),
+      });
     } catch {
       console.error("Failed to release hold on server");
+      outcome = classifyHoldResponse({ endpoint: "release", networkError: true, expired: hasExpired() });
+    } finally {
+      releaseInFlightRef.current = false;
     }
+    if (outcome !== "keep") {
+      if (isCurrentHold()) clearHoldState(resetStep);
+      setErrorStep1("");
+      setErrorStep2("");
+      return true;
+    }
+    if (isCurrentHold() && !suppressError) {
+      const message = serverMessage || "Could not release your slot. Your reservation and details are saved. Please try again.";
+      setErrorStep1(message);
+      setErrorStep2(message);
+    }
+    return false;
   };
 
   const releasePaymentSession = async () => {
@@ -2038,37 +2124,34 @@ export default function BookingForm({ isMobile }) {
 
   const handleLockAndGoNext = async () => {
     if (isPaymentPendingHold) {
-      setErrorStep1("Your payment session is already in progress. Return to payment to finish it.");
+      const message = "Your payment session is already in progress. Return to payment to finish it.";
+      if (myHold.startTimeUTC === selectedSlot?.utcStart?.toISOString()) {
+        setErrorStep1("");
+        setErrorStep2(message);
+        setStep(2);
+      } else {
+        setErrorStep1(message);
+      }
       return;
     }
     if (!selectedDate || !selectedSlot) {
       setErrorStep1("Please select a date and time before continuing.");
       return;
     }
+    const selectedSlotId = selectedSlot.utcStart.toISOString();
+    const isSameAsExisting =
+      myHold && myHold.startTimeUTC === selectedSlotId;
 
     if (lockingSlot) return;
 
     setErrorStep1("");
     setLockingSlot(true);
 
-    let previousHoldId = null;
-    let previousHoldToken = null;
-    const selectedSlotId = selectedSlot.utcStart.toISOString();
-    const isSameAsExisting =
-      myHold && myHold.startTimeUTC === selectedSlotId;
-
-    if (myHold && isSameAsExisting) {
-      updateHoldPackage(selectedPackage);
-      setStep(2);
-      setLockingSlot(false);
-      setPreventHoldAutoload(false);
-      return;
-    }
+    const previousHoldId = myHold?.holdId || null;
+    const previousHoldToken = myHold?.holdToken || null;
 
     if (myHold && !isSameAsExisting) {
-      previousHoldId = myHold.holdId || null;
-      previousHoldToken = myHold.holdToken || null;
-      await releaseHold(false);
+      await releaseHold(false, { suppressError: true });
     }
 
     try {
@@ -2079,23 +2162,53 @@ export default function BookingForm({ isMobile }) {
         previousHoldToken,
       };
 
-      const res = await fetch("/api/holdSlot", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
+      let res;
+      let data;
+      let networkError = false;
+      try {
+        res = await fetch("/api/holdSlot", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
+        });
+        data = await res.json();
+      } catch {
+        console.error("Failed to reserve slot");
+        networkError = true;
+      }
+      const outcome = classifyHoldResponse({
+        endpoint: "hold",
+        status: res?.status,
+        ok: res?.ok && data?.ok === true,
+        code: data?.code,
+        networkError,
       });
 
-      const data = await res.json();
-
-      if (!res.ok || !data.ok) {
+      if (outcome !== "replace") {
+        if (res?.status === 409 && data?.code === "hold_payment_in_progress" && isSameAsExisting) {
+          const pendingHold = { ...myHold, phase: "payment_pending", paymentStartedElsewhere: true };
+          setMyHold(pendingHold);
+          writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(pendingHold));
+          broadcastHold(pendingHold);
+          setErrorStep1("");
+          setErrorStep2(hasMatchingCheckoutBooking
+            ? "Your payment session is already in progress. Return to payment to finish it."
+            : "");
+          setStep(3);
+          return;
+        }
+        if (outcome === "clear") {
+          if (isSameAsExisting) clearHoldState(false);
+          setSelectedSlot(null);
+        }
         setErrorStep1(
-          data.message ||
-            "That slot was just taken by someone else. Please choose another time."
+          outcome === "clear"
+            ? data?.message || "That slot was just taken by someone else. Please choose another time."
+            : "Could not reserve this slot. Please check your internet and try again."
         );
-        setSelectedSlot(null);
         return;
       }
 
@@ -2113,6 +2226,8 @@ export default function BookingForm({ isMobile }) {
       setMyHold(newHold);
       writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(newHold));
       broadcastHold(newHold);
+      setErrorStep1("");
+      setErrorStep2("");
 
       const expiresIn =
         newHold.expiresAt && new Date(newHold.expiresAt).getTime() - Date.now();
@@ -2126,11 +2241,6 @@ export default function BookingForm({ isMobile }) {
         ),
       });
       setStep(2);
-    } catch {
-      console.error("Failed to reserve slot");
-      setErrorStep1(
-        "Could not reserve this slot. Please check your internet and try again."
-      );
     } finally {
       setLockingSlot(false);
     }
@@ -2168,7 +2278,7 @@ export default function BookingForm({ isMobile }) {
       });
 
     const displayTime =
-      formatLocalTime(selectedSlot.utcStart, localSlotFormatters.time) ||
+      getSlotLocalLabel(selectedSlot.utcStart, localSlotMap, localSlotFormatters) ||
       selectedSlot.localLabel;
 
     const finalReferralCode = String(appliedReferral?.code || "").trim();
@@ -2706,13 +2816,24 @@ export default function BookingForm({ isMobile }) {
                     />
                     <input
                       name="email"
+                      ref={emailInputRef}
                       aria-label="Booking email"
+                      aria-invalid={emailError ? "true" : undefined}
+                      aria-describedby={emailError ? "booking-email-error" : undefined}
                       type="email"
                       placeholder="Email"
-                      onChange={handleChange}
+                      onChange={(event) => {
+                        handleChange(event);
+                        if (isValidEmail(event.target.value.trim())) setEmailError("");
+                      }}
                       value={form.email}
                       className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
                     />
+                    {emailError && (
+                      <p id="booking-email-error" className="text-sm text-danger-text">
+                        {emailError}
+                      </p>
+                    )}
                     <input
                       name="specs"
                       aria-label="PC specifications"
@@ -2991,6 +3112,11 @@ export default function BookingForm({ isMobile }) {
 
                   <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
                     {isPaymentPendingHold ? (
+                      paymentInOtherTab ? (
+                        <p role="alert" className="text-sm text-info-text sm:col-span-2">
+                          Payment already started in another tab. Continue payment there. Your reservation and details are saved.
+                        </p>
+                      ) : (
                       <>
                         <button
                           type="button"
@@ -3014,6 +3140,7 @@ export default function BookingForm({ isMobile }) {
                           <span className="glow-line glow-line-left" />
                         </button>
                       </>
+                      )
                     ) : (
                       <>
                         <button

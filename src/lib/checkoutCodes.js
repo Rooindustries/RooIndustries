@@ -1,3 +1,28 @@
+import { fetchJsonWithTimeout } from "./clientRequest";
+
+export const CODE_VALIDATION_UNAVAILABLE_MESSAGE =
+  "Code validation is temporarily unavailable. Try again or continue without this code.";
+const unavailableCode = () => ({
+  ok: false,
+  unavailable: true,
+  error: CODE_VALIDATION_UNAVAILABLE_MESSAGE,
+});
+
+const lookupCode = async (url, fetchImpl) => {
+  try {
+    const { response, data } = await fetchJsonWithTimeout(url, {}, fetchImpl);
+    if (response.ok === false && (response.status !== 400 || data?.ok !== false)) {
+      return unavailableCode();
+    }
+    if (typeof data?.ok !== "boolean" || data?.reason === "unavailable") {
+      return unavailableCode();
+    }
+    return data;
+  } catch {
+    return unavailableCode();
+  }
+};
+
 const parseMoneyValue = (value) => {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;
@@ -188,10 +213,11 @@ export const calculateCheckoutDiscounts = ({
 };
 
 export const validateReferralCode = async (code, fetchImpl = fetch) => {
-  const response = await fetchImpl(
-    `/api/ref/validateReferral?code=${encodeURIComponent(code)}`
+  const data = await lookupCode(
+    `/api/ref/validateReferral?code=${encodeURIComponent(code)}`,
+    fetchImpl
   );
-  const data = await response.json();
+  if (data.unavailable) return data;
   if (!data?.ok) {
     return {
       ok: false,
@@ -217,12 +243,13 @@ export const validateCouponCode = async (
   packageTitle,
   fetchImpl = fetch
 ) => {
-  const response = await fetchImpl(
+  const data = await lookupCode(
     `/api/ref/validateCoupon?code=${encodeURIComponent(
       code
-    )}&packageTitle=${encodeURIComponent(packageTitle)}`
+    )}&packageTitle=${encodeURIComponent(packageTitle)}`,
+    fetchImpl
   );
-  const data = await response.json();
+  if (data.unavailable) return data;
   if (!data?.ok) {
     return {
       ok: false,
@@ -265,6 +292,9 @@ export const resolveCheckoutCode = async (
 
   if (hasReferral) {
     return { ok: true, type: "referral", value: referralResult.referral };
+  }
+  if (!referralResult || !couponResult || referralResult.unavailable || couponResult.unavailable) {
+    return unavailableCode();
   }
   if (hasCoupon) {
     return { ok: true, type: "coupon", value: couponResult.coupon };
