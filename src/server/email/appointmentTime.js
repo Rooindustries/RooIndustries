@@ -16,9 +16,12 @@ export const formatAppointmentTime = (instant, requestedTimeZone) => {
     date: new Intl.DateTimeFormat("en-US", {
       timeZone, weekday: "long", month: "long", day: "numeric", year: "numeric",
     }).format(date),
+    shortDate: new Intl.DateTimeFormat("en-US", {
+      timeZone, weekday: "short", month: "short", day: "2-digit", year: "numeric",
+    }).format(date).replaceAll(",", ""),
     time: new Intl.DateTimeFormat("en-US", {
       timeZone, hour: "numeric", minute: "2-digit",
     }).format(date),
-    timeZone: timeZone === "UTC" ? "UTC" : `${offset} (${timeZone})`,
+    timeZone: timeZone === "UTC" ? "UTC" : `${offset === "GMT" ? "GMT+00:00" : offset} (${timeZone})`,
   };
 };

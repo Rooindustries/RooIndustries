@@ -1339,7 +1339,7 @@ describe("booking reservation API", () => {
     );
     expect(ownerCall).toBeTruthy();
     expect(ownerCall[0].subject).toMatch(
-      /^New booking [A-Z0-9]{6} - Performance Vertex Overhaul \(Wednesday, January 15, 2025 1:55 PM\)$/
+      /^New booking [A-Z0-9]{6} - Performance Vertex Overhaul \(Wed Jan 15 2025 1:55 PM\)$/
     );
 
     const renderedOwnerEmail = JSON.stringify(ownerCall[0]);

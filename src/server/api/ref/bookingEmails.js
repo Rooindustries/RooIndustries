@@ -117,7 +117,7 @@ const emailHtml = ({
     <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#e9edf3;padding:32px 12px">
       <tr>
         <td align="center">
-          <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;table-layout:fixed;background:#0f172a;border:1px solid #2a3f5c;border-radius:16px;overflow:hidden">
+          <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;background:#0f172a;border:1px solid #2a3f5c;border-radius:16px;overflow:hidden;table-layout:fixed">
             <tr>
               <td style="padding:26px 28px 18px;text-align:center;background:#0b1120">
                 <img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(siteName)}" height="44" style="height:44px;display:block;margin:0 auto 8px"/>
@@ -141,7 +141,7 @@ const emailHtml = ({
               </p>`
                     : ""
                 }
-                <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;background:#0b1120;border:1px solid #24405e;border-radius:10px">
+                <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#0b1120;border:1px solid #24405e;border-radius:10px;table-layout:fixed">
                   <tbody>
                     ${fields
                       .map(
@@ -388,7 +388,7 @@ const buildBookingFieldGroups = (booking = {}) => {
     { label: "Client Date", value: appointment?.date || "Unavailable" },
     { label: "Client Time", value: appointment?.time || "Unavailable" },
     { label: "Client Time Zone", value: appointment?.timeZone || "Unavailable" },
-    { label: "Date", value: hostAppointment?.date || "Unavailable" },
+    { label: "Date", value: hostAppointment?.shortDate || "Unavailable" },
     { label: "Time", value: hostAppointment?.time || "Unavailable" },
     { label: "Time Zone", value: hostAppointment?.timeZone || "Unavailable" },
     ...ownerDiscountFields,
@@ -404,7 +404,7 @@ const buildBookingFieldGroups = (booking = {}) => {
     clientFields,
     ownerFields,
     ownerScheduleLabel: hostAppointment
-      ? `${hostAppointment.date} ${hostAppointment.time}`
+      ? `${hostAppointment.shortDate} ${hostAppointment.time}`
       : "Unavailable",
   };
 };
@@ -1037,7 +1037,7 @@ export const dispatchRescheduleNotifications = async ({
     OWNER_TZ_NAME
   );
   const ownerScheduleLabel = hostAppointment
-    ? `${hostAppointment.date} ${hostAppointment.time}`
+    ? `${hostAppointment.shortDate} ${hostAppointment.time}`
     : "Unavailable";
   const patchValues = {
     recoveryNotificationLeaseId: "",
@@ -1163,7 +1163,7 @@ export const dispatchRescheduleNotifications = async ({
                 "The payment was captured, but the original booking slot could not be reconstructed or is no longer available. Contact the customer and assign a new time.",
               fields: [
                 ...fields,
-                { label: "Host Date", value: hostAppointment?.date || "Unavailable" },
+                { label: "Host Date", value: hostAppointment?.shortDate || "Unavailable" },
                 { label: "Host Time", value: hostAppointment?.time || "Unavailable" },
                 { label: "Host Time Zone", value: hostAppointment?.timeZone || "Unavailable" },
                 { label: "Customer Email", value: customer || "Unavailable" },
