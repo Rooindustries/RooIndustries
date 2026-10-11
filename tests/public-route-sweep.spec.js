@@ -332,7 +332,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
             const failure = { url: response.url(), status: response.status(), method: request.method(), type: request.resourceType() };
             record.httpErrors.push(failure);
             const url = new URL(response.url());
-            if (url.origin === baseURL && failure.status === 503 && failure.method === "GET" && fixtureDeniedReads.has(url.pathname + url.search)) {
+            if (url.origin === new URL(baseURL).origin && failure.status === 503 && failure.method === "GET" && fixtureDeniedReads.has(url.pathname + url.search)) {
               responseChecks.push(response.json().then(body => {
                 if (JSON.stringify(body) === JSON.stringify(fixtureDenialBody)) record.fixtureDenials.push({ ...failure, body });
               }).catch(() => {}));
