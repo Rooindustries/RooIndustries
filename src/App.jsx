@@ -14,7 +14,7 @@ import SalesTelemetry from "./components/SalesTelemetry";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import ReservationBanner from "./components/ReservationBanner";
 import IntercomMessenger from "./components/IntercomMessenger";
-import PerfDebugOverlay from "./components/PerfDebugOverlay";
+import { subscribePerfDebugChanges, syncPerfDebugFromEnvironment } from "./lib/perfDebug";
 import { initializePerformanceProfile } from "./lib/performanceProfile";
 import Home from "./legacyPages/Home";
 import AboutPage from "./legacyPages/About";
@@ -39,6 +39,7 @@ const Privacy = lazy(async () => {
   ]);
   return { default: (props) => <Page {...props} initialData={props.initialData || initialData} /> };
 });
+const PerfDebugOverlay = lazy(() => import("./components/PerfDebugOverlay"));
 const Reviews = lazy(() => import("./legacyPages/Reviews"));
 const Tools = lazy(() => import("./legacyPages/Tools"));
 const RefLogin = lazy(() => import("./legacyPages/RefLogin"));
@@ -133,6 +134,20 @@ const RouteFallback = () => (
 const withRouteSuspense = (node, fallback = <RouteFallback />) => (
   <Suspense fallback={fallback}>{node}</Suspense>
 );
+
+const PerfDebugRuntime = () => {
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    const sync = () => {
+      if (syncPerfDebugFromEnvironment().enabled) setLoaded(true);
+    };
+    sync();
+    return subscribePerfDebugChanges(sync);
+  }, []);
+
+  return loaded ? withRouteSuspense(<PerfDebugOverlay />, null) : null;
+};
 
 function RedirectToDiscord() {
   React.useEffect(() => {
@@ -626,7 +641,7 @@ export function AppContent({
           </BookingModal>
         </Suspense>
       )}
-      <PerfDebugOverlay />
+      <PerfDebugRuntime />
     </>
   );
 }
