@@ -11,8 +11,7 @@ const sameContent = (expected, actual, fields = [], root = false) => {
   if (expected && typeof expected === "object") {
     if (!actual || typeof actual !== "object" || Array.isArray(actual)) return false;
     const ignored = new Set(fields.filter(field => field.readOnly).map(field => field.name));
-    const keys = new Set([...Object.keys(expected), ...Object.keys(actual)]);
-    for (const key of keys) {
+    for (const key of Object.keys(expected)) {
       if (ignored.has(key) || (root && systemFields.has(key)) || (key === "_key" && expected[key] === undefined)) continue;
       const field = fields.find(field => field.name === key);
       if (!sameContent(expected[key], actual[key], field?.type === "array" ? field.of : field?.fields)) return false;

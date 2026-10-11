@@ -303,6 +303,36 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-referral-draft:")))).toEqual([]);
     });
 
+    test("Bugbot publication response lost accepts server defaults", async ({ page, request }, testInfo) => {
+      await login(page); await choose(page, "Benchmark");
+      await page.getByRole("region", { name: "Benchmark list" }).getByRole("button", { name: "New", exact: true }).click();
+      const title = `  Defaulted benchmark café 日本語 ${viewport.width}  `;
+      await page.getByLabel("Benchmark Name", { exact: true }).fill(title);
+      await page.getByLabel("Sort Order", { exact: true }).fill("");
+      await page.clock.install();
+      const pending = await hold(page, "**/api/admin/content/publish", { method: "POST" });
+      const submitted = [];
+      page.on("request", request => {
+        if (new URL(request.url()).pathname === "/api/admin/content/publish" && request.method() === "POST") submitted.push(request.postDataJSON());
+      });
+      await page.getByRole("button", { name: "Publish", exact: true }).click();
+      const response = await pending.arrived;
+      try {
+        const receipt = (await response.json()).data;
+        expect(submitted).toHaveLength(1);
+        expect(submitted[0].document.title).toBe(title);
+        expect(submitted[0].document).not.toHaveProperty("sortOrder");
+        const stored = await cms(request, `/api/admin/content/documents/${receipt.documentId}`);
+        expect(stored.document).toMatchObject({ title, sortOrder: 0 });
+        await page.clock.fastForward(31000);
+        await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+        await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toHaveCount(0);
+        expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-content-draft:")))).toEqual([]);
+        expect(submitted).toHaveLength(1);
+        await evidence(page, testInfo, { submitted, stored, receipt });
+      } finally { await pending.release(); }
+    });
+
     test("#11 validation errors describe the actual input with stable ids", async ({ page }, testInfo) => {
       await login(page); await choose(page, "Tool");
       await page.getByRole("region", { name: "Tool list" }).getByRole("button", { name: "New", exact: true }).click();
