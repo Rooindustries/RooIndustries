@@ -219,9 +219,11 @@ export default function ContentAdmin() {
     if (isCurrentSelection(generation)) setUploadsInFlight((count) => Math.max(0, count - 1));
   }, [generation, isCurrentSelection]);
 
-  const confirmDiscard = () =>
-    !dirty ||
-    window.confirm("You have unpublished changes. They are kept as a local draft on this device. Leave this document?");
+  const confirmDiscard = () => {
+    if (!editorState.current.dirty) return true;
+    if (!window.confirm("You have unpublished changes. They are kept as a local draft on this device. Leave this document?")) return false;
+    return flushDraft() || window.confirm("Your draft could not be saved in this browser. Leave and lose these edits?");
+  };
 
   const resetEditorState = () => {
     setErrors([]);
@@ -357,21 +359,27 @@ export default function ContentAdmin() {
     return saved;
   }, []);
 
+  const flushDraft = useCallback(({ force = false } = {}) => {
+    const current = editorState.current;
+    if (!current.session || !current.working || (!current.dirty && !force)) return true;
+    return persistDraft(current.currentDraftKey, {
+      document: current.working,
+      assets: current.assets,
+      baseRevision: current.session.revision,
+      createIntentId: current.session.createIntentId,
+      documentId: current.session.documentId,
+      type: current.session.type,
+    });
+  }, [persistDraft]);
+
   useEffect(() => {
     if (loadingDocument || !session || !working || !dirty || !currentDraftKey) return undefined;
     const timer = window.setTimeout(() => {
       if (!isCurrentSelection(generation)) return;
-      persistDraft(currentDraftKey, {
-        document: working,
-        assets,
-        baseRevision: session.revision,
-        createIntentId: session.createIntentId,
-        documentId: session.documentId,
-        type: session.type,
-      });
+      flushDraft();
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [working, dirty, currentDraftKey, session, assets, persistDraft, loadingDocument, generation, isCurrentSelection]);
+  }, [working, dirty, currentDraftKey, session, assets, flushDraft, loadingDocument, generation, isCurrentSelection]);
 
   useEffect(() => {
     const workspace = workspaceRef.current;
@@ -380,14 +388,20 @@ export default function ContentAdmin() {
   }, [pane]);
 
   useEffect(() => {
-    if (!dirty) return undefined;
     const handler = (event) => {
+      if (!editorState.current.dirty) return;
+      flushDraft();
       event.preventDefault();
       event.returnValue = "";
     };
+    const pagehide = () => { flushDraft(); };
     window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [dirty]);
+    window.addEventListener("pagehide", pagehide);
+    return () => {
+      window.removeEventListener("beforeunload", handler);
+      window.removeEventListener("pagehide", pagehide);
+    };
+  }, [flushDraft]);
 
   const errorsByPath = useMemo(
     () =>

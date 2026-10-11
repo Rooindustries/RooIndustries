@@ -209,6 +209,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.getByLabel("Email", { exact: true }).fill(EMAIL);
       await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page.getByRole("navigation", { name: "Content types" })).toBeVisible();
       await hero(page); await page.getByRole("button", { name: "Restore my changes", exact: true }).click();
       await expect(field).toHaveValue(`${text} logout`);
       await evidence(page, testInfo, { text, dialogs });
