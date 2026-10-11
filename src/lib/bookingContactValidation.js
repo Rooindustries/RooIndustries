@@ -25,7 +25,8 @@ export const validateBookingContact = (payload) => {
     if (field === "email" && (
       trimmed.length > 254 ||
       /[\u0000-\u001f\u007f-\u009f]/.test(value) ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ||
+      trimmed.split("@")[1].split(".").some((label) => !label)
     )) reject(field);
     if (field === "localTimeZone") {
       try {
