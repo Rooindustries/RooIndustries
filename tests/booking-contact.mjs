@@ -7,6 +7,8 @@ const invalidInputs = [
   ['malformed email', 'email', 'not-an-email'],
   ['email with empty domain label', 'email', 'visitor@example..invalid'],
   ['email with trailing domain dot', 'email', 'visitor@example.invalid.'],
+  ['email with invalid domain character', 'email', 'visitor@exa!mple.invalid'],
+  ['email with hyphen-edged domain label', 'email', 'visitor@-example.invalid'],
   ['missing email', 'email', undefined],
   ['empty email', 'email', '   '],
   ['overlong email', 'email', `${'a'.repeat(243)}@example.test`],
