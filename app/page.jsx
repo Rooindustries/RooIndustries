@@ -5,15 +5,12 @@ import contentServer from "@/src/lib/contentServer";
 
 export default async function Page({ searchParams }) {
   const homePageData = await contentServer.fetchHomePageData();
-  const faqQuestions = homePageData?.faqQuestions || [];
-  const faqJsonLd = seo.buildFaqJsonLd(faqQuestions);
 
   return (
     <>
       <JsonLd data={seo.buildOrganizationJsonLd()} />
       <JsonLd data={seo.buildHomePageJsonLd(homePageData?.hero)} />
       <JsonLd data={seo.buildOfferCatalogJsonLd()} />
-      <JsonLd data={faqJsonLd.mainEntity?.length ? faqJsonLd : null} />
       <RouteRenderer
         pathname="/"
         searchParams={searchParams}

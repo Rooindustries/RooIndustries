@@ -388,6 +388,8 @@ const buildOfferCatalogJsonLd = (name = "PC Game Optimization Services") => ({
 const buildFaqJsonLd = (items = []) => ({
   "@context": "https://schema.org",
   "@type": "FAQPage",
+  "@id": `${siteUrl}/faq#faq`,
+  url: `${siteUrl}/faq`,
   mainEntity: items
     .filter((item) => item?.question && item?.answer)
     .map((item) => ({
