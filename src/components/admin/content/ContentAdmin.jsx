@@ -143,6 +143,7 @@ export default function ContentAdmin() {
           .slice()
           .sort((left, right) => String(right._updatedAt || "").localeCompare(String(left._updatedAt || "")));
         setLists((current) => ({ ...current, [name]: { loading: false, error: "", items } }));
+        setBanner((current) => current?.retry?.kind === "list" && current.retry.name === name ? null : current);
         if (force) referenceCache.current.delete(name);
         return items;
       } catch (error) {
@@ -152,6 +153,7 @@ export default function ContentAdmin() {
             ...current,
             [name]: { ...(current[name] || {}), loading: false, error: error.message },
           }));
+          setBanner({ tone: "error", text: error.message, retry: { kind: "list", name } });
         }
         return null;
       }
@@ -239,6 +241,9 @@ export default function ContentAdmin() {
       if (editorState.current.locking) return;
       const selectedGeneration = advanceSelection();
       setLoadingDocument(true);
+      setSession(null);
+      setWorking(null);
+      setPane("editor");
       setErrors([]);
       setConflict(null);
       setRecovery(null);
@@ -270,7 +275,7 @@ export default function ContentAdmin() {
         setPane("editor");
       } catch (error) {
         if (!isCurrentSelection(selectedGeneration)) return;
-        if (!handleAuthFailure(error)) setBanner({ tone: "error", text: error.message });
+        if (!handleAuthFailure(error)) setBanner({ tone: "error", text: error.message, retry: { kind: "document", documentId } });
       } finally {
         if (isCurrentSelection(selectedGeneration)) setLoadingDocument(false);
       }
@@ -298,8 +303,8 @@ export default function ContentAdmin() {
     setPane("editor");
   };
 
-  const selectType = async (name) => {
-    if (locking || (name === typeName && pane !== "types")) return;
+  const selectType = async (name, { force = false } = {}) => {
+    if (locking || (!force && name === typeName && pane !== "types")) return;
     if (!confirmDiscard()) return;
     const selectedGeneration = advanceSelection();
     setTypeName(name);
@@ -308,13 +313,14 @@ export default function ContentAdmin() {
     setWorking(null);
     resetEditorState();
     const selected = TYPES_BY_NAME.get(name);
+    setPane(selected?.singleton ? "editor" : "documents");
+    setLoadingDocument(Boolean(selected?.singleton));
     const items = await loadList(name);
     if (!isCurrentSelection(selectedGeneration)) return;
+    setLoadingDocument(false);
     if (selected?.singleton && items) {
       if (items.length > 0) await openDocument(items[0]._id);
       else startNewDocument(name, listNewDrafts(name)[0] || null);
-    } else {
-      setPane("documents");
     }
   };
 
@@ -537,6 +543,19 @@ export default function ContentAdmin() {
     setNotice(`Loaded the version that was live before ${displayTime(revision.createdAt)}. Publish to make it live again.`);
   };
 
+  const finishSignOut = (error = "") => {
+    setUnlocked(false);
+    setGateError(error);
+    setPassword("");
+    setSession(null);
+    setWorking(null);
+    setLists({});
+    setTypeName("");
+    referenceCache.current.clear();
+    resetEditorState();
+    setPane("types");
+  };
+
   const lock = async () => {
     if (locking || !confirmDiscard()) return;
     const selectedGeneration = advanceSelection();
@@ -544,21 +563,35 @@ export default function ContentAdmin() {
     try {
       await api.signOut();
       if (!isCurrentSelection(selectedGeneration)) return;
-      setUnlocked(false);
-      setPassword("");
-      setSession(null);
-      setWorking(null);
-      setLists({});
-      setTypeName("");
-      referenceCache.current.clear();
-      resetEditorState();
-      setPane("types");
+      finishSignOut();
     } catch (error) {
       if (!isCurrentSelection(selectedGeneration)) return;
-      if (!handleAuthFailure(error)) setBanner({ tone: "error", text: error.message });
+      if (handleAuthFailure(error)) return;
+      try {
+        const status = await api.getSession();
+        if (!isCurrentSelection(selectedGeneration)) return;
+        if (status.signedIn === false) {
+          finishSignOut(`${error.message} Your session is no longer active.`);
+          return;
+        }
+      } catch (probeError) {
+        if (!isCurrentSelection(selectedGeneration)) return;
+        if (probeError.status === 401) {
+          finishSignOut(`${error.message} Your session is no longer active.`);
+          return;
+        }
+      }
+      setBanner({ tone: "error", text: error.message, retry: { kind: "signout" } });
     } finally {
       if (isCurrentSelection(selectedGeneration)) setLocking(false);
     }
+  };
+
+  const retryFailure = () => {
+    const retry = banner?.retry;
+    if (retry?.kind === "list") selectType(retry.name, { force: true });
+    else if (retry?.kind === "document") openDocument(retry.documentId);
+    else if (retry?.kind === "signout") lock();
   };
 
   if (!unlocked) {
@@ -612,6 +645,12 @@ export default function ContentAdmin() {
       </header>
 
       {draftError ? <p className={styles.error} role="alert">{draftError}</p> : null}
+      {banner && !banner.summary ? (
+        <div className={banner.tone === "warning" ? styles.warningBox : styles.errorSummary} role="alert">
+          <p>{banner.text}</p>
+          {banner.retry ? <button type="button" className={styles.secondaryButton} onClick={retryFailure} disabled={locking || loadingDocument}>Retry</button> : null}
+        </div>
+      ) : null}
       {["terms", "faqSection"].includes(typeName) ? <p className={styles.notice}>The Payments &amp; refunds and Cancellations sections, the Terms last-updated date and the money-back FAQ answer are managed in code and ignore edits here.</p> : null}
       {notice ? (
         <p className={styles.notice} role="status"><Check size={17} aria-hidden="true" />{notice}</p>
@@ -690,7 +729,6 @@ export default function ContentAdmin() {
                 </button>
               </div>
             </div>
-            {list.error ? <p className={styles.error} role="alert">{list.error}</p> : null}
             {newDrafts.length > 0 ? (
               <div className={styles.draftList}>
                 <p className={styles.groupTitle}>Unpublished drafts on this device</p>
@@ -757,11 +795,10 @@ export default function ContentAdmin() {
           ) : !session || !working ? (
             <div className={styles.emptyState}>
               <button type="button" className={styles.backButton} onClick={() => setPane(type.singleton ? "types" : "documents")}>
-                <ArrowLeft size={16} aria-hidden="true" /> Back
+                <ArrowLeft size={16} aria-hidden="true" /> {type.singleton ? "Types" : type.title}
               </button>
               <h2>{loadingDocument ? "Loading…" : type.title}</h2>
               {!loadingDocument && !type.singleton ? <p>Choose an entry from the list, or create a new one.</p> : null}
-              {banner ? <p className={styles.error} role="alert">{banner.text}</p> : null}
             </div>
           ) : (
             <EditorContext.Provider value={editorContext}>
@@ -874,7 +911,7 @@ export default function ContentAdmin() {
                 </div>
               ) : null}
 
-              {banner && !(banner.summary && errors.length > 0) ? (
+              {banner?.summary && errors.length === 0 ? (
                 <p className={banner.tone === "warning" ? styles.warningLine : styles.error} role="alert">{banner.text}</p>
               ) : null}
 
