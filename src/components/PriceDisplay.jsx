@@ -43,12 +43,12 @@ export default function PriceDisplay({
   return (
     <div
       className={`flex flex-wrap items-baseline justify-center gap-x-3 gap-y-1 ${className}`}
-      aria-label={
-        oldPrice
-          ? `Price ${currentPrice}, previous price ${oldPrice}`
-          : `Price ${currentPrice}`
-      }
     >
+      <span className="sr-only">
+        {oldPrice
+          ? `Price ${currentPrice}, previous price ${oldPrice}`
+          : `Price ${currentPrice}`}
+      </span>
       <span
         aria-hidden="true"
         className={`ri-price-current ${classes.current} font-extrabold leading-none text-accent drop-shadow-[0_0_18px_rgba(56,189,248,0.35)]`}
