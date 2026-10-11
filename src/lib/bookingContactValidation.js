@@ -14,9 +14,9 @@ const reject = (field) => {
   });
 };
 
-export const validateBookingContact = (payload) => {
+export const validateBookingContact = (payload, { fields = Object.keys(messages) } = {}) => {
   const contact = {};
-  for (const field of Object.keys(messages)) {
+  for (const field of fields) {
     const value = payload[field];
     if (field === "message" && value === undefined) continue;
     if (typeof value !== "string") reject(field);

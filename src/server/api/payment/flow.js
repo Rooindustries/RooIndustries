@@ -2744,6 +2744,7 @@ const createOrReusePaymentRecordForStart = async ({
   client,
   provider,
   bookingPayload,
+  rawBookingPayload,
   holdDoc,
   quote,
   quoteFingerprint,
@@ -2785,6 +2786,23 @@ const createOrReusePaymentRecordForStart = async ({
   const startClaimId = isUpgrade
     ? buildPaymentUpgradeLockId(sessionScope)
     : buildPaymentStartClaimId(sessionScope);
+  if (isUpgrade) {
+    const claim = await getDocumentById({
+      client,
+      id: startClaimId,
+      type: PAYMENT_UPGRADE_LOCK_TYPE,
+    });
+    const existing = claim?.paymentRecordId
+      ? await getPaymentRecordById(client, claim.paymentRecordId)
+      : null;
+    if (!existing?._id) {
+      const fields = ["discord", "specs", "mainGame", "message", "localTimeZone"].filter(
+        field => Object.hasOwn(rawBookingPayload, field) &&
+          (typeof rawBookingPayload[field] !== "string" || rawBookingPayload[field].trim())
+      );
+      Object.assign(bookingPayload, validateBookingContact(rawBookingPayload, { fields }));
+    }
+  }
   const providerIdempotencyKey = buildPaymentProviderIdempotencyKey(paymentRecordId);
   const orderCreationLeaseId =
     provider === "free" ? "" : crypto.randomUUID();
@@ -3215,6 +3233,7 @@ export const startPaymentSession = async ({
       client,
       provider,
       bookingPayload,
+      rawBookingPayload,
       holdDoc,
       quote,
       quoteFingerprint: currentQuoteFingerprint,
