@@ -637,3 +637,26 @@ test("content fixture reset removes created documents and preserves referrals", 
   await login(page); await choose(page, "Benchmark");
   await evidence(page, testInfo, { createdId: receipt.documentId, restoredId: deletedId, benchmarkIds: reset.documents.map(document => document._id), referralCount: referralSnapshot.length });
 });
+
+test("empty Portable Text exposes validation on its accessible field", async ({ page }, testInfo) => {
+  await page.route("**/api/admin/content/documents/tooling-privacyPolicy", async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.data.document.sections = [{ _key: "empty-validation-section", _type: "object", heading: "Empty text section", content: {} }];
+    await route.fulfill({ response, json: body });
+  });
+  await login(page); await choose(page, "Privacy Policy Page");
+  await page.getByRole("button", { name: "Empty text section", exact: true }).click();
+  await expect(page.getByText("No text yet.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Content", exact: true })).toHaveCount(0);
+  await page.getByLabel("Page Title", { exact: true }).fill("Empty text validation");
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  const field = page.getByRole("group", { name: "Content", exact: true });
+  await expect(field).toHaveAttribute("aria-invalid", "true");
+  const errorId = await field.getAttribute("aria-describedby");
+  expect(errorId).toBe("content-error-sections%5B0%5D.content");
+  await expect(page.locator(`[id="${errorId}"]`)).toContainText("An array is required.");
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(field).toHaveAttribute("aria-describedby", errorId);
+  await evidence(page, testInfo, { renderedBlocks: 0, errorId, invalid: await field.getAttribute("aria-invalid") });
+});

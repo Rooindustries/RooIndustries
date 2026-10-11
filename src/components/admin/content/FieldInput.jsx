@@ -284,13 +284,15 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
 
   if (isPortableTextField(field)) {
     return wrap(
-      <PortableTextInput
-        inputAria={inputAria}
-        value={value}
-        label={field.title || field.name}
-        readOnly={readOnly}
-        onChange={onChange}
-      />
+      <div id={id} role="group" aria-label={field.title || field.name} {...inputAria}>
+        <PortableTextInput
+          inputAria={inputAria}
+          value={value}
+          label={field.title || field.name}
+          readOnly={readOnly}
+          onChange={onChange}
+        />
+      </div>
     );
   }
 
