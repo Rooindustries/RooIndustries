@@ -2,6 +2,7 @@ import { createDataClient as createClient } from "../../data/documentClient.js";
 import { Resend } from "resend";
 import crypto from "crypto";
 import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
+import { formatAppointmentTime } from "../../email/appointmentTime.js";
 import {
   claimEmailDispatchPair,
   completeEmailDispatch,
@@ -187,57 +188,17 @@ const formatMoney = (value) =>
   Number.isFinite(Number(value)) ? Number(value).toFixed(2) : "0.00";
 
 export const formatRequestedTimeFields = (booking = {}) => {
-  const requestedAt = new Date(
-    String(booking.originalRequestedStartTimeUTC || "").trim()
+  const appointment = formatAppointmentTime(
+    booking.originalRequestedStartTimeUTC,
+    booking.localTimeZone
   );
-  if (!Number.isFinite(requestedAt.getTime())) {
+  if (!appointment) {
     return [{ label: "Time Selected", value: "Unavailable" }];
   }
-
-  const requestedTimeZone = String(booking.localTimeZone || "").trim();
-  let timeZone = "UTC";
-  if (requestedTimeZone) {
-    try {
-      new Intl.DateTimeFormat("en-US", {
-        timeZone: requestedTimeZone,
-      }).format(requestedAt);
-      timeZone = requestedTimeZone;
-    } catch {
-      timeZone = "UTC";
-    }
-  }
-
-  const canUseStoredLabels = timeZone !== "UTC";
-  const requestedDate =
-    (canUseStoredLabels && String(booking.displayDate || "").trim()) ||
-    new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    }).format(requestedAt);
-  const requestedTime =
-    (canUseStoredLabels && String(booking.displayTime || "").trim()) ||
-    new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(requestedAt);
-  const timeZoneName =
-    new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      timeZoneName: "long",
-    })
-      .formatToParts(requestedAt)
-      .find((part) => part.type === "timeZoneName")?.value || timeZone;
-  const timeZoneDisplay =
-    timeZone === "UTC" ? "UTC" : `${timeZoneName} (${timeZone})`;
-
   return [
-    { label: "Requested Date", value: requestedDate },
-    { label: "Requested Time", value: requestedTime },
-    { label: "Time Zone", value: timeZoneDisplay },
+    { label: "Requested Date", value: appointment.date },
+    { label: "Requested Time", value: appointment.time },
+    { label: "Time Zone", value: appointment.timeZone },
   ];
 };
 
@@ -293,6 +254,7 @@ export const getBookingForEmailDispatch = async ({
       hostDate,
       hostTime,
       hostTimeZone,
+      startTimeUTC,
       localTimeZone,
       displayDate,
       displayTime,
@@ -354,6 +316,8 @@ const hasRenderableBookingEmailFields = (booking = {}) =>
 const buildBookingFieldGroups = (booking = {}) => {
   const siteName = process.env.SITE_NAME || "Roo Industries";
   const logoUrl = resolveLogoUrl();
+  const appointment = formatAppointmentTime(booking.startTimeUTC, booking.localTimeZone);
+  const hostAppointment = formatAppointmentTime(booking.startTimeUTC, OWNER_TZ_NAME);
   const discountPercentValue = Number(booking.discountPercent || 0);
   const discountAmountValue = Number(booking.discountAmount || 0);
   const couponPercentValue = Number(booking.couponDiscountPercent || 0);
@@ -399,23 +363,19 @@ const buildBookingFieldGroups = (booking = {}) => {
   }
 
   const clientFields = [
-    { label: "Date", value: booking.displayDate || "-" },
-    { label: "Time", value: booking.displayTime || "-" },
-    ...(booking.localTimeZone
-      ? [{ label: "Time Zone", value: booking.localTimeZone }]
-      : []),
+    { label: "Date", value: appointment?.date || "Unavailable" },
+    { label: "Time", value: appointment?.time || "Unavailable" },
+    { label: "Time Zone", value: appointment?.timeZone || "Unavailable" },
     ...sharedCoreFields,
   ];
 
   const ownerFields = [
-    { label: "Client Date", value: booking.displayDate || "-" },
-    { label: "Client Time", value: booking.displayTime || "-" },
-    ...(booking.localTimeZone
-      ? [{ label: "Client Time Zone", value: booking.localTimeZone }]
-      : []),
-    { label: "Date", value: booking.hostDate || "-" },
-    { label: "Time", value: booking.hostTime || "-" },
-    { label: "Time Zone", value: booking.hostTimeZone || OWNER_TZ_NAME },
+    { label: "Client Date", value: appointment?.date || "Unavailable" },
+    { label: "Client Time", value: appointment?.time || "Unavailable" },
+    { label: "Client Time Zone", value: appointment?.timeZone || "Unavailable" },
+    { label: "Date", value: hostAppointment?.date || "Unavailable" },
+    { label: "Time", value: hostAppointment?.time || "Unavailable" },
+    { label: "Time Zone", value: hostAppointment?.timeZone || "Unavailable" },
     ...ownerDiscountFields,
     ...sharedCoreFields,
   ];
@@ -428,6 +388,9 @@ const buildBookingFieldGroups = (booking = {}) => {
     bookingRef,
     clientFields,
     ownerFields,
+    ownerScheduleLabel: hostAppointment
+      ? `${hostAppointment.date} ${hostAppointment.time}`
+      : "Unavailable",
   };
 };
 
@@ -598,14 +561,9 @@ export const sendBookingEmailsForBooking = async ({
   };
 
   const owner = await resolveBookingOwnerEmail(client);
-  const { siteName, logoUrl, bookingRef, clientFields, ownerFields } =
+  const { siteName, logoUrl, bookingRef, clientFields, ownerFields, ownerScheduleLabel } =
     buildBookingFieldGroups(resolvedBooking);
   const from = process.env.FROM_EMAIL;
-  const ownerScheduleLabel =
-    [resolvedBooking.hostDate, resolvedBooking.hostTime]
-      .map((value) => String(value || "").trim())
-      .filter(Boolean)
-      .join(" ") || "time TBD";
   const clientRecipient = String(
     resolvedBooking.email || resolvedBooking.payerEmail || ""
   ).trim();
@@ -1058,6 +1016,13 @@ export const dispatchRescheduleNotifications = async ({
     { label: "Paid Amount", value: `$${amount}` },
     ...formatRequestedTimeFields(recoveryBooking),
   ];
+  const hostAppointment = formatAppointmentTime(
+    recoveryBooking.originalRequestedStartTimeUTC,
+    OWNER_TZ_NAME
+  );
+  const ownerScheduleLabel = hostAppointment
+    ? `${hostAppointment.date} ${hostAppointment.time}`
+    : "Unavailable";
   const patchValues = {
     recoveryNotificationLeaseId: "",
     recoveryNotificationLeaseExpiresAt: "",
@@ -1173,7 +1138,7 @@ export const dispatchRescheduleNotifications = async ({
           {
             from,
             to: owner,
-            subject: `Paid booking requires reschedule - ${recoveryBooking._id}`,
+            subject: `Paid booking requires reschedule - ${recoveryBooking._id} (${ownerScheduleLabel})`,
             html: emailHtml({
               logoUrl: resolveLogoUrl(),
               siteName,
@@ -1182,6 +1147,9 @@ export const dispatchRescheduleNotifications = async ({
                 "The payment was captured, but the original booking slot could not be reconstructed or is no longer available. Contact the customer and assign a new time.",
               fields: [
                 ...fields,
+                { label: "Host Date", value: hostAppointment?.date || "Unavailable" },
+                { label: "Host Time", value: hostAppointment?.time || "Unavailable" },
+                { label: "Host Time Zone", value: hostAppointment?.timeZone || "Unavailable" },
                 { label: "Customer Email", value: customer || "Unavailable" },
                 {
                   label: "Recovery Reason",
