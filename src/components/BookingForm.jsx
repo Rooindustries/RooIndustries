@@ -34,6 +34,7 @@ import {
 } from "../lib/checkoutCodes";
 import { trackEvent } from "../lib/analytics";
 import { captureSalesAttribution } from "../lib/salesAttribution";
+import { isValidEmail } from "../lib/emailValidation";
 
 const { applyPackageContentOverrides, getPackageFeatureItems } = packageContent;
 const {
@@ -486,6 +487,11 @@ export default function BookingForm({ isMobile }) {
   const [loading, setLoading] = useState(false);
   const [errorStep1, setErrorStep1] = useState("");
   const [errorStep2, setErrorStep2] = useState("");
+  const [emailError, setEmailError] = useState("");
+  const emailInputRef = useRef(null);
+  useEffect(() => {
+    if (emailError && step === 2) emailInputRef.current?.focus();
+  }, [emailError, step]);
 
   const [userTimeZone, setUserTimeZone] = useState("UTC");
   const localSlotFormatters = useMemo(
@@ -915,6 +921,12 @@ export default function BookingForm({ isMobile }) {
       return "Please fill out all required fields.";
     }
 
+    if (!isValidEmail(form.email.trim())) {
+      setEmailError("Please enter a valid email address.");
+      emailInputRef.current?.focus();
+      return "Please enter a valid email address.";
+    }
+    setEmailError("");
     return "";
   };
 
@@ -1902,6 +1914,7 @@ export default function BookingForm({ isMobile }) {
   ]);
 
   const clearHoldState = (resetStep = true, clearStorage = true) => {
+    setEmailError("");
     hasActiveHoldRef.current = false;
     currentHoldRef.current = null;
     setMyHold(null);
@@ -2770,13 +2783,24 @@ export default function BookingForm({ isMobile }) {
                     />
                     <input
                       name="email"
+                      ref={emailInputRef}
                       aria-label="Booking email"
+                      aria-invalid={emailError ? "true" : undefined}
+                      aria-describedby={emailError ? "booking-email-error" : undefined}
                       type="email"
                       placeholder="Email"
-                      onChange={handleChange}
+                      onChange={(event) => {
+                        handleChange(event);
+                        if (isValidEmail(event.target.value.trim())) setEmailError("");
+                      }}
                       value={form.email}
                       className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
                     />
+                    {emailError && (
+                      <p id="booking-email-error" className="text-sm text-danger-text">
+                        {emailError}
+                      </p>
+                    )}
                     <input
                       name="specs"
                       aria-label="PC specifications"
