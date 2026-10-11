@@ -9,6 +9,7 @@ import { createPortal } from "react-dom";
 import { useDialogFocus } from "../lib/useDialogFocus";
 import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { getPublicContent } from "../lib/publicContentClient";
+import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
@@ -25,6 +26,7 @@ import {
 } from "../lib/checkoutStorage";
 import {
   calculateCheckoutDiscounts,
+  CODE_VALIDATION_UNAVAILABLE_MESSAGE,
   resolveCheckoutCode,
   sanitizeCouponForCheckout,
   sanitizeReferralForCheckout,
@@ -55,7 +57,7 @@ const BOOKING_CONFIRMATION_STORAGE_KEY = "booking_confirmation_state";
 const SESSION_STATE_KEY = "booking_modal_state";
 const REFERRAL_STORAGE_KEY = "referral_session";
 const INVALID_CHECKOUT_CODE_MESSAGE = "Invalid referral or coupon code.";
-const BOOKING_FETCH_TIMEOUT_MS = 8000;
+const BOOKING_FETCH_TIMEOUT_MS = CLIENT_REQUEST_TIMEOUT_MS;
 const AVAILABILITY_REFRESH_INTERVAL_MS = 60_000;
 const AVAILABILITY_REFRESH_DEBOUNCE_MS = 5_000;
 const REASSURANCE_COPY =
@@ -1683,9 +1685,14 @@ export default function BookingForm({ isMobile }) {
       let nextCoupon = null;
       let nextDismissedCode = restoredCodeCandidates.dismissedCode || "";
       let invalidCodeFound = false;
+      let unavailableCode = "";
 
       const applyResult = (result, sourceType, sourceCode) => {
         if (!result?.ok) {
+          if (result?.unavailable) {
+            unavailableCode = sourceCode;
+            return;
+          }
           invalidCodeFound = true;
           if (sourceType === "referral") {
             nextDismissedCode = sourceCode;
@@ -1750,9 +1757,10 @@ export default function BookingForm({ isMobile }) {
       });
       setRestoredCodeCandidates(null);
 
-      if (invalidCodeFound) {
+      if (unavailableCode || invalidCodeFound) {
         setCodeEntryOpen(true);
-        setCodeError(INVALID_CHECKOUT_CODE_MESSAGE);
+        if (unavailableCode) setCodeInput(unavailableCode);
+        setCodeError(unavailableCode ? CODE_VALIDATION_UNAVAILABLE_MESSAGE : INVALID_CHECKOUT_CODE_MESSAGE);
       }
     };
 
@@ -1804,16 +1812,16 @@ export default function BookingForm({ isMobile }) {
         if (!active || !hasActiveHoldRef.current) return;
         if (!result?.ok) {
           const nextCoupon = sanitizeCouponForCheckout(appliedCoupon);
-          setDismissedReferralCode(autoCode);
+          if (!result?.unavailable) setDismissedReferralCode(autoCode);
           storeReferralSession("");
           persistCheckoutCodes({
             referral: null,
             coupon: nextCoupon,
-            dismissedCode: autoCode,
+            dismissedCode: result?.unavailable ? dismissedReferralCode : autoCode,
           });
           setCodeEntryOpen(true);
-          setCodeInput("");
-          setCodeError(INVALID_CHECKOUT_CODE_MESSAGE);
+          setCodeInput(result?.unavailable ? autoCode : "");
+          setCodeError(result?.unavailable ? CODE_VALIDATION_UNAVAILABLE_MESSAGE : INVALID_CHECKOUT_CODE_MESSAGE);
           return;
         }
         if (result.type === "coupon") {

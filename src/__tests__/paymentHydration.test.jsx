@@ -238,10 +238,12 @@ describe("payment reload hydration", () => {
     expect(screen.queryByText(/Private Creator Name/i)).not.toBeInTheDocument();
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        "/api/ref/validateReferral?code=creator"
+        "/api/ref/validateReferral?code=creator",
+        { signal: expect.any(AbortSignal) }
       );
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining("/api/ref/validateCoupon?code=SAVE10")
+        expect.stringContaining("/api/ref/validateCoupon?code=SAVE10"),
+        { signal: expect.any(AbortSignal) }
       );
     });
     expect(quotePayloads.at(-1)).toMatchObject({

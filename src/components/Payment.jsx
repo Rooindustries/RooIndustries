@@ -1444,7 +1444,7 @@ export default function Payment({ hideFooter = false }) {
       if (!result.ok) {
         setReferral(null);
         writeStoredReferral("");
-        setReferralError("Invalid or inactive referral code.");
+        setReferralError(result.unavailable ? result.error : "Invalid or inactive referral code.");
         return;
       }
 
