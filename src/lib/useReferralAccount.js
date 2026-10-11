@@ -19,7 +19,7 @@ export function useReferralAccount() {
           cache: "no-store",
           signal: controller.signal,
         });
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
         if (!active) return;
         if (response.status === 401) {
           removeBrowserStorage("sessionStorage", "creatorId");
