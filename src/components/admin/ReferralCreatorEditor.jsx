@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronRight, KeyRound, RefreshCw, Search } from "lucide-react";
+import { clearReferralDrafts, readReferralDraft, saveReferralDraft } from "./referralDraftStore";
 import styles from "./ReferralCreatorEditor.module.css";
 
 const percent = (basisPoints) => {
@@ -34,6 +35,7 @@ export default function ReferralCreatorEditor() {
   const [creators, setCreators] = useState([]);
   const [selectedId, setSelectedId] = useState("");
   const [draft, setDraft] = useState(null);
+  const [draftConflict, setDraftConflict] = useState(null);
   const [history, setHistory] = useState([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -42,6 +44,7 @@ export default function ReferralCreatorEditor() {
   const [notice, setNotice] = useState("");
   const [unlocked, setUnlocked] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  const [nextOffset, setNextOffset] = useState(0);
   const pendingOperation = useRef("");
   const latestCreatorRequest = useRef(0);
   const latestHistoryRequest = useRef(0);
@@ -52,6 +55,7 @@ export default function ReferralCreatorEditor() {
   const draftRef = useRef(null);
   const draftDirtyRef = useRef(false);
   const draftVersion = useRef(0);
+  const draftBaseVersion = useRef(null);
 
   const selected = creators.find((creator) => creator.creator_id === selectedId) || null;
 
@@ -65,6 +69,29 @@ export default function ReferralCreatorEditor() {
     draftDirtyRef.current = dirty;
     setDraft(nextDraft);
   };
+
+  const persistDraft = () => {
+    if (!draftDirtyRef.current || !selectedIdRef.current || !draftRef.current) return true;
+    const saved = saveReferralDraft(selectedIdRef.current, draftBaseVersion.current, draftRef.current);
+    if (!saved) setError("Your creator draft could not be saved in this browser. Keep this page open until you save it.");
+    return saved;
+  };
+
+  useEffect(() => {
+    const beforeunload = (event) => {
+      if (!draftDirtyRef.current) return;
+      persistDraft();
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    const pagehide = () => { persistDraft(); };
+    window.addEventListener("beforeunload", beforeunload);
+    window.addEventListener("pagehide", pagehide);
+    return () => {
+      window.removeEventListener("beforeunload", beforeunload);
+      window.removeEventListener("pagehide", pagehide);
+    };
+  }, []);
 
   const request = async (path, options = {}) => {
     const response = await fetch(path, {
@@ -104,6 +131,9 @@ export default function ReferralCreatorEditor() {
       const body = await request(`/api/admin/referral-creators?${parameters}`);
       if (requestId !== latestCreatorRequest.current) return;
       const page = Array.isArray(body.creators) ? body.creators : [];
+      if (body.hasMore === true && (!Number.isSafeInteger(body.nextOffset) || body.nextOffset <= offset || body.nextOffset > 1_000_000)) {
+        throw new Error("The creator page cursor is invalid. Refresh the list and try again.");
+      }
       const existingCreators = creatorsRef.current;
       let nextCreators = append
         ? [...new Map(
@@ -124,14 +154,20 @@ export default function ReferralCreatorEditor() {
         (creator) => creator.creator_id === selectedIdRef.current
       );
       if (refreshedSelection && !draftDirtyRef.current) {
-        replaceDraft(createDraft(refreshedSelection));
+        if (!draftConflict) {
+          draftBaseVersion.current = refreshedSelection.terms_version;
+          replaceDraft(createDraft(refreshedSelection));
+        }
       } else if (!append && !draftDirtyRef.current) {
         selectedIdRef.current = "";
         setSelectedId("");
         replaceDraft(null);
+        draftBaseVersion.current = null;
+        setDraftConflict(null);
         setHistory([]);
       }
       setHasMore(body.hasMore === true);
+      setNextOffset(Number.isSafeInteger(body.nextOffset) ? body.nextOffset : 0);
       lastLoadedSearch.current = normalizedSearch;
       setUnlocked(true);
     } catch (loadError) {
@@ -162,15 +198,26 @@ export default function ReferralCreatorEditor() {
     ) {
       return;
     }
+    if (draftDirtyRef.current && !clearReferralDrafts(selectedIdRef.current, draftBaseVersion.current)) {
+      setError("The draft could not be discarded in this browser. Keep this page open until you save it.");
+      return;
+    }
     const requestId = latestHistoryRequest.current + 1;
     latestHistoryRequest.current = requestId;
     selectedIdRef.current = creator.creator_id;
     setSelectedId(creator.creator_id);
-    replaceDraft(createDraft(creator));
+    draftVersion.current += 1;
+    draftBaseVersion.current = creator.terms_version;
+    const saved = readReferralDraft(creator);
+    const conflict = saved?.stale || saved?.invalid ? saved : null;
+    setDraftConflict(conflict);
+    if (saved?.draft && !conflict) replaceDraft(saved.draft, true);
+    else replaceDraft(createDraft(creator));
     setHistory([]);
     pendingOperation.current = "";
     setError("");
-    setNotice("");
+    setNotice(saved?.draft && !conflict ? "Recovered your unpublished creator draft." : "");
+    if (saved?.unavailable) setError("Local draft storage is unavailable in this browser.");
     try {
       const body = await request(
         `/api/admin/referral-creators?creatorId=${encodeURIComponent(creator.creator_id)}`
@@ -190,17 +237,34 @@ export default function ReferralCreatorEditor() {
   };
 
   const updateDraft = (field, value) => {
+    if (draftConflict) return;
     draftVersion.current += 1;
     pendingOperation.current = "";
     const nextDraft = { ...draftRef.current, [field]: value };
     replaceDraft(nextDraft, true);
+    persistDraft();
+  };
+
+  const discardDraft = () => {
+    if (!selected || !clearReferralDrafts(selected.creator_id, draftConflict?.baseVersion ?? draftBaseVersion.current)) {
+      setError("The draft could not be discarded in this browser.");
+      return;
+    }
+    draftVersion.current += 1;
+    draftBaseVersion.current = selected.terms_version;
+    pendingOperation.current = "";
+    replaceDraft(createDraft(selected));
+    setDraftConflict(null);
+    setError("");
+    setNotice("Draft discarded.");
   };
 
   const save = async () => {
-    if (!selected || !draft) return;
+    if (!selected || !draft || draftConflict) return;
     const creatorId = selected.creator_id;
     const creatorSnapshot = selected;
     const draftSnapshot = { ...draft };
+    const expectedVersion = draftBaseVersion.current;
     const submittedDraftVersion = draftVersion.current;
     const selectionRequestId = latestHistoryRequest.current;
     const saveRequestId = latestSaveRequest.current + 1;
@@ -215,7 +279,7 @@ export default function ReferralCreatorEditor() {
         method: "PATCH",
         body: JSON.stringify({
           creatorId,
-          expectedVersion: creatorSnapshot.terms_version,
+          expectedVersion,
           operationId,
           ...draftSnapshot,
         }),
@@ -238,7 +302,14 @@ export default function ReferralCreatorEditor() {
         latestHistoryRequest.current === selectionRequestId &&
         latestSaveRequest.current === saveRequestId;
       if (!selectionStillCurrent) return;
-      if (draftVersion.current === submittedDraftVersion) replaceDraft(createDraft(updated));
+      const cleared = clearReferralDrafts(creatorId, expectedVersion);
+      draftBaseVersion.current = updated.terms_version;
+      if (draftVersion.current === submittedDraftVersion) {
+        replaceDraft(createDraft(updated));
+      } else {
+        persistDraft();
+      }
+      if (!cleared) setError("Saved in Supabase, but the local draft could not be cleared in this browser.");
       pendingOperation.current = "";
       setNotice("Saved in Supabase.");
       try {
@@ -268,6 +339,7 @@ export default function ReferralCreatorEditor() {
       if ([400, 404, 409].includes(Number(saveError.status))) {
         pendingOperation.current = "";
       }
+      if (Number(saveError.status) === 409) setDraftConflict({ baseVersion: expectedVersion });
       setError(saveError.message);
     } finally {
       if (latestSaveRequest.current === saveRequestId) setSaving(false);
@@ -332,6 +404,7 @@ export default function ReferralCreatorEditor() {
 
       {error ? <p className={styles.error} role="alert">{error}</p> : null}
       {notice ? <p className={styles.notice} role="status"><Check size={17} />{notice}</p> : null}
+      {draftConflict ? <p className={styles.error} role="alert">Local draft conflict: {draftConflict.invalid ? "the saved draft could not be read." : `the draft's base version ${draftConflict.baseVersion} does not match the current saved version.`} The saved draft is kept on this device. Discard it before editing the current terms.</p> : null}
 
       <div className={styles.workspace}>
         <aside className={styles.creatorPanel}>
@@ -366,11 +439,11 @@ export default function ReferralCreatorEditor() {
               <button
                 className={styles.loadMore}
                 onClick={() => loadCreators({
-                  search: query,
-                  offset: creators.length,
+                  search: lastLoadedSearch.current,
+                  offset: nextOffset,
                   append: true,
                 })}
-                disabled={loading}
+                disabled={loading || query.trim() !== lastLoadedSearch.current}
               >
                 {loading ? "Loading…" : "Load more creators"}
               </button>
@@ -405,6 +478,7 @@ export default function ReferralCreatorEditor() {
                     min="0"
                     max="100"
                     step="0.01"
+                    disabled={Boolean(draftConflict)}
                     value={draft.totalPercent}
                     onChange={(event) => updateDraft("totalPercent", event.target.value)}
                   />
@@ -416,6 +490,7 @@ export default function ReferralCreatorEditor() {
                     min="0"
                     max="100"
                     step="0.01"
+                    disabled={Boolean(draftConflict)}
                     value={draft.discountPercent}
                     onChange={(event) => updateDraft("discountPercent", event.target.value)}
                   />
@@ -427,6 +502,7 @@ export default function ReferralCreatorEditor() {
                     min="0"
                     max="100"
                     step="0.01"
+                    disabled={Boolean(draftConflict)}
                     value={draft.commissionPercent}
                     onChange={(event) => updateDraft("commissionPercent", event.target.value)}
                   />
@@ -440,6 +516,7 @@ export default function ReferralCreatorEditor() {
                 </span>
                 <input
                   type="checkbox"
+                  disabled={Boolean(draftConflict)}
                   checked={draft.bypassUnlock}
                   onChange={(event) => updateDraft("bypassUnlock", event.target.checked)}
                 />
@@ -449,6 +526,7 @@ export default function ReferralCreatorEditor() {
                 <span>Reason for change</span>
                 <textarea
                   rows="3"
+                  disabled={Boolean(draftConflict)}
                   maxLength="500"
                   value={draft.reason}
                   onChange={(event) => updateDraft("reason", event.target.value)}
@@ -458,7 +536,8 @@ export default function ReferralCreatorEditor() {
 
               <div className={styles.saveRow}>
                 <p>Version {selected.terms_version}</p>
-                <button onClick={save} disabled={saving || draft.reason.trim().length < 3}>
+                <button className={styles.secondaryButton} onClick={discardDraft} disabled={saving || (!draftDirtyRef.current && !draftConflict)}>Discard draft</button>
+                <button onClick={save} disabled={saving || Boolean(draftConflict) || draft.reason.trim().length < 3}>
                   {saving ? "Saving…" : "Save creator settings"}
                 </button>
               </div>

@@ -73,8 +73,7 @@ const committed = (result, id) => {
   clearSupabasePublicContentCache();
   return { committed: true, replayed: result.replayed === true, documentId: id, revision };
 };
-export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = process.env, actor = "admin:key" } = {}) => {
-  assertGlobalCmsWritesAllowed(env);
+const prepareCmsCommand = (body, actor) => {
   if (!plain(body)) throw validationError("$", "A JSON content command is required.");
   const allowed = new Set(["operation", "type", "documentId", "document", "expectedRevision", "createIntentId"]);
   for (const key of Object.keys(body)) if (!allowed.has(key)) throw validationError(`$.${key}`, "Unsupported command field.");
@@ -100,6 +99,29 @@ export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = proc
   const requestHash = hash(material);
   const commandId = `cms:${requestHash}`;
   const lookup = { p_command_id: commandId, p_request_hash: requestHash, p_actor: actor };
+  return { schema, creating, id, document, requestHash, lookup };
+};
+export const getCreateCommandStatus = async ({ body, supabaseClient, actor = "admin:key" } = {}) => {
+  const { schema, creating, id, document, requestHash, lookup } = prepareCmsCommand(body, actor);
+  if (!creating) throw validationError("$.operation", "Only create commands have a creation status.");
+  const validation = validateContentDocument(body.type, preservedDocument(document, null, schema.fields, requestHash));
+  if (!validation.ok) throw cmsError("Content validation failed.", 400, "CMS_VALIDATION_FAILED", validation.errors);
+  const receipt = rpcData(await supabaseClient.rpc("roo_cms_publish_command_result", lookup), "Receipt lookup");
+  if (!receipt || receipt.replayed !== true) throw cmsError("Create command was not published.", 404, "CMS_NOT_FOUND");
+  const resultId = receipt.document_ids?.[0];
+  const record = receipt.results?.[0];
+  if (receipt.command_id !== lookup.p_command_id || receipt.operation !== "create" ||
+      !Array.isArray(receipt.document_ids) || receipt.document_ids.length !== 1 || resultId !== id ||
+      !Array.isArray(receipt.results) || receipt.results.length !== 1 || record?._id !== resultId || record?._type !== body.type ||
+      typeof record?._rev !== "string" || !record._rev.trim()) {
+    throw cmsError("The committed create receipt could not be confirmed.", 503, "CMS_RECEIPT_INVALID");
+  }
+  return { committed: true, createIntentId: body.createIntentId.toLowerCase(), type: body.type, documentId: resultId, revision: record._rev };
+};
+export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = process.env, actor = "admin:key" } = {}) => {
+  assertGlobalCmsWritesAllowed(env);
+  const { schema, creating, id, requestHash, lookup, document: inputDocument } = prepareCmsCommand(body, actor);
+  let document = inputDocument;
   const receipt = rpcData(await supabaseClient.rpc("roo_cms_publish_command_result", lookup), "Receipt lookup");
   if (receipt?.replayed) return committed(receipt, id);
   const current = await loadDocument(supabaseClient, id);

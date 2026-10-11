@@ -1,5 +1,7 @@
 const { NOINDEX_ROUTES } = require("./routes");
 const { HOME_COPY } = require("./homeCopy");
+const { buildPackageOffers } = require("./packageContent");
+const { getPackagePricePresentation } = require("./packagePricing");
 
 const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || "https://www.rooindustries.com").replace(/\/$/, "");
 
@@ -114,6 +116,12 @@ const routeMeta = {
     title: "Referral Program Sign Up | Roo Industries Partner Access",
     description:
       "Create your Roo Industries referral partner account to get a unique tracking link, monitor conversions, and earn rewards for qualified customer referrals.",
+    noindex: true,
+  },
+  "/referrals/verify": {
+    title: "Confirm Creator Account | Roo Industries",
+    description:
+      "Confirm your Roo Industries creator account email to finish referral registration and return securely to the referral partner sign-in page.",
     noindex: true,
   },
   "/referrals/dashboard": {
@@ -314,80 +322,43 @@ const buildHomePageJsonLd = (hero = HOME_COPY.hero) => ({
       areaServed: "Worldwide",
       description:
         "Remote optimization for BIOS, Windows, memory, GPU, RAM, and in-game settings focused on FPS, input lag, frametime stability, and ranked-game performance.",
-      hasOfferCatalog: {
-        "@type": "OfferCatalog",
-        name: "Roo Industries PC Game Optimization Packages",
-        url: `${siteUrl}/packages`,
-      },
     },
   ],
 });
 
-const buildOfferCatalogJsonLd = (name = "PC Game Optimization Services") => ({
-  "@context": "https://schema.org",
-  "@type": "OfferCatalog",
-  name,
-  itemListElement: [
-    {
-      "@type": "ListItem",
-      position: 1,
-      item: {
-        "@type": "Service",
-        name: "PC Game Optimization",
-        description: "Tune BIOS, Windows, GPU, RAM, and game settings for higher FPS and smoother ranked games.",
-      },
-    },
-    {
-      "@type": "ListItem",
-      position: 2,
-      item: {
-        "@type": "Service",
-        name: "FPS Tuning",
-        description: "Measure average FPS, 1% lows, and frametime spikes, then tune around the titles you play.",
-      },
-    },
-    {
-      "@type": "ListItem",
-      position: 3,
-      item: {
-        "@type": "Service",
-        name: "Input Lag Reduction",
-        description: "Dial in Windows, drivers, power behavior, polling, and game settings for a cleaner mouse feel.",
-      },
-    },
-    {
-      "@type": "ListItem",
-      position: 4,
-      item: {
-        "@type": "Service",
-        name: "Competitive Game Settings",
-        description: "Set up the PC around ranked play, not generic benchmark runs.",
-      },
-    },
-    {
-      "@type": "ListItem",
-      position: 5,
-      item: {
-        "@type": "Service",
-        name: "Streaming Performance Tuning",
-        description: "Balance OBS, capture, encoder, and recording settings around the game first.",
-      },
-    },
-    {
-      "@type": "ListItem",
-      position: 6,
-      item: {
-        "@type": "Service",
-        name: "Overclocking",
-        description: "CPU, GPU, and RAM tuning when it supports stable real-game performance.",
-      },
-    },
-  ],
-});
+const buildOfferCatalogJsonLd = (packages = []) => {
+  const itemListElement = buildPackageOffers(packages).flatMap((pkg) => {
+    const { price } = getPackagePricePresentation(
+      pkg.title,
+      pkg.price || pkg.compareAtPrice || pkg.originalPrice
+    );
+    const amount = String(price).trim().match(/^\$(\d+(?:,\d{3})*(?:\.\d{1,2})?)$/);
+    if (!pkg.title || !amount) return [];
+    return [{
+      "@type": "Offer",
+      url: `${siteUrl}/packages`,
+      price: amount[1].replace(/,/g, ""),
+      priceCurrency: "USD",
+      seller: { "@id": `${siteUrl}/#organization` },
+      itemOffered: { "@type": "Service", name: pkg.title },
+    }];
+  });
+  if (!itemListElement.length) return null;
+  return {
+    "@context": "https://schema.org",
+    "@type": "OfferCatalog",
+    "@id": `${siteUrl}/packages#offer-catalog`,
+    name: "PC Game Optimization Packages",
+    url: `${siteUrl}/packages`,
+    itemListElement,
+  };
+};
 
 const buildFaqJsonLd = (items = []) => ({
   "@context": "https://schema.org",
   "@type": "FAQPage",
+  "@id": `${siteUrl}/faq#faq`,
+  url: `${siteUrl}/faq`,
   mainEntity: items
     .filter((item) => item?.question && item?.answer)
     .map((item) => ({

@@ -14,9 +14,9 @@ import { installNetworkGuard } from './test-target-safety.mjs';
 export const storageRelease = { tag: 'v1.79.33', commit: '2379ad5493f06bcf3bb5f044b844e292b98df4a0' };
 const host = '127.0.0.1';
 const isAlive = pid => { try { process.kill(pid, 0); return true; } catch (error) { if (error.code === 'ESRCH') return false; throw error; } };
-const reservePort = async () => {
+const reservePort = async (requested = 0) => {
   const server = net.createServer();
-  server.listen(0, host);
+  server.listen(requested, host);
   await once(server, 'listening');
   const port = server.address().port;
   await new Promise(resolve => server.close(resolve));
@@ -40,7 +40,7 @@ const terminate = async child => {
   } finally { clearTimeout(timer); }
 };
 
-export async function start({ storageSource = '/tmp/roo-storage-api-v1.79.33', pgBin = '/tmp/roo-request-pg17/runtime/usr/lib/postgresql/17/bin', postgrestBin = '/tmp/roo-request-postgrest/postgrest', libraryPath = '/tmp/roo-request-pg17/runtime/usr/lib/x86_64-linux-gnu', signedUploadExpirationSeconds = 120, commerceRepairMigration = true, fullMigrationChain = false, afterMigrations, additionalOrigins = [] } = {}) {
+export async function start({ storageSource = '/tmp/roo-storage-api-v1.79.33', pgBin = '/tmp/roo-request-pg17/runtime/usr/lib/postgresql/17/bin', postgrestBin = '/tmp/roo-request-postgrest/postgrest', libraryPath = '/tmp/roo-request-pg17/runtime/usr/lib/x86_64-linux-gnu', signedUploadExpirationSeconds = 120, commerceRepairMigration = true, fullMigrationChain = false, afterMigrations, ports = {}, additionalOrigins = [] } = {}) {
   assert.equal(process.env.ROO_TEST_HOST || host, host, 'Storage fixture is an internal loopback-only stack');
   assert.equal(process.env.ROO_TEST_POSTGRES_HOST || host, host);
   assert.ok(Number.isSafeInteger(signedUploadExpirationSeconds) && signedUploadExpirationSeconds > 0 && signedUploadExpirationSeconds <= 7200);
@@ -51,8 +51,8 @@ export async function start({ storageSource = '/tmp/roo-storage-api-v1.79.33', p
   assert.equal(revision.stdout.trim(), storageRelease.commit, 'Storage source does not match pinned official release');
   assert.ok(fs.existsSync(path.join(storageSource, 'dist/start/server.js')), 'Build the pinned Storage checkout first (see roo-sanity-env.md)');
   assert.ok(fs.existsSync(path.join(storageSource, 'migrations/tenant/0073-revoke-grants-to-unused-operations.sql')), 'Pinned Storage migrations are unavailable');
-  const storagePort = await reservePort();
-  const gatewayPort = await reservePort();
+  const storagePort = await reservePort(ports.storage);
+  const gatewayPort = await reservePort(ports.gateway);
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'roo-storage-fixture-'));
   const storageUrl = `http://${host}:${storagePort}`;
   const supabaseUrl = `http://${host}:${gatewayPort}`;
@@ -75,7 +75,7 @@ export async function start({ storageSource = '/tmp/roo-storage-api-v1.79.33', p
   try {
     fs.mkdirSync(filePath);
     fs.symlinkSync(path.join(storageSource, 'migrations'), path.join(scratch, 'migrations'));
-    database = await createSweepPostgresFixture({ pgBin, postgrestBin, libraryPath, commerceRepairMigration, fullMigrationChain, beforeMigrations: async context => {
+    database = await createSweepPostgresFixture({ pgBin, postgrestBin, libraryPath, commerceRepairMigration, fullMigrationChain, ports, beforeMigrations: async context => {
       cleanup.postgresPid = Number(fs.readFileSync(path.join(context.scratch, 'data/postmaster.pid'), 'utf8').split('\n')[0]);
       cleanup.databaseScratch = context.scratch;
       serviceRoleKey = jwt(context.jwtSecret, 'service_role');

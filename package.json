@@ -26,7 +26,7 @@
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.545.0",
     "negotiator": "^0.6.4",
-    "next": "15.5.24",
+    "next": "15.5.27",
     "postgres": "^3.4.9",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -37,7 +37,7 @@
     "resend": "6.17.2",
     "uuid": "11.1.1",
     "web-vitals": "^2.1.4",
-    "sharp": "0.35.4"
+    "sharp": "0.35.5"
   },
   "scripts": {
     "dev": "next dev",
@@ -45,10 +45,25 @@
     "prebuild": "node scripts/validate-runtime-env.js && node scripts/generate-sitemap.js && node scripts/generate-robots.js",
     "build": "next build",
     "test": "jest",
+    "test:contact:csp": "playwright test tests/contact-form-csp.spec.js --project=chromium",
+    "test:booking-flow": "playwright test tests/booking-flow.spec.js --project=chromium",
+    "test:booking-initial-slot": "playwright test tests/booking-initial-slot.spec.js --project=chromium",
+    "test:booking-hold": "node --test tests/booking-hold.test.mjs",
+    "test:booking-hold:e2e": "playwright test tests/booking-hold.spec.js --project=chromium",
+    "test:booking-contact": "node scripts/test-booking-contact.mjs",
+    "test:emails": "playwright test tests/transactional-emails.spec.js --project=chromium",
     "test:payment-recovery:postgres17": "node scripts/test-payment-persistence-sweep.mjs --recovery --full-chain",
     "test:agent-readiness": "node --test tests/agent-readiness.test.mjs",
     "test:creator:portal": "cross-env TOOLING_CREATOR_PORTAL=1 TOOLING_API_ROUTES=1 NODE_OPTIONS=--import=./tests/fixtures/creator-portal-loader.mjs playwright test tests/creator-portal.spec.js --project=chromium",
+    "test:api:routes": "cross-env TOOLING_API_ROUTES=1 playwright test tests/api-routes.spec.js --project=chromium",
+    "test:booking:holds": "node --test tests/booking-holds.test.mjs",
+    "test:api:preview": "cross-env TOOLING_API_ROUTES=0 playwright test tests/api-preview.spec.js --project=chromium",
+    "test:perf:routes": "playwright test tests/route-bundles.spec.js --project=chromium",
+    "test:perf:debug": "playwright test tests/perf-debug-loading.spec.js --project=chromium",
+    "test:a11y": "playwright test tests/a11y-regressions.spec.js --project=chromium",
     "test:perf:home": "playwright test tests/home-performance.spec.js --project=chromium",
+    "test:perf:cls": "node scripts/test-content-layout-shift.mjs",
+    "test:perf:cls:states": "node scripts/test-content-layout-shift.mjs --states",
     "check:payment:runtime": "node scripts/diagnose-payment-runtime.js",
     "check:payment:webhooks": "node scripts/check-payment-webhooks.js",
     "check:payment:stack": "node scripts/check-payment-stack.mjs",
@@ -72,9 +87,12 @@
     "audit:referral-accounting": "node scripts/repair-referral-accounting.mjs --audit-all",
     "export:supabase:commerce:encrypted": "node scripts/export-supabase-commerce-encrypted.mjs",
     "check:seo": "node scripts/check-seo.js",
+    "test:seo:structured-data": "playwright test tests/structured-data.spec.js --project=chromium",
     "check:budgets": "node scripts/check-budgets.js",
     "test:seo:nonjs": "playwright test tests/nonjs-seo.spec.js",
     "test:smoke:routes": "playwright test tests/routes-smoke.spec.js",
+    "test:sweep": "playwright test tests/public-route-sweep.spec.js --project=chromium",
+    "test:hero-heading-fit": "playwright test tests/hero-heading-fit.spec.js --project=chromium",
     "test:nav:sections": "cross-env BASE_URL=http://${ROO_TEST_HOST:-127.0.0.1}:3001 playwright test tests/section-nav.spec.js",
     "test:nav:chaos": "cross-env BASE_URL=http://${ROO_TEST_HOST:-127.0.0.1}:3001 playwright test tests/nav-chaos.spec.js",
     "test:footer": "playwright test tests/footer.spec.js",
@@ -95,7 +113,8 @@
     "test:tooling:safety": "node scripts/test-tooling-sweep.mjs",
     "test:tooling:dependencies": "node scripts/test-tooling-sweep-dependencies.mjs",
     "audit:lighthouse": "lhci autorun --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/ --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/reviews --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/tools",
-    "audit:lighthouse:mobile": "lhci autorun --config=lighthouserc.mobile.json --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/"
+    "audit:lighthouse:mobile": "lhci autorun --config=lighthouserc.mobile.json --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/",
+    "test:e2e:admin": "playwright test --config=playwright.admin.config.js"
   },
   "eslintConfig": {
     "extends": [
@@ -120,8 +139,8 @@
     "@playwright/test": "^1.55.0",
     "autoprefixer": "^10.4.21",
     "cross-env": "^7.0.3",
-    "jest": "30.2.0",
-    "jest-environment-jsdom": "30.2.0",
+    "jest": "30.3.0",
+    "jest-environment-jsdom": "30.3.0",
     "postcss": "8.5.23",
     "tailwindcss": "^3.4.18",
     "tus-js-client": "^4.3.1"
@@ -134,6 +153,6 @@
     "picomatch": "2.3.2",
     "tmp": "0.2.7",
     "uuid": "11.1.1",
-    "sharp": "0.35.4"
+    "sharp": "0.35.5"
   }
 }

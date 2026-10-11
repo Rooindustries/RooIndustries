@@ -81,6 +81,11 @@ export default function ReservationBanner() {
   const isMobileWidth = useIsMobileWidth();
   const isDesktopWidth = !isMobileWidth;
   const isPaymentScreen = path.startsWith("/payment");
+  const checkoutBooking = readStoredCheckoutBooking();
+  const hasMatchingCheckoutBooking =
+    hold && checkoutBooking?.slotHoldId === hold.holdId &&
+    checkoutBooking?.slotHoldToken === hold.holdToken;
+  const paymentInOtherTab = hold?.paymentStartedElsewhere && !hasMatchingCheckoutBooking;
 
   useEffect(() => {
     try {
@@ -97,6 +102,7 @@ export default function ReservationBanner() {
             packagePrice: parsed.packagePrice,
             packageTag: parsed.packageTag,
             phase: parsed.phase || "",
+            ...(parsed.paymentStartedElsewhere ? { paymentStartedElsewhere: true } : {}),
           };
           const utcDate = getUtcDateFromHold(normalizedHold);
           if (!utcDate) {
@@ -129,6 +135,7 @@ export default function ReservationBanner() {
           packagePrice: detail.packagePrice,
           packageTag: detail.packageTag,
           phase: detail.phase || "",
+          ...(detail.paymentStartedElsewhere ? { paymentStartedElsewhere: true } : {}),
         };
         const utcDate = getUtcDateFromHold(normalizedHold);
         if (!utcDate) {
@@ -161,6 +168,10 @@ export default function ReservationBanner() {
     const tick = () => {
       const diff = expiresAtMs - Date.now();
       if (diff <= 0) {
+        if (hold.phase === "payment_pending" && paymentInOtherTab) {
+          setCountdown(0);
+          return false;
+        }
         const shouldRedirectHome =
           path.startsWith("/payment") || path.startsWith("/booking");
         releaseHold(true, shouldRedirectHome);
@@ -175,7 +186,7 @@ export default function ReservationBanner() {
       if (!ok) clearInterval(id);
     }, 1000);
     return () => clearInterval(id);
-  }, [hold, path]);
+  }, [hold, path, paymentInOtherTab]);
 
   const holdLocalTimeLabel = useMemo(() => {
     if (!hold) return "";
@@ -258,7 +269,7 @@ export default function ReservationBanner() {
   }, [shouldRender]);
 
   const continueBooking = () => {
-    if (String(hold?.phase || "").trim().toLowerCase() === "payment_pending") {
+    if (String(hold?.phase || "").trim().toLowerCase() === "payment_pending" && !paymentInOtherTab) {
       const bookingData = readStoredCheckoutBooking();
       nav("/payment", {
         state: {
@@ -422,7 +433,7 @@ export default function ReservationBanner() {
                 className={`rounded-lg border border-info-border bg-info-soft px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-info-text hover:bg-info-soft transition whitespace-nowrap shadow-sm`}
               >
                 {String(hold?.phase || "").trim().toLowerCase() === "payment_pending"
-                  ? "Return to payment"
+                  ? paymentInOtherTab ? "View reservation" : "Return to payment"
                   : "Continue booking"}
               </button>
           )}

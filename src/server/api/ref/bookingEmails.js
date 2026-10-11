@@ -2,6 +2,8 @@ import { createDataClient as createClient } from "../../data/documentClient.js";
 import { Resend } from "resend";
 import crypto from "crypto";
 import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
+import { formatAppointmentTime } from "../../email/appointmentTime.js";
+import { isIdempotencyPayloadConflict } from "../../email/resendOutcome.js";
 import {
   claimEmailDispatchPair,
   completeEmailDispatch,
@@ -58,6 +60,10 @@ const sendEmailAtLease = async ({ client, booking, leaseId, recovery = false, re
   }
   await client.patch(current._id).ifRevisionId(current._rev).set({ [firstAttemptField]: firstAttemptAt }).commit();
   const result = await resend.emails.send(message, options);
+  if (isIdempotencyPayloadConflict(result)) {
+    logSafeError("Booking email requires delivery review", { code: "email_delivery_unknown", status: 409 });
+    return { data: null, error: { code: "email_delivery_unknown" } };
+  }
   if (!result.error && !String(result.data?.id || "").trim()) {
     return { data: null, error: { code: "email_provider_receipt_missing" } };
   }
@@ -114,7 +120,7 @@ const emailHtml = ({
     <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#e9edf3;padding:32px 12px">
       <tr>
         <td align="center">
-          <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;background:#0f172a;border:1px solid #2a3f5c;border-radius:16px;overflow:hidden">
+          <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;background:#0f172a;border:1px solid #2a3f5c;border-radius:16px;overflow:hidden;table-layout:fixed">
             <tr>
               <td style="padding:26px 28px 18px;text-align:center;background:#0b1120">
                 <img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(siteName)}" height="44" style="height:44px;display:block;margin:0 auto 8px"/>
@@ -138,14 +144,14 @@ const emailHtml = ({
               </p>`
                     : ""
                 }
-                <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#0b1120;border:1px solid #24405e;border-radius:10px">
+                <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#0b1120;border:1px solid #24405e;border-radius:10px;table-layout:fixed">
                   <tbody>
                     ${fields
                       .map(
                         (field, index) => `
                       <tr>
-                        <td style="padding:11px 16px;font-size:13px;color:#93c5fd${index === 0 ? ";width:40%" : ""}${index === fields.length - 1 ? "" : ";border-bottom:1px solid #16263d"}">${escapeHtml(field.label)}</td>
-                        <td style="padding:11px 16px;font-size:13px;font-weight:600;color:#e5f2ff${index === fields.length - 1 ? "" : ";border-bottom:1px solid #16263d"}">${escapeHtml(field.value)}</td>
+                        <td style="padding:11px 16px;font-size:13px;color:#93c5fd;overflow-wrap:anywhere;word-break:break-word${index === 0 ? ";width:40%" : ""}${index === fields.length - 1 ? "" : ";border-bottom:1px solid #16263d"}">${escapeHtml(field.label)}</td>
+                        <td style="padding:11px 16px;font-size:13px;font-weight:600;color:#e5f2ff;overflow-wrap:anywhere;word-break:break-word${index === fields.length - 1 ? "" : ";border-bottom:1px solid #16263d"}">${escapeHtml(field.value)}</td>
                       </tr>`
                       )
                       .join("")}
@@ -183,61 +189,28 @@ const buildEmailDispatchState = () => ({
   allSent: true,
 });
 
-const formatMoney = (value) =>
-  Number.isFinite(Number(value)) ? Number(value).toFixed(2) : "0.00";
+const formatMoney = (value, currency = "USD") => {
+  if (value == null || String(value).trim() === "" || !Number.isFinite(Number(value))) return "-";
+  const options = { style: "currency", currency: String(currency || "USD").trim(), useGrouping: false };
+  try {
+    return new Intl.NumberFormat("en-US", options).format(Number(value));
+  } catch {
+    return `${Number(value).toFixed(2)} (currency unavailable)`;
+  }
+};
 
 export const formatRequestedTimeFields = (booking = {}) => {
-  const requestedAt = new Date(
-    String(booking.originalRequestedStartTimeUTC || "").trim()
+  const appointment = formatAppointmentTime(
+    booking.originalRequestedStartTimeUTC,
+    booking.localTimeZone
   );
-  if (!Number.isFinite(requestedAt.getTime())) {
+  if (!appointment) {
     return [{ label: "Time Selected", value: "Unavailable" }];
   }
-
-  const requestedTimeZone = String(booking.localTimeZone || "").trim();
-  let timeZone = "UTC";
-  if (requestedTimeZone) {
-    try {
-      new Intl.DateTimeFormat("en-US", {
-        timeZone: requestedTimeZone,
-      }).format(requestedAt);
-      timeZone = requestedTimeZone;
-    } catch {
-      timeZone = "UTC";
-    }
-  }
-
-  const canUseStoredLabels = timeZone !== "UTC";
-  const requestedDate =
-    (canUseStoredLabels && String(booking.displayDate || "").trim()) ||
-    new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    }).format(requestedAt);
-  const requestedTime =
-    (canUseStoredLabels && String(booking.displayTime || "").trim()) ||
-    new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(requestedAt);
-  const timeZoneName =
-    new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      timeZoneName: "long",
-    })
-      .formatToParts(requestedAt)
-      .find((part) => part.type === "timeZoneName")?.value || timeZone;
-  const timeZoneDisplay =
-    timeZone === "UTC" ? "UTC" : `${timeZoneName} (${timeZone})`;
-
   return [
-    { label: "Requested Date", value: requestedDate },
-    { label: "Requested Time", value: requestedTime },
-    { label: "Time Zone", value: timeZoneDisplay },
+    { label: "Requested Date", value: appointment.date },
+    { label: "Requested Time", value: appointment.time },
+    { label: "Time Zone", value: appointment.timeZone },
   ];
 };
 
@@ -285,6 +258,7 @@ export const getBookingForEmailDispatch = async ({
       discountAmount,
       grossAmount,
       netAmount,
+      currency,
       couponCode,
       couponDiscountPercent,
       couponDiscountAmount,
@@ -293,6 +267,7 @@ export const getBookingForEmailDispatch = async ({
       hostDate,
       hostTime,
       hostTimeZone,
+      startTimeUTC,
       localTimeZone,
       displayDate,
       displayTime,
@@ -354,6 +329,13 @@ const hasRenderableBookingEmailFields = (booking = {}) =>
 const buildBookingFieldGroups = (booking = {}) => {
   const siteName = process.env.SITE_NAME || "Roo Industries";
   const logoUrl = resolveLogoUrl();
+  const appointment = formatAppointmentTime(booking.startTimeUTC, booking.localTimeZone);
+  const hostAppointment = formatAppointmentTime(booking.startTimeUTC, OWNER_TZ_NAME);
+  const hasNetAmount = ["number", "string"].includes(typeof booking.netAmount) &&
+    String(booking.netAmount).trim() !== "" && Number.isFinite(Number(booking.netAmount));
+  const currency = booking.currency || "USD";
+  const priceAmount = hasNetAmount ? booking.netAmount : booking.grossAmount;
+  const priceDisplay = formatMoney(priceAmount, currency);
   const discountPercentValue = Number(booking.discountPercent || 0);
   const discountAmountValue = Number(booking.discountAmount || 0);
   const couponPercentValue = Number(booking.couponDiscountPercent || 0);
@@ -361,10 +343,10 @@ const buildBookingFieldGroups = (booking = {}) => {
   const couponType = String(booking.couponDiscountType || "").trim().toLowerCase();
   const couponValue = Number(booking.couponDiscountValue || 0);
   const couponSuffix =
-    couponPercentValue > 0 || couponAmountValue > 0
+    hasNetAmount && (couponPercentValue > 0 || couponAmountValue > 0)
       ? couponType === "fixed"
-        ? ` ($${formatMoney(couponValue || couponAmountValue)} off - $${formatMoney(couponAmountValue)})`
-        : ` (${couponPercentValue}% - $${formatMoney(couponAmountValue)})`
+        ? ` (${formatMoney(couponValue || couponAmountValue, currency)} off - ${formatMoney(couponAmountValue, currency)})`
+        : ` (${couponPercentValue}% - ${formatMoney(couponAmountValue, currency)})`
       : "";
   const couponDisplay = booking.couponCode
     ? `${booking.couponCode}${couponSuffix}`
@@ -376,9 +358,9 @@ const buildBookingFieldGroups = (booking = {}) => {
     {
       label: "Price",
       value:
-        Number(booking.netAmount || 0) < Number(booking.grossAmount || 0)
-          ? `$${formatMoney(booking.netAmount)} (was $${formatMoney(booking.grossAmount)})`
-          : booking.packagePrice || "-",
+        hasNetAmount && Number(booking.netAmount) < Number(booking.grossAmount || 0)
+          ? `${formatMoney(booking.netAmount, currency)} (was ${formatMoney(booking.grossAmount, currency)})`
+          : priceDisplay !== "-" ? priceDisplay : booking.packagePrice || "-",
     },
     { label: "Discord", value: booking.discord || "-" },
     { label: "Email", value: booking.email || booking.payerEmail || "-" },
@@ -391,31 +373,27 @@ const buildBookingFieldGroups = (booking = {}) => {
   ];
 
   const ownerDiscountFields = [];
-  if (discountPercentValue > 0 || discountAmountValue > 0) {
+  if (hasNetAmount && (discountPercentValue > 0 || discountAmountValue > 0)) {
     ownerDiscountFields.push({
       label: "Discount",
-      value: `${discountPercentValue}% ($${formatMoney(discountAmountValue)})`,
+      value: `${discountPercentValue}% (${formatMoney(discountAmountValue, currency)})`,
     });
   }
 
   const clientFields = [
-    { label: "Date", value: booking.displayDate || "-" },
-    { label: "Time", value: booking.displayTime || "-" },
-    ...(booking.localTimeZone
-      ? [{ label: "Time Zone", value: booking.localTimeZone }]
-      : []),
+    { label: "Date", value: appointment?.date || "Unavailable" },
+    { label: "Time", value: appointment?.time || "Unavailable" },
+    { label: "Time Zone", value: appointment?.timeZone || "Unavailable" },
     ...sharedCoreFields,
   ];
 
   const ownerFields = [
-    { label: "Client Date", value: booking.displayDate || "-" },
-    { label: "Client Time", value: booking.displayTime || "-" },
-    ...(booking.localTimeZone
-      ? [{ label: "Client Time Zone", value: booking.localTimeZone }]
-      : []),
-    { label: "Date", value: booking.hostDate || "-" },
-    { label: "Time", value: booking.hostTime || "-" },
-    { label: "Time Zone", value: booking.hostTimeZone || OWNER_TZ_NAME },
+    { label: "Client Date", value: appointment?.date || "Unavailable" },
+    { label: "Client Time", value: appointment?.time || "Unavailable" },
+    { label: "Client Time Zone", value: appointment?.timeZone || "Unavailable" },
+    { label: "Date", value: hostAppointment?.shortDate || "Unavailable" },
+    { label: "Time", value: hostAppointment?.time || "Unavailable" },
+    { label: "Time Zone", value: hostAppointment?.timeZone || "Unavailable" },
     ...ownerDiscountFields,
     ...sharedCoreFields,
   ];
@@ -428,6 +406,9 @@ const buildBookingFieldGroups = (booking = {}) => {
     bookingRef,
     clientFields,
     ownerFields,
+    ownerScheduleLabel: hostAppointment
+      ? `${hostAppointment.shortDate} ${hostAppointment.time}`
+      : "Unavailable",
   };
 };
 
@@ -598,14 +579,9 @@ export const sendBookingEmailsForBooking = async ({
   };
 
   const owner = await resolveBookingOwnerEmail(client);
-  const { siteName, logoUrl, bookingRef, clientFields, ownerFields } =
+  const { siteName, logoUrl, bookingRef, clientFields, ownerFields, ownerScheduleLabel } =
     buildBookingFieldGroups(resolvedBooking);
   const from = process.env.FROM_EMAIL;
-  const ownerScheduleLabel =
-    [resolvedBooking.hostDate, resolvedBooking.hostTime]
-      .map((value) => String(value || "").trim())
-      .filter(Boolean)
-      .join(" ") || "time TBD";
   const clientRecipient = String(
     resolvedBooking.email || resolvedBooking.payerEmail || ""
   ).trim();
@@ -682,7 +658,7 @@ export const sendBookingEmailsForBooking = async ({
             siteName,
             heading: "Booking Received",
             intro:
-              "To continue with your booking, please join the Roo Industries Discord using the button above. I'll contact you there (or by email if needed) to confirm your time and details.",
+              "To continue with your booking, please join the Roo Industries Discord using the button below. I'll contact you there (or by email if needed) to confirm your time and details.",
             fields: clientFields,
             discordInviteUrl: DISCORD_INVITE_URL,
           }),
@@ -752,7 +728,7 @@ export const sendBookingEmailsForBooking = async ({
         {
           from,
           to: owner,
-          subject: `New booking ${bookingRef} - ${resolvedBooking.packageTitle} (${ownerScheduleLabel})`,
+          subject: `New booking ${bookingRef} - ${String(resolvedBooking.packageTitle || "").trim() || "Unknown package"} (${ownerScheduleLabel})`,
           html: emailHtml({
             logoUrl,
             siteName,
@@ -1050,14 +1026,22 @@ export const dispatchRescheduleNotifications = async ({
   const from = String(process.env.FROM_EMAIL || "").trim();
   const deliveryEnabled = !!from && !!resend;
   const amount = formatMoney(
-    recoveryBooking.dodoTotalAmount || recoveryBooking.netAmount || recoveryBooking.grossAmount || 0
+    recoveryBooking.dodoTotalAmount ?? recoveryBooking.netAmount ?? recoveryBooking.grossAmount,
+    recoveryBooking.currency
   );
   const fields = [
     { label: "Order ID", value: recoveryBooking._id },
     { label: "Package", value: recoveryBooking.packageTitle || "-" },
-    { label: "Paid Amount", value: `$${amount}` },
+    { label: "Paid Amount", value: amount },
     ...formatRequestedTimeFields(recoveryBooking),
   ];
+  const hostAppointment = formatAppointmentTime(
+    recoveryBooking.originalRequestedStartTimeUTC,
+    OWNER_TZ_NAME
+  );
+  const ownerScheduleLabel = hostAppointment
+    ? `${hostAppointment.shortDate} ${hostAppointment.time}`
+    : "Unavailable";
   const patchValues = {
     recoveryNotificationLeaseId: "",
     recoveryNotificationLeaseExpiresAt: "",
@@ -1173,7 +1157,7 @@ export const dispatchRescheduleNotifications = async ({
           {
             from,
             to: owner,
-            subject: `Paid booking requires reschedule - ${recoveryBooking._id}`,
+            subject: `Paid booking requires reschedule - ${recoveryBooking._id} (${ownerScheduleLabel})`,
             html: emailHtml({
               logoUrl: resolveLogoUrl(),
               siteName,
@@ -1182,6 +1166,9 @@ export const dispatchRescheduleNotifications = async ({
                 "The payment was captured, but the original booking slot could not be reconstructed or is no longer available. Contact the customer and assign a new time.",
               fields: [
                 ...fields,
+                { label: "Host Date", value: hostAppointment?.shortDate || "Unavailable" },
+                { label: "Host Time", value: hostAppointment?.time || "Unavailable" },
+                { label: "Host Time Zone", value: hostAppointment?.timeZone || "Unavailable" },
                 { label: "Customer Email", value: customer || "Unavailable" },
                 {
                   label: "Recovery Reason",

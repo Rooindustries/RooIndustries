@@ -184,7 +184,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(email).toHaveValue('creator@fixture.invalid');
       await page.unroute('**/api/ref/forgot');
       await page.getByRole('button', { name: 'Send Reset Link', exact: true }).click();
-      await expect(page.locator('#main-content').getByRole('status')).toContainText('Reset link sent');
+      await expect(page.locator('#main-content').getByRole('status')).toHaveText('If email exists, link sent.');
       await expect(email).toHaveValue('');
       await record(page, testInfo, `announced-outcomes-${size}`);
     });

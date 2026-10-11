@@ -5,6 +5,7 @@ export default function Faq({ initialData = null }) {
   return (
     <>
       <Faqs
+        headingTag="h1"
         initialFaqCopy={initialData?.faqSettings || null}
         initialQuestions={initialData?.faqQuestions || null}
       />

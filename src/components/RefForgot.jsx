@@ -28,7 +28,7 @@ export default function RefForgot() {
       const data = await res.json();
 
       if (data.ok) {
-        showToast("success", "Reset link sent! Check your inbox.");
+        showToast("success", data.message);
         setEmail("");
       } else {
         showToast("error", data.error || "Failed to send link");

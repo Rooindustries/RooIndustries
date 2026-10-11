@@ -4,7 +4,7 @@ import { useContext, useEffect, useState } from "react";
 import { EditorContext } from "./FieldInput";
 import styles from "./ContentAdmin.module.css";
 
-export default function ReferenceInput({ field, value, onChange, readOnly, inputId, ariaLabel }) {
+export default function ReferenceInput({ field, value, onChange, readOnly, inputId, ariaLabel, inputAria }) {
   const { loadReferenceOptions } = useContext(EditorContext);
   const targets = Array.isArray(field.to) ? field.to : [];
   const [options, setOptions] = useState(null);
@@ -31,6 +31,7 @@ export default function ReferenceInput({ field, value, onChange, readOnly, input
   return (
     <div className={styles.referenceField}>
       <select
+        {...inputAria}
         id={inputId}
         aria-label={ariaLabel}
         className={styles.input}

@@ -138,9 +138,10 @@ export default function Contact({ initialData = null }) {
           className="p-6 rounded-lg w-full max-w-xl space-y-5 border border-line-input bg-surface-card backdrop-blur-sm"
         >
           <div>
-            <label className="block mb-1 font-semibold">Name</label>
+            <label htmlFor="contact-name" className="block mb-1 font-semibold">Name</label>
             <input
               type="text"
+              id="contact-name"
               name="name"
               placeholder="Your name"
               required
@@ -149,9 +150,10 @@ export default function Contact({ initialData = null }) {
             <ValidationError prefix="Name" field="name" errors={state.errors} />
           </div>
           <div>
-            <label className="block mb-1 font-semibold">Email</label>
+            <label htmlFor="contact-email" className="block mb-1 font-semibold">Email</label>
             <input
               type="email"
+              id="contact-email"
               name="email"
               placeholder="your.email@example.com"
               required
@@ -164,8 +166,9 @@ export default function Contact({ initialData = null }) {
             />
           </div>
           <div>
-            <label className="block mb-1 font-semibold">Message</label>
+            <label htmlFor="contact-message" className="block mb-1 font-semibold">Message</label>
             <textarea
+              id="contact-message"
               name="message"
               placeholder="Tell me about your PC and what you'd like to optimize..."
               rows="5"

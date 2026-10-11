@@ -51,6 +51,14 @@ async function run() {
       waitUntil: "domcontentloaded",
       timeout: 45000,
     });
+    await page.waitForFunction(
+      () =>
+        window.history.state?.__rooLegacy === true &&
+        document.body.innerText.trim() !== "Loading..." &&
+        document.querySelector("main")?.innerText.trim() !== "Loading...",
+      null,
+      { timeout: 15000 }
+    );
     const finalUrl = page.url();
     const status = response?.status() ?? 0;
     const title = await page.title();

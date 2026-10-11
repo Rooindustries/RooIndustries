@@ -14,14 +14,12 @@ import SalesTelemetry from "./components/SalesTelemetry";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import ReservationBanner from "./components/ReservationBanner";
 import IntercomMessenger from "./components/IntercomMessenger";
-import PerfDebugOverlay from "./components/PerfDebugOverlay";
+import { subscribePerfDebugChanges, syncPerfDebugFromEnvironment } from "./lib/perfDebug";
 import { initializePerformanceProfile } from "./lib/performanceProfile";
 import Home from "./legacyPages/Home";
 import AboutPage from "./legacyPages/About";
 import Packages from "./legacyPages/Packages";
-import Contact from "./legacyPages/Contact";
 import FaqPage from "./legacyPages/Faq";
-import Privacy from "./legacyPages/PrivacyPolicy";
 import {
   consumeRouteTransitionIntent,
   isHomeSectionHash,
@@ -31,7 +29,19 @@ import { sanitizeBrowserSearch } from "./lib/browserSearch";
 import { prefetchHomeSectionData } from "./lib/homeSectionData";
 import { whenUserInteracts } from "./lib/firstInteraction";
 import { migrateCheckoutStorageToSession } from "./lib/checkoutStorage";
+import { getPublicContent } from "./lib/publicContentClient";
 
+const Contact = lazy(() => import("./legacyPages/Contact"));
+const Privacy = lazy(async () => {
+  const [{ default: Page }, initialData] = await Promise.all([
+    import("./legacyPages/PrivacyPolicy"),
+    getPublicContent("privacy-policy").catch(() => null),
+  ]);
+  return { default: (props) => <Page {...props} initialData={props.initialData || initialData} /> };
+});
+const PerfDebugOverlay = lazy(() =>
+  import("./components/PerfDebugOverlay").catch(() => ({ default: () => null }))
+);
 const Reviews = lazy(() => import("./legacyPages/Reviews"));
 const Tools = lazy(() => import("./legacyPages/Tools"));
 const RefLogin = lazy(() => import("./legacyPages/RefLogin"));
@@ -127,6 +137,20 @@ const withRouteSuspense = (node, fallback = <RouteFallback />) => (
   <Suspense fallback={fallback}>{node}</Suspense>
 );
 
+const PerfDebugRuntime = () => {
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    const sync = () => {
+      if (syncPerfDebugFromEnvironment().enabled) setLoaded(true);
+    };
+    sync();
+    return subscribePerfDebugChanges(sync);
+  }, []);
+
+  return loaded ? withRouteSuspense(<PerfDebugOverlay />, null) : null;
+};
+
 function RedirectToDiscord() {
   React.useEffect(() => {
     window.location.href = "https://discord.com/invite/qs5HKNyazD";
@@ -140,15 +164,26 @@ function AnimatedRoutes({
   routeKey,
   initialHomeData,
   initialRouteData,
+  heroHeadingTag,
+  initialRouteContent,
+  initialRoutePath,
 }) {
   const baseLocation = useLocation();
   const location = routesLocation || baseLocation;
   const motionKey = routeKey || `${location.pathname}${location.search || ""}`;
+  const [initialEntryKey, setInitialEntryKey] = useState(baseLocation.key);
+  const initialContent = baseLocation.key === initialEntryKey ? initialRouteData : null;
+
+  useEffect(() => {
+    if (initialEntryKey !== null && baseLocation.key !== initialEntryKey) {
+      setInitialEntryKey(null);
+    }
+  }, [baseLocation.key, initialEntryKey]);
 
   return (
     <div key={motionKey} className="w-full flex flex-col flex-1">
         <Routes location={location}>
-          <Route path="/" element={<Home initialData={initialHomeData} />} />
+          <Route path="/" element={<Home initialData={initialHomeData} heroHeadingTag={heroHeadingTag} />} />
           <Route
             path="/packages"
             element={<Packages initialData={initialRouteData?.packages || null} />}
@@ -163,14 +198,14 @@ function AnimatedRoutes({
             )}
           />
           <Route path="/about" element={<AboutPage />} />
-          <Route path="/privacy" element={<Privacy initialData={initialRouteData?.privacy || null} />} />
+          <Route path="/privacy" element={initialRoutePath === "/privacy" && initialRouteContent ? initialRouteContent : <Privacy initialData={initialRouteData?.privacy || null} />} />
           <Route path="/terms" element={withRouteSuspense(<Terms />)} />
           <Route
             path="/reviews"
-            element={withRouteSuspense(<Reviews setIsModalOpen={setIsModalOpen} />)}
+            element={withRouteSuspense(<Reviews setIsModalOpen={setIsModalOpen} initialData={initialContent?.reviewsGallery || null} />)}
           />
           <Route path="/booking" element={withRouteSuspense(<Book />)} />
-          <Route path="/contact" element={<Contact initialData={initialRouteData?.contact || null} />} />
+          <Route path="/contact" element={initialRoutePath === "/contact" && initialRouteContent ? initialRouteContent : <Contact initialData={initialRouteData?.contact || null} />} />
           <Route
             path="/faq"
             element={<FaqPage initialData={initialHomeData} />}
@@ -185,7 +220,7 @@ function AnimatedRoutes({
           <Route
             path="/tools"
             element={withRouteSuspense(
-              <Tools initialData={initialRouteData?.tools || null} />
+              <Tools initialData={initialContent?.tools || null} />
             )}
           />
           <Route
@@ -248,6 +283,8 @@ function AnimatedRoutes({
 export function AppContent({
   initialHomeData = null,
   initialRouteData = null,
+  initialRouteContent = null,
+  initialRoutePath = null,
   routeShell = "browser",
 }) {
   const [, setIsModalOpen] = useState(false);
@@ -593,6 +630,9 @@ export function AppContent({
             routeKey={routesKey}
             initialHomeData={initialHomeData}
             initialRouteData={initialRouteData}
+            heroHeadingTag={isPaymentSuccessRoute || isThankYouRoute ? "h2" : "h1"}
+            initialRouteContent={initialRouteContent}
+            initialRoutePath={initialRoutePath}
           />
         </main>
       </div>
@@ -613,7 +653,7 @@ export function AppContent({
           </BookingModal>
         </Suspense>
       )}
-      <PerfDebugOverlay />
+      <PerfDebugRuntime />
     </>
   );
 }

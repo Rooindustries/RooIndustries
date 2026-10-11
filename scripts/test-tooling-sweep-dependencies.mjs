@@ -13,10 +13,10 @@ for(const [location,entry] of Object.entries(lock.packages)) {
   const actual=JSON.parse(fs.readFileSync(`${location}/package.json`,"utf8"));assert.equal(actual.version,entry.version,location);installed.push({location,version:actual.version});
 }
 evidence.push({check:"installed-root-lock-consistency",installed});
-assert.equal(manifest.dependencies.sharp,"0.35.4");assert.equal(JSON.parse(fs.readFileSync("node_modules/sharp/package.json", "utf8")).version,"0.35.4");
+assert.equal(manifest.dependencies.sharp,"0.35.5");assert.equal(JSON.parse(fs.readFileSync("node_modules/sharp/package.json", "utf8")).version,"0.35.5");
 for(const name of ["@sanity/client","@sanity/image-url"])assert.equal(lock.packages[`node_modules/${name}`],undefined);
 assert.ok(manifest.dependencies["groq-js"]);assert.ok(manifest.dependencies["@portabletext/react"]);assert.equal(fs.existsSync("rooindustries"),false);
-evidence.push({check:"native-direct-sharp-and-vendor-retirement",sharp:"0.35.4"});
+evidence.push({check:"native-direct-sharp-and-vendor-retirement",sharp:"0.35.5"});
 const expansion=require("brace-expansion");assert.deepEqual(expansion("a{b,c}d"),["abd","acd"]);
 const started=performance.now(),bounded=expansion("{a}"+"}".repeat(128000)+",z}");assert.ok(Array.isArray(bounded));const elapsedMs=performance.now()-started;assert.ok(elapsedMs<5000);
 evidence.push({check:"brace-expansion-documented-boundary",literalClosingBraces:128000,elapsedMs,outputs:bounded.length});

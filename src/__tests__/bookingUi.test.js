@@ -195,6 +195,7 @@ const installDefaultFetch = ({
       const referral = referrals[code];
       return {
         ok: true,
+        status: 200,
         json: async () =>
           referral
             ? { ok: true, referral }
@@ -208,6 +209,7 @@ const installDefaultFetch = ({
       const coupon = coupons[code];
       return {
         ok: true,
+        status: 200,
         json: async () =>
           coupon
             ? { ok: true, coupon }
@@ -221,16 +223,18 @@ const installDefaultFetch = ({
     if (String(url).startsWith("/api/content/package")) {
       return {
         ok: true,
+        status: 200,
         json: async () => ({ ok: true, data: packageData }),
       };
     }
     if (url === "/api/bookingAvailability") {
       return {
         ok: true,
+        status: 200,
         json: async () => ({ ok: true, settings, bookedSlots }),
       };
     }
-    return { ok: true, json: async () => ({ ok: true }) };
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
   });
 };
 
@@ -306,6 +310,7 @@ describe("booking calendar UI", () => {
       if (url === "/api/holdSlot") {
         return {
           ok: true,
+          status: 200,
           json: async () => ({
             ok: true,
             holdId: "hold_minute_precision",
@@ -448,6 +453,7 @@ describe("booking calendar UI", () => {
       if (url === "/api/bookingAvailability") {
         return {
           ok: true,
+          status: 200,
           json: async () => ({
             ok: true,
             settings,
@@ -459,6 +465,7 @@ describe("booking calendar UI", () => {
         holdRequestBody = JSON.parse(options.body || "{}");
         return {
           ok: true,
+          status: 200,
           json: async () => ({
             ok: true,
             holdId: "hold_ui_1",
@@ -470,10 +477,11 @@ describe("booking calendar UI", () => {
       if (url === "/api/releaseHold") {
         return {
           ok: true,
+          status: 200,
           json: async () => ({ ok: true }),
         };
       }
-      return { ok: true, json: async () => ({ ok: true }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
     });
 
     __setMockLocation({
@@ -532,13 +540,14 @@ describe("booking calendar UI", () => {
       if (url === "/api/bookingAvailability") {
         return {
           ok: true,
+          status: 200,
           json: async () => ({ ok: true, settings, bookedSlots: [] }),
         };
       }
       if (url === "/api/holdSlot") {
         return waitForAbort(options.signal);
       }
-      return { ok: true, json: async () => ({ ok: true }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
     });
     setBookingLocation();
 
@@ -594,6 +603,7 @@ describe("booking calendar UI", () => {
       if (url === "/api/bookingAvailability") {
         return {
           ok: true,
+          status: 200,
           json: async () => ({ ok: true, settings, bookedSlots: [] }),
         };
       }
@@ -603,6 +613,7 @@ describe("booking calendar UI", () => {
       if (url === "/api/holdSlot") {
         return {
           ok: true,
+          status: 200,
           json: async () => ({
             ok: true,
             holdId: "hold_replacement_1",
@@ -611,7 +622,7 @@ describe("booking calendar UI", () => {
           }),
         };
       }
-      return { ok: true, json: async () => ({ ok: true }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
     });
     setBookingLocation();
 
@@ -650,6 +661,321 @@ describe("booking calendar UI", () => {
     expect(abortTimeoutSpy).toHaveBeenNthCalledWith(2, 8_000);
   });
 
+  test("same-slot payment pending keeps credentials and returns to details", async () => {
+    seedBookingSession({ step: 1, holdPhase: "payment_pending" });
+    const originalHold = {
+      ...JSON.parse(sessionStorage.getItem("my_slot_hold")),
+      packageTitle: ESSENTIALS_PACKAGE.title,
+    };
+    sessionStorage.setItem("my_slot_hold", JSON.stringify(originalHold));
+    installDefaultFetch({
+      settings: { dateSlots: [{ date: "2099-01-05", times: ["10:00", "11:00"] }] },
+    });
+    setBookingLocation();
+    render(<BookingForm />);
+    await userEvent.click(await screen.findByRole("button", {
+      name: formatLocalTime(new Date(FUTURE_SLOT), "America/Los_Angeles"),
+    }));
+    await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
+
+    expect(await screen.findByLabelText("Booking email")).toHaveValue(VALID_FORM.email);
+    expect(screen.getByText("Your payment session is already in progress. Return to payment to finish it.")).toBeInTheDocument();
+    expectActiveStep("PC details", "Step 2 of 3");
+    expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toEqual(originalHold);
+    expect(global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot")).toHaveLength(0);
+    expect(global.fetch.mock.calls.filter(([url]) => url === "/api/releaseHold")).toHaveLength(0);
+  });
+
+  test.each([429, 503, "non-json", "unknown"])("same-slot refresh %s keeps credentials and retries successfully", async (failure) => {
+    consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    seedBookingSession();
+    const originalHold = JSON.parse(sessionStorage.getItem("my_slot_hold"));
+    installDefaultFetch({
+      settings: { dateSlots: [{ date: "2099-01-05", times: ["10:00", "11:00"] }] },
+    });
+    const defaultFetch = global.fetch.getMockImplementation();
+    let failed = false;
+    global.fetch.mockImplementation(async (url, options = {}) => {
+      if (url !== "/api/holdSlot") return defaultFetch(url, options);
+      if (!failed) {
+        failed = true;
+        return {
+          ok: failure === "unknown",
+          status: failure === "unknown" ? 200 : failure === "non-json" ? 502 : failure,
+          json: async () => {
+            if (failure === "non-json") throw new SyntaxError("Not JSON");
+            return { ok: false, message: "Temporarily unavailable." };
+          },
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, holdId: originalHold.holdId, holdToken: "refreshed-token", expiresAt: FUTURE_EXPIRY }),
+      };
+    });
+    setBookingLocation();
+    render(<BookingForm />);
+    await userEvent.click(await screen.findByRole("button", { name: /^back$/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /^next$/i }));
+
+    expect(await screen.findByText(/could not reserve.*try again/i)).toBeInTheDocument();
+    expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toEqual(originalHold);
+    await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
+    expect(await screen.findByLabelText("Booking email")).toHaveValue(VALID_FORM.email);
+    expect(screen.getByLabelText("PC specifications")).toHaveValue(VALID_FORM.specs);
+    expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toMatchObject({ holdId: originalHold.holdId, holdToken: "refreshed-token" });
+    const calls = global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot");
+    expect(calls).toHaveLength(2);
+    expect(JSON.parse(calls[1][1].body)).toMatchObject({
+      startTimeUTC: originalHold.startTimeUTC,
+      previousHoldId: originalHold.holdId,
+      previousHoldToken: originalHold.holdToken,
+    });
+    expect(global.fetch.mock.calls.filter(([url]) => url === "/api/releaseHold")).toHaveLength(0);
+  });
+
+  test("same-slot refresh 403 clears the refused hold and shows the server message", async () => {
+    seedBookingSession();
+    installDefaultFetch({
+      settings: { dateSlots: [{ date: "2099-01-05", times: ["10:00", "11:00"] }] },
+    });
+    const defaultFetch = global.fetch.getMockImplementation();
+    global.fetch.mockImplementation(async (url, options = {}) => {
+      if (url !== "/api/holdSlot") return defaultFetch(url, options);
+      return { ok: false, status: 403, json: async () => ({ ok: false, message: "Invalid hold token" }) };
+    });
+    setBookingLocation();
+    render(<BookingForm />);
+    await userEvent.click(await screen.findByRole("button", { name: /^back$/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /^next$/i }));
+
+    expect(await screen.findByText("Invalid hold token")).toBeInTheDocument();
+    expect(sessionStorage.getItem("my_slot_hold")).toBeNull();
+    expect(screen.queryByLabelText("Booking email")).not.toBeInTheDocument();
+  });
+
+  test.each([
+    [200, "json", false],
+    [400, "json", false],
+    [403, "json", false],
+    [404, "json", false],
+    [408, "json", true],
+    [409, "json", true],
+    [410, "json", false],
+    [422, "json", false],
+    [425, "json", true],
+    [429, "json", true],
+    [503, "json", true],
+    [200, "unknown", true],
+    [502, "non-json", true],
+    [403, "non-json", true],
+    [409, "non-json", true],
+  ])("release %s with %s response retains hold: %s", async (status, body, keep) => {
+    consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    seedBookingSession();
+    const originalHold = JSON.parse(sessionStorage.getItem("my_slot_hold"));
+    installDefaultFetch();
+    const defaultFetch = global.fetch.getMockImplementation();
+    global.fetch.mockImplementation(async (url, options = {}) => {
+      if (url !== "/api/releaseHold") return defaultFetch(url, options);
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        json: async () => {
+          if (body === "non-json") throw new SyntaxError("Not JSON");
+          return { ok: status === 200 && body === "json" };
+        },
+      };
+    });
+    setBookingLocation();
+    render(<BookingForm />);
+    await userEvent.click(await screen.findByRole("button", { name: /^release slot$/i }));
+    if (keep) {
+      expect(await screen.findByText(/could not release.*try again/i)).toBeInTheDocument();
+      expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toEqual(originalHold);
+      expect(screen.getByLabelText("Booking email")).toHaveValue(VALID_FORM.email);
+    } else {
+      await waitFor(() => expect(sessionStorage.getItem("my_slot_hold")).toBeNull());
+      await waitFor(() => expect(screen.queryByLabelText("Booking email")).not.toBeInTheDocument());
+    }
+  });
+
+  test("refused refresh then Next shows the empty-selection error", async () => {
+    seedBookingSession();
+    installDefaultFetch({ settings: { dateSlots: [{ date: "2099-01-05", times: ["10:00", "11:00"] }] } });
+    const defaultFetch = global.fetch.getMockImplementation();
+    global.fetch.mockImplementation(async (url, options = {}) => url === "/api/holdSlot"
+      ? { ok: false, status: 409, json: async () => ({ ok: false, message: "This slot is currently reserved by someone else." }) }
+      : defaultFetch(url, options));
+    setBookingLocation();
+    render(<BookingForm />);
+    await userEvent.click(await screen.findByRole("button", { name: /^back$/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /^next$/i }));
+    expect(await screen.findByText("This slot is currently reserved by someone else.")).toBeInTheDocument();
+    expect(sessionStorage.getItem("my_slot_hold")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
+    expect(await screen.findByText("Please select a date and time before continuing.")).toBeInTheDocument();
+  });
+
+  test.each(["This hold belongs to an active payment session.", "Hold changed before it could be released"])("release 409 keeps credentials and retries: %s", async (message) => {
+    seedBookingSession();
+    const original = JSON.parse(sessionStorage.getItem("my_slot_hold"));
+    installDefaultFetch();
+    const defaultFetch = global.fetch.getMockImplementation();
+    let refused = true;
+    global.fetch.mockImplementation(async (url, options = {}) => url === "/api/releaseHold" && refused
+      ? { ok: false, status: 409, json: async () => ({ ok: false, message }) }
+      : defaultFetch(url, options));
+    setBookingLocation();
+    render(<BookingForm />);
+    await userEvent.click(await screen.findByRole("button", { name: /^release slot$/i }));
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toEqual(original);
+    expect(screen.getByLabelText("Booking email")).toHaveValue(VALID_FORM.email);
+    refused = false;
+    await userEvent.click(screen.getByRole("button", { name: /^release slot$/i }));
+    await waitFor(() => expect(sessionStorage.getItem("my_slot_hold")).toBeNull());
+  });
+
+  test("clears a confirmed release before a replacement returns 409", async () => {
+    seedBookingSession({ step: 2 });
+    const originalHold = JSON.parse(sessionStorage.getItem("my_slot_hold"));
+    let storedAtReplacement;
+    installDefaultFetch({
+      settings: { dateSlots: [{ date: "2099-01-05", times: ["10:00", "11:00"] }] },
+    });
+    const defaultFetch = global.fetch.getMockImplementation();
+    global.fetch.mockImplementation(async (url, options = {}) => {
+      if (url === "/api/releaseHold") return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      if (url === "/api/holdSlot") {
+        storedAtReplacement = sessionStorage.getItem("my_slot_hold");
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({ ok: false, message: "The replacement slot is already held." }),
+        };
+      }
+      return defaultFetch(url, options);
+    });
+    setBookingLocation();
+    render(<BookingForm />);
+    await userEvent.click(await screen.findByRole("button", { name: /^back$/i }));
+    await userEvent.click(await screen.findByRole("button", {
+      name: formatLocalTime(getUtcFromHostLocal(2099, 0, 5, 11), "America/Los_Angeles"),
+    }));
+    await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
+
+    expect(await screen.findByText("The replacement slot is already held.")).toBeInTheDocument();
+    expect(storedAtReplacement).toBeNull();
+    expect(sessionStorage.getItem("my_slot_hold")).toBeNull();
+    expect(screen.queryByLabelText("Booking email")).not.toBeInTheDocument();
+    const holdCalls = global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot");
+    expect(holdCalls).toHaveLength(1);
+    expect(JSON.parse(holdCalls[0][1].body)).toMatchObject({
+      previousHoldId: originalHold.holdId,
+      previousHoldToken: originalHold.holdToken,
+    });
+  });
+
+  test.each(["active", "released", "taken"])("revalidates the %s original slot after release times out and its replacement returns 409", async (originalState) => {
+    const controllers = [];
+    abortTimeoutSpy = jest
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation(() => {
+        const controller = new AbortController();
+        controllers.push(controller);
+        return controller.signal;
+      });
+    consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    seedBookingSession({ step: 2 });
+    const originalHold = JSON.parse(sessionStorage.getItem("my_slot_hold"));
+    installDefaultFetch({
+      settings: { dateSlots: [{ date: "2099-01-05", times: ["10:00", "11:00"] }] },
+      bookedSlots: [{ startTimeUTC: FUTURE_SLOT, isHold: true, holdId: originalHold.holdId }],
+    });
+    const defaultFetch = global.fetch.getMockImplementation();
+    let holdRequests = 0;
+    const verifiedHold = {
+      ok: true,
+      holdId: originalState === "active" ? originalHold.holdId : "fresh_original_hold",
+      holdToken: "verified_original_token",
+      expiresAt: FUTURE_EXPIRY,
+    };
+    global.fetch.mockImplementation(async (url, options = {}) => {
+      if (url === "/api/releaseHold") return waitForAbort(options.signal);
+      if (url === "/api/holdSlot") {
+        holdRequests += 1;
+        if (holdRequests > 1 && originalState !== "taken") {
+          return { ok: true, status: 200, json: async () => verifiedHold };
+        }
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({ ok: false, message: holdRequests === 1
+            ? "The replacement slot is already held."
+            : "This slot is currently reserved by someone else." }),
+        };
+      }
+      return defaultFetch(url, options);
+    });
+    setBookingLocation();
+    render(<BookingForm />);
+    await userEvent.click(await screen.findByRole("button", { name: /^back$/i }));
+    await userEvent.click(await screen.findByRole("button", {
+      name: formatLocalTime(getUtcFromHostLocal(2099, 0, 5, 11), "America/Los_Angeles"),
+    }));
+    await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
+    await waitFor(() => expect(controllers).toHaveLength(1));
+    await act(async () => {
+      controllers[0].abort();
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByText("The replacement slot is already held.")).toBeInTheDocument();
+    expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toEqual(originalHold);
+    const holdCalls = global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot");
+    expect(holdCalls).toHaveLength(1);
+    expect(JSON.parse(holdCalls[0][1].body)).toMatchObject({
+      previousHoldId: originalHold.holdId,
+      previousHoldToken: originalHold.holdToken,
+    });
+    expect(abortTimeoutSpy).toHaveBeenCalledTimes(2);
+    expect(abortTimeoutSpy).toHaveBeenNthCalledWith(1, 8_000);
+    expect(abortTimeoutSpy).toHaveBeenNthCalledWith(2, 8_000);
+
+    const originalSlot = screen.getByRole("button", {
+      name: formatLocalTime(new Date(FUTURE_SLOT), "America/Los_Angeles"),
+    });
+    expect(originalSlot).toBeEnabled();
+    await userEvent.click(originalSlot);
+    await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
+    await waitFor(() => expect(global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot")).toHaveLength(2));
+    const revalidation = global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot")[1];
+    expect(JSON.parse(revalidation[1].body)).toMatchObject({
+      startTimeUTC: originalHold.startTimeUTC,
+      previousHoldId: originalHold.holdId,
+      previousHoldToken: originalHold.holdToken,
+    });
+    expect(global.fetch.mock.calls.filter(([url]) => url === "/api/releaseHold")).toHaveLength(1);
+    expect(abortTimeoutSpy).toHaveBeenCalledTimes(3);
+    expect(abortTimeoutSpy).toHaveBeenNthCalledWith(3, 8_000);
+    if (originalState === "taken") {
+      expect(await screen.findByText("This slot is currently reserved by someone else.")).toBeInTheDocument();
+      expect(sessionStorage.getItem("my_slot_hold")).toBeNull();
+      expect(screen.queryByLabelText("Booking email")).not.toBeInTheDocument();
+    } else {
+      expect(await screen.findByLabelText("Booking email")).toHaveValue(VALID_FORM.email);
+      expect(screen.getByLabelText("PC specifications")).toHaveValue(VALID_FORM.specs);
+      expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toMatchObject({
+        holdId: verifiedHold.holdId,
+        holdToken: verifiedHold.holdToken,
+        expiresAt: verifiedHold.expiresAt,
+        startTimeUTC: originalHold.startTimeUTC,
+      });
+    }
+  });
+
   test("re-enables payment release after the cancel request times out", async () => {
     const controller = new AbortController();
     abortTimeoutSpy = jest
@@ -664,6 +990,7 @@ describe("booking calendar UI", () => {
       if (url === "/api/bookingAvailability") {
         return {
           ok: true,
+          status: 200,
           json: async () => ({
             ok: true,
             settings: { dateSlots: [] },
@@ -674,7 +1001,7 @@ describe("booking calendar UI", () => {
       if (url === "/api/payment/cancel") {
         return waitForAbort(options.signal);
       }
-      return { ok: true, json: async () => ({ ok: true }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
     });
     setBookingLocation();
 
@@ -751,6 +1078,7 @@ describe("booking calendar UI", () => {
       if (String(url).startsWith("/api/content/package")) {
         return {
           ok: true,
+          status: 200,
           json: async () => ({
             ok: true,
             data: {
@@ -763,6 +1091,7 @@ describe("booking calendar UI", () => {
       if (url === "/api/bookingAvailability") {
         return {
           ok: true,
+          status: 200,
           json: async () => ({
             ok: true,
             settings: { dateSlots: [] },
@@ -776,6 +1105,7 @@ describe("booking calendar UI", () => {
         );
         return {
           ok: true,
+          status: 200,
           json: async () => ({
             ok: true,
             cancelled: true,
@@ -788,7 +1118,7 @@ describe("booking calendar UI", () => {
           }),
         };
       }
-      return { ok: true, json: async () => ({ ok: true }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
     });
 
     __setMockLocation({
@@ -867,12 +1197,14 @@ describe("booking calendar UI", () => {
       if (String(url).startsWith("/api/content/package")) {
         return {
           ok: true,
+          status: 200,
           json: async () => ({ ok: true, data: OVERHAUL_PACKAGE }),
         };
       }
       if (url === "/api/bookingAvailability") {
         return {
           ok: true,
+          status: 200,
           json: async () => ({
             ok: true,
             settings: { dateSlots: [] },
@@ -886,7 +1218,7 @@ describe("booking calendar UI", () => {
           json: async () => ({ error: "Payment cancellation was rejected." }),
         };
       }
-      return { ok: true, json: async () => ({ ok: true }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
     });
     setBookingLocation();
 
@@ -977,6 +1309,7 @@ describe("booking calendar UI", () => {
       if (String(url).startsWith("/api/content/package")) {
         return {
           ok: true,
+          status: 200,
           json: async () => ({
             ok: true,
             data: {
@@ -990,6 +1323,7 @@ describe("booking calendar UI", () => {
       if (url === "/api/bookingAvailability") {
         return {
           ok: true,
+          status: 200,
           json: async () => ({
             ok: true,
             settings: { dateSlots: [] },
@@ -997,7 +1331,7 @@ describe("booking calendar UI", () => {
           }),
         };
       }
-      return { ok: true, json: async () => ({ ok: true }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
     });
     __setMockLocation({
       pathname: "/booking",
@@ -1027,6 +1361,7 @@ describe("booking calendar UI", () => {
       if (url === "/api/bookingAvailability") {
         return {
           ok: true,
+          status: 200,
           json: async () => ({
             ok: true,
             settings: { dateSlots: [{ date: "2099-01-05", times: ["10:00"] }] },
@@ -1037,6 +1372,7 @@ describe("booking calendar UI", () => {
       if (url === "/api/holdSlot") {
         return {
           ok: true,
+          status: 200,
           json: async () => ({
             ok: true,
             holdId: "hold_tracker_1",
@@ -1045,7 +1381,7 @@ describe("booking calendar UI", () => {
           }),
         };
       }
-      return { ok: true, json: async () => ({ ok: true }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
     });
     setBookingLocation();
 
@@ -1385,6 +1721,45 @@ describe("booking calendar UI", () => {
     });
   });
 
+  test.each(["referral", "coupon"])("restored %s survives unavailable validation and applies on retry", async (type) => {
+    const checkoutCodes = {
+      referral: type === "referral" ? CREATOR_REFERRAL : null,
+      coupon: type === "coupon" ? FIXED_COUPON : null,
+      dismissedReferralCode: "",
+    };
+    seedBookingSession({ step: 3, checkoutCodes });
+    if (type === "referral") sessionStorage.setItem("referral_session", "creator");
+    installDefaultFetch({ referrals: { creator: CREATOR_REFERRAL }, coupons: { save10: FIXED_COUPON } });
+    const defaultFetch = global.fetch.getMockImplementation();
+    let unavailable = true;
+    global.fetch.mockImplementation(async (url, options = {}) => String(url).startsWith(type === "referral" ? "/api/ref/validateReferral" : "/api/ref/validateCoupon") && unavailable
+      ? { ok: false, status: 503, json: async () => ({ error: "Temporarily unavailable." }) }
+      : defaultFetch(url, options));
+    setBookingLocation();
+    render(<BookingForm />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/validation.*unavailable/i);
+    expect(JSON.parse(sessionStorage.getItem("booking_draft")).packages[OVERHAUL_PACKAGE.title].checkoutCodes).toEqual(checkoutCodes);
+    if (type === "referral") expect(sessionStorage.getItem("referral_session")).toBe("creator");
+    expect(screen.getByRole("button", { name: /^pay \$54\.95$/i })).toBeEnabled();
+    unavailable = false;
+    await userEvent.click(screen.getByRole("button", { name: /^apply$/i }));
+    expect(await screen.findByRole("button", { name: `Remove ${type} code ${type === "referral" ? "creator" : "SAVE10"}` })).toBeInTheDocument();
+  });
+
+  test("stored referral session survives unavailable automatic validation", async () => {
+    seedBookingSession({ step: 3 });
+    sessionStorage.setItem("referral_session", "creator");
+    installDefaultFetch();
+    const defaultFetch = global.fetch.getMockImplementation();
+    global.fetch.mockImplementation(async (url, options = {}) => String(url).startsWith("/api/ref/validateReferral")
+      ? { ok: false, status: 503, json: async () => ({ error: "Temporarily unavailable." }) }
+      : defaultFetch(url, options));
+    setBookingLocation();
+    render(<BookingForm />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/validation.*unavailable/i);
+    expect(sessionStorage.getItem("referral_session")).toBe("creator");
+  });
+
   test("drops a restored coupon that no longer validates", async () => {
     seedBookingSession({
       step: 3,
@@ -1568,6 +1943,7 @@ describe("booking calendar UI", () => {
       if (url === "/api/bookingAvailability") {
         return {
           ok: true,
+          status: 200,
           json: async () => ({
             ok: true,
             settings: {
@@ -1592,6 +1968,7 @@ describe("booking calendar UI", () => {
         holdRequestBody = JSON.parse(options.body || "{}");
         return {
           ok: true,
+          status: 200,
           json: async () => ({
             ok: true,
             holdId: "hold_earliest_1",
@@ -1600,7 +1977,7 @@ describe("booking calendar UI", () => {
           }),
         };
       }
-      return { ok: true, json: async () => ({ ok: true }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
     });
     setBookingLocation();
 

@@ -28,6 +28,7 @@ import { EditorContext, ObjectFields } from "./FieldInput";
 import RevisionHistory from "./RevisionHistory";
 import { clearDraft, draftKey, listNewDrafts, readDraft, saveDraft } from "./draftStore";
 import { contentErrorLabel, getIn, indexErrors, newUuid, resolveStablePath, setIn, stableJson, toStablePath } from "./documentPaths";
+import { hasCommittedCreateReceipt, publishedContentMatches, removedContentPaths } from "./publishStatus";
 
 const GROUPS = [
   { id: "site", title: "Site content" },
@@ -77,12 +78,15 @@ export default function ContentAdmin() {
   const [conflict, setConflict] = useState(null);
   const [recovery, setRecovery] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [pendingPublication, setPendingPublication] = useState(null);
+  const [locking, setLocking] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [uploadsInFlight, setUploadsInFlight] = useState(0);
 
   const referenceCache = useRef(new Map());
   const listRequest = useRef({});
-  const documentRequest = useRef(0);
+  const selection = useRef(0);
+  const editorState = useRef(null);
   const workingRef = useRef(null);
   const sessionKeyRef = useRef("");
 
@@ -90,11 +94,30 @@ export default function ContentAdmin() {
   const baseline = session?.baseline ?? null;
   const dirty = Boolean(session && working && stableJson(working) !== stableJson(baseline));
   const currentDraftKey = session ? draftKey(session) : null;
+  const generation = selection.current;
+  editorState.current = { session, working, assets, dirty, currentDraftKey, locking, saving, pendingPublication };
   workingRef.current = working;
-  sessionKeyRef.current = session ? `${session.documentId || session.createIntentId}:${loadVersion}` : "";
+  sessionKeyRef.current = session ? `${generation}:${session.documentId || session.createIntentId}:${loadVersion}` : "";
+
+  const isCurrentSelection = useCallback((value) => value === selection.current, []);
+  const advanceSelection = useCallback(() => {
+    selection.current += 1;
+    sessionKeyRef.current = "";
+    referenceCache.current.clear();
+    setSaving(false);
+    setPendingPublication(null);
+    setUploadsInFlight(0);
+    setLoadingDocument(false);
+    setHistoryOpen(false);
+    return selection.current;
+  }, []);
+
+  useEffect(() => () => { selection.current += 1; }, []);
 
   const handleAuthFailure = useCallback((error) => {
     if (error instanceof AdminApiError && (error.status === 401 || error.code === "ADMIN_NOT_CONFIGURED")) {
+      advanceSelection();
+      setLocking(false);
       setUnlocked(false);
       setGateError(
         error.code === "ADMIN_NOT_CONFIGURED"
@@ -104,11 +127,12 @@ export default function ContentAdmin() {
       return true;
     }
     return false;
-  }, []);
+  }, [advanceSelection]);
 
   const loadList = useCallback(
     async (name, { force = false } = {}) => {
       if (!name) return null;
+      const selectedGeneration = selection.current;
       const requestId = (listRequest.current[name] || 0) + 1;
       listRequest.current[name] = requestId;
       setLists((current) => ({
@@ -117,58 +141,64 @@ export default function ContentAdmin() {
       }));
       try {
         const data = await api.listDocuments(name);
-        if (listRequest.current[name] !== requestId) return null;
+        if (!isCurrentSelection(selectedGeneration) || listRequest.current[name] !== requestId) return null;
         const items = (Array.isArray(data?.documents) ? data.documents : [])
           .slice()
           .sort((left, right) => String(right._updatedAt || "").localeCompare(String(left._updatedAt || "")));
         setLists((current) => ({ ...current, [name]: { loading: false, error: "", items } }));
+        setBanner((current) => current?.retry?.kind === "list" && current.retry.name === name ? null : current);
         if (force) referenceCache.current.delete(name);
         return items;
       } catch (error) {
-        if (listRequest.current[name] !== requestId) return null;
+        if (!isCurrentSelection(selectedGeneration) || listRequest.current[name] !== requestId) return null;
         if (!handleAuthFailure(error)) {
           setLists((current) => ({
             ...current,
             [name]: { ...(current[name] || {}), loading: false, error: error.message },
           }));
+          setBanner({ tone: "error", text: error.message, retry: { kind: "list", name } });
         }
         return null;
       }
     },
-    [api, handleAuthFailure]
+    [api, handleAuthFailure, isCurrentSelection]
   );
 
   const loadReferenceOptions = useCallback(
     async (targets) => {
+      const selectedGeneration = selection.current;
       const results = [];
       for (const target of targets) {
         if (!referenceCache.current.has(target)) {
           referenceCache.current.set(
             target,
-            api.listDocuments(target).then((data) =>
-              (data?.documents || []).map((entry) => ({
+            api.listDocuments(target).then((data) => {
+              if (!isCurrentSelection(selectedGeneration)) throw Object.assign(new Error("The document changed."), { name: "AbortError" });
+              return (data?.documents || []).map((entry) => ({
                 _id: entry._id,
                 _type: entry._type || target,
                 title: entry.preview?.title || entry._id,
-              }))
-            )
+              }));
+            })
           );
         }
         try {
-          results.push(...(await referenceCache.current.get(target)));
+          const options = await referenceCache.current.get(target);
+          if (!isCurrentSelection(selectedGeneration)) throw Object.assign(new Error("The document changed."), { name: "AbortError" });
+          results.push(...options);
         } catch (error) {
-          referenceCache.current.delete(target);
+          if (isCurrentSelection(selectedGeneration)) referenceCache.current.delete(target);
           throw error;
         }
       }
       return results;
     },
-    [api]
+    [api, isCurrentSelection]
   );
 
   const registerAsset = useCallback((ref, meta) => {
-    setAssets((current) => ({ ...current, [ref]: meta }));
-  }, []);
+    if (isCurrentSelection(generation)) setAssets((current) => ({ ...current, [ref]: meta }));
+  }, [generation, isCurrentSelection]);
 
   const captureEditTarget = useCallback(
     (path) => ({ sessionKey: sessionKeyRef.current, stablePath: toStablePath(workingRef.current, path) }),
@@ -180,18 +210,25 @@ export default function ContentAdmin() {
     const path = resolveStablePath(workingRef.current, target.stablePath);
     if (!path) return false;
     setWorking((current) => {
+      if (target.sessionKey !== sessionKeyRef.current) return current;
       const resolved = resolveStablePath(current, target.stablePath);
       return resolved ? setIn(current, resolved, updater(getIn(current, resolved))) : current;
     });
     return true;
   }, []);
 
-  const beginUpload = useCallback(() => setUploadsInFlight((count) => count + 1), []);
-  const endUpload = useCallback(() => setUploadsInFlight((count) => Math.max(0, count - 1)), []);
+  const beginUpload = useCallback(() => {
+    if (isCurrentSelection(generation)) setUploadsInFlight((count) => count + 1);
+  }, [generation, isCurrentSelection]);
+  const endUpload = useCallback(() => {
+    if (isCurrentSelection(generation)) setUploadsInFlight((count) => Math.max(0, count - 1));
+  }, [generation, isCurrentSelection]);
 
-  const confirmDiscard = () =>
-    !dirty ||
-    window.confirm("You have unpublished changes. They are kept as a local draft on this device. Leave this document?");
+  const confirmDiscard = () => {
+    if (!editorState.current.dirty) return true;
+    if (!window.confirm("You have unpublished changes. They are kept as a local draft on this device. Leave this document?")) return false;
+    return flushDraft() || window.confirm("Your draft could not be saved in this browser. Leave and lose these edits?");
+  };
 
   const resetEditorState = () => {
     setErrors([]);
@@ -204,9 +241,12 @@ export default function ContentAdmin() {
 
   const openDocument = useCallback(
     async (documentId, { keepNotice = false } = {}) => {
-      const requestId = documentRequest.current + 1;
-      documentRequest.current = requestId;
+      if (editorState.current.locking) return;
+      const selectedGeneration = advanceSelection();
       setLoadingDocument(true);
+      setSession(null);
+      setWorking(null);
+      setPane("editor");
       setErrors([]);
       setConflict(null);
       setRecovery(null);
@@ -215,7 +255,7 @@ export default function ContentAdmin() {
       setBanner(null);
       try {
         const data = await api.getDocument(documentId);
-        if (requestId !== documentRequest.current) return;
+        if (!isCurrentSelection(selectedGeneration)) return;
         const document = data?.document;
         if (!document || typeof document !== "object") throw new Error("The document could not be loaded.");
         const nextSession = {
@@ -237,16 +277,18 @@ export default function ContentAdmin() {
         }
         setPane("editor");
       } catch (error) {
-        if (requestId !== documentRequest.current) return;
-        if (!handleAuthFailure(error)) setBanner({ tone: "error", text: error.message });
+        if (!isCurrentSelection(selectedGeneration)) return;
+        if (!handleAuthFailure(error)) setBanner({ tone: "error", text: error.message, retry: { kind: "document", documentId } });
       } finally {
-        if (requestId === documentRequest.current) setLoadingDocument(false);
+        if (isCurrentSelection(selectedGeneration)) setLoadingDocument(false);
       }
     },
-    [api, handleAuthFailure]
+    [api, handleAuthFailure, isCurrentSelection, advanceSelection]
   );
 
   const startNewDocument = (name, resume = null) => {
+    if (editorState.current.locking) return;
+    advanceSelection();
     const createIntentId = resume?.createIntentId || newUuid();
     const defaults = { _type: name, ...createContentDefaults(name) };
     const nextSession = {
@@ -264,33 +306,39 @@ export default function ContentAdmin() {
     setPane("editor");
   };
 
-  const selectType = async (name) => {
-    if (name === typeName && pane !== "types") return;
+  const selectType = async (name, { force = false } = {}) => {
+    if (locking || (!force && name === typeName && pane !== "types")) return;
     if (!confirmDiscard()) return;
+    const selectedGeneration = advanceSelection();
     setTypeName(name);
     setListFilter("");
     setSession(null);
     setWorking(null);
     resetEditorState();
     const selected = TYPES_BY_NAME.get(name);
+    setPane(selected?.singleton ? "editor" : "documents");
+    setLoadingDocument(Boolean(selected?.singleton));
     const items = await loadList(name);
+    if (!isCurrentSelection(selectedGeneration)) return;
+    setLoadingDocument(false);
     if (selected?.singleton && items) {
       if (items.length > 0) await openDocument(items[0]._id);
       else startNewDocument(name, listNewDrafts(name)[0] || null);
-    } else {
-      setPane("documents");
     }
   };
 
   const unlock = async (event) => {
     event.preventDefault();
+    const selectedGeneration = advanceSelection();
     setUnlocking(true);
     setGateError("");
     try {
       await api.signIn({ email, password });
+      if (!isCurrentSelection(selectedGeneration)) return;
       setPassword("");
       setUnlocked(true);
     } catch (error) {
+      if (!isCurrentSelection(selectedGeneration)) return;
       setGateError(
         error instanceof AdminApiError && error.status === 401
           ? "Email or password was not accepted."
@@ -301,17 +349,18 @@ export default function ContentAdmin() {
               : error.message
       );
     } finally {
-      setUnlocking(false);
+      if (isCurrentSelection(selectedGeneration)) setUnlocking(false);
     }
   };
 
   useEffect(() => {
     let active = true;
-    api.getSession().then(data => { if (active && data.signedIn) setUnlocked(true); }).catch(error => {
-      if (active && error.status !== 401) setGateError(error.code === "ADMIN_NOT_CONFIGURED" ? "The content admin is not configured on this deployment." : error.message);
+    const selectedGeneration = selection.current;
+    api.getSession().then(data => { if (active && isCurrentSelection(selectedGeneration) && data.signedIn === true) setUnlocked(true); }).catch(error => {
+      if (active && isCurrentSelection(selectedGeneration) && error.status !== 401) setGateError(error.code === "ADMIN_NOT_CONFIGURED" ? "The content admin is not configured on this deployment." : error.message);
     });
     return () => { active = false; };
-  }, [api]);
+  }, [api, isCurrentSelection]);
 
   const persistDraft = useCallback((key, draft) => {
     const saved = saveDraft(key, draft);
@@ -319,20 +368,27 @@ export default function ContentAdmin() {
     return saved;
   }, []);
 
+  const flushDraft = useCallback(({ force = false } = {}) => {
+    const current = editorState.current;
+    if (!current.session || !current.working || (!current.dirty && !force)) return true;
+    return persistDraft(current.currentDraftKey, {
+      document: current.working,
+      assets: current.assets,
+      baseRevision: current.session.revision,
+      createIntentId: current.session.createIntentId,
+      documentId: current.session.documentId,
+      type: current.session.type,
+    });
+  }, [persistDraft]);
+
   useEffect(() => {
     if (loadingDocument || !session || !working || !dirty || !currentDraftKey) return undefined;
     const timer = window.setTimeout(() => {
-      persistDraft(currentDraftKey, {
-        document: working,
-        assets,
-        baseRevision: session.revision,
-        createIntentId: session.createIntentId,
-        documentId: session.documentId,
-        type: session.type,
-      });
+      if (!isCurrentSelection(generation)) return;
+      flushDraft();
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [working, dirty, currentDraftKey, session, assets, persistDraft, loadingDocument]);
+  }, [working, dirty, currentDraftKey, session, assets, flushDraft, loadingDocument, generation, isCurrentSelection]);
 
   useEffect(() => {
     const workspace = workspaceRef.current;
@@ -341,14 +397,20 @@ export default function ContentAdmin() {
   }, [pane]);
 
   useEffect(() => {
-    if (!dirty) return undefined;
     const handler = (event) => {
+      if (!editorState.current.dirty) return;
+      flushDraft();
       event.preventDefault();
       event.returnValue = "";
     };
+    const pagehide = () => { flushDraft(); };
     window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [dirty]);
+    window.addEventListener("pagehide", pagehide);
+    return () => {
+      window.removeEventListener("beforeunload", handler);
+      window.removeEventListener("pagehide", pagehide);
+    };
+  }, [flushDraft]);
 
   const errorsByPath = useMemo(
     () =>
@@ -367,8 +429,59 @@ export default function ContentAdmin() {
     [api, assets, registerAsset, loadReferenceOptions, errorsByPath, captureEditTarget, applyAtTarget, beginUpload, endUpload]
   );
 
+  const finishPublication = async (pending, documentId) => {
+    if (!isCurrentSelection(pending.generation)) return;
+    clearDraft(draftKey(pending.session));
+    setPendingPublication(null);
+    referenceCache.current.delete(pending.session.type);
+    const opening = openDocument(documentId);
+    const publishedGeneration = selection.current;
+    loadList(pending.session.type);
+    await opening;
+    if (isCurrentSelection(publishedGeneration)) setNotice(PUBLISH_NOTICE);
+  };
+
+  const notPublished = () => {
+    setPendingPublication(null);
+    setBanner({ tone: "error", text: "Not published. Retry when you are ready; your changes are kept as a local draft.", retry: { kind: "publish" } });
+  };
+
+  const reconcilePublication = async (pending) => {
+    if (!pending || !isCurrentSelection(pending.generation)) return;
+    setSaving(true);
+    setBanner(null);
+    try {
+      let data;
+      if (pending.session.documentId) data = await api.getDocument(pending.session.documentId);
+      else {
+        const receipt = await api.getCreateStatus(pending.session.type, pending.session.createIntentId, pending.document);
+        if (!isCurrentSelection(pending.generation)) return;
+        if (!hasCommittedCreateReceipt(receipt, pending.session)) { notPublished(); return; }
+        data = { ...(await api.getDocument(receipt.documentId)), documentId: receipt.documentId, receipt };
+      }
+      if (!isCurrentSelection(pending.generation)) return;
+      const documentId = pending.session.documentId || data?.documentId;
+      if (!documentId || data?.document?._id !== documentId || data.document._type !== pending.session.type || typeof data.revision !== "string" || !data.revision || data.revision !== data.document._rev) {
+        throw new Error("The publication status could not be read.");
+      }
+      if (publishedContentMatches(data, pending.session, pending.document, TYPES_BY_NAME.get(pending.session.type), pending.removedPaths)) {
+        await finishPublication(pending, documentId);
+      } else notPublished();
+    } catch (error) {
+      if (!isCurrentSelection(pending.generation) || handleAuthFailure(error)) return;
+      if (error.status === 404) notPublished();
+      else {
+        setPendingPublication(pending);
+        setBanner({ tone: "error", text: "Could not confirm publication. Your changes are kept as a local draft. Retry to check the saved version before publishing again.", retry: { kind: "publish-status" } });
+      }
+    } finally {
+      if (isCurrentSelection(pending.generation)) setSaving(false);
+    }
+  };
+
   const publish = async () => {
-    if (!session || !working || saving || uploadsInFlight > 0) return;
+    if (!session || !working || saving || pendingPublication || locking || loadingDocument || uploadsInFlight > 0) return;
+    const selectedGeneration = selection.current;
     setNotice("");
     setBanner(null);
     setConflict(null);
@@ -381,8 +494,10 @@ export default function ContentAdmin() {
       return;
     }
     setErrors([]);
+    flushDraft({ force: true });
     setSaving(true);
     const submitted = working;
+    const pending = { generation: selectedGeneration, session, document: submitted, removedPaths: session.documentId ? removedContentPaths(session.baseline, submitted, type) : [] };
     try {
       const body = session.documentId
         ? {
@@ -399,16 +514,14 @@ export default function ContentAdmin() {
             document: submitted,
           };
       const result = await api.publish(body);
-      clearDraft(draftKey(session));
-      const documentId = result?.documentId || session.documentId;
-      referenceCache.current.delete(session.type);
-      loadList(session.type);
-      if (documentId) {
-        await openDocument(documentId);
-        setNotice(PUBLISH_NOTICE);
+      if (!isCurrentSelection(selectedGeneration)) return;
+      if (result?.committed !== true || typeof result.revision !== "string" || !result.revision || typeof result.documentId !== "string" || !result.documentId || (session.documentId && result.documentId !== session.documentId)) {
+        throw new AdminApiError("The publication receipt could not be confirmed.", { code: "CMS_RECEIPT_INVALID" });
       }
+      if (result.replayed === true) await reconcilePublication(pending);
+      else await finishPublication(pending, result.documentId);
     } catch (error) {
-      if (handleAuthFailure(error)) return;
+      if (!isCurrentSelection(selectedGeneration) || handleAuthFailure(error)) return;
       if (error.code === "CMS_VALIDATION_FAILED" && Array.isArray(error.details)) {
         setErrors(error.details);
         setBanner({ tone: "error", text: "The server refused some fields. Fix them and publish again.", summary: true });
@@ -418,16 +531,19 @@ export default function ContentAdmin() {
         setBanner({ tone: "error", text: "This section already exists. Reload the list and edit the existing one." });
       } else if (error.code === "CMS_WRITES_PAUSED") {
         setBanner({ tone: "warning", text: "Publishing is paused on this deployment. Your changes are kept as a local draft." });
+      } else if (["ADMIN_REQUEST_TIMEOUT", "NETWORK_ERROR", "CMS_RECEIPT_INVALID"].includes(error.code) || error.status >= 500) {
+        await reconcilePublication(pending);
       } else {
         setBanner({ tone: "error", text: `${error.message} Your changes are kept as a local draft.` });
       }
     } finally {
-      setSaving(false);
+      if (isCurrentSelection(selectedGeneration)) setSaving(false);
     }
   };
 
   const deleteDocument = async () => {
-    if (!session?.documentId || !type || type.singleton || saving) return;
+    if (!session?.documentId || !type || type.singleton || saving || pendingPublication || locking || loadingDocument) return;
+    const selectedGeneration = selection.current;
     const title = documentTitle(type, session.baseline);
     if (!window.confirm(`Delete “${title}” from the live site? It disappears from this list. A copy is kept in the database for recovery, but restoring it needs a developer.`)) return;
     setSaving(true);
@@ -439,6 +555,7 @@ export default function ContentAdmin() {
         documentId: session.documentId,
         expectedRevision: session.revision,
       });
+      if (!isCurrentSelection(selectedGeneration)) return;
       clearDraft(draftKey(session));
       referenceCache.current.delete(session.type);
       setSession(null);
@@ -447,7 +564,7 @@ export default function ContentAdmin() {
       setPane("documents");
       loadList(session.type);
     } catch (error) {
-      if (handleAuthFailure(error)) return;
+      if (!isCurrentSelection(selectedGeneration) || handleAuthFailure(error)) return;
       if (error.code === "CMS_REFERENCED") {
         const referencedBy = Array.isArray(error.details?.referencedBy) ? error.details.referencedBy : [];
         setBanner({
@@ -462,24 +579,25 @@ export default function ContentAdmin() {
         setBanner({ tone: "error", text: error.message });
       }
     } finally {
-      setSaving(false);
+      if (isCurrentSelection(selectedGeneration)) setSaving(false);
     }
   };
 
-  const restoreRevision = ({ document, assets: revisionAssets, revision }) => {
-    if (dirty && !window.confirm("Replace your unpublished changes with this version? They will be lost.")) return;
-    if (currentDraftKey) clearDraft(currentDraftKey);
-    setWorking({ ...document, _id: session.baseline?._id ?? document._id, _type: session.type });
-    setAssets((current) => ({ ...current, ...revisionAssets }));
+  const restoreRevision = ({ document, assets: revisionAssets, revision, documentId, selectionGeneration }) => {
+    const current = editorState.current;
+    if (!isCurrentSelection(selectionGeneration) || current.locking || current.pendingPublication || current.saving || current.session?.documentId !== documentId) return;
+    if (current.dirty && !window.confirm("Replace your unpublished changes with this version? They will be lost.")) return;
+    if (current.currentDraftKey) clearDraft(current.currentDraftKey);
+    setWorking({ ...document, _id: current.session.baseline?._id ?? document._id, _type: current.session.type });
+    setAssets((assets) => ({ ...assets, ...revisionAssets }));
     setLoadVersion((version) => version + 1);
     setHistoryOpen(false);
     setNotice(`Loaded the version that was live before ${displayTime(revision.createdAt)}. Publish to make it live again.`);
   };
 
-  const lock = async () => {
-    if (!confirmDiscard()) return;
-    try { await api.signOut(); } catch (error) { if (!handleAuthFailure(error)) { setBanner({ tone: "error", text: error.message }); return; } }
+  const finishSignOut = (error = "") => {
     setUnlocked(false);
+    setGateError(error);
     setPassword("");
     setSession(null);
     setWorking(null);
@@ -488,6 +606,46 @@ export default function ContentAdmin() {
     referenceCache.current.clear();
     resetEditorState();
     setPane("types");
+  };
+
+  const lock = async () => {
+    if (locking || !confirmDiscard()) return;
+    const selectedGeneration = advanceSelection();
+    setLocking(true);
+    try {
+      await api.signOut();
+      if (!isCurrentSelection(selectedGeneration)) return;
+      finishSignOut();
+    } catch (error) {
+      if (!isCurrentSelection(selectedGeneration)) return;
+      if (handleAuthFailure(error)) return;
+      try {
+        const status = await api.getSession();
+        if (!isCurrentSelection(selectedGeneration)) return;
+        if (status.signedIn === false) {
+          finishSignOut(`${error.message} Your session is no longer active.`);
+          return;
+        }
+      } catch (probeError) {
+        if (!isCurrentSelection(selectedGeneration)) return;
+        if (probeError.status === 401) {
+          finishSignOut(`${error.message} Your session is no longer active.`);
+          return;
+        }
+      }
+      setBanner({ tone: "error", text: error.message, retry: { kind: "signout" } });
+    } finally {
+      if (isCurrentSelection(selectedGeneration)) setLocking(false);
+    }
+  };
+
+  const retryFailure = () => {
+    const retry = banner?.retry;
+    if (retry?.kind === "list") selectType(retry.name, { force: true });
+    else if (retry?.kind === "document") openDocument(retry.documentId);
+    else if (retry?.kind === "signout") lock();
+    else if (retry?.kind === "publish") publish();
+    else if (retry?.kind === "publish-status") reconcilePublication(pendingPublication);
   };
 
   if (!unlocked) {
@@ -535,12 +693,18 @@ export default function ContentAdmin() {
           <h1>Site content</h1>
           <p className={styles.intro}>Edit what the site shows. Every publish is checked, versioned and goes straight to Supabase.</p>
         </div>
-        <button type="button" className={styles.secondaryButton} onClick={lock}>
+        <button type="button" className={styles.secondaryButton} onClick={lock} disabled={locking}>
           <Lock size={16} aria-hidden="true" /> Sign out
         </button>
       </header>
 
       {draftError ? <p className={styles.error} role="alert">{draftError}</p> : null}
+      {banner && !banner.summary ? (
+        <div className={banner.tone === "warning" ? styles.warningBox : styles.errorSummary} role="alert">
+          <p>{banner.text}</p>
+          {banner.retry ? <button type="button" className={styles.secondaryButton} onClick={retryFailure} disabled={saving || locking || loadingDocument}>Retry</button> : null}
+        </div>
+      ) : null}
       {["terms", "faqSection"].includes(typeName) ? <p className={styles.notice}>The Payments &amp; refunds and Cancellations sections, the Terms last-updated date and the money-back FAQ answer are managed in code and ignore edits here.</p> : null}
       {notice ? (
         <p className={styles.notice} role="status"><Check size={17} aria-hidden="true" />{notice}</p>
@@ -561,6 +725,7 @@ export default function ContentAdmin() {
                     className={entry.name === typeName ? styles.typeActive : styles.typeButton}
                     aria-current={entry.name === typeName ? "page" : undefined}
                     onClick={() => selectType(entry.name)}
+                    disabled={locking}
                   >
                     <span>{entry.title}</span>
                     <ChevronRight size={16} aria-hidden="true" />
@@ -618,7 +783,6 @@ export default function ContentAdmin() {
                 </button>
               </div>
             </div>
-            {list.error ? <p className={styles.error} role="alert">{list.error}</p> : null}
             {newDrafts.length > 0 ? (
               <div className={styles.draftList}>
                 <p className={styles.groupTitle}>Unpublished drafts on this device</p>
@@ -685,11 +849,10 @@ export default function ContentAdmin() {
           ) : !session || !working ? (
             <div className={styles.emptyState}>
               <button type="button" className={styles.backButton} onClick={() => setPane(type.singleton ? "types" : "documents")}>
-                <ArrowLeft size={16} aria-hidden="true" /> Back
+                <ArrowLeft size={16} aria-hidden="true" /> {type.singleton ? "Types" : type.title}
               </button>
               <h2>{loadingDocument ? "Loading…" : type.title}</h2>
               {!loadingDocument && !type.singleton ? <p>Choose an entry from the list, or create a new one.</p> : null}
-              {banner ? <p className={styles.error} role="alert">{banner.text}</p> : null}
             </div>
           ) : (
             <EditorContext.Provider value={editorContext}>
@@ -711,12 +874,12 @@ export default function ContentAdmin() {
                 </div>
                 <div className={styles.editorActions}>
                   {session.documentId ? (
-                    <button type="button" className={styles.secondaryButton} onClick={() => setHistoryOpen((open) => !open)}>
+                    <button type="button" className={styles.secondaryButton} onClick={() => setHistoryOpen((open) => !open)} disabled={saving || pendingPublication || locking || loadingDocument}>
                       <History size={16} aria-hidden="true" /> History
                     </button>
                   ) : null}
                   {session.documentId && !type.singleton ? (
-                    <button type="button" className={styles.secondaryButtonDanger} onClick={deleteDocument} disabled={saving}>
+                    <button type="button" className={styles.secondaryButtonDanger} onClick={deleteDocument} disabled={saving || pendingPublication || locking || loadingDocument}>
                       <Trash2 size={16} aria-hidden="true" /> Delete
                     </button>
                   ) : null}
@@ -724,7 +887,7 @@ export default function ContentAdmin() {
                     type="button"
                     className={styles.primaryButton}
                     onClick={publish}
-                    disabled={saving || uploadsInFlight > 0 || (!dirty && Boolean(session.documentId))}
+                    disabled={saving || pendingPublication || locking || loadingDocument || uploadsInFlight > 0 || (!dirty && Boolean(session.documentId))}
                     title={uploadsInFlight > 0 ? "Wait for the upload to finish" : undefined}
                   >
                     <Save size={16} aria-hidden="true" />
@@ -802,7 +965,7 @@ export default function ContentAdmin() {
                 </div>
               ) : null}
 
-              {banner && !(banner.summary && errors.length > 0) ? (
+              {banner?.summary && errors.length === 0 ? (
                 <p className={banner.tone === "warning" ? styles.warningLine : styles.error} role="alert">{banner.text}</p>
               ) : null}
 
@@ -824,8 +987,8 @@ export default function ContentAdmin() {
                 <form
                   key={`${session.documentId || session.createIntentId}:${loadVersion}`}
                   className={styles.form}
-                  inert={saving || loadingDocument ? true : undefined}
-                  aria-busy={saving || loadingDocument}
+                  inert={saving || pendingPublication || loadingDocument || locking ? true : undefined}
+                  aria-busy={Boolean(saving || pendingPublication || loadingDocument || locking)}
                   onSubmit={(event) => {
                     event.preventDefault();
                     publish();
@@ -842,6 +1005,8 @@ export default function ContentAdmin() {
                   <RevisionHistory
                     api={api}
                     documentId={session.documentId}
+                    selectionGeneration={generation}
+                    isCurrentSelection={isCurrentSelection}
                     onRestore={restoreRevision}
                     onClose={() => setHistoryOpen(false)}
                   />

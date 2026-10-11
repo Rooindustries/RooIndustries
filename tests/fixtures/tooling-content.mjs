@@ -81,6 +81,26 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       slug: { current: 'fixture-creator' },
     }, 'tooling-referral'));
   }
+  const layoutImages = process.env.TOOLING_CLS_CONTENT === '1' ? [
+    { id: 'image-cls-wide', width: 800, height: 400, storagePath: 'images/cls-wide.svg' },
+    { id: 'image-cls-tall', width: 600, height: 900, storagePath: 'images/cls-tall.svg' },
+  ].map(image => ({ ...image, body: `<svg xmlns="http://www.w3.org/2000/svg" width="${image.width}" height="${image.height}"><rect width="100%" height="100%" fill="#18202c"/><text x="24" y="48" fill="white" font-size="24">Synthetic review</text></svg>` })) : [];
+  if (layoutImages.length) {
+    documents.push(
+      ...Array.from({ length: 4 }, (_, index) => document('tool', {
+        title: `Fixture layout tool ${index + 1}`,
+        shortDescription: 'Synthetic tool content for layout stability checks.',
+        category: 'Benchmark',
+        downloadMode: 'external',
+        downloadUrl: '/favicon-96x96.png',
+        sortOrder: index,
+      }, `tooling-cls-tool-${index}`)),
+      ...layoutImages.map(image => document('review', {
+        alt: `Fixture layout review ${image.width} by ${image.height}`,
+        image: { _type: 'image', asset: { _type: 'reference', _ref: image.id } },
+      }, image.id.replace('image-', 'review-'))),
+    );
+  }
   const initialDocuments = structuredClone(documents);
   const dispatches = new Map();
   const rateLimits = new Map();
@@ -88,6 +108,9 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
   let session = 'valid';
   let failure = '';
   let revision = 0;
+  let enqueueDelayMs = 0;
+  let emailDelayMs = 0;
+  const emails = [];
   const mutate = mutations => {
     if (!Array.isArray(mutations) || !mutations.length) throw new Error('Missing fixture mutations.');
     const next = structuredClone(documents);
@@ -115,7 +138,8 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       let raw = '';
       for await (const chunk of req) { raw += chunk; if (Buffer.byteLength(raw) > 131072) throw new Error('Fixture body is too large.'); }
       const body = raw ? JSON.parse(raw) : {};
-      const call = { method: req.method, path: url.pathname, body, status: 503, rows: 0 };
+      const call = { method: req.method, path: url.pathname, body, status: 503, rows: 0, receivedAt: Date.now(), delayMs: 0 };
+      res.once('finish', () => { call.respondedAt = Date.now(); persist(); });
       evidence.requests.push(call);
       if (apiRoutes && url.pathname === '/__fixture' && ['GET', 'POST'].includes(req.method)) {
         if (req.method === 'POST') {
@@ -127,9 +151,12 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
             delivery = 'completed';
             session = 'valid';
             failure = '';
+            enqueueDelayMs = 0;
+            emailDelayMs = 0;
+            emails.length = 0;
           }
           if (body.delivery !== undefined) {
-            if (!['completed', 'pending', 'queued', 'failed', 'dead_letter', 'source_conflict', 'token_conflict', 'enqueue_failed', 'lookup_failed', 'requeue_failed'].includes(body.delivery)) throw new Error('Invalid fixture delivery state.');
+            if (!['completed', 'pending', 'queued', 'failed', 'dead_letter', 'source_conflict', 'token_conflict', 'enqueue_failed', 'lookup_failed', 'requeue_failed', 'captured'].includes(body.delivery)) throw new Error('Invalid fixture delivery state.');
             delivery = body.delivery;
           }
           if (body.session !== undefined) {
@@ -140,6 +167,11 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
             if (!['', 'limiter', 'settings', 'commerce_control', 'hold_write'].includes(body.failure)) throw new Error('Invalid fixture failure state.');
             failure = body.failure;
           }
+          for (const name of ['enqueueDelayMs', 'emailDelayMs']) {
+            if (body[name] !== undefined && (!Number.isInteger(body[name]) || body[name] < 0 || body[name] > 2000)) throw new Error('Invalid fixture delay.');
+          }
+          if (body.enqueueDelayMs !== undefined) enqueueDelayMs = body.enqueueDelayMs;
+          if (body.emailDelayMs !== undefined) emailDelayMs = body.emailDelayMs;
           if (body.bookingDocuments !== undefined) {
             if (!Array.isArray(body.bookingDocuments) || body.bookingDocuments.some(row => !row?._id || !['booking', 'bookingSlot', 'slotHold'].includes(row._type))) throw new Error('Invalid fixture booking documents.');
             for (const row of body.bookingDocuments) {
@@ -151,12 +183,24 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           }
         }
         call.status = 200;
-        json(res, 200, { delivery, session, documents, requests: evidence.requests });
+        json(res, 200, { delivery, session, documents, requests: evidence.requests, emails });
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_fetch_shadow_documents_targeted') {
         const scopedIds = apiRoutes && body.p_document_types === null && Array.isArray(body.p_ids) && body.p_ids.length > 0;
         if ((!scopedIds && (!Array.isArray(body.p_document_types) || !body.p_document_types.length)) || !Array.isArray(body.p_filters) || !Number.isInteger(body.p_limit) || body.p_limit < 1 || body.p_limit > 1000 || body.p_ids !== null && !Array.isArray(body.p_ids)) throw new Error('Invalid fixture read scope.');
         if (apiRoutes && delivery === 'lookup_failed' && body.p_document_types?.includes('referral')) throw Object.assign(new Error('Synthetic referral lookup outage.'), { status: 503, code: 'FIXTURE_LOOKUP_UNAVAILABLE' });
         if (apiRoutes && ((failure === 'settings' && body.p_document_types?.includes('bookingSettings')) || (failure === 'limiter' && body.p_document_types?.includes('rateLimitBucket')))) throw Object.assign(new Error('Synthetic document read outage.'), { status: 503, code: 'FIXTURE_READ_UNAVAILABLE' });
+        if (body.p_document_types?.some(type => type === 'tool' || type === 'review')) {
+          if (process.env.TOOLING_CLS_RESPONSE === 'delayed') {
+            call.delayMs = 650;
+            await new Promise(resolve => setTimeout(resolve, call.delayMs));
+          }
+          if (process.env.TOOLING_CLS_RESPONSE === 'failed') {
+            call.status = 503;
+            json(res, 503, { code: 'FIXTURE_CONTENT_UNAVAILABLE', message: 'Synthetic content is unavailable.' });
+            persist();
+            return;
+          }
+        }
         let rows = documents.filter(row => (!body.p_document_types || body.p_document_types.includes(row._type)) && (!body.p_ids || body.p_ids.includes(row._id)));
         for (const filter of body.p_filters) {
           if (!['eq', 'ieq', 'in'].includes(filter.op) || typeof filter.path !== 'string') throw new Error('Unsupported fixture filter.');
@@ -164,7 +208,21 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         }
         rows = rows.sort((a, b) => a._id < b._id ? -1 : a._id > b._id ? 1 : 0).slice(0, body.p_limit); call.status = 200; call.rows = rows.length; json(res, 200, rows);
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_asset_manifest_for_refs') {
-        call.status = 200; json(res, 200, []);
+        const assets = layoutImages.filter(image => body.p_asset_ids?.includes(image.id)).map(image => ({
+          legacy_sanity_asset_id: image.id,
+          storage_bucket: 'site-content-public',
+          storage_path: image.storagePath,
+          migration_status: 'verified',
+          sha256: createHash('sha256').update(image.body).digest('hex'),
+          width: image.width,
+          height: image.height,
+        }));
+        call.status = 200; json(res, 200, assets);
+      } else if (req.method === 'GET' && layoutImages.some(image => url.pathname === `/storage/v1/object/public/site-content-public/${image.storagePath}`)) {
+        const image = layoutImages.find(image => url.pathname.endsWith(image.storagePath));
+        call.status = 200;
+        res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' });
+        res.end(image.body);
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_fetch_commerce_availability') {
         call.status = 200; json(res, 200, { bookings: [], holds: [], slotLocks: [] });
       } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_commerce_control') {
@@ -211,6 +269,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         call.status = 200;
         json(res, 200, results);
       } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_enqueue_referral_email_mutation') {
+        if (enqueueDelayMs) await new Promise(resolve => setTimeout(resolve, enqueueDelayMs));
         if (delivery === 'token_conflict') throw Object.assign(new Error('Synthetic reset token revision conflict.'), { status: 409, code: '40001' });
         if (delivery === 'enqueue_failed') throw Object.assign(new Error('Synthetic email enqueue outage.'), { status: 503, code: 'FIXTURE_ENQUEUE_UNAVAILABLE' });
         mutate(body.p_mutations);
@@ -222,12 +281,12 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         const dispatch = dispatches.get(body.p_idempotency_key);
         if (!dispatch) throw new Error('Unknown fixture dispatch.');
         call.status = 200;
-        json(res, 200, delivery === 'failed'
+        json(res, 200, ['failed', 'captured'].includes(delivery)
           ? { ...dispatch, claimed: true, attempt_count: 1 }
           : { claimed: false, sent: delivery === 'completed', in_progress: delivery === 'pending', dead_letter: ['dead_letter', 'requeue_failed', 'source_conflict'].includes(delivery), source_state_changed: delivery === 'source_conflict' });
       } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_complete_referral_email_dispatch') {
         call.status = 200;
-        json(res, 200, { status: 'retry' });
+        json(res, 200, { status: body.p_success ? 'sent' : 'retry' });
       } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_requeue_referral_email_dispatch') {
         if (delivery === 'requeue_failed') throw Object.assign(new Error('Synthetic email recovery outage.'), { status: 503, code: 'FIXTURE_REQUEUE_UNAVAILABLE' });
         call.status = 200;
@@ -235,6 +294,17 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_refresh_operational_shadow') {
         call.status = 200;
         json(res, 200, {});
+      } else if (apiRoutes && req.method === 'POST' && url.pathname === '/emails') {
+        const idempotencyKey = req.headers['idempotency-key'];
+        if (req.headers.authorization !== 'Bearer fixture-only-referral-email-key' || !dispatches.has(idempotencyKey) ||
+            !Array.isArray(body.to) || body.to.length !== 1 || body.to[0] !== referralEmail) throw new Error('Invalid fixture email request.');
+        if (delivery === 'failed') throw Object.assign(new Error('Synthetic email provider unavailable.'), { status: 503, code: 'email_provider_unconfigured' });
+        if (delivery !== 'captured') throw new Error('Fixture email delivery is not enabled.');
+        if (emailDelayMs) await new Promise(resolve => setTimeout(resolve, emailDelayMs));
+        const id = `fixture-email-${emails.length + 1}`;
+        emails.push({ id, idempotencyKey, ...body, sentAt: Date.now() });
+        call.status = 200;
+        json(res, 200, { id });
       } else {
         json(res, 503, { code: 'FIXTURE_READ_ONLY', message: 'Synthetic content fixture refuses this operation.' });
       }

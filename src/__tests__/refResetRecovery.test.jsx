@@ -343,7 +343,7 @@ describe("referral signed-in password change outcomes", () => {
   const installFetch = (passwordResponse) => {
     global.fetch = jest.fn(async (url) => {
       if (String(url) === "/api/ref/getData") {
-        return { ok: true, status: 200, json: async () => ({ ok: true }) };
+        return { ok: true, status: 200, json: async () => ({ ok: true, referral: { _id: "fixture-creator" } }) };
       }
       if (String(url) === "/api/auth/reauth") {
         return { ok: true, status: 200, json: async () => ({ ok: true }) };

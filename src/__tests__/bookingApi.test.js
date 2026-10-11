@@ -39,20 +39,20 @@ let revisionCounter = 1;
 
 const resetStore = () => {
   const configuredUtcSlots = [
-    "2025-01-15T07:59:00.000Z",
-    "2025-01-15T08:00:00.000Z",
-    "2025-01-15T08:15:00.000Z",
-    "2025-01-15T08:18:00.000Z",
-    "2025-01-15T08:20:00.000Z",
-    "2025-01-15T08:22:00.000Z",
-    "2025-01-15T08:24:00.000Z",
-    "2025-01-15T08:25:00.000Z",
-    "2025-01-15T08:26:00.000Z",
-    "2025-01-15T08:28:00.000Z",
-    "2025-01-15T09:00:00.000Z",
-    "2025-01-15T10:00:00.000Z",
-    "2025-01-15T11:00:00.000Z",
-    "2025-01-15T18:30:00.000Z",
+    "2099-01-15T07:59:00.000Z",
+    "2099-01-15T08:00:00.000Z",
+    "2099-01-15T08:15:00.000Z",
+    "2099-01-15T08:18:00.000Z",
+    "2099-01-15T08:20:00.000Z",
+    "2099-01-15T08:22:00.000Z",
+    "2099-01-15T08:24:00.000Z",
+    "2099-01-15T08:25:00.000Z",
+    "2099-01-15T08:26:00.000Z",
+    "2099-01-15T08:28:00.000Z",
+    "2099-01-15T09:00:00.000Z",
+    "2099-01-15T10:00:00.000Z",
+    "2099-01-15T11:00:00.000Z",
+    "2099-01-15T18:30:00.000Z",
   ];
   const slotsByDate = new Map();
   configuredUtcSlots.forEach((value) => {
@@ -624,6 +624,11 @@ const reserveSlot = async (startTimeUTC, packageTitle = "Test Package") => {
   const req = createReq({ startTimeUTC, packageTitle });
   const res = createRes();
   await holdSlot(req, res);
+  if (res.statusCode === 200) {
+    expect(new Date(res.body.expiresAt).getTime()).toBeGreaterThan(
+      new Date().getTime()
+    );
+  }
   return { res, body: res.body };
 };
 
@@ -754,6 +759,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  jest.useRealTimers();
   jest.restoreAllMocks();
   delete global.fetch;
 });
@@ -765,7 +771,7 @@ describe("booking reservation API", () => {
     expect(CLIENT_EMAIL).toBe("vihaann2.0@gmail.com");
     expect(OWNER_EMAIL).toBe("serviroo@rooindustries.com");
 
-    const startTimeUTC = "2025-01-15T07:59:00.000Z";
+    const startTimeUTC = "2099-01-15T07:59:00.000Z";
     const first = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
 
     expect(first.res.statusCode).toBe(200);
@@ -788,7 +794,7 @@ describe("booking reservation API", () => {
 
 
   test("payment-pending holds cannot be refreshed, moved, or publicly released", async () => {
-    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const startTimeUTC = "2099-01-15T08:00:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     Object.assign(store.slotHolds[0], {
       phase: "payment_pending",
@@ -808,7 +814,7 @@ describe("booking reservation API", () => {
     const moveRes = createRes();
     await holdSlot(
       createReq({
-        startTimeUTC: "2025-01-15T08:15:00.000Z",
+        startTimeUTC: "2099-01-15T08:15:00.000Z",
         packageTitle: "Performance Vertex Overhaul",
         previousHoldId: hold.body.holdId,
         previousHoldToken: hold.body.holdToken,
@@ -838,14 +844,14 @@ describe("booking reservation API", () => {
     expect(CLIENT_EMAIL).toBe("vihaann2.0@gmail.com");
     expect(OWNER_EMAIL).toBe("serviroo@rooindustries.com");
 
-    const baseTime = new Date("2025-01-01T00:00:00.000Z").getTime();
-    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(baseTime);
+    const baseTime = new Date("2099-01-01T00:00:00.000Z").getTime();
+    jest.useFakeTimers({ now: baseTime, doNotFake: ["setTimeout", "clearTimeout"] });
 
-    const startTimeUTC = "2025-01-15T07:59:00.000Z";
+    const startTimeUTC = "2099-01-15T07:59:00.000Z";
     const first = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     expect(first.res.statusCode).toBe(200);
 
-    nowSpy.mockReturnValue(baseTime + 21 * 60 * 1000);
+    jest.setSystemTime(baseTime + 21 * 60 * 1000);
 
     const second = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     expect(second.res.statusCode).toBe(200);
@@ -869,7 +875,7 @@ describe("booking reservation API", () => {
     expect(CLIENT_EMAIL).toBe("vihaann2.0@gmail.com");
     expect(OWNER_EMAIL).toBe("serviroo@rooindustries.com");
 
-    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const startTimeUTC = "2099-01-15T08:00:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
 
     const { res, displayDate, displayTime } = await createPaidBooking({
@@ -914,7 +920,7 @@ describe("booking reservation API", () => {
   });
 
   test("createBooking can defer emails until the success page confirms the flow", async () => {
-    const startTimeUTC = "2025-01-15T08:15:00.000Z";
+    const startTimeUTC = "2099-01-15T08:15:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
 
     const { res } = await createPaidBooking({
@@ -943,7 +949,7 @@ describe("booking reservation API", () => {
   });
 
   test("direct paid bookings backfill a terminal payment record when no record exists yet", async () => {
-    const startTimeUTC = "2025-01-15T08:18:00.000Z";
+    const startTimeUTC = "2099-01-15T08:18:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
 
     const { res } = await createPaidBooking({
@@ -994,7 +1000,7 @@ describe("booking reservation API", () => {
       timesUsed: 0,
     });
 
-    const startTimeUTC = "2025-01-15T08:22:00.000Z";
+    const startTimeUTC = "2099-01-15T08:22:00.000Z";
     const timeZone = "America/Los_Angeles";
     const utcDate = new Date(startTimeUTC);
     const hold = await reserveSlot(startTimeUTC, "Test Package");
@@ -1048,7 +1054,7 @@ describe("booking reservation API", () => {
       timesUsed: 0,
     });
 
-    const startTimeUTC = "2025-01-15T08:24:00.000Z";
+    const startTimeUTC = "2099-01-15T08:24:00.000Z";
     const timeZone = "America/Los_Angeles";
     const utcDate = new Date(startTimeUTC);
     const hold = await reserveSlot(startTimeUTC, "Test Package");
@@ -1096,7 +1102,7 @@ describe("booking reservation API", () => {
       timesUsed: 0,
     });
 
-    const startTimeUTC = "2025-01-15T08:26:00.000Z";
+    const startTimeUTC = "2099-01-15T08:26:00.000Z";
     const timeZone = "America/Los_Angeles";
     const utcDate = new Date(startTimeUTC);
     const hold = await reserveSlot(startTimeUTC, "Test Package");
@@ -1105,6 +1111,9 @@ describe("booking reservation API", () => {
     await createBooking(
       createReq({
         email: CLIENT_EMAIL,
+        discord: "servi",
+        specs: "GPU/CPU",
+        mainGame: "Shooter",
         packageTitle: "Test Package",
         packagePrice: "$49.95",
         status: "captured",
@@ -1148,7 +1157,7 @@ describe("booking reservation API", () => {
       currentDiscountPercent: 100,
       successfulReferrals: 0,
     });
-    const startTimeUTC = "2025-01-15T08:18:00.000Z";
+    const startTimeUTC = "2099-01-15T08:18:00.000Z";
     const timeZone = "America/Los_Angeles";
     const utcDate = new Date(startTimeUTC);
     const hold = await reserveSlot(
@@ -1160,6 +1169,9 @@ describe("booking reservation API", () => {
     await createBooking(
       createReq({
         email: CLIENT_EMAIL,
+        discord: "servi",
+        specs: "GPU/CPU",
+        mainGame: "Shooter",
         packageTitle: "Performance Vertex Overhaul",
         packagePrice: "$54.95",
         status: "captured",
@@ -1210,7 +1222,7 @@ describe("booking reservation API", () => {
       timesUsed: 0,
     });
 
-    const startTimeUTC = "2025-01-15T08:28:00.000Z";
+    const startTimeUTC = "2099-01-15T08:28:00.000Z";
     const timeZone = "America/Los_Angeles";
     const utcDate = new Date(startTimeUTC);
     const hold = await reserveSlot(startTimeUTC, "Test Package");
@@ -1246,7 +1258,7 @@ describe("booking reservation API", () => {
   });
 
   test("sendBookingEmails dispatches deferred emails once and stays idempotent", async () => {
-    const startTimeUTC = "2025-01-15T08:20:00.000Z";
+    const startTimeUTC = "2099-01-15T08:20:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
 
     const { res: bookingRes } = await createPaidBooking({
@@ -1298,7 +1310,7 @@ describe("booking reservation API", () => {
   });
 
   test("sendBookingEmailsForBooking refetches full booking data before rendering", async () => {
-    const startTimeUTC = "2025-01-15T08:25:00.000Z";
+    const startTimeUTC = "2099-01-15T08:25:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
 
     const { res: bookingRes } = await createPaidBooking({
@@ -1339,7 +1351,7 @@ describe("booking reservation API", () => {
     );
     expect(ownerCall).toBeTruthy();
     expect(ownerCall[0].subject).toMatch(
-      /^New booking [A-Z0-9]{6} - Performance Vertex Overhaul \(Wed Jan 15 2025 1:55 PM\)$/
+      /^New booking [A-Z0-9]{6} - Performance Vertex Overhaul \(Thu Jan 15 2099 1:55 PM\)$/
     );
 
     const renderedOwnerEmail = JSON.stringify(ownerCall[0]);
@@ -1368,14 +1380,14 @@ describe("booking reservation API", () => {
   });
 
   test("captured paid bookings auto-reconcile after the original hold expires", async () => {
-    const baseTime = new Date("2025-01-01T00:00:00.000Z").getTime();
-    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(baseTime);
+    const baseTime = new Date("2099-01-01T00:00:00.000Z").getTime();
+    jest.useFakeTimers({ now: baseTime, doNotFake: ["setTimeout", "clearTimeout"] });
 
-    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const startTimeUTC = "2099-01-15T08:00:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     expect(hold.res.statusCode).toBe(200);
 
-    nowSpy.mockReturnValue(baseTime + 21 * 60 * 1000);
+    jest.setSystemTime(baseTime + 21 * 60 * 1000);
 
     const { res } = await createPaidBooking({
       startTimeUTC,
@@ -1393,19 +1405,18 @@ describe("booking reservation API", () => {
     );
     expect(mockSendEmail).toHaveBeenCalledTimes(2);
 
-    nowSpy.mockRestore();
   });
 
   test("captured paid bookings auto-reconcile when an expired hold was already deleted", async () => {
-    const baseTime = new Date("2025-01-01T00:00:00.000Z").getTime();
-    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(baseTime);
+    const baseTime = new Date("2099-01-01T00:00:00.000Z").getTime();
+    jest.useFakeTimers({ now: baseTime, doNotFake: ["setTimeout", "clearTimeout"] });
 
-    const startTimeUTC = "2025-01-15T09:00:00.000Z";
+    const startTimeUTC = "2099-01-15T09:00:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     expect(hold.res.statusCode).toBe(200);
 
     store.slotHolds = [];
-    nowSpy.mockReturnValue(baseTime + 21 * 60 * 1000);
+    jest.setSystemTime(baseTime + 21 * 60 * 1000);
 
     const { res } = await createPaidBooking({
       startTimeUTC,
@@ -1422,14 +1433,13 @@ describe("booking reservation API", () => {
       "reconciled_after_missing_hold"
     );
 
-    nowSpy.mockRestore();
   });
 
   test("payment failure releases hold via API and sends no emails", async () => {
     expect(CLIENT_EMAIL).toBe("vihaann2.0@gmail.com");
     expect(OWNER_EMAIL).toBe("serviroo@rooindustries.com");
 
-    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const startTimeUTC = "2099-01-15T08:00:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     expect(store.slotHolds).toHaveLength(1);
 
@@ -1470,14 +1480,14 @@ describe("booking reservation API", () => {
   });
 
   test("stale hold token cannot release a newly re-acquired slot", async () => {
-    const baseTime = new Date("2025-01-01T00:00:00.000Z").getTime();
-    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(baseTime);
+    const baseTime = new Date("2099-01-01T00:00:00.000Z").getTime();
+    jest.useFakeTimers({ now: baseTime, doNotFake: ["setTimeout", "clearTimeout"] });
 
-    const startTimeUTC = "2025-01-15T07:59:00.000Z";
+    const startTimeUTC = "2099-01-15T07:59:00.000Z";
     const first = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     expect(first.res.statusCode).toBe(200);
 
-    nowSpy.mockReturnValue(baseTime + 21 * 60 * 1000);
+    jest.setSystemTime(baseTime + 21 * 60 * 1000);
     const second = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     expect(second.res.statusCode).toBe(200);
     expect(second.body.holdId).toBe(first.body.holdId);
@@ -1492,14 +1502,13 @@ describe("booking reservation API", () => {
     expect(staleReleaseRes.statusCode).toBe(403);
     expect(store.slotHolds).toHaveLength(1);
 
-    nowSpy.mockRestore();
   });
 
   test("race conditions prevent double bookings and duplicate emails", async () => {
     expect(CLIENT_EMAIL).toBe("vihaann2.0@gmail.com");
     expect(OWNER_EMAIL).toBe("serviroo@rooindustries.com");
 
-    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const startTimeUTC = "2099-01-15T08:00:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
 
     const first = await createPaidBooking({
@@ -1545,9 +1554,9 @@ describe("booking reservation API", () => {
       email: CLIENT_EMAIL,
       packageTitle: "Performance Vertex Overhaul",
       packagePrice: "$84.99",
-      startTimeUTC: "2025-01-15T08:00:00.000Z",
+      startTimeUTC: "2099-01-15T08:00:00.000Z",
       localTimeZone: OWNER_TZ,
-      displayDate: "Wednesday, January 15, 2025",
+      displayDate: "Thursday, January 15, 2099",
       displayTime: "1:30 PM",
     };
     store.bookings.push(booking);
@@ -1581,8 +1590,8 @@ describe("booking reservation API", () => {
   });
 
   test("one provider proof cannot create bookings for two different slots", async () => {
-    const firstTime = "2025-01-15T08:00:00.000Z";
-    const secondTime = "2025-01-15T09:00:00.000Z";
+    const firstTime = "2099-01-15T08:00:00.000Z";
+    const secondTime = "2099-01-15T09:00:00.000Z";
     const [firstHold, secondHold] = await Promise.all([
       reserveSlot(firstTime, "Performance Vertex Overhaul"),
       reserveSlot(secondTime, "Performance Vertex Overhaul"),
@@ -1629,8 +1638,8 @@ describe("booking reservation API", () => {
       maxUses: 1,
     });
     const times = [
-      "2025-01-15T08:24:00.000Z",
-      "2025-01-15T08:26:00.000Z",
+      "2099-01-15T08:24:00.000Z",
+      "2099-01-15T08:26:00.000Z",
     ];
     const holds = await Promise.all(times.map((time) => reserveSlot(time, "Test Package")));
     const submit = (startTimeUTC, hold, suffix) => {
@@ -1639,6 +1648,9 @@ describe("booking reservation API", () => {
       return createBooking(
         createReq({
           email: `client-${suffix}@example.com`,
+          discord: "servi",
+          specs: "GPU/CPU",
+          mainGame: "Shooter",
           packageTitle: "Test Package",
           status: "captured",
           paymentProvider: "free",
@@ -1670,11 +1682,11 @@ describe("booking reservation API", () => {
 
   test("rejects sub-minute and off-calendar hold requests", async () => {
     const subMinute = await reserveSlot(
-      "2025-01-15T08:00:30.000Z",
+      "2099-01-15T08:00:30.000Z",
       "Performance Vertex Overhaul"
     );
     const offCalendar = await reserveSlot(
-      "2025-01-17T08:00:00.000Z",
+      "2099-01-17T08:00:00.000Z",
       "Performance Vertex Overhaul"
     );
 
@@ -1686,7 +1698,7 @@ describe("booking reservation API", () => {
   });
 
   test("cancelling a booking releases only its slot lock for rebooking", async () => {
-    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const startTimeUTC = "2099-01-15T08:00:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     const created = await createPaidBooking({
       startTimeUTC,
@@ -1711,7 +1723,7 @@ describe("booking reservation API", () => {
   });
 
   test("an active upgrade does not keep its refunded original slot blocked", async () => {
-    const startTimeUTC = "2025-01-15T08:25:00.000Z";
+    const startTimeUTC = "2099-01-15T08:25:00.000Z";
     const { buildBookingSlotId } = require("../../src/server/booking/slotIdentity");
     const slotLockId = buildBookingSlotId(startTimeUTC);
     store.bookings.push(
@@ -1754,7 +1766,7 @@ describe("booking reservation API", () => {
   });
 
   test("a cancelled booking cannot be reactivated over a new checkout hold", async () => {
-    const startTimeUTC = "2025-01-15T08:24:00.000Z";
+    const startTimeUTC = "2099-01-15T08:24:00.000Z";
     store.bookings.push({
       _id: "booking_cancelled_with_replacement_hold",
       _rev: "booking_cancelled_with_replacement_hold_rev",
@@ -1777,7 +1789,7 @@ describe("booking reservation API", () => {
   });
 
   test("checkout cannot overwrite a hold barrier created by concurrent reactivation", async () => {
-    const startTimeUTC = "2025-01-15T08:26:00.000Z";
+    const startTimeUTC = "2099-01-15T08:26:00.000Z";
     const bookingId = "booking_cancelled_during_hold";
     store.bookings.push({
       _id: bookingId,
@@ -1878,7 +1890,7 @@ describe("booking reservation API", () => {
       activeReservations: 0,
       maxUses: 1,
     });
-    const startTimeUTC = "2025-01-15T08:22:00.000Z";
+    const startTimeUTC = "2099-01-15T08:22:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Test Package");
     const utcDate = new Date(startTimeUTC);
     const res = createRes();
@@ -1942,7 +1954,7 @@ describe("booking reservation API", () => {
       _type: "booking",
       status: "captured",
       originalOrderId: "booking_original",
-      startTimeUTC: "2025-01-15T08:26:00.000Z",
+      startTimeUTC: "2099-01-15T08:26:00.000Z",
       paymentRecordId,
     });
     store.paymentRecords.push({
@@ -1977,7 +1989,7 @@ describe("booking reservation API", () => {
       _rev: "booking_refunded_terminal_rev",
       _type: "booking",
       status: "refunded",
-      startTimeUTC: "2025-01-15T08:26:00.000Z",
+      startTimeUTC: "2099-01-15T08:26:00.000Z",
       couponRestoredAfterRefund: true,
       referralReversedAfterRefund: true,
     });
@@ -2005,7 +2017,7 @@ describe("booking reservation API", () => {
       _type: "booking",
       status: "cancelled",
       originalOrderId: "booking_original",
-      startTimeUTC: "2025-01-15T08:26:00.000Z",
+      startTimeUTC: "2099-01-15T08:26:00.000Z",
     });
 
     const restored = await applyBookingStatusTransition({
@@ -2033,13 +2045,16 @@ describe("booking reservation API", () => {
       activeReservations: 0,
       maxUses: 1,
     });
-    const startTimeUTC = "2025-01-15T08:28:00.000Z";
+    const startTimeUTC = "2099-01-15T08:28:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Test Package");
     const utcDate = new Date(startTimeUTC);
     const res = createRes();
     await createBooking(
       createReq({
         email: CLIENT_EMAIL,
+        discord: "servi",
+        specs: "GPU/CPU",
+        mainGame: "Shooter",
         packageTitle: "Test Package",
         status: "captured",
         paymentProvider: "free",
@@ -2071,7 +2086,7 @@ describe("booking reservation API", () => {
   });
 
   test("concurrent email dispatch uses one lease and stable Resend keys", async () => {
-    const startTimeUTC = "2025-01-15T08:20:00.000Z";
+    const startTimeUTC = "2099-01-15T08:20:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     const created = await createPaidBooking({
       startTimeUTC,
@@ -2112,9 +2127,9 @@ describe("booking reservation API", () => {
       packageTitle: "Performance Vertex Overhaul",
       netAmount: 84.99,
       ...(dodoTotalAmount ? { dodoTotalAmount } : {}),
-      originalRequestedStartTimeUTC: "2025-01-15T08:00:00.000Z",
+      originalRequestedStartTimeUTC: "2099-01-15T08:00:00.000Z",
       localTimeZone: "America/Los_Angeles",
-      displayDate: "Wednesday, January 15, 2025",
+      displayDate: "Thursday, January 15, 2099",
       displayTime: "12:00 AM",
     });
 
@@ -2142,12 +2157,12 @@ describe("booking reservation API", () => {
       "We need to reschedule your Roo Industries booking"
     );
     expect(clientEmail.html).toContain("We need to reschedule your booking");
-    expect(clientEmail.html).toContain("Wednesday, January 15, 2025");
+    expect(clientEmail.html).toContain("Thursday, January 15, 2099");
     expect(clientEmail.html).toContain("12:00 AM");
     expect(clientEmail.html).toContain(
-      "Pacific Standard Time (America/Los_Angeles)"
+      "GMT-08:00 (America/Los_Angeles)"
     );
-    expect(clientEmail.html).not.toContain("2025-01-15T08:00:00.000Z");
+    expect(clientEmail.html).not.toContain("2099-01-15T08:00:00.000Z");
     expect(store.bookings[0].recoveryNotificationStatus).toBe("sent");
     expect(mockFlushCommerceMirror).not.toHaveBeenCalled();
   });
@@ -2163,7 +2178,7 @@ describe("booking reservation API", () => {
       { label: "Requested Time", value: "9:00 AM" },
       {
         label: "Time Zone",
-        value: "India Standard Time (Asia/Kolkata)",
+        value: "GMT+05:30 (Asia/Kolkata)",
       },
     ]);
     expect(
@@ -2187,9 +2202,9 @@ describe("booking reservation API", () => {
       bookingPayload: {
         email: CLIENT_EMAIL,
         packageTitle: "Performance Vertex Overhaul",
-        startTimeUTC: "2025-01-15T08:00:00.000Z",
+        startTimeUTC: "2099-01-15T08:00:00.000Z",
         localTimeZone: "America/Los_Angeles",
-        displayDate: "Wednesday, January 15, 2025",
+        displayDate: "Thursday, January 15, 2099",
         displayTime: "12:00 AM",
       },
       pricingSnapshot: { grossAmount: 84.99, netAmount: 84.99 },
@@ -2217,7 +2232,7 @@ describe("booking reservation API", () => {
       requiresReschedule: true,
       recoveryNotificationStatus: "sent",
       localTimeZone: "America/Los_Angeles",
-      displayDate: "Wednesday, January 15, 2025",
+      displayDate: "Thursday, January 15, 2099",
       displayTime: "12:00 AM",
     });
     expect(store.recoveryCases).toHaveLength(1);
@@ -2237,7 +2252,7 @@ describe("booking reservation API", () => {
       bookingPayload: {
         email: CLIENT_EMAIL,
         packageTitle: "Performance Vertex Overhaul",
-        startTimeUTC: "2025-01-15T08:00:00.000Z",
+        startTimeUTC: "2099-01-15T08:00:00.000Z",
         couponCode: "RECOVER",
       },
       pricingSnapshot: {
@@ -2380,7 +2395,7 @@ describe("booking reservation API", () => {
       coupon: { _type: "reference", _ref: coupon._id },
       paymentRecordId: paymentRecord._id,
       status: "released",
-      releasedAt: "2025-01-15T08:20:00.000Z",
+      releasedAt: "2099-01-15T08:20:00.000Z",
     };
     store.paymentRecords.push(paymentRecord);
     store.coupons.push(coupon);
@@ -2414,7 +2429,7 @@ describe("booking reservation API", () => {
     expect(OWNER_EMAIL).toBe("serviroo@rooindustries.com");
 
     const { res } = await createPaidBooking({
-      startTimeUTC: "2025-01-15T08:00:00.000Z",
+      startTimeUTC: "2099-01-15T08:00:00.000Z",
       timeZone: "America/Los_Angeles",
       paymentProvider: "razorpay",
     });
@@ -2425,7 +2440,7 @@ describe("booking reservation API", () => {
   });
 
   test("upgrade booking backfills original booking details without leaking them from the client", async () => {
-    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const startTimeUTC = "2099-01-15T08:00:00.000Z";
     const originalUtcDate = new Date(startTimeUTC);
     store.bookings.push({
       _id: "booking_original",
@@ -2482,7 +2497,7 @@ describe("booking reservation API", () => {
   });
 
   test("upgrade booking rejects requests without the original booking email", async () => {
-    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const startTimeUTC = "2099-01-15T08:00:00.000Z";
     const originalUtcDate = new Date(startTimeUTC);
     store.bookings.push({
       _id: "booking_original",
@@ -2523,7 +2538,7 @@ describe("booking reservation API", () => {
   });
 
   test("upgrade booking rejects mismatched booking email", async () => {
-    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const startTimeUTC = "2099-01-15T08:00:00.000Z";
     const originalUtcDate = new Date(startTimeUTC);
     store.bookings.push({
       _id: "booking_original",
@@ -2565,7 +2580,7 @@ describe("booking reservation API", () => {
   });
 
   test("upgrade pricing uses cumulative paid amount across prior paid upgrades", async () => {
-    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const startTimeUTC = "2099-01-15T08:00:00.000Z";
     const originalUtcDate = new Date(startTimeUTC);
     store.bookings.push({
       _id: "booking_original",
@@ -2617,7 +2632,7 @@ describe("booking reservation API", () => {
   });
 
   test("upgrade booking rejects orders already at the target package", async () => {
-    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const startTimeUTC = "2099-01-15T08:00:00.000Z";
     const originalUtcDate = new Date(startTimeUTC);
     store.bookings.push({
       _id: "booking_original",
@@ -2671,7 +2686,7 @@ describe("booking reservation API", () => {
     process.env.RAZORPAY_KEY_ID = "rzp_test_123";
     process.env.RAZORPAY_KEY_SECRET = "rzp_secret";
 
-    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const startTimeUTC = "2099-01-15T08:00:00.000Z";
     const originalUtcDate = new Date(startTimeUTC);
     store.bookings.push({
       _id: "booking_original",
@@ -2729,14 +2744,14 @@ describe("booking reservation API", () => {
     process.env.RAZORPAY_KEY_ID = "rzp_test_123";
     process.env.RAZORPAY_KEY_SECRET = "rzp_secret";
 
-    const baseTime = new Date("2025-01-01T00:00:00.000Z").getTime();
-    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(baseTime);
-    const startTimeUTC = "2025-01-15T10:00:00.000Z";
+    const baseTime = new Date("2099-01-01T00:00:00.000Z").getTime();
+    jest.useFakeTimers({ now: baseTime, doNotFake: ["setTimeout", "clearTimeout"] });
+    const startTimeUTC = "2099-01-15T10:00:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     expect(hold.res.statusCode).toBe(200);
 
     store.slotHolds = [];
-    nowSpy.mockReturnValue(baseTime + 21 * 60 * 1000);
+    jest.setSystemTime(baseTime + 21 * 60 * 1000);
 
     const paymentRecordId =
       "paymentRecord.razorpay.order.razorpay_order_webhook";
@@ -2820,11 +2835,10 @@ describe("booking reservation API", () => {
       slotReservationState: "reconciled_after_missing_hold",
     });
 
-    nowSpy.mockRestore();
   });
 
   test.each([false, true])("atomically consumes the internal proof claim and finalization lease with referral=%s", async (withReferral) => {
-    const startTimeUTC = "2025-01-15T10:00:00.000Z";
+    const startTimeUTC = "2099-01-15T10:00:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     const paymentRecordId = "paymentRecord.paypal.order.internal_order";
     const claimId = "paymentProofClaim.paypal.internal_order";
@@ -2928,12 +2942,12 @@ describe("booking reservation API", () => {
   });
 
   test("internal reconstruction preserves completed email delivery without resending", async () => {
-    const startTimeUTC = "2025-01-15T10:00:00.000Z";
+    const startTimeUTC = "2099-01-15T10:00:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     const paymentRecordId = "paymentRecord.paypal.order.email_reconstruction";
     const claimId = "paymentProofClaim.paypal.email_reconstruction";
     const leaseId = "lease_email_reconstruction";
-    const completedAt = "2025-01-15T10:05:00.000Z";
+    const completedAt = "2099-01-15T10:05:00.000Z";
     store.referrals.push({
       _id: "ref_historical_reconstruction",
       _type: "referral",
@@ -3029,7 +3043,7 @@ describe("booking reservation API", () => {
       activeReservations: 0,
       maxUses: 5,
     });
-    const startTimeUTC = "2025-01-15T08:28:00.000Z";
+    const startTimeUTC = "2099-01-15T08:28:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Test Package");
     const paymentRecordId = "paymentRecord.free.internal_free";
     const paymentProofClaimId = "paymentProofClaim.free.internal_free";
@@ -3106,7 +3120,7 @@ describe("booking reservation API", () => {
     process.env.RAZORPAY_KEY_ID = "rzp_test_123";
     process.env.RAZORPAY_KEY_SECRET = "rzp_secret";
 
-    const startTimeUTC = "2025-01-15T11:00:00.000Z";
+    const startTimeUTC = "2099-01-15T11:00:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     expect(hold.res.statusCode).toBe(200);
 
@@ -3144,7 +3158,7 @@ describe("booking reservation API", () => {
     process.env.PAYPAL_CLIENT_ID = "paypal_client";
     process.env.PAYPAL_CLIENT_SECRET = "paypal_secret";
 
-    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const startTimeUTC = "2099-01-15T08:00:00.000Z";
     const originalUtcDate = new Date(startTimeUTC);
     store.bookings.push({
       _id: "booking_original",
@@ -3214,7 +3228,7 @@ describe("booking reservation API", () => {
   });
 
   test("rate limits repeated hold requests", async () => {
-    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const startTimeUTC = "2099-01-15T08:00:00.000Z";
     let lastResponse = null;
 
     for (let index = 0; index < 21; index += 1) {
@@ -3233,17 +3247,17 @@ describe("email time zone separation and midnight handling", () => {
   test.each([
     {
       label: "client 11:59 PM",
-      startTimeUTC: "2025-01-15T07:59:00.000Z",
+      startTimeUTC: "2099-01-15T07:59:00.000Z",
       timeZone: "America/Los_Angeles",
     },
     {
       label: "client 12:00 AM",
-      startTimeUTC: "2025-01-15T08:00:00.000Z",
+      startTimeUTC: "2099-01-15T08:00:00.000Z",
       timeZone: "America/Los_Angeles",
     },
     {
       label: "owner crosses midnight",
-      startTimeUTC: "2025-01-15T18:30:00.000Z",
+      startTimeUTC: "2099-01-15T18:30:00.000Z",
       timeZone: "America/Los_Angeles",
     },
   ])("client/owner emails keep correct dates at $label", async ({ startTimeUTC, timeZone }) => {

@@ -1,4 +1,5 @@
 import { UPGRADE_LINK_SLUG_PATTERN } from "../globalCmsContract.js";
+import { isValidEmail } from "../emailValidation.js";
 
 const definitions = [
   {
@@ -2615,7 +2616,7 @@ export const validateContentDocument = (typeName, document, { current } = {}) =>
     if (field.min !== undefined && measure < field.min) fail(path, `Minimum is ${field.min}.`);
     if (field.max !== undefined && measure > field.max) fail(path, `Maximum is ${field.max}.`);
     if (field.integer && !Number.isInteger(value)) fail(path, "An integer is required.");
-    if ((type === "email" || field.email) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) fail(path, "A valid email is required.");
+    if ((type === "email" || field.email) && !isValidEmail(value)) fail(path, "A valid email is required.");
     if (type === "url" && !validUrl(value, field.schemes || ["http", "https"])) fail(path, "An absolute HTTP or HTTPS URL is required.");
     if (type === "date" && (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value)) fail(path, "A valid ISO date is required.");
     if (type === "datetime" && (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value) || !Number.isFinite(Date.parse(value)))) fail(path, "A valid ISO datetime is required.");
