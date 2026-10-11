@@ -144,8 +144,8 @@ export default function RefLogin() {
     const savedCode = readBrowserStorage("sessionStorage", "refLoginCode");
     if (savedCode) {
       setCode(savedCode);
-      setRememberMe(true);
     }
+    setRememberMe(readBrowserStorage("sessionStorage", "refLoginRememberMe") === "true");
   }, [location.pathname, location.search, nav]);
 
   async function handleLogin(e) {
@@ -187,6 +187,7 @@ export default function RefLogin() {
       }
 
       writeBrowserStorage("sessionStorage", "refLoginCode", data.code || code);
+      writeBrowserStorage("sessionStorage", "refLoginRememberMe", String(rememberMe));
       if (shouldLinkSocial) {
         clearPendingDiscordChoice();
         const socialLinked = data.discordLinked === true;
@@ -283,7 +284,10 @@ export default function RefLogin() {
               name="rememberMe"
               type="checkbox"
               checked={rememberMe}
-              onChange={(e) => setRememberMe(e.target.checked)}
+              onChange={(e) => {
+                setRememberMe(e.target.checked);
+                writeBrowserStorage("sessionStorage", "refLoginRememberMe", String(e.target.checked));
+              }}
               className="peer sr-only"
             />
             <div
