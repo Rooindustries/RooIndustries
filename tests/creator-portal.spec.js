@@ -213,7 +213,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     });
 
     test('a pending code is not advertised as available to another creator', async ({ page }, testInfo) => {
-      await page.goto('/referrals/register');
+      await openForm(page, '/referrals/register', '/api/auth/identities');
       await page.getByLabel('Referral Code', { exact: true }).fill('pending-code');
       await expect(page.getByText('Referral code is available.', { exact: true })).toBeVisible();
       const responsePromise = page.waitForResponse(r => r.url().endsWith('/api/ref/register') && r.request().method() === 'POST');
