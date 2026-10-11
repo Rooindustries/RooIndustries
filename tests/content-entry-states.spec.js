@@ -15,7 +15,7 @@ for (const [route, resource, heading] of [
   ["/reviews", "reviews-gallery", "Community Reviews"],
 ]) {
   if (process.env.TOOLING_CLS_RESPONSE === "failed") {
-    test(`${route} shows the page error when server content fails`, async ({ page }, testInfo) => {
+    test(`${route} preserves the page shell when server content fails`, async ({ page }, testInfo) => {
       await page.goto("/contact");
       const api = await page.evaluate(async (resource) => {
         const response = await fetch(`/api/content/${resource}`);
@@ -23,14 +23,29 @@ for (const [route, resource, heading] of [
       }, resource);
       expect(api.status).toBe(503);
       expect(api.body.ok).toBe(false);
+      const clientResponses = [];
+      page.on("response", (response) => {
+        if (new URL(response.url()).pathname === `/api/content/${resource}`) clientResponses.push(response.status());
+      });
       const response = await page.goto(route);
-      await expect(page.getByRole("heading", { name: "We couldn’t load this page." })).toBeVisible();
-      await expect(page.getByRole("button", { name: "Reload page" })).toBeVisible();
-      await expect(page.getByRole("heading", { name: heading, exact: true })).toHaveCount(0);
+      expect(response.status()).toBe(200);
+      await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+      await expect(page.locator("nav").first()).toBeVisible();
+      await expect(page.locator("footer")).toBeVisible();
+      await expect.poll(() => clientResponses).toEqual([503]);
+      await expect(page.locator("#main-content section [aria-hidden='true']")).toHaveCount(0);
+      if (route === "/tools") {
+        await expect(page.getByText("No tools configured yet. Add tools in the content editor.")).toBeVisible();
+        await expect(page.locator("main article")).toHaveCount(0);
+      } else {
+        await expect(page.locator("main section figure")).toHaveCount(0);
+      }
+      await expect(page.getByRole("heading", { name: "We couldn’t load this page." })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Reload page" })).toHaveCount(0);
       const artifact = testInfo.outputPath("content-state.json");
-      await fs.writeFile(artifact, `${JSON.stringify({ route, apiStatus: api.status, pageStatus: response.status(), errorVisible: true }, null, 2)}\n`);
+      await fs.writeFile(artifact, `${JSON.stringify({ route, apiStatus: api.status, pageStatus: response.status(), clientResponses, headingVisible: true, footerVisible: true, failureStateVisible: true, errorVisible: false }, null, 2)}\n`);
       await testInfo.attach("content-state", { path: artifact, contentType: "application/json" });
-      await page.screenshot({ path: testInfo.outputPath("server-error.png"), animations: "disabled" });
+      await page.screenshot({ path: testInfo.outputPath("server-fallback.png"), animations: "disabled" });
     });
     continue;
   }
