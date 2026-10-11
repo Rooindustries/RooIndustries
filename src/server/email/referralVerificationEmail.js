@@ -1,4 +1,5 @@
 import React from "react";
+import { formatLinkExpiry } from "./linkExpiry.js";
 
 const escapeHtml = (value) =>
   String(value || "")
@@ -8,7 +9,7 @@ const escapeHtml = (value) =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 
-export const buildReferralVerificationEmail = ({ name = "there", verifyLink }) =>
+export const buildReferralVerificationEmail = ({ name = "there", verifyLink, expiresAt }) =>
   React.createElement(
     React.Fragment,
     null,
@@ -30,17 +31,18 @@ export const buildReferralVerificationEmail = ({ name = "there", verifyLink }) =
     React.createElement(
       "p",
       null,
-      "This private link expires in one hour. If you did not start this signup, you can ignore it."
+      `${formatLinkExpiry(expiresAt)} If you did not start this signup, you can ignore it.`
     )
   );
 
 export const buildReferralVerificationEmailHtml = ({
   name = "there",
   verifyLink,
+  expiresAt,
 }) =>
   [
     `<p>Hi ${escapeHtml(name || "there")},</p>`,
     "<p>Confirm this email to finish creating your Roo Industries creator account.</p>",
     `<p><a href="${escapeHtml(verifyLink)}"><strong>Confirm creator account</strong></a></p>`,
-    "<p>This private link expires in one hour. If you did not start this signup, you can ignore it.</p>",
+    `<p>${formatLinkExpiry(expiresAt)} If you did not start this signup, you can ignore it.</p>`,
   ].join("");

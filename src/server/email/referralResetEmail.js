@@ -1,4 +1,5 @@
 import React from "react";
+import { formatLinkExpiry } from "./linkExpiry.js";
 
 const escapeHtml = (value) =>
   String(value || "")
@@ -8,7 +9,7 @@ const escapeHtml = (value) =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 
-export const buildResetEmail = ({ name = "there", resetLink }) =>
+export const buildResetEmail = ({ name = "there", resetLink, expiresAt }) =>
   React.createElement(
     React.Fragment,
     null,
@@ -26,14 +27,14 @@ export const buildResetEmail = ({ name = "there", resetLink }) =>
     React.createElement(
       "p",
       null,
-      "This private link expires in one hour. If you did not request it, you can ignore this email."
+      `${formatLinkExpiry(expiresAt)} If you did not request it, you can ignore this email.`
     )
   );
 
-export const buildResetEmailHtml = ({ name = "there", resetLink }) =>
+export const buildResetEmailHtml = ({ name = "there", resetLink, expiresAt }) =>
   [
     `<p>Hi ${escapeHtml(name || "there")},</p>`,
     "<p>Use the button below to choose a new password.</p>",
     `<p><a href="${escapeHtml(resetLink)}"><strong>Reset password</strong></a></p>`,
-    "<p>This private link expires in one hour. If you did not request it, you can ignore this email.</p>",
+    `<p>${formatLinkExpiry(expiresAt)} If you did not request it, you can ignore this email.</p>`,
   ].join("");

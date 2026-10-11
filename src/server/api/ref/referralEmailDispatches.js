@@ -147,6 +147,7 @@ const renderDispatch = ({ dispatch, env = process.env }) => {
       html: buildReferralVerificationEmailHtml({
         name,
         verifyLink: `${baseUrl}/referrals/verify#token=${encodeURIComponent(token)}`,
+        expiresAt: dispatch.expires_at,
       }),
     };
   }
@@ -155,6 +156,7 @@ const renderDispatch = ({ dispatch, env = process.env }) => {
     html: buildResetEmailHtml({
       name,
       resetLink: `${baseUrl}/referrals/reset#token=${encodeURIComponent(token)}`,
+      expiresAt: dispatch.expires_at,
     }),
   };
 };
@@ -336,6 +338,7 @@ export const sendReferralEmailDirect = async ({
   recipientEmail,
   token,
   name = "",
+  expiresAt,
   resendClient = createResendClient(),
   env = process.env,
 } = {}) => {
@@ -350,6 +353,7 @@ export const sendReferralEmailDirect = async ({
     dispatch: {
       dispatch_kind: dispatchKind,
       delivery_payload: { token, name },
+      expires_at: expiresAt,
     },
     env,
   });
