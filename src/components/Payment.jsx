@@ -659,13 +659,13 @@ export default function Payment({ hideFooter = false }) {
         if (!active) return;
         setServerQuote(null);
         setQuoteFingerprint("");
-        const quoteTimedOut = error?.name === "AbortError";
+        const quoteTimedOut = error?.name === "AbortError" || error?.name === "TimeoutError";
         showBanner(
           "error",
           quoteTimedOut
             ? "Checkout price confirmation took too long. Please try again."
             : error?.message || "Unable to confirm checkout price.",
-          quoteTimedOut ? { persistent: true, retryQuote: true } : {}
+          { persistent: true, retryQuote: true }
         );
       })
       .finally(() => {
@@ -1081,7 +1081,10 @@ export default function Payment({ hideFooter = false }) {
         ...options,
         signal: controller?.signal || options.signal,
       });
-      const data = await response.json().catch(() => ({}));
+      const data = await response.json().catch((error) => {
+        if (error?.name === "AbortError" || error?.name === "TimeoutError") throw error;
+        return {};
+      });
       return { response, data };
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
@@ -1410,7 +1413,12 @@ export default function Payment({ hideFooter = false }) {
       window.location.assign(session.providerPayload.checkoutUrl);
     } catch (error) {
       if (!operation.current()) return;
-      showBanner("error", error.message || "Unable to open checkout.");
+      const timedOut = error?.name === "AbortError" || error?.name === "TimeoutError";
+      showBanner(
+        "error",
+        timedOut ? "Checkout timed out. Please try again." : error.message || "Unable to open checkout.",
+        { persistent: true }
+      );
     } finally {
       if (operation.current()) setPayingDodo(false);
     }
