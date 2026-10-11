@@ -1,4 +1,5 @@
 import {
+  CODE_VALIDATION_UNAVAILABLE_MESSAGE,
   calculateCheckoutDiscounts,
   getCouponDiscountAmount,
   resolveCheckoutCode,
@@ -7,6 +8,7 @@ import {
   toMoney,
   validateReferralCode,
 } from "../lib/checkoutCodes";
+import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
 
 describe("shared checkout discount math", () => {
   const referral = {
@@ -224,5 +226,52 @@ describe("shared checkout discount math", () => {
       resolvedType: "referral",
     });
     warn.mockRestore();
+  });
+
+  test.each([
+    ["valid", "stalled", "referral"],
+    ["stalled", "valid", "unavailable"],
+    ["invalid", "stalled", "unavailable"],
+    ["invalid", "valid", "coupon"],
+    ["invalid", "invalid", "invalid"],
+  ])("resolves referral %s and coupon %s as %s", async (referralState, couponState, expected) => {
+    jest.useFakeTimers();
+    const fetchImpl = jest.fn(async (url, { signal }) => {
+      const isReferral = String(url).includes("validateReferral");
+      const state = isReferral ? referralState : couponState;
+      if (state === "stalled") {
+        return new Promise((resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      }
+      return {
+        ok: true,
+        json: async () => state === "invalid"
+          ? { ok: false, error: "Invalid referral or coupon code.", reason: "not_found" }
+          : isReferral
+            ? { ok: true, referral: { code: "samecode", currentDiscountPercent: 10 } }
+            : { ok: true, coupon: { code: "samecode", discountType: "percent", discountPercent: 20 } },
+      };
+    });
+    try {
+      const pending = resolveCheckoutCode("samecode", "Performance Vertex Overhaul", fetchImpl);
+      await jest.advanceTimersByTimeAsync(CLIENT_REQUEST_TIMEOUT_MS);
+      const result = await pending;
+      if (expected === "unavailable") {
+        expect(result).toEqual({ ok: false, unavailable: true, error: CODE_VALIDATION_UNAVAILABLE_MESSAGE });
+      } else if (expected === "invalid") {
+        expect(result).toEqual({ ok: false, error: "Invalid referral or coupon code." });
+      } else {
+        expect(result).toMatchObject({ ok: true, type: expected, value: { code: "samecode" } });
+      }
+      const stalledCall = fetchImpl.mock.calls.find(([url]) =>
+        String(url).includes(referralState === "stalled" ? "validateReferral" : "validateCoupon")
+      );
+      if (referralState === "stalled" || couponState === "stalled") {
+        expect(stalledCall[1].signal.aborted).toBe(true);
+      }
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

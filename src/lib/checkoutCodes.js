@@ -278,9 +278,6 @@ export const resolveCheckoutCode = async (
     referralAttempt.status === "fulfilled" ? referralAttempt.value : null;
   const couponResult =
     couponAttempt.status === "fulfilled" ? couponAttempt.value : null;
-  if (!referralResult || !couponResult || referralResult.unavailable || couponResult.unavailable) {
-    return unavailableCode();
-  }
   const hasReferral = !!(referralResult?.ok && referralResult.referral);
   const hasCoupon = !!(couponResult?.ok && couponResult.coupon);
 
@@ -295,6 +292,9 @@ export const resolveCheckoutCode = async (
 
   if (hasReferral) {
     return { ok: true, type: "referral", value: referralResult.referral };
+  }
+  if (!referralResult || !couponResult || referralResult.unavailable || couponResult.unavailable) {
+    return unavailableCode();
   }
   if (hasCoupon) {
     return { ok: true, type: "coupon", value: couponResult.coupon };

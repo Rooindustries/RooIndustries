@@ -113,10 +113,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       });
     }
 
-    test("coupon lookup timeout recovers and keeps referral-first collisions", async ({ page, flow }) => {
+    test("invalid referral with stalled coupon recovers and keeps referral-first collisions", async ({ page, flow }) => {
       await flow.review();
       flow.state.failures["/api/ref/validateCoupon"] = "timeout";
-      await flow.codeInput("friend");
+      await flow.codeInput("unknown");
       await expect(page.getByRole("alert").filter({ hasText: /validation.*unavailable|unable to validate/i })).toBeVisible({ timeout: 20000 });
       delete flow.state.failures["/api/ref/validateCoupon"];
       await flow.codeInput("expired");
@@ -136,6 +136,29 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page.getByRole("alert").filter({ hasText: /validation.*unavailable|unable to validate/i })).toBeVisible();
       await expect(page.getByRole("button", { name: /^Pay \$/ })).toBeEnabled();
     });
+
+    for (const stalled of ["coupon", "referral"]) {
+      test(`${stalled === "coupon" ? "valid referral wins over a stalled coupon" : "stalled referral blocks a valid coupon"}`, async ({ page, flow }) => {
+        await flow.review();
+        flow.state.collision = true;
+        flow.state.failures[stalled === "coupon" ? "/api/ref/validateCoupon" : "/api/ref/validateReferral"] = "timeout";
+        await flow.codeInput("friend");
+        if (stalled === "coupon") {
+          await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible({ timeout: 20000 });
+          await expect(page.getByRole("button", { name: /^Remove coupon code/ })).toHaveCount(0);
+        } else {
+          await expect(page.getByRole("alert").filter({ hasText: /validation.*unavailable/i })).toBeVisible({ timeout: 20000 });
+          await expect(page.getByRole("button", { name: /^Remove (referral|coupon) code/ })).toHaveCount(0);
+          await expect(page.getByRole("textbox", { name: "Referral or coupon code", exact: true })).toBeEnabled();
+        }
+        await expect(page.getByRole("button", { name: /^Pay \$/ })).toBeEnabled();
+        await flow.payment();
+        await expect.poll(() => flow.state.calls.filter(({ path }) => path === "/api/payment/quote").length).toBeGreaterThan(0);
+        const quote = flow.state.calls.filter(({ path }) => path === "/api/payment/quote").at(-1).body;
+        expect(quote.referralCode || "").toBe(stalled === "coupon" ? "friend" : "");
+        expect(quote.couponCode || "").toBe("");
+      });
+    }
 
     for (const failure of viewport.width === 1440 ? [400, 503, "network"] : [503]) {
       test(`quote ${failure} keeps an actionable error until a successful retry`, async ({ page, flow }) => {
