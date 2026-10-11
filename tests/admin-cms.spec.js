@@ -465,6 +465,40 @@ for (const committed of [true, false]) {
   });
 }
 
+test("#10 a concurrent subtitle prevents reconciling a missing deletion", async ({ page, request }, testInfo) => {
+  const documentId = "tooling-contact";
+  const initial = await cms(request, `/api/admin/content/documents/${documentId}`);
+  await cms(request, "/api/admin/content/publish", {
+    operation: "replace", type: "contact", documentId, expectedRevision: initial.revision,
+    document: { ...initial.document, subtitle: "Old subtitle" },
+  });
+  await login(page); await choose(page, "Contact Section");
+  const subtitle = page.getByLabel("Subtitle", { exact: true });
+  await expect(subtitle).toHaveValue("Old subtitle");
+  const original = await cms(request, `/api/admin/content/documents/${documentId}`);
+  await subtitle.fill("");
+  await page.clock.install();
+  const pending = await hold(page, "**/api/admin/content/publish", { forward: false });
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await pending.arrived;
+  try {
+    await cms(request, "/api/admin/content/publish", {
+      operation: "replace", type: "contact", documentId, expectedRevision: original.revision,
+      document: { ...original.document, subtitle: "Concurrent editor subtitle" },
+    });
+    await page.clock.fastForward(31000);
+    await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
+    await expect(subtitle).toHaveValue("");
+    const draft = await page.evaluate(id => JSON.parse(localStorage.getItem(`roo-content-draft:v1:doc:${id}`)), documentId);
+    expect(draft.baseRevision).toBe(original.revision);
+    expect(draft.document).not.toHaveProperty("subtitle");
+    const stored = await cms(request, `/api/admin/content/documents/${documentId}`);
+    expect(stored.document.subtitle).toBe("Concurrent editor subtitle");
+    await evidence(page, testInfo, { originalRevision: original.revision, stored, draft });
+  } finally { await pending.release(); }
+});
+
 test("#10 uncertain publication keeps its draft and Retry only reads", async ({ page, request }, testInfo) => {
   await login(page); await hero(page);
   const original = await cms(request, `/api/admin/content/documents/${HERO_ID}`);

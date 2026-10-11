@@ -28,7 +28,7 @@ import { EditorContext, ObjectFields } from "./FieldInput";
 import RevisionHistory from "./RevisionHistory";
 import { clearDraft, draftKey, listNewDrafts, readDraft, saveDraft } from "./draftStore";
 import { contentErrorLabel, getIn, indexErrors, newUuid, resolveStablePath, setIn, stableJson, toStablePath } from "./documentPaths";
-import { publishedContentMatches } from "./publishStatus";
+import { publishedContentMatches, removedContentPaths } from "./publishStatus";
 
 const GROUPS = [
   { id: "site", title: "Site content" },
@@ -459,7 +459,7 @@ export default function ContentAdmin() {
       if (!documentId || data?.document?._id !== documentId || data.document._type !== pending.session.type || typeof data.revision !== "string" || !data.revision || data.revision !== data.document._rev) {
         throw new Error("The publication status could not be read.");
       }
-      if (publishedContentMatches(data, pending.session, pending.document, TYPES_BY_NAME.get(pending.session.type))) {
+      if (publishedContentMatches(data, pending.session, pending.document, TYPES_BY_NAME.get(pending.session.type), pending.removedPaths)) {
         await finishPublication(pending, documentId);
       } else notPublished();
     } catch (error) {
@@ -492,7 +492,7 @@ export default function ContentAdmin() {
     flushDraft({ force: true });
     setSaving(true);
     const submitted = working;
-    const pending = { generation: selectedGeneration, session, document: submitted };
+    const pending = { generation: selectedGeneration, session, document: submitted, removedPaths: session.documentId ? removedContentPaths(session.baseline, submitted, type) : [] };
     try {
       const body = session.documentId
         ? {
