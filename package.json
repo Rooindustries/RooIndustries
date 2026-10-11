@@ -47,6 +47,7 @@
     "test": "jest",
     "test:payment-recovery:postgres17": "node scripts/test-payment-persistence-sweep.mjs --recovery --full-chain",
     "test:agent-readiness": "node --test tests/agent-readiness.test.mjs",
+    "test:perf:routes": "playwright test tests/route-bundles.spec.js --project=chromium",
     "test:perf:home": "playwright test tests/home-performance.spec.js --project=chromium",
     "check:payment:runtime": "node scripts/diagnose-payment-runtime.js",
     "check:payment:webhooks": "node scripts/check-payment-webhooks.js",

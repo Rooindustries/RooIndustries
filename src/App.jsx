@@ -19,9 +19,7 @@ import { initializePerformanceProfile } from "./lib/performanceProfile";
 import Home from "./legacyPages/Home";
 import AboutPage from "./legacyPages/About";
 import Packages from "./legacyPages/Packages";
-import Contact from "./legacyPages/Contact";
 import FaqPage from "./legacyPages/Faq";
-import Privacy from "./legacyPages/PrivacyPolicy";
 import {
   consumeRouteTransitionIntent,
   isHomeSectionHash,
@@ -31,7 +29,16 @@ import { sanitizeBrowserSearch } from "./lib/browserSearch";
 import { prefetchHomeSectionData } from "./lib/homeSectionData";
 import { whenUserInteracts } from "./lib/firstInteraction";
 import { migrateCheckoutStorageToSession } from "./lib/checkoutStorage";
+import { getPublicContent } from "./lib/publicContentClient";
 
+const Contact = lazy(() => import("./legacyPages/Contact"));
+const Privacy = lazy(async () => {
+  const [{ default: Page }, initialData] = await Promise.all([
+    import("./legacyPages/PrivacyPolicy"),
+    getPublicContent("privacy-policy").catch(() => null),
+  ]);
+  return { default: (props) => <Page {...props} initialData={props.initialData || initialData} /> };
+});
 const Reviews = lazy(() => import("./legacyPages/Reviews"));
 const Tools = lazy(() => import("./legacyPages/Tools"));
 const RefLogin = lazy(() => import("./legacyPages/RefLogin"));
@@ -140,6 +147,8 @@ function AnimatedRoutes({
   routeKey,
   initialHomeData,
   initialRouteData,
+  initialRouteContent,
+  initialRoutePath,
 }) {
   const baseLocation = useLocation();
   const location = routesLocation || baseLocation;
@@ -163,14 +172,14 @@ function AnimatedRoutes({
             )}
           />
           <Route path="/about" element={<AboutPage />} />
-          <Route path="/privacy" element={<Privacy initialData={initialRouteData?.privacy || null} />} />
+          <Route path="/privacy" element={initialRoutePath === "/privacy" && initialRouteContent ? initialRouteContent : <Privacy initialData={initialRouteData?.privacy || null} />} />
           <Route path="/terms" element={withRouteSuspense(<Terms />)} />
           <Route
             path="/reviews"
             element={withRouteSuspense(<Reviews setIsModalOpen={setIsModalOpen} />)}
           />
           <Route path="/booking" element={withRouteSuspense(<Book />)} />
-          <Route path="/contact" element={<Contact initialData={initialRouteData?.contact || null} />} />
+          <Route path="/contact" element={initialRoutePath === "/contact" && initialRouteContent ? initialRouteContent : <Contact initialData={initialRouteData?.contact || null} />} />
           <Route
             path="/faq"
             element={<FaqPage initialData={initialHomeData} />}
@@ -248,6 +257,8 @@ function AnimatedRoutes({
 export function AppContent({
   initialHomeData = null,
   initialRouteData = null,
+  initialRouteContent = null,
+  initialRoutePath = null,
   routeShell = "browser",
 }) {
   const [, setIsModalOpen] = useState(false);
@@ -593,6 +604,8 @@ export function AppContent({
             routeKey={routesKey}
             initialHomeData={initialHomeData}
             initialRouteData={initialRouteData}
+            initialRouteContent={initialRouteContent}
+            initialRoutePath={initialRoutePath}
           />
         </main>
       </div>
