@@ -2,6 +2,7 @@ const normalizeDispatch = (value = {}) => ({
   claimed: value?.claimed === true,
   sent: value?.sent === true,
   historicalUnknown: value?.historical_unknown === true,
+  inactive: value?.booking_inactive === true,
   inProgress: value?.in_progress === true,
   idempotencyKey: String(value?.idempotency_key || "").trim(),
   providerMessageId: String(value?.provider_message_id || "").trim(),

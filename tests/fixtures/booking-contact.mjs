@@ -130,6 +130,7 @@ export async function createBookingContactFixture() {
       '/api/payment/status': '../../src/server/api/payment/status.js',
       '/api/ref/getUpgradeInfo': '../../src/server/api/ref/getUpgradeInfo.js',
       '/api/ref/createBooking': '../../src/server/api/ref/createBooking.js',
+      '/api/ref/sendBookingEmails': '../../src/server/api/ref/sendBookingEmails.js',
     })) handlers.set(route, (await import(module)).default);
     server = http.createServer(async (req, res) => {
       try {
@@ -224,7 +225,7 @@ export async function createBookingContactFixture() {
         email: original.email, upgradeIntentToken: lookup.body.upgradeIntentToken,
         deferEmailsUntilConfirmation: true } };
     };
-    return { post, start, hold, snapshot, recordFor, seedUpgrade, commerce, details, evidence, save, stop };
+    return { post, start, hold, snapshot, recordFor, seedUpgrade, commerce, database, details, evidence, save, stop };
   } catch (error) {
     await stop();
     throw error;

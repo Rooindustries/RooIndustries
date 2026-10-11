@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
 import { formatAppointmentTime } from "../../email/appointmentTime.js";
 import { isIdempotencyPayloadConflict } from "../../email/resendOutcome.js";
+import { isBookingBlockingStatus } from "../../booking/bookingStatus.js";
 import {
   claimEmailDispatchPair,
   completeEmailDispatch,
@@ -48,6 +49,9 @@ const sendEmailAtLease = async ({ client, booking, leaseId, recovery = false, re
   if (!current?._rev || current?.[`${prefix}LeaseId`] !== leaseId ||
       !Number.isFinite(leaseExpiresAt) || leaseExpiresAt <= Date.now()) {
     throw Object.assign(new Error("Email dispatch lease changed."), { code: "email_dispatch_lease_changed", status: 409 });
+  }
+  if (!recovery && !isBookingBlockingStatus(current.status)) {
+    return { data: null, error: { code: "booking_inactive" } };
   }
   const firstAttemptAt = current[firstAttemptField] ||
     (Number(booking[`${prefix}AttemptCount`] || 0) > 0
@@ -245,6 +249,7 @@ export const getBookingForEmailDispatch = async ({
       _rev,
       backendOwner,
       cutoverGeneration,
+      status,
       discord,
       email,
       payerEmail,
@@ -495,7 +500,7 @@ export const sendBookingEmailsForBooking = async ({
         emailDispatchLastAttemptAt: now,
       })
       .setIfMissing({ emailDispatchAttemptCount: 0 })
-      .inc({ emailDispatchAttemptCount: 1 })
+      .inc({ emailDispatchAttemptCount: isBookingBlockingStatus(resolvedBooking.status) ? 1 : 0 })
       .commit();
   } catch (error) {
     if (Number(error?.statusCode || error?.status || 0) === 409) {
@@ -609,26 +614,31 @@ export const sendBookingEmailsForBooking = async ({
     dispatch.owner.sent = ownerAlreadySent;
     dispatch.client.skippedReason = clientAlreadySent
       ? "already_sent"
-      : ledger?.customer?.historicalUnknown ? "historical_delivery_unknown" : "delivery_disabled";
+      : ledger?.customer?.inactive ? "booking_inactive"
+        : ledger?.customer?.historicalUnknown ? "historical_delivery_unknown" : "delivery_disabled";
     dispatch.owner.skippedReason = ownerAlreadySent
       ? "already_sent"
-      : ledger?.owner?.historicalUnknown ? "historical_delivery_unknown" : "delivery_disabled";
+      : ledger?.owner?.inactive ? "booking_inactive"
+        : ledger?.owner?.historicalUnknown ? "historical_delivery_unknown" : "delivery_disabled";
     dispatch.allSent = dispatch.client.sent && dispatch.owner.sent;
     const deliveryUnknown = isEmailDeliveryUnknown({ ...dispatch, ledger });
-    patchValues.emailDispatchStatus = deliveryUnknown ? "delivery_unknown" : dispatch.allSent ? "sent" : "delivery_disabled";
+    const bookingInactive = dispatch.client.skippedReason === "booking_inactive" || dispatch.owner.skippedReason === "booking_inactive";
+    patchValues.emailDispatchStatus = deliveryUnknown ? "delivery_unknown" : dispatch.allSent ? "sent" : bookingInactive ? "failed" : "delivery_disabled";
+    if (bookingInactive) patchValues.emailDispatchLastError = "booking_inactive";
     patchValues.emailDispatchDeferred = false;
     patchValues.emailDispatchLeaseId = "";
     patchValues.emailDispatchLeaseExpiresAt = "";
-    patchValues.emailDispatchNextAttemptAt = dispatch.allSent || deliveryUnknown
+    patchValues.emailDispatchNextAttemptAt = dispatch.allSent || deliveryUnknown || bookingInactive
       ? ""
       : new Date(nowMs + 5 * 60 * 1000).toISOString();
     await client.patch(resolvedBooking._id).set(patchValues).commit();
     return {
-      httpStatus: dispatch.allSent ? 200 : 503,
+      httpStatus: dispatch.allSent ? 200 : bookingInactive ? 409 : 503,
       body: {
         ok: dispatch.allSent,
         bookingId: resolvedBooking._id,
-        retryable: !dispatch.allSent && !deliveryUnknown,
+        retryable: !dispatch.allSent && !deliveryUnknown && !bookingInactive,
+        ...(bookingInactive ? { code: "booking_inactive" } : {}),
         deliveryUnknown,
         emailDispatch: dispatch,
       },
@@ -640,6 +650,8 @@ export const sendBookingEmailsForBooking = async ({
     dispatch.client.skippedReason = "already_sent";
   } else if (ledger?.customer?.historicalUnknown) {
     dispatch.client.skippedReason = "historical_delivery_unknown";
+  } else if (ledger?.customer?.inactive) {
+    dispatch.client.skippedReason = "booking_inactive";
   } else if (ledger && !ledger.customer?.claimed) {
     dispatch.client.skippedReason = "dispatch_in_progress";
   } else if (!clientRecipient) {
@@ -673,6 +685,7 @@ export const sendBookingEmailsForBooking = async ({
       if (error) {
         const errorCode = getSafeErrorCode(error, "resend_client_error");
         dispatch.client.skippedReason = errorCode;
+        if (errorCode === "booking_inactive") dispatch.client.attempted = false;
         await recordEmailLedgerOutcome({
           client,
           dispatch: ledger?.customer,
@@ -716,6 +729,8 @@ export const sendBookingEmailsForBooking = async ({
     dispatch.owner.skippedReason = "already_sent";
   } else if (ledger?.owner?.historicalUnknown) {
     dispatch.owner.skippedReason = "historical_delivery_unknown";
+  } else if (ledger?.owner?.inactive) {
+    dispatch.owner.skippedReason = "booking_inactive";
   } else if (ledger && !ledger.owner?.claimed) {
     dispatch.owner.skippedReason = "dispatch_in_progress";
   } else if (!owner) {
@@ -747,6 +762,7 @@ export const sendBookingEmailsForBooking = async ({
       if (error) {
         const errorCode = getSafeErrorCode(error, "resend_owner_error");
         dispatch.owner.skippedReason = errorCode;
+        if (errorCode === "booking_inactive") dispatch.owner.attempted = false;
         await recordEmailLedgerOutcome({
           client,
           dispatch: ledger?.owner,
@@ -791,6 +807,7 @@ export const sendBookingEmailsForBooking = async ({
   dispatch.allSent = dispatch.client.sent && dispatch.owner.sent;
   dispatch.deferred = false;
   const deliveryUnknown = isEmailDeliveryUnknown({ ...dispatch, ledger });
+  const bookingInactive = dispatch.client.skippedReason === "booking_inactive" || dispatch.owner.skippedReason === "booking_inactive";
 
   patchValues.emailDispatchStatus = deliveryUnknown ? "delivery_unknown" : dispatch.allSent
     ? "sent"
@@ -798,10 +815,10 @@ export const sendBookingEmailsForBooking = async ({
       ? "partial"
       : "failed";
   patchValues.emailDispatchDeferred = false;
-  patchValues.emailDispatchLastError = lastErrors;
+  patchValues.emailDispatchLastError = bookingInactive ? "booking_inactive" : lastErrors;
   patchValues.emailDispatchLeaseId = "";
   patchValues.emailDispatchLeaseExpiresAt = "";
-  patchValues.emailDispatchNextAttemptAt = dispatch.allSent || deliveryUnknown
+  patchValues.emailDispatchNextAttemptAt = dispatch.allSent || deliveryUnknown || bookingInactive
     ? ""
     : new Date(nowMs + 5 * 60 * 1000).toISOString();
 
@@ -818,11 +835,12 @@ export const sendBookingEmailsForBooking = async ({
   }
 
   return {
-    httpStatus: dispatch.allSent ? 200 : 503,
+    httpStatus: dispatch.allSent ? 200 : bookingInactive ? 409 : 503,
     body: {
       ok: dispatch.allSent,
       bookingId: resolvedBooking._id,
-      retryable: !dispatch.allSent && !deliveryUnknown,
+      retryable: !dispatch.allSent && !deliveryUnknown && !bookingInactive,
+      ...(bookingInactive ? { code: "booking_inactive" } : {}),
       deliveryUnknown,
       emailDispatch: dispatch,
     },
