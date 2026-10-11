@@ -653,7 +653,7 @@ export const sendBookingEmailsForBooking = async ({
             siteName,
             heading: "Booking Received",
             intro:
-              "To continue with your booking, please join the Roo Industries Discord using the button above. I'll contact you there (or by email if needed) to confirm your time and details.",
+              "To continue with your booking, please join the Roo Industries Discord using the button below. I'll contact you there (or by email if needed) to confirm your time and details.",
             fields: clientFields,
             discordInviteUrl: DISCORD_INVITE_URL,
           }),
