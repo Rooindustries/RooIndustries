@@ -184,8 +184,15 @@ const buildEmailDispatchState = () => ({
   allSent: true,
 });
 
-const formatMoney = (value) =>
-  Number.isFinite(Number(value)) ? Number(value).toFixed(2) : "0.00";
+const formatMoney = (value, currency = "USD") => {
+  if (value == null || String(value).trim() === "" || !Number.isFinite(Number(value))) return "-";
+  const options = { style: "currency", currency: String(currency || "USD").trim(), useGrouping: false };
+  try {
+    return new Intl.NumberFormat("en-US", options).format(Number(value));
+  } catch {
+    return `${Number(value).toFixed(2)} (currency unavailable)`;
+  }
+};
 
 export const formatRequestedTimeFields = (booking = {}) => {
   const appointment = formatAppointmentTime(
@@ -246,6 +253,7 @@ export const getBookingForEmailDispatch = async ({
       discountAmount,
       grossAmount,
       netAmount,
+      currency,
       couponCode,
       couponDiscountPercent,
       couponDiscountAmount,
@@ -320,6 +328,9 @@ const buildBookingFieldGroups = (booking = {}) => {
   const hostAppointment = formatAppointmentTime(booking.startTimeUTC, OWNER_TZ_NAME);
   const hasNetAmount = ["number", "string"].includes(typeof booking.netAmount) &&
     String(booking.netAmount).trim() !== "" && Number.isFinite(Number(booking.netAmount));
+  const currency = booking.currency || "USD";
+  const priceAmount = hasNetAmount ? booking.netAmount : booking.grossAmount;
+  const priceDisplay = formatMoney(priceAmount, currency);
   const discountPercentValue = Number(booking.discountPercent || 0);
   const discountAmountValue = Number(booking.discountAmount || 0);
   const couponPercentValue = Number(booking.couponDiscountPercent || 0);
@@ -329,8 +340,8 @@ const buildBookingFieldGroups = (booking = {}) => {
   const couponSuffix =
     hasNetAmount && (couponPercentValue > 0 || couponAmountValue > 0)
       ? couponType === "fixed"
-        ? ` ($${formatMoney(couponValue || couponAmountValue)} off - $${formatMoney(couponAmountValue)})`
-        : ` (${couponPercentValue}% - $${formatMoney(couponAmountValue)})`
+        ? ` (${formatMoney(couponValue || couponAmountValue, currency)} off - ${formatMoney(couponAmountValue, currency)})`
+        : ` (${couponPercentValue}% - ${formatMoney(couponAmountValue, currency)})`
       : "";
   const couponDisplay = booking.couponCode
     ? `${booking.couponCode}${couponSuffix}`
@@ -343,8 +354,8 @@ const buildBookingFieldGroups = (booking = {}) => {
       label: "Price",
       value:
         hasNetAmount && Number(booking.netAmount) < Number(booking.grossAmount || 0)
-          ? `$${formatMoney(booking.netAmount)} (was $${formatMoney(booking.grossAmount)})`
-          : booking.packagePrice || "-",
+          ? `${formatMoney(booking.netAmount, currency)} (was ${formatMoney(booking.grossAmount, currency)})`
+          : priceDisplay !== "-" ? priceDisplay : booking.packagePrice || "-",
     },
     { label: "Discord", value: booking.discord || "-" },
     { label: "Email", value: booking.email || booking.payerEmail || "-" },
@@ -360,7 +371,7 @@ const buildBookingFieldGroups = (booking = {}) => {
   if (hasNetAmount && (discountPercentValue > 0 || discountAmountValue > 0)) {
     ownerDiscountFields.push({
       label: "Discount",
-      value: `${discountPercentValue}% ($${formatMoney(discountAmountValue)})`,
+      value: `${discountPercentValue}% (${formatMoney(discountAmountValue, currency)})`,
     });
   }
 
@@ -1010,12 +1021,13 @@ export const dispatchRescheduleNotifications = async ({
   const from = String(process.env.FROM_EMAIL || "").trim();
   const deliveryEnabled = !!from && !!resend;
   const amount = formatMoney(
-    recoveryBooking.dodoTotalAmount || recoveryBooking.netAmount || recoveryBooking.grossAmount || 0
+    recoveryBooking.dodoTotalAmount ?? recoveryBooking.netAmount ?? recoveryBooking.grossAmount,
+    recoveryBooking.currency
   );
   const fields = [
     { label: "Order ID", value: recoveryBooking._id },
     { label: "Package", value: recoveryBooking.packageTitle || "-" },
-    { label: "Paid Amount", value: `$${amount}` },
+    { label: "Paid Amount", value: amount },
     ...formatRequestedTimeFields(recoveryBooking),
   ];
   const hostAppointment = formatAppointmentTime(
