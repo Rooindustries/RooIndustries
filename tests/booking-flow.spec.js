@@ -111,6 +111,54 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       });
     }
 
+    for (const failure of [503, 404]) {
+      test(`other-tab Check again handles ${failure} without trapping the customer`, async ({ page, flow }) => {
+        await flow.reserve();
+        await flow.details();
+        const original = { ...await hold(page), phase: "payment_pending", paymentStartedElsewhere: true };
+        await page.evaluate(value => {
+          sessionStorage.setItem("my_slot_hold", JSON.stringify(value));
+          sessionStorage.removeItem("checkout_booking_state");
+        }, original);
+        await page.reload();
+        flow.state.failures["/api/holdSlot"] = failure;
+        await page.getByRole("button", { name: "Check again", exact: true }).click();
+        if (failure === 503) {
+          await expect(page.getByRole("alert").filter({ hasText: "Could not reserve this slot" })).toBeVisible();
+          expect(await hold(page)).toEqual(original);
+          delete flow.state.failures["/api/holdSlot"];
+          await page.getByRole("button", { name: "Check again", exact: true }).click();
+          await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveValue("visitor@example.invalid");
+          expect(await hold(page)).toMatchObject({ phase: "active" });
+          expect((await hold(page)).paymentStartedElsewhere).toBeUndefined();
+        } else {
+          await expect.poll(() => hold(page)).toBeNull();
+          await expect(page.getByRole("button", { name: "Next", exact: true }).last()).toBeVisible();
+          await expect(page.getByRole("button", { name: "Check again", exact: true })).toHaveCount(0);
+        }
+        expect(flow.state.calls.filter(({ path }) => path === "/api/holdSlot").at(-1).body).toMatchObject({
+          previousHoldId: original.holdId, previousHoldToken: original.holdToken, startTimeUTC: original.startTimeUTC,
+        });
+      });
+    }
+
+    test("expired other-tab reservation offers Check again and returns to slot selection", async ({ page, flow }, testInfo) => {
+      await page.clock.install();
+      await flow.reserve();
+      await flow.details();
+      const original = { ...await hold(page), phase: "payment_pending", paymentStartedElsewhere: true };
+      await page.evaluate(value => sessionStorage.setItem("my_slot_hold", JSON.stringify(value)), original);
+      await page.reload();
+      await expect(page.getByRole("button", { name: "Check again", exact: true })).toBeVisible();
+      await page.clock.fastForward(21 * 60 * 1000);
+      await expect(page.getByRole("alert").filter({ hasText: "This reservation expired. Use Check again to choose a slot again." })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Return to payment", exact: true })).toHaveCount(0);
+      await testInfo.attach("expired-other-tab", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
+      await page.getByRole("button", { name: "Check again", exact: true }).click();
+      await expect.poll(() => hold(page)).toBeNull();
+      await expect(page.getByRole("button", { name: "Next", exact: true }).last()).toBeVisible();
+    });
+
     test("same-slot payment pending keeps credentials and returns to details", async ({ page, flow }) => {
       await flow.reserve();
       await flow.details();

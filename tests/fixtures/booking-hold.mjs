@@ -70,6 +70,9 @@ export async function createBookingHoldFixture() {
         const id = `session_fixture_${++checkoutCount}`;
         return { body: { session_id: id, checkout_url: `https://test.checkout.dodopayments.com/session/${id}` } };
       }
+      if (request.path.startsWith("/checkouts/") && request.method === "GET") {
+        return { body: { id: request.path.split("/").pop(), payment_id: null } };
+      }
       throw new Error(`Unhandled fixture provider request ${request.path}`);
     });
     const providers = new Set(["https://test.dodopayments.com", "https://api.resend.com"]);
@@ -92,6 +95,8 @@ export async function createBookingHoldFixture() {
       "/api/holdSlot": "../../src/server/booking/holdSlot.js",
       "/api/payment/quote": "../../src/server/api/payment/quote.js",
       "/api/payment/start": "../../src/server/api/payment/start.js",
+      "/api/payment/cancel": "../../src/server/api/payment/cancel.js",
+      "/api/releaseHold": "../../src/server/booking/releaseHold.js",
     })) handlers.set(route, (await import(module)).default);
     server = http.createServer(async (req, res) => {
       try {
@@ -113,10 +118,10 @@ export async function createBookingHoldFixture() {
     });
     server.listen(port, host);
     await once(server, "listening");
-    const post = async (route, body) => {
+    const post = async (route, body, authorization = "") => {
       globalThis.__rooRateLimitBuckets?.clear();
       const response = await fetch(`${baseURL}${route}`, { method: "POST",
-        headers: { "content-type": "application/json", origin: baseURL }, body: JSON.stringify(body) });
+        headers: { "content-type": "application/json", origin: baseURL, ...(authorization ? { authorization } : {}) }, body: JSON.stringify(body) });
       return { status: response.status, body: await response.json() };
     };
     const details = { email: "visitor@example.invalid", discord: "fixture_visitor", specs: "Ryzen 7700 / RTX 4070",

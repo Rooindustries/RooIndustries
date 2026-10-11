@@ -699,13 +699,13 @@ export default function Payment({ hideFooter = false }) {
     const couponCode = String(bookingData.couponCode || "").trim();
     let active = true;
     setPreApplyingCodes(true);
-    setReferral(null);
     setCoupon(null);
     setReferralError("");
     setCouponError("");
 
     const preApplyCodes = async () => {
       let nextReferral = null;
+      let referralUnavailable = false;
       let nextCoupon = null;
       let nextReferralInput = referralCode;
       let nextCouponInput = couponCode;
@@ -714,8 +714,14 @@ export default function Payment({ hideFooter = false }) {
       const applyResolved = (result, source) => {
         if (!result?.ok) {
           if (source === "referral") {
-            nextReferralInput = "";
-            setReferralError("Invalid or inactive referral code.");
+            if (result?.unavailable) {
+              referralUnavailable = true;
+              nextReferral = referral;
+              setReferralError(result.error);
+            } else {
+              nextReferralInput = "";
+              setReferralError("Invalid or inactive referral code.");
+            }
           } else {
             nextCouponInput = "";
             setCouponError(result?.error || "Invalid coupon code.");
@@ -779,7 +785,7 @@ export default function Payment({ hideFooter = false }) {
       setCoupon(nextCoupon);
       setReferralInput(nextReferralInput);
       setCouponInput(nextCouponInput);
-      writeStoredReferral(nextReferral?.code || "");
+      if (!referralUnavailable) writeStoredReferral(nextReferral?.code || "");
       if (infoMessage) showBanner("info", infoMessage);
     };
 
@@ -1450,8 +1456,10 @@ export default function Payment({ hideFooter = false }) {
       const result = await resolveCheckoutCode(normalizedCode, packageTitle);
       if (!codeApplicationAllowedRef.current) return;
       if (!result.ok) {
-        setReferral(null);
-        writeStoredReferral("");
+        if (!result.unavailable) {
+          setReferral(null);
+          writeStoredReferral("");
+        }
         setReferralError(result.unavailable ? result.error : "Invalid or inactive referral code.");
         return;
       }
@@ -1493,8 +1501,6 @@ export default function Payment({ hideFooter = false }) {
       }
     } catch {
       console.error("Referral validation failed");
-      setReferral(null);
-      writeStoredReferral("");
       setReferralError(
         "We couldn't validate that referral code. Please try again."
       );

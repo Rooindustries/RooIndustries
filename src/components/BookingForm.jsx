@@ -864,7 +864,9 @@ export default function BookingForm({ isMobile }) {
         const paymentPending =
           String(myHold.phase || "").trim().toLowerCase() === "payment_pending";
         if (paymentPending) {
-          setErrorStep2(PAYMENT_PENDING_EXPIRY_ERROR);
+          setErrorStep2(paymentInOtherTab
+            ? "This reservation expired. Use Check again to choose a slot again."
+            : PAYMENT_PENDING_EXPIRY_ERROR);
         } else {
           releaseHold();
         }
@@ -883,7 +885,7 @@ export default function BookingForm({ isMobile }) {
     }, 1000);
 
     return () => clearInterval(id);
-  }, [myHold]);
+  }, [myHold, paymentInOtherTab]);
 
   const clearErrorIfResolved = (nextForm = form) => {
     if (!errorStep2) return;
@@ -2122,8 +2124,15 @@ export default function BookingForm({ isMobile }) {
     }
   };
 
-  const handleLockAndGoNext = async () => {
-    if (isPaymentPendingHold) {
+  const handleLockAndGoNext = async (recheckOtherTab = false) => {
+    const recheckingPayment = recheckOtherTab === true && paymentInOtherTab;
+    if (recheckingPayment && new Date(myHold.expiresAt).getTime() <= Date.now()) {
+      clearHoldState(true);
+      setErrorStep2("");
+      setErrorStep1("The reservation expired. Please choose a slot again.");
+      return;
+    }
+    if (isPaymentPendingHold && !recheckingPayment) {
       const message = "Your payment session is already in progress. Return to payment to finish it.";
       if (myHold.startTimeUTC === selectedSlot?.utcStart?.toISOString()) {
         setErrorStep1("");
@@ -2134,17 +2143,18 @@ export default function BookingForm({ isMobile }) {
       }
       return;
     }
-    if (!selectedDate || !selectedSlot) {
+    if (!recheckingPayment && (!selectedDate || !selectedSlot)) {
       setErrorStep1("Please select a date and time before continuing.");
       return;
     }
-    const selectedSlotId = selectedSlot.utcStart.toISOString();
+    const selectedSlotId = recheckingPayment ? myHold.startTimeUTC : selectedSlot.utcStart.toISOString();
     const isSameAsExisting =
       myHold && myHold.startTimeUTC === selectedSlotId;
 
     if (lockingSlot) return;
 
     setErrorStep1("");
+    if (recheckingPayment) setErrorStep2("");
     setLockingSlot(true);
 
     const previousHoldId = myHold?.holdId || null;
@@ -2157,7 +2167,7 @@ export default function BookingForm({ isMobile }) {
     try {
       const body = {
         startTimeUTC: selectedSlotId,
-        packageTitle: selectedPackage.title,
+        packageTitle: recheckingPayment ? myHold.packageTitle : selectedPackage.title,
         previousHoldId,
         previousHoldToken,
       };
@@ -2201,10 +2211,11 @@ export default function BookingForm({ isMobile }) {
           return;
         }
         if (outcome === "clear") {
-          if (isSameAsExisting) clearHoldState(false);
+          if (isSameAsExisting) clearHoldState(recheckingPayment);
           setSelectedSlot(null);
         }
-        setErrorStep1(
+        const setHoldError = recheckingPayment && outcome !== "clear" ? setErrorStep2 : setErrorStep1;
+        setHoldError(
           outcome === "clear"
             ? data?.message || "That slot was just taken by someone else. Please choose another time."
             : "Could not reserve this slot. Please check your internet and try again."
@@ -3113,9 +3124,19 @@ export default function BookingForm({ isMobile }) {
                   <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
                     {isPaymentPendingHold ? (
                       paymentInOtherTab ? (
-                        <p role="alert" className="text-sm text-info-text sm:col-span-2">
-                          Payment already started in another tab. Continue payment there. Your reservation and details are saved.
-                        </p>
+                        <>
+                          <p role="alert" className="text-sm text-info-text sm:col-span-2">
+                            Payment already started in another tab. Continue payment there. Your reservation and details are saved.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => handleLockAndGoNext(true)}
+                            disabled={lockingSlot}
+                            className="w-full min-w-0 rounded-lg bg-surface-input py-3 font-semibold transition hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60 sm:col-span-2"
+                          >
+                            {lockingSlot ? "Checking reservation..." : "Check again"}
+                          </button>
+                        </>
                       ) : (
                       <>
                         <button
