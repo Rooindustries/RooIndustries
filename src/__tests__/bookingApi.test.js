@@ -1105,6 +1105,9 @@ describe("booking reservation API", () => {
     await createBooking(
       createReq({
         email: CLIENT_EMAIL,
+        discord: "servi",
+        specs: "GPU/CPU",
+        mainGame: "Shooter",
         packageTitle: "Test Package",
         packagePrice: "$49.95",
         status: "captured",
@@ -1160,6 +1163,9 @@ describe("booking reservation API", () => {
     await createBooking(
       createReq({
         email: CLIENT_EMAIL,
+        discord: "servi",
+        specs: "GPU/CPU",
+        mainGame: "Shooter",
         packageTitle: "Performance Vertex Overhaul",
         packagePrice: "$54.95",
         status: "captured",
@@ -1639,6 +1645,9 @@ describe("booking reservation API", () => {
       return createBooking(
         createReq({
           email: `client-${suffix}@example.com`,
+          discord: "servi",
+          specs: "GPU/CPU",
+          mainGame: "Shooter",
           packageTitle: "Test Package",
           status: "captured",
           paymentProvider: "free",
@@ -2040,6 +2049,9 @@ describe("booking reservation API", () => {
     await createBooking(
       createReq({
         email: CLIENT_EMAIL,
+        discord: "servi",
+        specs: "GPU/CPU",
+        mainGame: "Shooter",
         packageTitle: "Test Package",
         status: "captured",
         paymentProvider: "free",
