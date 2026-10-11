@@ -38,7 +38,12 @@ const stop = async () => {
   if (stopped) return;
   stopped = true;
   if (active && active.exitCode === null && active.signalCode === null) {
-    await new Promise(resolve => { active.once("exit", resolve); active.kill("SIGTERM"); });
+    const child = active;
+    await new Promise(resolve => {
+      const timer = setTimeout(() => child.kill("SIGKILL"), 5000);
+      child.once("exit", () => { clearTimeout(timer); resolve(); });
+      child.kill("SIGTERM");
+    });
   }
   if (control) { control.closeAllConnections(); await new Promise(resolve => control.close(resolve)); }
   const cleanup = await fixture.stop();
