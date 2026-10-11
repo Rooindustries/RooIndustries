@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import useUpgradeEligibility from "../lib/useUpgradeEligibility";
 import { useNavigate, useParams } from "react-router-dom";
 import { getPublicContent } from "../lib/publicContentClient";
+import { CLIENT_REQUEST_TIMEOUT_MS, fetchJsonWithTimeout } from "../lib/clientRequest";
 import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
 
@@ -47,6 +48,11 @@ export default function UpgradeLink() {
   const [linkInfo, setLinkInfo] = useState(null);
   const [linkLoading, setLinkLoading] = useState(true);
   const [linkError, setLinkError] = useState(null);
+  const [linkRetryKey, setLinkRetryKey] = useState(0);
+  const eligibilityAbortRef = useRef(null);
+  const formId = useId();
+
+  useEffect(() => () => eligibilityAbortRef.current?.abort(), []);
 
   const normalizedSlug = useMemo(
     () => (slug ? String(slug).toLowerCase() : ""),
@@ -69,7 +75,9 @@ export default function UpgradeLink() {
       };
     }
 
-    getPublicContent("upgrade-link", { slug: normalizedSlug })
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CLIENT_REQUEST_TIMEOUT_MS);
+    getPublicContent("upgrade-link", { slug: normalizedSlug }, { signal: controller.signal })
       .then((data) => {
         if (!active) return;
         if (!data) {
@@ -89,14 +97,17 @@ export default function UpgradeLink() {
         setLinkError("Could not load this upgrade link. Please try again.");
       })
       .finally(() => {
+        clearTimeout(timeout);
         if (!active) return;
         setLinkLoading(false);
       });
 
     return () => {
       active = false;
+      clearTimeout(timeout);
+      controller.abort();
     };
-  }, [normalizedSlug]);
+  }, [normalizedSlug, linkRetryKey]);
 
   const headingText =
     linkInfo?.title ||
@@ -134,9 +145,13 @@ export default function UpgradeLink() {
     }
 
     const snapshot = eligibilityRequest.capture();
+    eligibilityAbortRef.current?.abort();
+    const controller = new AbortController();
+    eligibilityAbortRef.current = controller;
     setLoading(true);
     try {
-      const res = await fetch("/api/ref/getUpgradeInfo", {
+      const { response: res, data } = await fetchJsonWithTimeout("/api/ref/getUpgradeInfo", {
+        signal: controller.signal,
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -145,7 +160,6 @@ export default function UpgradeLink() {
           slug: normalizedSlug,
         }),
       });
-      const data = await res.json();
       if (!snapshot.isCurrent()) return;
 
       if (!res.ok || !data.ok) {
@@ -169,6 +183,7 @@ export default function UpgradeLink() {
       console.error("Upgrade eligibility check failed");
       setError("Something went wrong while checking your order. Try again.");
     } finally {
+      if (eligibilityAbortRef.current === controller) eligibilityAbortRef.current = null;
       if (snapshot.isLatest()) setLoading(false);
     }
   }
@@ -247,14 +262,20 @@ export default function UpgradeLink() {
       )}
 
       {linkError && (
-        <div className="mt-6 rounded-xl border border-danger-border bg-danger-soft text-danger-text text-sm px-4 py-3 text-center">
+        <div role="alert" className="mt-6 rounded-xl border border-danger-border bg-danger-soft text-danger-text text-sm px-4 py-3 text-center">
           {linkError}
+          <button
+            type="button"
+            onClick={() => setLinkRetryKey((key) => key + 1)}
+            className="block mx-auto mt-3 font-semibold underline"
+          >
+            Retry
+          </button>
         </div>
       )}
 
-      {!linkError && (
         <div className="mt-8 rounded-2xl border border-line-input bg-surface-card shadow-[var(--shadow-card-glow-info)] backdrop-blur-md p-6 sm:p-7">
-          <label className="block text-sm font-semibold mb-2">
+          <label htmlFor={`${formId}-order`} className="block text-sm font-semibold mb-2">
             Enter your Order ID
           </label>
           <p className="text-xs text-ink-muted mb-3">
@@ -262,10 +283,11 @@ export default function UpgradeLink() {
             "Order ID").
           </p>
           <div className="mb-3">
-            <label className="block text-sm font-semibold mb-2">
+            <label htmlFor={`${formId}-email`} className="block text-sm font-semibold mb-2">
               Booking email
             </label>
             <input
+              id={`${formId}-email`}
               value={orderEmail}
               onChange={(e) => {
                 setOrderEmail(e.target.value);
@@ -280,6 +302,7 @@ export default function UpgradeLink() {
           </div>
           <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
             <input
+              id={`${formId}-order`}
               value={orderId}
               onChange={(e) => {
                 setOrderId(e.target.value);
@@ -291,7 +314,7 @@ export default function UpgradeLink() {
             />
             <button
               onClick={handleCheckOrder}
-              disabled={loading || linkLoading}
+              disabled={loading || linkLoading || !!linkError}
               className="glow-button px-4 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
             >
               {loading ? "Checking..." : "Check eligibility"}
@@ -308,7 +331,6 @@ export default function UpgradeLink() {
             </p>
           )}
         </div>
-      )}
 
       {upgradeInfo && (
         <div className="mt-8 rounded-2xl border border-success-border bg-success-soft shadow-success-soft backdrop-blur-lg p-6 sm:p-7">

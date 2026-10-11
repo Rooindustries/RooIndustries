@@ -109,6 +109,7 @@ describe("upgrade payment handoff", () => {
     expect(screen.getByText("$45.00")).toBeInTheDocument();
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith("/api/ref/getUpgradeInfo", {
+        signal: expect.any(AbortSignal),
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
