@@ -576,7 +576,7 @@ describe("booking calendar UI", () => {
     );
   });
 
-  test("keeps the original hold when release times out during a slot switch", async () => {
+  test("continues with a new hold after the previous release times out", async () => {
     const controllers = [];
     abortTimeoutSpy = jest
       .spyOn(AbortSignal, "timeout")
@@ -627,7 +627,6 @@ describe("booking calendar UI", () => {
     await userEvent.click(
       await screen.findByRole("button", { name: replacementTime })
     );
-    const originalHold = JSON.parse(sessionStorage.getItem("my_slot_hold"));
     await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
 
     await waitFor(() => {
@@ -642,13 +641,78 @@ describe("booking calendar UI", () => {
       await Promise.resolve();
     });
 
-    expect(await screen.findByText(/could not release.*try again/i)).toBeInTheDocument();
-    expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toEqual(originalHold);
+    expect(await screen.findByLabelText("Discord username")).toBeInTheDocument();
     expect(
       global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot")
-    ).toHaveLength(0);
-    expect(abortTimeoutSpy).toHaveBeenCalledTimes(1);
+    ).toHaveLength(1);
+    expect(abortTimeoutSpy).toHaveBeenCalledTimes(2);
     expect(abortTimeoutSpy).toHaveBeenNthCalledWith(1, 8_000);
+    expect(abortTimeoutSpy).toHaveBeenNthCalledWith(2, 8_000);
+  });
+
+  test("keeps the original hold after release times out and its replacement returns 409", async () => {
+    const controllers = [];
+    abortTimeoutSpy = jest
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation(() => {
+        const controller = new AbortController();
+        controllers.push(controller);
+        return controller.signal;
+      });
+    consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    seedBookingSession({ step: 2 });
+    const originalHold = JSON.parse(sessionStorage.getItem("my_slot_hold"));
+    installDefaultFetch({
+      settings: { dateSlots: [{ date: "2099-01-05", times: ["10:00", "11:00"] }] },
+      bookedSlots: [{ startTimeUTC: FUTURE_SLOT, isHold: true, holdId: originalHold.holdId }],
+    });
+    const defaultFetch = global.fetch.getMockImplementation();
+    global.fetch.mockImplementation(async (url, options = {}) => {
+      if (url === "/api/releaseHold") return waitForAbort(options.signal);
+      if (url === "/api/holdSlot") {
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({ ok: false, message: "The replacement slot is already held." }),
+        };
+      }
+      return defaultFetch(url, options);
+    });
+    setBookingLocation();
+    render(<BookingForm />);
+    await userEvent.click(await screen.findByRole("button", { name: /^back$/i }));
+    await userEvent.click(await screen.findByRole("button", {
+      name: formatLocalTime(getUtcFromHostLocal(2099, 0, 5, 11), "America/Los_Angeles"),
+    }));
+    await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
+    await waitFor(() => expect(controllers).toHaveLength(1));
+    await act(async () => {
+      controllers[0].abort();
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByText("The replacement slot is already held.")).toBeInTheDocument();
+    expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toEqual(originalHold);
+    const holdCalls = global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot");
+    expect(holdCalls).toHaveLength(1);
+    expect(JSON.parse(holdCalls[0][1].body)).toMatchObject({
+      previousHoldId: originalHold.holdId,
+      previousHoldToken: originalHold.holdToken,
+    });
+    expect(abortTimeoutSpy).toHaveBeenCalledTimes(2);
+    expect(abortTimeoutSpy).toHaveBeenNthCalledWith(1, 8_000);
+    expect(abortTimeoutSpy).toHaveBeenNthCalledWith(2, 8_000);
+
+    const originalSlot = screen.getByRole("button", {
+      name: formatLocalTime(new Date(FUTURE_SLOT), "America/Los_Angeles"),
+    });
+    expect(originalSlot).toBeEnabled();
+    await userEvent.click(originalSlot);
+    await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
+    expect(await screen.findByLabelText("Booking email")).toHaveValue(VALID_FORM.email);
+    expect(screen.getByLabelText("PC specifications")).toHaveValue(VALID_FORM.specs);
+    expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toEqual(originalHold);
+    expect(global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot")).toHaveLength(1);
   });
 
   test("re-enables payment release after the cancel request times out", async () => {

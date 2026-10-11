@@ -19,6 +19,7 @@ const test = base.extend({
       failures: {},
       pending: [],
       slots: [{ date, times: ["10:00", "11:00"] }],
+      bookedSlots: [],
       holdMs: 20 * 60 * 1000,
       holdCount: 0,
       collision: false,
@@ -46,7 +47,7 @@ const test = base.extend({
         return route.fulfill({ contentType: "text/html", body: "<h1>Checkout handoff</h1>" });
       }
       if (path === "/api/bookingAvailability") {
-        return json(route, { settings: { dateSlots: state.slots }, bookedSlots: [] });
+        return json(route, { settings: { dateSlots: state.slots }, bookedSlots: state.bookedSlots });
       }
       if (path === "/api/holdSlot") {
         state.holdCount += 1;

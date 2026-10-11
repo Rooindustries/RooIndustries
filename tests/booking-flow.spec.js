@@ -43,20 +43,55 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       });
     }
 
-    test("a failed release stops a slot switch", async ({ page, flow }) => {
-      await flow.reserve();
-      const original = await hold(page);
-      flow.state.failures["/api/releaseHold"] = 503;
-      await page.getByRole("button", { name: "Back", exact: true }).last().click();
-      await page.getByRole("button", { name: "11:00 AM", exact: true }).click();
-      await page.getByRole("button", { name: "Next", exact: true }).last().click();
-      await expect(page.getByRole("alert").filter({ hasText: /release/i })).toBeVisible();
-      expect(await hold(page)).toEqual(original);
-      expect(flow.state.calls.filter(({ path }) => path === "/api/holdSlot")).toHaveLength(1);
-      delete flow.state.failures["/api/releaseHold"];
-      await page.getByRole("button", { name: "Next", exact: true }).last().click();
-      await expect.poll(async () => (await hold(page))?.startTimeUTC).not.toBe(original.startTimeUTC);
-    });
+    for (const releaseFailure of viewport.width === 1440 ? [503, "timeout"] : [503]) {
+      test(`release ${releaseFailure} still replaces a slot using the previous credentials`, async ({ page, flow }) => {
+        await flow.reserve();
+        await flow.details();
+        const original = await hold(page);
+        flow.state.failures["/api/releaseHold"] = releaseFailure;
+        await page.getByRole("button", { name: "Back", exact: true }).last().click();
+        await page.getByRole("button", { name: "11:00 AM", exact: true }).click();
+        await page.getByRole("button", { name: "Next", exact: true }).last().click();
+        await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveValue("visitor@example.invalid", { timeout: 12000 });
+        await expect.poll(async () => (await hold(page))?.startTimeUTC).not.toBe(original.startTimeUTC);
+        const calls = flow.state.calls.filter(({ path }) => path === "/api/holdSlot");
+        expect(calls).toHaveLength(2);
+        expect(calls[1].body).toMatchObject({ previousHoldId: original.holdId, previousHoldToken: original.holdToken });
+        expect((await hold(page)).holdId).not.toBe(original.holdId);
+        await expect(page.getByRole("alert").filter({ hasText: /could not release/i })).toHaveCount(0);
+      });
+    }
+
+    for (const holdFailure of viewport.width === 1440 ? [409, 400, 503, "timeout"] : [409]) {
+      test(`release timeout and replacement ${holdFailure} preserve the original slot`, async ({ page, flow }) => {
+        await flow.reserve();
+        await flow.details();
+        const original = await hold(page);
+        flow.state.bookedSlots = [{ startTimeUTC: original.startTimeUTC, isHold: true, holdId: original.holdId }];
+        flow.state.failures["/api/releaseHold"] = "timeout";
+        flow.state.failures["/api/holdSlot"] = holdFailure;
+        await page.getByRole("button", { name: "Back", exact: true }).last().click();
+        await page.getByRole("button", { name: "11:00 AM", exact: true }).click();
+        await page.getByRole("button", { name: "Next", exact: true }).last().click();
+        await expect(page.getByRole("alert").filter({
+          hasText: holdFailure === "timeout" ? /could not reserve/i : /slot was just taken/i,
+        })).toBeVisible({ timeout: 20000 });
+        expect(await hold(page)).toEqual(original);
+        const calls = flow.state.calls.filter(({ path }) => path === "/api/holdSlot");
+        expect(calls).toHaveLength(2);
+        expect(calls[1].body).toMatchObject({ previousHoldId: original.holdId, previousHoldToken: original.holdToken });
+        await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+        await page.getByRole("button", { name: "Next", exact: true }).last().click();
+        await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveValue("visitor@example.invalid");
+        await expect(page.getByRole("textbox", { name: "PC specifications", exact: true })).toHaveValue("Ryzen 7700 / RTX 4070");
+        expect(flow.state.calls.filter(({ path }) => path === "/api/holdSlot")).toHaveLength(2);
+        await page.reload();
+        await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveValue("visitor@example.invalid");
+        expect(await hold(page)).toEqual(original);
+        await page.getByRole("button", { name: "Back", exact: true }).last().click();
+        await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toBeEnabled();
+      });
+    }
 
     for (const failure of viewport.width === 1440 ? [503, "network", "timeout"] : ["timeout"]) {
       test(`code validation ${failure} is unavailable and allows full-price payment`, async ({ page, flow }) => {

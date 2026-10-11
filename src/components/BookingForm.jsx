@@ -1992,7 +1992,7 @@ export default function BookingForm({ isMobile }) {
     broadcastHold(updated);
   };
 
-  const releaseHold = async (resetStep = true) => {
+  const releaseHold = async (resetStep = true, { preserveHold = false } = {}) => {
     if (!myHold) return true;
     if (isPaymentPendingHold) {
       setErrorStep2(
@@ -2022,7 +2022,7 @@ export default function BookingForm({ isMobile }) {
         signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
       });
       if (!response.ok) throw new Error("Release failed.");
-      if (isCurrentHold()) clearHoldState(resetStep);
+      if (isCurrentHold() && !preserveHold) clearHoldState(resetStep);
       setErrorStep1("");
       setErrorStep2("");
       return true;
@@ -2032,7 +2032,7 @@ export default function BookingForm({ isMobile }) {
         if (isCurrentHold()) clearHoldState(resetStep);
         return true;
       }
-      if (isCurrentHold()) {
+      if (isCurrentHold() && !preserveHold) {
         const message = "Could not release your slot. Your reservation and details are saved. Please try again.";
         setErrorStep1(message);
         setErrorStep2(message);
@@ -2142,10 +2142,7 @@ export default function BookingForm({ isMobile }) {
     if (myHold && !isSameAsExisting) {
       previousHoldId = myHold.holdId || null;
       previousHoldToken = myHold.holdToken || null;
-      if (!(await releaseHold(false))) {
-        setLockingSlot(false);
-        return;
-      }
+      await releaseHold(false, { preserveHold: true });
     }
 
     try {
@@ -2190,6 +2187,8 @@ export default function BookingForm({ isMobile }) {
       setMyHold(newHold);
       writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(newHold));
       broadcastHold(newHold);
+      setErrorStep1("");
+      setErrorStep2("");
 
       const expiresIn =
         newHold.expiresAt && new Date(newHold.expiresAt).getTime() - Date.now();
