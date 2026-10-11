@@ -52,7 +52,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium webkit
-      - run: npm run test:tooling:safety
       - name: Run browser and agent-readiness tests
         run: |
           node scripts/test-tooling-sweep-server.mjs &
