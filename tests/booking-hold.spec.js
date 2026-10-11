@@ -1,6 +1,8 @@
 const { test: base, expect } = require("./fixtures/booking-flow.cjs");
 const { fork } = require("node:child_process");
 const { once } = require("node:events");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const test = base.extend({
   native: [async ({}, use) => {
@@ -42,6 +44,8 @@ const test = base.extend({
 });
 
 test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", reducedMotion: "reduce", actionTimeout: 10000, navigationTimeout: 20000, trace: "off" });
+const nativeBinaries = [process.env.PG_BIN && path.join(process.env.PG_BIN, "postgres"), process.env.POSTGREST_BIN];
+test.skip(!nativeBinaries.every(file => file && fs.existsSync(file)), "Needs PG_BIN and POSTGREST_BIN for the native PostgreSQL 17 fixture.");
 const readHold = page => page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold")));
 const specifications = "Ryzen 7700 / RTX 4070 · 東京 🦊";
 
