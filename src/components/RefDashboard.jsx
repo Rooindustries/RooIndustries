@@ -68,6 +68,8 @@ export default function RefDashboard() {
   const [logsModalAnimatingIn, setLogsModalAnimatingIn] = useState(false);
 
   const [saving, setSaving] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
 
   const [toast, setToast] = useState(null);
   const [authNotice] = useState(() => resolveAuthNotice(location.search));
@@ -234,6 +236,25 @@ export default function RefDashboard() {
       setLogsModalAnimatingIn(false);
     }
   }, [showLogsModal]);
+
+  async function logout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    setLogoutError("");
+    try {
+      const response = await fetch("/api/ref/logout", {
+        method: "POST",
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) throw new Error("Logout failed");
+      removeBrowserStorage("sessionStorage", "creatorId");
+      nav("/referrals/login");
+    } catch {
+      setLogoutError("Could not sign out. Please try again.");
+    } finally {
+      setLoggingOut(false);
+    }
+  }
 
   const unlocked =
     (creator?.successfulReferrals || 0) >= 5 || creator?.bypassUnlock === true;
@@ -661,20 +682,22 @@ export default function RefDashboard() {
 
 
       <button
-        onClick={async () => {
-          try {
-            await fetch("/api/ref/logout", { method: "POST" });
-          } catch {
-            console.error("Referral logout failed");
-          } finally {
-            removeBrowserStorage("sessionStorage", "creatorId");
-            nav("/referrals/login");
-          }
-        }}
+        onClick={logout}
+        disabled={loggingOut}
+        aria-busy={loggingOut}
+        aria-describedby={logoutError ? "ref-logout-error" : undefined}
         className="mt-3 w-full py-3 bg-danger-soft border border-danger-border rounded-xl text-danger-text text-center font-semibold hover:bg-danger-soft hover:border-danger-border transition-all shadow-danger-soft"
       >
-        Log Out
+        {loggingOut ? "Signing out…" : "Log Out"}
       </button>
+      {logoutError && (
+        <div id="ref-logout-error" role="alert" className="mt-3 text-sm text-danger-text">
+          <p>{logoutError}</p>
+          <button onClick={logout} disabled={loggingOut} className="mt-2 underline font-semibold">
+            Retry
+          </button>
+        </div>
+      )}
 
 
       {toast && (
