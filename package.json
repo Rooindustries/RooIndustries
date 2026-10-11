@@ -47,6 +47,7 @@
     "test": "jest",
     "test:payment-recovery:postgres17": "node scripts/test-payment-persistence-sweep.mjs --recovery --full-chain",
     "test:agent-readiness": "node --test tests/agent-readiness.test.mjs",
+    "test:creator:portal": "cross-env TOOLING_CREATOR_PORTAL=1 TOOLING_API_ROUTES=1 NODE_OPTIONS=--import=./tests/fixtures/creator-portal-loader.mjs playwright test tests/creator-portal.spec.js --project=chromium",
     "test:perf:home": "playwright test tests/home-performance.spec.js --project=chromium",
     "check:payment:runtime": "node scripts/diagnose-payment-runtime.js",
     "check:payment:webhooks": "node scripts/check-payment-webhooks.js",
