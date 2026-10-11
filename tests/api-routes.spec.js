@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const fs = require("node:fs/promises");
 const { MARKDOWN_PATHS, MARKDOWN_VARY } = require("../src/lib/markdownContent");
 let apiFixture;
 let restoreNetworkGuard;
@@ -31,6 +32,12 @@ test.describe("referral reset acknowledgement", () => {
         unknown: { status: unknown.status, body: await unknown.text() },
         known: { status: known.status, body: await known.text() },
       };
+      if (!["token_conflict", "enqueue_failed"].includes(delivery)) {
+        const checkpoint = delivery === "failed" ? "/roo_complete_referral_email_dispatch"
+          : ["dead_letter", "requeue_failed"].includes(delivery) ? "/roo_requeue_referral_email_dispatch"
+          : "/roo_claim_referral_email_dispatch";
+        await expect.poll(async () => (await apiFixture.readApiFixture(baseURL)).requests.some(call => call.path.endsWith(checkpoint))).toBe(true);
+      }
       const state = await apiFixture.readApiFixture(baseURL);
       await testInfo.attach("reset-responses", { body: JSON.stringify({ delivery, ...result, requests: state.requests }, null, 2), contentType: "application/json" });
       expect(result.unknown).toEqual({ status: 200, body: JSON.stringify(acknowledgement) });
@@ -51,6 +58,58 @@ test.describe("referral reset acknowledgement", () => {
     });
   }
 
+  test("applies one uniform response floor despite a delayed durable enqueue", async ({ baseURL }, testInfo) => {
+    const samples = { unknown: [], known: [] };
+    for (let index = 0; index < 10; index += 1) {
+      await apiFixture.configureApiFixture(baseURL, { reset: true, enqueueDelayMs: 400 });
+      for (const [kind, email] of [["unknown", "unknown@fixture.invalid"], ["known", apiFixture.referralEmail]]) {
+        const startedAt = performance.now();
+        const response = await apiFixture.requestRoute(baseURL, "/api/ref/forgot", { data: { email } });
+        const body = await response.json();
+        samples[kind].push({ milliseconds: performance.now() - startedAt, status: response.status, body });
+      }
+      await expect.poll(async () => (await apiFixture.readApiFixture(baseURL)).requests.some(call => call.path.endsWith("/roo_claim_referral_email_dispatch"))).toBe(true);
+    }
+    const median = values => {
+      const ordered = values.map(sample => sample.milliseconds).sort((left, right) => left - right);
+      return (ordered[4] + ordered[5]) / 2;
+    };
+    const medianDifference = Math.abs(median(samples.known) - median(samples.unknown));
+    const artifact = testInfo.outputPath("reset-timing.json");
+    await fs.writeFile(artifact, JSON.stringify({ samples, medianDifference }, null, 2));
+    await testInfo.attach("reset-timing", { path: artifact, contentType: "application/json" });
+    for (const sample of [...samples.known, ...samples.unknown]) {
+      expect(sample).toMatchObject({ status: 200, body: acknowledgement });
+      expect(sample.milliseconds).toBeGreaterThanOrEqual(800);
+    }
+    expect(medianDifference).toBeLessThan(50);
+  });
+
+  test("captures reset email delivery after the acknowledgement", async ({ baseURL }, testInfo) => {
+    await apiFixture.configureApiFixture(baseURL, { reset: true, delivery: "captured", enqueueDelayMs: 400, emailDelayMs: 1200 });
+    const startedAt = performance.now();
+    const response = await apiFixture.requestRoute(baseURL, "/api/ref/forgot", { data: { email: apiFixture.referralEmail } });
+    const body = await response.json();
+    const milliseconds = performance.now() - startedAt;
+    const responseReceivedAt = Date.now();
+    const atResponse = await apiFixture.readApiFixture(baseURL);
+    await expect.poll(async () => (await apiFixture.readApiFixture(baseURL)).requests.some(call => call.path.endsWith("/roo_complete_referral_email_dispatch"))).toBe(true);
+    const delivered = await apiFixture.readApiFixture(baseURL);
+    const artifact = testInfo.outputPath("reset-deferred-delivery.json");
+    await fs.writeFile(artifact, JSON.stringify({ milliseconds, responseReceivedAt, atResponse, delivered }, null, 2));
+    await testInfo.attach("reset-deferred-delivery", { path: artifact, contentType: "application/json" });
+    expect(response.status).toBe(200);
+    expect(body).toEqual(acknowledgement);
+    expect(milliseconds).toBeGreaterThanOrEqual(800);
+    expect(milliseconds).toBeLessThan(1100);
+    expect(atResponse.emails).toEqual([]);
+    expect(delivered.emails).toHaveLength(1);
+    expect(delivered.emails[0]).toMatchObject({ to: [apiFixture.referralEmail], subject: "Reset your Roo Industries password" });
+    expect(delivered.emails[0].html).toContain(`${baseURL}/referrals/reset#token=`);
+    expect(delivered.emails[0].sentAt).toBeGreaterThan(responseReceivedAt);
+    expect(delivered.requests.find(call => call.path.endsWith("/roo_complete_referral_email_dispatch")).body.p_success).toBe(true);
+  });
+
   test("rejects malformed emails and preserves the admission limit", async ({ baseURL }) => {
     await apiFixture.configureApiFixture(baseURL, { reset: true });
     for (const email of [undefined, "", "not-an-email", `${"a".repeat(250)}@fixture.invalid`]) {
@@ -68,12 +127,12 @@ test.describe("referral reset acknowledgement", () => {
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
   });
 
-  test("keeps account-independent lookup failures visible", async ({ baseURL }) => {
+  test("acknowledges admitted lookup failures without revealing account state", async ({ baseURL }) => {
     await apiFixture.configureApiFixture(baseURL, { reset: true, delivery: "lookup_failed" });
     for (const email of ["unknown@fixture.invalid", apiFixture.referralEmail]) {
       const response = await apiFixture.requestRoute(baseURL, "/api/ref/forgot", { data: { email } });
-      expect(response.status).toBe(500);
-      expect(await response.json()).toEqual({ ok: false, error: "Server error" });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(acknowledgement);
     }
   });
 

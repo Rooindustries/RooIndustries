@@ -53,6 +53,7 @@ module.exports = defineConfig({
         url: baseURL,
         env: { ROO_TEST_HOST: testHost, BASE_URL: baseURL, NEXT_DIST_DIR: internalDistDir, PW_PORT: String(internalPort) },
         reuseExistingServer: false,
+        gracefulShutdown: { signal: "SIGTERM", timeout: 15000 },
         timeout: 180000,
       },
   use: {

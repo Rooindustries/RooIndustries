@@ -36,7 +36,13 @@ const env = {
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "fixture-only-tooling-browser-publishable-key",
   ALLOW_LIVE_PAYMENTS: "0",
   SALES_PREVIEW_READ_ONLY: apiRoutes ? "0" : "1",
-  ...(apiRoutes ? apiRouteSecrets : {}),
+  ...(apiRoutes ? {
+    ...apiRouteSecrets,
+    RESEND_API_KEY: "fixture-only-referral-email-key",
+    RESEND_BASE_URL: contentURL,
+    FROM_EMAIL: "reset@fixture.invalid",
+    NEXT_PUBLIC_BASE_URL: baseURL,
+  } : {}),
   NEXT_TELEMETRY_DISABLED: "1",
   BASE_URL: baseURL,
   ROO_TEST_HOST: testHost,
@@ -58,14 +64,15 @@ fingerprint.update(fs.readFileSync(fileURLToPath(new URL("./lib/test-target-safe
 const sourceHash = fingerprint.digest("hex");
 const manifestPath = path.join(dist, "tooling-build.json");
 let active;
+let stopping = false;
 const execute = args => new Promise((resolve, reject) => {
   active = spawn(process.execPath, args, { env, stdio: "inherit" });
   active.once("error", reject);
   active.once("exit", (code, signal) => code === 0 ? resolve() : reject(new Error(`Test server exited ${signal || code}.`)));
 });
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => {
+  stopping = true;
   active?.kill(signal);
-  process.exitCode = 1;
 });
 if (development) {
   if (fs.existsSync(path.join(dist, "BUILD_ID"))) throw new Error("Development server cannot reuse a production build.");
@@ -87,4 +94,6 @@ try {
     }
     await execute([next, "start", "--hostname", testHost, "--port", target.port]);
   }
+} catch (error) {
+  if (!stopping) throw error;
 } finally { await fixture.close(); }

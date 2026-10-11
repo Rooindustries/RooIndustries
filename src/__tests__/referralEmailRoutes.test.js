@@ -26,6 +26,8 @@ const testSessionSecret = `fixture-${"s".repeat(64)}`;
 
 const loadForgotHandler = () => {
   jest.resetModules();
+  const afterTasks = [];
+  jest.doMock("next/server", () => ({ after: task => { afterTasks.push(task); } }));
   const fetch = jest.fn(async () => ({
     _id: "referral.creator",
     _rev: "revision-one",
@@ -75,8 +77,13 @@ const loadForgotHandler = () => {
     sendReferralEmailDirect: jest.fn(),
   }));
   const module = require("../server/api/ref/forgot.js");
+  const handler = module.default || module;
   return {
-    handler: module.default || module,
+    handler: async (...args) => {
+      const result = await handler(...args);
+      while (afterTasks.length) await afterTasks.shift()();
+      return result;
+    },
     fetch,
     patch,
     createDataClient,
@@ -239,7 +246,7 @@ describe("Supabase-primary referral email routes", () => {
     });
   });
 
-  test("requeues a dead-lettered reset before acknowledging the request", async () => {
+  test("requeues a dead-lettered reset during deferred delivery", async () => {
     const loaded = loadForgotHandler();
     loaded.deliverReferralEmailDispatch.mockResolvedValue({
       claimed: false,

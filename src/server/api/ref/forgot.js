@@ -1,5 +1,6 @@
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import crypto from "crypto";
+import { after } from "next/server";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
@@ -35,12 +36,9 @@ const isMutationConflict = (error) =>
   isRevisionConflict(error) ||
   ["23505", "40001"].includes(String(error?.code || ""));
 
-const respondToResetConflict = (res) => {
-  logSafeError("Referral reset source conflict", Object.assign(
-    new Error("Referral reset source changed."), { code: "RESET_TOKEN_CONFLICT" }
-  ));
-  return res.status(200).json({ ok: true, message: "If email exists, link sent." });
-};
+const reportResetConflict = (error = Object.assign(
+  new Error("Referral reset source changed."), { code: "RESET_TOKEN_CONFLICT" }
+)) => logSafeError("Referral reset source conflict", error);
 
 const enqueueSupabaseReset = async ({ initialReferral, recipientEmail }) => {
   let referral = initialReferral;
@@ -93,13 +91,14 @@ const enqueueSupabaseReset = async ({ initialReferral, recipientEmail }) => {
 };
 
 export default async function handler(req, res) {
+  const startedAt = performance.now();
   if (req.method !== "POST") {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
-  let accountFound = false;
+  let admitted = false;
   try {
-    const { email } = req.body;
+    const { email } = req.body || {};
 
     if (!email) {
       return res.status(400).json({ ok: false, error: "Missing email" });
@@ -124,7 +123,8 @@ export default async function handler(req, res) {
       return;
     }
 
-    const policy = resolveSupabaseRuntimePolicy();
+    admitted = true;
+    resolveSupabaseRuntimePolicy();
 
 
     const referral = await client.fetch(
@@ -133,23 +133,21 @@ export default async function handler(req, res) {
     );
 
     if (!referral) {
-      return res
-        .status(200)
-        .json({ ok: true, message: "If email exists, link sent." });
+      return acknowledgeReset(res, startedAt);
     }
-    accountFound = true;
 
-    {
-      const { dispatch } = await enqueueSupabaseReset({
-        initialReferral: referral,
-        recipientEmail: normalizedEmail,
-      });
+    const { dispatch } = await enqueueSupabaseReset({
+      initialReferral: referral,
+      recipientEmail: normalizedEmail,
+    });
+    after(async () => {
       try {
         const delivery = await deliverReferralEmailDispatch({
           idempotencyKey: dispatch?.idempotency_key,
         });
         if (isReferralEmailSourceStateConflict(delivery)) {
-          return respondToResetConflict(res);
+          reportResetConflict();
+          return;
         }
         if (delivery.deadLetter > 0) {
           let recovery;
@@ -160,16 +158,15 @@ export default async function handler(req, res) {
             });
           } catch (error) {
             if (isReferralEmailSourceStateConflict(error)) {
-              return respondToResetConflict(res);
+              reportResetConflict(error);
+              return;
             }
             logSafeError("Referral reset email recovery failed", error);
-            return res.status(200).json({
-              ok: true,
-              message: "If email exists, link sent.",
-            });
+            return;
           }
           if (isReferralEmailSourceStateConflict(recovery)) {
-            return respondToResetConflict(res);
+            reportResetConflict();
+            return;
           }
           if (recovery?.requeued !== true && recovery?.sent !== true) {
             logSafeError(
@@ -178,10 +175,7 @@ export default async function handler(req, res) {
                 code: recovery?.recovery_blocked_reason || "email_recovery_blocked",
               })
             );
-            return res.status(200).json({
-              ok: true,
-              message: "If email exists, link sent.",
-            });
+            return;
           }
         }
         if (delivery.sent !== 1) {
@@ -191,26 +185,30 @@ export default async function handler(req, res) {
         }
       } catch (error) {
         if (isReferralEmailSourceStateConflict(error)) {
-          return respondToResetConflict(res);
+          reportResetConflict(error);
+          return;
         }
         logSafeError("Referral reset email delivery remains pending", error);
       }
-      return res.status(200).json({
-        ok: true,
-        message: "If email exists, link sent.",
-      });
-    }} catch (err) {
+    });
+    return acknowledgeReset(res, startedAt);
+  } catch (err) {
     if (
       err?.code === "RESET_TOKEN_CONFLICT" ||
       isReferralEmailSourceStateConflict(err)
     ) {
-      logSafeError("Referral reset source conflict", err);
-      return respondToResetConflict(res);
+      reportResetConflict(err);
+    } else {
+      logSafeError("Referral forgot-password failed", err);
     }
-    logSafeError("Referral forgot-password failed", err);
-    if (accountFound) {
-      return res.status(200).json({ ok: true, message: "If email exists, link sent." });
-    }
+    if (admitted) return acknowledgeReset(res, startedAt);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 }
+
+const acknowledgeReset = async (res, startedAt) => {
+  while (performance.now() - startedAt < 800) {
+    await new Promise(resolve => setTimeout(resolve, Math.ceil(800 - (performance.now() - startedAt))));
+  }
+  return res.status(200).json({ ok: true, message: "If email exists, link sent." });
+};
