@@ -39,7 +39,9 @@ const Privacy = lazy(async () => {
   ]);
   return { default: (props) => <Page {...props} initialData={props.initialData || initialData} /> };
 });
-const PerfDebugOverlay = lazy(() => import("./components/PerfDebugOverlay"));
+const PerfDebugOverlay = lazy(() =>
+  import("./components/PerfDebugOverlay").catch(() => ({ default: () => null }))
+);
 const Reviews = lazy(() => import("./legacyPages/Reviews"));
 const Tools = lazy(() => import("./legacyPages/Tools"));
 const RefLogin = lazy(() => import("./legacyPages/RefLogin"));
