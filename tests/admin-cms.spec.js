@@ -16,6 +16,11 @@ const cms = async (request, path, body) => {
   expect(response.ok(), await response.text()).toBe(true);
   return (await response.json()).data;
 };
+const contentCounts = async (request, control) => {
+  const response = await request.get(`${control}/content-counts`);
+  expect(response.ok()).toBe(true);
+  return response.json();
+};
 const login = async page => {
   await page.goto("/admin/content");
   await page.getByLabel("Email", { exact: true }).fill(EMAIL);
@@ -464,6 +469,184 @@ for (const committed of [true, false]) {
     } finally { await pending.release(); }
   });
 }
+
+test("create receipts keep a failed singleton draft after another create commits", async ({ page, request, baseURL }, testInfo) => {
+  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  expect((await request.post(`${control}/booking-create-fixture/legacy`)).ok()).toBe(true);
+  await page.route("**/api/admin/content/documents?type=bookingSettings", route => route.fulfill({ json: { ok: true, data: { documents: [] } } }));
+  await login(page); await choose(page, "Booking Settings");
+  await page.getByLabel("Maximum Days Ahead Booking", { exact: true }).fill("11");
+  await page.clock.install();
+  const pending = await hold(page, "**/api/admin/content/publish", { method: "POST" });
+  let submitted, writes = 0;
+  page.on("request", request => {
+    if (new URL(request.url()).pathname === "/api/admin/content/publish" && request.method() === "POST") { submitted = request.postDataJSON(); writes += 1; }
+  });
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  const response = await pending.arrived;
+  try {
+    expect(response.status()).toBe(409);
+    expect(await response.json()).toMatchObject({ ok: false, code: "CMS_SINGLETON_EXISTS" });
+    expect((await request.post(`${control}/booking-create-fixture/empty`)).ok()).toBe(true);
+    const otherIntent = require("node:crypto").randomUUID();
+    const otherReceipt = await cms(request, "/api/admin/content/publish", { ...submitted, createIntentId: otherIntent });
+    expect(otherReceipt).toMatchObject({ committed: true, documentId: "6d8a3646-0ed2-44b5-ad45-c5c9d578126a" });
+    expect(otherIntent).not.toBe(submitted.createIntentId);
+    const beforeLookup = await contentCounts(request, control);
+    await page.clock.fastForward(31000);
+    await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
+    const drafts = await page.evaluate(() => Object.entries(localStorage).filter(([key]) => key.startsWith("roo-content-draft:")));
+    expect(drafts).toHaveLength(1);
+    expect(JSON.parse(drafts[0][1])).toMatchObject({ createIntentId: submitted.createIntentId, document: { maxDaysAheadBooking: 11 } });
+    expect(writes).toBe(1);
+    const afterLookup = await contentCounts(request, control);
+    expect(afterLookup).toEqual(beforeLookup);
+    await evidence(page, testInfo, { failure: "CMS_SINGLETON_EXISTS", failedIntent: submitted.createIntentId, otherIntent, otherReceipt, retainedDraft: JSON.parse(drafts[0][1]), writes, beforeLookup, afterLookup });
+  } finally {
+    await pending.release();
+    expect((await request.post(`${control}/reset-content`)).ok()).toBe(true);
+  }
+});
+
+test("create receipts reconcile a committed fixed-ID singleton after its response is lost", async ({ page, request, baseURL }, testInfo) => {
+  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  expect((await request.post(`${control}/booking-create-fixture/empty`)).ok()).toBe(true);
+  await login(page); await choose(page, "Booking Settings");
+  await page.getByLabel("Maximum Days Ahead Booking", { exact: true }).fill("13");
+  await page.clock.install();
+  const pending = await hold(page, "**/api/admin/content/publish", { method: "POST" });
+  let submitted, writes = 0;
+  page.on("request", request => {
+    if (new URL(request.url()).pathname === "/api/admin/content/publish" && request.method() === "POST") { submitted = request.postDataJSON(); writes += 1; }
+  });
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  const response = await pending.arrived;
+  try {
+    expect(response.ok(), await response.text()).toBe(true);
+    const receipt = (await response.json()).data;
+    expect(receipt).toMatchObject({ committed: true, documentId: "6d8a3646-0ed2-44b5-ad45-c5c9d578126a" });
+    const beforeLookup = await contentCounts(request, control);
+    await page.clock.fastForward(31000);
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+    expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-content-draft:")))).toEqual([]);
+    expect((await cms(request, `/api/admin/content/documents/${receipt.documentId}`)).document.maxDaysAheadBooking).toBe(13);
+    expect(writes).toBe(1);
+    const afterLookup = await contentCounts(request, control);
+    expect(afterLookup).toEqual(beforeLookup);
+    await evidence(page, testInfo, { receipt, createIntentId: submitted.createIntentId, writes, beforeLookup, afterLookup });
+  } finally {
+    await pending.release();
+    expect((await request.post(`${control}/reset-content`)).ok()).toBe(true);
+  }
+});
+
+test("create receipts refuse matching content without an intent receipt", async ({ page, request }, testInfo) => {
+  await login(page); await choose(page, "Tool");
+  await page.getByRole("region", { name: "Tool list" }).getByRole("button", { name: "New", exact: true }).click();
+  const title = "Receipt required café 日本語";
+  await page.getByLabel(/^Tool Name/).fill(title);
+  await page.getByLabel("External Download URL", { exact: true }).fill("https://example.invalid/fixture-download");
+  await page.clock.install();
+  const pending = await hold(page, "**/api/admin/content/publish", { method: "POST" });
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  const response = await pending.arrived;
+  try {
+    expect(response.ok(), await response.text()).toBe(true);
+    const receipt = (await response.json()).data;
+    const content = await cms(request, `/api/admin/content/documents/${receipt.documentId}`);
+    await page.route("**/api/admin/content/publish**", route => route.fulfill({ json: { ok: true, data: { ...content, documentId: receipt.documentId } } }));
+    await page.clock.fastForward(31000);
+    await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
+    const drafts = await page.evaluate(() => Object.entries(localStorage).filter(([key]) => key.startsWith("roo-content-draft:")));
+    expect(drafts).toHaveLength(1);
+    expect(JSON.parse(drafts[0][1]).document.title).toBe(title);
+    await evidence(page, testInfo, { committedDocumentId: receipt.documentId, receiptOmittedFromStatus: true, draftKept: true });
+  } finally { await pending.release(); }
+});
+
+test("create receipts keep a draft while its receipt is processing", async ({ page, request, baseURL }, testInfo) => {
+  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  await login(page); await choose(page, "Benchmark");
+  await page.getByRole("region", { name: "Benchmark list" }).getByRole("button", { name: "New", exact: true }).click();
+  const title = "Processing receipt café 日本語";
+  await page.getByLabel("Benchmark Name", { exact: true }).fill(title);
+  await page.clock.install();
+  const pending = await hold(page, "**/api/admin/content/publish", { method: "POST" });
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  const response = await pending.arrived;
+  try {
+    expect(response.ok(), await response.text()).toBe(true);
+    const receipt = (await response.json()).data;
+    expect((await request.post(`${control}/create-receipt-processing/${receipt.documentId}`)).ok()).toBe(true);
+    const beforeLookup = await contentCounts(request, control);
+    await page.clock.fastForward(31000);
+    await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
+    const drafts = await page.evaluate(() => Object.entries(localStorage).filter(([key]) => key.startsWith("roo-content-draft:")));
+    expect(drafts).toHaveLength(1);
+    expect(JSON.parse(drafts[0][1]).document.title).toBe(title);
+    const afterLookup = await contentCounts(request, control);
+    expect(afterLookup).toEqual(beforeLookup);
+    await evidence(page, testInfo, { receiptState: "processing", documentId: receipt.documentId, draftKept: true, beforeLookup, afterLookup });
+  } finally { await pending.release(); }
+});
+
+test("create receipts bind a read-only lookup to the original validated request", async ({ page, request, baseURL }, testInfo) => {
+  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  const path = "/api/admin/content/publish/status";
+  const command = { operation: "create", type: "benchmark", createIntentId: require("node:crypto").randomUUID(), document: { title: "Read-only receipt café 日本語" } };
+  const receipt = await cms(request, "/api/admin/content/publish", command);
+  const beforeLookup = await contentCounts(request, control);
+  const status = await cms(request, path, command);
+  expect(status).toEqual({ committed: true, createIntentId: command.createIntentId, type: command.type, documentId: receipt.documentId, revision: receipt.revision });
+  expect(await cms(request, path, { ...command, createIntentId: command.createIntentId.toUpperCase(), document: { ...command.document, sortOrder: 0, _rev: "ignored-system-field" } })).toEqual(status);
+  const missing = [
+    { ...command, createIntentId: require("node:crypto").randomUUID() },
+    { ...command, document: { title: "Different request content" } },
+    { ...command, type: "tool", document: { title: command.document.title, downloadUrl: "https://example.invalid/fixture-download" } },
+  ];
+  for (const body of missing) {
+    const response = await request.post(path, { headers: { "x-admin-key": ADMIN_KEY }, data: body });
+    expect(response.status(), await response.text()).toBe(404);
+    expect(await response.json()).toMatchObject({ ok: false, code: "CMS_NOT_FOUND" });
+    expect(await contentCounts(request, control)).toEqual(beforeLookup);
+  }
+  const invalid = [
+    { ...command, createIntentId: "invalid" },
+    { ...command, expectedRevision: "create-has-no-loaded-revision" },
+    { ...command, action: "publish" },
+    { ...command, document: { title: 7 } },
+    { ...command, document: { ...command.document, _supabaseRuntime: true } },
+  ];
+  for (const body of invalid) {
+    for (const endpoint of [path, "/api/admin/content/publish"]) {
+      const response = await request.post(endpoint, { headers: { "x-admin-key": ADMIN_KEY }, data: body });
+      expect(response.status(), await response.text()).toBe(400);
+      expect(await response.json()).toMatchObject({ ok: false, code: "CMS_VALIDATION_FAILED" });
+    }
+  }
+  for (const endpoint of [path, "/api/admin/content/publish"]) {
+    const response = await request.post(endpoint, { headers: { "x-admin-key": ADMIN_KEY, "Content-Type": "application/json" }, data: JSON.stringify({ ...command, document: { title: "x".repeat(1024 * 1024) } }) });
+    expect(response.status()).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "CMS_VALIDATION_FAILED", details: [{ message: "JSON content exceeds 1 MiB." }] });
+  }
+  const replacement = await request.post(path, { headers: { "x-admin-key": ADMIN_KEY }, data: { operation: "replace", type: command.type, documentId: receipt.documentId, expectedRevision: receipt.revision, document: { title: "Must not write" } } });
+  expect(replacement.status()).toBe(400);
+  expect((await request.get(`/api/admin/content/publish?type=${command.type}&createIntentId=${command.createIntentId}`, { headers: { "x-admin-key": ADMIN_KEY } })).status()).toBe(405);
+  expect((await request.post(path, { data: command })).status()).toBe(401);
+  await login(page);
+  const otherActor = await page.evaluate(async ({ path, command }) => {
+    const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(command) });
+    return { status: response.status, body: await response.json() };
+  }, { path, command });
+  expect(otherActor).toMatchObject({ status: 404, body: { ok: false, code: "CMS_NOT_FOUND" } });
+  const afterLookup = await contentCounts(request, control);
+  expect(afterLookup).toEqual(beforeLookup);
+  expect((await cms(request, `/api/admin/content/documents/${receipt.documentId}`)).document.title).toBe(command.document.title);
+  await evidence(page, testInfo, { status, missingRequests: missing.length, invalidRequests: invalid.length, otherActor, beforeLookup, afterLookup, legacyGetStatus: 405 });
+});
 
 test("#10 a concurrent subtitle prevents reconciling a missing deletion", async ({ page, request }, testInfo) => {
   const documentId = "tooling-contact";

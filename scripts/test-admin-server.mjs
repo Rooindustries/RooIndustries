@@ -108,6 +108,34 @@ try {
     if (request.method === "GET" && request.url === "/fixture") {
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(marker)); return;
     }
+    if (request.method === "GET" && request.url === "/content-counts") {
+      const [counts] = await fixture.sql`select
+        (select count(*)::int from cms.documents) as documents,
+        (select count(*)::int from migration.source_documents) as "sourceDocuments",
+        (select count(*)::int from migration.cms_publish_commands) as receipts`;
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(counts)); return;
+    }
+    if (request.method === "POST" && request.url.startsWith("/create-receipt-processing/")) {
+      const documentId = request.url.slice("/create-receipt-processing/".length);
+      const updated = await fixture.sql`update migration.cms_publish_commands set status='processing',result=null,committed_at=null
+        where operation='create' and status='committed' and result->'document_ids' ? ${documentId} returning command_id`;
+      response.writeHead(updated.length === 1 ? 200 : 500); response.end(String(updated.length)); return;
+    }
+    if (request.method === "POST" && ["/booking-create-fixture/empty", "/booking-create-fixture/legacy"].includes(request.url)) {
+      const ids = ["6d8a3646-0ed2-44b5-ad45-c5c9d578126a", "fixture-bookingSettings-legacy"];
+      await fixture.sql.begin(async sql => {
+        await sql`delete from migration.cms_publish_commands where result->'document_ids' ?| ${ids}::text[]`;
+        await sql`delete from commerce.booking_settings where legacy_sanity_id=any(${ids}::text[])`;
+        await sql`delete from cms.documents where legacy_sanity_id=any(${ids}::text[])`;
+        await sql`delete from migration.source_documents where legacy_sanity_id=any(${ids}::text[])`;
+      });
+      if (request.url.endsWith("/legacy")) {
+        const document = { _id: ids[1], _type: "bookingSettings", maxDaysAheadBooking: 7 };
+        const result = await fixture.client.rpc("roo_apply_document_mutations", { p_mutations: [{ operation: "create", id: document._id, document }] });
+        if (result.error) { response.writeHead(500); response.end("Booking fixture preparation failed."); return; }
+      }
+      response.writeHead(200); response.end("ok"); return;
+    }
     if (request.method === "POST" && request.url === "/reset-content") {
       const current = await fixture.sql`select legacy_sanity_id from migration.source_documents where document_type=any(${CONTENT_TYPES.map(type => type.name)}::text[]) and not tombstoned`;
       const currentIds = new Set(current.map(document => document.legacy_sanity_id));

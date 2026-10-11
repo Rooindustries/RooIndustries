@@ -28,7 +28,7 @@ import { EditorContext, ObjectFields } from "./FieldInput";
 import RevisionHistory from "./RevisionHistory";
 import { clearDraft, draftKey, listNewDrafts, readDraft, saveDraft } from "./draftStore";
 import { contentErrorLabel, getIn, indexErrors, newUuid, resolveStablePath, setIn, stableJson, toStablePath } from "./documentPaths";
-import { publishedContentMatches, removedContentPaths } from "./publishStatus";
+import { hasCommittedCreateReceipt, publishedContentMatches, removedContentPaths } from "./publishStatus";
 
 const GROUPS = [
   { id: "site", title: "Site content" },
@@ -451,9 +451,14 @@ export default function ContentAdmin() {
     setSaving(true);
     setBanner(null);
     try {
-      const data = pending.session.documentId
-        ? await api.getDocument(pending.session.documentId)
-        : await api.getCreatedDocument(pending.session.type, pending.session.createIntentId);
+      let data;
+      if (pending.session.documentId) data = await api.getDocument(pending.session.documentId);
+      else {
+        const receipt = await api.getCreateStatus(pending.session.type, pending.session.createIntentId, pending.document);
+        if (!isCurrentSelection(pending.generation)) return;
+        if (!hasCommittedCreateReceipt(receipt, pending.session)) { notPublished(); return; }
+        data = { ...(await api.getDocument(receipt.documentId)), documentId: receipt.documentId, receipt };
+      }
       if (!isCurrentSelection(pending.generation)) return;
       const documentId = pending.session.documentId || data?.documentId;
       if (!documentId || data?.document?._id !== documentId || data.document._type !== pending.session.type || typeof data.revision !== "string" || !data.revision || data.revision !== data.document._rev) {
