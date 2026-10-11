@@ -228,17 +228,18 @@ function routeProblems(record) {
   const problems = [];
   const add = (kind, count, details) => { if (count) problems.push({ route: record.route, kind, count, details }); };
   add("navigation", record.navigationError || record.status >= 400 ? 1 : 0, record.navigationError || record.status);
-  if (record.redirect || record.privateGate || !record.document) return problems;
-  const doc = record.document;
   const isFixtureResourceError = entry => entry.text === "Failed to load resource: the server responded with a status of 503 (Service Unavailable)" &&
     record.fixtureDenials.some(denial => denial.url === entry.location.url);
   add("consoleErrors", record.console.filter(entry => entry.type === "error" && !isFixtureResourceError(entry)).length);
   add("consoleWarnings", record.console.filter(entry => entry.type === "warning").length);
+  add("hydrationWarnings", record.hydrationWarnings?.length || 0);
   add("pageErrors", record.pageErrors.length);
   add("failedRequests", record.failedRequests.filter(entry => entry.error !== "net::ERR_ABORTED").length);
   add("httpErrors", record.httpErrors.filter(entry => !record.fixtureDenials.some(denial => denial.url === entry.url && denial.method === entry.method)).length);
   add("unexpectedExternalRequests", record.blockedExternalRequests.length);
   add("behaviour", record.behaviourErrors.length, record.behaviourErrors);
+  if (record.redirect || record.privateGate || !record.document) return problems;
+  const doc = record.document;
   for (const [field, values] of Object.entries(doc.metadata)) add(`metadata:${field}`, values.length !== 1 || !values[0]?.trim() ? 1 : 0, values);
   const canonical = doc.metadata.canonical[0];
   const actualPath = new URL(doc.url).pathname.replace(/\/$/, "") || "/";
