@@ -5,7 +5,7 @@ let restoreGuard;
 
 test.skip(process.env.TOOLING_CREATOR_PORTAL !== '1', 'Select the creator fixture with npm run test:creator:portal.');
 
-test.use({ javaScriptEnabled: true, trace: 'off', video: 'off' });
+test.use({ javaScriptEnabled: true, trace: 'retain-on-failure', video: 'off' });
 test.beforeAll(async ({ baseURL }) => {
   fixture = await import('./fixtures/api-routes.mjs');
   const { installNetworkGuard, refuseEnvFiles } = await import('../scripts/lib/test-target-safety.mjs');
@@ -25,13 +25,13 @@ const configure = (baseURL, data) => fixture.requestRoute(fixture.apiFixtureOrig
 async function signIn(context, baseURL) {
   await context.addCookies([{ name: 'ref_session', value: fixture.referralSessionCookie(), url: baseURL, httpOnly: true, sameSite: 'Lax' }]);
 }
-async function record(page, testInfo, label, values = {}) {
+async function record(page, testInfo, label, values = {}, fullPage = true) {
   const details = { url: page.url(), viewport: page.viewportSize(), ...values };
   fs.mkdirSync(testInfo.outputDir, { recursive: true });
   fs.writeFileSync(testInfo.outputPath(`${label}.json`), JSON.stringify(details, null, 2));
   await testInfo.attach(label, { body: JSON.stringify(details), contentType: 'application/json' });
   const screenshot = testInfo.outputPath(`${label}.png`);
-  await page.screenshot({ path: screenshot, fullPage: true });
+  await page.screenshot({ path: screenshot, fullPage });
   await testInfo.attach(`${label}-screenshot`, { path: screenshot, contentType: 'image/png' });
 }
 async function openForm(page, pathname, effectPath) {
@@ -126,16 +126,67 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
 
     test('a failed logout does not pretend the session ended', async ({ page, context, baseURL }, testInfo) => {
       await signIn(context, baseURL);
-      await page.route('**/api/ref/logout', route => route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic logout outage.' } }));
-      const sessionChecks = [];
-      page.on('response', r => { if (r.url().endsWith('/api/ref/sessionStatus')) sessionChecks.push(r.status()); });
       await page.goto('/referrals/dashboard');
       await expect(page.getByRole('button', { name: 'Log Out', exact: true })).toBeVisible();
-      await page.getByRole('button', { name: 'Log Out', exact: true }).click();
-      await expect.poll(() => sessionChecks.length).toBeGreaterThan(0);
-      await expect(page.getByRole('heading', { name: 'Welcome, Synthetic Creator' })).toBeVisible();
-      await record(page, testInfo, `logout-outage-${size}`, { sessionChecks, cookiePresent: (await context.cookies()).some(c => c.name === 'ref_session') });
-      await expect(page.locator('#main-content').getByRole('alert')).toContainText(/logout|sign out|try again/i, { timeout: 1000 });
+      await page.evaluate(() => sessionStorage.setItem('creatorId', 'synthetic-existing-state'));
+      const outcomes = [];
+      await page.route('**/api/ref/sessionStatus', route => route.fulfill({ status: 200, json: { ok: true, authenticated: false } }));
+      for (const failure of ['http', 'network']) {
+        await page.route('**/api/ref/logout', route => failure === 'http'
+          ? route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic logout outage.' } })
+          : route.abort('failed'));
+        await page.getByRole('button', { name: 'Log Out', exact: true }).click();
+        const alert = page.locator('#main-content').getByRole('alert');
+        await expect(alert).toContainText(/sign out|try again/i);
+        await expect(alert.getByRole('button', { name: 'Retry', exact: true })).toBeEnabled();
+        await expect(page.getByRole('heading', { name: 'Welcome, Synthetic Creator' })).toBeVisible();
+        await expect(page).toHaveURL('/referrals/dashboard');
+        expect(await page.evaluate(() => sessionStorage.getItem('creatorId'))).toBe('synthetic-existing-state');
+        expect((await context.cookies()).some(cookie => cookie.name === 'ref_session')).toBe(true);
+        outcomes.push({ failure, retainedState: true });
+        await page.unroute('**/api/ref/logout');
+      }
+      await page.unroute('**/api/ref/sessionStatus');
+      await page.route('**/api/ref/logout', async route => {
+        const response = await fixture.requestRoute(baseURL, '/api/ref/logout', {
+          data: {}, headers: { cookie: await route.request().headerValue('cookie') || '' },
+        });
+        expect(response.status).toBe(200);
+        await route.fulfill({
+          status: 204,
+          headers: { 'set-cookie': response.headers.getSetCookie().find(cookie => cookie.startsWith('ref_session=')) },
+          body: '',
+        });
+      });
+      await page.locator('#main-content').getByRole('alert').getByRole('button', { name: 'Retry', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Referral Creator Login', exact: true })).toBeVisible();
+      expect((await context.cookies()).some(cookie => cookie.name === 'ref_session')).toBe(false);
+      expect(await page.evaluate(() => sessionStorage.getItem('creatorId'))).toBeNull();
+      await record(page, testInfo, `logout-outage-${size}`, { outcomes, bodylessSuccess: true });
+    });
+
+    test('dashboard and password reset outcomes are announced', async ({ page, context, baseURL }, testInfo) => {
+      await signIn(context, baseURL);
+      await page.goto('/referrals/dashboard');
+      await page.route('**/api/ref/updateSplit', route => route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic save outage.' } }));
+      await page.getByRole('button', { name: 'Save Settings', exact: true }).click();
+      await expect(page.locator('#main-content').getByRole('alert')).toHaveText('Synthetic save outage.');
+      await page.unroute('**/api/ref/updateSplit');
+      await page.getByRole('button', { name: 'Save Settings', exact: true }).click();
+      await expect(page.locator('#main-content').getByRole('status')).toContainText(/saved/i);
+      await page.goto('/referrals/forgot');
+      const email = page.getByLabel('Creator Email', { exact: true });
+      await expect(email).toHaveAttribute('autocomplete', 'email');
+      await email.fill('creator@fixture.invalid');
+      await page.route('**/api/ref/forgot', route => route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic forgot outage.' } }));
+      await page.getByRole('button', { name: 'Send Reset Link', exact: true }).click();
+      await expect(page.locator('#main-content').getByRole('alert')).toHaveText('Synthetic forgot outage.');
+      await expect(email).toHaveValue('creator@fixture.invalid');
+      await page.unroute('**/api/ref/forgot');
+      await page.getByRole('button', { name: 'Send Reset Link', exact: true }).click();
+      await expect(page.locator('#main-content').getByRole('status')).toContainText('Reset link sent');
+      await expect(email).toHaveValue('');
+      await record(page, testInfo, `announced-outcomes-${size}`);
     });
 
     test('decimal percentage adjustment remains acceptable to the API', async ({ page, context, baseURL }, testInfo) => {
@@ -168,11 +219,15 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     test('payment dialog receives keyboard focus', async ({ page, context, baseURL }, testInfo) => {
       await signIn(context, baseURL);
       await page.goto('/referrals/dashboard');
+      await page.evaluate(() => document.documentElement.classList.add('low-performance-mode'));
       await page.getByRole('button', { name: 'View my payment logs', exact: true }).click();
       await expect(page.getByRole('dialog')).toBeVisible();
+      await expect(page.getByRole('dialog')).toHaveCSS('opacity', '1');
       const opened = await page.evaluate(() => ({ focused: document.activeElement?.textContent, inside: Boolean(document.activeElement?.closest('[role=dialog]')) }));
       await page.keyboard.press('Tab');
       const tabbed = await page.evaluate(() => ({ focused: document.activeElement?.textContent, inside: Boolean(document.activeElement?.closest('[role=dialog]')) }));
+      await page.keyboard.press('Shift+Tab');
+      const reverseTabbed = await page.evaluate(() => Boolean(document.activeElement?.closest('[role=dialog]')));
       const dialog = await page.getByRole('dialog').evaluate(el => {
         const b = el.getBoundingClientRect();
         const ancestors = [];
@@ -185,13 +240,23 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.evaluate(() => document.documentElement.classList.remove('low-performance-mode'));
       const withoutContainment = await page.getByRole('dialog').evaluate(el => { const b = el.getBoundingClientRect(); return { top: b.top, bottom: b.bottom }; });
       if (dialog.htmlClass.includes('low-performance-mode')) await page.evaluate(() => document.documentElement.classList.add('low-performance-mode'));
-      await record(page, testInfo, `payment-dialog-${size}`, { opened, tabbed, dialog, withoutContainment });
+      await record(page, testInfo, `payment-dialog-${size}`, { opened, tabbed, reverseTabbed, dialog, withoutContainment }, false);
       await page.keyboard.press('Escape');
       await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'View my payment logs', exact: true })).toBeFocused();
       expect(opened.inside).toBe(true);
       expect(tabbed.inside).toBe(true);
+      expect(reverseTabbed).toBe(true);
+      expect(dialog.ancestors).toEqual([]);
       expect(dialog.top).toBeGreaterThanOrEqual(0);
       expect(dialog.bottom).toBeLessThanOrEqual(viewport.height);
+      expect(withoutContainment.top).toBeGreaterThanOrEqual(0);
+      expect(withoutContainment.bottom).toBeLessThanOrEqual(viewport.height);
+      await page.getByRole('button', { name: 'View my payment logs', exact: true }).click();
+      await expect(page.getByRole('button', { name: 'Close payment logs', exact: true })).toBeFocused();
+      await page.getByRole('button', { name: 'Close payment logs', exact: true }).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'View my payment logs', exact: true })).toBeFocused();
     });
 
     test('registration with a new normalized code verifies into a working dashboard', async ({ page, baseURL }, testInfo) => {
@@ -222,6 +287,55 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await record(page, testInfo, `pending-code-${size}`, { status: response.status(), body: await response.json() });
       expect(response.status()).toBe(409);
       await expect(page.getByText('Referral code is available.', { exact: true })).toHaveCount(0, { timeout: 1000 });
+    });
+
+    test('unauthorized account reads route by status even without JSON', async ({ page, context, baseURL }, testInfo) => {
+      await signIn(context, baseURL);
+      await page.route('**/api/ref/sessionStatus', route => route.fulfill({ status: 200, json: { ok: true, authenticated: false } }));
+      const outcomes = [];
+      for (const path of ['/referrals/dashboard', '/referrals/change-password']) {
+        for (const body of ['', '<h1>Unauthorized</h1>']) {
+          await page.route('**/api/ref/getData', route => route.fulfill({ status: 401, contentType: 'text/html', body }));
+          await page.goto(path);
+          await expect(page.getByRole('heading', { name: 'Referral Creator Login', exact: true })).toBeVisible();
+          expect(await page.evaluate(() => sessionStorage.getItem('creatorId'))).toBeNull();
+          outcomes.push({ path, body, redirected: true });
+          await page.unroute('**/api/ref/getData');
+        }
+      }
+      await record(page, testInfo, `unauthorized-bodies-${size}`, { outcomes });
+    });
+
+    test('creator percentages are correct from the first render and paint', async ({ page, context, baseURL }, testInfo) => {
+      await signIn(context, baseURL);
+      await page.addInitScript(() => {
+        window.creatorRenders = [];
+        window.creatorPaints = [];
+        const snapshot = () => {
+          const paragraphs = [...document.querySelectorAll('p')];
+          const commission = paragraphs.find(el => el.textContent === 'Commission (%)')?.parentElement.querySelector('span')?.textContent;
+          const discount = paragraphs.find(el => el.textContent === 'Viewer Discount (%)')?.parentElement.querySelector('span')?.textContent;
+          const total = [...document.querySelectorAll('div')].find(el => el.childElementCount === 0 && el.textContent.startsWith('Total: '))?.textContent;
+          return commission && discount && total ? { commission, discount, total: total.trim() } : null;
+        };
+        new MutationObserver(() => {
+          const values = snapshot();
+          if (values && window.creatorRenders.length < 20) window.creatorRenders.push(values);
+        }).observe(document, { childList: true, subtree: true, characterData: true });
+        const paint = () => {
+          const values = snapshot();
+          if (values) window.creatorPaints.push(values);
+          if (window.creatorPaints.length < 5) requestAnimationFrame(paint);
+        };
+        requestAnimationFrame(paint);
+      });
+      await page.goto('/referrals/dashboard');
+      await expect.poll(() => page.evaluate(() => window.creatorPaints.length)).toBe(5);
+      const frames = await page.evaluate(() => ({ renders: window.creatorRenders, paints: window.creatorPaints }));
+      await record(page, testInfo, `initial-percentages-${size}`, frames);
+      const expected = { commission: '7.25%', discount: '2.75%', total: 'Total: 10% / Max 15%' };
+      expect(frames.renders[0]).toEqual(expected);
+      for (const frame of frames.paints) expect(frame).toEqual(expected);
     });
 
     test('an unauthorized dashboard read returns to login', async ({ page }, testInfo) => {
@@ -270,10 +384,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page.getByRole('status')).toContainText('Invalid or expired confirmation link');
     });
 
-    test('a confirmation session outage does not leave a consumed link asking for retry', async ({ page, baseURL }, testInfo) => {
-      for (const outage of ['linkUnavailable', 'sessionInstallUnavailable']) {
-        await fixture.configureApiFixture(baseURL, { reset: true });
-        await configure(baseURL, { reset: true, settings: { [outage]: true } });
+    for (const outage of ['linkUnavailable', 'sessionInstallUnavailable']) {
+      test(`a confirmation session outage does not leave a consumed link asking for retry (${outage})`, async ({ page, context, baseURL }, testInfo) => {
+        await configure(baseURL, { settings: { [outage]: true } });
+        await signIn(context, baseURL);
         const responsePromise = page.waitForResponse(response => response.url().endsWith('/api/ref/verifyRegistration'));
         await page.goto('/referrals/verify#token=' + 'b'.repeat(43));
         const response = await responsePromise;
@@ -285,17 +399,21 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         expect(body).toEqual({ ok: true, requiresLogin: true });
         expect(source.registrationStatus).toBe('active');
         expect(source.registrationVerificationTokenHash).toBeUndefined();
-        await expect(page.getByRole('status')).toContainText('Email confirmed');
+        await expect(page.getByRole('status')).toContainText('Your account is confirmed');
         expect(await page.evaluate(() => sessionStorage.getItem('referral_registration_verification'))).toBeNull();
         await configure(baseURL, { settings: { [outage]: false } });
-        await page.getByRole('button', { name: 'Log in', exact: true }).click();
+        await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toHaveAttribute('href', '/referrals/login?notice=email-confirmed');
+        await page.getByRole('link', { name: 'Sign in', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Referral Creator Login', exact: true })).toBeVisible();
-        const login = await fixture.requestRoute(baseURL, '/api/ref/login', { data: { code: 'pending-code', password: 'Synthetic-password1!' } });
-        expect(login.status).toBe(200);
+        await expect(page.locator('form').getByRole('status')).toContainText('Email confirmed');
+        await page.getByLabel('Referral code or login email', { exact: true }).fill('pending-code');
+        await page.getByLabel('Password', { exact: true }).fill('Synthetic-password1!');
+        await page.getByRole('button', { name: 'Login', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Welcome, Pending Creator' })).toBeVisible();
         await page.goto('/referrals/verify#token=' + 'b'.repeat(43));
         await expect(page.getByRole('status')).toContainText('Invalid or expired confirmation link');
-      }
-    });
+      });
+    }
 
     test('legacy reset changes the password and retains safe replay behavior', async ({ page, baseURL }, testInfo) => {
       await page.goto('/referrals/reset#token=' + 'a'.repeat(64));
@@ -647,7 +765,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page.getByRole('heading', { name: 'Forgot Password', exact: true })).toBeVisible();
       for (const status of [400, 429, 503, 0]) {
         await page.route('**/api/ref/forgot', route => status ? route.fulfill({ status, json: { ok: false, error: `Synthetic ${status} forgot failure.` } }) : route.abort('failed'));
-        const email = page.locator('form input[type=email]');
+        const email = page.getByLabel('Creator Email', { exact: true });
         await email.fill('creator@fixture.invalid');
         await expect(email).toHaveValue('creator@fixture.invalid');
         const requestPromise = page.waitForRequest('**/api/ref/forgot');
@@ -657,6 +775,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         expect(request.postDataJSON()).toEqual({ email: 'creator@fixture.invalid' });
         const message = page.getByText(status ? `Synthetic ${status} forgot failure.` : 'Server error.', { exact: true });
         await expect(message).toBeVisible();
+        await expect(page.locator('#main-content').getByRole('alert')).toContainText(await message.innerText());
         await expect(page.getByRole('button', { name: 'Send Reset Link', exact: true })).toBeEnabled();
         await expect(email).toHaveValue('creator@fixture.invalid');
         outcomes.push({ route: 'forgot', status, fieldsRetained: true, message: await message.innerText() });
@@ -733,12 +852,14 @@ test('API rejects invalid registration, expired links and rejected sessions', as
 
 test.describe('payment timestamps in western time zones', () => {
   test.use({ timezoneId: 'America/Los_Angeles', viewport: { width: 1440, height: 900 } });
-  test('a payment timestamp renders its local day', async ({ page, context, baseURL }, testInfo) => {
+  test('calendar payout dates keep their day while timestamps use the local day', async ({ page, context, baseURL }, testInfo) => {
+    await configure(baseURL, { documents: [{ _id: 'tooling-referral', vertexPayments: [{ _key: 'timestamp', amount: 5.25, paidOn: '2026-10-10T00:00:00Z', note: 'UTC timestamp payout' }] }] });
     await signIn(context, baseURL);
     await page.goto('/referrals/dashboard');
     await page.getByRole('button', { name: 'View my payment logs', exact: true }).click();
     const row = page.getByText('Date-only payout', { exact: true }).locator('../..');
     await record(page, testInfo, 'payment-calendar-date', { shown: await row.innerText(), stored: '2026-10-10', timezone: 'America/Los_Angeles' });
-    await expect(row).toContainText('Oct 9, 2026', { timeout: 1000 });
+    await expect(row).toContainText('Oct 10, 2026');
+    await expect(page.getByText('UTC timestamp payout', { exact: true }).locator('../..')).toContainText('Oct 9, 2026');
   });
 });
