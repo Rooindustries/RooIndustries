@@ -81,7 +81,7 @@ const STEP_PROGRESS_PERCENTS = { 1: 33, 2: 67, 3: 100 };
 const classifyHoldResponse = ({ status, ok, networkError = false, expired = false }) => {
   if (expired) return "clear";
   if (networkError) return "keep";
-  if (status === 400 || status === 409) return "clear";
+  if (status >= 400 && status < 500 && ![408, 425, 429].includes(status)) return "clear";
   if (status >= 200 && status < 300 && ok) return "replace";
   return "keep";
 };

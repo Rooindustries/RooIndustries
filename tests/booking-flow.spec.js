@@ -62,13 +62,19 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       });
     }
 
-    for (const status of [400, 409]) {
+    for (const status of [400, 403, 404, 409]) {
       test(`release ${status} clears a definitively refused hold`, async ({ page, flow }) => {
         await flow.reserve();
         flow.state.failures["/api/releaseHold"] = status;
         await page.getByRole("button", { name: "Release Slot", exact: true }).click();
         await expect.poll(() => hold(page)).toBeNull();
         await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveCount(0);
+        await expect(page.getByRole("alert").filter({ hasText: /could not release/i })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Release Slot", exact: true })).toHaveCount(0);
+        await page.reload();
+        expect(await hold(page)).toBeNull();
+        await expect(page.getByRole("alert").filter({ hasText: /could not release/i })).toHaveCount(0);
+        expect(flow.state.calls.filter(({ path }) => path === "/api/releaseHold")).toHaveLength(1);
       });
     }
 
@@ -121,6 +127,20 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.getByRole("button", { name: "Next", exact: true }).last().click();
       await expect.poll(() => hold(page)).toBeNull();
       await expect(page.getByRole("alert").filter({ hasText: /slot was just taken/i })).toBeVisible();
+    });
+
+    test("same-slot refresh 403 clears the refused hold and shows the server message", async ({ page, flow }) => {
+      await flow.reserve();
+      await page.route("**/api/holdSlot", (route) => route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: false, message: "Invalid hold token" }),
+      }));
+      await page.getByRole("button", { name: "Back", exact: true }).last().click();
+      await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+      await page.getByRole("button", { name: "Next", exact: true }).last().click();
+      await expect.poll(() => hold(page)).toBeNull();
+      await expect(page.getByRole("alert").filter({ hasText: "Invalid hold token" })).toBeVisible();
     });
 
     test("confirmed release and replacement 409 clear the stored hold", async ({ page, flow }) => {

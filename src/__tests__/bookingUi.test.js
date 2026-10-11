@@ -735,14 +735,41 @@ describe("booking calendar UI", () => {
     expect(global.fetch.mock.calls.filter(([url]) => url === "/api/releaseHold")).toHaveLength(0);
   });
 
+  test("same-slot refresh 403 clears the refused hold and shows the server message", async () => {
+    seedBookingSession();
+    installDefaultFetch({
+      settings: { dateSlots: [{ date: "2099-01-05", times: ["10:00", "11:00"] }] },
+    });
+    const defaultFetch = global.fetch.getMockImplementation();
+    global.fetch.mockImplementation(async (url, options = {}) => {
+      if (url !== "/api/holdSlot") return defaultFetch(url, options);
+      return { ok: false, status: 403, json: async () => ({ ok: false, message: "Invalid hold token" }) };
+    });
+    setBookingLocation();
+    render(<BookingForm />);
+    await userEvent.click(await screen.findByRole("button", { name: /^back$/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /^next$/i }));
+
+    expect(await screen.findByText("Invalid hold token")).toBeInTheDocument();
+    expect(sessionStorage.getItem("my_slot_hold")).toBeNull();
+    expect(screen.queryByLabelText("Booking email")).not.toBeInTheDocument();
+  });
+
   test.each([
     [200, "json", false],
     [400, "json", false],
+    [403, "json", false],
+    [404, "json", false],
+    [408, "json", true],
     [409, "json", false],
+    [410, "json", false],
+    [422, "json", false],
+    [425, "json", true],
     [429, "json", true],
     [503, "json", true],
     [200, "unknown", true],
     [502, "non-json", true],
+    [403, "non-json", true],
     [409, "non-json", true],
   ])("release %s with %s response retains hold: %s", async (status, body, keep) => {
     consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
