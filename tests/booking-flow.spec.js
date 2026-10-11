@@ -13,7 +13,7 @@ test.afterEach(async ({ page, flow }, testInfo) => {
 });
 
 const hold = (page) => page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold")));
-const failureTypes = [400, 503, "network", "timeout"];
+const failureTypes = [429, 503, "non-json", "unknown", "network", "timeout"];
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test.describe(`${viewport.width}px`, () => {
@@ -62,6 +62,67 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       });
     }
 
+    for (const status of [400, 409]) {
+      test(`release ${status} clears a definitively refused hold`, async ({ page, flow }) => {
+        await flow.reserve();
+        flow.state.failures["/api/releaseHold"] = status;
+        await page.getByRole("button", { name: "Release Slot", exact: true }).click();
+        await expect.poll(() => hold(page)).toBeNull();
+        await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveCount(0);
+      });
+    }
+
+    test("same-slot payment pending keeps credentials and returns to details", async ({ page, flow }) => {
+      await flow.reserve();
+      await flow.details();
+      const original = { ...await hold(page), phase: "payment_pending", packageTitle: "Vertex Essentials" };
+      await page.evaluate((value) => sessionStorage.setItem("my_slot_hold", JSON.stringify(value)), original);
+      flow.state.failures["/api/holdSlot"] = 409;
+      await page.reload();
+      await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+      const callsBefore = flow.state.calls.filter(({ path }) => path === "/api/holdSlot").length;
+      await page.getByRole("button", { name: "Next", exact: true }).last().click();
+      await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveValue("visitor@example.invalid");
+      await expect(page.getByRole("alert").filter({ hasText: /payment session is already in progress/i })).toBeVisible();
+      expect(flow.state.calls.filter(({ path }) => path === "/api/holdSlot")).toHaveLength(callsBefore);
+      expect(flow.state.calls.filter(({ path }) => path === "/api/releaseHold")).toHaveLength(0);
+      expect(await hold(page)).toEqual(original);
+      await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Return to payment", exact: true })).toBeVisible();
+    });
+
+    for (const failure of viewport.width === 1440 ? [429, 503, "non-json", "unknown"] : [503]) {
+      test(`same-slot refresh ${failure} retains credentials for retry`, async ({ page, flow }) => {
+        await flow.reserve();
+        await flow.details();
+        const original = await hold(page);
+        flow.state.failures["/api/holdSlot"] = failure;
+        await page.getByRole("button", { name: "Back", exact: true }).last().click();
+        await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+        await page.getByRole("button", { name: "Next", exact: true }).last().click();
+        await expect(page.getByRole("alert").filter({ hasText: /could not reserve.*try again/i })).toBeVisible();
+        expect(await hold(page)).toEqual(original);
+        delete flow.state.failures["/api/holdSlot"];
+        await page.getByRole("button", { name: "Next", exact: true }).last().click();
+        await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveValue("visitor@example.invalid");
+        await expect(page.getByRole("textbox", { name: "PC specifications", exact: true })).toHaveValue("Ryzen 7700 / RTX 4070");
+        const calls = flow.state.calls.filter(({ path }) => path === "/api/holdSlot");
+        expect(calls).toHaveLength(3);
+        expect(calls[2].body).toMatchObject({ startTimeUTC: original.startTimeUTC, previousHoldId: original.holdId, previousHoldToken: original.holdToken });
+        expect((await hold(page)).holdToken).not.toBe(original.holdToken);
+      });
+    }
+
+    test("same-slot refresh 400 clears the refused hold", async ({ page, flow }) => {
+      await flow.reserve();
+      flow.state.failures["/api/holdSlot"] = 400;
+      await page.getByRole("button", { name: "Back", exact: true }).last().click();
+      await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+      await page.getByRole("button", { name: "Next", exact: true }).last().click();
+      await expect.poll(() => hold(page)).toBeNull();
+      await expect(page.getByRole("alert").filter({ hasText: /slot was just taken/i })).toBeVisible();
+    });
+
     test("confirmed release and replacement 409 clear the stored hold", async ({ page, flow }) => {
       await flow.reserve();
       const original = await hold(page);
@@ -81,7 +142,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect((await hold(page)).holdToken).not.toBe(original.holdToken);
     });
 
-    for (const holdFailure of viewport.width === 1440 ? [409, 400, 503, "timeout"] : [409]) {
+    for (const holdFailure of viewport.width === 1440 ? [409, 400, 429, 503, "non-json", "unknown", "timeout"] : [409]) {
       test(`release timeout and replacement ${holdFailure} preserve the original slot`, async ({ page, flow }) => {
         await flow.reserve();
         await flow.details();
@@ -93,7 +154,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await page.getByRole("button", { name: "11:00 AM", exact: true }).click();
         await page.getByRole("button", { name: "Next", exact: true }).last().click();
         await expect(page.getByRole("alert").filter({
-          hasText: holdFailure === "timeout" ? /could not reserve/i : /slot was just taken/i,
+          hasText: [400, 409].includes(holdFailure) ? /slot was just taken/i : /could not reserve/i,
         })).toBeVisible({ timeout: 20000 });
         expect(await hold(page)).toEqual(original);
         const calls = flow.state.calls.filter(({ path }) => path === "/api/holdSlot");

@@ -43,6 +43,8 @@ const test = base.extend({
         return;
       }
       if (failure === "network") return route.abort("failed");
+      if (failure === "non-json") return route.fulfill({ status: 502, contentType: "text/html", body: "Unavailable" });
+      if (failure === "unknown") return json(route, { ok: false });
       if (failure) return json(route, { ok: false, error: "Fixture request rejected." }, failure);
       if (path === "/__test/checkout-handoff") {
         return route.fulfill({ contentType: "text/html", body: "<h1>Checkout handoff</h1>" });

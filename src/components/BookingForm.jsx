@@ -78,6 +78,13 @@ const STEP_PROGRESS_LABELS = {
 };
 const STEP_PROGRESS_WIDTHS = { 1: "33%", 2: "67%", 3: "100%" };
 const STEP_PROGRESS_PERCENTS = { 1: 33, 2: 67, 3: 100 };
+const classifyHoldResponse = ({ status, ok, networkError = false, expired = false }) => {
+  if (expired) return "clear";
+  if (networkError) return "keep";
+  if (status === 400 || status === 409) return "clear";
+  if (status >= 200 && status < 300 && ok) return "replace";
+  return "keep";
+};
 const createFreshForm = () => ({
   discord: "",
   email: "",
@@ -1990,10 +1997,13 @@ export default function BookingForm({ isMobile }) {
     const isCurrentHold = () =>
       currentHoldRef.current?.holdId === holdIdToDelete &&
       currentHoldRef.current?.holdToken === holdTokenToDelete;
-    if (hasExpired()) clearHoldState(resetStep);
+    if (classifyHoldResponse({ expired: hasExpired() }) === "clear") {
+      clearHoldState(resetStep);
+    }
     if (releaseInFlightRef.current) return hasExpired();
     releaseInFlightRef.current = true;
 
+    let outcome;
     try {
       const response = await fetch("/api/releaseHold", {
         method: "POST",
@@ -2004,26 +2014,30 @@ export default function BookingForm({ isMobile }) {
         }),
         signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
       });
-      if (!response.ok) throw new Error("Release failed.");
+      const data = await response.json();
+      outcome = classifyHoldResponse({
+        status: response.status,
+        ok: response.ok && data?.ok === true,
+        expired: hasExpired(),
+      });
+    } catch {
+      console.error("Failed to release hold on server");
+      outcome = classifyHoldResponse({ networkError: true, expired: hasExpired() });
+    } finally {
+      releaseInFlightRef.current = false;
+    }
+    if (outcome !== "keep") {
       if (isCurrentHold()) clearHoldState(resetStep);
       setErrorStep1("");
       setErrorStep2("");
       return true;
-    } catch {
-      console.error("Failed to release hold on server");
-      if (hasExpired()) {
-        if (isCurrentHold()) clearHoldState(resetStep);
-        return true;
-      }
-      if (isCurrentHold() && !suppressError) {
-        const message = "Could not release your slot. Your reservation and details are saved. Please try again.";
-        setErrorStep1(message);
-        setErrorStep2(message);
-      }
-      return false;
-    } finally {
-      releaseInFlightRef.current = false;
     }
+    if (isCurrentHold() && !suppressError) {
+      const message = "Could not release your slot. Your reservation and details are saved. Please try again.";
+      setErrorStep1(message);
+      setErrorStep2(message);
+    }
+    return false;
   };
 
   const releasePaymentSession = async () => {
@@ -2094,8 +2108,18 @@ export default function BookingForm({ isMobile }) {
   };
 
   const handleLockAndGoNext = async () => {
+    const selectedSlotId = selectedSlot?.utcStart.toISOString();
+    const isSameAsExisting =
+      myHold && myHold.startTimeUTC === selectedSlotId;
     if (isPaymentPendingHold) {
-      setErrorStep1("Your payment session is already in progress. Return to payment to finish it.");
+      const message = "Your payment session is already in progress. Return to payment to finish it.";
+      if (isSameAsExisting) {
+        setErrorStep1("");
+        setErrorStep2(message);
+        setStep(2);
+      } else {
+        setErrorStep1(message);
+      }
       return;
     }
     if (!selectedDate || !selectedSlot) {
@@ -2110,9 +2134,6 @@ export default function BookingForm({ isMobile }) {
 
     const previousHoldId = myHold?.holdId || null;
     const previousHoldToken = myHold?.holdToken || null;
-    const selectedSlotId = selectedSlot.utcStart.toISOString();
-    const isSameAsExisting =
-      myHold && myHold.startTimeUTC === selectedSlotId;
 
     if (myHold && !isSameAsExisting) {
       await releaseHold(false, { suppressError: true });
@@ -2126,24 +2147,39 @@ export default function BookingForm({ isMobile }) {
         previousHoldToken,
       };
 
-      const res = await fetch("/api/holdSlot", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
+      let res;
+      let data;
+      let networkError = false;
+      try {
+        res = await fetch("/api/holdSlot", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
+        });
+        data = await res.json();
+      } catch {
+        console.error("Failed to reserve slot");
+        networkError = true;
+      }
+      const outcome = classifyHoldResponse({
+        status: res?.status,
+        ok: res?.ok && data?.ok === true,
+        networkError,
       });
 
-      const data = await res.json();
-
-      if (!res.ok || !data.ok) {
-        if (isSameAsExisting) clearHoldState(false);
+      if (outcome !== "replace") {
+        if (outcome === "clear") {
+          if (isSameAsExisting) clearHoldState(false);
+          setSelectedSlot(null);
+        }
         setErrorStep1(
-          data.message ||
-            "That slot was just taken by someone else. Please choose another time."
+          outcome === "clear"
+            ? data?.message || "That slot was just taken by someone else. Please choose another time."
+            : "Could not reserve this slot. Please check your internet and try again."
         );
-        setSelectedSlot(null);
         return;
       }
 
@@ -2176,11 +2212,6 @@ export default function BookingForm({ isMobile }) {
         ),
       });
       setStep(2);
-    } catch {
-      console.error("Failed to reserve slot");
-      setErrorStep1(
-        "Could not reserve this slot. Please check your internet and try again."
-      );
     } finally {
       setLockingSlot(false);
     }
