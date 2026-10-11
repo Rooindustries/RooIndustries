@@ -541,7 +541,7 @@ test("create receipts reconcile a committed fixed-ID singleton after its respons
   }
 });
 
-test("create receipts refuse matching content without an intent receipt", async ({ page, request }, testInfo) => {
+test("create reconciliation refuses a status response without a committed receipt", async ({ page, request }, testInfo) => {
   await login(page); await choose(page, "Tool");
   await page.getByRole("region", { name: "Tool list" }).getByRole("button", { name: "New", exact: true }).click();
   const title = "Receipt required café 日本語";
@@ -555,7 +555,7 @@ test("create receipts refuse matching content without an intent receipt", async 
     expect(response.ok(), await response.text()).toBe(true);
     const receipt = (await response.json()).data;
     const content = await cms(request, `/api/admin/content/documents/${receipt.documentId}`);
-    await page.route("**/api/admin/content/publish**", route => route.fulfill({ json: { ok: true, data: { ...content, documentId: receipt.documentId } } }));
+    await page.route("**/api/admin/content/publish/status", route => route.fulfill({ json: { ok: true, data: { ...content, documentId: receipt.documentId } } }));
     await page.clock.fastForward(31000);
     await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
     await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
