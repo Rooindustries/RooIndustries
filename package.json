@@ -75,6 +75,7 @@
     "test:seo:nonjs": "playwright test tests/nonjs-seo.spec.js",
     "test:smoke:routes": "playwright test tests/routes-smoke.spec.js",
     "test:sweep": "playwright test tests/public-route-sweep.spec.js --project=chromium",
+    "test:hero-heading-fit": "playwright test tests/hero-heading-fit.spec.js --project=chromium",
     "test:nav:sections": "cross-env BASE_URL=http://${ROO_TEST_HOST:-127.0.0.1}:3001 playwright test tests/section-nav.spec.js",
     "test:nav:chaos": "cross-env BASE_URL=http://${ROO_TEST_HOST:-127.0.0.1}:3001 playwright test tests/nav-chaos.spec.js",
     "test:footer": "playwright test tests/footer.spec.js",

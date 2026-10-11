@@ -236,7 +236,7 @@ export default function Hero({ initialData = null, headingTag = "h1" }) {
       cancelAnimationFrame(rafId);
       if (probe.parentNode) probe.parentNode.removeChild(probe);
     };
-  }, [headingLine1, headingLine2]);
+  }, [headingLine1, headingLine2, headingTag]);
 
   return (
     <header id="top" className="py-16 flex justify-center">
