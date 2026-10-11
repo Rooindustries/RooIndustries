@@ -129,7 +129,7 @@ const browserMatrix = async () => {
       "route",
       "status",
       "main_count",
-      "plans_link_count",
+      "packages_link_count",
       "faq_link_count",
       "pass",
     ].join(","),
@@ -157,9 +157,9 @@ const browserMatrix = async () => {
       });
       const status = response?.status() ?? 0;
       const mainCount = await page.locator("main").count();
-      const plansLinkCount = await page.getByRole("link", { name: "Plans" }).count();
+      const packagesLinkCount = await page.getByRole("link", { name: "Packages", exact: true }).count();
       const faqLinkCount = await page.getByRole("link", { name: "FAQ" }).count();
-      const pass = status < 400 && mainCount === 1 && plansLinkCount >= 1 && faqLinkCount >= 1;
+      const pass = status < 400 && mainCount === 1 && packagesLinkCount >= 1 && faqLinkCount >= 1;
       rows.push(
         [
           b.name,
@@ -167,7 +167,7 @@ const browserMatrix = async () => {
           "/",
           status,
           mainCount,
-          plansLinkCount,
+          packagesLinkCount,
           faqLinkCount,
           pass ? "true" : "false",
         ].join(",")
@@ -270,7 +270,7 @@ const stressResults = async () => {
         timeout: 60000,
       });
       const started = Date.now();
-      await page.getByRole("link", { name: "Plans" }).first().click();
+      await page.getByRole("link", { name: "Packages", exact: true }).first().click();
 
       let settled = false;
       while (Date.now() - started <= 4500) {
@@ -480,6 +480,14 @@ const businessSmoke = async () => {
   await referralPage.goto(`${BASE_URL}/referrals/login`, {
     waitUntil: "domcontentloaded",
   });
+  await referralPage.waitForFunction(
+    () =>
+      window.history.state?.__rooLegacy === true &&
+      document.body.innerText.trim() !== "Loading..." &&
+      document.querySelector("main")?.innerText.trim() !== "Loading...",
+    null,
+    { timeout: 15000 }
+  );
   checks.push({
     check: "referral_login_renders",
     pass: (await referralPage.locator("text=Referral").count()) >= 1,
