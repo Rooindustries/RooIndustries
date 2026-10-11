@@ -1499,16 +1499,12 @@ export default function BookingForm({ isMobile }) {
     if (settings && !selectedDate) {
       if (!localSlotMap) return;
 
-      const nextDate = Object.keys(localSlotMap)
-        .map((key) => new Date(key))
-        .filter((d) => !Number.isNaN(d.getTime()) && d >= startOfToday)
-        .sort((a, b) => a - b)[0];
-      const initialDate = nextDate ? new Date(nextDate) : new Date(startOfToday);
+      const initialDate = new Date(earliestAvailableSlot?.localDate || startOfToday);
       initialDate.setHours(0, 0, 0, 0);
       setSelectedDate(initialDate);
       setMonth(new Date(initialDate.getFullYear(), initialDate.getMonth(), 1));
     }
-  }, [settings, selectedDate, localSlotMap, startOfToday]);
+  }, [settings, selectedDate, localSlotMap, earliestAvailableSlot, startOfToday]);
 
   const handleChange = (e) => {
     if (isPaymentPendingHold) return;
