@@ -78,10 +78,11 @@ const STEP_PROGRESS_LABELS = {
 };
 const STEP_PROGRESS_WIDTHS = { 1: "33%", 2: "67%", 3: "100%" };
 const STEP_PROGRESS_PERCENTS = { 1: 33, 2: 67, 3: 100 };
-const classifyHoldResponse = ({ endpoint, status, ok, networkError = false, expired = false }) => {
+const classifyHoldResponse = ({ endpoint, status, ok, code, networkError = false, expired = false }) => {
   if (expired) return "clear";
   if (networkError) return "keep";
   if (endpoint === "release" && status === 409) return "keep";
+  if (endpoint === "hold" && status === 409 && code === "hold_payment_in_progress") return "keep";
   if (status >= 400 && status < 500 && ![408, 425, 429].includes(status)) return "clear";
   if (status >= 200 && status < 300 && ok) return endpoint === "release" ? "clear" : "replace";
   return "keep";
@@ -575,6 +576,11 @@ export default function BookingForm({ isMobile }) {
   const releaseInFlightRef = useRef(false);
   const isPaymentPendingHold =
     String(myHold?.phase || "").trim().toLowerCase() === "payment_pending";
+  const checkoutBooking = readStoredCheckoutBooking();
+  const hasMatchingCheckoutBooking =
+    myHold && checkoutBooking?.slotHoldId === myHold.holdId &&
+    checkoutBooking?.slotHoldToken === myHold.holdToken;
+  const paymentInOtherTab = myHold?.paymentStartedElsewhere && !hasMatchingCheckoutBooking;
   const [lockingSlot, setLockingSlot] = useState(false);
   const [holdCountdownMs, setHoldCountdownMs] = useState(null);
   const [releasingPayment, setReleasingPayment] = useState(false);
@@ -766,6 +772,7 @@ export default function BookingForm({ isMobile }) {
             packagePrice: parsed.packagePrice,
             packageTag: parsed.packageTag,
             phase: parsed.phase || "",
+            ...(parsed.paymentStartedElsewhere ? { paymentStartedElsewhere: true } : {}),
           };
           const utcDate = getUtcDateFromHold(normalizedHold);
           if (!utcDate) {
@@ -2176,10 +2183,23 @@ export default function BookingForm({ isMobile }) {
         endpoint: "hold",
         status: res?.status,
         ok: res?.ok && data?.ok === true,
+        code: data?.code,
         networkError,
       });
 
       if (outcome !== "replace") {
+        if (res?.status === 409 && data?.code === "hold_payment_in_progress" && isSameAsExisting) {
+          const pendingHold = { ...myHold, phase: "payment_pending", paymentStartedElsewhere: true };
+          setMyHold(pendingHold);
+          writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(pendingHold));
+          broadcastHold(pendingHold);
+          setErrorStep1("");
+          setErrorStep2(hasMatchingCheckoutBooking
+            ? "Your payment session is already in progress. Return to payment to finish it."
+            : "");
+          setStep(3);
+          return;
+        }
         if (outcome === "clear") {
           if (isSameAsExisting) clearHoldState(false);
           setSelectedSlot(null);
@@ -3092,6 +3112,11 @@ export default function BookingForm({ isMobile }) {
 
                   <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
                     {isPaymentPendingHold ? (
+                      paymentInOtherTab ? (
+                        <p role="alert" className="text-sm text-info-text sm:col-span-2">
+                          Payment already started in another tab. Continue payment there. Your reservation and details are saved.
+                        </p>
+                      ) : (
                       <>
                         <button
                           type="button"
@@ -3115,6 +3140,7 @@ export default function BookingForm({ isMobile }) {
                           <span className="glow-line glow-line-left" />
                         </button>
                       </>
+                      )
                     ) : (
                       <>
                         <button

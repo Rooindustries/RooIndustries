@@ -331,15 +331,6 @@ export default async function handler(req, res) {
     }
 
     if (isHoldActive(existingHold, now)) {
-      if (
-        String(existingHold.phase || "").trim().toLowerCase() ===
-        "payment_pending"
-      ) {
-        return res.status(409).json({
-          ok: false,
-          message: "This slot already has a payment session in progress.",
-        });
-      }
       const mayRefresh =
         previousHoldId === holdId &&
         verifyHoldToken({
@@ -351,6 +342,16 @@ export default async function handler(req, res) {
             existingHold.backendOwner,
           cutoverGeneration: Number(existingHold.cutoverGeneration || 0),
         });
+      if (
+        String(existingHold.phase || "").trim().toLowerCase() ===
+        "payment_pending"
+      ) {
+        return res.status(409).json({
+          ok: false,
+          message: "This slot already has a payment session in progress.",
+          ...(mayRefresh ? { code: "hold_payment_in_progress" } : {}),
+        });
+      }
       if (!mayRefresh) {
         return res.status(409).json({
           ok: false,

@@ -1,6 +1,9 @@
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 
 test.use({ javaScriptEnabled: true, reducedMotion: "reduce", trace: "off" });
+test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-10-11T12:00:00Z"));
+});
 
 const zones = [
   { timezoneId: "UTC", firstDay: "Monday, January 5", nextDay: "Tuesday, January 6", firstTime: "4:30 AM", secondTime: "5:30 AM" },
