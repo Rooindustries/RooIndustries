@@ -85,6 +85,7 @@ export default function RefLogin() {
 
   useEffect(() => {
     const query = new URLSearchParams(location.search);
+    const emailConfirmed = query.get("notice") === "email-confirmed";
     const oauthError = query.get("oauth");
     const provider = String(query.get("provider") || "").trim().toLowerCase();
     let pendingChoice = readPendingDiscordChoice();
@@ -119,6 +120,10 @@ export default function RefLogin() {
       setOutcome({ type: "success", message: PASSWORD_UPDATED_MESSAGE });
       query.delete("notice");
     }
+    if (emailConfirmed) {
+      setOutcome({ type: "success", message: "Email confirmed. Log in to open your creator dashboard." });
+      query.delete("notice");
+    }
     const cleanSearch = query.toString();
     if (window.location.pathname === location.pathname) {
       window.history.replaceState(
@@ -129,7 +134,7 @@ export default function RefLogin() {
     }
 
     const checkSession = async () => {
-      if (pendingChoice.state) return;
+      if (pendingChoice.state || emailConfirmed) return;
       try {
         const sessionRes = await fetch("/api/ref/sessionStatus");
         if (sessionRes.ok) {
