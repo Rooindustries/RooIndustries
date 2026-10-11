@@ -81,6 +81,26 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       slug: { current: 'fixture-creator' },
     }, 'tooling-referral'));
   }
+  const layoutImages = process.env.TOOLING_CLS_CONTENT === '1' ? [
+    { id: 'image-cls-wide', width: 800, height: 400, storagePath: 'images/cls-wide.svg' },
+    { id: 'image-cls-tall', width: 600, height: 900, storagePath: 'images/cls-tall.svg' },
+  ].map(image => ({ ...image, body: `<svg xmlns="http://www.w3.org/2000/svg" width="${image.width}" height="${image.height}"><rect width="100%" height="100%" fill="#18202c"/><text x="24" y="48" fill="white" font-size="24">Synthetic review</text></svg>` })) : [];
+  if (layoutImages.length) {
+    documents.push(
+      ...Array.from({ length: 4 }, (_, index) => document('tool', {
+        title: `Fixture layout tool ${index + 1}`,
+        shortDescription: 'Synthetic tool content for layout stability checks.',
+        category: 'Benchmark',
+        downloadMode: 'external',
+        downloadUrl: '/favicon-96x96.png',
+        sortOrder: index,
+      }, `tooling-cls-tool-${index}`)),
+      ...layoutImages.map(image => document('review', {
+        alt: `Fixture layout review ${image.width} by ${image.height}`,
+        image: { _type: 'image', asset: { _type: 'reference', _ref: image.id } },
+      }, image.id.replace('image-', 'review-'))),
+    );
+  }
   const initialDocuments = structuredClone(documents);
   const dispatches = new Map();
   const rateLimits = new Map();
@@ -118,7 +138,8 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       let raw = '';
       for await (const chunk of req) { raw += chunk; if (Buffer.byteLength(raw) > 131072) throw new Error('Fixture body is too large.'); }
       const body = raw ? JSON.parse(raw) : {};
-      const call = { method: req.method, path: url.pathname, body, status: 503, rows: 0, receivedAt: Date.now() };
+      const call = { method: req.method, path: url.pathname, body, status: 503, rows: 0, receivedAt: Date.now(), delayMs: 0 };
+      res.once('finish', () => { call.respondedAt = Date.now(); persist(); });
       evidence.requests.push(call);
       if (apiRoutes && url.pathname === '/__fixture' && ['GET', 'POST'].includes(req.method)) {
         if (req.method === 'POST') {
@@ -168,6 +189,18 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         if ((!scopedIds && (!Array.isArray(body.p_document_types) || !body.p_document_types.length)) || !Array.isArray(body.p_filters) || !Number.isInteger(body.p_limit) || body.p_limit < 1 || body.p_limit > 1000 || body.p_ids !== null && !Array.isArray(body.p_ids)) throw new Error('Invalid fixture read scope.');
         if (apiRoutes && delivery === 'lookup_failed' && body.p_document_types?.includes('referral')) throw Object.assign(new Error('Synthetic referral lookup outage.'), { status: 503, code: 'FIXTURE_LOOKUP_UNAVAILABLE' });
         if (apiRoutes && ((failure === 'settings' && body.p_document_types?.includes('bookingSettings')) || (failure === 'limiter' && body.p_document_types?.includes('rateLimitBucket')))) throw Object.assign(new Error('Synthetic document read outage.'), { status: 503, code: 'FIXTURE_READ_UNAVAILABLE' });
+        if (body.p_document_types?.some(type => type === 'tool' || type === 'review')) {
+          if (process.env.TOOLING_CLS_RESPONSE === 'delayed') {
+            call.delayMs = 650;
+            await new Promise(resolve => setTimeout(resolve, call.delayMs));
+          }
+          if (process.env.TOOLING_CLS_RESPONSE === 'failed') {
+            call.status = 503;
+            json(res, 503, { code: 'FIXTURE_CONTENT_UNAVAILABLE', message: 'Synthetic content is unavailable.' });
+            persist();
+            return;
+          }
+        }
         let rows = documents.filter(row => (!body.p_document_types || body.p_document_types.includes(row._type)) && (!body.p_ids || body.p_ids.includes(row._id)));
         for (const filter of body.p_filters) {
           if (!['eq', 'ieq', 'in'].includes(filter.op) || typeof filter.path !== 'string') throw new Error('Unsupported fixture filter.');
@@ -175,7 +208,21 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         }
         rows = rows.sort((a, b) => a._id < b._id ? -1 : a._id > b._id ? 1 : 0).slice(0, body.p_limit); call.status = 200; call.rows = rows.length; json(res, 200, rows);
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_asset_manifest_for_refs') {
-        call.status = 200; json(res, 200, []);
+        const assets = layoutImages.filter(image => body.p_asset_ids?.includes(image.id)).map(image => ({
+          legacy_sanity_asset_id: image.id,
+          storage_bucket: 'site-content-public',
+          storage_path: image.storagePath,
+          migration_status: 'verified',
+          sha256: createHash('sha256').update(image.body).digest('hex'),
+          width: image.width,
+          height: image.height,
+        }));
+        call.status = 200; json(res, 200, assets);
+      } else if (req.method === 'GET' && layoutImages.some(image => url.pathname === `/storage/v1/object/public/site-content-public/${image.storagePath}`)) {
+        const image = layoutImages.find(image => url.pathname.endsWith(image.storagePath));
+        call.status = 200;
+        res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' });
+        res.end(image.body);
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_fetch_commerce_availability') {
         call.status = 200; json(res, 200, { bookings: [], holds: [], slotLocks: [] });
       } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_commerce_control') {

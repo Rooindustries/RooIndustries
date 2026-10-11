@@ -145,6 +145,14 @@ function AnimatedRoutes({
   const baseLocation = useLocation();
   const location = routesLocation || baseLocation;
   const motionKey = routeKey || `${location.pathname}${location.search || ""}`;
+  const [initialEntryKey, setInitialEntryKey] = useState(baseLocation.key);
+  const initialContent = baseLocation.key === initialEntryKey ? initialRouteData : null;
+
+  useEffect(() => {
+    if (initialEntryKey !== null && baseLocation.key !== initialEntryKey) {
+      setInitialEntryKey(null);
+    }
+  }, [baseLocation.key, initialEntryKey]);
 
   return (
     <div key={motionKey} className="w-full flex flex-col flex-1">
@@ -168,7 +176,7 @@ function AnimatedRoutes({
           <Route path="/terms" element={withRouteSuspense(<Terms />)} />
           <Route
             path="/reviews"
-            element={withRouteSuspense(<Reviews setIsModalOpen={setIsModalOpen} />)}
+            element={withRouteSuspense(<Reviews setIsModalOpen={setIsModalOpen} initialData={initialContent?.reviewsGallery || null} />)}
           />
           <Route path="/booking" element={withRouteSuspense(<Book />)} />
           <Route path="/contact" element={<Contact initialData={initialRouteData?.contact || null} />} />
@@ -186,7 +194,7 @@ function AnimatedRoutes({
           <Route
             path="/tools"
             element={withRouteSuspense(
-              <Tools initialData={initialRouteData?.tools || null} />
+              <Tools initialData={initialContent?.tools || null} />
             )}
           />
           <Route

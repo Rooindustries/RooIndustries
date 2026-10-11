@@ -18,9 +18,14 @@ const optimizeIconUrl = (url) => {
   return `${url}${separator}auto=format&fit=max&w=64&h=64`;
 };
 
-export default function Tools() {
-  const [tools, setTools] = useState([]);
-  const [loading, setLoading] = useState(true);
+const normalizeTools = (tools) => tools.map((tool) => ({
+  ...tool,
+  iconUrl: optimizeIconUrl(tool?.iconUrl),
+}));
+
+export default function Tools({ initialData = null }) {
+  const [tools, setTools] = useState(() => Array.isArray(initialData) ? normalizeTools(initialData) : []);
+  const [loading, setLoading] = useState(() => !Array.isArray(initialData));
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [pendingDownload, setPendingDownload] = useState(null);
   const [downloadFadeOut, setDownloadFadeOut] = useState(false);
@@ -32,17 +37,14 @@ export default function Tools() {
   const closeTimerRef = useRef(null);
 
   useEffect(() => {
+    if (Array.isArray(initialData)) return undefined;
     let cancelled = false;
 
     async function fetchTools() {
       try {
         const data = await getPublicContent("tools");
         if (!cancelled) {
-          const normalizedTools = (data || []).map((tool) => ({
-            ...tool,
-            iconUrl: optimizeIconUrl(tool?.iconUrl),
-          }));
-          setTools(normalizedTools);
+          setTools(normalizeTools(data || []));
           setLoading(false);
         }
       } catch (err) {

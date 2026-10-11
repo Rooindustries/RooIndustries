@@ -51,6 +51,8 @@
     "test:booking:holds": "node --test tests/booking-holds.test.mjs",
     "test:api:preview": "cross-env TOOLING_API_ROUTES=0 playwright test tests/api-preview.spec.js --project=chromium",
     "test:perf:home": "playwright test tests/home-performance.spec.js --project=chromium",
+    "test:perf:cls": "node scripts/test-content-layout-shift.mjs",
+    "test:perf:cls:states": "node scripts/test-content-layout-shift.mjs --states",
     "check:payment:runtime": "node scripts/diagnose-payment-runtime.js",
     "check:payment:webhooks": "node scripts/check-payment-webhooks.js",
     "check:payment:stack": "node scripts/check-payment-stack.mjs",
