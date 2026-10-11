@@ -2148,7 +2148,7 @@ describe("booking reservation API", () => {
     expect(clientEmail.html).toContain("Thursday, January 15, 2099");
     expect(clientEmail.html).toContain("12:00 AM");
     expect(clientEmail.html).toContain(
-      "Pacific Standard Time (America/Los_Angeles)"
+      "GMT-08:00 (America/Los_Angeles)"
     );
     expect(clientEmail.html).not.toContain("2099-01-15T08:00:00.000Z");
     expect(store.bookings[0].recoveryNotificationStatus).toBe("sent");
@@ -2166,7 +2166,7 @@ describe("booking reservation API", () => {
       { label: "Requested Time", value: "9:00 AM" },
       {
         label: "Time Zone",
-        value: "India Standard Time (Asia/Kolkata)",
+        value: "GMT+05:30 (Asia/Kolkata)",
       },
     ]);
     expect(

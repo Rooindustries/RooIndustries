@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { Resend } from "resend";
 import { buildReferralVerificationEmailHtml } from "../../email/referralVerificationEmail.js";
 import { buildResetEmailHtml } from "../../email/referralResetEmail.js";
+import { isIdempotencyPayloadConflict } from "../../email/resendOutcome.js";
 import { createSupabaseAdminClient } from "../../supabase/adminClient.js";
 import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
 
@@ -147,6 +148,7 @@ const renderDispatch = ({ dispatch, env = process.env }) => {
       html: buildReferralVerificationEmailHtml({
         name,
         verifyLink: `${baseUrl}/referrals/verify#token=${encodeURIComponent(token)}`,
+        expiresAt: dispatch.expires_at,
       }),
     };
   }
@@ -155,6 +157,7 @@ const renderDispatch = ({ dispatch, env = process.env }) => {
     html: buildResetEmailHtml({
       name,
       resetLink: `${baseUrl}/referrals/reset#token=${encodeURIComponent(token)}`,
+      expiresAt: dispatch.expires_at,
     }),
   };
 };
@@ -225,6 +228,9 @@ const sendClaimedDispatch = async ({
       ),
       20_000
     );
+    if (isIdempotencyPayloadConflict(result)) {
+      throw Object.assign(new Error("Referral email idempotency key was used with a different payload."), { code: "email_idempotency_conflict" });
+    }
     if (result?.error) throw result.error;
     await completeDispatch({
       adminClient,
@@ -336,6 +342,7 @@ export const sendReferralEmailDirect = async ({
   recipientEmail,
   token,
   name = "",
+  expiresAt,
   resendClient = createResendClient(),
   env = process.env,
 } = {}) => {
@@ -350,6 +357,7 @@ export const sendReferralEmailDirect = async ({
     dispatch: {
       dispatch_kind: dispatchKind,
       delivery_payload: { token, name },
+      expires_at: expiresAt,
     },
     env,
   });
@@ -361,6 +369,9 @@ export const sendReferralEmailDirect = async ({
     },
     { idempotencyKey }
   );
+  if (isIdempotencyPayloadConflict(result)) {
+    throw Object.assign(new Error("Referral email idempotency key was used with a different payload."), { code: "email_idempotency_conflict" });
+  }
   if (result?.error) throw result.error;
   return { idempotencyKey, providerMessageId: String(result?.data?.id || "") };
 };
