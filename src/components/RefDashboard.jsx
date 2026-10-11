@@ -130,9 +130,11 @@ export default function RefDashboard() {
 
   const formatDate = (value) => {
     if (!value) return "-";
-    const d = new Date(value);
+    const calendarDate = typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+    const d = new Date(calendarDate ? `${value}T00:00:00Z` : value);
     if (isNaN(d.getTime())) return value;
     return d.toLocaleDateString(undefined, {
+      ...(calendarDate ? { timeZone: "UTC" } : {}),
       year: "numeric",
       month: "short",
       day: "numeric",
