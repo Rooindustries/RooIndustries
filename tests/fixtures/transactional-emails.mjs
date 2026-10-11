@@ -116,6 +116,11 @@ await captureBooking("long-fields", {
   specs: "Ryzen9800X3D-RTX5080-".repeat(10),
   message: `https://example.invalid/${"x".repeat(180)}`,
 });
+await captureBooking("recovery-long-fields", {
+  email: `${"a".repeat(60)}@fixture.invalid`,
+  packageTitle: "PerformanceVertex".repeat(20),
+  requiresReschedule: true,
+}, true);
 const hostile = '<img src=x onerror="alert(1)"> & "quoted" \'single\' धन्यवाद 🦘';
 await captureBooking("escaping", { discord: hostile, specs: hostile, mainGame: hostile, message: hostile, referralCode: hostile, couponCode: hostile });
 await captureBooking("upgrade", { packageTitle: "Performance Vertex Max", packagePrice: "$64.96", grossAmount: 64.96, netAmount: 64.96, dodoTotalAmount: 64.96, isUpgrade: true });
@@ -149,6 +154,8 @@ for (const [name, startTimeUTC, localTimeZone] of clocks) {
 }
 await captureBooking("missing-instant", { startTimeUTC: "", originalRequestedStartTimeUTC: "", displayDate: "stale", displayTime: "stale" });
 await captureBooking("requested-missing-instant", { startTimeUTC: "", originalRequestedStartTimeUTC: "", requiresReschedule: true, displayDate: "stale", displayTime: "stale" }, true);
+await captureBooking("invalid-instant", { startTimeUTC: "not-an-instant", displayDate: "stale", displayTime: "stale" });
+await captureBooking("requested-invalid-instant", { originalRequestedStartTimeUTC: "not-an-instant", requiresReschedule: true, displayDate: "stale", displayTime: "stale" }, true);
 await captureBooking("requested-original-only", { startTimeUTC: "", originalRequestedStartTimeUTC: "2026-03-08T06:30:00Z", requiresReschedule: true, displayDate: "stale", displayTime: "stale" }, true);
 await captureBooking("requested-different-instant", { startTimeUTC: "2026-11-01T05:30:00Z", originalRequestedStartTimeUTC: "2026-03-08T06:30:00Z", requiresReschedule: true }, true);
 const acceptedError = { name: "invalid_idempotent_request", statusCode: 409, message: "This idempotency key has already been used on a different payload." };
@@ -167,12 +174,12 @@ for (const recovery of [false, true]) {
   await captureBooking(recovery ? "concurrent-recovery" : "concurrent-booking", fields, recovery, { name: "concurrent_idempotent_requests", statusCode: 409 });
 }
 for (const kind of ["registration_verification", "password_reset"]) {
-  for (const [name, remaining] of [["ten-minutes", 600000], ["one-hour", 3600000], ["one-minute", 60000], ["seconds", 30000], ["expired", -1], ["missing", null]]) {
+  for (const [name, remaining] of [["ten-minutes", 600000], ["one-hour", 3600000], ["one-minute", 60000], ["seconds", 30000], ["expired", -1], ["missing", null], ["long-name", 600000]]) {
     currentCase = `${kind}-${name}`;
     const token = kind === "registration_verification" ? "a".repeat(64) : "b".repeat(64);
     const dispatch = {
       claimed: true, idempotency_key: currentCase, dispatch_kind: kind,
-      recipient_email: "creator-a@fixture.invalid", delivery_payload: { token, name: hostile },
+      recipient_email: "creator-a@fixture.invalid", delivery_payload: { token, name: name === "long-name" ? "W".repeat(80) : hostile },
       attempt_count: 3, expires_at: remaining === null ? null : new Date(now + remaining).toISOString(),
     };
     const rpc = async (name, parameters) => {

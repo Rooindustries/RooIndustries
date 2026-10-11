@@ -13,7 +13,7 @@ export const buildReferralVerificationEmail = ({ name = "there", verifyLink, exp
   React.createElement(
     React.Fragment,
     null,
-    React.createElement("p", null, `Hi ${name || "there"},`),
+    React.createElement("p", { style: { overflowWrap: "anywhere", wordBreak: "break-word" } }, `Hi ${name || "there"},`),
     React.createElement(
       "p",
       null,
@@ -41,7 +41,7 @@ export const buildReferralVerificationEmailHtml = ({
   expiresAt,
 }) =>
   [
-    `<p>Hi ${escapeHtml(name || "there")},</p>`,
+    `<p style="overflow-wrap:anywhere;word-break:break-word">Hi ${escapeHtml(name || "there")},</p>`,
     "<p>Confirm this email to finish creating your Roo Industries creator account.</p>",
     `<p><a href="${escapeHtml(verifyLink)}"><strong>Confirm creator account</strong></a></p>`,
     `<p>${formatLinkExpiry(expiresAt)} If you did not start this signup, you can ignore it.</p>`,
