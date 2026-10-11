@@ -131,6 +131,12 @@ const createLocalSlotFormatters = (timeZone) => {
         hour: "numeric",
         minute: "2-digit",
       }),
+      timeWithZone: new Intl.DateTimeFormat(undefined, {
+        ...options,
+        hour: "numeric",
+        minute: "2-digit",
+        timeZoneName: "short",
+      }),
       date: new Intl.DateTimeFormat("en-US", {
         ...options,
         year: "numeric",
@@ -149,6 +155,24 @@ const formatLocalTime = (utcDate, formatter) => {
   } catch {
     return utcDate.toISOString();
   }
+};
+
+const disambiguateSlotLabels = (slots, formatters) => {
+  const labels = slots.map((slot) => formatLocalTime(slot.utcStart, formatters.time));
+  const counts = new Map();
+  labels.forEach((label) => counts.set(label, (counts.get(label) || 0) + 1));
+  return slots.map((slot, index) => ({
+    ...slot,
+    localLabel: counts.get(labels[index]) > 1
+      ? formatLocalTime(slot.utcStart, formatters.timeWithZone)
+      : labels[index],
+  }));
+};
+
+const getSlotLocalLabel = (utcDate, slotMap, formatters) => {
+  const dateKey = getLocalDateKey(utcDate, formatters.date);
+  return slotMap?.[dateKey]?.find((slot) => slot.slotId === utcDate.toISOString())?.localLabel ||
+    formatLocalTime(utcDate, formatters.time);
 };
 
 const formatLocalDate = (utcDate, timeZone) => {
@@ -936,7 +960,9 @@ export default function BookingForm({ isMobile }) {
       const hostDate = new Date(hostDateKey);
       if (Number.isNaN(hostDate.getTime())) return;
 
-      (minutes || []).forEach((minute) => {
+      const allowedMinutes = new Set((minutes || []).filter(Number.isFinite));
+      const visibleMinutes = new Set([...allowedMinutes, ...Array.from({ length: 24 }, (_, hour) => hour * 60)]);
+      visibleMinutes.forEach((minute) => {
         if (!Number.isFinite(minute)) return;
         const utcStart = getUtcFromHostLocal(
           hostDate.getFullYear(),
@@ -953,14 +979,16 @@ export default function BookingForm({ isMobile }) {
         const localLabel = formatLocalTime(utcStart, localSlotFormatters.time);
 
         const list = map[localDateKey] || [];
-        list.push({ slotId, utcStart, localLabel });
+        list.push({ slotId, utcStart, localLabel, isAllowed: allowedMinutes.has(minute) });
         map[localDateKey] = list;
       });
     });
 
-    Object.values(map).forEach((list) =>
-      list.sort((a, b) => a.utcStart - b.utcStart)
-    );
+    Object.entries(map).forEach(([key, list]) => {
+      map[key] = disambiguateSlotLabels(list, localSlotFormatters)
+        .filter((slot) => slot.isAllowed)
+        .sort((a, b) => a.utcStart - b.utcStart);
+    });
 
     return map;
   }, [dateSlotMap, localSlotFormatters]);
@@ -1393,7 +1421,7 @@ export default function BookingForm({ isMobile }) {
 
     const allSlots = [...availableSlots, ...unavailableSlots];
     allSlots.sort((a, b) => a.utcStart - b.utcStart);
-    return allSlots;
+    return disambiguateSlotLabels(allSlots, localSlotFormatters);
   }, [settings, selectedDate, localSlotMap, dateSlotMap, myHold, localSlotFormatters]);
 
   const getDaySlotInfo = (dateObj) => {
@@ -1524,8 +1552,8 @@ export default function BookingForm({ isMobile }) {
     if (!myHold) return "";
     const utcDate = getUtcDateFromHold(myHold);
     if (!utcDate) return "";
-    return formatLocalTime(utcDate, localSlotFormatters.time);
-  }, [myHold, localSlotFormatters]);
+    return getSlotLocalLabel(utcDate, localSlotMap, localSlotFormatters);
+  }, [myHold, localSlotMap, localSlotFormatters]);
   const hasActiveHold =
     !!myHold &&
     holdCountdownMs !== null &&
@@ -1537,9 +1565,9 @@ export default function BookingForm({ isMobile }) {
     if (Number.isNaN(utcStart.getTime())) return "";
     const dateLabel = formatShortLocalDate(utcStart, userTimeZone);
     const timeLabel =
-      formatLocalTime(utcStart, localSlotFormatters.time) || selectedSlot.localLabel;
+      getSlotLocalLabel(utcStart, localSlotMap, localSlotFormatters) || selectedSlot.localLabel;
     return `${dateLabel} · ${timeLabel} (${userTimeZone})`;
-  }, [selectedSlot, userTimeZone, localSlotFormatters]);
+  }, [selectedSlot, userTimeZone, localSlotMap, localSlotFormatters]);
   const reviewBaseAmount = Math.max(0, toMoney(selectedPackage.price));
   const reviewDiscounts = useMemo(
     () =>
@@ -2204,7 +2232,7 @@ export default function BookingForm({ isMobile }) {
       });
 
     const displayTime =
-      formatLocalTime(selectedSlot.utcStart, localSlotFormatters.time) ||
+      getSlotLocalLabel(selectedSlot.utcStart, localSlotMap, localSlotFormatters) ||
       selectedSlot.localLabel;
 
     const finalReferralCode = String(appliedReferral?.code || "").trim();
