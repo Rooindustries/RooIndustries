@@ -38,6 +38,7 @@ const unlockEditor = async () => {
 };
 
 describe("referral creator editor paging", () => {
+  beforeEach(() => window.localStorage.clear());
   afterEach(() => {
     jest.useRealTimers();
     jest.restoreAllMocks();

@@ -1,3 +1,5 @@
+"use client";
+
 import Privacy from "../components/PrivacyPolicy";
 import Footer from "../components/Footer";
 

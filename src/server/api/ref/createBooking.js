@@ -2,6 +2,7 @@ import envValue from "../../supabase/envValue.cjs";
 const { resolveStoreBackend } = envValue;
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
+import { validateBookingContact } from "../../../lib/bookingContactValidation.js";
 import { verifyHoldToken } from "../../booking/holdToken.js";
 import { resolveBookingPricing, resolveUpgradeContext } from "./pricing.js";
 import {
@@ -1110,6 +1111,13 @@ export default async function handler(req, res) {
       email: resolvedEmail,
       couponCode,
     });
+    if (paymentProvider === "free" && !isUpgrade && !isInternalPaymentFinalization) {
+      const storedBooking = await writeClient.fetch(
+        `*[_type == "booking" && _id == $id][0]{_id}`,
+        { id: bookingDocId }
+      );
+      if (!storedBooking?._id) validateBookingContact(req.body || {});
+    }
     const expectedHoldId = !isUpgrade
       ? buildSlotHoldId(normalizedStartTimeUTC)
       : "";

@@ -348,7 +348,7 @@ function AutoReviewCarousel({ reviews }) {
           position = arrow.from + (arrow.to - arrow.from) * easeInOut(progress);
           if (progress === 1) motion.arrow = null;
         }
-        if (arrow || motion.drag || motion.touching || time - motion.wheelAt < WHEEL_ACTIVE_MS) {
+        if (arrow || motion.drag || motion.touching || motion.focused || time - motion.wheelAt < WHEEL_ACTIVE_MS) {
           motion.interactedAt = time;
         } else if (!paused && visible) {
           const idle = time - motion.interactedAt - AUTO_SCROLL_RESUME_DELAY_MS;
@@ -492,6 +492,15 @@ function AutoReviewCarousel({ reviews }) {
         className="ri-reviews-viewport w-full overflow-x-auto overflow-y-hidden cursor-grab active:cursor-grabbing select-none"
         role="region"
         aria-label="Player reviews"
+        tabIndex={0}
+        onFocus={(event) => {
+          if (event.target.matches(":focus-visible")) markInteraction().focused = true;
+        }}
+        onBlur={(event) => {
+          if (event.currentTarget.contains(event.relatedTarget)) return;
+          markInteraction().focused = false;
+        }}
+        onKeyDown={markInteraction}
         onWheel={onWheel}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}

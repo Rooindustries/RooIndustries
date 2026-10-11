@@ -2,7 +2,7 @@ import React from "react";
 import { act } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import Payment from "../components/Payment";
 
@@ -238,10 +238,12 @@ describe("payment reload hydration", () => {
     expect(screen.queryByText(/Private Creator Name/i)).not.toBeInTheDocument();
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        "/api/ref/validateReferral?code=creator"
+        "/api/ref/validateReferral?code=creator",
+        { signal: expect.any(AbortSignal) }
       );
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining("/api/ref/validateCoupon?code=SAVE10")
+        expect.stringContaining("/api/ref/validateCoupon?code=SAVE10"),
+        { signal: expect.any(AbortSignal) }
       );
     });
     expect(quotePayloads.at(-1)).toMatchObject({
@@ -250,6 +252,42 @@ describe("payment reload hydration", () => {
       couponCode: "SAVE10",
     });
     expect(quotePayloads.at(-1)).not.toHaveProperty("referralId");
+  });
+
+  test.each(["arrival", "manual"])("keeps referral attribution after an unavailable %s lookup", async (entry) => {
+    let outcome = entry === "arrival" ? "unavailable" : "valid";
+    window.sessionStorage.setItem("checkout_booking_state", JSON.stringify({ ...checkout, referralCode: "creator" }));
+    window.sessionStorage.setItem("referral_session", "creator");
+    global.fetch = jest.fn(async (url) => {
+      if (String(url).startsWith("/api/ref/validateReferral")) {
+        return {
+          ok: outcome !== "unavailable",
+          status: outcome === "unavailable" ? 503 : 200,
+          json: async () => outcome === "valid"
+            ? { ok: true, referral: { code: "creator", currentDiscountPercent: 10 } }
+            : { ok: false, reason: outcome === "unavailable" ? "unavailable" : "not_found" },
+        };
+      }
+      if (String(url).startsWith("/api/ref/validateCoupon")) {
+        return { ok: true, status: 200, json: async () => ({ ok: false, reason: "not_found" }) };
+      }
+      return { ok: true, json: async () => ({ ok: true, providers: {}, quoteFingerprint: "referral-retry",
+        quote: { grossAmount: 99.95, netAmount: 99.95, isFree: false } }) };
+    });
+    render(tree);
+    const input = await screen.findByPlaceholderText("e.g. vouch");
+    if (entry === "manual") {
+      await waitFor(() => expect(input).toHaveValue("creator"));
+      outcome = "unavailable";
+      fireEvent.click(input.parentElement.querySelector("button"));
+    }
+    expect(await screen.findByText("Code validation is temporarily unavailable. Try again or continue without this code.")).toBeInTheDocument();
+    expect(input).toHaveValue("creator");
+    expect(window.sessionStorage.getItem("referral_session")).toBe("creator");
+    outcome = "invalid";
+    fireEvent.click(input.parentElement.querySelector("button"));
+    expect(await screen.findByText("Invalid or inactive referral code.")).toBeInTheDocument();
+    expect(window.sessionStorage.getItem("referral_session")).toBeNull();
   });
 
   test("drops an expired restored coupon before requesting a quote", async () => {

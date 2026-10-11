@@ -9,33 +9,50 @@ export class AdminApiError extends Error {
 }
 
 const NETWORK_ERROR = "The admin service could not be reached. Check your connection and try again.";
+const REQUEST_DEADLINE_MS = 25000;
 
 export const createAdminApi = () => {
   const request = async (path, { method = "GET", body, signal } = {}) => {
-    let response;
+    const controller = new AbortController();
+    let timedOut = false;
+    const abort = () => controller.abort(signal?.reason);
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, REQUEST_DEADLINE_MS);
     try {
-      response = await fetch(path, {
+      const response = await fetch(path, {
         method,
-        signal,
+        signal: controller.signal,
         cache: "no-store",
         headers: {
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
+      let payload;
+      try { payload = await response.json(); }
+      catch (error) {
+        if (controller.signal.aborted) throw error;
+        payload = null;
+      }
+      if (controller.signal.aborted) throw Object.assign(new Error("Request aborted."), { name: "AbortError" });
+      if (!response.ok || payload?.ok === false || !payload) {
+        throw new AdminApiError(payload?.error || `Request failed (${response.status}).`, {
+          status: response.status,
+          code: payload?.code || "",
+          details: payload?.details ?? null,
+        });
+      }
+      return payload.data;
     } catch (error) {
+      if (timedOut) throw new AdminApiError("The admin request timed out.", { code: "ADMIN_REQUEST_TIMEOUT" });
+      if (error instanceof AdminApiError) throw error;
       if (error?.name === "AbortError") throw error;
       throw new AdminApiError(NETWORK_ERROR, { code: "NETWORK_ERROR" });
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
     }
-    const payload = await response.json().catch(() => null);
-    if (!response.ok || payload?.ok === false || !payload) {
-      throw new AdminApiError(payload?.error || `Request failed (${response.status}).`, {
-        status: response.status,
-        code: payload?.code || "",
-        details: payload?.details ?? null,
-      });
-    }
-    return payload.data;
   };
 
   return {
@@ -46,6 +63,8 @@ export const createAdminApi = () => {
       request(`/api/admin/content/documents?type=${encodeURIComponent(type)}`, options),
     getDocument: (id, options) =>
       request(`/api/admin/content/documents/${encodeURIComponent(id)}`, options),
+    getCreateStatus: (type, createIntentId, document) =>
+      request("/api/admin/content/publish/status", { method: "POST", body: { operation: "create", type, createIntentId, document } }),
     listRevisions: (id, options) =>
       request(`/api/admin/content/documents/${encodeURIComponent(id)}/revisions`, options),
     getRevision: (id, revisionId, options) =>

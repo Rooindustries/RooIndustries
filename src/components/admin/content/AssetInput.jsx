@@ -13,7 +13,7 @@ const formatBytes = (bytes) => {
   return `${value} B`;
 };
 
-export default function AssetInput({ kind, field, value, onChange, readOnly, inputId, ariaLabel, path }) {
+export default function AssetInput({ kind, field, value, onChange, readOnly, inputId, ariaLabel, path, inputAria }) {
   const { api, assets, registerAsset, captureEditTarget, applyAtTarget, beginUpload, endUpload } = useContext(EditorContext);
   const fileInput = useRef(null);
   const abortRef = useRef(null);
@@ -143,6 +143,7 @@ export default function AssetInput({ kind, field, value, onChange, readOnly, inp
       {!readOnly ? (
         <div className={styles.inlineGroup}>
           <input
+            {...inputAria}
             ref={fileInput}
             id={inputId}
             aria-label={ariaLabel}
@@ -156,6 +157,7 @@ export default function AssetInput({ kind, field, value, onChange, readOnly, inp
             }}
           />
           <button
+            {...inputAria}
             type="button"
             className={styles.secondaryButton}
             disabled={Boolean(status)}

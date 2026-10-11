@@ -81,7 +81,7 @@ const toggleCode = (editor) => {
   selection.addRange(after);
 };
 
-function BlockEditor({ block, label, onChange, onSplit, onRemoveEmpty, registerEditor }) {
+function BlockEditor({ block, label, onChange, onSplit, onRemoveEmpty, registerEditor, inputAria }) {
   const editorRef = useRef(null);
   const blockRef = useRef(block);
   const editedRef = useRef(false);
@@ -149,6 +149,7 @@ function BlockEditor({ block, label, onChange, onSplit, onRemoveEmpty, registerE
 
   return (
     <div
+      {...inputAria}
       ref={editorRef}
       className={`${styles.ptEditable} ${styles[`ptStyle_${block.style || "normal"}`] || ""}`}
       contentEditable
@@ -168,7 +169,7 @@ function BlockEditor({ block, label, onChange, onSplit, onRemoveEmpty, registerE
   );
 }
 
-export default function PortableTextInput({ value, onChange, label, readOnly = false }) {
+export default function PortableTextInput({ value, onChange, label, readOnly = false, inputAria }) {
   const blocks = Array.isArray(value) ? value : [];
   const editors = useRef(new Map());
   const focusRequest = useRef(null);
@@ -345,6 +346,7 @@ export default function PortableTextInput({ value, onChange, label, readOnly = f
               </span>
             </div>
             <BlockEditor
+              inputAria={inputAria}
               block={block}
               label={`${label}, paragraph ${index + 1}`}
               registerEditor={registerEditor}
