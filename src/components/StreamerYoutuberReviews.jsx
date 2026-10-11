@@ -492,6 +492,7 @@ function AutoReviewCarousel({ reviews }) {
         className="ri-reviews-viewport w-full overflow-x-auto overflow-y-hidden cursor-grab active:cursor-grabbing select-none"
         role="region"
         aria-label="Player reviews"
+        tabIndex={0}
         onWheel={onWheel}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}

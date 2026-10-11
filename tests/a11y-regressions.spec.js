@@ -32,5 +32,20 @@ for (const [name, viewport] of [
       await page.screenshot({ path: testInfo.outputPath("package-prices.png"), fullPage: true });
     });
 
+    test("the reviews region is reachable by keyboard", async ({ page }, testInfo) => {
+      await page.goto("/", { waitUntil: "networkidle" });
+      const reviews = page.getByRole("region", { name: "Player reviews", exact: true });
+      await expect(reviews).toHaveAttribute("tabindex", "0");
+      await reviews.scrollIntoViewIfNeeded();
+      await reviews.focus();
+      await expect(reviews).toBeFocused();
+      await page.keyboard.press("Shift+Tab");
+      await expect(reviews).not.toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(reviews).toBeFocused();
+
+      await reviews.screenshot({ path: testInfo.outputPath("keyboard-reviews.png") });
+    });
+
   });
 }
