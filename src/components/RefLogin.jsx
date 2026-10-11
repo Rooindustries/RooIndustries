@@ -333,7 +333,7 @@ export default function RefLogin() {
             ${
               loading
                 ? "bg-surface-input opacity-40 cursor-not-allowed"
-                : "bg-accent-strong hover:bg-accent text-white shadow-glow-soft"
+                : "bg-accent-strong hover:bg-accent text-accent-contrast shadow-glow-soft"
             }
           `}
         >
@@ -354,7 +354,7 @@ export default function RefLogin() {
         <button
           type="button"
           onClick={() => nav("/referrals/register")}
-          className="px-5 py-2 rounded-xl text-sm font-semibold bg-accent-strong hover:bg-accent text-white
+          className="px-5 py-2 rounded-xl text-sm font-semibold bg-accent-strong hover:bg-accent text-accent-contrast
                      shadow-glow-soft transition-all"
         >
           Create an account

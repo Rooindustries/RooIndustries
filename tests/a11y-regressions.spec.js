@@ -58,5 +58,40 @@ for (const [name, viewport] of [
       await footer.screenshot({ path: testInfo.outputPath("footer-landmark.png") });
     });
 
+    test("referral action text meets contrast in Roo Blue", async ({ page }, testInfo) => {
+      await page.addInitScript(() => localStorage.setItem("roo-theme", "default"));
+      await page.goto("/referrals/login", { waitUntil: "networkidle" });
+      await expect(page.locator("html")).toHaveAttribute("data-theme", "default");
+
+      for (const name of ["Login", "Create an account"]) {
+        const button = page.getByRole("button", { name, exact: true });
+        await page.mouse.move(0, 0);
+        await expect(button).toHaveCSS("background-color", "rgb(2, 132, 199)");
+        await expect(button).toHaveCSS("color", "rgb(0, 0, 0)");
+
+        for (const hovered of [false, true]) {
+          if (hovered) {
+            await button.hover();
+            await expect(button).toHaveCSS("background-color", "rgb(34, 211, 238)");
+          }
+          const contrast = await button.evaluate((element) => {
+            const luminance = (color) => {
+              const channels = color.match(/[\d.]+/g).slice(0, 3).map((value) => {
+                const channel = Number(value) / 255;
+                return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+              });
+              return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+            };
+            const style = getComputedStyle(element);
+            const foreground = luminance(style.color);
+            const background = luminance(style.backgroundColor);
+            return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+          });
+          expect(contrast).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+
+      await page.screenshot({ path: testInfo.outputPath("referral-button-contrast.png"), fullPage: true });
+    });
   });
 }
