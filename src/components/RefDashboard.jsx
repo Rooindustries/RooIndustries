@@ -244,7 +244,7 @@ export default function RefDashboard() {
   const unlocked =
     (creator?.successfulReferrals || 0) >= 5 || creator?.bypassUnlock === true;
 
-  const total = commission + discount;
+  const total = (Math.round(commission * 100) + Math.round(discount * 100)) / 100;
   const invalid = total > max;
   const panelClass =
     "bg-panel p-6 rounded-2xl border border-line-input shadow-glow-soft backdrop-blur-md";
@@ -253,17 +253,17 @@ export default function RefDashboard() {
 
   function adjustCommission(delta) {
     if (!unlocked) return;
-    const newVal = commission + delta;
+    const newVal = (Math.round(commission * 100) + delta * 100) / 100;
     if (newVal < 0) return;
-    if (newVal + discount > max) return;
+    if (Math.round(newVal * 100) + Math.round(discount * 100) > Math.round(max * 100)) return;
     setCommission(newVal);
   }
 
   function adjustDiscount(delta) {
     if (!unlocked) return;
-    const newVal = discount + delta;
+    const newVal = (Math.round(discount * 100) + delta * 100) / 100;
     if (newVal < 0) return;
-    if (newVal + commission > max) return;
+    if (Math.round(newVal * 100) + Math.round(commission * 100) > Math.round(max * 100)) return;
     setDiscount(newVal);
   }
 
