@@ -129,6 +129,7 @@ export async function createBookingContactFixture() {
       '/api/payment/finalize': '../../src/server/api/payment/finalize.js',
       '/api/payment/status': '../../src/server/api/payment/status.js',
       '/api/ref/getUpgradeInfo': '../../src/server/api/ref/getUpgradeInfo.js',
+      '/api/ref/createBooking': '../../src/server/api/ref/createBooking.js',
     })) handlers.set(route, (await import(module)).default);
     server = http.createServer(async (req, res) => {
       try {

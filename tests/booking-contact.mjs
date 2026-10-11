@@ -57,14 +57,16 @@ test('booking contact validation over HTTP', { timeout: 300000 }, async t => {
       fixture.save();
     }
   });
-  const submit = (path, payload) => start(payload, path === 'new paid start' ? 'dodo' : 'free');
+  const submit = (path, payload) => path === 'new direct free booking'
+    ? post('/api/ref/createBooking', { ...payload, paymentProvider: 'free', status: 'captured' })
+    : start(payload, path === 'new paid start' ? 'dodo' : 'free');
   const prepare = async (path, changes) => hold({
     couponCode: path === 'new paid start' ? 'FIXTUREPAID' : 'FIXTUREFREE',
     ...changes,
   });
 
   try {
-    for (const path of ['new paid start', 'new zero-value start']) {
+    for (const path of ['new paid start', 'new zero-value start', 'new direct free booking']) {
       for (const [description, field, value] of invalidInputs) {
         await check(`${path}: rejects ${description} before any mutation`, async result => {
           const payload = await prepare(path, { [field]: value });
@@ -99,6 +101,21 @@ test('booking contact validation over HTTP', { timeout: 300000 }, async t => {
         }
       });
     }
+
+    await check('direct free booking replay with legacy malformed contacts keeps its outcome', async result => {
+      const payload = await prepare('new direct free booking', {});
+      const created = await submit('new direct free booking', payload);
+      assert.equal(created.status, 200, JSON.stringify(created));
+      const legacy = { ...payload, discord: { legacy: true }, specs: ['legacy'], mainGame: 47,
+        message: { legacy: true }, localTimeZone: 'Mars/Olympus',
+        displayDate: 'Stored booking date', displayTime: 'Stored booking time' };
+      const before = await snapshot();
+      result.response = await submit('new direct free booking', legacy);
+      assert.equal(result.response.status, 409, JSON.stringify(result.response));
+      assert.equal(result.response.body.error, 'This slot is already booked.');
+      result.noMutation = isDeepStrictEqual(before, await snapshot());
+      assert.ok(result.noMutation, 'Replaying a free booking changed stored state');
+    });
 
     await check('valid boundary email and optional omitted notes are accepted', async result => {
       const email = `${'a'.repeat(241)}@example.test`;
