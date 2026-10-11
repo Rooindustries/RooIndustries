@@ -53,10 +53,10 @@ jest.mock("../lib/browserSearch", () => ({
 }));
 jest.mock("@vercel/analytics/react", () => ({
   Analytics: () => null,
-}), { virtual: true });
+}));
 jest.mock("@vercel/speed-insights/react", () => ({
   SpeedInsights: () => null,
-}), { virtual: true });
+}));
 jest.mock("react-router-dom", () => ({
   BrowserRouter: ({ children }) => children,
   Routes: ({ children }) => children,

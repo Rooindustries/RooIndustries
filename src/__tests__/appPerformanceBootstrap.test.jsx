@@ -66,15 +66,13 @@ const loadAppContent = () => {
     "@vercel/analytics/react",
     () => ({
       Analytics: () => null,
-    }),
-    { virtual: true }
+    })
   );
   jest.doMock(
     "@vercel/speed-insights/react",
     () => ({
       SpeedInsights: () => null,
-    }),
-    { virtual: true }
+    })
   );
   jest.doMock(
     "react-router-dom",
