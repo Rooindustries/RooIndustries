@@ -8,6 +8,9 @@ import { fileURLToPath } from "node:url";
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
 import { createToolingContentFixture } from "../tests/fixtures/tooling-content.mjs";
 
+if (process.env.ROO_ADMIN_FIXTURE === "1") {
+  await import("./test-admin-server.mjs");
+} else {
 refuseEnvFiles();
 const dist = validateDistDir(process.env.NEXT_DIST_DIR, { isolated: true });
 const baseURL = localOrigin(process.env.BASE_URL);
@@ -78,3 +81,5 @@ if (!fs.existsSync(path.join(dist, "BUILD_ID"))) {
 }
 await execute([next, "start", "--hostname", testHost, "--port", target.port]);
 } finally { await fixture.close(); }
+
+}

@@ -1,0 +1,435 @@
+const { test, expect } = require("@playwright/test");
+const fs = require("node:fs/promises");
+
+const ADMIN_KEY = "synthetic-admin-key";
+const EMAIL = "content-admin@example.invalid";
+const PASSWORD = "Synthetic-Content-Password-123";
+const HERO_ID = "tooling-hero";
+const FAQ_ID = "tooling-faqSettings";
+
+const cms = async (request, path, body) => {
+  const response = await request.fetch(path, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { "x-admin-key": ADMIN_KEY },
+    ...(body === undefined ? {} : { data: body }),
+  });
+  expect(response.ok(), await response.text()).toBe(true);
+  return (await response.json()).data;
+};
+const login = async page => {
+  await page.goto("/admin/content");
+  await page.getByLabel("Email", { exact: true }).fill(EMAIL);
+  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Content types" })).toBeVisible();
+};
+const choose = async (page, title) => {
+  const navigation = page.getByRole("navigation", { name: "Content types" });
+  if (!await navigation.isVisible()) await page.getByRole("button", { name: "Types", exact: true }).first().click();
+  await navigation.getByRole("button", { name: title, exact: true }).click();
+};
+const hero = async page => {
+  await choose(page, "Hero Section");
+  await expect(page.getByLabel("Main Heading (Line 1)", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Editor", exact: true })).toHaveAttribute("aria-busy", "false");
+};
+const faq = async page => {
+  await choose(page, "FAQ Settings");
+  await expect(page.getByLabel("Heading", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Editor", exact: true })).toHaveAttribute("aria-busy", "false");
+};
+const openReferrals = async page => {
+  await page.goto("/admin/referrals");
+  await page.getByLabel("Admin key", { exact: true }).fill(ADMIN_KEY);
+  await page.getByRole("button", { name: "Open editor", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Load more creators", exact: true })).toBeVisible();
+};
+const creators = request => request.get("/api/admin/referral-creators?limit=100", { headers: { "x-admin-key": ADMIN_KEY } }).then(async response => {
+  expect(response.ok()).toBe(true);
+  return (await response.json()).creators;
+});
+const selectCreator = async (page, creator) => {
+  await page.locator("aside").getByRole("button").filter({ hasText: creator.referral_code }).click();
+  await expect(page.getByRole("heading", { name: creator.name, exact: true })).toBeVisible();
+};
+const hold = async (page, pattern, { forward = true, method } = {}) => {
+  let release, seen, finished;
+  const blocked = new Promise(resolve => { release = resolve; });
+  const arrived = new Promise(resolve => { seen = resolve; });
+  const completed = new Promise(resolve => { finished = resolve; });
+  const handler = async route => {
+    if (method && route.request().method() !== method) return route.fallback();
+    const response = forward ? await route.fetch() : null;
+    seen(response);
+    await blocked;
+    try {
+      if (response) await route.fulfill({ response });
+      else await route.abort("timedout");
+    } catch { /* The client deadline can abort an intentionally held response. */ }
+    finished();
+  };
+  await page.route(pattern, handler);
+  return { arrived, release: async () => { release(); await completed; await page.unroute(pattern, handler); } };
+};
+const evidence = async (page, testInfo, details) => {
+  const json = testInfo.outputPath("result.json");
+  await fs.writeFile(json, JSON.stringify(details, null, 2));
+  await testInfo.attach("result", { path: json, contentType: "application/json" });
+  await page.screenshot({ path: testInfo.outputPath("result.png"), fullPage: true });
+};
+
+test.beforeEach(async ({ context, page, request, baseURL }) => {
+  page.setDefaultTimeout(10000);
+  const { guardBrowserContext, localOrigin } = await import("../scripts/lib/test-target-safety.mjs");
+  const origin = localOrigin(baseURL);
+  const control = localOrigin(`http://127.0.0.1:${Number(new URL(origin).port) + 6}`);
+  const markerResponse = await request.get(`${control}/fixture`);
+  expect(markerResponse.ok(), "The native fixture must attest before admin I/O").toBe(true);
+  const marker = await markerResponse.json();
+  expect(marker).toMatchObject({ version: 1, isolated: true, baseURL: origin });
+  expect(marker.versions.postgres).toContain("17.");
+  await guardBrowserContext(context, marker.origins);
+  expect((await request.post(`${control}/reset-rate-limits`)).ok()).toBe(true);
+  // Secure cookies are preserved in the product. Synthetic fixture HTTP needs this on private-IP hosts.
+  await context.route("**/api/admin/content/session", async route => {
+    const response = await route.fetch();
+    const headers = response.headers();
+    if (headers["set-cookie"]) headers["set-cookie"] = headers["set-cookie"].replace(/; Secure(?=;|$)/gi, "");
+    await route.fulfill({ response, headers });
+  });
+});
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  test.describe(`${viewport.width}px`, () => {
+    test.use({ viewport });
+
+    for (const source of ["list", "document", "publish", "history"]) {
+      test(`#1 late ${source} cannot change the selected editor`, async ({ page, request }, testInfo) => {
+        const original = await cms(request, `/api/admin/content/documents/${HERO_ID}`);
+        if (source === "history") await cms(request, "/api/admin/content/publish", { operation: "replace", type: "hero", documentId: HERO_ID, expectedRevision: original.revision, document: { ...original.document, description: `History seed ${viewport.width}` } });
+        await login(page);
+        let pending;
+        if (["list", "document"].includes(source)) {
+          pending = await hold(page, source === "list" ? "**/api/admin/content/documents?type=hero" : `**/api/admin/content/documents/${HERO_ID}`);
+          await choose(page, "Hero Section");
+        } else {
+          await hero(page);
+          if (source === "publish") {
+            await page.getByLabel("Main Heading (Line 1)", { exact: true }).fill(`Delayed publish ${viewport.width} ${original.revision}`);
+            pending = await hold(page, "**/api/admin/content/publish");
+            await page.getByRole("button", { name: "Publish", exact: true }).click();
+          } else {
+            await page.getByRole("button", { name: "History", exact: true }).click();
+            await expect(page.getByRole("button", { name: "Load this version", exact: true }).first()).toBeVisible();
+            pending = await hold(page, `**/api/admin/content/documents/${HERO_ID}/revisions/*`);
+            await page.getByRole("button", { name: "Load this version", exact: true }).first().click();
+          }
+        }
+        await pending.arrived;
+        try {
+          page.on("dialog", dialog => dialog.accept());
+          await faq(page);
+          const field = page.getByLabel("Heading", { exact: true });
+          if (source === "history") await field.fill("Other document work that must survive café 日本語");
+          const expected = await field.inputValue();
+          const revision = (await cms(request, `/api/admin/content/documents/${FAQ_ID}`)).revision;
+          await pending.release();
+          await page.waitForLoadState("networkidle");
+          await expect(field).toHaveValue(expected);
+          expect((await cms(request, `/api/admin/content/documents/${FAQ_ID}`)).revision).toBe(revision);
+          const drafts = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith("roo-content-draft:"))));
+          if (drafts[`roo-content-draft:v1:doc:${FAQ_ID}`]) expect(JSON.parse(drafts[`roo-content-draft:v1:doc:${FAQ_ID}`]).document._id).toBe(FAQ_ID);
+          await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
+          await evidence(page, testInfo, { source, expected, actual: await field.inputValue(), revision, drafts });
+        } finally { await pending.release(); }
+      });
+    }
+
+    test("#2 immediate Unicode type switch keeps the exact draft", async ({ page }, testInfo) => {
+      await login(page); await hero(page);
+      page.on("dialog", dialog => dialog.accept());
+      const field = page.getByLabel("Main Heading (Line 1)", { exact: true });
+      const text = `Unpublished café 日本語 🦘 ${viewport.width}`;
+      await field.fill(text);
+      const started = Date.now();
+      await choose(page, "FAQ Settings");
+      const elapsed = Date.now() - started;
+      expect(elapsed, "The switch must beat the 500ms autosave debounce").toBeLessThan(500);
+      await expect(page.getByLabel("Heading", { exact: true })).toBeVisible();
+      await hero(page);
+      await page.getByRole("button", { name: "Restore my changes", exact: true }).click();
+      await expect(field).toHaveValue(text);
+      await evidence(page, testInfo, { text, elapsedMs: elapsed });
+    });
+
+    test("#2 immediate Unicode document switch keeps the exact draft", async ({ page, request }, testInfo) => {
+      const list = await cms(request, "/api/admin/content/documents?type=package");
+      const [first, second] = list.documents;
+      expect(first && second).toBeTruthy();
+      await login(page); await choose(page, "Packages");
+      const panel = page.getByRole("region", { name: "Packages list" });
+      await panel.getByRole("button").filter({ hasText: first.preview.title }).click();
+      const field = page.getByLabel(/^Package Title/);
+      await expect(field).toBeEditable();
+      const text = `Document café 日本語 🦘 ${viewport.width}`;
+      await field.fill(text);
+      page.on("dialog", dialog => dialog.accept());
+      const started = Date.now();
+      if (!await panel.isVisible()) await page.getByRole("region", { name: "Editor" }).getByRole("button", { name: "Packages", exact: true }).click();
+      await panel.getByRole("button").filter({ hasText: second.preview.title }).click();
+      const elapsed = Date.now() - started;
+      expect(elapsed).toBeLessThan(500);
+      await expect(field).toHaveValue(second.preview.title);
+      if (!await panel.isVisible()) await page.getByRole("region", { name: "Editor" }).getByRole("button", { name: "Packages", exact: true }).click();
+      await panel.getByRole("button").filter({ hasText: first.preview.title }).click();
+      await expect(page.getByRole("button", { name: "Restore my changes", exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Restore my changes", exact: true }).click();
+      await expect(field).toHaveValue(text);
+      await evidence(page, testInfo, { first: first._id, second: second._id, text, elapsedMs: elapsed });
+    });
+
+    test("#2 pagehide, reload and logout flush the latest draft", async ({ page }, testInfo) => {
+      await login(page); await hero(page);
+      const field = page.getByLabel("Main Heading (Line 1)", { exact: true });
+      const text = `Lifecycle café 日本語 🦘 ${viewport.width}`;
+      await field.fill(text);
+      await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide")));
+      expect(await page.evaluate(id => JSON.parse(localStorage.getItem(`roo-content-draft:v1:doc:${id}`))?.document.headingLine1, HERO_ID)).toBe(text);
+      const dialogs = [];
+      page.on("dialog", dialog => { dialogs.push(dialog.type()); return dialog.accept(); });
+      await field.fill(`${text} reload`);
+      await page.reload();
+      await expect(page.getByRole("navigation", { name: "Content types" })).toBeVisible();
+      await hero(page); await page.getByRole("button", { name: "Restore my changes", exact: true }).click();
+      await expect(field).toHaveValue(`${text} reload`);
+      expect(dialogs).toContain("beforeunload");
+      await field.fill(`${text} logout`);
+      await page.getByRole("button", { name: "Sign out", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+      await page.getByLabel("Email", { exact: true }).fill(EMAIL);
+      await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await hero(page); await page.getByRole("button", { name: "Restore my changes", exact: true }).click();
+      await expect(field).toHaveValue(`${text} logout`);
+      await evidence(page, testInfo, { text, dialogs });
+    });
+
+    for (const source of ["list", "document", "signout"]) {
+      test(`#3 ${source} errors stay visible and Retry restores a working pane`, async ({ page }, testInfo) => {
+        await login(page);
+        const pattern = source === "list" ? "**/api/admin/content/documents?type=hero" : source === "document" ? `**/api/admin/content/documents/${HERO_ID}` : "**/api/admin/content/session";
+        const handler = route => route.fulfill({ status: 503, json: { ok: false, error: `Synthetic ${source} outage`, code: "FIXTURE_FAILURE" } });
+        await page.route(pattern, handler);
+        if (source === "signout") await page.getByRole("button", { name: "Sign out", exact: true }).click();
+        else await choose(page, "Hero Section");
+        await expect(page.getByRole("alert").filter({ hasText: `Synthetic ${source} outage` })).toBeVisible();
+        await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+        if (source === "signout") {
+          expect((await page.request.get("/api/admin/content/session").then(response => response.json())).data.signedIn).toBe(true);
+          await expect(page.getByRole("button", { name: "Sign in", exact: true })).toHaveCount(0);
+        }
+        await evidence(page, testInfo, { source, serverSessionStillActive: source === "signout" });
+        await page.unroute(pattern, handler);
+        await page.getByRole("button", { name: "Retry", exact: true }).click();
+        if (source === "signout") {
+          await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+          expect((await page.request.get("/api/admin/content/session").then(response => response.json())).data.signedIn).toBe(false);
+        } else await expect(page.getByLabel("Main Heading (Line 1)", { exact: true })).toBeEditable();
+      });
+    }
+
+    test("#6 pinned creator pagination includes every server row", async ({ page, request }, testInfo) => {
+      const server = await creators(request);
+      expect(server).toHaveLength(55);
+      await openReferrals(page);
+      await page.getByRole("button", { name: "Load more creators", exact: true }).click();
+      await selectCreator(page, server[54]);
+      await page.getByLabel("Reason for change").fill("Unsaved pinned creator draft");
+      await page.getByRole("button", { name: "Refresh", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Load more creators", exact: true })).toBeEnabled();
+      const next = page.waitForRequest(request => new URL(request.url()).pathname === "/api/admin/referral-creators" && new URL(request.url()).searchParams.get("offset") !== "0" && !new URL(request.url()).searchParams.has("creatorId"));
+      await page.getByRole("button", { name: "Load more creators", exact: true }).click();
+      const offset = new URL((await next).url()).searchParams.get("offset");
+      await expect(page.getByRole("button", { name: "Load more creators", exact: true })).toHaveCount(0);
+      const displayed = await page.locator("aside button").allTextContents();
+      expect(server.filter(creator => !displayed.some(text => text.includes(creator.referral_code)))).toEqual([]);
+      expect(displayed).toHaveLength(55);
+      expect(offset).toBe("50");
+      await expect(page.getByLabel("Reason for change")).toHaveValue("Unsaved pinned creator draft");
+      await evidence(page, testInfo, { offset, serverCount: server.length, displayedCount: displayed.length });
+    });
+
+    test("#7 referral drafts survive reload and clear only on save or discard", async ({ page, request }, testInfo) => {
+      const creator = (await creators(request))[0];
+      await openReferrals(page); await selectCreator(page, creator);
+      const reason = `Unsaved terms café 日本語 🦘 ${viewport.width}`;
+      await page.getByLabel("Reason for change").fill(reason);
+      await page.getByLabel("Creator commission percentage").fill("9.75");
+      await page.getByLabel("Customer discount percentage").fill("5.25");
+      const dialogs = [];
+      page.on("dialog", dialog => { dialogs.push(dialog.type()); return dialog.accept(); });
+      await page.reload(); await page.getByLabel("Admin key").fill(ADMIN_KEY); await page.getByRole("button", { name: "Open editor", exact: true }).click();
+      await selectCreator(page, creator);
+      await expect(page.getByLabel("Creator commission percentage")).toHaveValue("9.75");
+      await expect(page.getByLabel("Reason for change")).toHaveValue(reason);
+      expect(dialogs).toContain("beforeunload");
+      await page.getByRole("button", { name: "Save creator settings", exact: true }).click();
+      await expect(page.getByRole("status")).toContainText("Saved in Supabase");
+      expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-referral-draft:")))).toEqual([]);
+      await page.getByLabel("Reason for change").fill("Explicit discard");
+      await page.getByRole("button", { name: "Discard draft", exact: true }).click();
+      await expect(page.getByLabel("Reason for change")).toHaveValue("");
+      expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-referral-draft:")))).toEqual([]);
+      await evidence(page, testInfo, { creatorId: creator.creator_id, reason, dialogs });
+    });
+
+    test("#7 stale referral draft is a conflict and never silently applied", async ({ page, request }, testInfo) => {
+      const creator = (await creators(request))[1];
+      await openReferrals(page); await selectCreator(page, creator);
+      await page.getByLabel("Reason for change").fill("Older local draft café 日本語");
+      await page.getByLabel("Creator commission percentage").fill("8.75");
+      const response = await request.patch("/api/admin/referral-creators", { headers: { "x-admin-key": ADMIN_KEY }, data: { creatorId: creator.creator_id, expectedVersion: creator.terms_version, operationId: require("node:crypto").randomUUID(), totalPercent: "15", commissionPercent: "10", discountPercent: "5", bypassUnlock: false, reason: "Another session advanced the version" } });
+      expect(response.ok(), await response.text()).toBe(true);
+      page.on("dialog", dialog => dialog.accept());
+      await page.reload(); await page.getByLabel("Admin key").fill(ADMIN_KEY); await page.getByRole("button", { name: "Open editor", exact: true }).click();
+      await selectCreator(page, creator);
+      await expect(page.getByRole("alert").filter({ hasText: /draft.*conflict|conflict.*draft/i })).toBeVisible();
+      await expect(page.getByLabel("Creator commission percentage")).toHaveValue("10");
+      await expect(page.getByRole("button", { name: "Save creator settings", exact: true })).toBeDisabled();
+      await evidence(page, testInfo, { creatorId: creator.creator_id, baseVersion: creator.terms_version, serverVersion: (await response.json()).creator.terms_version });
+      await page.getByRole("button", { name: "Discard draft", exact: true }).click();
+      expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-referral-draft:")))).toEqual([]);
+    });
+
+    test("#11 validation errors describe the actual input with stable ids", async ({ page }, testInfo) => {
+      await login(page); await choose(page, "Tool");
+      await page.getByRole("region", { name: "Tool list" }).getByRole("button", { name: "New", exact: true }).click();
+      await page.getByLabel("External Download URL", { exact: true }).fill("https://example.invalid/fixture-download");
+      const field = page.getByLabel(/^Tool Name/);
+      await field.fill("");
+      await page.getByRole("button", { name: "Publish", exact: true }).click();
+      await expect(field).toHaveAttribute("aria-invalid", "true");
+      const ids = await field.getAttribute("aria-describedby");
+      expect(ids).toBeTruthy();
+      const messages = await field.evaluate(input => input.getAttribute("aria-describedby").split(/\s+/).map(id => ({ id, count: document.querySelectorAll(`[id="${id}"]`).length, text: document.getElementById(id)?.textContent })));
+      expect(messages.every(message => message.count === 1)).toBe(true);
+      expect(messages.some(message => /required/i.test(message.text))).toBe(true);
+      await page.getByRole("button", { name: "Publish", exact: true }).click();
+      expect(await field.getAttribute("aria-describedby")).toBe(ids);
+      await evidence(page, testInfo, { ids, messages });
+    });
+  });
+}
+
+for (const committed of [true, false]) {
+  test(`#10 publish deadline reconciles ${committed ? "committed response lost" : "request never sent"} without retrying`, async ({ page, request }, testInfo) => {
+    await login(page); await hero(page);
+    const original = await cms(request, `/api/admin/content/documents/${HERO_ID}`);
+    const heading = `Timeout café 日本語 ${committed} ${original.revision}`;
+    await page.getByLabel("Main Heading (Line 1)", { exact: true }).fill(heading);
+    await page.clock.install();
+    const pending = await hold(page, "**/api/admin/content/publish", { forward: committed });
+    let calls = 0;
+    page.on("request", request => { if (new URL(request.url()).pathname === "/api/admin/content/publish") calls += 1; });
+    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    await pending.arrived;
+    try {
+      await page.clock.fastForward(31000);
+      await expect(page.getByRole("button", { name: "Publishing…", exact: true })).toHaveCount(0);
+      const stored = await cms(request, `/api/admin/content/documents/${HERO_ID}`);
+      if (committed) {
+        await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+        expect(stored.revision).not.toBe(original.revision);
+        expect(stored.document.headingLine1).toBe(heading);
+        expect(await page.evaluate(id => localStorage.getItem(`roo-content-draft:v1:doc:${id}`), HERO_ID)).toBeNull();
+      } else {
+        await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
+        expect(stored.revision).toBe(original.revision);
+        expect(await page.evaluate(id => JSON.parse(localStorage.getItem(`roo-content-draft:v1:doc:${id}`))?.document.headingLine1, HERO_ID)).toBe(heading);
+        await expect(page.getByLabel("Main Heading (Line 1)", { exact: true })).toHaveValue(heading);
+      }
+      expect(calls).toBe(1);
+      await evidence(page, testInfo, { committed, originalRevision: original.revision, storedRevision: stored.revision, calls });
+    } finally { await pending.release(); }
+  });
+}
+
+for (const committed of [true, false]) {
+  test(`#10 create deadline reconciles ${committed ? "committed response lost" : "request never sent"} with the same create intent`, async ({ page, request }, testInfo) => {
+    await login(page); await choose(page, "Tool");
+    await page.getByRole("region", { name: "Tool list" }).getByRole("button", { name: "New", exact: true }).click();
+    const title = `Deadline tool café 日本語 ${committed}`;
+    await page.getByLabel(/^Tool Name/).fill(title);
+    await page.getByLabel("External Download URL", { exact: true }).fill("https://example.invalid/fixture-download");
+    await page.clock.install();
+    const pending = await hold(page, "**/api/admin/content/publish", { forward: committed });
+    let calls = 0, submitted;
+    page.on("request", request => { if (new URL(request.url()).pathname === "/api/admin/content/publish") { calls += 1; submitted = request.postDataJSON(); } });
+    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    const response = await pending.arrived;
+    try {
+      await page.clock.fastForward(31000);
+      await expect(page.getByRole("button", { name: "Publishing…", exact: true })).toHaveCount(0);
+      expect(submitted.createIntentId).toBeTruthy();
+      if (committed) {
+        const receipt = (await response.json()).data;
+        await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+        expect((await cms(request, `/api/admin/content/documents/${receipt.documentId}`)).document.title).toBe(title);
+        expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-content-draft:")))).toEqual([]);
+        await evidence(page, testInfo, { committed, title, documentId: receipt.documentId, createIntentId: submitted.createIntentId, calls });
+      } else {
+        await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
+        const drafts = await page.evaluate(() => Object.entries(localStorage).filter(([key]) => key.startsWith("roo-content-draft:")));
+        expect(drafts).toHaveLength(1);
+        const draft = JSON.parse(drafts[0][1]);
+        expect(draft).toMatchObject({ createIntentId: submitted.createIntentId, document: { title } });
+        await evidence(page, testInfo, { committed, title, createIntentId: submitted.createIntentId, calls });
+      }
+      expect(calls).toBe(1);
+    } finally { await pending.release(); }
+  });
+}
+
+test("#10 uncertain publication keeps its draft and Retry only reads", async ({ page, request }, testInfo) => {
+  await login(page); await hero(page);
+  const original = await cms(request, `/api/admin/content/documents/${HERO_ID}`);
+  const text = `Uncertain café 日本語 ${original.revision}`;
+  await page.getByLabel("Main Heading (Line 1)", { exact: true }).fill(text);
+  const failedRead = route => route.fulfill({ status: 503, json: { ok: false, error: "Synthetic reconciliation outage" } });
+  await page.route(`**/api/admin/content/documents/${HERO_ID}`, failedRead);
+  await page.clock.install();
+  const pending = await hold(page, "**/api/admin/content/publish");
+  let calls = 0;
+  page.on("request", request => { if (new URL(request.url()).pathname === "/api/admin/content/publish") calls += 1; });
+  await page.getByRole("button", { name: "Publish", exact: true }).click(); await pending.arrived;
+  try {
+    await page.clock.fastForward(31000);
+    await expect(page.getByRole("alert").filter({ hasText: /could not confirm.*publication/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Publish", exact: true })).toBeDisabled();
+    expect(await page.evaluate(id => JSON.parse(localStorage.getItem(`roo-content-draft:v1:doc:${id}`))?.document.headingLine1, HERO_ID)).toBe(text);
+    await page.unroute(`**/api/admin/content/documents/${HERO_ID}`, failedRead);
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+    expect(calls).toBe(1);
+    await evidence(page, testInfo, { originalRevision: original.revision, calls, text });
+  } finally { await pending.release(); }
+});
+
+test("#10 signout deadline preserves the server session and permits an explicit retry", async ({ page }, testInfo) => {
+  await login(page); await page.clock.install();
+  const pending = await hold(page, "**/api/admin/content/session", { forward: false, method: "DELETE" });
+  let calls = 0;
+  page.on("request", request => { if (new URL(request.url()).pathname === "/api/admin/content/session" && request.method() === "DELETE") calls += 1; });
+  await page.getByRole("button", { name: "Sign out", exact: true }).click(); await pending.arrived;
+  try {
+    await page.clock.fastForward(31000);
+    await expect(page.getByRole("alert").filter({ hasText: /timed out/i })).toBeVisible();
+    expect((await page.request.get("/api/admin/content/session").then(response => response.json())).data.signedIn).toBe(true);
+    await expect(page.getByRole("button", { name: "Sign in", exact: true })).toHaveCount(0);
+    expect(calls).toBe(1);
+    await evidence(page, testInfo, { calls, signedIn: true });
+  } finally { await pending.release(); }
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+  expect(calls).toBe(2);
+});
