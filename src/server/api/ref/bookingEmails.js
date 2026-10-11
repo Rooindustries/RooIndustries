@@ -115,7 +115,7 @@ const emailHtml = ({
     <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#e9edf3;padding:32px 12px">
       <tr>
         <td align="center">
-          <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;background:#0f172a;border:1px solid #2a3f5c;border-radius:16px;overflow:hidden">
+          <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;table-layout:fixed;background:#0f172a;border:1px solid #2a3f5c;border-radius:16px;overflow:hidden">
             <tr>
               <td style="padding:26px 28px 18px;text-align:center;background:#0b1120">
                 <img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(siteName)}" height="44" style="height:44px;display:block;margin:0 auto 8px"/>
@@ -139,14 +139,14 @@ const emailHtml = ({
               </p>`
                     : ""
                 }
-                <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#0b1120;border:1px solid #24405e;border-radius:10px">
+                <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;background:#0b1120;border:1px solid #24405e;border-radius:10px">
                   <tbody>
                     ${fields
                       .map(
                         (field, index) => `
                       <tr>
-                        <td style="padding:11px 16px;font-size:13px;color:#93c5fd${index === 0 ? ";width:40%" : ""}${index === fields.length - 1 ? "" : ";border-bottom:1px solid #16263d"}">${escapeHtml(field.label)}</td>
-                        <td style="padding:11px 16px;font-size:13px;font-weight:600;color:#e5f2ff${index === fields.length - 1 ? "" : ";border-bottom:1px solid #16263d"}">${escapeHtml(field.value)}</td>
+                        <td style="padding:11px 16px;font-size:13px;color:#93c5fd;overflow-wrap:anywhere;word-break:break-word${index === 0 ? ";width:40%" : ""}${index === fields.length - 1 ? "" : ";border-bottom:1px solid #16263d"}">${escapeHtml(field.label)}</td>
+                        <td style="padding:11px 16px;font-size:13px;font-weight:600;color:#e5f2ff;overflow-wrap:anywhere;word-break:break-word${index === fields.length - 1 ? "" : ";border-bottom:1px solid #16263d"}">${escapeHtml(field.value)}</td>
                       </tr>`
                       )
                       .join("")}
