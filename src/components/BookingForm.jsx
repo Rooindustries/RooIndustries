@@ -78,11 +78,12 @@ const STEP_PROGRESS_LABELS = {
 };
 const STEP_PROGRESS_WIDTHS = { 1: "33%", 2: "67%", 3: "100%" };
 const STEP_PROGRESS_PERCENTS = { 1: 33, 2: 67, 3: 100 };
-const classifyHoldResponse = ({ status, ok, networkError = false, expired = false }) => {
+const classifyHoldResponse = ({ endpoint, status, ok, networkError = false, expired = false }) => {
   if (expired) return "clear";
   if (networkError) return "keep";
+  if (endpoint === "release" && status === 409) return "keep";
   if (status >= 400 && status < 500 && ![408, 425, 429].includes(status)) return "clear";
-  if (status >= 200 && status < 300 && ok) return "replace";
+  if (status >= 200 && status < 300 && ok) return endpoint === "release" ? "clear" : "replace";
   return "keep";
 };
 const createFreshForm = () => ({
@@ -1738,6 +1739,9 @@ export default function BookingForm({ isMobile }) {
         if (!result?.ok) {
           if (result?.unavailable) {
             unavailableCode = sourceCode;
+            if (sourceType === "referral") {
+              autoReferralAttemptRef.current = `${selectedPackage.title}:${sourceCode.toLowerCase()}`;
+            }
             return;
           }
           invalidCodeFound = true;
@@ -1796,12 +1800,14 @@ export default function BookingForm({ isMobile }) {
       setAppliedReferral(nextReferral);
       setAppliedCoupon(nextCoupon);
       setDismissedReferralCode(nextDismissedCode);
-      storeReferralSession(nextReferral?.code || "");
-      persistCheckoutCodes({
-        referral: nextReferral,
-        coupon: nextCoupon,
-        dismissedCode: nextDismissedCode,
-      });
+      if (!unavailableCode) {
+        storeReferralSession(nextReferral?.code || "");
+        persistCheckoutCodes({
+          referral: nextReferral,
+          coupon: nextCoupon,
+          dismissedCode: nextDismissedCode,
+        });
+      }
       setRestoredCodeCandidates(null);
 
       if (unavailableCode || invalidCodeFound) {
@@ -1859,13 +1865,15 @@ export default function BookingForm({ isMobile }) {
         if (!active || !hasActiveHoldRef.current) return;
         if (!result?.ok) {
           const nextCoupon = sanitizeCouponForCheckout(appliedCoupon);
-          if (!result?.unavailable) setDismissedReferralCode(autoCode);
-          storeReferralSession("");
-          persistCheckoutCodes({
-            referral: null,
-            coupon: nextCoupon,
-            dismissedCode: result?.unavailable ? dismissedReferralCode : autoCode,
-          });
+          if (!result?.unavailable) {
+            setDismissedReferralCode(autoCode);
+            storeReferralSession("");
+            persistCheckoutCodes({
+              referral: null,
+              coupon: nextCoupon,
+              dismissedCode: autoCode,
+            });
+          }
           setCodeEntryOpen(true);
           setCodeInput(result?.unavailable ? autoCode : "");
           setCodeError(result?.unavailable ? CODE_VALIDATION_UNAVAILABLE_MESSAGE : INVALID_CHECKOUT_CODE_MESSAGE);
@@ -1997,13 +2005,14 @@ export default function BookingForm({ isMobile }) {
     const isCurrentHold = () =>
       currentHoldRef.current?.holdId === holdIdToDelete &&
       currentHoldRef.current?.holdToken === holdTokenToDelete;
-    if (classifyHoldResponse({ expired: hasExpired() }) === "clear") {
+    if (classifyHoldResponse({ endpoint: "release", expired: hasExpired() }) === "clear") {
       clearHoldState(resetStep);
     }
     if (releaseInFlightRef.current) return hasExpired();
     releaseInFlightRef.current = true;
 
     let outcome;
+    let serverMessage = "";
     try {
       const response = await fetch("/api/releaseHold", {
         method: "POST",
@@ -2015,14 +2024,17 @@ export default function BookingForm({ isMobile }) {
         signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
       });
       const data = await response.json();
+      const message = data?.message || data?.error;
+      if (response.status === 409 && typeof message === "string") serverMessage = message;
       outcome = classifyHoldResponse({
+        endpoint: "release",
         status: response.status,
         ok: response.ok && data?.ok === true,
         expired: hasExpired(),
       });
     } catch {
       console.error("Failed to release hold on server");
-      outcome = classifyHoldResponse({ networkError: true, expired: hasExpired() });
+      outcome = classifyHoldResponse({ endpoint: "release", networkError: true, expired: hasExpired() });
     } finally {
       releaseInFlightRef.current = false;
     }
@@ -2033,7 +2045,7 @@ export default function BookingForm({ isMobile }) {
       return true;
     }
     if (isCurrentHold() && !suppressError) {
-      const message = "Could not release your slot. Your reservation and details are saved. Please try again.";
+      const message = serverMessage || "Could not release your slot. Your reservation and details are saved. Please try again.";
       setErrorStep1(message);
       setErrorStep2(message);
     }
@@ -2108,12 +2120,9 @@ export default function BookingForm({ isMobile }) {
   };
 
   const handleLockAndGoNext = async () => {
-    const selectedSlotId = selectedSlot?.utcStart.toISOString();
-    const isSameAsExisting =
-      myHold && myHold.startTimeUTC === selectedSlotId;
     if (isPaymentPendingHold) {
       const message = "Your payment session is already in progress. Return to payment to finish it.";
-      if (isSameAsExisting) {
+      if (myHold.startTimeUTC === selectedSlot?.utcStart?.toISOString()) {
         setErrorStep1("");
         setErrorStep2(message);
         setStep(2);
@@ -2126,6 +2135,9 @@ export default function BookingForm({ isMobile }) {
       setErrorStep1("Please select a date and time before continuing.");
       return;
     }
+    const selectedSlotId = selectedSlot.utcStart.toISOString();
+    const isSameAsExisting =
+      myHold && myHold.startTimeUTC === selectedSlotId;
 
     if (lockingSlot) return;
 
@@ -2165,6 +2177,7 @@ export default function BookingForm({ isMobile }) {
         networkError = true;
       }
       const outcome = classifyHoldResponse({
+        endpoint: "hold",
         status: res?.status,
         ok: res?.ok && data?.ok === true,
         networkError,

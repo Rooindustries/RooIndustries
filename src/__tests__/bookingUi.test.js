@@ -761,7 +761,7 @@ describe("booking calendar UI", () => {
     [403, "json", false],
     [404, "json", false],
     [408, "json", true],
-    [409, "json", false],
+    [409, "json", true],
     [410, "json", false],
     [422, "json", false],
     [425, "json", true],
@@ -799,6 +799,43 @@ describe("booking calendar UI", () => {
       await waitFor(() => expect(sessionStorage.getItem("my_slot_hold")).toBeNull());
       await waitFor(() => expect(screen.queryByLabelText("Booking email")).not.toBeInTheDocument());
     }
+  });
+
+  test("refused refresh then Next shows the empty-selection error", async () => {
+    seedBookingSession();
+    installDefaultFetch({ settings: { dateSlots: [{ date: "2099-01-05", times: ["10:00", "11:00"] }] } });
+    const defaultFetch = global.fetch.getMockImplementation();
+    global.fetch.mockImplementation(async (url, options = {}) => url === "/api/holdSlot"
+      ? { ok: false, status: 409, json: async () => ({ ok: false, message: "This slot is currently reserved by someone else." }) }
+      : defaultFetch(url, options));
+    setBookingLocation();
+    render(<BookingForm />);
+    await userEvent.click(await screen.findByRole("button", { name: /^back$/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /^next$/i }));
+    expect(await screen.findByText("This slot is currently reserved by someone else.")).toBeInTheDocument();
+    expect(sessionStorage.getItem("my_slot_hold")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
+    expect(await screen.findByText("Please select a date and time before continuing.")).toBeInTheDocument();
+  });
+
+  test.each(["This hold belongs to an active payment session.", "Hold changed before it could be released"])("release 409 keeps credentials and retries: %s", async (message) => {
+    seedBookingSession();
+    const original = JSON.parse(sessionStorage.getItem("my_slot_hold"));
+    installDefaultFetch();
+    const defaultFetch = global.fetch.getMockImplementation();
+    let refused = true;
+    global.fetch.mockImplementation(async (url, options = {}) => url === "/api/releaseHold" && refused
+      ? { ok: false, status: 409, json: async () => ({ ok: false, message }) }
+      : defaultFetch(url, options));
+    setBookingLocation();
+    render(<BookingForm />);
+    await userEvent.click(await screen.findByRole("button", { name: /^release slot$/i }));
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toEqual(original);
+    expect(screen.getByLabelText("Booking email")).toHaveValue(VALID_FORM.email);
+    refused = false;
+    await userEvent.click(screen.getByRole("button", { name: /^release slot$/i }));
+    await waitFor(() => expect(sessionStorage.getItem("my_slot_hold")).toBeNull());
   });
 
   test("clears a confirmed release before a replacement returns 409", async () => {
@@ -1682,6 +1719,45 @@ describe("booking calendar UI", () => {
       discountAmount: 10,
       canCombineWithReferral: true,
     });
+  });
+
+  test.each(["referral", "coupon"])("restored %s survives unavailable validation and applies on retry", async (type) => {
+    const checkoutCodes = {
+      referral: type === "referral" ? CREATOR_REFERRAL : null,
+      coupon: type === "coupon" ? FIXED_COUPON : null,
+      dismissedReferralCode: "",
+    };
+    seedBookingSession({ step: 3, checkoutCodes });
+    if (type === "referral") sessionStorage.setItem("referral_session", "creator");
+    installDefaultFetch({ referrals: { creator: CREATOR_REFERRAL }, coupons: { save10: FIXED_COUPON } });
+    const defaultFetch = global.fetch.getMockImplementation();
+    let unavailable = true;
+    global.fetch.mockImplementation(async (url, options = {}) => String(url).startsWith(type === "referral" ? "/api/ref/validateReferral" : "/api/ref/validateCoupon") && unavailable
+      ? { ok: false, status: 503, json: async () => ({ error: "Temporarily unavailable." }) }
+      : defaultFetch(url, options));
+    setBookingLocation();
+    render(<BookingForm />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/validation.*unavailable/i);
+    expect(JSON.parse(sessionStorage.getItem("booking_draft")).packages[OVERHAUL_PACKAGE.title].checkoutCodes).toEqual(checkoutCodes);
+    if (type === "referral") expect(sessionStorage.getItem("referral_session")).toBe("creator");
+    expect(screen.getByRole("button", { name: /^pay \$54\.95$/i })).toBeEnabled();
+    unavailable = false;
+    await userEvent.click(screen.getByRole("button", { name: /^apply$/i }));
+    expect(await screen.findByRole("button", { name: `Remove ${type} code ${type === "referral" ? "creator" : "SAVE10"}` })).toBeInTheDocument();
+  });
+
+  test("stored referral session survives unavailable automatic validation", async () => {
+    seedBookingSession({ step: 3 });
+    sessionStorage.setItem("referral_session", "creator");
+    installDefaultFetch();
+    const defaultFetch = global.fetch.getMockImplementation();
+    global.fetch.mockImplementation(async (url, options = {}) => String(url).startsWith("/api/ref/validateReferral")
+      ? { ok: false, status: 503, json: async () => ({ error: "Temporarily unavailable." }) }
+      : defaultFetch(url, options));
+    setBookingLocation();
+    render(<BookingForm />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/validation.*unavailable/i);
+    expect(sessionStorage.getItem("referral_session")).toBe("creator");
   });
 
   test("drops a restored coupon that no longer validates", async () => {

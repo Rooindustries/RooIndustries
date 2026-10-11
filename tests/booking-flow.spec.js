@@ -62,7 +62,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       });
     }
 
-    for (const status of [400, 403, 404, 409]) {
+    for (const status of [400, 403, 404]) {
       test(`release ${status} clears a definitively refused hold`, async ({ page, flow }) => {
         await flow.reserve();
         flow.state.failures["/api/releaseHold"] = status;
@@ -75,6 +75,39 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         expect(await hold(page)).toBeNull();
         await expect(page.getByRole("alert").filter({ hasText: /could not release/i })).toHaveCount(0);
         expect(flow.state.calls.filter(({ path }) => path === "/api/releaseHold")).toHaveLength(1);
+      });
+    }
+
+    test("refused refresh then Next keeps the empty-selection error actionable", async ({ page, flow }) => {
+      const pageErrors = [];
+      page.on("pageerror", (error) => pageErrors.push(error.message));
+      await flow.reserve();
+      flow.state.failures["/api/holdSlot"] = 409;
+      await page.getByRole("button", { name: "Back", exact: true }).last().click();
+      await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+      await page.getByRole("button", { name: "Next", exact: true }).last().click();
+      await expect.poll(() => hold(page)).toBeNull();
+      await expect(page.getByRole("alert").filter({ hasText: /slot was just taken/i })).toBeVisible();
+      await page.getByRole("button", { name: "Next", exact: true }).last().press("Enter");
+      await expect(page.getByRole("alert").filter({ hasText: "Please select a date and time before continuing." })).toBeVisible();
+      expect(pageErrors).toEqual([]);
+    });
+
+    for (const message of ["This hold belongs to an active payment session.", "Hold changed before it could be released"]) {
+      test(`release 409 keeps credentials: ${message}`, async ({ page, flow }) => {
+        await flow.reserve();
+        await flow.details();
+        const original = await hold(page);
+        await page.route("**/api/releaseHold", (route) => route.fulfill({
+          status: 409, contentType: "application/json", body: JSON.stringify({ ok: false, message }),
+        }));
+        await page.getByRole("button", { name: "Release Slot", exact: true }).click();
+        await expect(page.getByRole("alert").filter({ hasText: message })).toBeVisible();
+        expect(await hold(page)).toEqual(original);
+        await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveValue("visitor@example.invalid");
+        await page.unroute("**/api/releaseHold");
+        await page.getByRole("button", { name: "Release Slot", exact: true }).click();
+        await expect.poll(() => hold(page)).toBeNull();
       });
     }
 
@@ -252,6 +285,26 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await page.goto("/booking?ref=friend");
         await expect(page.getByRole("alert").filter({ hasText: /validation.*unavailable|unable to validate/i })).toBeVisible({ timeout: 20000 });
         await expect(page.getByRole("button", { name: /^Pay \$/ })).toBeEnabled();
+      });
+    }
+
+    for (const code of ["friend", "save20"]) {
+      test(`restored ${code} survives unavailable validation and applies on retry`, async ({ page, flow }) => {
+        await flow.review();
+        await flow.codeInput(code);
+        const type = code === "friend" ? "referral" : "coupon";
+        await expect(page.getByRole("button", { name: `Remove ${type} code ${code}`, exact: true })).toBeVisible();
+        const savedCodes = await page.evaluate(() => Object.values(JSON.parse(sessionStorage.getItem("booking_draft")).packages)[0].checkoutCodes);
+        flow.state.failures[type === "referral" ? "/api/ref/validateReferral" : "/api/ref/validateCoupon"] = 503;
+        await page.reload();
+        await expect(page.getByRole("alert").filter({ hasText: /validation.*unavailable/i })).toBeVisible();
+        expect(await page.evaluate(() => Object.values(JSON.parse(sessionStorage.getItem("booking_draft")).packages)[0].checkoutCodes)).toEqual(savedCodes);
+        if (type === "referral") expect(await page.evaluate(() => sessionStorage.getItem("referral_session"))).toBe(code);
+        await expect(page.getByRole("button", { name: /^Remove (referral|coupon) code/ })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: /^Pay \$/ })).toBeEnabled();
+        delete flow.state.failures[type === "referral" ? "/api/ref/validateReferral" : "/api/ref/validateCoupon"];
+        await page.getByRole("button", { name: "Apply", exact: true }).click();
+        await expect(page.getByRole("button", { name: `Remove ${type} code ${code}`, exact: true })).toBeVisible();
       });
     }
 
