@@ -332,7 +332,7 @@ for (const committed of [true, false]) {
     await page.clock.install();
     const pending = await hold(page, "**/api/admin/content/publish", { forward: committed });
     let calls = 0;
-    page.on("request", request => { if (new URL(request.url()).pathname === "/api/admin/content/publish") calls += 1; });
+    page.on("request", request => { if (new URL(request.url()).pathname === "/api/admin/content/publish" && request.method() === "POST") calls += 1; });
     await page.getByRole("button", { name: "Publish", exact: true }).click();
     await pending.arrived;
     try {
@@ -366,7 +366,7 @@ for (const committed of [true, false]) {
     await page.clock.install();
     const pending = await hold(page, "**/api/admin/content/publish", { forward: committed });
     let calls = 0, submitted;
-    page.on("request", request => { if (new URL(request.url()).pathname === "/api/admin/content/publish") { calls += 1; submitted = request.postDataJSON(); } });
+    page.on("request", request => { if (new URL(request.url()).pathname === "/api/admin/content/publish" && request.method() === "POST") { calls += 1; submitted = request.postDataJSON(); } });
     await page.getByRole("button", { name: "Publish", exact: true }).click();
     const response = await pending.arrived;
     try {
@@ -402,7 +402,7 @@ test("#10 uncertain publication keeps its draft and Retry only reads", async ({ 
   await page.clock.install();
   const pending = await hold(page, "**/api/admin/content/publish");
   let calls = 0;
-  page.on("request", request => { if (new URL(request.url()).pathname === "/api/admin/content/publish") calls += 1; });
+  page.on("request", request => { if (new URL(request.url()).pathname === "/api/admin/content/publish" && request.method() === "POST") calls += 1; });
   await page.getByRole("button", { name: "Publish", exact: true }).click(); await pending.arrived;
   try {
     await page.clock.fastForward(31000);
@@ -414,6 +414,40 @@ test("#10 uncertain publication keeps its draft and Retry only reads", async ({ 
     await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
     expect(calls).toBe(1);
     await evidence(page, testInfo, { originalRevision: original.revision, calls, text });
+  } finally { await pending.release(); }
+});
+
+test("#10 a superseded publication keeps the draft and its revision guard", async ({ page, request }, testInfo) => {
+  await login(page); await hero(page);
+  const original = await cms(request, `/api/admin/content/documents/${HERO_ID}`);
+  const text = `Superseded café 日本語 ${original.revision}`;
+  const otherText = `Different work published by another editor ${original.revision}`;
+  await page.getByLabel("Main Heading (Line 1)", { exact: true }).fill(text);
+  await page.clock.install();
+  const pending = await hold(page, "**/api/admin/content/publish");
+  const submitted = [];
+  page.on("request", request => {
+    if (new URL(request.url()).pathname === "/api/admin/content/publish" && request.method() === "POST") submitted.push(request.postDataJSON());
+  });
+  await page.getByRole("button", { name: "Publish", exact: true }).click(); await pending.arrived;
+  try {
+    const ours = await cms(request, `/api/admin/content/documents/${HERO_ID}`);
+    await cms(request, "/api/admin/content/publish", { operation: "replace", type: "hero", documentId: HERO_ID, expectedRevision: ours.revision, document: { ...ours.document, description: otherText } });
+    await page.clock.fastForward(31000);
+    await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
+    expect(submitted).toHaveLength(1);
+    const draft = await page.evaluate(id => JSON.parse(localStorage.getItem(`roo-content-draft:v1:doc:${id}`)), HERO_ID);
+    expect(draft.baseRevision).toBe(original.revision);
+    expect(draft.document.headingLine1).toBe(text);
+    await pending.release();
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Publishing…", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
+    expect(submitted[1].expectedRevision).toBe(original.revision);
+    expect((await cms(request, `/api/admin/content/documents/${HERO_ID}`)).document.description).toBe(otherText);
+    await evidence(page, testInfo, { submitted, baseRevision: draft.baseRevision, text });
   } finally { await pending.release(); }
 });
 
