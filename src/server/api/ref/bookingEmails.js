@@ -318,6 +318,8 @@ const buildBookingFieldGroups = (booking = {}) => {
   const logoUrl = resolveLogoUrl();
   const appointment = formatAppointmentTime(booking.startTimeUTC, booking.localTimeZone);
   const hostAppointment = formatAppointmentTime(booking.startTimeUTC, OWNER_TZ_NAME);
+  const hasNetAmount = ["number", "string"].includes(typeof booking.netAmount) &&
+    String(booking.netAmount).trim() !== "" && Number.isFinite(Number(booking.netAmount));
   const discountPercentValue = Number(booking.discountPercent || 0);
   const discountAmountValue = Number(booking.discountAmount || 0);
   const couponPercentValue = Number(booking.couponDiscountPercent || 0);
@@ -325,7 +327,7 @@ const buildBookingFieldGroups = (booking = {}) => {
   const couponType = String(booking.couponDiscountType || "").trim().toLowerCase();
   const couponValue = Number(booking.couponDiscountValue || 0);
   const couponSuffix =
-    couponPercentValue > 0 || couponAmountValue > 0
+    hasNetAmount && (couponPercentValue > 0 || couponAmountValue > 0)
       ? couponType === "fixed"
         ? ` ($${formatMoney(couponValue || couponAmountValue)} off - $${formatMoney(couponAmountValue)})`
         : ` (${couponPercentValue}% - $${formatMoney(couponAmountValue)})`
@@ -340,7 +342,7 @@ const buildBookingFieldGroups = (booking = {}) => {
     {
       label: "Price",
       value:
-        Number(booking.netAmount || 0) < Number(booking.grossAmount || 0)
+        hasNetAmount && Number(booking.netAmount) < Number(booking.grossAmount || 0)
           ? `$${formatMoney(booking.netAmount)} (was $${formatMoney(booking.grossAmount)})`
           : booking.packagePrice || "-",
     },
@@ -355,7 +357,7 @@ const buildBookingFieldGroups = (booking = {}) => {
   ];
 
   const ownerDiscountFields = [];
-  if (discountPercentValue > 0 || discountAmountValue > 0) {
+  if (hasNetAmount && (discountPercentValue > 0 || discountAmountValue > 0)) {
     ownerDiscountFields.push({
       label: "Discount",
       value: `${discountPercentValue}% ($${formatMoney(discountAmountValue)})`,
@@ -710,7 +712,7 @@ export const sendBookingEmailsForBooking = async ({
         {
           from,
           to: owner,
-          subject: `New booking ${bookingRef} - ${resolvedBooking.packageTitle} (${ownerScheduleLabel})`,
+          subject: `New booking ${bookingRef} - ${String(resolvedBooking.packageTitle || "").trim() || "Unknown package"} (${ownerScheduleLabel})`,
           html: emailHtml({
             logoUrl,
             siteName,
