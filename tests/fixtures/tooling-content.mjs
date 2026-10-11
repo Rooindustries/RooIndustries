@@ -72,6 +72,26 @@ export async function createToolingContentFixture({ origin, artifact }) {
     document('meetTheTeam', { heroTitle: 'Meet the Team', heroSubtitle: 'Synthetic local team', showFounder: false, sections: [] }),
     document('bookingSettings', { dateSlots: [{ date: '2099-01-05', times: ['10:00', '11:00'] }], xocDateSlots: [], vertexEssentialsDateSlots: [], packageDateSlots: [] }, '6d8a3646-0ed2-44b5-ad45-c5c9d578126a'),
   ];
+  const layoutImages = process.env.TOOLING_CLS_CONTENT === '1' ? [
+    { id: 'image-cls-wide', width: 800, height: 400, storagePath: 'images/cls-wide.svg' },
+    { id: 'image-cls-tall', width: 600, height: 900, storagePath: 'images/cls-tall.svg' },
+  ].map(image => ({ ...image, body: `<svg xmlns="http://www.w3.org/2000/svg" width="${image.width}" height="${image.height}"><rect width="100%" height="100%" fill="#18202c"/><text x="24" y="48" fill="white" font-size="24">Synthetic review</text></svg>` })) : [];
+  if (layoutImages.length) {
+    documents.push(
+      ...Array.from({ length: 4 }, (_, index) => document('tool', {
+        title: `Fixture layout tool ${index + 1}`,
+        shortDescription: 'Synthetic tool content for layout stability checks.',
+        category: 'Benchmark',
+        downloadMode: 'external',
+        downloadUrl: '/favicon-96x96.png',
+        sortOrder: index,
+      }, `tooling-cls-tool-${index}`)),
+      ...layoutImages.map(image => document('review', {
+        alt: `Fixture layout review ${image.width} by ${image.height}`,
+        image: { _type: 'image', asset: { _type: 'reference', _ref: image.id } },
+      }, image.id.replace('image-', 'review-'))),
+    );
+  }
   const evidence = { origin, pid: process.pid, contentSha256: createHash('sha256').update(JSON.stringify(documents)).digest('hex'), documentTypes: [...new Set(documents.map(row => row._type))], requests: [], stopped: false, standIn: 'Synthetic read-only HTTP responses shaped as the current PostgREST RPC contract. Actual Supabase SDK and GROQ evaluator execute. No PostgreSQL, hosted PostgREST, Sanity, GoTrue, provider or persistence equivalence is claimed.' };
   const persist = () => { if (artifact) { fs.mkdirSync(path.dirname(artifact), { recursive: true }); fs.writeFileSync(artifact, JSON.stringify(evidence, null, 2) + '\n'); } };
   const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
@@ -85,6 +105,15 @@ export async function createToolingContentFixture({ origin, artifact }) {
       evidence.requests.push(call);
       if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_fetch_shadow_documents_targeted') {
         if (!Array.isArray(body.p_document_types) || !body.p_document_types.length || !Array.isArray(body.p_filters) || !Number.isInteger(body.p_limit) || body.p_limit < 1 || body.p_limit > 1000 || body.p_ids !== null && !Array.isArray(body.p_ids)) throw new Error('Invalid fixture read scope.');
+        if (body.p_document_types.some(type => type === 'tool' || type === 'review')) {
+          if (process.env.TOOLING_CLS_RESPONSE === 'delayed') await new Promise(resolve => setTimeout(resolve, 650));
+          if (process.env.TOOLING_CLS_RESPONSE === 'failed') {
+            call.status = 503;
+            json(res, 503, { code: 'FIXTURE_CONTENT_UNAVAILABLE', message: 'Synthetic content is unavailable.' });
+            persist();
+            return;
+          }
+        }
         let rows = documents.filter(row => body.p_document_types.includes(row._type) && (!body.p_ids || body.p_ids.includes(row._id)));
         for (const filter of body.p_filters) {
           if (!['eq', 'ieq', 'in'].includes(filter.op) || typeof filter.path !== 'string') throw new Error('Unsupported fixture filter.');
@@ -92,7 +121,21 @@ export async function createToolingContentFixture({ origin, artifact }) {
         }
         rows = rows.sort((a, b) => a._id < b._id ? -1 : a._id > b._id ? 1 : 0).slice(0, body.p_limit); call.status = 200; call.rows = rows.length; json(res, 200, rows);
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_asset_manifest_for_refs') {
-        call.status = 200; json(res, 200, []);
+        const assets = layoutImages.filter(image => body.p_asset_ids?.includes(image.id)).map(image => ({
+          legacy_sanity_asset_id: image.id,
+          storage_bucket: 'site-content-public',
+          storage_path: image.storagePath,
+          migration_status: 'verified',
+          sha256: createHash('sha256').update(image.body).digest('hex'),
+          width: image.width,
+          height: image.height,
+        }));
+        call.status = 200; json(res, 200, assets);
+      } else if (req.method === 'GET' && layoutImages.some(image => url.pathname === `/storage/v1/object/public/site-content-public/${image.storagePath}`)) {
+        const image = layoutImages.find(image => url.pathname.endsWith(image.storagePath));
+        call.status = 200;
+        res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' });
+        res.end(image.body);
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_fetch_commerce_availability') {
         call.status = 200; json(res, 200, { bookings: [], holds: [], slotLocks: [] });
       } else {

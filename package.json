@@ -48,6 +48,8 @@
     "test:payment-recovery:postgres17": "node scripts/test-payment-persistence-sweep.mjs --recovery --full-chain",
     "test:agent-readiness": "node --test tests/agent-readiness.test.mjs",
     "test:perf:home": "playwright test tests/home-performance.spec.js --project=chromium",
+    "test:perf:cls": "playwright test tests/content-layout-shift.spec.js --project=chromium",
+    "test:perf:cls:states": "playwright test tests/content-entry-states.spec.js --project=chromium",
     "check:payment:runtime": "node scripts/diagnose-payment-runtime.js",
     "check:payment:webhooks": "node scripts/check-payment-webhooks.js",
     "check:payment:stack": "node scripts/check-payment-stack.mjs",
