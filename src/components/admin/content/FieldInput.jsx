@@ -21,13 +21,15 @@ import {
 export const EditorContext = createContext(null);
 
 const useEditor = () => useContext(EditorContext);
+const errorId = (path) => `content-error-${encodeURIComponent(pathLabel(path))}`;
+const helpId = (path) => `content-help-${encodeURIComponent(pathLabel(path))}`;
 
 function FieldErrors({ path }) {
   const { errorsByPath } = useEditor();
   const messages = errorsByPath.get(pathLabel(path)) || [];
   if (messages.length === 0) return null;
   return (
-    <ul className={styles.fieldErrors} role="alert">
+    <ul id={errorId(path)} className={styles.fieldErrors} role="alert">
       {messages.map((message, index) => (
         <li key={index}>{message}</li>
       ))}
@@ -45,7 +47,7 @@ function FieldShell({ field, path, htmlFor, children, inline = false }) {
         {field.required ? <span className={styles.required} aria-label="required">*</span> : null}
         {field.readOnly ? <span className={styles.readOnlyTag}>Read only</span> : null}
       </label>
-      {field.description ? <p className={styles.fieldHelp}>{field.description}</p> : null}
+      {field.description ? <p id={helpId(path)} className={styles.fieldHelp}>{field.description}</p> : null}
       {children}
       <FieldErrors path={path} />
     </div>
@@ -70,7 +72,7 @@ const itemTypeFor = (field, item) =>
   (field.of || []).find((candidate) => candidate.type === item?._type) ||
   field.of?.[0];
 
-function ArrayInput({ field, path, value, onChange, readOnly }) {
+function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria }) {
   const items = Array.isArray(value) ? value : [];
   const [openKeys, setOpenKeys] = useState(() => new Set());
   const ofTypes = field.of || [];
@@ -113,13 +115,14 @@ function ArrayInput({ field, path, value, onChange, readOnly }) {
 
   if (listOptions && primitive) {
     return (
-      <div className={styles.checkGroup}>
+      <div id={inputId} className={styles.checkGroup} role="group" aria-label={field.title || field.name} {...inputAria}>
         {listOptions.map((option) => {
           const optionVal = optionValue(option);
           const checked = items.includes(optionVal);
           return (
             <label key={String(optionVal)} className={styles.checkOption}>
               <input
+                {...inputAria}
                 type="checkbox"
                 checked={checked}
                 disabled={readOnly}
@@ -140,7 +143,7 @@ function ArrayInput({ field, path, value, onChange, readOnly }) {
   }
 
   return (
-    <div className={styles.arrayField}>
+    <div id={inputId} className={styles.arrayField} role="group" aria-label={field.title || field.name} {...inputAria}>
       {items.length === 0 ? <p className={styles.muted}>No items yet.</p> : null}
       {items.map((item, index) => {
         const itemType = itemTypeFor(field, item);
@@ -264,6 +267,12 @@ export function ObjectFields({ fields, path, value, onChange, readOnly }) {
 
 export function ValueInput({ field, path, value, parent, onChange, readOnly = false, bare = false }) {
   const id = useId();
+  const { errorsByPath } = useEditor();
+  const invalid = (errorsByPath.get(pathLabel(path)) || []).length > 0;
+  const inputAria = {
+    "aria-invalid": invalid ? true : undefined,
+    "aria-describedby": [!bare && field.description ? helpId(path) : "", invalid ? errorId(path) : ""].filter(Boolean).join(" ") || undefined,
+  };
   const type = field.type;
   const ariaLabel = bare ? field.title || field.name : undefined;
   const wrap = (control, inline = false) =>
@@ -276,6 +285,7 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
   if (isPortableTextField(field)) {
     return wrap(
       <PortableTextInput
+        inputAria={inputAria}
         value={value}
         label={field.title || field.name}
         readOnly={readOnly}
@@ -285,12 +295,12 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
   }
 
   if (type === "array") {
-    return wrap(<ArrayInput field={field} path={path} value={value} onChange={onChange} readOnly={readOnly} />);
+    return wrap(<ArrayInput field={field} path={path} value={value} onChange={onChange} readOnly={readOnly} inputId={id} inputAria={inputAria} />);
   }
 
   if (type === "object") {
     return wrap(
-      <div className={styles.nestedObject}>
+      <div id={id} className={styles.nestedObject} role="group" aria-label={field.title || field.name} {...inputAria}>
         <ObjectFields fields={field.fields || []} path={path} value={value} onChange={onChange} readOnly={readOnly} />
       </div>
     );
@@ -298,18 +308,19 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
 
   if (type === "image" || type === "file") {
     return wrap(
-      <AssetInput kind={type} field={field} value={value} onChange={onChange} readOnly={readOnly} inputId={id} ariaLabel={ariaLabel || field.title || field.name} path={path} />
+      <AssetInput kind={type} field={field} value={value} onChange={onChange} readOnly={readOnly} inputId={id} ariaLabel={ariaLabel || field.title || field.name} path={path} inputAria={inputAria} />
     );
   }
 
   if (type === "reference") {
-    return wrap(<ReferenceInput field={field} value={value} onChange={onChange} readOnly={readOnly} inputId={id} ariaLabel={ariaLabel} />);
+    return wrap(<ReferenceInput field={field} value={value} onChange={onChange} readOnly={readOnly} inputId={id} ariaLabel={ariaLabel} inputAria={inputAria} />);
   }
 
   if (type === "boolean") {
     return wrap(
       <label className={styles.toggle}>
         <input
+          {...inputAria}
           id={id}
           aria-label={ariaLabel}
           type="checkbox"
@@ -333,6 +344,7 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
             return (
               <label key={String(optionVal)} className={styles.radioOption}>
                 <input
+                  {...inputAria}
                   type="radio"
                   name={id}
                   checked={value === optionVal}
@@ -348,6 +360,7 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
     }
     return wrap(
       <select
+        {...inputAria}
         id={id}
         aria-label={ariaLabel}
         className={styles.input}
@@ -376,6 +389,7 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
   if (type === "text") {
     return wrap(
       <textarea
+        {...inputAria}
         id={id}
         aria-label={ariaLabel}
         className={styles.input}
@@ -390,6 +404,7 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
   if (type === "number") {
     return wrap(
       <input
+        {...inputAria}
         id={id}
         aria-label={ariaLabel}
         className={styles.input}
@@ -413,6 +428,7 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
   if (type === "date") {
     return wrap(
       <input
+        {...inputAria}
         id={id}
         aria-label={ariaLabel}
         className={styles.input}
@@ -427,6 +443,7 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
   if (type === "datetime") {
     return wrap(
       <input
+        {...inputAria}
         id={id}
         aria-label={ariaLabel}
         className={styles.input}
@@ -444,6 +461,7 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
     return wrap(
       <div className={styles.inlineGroup}>
         <input
+          {...inputAria}
           id={id}
           aria-label={ariaLabel}
           className={styles.input}
@@ -471,6 +489,7 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
 
   return wrap(
     <input
+      {...inputAria}
       id={id}
       aria-label={ariaLabel}
       className={styles.input}
