@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import packageContent from "../lib/packageContent";
 import ConnectedAccounts from "./ConnectedAccounts";
+import { useReferralAccount } from "../lib/useReferralAccount";
 
 const { normalizePackageText } = packageContent;
 
@@ -55,7 +56,7 @@ export default function RefDashboard() {
   const nav = useNavigate();
   const location = useLocation();
 
-  const [creator, setCreator] = useState(null);
+  const { referral: creator, loading, error: accountError, retry } = useReferralAccount();
   const [commission, setCommission] = useState(0);
   const [discount, setDiscount] = useState(0);
   const [max, setMax] = useState(0);
@@ -66,7 +67,6 @@ export default function RefDashboard() {
   const [closingLogsModal, setClosingLogsModal] = useState(false);
   const [logsModalAnimatingIn, setLogsModalAnimatingIn] = useState(false);
 
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const [toast, setToast] = useState(null);
@@ -77,12 +77,15 @@ export default function RefDashboard() {
   `;
 
   useEffect(() => {
+    if (!creator) return undefined;
+    let active = true;
     const loadPayouts = async () => {
       try {
         setPayoutLoading(true);
         setPayoutError(null);
         const res = await fetch("/api/ref/payouts");
         const data = await res.json();
+        if (!active) return;
 
         if (!data.ok) {
           setPayout(null);
@@ -92,66 +95,26 @@ export default function RefDashboard() {
 
         setPayout(data);
       } catch {
+        if (!active) return;
         console.error("Referral payout loading failed");
         setPayout(null);
         setPayoutError("Could not load payout data.");
       } finally {
-        setPayoutLoading(false);
+        if (active) setPayoutLoading(false);
       }
     };
-
-    async function load() {
-      try {
-        const res = await fetch("/api/ref/getData");
-        const data = await res.json();
-
-        if (!data.ok) {
-          try {
-            sessionStorage.removeItem("creatorId");
-          } catch {
-            console.error("Failed to clear obsolete referral state");
-          }
-          return nav("/referrals/login");
-        }
-
-        const ref = data.referral || {};
-
-        const successfulReferrals = ref.successfulReferrals ?? 0;
-
-        const normalized = {
-          ...ref,
-          successfulReferrals,
-        };
-
-        setCreator(normalized);
-        setMax(normalized.maxCommissionPercent ?? 15);
-        loadPayouts();
-
-        const bypass = normalized.bypassUnlock === true;
-        const isUnlocked = successfulReferrals >= 5 || bypass;
-
-        if (!isUnlocked) {
-          setCommission(10);
-          setDiscount(0);
-        } else {
-          setCommission(normalized.currentCommissionPercent ?? 10);
-          setDiscount(normalized.currentDiscountPercent ?? 0);
-        }
-      } catch {
-        console.error("Referral dashboard loading failed");
-        try {
-          sessionStorage.removeItem("creatorId");
-        } catch {
-          console.error("Failed to clear obsolete referral state");
-        }
-        nav("/referrals/login");
-      } finally {
-        setLoading(false);
-      }
+    setMax(creator.maxCommissionPercent ?? 15);
+    const isUnlocked = (creator.successfulReferrals ?? 0) >= 5 || creator.bypassUnlock === true;
+    if (!isUnlocked) {
+      setCommission(10);
+      setDiscount(0);
+    } else {
+      setCommission(creator.currentCommissionPercent ?? 10);
+      setDiscount(creator.currentDiscountPercent ?? 0);
     }
-
-    load();
-  }, [nav]);
+    loadPayouts();
+    return () => { active = false; };
+  }, [creator]);
 
   function showToast(type, message) {
     setToast({ type, message });
@@ -330,7 +293,14 @@ export default function RefDashboard() {
   }
 
   if (loading)
-    return <p className="text-center text-ink pt-32">Loading...</p>;
+    return <p role="status" className="text-center text-ink pt-32">Loading...</p>;
+  if (accountError) return (
+    <section className="pt-32 px-6 max-w-xl mx-auto text-ink">
+      <h1 className="text-3xl font-bold text-accent">Creator dashboard</h1>
+      <p role="alert" className="mt-4 text-danger-text">{accountError}</p>
+      <button onClick={retry} className="mt-6 rounded-xl bg-accent-strong px-6 py-3 font-semibold text-accent-contrast">Retry</button>
+    </section>
+  );
   if (!creator) return null;
 
   const currentRefs = creator.successfulReferrals ?? 0;

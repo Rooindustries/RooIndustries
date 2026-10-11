@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../lib/passwordPolicy";
+import { useReferralAccount } from "../lib/useReferralAccount";
 
 const PASSWORD_PENDING_MESSAGE =
   "Your password change is saving. It will finish in a moment.";
@@ -9,7 +10,7 @@ const PASSWORD_UPDATED_MESSAGE =
 
 export default function RefChangePassword() {
   const nav = useNavigate();
-  const [sessionChecked, setSessionChecked] = useState(false);
+  const { referral, loading: checking, error: accountError, retry } = useReferralAccount();
 
   const [pass1, setPass1] = useState("");
   const [pass2, setPass2] = useState("");
@@ -17,27 +18,15 @@ export default function RefChangePassword() {
   const [loading, setLoading] = useState(false);
   const [outcome, setOutcome] = useState(null);
 
-  useEffect(() => {
-    const checkSession = async () => {
-      try {
-        const res = await fetch("/api/ref/getData");
-        const data = await res.json();
-        if (!data.ok) {
-          nav("/referrals/login");
-          return;
-        }
-      } catch {
-        console.error("Referral session validation failed");
-        nav("/referrals/login");
-        return;
-      } finally {
-        setSessionChecked(true);
-      }
-    };
-    checkSession();
-  }, [nav]);
-
-  if (!sessionChecked) return null;
+  if (checking) return <p role="status" className="pt-32 text-center text-ink">Checking your account...</p>;
+  if (accountError) return (
+    <section className="pt-32 px-6 max-w-xl mx-auto text-ink">
+      <h1 className="text-3xl font-bold text-accent">Change Password</h1>
+      <p role="alert" className="mt-4 text-danger-text">{accountError}</p>
+      <button onClick={retry} className="mt-6 rounded-xl bg-accent-strong px-6 py-3 font-semibold text-accent-contrast">Retry</button>
+    </section>
+  );
+  if (!referral) return null;
 
   async function update() {
     if (!currentPassword || !pass1 || !pass2) {
