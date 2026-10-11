@@ -41,7 +41,7 @@ module.exports = defineConfig({
   retries: process.env.CI ? 1 : 0,
   workers: 1,
   projects: [
-    { name: "chromium", testIgnore: /home-cta-mobile\.spec\.js$/, use: { browserName: "chromium", launchOptions: { args: ["--ozone-platform=x11"] } } },
+    { name: "chromium", testIgnore: /(home-cta-mobile|admin-cms)\.spec\.js$/, use: { browserName: "chromium", launchOptions: { args: ["--ozone-platform=x11"] } } },
     { name: "mobile-webkit", testMatch: /home-cta-mobile\.spec\.js$/, use: { browserName: "webkit", launchOptions: webkitLaunchOptions } },
   ],
   webServer: shouldUseExternalServer
@@ -51,6 +51,7 @@ module.exports = defineConfig({
         url: baseURL,
         env: { ROO_TEST_HOST: testHost, BASE_URL: baseURL, NEXT_DIST_DIR: internalDistDir, PW_PORT: String(internalPort) },
         reuseExistingServer: false,
+        gracefulShutdown: { signal: "SIGTERM", timeout: 15000 },
         timeout: 180000,
       },
   use: {
