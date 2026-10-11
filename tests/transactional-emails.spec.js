@@ -108,22 +108,28 @@ for (const [name, viewport] of [["desktop", { width: 1440, height: 900 }], ["mob
       for (const item of messages(`recovery-${currency}`)) check(item.fields["Paid Amount"]).toBe(`${symbol}84.99`);
     }
     for (const kind of ["registration_verification", "password_reset"]) {
-      for (const [caseName, wording] of [["ten-minutes", "expires in 10 minutes"], ["one-hour", "expires in 60 minutes"], ["one-minute", "expires in 1 minute"], ["seconds", "expires in less than a minute"], ["expired", "has expired"], ["missing", "expiry is unavailable"]]) {
+      for (const [caseName, wording] of [["ten-minutes", "This private link expires Oct 11, 2026, 12:10 AM UTC."], ["one-hour", "This private link expires Oct 11, 2026, 1:00 AM UTC."], ["utc-minute", "This private link expires Oct 11, 2026, 12:01 AM UTC."], ["utc-midnight", "This private link expires Oct 12, 2026, 12:00 AM UTC."], ["utc-afternoon", "This private link expires Oct 11, 2026, 3:30 AM UTC."], ["expired", "has expired"], ["missing", "expiry is unavailable"]]) {
         check(messages(`${kind}-${caseName}`)[0].text, `${kind}-${caseName}`).toContain(wording);
       }
     }
     check(messages("normal")[0].text).toContain("using the button below");
-    for (const caseName of ["retry-booking", "retry-recovery"]) {
+    for (const caseName of ["retry-booking", "retry-recovery", "retry-booking-no-receipt", "retry-recovery-no-receipt"]) {
       const input = capture.inputs.find(item => item.case === caseName);
-      const recovery = caseName === "retry-recovery";
+      const recovery = caseName.startsWith("retry-recovery");
       const prefix = recovery ? "recoveryNotification" : "emailDispatch";
-      check(input.after[`${prefix}Status`], caseName).toBe("sent");
+      check(input.after[`${prefix}Status`], caseName).toBe("delivery_unknown");
+      const outcome = recovery ? input.result : input.result.body;
+      check(outcome, caseName).toMatchObject({ retryable: false, deliveryUnknown: true });
+      check(outcome.ok, caseName).toBe(false);
+      check(recovery ? outcome.notificationRequired : outcome.emailDispatch.allSent, caseName).toBe(false);
+      check(recovery ? input.repeat : input.repeat.body, `${caseName} repeat`).toMatchObject({ retryable: false, deliveryUnknown: true });
       check(input.after[`${prefix}NextAttemptAt`], caseName).toBe("");
       check(input.attempts, caseName).toBe(2);
       for (const recipient of ["Client", "Owner"]) {
         const recipientPrefix = recovery ? `recovery${recipient}` : `emailDispatch${recipient}`;
         check(input.after[`${recipientPrefix}FirstAttemptAt`]).toBe(input.booking[`${recipientPrefix}FirstAttemptAt`]);
-        check(input.after[`${recipientPrefix}ProviderId`]).toBe(input.booking[`${recipientPrefix}ProviderId`]);
+        check(input.after[`${recipientPrefix}ProviderId`] || "").toBe(input.booking[`${recipientPrefix}ProviderId`] || "");
+        check(input.after[recovery ? `${recipientPrefix}NotifiedAt` : `${recipientPrefix}SentAt`]).toBeFalsy();
       }
       check(messages(caseName).slice(0, 2).map(item => item.options.idempotencyKey)).toEqual([
         `booking-${input.booking._id}-${recovery ? "reschedule-" : ""}client`,
@@ -132,13 +138,24 @@ for (const [name, viewport] of [["desktop", { width: 1440, height: 900 }], ["mob
     }
     for (const kind of ["registration_verification", "password_reset"]) {
       const input = capture.inputs.find(item => item.case === `${kind}-retry`);
-      check(input.result).toMatchObject({ sent: 1, retry: 0 });
-      check(input.completion.p_success).toBe(true);
+      check(input.result).toMatchObject({ sent: 0, retry: 1, deadLetter: 0 });
+      check(input.completion).toMatchObject({ p_success: false, p_error_code: "email_idempotency_conflict", p_provider_message_id: null });
+      check(input.completion.p_retry_delay_seconds).toBe(120);
+      check(capture.inputs.find(item => item.case === `${kind}-direct-conflict`).error).toMatchObject({ code: "email_idempotency_conflict" });
+      const stable = messages(`${kind}-deterministic`).map(({ payload }) => ({ subject: payload.subject, html: payload.html, text: payload.text }));
+      check(stable).toHaveLength(3);
+      for (const payload of stable.slice(1)) check(payload).toEqual(stable[0]);
       check(messages(input.case)[0].options.idempotencyKey).toBe(input.dispatch.idempotency_key);
     }
     for (const caseName of ["concurrent-booking", "concurrent-recovery"]) {
       const input = capture.inputs.find(item => item.case === caseName);
       check(input.after[caseName === "concurrent-booking" ? "emailDispatchStatus" : "recoveryNotificationStatus"]).not.toBe("sent");
+      check(caseName === "concurrent-booking" ? input.result.body : input.result).toMatchObject({ retryable: true, deliveryUnknown: false });
+    }
+    for (const caseName of ["deterministic-booking", "deterministic-recovery"]) {
+      const stable = messages(caseName).map(({ payload }) => ({ subject: payload.subject, html: payload.html, text: payload.text }));
+      check(stable).toHaveLength(4);
+      check(stable.slice(2)).toEqual(stable.slice(0, 2));
     }
     expect(capture.safety).toEqual({ resend: "module replaced before import", externalRequests: 0 });
     for (const [index, item] of capture.captured.entries()) {

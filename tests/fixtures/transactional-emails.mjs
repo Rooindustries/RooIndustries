@@ -5,7 +5,8 @@ import { refuseEnvFiles, installNetworkGuard } from "../../scripts/lib/test-targ
 
 refuseEnvFiles();
 installNetworkGuard([]);
-const now = Date.parse("2026-10-11T00:00:00Z");
+const baseNow = Date.parse("2026-10-11T00:00:00Z");
+let now = baseNow;
 const RealDate = Date;
 globalThis.Date = class extends RealDate {
   constructor(...args) { super(...(args.length ? args : [now])); }
@@ -75,7 +76,7 @@ Object.assign(process.env, {
   SITE_NAME: "Roo Industries",
 });
 const { sendBookingEmailsForBooking, dispatchRescheduleNotifications } = await import("../../src/server/api/ref/bookingEmails.js");
-const { deliverReferralEmailDispatch } = await import("../../src/server/api/ref/referralEmailDispatches.js");
+const { deliverReferralEmailDispatch, sendReferralEmailDirect } = await import("../../src/server/api/ref/referralEmailDispatches.js");
 const { buildDeterministicBookingId } = await import("../../src/server/booking/slotIdentity.js");
 const inputs = [];
 const booking = (name, extra = {}) => ({
@@ -158,7 +159,7 @@ await captureBooking("invalid-instant", { startTimeUTC: "not-an-instant", displa
 await captureBooking("requested-invalid-instant", { originalRequestedStartTimeUTC: "not-an-instant", requiresReschedule: true, displayDate: "stale", displayTime: "stale" }, true);
 await captureBooking("requested-original-only", { startTimeUTC: "", originalRequestedStartTimeUTC: "2026-03-08T06:30:00Z", requiresReschedule: true, displayDate: "stale", displayTime: "stale" }, true);
 await captureBooking("requested-different-instant", { startTimeUTC: "2026-11-01T05:30:00Z", originalRequestedStartTimeUTC: "2026-03-08T06:30:00Z", requiresReschedule: true }, true);
-const acceptedError = { name: "invalid_idempotent_request", statusCode: 409, message: "This idempotency key has already been used on a different payload." };
+const conflictError = { name: "invalid_idempotent_request", statusCode: 409, message: "This idempotency key has already been used on a different payload." };
 for (const recovery of [false, true]) {
   const prefix = recovery ? "recoveryNotification" : "emailDispatch";
   const fields = {
@@ -170,11 +171,16 @@ for (const recovery of [false, true]) {
     [`${recovery ? "recoveryClient" : "emailDispatchClient"}ProviderId`]: "existing-client-receipt",
     [`${recovery ? "recoveryOwner" : "emailDispatchOwner"}ProviderId`]: "existing-owner-receipt",
   };
-  await captureBooking(recovery ? "retry-recovery" : "retry-booking", fields, recovery, acceptedError);
+  await captureBooking(recovery ? "retry-recovery" : "retry-booking", fields, recovery, conflictError);
+  await captureBooking(recovery ? "retry-recovery-no-receipt" : "retry-booking-no-receipt", {
+    ...fields,
+    [`${recovery ? "recoveryClient" : "emailDispatchClient"}ProviderId`]: "",
+    [`${recovery ? "recoveryOwner" : "emailDispatchOwner"}ProviderId`]: "",
+  }, recovery, conflictError);
   await captureBooking(recovery ? "concurrent-recovery" : "concurrent-booking", fields, recovery, { name: "concurrent_idempotent_requests", statusCode: 409 });
 }
 for (const kind of ["registration_verification", "password_reset"]) {
-  for (const [name, remaining] of [["ten-minutes", 600000], ["one-hour", 3600000], ["one-minute", 60000], ["seconds", 30000], ["expired", -1], ["missing", null], ["long-name", 600000]]) {
+  for (const [name, remaining] of [["ten-minutes", 600000], ["one-hour", 3600000], ["utc-minute", 60000], ["utc-midnight", 86400000], ["utc-afternoon", 12600000], ["expired", -1], ["missing", null], ["long-name", 600000]]) {
     currentCase = `${kind}-${name}`;
     const token = kind === "registration_verification" ? "a".repeat(64) : "b".repeat(64);
     const dispatch = {
@@ -194,7 +200,7 @@ for (const kind of ["registration_verification", "password_reset"]) {
     inputs.push({ case: currentCase, dispatch });
   }
   currentCase = `${kind}-retry`;
-  providerError = acceptedError;
+  providerError = conflictError;
   const dispatch = { claimed: true, idempotency_key: `${kind}-original-key`, dispatch_kind: kind, recipient_email: "creator-a@fixture.invalid", delivery_payload: { token: "c".repeat(64), name: "Maya" }, attempt_count: 2, expires_at: new Date(now + 600000).toISOString() };
   let completion;
   const result = await deliverReferralEmailDispatch({
@@ -207,6 +213,38 @@ for (const kind of ["registration_verification", "password_reset"]) {
     env: { FROM_EMAIL: "accounts@fixture.invalid" },
   });
   inputs.push({ case: currentCase, dispatch, result, completion });
+  currentCase = `${kind}-direct-conflict`;
+  let directError = null;
+  try {
+    await sendReferralEmailDirect({
+      dispatchKind: kind, referralId: "referral.fixture", recipientEmail: dispatch.recipient_email,
+      token: dispatch.delivery_payload.token, name: "Maya", expiresAt: dispatch.expires_at,
+      env: { RESEND_API_KEY: "capture-only", FROM_EMAIL: "accounts@fixture.invalid" },
+    });
+  } catch (error) {
+    directError = { code: error.code, message: error.message };
+  }
+  inputs.push({ case: currentCase, error: directError });
   providerError = null;
+  currentCase = `${kind}-deterministic`;
+  const stableDispatch = { ...dispatch, expires_at: new Date(baseNow + 7200000).toISOString() };
+  for (const elapsed of [0, 61000, 1800000]) {
+    now = baseNow + elapsed;
+    await deliverReferralEmailDispatch({
+      idempotencyKey: stableDispatch.idempotency_key,
+      adminClient: { rpc: async (operation) => ({
+        data: operation === "roo_claim_referral_email_dispatch" ? stableDispatch : { status: "sent" }, error: null,
+      }) },
+      env: { FROM_EMAIL: "accounts@fixture.invalid" },
+    });
+  }
+  now = baseNow;
+}
+for (const recovery of [false, true]) {
+  for (const elapsed of [0, 61000]) {
+    now = baseNow + elapsed;
+    await captureBooking(recovery ? "deterministic-recovery" : "deterministic-booking", { requiresReschedule: recovery }, recovery);
+  }
+  now = baseNow;
 }
 console.log(JSON.stringify({ captured, inputs, safety: { resend: "module replaced before import", externalRequests: 0 } }));
