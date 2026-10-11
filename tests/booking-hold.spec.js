@@ -51,9 +51,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     for (const canResume of [true, false]) {
       test(`another tab starts payment; revalidation keeps credentials and ${canResume ? "resumes checkout" : "protects the draft without checkout data"}`, async ({ page, context, flow, native }, testInfo) => {
         flow.state.slots = [{ date: await native.nextSlotDate(), times: ["10:00", "11:00"] }];
-        await context.route(/\/api\/(holdSlot|payment\/quote|payment\/start)(?:\?|$)/, async route => {
+        await context.route(/\/api\/(holdSlot|releaseHold|payment\/quote|payment\/start|payment\/cancel)(?:\?|$)/, async route => {
           const request = route.request();
-          const response = await native.post(new URL(request.url()).pathname, request.postDataJSON());
+          const response = await native.post(new URL(request.url()).pathname, request.postDataJSON(), request.headers().authorization);
           return route.fulfill({ status: response.status, contentType: "application/json", body: JSON.stringify(response.body) });
         });
         // The provider boundary stays inside the fixture; no checkout request is sent.
@@ -89,6 +89,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         expect(await page.evaluate(() => sessionStorage.getItem("booking_draft"))).toContain(specifications);
         await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
         await expect(page.getByText(specifications, { exact: true })).toBeVisible();
+        expect(await native.verifyHold({ token: original.holdToken, holdId: stored._id })).toBe(true);
         if (canResume) {
           const checkoutRequests = (await native.evidence()).providerRequests.filter(request => request.path === "/checkouts").length;
           await expect(page.getByRole("alert").filter({ hasText: "Your payment session is already in progress." })).toBeVisible();
@@ -110,10 +111,26 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           await page.getByRole("button", { name: "View reservation", exact: true }).click();
           await expect(page.getByRole("alert").filter({ hasText: "Payment already started in another tab." })).toBeVisible();
           await expect(page.getByText(specifications, { exact: true })).toBeVisible();
+          await testInfo.attach("other-tab-check-again", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
+          await page.getByRole("button", { name: "Check again", exact: true }).click();
+          await expect(page.getByRole("button", { name: "Check again", exact: true })).toBeEnabled();
+          expect(await readHold(page)).toMatchObject({ holdId: original.holdId, holdToken: original.holdToken, phase: "payment_pending" });
+          await other.goto("/booking");
+          await other.getByRole("button", { name: "Release payment", exact: true }).click();
+          await expect(other.getByText(/Payment method released/)).toBeVisible();
+          await other.getByRole("button", { name: "Back", exact: true }).last().click();
+          await other.getByRole("button", { name: "Release Slot", exact: true }).click();
+          await expect.poll(() => readHold(other)).toBeNull();
+          await page.getByRole("button", { name: "Check again", exact: true }).click();
+          await expect(page.getByRole("textbox", { name: "PC specifications", exact: true })).toHaveValue(specifications);
+          const recovered = await readHold(page);
+          expect(recovered).toMatchObject({ holdId: original.holdId, startTimeUTC: original.startTimeUTC, phase: "active" });
+          expect(recovered.paymentStartedElsewhere).toBeUndefined();
+          expect(recovered.holdToken).not.toBe(original.holdToken);
+          expect(await native.verifyHold({ token: recovered.holdToken, holdId: recovered.holdId })).toBe(true);
         }
         const evidence = await native.evidence();
         expect(evidence.blocked).toEqual([]);
-        expect(await native.verifyHold({ token: original.holdToken, holdId: stored._id })).toBe(true);
         await testInfo.attach("native-reservation", { body: JSON.stringify(evidence, null, 2), contentType: "application/json" });
         await other.close();
       });

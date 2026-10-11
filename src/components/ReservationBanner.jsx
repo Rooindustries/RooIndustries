@@ -168,6 +168,10 @@ export default function ReservationBanner() {
     const tick = () => {
       const diff = expiresAtMs - Date.now();
       if (diff <= 0) {
+        if (hold.phase === "payment_pending" && paymentInOtherTab) {
+          setCountdown(0);
+          return false;
+        }
         const shouldRedirectHome =
           path.startsWith("/payment") || path.startsWith("/booking");
         releaseHold(true, shouldRedirectHome);
@@ -182,7 +186,7 @@ export default function ReservationBanner() {
       if (!ok) clearInterval(id);
     }, 1000);
     return () => clearInterval(id);
-  }, [hold, path]);
+  }, [hold, path, paymentInOtherTab]);
 
   const holdLocalTimeLabel = useMemo(() => {
     if (!hold) return "";
