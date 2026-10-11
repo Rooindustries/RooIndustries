@@ -3,6 +3,7 @@ const { resolveStoreBackend } = envValue;
 import { createDodoCheckout, inspectDodoCheckout, retrieveDodoPayment, retrieveDodoRefund, validateDodoPayment, verifyDodoCapture, unwrapDodoWebhook } from "./dodoProvider.js";
 import crypto from "crypto";
 import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
+import { validateBookingContact } from "../../../lib/bookingContactValidation.js";
 import { buildSalesReceipt } from "./salesReceipt.ts";
 import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
 import { authorizeCronRequest } from "../cronAuth.js";
@@ -3017,14 +3018,14 @@ export const startPaymentSession = async ({
   }
 
   const requestBody = normalizeObject(body);
-  const bookingPayload = sanitizeBookingPayload(requestBody.bookingPayload || {});
+  const rawBookingPayload = normalizeObject(requestBody.bookingPayload);
   const requestedProvider = String(requestBody.provider || "").trim().toLowerCase();
   let pinnedCutoverGeneration = Math.max(
     0,
     Number(cutoverGeneration) || 0
   );
 
-  if (!bookingPayload.packageTitle) {
+  if (!String(rawBookingPayload.packageTitle || "").trim()) {
     return {
       httpStatus: 400,
       body: {
@@ -3035,6 +3036,25 @@ export const startPaymentSession = async ({
   }
 
   try {
+    let contact = {};
+    if (!String(rawBookingPayload.originalOrderId || "").trim()) {
+      const holdId = String(rawBookingPayload.slotHoldId || "").trim();
+      const hold = holdId ? await getHoldById(client, holdId) : null;
+      const scope = buildPaymentSessionScope({
+        bookingPayload: rawBookingPayload,
+        holdNonce: hold?.holdNonce || "",
+      });
+      const claim = await getDocumentById({
+        client,
+        id: buildPaymentStartClaimId(scope),
+        type: PAYMENT_START_CLAIM_TYPE,
+      });
+      const existing = claim?.paymentRecordId
+        ? await getPaymentRecordById(client, claim.paymentRecordId)
+        : null;
+      if (!existing?._id) contact = validateBookingContact(rawBookingPayload);
+    }
+    const bookingPayload = sanitizeBookingPayload({ ...rawBookingPayload, ...contact });
     let upgradeIntentSnapshot = null;
     if (bookingPayload.originalOrderId) {
       if (!String(bookingPayload.email || "").trim()) {

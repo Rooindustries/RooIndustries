@@ -71,15 +71,15 @@ const freePort = async () => {
   return port;
 };
 
-export const createSweepPostgresFixture = async ({ commerceRepairMigration = true, fullMigrationChain = false, beforeMigrations, pgBin: requestedPgBin, postgrestBin: requestedPostgrestBin, libraryPath } = {}) => {
+export const createSweepPostgresFixture = async ({ commerceRepairMigration = true, fullMigrationChain = false, beforeMigrations, pgBin: requestedPgBin, postgrestBin: requestedPostgrestBin, libraryPath, ports = {} } = {}) => {
   assert.equal(process.env.ROO_TEST_POSTGRES_HOST || host, host);
   const pgBin = requestedPgBin || process.env.PG_BIN || '/tmp/roo-request-pg17/runtime/usr/lib/postgresql/17/bin';
   const postgrestBin = requestedPostgrestBin || process.env.POSTGREST_BIN || '/tmp/roo-request-postgrest/postgrest';
   const env = {...process.env, LC_ALL: 'C', LD_LIBRARY_PATH: libraryPath || process.env.LD_LIBRARY_PATH || '/tmp/roo-request-pg17/runtime/usr/lib/x86_64-linux-gnu'};
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'roo-persistence-sweep-'));
   const dataDir = path.join(scratch, 'data');
-  const pgPort = await freePort();
-  const restPort = await freePort();
+  const pgPort = ports.postgres ?? await freePort();
+  const restPort = ports.rest ?? await freePort();
   const run = (binary, args) => {
     const result = spawnSync(binary, args, {env, encoding:'utf8',timeout:60000,maxBuffer:16*1024*1024});
     if (result.status !== 0) throw new Error(`${path.basename(binary)} failed: ${result.stderr || result.stdout}`);
@@ -215,7 +215,7 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
         res.writeHead(response.status,{'content-type':response.headers.get('content-type')||'application/json'});res.end(responseBody);
       }catch(error){res.writeHead(500,{'content-type':'application/json'});res.end(JSON.stringify({code:'FIXTURE_PROXY_ERROR',message:error.message}));}
     });
-    proxy.listen(0,host);await once(proxy,'listening');
+    proxy.listen(ports.proxy ?? 0,host);await once(proxy,'listening');
     const origin=`http://${host}:${proxy.address().port}`;
     const header=Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url');
     const payload=Buffer.from(JSON.stringify({role:'service_role',iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+3600})).toString('base64url');
