@@ -16,3 +16,13 @@ With an existing guarded fixture server, set `BASE_URL` to its app origin.
 omit it for the production build and server. Production builds require a fresh
 directory when their source fingerprint changes. Generated HTTP attachments,
 screenshots, traces, and logs belong under `test-results/`.
+
+`npm run test:booking:holds` starts the real hold handler and request adapter over
+HTTP, using the same content fixture and a clock mock confined to that test
+process. It owns both servers and stops them on completion. `BOOKING_ROUTE_PORT`
+defaults to `PW_PORT` or `4173`; the content port defaults to that port plus one.
+`BOOKING_HOLDS_ARTIFACT` defaults to
+`test-results/api-routes/booking-holds.jsonl`.
+
+`npm run test:api:preview` checks the read-only middleware against Next.js. When
+using `BASE_URL`, start that server with `TOOLING_API_ROUTES=0`.

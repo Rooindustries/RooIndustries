@@ -83,8 +83,10 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
   }
   const initialDocuments = structuredClone(documents);
   const dispatches = new Map();
+  const rateLimits = new Map();
   let delivery = 'completed';
   let session = 'valid';
+  let failure = '';
   let revision = 0;
   const mutate = mutations => {
     if (!Array.isArray(mutations) || !mutations.length) throw new Error('Missing fixture mutations.');
@@ -104,7 +106,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
     documents.splice(0, documents.length, ...next);
     return results;
   };
-  const evidence = { origin, pid: process.pid, contentSha256: createHash('sha256').update(JSON.stringify(documents)).digest('hex'), documentTypes: [...new Set(documents.map(row => row._type))], requests: [], stopped: false, standIn: 'Synthetic read-only HTTP responses shaped as the current PostgREST RPC contract. Actual Supabase SDK and GROQ evaluator execute. No PostgreSQL, hosted PostgREST, Sanity, GoTrue, provider or persistence equivalence is claimed.' };
+  const evidence = { origin, pid: process.pid, contentSha256: createHash('sha256').update(JSON.stringify(documents)).digest('hex'), documentTypes: [...new Set(documents.map(row => row._type))], requests: [], stopped: false, standIn: `Synthetic ${apiRoutes ? 'in-memory' : 'read-only'} HTTP responses shaped as the current PostgREST RPC contract. Actual Supabase SDK and GROQ evaluator execute. No PostgreSQL, hosted PostgREST, Sanity, GoTrue, provider or persistence equivalence is claimed.` };
   const persist = () => { if (artifact) { fs.mkdirSync(path.dirname(artifact), { recursive: true }); fs.writeFileSync(artifact, JSON.stringify(evidence, null, 2) + '\n'); } };
   const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
   const server = http.createServer(async (req, res) => {
@@ -120,9 +122,11 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           if (body.reset === true) {
             documents.splice(0, documents.length, ...structuredClone(initialDocuments));
             dispatches.clear();
+            rateLimits.clear();
             evidence.requests.length = 0;
             delivery = 'completed';
             session = 'valid';
+            failure = '';
           }
           if (body.delivery !== undefined) {
             if (!['completed', 'pending', 'queued', 'failed', 'dead_letter', 'source_conflict', 'token_conflict', 'enqueue_failed', 'lookup_failed', 'requeue_failed'].includes(body.delivery)) throw new Error('Invalid fixture delivery state.');
@@ -132,6 +136,19 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
             if (!['valid', 'unavailable', 'network_error', 'malformed_response', 'inactive', 'deleted', 'revoked', 'no_role', 'principal_mismatch', 'code_mismatch', 'referral_mismatch'].includes(body.session)) throw new Error('Invalid fixture session state.');
             session = body.session;
           }
+          if (body.failure !== undefined) {
+            if (!['', 'limiter', 'settings', 'commerce_control', 'hold_write'].includes(body.failure)) throw new Error('Invalid fixture failure state.');
+            failure = body.failure;
+          }
+          if (body.bookingDocuments !== undefined) {
+            if (!Array.isArray(body.bookingDocuments) || body.bookingDocuments.some(row => !row?._id || !['booking', 'bookingSlot', 'slotHold'].includes(row._type))) throw new Error('Invalid fixture booking documents.');
+            for (const row of body.bookingDocuments) {
+              const index = documents.findIndex(value => value._id === row._id);
+              const value = { ...row, _rev: `tooling-fixture-${++revision}` };
+              if (index >= 0) documents[index] = value;
+              else documents.push(value);
+            }
+          }
         }
         call.status = 200;
         json(res, 200, { delivery, session, documents, requests: evidence.requests });
@@ -139,6 +156,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         const scopedIds = apiRoutes && body.p_document_types === null && Array.isArray(body.p_ids) && body.p_ids.length > 0;
         if ((!scopedIds && (!Array.isArray(body.p_document_types) || !body.p_document_types.length)) || !Array.isArray(body.p_filters) || !Number.isInteger(body.p_limit) || body.p_limit < 1 || body.p_limit > 1000 || body.p_ids !== null && !Array.isArray(body.p_ids)) throw new Error('Invalid fixture read scope.');
         if (apiRoutes && delivery === 'lookup_failed' && body.p_document_types?.includes('referral')) throw Object.assign(new Error('Synthetic referral lookup outage.'), { status: 503, code: 'FIXTURE_LOOKUP_UNAVAILABLE' });
+        if (apiRoutes && ((failure === 'settings' && body.p_document_types?.includes('bookingSettings')) || (failure === 'limiter' && body.p_document_types?.includes('rateLimitBucket')))) throw Object.assign(new Error('Synthetic document read outage.'), { status: 503, code: 'FIXTURE_READ_UNAVAILABLE' });
         let rows = documents.filter(row => (!body.p_document_types || body.p_document_types.includes(row._type)) && (!body.p_ids || body.p_ids.includes(row._id)));
         for (const filter of body.p_filters) {
           if (!['eq', 'ieq', 'in'].includes(filter.op) || typeof filter.path !== 'string') throw new Error('Unsupported fixture filter.');
@@ -149,6 +167,25 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         call.status = 200; json(res, 200, []);
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_fetch_commerce_availability') {
         call.status = 200; json(res, 200, { bookings: [], holds: [], slotLocks: [] });
+      } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_commerce_control') {
+        if (failure === 'commerce_control') throw Object.assign(new Error('Synthetic commerce control outage.'), { status: 503, code: 'FIXTURE_CONTROL_UNAVAILABLE' });
+        call.status = 200;
+        json(res, 200, { primary_backend: 'supabase', generation: 0, starts_paused: false });
+      } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_consume_rate_limit') {
+        if (failure === 'limiter') throw Object.assign(new Error('Synthetic rate limiter outage.'), { status: 503, code: 'FIXTURE_LIMITER_UNAVAILABLE' });
+        const key = `${body.p_bucket_key_hmac}:${body.p_window_started_at}`;
+        const count = rateLimits.get(key) || 0;
+        rateLimits.set(key, count + 1);
+        call.status = 200;
+        json(res, 200, { allowed: count < body.p_max });
+      } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_apply_commerce_document_mutations') {
+        if (failure === 'hold_write') throw Object.assign(new Error('Synthetic hold write outage.'), { status: 503, code: 'FIXTURE_WRITE_UNAVAILABLE' });
+        const results = mutate(body.p_mutations);
+        call.status = 200;
+        json(res, 200, { results });
+      } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_record_commerce_metric') {
+        call.status = 200;
+        json(res, 200, {});
       } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_validate_referral_session') {
         if (session === 'unavailable') throw Object.assign(new Error('Synthetic account verification outage.'), { status: 503, code: 'FIXTURE_ACCOUNT_UNAVAILABLE' });
         if (session === 'network_error') {

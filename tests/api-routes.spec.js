@@ -75,6 +75,18 @@ test.describe("referral reset acknowledgement", () => {
     }
   });
 
+  test("keeps account-independent limiter outages at 503", async ({ baseURL }) => {
+    await apiFixture.configureApiFixture(baseURL, { reset: true, failure: "limiter" });
+    for (const email of ["unknown@fixture.invalid", apiFixture.referralEmail]) {
+      const response = await apiFixture.requestRoute(baseURL, "/api/ref/forgot", { data: { email } });
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ ok: false, error: "Request protection is temporarily unavailable." });
+    }
+    const state = await apiFixture.readApiFixture(baseURL);
+    expect(state.requests.some(call => call.body.p_document_types?.includes("referral"))).toBe(false);
+    expect(state.requests.some(call => call.path.endsWith("/roo_enqueue_referral_email_mutation"))).toBe(false);
+  });
+
   test.describe("forgot page", () => {
     test.use({ javaScriptEnabled: true });
     test("shows the API acknowledgement after requesting a reset", async ({ page, baseURL }, testInfo) => {
@@ -175,6 +187,15 @@ test.describe("referral session status", () => {
       expect(await response.json()).toEqual({ ok: true, authenticated: session === "valid" });
     });
   }
+
+  test("a revoked session version stays anonymous", async ({ baseURL }) => {
+    await apiFixture.configureApiFixture(baseURL, { reset: true });
+    const response = await apiFixture.requestRoute(baseURL, "/api/ref/sessionStatus", {
+      headers: { Cookie: `ref_session=${apiFixture.referralSessionCookie({ sv: 2 })}` },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, authenticated: false });
+  });
 
   test.describe("login page", () => {
     test.use({ javaScriptEnabled: true });

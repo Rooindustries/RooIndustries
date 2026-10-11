@@ -77,14 +77,14 @@ if (development) {
 }
 const fixture = await createToolingContentFixture({ origin: contentURL, artifact: process.env.TOOLING_CONTENT_ARTIFACT, apiRoutes });
 try {
-if (development) {
-  await execute([next, "dev", "--hostname", testHost, "--port", target.port]);
-} else {
-if (!fs.existsSync(path.join(dist, "BUILD_ID"))) {
-  await execute(["scripts/validate-runtime-env.js"]);
-  await execute([next, "build"]);
-  fs.writeFileSync(manifestPath, JSON.stringify({ version: 1, sourceHash, baseURL, contentURL, contentSha256: fixture.evidence.contentSha256 }));
-}
-await execute([next, "start", "--hostname", testHost, "--port", target.port]);
-}
+  if (development) {
+    await execute([next, "dev", "--hostname", testHost, "--port", target.port]);
+  } else {
+    if (!fs.existsSync(path.join(dist, "BUILD_ID"))) {
+      await execute(["scripts/validate-runtime-env.js"]);
+      await execute([next, "build"]);
+      fs.writeFileSync(manifestPath, JSON.stringify({ version: 1, sourceHash, baseURL, contentURL, contentSha256: fixture.evidence.contentSha256 }));
+    }
+    await execute([next, "start", "--hostname", testHost, "--port", target.port]);
+  }
 } finally { await fixture.close(); }
