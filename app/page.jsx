@@ -10,7 +10,6 @@ export default async function Page({ searchParams }) {
     <>
       <JsonLd data={seo.buildOrganizationJsonLd()} />
       <JsonLd data={seo.buildHomePageJsonLd(homePageData?.hero)} />
-      <JsonLd data={seo.buildOfferCatalogJsonLd()} />
       <RouteRenderer
         pathname="/"
         searchParams={searchParams}
