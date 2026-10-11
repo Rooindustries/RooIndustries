@@ -96,7 +96,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
-  let admitted = false;
+  let accountFound = false;
   try {
     const { email } = req.body || {};
 
@@ -123,7 +123,6 @@ export default async function handler(req, res) {
       return;
     }
 
-    admitted = true;
     resolveSupabaseRuntimePolicy();
 
 
@@ -135,6 +134,7 @@ export default async function handler(req, res) {
     if (!referral) {
       return acknowledgeReset(res, startedAt);
     }
+    accountFound = true;
 
     const { dispatch } = await enqueueSupabaseReset({
       initialReferral: referral,
@@ -201,7 +201,7 @@ export default async function handler(req, res) {
     } else {
       logSafeError("Referral forgot-password failed", err);
     }
-    if (admitted) return acknowledgeReset(res, startedAt);
+    if (accountFound) return acknowledgeReset(res, startedAt);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 }

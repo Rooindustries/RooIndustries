@@ -27,11 +27,13 @@ test.describe("referral reset acknowledgement", () => {
     test(`${delivery} is indistinguishable from an unknown email`, async ({ baseURL }, testInfo) => {
       await apiFixture.configureApiFixture(baseURL, { reset: true, delivery });
       const unknown = await apiFixture.requestRoute(baseURL, "/api/ref/forgot", { data: { email: "unknown@fixture.invalid" } });
+      const knownStartedAt = performance.now();
       const known = await apiFixture.requestRoute(baseURL, "/api/ref/forgot", { data: { email: ` ${apiFixture.referralEmail.toUpperCase()} ` } });
       const result = {
         unknown: { status: unknown.status, body: await unknown.text() },
         known: { status: known.status, body: await known.text() },
       };
+      const knownMilliseconds = performance.now() - knownStartedAt;
       if (!["token_conflict", "enqueue_failed"].includes(delivery)) {
         const checkpoint = delivery === "failed" ? "/roo_complete_referral_email_dispatch"
           : ["dead_letter", "requeue_failed"].includes(delivery) ? "/roo_requeue_referral_email_dispatch"
@@ -42,6 +44,12 @@ test.describe("referral reset acknowledgement", () => {
       await testInfo.attach("reset-responses", { body: JSON.stringify({ delivery, ...result, requests: state.requests }, null, 2), contentType: "application/json" });
       expect(result.unknown).toEqual({ status: 200, body: JSON.stringify(acknowledgement) });
       expect(result.known).toEqual(result.unknown);
+      if (delivery === "enqueue_failed") {
+        const artifact = testInfo.outputPath("reset-enqueue-failure.json");
+        await fs.writeFile(artifact, JSON.stringify({ ...result, knownMilliseconds }, null, 2));
+        await testInfo.attach("reset-enqueue-failure", { path: artifact, contentType: "application/json" });
+        expect(knownMilliseconds).toBeGreaterThanOrEqual(800);
+      }
       const enqueues = state.requests.filter(call => call.path.endsWith("/roo_enqueue_referral_email_mutation"));
       expect(enqueues).toHaveLength(delivery === "token_conflict" ? 3 : 1);
       expect(enqueues[0].body.p_recipient_email).toBe(apiFixture.referralEmail);
@@ -127,12 +135,12 @@ test.describe("referral reset acknowledgement", () => {
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
   });
 
-  test("acknowledges admitted lookup failures without revealing account state", async ({ baseURL }) => {
+  test("keeps account-independent lookup failures visible", async ({ baseURL }) => {
     await apiFixture.configureApiFixture(baseURL, { reset: true, delivery: "lookup_failed" });
     for (const email of ["unknown@fixture.invalid", apiFixture.referralEmail]) {
       const response = await apiFixture.requestRoute(baseURL, "/api/ref/forgot", { data: { email } });
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual(acknowledgement);
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ ok: false, error: "Server error" });
     }
   });
 
