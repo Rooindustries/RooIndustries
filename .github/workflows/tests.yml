@@ -33,10 +33,21 @@ jobs:
           NODE_OPTIONS: --import=${{ github.workspace }}/scripts/lib/test-target-safety.mjs
 
   playwright:
-    name: Playwright
+    name: Playwright ${{ matrix.suite.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - name: navigation
+            files: 'section-nav\.spec\.js'
+          - name: booking
+            files: 'booking-flow\.spec\.js'
+          - name: rest
+            files: '^(?!.*(section-nav|booking-flow)\.spec\.js$).*'
     env:
+      PW_FILES: ${{ matrix.suite.files }}
       ROO_TEST_HOST: 127.0.0.1
       BASE_URL: http://127.0.0.1:3211
       PW_PORT: "3211"
@@ -65,12 +76,14 @@ jobs:
             sleep 1
           done
           curl --fail --silent "$BASE_URL" > /dev/null
-          TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:agent-readiness
-          xvfb-run -a npx playwright test
+          if [ "${{ matrix.suite.name }}" = "rest" ]; then
+            TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:agent-readiness
+          fi
+          xvfb-run -a npx playwright test "$PW_FILES"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: test-results
+          name: test-results-${{ matrix.suite.name }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
