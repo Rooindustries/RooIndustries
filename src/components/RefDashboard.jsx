@@ -1,9 +1,11 @@
 import { removeBrowserStorage } from "../lib/browserStorage";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import packageContent from "../lib/packageContent";
 import ConnectedAccounts from "./ConnectedAccounts";
 import { useReferralAccount } from "../lib/useReferralAccount";
+import { useDialogFocus } from "../lib/useDialogFocus";
 
 const { normalizePackageText } = packageContent;
 
@@ -66,6 +68,9 @@ export default function RefDashboard() {
   const [showLogsModal, setShowLogsModal] = useState(false);
   const [closingLogsModal, setClosingLogsModal] = useState(false);
   const [logsModalAnimatingIn, setLogsModalAnimatingIn] = useState(false);
+  const logsDialogRef = useRef(null);
+  const logsCloseRef = useRef(null);
+  const logsCloseTimer = useRef(null);
 
   const [saving, setSaving] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -195,46 +200,39 @@ export default function RefDashboard() {
   );
 
   useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    if (showLogsModal) {
-      document.body.style.overflow = "hidden";
-      document.documentElement.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = previousOverflow || "";
-      document.documentElement.style.overflow = previousOverflow || "";
-    }
+    if (!showLogsModal) return undefined;
+    const bodyOverflow = document.body.style.overflow;
+    const htmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
     return () => {
-      document.body.style.overflow = previousOverflow || "";
-      document.documentElement.style.overflow = previousOverflow || "";
+      clearTimeout(logsCloseTimer.current);
+      document.body.style.overflow = bodyOverflow;
+      document.documentElement.style.overflow = htmlOverflow;
     };
   }, [showLogsModal]);
 
   const closeLogsModal = useCallback(() => {
     setClosingLogsModal(true);
-    setTimeout(() => {
+    clearTimeout(logsCloseTimer.current);
+    logsCloseTimer.current = setTimeout(() => {
       setShowLogsModal(false);
       setClosingLogsModal(false);
     }, 200);
   }, []);
 
+  useDialogFocus({
+    open: showLogsModal,
+    dialogRef: logsDialogRef,
+    initialFocusRef: logsCloseRef,
+    onClose: closeLogsModal,
+  });
+
   useEffect(() => {
+    setLogsModalAnimatingIn(false);
     if (!showLogsModal) return undefined;
-
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape") closeLogsModal();
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [closeLogsModal, showLogsModal]);
-
-  useEffect(() => {
-    if (showLogsModal) {
-      setLogsModalAnimatingIn(false);
-      requestAnimationFrame(() => setLogsModalAnimatingIn(true));
-    } else {
-      setLogsModalAnimatingIn(false);
-    }
+    const frame = requestAnimationFrame(() => setLogsModalAnimatingIn(true));
+    return () => cancelAnimationFrame(frame);
   }, [showLogsModal]);
 
   async function logout() {
@@ -713,7 +711,7 @@ export default function RefDashboard() {
       )}
 
 
-      {showLogsModal && (
+      {showLogsModal && createPortal(
         <div
           className={`fixed inset-0 z-[120] bg-black/60 backdrop-blur-lg flex items-center justify-center px-4 sm:px-6 transition-opacity duration-200 ${
             closingLogsModal
@@ -725,10 +723,12 @@ export default function RefDashboard() {
           onClick={closeLogsModal}
         >
           <div
+            ref={logsDialogRef}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-labelledby="payment-logs-title"
-            className={`relative w-full max-w-5xl max-h-[70vh] sm:max-h-[50vh] bg-panel border border-info-border rounded-2xl shadow-glow-strong p-6 transition-all duration-500 ease-in-out ${
+            className={`relative w-full max-w-5xl max-h-[85vh] overflow-y-auto bg-panel border border-info-border rounded-2xl shadow-glow-strong p-6 transition-all duration-500 ease-in-out ${
               closingLogsModal
                 ? "opacity-0 scale-95"
                 : logsModalAnimatingIn
@@ -738,6 +738,7 @@ export default function RefDashboard() {
             onClick={(e) => e.stopPropagation()}
           >
             <button
+              ref={logsCloseRef}
               onClick={closeLogsModal}
               className="absolute right-3 top-3 text-info-text hover:text-white transition text-2xl"
               aria-label="Close payment logs"
@@ -846,7 +847,8 @@ export default function RefDashboard() {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
       </section>
     </>
