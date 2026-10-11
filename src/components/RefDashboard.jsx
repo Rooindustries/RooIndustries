@@ -104,14 +104,8 @@ export default function RefDashboard() {
       }
     };
     setMax(creator.maxCommissionPercent ?? 15);
-    const isUnlocked = (creator.successfulReferrals ?? 0) >= 5 || creator.bypassUnlock === true;
-    if (!isUnlocked) {
-      setCommission(10);
-      setDiscount(0);
-    } else {
-      setCommission(creator.currentCommissionPercent ?? 10);
-      setDiscount(creator.currentDiscountPercent ?? 0);
-    }
+    setCommission(creator.currentCommissionPercent ?? 10);
+    setDiscount(creator.currentDiscountPercent ?? 0);
     loadPayouts();
     return () => { active = false; };
   }, [creator]);
@@ -473,6 +467,7 @@ export default function RefDashboard() {
           <div className="flex items-center justify-between bg-surface-input p-3 rounded-xl border border-line-input">
             <button
               onClick={() => adjustCommission(-1)}
+              disabled={!unlocked}
               className="px-4 py-2 bg-surface-hover-accent hover:bg-info-soft rounded-xl text-xl font-bold transition"
             >
               –
@@ -480,6 +475,7 @@ export default function RefDashboard() {
             <span className="text-xl font-bold">{commission}%</span>
             <button
               onClick={() => adjustCommission(1)}
+              disabled={!unlocked}
               className="px-4 py-2 bg-surface-hover-accent hover:bg-info-soft rounded-xl text-xl font-bold transition"
             >
               +
@@ -497,6 +493,7 @@ export default function RefDashboard() {
           <div className="flex items-center justify-between bg-surface-input p-3 rounded-xl border border-line-input">
             <button
               onClick={() => adjustDiscount(-1)}
+              disabled={!unlocked}
               className="px-4 py-2 bg-surface-hover-accent hover:bg-info-soft rounded-xl text-xl font-bold transition"
             >
               –
@@ -504,6 +501,7 @@ export default function RefDashboard() {
             <span className="text-xl font-bold">{discount}%</span>
             <button
               onClick={() => adjustDiscount(1)}
+              disabled={!unlocked}
               className="px-4 py-2 bg-surface-hover-accent hover:bg-info-soft rounded-xl text-xl font-bold transition"
             >
               +
