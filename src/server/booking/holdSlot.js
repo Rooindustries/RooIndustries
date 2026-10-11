@@ -231,6 +231,12 @@ export default async function handler(req, res) {
         message: "This time is not available for the selected package.",
       });
     }
+    if (Date.parse(normalizedStartTimeUTC) <= Date.now()) {
+      return res.status(400).json({
+        ok: false,
+        message: "This time has already started.",
+      });
+    }
 
     const holdId = buildSlotHoldId(normalizedStartTimeUTC);
     const slotLockId = buildBookingSlotId(normalizedStartTimeUTC);
@@ -304,8 +310,6 @@ export default async function handler(req, res) {
       });
     }
 
-    const now = Date.now();
-    const expiresAt = new Date(now + HOLD_DURATION_MS).toISOString();
     const existingHold = await client.fetch(`*[_type == "slotHold" && _id == $id][0]`,{id:holdId});
 
     // The booking can be reactivated after the first availability read. Recheck
@@ -329,6 +333,15 @@ export default async function handler(req, res) {
         message: "This slot is already booked.",
       });
     }
+
+    const now = Date.now();
+    if (Date.parse(normalizedStartTimeUTC) <= now) {
+      return res.status(400).json({
+        ok: false,
+        message: "This time has already started.",
+      });
+    }
+    const expiresAt = new Date(now + HOLD_DURATION_MS).toISOString();
 
     if (isHoldActive(existingHold, now)) {
       if (

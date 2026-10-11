@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
 import { createToolingContentFixture } from "../tests/fixtures/tooling-content.mjs";
+import { apiRouteSecrets } from "../tests/fixtures/api-routes.mjs";
 
 refuseEnvFiles();
 const dist = validateDistDir(process.env.NEXT_DIST_DIR, { isolated: true });
@@ -17,6 +18,7 @@ const contentPort = Number(process.env.TOOLING_CONTENT_PORT || Number(target.por
 if (!Number.isInteger(contentPort) || contentPort < 1024 || contentPort > 65535 || contentPort === Number(target.port)) throw new Error("Invalid local content fixture port.");
 const contentURL = localOrigin(`http://${testHost}:${contentPort}`);
 installNetworkGuard([baseURL, contentURL]);
+const apiRoutes = process.env.TOOLING_API_ROUTES === "1";
 const env = {
   PATH: process.env.PATH,
   HOME: process.env.HOME,
@@ -33,7 +35,14 @@ const env = {
   SUPABASE_SECRET_KEY: "fixture-only-tooling-server-secret-key",
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "fixture-only-tooling-browser-publishable-key",
   ALLOW_LIVE_PAYMENTS: "0",
-  SALES_PREVIEW_READ_ONLY: "1",
+  SALES_PREVIEW_READ_ONLY: apiRoutes ? "0" : "1",
+  ...(apiRoutes ? {
+    ...apiRouteSecrets,
+    RESEND_API_KEY: "fixture-only-referral-email-key",
+    RESEND_BASE_URL: contentURL,
+    FROM_EMAIL: "reset@fixture.invalid",
+    NEXT_PUBLIC_BASE_URL: baseURL,
+  } : {}),
   NEXT_TELEMETRY_DISABLED: "1",
   BASE_URL: baseURL,
   ROO_TEST_HOST: testHost,
@@ -42,6 +51,7 @@ const env = {
   NODE_OPTIONS: `--import=${fileURLToPath(new URL("./lib/test-target-safety.mjs", import.meta.url))}`,
 };
 const next = path.resolve("node_modules/next/dist/bin/next");
+const development = process.env.TOOLING_DEV_SERVER === "1";
 const fingerprint = createHash("sha256");
 const tracked = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean);
 for (const file of tracked.filter(file => /^(?:src\/|app\/|scripts\/|tests\/fixtures\/|package(?:-lock)?\.json$|next\.config\.mjs$|(?:tailwind|postcss)\.config)/.test(file)).sort()) {
@@ -54,27 +64,36 @@ fingerprint.update(fs.readFileSync(fileURLToPath(new URL("./lib/test-target-safe
 const sourceHash = fingerprint.digest("hex");
 const manifestPath = path.join(dist, "tooling-build.json");
 let active;
+let stopping = false;
 const execute = args => new Promise((resolve, reject) => {
   active = spawn(process.execPath, args, { env, stdio: "inherit" });
   active.once("error", reject);
   active.once("exit", (code, signal) => code === 0 ? resolve() : reject(new Error(`Test server exited ${signal || code}.`)));
 });
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => {
+  stopping = true;
   active?.kill(signal);
-  process.exitCode = 1;
 });
-if (fs.existsSync(path.join(dist, "BUILD_ID"))) {
+if (development) {
+  if (fs.existsSync(path.join(dist, "BUILD_ID"))) throw new Error("Development server cannot reuse a production build.");
+} else if (fs.existsSync(path.join(dist, "BUILD_ID"))) {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   if (manifest.version !== 1 || manifest.sourceHash !== sourceHash || manifest.baseURL !== baseURL || manifest.contentURL !== contentURL) throw new Error("Isolated build ownership or source fingerprint differs; choose a fresh NEXT_DIST_DIR.");
 } else {
   if (fs.existsSync(dist)) throw new Error("Incomplete isolated build exists; choose a fresh NEXT_DIST_DIR.");
 }
-const fixture = await createToolingContentFixture({ origin: contentURL, artifact: process.env.TOOLING_CONTENT_ARTIFACT });
+const fixture = await createToolingContentFixture({ origin: contentURL, artifact: process.env.TOOLING_CONTENT_ARTIFACT, apiRoutes });
 try {
-if (!fs.existsSync(path.join(dist, "BUILD_ID"))) {
-  await execute(["scripts/validate-runtime-env.js"]);
-  await execute([next, "build"]);
-  fs.writeFileSync(manifestPath, JSON.stringify({ version: 1, sourceHash, baseURL, contentURL, contentSha256: fixture.evidence.contentSha256 }));
-}
-await execute([next, "start", "--hostname", testHost, "--port", target.port]);
+  if (development) {
+    await execute([next, "dev", "--hostname", testHost, "--port", target.port]);
+  } else {
+    if (!fs.existsSync(path.join(dist, "BUILD_ID"))) {
+      await execute(["scripts/validate-runtime-env.js"]);
+      await execute([next, "build"]);
+      fs.writeFileSync(manifestPath, JSON.stringify({ version: 1, sourceHash, baseURL, contentURL, contentSha256: fixture.evidence.contentSha256 }));
+    }
+    await execute([next, "start", "--hostname", testHost, "--port", target.port]);
+  }
+} catch (error) {
+  if (!stopping) throw error;
 } finally { await fixture.close(); }
