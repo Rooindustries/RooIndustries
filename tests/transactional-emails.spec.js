@@ -1,0 +1,148 @@
+const { test, expect } = require("@playwright/test");
+const { execFileSync } = require("node:child_process");
+const fs = require("node:fs");
+const check = expect.configure({ soft: true });
+let capture;
+
+test.beforeAll(() => {
+  capture = JSON.parse(execFileSync(process.execPath, ["tests/fixtures/transactional-emails.mjs"], {
+    encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_OPTIONS: "--no-experimental-webstorage" },
+  }));
+});
+test.beforeEach(async ({ context, baseURL }) => {
+  const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+  await guardBrowserContext(context, [baseURL]);
+});
+const escapeAttribute = value => value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
+
+for (const [name, viewport] of [["desktop", { width: 1440, height: 900 }], ["mobile", { width: 390, height: 844 }]]) {
+  test(`transactional email details, safety and layout on ${name}`, async ({ page, baseURL }, testInfo) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/robots.txt");
+    const frames = capture.captured.map((item, index) => {
+      const html = item.payload.html.replaceAll("https://www.rooindustries.com/embed_logo.png", `${baseURL}/embed_logo.png`);
+      return `<iframe id="email-${index}" style="display:block;width:${viewport.width}px;height:1200px;border:0" srcdoc="${escapeAttribute(html)}"></iframe>`;
+    }).join("");
+    await page.setContent(`<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src 'self'; img-src 'self'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'"><body style="margin:0">${frames}</body>`);
+    const rendered = await page.locator("iframe").evaluateAll(frames => frames.map(frame => {
+      const doc = frame.contentDocument;
+      const fields = Object.fromEntries(Array.from(doc.querySelectorAll("tr")).flatMap(row => {
+        const cells = row.querySelectorAll(":scope > td");
+        return cells.length === 2 ? [[cells[0].textContent.trim(), cells[1].textContent.trim()]] : [];
+      }));
+      frame.style.height = `${doc.documentElement.scrollHeight}px`;
+      return { fields, text: doc.body.textContent, scrollWidth: doc.documentElement.scrollWidth,
+        unsafeNodes: doc.querySelectorAll("script, img[src=x]").length,
+        imagesWithoutAlt: doc.querySelectorAll("img:not([alt])").length };
+    }));
+    const messages = caseName => capture.captured.flatMap((item, index) => item.case === caseName ? [{ ...item, index, ...rendered[index] }] : []);
+    const clocks = [
+      ["stale", "Sunday, March 8, 2026", "1:30 AM", "GMT-05:00 (America/New_York)", "12:00 PM"],
+      ["spring-after", "Sunday, March 8, 2026", "3:30 AM", "GMT-04:00 (America/New_York)", "1:00 PM"],
+      ["fold-first", "Sunday, November 1, 2026", "1:30 AM", "GMT-04:00 (America/New_York)", "11:00 AM"],
+      ["fold-second", "Sunday, November 1, 2026", "1:30 AM", "GMT-05:00 (America/New_York)", "12:00 PM"],
+      ["london-first", "Sunday, October 25, 2026", "1:30 AM", "GMT+01:00 (Europe/London)", "6:00 AM"],
+      ["london-second", "Sunday, October 25, 2026", "1:30 AM", "GMT (Europe/London)", "7:00 AM"],
+      ["sydney-before", "Sunday, October 4, 2026", "1:30 AM", "GMT+10:00 (Australia/Sydney)", "9:00 PM"],
+      ["sydney-after", "Sunday, October 4, 2026", "3:30 AM", "GMT+11:00 (Australia/Sydney)", "10:00 PM"],
+      ["midnight", "Friday, January 1, 2027", "12:00 AM", "GMT+05:30 (Asia/Kolkata)", "12:00 AM"],
+      ["missing-zone", "Sunday, November 1, 2026", "5:30 AM", "UTC", "11:00 AM"],
+      ["invalid-zone", "Sunday, November 1, 2026", "5:30 AM", "UTC", "11:00 AM"],
+    ];
+    for (const [caseName, date, time, zone, hostTime] of clocks) {
+      for (const prefix of ["clock", "requested"]) {
+        for (const item of messages(`${prefix}-${caseName}`)) {
+          const { fields } = item;
+          const customer = item.payload.to === "customer-a@fixture.invalid";
+          const requested = prefix === "requested";
+          check(fields[requested ? "Requested Date" : customer ? "Date" : "Client Date"], item.case).toBe(date);
+          check(fields[requested ? "Requested Time" : customer ? "Time" : "Client Time"], item.case).toBe(time);
+          check(fields[requested || customer ? "Time Zone" : "Client Time Zone"], item.case).toBe(zone);
+          if (!customer) {
+            const hostLabel = requested ? "Host " : "";
+            check(fields[`${hostLabel}Time`], item.case).toBe(hostTime);
+            check(fields[`${hostLabel}Time Zone`], item.case).toBe("GMT+05:30 (Asia/Kolkata)");
+            check(item.payload.subject, item.case).toContain(`(${fields[`${hostLabel}Date`]} ${fields[`${hostLabel}Time`]})`);
+          }
+        }
+      }
+    }
+    for (const caseName of ["missing-instant", "requested-missing-instant"]) {
+      for (const item of messages(caseName)) {
+        check(item.text, caseName).toContain("Unavailable");
+        check(item.text, caseName).not.toContain("stale");
+      }
+    }
+    for (const item of [...messages("requested-original-only"), ...messages("requested-different-instant")]) {
+      check(item.fields["Requested Time"], item.case).toBe("1:30 AM");
+    }
+    for (const caseName of ["normal", "long-fields", "recovery-usd"]) {
+      for (const item of messages(caseName)) {
+        check(item.scrollWidth, `${caseName}: ${item.payload.to}`).toBeLessThanOrEqual(viewport.width);
+        await page.locator(`#email-${item.index}`).screenshot({ path: testInfo.outputPath(`${caseName}-${item.payload.to.startsWith("configured") ? "owner" : "customer"}.png`) });
+      }
+    }
+    for (const caseName of ["net-missing", "net-null", "net-empty", "net-nan", "net-infinity", "net-invalid"]) {
+      for (const item of messages(caseName)) {
+        check(item.fields.Price, caseName).toBe("$84.99");
+        check(item.fields.Discount, caseName).toBeUndefined();
+        check(item.fields["Coupon Code"], caseName).toBe("SAVE10");
+      }
+    }
+    for (const item of messages("free")) check(item.fields.Price).toBe("$0.00 (was $84.99)");
+    for (const item of messages("missing-title")) check(item.payload.subject).not.toMatch(/\b(null|undefined)\b/);
+    for (const [currency, symbol] of [["usd", "$"], ["eur", "€"], ["gbp", "£"]]) {
+      for (const item of messages(`money-${currency}`)) {
+        check(item.fields.Price).toBe(`${symbol}76.49 (was ${symbol}84.99)`);
+        check(item.fields["Coupon Code"]).toBe(`SAVE10 (10% - ${symbol}8.50)`);
+        if (item.payload.to.startsWith("configured")) check(item.fields.Discount).toBe(`10% (${symbol}8.50)`);
+      }
+      for (const item of messages(`fixed-${currency}`)) check(item.fields["Coupon Code"]).toBe(`SAVE15 (${symbol}15.00 off - ${symbol}15.00)`);
+      for (const item of messages(`recovery-${currency}`)) check(item.fields["Paid Amount"]).toBe(`${symbol}84.99`);
+    }
+    for (const kind of ["registration_verification", "password_reset"]) {
+      for (const [caseName, wording] of [["ten-minutes", "expires in 10 minutes"], ["one-hour", "expires in 60 minutes"], ["one-minute", "expires in 1 minute"], ["seconds", "expires in less than a minute"], ["expired", "has expired"], ["missing", "expiry is unavailable"]]) {
+        check(messages(`${kind}-${caseName}`)[0].text, `${kind}-${caseName}`).toContain(wording);
+      }
+    }
+    check(messages("normal")[0].text).toContain("using the button below");
+    for (const caseName of ["retry-booking", "retry-recovery"]) {
+      const input = capture.inputs.find(item => item.case === caseName);
+      const recovery = caseName === "retry-recovery";
+      const prefix = recovery ? "recoveryNotification" : "emailDispatch";
+      check(input.after[`${prefix}Status`], caseName).toBe("sent");
+      check(input.after[`${prefix}NextAttemptAt`], caseName).toBe("");
+      check(input.attempts, caseName).toBe(2);
+      for (const recipient of ["Client", "Owner"]) {
+        const recipientPrefix = recovery ? `recovery${recipient}` : `emailDispatch${recipient}`;
+        check(input.after[`${recipientPrefix}FirstAttemptAt`]).toBe(input.booking[`${recipientPrefix}FirstAttemptAt`]);
+        check(input.after[`${recipientPrefix}ProviderId`]).toBe(input.booking[`${recipientPrefix}ProviderId`]);
+      }
+      check(messages(caseName).slice(0, 2).map(item => item.options.idempotencyKey)).toEqual([
+        `booking-${input.booking._id}-${recovery ? "reschedule-" : ""}client`,
+        `booking-${input.booking._id}-${recovery ? "reschedule-" : ""}owner`,
+      ]);
+    }
+    for (const kind of ["registration_verification", "password_reset"]) {
+      const input = capture.inputs.find(item => item.case === `${kind}-retry`);
+      check(input.result).toMatchObject({ sent: 1, retry: 0 });
+      check(input.completion.p_success).toBe(true);
+      check(messages(input.case)[0].options.idempotencyKey).toBe(input.dispatch.idempotency_key);
+    }
+    for (const caseName of ["concurrent-booking", "concurrent-recovery"]) {
+      const input = capture.inputs.find(item => item.case === caseName);
+      check(input.after[caseName === "concurrent-booking" ? "emailDispatchStatus" : "recoveryNotificationStatus"]).not.toBe("sent");
+    }
+    expect(capture.safety).toEqual({ resend: "module replaced before import", externalRequests: 0 });
+    for (const [index, item] of capture.captured.entries()) {
+      expect(item.payload.subject).toBeTruthy();
+      check(rendered[index].unsafeNodes, item.case).toBe(0);
+      check(rendered[index].imagesWithoutAlt, item.case).toBe(0);
+      if (item.case === "escaping") check(rendered[index].text).toContain("धन्यवाद 🦘");
+      if (!Array.isArray(item.payload.to)) check(item.payload.html).not.toContain("#token=");
+    }
+    fs.writeFileSync(testInfo.outputPath("captures.json"), JSON.stringify(capture, null, 2));
+    fs.writeFileSync(testInfo.outputPath("rendered.json"), JSON.stringify(rendered, null, 2));
+  });
+}
