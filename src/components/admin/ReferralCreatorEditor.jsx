@@ -198,7 +198,7 @@ export default function ReferralCreatorEditor() {
     ) {
       return;
     }
-    if (draftDirtyRef.current && !clearReferralDrafts(selectedIdRef.current)) {
+    if (draftDirtyRef.current && !clearReferralDrafts(selectedIdRef.current, draftBaseVersion.current)) {
       setError("The draft could not be discarded in this browser. Keep this page open until you save it.");
       return;
     }
@@ -246,7 +246,7 @@ export default function ReferralCreatorEditor() {
   };
 
   const discardDraft = () => {
-    if (!selected || !clearReferralDrafts(selected.creator_id)) {
+    if (!selected || !clearReferralDrafts(selected.creator_id, draftConflict?.baseVersion ?? draftBaseVersion.current)) {
       setError("The draft could not be discarded in this browser.");
       return;
     }
@@ -302,13 +302,14 @@ export default function ReferralCreatorEditor() {
         latestHistoryRequest.current === selectionRequestId &&
         latestSaveRequest.current === saveRequestId;
       if (!selectionStillCurrent) return;
+      const cleared = clearReferralDrafts(creatorId, expectedVersion);
       draftBaseVersion.current = updated.terms_version;
       if (draftVersion.current === submittedDraftVersion) {
         replaceDraft(createDraft(updated));
-        if (!clearReferralDrafts(creatorId)) setError("Saved in Supabase, but the local draft could not be cleared in this browser.");
       } else {
         persistDraft();
       }
+      if (!cleared) setError("Saved in Supabase, but the local draft could not be cleared in this browser.");
       pendingOperation.current = "";
       setNotice("Saved in Supabase.");
       try {

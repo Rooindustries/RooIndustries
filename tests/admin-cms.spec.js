@@ -576,3 +576,42 @@ test("#10 signout deadline preserves the server session and permits an explicit 
   await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
   expect(calls).toBe(2);
 });
+
+test("referral drafts in two tabs preserve both terms versions", async ({ page, context, request }, testInfo) => {
+  const creator = (await creators(request))[4];
+  await openReferrals(page); await selectCreator(page, creator);
+  const response = await request.patch("/api/admin/referral-creators", {
+    headers: { "x-admin-key": ADMIN_KEY },
+    data: { creatorId: creator.creator_id, expectedVersion: creator.terms_version, operationId: require("node:crypto").randomUUID(), totalPercent: "15", commissionPercent: "10", discountPercent: "5", bypassUnlock: false, reason: "A newer tab advances the terms version" },
+  });
+  expect(response.ok(), await response.text()).toBe(true);
+  const newer = (await response.json()).creator;
+  const other = await context.newPage();
+  await openReferrals(other); await selectCreator(other, creator);
+  await other.getByLabel("Reason for change").fill("Newer terms version draft");
+  const prefix = `roo-referral-draft:v1:${encodeURIComponent(creator.creator_id)}:`;
+  const oldKey = `${prefix}${creator.terms_version}`;
+  const newKey = `${prefix}${newer.terms_version}`;
+  await page.evaluate(prefix => localStorage.setItem(`${prefix}corrupt`, "{broken"), prefix);
+  await page.getByLabel("Reason for change").fill("Older tab saves last");
+  const stored = await page.evaluate(prefix => Object.keys(localStorage).filter(key => key.startsWith(prefix)).sort(), prefix);
+  expect(stored).toEqual([oldKey, newKey].sort());
+  other.on("dialog", dialog => dialog.accept());
+  await other.reload();
+  await other.getByLabel("Admin key").fill(ADMIN_KEY);
+  await other.getByRole("button", { name: "Open editor", exact: true }).click();
+  await selectCreator(other, creator);
+  await expect(other.getByLabel("Reason for change")).toHaveValue("Newer terms version draft");
+  await other.getByRole("button", { name: "Discard draft", exact: true }).click();
+  expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).draft.reason, oldKey)).toBe("Older tab saves last");
+  expect(await page.evaluate(key => localStorage.getItem(key), newKey)).toBeNull();
+  await other.getByLabel("Reason for change").fill("Save only the newer terms draft");
+  await other.getByRole("button", { name: "Save creator settings", exact: true }).click();
+  await expect(other.getByRole("status")).toContainText("Saved in Supabase");
+  expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).draft.reason, oldKey)).toBe("Older tab saves last");
+  expect(await page.evaluate(key => localStorage.getItem(key), newKey)).toBeNull();
+  await page.getByRole("button", { name: "Discard draft", exact: true }).click();
+  expect(await page.evaluate(prefix => Object.keys(localStorage).filter(key => key.startsWith(prefix)), prefix)).toEqual([]);
+  await evidence(other, testInfo, { creatorId: creator.creator_id, oldVersion: creator.terms_version, newVersion: newer.terms_version, stored });
+  await other.close();
+});
