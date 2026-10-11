@@ -63,8 +63,8 @@ export const createAdminApi = () => {
       request(`/api/admin/content/documents?type=${encodeURIComponent(type)}`, options),
     getDocument: (id, options) =>
       request(`/api/admin/content/documents/${encodeURIComponent(id)}`, options),
-    getCreatedDocument: (type, createIntentId) =>
-      request(`/api/admin/content/publish?${new URLSearchParams({ type, createIntentId })}`),
+    getCreateStatus: (type, createIntentId, document) =>
+      request("/api/admin/content/publish/status", { method: "POST", body: { operation: "create", type, createIntentId, document } }),
     listRevisions: (id, options) =>
       request(`/api/admin/content/documents/${encodeURIComponent(id)}/revisions`, options),
     getRevision: (id, revisionId, options) =>

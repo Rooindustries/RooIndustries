@@ -69,9 +69,15 @@ const sameContent = (expected, actual, fields = [], root = false) => {
   return expected === actual;
 };
 
+export const hasCommittedCreateReceipt = (receipt, session) => receipt?.committed === true &&
+  typeof session.createIntentId === "string" && receipt.createIntentId === session.createIntentId.toLowerCase() && receipt.type === session.type &&
+  typeof receipt.documentId === "string" && receipt.documentId.trim().length > 0 &&
+  typeof receipt.revision === "string" && receipt.revision.trim().length > 0;
+
 export const publishedContentMatches = (data, session, submitted, schema, removedPaths = session.documentId ? removedContentPaths(session.baseline, submitted, schema) : []) => {
   const document = data?.document;
   const id = session.documentId || data?.documentId;
+  if (!session.documentId && (!hasCommittedCreateReceipt(data?.receipt, session) || data.receipt.documentId !== id || data.receipt.revision !== data.revision)) return false;
   return typeof id === "string" && document?._id === id && document._type === session.type &&
     typeof data.revision === "string" && data.revision.length > 0 && data.revision === document._rev &&
     data.revision !== session.revision && sameContent(JSON.parse(JSON.stringify(submitted)), document, schema.fields, true) &&
