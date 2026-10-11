@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { Resend } from "resend";
 import { buildReferralVerificationEmailHtml } from "../../email/referralVerificationEmail.js";
 import { buildResetEmailHtml } from "../../email/referralResetEmail.js";
+import { wasPreviouslyAccepted } from "../../email/resendOutcome.js";
 import { createSupabaseAdminClient } from "../../supabase/adminClient.js";
 import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
 
@@ -227,7 +228,7 @@ const sendClaimedDispatch = async ({
       ),
       20_000
     );
-    if (result?.error) throw result.error;
+    if (result?.error && !wasPreviouslyAccepted(result)) throw result.error;
     await completeDispatch({
       adminClient,
       dispatch,
@@ -365,6 +366,6 @@ export const sendReferralEmailDirect = async ({
     },
     { idempotencyKey }
   );
-  if (result?.error) throw result.error;
+  if (result?.error && !wasPreviouslyAccepted(result)) throw result.error;
   return { idempotencyKey, providerMessageId: String(result?.data?.id || "") };
 };

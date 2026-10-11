@@ -3,6 +3,7 @@ import { Resend } from "resend";
 import crypto from "crypto";
 import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
 import { formatAppointmentTime } from "../../email/appointmentTime.js";
+import { wasPreviouslyAccepted } from "../../email/resendOutcome.js";
 import {
   claimEmailDispatchPair,
   completeEmailDispatch,
@@ -59,6 +60,7 @@ const sendEmailAtLease = async ({ client, booking, leaseId, recovery = false, re
   }
   await client.patch(current._id).ifRevisionId(current._rev).set({ [firstAttemptField]: firstAttemptAt }).commit();
   const result = await resend.emails.send(message, options);
+  if (wasPreviouslyAccepted(result)) return { data: result.data, error: null };
   if (!result.error && !String(result.data?.id || "").trim()) {
     return { data: null, error: { code: "email_provider_receipt_missing" } };
   }
