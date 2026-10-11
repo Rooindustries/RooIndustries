@@ -59,9 +59,11 @@ export default function RefDashboard() {
   const location = useLocation();
 
   const { referral: creator, loading, error: accountError, retry } = useReferralAccount();
-  const [commission, setCommission] = useState(0);
-  const [discount, setDiscount] = useState(0);
-  const [max, setMax] = useState(0);
+  const [editedCommission, setCommission] = useState(null);
+  const [editedDiscount, setDiscount] = useState(null);
+  const commission = editedCommission ?? creator?.currentCommissionPercent ?? 10;
+  const discount = editedDiscount ?? creator?.currentDiscountPercent ?? 0;
+  const max = creator?.maxCommissionPercent ?? 15;
   const [payout, setPayout] = useState(null);
   const [payoutLoading, setPayoutLoading] = useState(true);
   const [payoutError, setPayoutError] = useState(null);
@@ -110,9 +112,6 @@ export default function RefDashboard() {
         if (active) setPayoutLoading(false);
       }
     };
-    setMax(creator.maxCommissionPercent ?? 15);
-    setCommission(creator.currentCommissionPercent ?? 10);
-    setDiscount(creator.currentDiscountPercent ?? 0);
     loadPayouts();
     return () => { active = false; };
   }, [creator]);
