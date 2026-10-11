@@ -700,6 +700,8 @@ export default function RefDashboard() {
 
       {toast && (
         <div
+          role={toast.type === "error" ? "alert" : "status"}
+          aria-atomic="true"
           className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl text-white text-sm font-semibold shadow-lg transition-all ${
             toast.type === "success"
               ? "bg-success shadow-success-soft"
