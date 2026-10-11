@@ -46,7 +46,7 @@ const contentSecurityPolicy = [
   "font-src 'self' data: https://js.intercomcdn.com",
   `img-src 'self' data: blob: ${supabaseAssetOrigin} https://razorpay.com https://*.razorpay.com https://www.paypalobjects.com https://*.paypal.com https://static.intercomassets.com https://*.intercomcdn.com https://static-cdn.jtvnw.net https://d15f34w2p8l1cc.cloudfront.net https://overfast-api.tekrop.fr`,
   `media-src 'self' blob: ${supabaseAssetOrigin} https://js.intercomcdn.com`,
-  `connect-src 'self' ${supabaseAuthOrigin} https://scripts.seorce.com https://fixes.seorce.com https://www.google-analytics.com https://www.paypal.com https://api.razorpay.com https://checkout.razorpay.com https://checkout-static-next.razorpay.com https://lumberjack.razorpay.com https://api-iam.intercom.io https://api-iam.eu.intercom.io wss://nexus-websocket-a.intercom.io`,
+  `connect-src 'self' ${supabaseAuthOrigin} https://formspree.io https://scripts.seorce.com https://fixes.seorce.com https://www.google-analytics.com https://www.paypal.com https://api.razorpay.com https://checkout.razorpay.com https://checkout-static-next.razorpay.com https://lumberjack.razorpay.com https://api-iam.intercom.io https://api-iam.eu.intercom.io wss://nexus-websocket-a.intercom.io`,
   "frame-src https://www.paypal.com https://checkout.razorpay.com https://api.razorpay.com",
   "worker-src 'self' blob:",
   ...(isProduction ? ["upgrade-insecure-requests"] : []),
