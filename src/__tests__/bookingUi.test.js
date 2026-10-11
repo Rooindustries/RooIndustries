@@ -650,7 +650,47 @@ describe("booking calendar UI", () => {
     expect(abortTimeoutSpy).toHaveBeenNthCalledWith(2, 8_000);
   });
 
-  test("keeps the original hold after release times out and its replacement returns 409", async () => {
+  test("clears a confirmed release before a replacement returns 409", async () => {
+    seedBookingSession({ step: 2 });
+    const originalHold = JSON.parse(sessionStorage.getItem("my_slot_hold"));
+    let storedAtReplacement;
+    installDefaultFetch({
+      settings: { dateSlots: [{ date: "2099-01-05", times: ["10:00", "11:00"] }] },
+    });
+    const defaultFetch = global.fetch.getMockImplementation();
+    global.fetch.mockImplementation(async (url, options = {}) => {
+      if (url === "/api/releaseHold") return { ok: true };
+      if (url === "/api/holdSlot") {
+        storedAtReplacement = sessionStorage.getItem("my_slot_hold");
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({ ok: false, message: "The replacement slot is already held." }),
+        };
+      }
+      return defaultFetch(url, options);
+    });
+    setBookingLocation();
+    render(<BookingForm />);
+    await userEvent.click(await screen.findByRole("button", { name: /^back$/i }));
+    await userEvent.click(await screen.findByRole("button", {
+      name: formatLocalTime(getUtcFromHostLocal(2099, 0, 5, 11), "America/Los_Angeles"),
+    }));
+    await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
+
+    expect(await screen.findByText("The replacement slot is already held.")).toBeInTheDocument();
+    expect(storedAtReplacement).toBeNull();
+    expect(sessionStorage.getItem("my_slot_hold")).toBeNull();
+    expect(screen.queryByLabelText("Booking email")).not.toBeInTheDocument();
+    const holdCalls = global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot");
+    expect(holdCalls).toHaveLength(1);
+    expect(JSON.parse(holdCalls[0][1].body)).toMatchObject({
+      previousHoldId: originalHold.holdId,
+      previousHoldToken: originalHold.holdToken,
+    });
+  });
+
+  test.each(["active", "released", "taken"])("revalidates the %s original slot after release times out and its replacement returns 409", async (originalState) => {
     const controllers = [];
     abortTimeoutSpy = jest
       .spyOn(AbortSignal, "timeout")
@@ -667,13 +707,26 @@ describe("booking calendar UI", () => {
       bookedSlots: [{ startTimeUTC: FUTURE_SLOT, isHold: true, holdId: originalHold.holdId }],
     });
     const defaultFetch = global.fetch.getMockImplementation();
+    let holdRequests = 0;
+    const verifiedHold = {
+      ok: true,
+      holdId: originalState === "active" ? originalHold.holdId : "fresh_original_hold",
+      holdToken: "verified_original_token",
+      expiresAt: FUTURE_EXPIRY,
+    };
     global.fetch.mockImplementation(async (url, options = {}) => {
       if (url === "/api/releaseHold") return waitForAbort(options.signal);
       if (url === "/api/holdSlot") {
+        holdRequests += 1;
+        if (holdRequests > 1 && originalState !== "taken") {
+          return { ok: true, json: async () => verifiedHold };
+        }
         return {
           ok: false,
           status: 409,
-          json: async () => ({ ok: false, message: "The replacement slot is already held." }),
+          json: async () => ({ ok: false, message: holdRequests === 1
+            ? "The replacement slot is already held."
+            : "This slot is currently reserved by someone else." }),
         };
       }
       return defaultFetch(url, options);
@@ -709,10 +762,30 @@ describe("booking calendar UI", () => {
     expect(originalSlot).toBeEnabled();
     await userEvent.click(originalSlot);
     await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
-    expect(await screen.findByLabelText("Booking email")).toHaveValue(VALID_FORM.email);
-    expect(screen.getByLabelText("PC specifications")).toHaveValue(VALID_FORM.specs);
-    expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toEqual(originalHold);
-    expect(global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot")).toHaveLength(1);
+    await waitFor(() => expect(global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot")).toHaveLength(2));
+    const revalidation = global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot")[1];
+    expect(JSON.parse(revalidation[1].body)).toMatchObject({
+      startTimeUTC: originalHold.startTimeUTC,
+      previousHoldId: originalHold.holdId,
+      previousHoldToken: originalHold.holdToken,
+    });
+    expect(global.fetch.mock.calls.filter(([url]) => url === "/api/releaseHold")).toHaveLength(1);
+    expect(abortTimeoutSpy).toHaveBeenCalledTimes(3);
+    expect(abortTimeoutSpy).toHaveBeenNthCalledWith(3, 8_000);
+    if (originalState === "taken") {
+      expect(await screen.findByText("This slot is currently reserved by someone else.")).toBeInTheDocument();
+      expect(sessionStorage.getItem("my_slot_hold")).toBeNull();
+      expect(screen.queryByLabelText("Booking email")).not.toBeInTheDocument();
+    } else {
+      expect(await screen.findByLabelText("Booking email")).toHaveValue(VALID_FORM.email);
+      expect(screen.getByLabelText("PC specifications")).toHaveValue(VALID_FORM.specs);
+      expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toMatchObject({
+        holdId: verifiedHold.holdId,
+        holdToken: verifiedHold.holdToken,
+        expiresAt: verifiedHold.expiresAt,
+        startTimeUTC: originalHold.startTimeUTC,
+      });
+    }
   });
 
   test("re-enables payment release after the cancel request times out", async () => {

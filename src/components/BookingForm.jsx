@@ -1975,24 +1975,7 @@ export default function BookingForm({ isMobile }) {
     });
   };
 
-  const updateHoldPackage = (pkg) => {
-    if (!myHold || isPaymentPendingHold) return;
-    const updated = {
-      ...myHold,
-      packageTitle: pkg?.title || myHold.packageTitle,
-      packagePrice: pkg?.price || myHold.packagePrice,
-      packageTag: pkg?.tag || myHold.packageTag,
-    };
-    setMyHold(updated);
-    try {
-      sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(updated));
-    } catch {
-      console.error("Failed to persist updated hold");
-    }
-    broadcastHold(updated);
-  };
-
-  const releaseHold = async (resetStep = true, { preserveHold = false } = {}) => {
+  const releaseHold = async (resetStep = true, { suppressError = false } = {}) => {
     if (!myHold) return true;
     if (isPaymentPendingHold) {
       setErrorStep2(
@@ -2022,7 +2005,7 @@ export default function BookingForm({ isMobile }) {
         signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
       });
       if (!response.ok) throw new Error("Release failed.");
-      if (isCurrentHold() && !preserveHold) clearHoldState(resetStep);
+      if (isCurrentHold()) clearHoldState(resetStep);
       setErrorStep1("");
       setErrorStep2("");
       return true;
@@ -2032,7 +2015,7 @@ export default function BookingForm({ isMobile }) {
         if (isCurrentHold()) clearHoldState(resetStep);
         return true;
       }
-      if (isCurrentHold() && !preserveHold) {
+      if (isCurrentHold() && !suppressError) {
         const message = "Could not release your slot. Your reservation and details are saved. Please try again.";
         setErrorStep1(message);
         setErrorStep2(message);
@@ -2125,24 +2108,14 @@ export default function BookingForm({ isMobile }) {
     setErrorStep1("");
     setLockingSlot(true);
 
-    let previousHoldId = null;
-    let previousHoldToken = null;
+    const previousHoldId = myHold?.holdId || null;
+    const previousHoldToken = myHold?.holdToken || null;
     const selectedSlotId = selectedSlot.utcStart.toISOString();
     const isSameAsExisting =
       myHold && myHold.startTimeUTC === selectedSlotId;
 
-    if (myHold && isSameAsExisting) {
-      updateHoldPackage(selectedPackage);
-      setStep(2);
-      setLockingSlot(false);
-      setPreventHoldAutoload(false);
-      return;
-    }
-
     if (myHold && !isSameAsExisting) {
-      previousHoldId = myHold.holdId || null;
-      previousHoldToken = myHold.holdToken || null;
-      await releaseHold(false, { preserveHold: true });
+      await releaseHold(false, { suppressError: true });
     }
 
     try {
@@ -2165,6 +2138,7 @@ export default function BookingForm({ isMobile }) {
       const data = await res.json();
 
       if (!res.ok || !data.ok) {
+        if (isSameAsExisting) clearHoldState(false);
         setErrorStep1(
           data.message ||
             "That slot was just taken by someone else. Please choose another time."

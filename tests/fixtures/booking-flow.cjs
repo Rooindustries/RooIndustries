@@ -22,6 +22,7 @@ const test = base.extend({
       bookedSlots: [],
       holdMs: 20 * 60 * 1000,
       holdCount: 0,
+      holds: new Map(),
       collision: false,
     };
     page.on("requestfailed", (request) => state.aborted.push(new URL(request.url()).pathname));
@@ -50,14 +51,34 @@ const test = base.extend({
         return json(route, { settings: { dateSlots: state.slots }, bookedSlots: state.bookedSlots });
       }
       if (path === "/api/holdSlot") {
+        const body = request.postDataJSON();
+        const existing = state.holds.get(body.startTimeUTC);
+        if (existing && (body.previousHoldId !== existing.holdId || body.previousHoldToken !== existing.holdToken)) {
+          return json(route, { ok: false, message: "This slot is currently reserved by someone else." }, 409);
+        }
         state.holdCount += 1;
-        return json(route, {
-          ok: true, holdId: `fixture-hold-${state.holdCount}`, holdToken: "fixture-token",
+        const nextHold = {
+          ok: true, holdId: existing?.holdId || `fixture-hold-${state.holdCount}`, holdToken: `fixture-token-${state.holdCount}`,
           expiresAt: new Date(Date.now() + state.holdMs).toISOString(),
-          startTimeUTC: request.postDataJSON().startTimeUTC,
-        });
+          startTimeUTC: body.startTimeUTC,
+        };
+        for (const [slot, previous] of state.holds) {
+          if (previous.holdId === body.previousHoldId && previous.holdToken === body.previousHoldToken) {
+            state.holds.delete(slot);
+          }
+        }
+        state.holds.set(body.startTimeUTC, nextHold);
+        return json(route, nextHold);
       }
-      if (path === "/api/releaseHold") return json(route, { ok: true });
+      if (path === "/api/releaseHold") {
+        const body = request.postDataJSON();
+        for (const [slot, previous] of state.holds) {
+          if (previous.holdId === body.holdId && previous.holdToken === body.holdToken) {
+            state.holds.delete(slot);
+          }
+        }
+        return json(route, { ok: true });
+      }
       const code = (url.searchParams.get("code") || "").trim().toLowerCase();
       if (path === "/api/ref/validateReferral") {
         return json(route, code === "friend" || (code === "save20" && state.collision)
