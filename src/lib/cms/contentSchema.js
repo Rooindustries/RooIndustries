@@ -958,7 +958,9 @@ const definitions = [
     "name": "faqSection",
     "title": "FAQ",
     "group": "site",
-    "singleton": false,
+    "singleton": true,
+    "fixedId": "faq",
+    "description": "Only the canonical FAQ document is shown on the site. Additional FAQ documents cannot be created here.",
     "fields": [
       {
         "name": "questions",
@@ -1003,7 +1005,10 @@ const definitions = [
       {
         "name": "title",
         "title": "Heading",
-        "type": "string"
+        "type": "string",
+        "readOnly": true,
+        "preserveStoredValue": true,
+        "description": "Not shown on the site yet. Edits here won't appear."
       },
       {
         "name": "subtitle",
@@ -1058,7 +1063,10 @@ const definitions = [
       {
         "name": "tagline",
         "title": "Tagline",
-        "type": "string"
+        "type": "string",
+        "readOnly": true,
+        "preserveStoredValue": true,
+        "description": "Not shown on the site yet. Edits here won't appear."
       },
       {
         "name": "headingLine1",
@@ -1103,12 +1111,17 @@ const definitions = [
         "name": "ctaNoteIcon",
         "title": "CTA Note Icon",
         "type": "string",
-        "description": "Optional icon/emoji shown before the CTA note."
+        "readOnly": true,
+        "preserveStoredValue": true,
+        "description": "Not shown on the site yet. Edits here won't appear."
       },
       {
         "name": "bullets",
         "title": "Bottom Bullet Points",
         "type": "array",
+        "readOnly": true,
+        "preserveStoredValue": true,
+        "description": "Not shown on the site yet. Edits here won't appear.",
         "of": [
           {
             "type": "string"
@@ -1614,7 +1627,9 @@ const definitions = [
         "name": "heading",
         "title": "Heading",
         "type": "string",
-        "description": "Main heading above the packages list."
+        "readOnly": true,
+        "preserveStoredValue": true,
+        "description": "Not shown on the site yet. Edits here won't appear."
       },
       {
         "name": "badgeText",
@@ -1739,7 +1754,10 @@ const definitions = [
       {
         "name": "title",
         "title": "Section Title",
-        "type": "string"
+        "type": "string",
+        "readOnly": true,
+        "preserveStoredValue": true,
+        "description": "Not shown on the site yet. Edits here won't appear."
       },
       {
         "name": "subtitle",
@@ -1935,7 +1953,10 @@ const definitions = [
       {
         "name": "heading",
         "title": "Heading",
-        "type": "string"
+        "type": "string",
+        "readOnly": true,
+        "preserveStoredValue": true,
+        "description": "Not shown on the site yet. Edits here won't appear."
       },
       {
         "name": "subheading",
@@ -2190,6 +2211,9 @@ const definitions = [
         "name": "title",
         "title": "Title",
         "type": "string",
+        "readOnly": true,
+        "preserveStoredValue": true,
+        "description": "Not shown on the site yet. Edits here won't appear.",
         "initialValue": "Supported Games"
       },
       {

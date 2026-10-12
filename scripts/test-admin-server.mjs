@@ -66,12 +66,22 @@ try {
     if (!response.ok) throw new Error("Content fixture seed failed.");
     documents = await response.json();
   } finally { await seed.close(); }
+  const unusedFields = {
+    hero: { tagline: "Legacy tagline café 日本語", ctaNoteIcon: "☀️", bullets: ["Legacy bullet café 日本語", ""] },
+    packagesSettings: { heading: "Legacy packages heading" },
+    faqSettings: { title: "Legacy FAQ heading" },
+    services: { heading: "Legacy services heading" },
+    supportedGames: { title: "Legacy games heading" },
+    proReviewsCarousel: { title: "Legacy reviews heading" },
+  };
   for (const document of documents) {
     delete document._rev;
+    Object.assign(document, unusedFields[document._type]);
     if (document._type === "package") document.order += 1;
     // Native publishing validates hour codes rather than display labels.
     if (document._type === "bookingSettings") document.dateSlots[0].times = ["10", "11"];
   }
+  documents.push({ _id: "fixture-faq-legacy", _type: "faqSection", questions: [{ _key: "legacy-question", question: "Legacy extra FAQ question", answer: "This extra document must stay untouched." }] });
   const used = new Set(documents.map(document => document._type));
   for (const type of CONTENT_TYPES) {
     if (used.has(type.name)) continue;
@@ -120,6 +130,14 @@ try {
       const updated = await fixture.sql`update migration.cms_publish_commands set status='processing',result=null,committed_at=null
         where operation='create' and status='committed' and result->'document_ids' ? ${documentId} returning command_id`;
       response.writeHead(updated.length === 1 ? 200 : 500); response.end(String(updated.length)); return;
+    }
+    if (request.method === "POST" && request.url === "/faq-create-fixture/legacy") {
+      await fixture.sql.begin(async sql => {
+        await sql`delete from migration.cms_publish_commands where result->'document_ids' ? 'faq'`;
+        await sql`delete from cms.documents where legacy_sanity_id='faq'`;
+        await sql`delete from migration.source_documents where legacy_sanity_id='faq'`;
+      });
+      response.writeHead(200); response.end("ok"); return;
     }
     if (request.method === "POST" && ["/booking-create-fixture/empty", "/booking-create-fixture/legacy"].includes(request.url)) {
       const ids = ["6d8a3646-0ed2-44b5-ad45-c5c9d578126a", "fixture-bookingSettings-legacy"];

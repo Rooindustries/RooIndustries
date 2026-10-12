@@ -1,5 +1,7 @@
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs/promises");
+const path = require("node:path");
+const { createHash, randomUUID } = require("node:crypto");
 
 const ADMIN_KEY = "synthetic-admin-key";
 const EMAIL = "content-admin@example.invalid";
@@ -104,6 +106,178 @@ test.beforeEach(async ({ context, page, request, baseURL }) => {
   });
 });
 
+test("ROO-66 public fixture HTML and API stay identical", async ({ page, request }, testInfo) => {
+  test.skip(process.env.ROO_TEST_DEV === "1", "Public byte comparison requires a production build.");
+  const buildId = await fs.readFile(path.join(testInfo.config.metadata.toolingDistDir, "BUILD_ID"), "utf8");
+  const normalize = html => html.split(buildId.trim()).join("BUILD_ID")
+    .replace(/(\/_next\/static\/[^"'\s<>\\]*?)[a-f0-9]{8,64}(?=\.(?:js|css))/g, "$1BUILD_HASH");
+  const snapshot = { pages: {}, api: {} };
+  for (const pathname of ["/", "/packages", "/faq", "/reviews"]) {
+    const response = await request.get(pathname);
+    expect(response.status()).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("<!DOCTYPE html>");
+    const normalized = normalize(html);
+    snapshot.pages[pathname] = { html, normalized, sha256: createHash("sha256").update(normalized).digest("hex") };
+  }
+  for (const resource of ["hero", "packages-settings", "faq-settings", "faq-questions", "services", "supported-games", "reviews"]) {
+    const response = await request.get(`/api/content/${resource}`);
+    expect(response.status()).toBe(200);
+    snapshot.api[resource] = await response.text();
+  }
+  const artifact = testInfo.outputPath("public-content.json");
+  await fs.writeFile(artifact, JSON.stringify(snapshot, null, 2));
+  await testInfo.attach("public-content", { path: artifact, contentType: "application/json" });
+  if (process.env.ROO_PUBLIC_CONTENT_BASELINE) {
+    const baseline = JSON.parse(await fs.readFile(process.env.ROO_PUBLIC_CONTENT_BASELINE, "utf8"));
+    for (const pathname of Object.keys(snapshot.pages)) {
+      expect(snapshot.pages[pathname].normalized, `${pathname} public HTML changed`).toBe(baseline.pages[pathname].normalized);
+    }
+    expect(snapshot.api).toEqual(baseline.api);
+  }
+  await page.goto("/admin/content");
+  await evidence(page, testInfo, { publicHtmlSha256: Object.fromEntries(Object.entries(snapshot.pages).map(([pathname, value]) => [pathname, value.sha256])), apiResources: Object.keys(snapshot.api) });
+});
+
+const UNUSED_NOTE = "Not shown on the site yet. Edits here won't appear.";
+const unusedFields = [
+  { type: "Packages Section", label: "Heading" },
+  { type: "FAQ Settings", label: "Heading" },
+  { type: "Services Section", label: "Heading" },
+  { type: "Supported Games Section", label: "Title" },
+  { type: "Pro Reviews Carousel", label: "Section Title" },
+  { type: "Hero Section", label: "Tagline" },
+  { type: "Hero Section", label: "CTA Note Icon" },
+  { type: "Hero Section", label: "Bottom Bullet Points", array: true },
+];
+
+for (const field of unusedFields) {
+  test(`ROO-66 ${field.type} ${field.label} is visibly and accessibly read-only`, async ({ page }, testInfo) => {
+    await login(page); await choose(page, field.type);
+    const input = field.array ? page.getByRole("group", { name: field.label, exact: true }) : page.getByLabel(field.label, { exact: true });
+    await expect(input).toBeVisible();
+    const describedBy = await input.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    const note = page.locator(`[id="${describedBy}"]`);
+    await expect(note).toHaveText(UNUSED_NOTE);
+    await expect(note).toBeVisible();
+    if (field.array) {
+      await expect(input).toHaveAttribute("aria-disabled", "true");
+      await expect(input.getByRole("button")).toHaveCount(0);
+    }
+    const controls = field.array ? await input.getByRole("textbox").all() : [input];
+    expect(controls.length).toBeGreaterThan(0);
+    const values = [];
+    for (const control of controls) {
+      await expect(control).not.toBeEditable();
+      await expect(control).toHaveAttribute("readonly", "");
+      const value = await control.inputValue();
+      await control.focus(); await control.press("End"); await control.pressSequentially("Attempted edit");
+      await expect(control).toHaveValue(value);
+      values.push(value);
+    }
+    await expect(page.getByRole("button", { name: "Publish", exact: true })).toBeDisabled();
+    await input.scrollIntoViewIfNeeded();
+    await evidence(page, testInfo, { field, describedBy, note: await note.textContent(), values });
+  });
+}
+
+test("ROO-66 FAQ only opens the canonical document and offers no extra creation", async ({ page, request }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const legacy = await cms(request, "/api/admin/content/documents/fixture-faq-legacy");
+  const canonical = await cms(request, "/api/admin/content/documents/faq");
+  await page.route("**/api/admin/content/documents?type=faqSection", async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.data.documents.sort((a, b) => a._id === "faq" ? 1 : b._id === "faq" ? -1 : 0);
+    await route.fulfill({ response, json: body });
+  });
+  await login(page); await choose(page, "FAQ");
+  await expect(page.getByRole("button", { name: "New", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Only the canonical FAQ document is shown on the site. Additional FAQ documents cannot be created here.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Questions", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: canonical.document.questions[0].question, exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Legacy extra FAQ question", exact: true })).toHaveCount(0);
+  expect(await cms(request, "/api/admin/content/documents/fixture-faq-legacy")).toEqual(legacy);
+  await evidence(page, testInfo, { canonicalId: canonical.document._id, extraDocumentUnchanged: legacy.document });
+});
+
+test("ROO-66 a missing canonical FAQ starts a canonical document without touching extras", async ({ page, request, baseURL }, testInfo) => {
+  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  const legacy = await cms(request, "/api/admin/content/documents/fixture-faq-legacy");
+  expect((await request.post(`${control}/faq-create-fixture/legacy`)).ok()).toBe(true);
+  try {
+    await login(page); await choose(page, "FAQ");
+    await expect(page.getByRole("group", { name: "Questions", exact: true })).toBeVisible();
+    await expect(page.getByText("Not published yet", { exact: false })).toBeVisible();
+    await expect(page.getByRole("button", { name: "New", exact: true })).toHaveCount(0);
+    await page.getByRole("group", { name: "Questions", exact: true }).getByRole("button", { name: "Add item", exact: true }).click();
+    await page.getByLabel("Question", { exact: true }).fill("Canonical replacement question");
+    await page.getByLabel("Answer", { exact: true }).fill("Canonical replacement answer");
+    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+    const stored = await cms(request, "/api/admin/content/documents/faq");
+    expect(stored.document.questions[0].question).toBe("Canonical replacement question");
+    expect(await cms(request, "/api/admin/content/documents/fixture-faq-legacy")).toEqual(legacy);
+    await evidence(page, testInfo, { documentId: stored.document._id, questions: stored.document.questions, legacyRevision: legacy.revision });
+  } finally { expect((await request.post(`${control}/reset-content`)).ok()).toBe(true); }
+});
+
+test("ROO-66 the admin API cannot create a second FAQ document", async ({ page, request }, testInfo) => {
+  const before = await cms(request, "/api/admin/content/documents?type=faqSection");
+  const response = await request.post("/api/admin/content/publish", {
+    headers: { "x-admin-key": ADMIN_KEY },
+    data: { operation: "create", type: "faqSection", createIntentId: randomUUID(), document: { questions: [] } },
+  });
+  expect(response.status()).toBe(409);
+  expect(await cms(request, "/api/admin/content/documents?type=faqSection")).toEqual(before);
+  await login(page); await choose(page, "FAQ");
+  await evidence(page, testInfo, { rejectedStatus: response.status(), documentIds: before.documents.map(document => document._id) });
+});
+
+test("ROO-66 publishing a used hero field preserves every legacy unused hero value", async ({ page, request }, testInfo) => {
+  const original = await cms(request, `/api/admin/content/documents/${HERO_ID}`);
+  const usedValue = `Used heading café 日本語 ${original.revision}`;
+  await login(page); await hero(page);
+  await page.getByLabel("Main Heading (Line 1)", { exact: true }).fill(usedValue);
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+  const stored = await cms(request, `/api/admin/content/documents/${HERO_ID}`);
+  expect(stored.document.headingLine1).toBe(usedValue);
+  for (const field of ["tagline", "ctaNoteIcon", "bullets"]) expect(stored.document[field]).toEqual(original.document[field]);
+  const publicResponse = await request.get("/api/content/hero");
+  expect(publicResponse.ok()).toBe(true);
+  expect((await publicResponse.json()).data.headingLine1).toBe(usedValue);
+  await page.reload();
+  await expect(page.getByRole("navigation", { name: "Content types" })).toBeVisible();
+  await hero(page);
+  await expect(page.getByLabel("Main Heading (Line 1)", { exact: true })).toHaveValue(usedValue);
+  await evidence(page, testInfo, { usedValue, unusedValues: { tagline: stored.document.tagline, ctaNoteIcon: stored.document.ctaNoteIcon, bullets: stored.document.bullets } });
+});
+
+for (const submitted of ["changed", "omitted"]) {
+  test(`ROO-66 publishing with ${submitted} unused values keeps stored headings intact`, async ({ page, request }, testInfo) => {
+    const results = [];
+    for (const [type, field, usedField] of [
+      ["packagesSettings", "heading", "badgeText"], ["faqSettings", "title", "eyebrow"],
+      ["services", "heading", "subheading"], ["supportedGames", "title", "subtitle"], ["proReviewsCarousel", "title", "subtitle"],
+    ]) {
+      const id = `tooling-${type}`;
+      const original = await cms(request, `/api/admin/content/documents/${id}`);
+      const document = { ...original.document, [usedField]: `Unrelated ${submitted} publish` };
+      if (submitted === "changed") document[field] = "Attempted overwrite";
+      else delete document[field];
+      await cms(request, "/api/admin/content/publish", { operation: "replace", type, documentId: id, expectedRevision: original.revision, document });
+      const stored = await cms(request, `/api/admin/content/documents/${id}`);
+      expect(stored.document[field]).toEqual(original.document[field]);
+      expect(stored.document[usedField]).toBe(document[usedField]);
+      results.push({ type, field, value: stored.document[field], revision: stored.revision });
+    }
+    await login(page); await choose(page, "Packages Section");
+    await evidence(page, testInfo, { submitted, results });
+  });
+}
+
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test.describe(`${viewport.width}px`, () => {
     test.use({ viewport });
@@ -134,7 +308,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         try {
           page.on("dialog", dialog => dialog.accept());
           await faq(page);
-          const field = page.getByLabel("Heading", { exact: true });
+          const field = page.getByLabel("Eyebrow Text", { exact: true });
           if (source === "history") await field.fill("Other document work that must survive café 日本語");
           const expected = await field.inputValue();
           const revision = (await cms(request, `/api/admin/content/documents/${FAQ_ID}`)).revision;

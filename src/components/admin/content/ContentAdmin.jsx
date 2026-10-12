@@ -322,7 +322,8 @@ export default function ContentAdmin() {
     if (!isCurrentSelection(selectedGeneration)) return;
     setLoadingDocument(false);
     if (selected?.singleton && items) {
-      if (items.length > 0) await openDocument(items[0]._id);
+      const document = selected.fixedId ? items.find(item => item._id === selected.fixedId) : items[0];
+      if (document) await openDocument(document._id);
       else startNewDocument(name, listNewDrafts(name)[0] || null);
     }
   };
@@ -871,6 +872,7 @@ export default function ContentAdmin() {
                     {session.documentId ? "Published" : "Not published yet"}
                     {dirty ? <span className={styles.dirtyTag}>Unpublished changes</span> : null}
                   </p>
+                  {type.description ? <p className={styles.fieldHelp}>{type.description}</p> : null}
                 </div>
                 <div className={styles.editorActions}>
                   {session.documentId ? (

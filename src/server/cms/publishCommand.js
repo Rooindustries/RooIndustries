@@ -44,7 +44,11 @@ const preservedDocument = (input, current, fields, seed, path = "$", root = true
   const known = new Set(fields.map(field => field.name));
   for (const [key, value] of Object.entries(current || {})) if (!known.has(key) && !(root && system.has(key)) && !key.startsWith("_supabase") && output[key] === undefined) output[key] = value;
   for (const field of fields) {
-    if (field.readOnly) { delete output[field.name]; continue; }
+    if (field.readOnly) {
+      if (field.preserveStoredValue && current && Object.hasOwn(current, field.name)) output[field.name] = current[field.name];
+      else delete output[field.name];
+      continue;
+    }
     const value = output[field.name];
     const prior = current?.[field.name];
     if (field.type === "object" && plain(value)) output[field.name] = preservedDocument(value, prior, field.fields || [], seed, `${path}.${field.name}`, false);

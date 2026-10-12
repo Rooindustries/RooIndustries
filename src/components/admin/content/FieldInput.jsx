@@ -45,7 +45,7 @@ function FieldShell({ field, path, htmlFor, children, inline = false }) {
       <label className={styles.fieldLabel} htmlFor={htmlFor}>
         {field.title || field.name}
         {field.required ? <span className={styles.required} aria-label="required">*</span> : null}
-        {field.readOnly ? <span className={styles.readOnlyTag}>Read only</span> : null}
+        {field.readOnly ? <span className={styles.readOnlyTag} aria-hidden="true">Read only</span> : null}
       </label>
       {field.description ? <p id={helpId(path)} className={styles.fieldHelp}>{field.description}</p> : null}
       {children}
@@ -115,7 +115,7 @@ function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria
 
   if (listOptions && primitive) {
     return (
-      <div id={inputId} className={styles.checkGroup} role="group" aria-label={field.title || field.name} {...inputAria}>
+      <div id={inputId} className={styles.checkGroup} role="group" aria-label={field.title || field.name} aria-disabled={readOnly || undefined} {...inputAria}>
         {listOptions.map((option) => {
           const optionVal = optionValue(option);
           const checked = items.includes(optionVal);
@@ -143,7 +143,7 @@ function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria
   }
 
   return (
-    <div id={inputId} className={styles.arrayField} role="group" aria-label={field.title || field.name} {...inputAria}>
+    <div id={inputId} className={styles.arrayField} role="group" aria-label={field.title || field.name} aria-disabled={readOnly || undefined} {...inputAria}>
       {items.length === 0 ? <p className={styles.muted}>No items yet.</p> : null}
       {items.map((item, index) => {
         const itemType = itemTypeFor(field, item);
@@ -274,7 +274,7 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
     "aria-describedby": [!bare && field.description ? helpId(path) : "", invalid ? errorId(path) : ""].filter(Boolean).join(" ") || undefined,
   };
   const type = field.type;
-  const ariaLabel = bare ? field.title || field.name : undefined;
+  const ariaLabel = bare || readOnly ? field.title || field.name : undefined;
   const wrap = (control, inline = false) =>
     bare ? control : (
       <FieldShell field={field} path={path} htmlFor={id} inline={inline}>
