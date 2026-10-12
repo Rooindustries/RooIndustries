@@ -2,6 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
+const { parseArgs } = require("node:util");
 const { chromium, firefox, webkit } = require("playwright");
 
 let BASE_URL = process.env.BASE_URL;
@@ -11,6 +12,7 @@ if (!BASE_URL) {
 }
 const auditDir = path.join(process.cwd(), "audit");
 const visualDir = path.join(auditDir, "visual");
+const readOnlyTarget = process.env.TOOLING_API_ROUTES !== "1";
 
 const run = (cmd) => {
   try {
@@ -110,7 +112,7 @@ const captureCssIntegrity = async () => {
   }
 };
 
-const browserMatrix = async () => {
+const browserMatrix = async (skippedBrowsers = []) => {
   const browserEntries = [
     { name: "chromium", launcher: chromium },
     { name: "firefox", launcher: firefox },
@@ -134,50 +136,67 @@ const browserMatrix = async () => {
       "pass",
     ].join(","),
   ];
+  let failed = false;
 
-  for (const b of browserEntries) {
-    let browser = null;
-    try {
-      browser = await b.launcher.launch({ headless: false });
-    } catch (err) {
-      rows.push([b.name, "all", "/", "launch_failed", 0, 0, 0, "false"].join(","));
-      continue;
-    }
+  try {
+    for (const b of browserEntries) {
+      if (skippedBrowsers.includes(b.name)) {
+        rows.push([b.name, "all", "/", "skipped", "", "", "", ""].join(","));
+        continue;
+      }
+      let browser = null;
+      try {
+        browser = await b.launcher.launch({ headless: false });
+      } catch (err) {
+        rows.push([b.name, "all", "/", "launch_failed", 0, 0, 0, "false"].join(","));
+        console.error(`[phase1-runtime-audits] ${b.name} launch failed: ${err.message}`);
+        failed = true;
+        continue;
+      }
 
-    for (const vp of viewports) {
-      const context = await browser.newContext({
-        serviceWorkers: "block",
-        viewport: { width: vp.width, height: vp.height },
-      });
-      await (await import("./lib/test-target-safety.mjs")).guardBrowserContext(context, [BASE_URL]);
-      const page = await context.newPage();
-      const response = await page.goto(`${BASE_URL}/`, {
-        waitUntil: "domcontentloaded",
-        timeout: 60000,
-      });
-      const status = response?.status() ?? 0;
-      const mainCount = await page.locator("main").count();
-      const packagesLinkCount = await page.getByRole("link", { name: "Packages", exact: true }).count();
-      const faqLinkCount = await page.getByRole("link", { name: "FAQ" }).count();
-      const pass = status < 400 && mainCount === 1 && packagesLinkCount >= 1 && faqLinkCount >= 1;
-      rows.push(
-        [
-          b.name,
-          vp.name,
-          "/",
-          status,
-          mainCount,
-          packagesLinkCount,
-          faqLinkCount,
-          pass ? "true" : "false",
-        ].join(",")
-      );
-      await context.close();
+      try {
+        for (const vp of viewports) {
+          const context = await browser.newContext({
+            serviceWorkers: "block",
+            viewport: { width: vp.width, height: vp.height },
+          });
+          try {
+            await (await import("./lib/test-target-safety.mjs")).guardBrowserContext(context, [BASE_URL]);
+            const page = await context.newPage();
+            const response = await page.goto(`${BASE_URL}/`, {
+              waitUntil: "domcontentloaded",
+              timeout: 60000,
+            });
+            const status = response?.status() ?? 0;
+            const mainCount = await page.locator("main").count();
+            const packagesLinkCount = await page.getByRole("link", { name: "Packages", exact: true }).count();
+            const faqLinkCount = await page.getByRole("link", { name: "FAQ" }).count();
+            const pass = status >= 200 && status < 400 && mainCount === 1 && packagesLinkCount >= 1 && faqLinkCount >= 1;
+            if (!pass) failed = true;
+            rows.push(
+              [
+                b.name,
+                vp.name,
+                "/",
+                status,
+                mainCount,
+                packagesLinkCount,
+                faqLinkCount,
+                pass ? "true" : "false",
+              ].join(",")
+            );
+          } finally {
+            await context.close();
+          }
+        }
+      } finally {
+        await browser.close();
+      }
     }
-    await browser.close();
+  } finally {
+    writeFile("phase1-browser-device-matrix.csv", `${rows.join("\n")}\n`);
   }
-
-  writeFile("phase1-browser-device-matrix.csv", `${rows.join("\n")}\n`);
+  if (failed) throw new Error("Browser matrix checks failed");
 };
 
 const visualParity = async () => {
@@ -423,25 +442,23 @@ const businessSmoke = async () => {
       const body = await response.json().catch(() => null);
       return {
         status: response.status,
-        ok: !!body?.ok,
-        runtime: body?.environment?.runtime || "",
-        previewPaymentsEnabled: body?.environment?.previewPaymentsEnabled === true,
-        livePaymentsEnabled: body?.environment?.livePaymentsEnabled === true,
-        razorpayEnabled: !!body?.providers?.razorpay?.enabled,
-        paypalEnabled: !!body?.providers?.paypal?.enabled,
+        contentType: response.headers.get("content-type") || "",
+        body,
       };
     } catch (error) {
       return {
         status: 0,
-        ok: false,
-        runtime: "",
-        previewPaymentsEnabled: false,
-        livePaymentsEnabled: false,
-        razorpayEnabled: false,
-        paypalEnabled: false,
+        contentType: "",
+        body: null,
       };
     }
   });
+  writeFile("phase1-provider-config.json", `${JSON.stringify({
+    generatedAt: new Date().toISOString(),
+    baseUrl: BASE_URL,
+    targetMode: readOnlyTarget ? "read-only" : "api-routes",
+    ...providerConfig,
+  }, null, 2)}\n`);
   checks.push({
     check: "payment_renders_method_block",
     pass:
@@ -449,24 +466,46 @@ const businessSmoke = async () => {
         .getByRole("heading", { name: "Payment Method" })
         .count()) >= 1,
   });
-  checks.push({
-    check: "payment_provider_config_loads",
-    pass: providerConfig.ok && providerConfig.status === 200,
-  });
-  checks.push({
-    check: "payment_provider_runtime_reported",
-    pass: providerConfig.ok && typeof providerConfig.runtime === "string",
-  });
+  if (readOnlyTarget) {
+    checks.push({
+      check: "payment_provider_config_withheld",
+      pass: providerConfig.status === 503 &&
+        /application\/json/i.test(providerConfig.contentType) &&
+        providerConfig.body?.ok === false &&
+        providerConfig.body?.error === "This preview does not create bookings or accept payments.",
+    });
+    checks.push({
+      check: "payment_provider_details_withheld",
+      pass: providerConfig.body !== null &&
+        typeof providerConfig.body === "object" &&
+        !Array.isArray(providerConfig.body) &&
+        Object.keys(providerConfig.body).length === 2 &&
+        Object.keys(providerConfig.body).every(key => ["ok", "error"].includes(key)),
+    });
+  } else {
+    checks.push({
+      check: "payment_provider_config_loads",
+      pass: providerConfig.body?.ok === true && providerConfig.status === 200 &&
+        /application\/json/i.test(providerConfig.contentType),
+    });
+    checks.push({
+      check: "payment_provider_runtime_reported",
+      pass: providerConfig.body?.ok === true &&
+        ["production", "preview", "development"].includes(providerConfig.body?.environment?.runtime) &&
+        typeof providerConfig.body?.environment?.previewPaymentsEnabled === "boolean" &&
+        typeof providerConfig.body?.environment?.livePaymentsEnabled === "boolean",
+    });
+  }
   checks.push({
     check: "razorpay_option_present_when_provider_enabled",
     pass:
-      !providerConfig.razorpayEnabled ||
+      providerConfig.body?.providers?.razorpay?.enabled !== true ||
       (await paymentPage.locator("text=RazorPay Secure Checkout").count()) >= 1,
   });
   checks.push({
     check: "paypal_option_present_when_provider_enabled",
     pass:
-      !providerConfig.paypalEnabled ||
+      providerConfig.body?.providers?.paypal?.enabled !== true ||
       (await paymentPage.locator('img[alt="PayPal payment logo"]').count()) >= 1 ||
       (await paymentPage.locator("text=Secure global payment").count()) >= 1,
   });
@@ -510,18 +549,31 @@ const businessSmoke = async () => {
 };
 
 async function runAll() {
+  const { values } = parseArgs({ options: {
+    check: { type: "string" },
+    "skip-browser": { type: "string", multiple: true, default: [] },
+  } });
+  const checks = {
+    seo: captureSeoReport,
+    css: captureCssIntegrity,
+    "browser-matrix": () => browserMatrix(values["skip-browser"]),
+    visual: visualParity,
+    stress: stressResults,
+    a11y: a11yCritical,
+    business: businessSmoke,
+  };
+  if (values.check && !Object.hasOwn(checks, values.check)) throw new Error("Unknown runtime check.");
+  if (values["skip-browser"].some(name => !["chromium", "firefox", "webkit"].includes(name))) {
+    throw new Error("Unknown browser to skip.");
+  }
   const safety = await import("./lib/test-target-safety.mjs");
   safety.refuseEnvFiles();
   BASE_URL = safety.localOrigin(BASE_URL);
   safety.installNetworkGuard([BASE_URL]);
   fs.mkdirSync(auditDir, { recursive: true });
-  captureSeoReport();
-  await captureCssIntegrity();
-  await browserMatrix();
-  await visualParity();
-  await stressResults();
-  await a11yCritical();
-  await businessSmoke();
+  for (const [name, check] of Object.entries(checks)) {
+    if (!values.check || values.check === name) await check();
+  }
 }
 
 runAll().catch((err) => {

@@ -57,6 +57,7 @@
     "test:api:routes": "cross-env TOOLING_API_ROUTES=1 playwright test tests/api-routes.spec.js --project=chromium",
     "test:booking:holds": "node --test tests/booking-holds.test.mjs",
     "test:api:preview": "cross-env TOOLING_API_ROUTES=0 playwright test tests/api-preview.spec.js --project=chromium",
+    "test:audit:runtime": "cross-env TOOLING_API_ROUTES=0 playwright test tests/runtime-audits.spec.js --project=chromium",
     "test:perf:routes": "playwright test tests/route-bundles.spec.js --project=chromium",
     "test:perf:debug": "playwright test tests/perf-debug-loading.spec.js --project=chromium",
     "test:a11y": "playwright test tests/a11y-regressions.spec.js --project=chromium",
