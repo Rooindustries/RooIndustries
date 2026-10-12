@@ -40,12 +40,12 @@ const terminate = async child => {
   } finally { clearTimeout(timer); }
 };
 
-export async function start({ storageSource = '/tmp/roo-storage-api-v1.79.33', pgBin = '/tmp/roo-request-pg17/runtime/usr/lib/postgresql/17/bin', postgrestBin = '/tmp/roo-request-postgrest/postgrest', libraryPath = '/tmp/roo-request-pg17/runtime/usr/lib/x86_64-linux-gnu', signedUploadExpirationSeconds = 120, commerceRepairMigration = true, fullMigrationChain = false, afterMigrations, ports = {}, additionalOrigins = [] } = {}) {
+export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storage-api-v1.79.33'), pgBin = '/tmp/roo-request-pg17/runtime/usr/lib/postgresql/17/bin', postgrestBin = '/tmp/roo-request-postgrest/postgrest', libraryPath = process.env.LD_LIBRARY_PATH || '/tmp/roo-request-pg17/runtime/usr/lib/x86_64-linux-gnu', signedUploadExpirationSeconds = 120, commerceRepairMigration = true, fullMigrationChain = false, afterMigrations, ports = {}, additionalOrigins = [] } = {}) {
   assert.equal(process.env.ROO_TEST_HOST || host, host, 'Storage fixture is an internal loopback-only stack');
   assert.equal(process.env.ROO_TEST_POSTGRES_HOST || host, host);
   assert.ok(Number.isSafeInteger(signedUploadExpirationSeconds) && signedUploadExpirationSeconds > 0 && signedUploadExpirationSeconds <= 7200);
   storageSource = fs.realpathSync(storageSource);
-  assert.ok(storageSource.startsWith('/tmp/roo-storage-api-'), 'Official Storage build must be task-owned under /tmp');
+  assert.ok(storageSource.startsWith(path.join(fs.realpathSync(os.tmpdir()), 'roo-storage-api-')), 'Official Storage build must be task-owned under the temporary directory');
   const revision = spawnSync('git', ['-C', storageSource, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 10000 });
   assert.equal(revision.status, 0, 'Storage source revision is unavailable');
   assert.equal(revision.stdout.trim(), storageRelease.commit, 'Storage source does not match pinned official release');

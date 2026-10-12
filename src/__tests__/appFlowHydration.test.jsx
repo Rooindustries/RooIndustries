@@ -70,12 +70,8 @@ jest.mock("../lib/sectionNavigation", () => ({
 jest.mock("../lib/browserSearch", () => ({
   sanitizeBrowserSearch: jest.fn((_, search) => search || ""),
 }));
-jest.mock("@vercel/analytics/react", () => ({ Analytics: () => null }), {
-  virtual: true,
-});
-jest.mock("@vercel/speed-insights/react", () => ({ SpeedInsights: () => null }), {
-  virtual: true,
-});
+jest.mock("@vercel/analytics/react", () => ({ Analytics: () => null }));
+jest.mock("@vercel/speed-insights/react", () => ({ SpeedInsights: () => null }));
 jest.mock(
   "react-router-dom",
   () => ({
