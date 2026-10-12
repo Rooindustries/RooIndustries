@@ -288,15 +288,18 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await page.evaluate(() => document.fonts.ready);
         await page.waitForTimeout(1000);
         await page.evaluate(() => window.__resetConfirmationMetrics());
+        const completedAt = Date.now();
         if (kind === "paid") await finalizeRoute.fulfill({ json: completed });
         if (kind === "free") await page.getByRole("button", { name: "Confirm Free Booking", exact: true }).click();
-        await expect(page).toHaveURL(new RegExp(`${route}$`));
+        await expect(page).toHaveURL(new RegExp(`${route}$`), { timeout: 1000 });
+        await testInfo.attach("arrival-navigation", { body: JSON.stringify({ elapsedMs: Date.now() - completedAt }), contentType: "application/json" });
         await expect(page.getByRole("heading", { level: 1, name: heading, exact: true })).toBeVisible();
         await expect(page.getByRole("link", { name: "Back to Home", exact: true })).toBeVisible();
         await expect.poll(() => page.evaluate(() => window.history.state.usr.bookingConfirmation)).toEqual({ bookingId: bookingConfirmation.bookingId });
         expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("booking_confirmation_state")))).toEqual({ bookingId: bookingConfirmation.bookingId });
         const arrival = await capture(page, testInfo, "arrival");
         expect(arrival.h1Count).toBe(1);
+        expect(arrival.fallbackSeen).toBe(false);
         assertReceiptLayout(arrival);
         expect(arrival.headings).not.toContain(neutralHeading);
         await expect.poll(() => flow.state.calls.filter(call => call.path === "/api/ref/sendBookingEmails").length).toBe(1);
@@ -433,6 +436,92 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           expect(errors).toEqual([]);
         });
       }
+    }
+
+    for (const chunkState of ["failed", "delayed"]) {
+      test(`paid arrival leaves checkout with a ${chunkState} confirmation chunk`, async ({ page, flow, baseURL }, testInfo) => {
+        const pageErrors = [];
+        const chunks = [];
+        page.on("pageerror", error => pageErrors.push(error.message));
+        await page.addInitScript(() => {
+          window.__confirmationRejections = [];
+          window.addEventListener("unhandledrejection", event => {
+            window.__confirmationRejections.push(String(event.reason?.message || event.reason));
+          });
+        });
+        const bookingId = `fixture-paid-confirmation-${chunkState}`;
+        const completed = {
+          ok: true, status: "booked", provider: "dodo", bookingId,
+          emailDispatch: { allSent: true, client: { sent: true }, owner: { sent: true } },
+          emailDispatchToken: "",
+        };
+        let finalizeRoute;
+        await page.route("**/api/payment/finalize", route => {
+          expect(route.request().headers().authorization).toBe("Bearer fixture-payment");
+          finalizeRoute = route;
+        });
+        await flow.review();
+        await flow.payment();
+        await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+        await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+
+        let releaseChunk;
+        let delayTimer;
+        const delayedChunk = new Promise(resolve => { releaseChunk = resolve; });
+        const interceptChunk = async route => {
+          expect(new URL(route.request().url()).origin).toBe(new URL(baseURL).origin);
+          const response = await route.fetch();
+          const body = await response.text();
+          if (!body.includes(neutralHeading) || !body.includes("Payment Successful")) return route.fulfill({ response, body });
+          const chunk = { url: route.request().url(), requestedAt: Date.now(), fulfilledAt: null };
+          chunks.push(chunk);
+          if (chunkState === "failed") return route.abort("failed");
+          delayTimer = setTimeout(releaseChunk, 10_000);
+          await delayedChunk;
+          await route.fulfill({ response, body });
+          chunk.fulfilledAt = Date.now();
+        };
+        await page.route("**/_next/static/chunks/**", interceptChunk);
+        try {
+          await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
+          await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
+          await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
+          await expect.poll(() => chunks.length).toBeGreaterThan(0);
+          const completedAt = Date.now();
+          await finalizeRoute.fulfill({ json: completed });
+          await expect(page).toHaveURL(/\/payment-success$/, { timeout: 3000 });
+          const navigationMs = Date.now() - completedAt;
+          await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toHaveCount(0);
+          expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("booking_confirmation_state")))).toEqual({ bookingId });
+          if (chunkState === "failed") {
+            await expect(page.getByRole("heading", { name: "We couldn’t load this page.", exact: true })).toBeVisible();
+            await expect(page.getByRole("button", { name: "Reload page", exact: true })).toBeVisible();
+          } else {
+            expect(chunks.every(chunk => chunk.fulfilledAt === null)).toBe(true);
+            await expect(page.getByRole("dialog").getByText("Loading...", { exact: true })).toBeVisible();
+            await expect(page.getByRole("heading", { level: 1, name: "Payment Successful", exact: true })).toBeVisible({ timeout: 12_000 });
+            expect(chunks.some(chunk => chunk.fulfilledAt !== null && chunk.fulfilledAt - chunk.requestedAt >= 10_000)).toBe(true);
+          }
+          const unhandledRejections = await page.evaluate(() => window.__confirmationRejections);
+          await testInfo.attach("confirmation-chunk", { body: JSON.stringify({
+            chunkState, navigationMs, url: page.url(), chunks, pageErrors, unhandledRejections,
+          }), contentType: "application/json" });
+          expect(unhandledRejections).toEqual([]);
+          expect(pageErrors).toEqual([]);
+          if (chunkState === "failed") {
+            await page.unroute("**/_next/static/chunks/**", interceptChunk);
+            await page.getByRole("button", { name: "Reload page", exact: true }).click();
+            await expect(page.getByRole("heading", { level: 1, name: "Payment Successful", exact: true })).toBeVisible();
+          }
+          await expect(page.getByRole("heading", { level: 1, name: neutralHeading, exact: true })).toHaveCount(0);
+          expect(await page.evaluate(() => history.state.usr.bookingConfirmation)).toEqual({ bookingId });
+          expect(flow.state.calls.filter(call => call.path === "/api/ref/sendBookingEmails")).toEqual([]);
+        } finally {
+          clearTimeout(delayTimer);
+          releaseChunk();
+          await page.unrouteAll({ behavior: "wait" });
+        }
+      });
     }
 
     for (const completion of ["Dodo finalize", "free booking", "recovery poll", "webhook completed", "captured payment"]) {

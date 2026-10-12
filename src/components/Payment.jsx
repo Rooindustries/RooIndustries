@@ -21,6 +21,7 @@ const { applyPackagePricing } = packagePricing;
 const PAYMENT_FETCH_TIMEOUT_MS = 15_000;
 const PAYMENT_STATUS_POLL_TIMEOUT_MS = 90_000;
 const PAYMENT_STATUS_POLL_INTERVAL_MS = 2_500;
+const CONFIRMATION_PRELOAD_WAIT_MS = 2500;
 
 const formatLocalDate = (utcDate, timeZone) => {
   try {
@@ -1073,7 +1074,10 @@ export default function Payment({ hideFooter = false }) {
   };
 
   const navigateToConfirmation = async (kind, responseBody, operation) => {
-    await preloadConfirmationPage(kind);
+    await Promise.race([
+      preloadConfirmationPage(kind).catch(() => {}),
+      new Promise(resolve => setTimeout(resolve, CONFIRMATION_PRELOAD_WAIT_MS)),
+    ]);
     if (!operation.current()) return;
     const state = kind === "paid"
       ? buildFinalizeNavigation(responseBody, operation)

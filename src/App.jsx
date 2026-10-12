@@ -670,7 +670,10 @@ export function AppContent({
             onClose={closeBookingModal}
             skipInitialSizeAnimation={isPaymentSuccessRoute || isThankYouRoute}
           >
-            <Suspense fallback={<RouteFallback />}>
+            <Suspense
+              key={isPaymentSuccessRoute || isThankYouRoute ? pathName : "checkout"}
+              fallback={<RouteFallback />}
+            >
               {initialRoutePath === pathName && InitialRouteComponent ? (
                 <InitialRouteComponent hideFooter compact={isBookingRoute} />
               ) : isPaymentSuccessRoute ? (
