@@ -1,3 +1,5 @@
+import { isUnusedField } from "../../../lib/cms/fieldUsage.js";
+
 const systemFields = new Set(["_id", "_type", "_rev", "_createdAt", "_updatedAt", "_createdBy", "_originalId", "_system"]);
 
 const namedFields = names => names.map(name => ({ name }));
@@ -28,7 +30,7 @@ const collectRemovedPaths = (baseline, submitted, field, path = []) => {
   }
   if (!baseline || typeof baseline !== "object" || !submitted || typeof submitted !== "object") return [];
   return (field.fields || structuredFields[field.type] || []).flatMap(child => {
-    if (child.readOnly || baseline[child.name] === undefined) return [];
+    if (child.readOnly || isUnusedField(child, submitted) || baseline[child.name] === undefined) return [];
     const nextPath = [...path, child.name];
     return submitted[child.name] === undefined
       ? [nextPath]
@@ -58,7 +60,7 @@ const sameContent = (expected, actual, fields = [], root = false) => {
   }
   if (expected && typeof expected === "object") {
     if (!actual || typeof actual !== "object" || Array.isArray(actual)) return false;
-    const ignored = new Set(fields.filter(field => field.readOnly).map(field => field.name));
+    const ignored = new Set(fields.filter(field => field.readOnly || isUnusedField(field, expected)).map(field => field.name));
     for (const key of Object.keys(expected)) {
       if (ignored.has(key) || (root && systemFields.has(key)) || (key === "_key" && expected[key] === undefined)) continue;
       const field = fields.find(field => field.name === key);

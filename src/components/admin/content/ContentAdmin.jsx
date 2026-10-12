@@ -889,7 +889,7 @@ export default function ContentAdmin() {
                     type="button"
                     className={styles.primaryButton}
                     onClick={publish}
-                    disabled={saving || pendingPublication || locking || loadingDocument || uploadsInFlight > 0 || (!dirty && Boolean(session.documentId))}
+                    disabled={saving || pendingPublication || locking || loadingDocument || uploadsInFlight > 0 || type.fields.every(field => field.readOnly) || (!dirty && Boolean(session.documentId))}
                     title={uploadsInFlight > 0 ? "Wait for the upload to finish" : undefined}
                   >
                     <Save size={16} aria-hidden="true" />

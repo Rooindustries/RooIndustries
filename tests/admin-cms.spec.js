@@ -2,12 +2,16 @@ const { test, expect } = require("@playwright/test");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { createHash, randomUUID } = require("node:crypto");
+const { CONTENT_TYPES } = require("../src/lib/cms/contentSchema.js");
+const { PUBLIC_CONTENT_RESOURCES } = require("../src/lib/publicContentQueries.js");
+const { ALL_PUBLIC_ROUTES } = require("../src/lib/routes.js");
+const fieldContract = require("./fixtures/cms-field-contract.cjs");
 
 const ADMIN_KEY = "synthetic-admin-key";
 const EMAIL = "content-admin@example.invalid";
 const PASSWORD = "Synthetic-Content-Password-123";
 const HERO_ID = "tooling-hero";
-const FAQ_ID = "tooling-faqSettings";
+const FAQ_ID = "tooling-contact";
 
 const cms = async (request, path, body) => {
   const response = await request.fetch(path, {
@@ -41,7 +45,7 @@ const hero = async page => {
   await expect(page.getByRole("region", { name: "Editor", exact: true })).toHaveAttribute("aria-busy", "false");
 };
 const faq = async page => {
-  await choose(page, "FAQ Settings");
+  await choose(page, "Contact Section");
   await expect(page.getByLabel("Heading", { exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Editor", exact: true })).toHaveAttribute("aria-busy", "false");
 };
@@ -112,7 +116,8 @@ test("ROO-66 public fixture HTML and API stay identical", async ({ page, request
   const normalize = html => html.split(buildId.trim()).join("BUILD_ID")
     .replace(/(\/_next\/static\/[^"'\s<>\\]*?)[a-f0-9]{8,64}(?=\.(?:js|css))/g, "$1BUILD_HASH");
   const snapshot = { pages: {}, api: {} };
-  for (const pathname of ["/", "/packages", "/faq", "/reviews"]) {
+  for (const pathname of [...ALL_PUBLIC_ROUTES.filter(pathname => pathname !== "/tourney"), "/upgrade/fixture-upgrade", "/downloads/fixture-download"]) {
+    expect((await request.get(pathname)).status()).toBe(200);
     const response = await request.get(pathname);
     expect(response.status()).toBe(200);
     const html = await response.text();
@@ -120,11 +125,18 @@ test("ROO-66 public fixture HTML and API stay identical", async ({ page, request
     const normalized = normalize(html);
     snapshot.pages[pathname] = { html, normalized, sha256: createHash("sha256").update(normalized).digest("hex") };
   }
-  for (const resource of ["hero", "packages-settings", "faq-settings", "faq-questions", "services", "supported-games", "reviews"]) {
-    const response = await request.get(`/api/content/${resource}`);
+  const packages = await cms(request, "/api/admin/content/documents?type=package");
+  const firstPackage = await cms(request, `/api/admin/content/documents/${packages.documents[0]._id}`);
+  for (const resource of PUBLIC_CONTENT_RESOURCES) {
+    const query = resource === "package" ? `?title=${encodeURIComponent(firstPackage.document.title)}` : resource === "upgrade-link" ? "?slug=fixture-upgrade" : "";
+    const response = await request.get(`/api/content/${resource}${query}`);
     expect(response.status()).toBe(200);
     snapshot.api[resource] = await response.text();
   }
+  snapshot.api.bookingAvailability = await (await request.get("/api/bookingAvailability")).text();
+  const coupons = await cms(request, "/api/admin/content/documents?type=coupon");
+  const coupon = await cms(request, `/api/admin/content/documents/${coupons.documents[0]._id}`);
+  snapshot.api.validateCoupon = await (await request.get(`/api/ref/validateCoupon?code=${encodeURIComponent(coupon.document.code)}`)).text();
   const artifact = testInfo.outputPath("public-content.json");
   await fs.writeFile(artifact, JSON.stringify(snapshot, null, 2));
   await testInfo.attach("public-content", { path: artifact, contentType: "application/json" });
@@ -137,6 +149,259 @@ test("ROO-66 public fixture HTML and API stay identical", async ({ page, request
   }
   await page.goto("/admin/content");
   await evidence(page, testInfo, { publicHtmlSha256: Object.fromEntries(Object.entries(snapshot.pages).map(([pathname, value]) => [pathname, value.sha256])), apiResources: Object.keys(snapshot.api) });
+});
+
+const prepareFieldFixture = async (request, baseURL, document) => {
+  const response = await request.post(`http://127.0.0.1:${Number(new URL(baseURL).port) + 6}/cms-field-fixture`, { data: document });
+  expect(response.ok(), await response.text()).toBe(true);
+};
+
+const expandEditor = async page => {
+  await expect(page.getByRole("region", { name: "Editor", exact: true })).toHaveAttribute("aria-busy", "false");
+  const closed = page.getByRole("region", { name: "Editor", exact: true }).locator('button[aria-expanded="false"]');
+  while (await closed.count()) await closed.first().click();
+};
+const expectUnused = async (page, type, fieldPath) => {
+  const helpId = `content-help-${encodeURIComponent(fieldPath)}`;
+  await expect(page.locator(`[id="${helpId}"]`), `${type}.${fieldPath} silently does nothing`).toHaveText(UNUSED_NOTE);
+  const controls = page.locator(`[aria-describedby~="${helpId}"]`);
+  expect(await controls.count(), `${type}.${fieldPath} lacks an accessible note`).toBeGreaterThan(0);
+  for (const control of await controls.all()) expect(await control.evaluate(node => node.readOnly || node.disabled || node.getAttribute("aria-disabled") === "true")).toBe(true);
+};
+
+const publishDraft = async (page, schema, original, document) => {
+  await expect(page.getByRole("navigation", { name: "Content types" })).toBeVisible();
+  await page.evaluate(({ original, document }) => {
+    localStorage.setItem(`roo-content-draft:v1:doc:${original.document._id}`, JSON.stringify({ document, assets: original.assets, baseRevision: original.revision, documentId: original.document._id, type: original.document._type, savedAt: new Date().toISOString() }));
+  }, { original, document });
+  await choose(page, schema.name === "hero" ? "Contact Section" : "Hero Section");
+  await choose(page, schema.title);
+  if (!schema.singleton) {
+    const title = original.document[schema.preview.title] || original.document.title || original.document._id;
+    await page.getByRole("region", { name: `${schema.title} list`, exact: true }).getByRole("button").filter({ hasText: title }).first().click();
+  }
+  await page.getByRole("button", { name: "Restore my changes", exact: true }).click();
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+};
+
+test.describe("CMS field contract", () => {
+test.afterEach(async ({ request, baseURL }) => {
+  expect((await request.post(`http://127.0.0.1:${Number(new URL(baseURL).port) + 6}/reset-content`)).ok()).toBe(true);
+});
+for (const schema of CONTENT_TYPES.filter(type => !["footer", "siteSettings"].includes(type.name))) {
+  test(`ROO-66 every editable ${schema.name} field reaches the public site or shows its unused note`, async ({ page, request, baseURL }, testInfo) => {
+    test.setTimeout(180000);
+    const binding = fieldContract.bindings[schema.name];
+    expect(binding, "New editor types require a public contract").toBeTruthy();
+    for (const item of fieldContract.schemaFields(schema.fields)) if ((fieldContract.unused[schema.name] || []).includes(item.path)) {
+      expect(item.field, `${schema.name}.${item.path} needs unused metadata`).toMatchObject({ unusedOnSite: true, readOnly: true, preserveStoredValue: true, description: UNUSED_NOTE });
+    }
+    const list = await cms(request, `/api/admin/content/documents?type=${schema.name}`);
+    const entry = schema.fixedId ? list.documents.find(document => document._id === schema.fixedId) : list.documents[0];
+    const initial = await cms(request, `/api/admin/content/documents/${entry._id}`);
+    const marker = `cms66-${randomUUID().slice(0, 8)}`;
+    const upload = async (kind, token) => {
+      const comment = Buffer.from(token);
+      const zip = Buffer.alloc(22); zip.writeUInt32LE(0x06054b50); zip.writeUInt16LE(comment.length, 20);
+      const bytes = kind === "image" ? Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><text x="0" y="12">${token}</text></svg>`) : Buffer.concat([zip, comment]);
+      const mimeType = kind === "image" ? "image/svg+xml" : "application/zip";
+      const issued = await cms(request, "/api/admin/content/assets/upload", { kind, fileName: `${token}.${kind === "image" ? "svg" : "zip"}`, mimeType, byteSize: bytes.length, sha1: createHash("sha1").update(bytes).digest("hex"), sha256: createHash("sha256").update(bytes).digest("hex") });
+      if (issued.alreadyExists) return issued.assetId;
+      expect(new URL(issued.signedUrl).hostname).toBe("127.0.0.1");
+      expect((await request.put(issued.signedUrl, { data: bytes, headers: { "content-type": mimeType } })).ok()).toBe(true);
+      return (await cms(request, "/api/admin/content/assets/finalize", { uploadId: issued.uploadId })).assetId;
+    };
+    const reference = async token => {
+      const id = `fixture-${createHash("sha1").update(token).digest("hex")}`;
+      await prepareFieldFixture(request, baseURL, { _id: id, _type: "package", title: token, price: "$321.67", order: 99 });
+      return id;
+    };
+    const seed = await fieldContract.buildDocument({ schema, current: initial.document, marker: `seed66-${randomUUID().slice(0, 8)}`, origin: baseURL, upload, reference });
+    await prepareFieldFixture(request, baseURL, seed.document);
+    const original = await cms(request, `/api/admin/content/documents/${entry._id}`);
+    const pending = await fieldContract.buildDocument({ schema, current: original.document, marker, origin: baseURL, upload, reference, preserveUnused: true });
+    await login(page);
+    await choose(page, schema.title);
+    if (!schema.singleton) await page.getByRole("region", { name: `${schema.title} list`, exact: true }).getByRole("button").filter({ hasText: original.document[schema.preview.title] || original.document._id }).first().click();
+    await expandEditor(page);
+    const unusedResults = [];
+    for (const item of seed.cases.filter(item => !item.bare && fieldContract.unusedField(schema.name, item.path, fieldContract.get(original.document, item.path.replace(/\.?[^.[\]]+$/, "")) || original.document))) {
+      await expectUnused(page, schema.name, item.path);
+      unusedResults.push(item.path);
+    }
+    if (!pending.cases.length) {
+      await expect(page.getByRole("button", { name: "Publish", exact: true })).toBeDisabled();
+      await evidence(page, testInfo, { type: schema.name, unused: unusedResults });
+      return;
+    }
+    for (const path of unusedResults) {
+      const keys = path.replace(/\[(\d+)\]/g, ".$1").split(".");
+      const last = keys.pop();
+      const parent = keys.reduce((value, key) => value?.[key], pending.document);
+      if (parent) delete parent[last];
+    }
+    if (schema.fields.some(field => field.name === "sortOrder")) await prepareFieldFixture(request, baseURL, { ...pending.document, _id: `${entry._id}-order-peer`, title: `${marker}-order-peer`, sortOrder: pending.document.sortOrder - 1 });
+    await publishDraft(page, schema, original, pending.document);
+    const stored = await cms(request, `/api/admin/content/documents/${entry._id}`);
+    for (const path of unusedResults) expect(fieldContract.get(stored.document, path)).toEqual(fieldContract.get(original.document, path));
+    const endpoint = binding.resource ? `/api/content/${binding.resource}${schema.name === "upgradeLink" ? `?slug=${pending.document.slug.current}` : ""}` : `${binding.endpoint}${schema.name === "coupon" ? `?code=${pending.document.code}&packageTitle=${encodeURIComponent((await cms(request, `/api/admin/content/documents/${pending.document.eligiblePackages[0]._ref}`)).document.title)}` : ""}`;
+    let body, publicData;
+    const anchor = pending.cases.find(item => typeof item.value === "string" && !fieldContract.unusedField(schema.name, item.path));
+    await expect.poll(async () => {
+      const publicResponse = await request.get(endpoint);
+      expect(publicResponse.ok(), await publicResponse.text()).toBe(true);
+      body = await publicResponse.json();
+      publicData = binding.resource ? body.data : schema.name === "bookingSettings" ? body.settings : body.coupon;
+      if (["benchmark", "tool", "package", "review"].includes(schema.name)) publicData = publicData.find(document => document._id === entry._id || schema.name === "benchmark" && document.title === pending.document.title || schema.name === "review" && document.alt === pending.document.alt);
+      return fieldContract.get(publicData, schema.name === "faqSection" ? anchor.path.replace(/^questions/, "") : anchor.path);
+    }, { timeout: 75000, intervals: [100, 500, 1000], message: `${schema.name} published markers must reach the public API after its cache expires` }).toEqual(anchor.value);
+    const publishedArtifact = testInfo.outputPath("published-content.json");
+    await fs.writeFile(publishedArtifact, JSON.stringify({ stored: stored.document, response: body }, null, 2));
+    await testInfo.attach("published-content", { path: publishedArtifact, contentType: "application/json" });
+    expect(publicData).toBeTruthy();
+    if (binding.page) {
+      await page.goto(binding.page === "/" ? "/#services" : binding.page);
+      if (schema.name === "faqSection") await page.getByRole("button").filter({ hasText: pending.document.questions[0].question }).first().click();
+      if (["proReviewsCarousel", "services", "howItWorks", "supportedGames"].includes(schema.name)) await page.locator(schema.name === "proReviewsCarousel" ? ".ri-reviews-heading" : schema.name === "services" ? "#services" : schema.name === "howItWorks" ? "#how-it-works" : "#supported-games").scrollIntoViewIfNeeded();
+      if (schema.name === "supportedGames") await page.getByRole("button", { name: "View All Games", exact: true }).click();
+    }
+    const renderedBody = () => page.evaluate(() => document.body.innerText + [...document.querySelectorAll("body [href],body [src],body [alt],body [placeholder]")].map(node => ["href", "src", "alt", "placeholder"].map(name => node.getAttribute(name) || "").join(" ")).join(" "));
+    let renderedPages = "";
+    if (schema.name === "services") {
+      await expect(page.getByRole("button", { name: "Next benchmark page" })).toBeVisible();
+      renderedPages += await renderedBody();
+      while (await page.getByRole("button", { name: "Next benchmark page" }).isEnabled()) {
+        await page.getByRole("button", { name: "Next benchmark page" }).click();
+        renderedPages += await renderedBody();
+      }
+    }
+    const checked = [];
+    for (const item of pending.cases) {
+      const pattern = fieldContract.patternPath(item.path);
+      const parent = fieldContract.get(pending.document, item.path.replace(/\.?[^.[\]]+$/, "")) || pending.document;
+      if (fieldContract.unusedField(schema.name, item.path, parent)) continue;
+      if (["object", "array"].includes(item.field.type)) continue;
+      let actual = fieldContract.get(publicData, item.path);
+      if (schema.name === "faqSection") actual = fieldContract.get(publicData, item.path.replace(/^questions/, ""));
+      if (schema.name === "tool" && item.path === "icon") actual = publicData.iconUrl;
+      if (schema.name === "upgradeLink" && item.path === "targetPackage") actual = publicData.targetPackage;
+      if (schema.name === "upgradeLink" && item.path === "slug") {
+        expect(body.data.title).toBe(pending.document.title);
+        const previous = await request.get(`/api/content/upgrade-link?slug=${original.document.slug.current}`);
+        expect(previous.ok()).toBe(true);
+        expect((await previous.json()).data, "The former slug must stop resolving after publishing its replacement").toBeNull();
+        checked.push(item.path); continue;
+      }
+      if (item.path.endsWith("sortOrder")) {
+        const peerId = `${entry._id}-order-peer`;
+        const ordered = (await (await request.get(endpoint)).json()).data;
+        expect(ordered.some(row => row.title === `${marker}-order-peer`)).toBe(true);
+        expect(ordered.some(row => row.title === pending.document.title)).toBe(true);
+        expect(ordered.findIndex(row => row.title === `${marker}-order-peer`)).toBeLessThan(ordered.findIndex(row => row.title === pending.document.title));
+        await page.goto("/admin/content");
+        await publishDraft(page, schema, stored, { ...stored.document, sortOrder: item.value - 2 });
+        const reordered = (await (await request.get(endpoint)).json()).data;
+        expect(reordered.findIndex(row => row.title === pending.document.title)).toBeLessThan(reordered.findIndex(row => row.title === `${marker}-order-peer`));
+        if (binding.page) await page.goto(binding.page);
+        checked.push(item.path); continue;
+      }
+      if (schema.name === "coupon" && item.path.startsWith("eligiblePackages")) {
+        const invalid = await request.get(endpoint.replace(/packageTitle=[^&]*/, "packageTitle=not-an-eligible-package"));
+        expect((await invalid.json()).error).toBe("This coupon is not valid for the selected package.");
+      } else if (item.field.type === "reference") {
+        const target = await cms(request, `/api/admin/content/documents/${item.value._ref}`);
+        expect(JSON.stringify(actual)).toContain(target.document.title);
+      } else if (item.field.type === "image" || item.field.type === "file") expect(JSON.stringify(actual)).toContain(item.value.asset._ref.split("-")[1]);
+      else if (schema.name === "coupon" && !["code", "discountType", "discountAmount", "canCombineWithReferral"].includes(item.path)) {
+        const latest = await cms(request, `/api/admin/content/documents/${entry._id}`);
+        let changed, error;
+        if (item.path === "discountPercent") {
+          changed = { discountType: "percent" };
+        } else if (item.path === "isActive") { changed = { isActive: false }; error = "This coupon is not active."; }
+        else if (item.path === "validFrom") { changed = { validFrom: "2099-01-01T00:00:00.000Z" }; error = "This coupon is not valid yet."; }
+        else if (item.path === "validTo") { changed = { validTo: "2020-01-01T00:00:00.000Z" }; error = "This coupon has expired."; }
+        else if (item.path === "maxUses") {
+          await prepareFieldFixture(request, baseURL, { ...latest.document, timesUsed: 1 });
+          changed = { maxUses: 1 }; error = "This coupon has reached its maximum number of uses.";
+        } else throw new Error(`No public behavior assertion for coupon.${item.path}`);
+        await page.goto("/admin/content");
+        const before = await cms(request, `/api/admin/content/documents/${entry._id}`);
+        await publishDraft(page, schema, before, { ...before.document, ...changed });
+        const result = await (await request.get(endpoint)).json();
+        if (error) expect(result.error).toBe(error);
+        else expect(result.coupon.discountPercent).toBe(item.value);
+        const after = await cms(request, `/api/admin/content/documents/${entry._id}`);
+        await publishDraft(page, schema, after, latest.document);
+      } else if (schema.name === "tool" && item.path === "downloadUrl") {
+        await page.goto("/admin/content");
+        const latest = await cms(request, `/api/admin/content/documents/${entry._id}`);
+        await publishDraft(page, schema, latest, { ...latest.document, downloadMode: "external" });
+        const external = (await (await request.get(endpoint)).json()).data.find(row => row._id === entry._id);
+        expect(external.downloadUrl).toBe(item.value);
+        await page.goto(binding.page);
+        await page.getByRole("article").filter({ hasText: pending.document.title }).getByRole("button", { name: "Download", exact: true }).click();
+        const opened = page.waitForEvent("popup");
+        await page.getByRole("dialog").getByRole("button", { name: "Download", exact: true }).click();
+        const popup = await opened;
+        await expect.poll(() => popup.url()).toBe(item.value);
+        await popup.close();
+      } else if (binding.page && typeof item.token === "string" && !(binding.api || []).some(path => pattern === path || pattern.startsWith(`${path}[`)) && !["date", "datetime", "number"].includes(item.field.type) && !item.field.options?.list && !item.listed) {
+        await expect.poll(async () => (renderedPages + await renderedBody()).toLowerCase().replace(/\s+/g, ""), { message: `${schema.name}.${item.path} was published but never rendered` }).toContain(item.token.toLowerCase().replace(/\s+/g, ""));
+      } else expect(actual, `${schema.name}.${item.path} disappeared from the public API`).toEqual(item.value);
+      checked.push(item.path);
+    }
+    await evidence(page, testInfo, { type: schema.name, marker, rendered: checked, unused: unusedResults, endpoint, publicData });
+  });
+}
+
+test("ROO-66 conditional overrides stay read-only and preserve legacy values", async ({ page, request, baseURL }, testInfo) => {
+  test.setTimeout(180000);
+  const block = text => [{ _key: "legacy-block", _type: "block", style: "normal", markDefs: [], children: [{ _key: "legacy-span", _type: "span", text, marks: [] }] }];
+  const fixtures = [
+    { type: "about", seed: { recordDetails: [{ _key: "cpu", label: "CPU", value: "Legacy CPU café", sub: "Legacy CPU detail" }, { _key: "gpu", label: "GPU", value: "Legacy GPU 日本語", sub: "Legacy GPU detail" }] }, paths: ["recordDetails[0].label", "recordDetails[0].value", "recordDetails[1].label", "recordDetails[1].value"], used: "recordTitle", value: "Published fixture proof" },
+    { type: "package", seed: { title: "XOC / Extreme Overclocking", description: "Legacy package café", checkedBullets: ["Legacy checked"], uncheckedBullets: ["Legacy unchecked"] }, paths: ["description", "checkedBullets", "uncheckedBullets"], used: "price", value: "$321.67" },
+    { type: "faqSection", seed: { questions: [
+      { _key: "money-back", question: "Refund and warranty?", answer: "Legacy warranty café" },
+      { _key: "free-retune", question: "Free reoptimization?", answer: "Legacy retune 日本語" },
+      { _key: "ordinary", question: "Fixture ordinary question?", answer: "Fixture ordinary answer" },
+    ] }, paths: ["questions[0].question", "questions[0].answer", "questions[1].question", "questions[1].answer"], used: "questions[2].answer", value: "Published ordinary answer" },
+    { type: "terms", seed: { sections: [
+      { _key: "refunds", heading: "Payments and refunds", content: block("Legacy refund café") },
+      { _key: "reschedule", heading: "Rescheduling policy", content: block("Legacy cancellation 日本語") },
+    ] }, paths: ["sections[0].content", "sections[1].heading", "sections[1].content"], used: "title", value: "Published fixture terms" },
+    { type: "meetTheTeam", seed: { sections: [{ _key: "team", title: "Fixture team", variant: "standard", cards: [
+      { _key: "wanted", name: "Wanted", bio: "Legacy Wanted café" }, { _key: "candi", name: "Candi", bio: "Legacy Candi 日本語" },
+    ] }] }, paths: ["sections[0].cards[0].bio", "sections[0].cards[1].bio"], used: "heroTitle", value: "Published fixture team" },
+    { type: "services", seed: { benchPages: [{ _key: "bench", games: [{ _key: "ovw", gameTitle: " Overwatch 2 ", beforeFps: 123, afterFps: 234, metricLabel: "Legacy metric", gpu: "Legacy GPU", cpu: "Legacy CPU", ram: "Legacy RAM" }] }] }, paths: ["benchPages[0].games[0].gameTitle", "benchPages[0].games[0].beforeFps", "benchPages[0].games[0].afterFps", "benchPages[0].games[0].metricLabel", "benchPages[0].games[0].gpu", "benchPages[0].games[0].cpu", "benchPages[0].games[0].ram", "benchPages[0].games[0].gameLogo"], used: "benchBeforeLabel", value: "Published fixture before" },
+  ];
+  const results = [];
+  await login(page);
+  for (const item of fixtures) {
+    const schema = CONTENT_TYPES.find(type => type.name === item.type);
+    const list = await cms(request, `/api/admin/content/documents?type=${item.type}`);
+    const id = schema.fixedId || (item.type === "package" ? list.documents.find(document => document.preview.title === "Performance Vertex Max")._id : list.documents[0]._id);
+    const current = await cms(request, `/api/admin/content/documents/${id}`);
+    await prepareFieldFixture(request, baseURL, { ...current.document, ...item.seed });
+    const original = await cms(request, `/api/admin/content/documents/${id}`);
+    await page.goto("/admin/content");
+    await expect(page.getByRole("navigation", { name: "Content types" })).toBeVisible();
+    await choose(page, schema.title);
+    if (!schema.singleton) await page.getByRole("region", { name: `${schema.title} list`, exact: true }).getByRole("button").filter({ hasText: original.document[schema.preview.title] }).first().click();
+    await expandEditor(page);
+    for (const fieldPath of item.paths) await expectUnused(page, item.type, fieldPath);
+    const pending = structuredClone(original.document);
+    const set = (path, value) => { const keys = path.replace(/\[(\d+)\]/g, ".$1").split("."); const last = keys.pop(); const parent = keys.reduce((object, key) => object[key], pending); if (value === undefined) delete parent[last]; else parent[last] = value; };
+    set(item.used, item.value);
+    for (const fieldPath of item.paths) if (!/(question|heading|gameTitle|label)$/.test(fieldPath)) set(fieldPath, undefined);
+    await publishDraft(page, schema, original, pending);
+    const stored = await cms(request, `/api/admin/content/documents/${id}`);
+    for (const fieldPath of item.paths) expect(fieldContract.get(stored.document, fieldPath)).toEqual(fieldContract.get(original.document, fieldPath));
+    expect(fieldContract.get(stored.document, item.used)).toBe(item.value);
+    results.push({ type: item.type, preserved: item.paths, published: item.used });
+  }
+  await evidence(page, testInfo, { conditionalOverrides: results });
+});
 });
 
 const UNUSED_NOTE = "Not shown on the site yet. Edits here won't appear.";
@@ -270,7 +535,7 @@ for (const submitted of ["changed", "omitted"]) {
       await cms(request, "/api/admin/content/publish", { operation: "replace", type, documentId: id, expectedRevision: original.revision, document });
       const stored = await cms(request, `/api/admin/content/documents/${id}`);
       expect(stored.document[field]).toEqual(original.document[field]);
-      expect(stored.document[usedField]).toBe(document[usedField]);
+      expect(stored.document[usedField]).toBe(original.document[usedField]);
       results.push({ type, field, value: stored.document[field], revision: stored.revision });
     }
     await login(page); await choose(page, "Packages Section");
@@ -308,7 +573,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         try {
           page.on("dialog", dialog => dialog.accept());
           await faq(page);
-          const field = page.getByLabel("Eyebrow Text", { exact: true });
+          const field = page.getByLabel("Heading", { exact: true });
           if (source === "history") await field.fill("Other document work that must survive café 日本語");
           const expected = await field.inputValue();
           const revision = (await cms(request, `/api/admin/content/documents/${FAQ_ID}`)).revision;
@@ -649,7 +914,8 @@ test("create receipts keep a failed singleton draft after another create commits
   expect((await request.post(`${control}/booking-create-fixture/legacy`)).ok()).toBe(true);
   await page.route("**/api/admin/content/documents?type=bookingSettings", route => route.fulfill({ json: { ok: true, data: { documents: [] } } }));
   await login(page); await choose(page, "Booking Settings");
-  await page.getByLabel("Maximum Days Ahead Booking", { exact: true }).fill("11");
+  await page.getByRole("group", { name: "Date-Based Time Slots (Vertex / Default)", exact: true }).getByRole("button", { name: "Add item", exact: true }).click();
+  await page.getByLabel("Date", { exact: true }).fill("2099-01-11");
   await page.clock.install();
   const pending = await hold(page, "**/api/admin/content/publish", { method: "POST" });
   let submitted, writes = 0;
@@ -672,7 +938,7 @@ test("create receipts keep a failed singleton draft after another create commits
     await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
     const drafts = await page.evaluate(() => Object.entries(localStorage).filter(([key]) => key.startsWith("roo-content-draft:")));
     expect(drafts).toHaveLength(1);
-    expect(JSON.parse(drafts[0][1])).toMatchObject({ createIntentId: submitted.createIntentId, document: { maxDaysAheadBooking: 11 } });
+    expect(JSON.parse(drafts[0][1])).toMatchObject({ createIntentId: submitted.createIntentId, document: { dateSlots: [{ date: "2099-01-11" }] } });
     expect(writes).toBe(1);
     const afterLookup = await contentCounts(request, control);
     expect(afterLookup).toEqual(beforeLookup);
@@ -687,7 +953,8 @@ test("create receipts reconcile a committed fixed-ID singleton after its respons
   const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
   expect((await request.post(`${control}/booking-create-fixture/empty`)).ok()).toBe(true);
   await login(page); await choose(page, "Booking Settings");
-  await page.getByLabel("Maximum Days Ahead Booking", { exact: true }).fill("13");
+  await page.getByRole("group", { name: "Date-Based Time Slots (Vertex / Default)", exact: true }).getByRole("button", { name: "Add item", exact: true }).click();
+  await page.getByLabel("Date", { exact: true }).fill("2099-01-13");
   await page.clock.install();
   const pending = await hold(page, "**/api/admin/content/publish", { method: "POST" });
   let submitted, writes = 0;
@@ -704,7 +971,7 @@ test("create receipts reconcile a committed fixed-ID singleton after its respons
     await page.clock.fastForward(31000);
     await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
     expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-content-draft:")))).toEqual([]);
-    expect((await cms(request, `/api/admin/content/documents/${receipt.documentId}`)).document.maxDaysAheadBooking).toBe(13);
+    expect((await cms(request, `/api/admin/content/documents/${receipt.documentId}`)).document.dateSlots[0].date).toBe("2099-01-13");
     expect(writes).toBe(1);
     const afterLookup = await contentCounts(request, control);
     expect(afterLookup).toEqual(beforeLookup);

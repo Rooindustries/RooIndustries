@@ -7,6 +7,7 @@ import AssetInput from "./AssetInput";
 import PortableTextInput from "./PortableTextInput";
 import ReferenceInput from "./ReferenceInput";
 import { newKey, pathLabel } from "./documentPaths";
+import { fieldUsage } from "../../../lib/cms/fieldUsage.js";
 import {
   defaultsFor,
   fromLocalDateTimeInput,
@@ -150,11 +151,11 @@ function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria
         const itemPath = [...path, index];
         const key = item && typeof item === "object" ? item._key || `index-${index}` : `index-${index}`;
         const isObject = itemType?.type === "object";
-        const open = !isObject || openKeys.has(key);
+        const open = readOnly || !isObject || openKeys.has(key);
         return (
           <div key={key} className={styles.arrayItem}>
             <div className={styles.arrayItemHeader}>
-              {isObject ? (
+              {isObject && !readOnly ? (
                 <button
                   type="button"
                   className={styles.disclosure}
@@ -172,7 +173,7 @@ function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria
                   <span>{itemSummary(item, itemType)}</span>
                 </button>
               ) : (
-                <span className={styles.arrayIndex}>{index + 1}</span>
+                <span className={styles.arrayIndex}>{isObject ? itemSummary(item, itemType) : index + 1}</span>
               )}
               {!isObject ? (
                 <div className={styles.arrayInline}>
@@ -242,7 +243,8 @@ export function ObjectFields({ fields, path, value, onChange, readOnly }) {
   const current = value && typeof value === "object" ? value : {};
   return (
     <div className={styles.objectFields}>
-      {fields.map((field) => {
+      {fields.map((definition) => {
+        const field = fieldUsage(definition, current);
         if (isFieldHidden(field, current)) return null;
         return (
           <ValueInput
@@ -284,7 +286,7 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
 
   if (isPortableTextField(field)) {
     return wrap(
-      <div id={id} role="group" aria-label={field.title || field.name} {...inputAria}>
+      <div id={id} role="group" aria-label={field.title || field.name} aria-disabled={readOnly || undefined} {...inputAria}>
         <PortableTextInput
           inputAria={inputAria}
           value={value}
@@ -302,7 +304,7 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
 
   if (type === "object") {
     return wrap(
-      <div id={id} className={styles.nestedObject} role="group" aria-label={field.title || field.name} {...inputAria}>
+      <div id={id} className={styles.nestedObject} role="group" aria-label={field.title || field.name} aria-disabled={readOnly || undefined} {...inputAria}>
         <ObjectFields fields={field.fields || []} path={path} value={value} onChange={onChange} readOnly={readOnly} />
       </div>
     );
@@ -310,7 +312,9 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
 
   if (type === "image" || type === "file") {
     return wrap(
-      <AssetInput kind={type} field={field} value={value} onChange={onChange} readOnly={readOnly} inputId={id} ariaLabel={ariaLabel || field.title || field.name} path={path} inputAria={inputAria} />
+      <div id={readOnly ? id : undefined} role={readOnly ? "group" : undefined} aria-label={readOnly ? ariaLabel : undefined} aria-disabled={readOnly || undefined} {...(readOnly ? inputAria : {})}>
+        <AssetInput kind={type} field={field} value={value} onChange={onChange} readOnly={readOnly} inputId={id} ariaLabel={ariaLabel || field.title || field.name} path={path} inputAria={inputAria} />
+      </div>
     );
   }
 

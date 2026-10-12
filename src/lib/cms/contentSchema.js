@@ -1,5 +1,6 @@
 import { UPGRADE_LINK_SLUG_PATTERN } from "../globalCmsContract.js";
 import { isValidEmail } from "../emailValidation.js";
+import { isUnusedField, markFieldUsage } from "./fieldUsage.js";
 
 const definitions = [
   {
@@ -2528,7 +2529,7 @@ const definitions = [
   }
 ];
 
-export const CONTENT_TYPES = Object.freeze(definitions);
+export const CONTENT_TYPES = Object.freeze(definitions.map(markFieldUsage));
 
 export const PORTABLE_TEXT_DEFAULTS = Object.freeze({
   styles: ["normal", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote"],
@@ -2625,7 +2626,8 @@ export const validateContentDocument = (typeName, document, { current } = {}) =>
     });
   };
   const validate = (field, value, previous, path, parent) => {
-    if (field.readOnly) return;
+    if (field.readOnly && !field.preserveStoredValue) return;
+    if (isUnusedField(field, parent) && (value === undefined || previous !== undefined)) return;
     if (field.required && !hasValue(value)) fail(path, "This field is required.");
     if (field.customRule === "tool.downloadUrl" && parent.downloadMode === "external" && !value) fail(path, "An external download URL is required.");
     if (field.customRule === "tool.downloadFile" && parent.downloadMode === "hosted" && !value) fail(path, "A hosted download file is required.");

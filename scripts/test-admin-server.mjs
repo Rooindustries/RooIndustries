@@ -125,6 +125,17 @@ try {
         (select count(*)::int from migration.cms_publish_commands) as receipts`;
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(counts)); return;
     }
+    if (request.method === "POST" && request.url === "/cms-field-fixture") {
+      let raw = "";
+      for await (const chunk of request) raw += chunk;
+      const document = JSON.parse(raw);
+      if (!CONTENT_TYPES.some(type => type.name === document._type) || typeof document._id !== "string") {
+        response.writeHead(400); response.end("Invalid content fixture."); return;
+      }
+      const [existing] = await fixture.sql`select legacy_sanity_id from migration.source_documents where legacy_sanity_id=${document._id}`;
+      const result = await fixture.client.rpc("roo_apply_document_mutations", { p_mutations: [{ operation: existing ? "replace" : "create", id: document._id, document }] });
+      response.writeHead(result.error ? 500 : 200); response.end(result.error?.message || "ok"); return;
+    }
     if (request.method === "POST" && request.url.startsWith("/create-receipt-processing/")) {
       const documentId = request.url.slice("/create-receipt-processing/".length);
       const updated = await fixture.sql`update migration.cms_publish_commands set status='processing',result=null,committed_at=null

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { validateContentDocument, createContentDefaults } from "../../lib/cms/contentSchema.js";
 import { stableCmsJson } from "../../lib/globalCmsContract.js";
+import { isUnusedField } from "../../lib/cms/fieldUsage.js";
 import { clearSupabasePublicContentCache } from "../content/publicContent.js";
 import { contentType, documentId, loadDocument } from "./documents.js";
 import { cmsError, rpcData, validationError } from "./errors.js";
@@ -44,7 +45,7 @@ const preservedDocument = (input, current, fields, seed, path = "$", root = true
   const known = new Set(fields.map(field => field.name));
   for (const [key, value] of Object.entries(current || {})) if (!known.has(key) && !(root && system.has(key)) && !key.startsWith("_supabase") && output[key] === undefined) output[key] = value;
   for (const field of fields) {
-    if (field.readOnly) {
+    if (field.readOnly || isUnusedField(field, input)) {
       if (field.preserveStoredValue && current && Object.hasOwn(current, field.name)) output[field.name] = current[field.name];
       else delete output[field.name];
       continue;
