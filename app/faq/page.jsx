@@ -1,3 +1,4 @@
+import Faq from "@/src/next/entries/Faq";
 import RouteRenderer from "@/src/next/RouteRenderer";
 import JsonLd from "@/src/next/JsonLd";
 import seo from "@/src/lib/seo";
@@ -22,7 +23,7 @@ export default async function Page({ searchParams }) {
           ))}
         </section>
       </noscript>
-      <RouteRenderer
+      <RouteRenderer entry={Faq}
         pathname="/faq"
         searchParams={searchParams}
         initialHomeData={initialHomeData}

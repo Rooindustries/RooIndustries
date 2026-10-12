@@ -1,3 +1,4 @@
+import Upgrade from "@/src/next/entries/Upgrade";
 import RouteRenderer from "@/src/next/RouteRenderer";
 import seo from "@/src/lib/seo";
 
@@ -10,7 +11,7 @@ export default function Page({ params, searchParams }) {
   return (
     <>
       <h1 className="sr-only">Upgrade Booking</h1>
-      <RouteRenderer pathname={`/upgrade/${slug}`} searchParams={searchParams} />
+      <RouteRenderer entry={Upgrade} pathname={`/upgrade/${slug}`} searchParams={searchParams} />
     </>
   );
 }

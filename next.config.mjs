@@ -105,6 +105,12 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  webpack(config, { isServer, dev }) {
+    if (!isServer && !dev) {
+      config.optimization.splitChunks.cacheGroups.default = false;
+    }
+    return config;
+  },
   async redirects() {
     return [
       { source: '/tourney/:page(bracket|roster)', destination: '/tourney', permanent: true },

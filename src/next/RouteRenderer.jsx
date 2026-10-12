@@ -6,19 +6,18 @@ export default async function RouteRenderer({
   searchParams,
   initialHomeData = null,
   initialRouteData = null,
-  initialRouteContent = null,
+  entry: Entry = LegacyRoutePage,
 }) {
   const resolvedSearchParams = await searchParams;
 
   return (
     <>
       <SeoFallback pathname={pathname} />
-      <LegacyRoutePage
+      <Entry
         pathname={pathname}
         searchParams={resolvedSearchParams}
         initialHomeData={initialHomeData}
         initialRouteData={initialRouteData}
-        initialRouteContent={initialRouteContent}
       />
     </>
   );
