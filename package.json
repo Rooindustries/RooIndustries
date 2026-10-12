@@ -52,6 +52,7 @@
     "test:booking-hold:e2e": "playwright test tests/booking-hold.spec.js --project=chromium",
     "test:booking-contact": "node scripts/test-booking-contact.mjs",
     "test:emails": "playwright test tests/transactional-emails.spec.js --project=chromium",
+    "test:referral-email:origins": "node scripts/test-referral-email-link-origin.mjs",
     "test:payment-recovery:postgres17": "node scripts/test-payment-persistence-sweep.mjs --recovery --full-chain",
     "test:agent-readiness": "node --test tests/agent-readiness.test.mjs",
     "test:api:routes": "cross-env TOOLING_API_ROUTES=1 playwright test tests/api-routes.spec.js --project=chromium",
