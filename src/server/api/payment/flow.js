@@ -9,7 +9,7 @@ import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
 import { authorizeCronRequest } from "../cronAuth.js";
 import createBookingHandler from "../ref/createBooking.js";
 import { createCommerceWriteClient } from "../ref/documentStore.js";
-import { resolvePaymentQuote } from "../ref/pricing.js";
+import { resolveCapturedUpgradeFunding, resolvePaymentQuote } from "../ref/pricing.js";
 import { resolvePaymentCurrency } from "../ref/bookingRefunds.js";
 import {
   freezeUpgradeIntent,
@@ -17,6 +17,7 @@ import {
 } from "../ref/upgradeIntentToken.js";
 import { getBookingSettings, isSlotAllowedForPackage } from "../../booking/slotPolicy.js";
 import { issueHoldToken, verifyHoldToken } from "../../booking/holdToken.js";
+import { isBookingBlockingStatus } from "../../booking/bookingStatus.js";
 import providerConfig from "./providerConfig.js";
 import { createPayPalOrder, createRazorpayOrder, DEFAULT_PAYPAL_CURRENCY, DEFAULT_RAZORPAY_CURRENCY, getPayPalRefundCaptureId, inspectPayPalCapture, inspectPayPalOrder, inspectRazorpayOrder, inspectRazorpayPayment, parseMoneySubunits, toSubunits, verifyPayPalOrder, verifyPayPalWebhookSignature, verifyRazorpayPayment, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from "./providerClients.js";
 import {
@@ -68,7 +69,7 @@ import {
 import { selectPaymentAuthority, resolveWebhookBackend, createPaymentBackendClient } from "./backend.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 
-import { isEmailDeliveryUnknown } from "../ref/bookingEmails.js";
+import { getBookingForEmailDispatch, isBookingEmailSuppressed, isEmailDeliveryUnknown } from "../ref/bookingEmails.js";
 
 export { authorizeCronRequest };
 
@@ -83,6 +84,22 @@ const normalizeObject = (value) =>
   value && typeof value === "object" && !Array.isArray(value) ? value : {};
 
 const nowIso = () => new Date().toISOString();
+
+const getDodoCaptureAmountUpdates = (record, { totalAmount, taxAmount }) => {
+  const updates = {};
+  for (const [field, amount] of Object.entries({ totalAmount, taxAmount })) {
+    const previous = record.providerPublicData?.[field];
+    if (!Number.isSafeInteger(amount) || amount < 0 || previous === amount) continue;
+    if (Number.isSafeInteger(previous)) {
+      const name = field === "taxAmount" ? "tax" : "total";
+      logSafeError(`Dodo capture ${name} changed: ${record._id}`, Object.assign(new Error(), {
+        code: `dodo_capture_${name}_changed`,
+      }));
+    }
+    updates[field] = amount;
+  }
+  return updates;
+};
 
 const buildRecoveryFailureState = (record) => {
   const normalizeCount = (value) => {
@@ -290,15 +307,17 @@ const getLegacySuccessStatus = (emailDispatch = {}) =>
 
 const isEmailDispatchComplete = (emailDispatch = {}) => {
   const dispatch = normalizeObject(emailDispatch);
+  if (isBookingEmailSuppressed(dispatch)) return false;
   if (dispatch.allSent === true &&
       (dispatch.client?.sent === undefined || dispatch.client.sent === true) &&
       (dispatch.owner?.sent === undefined || dispatch.owner.sent === true)) return true;
   return dispatch.client?.sent === true && dispatch.owner?.sent === true;
 };
 
-const shouldRetryEmailPartialDispatch = ({ record, source = "" }) => {
+const shouldRetryEmailPartialDispatch = ({ record, source = "", booking = null }) => {
   const status = String(record?.status || "").trim().toLowerCase();
   if (record?.requiresReschedule === true || record?.emailDeliveryReviewRequired === true) return false;
+  if (isBookingEmailSuppressed(record?.emailDispatch) && (!booking || !isBookingBlockingStatus(booking.status))) return false;
   const emailRecoveryPending =
     status === PAYMENT_STATUS_EMAIL_PARTIAL ||
     (status === PAYMENT_STATUS_BOOKED && record?.emailDispatchRequired === true);
@@ -438,8 +457,15 @@ const buildRecordPricingFingerprint = ({
         : DEFAULT_RAZORPAY_CURRENCY),
   });
 
+const isUpgradeCreditReview = (record = {}) =>
+  record.status === PAYMENT_STATUS_NEEDS_RECOVERY && record.reconciliationRecoveryTerminal === true &&
+  ["upgrade_credit_changed_after_quote", "upgrade_credit_unverified"].includes(record.recoveryReason);
+
 const getPublicRecoveryMessage = (record = {}) => {
   const status = String(record.status || "").trim().toLowerCase();
+  if (isUpgradeCreditReview(record) && record.recoveryReason === "upgrade_credit_changed_after_quote") {
+    return "Your payment was received. Roo Industries will contact you about your upgrade.";
+  }
   if (record.reconciliationRecoveryTerminal === true) {
     return "This payment requires manual review. Please contact Roo Industries.";
   }
@@ -520,7 +546,26 @@ const buildPublicStatusBody = (record = {}) => ({
   emailDispatch: buildPublicEmailDispatch(record.emailDispatch),
   emailDispatchToken: String(record.emailDispatchToken || "").trim(),
   analyticsReceipt: buildSalesReceipt(record),
+  ...(isUpgradeCreditReview(record) && record.recoveryReason === "upgrade_credit_changed_after_quote"
+    ? { manualReviewRequired: true } : {}),
 });
+
+const buildUpgradeCreditReviewResult = (record) => {
+  const unverified = record.recoveryReason === "upgrade_credit_unverified";
+  return {
+    ok: !unverified,
+    httpStatus: unverified ? 409 : 200,
+    paymentRecord: record,
+    response: {
+      ...buildPublicStatusBody(record),
+      ...(unverified ? {
+        ok: false,
+        code: "upgrade_credit_unverified",
+        error: "Please contact us to upgrade this booking. The original payment and refund amounts could not be verified.",
+      } : {}),
+    },
+  };
+};
 
 const resolvePaymentRecordSuccessStatus = (emailDispatch = {}) =>
   emailDispatch?.allSent === false
@@ -1887,6 +1932,38 @@ const markRetryableFinalizeFailure = async ({
   };
 };
 
+const holdCapturedUpgradeForReview = async ({ client, record, source, error }) => {
+  const operation = await currentPaymentOperation({ client, record });
+  const current = operation.record;
+  if (isUpgradeCreditReview(current)) return buildUpgradeCreditReviewResult(current);
+  if (!operation.owned || (isPaymentTerminalStatus(current.status) && current.status !== PAYMENT_STATUS_NEEDS_RECOVERY)) {
+    return currentPaymentOperationResult(current);
+  }
+  let held;
+  try {
+    held = await patchPaymentRecord({ client, record: current, set: {
+      status: PAYMENT_STATUS_NEEDS_RECOVERY,
+      recoveryReason: error.code,
+      recoveryCategory: "booking_finalize",
+      recoveryHttpStatus: 409,
+      providerRecoveryTerminal: true,
+      providerRecoveryTerminalReason: error.code,
+      reconciliationRecoveryTerminal: true,
+      nextRecoveryAt: "",
+      finalizationLeaseId: "",
+      finalizationLeaseExpiresAt: "",
+      source,
+    }, event: buildPaymentRecordEvent({ status: PAYMENT_STATUS_NEEDS_RECOVERY, source,
+      reason: error.code, data: { capturedAmount: error.capturedAmount, requiredAmount: error.requiredAmount } }) });
+  } catch (conflict) {
+    if (!isConflictError(conflict)) throw conflict;
+    const current = await getPaymentRecordById(client, record._id);
+    return isUpgradeCreditReview(current) ? buildUpgradeCreditReviewResult(current) : currentPaymentOperationResult(current);
+  }
+  logSafeError(`Captured upgrade requires owner review: ${held._id}`, error);
+  return buildUpgradeCreditReviewResult(held);
+};
+
 const rejectUntrustedFinalizeAttempt = async ({
   client,
   record,
@@ -2079,6 +2156,7 @@ const finalizePaymentRecordInternal = async ({
       },
     };
   }
+  if (isUpgradeCreditReview(record)) return buildUpgradeCreditReviewResult(record);
 
   const shouldRetryEmailDispatch = shouldRetryEmailPartialDispatch({
     record,
@@ -2247,6 +2325,8 @@ const finalizePaymentRecordInternal = async ({
   }
 
   const captureStatus = resolveClientSourceStatus(normalizedSource);
+  const captureAmountUpdates = workingRecord.provider === "dodo"
+    ? getDodoCaptureAmountUpdates(workingRecord, verification) : {};
   try {
     workingRecord = await patchPaymentRecord({
       client,
@@ -2274,8 +2354,8 @@ const finalizePaymentRecordInternal = async ({
           nextRecoveryAt: "",
         } : {}),
         paymentProofClaimId: String(proofClaim?._id || "").trim(),
-        ...(workingRecord.provider === "dodo" && Number.isSafeInteger(verification.totalAmount) ? {
-          providerPublicData: { ...workingRecord.providerPublicData, totalAmount: verification.totalAmount },
+        ...(Object.keys(captureAmountUpdates).length ? {
+          providerPublicData: { ...workingRecord.providerPublicData, ...captureAmountUpdates },
         } : {}),
       },
       event: buildPaymentRecordEvent({
@@ -2318,6 +2398,7 @@ const finalizePaymentRecordInternal = async ({
         paymentProofClaim: proofClaim,
       });
       if (recovered?._id) {
+        if (isUpgradeCreditReview(recovered)) return buildUpgradeCreditReviewResult(recovered);
         return {
           ok: true,
           httpStatus: 200,
@@ -2383,12 +2464,18 @@ const finalizePaymentRecordInternal = async ({
     preserveHistoricalAccounting:
       workingRecord.historicalBookingReconstruction === true,
   });
+  if (["upgrade_credit_changed_after_quote", "upgrade_credit_unverified"].includes(result.body?.code)) {
+    return holdCapturedUpgradeForReview({ client, record: workingRecord, source: normalizedSource,
+      error: Object.assign(new Error(result.body.error), { code: result.body.code }) });
+  }
 
   if (result.body?.bookingId && (
     (result.status >= 200 && result.status < 300) ||
-    (result.status === 503 && result.body.emailDispatch?.allSent === false)
+    (result.status === 503 && result.body.emailDispatch?.allSent === false) ||
+    isBookingEmailSuppressed(result.body)
   )) {
     const deliveryUnknown = isEmailDeliveryUnknown(result.body);
+    const bookingInactive = !deliveryUnknown && isBookingEmailSuppressed(result.body);
     const nextStatus = deliveryUnknown ? PAYMENT_STATUS_BOOKED : getLegacySuccessStatus(result.body?.emailDispatch);
     const bookingId = String(result.body.bookingId || "").trim();
     const bookingDoc = await client.fetch(
@@ -2424,9 +2511,10 @@ const finalizePaymentRecordInternal = async ({
         nextRecord = current;
         break;
       }
-      const complete = isEmailDispatchComplete(current.emailDispatch);
+      const complete = !bookingInactive && isEmailDispatchComplete(current.emailDispatch);
       const completionDispatch = complete ? current.emailDispatch : normalizeObject(result.body?.emailDispatch);
       const completionUnknown = !complete && (current.emailDeliveryReviewRequired === true || deliveryUnknown);
+      const completionSuppressed = !complete && !completionUnknown && bookingInactive;
       const completionStatus = complete || completionUnknown ? PAYMENT_STATUS_BOOKED : nextStatus;
       try {
         nextRecord = await patchPaymentRecord({
@@ -2435,7 +2523,8 @@ const finalizePaymentRecordInternal = async ({
           set: {
             status: completionStatus,
             bookingId,
-            recoveryReason: current.providerRefundDetailsMissing === true ? "provider_partial_refund_details_missing_owner_review"
+            recoveryReason: completionSuppressed ? "booking_inactive"
+              : current.providerRefundDetailsMissing === true ? "provider_partial_refund_details_missing_owner_review"
               : completionUnknown ? "booking_email_delivery_review_required" : "",
             recoveryAttemptCount: 0,
             ...buildRecoveryCompletionState(current),
@@ -2444,9 +2533,9 @@ const finalizePaymentRecordInternal = async ({
             finalizationLeaseExpiresAt: "",
             emailDispatch: completionDispatch,
             emailDispatchToken: String(
-              complete ? "" : result.body?.emailDispatchToken || ""
+              complete || completionUnknown || completionSuppressed ? "" : result.body?.emailDispatchToken || ""
             ).trim(),
-            emailDispatchRequired: completionStatus === PAYMENT_STATUS_EMAIL_PARTIAL,
+            emailDispatchRequired: completionStatus === PAYMENT_STATUS_EMAIL_PARTIAL && !completionSuppressed,
             emailDeliveryReviewRequired: completionUnknown,
             verificationState: String(
               bookingDoc?.paymentVerificationState || workingRecord.verificationState || ""
@@ -3828,6 +3917,17 @@ const recoverCapturedPaymentAsReschedule = async ({
   providerData = {},
   paymentProofClaim = null,
 }) => {
+  if (isUpgradeCreditReview(record)) return record;
+  let upgradeFunding = null;
+  if (String(record.bookingPayload?.originalOrderId || "").trim()) {
+    try {
+      upgradeFunding = await resolveCapturedUpgradeFunding({ record, client });
+    } catch (error) {
+      if (!["upgrade_credit_changed_after_quote", "upgrade_credit_unverified"].includes(error.code)) throw error;
+      const held = await holdCapturedUpgradeForReview({ client, record, source: "reconcile", error });
+      return held.paymentRecord;
+    }
+  }
   const handler =
     createRequiresRescheduleBooking || (await loadRequiresRescheduleHandler());
   if (typeof handler !== "function") return null;
@@ -3971,6 +4071,7 @@ const recoverCapturedPaymentAsReschedule = async ({
     recovery = await handler({
       client,
       paymentRecord: recoveryRecord,
+      creditSources: upgradeFunding?.creditSources || [],
       reason: normalizedReason,
       notify: false,
       paymentProofClaim: proofClaim,
@@ -4327,12 +4428,21 @@ export const reconcilePaymentSessions = async ({
       if (record.providerRecoveryTerminal === true &&
           ["payment_currency_mismatch", "payment_currency_invalid"].includes(record.providerRecoveryTerminalReason)) continue;
       const localStatus = String(record.status || "").trim().toLowerCase();
+      const confirmationPending = record.requiresReschedule !== true &&
+        (localStatus === PAYMENT_STATUS_EMAIL_PARTIAL ||
+          (localStatus === PAYMENT_STATUS_BOOKED && record.emailDispatchRequired === true));
+      const confirmationBooking = confirmationPending && record.bookingId
+        ? await getBookingForEmailDispatch({ client, bookingId: record.bookingId }) : null;
+      const inactiveConfirmation = !!confirmationBooking && !isBookingBlockingStatus(confirmationBooking.status);
+      if (inactiveConfirmation && isBookingEmailSuppressed(record.emailDispatch) &&
+          record.emailDispatchRequired !== true && record.refundRequiresBookingSync !== true &&
+          record.resourceReleasePending !== true) continue;
       const localRecovery =
         (record.refundRequiresBookingSync === true &&
           (record.refundState !== "partial" || !!String(record.bookingId || "").trim())) ||
         record.resourceReleasePending === true ||
         (localStatus === PAYMENT_STATUS_EMAIL_PARTIAL && record.requiresReschedule === true) ||
-        shouldRetryEmailPartialDispatch({ record, source: "reconcile" });
+        inactiveConfirmation || shouldRetryEmailPartialDispatch({ record, source: "reconcile", booking: confirmationBooking });
       if (record.provider === "dodo" && !localRecovery && (!dodoEnabled || record.providerRecoveryTerminal === true)) continue;
       summary.scanned += 1;
       const ageMinutes = getPaymentAgeMinutes(record);
@@ -4505,6 +4615,7 @@ export const reconcilePaymentSessions = async ({
       const shouldRetryEmailDispatch = shouldRetryEmailPartialDispatch({
         record,
         source: "reconcile",
+        booking: confirmationBooking,
       });
 
       if (
@@ -4514,7 +4625,7 @@ export const reconcilePaymentSessions = async ({
           status === PAYMENT_STATUS_EMAIL_PARTIAL &&
           record.requiresReschedule === true
         ) &&
-        !shouldRetryEmailDispatch
+        !shouldRetryEmailDispatch && !inactiveConfirmation
       ) {
         continue;
       }
@@ -4540,23 +4651,26 @@ export const reconcilePaymentSessions = async ({
         continue;
       }
 
-      if (record.provider === "dodo" && shouldRetryEmailDispatch) {
+      if ((record.provider === "dodo" && shouldRetryEmailDispatch) || inactiveConfirmation) {
         const { sendBookingEmailsForBooking } = await import("../ref/bookingEmails.js");
         const emailed = await sendBookingEmailsForBooking({ bookingId: record.bookingId, client });
         const complete = isEmailDispatchComplete(emailed.body?.emailDispatch);
         const deliveryUnknown = isEmailDeliveryUnknown(emailed.body);
-        const recoveryAttemptCount = complete || deliveryUnknown ? 0 : Number(record.recoveryAttemptCount || 0) + 1;
+        const bookingInactive = !deliveryUnknown && isBookingEmailSuppressed(emailed.body);
+        const settled = complete || deliveryUnknown || bookingInactive;
+        const recoveryAttemptCount = bookingInactive ? Number(record.recoveryAttemptCount || 0)
+          : settled ? 0 : Number(record.recoveryAttemptCount || 0) + 1;
         try {
           await patchPaymentRecord({ client, record, set: {
             status: complete || deliveryUnknown ? PAYMENT_STATUS_BOOKED : PAYMENT_STATUS_EMAIL_PARTIAL,
-            emailDispatchRequired: !complete && !deliveryUnknown,
+            emailDispatchRequired: !settled,
             emailDeliveryReviewRequired: deliveryUnknown,
-            emailDispatchToken: complete ? "" : record.emailDispatchToken || "",
+            emailDispatchToken: settled ? "" : record.emailDispatchToken || "",
             ...(emailed.body?.emailDispatch ? { emailDispatch: emailed.body.emailDispatch } : {}),
             recoveryAttemptCount,
-            ...(complete || deliveryUnknown ? buildRecoveryCompletionState(record) : {}),
-            recoveryReason: deliveryUnknown ? "booking_email_delivery_review_required" : complete ? "" : "booking_email_retry_pending",
-            nextRecoveryAt: complete || deliveryUnknown ? "" : getNextPaymentRecoveryAt(recoveryAttemptCount),
+            ...(settled ? buildRecoveryCompletionState(record) : {}),
+            recoveryReason: bookingInactive ? "booking_inactive" : deliveryUnknown ? "booking_email_delivery_review_required" : complete ? "" : "booking_email_retry_pending",
+            nextRecoveryAt: settled ? "" : getNextPaymentRecoveryAt(recoveryAttemptCount),
           } });
         } catch (error) {
           if (!isConflictError(error)) throw error;
@@ -5883,12 +5997,13 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     return { httpStatus: 503, body: { ok: false, code: "dodo_refund_details_pending",
       error: "Refund details are temporarily unavailable." } };
   }
-  if (payment.status === "succeeded" && record.providerPublicData?.taxInclusive === false &&
-      record.providerPublicData.totalAmount !== payment.total_amount) {
+  let captureAmountUpdates = payment.status === "succeeded"
+    ? getDodoCaptureAmountUpdates(record, { totalAmount: payment.total_amount, taxAmount: payment.tax }) : {};
+  if (Object.keys(captureAmountUpdates).length) {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         record = await patchPaymentRecord({ client, record, set: {
-          providerPublicData: { ...record.providerPublicData, totalAmount: payment.total_amount },
+          providerPublicData: { ...record.providerPublicData, ...captureAmountUpdates },
         } });
         break;
       } catch (error) {
@@ -5898,12 +6013,14 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
         record = current;
         const currentValidation = validateDodoPayment({ record, payment });
         if (!currentValidation.ok) return { httpStatus: 409, body: { ok: false, code: currentValidation.reason } };
-        if (record.providerPublicData?.totalAmount === payment.total_amount) break;
+        captureAmountUpdates = getDodoCaptureAmountUpdates(record,
+          { totalAmount: payment.total_amount, taxAmount: payment.tax });
+        if (!Object.keys(captureAmountUpdates).length) break;
         if (attempt === 2) return { httpStatus: 202, body: buildPublicStatusBody(record) };
       }
     }
   }
-  if (record.providerRecoveryTerminal === true && payment.status === "succeeded" && !terminalDispute) {
+  if (record.providerRecoveryTerminal === true && payment.status === "succeeded" && !terminalDispute && !isUpgradeCreditReview(record)) {
     record = await patchPaymentRecord({ client, record, set: { providerRecoveryTerminal: false } });
   }
 

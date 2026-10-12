@@ -1,3 +1,4 @@
+import Packages from "@/src/next/entries/Packages";
 import RouteRenderer from "@/src/next/RouteRenderer";
 import JsonLd from "@/src/next/JsonLd";
 import seo from "@/src/lib/seo";
@@ -12,11 +13,20 @@ export default async function Page({ searchParams }) {
       fetchPublicContent({ resource, searchParams: new URLSearchParams() }).catch(() => null)
     )
   );
+  const packagesData = {
+    packagesList,
+    packagesSettings: applyHomeSectionCopyOverride("packages-settings", packagesSettings),
+  };
   return (
     <>
       <JsonLd data={seo.buildOfferCatalogJsonLd(packagesList)} />
       <h1 className="sr-only">PC Game Optimization Packages</h1>
-      <RouteRenderer pathname="/packages" searchParams={searchParams} initialRouteData={{ packages: { packagesList, packagesSettings: applyHomeSectionCopyOverride("packages-settings", packagesSettings) } }} />
+      <RouteRenderer
+        entry={Packages}
+        pathname="/packages"
+        searchParams={searchParams}
+        initialRouteData={{ packages: packagesData }}
+      />
     </>
   );
 }

@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { evaluate, parse } from "groq-js";
+import { isBookingBlockingStatus } from "../booking/bookingStatus.js";
 import {
   applyShadowMutations,
   fetchCommerceAvailability,
@@ -197,6 +198,19 @@ class PatchSpec {
   }
 }
 
+const resumeBookingConfirmation = (current, next) => {
+  if (current?._type !== "booking" || isBookingBlockingStatus(current.status) ||
+      !isBookingBlockingStatus(next.status)) return next;
+  if (["delivery_unknown", "historical_unknown"].includes(current.emailDispatchStatus)) return next;
+  const unattempted = ["Client", "Owner"].some(recipient =>
+    !current[`emailDispatch${recipient}SentAt`] && !current[`emailDispatch${recipient}FirstAttemptAt`]);
+  return { ...next,
+    ...(unattempted ? { emailDispatchAttemptCount: 0 } : {}),
+    ...(current.emailDispatchLastError === "booking_inactive" ? { emailDispatchLastError: "" } : {}),
+    emailDispatchNextAttemptAt: "", emailDispatchLeaseId: "", emailDispatchLeaseExpiresAt: "",
+  };
+};
+
 const applyPatch = (document, patch) => {
   const next = clone(document);
   for (const operation of patch.operations) {
@@ -217,7 +231,7 @@ const applyPatch = (document, patch) => {
       writePath(next, path, value);
     }
   }
-  return next;
+  return resumeBookingConfirmation(document, next);
 };
 
 class PatchBuilder extends PatchSpec {
@@ -529,7 +543,7 @@ export class SupabaseDocumentClient {
         existing
           ? {
               operation: "replace",
-              document,
+              document: resumeBookingConfirmation(existing, document),
               expected_revision: existing._rev || "",
             }
           : { operation: "create", document },
@@ -670,7 +684,7 @@ export class SupabaseDocumentClient {
         }
         continue;
       }
-      const document = clone(operation.document);
+      const document = resumeBookingConfirmation(current, clone(operation.document));
       if (prior && prior.operation !== "delete") {
         prior.document = document;
         if (prior.operation === "create_if_missing") {

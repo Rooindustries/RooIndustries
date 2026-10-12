@@ -1,3 +1,4 @@
+import Home from "@/src/next/entries/Home";
 import RouteRenderer from "@/src/next/RouteRenderer";
 import JsonLd from "@/src/next/JsonLd";
 import seo from "@/src/lib/seo";
@@ -10,7 +11,7 @@ export default async function Page({ searchParams }) {
     <>
       <JsonLd data={seo.buildOrganizationJsonLd()} />
       <JsonLd data={seo.buildHomePageJsonLd(homePageData?.hero)} />
-      <RouteRenderer
+      <RouteRenderer entry={Home}
         pathname="/"
         searchParams={searchParams}
         initialHomeData={homePageData}

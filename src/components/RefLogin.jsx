@@ -85,6 +85,7 @@ export default function RefLogin() {
 
   useEffect(() => {
     const query = new URLSearchParams(location.search);
+    const emailConfirmed = query.get("notice") === "email-confirmed";
     const oauthError = query.get("oauth");
     const provider = String(query.get("provider") || "").trim().toLowerCase();
     let pendingChoice = readPendingDiscordChoice();
@@ -119,6 +120,10 @@ export default function RefLogin() {
       setOutcome({ type: "success", message: PASSWORD_UPDATED_MESSAGE });
       query.delete("notice");
     }
+    if (emailConfirmed) {
+      setOutcome({ type: "success", message: "Email confirmed. Log in to open your creator dashboard." });
+      query.delete("notice");
+    }
     const cleanSearch = query.toString();
     if (window.location.pathname === location.pathname) {
       window.history.replaceState(
@@ -129,7 +134,7 @@ export default function RefLogin() {
     }
 
     const checkSession = async () => {
-      if (pendingChoice.state) return;
+      if (pendingChoice.state || emailConfirmed) return;
       try {
         const sessionRes = await fetch("/api/ref/sessionStatus");
         if (sessionRes.ok) {
@@ -144,8 +149,8 @@ export default function RefLogin() {
     const savedCode = readBrowserStorage("sessionStorage", "refLoginCode");
     if (savedCode) {
       setCode(savedCode);
-      setRememberMe(true);
     }
+    setRememberMe(readBrowserStorage("sessionStorage", "refLoginRememberMe") === "true");
   }, [location.pathname, location.search, nav]);
 
   async function handleLogin(e) {
@@ -187,6 +192,7 @@ export default function RefLogin() {
       }
 
       writeBrowserStorage("sessionStorage", "refLoginCode", data.code || code);
+      writeBrowserStorage("sessionStorage", "refLoginRememberMe", String(rememberMe));
       if (shouldLinkSocial) {
         clearPendingDiscordChoice();
         const socialLinked = data.discordLinked === true;
@@ -283,7 +289,10 @@ export default function RefLogin() {
               name="rememberMe"
               type="checkbox"
               checked={rememberMe}
-              onChange={(e) => setRememberMe(e.target.checked)}
+              onChange={(e) => {
+                setRememberMe(e.target.checked);
+                writeBrowserStorage("sessionStorage", "refLoginRememberMe", String(e.target.checked));
+              }}
               className="peer sr-only"
             />
             <div

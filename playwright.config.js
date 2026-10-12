@@ -44,7 +44,7 @@ module.exports = defineConfig({
   retries: process.env.CI ? 1 : 0,
   workers: 1,
   projects: [
-    { name: "chromium", testIgnore: /(home-cta-mobile|admin-cms)\.spec\.js$/, use: { browserName: "chromium", launchOptions: { args: ["--ozone-platform=x11"] } } },
+    { name: "chromium", testIgnore: /(home-cta-mobile|admin-cms)\.spec\.js$/, use: { browserName: "chromium", launchOptions: { args: ["--ozone-platform=x11", `--unsafely-treat-insecure-origin-as-secure=${target.origin}`] } } },
     { name: "mobile-webkit", testMatch: /home-cta-mobile\.spec\.js$/, use: { browserName: "webkit", launchOptions: webkitLaunchOptions } },
   ],
   webServer: shouldUseExternalServer

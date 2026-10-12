@@ -24,6 +24,7 @@ export default async function handler(req, res) {
 
   const probe = createProbeResponse();
   const session = await requireReferralSession(req, probe);
+  res.setHeader?.("Cache-Control", "private, no-store");
   if (probe.statusCode === 503) {
     return res.status(503).json(probe.body);
   }

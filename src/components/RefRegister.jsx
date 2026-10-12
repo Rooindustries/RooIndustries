@@ -1,5 +1,5 @@
 import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import SupabaseSocialLogin from "./SupabaseSocialLogin";
 import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../lib/passwordPolicy";
@@ -27,6 +27,7 @@ export default function RefRegister() {
   const [toast, setToast] = useState(null);
   const [socialIdentity, setSocialIdentity] = useState(null);
   const [verificationPending, setVerificationPending] = useState(false);
+  const availabilityVersion = useRef(0);
 
   function showToast(type, message) {
     setToast({ type, message });
@@ -64,6 +65,7 @@ export default function RefRegister() {
     );
   };
   useEffect(() => {
+    const version = ++availabilityVersion.current;
     setSlugAvailable(null);
     if (!slug) return undefined;
     let active = true;
@@ -77,10 +79,10 @@ export default function RefRegister() {
           { signal: controller.signal }
         );
         const data = await res.json();
-        if (active) setSlugAvailable(resolveReferralCodeAvailability(res, data));
+        if (active && version === availabilityVersion.current) setSlugAvailable(resolveReferralCodeAvailability(res, data));
       } catch (err) {
         // network or server error: we don't assume taken
-        if (active) setSlugAvailable(null);
+        if (active && version === availabilityVersion.current) setSlugAvailable(null);
       }
     }, 500);
     return () => {
@@ -181,7 +183,11 @@ export default function RefRegister() {
       });
 
       const data = await res.json();
-      if (!data.ok) {
+      if (!res.ok || !data.ok) {
+        if (res.status === 409) {
+          availabilityVersion.current += 1;
+          setSlugAvailable(null);
+        }
         showToast("error", data.error || "Registration failed.");
         setLoading(false);
         return;

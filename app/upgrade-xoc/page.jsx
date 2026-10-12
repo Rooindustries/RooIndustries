@@ -1,3 +1,4 @@
+import UpgradeXoc from "@/src/next/entries/UpgradeXoc";
 import RouteRenderer from "@/src/next/RouteRenderer";
 import seo from "@/src/lib/seo";
 
@@ -7,7 +8,7 @@ export default function Page({ searchParams }) {
   return (
     <>
       <h1 className="sr-only">Upgrade to Performance Vertex Max</h1>
-      <RouteRenderer pathname="/upgrade-xoc" searchParams={searchParams} />
+      <RouteRenderer entry={UpgradeXoc} pathname="/upgrade-xoc" searchParams={searchParams} />
     </>
   );
 }

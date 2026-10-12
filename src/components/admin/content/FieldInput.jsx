@@ -7,6 +7,8 @@ import AssetInput from "./AssetInput";
 import PortableTextInput from "./PortableTextInput";
 import ReferenceInput from "./ReferenceInput";
 import { newKey, pathLabel } from "./documentPaths";
+import { fieldUsage, fieldUsageContext, UNUSED_FIELD_NOTE } from "../../../lib/cms/fieldUsage.js";
+import { findStoredRow, rowRemovalProtected, storedFieldAtPath } from "../../../lib/cms/contentPreservation.js";
 import {
   defaultsFor,
   fromLocalDateTimeInput,
@@ -45,7 +47,7 @@ function FieldShell({ field, path, htmlFor, children, inline = false }) {
       <label className={styles.fieldLabel} htmlFor={htmlFor}>
         {field.title || field.name}
         {field.required ? <span className={styles.required} aria-label="required">*</span> : null}
-        {field.readOnly ? <span className={styles.readOnlyTag}>Read only</span> : null}
+        {field.readOnly ? <span className={styles.readOnlyTag} aria-hidden="true">Read only</span> : null}
       </label>
       {field.description ? <p id={helpId(path)} className={styles.fieldHelp}>{field.description}</p> : null}
       {children}
@@ -72,7 +74,9 @@ const itemTypeFor = (field, item) =>
   (field.of || []).find((candidate) => candidate.type === item?._type) ||
   field.of?.[0];
 
-function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria }) {
+function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria, context }) {
+  const editor = useEditor();
+  const stored = storedFieldAtPath(editor.baseline, editor.document, path);
   const items = Array.isArray(value) ? value : [];
   const [openKeys, setOpenKeys] = useState(() => new Set());
   const ofTypes = field.of || [];
@@ -115,7 +119,7 @@ function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria
 
   if (listOptions && primitive) {
     return (
-      <div id={inputId} className={styles.checkGroup} role="group" aria-label={field.title || field.name} {...inputAria}>
+      <div id={inputId} className={styles.checkGroup} role="group" aria-label={field.title || field.name} aria-disabled={readOnly || undefined} {...inputAria}>
         {listOptions.map((option) => {
           const optionVal = optionValue(option);
           const checked = items.includes(optionVal);
@@ -143,18 +147,22 @@ function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria
   }
 
   return (
-    <div id={inputId} className={styles.arrayField} role="group" aria-label={field.title || field.name} {...inputAria}>
+    <div id={inputId} className={styles.arrayField} role="group" aria-label={field.title || field.name} aria-disabled={readOnly || undefined} {...inputAria}>
       {items.length === 0 ? <p className={styles.muted}>No items yet.</p> : null}
       {items.map((item, index) => {
         const itemType = itemTypeFor(field, item);
         const itemPath = [...path, index];
         const key = item && typeof item === "object" ? item._key || `index-${index}` : `index-${index}`;
         const isObject = itemType?.type === "object";
-        const open = !isObject || openKeys.has(key);
+        const open = readOnly || !isObject || openKeys.has(key);
+        const prior = findStoredRow(stored.value, item, itemType?.fields);
+        const protectedRow = isObject && (rowRemovalProtected(prior, itemType.fields, stored.context) ||
+          !item?._key && !prior && stored.value?.some(row => !row?._key && rowRemovalProtected(row, itemType.fields, stored.context)));
+        const removalHelp = helpId([...itemPath, "_remove"]);
         return (
           <div key={key} className={styles.arrayItem}>
             <div className={styles.arrayItemHeader}>
-              {isObject ? (
+              {isObject && !readOnly ? (
                 <button
                   type="button"
                   className={styles.disclosure}
@@ -172,7 +180,7 @@ function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria
                   <span>{itemSummary(item, itemType)}</span>
                 </button>
               ) : (
-                <span className={styles.arrayIndex}>{index + 1}</span>
+                <span className={styles.arrayIndex}>{isObject ? itemSummary(item, itemType) : index + 1}</span>
               )}
               {!isObject ? (
                 <div className={styles.arrayInline}>
@@ -199,12 +207,13 @@ function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria
                   <button type="button" className={styles.iconButton} aria-label="Move down" title="Move down" onClick={() => move(index, 1)} disabled={index === items.length - 1}>
                     <ArrowDown size={16} aria-hidden="true" />
                   </button>
-                  <button type="button" className={styles.iconButtonDanger} aria-label="Remove item" title="Remove item" onClick={() => remove(index)}>
+                  <button type="button" className={styles.iconButtonDanger} aria-label="Remove item" title="Remove item" disabled={protectedRow} aria-describedby={protectedRow ? removalHelp : undefined} onClick={() => remove(index)}>
                     <Trash2 size={16} aria-hidden="true" />
                   </button>
                 </span>
               ) : null}
             </div>
+            {protectedRow ? <p id={removalHelp} className={styles.fieldHelp}>{UNUSED_FIELD_NOTE}</p> : null}
             {isObject && open ? (
               <div className={styles.arrayItemBody}>
                 <ObjectFields
@@ -212,6 +221,7 @@ function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria
                   path={itemPath}
                   value={item}
                   readOnly={readOnly}
+                  context={context}
                   onChange={(next) => {
                     const copy = items.slice();
                     copy[index] = next;
@@ -238,11 +248,13 @@ function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria
   );
 }
 
-export function ObjectFields({ fields, path, value, onChange, readOnly }) {
+export function ObjectFields({ fields, path, value, onChange, readOnly, context }) {
   const current = value && typeof value === "object" ? value : {};
+  const fieldContext = fieldUsageContext(fields, current, context);
   return (
     <div className={styles.objectFields}>
-      {fields.map((field) => {
+      {fields.map((definition) => {
+        const field = fieldUsage(definition, current, fieldContext);
         if (isFieldHidden(field, current)) return null;
         return (
           <ValueInput
@@ -251,6 +263,7 @@ export function ObjectFields({ fields, path, value, onChange, readOnly }) {
             path={[...path, field.name]}
             value={current[field.name]}
             parent={current}
+            context={fieldContext}
             readOnly={readOnly || field.readOnly === true}
             onChange={(next) => {
               const copy = { ...current };
@@ -265,7 +278,7 @@ export function ObjectFields({ fields, path, value, onChange, readOnly }) {
   );
 }
 
-export function ValueInput({ field, path, value, parent, onChange, readOnly = false, bare = false }) {
+export function ValueInput({ field, path, value, parent, onChange, readOnly = false, bare = false, context }) {
   const id = useId();
   const { errorsByPath } = useEditor();
   const invalid = (errorsByPath.get(pathLabel(path)) || []).length > 0;
@@ -274,7 +287,7 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
     "aria-describedby": [!bare && field.description ? helpId(path) : "", invalid ? errorId(path) : ""].filter(Boolean).join(" ") || undefined,
   };
   const type = field.type;
-  const ariaLabel = bare ? field.title || field.name : undefined;
+  const ariaLabel = bare || readOnly ? field.title || field.name : undefined;
   const wrap = (control, inline = false) =>
     bare ? control : (
       <FieldShell field={field} path={path} htmlFor={id} inline={inline}>
@@ -284,7 +297,7 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
 
   if (isPortableTextField(field)) {
     return wrap(
-      <div id={id} role="group" aria-label={field.title || field.name} {...inputAria}>
+      <div id={id} role="group" aria-label={field.title || field.name} aria-disabled={readOnly || undefined} {...inputAria}>
         <PortableTextInput
           inputAria={inputAria}
           value={value}
@@ -297,20 +310,22 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
   }
 
   if (type === "array") {
-    return wrap(<ArrayInput field={field} path={path} value={value} onChange={onChange} readOnly={readOnly} inputId={id} inputAria={inputAria} />);
+    return wrap(<ArrayInput field={field} path={path} value={value} onChange={onChange} readOnly={readOnly} inputId={id} inputAria={inputAria} context={context} />);
   }
 
   if (type === "object") {
     return wrap(
-      <div id={id} className={styles.nestedObject} role="group" aria-label={field.title || field.name} {...inputAria}>
-        <ObjectFields fields={field.fields || []} path={path} value={value} onChange={onChange} readOnly={readOnly} />
+      <div id={id} className={styles.nestedObject} role="group" aria-label={field.title || field.name} aria-disabled={readOnly || undefined} {...inputAria}>
+        <ObjectFields fields={field.fields || []} path={path} value={value} onChange={onChange} readOnly={readOnly} context={context} />
       </div>
     );
   }
 
   if (type === "image" || type === "file") {
     return wrap(
-      <AssetInput kind={type} field={field} value={value} onChange={onChange} readOnly={readOnly} inputId={id} ariaLabel={ariaLabel || field.title || field.name} path={path} inputAria={inputAria} />
+      <div id={readOnly ? id : undefined} role={readOnly ? "group" : undefined} aria-label={readOnly ? ariaLabel : undefined} aria-disabled={readOnly || undefined} {...(readOnly ? inputAria : {})}>
+        <AssetInput kind={type} field={field} value={value} onChange={onChange} readOnly={readOnly} inputId={id} ariaLabel={ariaLabel || field.title || field.name} path={path} inputAria={inputAria} />
+      </div>
     );
   }
 

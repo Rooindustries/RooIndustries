@@ -3,7 +3,7 @@ create role postgres superuser login;
 create role anon nologin;
 create role authenticated nologin;
 create role service_role nologin bypassrls;
-grant service_role to serviroo;
+grant service_role to current_user;
 create schema extensions;
 create extension pgcrypto with schema extensions;
 create extension "uuid-ossp" with schema extensions;

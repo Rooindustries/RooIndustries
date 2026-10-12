@@ -82,6 +82,8 @@ const inputs = [];
 const booking = (name, extra = {}) => ({
   _id: buildDeterministicBookingId({ paymentRecordId: `paymentRecord.${name}` }),
   _type: "booking", _rev: `fixture-${revision++}`, status: "captured", paymentProvider: "dodo",
+  paymentRecordId: `paymentRecord.${name}`, dodoCheckoutSessionId: `checkout-${name}`, dodoPaymentId: `payment-${name}`,
+  paypalOrderId: `paypal-${name}`, razorpayOrderId: `razorpay-${name}`, razorpayPaymentId: `payment-${name}`,
   email: "customer-a@fixture.invalid", payerEmail: "payer-a@fixture.invalid",
   discord: "Maya#1234", specs: "Ryzen 9800X3D / RTX 5080 / 32 GB DDR5", mainGame: "Valorant",
   message: "Please preserve my streaming settings. धन्यवाद 🦘",
@@ -92,11 +94,19 @@ const booking = (name, extra = {}) => ({
   hostDate: "Sun, Nov 01, 2026", hostTime: "11:00 AM", hostTimeZone: "Asia/Kolkata",
   ...extra,
 });
-async function captureBooking(name, extra = {}, recovery = false, error = null) {
+async function captureBooking(name, extra = {}, recovery = false, error = null, paymentExtra = {}) {
   currentCase = name;
   providerError = error;
   const source = booking(name, extra);
   documents = [structuredClone(source), { _id: "settings", _type: "bookingSettings", ownerEmail: "configured-owner@fixture.invalid" }];
+  if (paymentExtra !== null) documents.push({
+    _id: source.paymentRecordId, _type: "paymentRecord", provider: source.paymentProvider,
+    providerOrderId: source.paymentProvider === "paypal" ? source.paypalOrderId : source.paymentProvider === "razorpay" ? source.razorpayOrderId : source.dodoCheckoutSessionId,
+    providerPaymentId: source.dodoPaymentId, bookingId: source._id, verificationState: "server_verified",
+    pricingSnapshot: { netAmount: source.netAmount, currency: source.currency },
+    providerPublicData: { totalAmount: typeof source.dodoTotalAmount === "number" ? Math.round(source.dodoTotalAmount * 100) : source.dodoTotalAmount, currency: source.currency },
+    ...paymentExtra,
+  });
   const before = captured.length;
   const send = recovery ? dispatchRescheduleNotifications : sendBookingEmailsForBooking;
   const result = await send({ bookingId: source._id, client });
@@ -112,6 +122,28 @@ async function captureBooking(name, extra = {}, recovery = false, error = null) 
   providerError = null;
 }
 await captureBooking("normal");
+await captureBooking("paid-tax", { dodoTotalAmount: 101.99 });
+await captureBooking("paid-partial-refund", { dodoTotalAmount: 101.99, refundedAmount: 20, refundStatus: "partial" });
+for (const [name, dodoTotalAmount] of [["missing", undefined], ["null", null], ["empty", ""], ["invalid", "not-money"], ["nan", NaN], ["infinity", Infinity]]) {
+  await captureBooking(`paid-total-${name}`, { dodoTotalAmount });
+}
+await captureBooking("paid-no-record", {}, false, null, null);
+await captureBooking("paid-unverified", {}, false, null, { verificationState: "" });
+await captureBooking("paid-wrong-record", {}, false, null, { _id: "paymentRecord.other" });
+await captureBooking("paid-wrong-booking", {}, false, null, { bookingId: "booking.other" });
+await captureBooking("paid-wrong-provider", {}, false, null, { provider: "paypal" });
+await captureBooking("paid-wrong-order", {}, false, null, { providerOrderId: "checkout-other" });
+await captureBooking("paid-wrong-payment", {}, false, null, { providerPaymentId: "payment-other" });
+await captureBooking("paid-no-currency", {}, false, null, { providerPublicData: { totalAmount: 10199 } });
+await captureBooking("paid-quote-only", {}, false, null, { providerPublicData: { currency: "USD" } });
+await captureBooking("paid-record-authority", { dodoTotalAmount: 84.99 }, false, null, { providerPublicData: { totalAmount: 10199, currency: "USD" } });
+await captureBooking("paid-record-currency", { currency: undefined }, false, null, { providerPublicData: { totalAmount: 10199, currency: "EUR" } });
+for (const paymentProvider of ["paypal", "razorpay"]) {
+  await captureBooking(`paid-${paymentProvider}`, { paymentProvider, dodoTotalAmount: undefined, netAmount: 84.99, currency: "EUR" });
+  await captureBooking(`paid-${paymentProvider}-unverified`, { paymentProvider }, false, null, { verificationState: "" });
+  await captureBooking(`paid-${paymentProvider}-no-currency`, { paymentProvider }, false, null, { pricingSnapshot: { netAmount: 84.99 } });
+  await captureBooking(`paid-${paymentProvider}-wrong-order`, { paymentProvider }, false, null, { providerOrderId: "other-order" });
+}
 await captureBooking("long-fields", {
   email: `${"a".repeat(60)}@fixture.invalid`,
   specs: "Ryzen9800X3D-RTX5080-".repeat(10),
@@ -243,7 +275,7 @@ for (const kind of ["registration_verification", "password_reset"]) {
 for (const recovery of [false, true]) {
   for (const elapsed of [0, 61000]) {
     now = baseNow + elapsed;
-    await captureBooking(recovery ? "deterministic-recovery" : "deterministic-booking", { requiresReschedule: recovery }, recovery);
+    await captureBooking(recovery ? "deterministic-recovery" : "deterministic-booking", { requiresReschedule: recovery, dodoTotalAmount: 101.99, refundedAmount: elapsed ? 20 : 0, refundStatus: elapsed ? "partial" : "" }, recovery);
   }
   now = baseNow;
 }

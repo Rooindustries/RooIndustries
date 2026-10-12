@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
+import { randomUUID } from "node:crypto";
 import { registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
@@ -32,7 +33,9 @@ const fixture = await start({
   ...(process.env.POSTGREST_BIN ? { postgrestBin: process.env.POSTGREST_BIN } : {}),
   ...(process.env.LD_LIBRARY_PATH ? { libraryPath: process.env.LD_LIBRARY_PATH } : {}),
 });
-let active, control;
+let active, control, restoreEmailFetch;
+const emails = [];
+let notificationSequence = 0;
 let stopped = false;
 const stop = async () => {
   if (stopped) return;
@@ -46,6 +49,7 @@ const stop = async () => {
     });
   }
   if (control) { control.closeAllConnections(); await new Promise(resolve => control.close(resolve)); }
+  restoreEmailFetch?.();
   const cleanup = await fixture.stop();
   fs.mkdirSync("test-results/admin", { recursive: true });
   fs.writeFileSync("test-results/admin/cleanup.json", JSON.stringify(cleanup, null, 2));
@@ -54,6 +58,18 @@ for (const signal of ["SIGTERM", "SIGINT"]) process.on(signal, () => { void stop
 try {
   const { seedContentAdmin } = await import("./lib/content-admin-fixture.mjs");
   await seedContentAdmin(fixture);
+  Object.assign(process.env, {
+    DATA_PRIMARY_BACKEND: "supabase", COMMERCE_PRIMARY_BACKEND: "supabase", COMMERCE_FAILOVER_GENERATION: "0",
+    SUPABASE_CUTOVER_ENABLED: "1", COMMERCE_CUTOVER_ENABLED: "1",
+    SUPABASE_URL: fixture.origin, SUPABASE_SECRET_KEY: fixture.serviceRoleKey,
+    RESEND_API_KEY: "synthetic-booking-email-key", FROM_EMAIL: "sender@fixture.invalid", OWNER_EMAIL: "fallback-owner@fixture.invalid",
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (input, init) => {
+    const url = new URL(typeof input === "string" || input instanceof URL ? String(input) : input.url);
+    return originalFetch(url.origin === "https://api.resend.com" ? `${controlOrigin}${url.pathname}${url.search}` : input, init);
+  };
+  restoreEmailFetch = () => { globalThis.fetch = originalFetch; };
   const { CONTENT_TYPES, createContentDefaults } = await import("../src/lib/cms/contentSchema.js");
   const { createToolingContentFixture } = await import("../tests/fixtures/tooling-content.mjs");
   const seed = await createToolingContentFixture({ origin: controlOrigin });
@@ -66,12 +82,22 @@ try {
     if (!response.ok) throw new Error("Content fixture seed failed.");
     documents = await response.json();
   } finally { await seed.close(); }
+  const unusedFields = {
+    hero: { tagline: "Legacy tagline café 日本語", ctaNoteIcon: "☀️", bullets: ["Legacy bullet café 日本語", ""] },
+    packagesSettings: { heading: "Legacy packages heading" },
+    faqSettings: { title: "Legacy FAQ heading" },
+    services: { heading: "Legacy services heading" },
+    supportedGames: { title: "Legacy games heading" },
+    proReviewsCarousel: { title: "Legacy reviews heading" },
+  };
   for (const document of documents) {
     delete document._rev;
+    Object.assign(document, unusedFields[document._type]);
     if (document._type === "package") document.order += 1;
     // Native publishing validates hour codes rather than display labels.
     if (document._type === "bookingSettings") document.dateSlots[0].times = ["10", "11"];
   }
+  documents.push({ _id: "fixture-faq-legacy", _type: "faqSection", questions: [{ _key: "legacy-question", question: "Legacy extra FAQ question", answer: "This extra document must stay untouched." }] });
   const used = new Set(documents.map(document => document._type));
   for (const type of CONTENT_TYPES) {
     if (used.has(type.name)) continue;
@@ -108,6 +134,35 @@ try {
     if (request.method === "GET" && request.url === "/fixture") {
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(marker)); return;
     }
+    if (request.method === "POST" && request.url === "/emails") {
+      let raw = "";
+      for await (const chunk of request) raw += chunk;
+      emails.push(JSON.parse(raw));
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ id: `fixture-email-${emails.length}` })); return;
+    }
+    if (request.method === "POST" && request.url === "/owner-notification") {
+      try {
+        const { createSupabaseDocumentClient } = await import("../src/server/supabase/documentClient.js");
+        const { sendBookingEmailsForBooking } = await import("../src/server/api/ref/bookingEmails.js");
+        const client = createSupabaseDocumentClient({ shadowClient: fixture.client, commerceOnly: true, cutoverGeneration: 0 });
+        const id = `fixture-owner-${randomUUID()}`;
+        const startTimeUTC = new Date(Date.UTC(2099, 0, 5 + notificationSequence++, 10)).toISOString();
+        await client.create({
+          _id: id, _type: "booking", packageTitle: "Performance Vertex Max", packagePrice: "$99.95",
+          email: "customer@fixture.invalid", displayDate: "January 5, 2099", displayTime: "10:00", localTimeZone: "UTC",
+          hostDate: "January 5, 2099", hostTime: "15:30", hostTimeZone: "Asia/Kolkata", startTimeUTC,
+          grossAmount: 99.95, netAmount: 99.95, currency: "USD", paymentStatus: "paid",
+        });
+        const start = emails.length;
+        const result = await sendBookingEmailsForBooking({ bookingId: id, client });
+        response.writeHead(result.httpStatus, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ result, emails: emails.slice(start) })); return;
+      } catch (error) {
+        response.writeHead(500, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ error: error.message })); return;
+      }
+    }
     if (request.method === "GET" && request.url === "/content-counts") {
       const [counts] = await fixture.sql`select
         (select count(*)::int from cms.documents) as documents,
@@ -115,11 +170,30 @@ try {
         (select count(*)::int from migration.cms_publish_commands) as receipts`;
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(counts)); return;
     }
+    if (request.method === "POST" && request.url === "/cms-field-fixture") {
+      let raw = "";
+      for await (const chunk of request) raw += chunk;
+      const document = JSON.parse(raw);
+      if (!CONTENT_TYPES.some(type => type.name === document._type) || typeof document._id !== "string") {
+        response.writeHead(400); response.end("Invalid content fixture."); return;
+      }
+      const [existing] = await fixture.sql`select legacy_sanity_id from migration.source_documents where legacy_sanity_id=${document._id}`;
+      const result = await fixture.client.rpc("roo_apply_document_mutations", { p_mutations: [{ operation: existing ? "replace" : "create", id: document._id, document }] });
+      response.writeHead(result.error ? 500 : 200); response.end(result.error?.message || "ok"); return;
+    }
     if (request.method === "POST" && request.url.startsWith("/create-receipt-processing/")) {
       const documentId = request.url.slice("/create-receipt-processing/".length);
       const updated = await fixture.sql`update migration.cms_publish_commands set status='processing',result=null,committed_at=null
         where operation='create' and status='committed' and result->'document_ids' ? ${documentId} returning command_id`;
       response.writeHead(updated.length === 1 ? 200 : 500); response.end(String(updated.length)); return;
+    }
+    if (request.method === "POST" && request.url === "/faq-create-fixture/legacy") {
+      await fixture.sql.begin(async sql => {
+        await sql`delete from migration.cms_publish_commands where result->'document_ids' ? 'faq'`;
+        await sql`delete from cms.documents where legacy_sanity_id='faq'`;
+        await sql`delete from migration.source_documents where legacy_sanity_id='faq'`;
+      });
+      response.writeHead(200); response.end("ok"); return;
     }
     if (request.method === "POST" && ["/booking-create-fixture/empty", "/booking-create-fixture/legacy"].includes(request.url)) {
       const ids = ["6d8a3646-0ed2-44b5-ad45-c5c9d578126a", "fixture-bookingSettings-legacy"];

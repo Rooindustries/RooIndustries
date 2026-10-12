@@ -1,18 +1,7 @@
 import React from "react";
+import { MemoryRouter } from "react-router-dom";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import RefDashboard from "../components/RefDashboard";
-
-const mockNavigate = jest.fn();
-
-jest.mock(
-  "react-router-dom",
-  () => ({
-    __esModule: true,
-    useLocation: () => ({ search: window.location.search }),
-    useNavigate: () => mockNavigate,
-  }),
-  { virtual: true }
-);
 
 const referralPayload = {
   ok: true,
@@ -69,7 +58,6 @@ const payoutPayload = {
 
 describe("RefDashboard payout summary", () => {
   beforeEach(() => {
-    mockNavigate.mockReset();
     window.history.replaceState(null, "", "/referrals/dashboard");
     global.fetch = jest.fn(async (url) => {
       if (url === "/api/ref/getData") {
@@ -91,7 +79,11 @@ describe("RefDashboard payout summary", () => {
   });
 
   test("shows earned, paid, and remaining owed without labeling package earnings as owed", async () => {
-    render(<RefDashboard />);
+    render(
+      <MemoryRouter initialEntries={[window.location.pathname + window.location.search]}>
+        <RefDashboard />
+      </MemoryRouter>
+    );
 
     expect(await screen.findByText("Remaining owed")).toBeInTheDocument();
     expect(screen.getByText("Total earned")).toBeInTheDocument();
@@ -107,7 +99,11 @@ describe("RefDashboard payout summary", () => {
   });
 
   test("shows referral links without the packages anchor", async () => {
-    render(<RefDashboard />);
+    render(
+      <MemoryRouter initialEntries={[window.location.pathname + window.location.search]}>
+        <RefDashboard />
+      </MemoryRouter>
+    );
 
     const referralInput = await screen.findByDisplayValue(
       `${window.location.origin}/?ref=creator-code`
@@ -123,7 +119,11 @@ describe("RefDashboard payout summary", () => {
       "/referrals/dashboard?notice=discord-linked"
     );
 
-    render(<RefDashboard />);
+    render(
+      <MemoryRouter initialEntries={[window.location.pathname + window.location.search]}>
+        <RefDashboard />
+      </MemoryRouter>
+    );
 
     expect(
       await screen.findByText("Discord linked to your account.")
@@ -137,7 +137,11 @@ describe("RefDashboard payout summary", () => {
       "/referrals/dashboard?notice=discord-link-failed"
     );
 
-    render(<RefDashboard />);
+    render(
+      <MemoryRouter initialEntries={[window.location.pathname + window.location.search]}>
+        <RefDashboard />
+      </MemoryRouter>
+    );
 
     expect(
       await screen.findByText(
@@ -147,7 +151,11 @@ describe("RefDashboard payout summary", () => {
   });
 
   test("exposes payment logs as a modal dialog and closes it with Escape", async () => {
-    render(<RefDashboard />);
+    render(
+      <MemoryRouter initialEntries={[window.location.pathname + window.location.search]}>
+        <RefDashboard />
+      </MemoryRouter>
+    );
 
     fireEvent.click(
       await screen.findByRole("button", { name: "View my payment logs" })

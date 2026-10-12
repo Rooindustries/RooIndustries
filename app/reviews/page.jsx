@@ -1,3 +1,4 @@
+import Reviews from "@/src/next/entries/Reviews";
 import RouteRenderer from "@/src/next/RouteRenderer";
 import seo from "@/src/lib/seo";
 import { fetchPublicContent } from "@/src/server/content/publicContent";
@@ -13,5 +14,5 @@ export default async function Page() {
   } catch (error) {
     logSafeError("Reviews page content unavailable", error);
   }
-  return <RouteRenderer pathname="/reviews" searchParams={{}} initialRouteData={{ reviewsGallery }} />;
+  return <RouteRenderer entry={Reviews} pathname="/reviews" searchParams={{}} initialRouteData={{ reviewsGallery }} />;
 }

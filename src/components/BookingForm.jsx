@@ -16,7 +16,7 @@ import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
 import PriceDisplay from "./PriceDisplay";
-import { getWarrantyCallout } from "./Packages";
+import { getWarrantyCallout } from "../lib/packageWarranty";
 import {
   BOOKING_DRAFT_STORAGE_KEY,
   CHECKOUT_BOOKING_STORAGE_KEY,
@@ -1966,14 +1966,13 @@ export default function BookingForm({ isMobile }) {
     const emailDispatchToken = String(data.emailDispatchToken || "").trim();
     if (
       !["booked", "email_partial"].includes(status) ||
-      !bookingId ||
-      !emailDispatchToken
+      !bookingId
     ) {
       returnToPayment();
       return;
     }
 
-    const bookingConfirmation = { bookingId, emailDispatchToken };
+    const bookingConfirmation = { bookingId, ...(emailDispatchToken ? { emailDispatchToken } : {}) };
     try {
       sessionStorage.setItem(
         BOOKING_CONFIRMATION_STORAGE_KEY,

@@ -1,8 +1,11 @@
 import { removeBrowserStorage } from "../lib/browserStorage";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import packageContent from "../lib/packageContent";
 import ConnectedAccounts from "./ConnectedAccounts";
+import { useReferralAccount } from "../lib/useReferralAccount";
+import { useDialogFocus } from "../lib/useDialogFocus";
 
 const { normalizePackageText } = packageContent;
 
@@ -55,19 +58,25 @@ export default function RefDashboard() {
   const nav = useNavigate();
   const location = useLocation();
 
-  const [creator, setCreator] = useState(null);
-  const [commission, setCommission] = useState(0);
-  const [discount, setDiscount] = useState(0);
-  const [max, setMax] = useState(0);
+  const { referral: creator, loading, error: accountError, retry } = useReferralAccount();
+  const [editedCommission, setCommission] = useState(null);
+  const [editedDiscount, setDiscount] = useState(null);
+  const commission = editedCommission ?? creator?.currentCommissionPercent ?? 10;
+  const discount = editedDiscount ?? creator?.currentDiscountPercent ?? 0;
+  const max = creator?.maxCommissionPercent ?? 15;
   const [payout, setPayout] = useState(null);
   const [payoutLoading, setPayoutLoading] = useState(true);
   const [payoutError, setPayoutError] = useState(null);
   const [showLogsModal, setShowLogsModal] = useState(false);
   const [closingLogsModal, setClosingLogsModal] = useState(false);
   const [logsModalAnimatingIn, setLogsModalAnimatingIn] = useState(false);
+  const logsDialogRef = useRef(null);
+  const logsCloseRef = useRef(null);
+  const logsCloseTimer = useRef(null);
 
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
 
   const [toast, setToast] = useState(null);
   const [authNotice] = useState(() => resolveAuthNotice(location.search));
@@ -77,12 +86,15 @@ export default function RefDashboard() {
   `;
 
   useEffect(() => {
+    if (!creator) return undefined;
+    let active = true;
     const loadPayouts = async () => {
       try {
         setPayoutLoading(true);
         setPayoutError(null);
         const res = await fetch("/api/ref/payouts");
         const data = await res.json();
+        if (!active) return;
 
         if (!data.ok) {
           setPayout(null);
@@ -92,66 +104,17 @@ export default function RefDashboard() {
 
         setPayout(data);
       } catch {
+        if (!active) return;
         console.error("Referral payout loading failed");
         setPayout(null);
         setPayoutError("Could not load payout data.");
       } finally {
-        setPayoutLoading(false);
+        if (active) setPayoutLoading(false);
       }
     };
-
-    async function load() {
-      try {
-        const res = await fetch("/api/ref/getData");
-        const data = await res.json();
-
-        if (!data.ok) {
-          try {
-            sessionStorage.removeItem("creatorId");
-          } catch {
-            console.error("Failed to clear obsolete referral state");
-          }
-          return nav("/referrals/login");
-        }
-
-        const ref = data.referral || {};
-
-        const successfulReferrals = ref.successfulReferrals ?? 0;
-
-        const normalized = {
-          ...ref,
-          successfulReferrals,
-        };
-
-        setCreator(normalized);
-        setMax(normalized.maxCommissionPercent ?? 15);
-        loadPayouts();
-
-        const bypass = normalized.bypassUnlock === true;
-        const isUnlocked = successfulReferrals >= 5 || bypass;
-
-        if (!isUnlocked) {
-          setCommission(10);
-          setDiscount(0);
-        } else {
-          setCommission(normalized.currentCommissionPercent ?? 10);
-          setDiscount(normalized.currentDiscountPercent ?? 0);
-        }
-      } catch {
-        console.error("Referral dashboard loading failed");
-        try {
-          sessionStorage.removeItem("creatorId");
-        } catch {
-          console.error("Failed to clear obsolete referral state");
-        }
-        nav("/referrals/login");
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    load();
-  }, [nav]);
+    loadPayouts();
+    return () => { active = false; };
+  }, [creator]);
 
   function showToast(type, message) {
     setToast({ type, message });
@@ -167,9 +130,11 @@ export default function RefDashboard() {
 
   const formatDate = (value) => {
     if (!value) return "-";
-    const d = new Date(value);
+    const calendarDate = typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+    const d = new Date(calendarDate ? `${value}T00:00:00Z` : value);
     if (isNaN(d.getTime())) return value;
     return d.toLocaleDateString(undefined, {
+      ...(calendarDate ? { timeZone: "UTC" } : {}),
       year: "numeric",
       month: "short",
       day: "numeric",
@@ -236,52 +201,64 @@ export default function RefDashboard() {
   );
 
   useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    if (showLogsModal) {
-      document.body.style.overflow = "hidden";
-      document.documentElement.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = previousOverflow || "";
-      document.documentElement.style.overflow = previousOverflow || "";
-    }
+    if (!showLogsModal) return undefined;
+    const bodyOverflow = document.body.style.overflow;
+    const htmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
     return () => {
-      document.body.style.overflow = previousOverflow || "";
-      document.documentElement.style.overflow = previousOverflow || "";
+      clearTimeout(logsCloseTimer.current);
+      document.body.style.overflow = bodyOverflow;
+      document.documentElement.style.overflow = htmlOverflow;
     };
   }, [showLogsModal]);
 
   const closeLogsModal = useCallback(() => {
     setClosingLogsModal(true);
-    setTimeout(() => {
+    clearTimeout(logsCloseTimer.current);
+    logsCloseTimer.current = setTimeout(() => {
       setShowLogsModal(false);
       setClosingLogsModal(false);
     }, 200);
   }, []);
 
+  useDialogFocus({
+    open: showLogsModal,
+    dialogRef: logsDialogRef,
+    initialFocusRef: logsCloseRef,
+    onClose: closeLogsModal,
+  });
+
   useEffect(() => {
+    setLogsModalAnimatingIn(false);
     if (!showLogsModal) return undefined;
-
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape") closeLogsModal();
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [closeLogsModal, showLogsModal]);
-
-  useEffect(() => {
-    if (showLogsModal) {
-      setLogsModalAnimatingIn(false);
-      requestAnimationFrame(() => setLogsModalAnimatingIn(true));
-    } else {
-      setLogsModalAnimatingIn(false);
-    }
+    const frame = requestAnimationFrame(() => setLogsModalAnimatingIn(true));
+    return () => cancelAnimationFrame(frame);
   }, [showLogsModal]);
+
+  async function logout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    setLogoutError("");
+    try {
+      const response = await fetch("/api/ref/logout", {
+        method: "POST",
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) throw new Error("Logout failed");
+      removeBrowserStorage("sessionStorage", "creatorId");
+      nav("/referrals/login");
+    } catch {
+      setLogoutError("Could not sign out. Please try again.");
+    } finally {
+      setLoggingOut(false);
+    }
+  }
 
   const unlocked =
     (creator?.successfulReferrals || 0) >= 5 || creator?.bypassUnlock === true;
 
-  const total = commission + discount;
+  const total = (Math.round(commission * 100) + Math.round(discount * 100)) / 100;
   const invalid = total > max;
   const panelClass =
     "bg-panel p-6 rounded-2xl border border-line-input shadow-glow-soft backdrop-blur-md";
@@ -290,17 +267,17 @@ export default function RefDashboard() {
 
   function adjustCommission(delta) {
     if (!unlocked) return;
-    const newVal = commission + delta;
+    const newVal = (Math.round(commission * 100) + delta * 100) / 100;
     if (newVal < 0) return;
-    if (newVal + discount > max) return;
+    if (Math.round(newVal * 100) + Math.round(discount * 100) > Math.round(max * 100)) return;
     setCommission(newVal);
   }
 
   function adjustDiscount(delta) {
     if (!unlocked) return;
-    const newVal = discount + delta;
+    const newVal = (Math.round(discount * 100) + delta * 100) / 100;
     if (newVal < 0) return;
-    if (newVal + commission > max) return;
+    if (Math.round(newVal * 100) + Math.round(commission * 100) > Math.round(max * 100)) return;
     setDiscount(newVal);
   }
 
@@ -330,7 +307,14 @@ export default function RefDashboard() {
   }
 
   if (loading)
-    return <p className="text-center text-ink pt-32">Loading...</p>;
+    return <p role="status" className="text-center text-ink pt-32">Loading...</p>;
+  if (accountError) return (
+    <section className="pt-32 px-6 max-w-xl mx-auto text-ink">
+      <h1 className="text-3xl font-bold text-accent">Creator dashboard</h1>
+      <p role="alert" className="mt-4 text-danger-text">{accountError}</p>
+      <button onClick={retry} className="mt-6 rounded-xl bg-accent-strong px-6 py-3 font-semibold text-accent-contrast">Retry</button>
+    </section>
+  );
   if (!creator) return null;
 
   const currentRefs = creator.successfulReferrals ?? 0;
@@ -503,6 +487,7 @@ export default function RefDashboard() {
           <div className="flex items-center justify-between bg-surface-input p-3 rounded-xl border border-line-input">
             <button
               onClick={() => adjustCommission(-1)}
+              disabled={!unlocked}
               className="px-4 py-2 bg-surface-hover-accent hover:bg-info-soft rounded-xl text-xl font-bold transition"
             >
               –
@@ -510,6 +495,7 @@ export default function RefDashboard() {
             <span className="text-xl font-bold">{commission}%</span>
             <button
               onClick={() => adjustCommission(1)}
+              disabled={!unlocked}
               className="px-4 py-2 bg-surface-hover-accent hover:bg-info-soft rounded-xl text-xl font-bold transition"
             >
               +
@@ -527,6 +513,7 @@ export default function RefDashboard() {
           <div className="flex items-center justify-between bg-surface-input p-3 rounded-xl border border-line-input">
             <button
               onClick={() => adjustDiscount(-1)}
+              disabled={!unlocked}
               className="px-4 py-2 bg-surface-hover-accent hover:bg-info-soft rounded-xl text-xl font-bold transition"
             >
               –
@@ -534,6 +521,7 @@ export default function RefDashboard() {
             <span className="text-xl font-bold">{discount}%</span>
             <button
               onClick={() => adjustDiscount(1)}
+              disabled={!unlocked}
               className="px-4 py-2 bg-surface-hover-accent hover:bg-info-soft rounded-xl text-xl font-bold transition"
             >
               +
@@ -693,24 +681,28 @@ export default function RefDashboard() {
 
 
       <button
-        onClick={async () => {
-          try {
-            await fetch("/api/ref/logout", { method: "POST" });
-          } catch {
-            console.error("Referral logout failed");
-          } finally {
-            removeBrowserStorage("sessionStorage", "creatorId");
-            nav("/referrals/login");
-          }
-        }}
+        onClick={logout}
+        disabled={loggingOut}
+        aria-busy={loggingOut}
+        aria-describedby={logoutError ? "ref-logout-error" : undefined}
         className="mt-3 w-full py-3 bg-danger-soft border border-danger-border rounded-xl text-danger-text text-center font-semibold hover:bg-danger-soft hover:border-danger-border transition-all shadow-danger-soft"
       >
-        Log Out
+        {loggingOut ? "Signing out…" : "Log Out"}
       </button>
+      {logoutError && (
+        <div id="ref-logout-error" role="alert" className="mt-3 text-sm text-danger-text">
+          <p>{logoutError}</p>
+          <button onClick={logout} disabled={loggingOut} className="mt-2 underline font-semibold">
+            Retry
+          </button>
+        </div>
+      )}
 
 
       {toast && (
         <div
+          role={toast.type === "error" ? "alert" : "status"}
+          aria-atomic="true"
           className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl text-white text-sm font-semibold shadow-lg transition-all ${
             toast.type === "success"
               ? "bg-success shadow-success-soft"
@@ -722,7 +714,7 @@ export default function RefDashboard() {
       )}
 
 
-      {showLogsModal && (
+      {showLogsModal && createPortal(
         <div
           className={`fixed inset-0 z-[120] bg-black/60 backdrop-blur-lg flex items-center justify-center px-4 sm:px-6 transition-opacity duration-200 ${
             closingLogsModal
@@ -734,10 +726,12 @@ export default function RefDashboard() {
           onClick={closeLogsModal}
         >
           <div
+            ref={logsDialogRef}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-labelledby="payment-logs-title"
-            className={`relative w-full max-w-5xl max-h-[70vh] sm:max-h-[50vh] bg-panel border border-info-border rounded-2xl shadow-glow-strong p-6 transition-all duration-500 ease-in-out ${
+            className={`relative w-full max-w-5xl max-h-[85vh] overflow-y-auto bg-panel border border-info-border rounded-2xl shadow-glow-strong p-6 transition-all duration-500 ease-in-out ${
               closingLogsModal
                 ? "opacity-0 scale-95"
                 : logsModalAnimatingIn
@@ -747,6 +741,7 @@ export default function RefDashboard() {
             onClick={(e) => e.stopPropagation()}
           >
             <button
+              ref={logsCloseRef}
               onClick={closeLogsModal}
               className="absolute right-3 top-3 text-info-text hover:text-white transition text-2xl"
               aria-label="Close payment logs"
@@ -855,7 +850,8 @@ export default function RefDashboard() {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
       </section>
     </>

@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, lazy, Suspense, startTransition } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Shield, ShieldCheck } from "lucide-react";
-import PackageDetailsModal from "./PackageDetailsModal";
+import { getWarrantyCallout } from "../lib/packageWarranty";
 import PriceDisplay from "./PriceDisplay";
 import {
   fetchHomeSectionData,
@@ -15,18 +14,15 @@ import { persistBookingPackageSelection } from "../lib/checkoutStorage";
 import { trackEvent } from "../lib/analytics";
 import { getSessionAvailability } from "../lib/sessionAvailability";
 
+const loadPackageDetails = () => import("./PackageDetailsModal");
+const PackageDetailsModal = lazy(loadPackageDetails);
+
 const REFERRAL_STORAGE_KEY = "referral_session";
 const AVAILABILITY_REFRESH_INTERVAL_MS = 60_000;
-const { buildPackageOffer, buildPackageOffers } = packageContent;
+const { buildPackageOffers } = packageContent;
 const { HOME_COPY } = homeCopy;
 
-export const getWarrantyCallout = (pkg) => {
-  const offer = pkg?.warranty ? pkg : buildPackageOffer(pkg);
-  return {
-    ...offer.warranty,
-    Icon: offer.isTopPackage ? ShieldCheck : Shield,
-  };
-};
+export { getWarrantyCallout };
 
 export default function Packages({
   initialPackages = null,
@@ -51,6 +47,7 @@ export default function Packages({
     }
   }, [initialPackages, initialSectionCopy]);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsLoaded, setDetailsLoaded] = useState(false);
   const [detailsPkg, setDetailsPkg] = useState(null);
 
   const location = useLocation();
@@ -60,8 +57,11 @@ export default function Packages({
   const UPGRADE_FAQ_HASH = "upgrade-path";
 
   const openDetails = (pkg) => {
-    setDetailsPkg(pkg);
-    setDetailsOpen(true);
+    startTransition(() => {
+      setDetailsLoaded(true);
+      setDetailsPkg(pkg);
+      setDetailsOpen(true);
+    });
   };
 
   const closeDetails = () => {
@@ -357,6 +357,8 @@ export default function Packages({
                   <div className="mt-auto pt-7 flex flex-col sm:flex-row gap-3">
                     <button
                       type="button"
+                      onPointerEnter={() => { loadPackageDetails().catch(() => {}); }}
+                      onFocus={() => { loadPackageDetails().catch(() => {}); }}
                       onClick={() => openDetails(p)}
                       className="ri-package-details-button w-full sm:w-1/2 rounded-md border border-info-border bg-surface-input py-3 text-base font-semibold text-info-text shadow-info-soft transition hover:bg-surface-hover-accent hover:text-[color:var(--color-link-hover)]"
                     >
@@ -405,12 +407,16 @@ export default function Packages({
         </div>
       </div>
 
-      <PackageDetailsModal
-        open={detailsOpen}
-        onClose={closeDetails}
-        pkg={detailsPkg}
-        renderFeature={renderFeatureText}
-      />
+      <Suspense fallback={null}>
+        {detailsLoaded && (
+          <PackageDetailsModal
+            open={detailsOpen}
+            onClose={closeDetails}
+            pkg={detailsPkg}
+            renderFeature={renderFeatureText}
+          />
+        )}
+      </Suspense>
     </section>
   );
 }

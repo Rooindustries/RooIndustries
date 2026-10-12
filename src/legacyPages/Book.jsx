@@ -1,8 +1,13 @@
-import React from "react";
+import React, { lazy, Suspense, useEffect } from "react";
 import BookingForm from "../components/BookingForm";
-import Footer from "../components/Footer";
+import { preloadConfirmationPages } from "../lib/confirmationPages";
+
+const Footer = lazy(() => import("../components/Footer"));
 
 export default function Book({ hideFooter = false, compact = false }) {
+  useEffect(() => {
+    preloadConfirmationPages().catch(() => {});
+  }, []);
   const padY = compact ? "pt-2 pb-6" : "pt-32 pb-24";
   const titleMargin = compact ? "mb-4" : "mb-10";
   const titleSize = compact ? "text-3xl sm:text-4xl" : "text-4xl sm:text-5xl";
@@ -20,7 +25,7 @@ export default function Book({ hideFooter = false, compact = false }) {
         </h2>
         <BookingForm />
       </section>
-      {!hideFooter && <Footer />}
+      {!hideFooter && <Suspense fallback={null}><Footer /></Suspense>}
     </>
   );
 }

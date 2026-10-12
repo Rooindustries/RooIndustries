@@ -356,20 +356,42 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
             record.hydrationWarnings = record.console.filter(entry => /hydrat|server html|server snapshot|#418|#423|#425/i.test(entry.text));
             if (entry.route.startsWith("/admin") || privateRoutes.has(entry.route)) {
               record.privateGate = true;
-              if (entry.route === "/admin/content") {
-                await expect(page.locator("#content-admin-password")).toBeVisible();
-                await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
-              } else if (entry.route === "/admin/referrals") await expect(page.locator("#ref-admin-key")).toBeVisible();
-              else {
-                await expect(page.getByRole("heading", { name: "Referral Creator Login", exact: true })).toBeVisible();
-                record.destination = page.url();
-              }
               const endpoint = entry.route === "/admin/content" ? "/api/admin/content/documents" : entry.route === "/admin/referrals" ? "/api/admin/referral-creators" : "/api/ref/getData";
               const denial = await context.request.get(new URL(endpoint, baseURL).href, { maxRedirects: 0, timeout: 10000 });
               record.denial = { endpoint, status: denial.status(), body: await denial.json() };
               expect([401, 403, 503]).toContain(record.denial.status);
               expect(record.denial.body.documents || record.denial.body.creators || record.denial.body.referral).toBeFalsy();
               await denial.dispose();
+              if (entry.route === "/admin/content") {
+                await expect(page.locator("#content-admin-password")).toBeVisible();
+                await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+              } else if (entry.route === "/admin/referrals") await expect(page.locator("#ref-admin-key")).toBeVisible();
+              else {
+                const main = page.locator("#main-content");
+                const login = main.getByRole("heading", { name: "Referral Creator Login", exact: true });
+                const readOnly = record.denial.status === 503 && JSON.stringify(record.denial.body) === JSON.stringify(fixtureDenialBody);
+                if (readOnly) {
+                  const unavailable = main.getByRole("alert").filter({ hasText: fixtureDenialBody.error });
+                  await expect.poll(async () => await login.isVisible() || await unavailable.isVisible()).toBe(true);
+                  if (await unavailable.isVisible()) {
+                    await expect(unavailable).toHaveText(fixtureDenialBody.error);
+                    await expect(main.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+                    await expect(main.getByRole("button", { name: "Retry", exact: true })).toBeEnabled();
+                  }
+                } else await expect(login).toBeVisible();
+                for (const text of [
+                  /^Welcome,/, /^Referral Code:/, "Your referral link", "Commission (%)", "Viewer Discount (%)",
+                  "Total successful referrals", "Total earned", "Total paid", "Remaining owed", "Earnings & Payments", "Payment history",
+                  /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i,
+                ]) await expect(main.getByText(text, { exact: true })).toHaveCount(0);
+                await expect(main.getByRole("table")).toHaveCount(0);
+                await expect(page.getByRole("dialog", { name: "Payment Logs", exact: true })).toHaveCount(0);
+                await expect(main.locator('input[readonly], input[type="email"], #ref-change-current-password, #ref-change-new-password, #ref-change-confirm-password')).toHaveCount(0);
+                await expect(main.getByRole("button", { name: "Save Password", exact: true })).toHaveCount(0);
+                const identifier = main.getByLabel("Referral code or login email", { exact: true });
+                if (await identifier.count()) await expect(identifier).toHaveValue("");
+                record.destination = page.url();
+              }
             } else {
               const height = await page.evaluate(() => document.documentElement.scrollHeight);
               const steps = Math.min(18, Math.ceil(height / viewport.height));

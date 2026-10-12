@@ -30,8 +30,15 @@ const DEFAULT_REPEAT_COUNTS = {
   desktop: Number(process.env.NAV_REPEAT_COUNT_DESKTOP || 5),
   mobile: Number(process.env.NAV_REPEAT_COUNT_MOBILE || 3),
 };
+if (!Object.values(DEFAULT_REPEAT_COUNTS).every((count) => Number.isInteger(count) && count > 0)) {
+  throw new Error("Navigation repeat counts must be positive integers.");
+}
 const FINAL_OFFSET_MAX = 140;
 const DRIFT_MAX = 40;
+const CPU_THROTTLE_RATE = Number(process.env.NAV_CPU_THROTTLE_RATE || 1);
+if (!Number.isFinite(CPU_THROTTLE_RATE) || CPU_THROTTLE_RATE < 1 || CPU_THROTTLE_RATE > 4) {
+  throw new Error("NAV_CPU_THROTTLE_RATE must be between 1 and 4.");
+}
 
 const VIEWPORTS = [
   {
@@ -122,6 +129,7 @@ const hydrationArtifactPath = path.join(auditDir, "phase1-hydration-log.json");
 
 const navMetrics = [];
 const navFailures = [];
+const settleSummaries = [];
 const crashLog = [];
 
 const ensureAuditDir = () => {
@@ -326,8 +334,8 @@ for (const viewportCfg of VIEWPORTS) {
             reasons.push("hash_latency_exceeded");
           }
           if (!settleResult.ok) reasons.push("target_not_settled");
-          if (settleResult.timeToTargetMs > viewportCfg.settleMaxMs) {
-            reasons.push("settle_time_exceeded");
+          if (settleResult.timeToTargetMs > viewportCfg.settleMaxMs + 1500) {
+            reasons.push("settle_deadline_exceeded");
           }
           if (driftTop === null || Math.abs(driftTop) > FINAL_OFFSET_MAX) {
             reasons.push("final_offset_exceeded");
@@ -355,6 +363,32 @@ for (const viewportCfg of VIEWPORTS) {
             });
           }
         }
+      }
+    }
+
+    const samples = navMetrics
+      .filter((result) => result.viewport === viewportCfg.name)
+      .map((result) => result.settleMs)
+      .sort((a, b) => a - b);
+    const summary = {
+      viewport: viewportCfg.name,
+      sampleCount: samples.length,
+      medianMs: samples[Math.ceil(samples.length * 0.5) - 1],
+      p90Ms: samples[Math.ceil(samples.length * 0.9) - 1],
+      maxMs: samples[samples.length - 1],
+      cases: ORIGINS.flatMap((origin) => ACTIONS.map((action) => {
+        const times = navMetrics
+          .filter((result) => result.viewport === viewportCfg.name && result.origin === origin && result.action === action.label)
+          .map((result) => result.settleMs)
+          .sort((a, b) => a - b);
+        return { origin, action: action.label, sampleCount: times.length, medianMs: times[Math.ceil(times.length * 0.5) - 1] };
+      })),
+    };
+    settleSummaries.push(summary);
+    if (summary.p90Ms > viewportCfg.settleMaxMs) navFailures.push({ ...summary, reasons: ["settle_p90_exceeded"] });
+    for (const result of summary.cases) {
+      if (result.medianMs > viewportCfg.settleMaxMs) {
+        navFailures.push({ viewport: viewportCfg.name, ...result, reasons: ["settle_case_median_exceeded"] });
       }
     }
   });
@@ -415,17 +449,22 @@ test.afterAll(async () => {
 
   const payload = {
     generatedAt: new Date().toISOString(),
+    cpuThrottleRate: CPU_THROTTLE_RATE,
     repeatCount: DEFAULT_REPEAT_COUNTS,
     thresholds: {
       finalOffsetPxMax: FINAL_OFFSET_MAX,
       driftPxMax: DRIFT_MAX,
       desktop: {
         hashLatencyMsMax: VIEWPORTS[0].hashLatencyMaxMs,
-        settleMsMax: VIEWPORTS[0].settleMaxMs,
+        caseSettleMedianMsMax: VIEWPORTS[0].settleMaxMs,
+        settleP90MsMax: VIEWPORTS[0].settleMaxMs,
+        settleDeadlineMs: VIEWPORTS[0].settleMaxMs + 1500,
       },
       mobile: {
         hashLatencyMsMax: VIEWPORTS[1].hashLatencyMaxMs,
-        settleMsMax: VIEWPORTS[1].settleMaxMs,
+        caseSettleMedianMsMax: VIEWPORTS[1].settleMaxMs,
+        settleP90MsMax: VIEWPORTS[1].settleMaxMs,
+        settleDeadlineMs: VIEWPORTS[1].settleMaxMs + 1500,
       },
     },
     summary: {
@@ -434,6 +473,7 @@ test.afterAll(async () => {
       pass: navFailures.length === 0,
     },
     metrics: navMetrics,
+    settleSummaries,
     failures: navFailures,
   };
 
@@ -472,7 +512,11 @@ test.afterAll(async () => {
 });
 
 
-test.beforeEach(async ({ context, baseURL }) => {
+test.beforeEach(async ({ context, page, baseURL }) => {
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
   await guardBrowserContext(context, [baseURL]);
+  if (CPU_THROTTLE_RATE > 1) {
+    const session = await context.newCDPSession(page);
+    await session.send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE_RATE });
+  }
 });

@@ -7,6 +7,7 @@ import { WalletCards } from "lucide-react";
 import packagePricing from "../lib/packagePricing";
 import { captureSalesAttribution, sanitizeSalesAttribution } from "../lib/salesAttribution";
 import { trackConfirmedPurchase } from "../lib/analytics";
+import { preloadConfirmationPage, preloadConfirmationPages } from "../lib/confirmationPages";
 import {
   calculateCheckoutDiscounts,
   formatCouponValue,
@@ -20,6 +21,7 @@ const { applyPackagePricing } = packagePricing;
 const PAYMENT_FETCH_TIMEOUT_MS = 15_000;
 const PAYMENT_STATUS_POLL_TIMEOUT_MS = 90_000;
 const PAYMENT_STATUS_POLL_INTERVAL_MS = 2_500;
+const CONFIRMATION_PRELOAD_WAIT_MS = 2500;
 
 const formatLocalDate = (utcDate, timeZone) => {
   try {
@@ -104,6 +106,9 @@ function PayPalCheckout({ children }) {
 }
 
 export default function Payment({ hideFooter = false }) {
+  useEffect(() => {
+    preloadConfirmationPages().catch(() => {});
+  }, []);
   const location = useLocation();
   const navigate = useNavigate();
   const [hydrated, setHydrated] = useState(false);
@@ -173,7 +178,7 @@ export default function Payment({ hideFooter = false }) {
 
   const writeStoredBookingConfirmation = (confirmation) => {
     try {
-      if (!confirmation?.bookingId || !confirmation?.emailDispatchToken) {
+      if (!confirmation?.bookingId) {
         sessionStorage.removeItem(BOOKING_CONFIRMATION_STORAGE_KEY);
         return;
       }
@@ -182,7 +187,7 @@ export default function Payment({ hideFooter = false }) {
         BOOKING_CONFIRMATION_STORAGE_KEY,
         JSON.stringify({
           bookingId: confirmation.bookingId,
-          emailDispatchToken: confirmation.emailDispatchToken,
+          ...(confirmation.emailDispatchToken ? { emailDispatchToken: confirmation.emailDispatchToken } : {}),
         })
       );
     } catch {}
@@ -249,14 +254,14 @@ export default function Payment({ hideFooter = false }) {
       window.dispatchEvent(new CustomEvent("hold-state", { detail: null }));
     } catch {}
 
-    if (!bookingId || !emailDispatchToken) {
+    if (!bookingId) {
       writeStoredBookingConfirmation(null);
       return baseState;
     }
 
     const bookingConfirmation = {
       bookingId,
-      emailDispatchToken,
+      ...(emailDispatchToken ? { emailDispatchToken } : {}),
     };
 
     writeStoredBookingConfirmation(bookingConfirmation);
@@ -1009,10 +1014,7 @@ export default function Payment({ hideFooter = false }) {
       if (!operation.current()) return;
       if (data?.captured) {
         if (["booked", "email_partial"].includes(String(data.status || "").toLowerCase())) {
-          navigate("/payment-success", {
-            state: buildFinalizeNavigation(data, operation),
-            replace: true,
-          });
+          await navigateToConfirmation("paid", data, operation);
           return;
         }
         showBanner("info", "Your payment was received and is being finalized.");
@@ -1069,6 +1071,18 @@ export default function Payment({ hideFooter = false }) {
     clearPaymentSession("", operation.token);
     operation.token = "";
     return buildConfirmationNavigationState(responseBody);
+  };
+
+  const navigateToConfirmation = async (kind, responseBody, operation) => {
+    await Promise.race([
+      preloadConfirmationPage(kind).catch(() => {}),
+      new Promise(resolve => setTimeout(resolve, CONFIRMATION_PRELOAD_WAIT_MS)),
+    ]);
+    if (!operation.current()) return;
+    const state = kind === "paid"
+      ? buildFinalizeNavigation(responseBody, operation)
+      : buildConfirmationNavigationState(responseBody);
+    navigate(kind === "paid" ? "/payment-success" : "/thank-you", { state, replace: true });
   };
 
   const fetchJson = async (
@@ -1131,6 +1145,7 @@ export default function Payment({ hideFooter = false }) {
       }
 
       const nextStatus = String(data?.status || "").trim().toLowerCase();
+      if (data?.manualReviewRequired === true) return data;
       if (
         nextStatus === "booked" ||
         nextStatus === "email_partial" ||
@@ -1176,14 +1191,15 @@ export default function Payment({ hideFooter = false }) {
       });
       if (!operation.current()) return { terminal: true, stale: true };
       const resumedStatus = String(data?.status || "").trim().toLowerCase();
+      if (response.ok && data?.manualReviewRequired === true) {
+        showBanner("info", data.recoveryReason, { persistent: true });
+        return { ...paymentSession, result: data, terminal: true };
+      }
       if (
         response.ok &&
         (resumedStatus === "booked" || resumedStatus === "email_partial")
       ) {
-        navigate("/payment-success", {
-          state: buildFinalizeNavigation(data, operation),
-          replace: true,
-        });
+        await navigateToConfirmation("paid", data, operation);
         return { ...paymentSession, result: data, terminal: true };
       }
       if (
@@ -1289,10 +1305,7 @@ export default function Payment({ hideFooter = false }) {
         provider !== "free" &&
         (returnedStatus === "booked" || returnedStatus === "email_partial")
       ) {
-        navigate("/payment-success", {
-          state: buildFinalizeNavigation(data, operation),
-          replace: true,
-        });
+        await navigateToConfirmation("paid", data, operation);
         return { ...nextSession, terminal: true };
       }
       if (provider !== "free") {
@@ -1333,16 +1346,17 @@ export default function Payment({ hideFooter = false }) {
 
       const status = String(data?.status || "").trim().toLowerCase();
       const isFinalizedStatus = status === "booked" || status === "email_partial";
+      if (response.ok && data?.manualReviewRequired === true) {
+        showBanner("info", data.recoveryReason, { persistent: true });
+        return data;
+      }
 
       if (!response.ok && response.status !== 202 && !isFinalizedStatus) {
         throw new Error(data?.error || "Unable to finalize payment.");
       }
 
       if (isFinalizedStatus) {
-        navigate("/payment-success", {
-          state: buildFinalizeNavigation(data, operation),
-          replace: true,
-        });
+        await navigateToConfirmation("paid", data, operation);
         return data;
       }
 
@@ -1355,11 +1369,12 @@ export default function Payment({ hideFooter = false }) {
         const settled = await pollPaymentUntilTerminal(paymentAccessToken, operation);
         if (!operation.current()) return null;
         const settledStatus = String(settled?.status || "").trim().toLowerCase();
+        if (settled?.manualReviewRequired === true) {
+          showBanner("info", settled.recoveryReason, { persistent: true });
+          return settled;
+        }
         if (settledStatus === "booked" || settledStatus === "email_partial") {
-          navigate("/payment-success", {
-            state: buildFinalizeNavigation(settled, operation),
-            replace: true,
-          });
+          await navigateToConfirmation("paid", settled, operation);
           return settled;
         }
 
@@ -1589,10 +1604,7 @@ export default function Payment({ hideFooter = false }) {
         throw new Error(data.error || "Could not save your free booking.");
       }
 
-      navigate("/thank-you", {
-        state: buildConfirmationNavigationState(data),
-        replace: true,
-      });
+      await navigateToConfirmation("free", data, operation);
     } catch (err) {
       if (!operation.current()) return;
       console.error("Free booking failed");

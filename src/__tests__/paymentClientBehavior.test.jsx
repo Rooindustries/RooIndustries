@@ -167,6 +167,43 @@ describe("payment client request and accessibility behavior", () => {
     expect(global.fetch).toHaveBeenCalledWith("/api/payment/finalize", expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer dodo-return-token" }) }));
   });
 
+  test.each(["return", "poll", "status", "resume"])("shows owner follow-up without a failure or another checkout after %s", async (via) => {
+    const booking = { ...checkout, originalOrderId: "booking_original", packageTitle: "Performance Vertex Max", packagePrice: "$45.00" };
+    const message = "Your payment was received. Roo Industries will contact you about your upgrade.";
+    const held = { ok: true, status: "needs_recovery", manualReviewRequired: true, recoveryReason: message };
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(booking));
+    sessionStorage.setItem("payment_session_state", JSON.stringify({
+      provider: "dodo", paymentAccessToken: "dodo-review-token", providerPayload: { orderId: "cks_review" },
+      fingerprint: JSON.stringify({ packageTitle: booking.packageTitle, originalOrderId: booking.originalOrderId,
+        startTimeUTC: booking.startTimeUTC, email: booking.email, referralCode: "", couponCode: "" }),
+    }));
+    global.fetch = jest.fn(async (url) => {
+      if (url === "/api/payment/finalize") return response(via === "poll" ? { ok: true, status: "finalizing" } : held);
+      if (url === "/api/payment/status") return response(held);
+      if (url === "/api/payment/providers") return response({ ...providerPayload,
+        providers: { ...providerPayload.providers, dodo: { enabled: true, mode: "live" } } });
+      return standardFetch(url);
+    });
+    render(<MemoryRouter initialEntries={[{ pathname: "/payment", search: ["return", "poll"].includes(via) ? "?dodo_return=1" : "" }]}>
+      <Routes>
+        <Route path="/payment" element={<Payment hideFooter />} />
+        <Route path="/payment-success" element={<div>Upgrade confirmed</div>} />
+      </Routes>
+    </MemoryRouter>);
+    if (["status", "resume"].includes(via)) {
+      const button = await screen.findByRole("button", { name: via === "status" ? "Check payment status" : "Resume checkout" });
+      await waitFor(() => expect(button).toBeEnabled());
+      fireEvent.click(button);
+    }
+    const banner = await screen.findByRole("status");
+    await waitFor(() => expect(banner).toHaveTextContent(message));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("Upgrade confirmed")).not.toBeInTheDocument();
+    expect(JSON.parse(sessionStorage.getItem("payment_session_state")).paymentAccessToken).toBe("dodo-review-token");
+    expect(global.fetch).not.toHaveBeenCalledWith("/api/payment/start", expect.anything());
+    expect(global.fetch.mock.calls.filter(([url]) => url === "/api/payment/status")).toHaveLength(["poll", "resume"].includes(via) ? 1 : 0);
+  });
+
   test.each(["failed", "abandoned", "refunded", "poll-failed", "manual-failed", "resume-failed"])("clears a released Dodo hold after %s", async (outcome) => {
     jest.useFakeTimers();
     sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));

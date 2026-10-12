@@ -82,27 +82,34 @@ export default async function handler(req, res) {
       ])
       .commit({ visibility: "sync" });
 
-    const browserSession = await createVerifiedSupabaseBrowserSession({
-      userId: created.userId,
-      expectedLegacySanityId: referral._id,
-    });
-    await installLegacySupabaseSession({
-      req,
-      res,
-      session: browserSession.session,
-    });
+    try {
+      const browserSession = await createVerifiedSupabaseBrowserSession({
+        userId: created.userId,
+        expectedLegacySanityId: referral._id,
+      });
+      const installed = await installLegacySupabaseSession({
+        req,
+        res,
+        session: browserSession.session,
+      });
+      if (!installed) throw new Error("Creator browser session was not installed.");
 
-    setReferralSessionCookie(
-      res,
-      {
-        authBackend: "supabase",
-        code: referral.slug?.current || "",
-        referralId: referral._id,
-        principalId: browserSession.account?.principal_id || "",
-        sessionVersion: browserSession.account?.session_version || 1,
-      },
-      true
-    );
+      setReferralSessionCookie(
+        res,
+        {
+          authBackend: "supabase",
+          code: referral.slug?.current || "",
+          referralId: referral._id,
+          principalId: browserSession.account?.principal_id || "",
+          sessionVersion: browserSession.account?.session_version || 1,
+        },
+        true
+      );
+    } catch (error) {
+      logSafeError("Confirmed creator automatic sign-in failed", error);
+      res.setHeader("Cache-Control", "private, no-store");
+      return res.status(200).json({ ok: true, requiresLogin: true });
+    }
     res.setHeader("Cache-Control", "private, no-store");
     return res.status(200).json({ ok: true });
   } catch (error) {

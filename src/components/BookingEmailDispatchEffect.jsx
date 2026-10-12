@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 const BOOKING_CONFIRMATION_STORAGE_KEY = "booking_confirmation_state";
 const TERMINAL_FAILURE_STATUSES = new Set([400, 401, 403, 404]);
@@ -17,14 +17,19 @@ const readStoredBookingConfirmation = () => {
   return null;
 };
 
-const clearStoredBookingConfirmation = () => {
+const writeStoredBookingConfirmation = (confirmation) => {
   try {
-    sessionStorage.removeItem(BOOKING_CONFIRMATION_STORAGE_KEY);
+    if (confirmation) {
+      sessionStorage.setItem(BOOKING_CONFIRMATION_STORAGE_KEY, JSON.stringify(confirmation));
+    } else {
+      sessionStorage.removeItem(BOOKING_CONFIRMATION_STORAGE_KEY);
+    }
   } catch {}
 };
 
 export default function BookingEmailDispatchEffect() {
   const location = useLocation();
+  const navigate = useNavigate();
   const attemptedKeyRef = useRef("");
   const historyUsrState =
     typeof window !== "undefined" ? window.history?.state?.usr : null;
@@ -62,13 +67,26 @@ export default function BookingEmailDispatchEffect() {
         if (cancelled) return;
 
         const body = await response.json().catch(() => ({}));
+        if (cancelled) return;
         const allSent =
           body?.emailDispatch?.allSent === true ||
           (body?.emailDispatch?.client?.sent === true &&
             body?.emailDispatch?.owner?.sent === true);
 
-        if (allSent || TERMINAL_FAILURE_STATUSES.has(response.status)) {
-          clearStoredBookingConfirmation();
+        const inactive = body?.code === "booking_inactive";
+        if (allSent || TERMINAL_FAILURE_STATUSES.has(response.status) || inactive) {
+          const nextState = { ...navState };
+          if (inactive) {
+            writeStoredBookingConfirmation(null);
+            delete nextState.bookingConfirmation;
+          } else {
+            const receipt = { ...bookingConfirmation, bookingId };
+            delete receipt.emailDispatchToken;
+            writeStoredBookingConfirmation(receipt);
+            nextState.bookingConfirmation = receipt;
+          }
+          navigate({ pathname: location.pathname, search: location.search, hash: location.hash },
+            { replace: true, state: nextState });
           return;
         }
 
@@ -82,7 +100,7 @@ export default function BookingEmailDispatchEffect() {
     return () => {
       cancelled = true;
     };
-  }, [bookingId, emailDispatchToken]);
+  }, [bookingId, emailDispatchToken, navigate, location.pathname, location.search, location.hash]);
 
   return null;
 }
