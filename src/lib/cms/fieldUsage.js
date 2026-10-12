@@ -4,29 +4,30 @@ import policyContent from "../policyContent.js";
 export const UNUSED_FIELD_NOTE = "Not shown on the site yet. Edits here won't appear.";
 
 const unused = {
-  about: ["recordNote"],
+  about: ["recordImage", "recordNote", "recordDetails[].sub"],
   bookingSettings: ["maxDaysAheadBooking"],
   coupon: ["notes"],
   discordBanner: ["text", "mobileText"],
-  faqSettings: ["eyebrow", "subtitle"],
-  footer: ["subtitle", "description", "availability"],
+  faqSettings: ["eyebrow", "title", "subtitle"],
+  footer: ["title", "subtitle", "description", "availability"],
   hero: ["tagline", "ctaNoteIcon", "bullets"],
+  howItWorks: ["steps[].faqText", "steps[].faqLink", "steps[].iconType"],
   meetTheTeam: ["seoTitle", "seoDescription"],
-  packagesSettings: ["badgeText", "subheading", "dividerText"],
-  proReviewsCarousel: ["subtitle"],
-  services: ["subheading", "cards[].customIcon", "benchAfterLabel"],
+  packagesSettings: ["heading", "badgeText", "subheading", "dividerText"],
+  proReviewsCarousel: ["title", "subtitle"],
+  services: ["heading", "subheading", "cards", "cards[].title", "cards[].description", "cards[].iconType", "cards[].customIcon", "benchAfterLabel"],
   siteSettings: ["siteMode"],
-  supportedGames: ["subtitle", "showAllLabel", "showLessLabel"],
+  supportedGames: ["title", "subtitle", "showAllLabel", "showLessLabel"],
   terms: ["lastUpdated"],
 };
 
 const conditional = {
-  about: { "recordDetails[].value": "hardwareStat" },
+  about: { "recordDetails[].label": "hardwareStat", "recordDetails[].value": "hardwareStat" },
   package: { description: "package", checkedBullets: "package", uncheckedBullets: "package" },
-  faqSection: { "questions[].answer": "faq" },
-  terms: { "sections[].content": "terms" },
+  faqSection: { "questions[].question": "faq", "questions[].answer": "faq" },
+  terms: { "sections[].heading": "terms", "sections[].content": "terms" },
   meetTheTeam: { "sections[].cards[].bio": "team" },
-  services: Object.fromEntries(["gameLogo", "beforeFps", "afterFps", "metricLabel", "gpu", "cpu", "ram"].map(name => [`benchPages[].games[].${name}`, "overwatch"])),
+  services: Object.fromEntries(["gameTitle", "gameLogo", "beforeFps", "afterFps", "metricLabel", "gpu", "cpu", "ram"].map(name => [`benchPages[].games[].${name}`, "overwatch"])),
 };
 
 export const isUnusedField = (field, parent = {}) => {
@@ -43,7 +44,7 @@ export const isUnusedField = (field, parent = {}) => {
     case "terms": {
       const probe = { ...parent, content: [] };
       const result = policyContent.applyTermsPolicyOverrides({ sections: [probe] }).sections[0];
-      return result.content !== probe.content;
+      return field.name === "content" ? result.content !== probe.content : result.heading !== probe.heading;
     }
     case "team": return /^(wanted|candi)$/i.test(String(parent.name || "").trim());
     case "hardwareStat": return /^(cpu|gpu)$/i.test(String(parent.label || "").trim());

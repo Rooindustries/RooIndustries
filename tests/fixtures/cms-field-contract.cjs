@@ -1,19 +1,20 @@
 const { createHash } = require("node:crypto");
 
 const unused = {
-  about: ["recordNote"],
+  about: ["recordImage", "recordNote", "recordDetails[].sub"],
   bookingSettings: ["maxDaysAheadBooking"],
   coupon: ["notes"],
   discordBanner: ["text", "mobileText"],
-  faqSettings: ["eyebrow", "subtitle"],
-  footer: ["subtitle", "description", "availability"],
+  faqSettings: ["eyebrow", "title", "subtitle"],
+  footer: ["title", "subtitle", "description", "availability"],
   hero: ["tagline", "ctaNoteIcon", "bullets"],
+  howItWorks: ["steps[].faqText", "steps[].faqLink", "steps[].iconType"],
   meetTheTeam: ["seoTitle", "seoDescription"],
-  packagesSettings: ["badgeText", "subheading", "dividerText"],
-  proReviewsCarousel: ["subtitle"],
-  services: ["subheading", "cards[].customIcon", "benchAfterLabel"],
+  packagesSettings: ["heading", "badgeText", "subheading", "dividerText"],
+  proReviewsCarousel: ["title", "subtitle"],
+  services: ["heading", "subheading", "cards", "cards[].title", "cards[].description", "cards[].iconType", "cards[].customIcon", "benchAfterLabel"],
   siteSettings: ["siteMode"],
-  supportedGames: ["subtitle", "showAllLabel", "showLessLabel"],
+  supportedGames: ["title", "subtitle", "showAllLabel", "showLessLabel"],
   terms: ["lastUpdated"],
 };
 
@@ -45,52 +46,19 @@ const rendered = {
 };
 
 const internal = {
-  about: {
-    recordImage: { kind: "previewImage", consumer: "src/server/cms/documents.js:41" },
-    "recordDetails[].sub": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63" },
-    "recordDetails[].label": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63", when: "hardwareStat" },
-  },
   bookingSettings: { ownerEmail: { kind: "ownerNotification", consumer: "src/server/api/ref/bookingEmails.js:222" } },
   coupon: { title: { kind: "documentTitle", consumer: "src/components/admin/content/ContentAdmin.jsx:834" } },
-  faqSettings: { title: { kind: "documentTitle", consumer: "src/components/admin/content/ContentAdmin.jsx:870" } },
-  footer: { title: { kind: "documentTitle", consumer: "src/server/cms/documents.js:45" } },
-  howItWorks: {
-    "steps[].faqText": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63" },
-    "steps[].faqLink": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63" },
-    "steps[].iconType": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63" },
-  },
-  packagesSettings: { heading: { kind: "documentTitle", consumer: "src/components/admin/content/ContentAdmin.jsx:870" } },
-  proReviewsCarousel: { title: { kind: "documentTitle", consumer: "src/components/admin/content/ContentAdmin.jsx:870" } },
   review: { title: { kind: "documentTitle", consumer: "src/components/admin/content/ContentAdmin.jsx:834" } },
-  services: {
-    heading: { kind: "documentTitle", consumer: "src/components/admin/content/ContentAdmin.jsx:870" },
-    cards: { kind: "rowCollection", consumer: "src/components/admin/content/FieldInput.jsx:149" },
-    "cards[].title": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63" },
-    "cards[].description": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63" },
-    "cards[].iconType": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63" },
-    "benchPages[].games[].gameTitle": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63", when: "overwatch" },
-  },
-  supportedGames: { title: { kind: "documentTitle", consumer: "src/components/admin/content/ContentAdmin.jsx:870" } },
-  faqSection: { "questions[].question": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63", when: "faq" } },
-  terms: { "sections[].heading": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63", when: "terms" } },
 };
 
 const operationalReadOnly = { coupon: ["timesUsed", "activeReservations", "autoDeactivatedByRedemptionId", "autoDeactivatedAt", "redemptionCount"] };
 
-const internalField = (type, path, parent = {}) => {
-  const entry = internal[type]?.[patternPath(path)];
-  if (!entry?.when) return entry;
-  const matches = entry.when === "hardwareStat" ? /^(cpu|gpu)$/i.test(String(parent.label || "").trim())
-    : entry.when === "overwatch" ? /^overwatch(?:\s+2)?$/i.test(String(parent.gameTitle || "").trim())
-    : entry.when === "terms" ? /rescheduling policy|cancellations and rescheduling/i.test(parent.heading || "")
-    : /(?:refund|money[- ]back).*warranty|warranty.*(?:refund|money[- ]back)|free re[-\s]?optimization|(?:re[-\s]?xoc|rexoc).*free|upgrade pc each 6 months|change a part before the 6[-\s]?month period/i.test(parent.question || "");
-  return matches ? entry : undefined;
-};
+const internalField = (type, path) => internal[type]?.[patternPath(path)];
 
 const classify = (type, path, parent = {}) => {
   const normalized = patternPath(path).replace(/\[\]$/, "");
   if (unusedField(type, path, parent)) return "UNUSED";
-  if (internalField(type, path, parent)) return "INTERNAL";
+  if (internalField(type, path)) return "INTERNAL";
   if (rendered[type]?.includes(normalized)) return "RENDERED";
   throw new Error(`Unclassified editable CMS field: ${type}.${normalized}`);
 };
@@ -125,7 +93,7 @@ const bindings = {
 const hash = value => createHash("sha1").update(value).digest("hex");
 const patternPath = path => path.replace(/\[\d+\]/g, "[]");
 const unusedField = (type, field, parent = {}) => {
-  if (internalField(type, field, parent)) return false;
+  if (internalField(type, field)) return false;
   if ((unused[type] || []).includes(patternPath(field))) return true;
   if (type === "about" && /\.(?:label|value)$/.test(field)) return /^(cpu|gpu)$/i.test(String(parent.label || "").trim());
   if (type === "package" && /^(?:checkedBullets|uncheckedBullets)$/.test(field)) return /^(?:vertex essentials|performance vertex overhaul|performance vertex max|xoc(?:\s*\/\s*extreme overclocking)?)$/i.test(parent.title || "");

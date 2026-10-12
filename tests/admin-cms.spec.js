@@ -203,7 +203,6 @@ test("ROO-66 every schema field has an explicit rendered, internal or unused con
         expect(internal.consumer).toMatch(/^src\/.+:\d+$/);
         expect(field.readOnly, `${schema.name}.${path} has an internal consumer`).not.toBe(true);
         expect(field.description).not.toBe(UNUSED_NOTE);
-        if (internal.when) expect(field.unusedWhen).toBeUndefined();
       }
       if (usage === "UNUSED") expect(field).toMatchObject({ unusedOnSite: true, readOnly: true, preserveStoredValue: true, description: UNUSED_NOTE });
       classified.push({ type: schema.name, path, usage, internal });
@@ -303,43 +302,22 @@ for (const schema of CONTENT_TYPES.filter(type => !["footer", "siteSettings"].in
     const verifyInternal = async () => {
       const checked = [];
       for (const item of internalCases) {
-        const consumer = fieldContract.internalField(schema.name, item.path, fieldContract.get(pending.document, item.path.replace(/\.?[^.[\]]+$/, "")) || pending.document);
+        const consumer = fieldContract.internalField(schema.name, item.path);
         const current = await cms(request, `/api/admin/content/documents/${entry._id}`);
         await page.goto("/admin/content");
         await expect(page.getByRole("navigation", { name: "Content types" })).toBeVisible();
         await choose(page, schema.title);
         if (!schema.singleton) await page.getByRole("region", { name: `${schema.title} list`, exact: true }).getByRole("button").filter({ hasText: current.document[schema.preview.title] }).first().click();
         if (consumer.kind === "documentTitle") {
-          await expect(page.getByRole("region", { name: "Editor", exact: true }).getByRole("heading", { name: item.value, exact: true })).toBeVisible();
-          if (!schema.singleton) await expect(page.getByRole("region", { name: `${schema.title} list`, exact: true }).getByRole("button").filter({ hasText: item.value })).toBeVisible();
+          expect(schema.singleton).not.toBe(true);
+          await expect(page.getByRole("region", { name: `${schema.title} list`, exact: true }).getByRole("button").filter({ hasText: item.value })).toBeVisible();
           expect((await cms(request, `/api/admin/content/documents?type=${schema.name}`)).documents.find(row => row._id === entry._id).preview.title).toBe(item.value);
-        } else if (consumer.kind === "previewImage") {
-          const preview = (await cms(request, `/api/admin/content/documents?type=${schema.name}`)).documents.find(row => row._id === entry._id).preview;
-          expect(preview.imageUrl).toContain(item.value.asset._ref.split("-")[1]);
         } else if (consumer.kind === "ownerNotification") {
           const notification = await request.post(`http://127.0.0.1:${Number(new URL(baseURL).port) + 6}/owner-notification`);
           expect(notification.ok(), await notification.text()).toBe(true);
           const result = await notification.json();
           expect(result.result.body.emailDispatch.owner.sent).toBe(true);
           expect([result.emails.find(message => message.subject.startsWith("New booking")).to].flat()).toEqual([item.value]);
-        } else if (consumer.kind === "rowCollection") {
-          await expandEditor(page);
-          await expect(page.getByRole("group", { name: item.field.title, exact: true }).getByRole("button", { name: "Add item", exact: true })).toBeEnabled();
-          await expect(page.getByRole("group", { name: item.field.title, exact: true }).locator("button[aria-expanded]")).toHaveCount(fieldContract.get(current.document, item.path).length);
-        } else if (consumer.kind === "rowSummary") {
-          const keys = item.path.replace(/\[(\d+)\]/g, ".$1").split(".");
-          const name = keys.pop();
-          let fields = schema.fields;
-          for (const key of keys.filter(key => !/^\d+$/.test(key))) {
-            const definition = fields.find(field => field.name === key);
-            fields = definition.fields || definition.of?.[0]?.fields || [];
-          }
-          const document = structuredClone(current.document);
-          const parent = keys.reduce((value, key) => value[key], document);
-          for (const field of fields.slice(0, fields.findIndex(field => field.name === name))) if (typeof parent[field.name] === "string") parent[field.name] = "";
-          if (JSON.stringify(document) !== JSON.stringify(current.document)) await publishDraft(page, schema, current, document);
-          await expandEditor(page);
-          await expect(page.getByRole("button", { name: item.value, exact: true })).toBeVisible();
         } else throw new Error(`Missing INTERNAL consumer assertion: ${consumer.kind}`);
         checked.push({ path: item.path, ...consumer });
       }
@@ -462,21 +440,21 @@ test("ROO-66 conditional overrides stay read-only and preserve legacy values", a
   test.setTimeout(180000);
   const block = text => [{ _key: "legacy-block", _type: "block", style: "normal", markDefs: [], children: [{ _key: "legacy-span", _type: "span", text, marks: [] }] }];
   const fixtures = [
-    { type: "about", seed: { recordDetails: [{ _key: "cpu", label: "CPU", value: "Legacy CPU café", sub: "Legacy CPU detail" }, { _key: "gpu", label: "GPU", value: "Legacy GPU 日本語", sub: "Legacy GPU detail" }] }, paths: ["recordDetails[0].value", "recordDetails[1].value"], internal: [["recordDetails[0].label", "GPU"], ["recordDetails[1].label", "CPU"]], used: "recordTitle", value: "Published fixture proof" },
+    { type: "about", seed: { recordDetails: [{ _key: "cpu", label: "CPU", value: "Legacy CPU café", sub: "Legacy CPU detail" }, { _key: "gpu", label: "GPU", value: "Legacy GPU 日本語", sub: "Legacy GPU detail" }] }, paths: ["recordDetails[0].label", "recordDetails[0].value", "recordDetails[1].label", "recordDetails[1].value"], used: "recordTitle", value: "Published fixture proof" },
     { type: "package", seed: { title: "XOC / Extreme Overclocking", description: "Legacy package café", checkedBullets: ["Legacy checked"], uncheckedBullets: ["Legacy unchecked"] }, paths: ["description", "checkedBullets", "uncheckedBullets"], used: "price", value: "$321.67" },
     { type: "faqSection", seed: { questions: [
       { _key: "money-back", question: "Refund and warranty?", answer: "Legacy warranty café" },
       { _key: "free-retune", question: "Free reoptimization?", answer: "Legacy retune 日本語" },
       { _key: "ordinary", question: "Fixture ordinary question?", answer: "Fixture ordinary answer" },
-    ] }, paths: ["questions[0].answer", "questions[1].answer"], internal: [["questions[0].question", `Refund and warranty? ${randomUUID()}`], ["questions[1].question", `Free reoptimization? ${randomUUID()}`]], used: "questions[2].answer", value: "Published ordinary answer" },
+    ] }, paths: ["questions[0].question", "questions[0].answer", "questions[1].question", "questions[1].answer"], used: "questions[2].answer", value: "Published ordinary answer" },
     { type: "terms", seed: { sections: [
       { _key: "refunds", heading: "Payments and refunds", content: block("Legacy refund café") },
       { _key: "reschedule", heading: "Rescheduling policy", content: block("Legacy cancellation 日本語") },
-    ] }, paths: ["sections[0].content", "sections[1].content"], internal: [["sections[1].heading", `Rescheduling policy ${randomUUID()}`]], used: "title", value: "Published fixture terms" },
+    ] }, paths: ["sections[0].content", "sections[1].heading", "sections[1].content"], used: "title", value: "Published fixture terms" },
     { type: "meetTheTeam", seed: { sections: [{ _key: "team", title: "Fixture team", variant: "standard", cards: [
       { _key: "wanted", name: "Wanted", bio: "Legacy Wanted café" }, { _key: "candi", name: "Candi", bio: "Legacy Candi 日本語" },
     ] }] }, paths: ["sections[0].cards[0].bio", "sections[0].cards[1].bio"], used: "heroTitle", value: "Published fixture team" },
-    { type: "services", seed: { benchPages: [{ _key: "bench", games: [{ _key: "ovw", gameTitle: " Overwatch 2 ", beforeFps: 123, afterFps: 234, metricLabel: "Legacy metric", gpu: "Legacy GPU", cpu: "Legacy CPU", ram: "Legacy RAM" }] }] }, internal: [["benchPages[0].games[0].gameTitle", "Overwatch"]], paths: ["benchPages[0].games[0].beforeFps", "benchPages[0].games[0].afterFps", "benchPages[0].games[0].metricLabel", "benchPages[0].games[0].gpu", "benchPages[0].games[0].cpu", "benchPages[0].games[0].ram", "benchPages[0].games[0].gameLogo"], used: "benchBeforeLabel", value: "Published fixture before" },
+    { type: "services", seed: { benchPages: [{ _key: "bench", games: [{ _key: "ovw", gameTitle: " Overwatch 2 ", beforeFps: 123, afterFps: 234, metricLabel: "Legacy metric", gpu: "Legacy GPU", cpu: "Legacy CPU", ram: "Legacy RAM" }] }] }, paths: ["benchPages[0].games[0].gameTitle", "benchPages[0].games[0].beforeFps", "benchPages[0].games[0].afterFps", "benchPages[0].games[0].metricLabel", "benchPages[0].games[0].gpu", "benchPages[0].games[0].cpu", "benchPages[0].games[0].ram", "benchPages[0].games[0].gameLogo"], used: "benchBeforeLabel", value: "Published fixture before" },
   ];
   const results = [];
   await login(page);
@@ -496,20 +474,15 @@ test("ROO-66 conditional overrides stay read-only and preserve legacy values", a
     const pending = structuredClone(original.document);
     const set = (path, value) => { const keys = path.replace(/\[(\d+)\]/g, ".$1").split("."); const last = keys.pop(); const parent = keys.reduce((object, key) => object[key], pending); if (value === undefined) delete parent[last]; else parent[last] = value; };
     set(item.used, item.value);
-    for (const [fieldPath, value] of item.internal || []) set(fieldPath, value);
     for (const fieldPath of item.paths) if (!/(question|heading|gameTitle|label)$/.test(fieldPath)) set(fieldPath, undefined);
     await publishDraft(page, schema, original, pending);
     const stored = await cms(request, `/api/admin/content/documents/${id}`);
     for (const fieldPath of item.paths) expect(fieldContract.get(stored.document, fieldPath)).toEqual(fieldContract.get(original.document, fieldPath));
     expect(fieldContract.get(stored.document, item.used)).toBe(item.value);
     await expandEditor(page);
-    for (const [fieldPath, value] of item.internal || []) {
-      expect(fieldContract.get(stored.document, fieldPath)).toBe(value);
-      await expect(page.getByRole("button", { name: value, exact: true })).toBeVisible();
-      expect(await page.locator(`[id="content-help-${encodeURIComponent(fieldPath)}"]`).allTextContents()).not.toContain(UNUSED_NOTE);
-      const definition = fieldContract.schemaFields(schema.fields).find(field => field.path === fieldContract.patternPath(fieldPath)).field;
-      const indexes = [...fieldPath.matchAll(/\[(\d+)\]/g)];
-      await expect(page.getByLabel(definition.title, { exact: true }).nth(Number(indexes.at(-1)?.[1] || 0))).toBeEditable();
+    for (const fieldPath of item.paths.filter(path => /(question|heading|gameTitle|label)$/.test(path))) {
+      await expect(page.getByRole("button", { name: fieldContract.get(original.document, fieldPath).trim(), exact: true })).toBeVisible();
+      await expectUnused(page, item.type, fieldPath);
     }
     results.push({ type: item.type, preserved: item.paths, published: item.used });
   }
@@ -519,33 +492,22 @@ test("ROO-66 conditional overrides stay read-only and preserve legacy values", a
 
 const UNUSED_NOTE = "Not shown on the site yet. Edits here won't appear.";
 const unusedFields = [
-  { type: "Packages Section", label: "Heading", internal: true },
-  { type: "FAQ Settings", label: "Heading", internal: true },
-  { type: "Services Section", label: "Heading", internal: true },
-  { type: "Supported Games Section", label: "Title", internal: true },
-  { type: "Pro Reviews Carousel", label: "Section Title", internal: true },
+  { type: "Packages Section", label: "Heading" },
+  { type: "FAQ Settings", label: "Heading" },
+  { type: "Services Section", label: "Heading" },
+  { type: "Supported Games Section", label: "Title" },
+  { type: "Pro Reviews Carousel", label: "Section Title" },
   { type: "Hero Section", label: "Tagline" },
   { type: "Hero Section", label: "CTA Note Icon" },
   { type: "Hero Section", label: "Bottom Bullet Points", array: true },
 ];
 
 for (const field of unusedFields) {
-  test(`ROO-66 ${field.type} ${field.label} ${field.internal ? "updates its internal editor title" : "is visibly and accessibly read-only"}`, async ({ page, request, baseURL }, testInfo) => {
+  test(`ROO-66 ${field.type} ${field.label} is visibly and accessibly read-only`, async ({ page }, testInfo) => {
     await login(page); await choose(page, field.type);
     const input = field.array ? page.getByRole("group", { name: field.label, exact: true }) : page.getByLabel(field.label, { exact: true });
     await expect(input).toBeVisible();
-    if (field.internal) {
-      await expect(input).toBeEditable();
-      const value = `Internal title ${randomUUID()}`;
-      await input.fill(value);
-      await page.getByRole("button", { name: "Publish", exact: true }).click();
-      await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
-      await page.reload(); await choose(page, field.type);
-      await expect(page.getByRole("region", { name: "Editor", exact: true }).getByRole("heading", { name: value, exact: true })).toBeVisible();
-      await evidence(page, testInfo, { field, internalTitle: value });
-      expect((await request.post(`http://127.0.0.1:${Number(new URL(baseURL).port) + 6}/reset-content`)).ok()).toBe(true);
-      return;
-    }
+    if (field.type !== "Hero Section") await expect(page.getByRole("region", { name: "Editor", exact: true }).getByRole("heading", { name: await input.inputValue(), exact: true })).toBeVisible();
     const describedBy = await input.getAttribute("aria-describedby");
     expect(describedBy).toBeTruthy();
     const note = page.locator(`[id="${describedBy}"]`);
@@ -646,11 +608,11 @@ test("ROO-66 publishing a used hero field preserves every legacy unused hero val
 });
 
 for (const submitted of ["changed", "omitted"]) {
-  test(`ROO-66 publishing with ${submitted} unused values preserves them and updates internal labels`, async ({ page, request }, testInfo) => {
+  test(`ROO-66 publishing with ${submitted} unused values keeps stored headings intact`, async ({ page, request }, testInfo) => {
     const results = [];
     for (const [type, field, usedField] of [
-      ["packagesSettings", "badgeText", "heading"], ["faqSettings", "eyebrow", "title"],
-      ["services", "subheading", "heading"], ["supportedGames", "subtitle", "title"], ["proReviewsCarousel", "subtitle", "title"],
+      ["packagesSettings", "heading", "badgeText"], ["faqSettings", "title", "eyebrow"],
+      ["services", "heading", "subheading"], ["supportedGames", "title", "subtitle"], ["proReviewsCarousel", "title", "subtitle"],
     ]) {
       const id = `tooling-${type}`;
       const original = await cms(request, `/api/admin/content/documents/${id}`);
@@ -660,7 +622,7 @@ for (const submitted of ["changed", "omitted"]) {
       await cms(request, "/api/admin/content/publish", { operation: "replace", type, documentId: id, expectedRevision: original.revision, document });
       const stored = await cms(request, `/api/admin/content/documents/${id}`);
       expect(stored.document[field]).toEqual(original.document[field]);
-      expect(stored.document[usedField]).toBe(document[usedField]);
+      expect(stored.document[usedField]).toBe(original.document[usedField]);
       results.push({ type, field, value: stored.document[field], revision: stored.revision });
     }
     await login(page); await choose(page, "Packages Section");
