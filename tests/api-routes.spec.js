@@ -3,6 +3,7 @@ const fs = require("node:fs/promises");
 const { spawn } = require("node:child_process");
 const { MARKDOWN_PATHS, MARKDOWN_VARY } = require("../src/lib/markdownContent");
 let apiFixture;
+let proxyFixture;
 let restoreNetworkGuard;
 
 test.skip(process.env.TOOLING_API_ROUTES !== "1", "Select the writable fixture with npm run test:api:routes.");
@@ -10,7 +11,8 @@ test.skip(process.env.TOOLING_API_ROUTES !== "1", "Select the writable fixture w
 test.beforeAll(async ({ baseURL }) => {
   const { installNetworkGuard } = await import("../scripts/lib/test-target-safety.mjs");
   apiFixture = await import("./fixtures/api-routes.mjs");
-  restoreNetworkGuard = installNetworkGuard([baseURL, apiFixture.apiFixtureOrigin(baseURL)]);
+  proxyFixture = await import("./fixtures/audit-provider-proxy.mjs");
+  restoreNetworkGuard = installNetworkGuard([baseURL, apiFixture.apiFixtureOrigin(baseURL), proxyFixture.auditProviderProxyOrigin(baseURL)]);
 });
 
 test.afterAll(() => restoreNetworkGuard?.());
@@ -22,26 +24,42 @@ test.beforeEach(async ({ context, baseURL }) => {
   await guardBrowserContext(context, [baseURL]);
 });
 
+const runApiAudit = baseURL => new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, ["scripts/phase1-api-contract.js"], {
+    env: { ...process.env, BASE_URL: baseURL },
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 90000,
+  });
+  let output = "";
+  child.stdout.on("data", chunk => { output += chunk; });
+  child.stderr.on("data", chunk => { output += chunk; });
+  child.once("error", reject);
+  child.once("close", code => resolve({ code, output }));
+});
+
 test("API contract audit covers handler validation and retired endpoints", async ({ baseURL }, testInfo) => {
   await apiFixture.configureApiFixture(baseURL, { reset: true });
-  const result = await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["scripts/phase1-api-contract.js"], {
-      env: { ...process.env, BASE_URL: baseURL },
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 90000,
-    });
-    let output = "";
-    child.stdout.on("data", chunk => { output += chunk; });
-    child.stderr.on("data", chunk => { output += chunk; });
-    child.once("error", reject);
-    child.once("close", code => resolve({ code, output }));
-  });
+  const result = await runApiAudit(baseURL);
   await testInfo.attach("api-contract-output", { body: result.output, contentType: "text/plain" });
   await testInfo.attach("api-contract-responses", {
     body: await fs.readFile("audit/phase1-api-contract.csv"),
     contentType: "text/csv",
   });
   expect(result.code, result.output).toBe(0);
+});
+
+test("API contract audit rejects a null provider configuration", async ({ baseURL }, testInfo) => {
+  await apiFixture.configureApiFixture(baseURL, { reset: true });
+  const proxy = await proxyFixture.startAuditProviderProxy(baseURL, { status: 200, body: { ok: true, providers: null } });
+  try {
+    const result = await runApiAudit(proxy.origin);
+    await testInfo.attach("api-contract-output", { body: result.output, contentType: "text/plain" });
+    await testInfo.attach("api-contract-responses", { body: await fs.readFile("audit/phase1-api-contract.csv"), contentType: "text/csv" });
+    expect(result.code, result.output).toBe(1);
+    expect(result.output).toContain("/api/payment/providers");
+  } finally {
+    await proxy.close();
+  }
 });
 
 test.describe("referral reset acknowledgement", () => {

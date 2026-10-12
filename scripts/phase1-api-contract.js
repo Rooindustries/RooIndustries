@@ -38,8 +38,19 @@ async function run() {
       expect: (response, body, hostDrift) =>
         response.status === 200 &&
         !hostDrift &&
+        /application\/json/i.test(response.headers.get("content-type") || "") &&
         body?.ok === true &&
-        typeof body?.providers === "object",
+        ["dodo", "razorpay", "paypal"].every(name =>
+          typeof body?.providers?.[name]?.enabled === "boolean" &&
+          typeof body?.providers?.[name]?.mode === "string" &&
+          body.providers[name].mode.length > 0
+        ) &&
+        typeof body?.providers?.paypal?.clientId === "string" &&
+        (body?.providers?.razorpay?.disabledReason === undefined ||
+          typeof body.providers.razorpay.disabledReason === "string") &&
+        ["production", "preview", "development"].includes(body?.environment?.runtime) &&
+        typeof body?.environment?.previewPaymentsEnabled === "boolean" &&
+        typeof body?.environment?.livePaymentsEnabled === "boolean",
     },
     {
       route: "/api/holdSlot",
