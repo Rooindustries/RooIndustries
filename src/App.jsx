@@ -173,7 +173,15 @@ function AnimatedRoutes({
   const location = routesLocation || baseLocation;
   const motionKey = routeKey || `${location.pathname}${location.search || ""}`;
   const [initialEntryKey, setInitialEntryKey] = useState(baseLocation.key);
+  const [hydrated, setHydrated] = useState(false);
   const initialContent = baseLocation.key === initialEntryKey ? initialRouteData : null;
+  const EagerPage = initialRoutePath === location.pathname
+    ? initialRouteComponent
+    : location.pathname === "/" ? initialHomeComponent : null;
+
+  React.useLayoutEffect(() => {
+    if (initialRouteComponent || initialHomeComponent) setHydrated(true);
+  }, [initialRouteComponent, initialHomeComponent]);
 
   useEffect(() => {
     if (initialEntryKey !== null && baseLocation.key !== initialEntryKey) {
@@ -182,11 +190,7 @@ function AnimatedRoutes({
   }, [baseLocation.key, initialEntryKey]);
 
   const renderPage = (node) => {
-    if (baseLocation.key !== initialEntryKey) return node;
-    const Page = initialRoutePath === location.pathname
-      ? initialRouteComponent
-      : location.pathname === "/" ? initialHomeComponent : null;
-    return Page ? <Page {...node.props} /> : node;
+    return EagerPage ? <EagerPage {...node.props} /> : node;
   };
 
   const routes = (
@@ -288,7 +292,9 @@ function AnimatedRoutes({
       </div>
   );
 
-  return initialRouteComponent || initialHomeComponent ? routes : withRouteSuspense(routes);
+  if (!EagerPage) return withRouteSuspense(routes);
+  if (!hydrated) return routes;
+  return <>{routes}{withRouteSuspense(null)}</>;
 }
 
 export function AppContent({
