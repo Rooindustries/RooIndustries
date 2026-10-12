@@ -5,9 +5,10 @@ import { once } from 'node:events';
 import { registerHooks } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { createHmac } from 'node:crypto';
 import { installNetworkGuard, refuseEnvFiles } from '../../scripts/lib/test-target-safety.mjs';
 
-export async function createBookingContactFixture() {
+export async function createBookingContactFixture({ artifactName = 'booking-contact' } = {}) {
   refuseEnvFiles();
   const host = process.env.ROO_TEST_HOST || '127.0.0.1';
   const port = Number(process.env.BOOKING_CONTACT_PORT || 4173);
@@ -39,7 +40,8 @@ export async function createBookingContactFixture() {
   } });
 
   const evidence = { livePayments: false, cases: [], http: [], providerRequests: [], blocked: [] };
-  const artifact = new URL('../../test-results/booking-contact/results.json', import.meta.url);
+  assert.match(artifactName, /^[a-z0-9-]+$/);
+  const artifact = new URL(`../../test-results/${artifactName}/results.json`, import.meta.url);
   const save = () => {
     fs.mkdirSync(new URL('.', artifact), { recursive: true });
     fs.writeFileSync(artifact, JSON.stringify(evidence, null, 2));
@@ -76,6 +78,8 @@ export async function createBookingContactFixture() {
       NEXT_PUBLIC_SUPABASE_URL: database.origin, NEXT_PUBLIC_SUPABASE_ANON_KEY: database.token,
     });
     const sessions = new Map();
+    const paymentRefunds = new Map();
+    let paymentTax = 0;
     database.setProviderHandler(async request => {
       evidence.providerRequests.push(request);
       if (request.path === '/products/pdt_fixture') return { body: {
@@ -97,10 +101,13 @@ export async function createBookingContactFixture() {
         const id = paymentId.replace(/^payment_/, '');
         const session = sessions.get(id);
         assert.ok(session, 'Unknown synthetic payment');
+        const refunds = paymentRefunds.get(paymentId) || [];
+        const settled = refunds.filter(refund => refund.status === 'succeeded').reduce((sum, refund) => sum + refund.amount, 0);
+        const total = session.product_cart[0].amount + paymentTax;
         return { body: {
           payment_id: paymentId, checkout_session_id: id, metadata: session.metadata,
-          status: 'succeeded', total_amount: session.product_cart[0].amount, tax: 0, currency: 'USD',
-          product_cart: session.product_cart, refunds: [], disputes: [], refund_status: null,
+          status: 'succeeded', total_amount: total, tax: paymentTax, currency: 'USD',
+          product_cart: session.product_cart, refunds, disputes: [], refund_status: settled >= total ? 'full' : settled > 0 ? 'partial' : null,
           customer: session.customer,
         } };
       }
@@ -128,6 +135,7 @@ export async function createBookingContactFixture() {
       '/api/payment/quote': '../../src/server/api/payment/quote.js',
       '/api/payment/finalize': '../../src/server/api/payment/finalize.js',
       '/api/payment/status': '../../src/server/api/payment/status.js',
+      '/api/payment/webhook/dodo': '../../src/server/api/payment/webhookDodo.js',
       '/api/ref/getUpgradeInfo': '../../src/server/api/ref/getUpgradeInfo.js',
       '/api/ref/createBooking': '../../src/server/api/ref/createBooking.js',
     })) handlers.set(route, (await import(module)).default);
@@ -168,11 +176,12 @@ export async function createBookingContactFixture() {
         discountType: 'percent', discountPercent, canCombineWithReferral: true,
         timesUsed: 0, activeReservations: 0, maxUses: 0, backendOwner: 'supabase', cutoverGeneration: 0 });
     }
-    const post = async (route, body, token = '') => {
+    const post = async (route, body, token = '', headers = {}) => {
       globalThis.__rooRateLimitBuckets?.clear();
       const response = await fetch(`${base}${route}`, { method: 'POST', headers: {
         'content-type': 'application/json', origin: base,
         ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...headers,
       }, body: JSON.stringify(body) });
       return { status: response.status, body: await response.json() };
     };
@@ -183,7 +192,7 @@ export async function createBookingContactFixture() {
     };
     const hold = async (changes = {}) => {
       const startTimeUTC = `${dateSlots[nextDate++].date}T04:30:00.000Z`;
-      const response = await post('/api/holdSlot', { startTimeUTC, packageTitle: 'Vertex Essentials' });
+      const response = await post('/api/holdSlot', { startTimeUTC, packageTitle: changes.packageTitle || 'Vertex Essentials' });
       assert.equal(response.status, 200, JSON.stringify(response));
       return { packageTitle: 'Vertex Essentials', ...details, startTimeUTC,
         slotHoldId: response.body.holdId, slotHoldToken: response.body.holdToken,
@@ -215,7 +224,7 @@ export async function createBookingContactFixture() {
         backendOwner: 'supabase', cutoverGeneration: 0, packageTitle: 'Performance Vertex Overhaul',
         packagePrice: '$54.95', grossAmount: 54.95, netAmount: 54.95, paymentProvider: 'paypal',
         paypalOrderId: `order_fixture_${nextDate}`, status: 'captured', ...details,
-        startTimeUTC: `${dateSlots[nextDate].date}T04:30:00.000Z`,
+        startTimeUTC: `${dateSlots[nextDate - 1].date}T04:30:00.000Z`,
         displayDate: 'Legacy date', displayTime: '10:00 AM', ...changes };
       await commerce.create(original);
       const lookup = await post('/api/ref/getUpgradeInfo', { id: original._id, email: original.email });
@@ -224,7 +233,22 @@ export async function createBookingContactFixture() {
         email: original.email, upgradeIntentToken: lookup.body.upgradeIntentToken,
         deferEmailsUntilConfirmation: true } };
     };
-    return { post, start, hold, snapshot, recordFor, seedUpgrade, commerce, details, evidence, save, stop };
+    const setPaymentTax = amount => {
+      assert.ok(Number.isSafeInteger(amount) && amount >= 0);
+      paymentTax = amount;
+    };
+    const refundPayment = async (paymentId, refunds, eventId) => {
+      paymentRefunds.set(paymentId, refunds);
+      const body = { business_id: 'business_fixture', type: 'refund.succeeded',
+        timestamp: new Date().toISOString(), data: { payment_id: paymentId } };
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const signature = createHmac('sha256', Buffer.from('fixture-only'))
+        .update(`${eventId}.${timestamp}.${JSON.stringify(body)}`).digest('base64');
+      return post('/api/payment/webhook/dodo', body, '', {
+        'webhook-id': eventId, 'webhook-timestamp': timestamp, 'webhook-signature': `v1,${signature}`,
+      });
+    };
+    return { post, start, hold, snapshot, recordFor, seedUpgrade, commerce, details, evidence, save, stop, setPaymentTax, refundPayment };
   } catch (error) {
     await stop();
     throw error;

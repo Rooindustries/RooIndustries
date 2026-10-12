@@ -96,6 +96,7 @@ export const validateDodoPayment = ({ record, payment }) => {
   const addedTax = record.providerPublicData?.taxInclusive === false ? payment.tax ?? 0 : 0;
   if (!Number.isSafeInteger(addedTax) || addedTax < 0 ||
       !Number.isSafeInteger(payment.total_amount) || payment.total_amount <= 0 ||
+      (payment.tax != null && (!Number.isSafeInteger(payment.tax) || payment.tax < 0 || payment.tax > payment.total_amount)) ||
       payment.total_amount - addedTax !== Math.round(Number(record.pricingSnapshot?.netAmount) * 100)) {
     return fail("dodo_amount_mismatch");
   }
@@ -154,6 +155,7 @@ export const verifyDodoCapture = async ({ record, payment: suppliedPayment }) =>
     providerOrderId: payment.checkout_session_id,
     providerPaymentId: payment.payment_id,
     totalAmount: payment.total_amount,
+    taxAmount: payment.tax ?? null,
     payerEmail: String(payment.customer?.email || ""),
   };
 };

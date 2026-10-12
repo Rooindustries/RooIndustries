@@ -1,5 +1,8 @@
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import packagePricing from "../../../lib/packagePricing.js";
+import { resolvePaymentCurrency } from "./bookingRefunds.js";
+import { parseMoneySubunits } from "../payment/providerClients.js";
+import { logSafeError } from "../../safeErrorLog.js";
 
 const {
   applyPackagePricing,
@@ -81,22 +84,121 @@ export const isCouponEligibleForPackage = ({
   });
 };
 
+const creditError = () => {
+  const error = createApiError(
+    409,
+    "Please contact us to upgrade this booking. The original payment and refund amounts could not be verified.",
+    "upgrade_credit_unverified"
+  );
+  logSafeError("Upgrade credit requires review", error);
+  return error;
+};
+
+const creditSubunits = (value) => {
+  if (typeof value !== "number" && typeof value !== "string") throw creditError();
+  const normalized = typeof value === "string" ? value.trim().replace(/^\$/, "").replace(/,/g, "") : value;
+  if (/^0(?:\.0+)?$/.test(String(normalized))) return 0;
+  const amount = parseMoneySubunits(normalized, "USD");
+  if (amount === null) throw creditError();
+  return amount;
+};
+
+const refundSubunits = (refund) => {
+  const amount = refund.amount == null ? null : creditSubunits(refund.amount);
+  const subunits = refund.amountInSubunits;
+  if (subunits == null) {
+    if (amount === null) throw creditError();
+    return amount;
+  }
+  if (!Number.isSafeInteger(subunits) || subunits < 0 || (amount !== null && amount !== subunits)) {
+    throw creditError();
+  }
+  return subunits;
+};
+
 export const getPaidAmount = (booking) => {
-  if (
-    typeof booking?.netAmount === "number" &&
-    !Number.isNaN(booking.netAmount)
-  ) {
-    return booking.netAmount;
-  }
+  const amount = booking?.netAmount ?? booking?.grossAmount ?? booking?.packagePrice;
+  return creditSubunits(amount) / 100;
+};
 
-  if (
-    typeof booking?.grossAmount === "number" &&
-    !Number.isNaN(booking.grossAmount)
-  ) {
-    return booking.grossAmount;
+export const getRetainedUpgradeCredit = async ({ booking, client }) => {
+  const records = booking.paymentRecordId
+    ? [await client.fetch(`*[_type == "paymentRecord" && _id == $id][0]{...}`, { id: booking.paymentRecordId })]
+    : await client.fetch(`*[_type == "paymentRecord" && bookingId == $bookingId][0...2]{...}`, { bookingId: booking._id });
+  if (records && !Array.isArray(records)) throw creditError();
+  if (records?.length > 1 || (booking.paymentRecordId && !records?.[0]?._id)) throw creditError();
+  const record = records?.[0] || null;
+  const paid = record?.pricingSnapshot?.netAmount == null
+    ? creditSubunits(getPaidAmount(booking))
+    : creditSubunits(record.pricingSnapshot.netAmount);
+  if (record && (record._type !== "paymentRecord" || record.bookingId !== booking._id ||
+      (booking.paymentProvider && record.provider !== booking.paymentProvider))) throw creditError();
+  const provider = record?.provider || booking.paymentProvider;
+  let currency;
+  try {
+    currency = resolvePaymentCurrency(record || {}, { booking, fallback: "USD" });
+  } catch {
+    throw creditError();
   }
+  if (currency !== "USD") throw creditError();
+  if (booking.netAmount != null && creditSubunits(booking.netAmount) !== paid) {
+    throw creditError();
+  }
+  const providerOrderId = provider === "dodo" ? booking.dodoCheckoutSessionId
+    : provider === "paypal" ? booking.paypalOrderId : booking.razorpayOrderId;
+  const providerPaymentId = provider === "dodo" ? booking.dodoPaymentId
+    : provider === "razorpay" ? booking.razorpayPaymentId : "";
+  if (record && ((providerOrderId && record.providerOrderId !== providerOrderId) ||
+      (providerPaymentId && record.providerPaymentId !== providerPaymentId))) throw creditError();
+  if (booking.refundStatus === "full" || record?.refundState === "full" || record?.status === "refunded") return null;
 
-  return toMoney(booking?.packagePrice);
+  const bookingRefunded = booking.refundedAmount == null ? 0 : creditSubunits(booking.refundedAmount);
+  const settled = new Map();
+  let refunded = 0;
+  if (record) {
+    if (record.refunds != null && !Array.isArray(record.refunds)) throw creditError();
+    const identified = new Map();
+    for (const refund of record.refunds || []) {
+      if (!refund || typeof refund !== "object") throw creditError();
+      if (!["processed", "pending", "review", "failed"].includes(refund.status) ||
+          typeof refund.providerRefundId !== "string" || !refund.providerRefundId.trim()) throw creditError();
+      if (refund.providerPaymentId && refund.providerPaymentId !== record.providerPaymentId) throw creditError();
+      const amount = refund.amount == null && refund.amountInSubunits == null ? null : refundSubunits(refund);
+      const previous = identified.get(refund.providerRefundId);
+      if (previous != null && amount !== null && previous !== amount) throw creditError();
+      if (amount !== null) identified.set(refund.providerRefundId, amount);
+      if (refund.status !== "processed") continue;
+      if (!refund.currency || !refund.providerPaymentId || refund.reversed === true || amount === null) throw creditError();
+      settled.set(refund.providerRefundId, amount);
+    }
+    refunded = [...settled.values()].reduce((sum, amount) => sum + amount, 0);
+    if (!Number.isSafeInteger(refunded) || bookingRefunded > refunded) throw creditError();
+    if (record.refundProcessedAmountInSubunits != null &&
+        record.refundProcessedAmountInSubunits !== refunded) throw creditError();
+    if (record.providerRefundDetailsMissing === true) throw creditError();
+  }
+  if ((booking.refundStatus === "partial" || record?.refundState === "partial") && refunded === 0) throw creditError();
+  if (!record && bookingRefunded > 0) throw creditError();
+  if (refunded > 0 && !["paypal", "razorpay", "dodo"].includes(provider)) throw creditError();
+  if ((refunded > 0 || provider === "dodo") &&
+      (record?.verificationState !== "server_verified" || record.pricingSnapshot?.netAmount == null)) throw creditError();
+
+  const publicData = record?.providerPublicData || {};
+  const tax = publicData.taxAmount ?? (provider === "dodo" ? null : 0);
+  const total = publicData.totalAmount ?? (provider === "dodo" || tax !== 0 ? null : paid);
+  if (!Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(tax) || tax < 0 || tax > total) {
+    throw creditError();
+  }
+  const taxInclusive = provider === "dodo" ? publicData.taxInclusive !== false : publicData.taxInclusive === true;
+  const price = total - tax;
+  if ((taxInclusive ? total : price) !== paid || refunded > total) throw creditError();
+  if (total > 0 && refunded === total) return null;
+  let refundedPrice = 0;
+  for (const amount of settled.values()) {
+    if (total <= 0) throw creditError();
+    refundedPrice += Number((BigInt(amount) * BigInt(price) + BigInt(total) - 1n) / BigInt(total));
+  }
+  return Math.max(0, price - refundedPrice) / 100;
 };
 
 const normalizeCouponCode = (value) => String(value || "").trim().toLowerCase();
@@ -114,25 +216,7 @@ export async function resolveUpgradeContext({
   const normalizedTargetTitle = normalizePackageTitle(normalizedUpgradeTitle);
 
   const booking = await client.fetch(
-    `*[_type == "booking" && _id == $id][0]{
-      _id,
-      status,
-      originalOrderId,
-      packageTitle,
-      packagePrice,
-      grossAmount,
-      netAmount,
-      email,
-      payerEmail,
-      discord,
-      specs,
-      mainGame,
-      message,
-      localTimeZone,
-      startTimeUTC,
-      displayDate,
-      displayTime
-    }`,
+    `*[_type == "booking" && _id == $id][0]{...}`,
     { id: originalOrderId }
   );
 
@@ -162,13 +246,7 @@ export async function resolveUpgradeContext({
       `*[_type == "booking"
         && status in ["captured", "completed"]
         && (_id == $rootId || originalOrderId == $rootId)
-      ]{
-        _id,
-        packageTitle,
-        netAmount,
-        grossAmount,
-        packagePrice
-      }`,
+      ]{...}`,
       { rootId: rootOrderId }
     )) || [];
 
@@ -184,11 +262,23 @@ export async function resolveUpgradeContext({
 
   const pricedTargetPackage = applyPackagePricing(targetPackage);
   const targetPrice = toMoney(pricedTargetPackage.price);
-  const totalPaid = paidBookings.reduce(
-    (sum, entry) => sum + getPaidAmount(entry),
-    0
-  );
-  const alreadyTarget = paidBookings.some(
+  if (!Array.isArray(paidBookings) || !paidBookings.some(entry => entry?._id === booking._id)) throw creditError();
+  let totalPaid = 0;
+  const retainedBookings = [];
+  for (const entry of paidBookings) {
+    const credit = await getRetainedUpgradeCredit({ booking: entry, client });
+    if (credit === null) {
+      if (entry._id === booking._id) {
+        throw createApiError(400, "Only paid bookings can be upgraded.", "original_booking_unpaid");
+      }
+      continue;
+    }
+    retainedBookings.push(entry);
+    totalPaid += Math.round(credit * 100);
+  }
+  if (!Number.isSafeInteger(totalPaid)) throw creditError();
+  totalPaid /= 100;
+  const alreadyTarget = retainedBookings.some(
     (entry) => normalizePackageTitle(entry?.packageTitle) === normalizedTargetTitle
   );
 
@@ -200,14 +290,19 @@ export async function resolveUpgradeContext({
     );
   }
 
+  const upgradePrice = Math.max(0, toMoney(targetPrice - totalPaid));
+  if (upgradePrice <= 0) {
+    throw createApiError(400, "Unable to resolve package pricing on server.", "package_pricing_missing");
+  }
+
   return {
     booking,
     rootOrderId,
-    paidBookings,
+    paidBookings: retainedBookings,
     targetPackage: pricedTargetPackage,
     targetPrice,
     totalPaid: toMoney(totalPaid),
-    upgradePrice: Math.max(0, toMoney(targetPrice - totalPaid)),
+    upgradePrice,
   };
 }
 
