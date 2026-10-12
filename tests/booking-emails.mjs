@@ -31,7 +31,7 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
   const { issueBookingEmailDispatchToken } = await import('../src/server/api/ref/bookingEmailDispatchToken.js');
   const { reconcilePaymentSessions } = await import('../src/server/api/payment/flow.js');
   process.env.CRON_SECRET = 'fixture-booking-emails-cron';
-  const artifact = new URL('../test-results/booking-emails/postgres17.json', import.meta.url);
+  const artifact = new URL(process.env.BOOKING_EMAIL_ARTIFACT || '../test-results/booking-emails/postgres17.json', import.meta.url);
   const results = { rollout, database: fixture.evidence.database, cases: [] };
   const messages = (bookingId = '') => fixture.evidence.providerRequests.filter(request =>
     request.path === '/emails' && (!bookingId || request.body.html?.includes(`>${bookingId}<`)));
@@ -53,6 +53,7 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
       _id: bookingId, _type: 'booking', backendOwner: 'supabase', cutoverGeneration: 0,
       ...fixture.details, status: 'captured', paymentProvider: provider, paymentRecordId,
       ...(provider === 'paypal' ? { paypalOrderId: `order_emails_${id}` } : {}),
+      ...(provider === 'razorpay' ? { razorpayOrderId: `order_emails_${id}`, razorpayPaymentId: `payment_emails_${id}` } : {}),
       packageTitle: 'Vertex Essentials', packagePrice: '$29.95',
       currency: 'USD', grossAmount: 29.95, netAmount: 29.95, dodoTotalAmount: 29.95,
       startTimeUTC: new Date(Date.UTC(2099, 0, id, 4, 30)).toISOString(),
@@ -63,7 +64,7 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
     const record = await commerce.create({
       _id: paymentRecordId, _type: 'paymentRecord', backendOwner: 'supabase', cutoverGeneration: 0,
       provider, status: 'email_partial', bookingId, emailDispatchRequired: true,
-      providerOrderId: provider === 'paypal' ? `order_emails_${id}` : `session_emails_${id}`,
+      providerOrderId: provider === 'paypal' || provider === 'razorpay' ? `order_emails_${id}` : `session_emails_${id}`,
       providerPaymentId: `payment_emails_${id}`,
       bookingPayload: { ...fixture.details, packageTitle: booking.packageTitle, netAmount: 29.95, currency: 'USD' },
       providerPublicData: { totalAmount: 2995, currency: 'USD' },
@@ -75,6 +76,28 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
   };
   const confirm = ({ bookingId, emailDispatchToken }) =>
     fixture.post('/api/ref/sendBookingEmails', { bookingId, emailDispatchToken });
+  const replay = async booking => {
+    const saved = await commerce.getDocument(booking.bookingId);
+    return fixture.post('/api/ref/createBooking', { ...fixture.details,
+      packageTitle: saved.packageTitle, packagePrice: saved.packagePrice,
+      paymentProvider: saved.paymentProvider, paymentRecordId: saved.paymentRecordId,
+      paypalOrderId: saved.paypalOrderId,
+      razorpayOrderId: saved.razorpayOrderId, razorpayPaymentId: saved.razorpayPaymentId,
+      status: 'captured', startTimeUTC: saved.startTimeUTC, deferEmailsUntilConfirmation: true });
+  };
+  const conflictAfterRead = (booking, changes, result) => {
+    let reads = 0;
+    let changing = false;
+    result.conflicts = 0;
+    database.setRequestHook(async (phase, request) => {
+      if (changing || phase !== 'after' || !request.path.endsWith('/roo_fetch_shadow_documents_targeted') ||
+          !request.body.p_document_types?.includes('booking') || !request.body.p_ids?.includes(booking.bookingId)) return;
+      reads += 1;
+      if (reads < 3 || result.conflicts >= changes.length) return;
+      changing = true;
+      try { await changes[result.conflicts++](booking); } finally { changing = false; }
+    });
+  };
   const transition = (bookingId, status) => applyBookingStatusTransition({ client: commerce, bookingId, status });
   const inactive = async (booking, status) => {
     if (status === 'refunded') {
@@ -137,7 +160,7 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
         'Inactive booking reached confirmation transport');
         const ownConfirmations = confirmations.filter(request =>
           Number(request.bookings[0].id.split('.').at(-1)) >= firstBooking);
-        if (name.startsWith('active classification') || name.startsWith('partial refund') ||
+        if (name.startsWith('active classification') || name.startsWith('active deferred replay') || name.startsWith('partial refund') ||
             name.startsWith('suppressed never-attempted') || name.startsWith('projection-only') ||
             name.startsWith('reactivation')) {
           strictAssert.deepEqual(ownConfirmations.map(request => request.body.to).sort(),
@@ -316,6 +339,154 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
       assert.equal(result.booking.emailDispatchLastError, 'booking_inactive');
       assert.equal(result.booking.emailDispatchNextAttemptAt || '', '');
       assertSuppressed(result.ledger);
+    });
+
+    for (const provider of ['paypal', 'razorpay']) {
+      for (const status of ['cancelled', 'refunded']) {
+        await check(`${provider}: inactive ${status} create replay succeeds and clears payment email work`, async result => {
+          const booking = await create({ provider });
+          await inactive(booking, status);
+          result.response = await replay(booking);
+          result.record = await commerce.getDocument(booking.record._id);
+          assert.equal(result.response.status, 200, JSON.stringify(result.response));
+          assert.equal(result.response.body.bookingId, booking.bookingId);
+          assert.equal(result.response.body.idempotent, true);
+          assert.equal(result.response.body.emailDispatch?.suppressed, true);
+          assert.equal(result.response.body.emailDispatch?.allSent, false);
+          for (const recipient of ['client', 'owner']) {
+            assert.equal(result.response.body.emailDispatch?.[recipient]?.sent, false);
+            assert.equal(result.response.body.emailDispatch?.[recipient]?.skippedReason, 'booking_inactive');
+          }
+          assert.equal(result.record.emailDispatchRequired, false);
+          assert.equal(result.record.emailDispatchToken || '', '');
+          result.replay = await replay(booking);
+          assert.equal(result.replay.status, 200);
+          await isolateRecovery(booking);
+          const saved = await commerce.getDocument(booking.record._id);
+          result.recovery = await recover();
+          assert.equal((await commerce.getDocument(booking.record._id))._rev, saved._rev);
+          assert.equal(messages(booking.bookingId).length, 0);
+        });
+      }
+      for (const recordStatus of ['refunded', 'failed', 'abandoned']) {
+        await check(`${provider}: suppressed create replay preserves a ${recordStatus} payment record`, async result => {
+          const booking = await create({ provider });
+          await inactive(booking, recordStatus === 'refunded' ? 'refunded' : 'cancelled');
+          await commerce.patch(booking.record._id).set({ status: recordStatus, emailDispatchRequired: true,
+            emailDispatchToken: 'stale-confirmation-token', refundRequiresBookingSync: recordStatus === 'refunded' }).commit();
+          result.response = await replay(booking);
+          result.record = await commerce.getDocument(booking.record._id);
+          assert.equal(result.response.status, 200);
+          assert.equal(result.record.status, recordStatus);
+          assert.equal(result.record.refundRequiresBookingSync, recordStatus === 'refunded');
+          assert.equal(result.record.emailDispatchRequired, false);
+          assert.equal(result.record.emailDispatchToken, '');
+          assert.equal(messages(booking.bookingId).length, 0);
+        });
+      }
+    }
+
+    await check('inactive create replay reports suppression even with prior delivery receipts', async result => {
+      const booking = await create({ provider: 'paypal' });
+      await confirm(booking);
+      const before = messages(booking.bookingId).length;
+      await inactive(booking, 'cancelled');
+      result.response = await replay(booking);
+      result.ledger = await rows(booking.bookingId);
+      assert.equal(result.response.status, 200);
+      assert.equal(result.response.body.emailDispatch?.allSent, false);
+      assert.equal(result.response.body.emailDispatch?.client?.sent, false);
+      assert.equal(result.response.body.emailDispatch?.owner?.sent, false);
+      assert.ok(result.ledger.every(row => row.status === 'sent'));
+      assert.equal(messages(booking.bookingId).length, before);
+    });
+
+    await check('reactivation during create replay reports the actual active delivery', async result => {
+      const booking = await create({ provider: 'paypal' });
+      await inactive(booking, 'cancelled');
+      conflictAfterRead(booking, [value => commerce.patch(value.bookingId).set({ status: 'captured' }).commit()], result);
+      result.response = await replay(booking);
+      database.setRequestHook(null);
+      await confirm({ ...booking, emailDispatchToken: result.response.body.emailDispatchToken || booking.emailDispatchToken });
+      assert.equal(result.conflicts, 1);
+      assert.equal(result.response.status, 200);
+      assert.equal(result.response.body.emailDispatch?.allSent, true);
+      assert.equal(result.response.body.emailDispatch?.client?.sent, true);
+      assert.equal(result.response.body.emailDispatch?.owner?.sent, true);
+      assert.equal(messages(booking.bookingId).length, 2);
+    });
+
+    for (const status of ['cancelled', 'refunded']) {
+      await check(`${status}: deferred replay rechecks inactivity after a revision conflict`, async result => {
+        const booking = await create({ provider: 'paypal' });
+        conflictAfterRead(booking, [value => inactive(value, status)], result);
+        result.response = await replay(booking);
+        database.setRequestHook(null);
+        result.booking = await commerce.getDocument(booking.bookingId);
+        result.record = await commerce.getDocument(booking.record._id);
+        assert.equal(result.conflicts, 1);
+        assert.equal(result.response.status, 200, JSON.stringify(result.response));
+        assert.equal(result.response.body.idempotent, true);
+        assert.equal(result.response.body.emailDispatch?.suppressed, true);
+        assert.equal(result.response.body.emailDispatch?.allSent, false);
+        assert.equal(result.record.emailDispatchRequired, false);
+        assert.equal(result.booking.status, status);
+        assert.equal(result.booking.emailDispatchLastError, 'booking_inactive');
+        assert.equal(messages(booking.bookingId).length, 0);
+      });
+    }
+
+    for (const conflicts of [1, 2]) {
+      await check(`active deferred replay succeeds after ${conflicts} revision conflicts`, async result => {
+        const booking = await create({ provider: 'paypal' });
+        conflictAfterRead(booking, Array.from({ length: conflicts }, (_, index) => value =>
+          commerce.patch(value.bookingId).set({ message: `Concurrent update ${index + 1}` }).commit()), result);
+        result.response = await replay(booking);
+        database.setRequestHook(null);
+        result.booking = await commerce.getDocument(booking.bookingId);
+        assert.equal(result.conflicts, conflicts);
+        assert.equal(result.response.status, 200, JSON.stringify(result.response));
+        assert.equal(result.response.body.idempotent, true);
+        assert.equal(result.response.body.emailDispatch?.deferred, true);
+        assert.equal(result.response.body.emailDispatch?.allSent, false);
+        assert.equal(result.booking.message, `Concurrent update ${conflicts}`);
+        if (conflicts === 1) assert.ok(result.booking.emailDispatchQueuedAt);
+        else assert.ok(!result.booking.emailDispatchQueuedAt);
+        result.confirmation = await confirm({ ...booking, emailDispatchToken: result.response.body.emailDispatchToken });
+        await confirm({ ...booking, emailDispatchToken: result.response.body.emailDispatchToken });
+        assert.equal(result.confirmation.status, 200);
+        assert.equal(messages(booking.bookingId).length, 2);
+      });
+    }
+
+    await check('payment finalization accepts an existing inactive booking without scheduling confirmation recovery', async result => {
+      const startTimeUTC = '2099-08-01T04:30:00.000Z';
+      const held = await fixture.post('/api/holdSlot', { startTimeUTC, packageTitle: 'Vertex Essentials' });
+      assert.equal(held.status, 200, JSON.stringify(held));
+      const payload = { ...fixture.details, packageTitle: 'Vertex Essentials', startTimeUTC,
+        slotHoldId: held.body.holdId, slotHoldToken: held.body.holdToken, deferEmailsUntilConfirmation: true };
+      const started = await fixture.start(payload);
+      assert.equal(started.status, 200);
+      const record = await commerce.fetch('*[_type == "paymentRecord" && bookingPayload.slotHoldId in $holdIds][0]',
+        { holdIds: [payload.slotHoldId] });
+      assert.ok(record);
+      const bookingId = 'booking.emails.finalize';
+      await commerce.create({ _id: bookingId, _type: 'booking', backendOwner: 'supabase', cutoverGeneration: 0,
+        ...payload, packagePrice: '$29.95', grossAmount: 29.95, netAmount: 29.95, currency: 'USD',
+        status: 'cancelled', paymentProvider: 'dodo', paymentRecordId: record._id,
+        dodoCheckoutSessionId: record.providerOrderId, dodoPaymentId: `payment_${record.providerOrderId}`,
+        emailDispatchDeferred: true, emailDispatchStatus: 'pending' });
+      await commerce.patch(record._id).set({ bookingId }).commit();
+      result.response = await fixture.post('/api/payment/finalize', {}, started.body.paymentAccessToken);
+      result.record = await commerce.getDocument(record._id);
+      assert.equal(result.response.status, 200, JSON.stringify(result.response));
+      assert.equal(result.response.body.bookingId, bookingId);
+      assert.equal(result.record.status, 'email_partial');
+      assert.equal(result.record.emailDispatch.suppressed, true);
+      assert.equal(result.record.emailDispatchRequired, false);
+      assert.equal(result.record.nextRecoveryAt || '', '');
+      assert.equal(result.record.finalizationLeaseId || '', '');
+      assert.equal(messages(bookingId).length, 0);
     });
 
     for (const unavailable of ['configuration', 'recipients']) {
