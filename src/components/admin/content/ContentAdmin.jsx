@@ -426,8 +426,8 @@ export default function ContentAdmin() {
   );
 
   const editorContext = useMemo(
-    () => ({ api, assets, registerAsset, loadReferenceOptions, errorsByPath, captureEditTarget, applyAtTarget, beginUpload, endUpload }),
-    [api, assets, registerAsset, loadReferenceOptions, errorsByPath, captureEditTarget, applyAtTarget, beginUpload, endUpload]
+    () => ({ api, assets, registerAsset, loadReferenceOptions, errorsByPath, captureEditTarget, applyAtTarget, beginUpload, endUpload, baseline: session?.documentId ? baseline : null, document: working }),
+    [api, assets, registerAsset, loadReferenceOptions, errorsByPath, captureEditTarget, applyAtTarget, beginUpload, endUpload, session?.documentId, baseline, working]
   );
 
   const finishPublication = async (pending, documentId) => {

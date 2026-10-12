@@ -51,13 +51,22 @@ const internal = {
   review: { title: { kind: "documentTitle", consumer: "src/components/admin/content/ContentAdmin.jsx:834" } },
 };
 
+const overrideKeys = {
+  about: ["recordDetails[].label"],
+  faqSection: ["questions[].question"],
+  package: ["title"],
+  meetTheTeam: ["sections[].cards[].name", "sections[].variant"],
+  services: ["benchPages[].games[].gameTitle"],
+  terms: ["sections[].heading"],
+};
+
 const operationalReadOnly = { coupon: ["timesUsed", "activeReservations", "autoDeactivatedByRedemptionId", "autoDeactivatedAt", "redemptionCount"] };
 
 const internalField = (type, path) => internal[type]?.[patternPath(path)];
 
-const classify = (type, path, parent = {}) => {
+const classify = (type, path, parent = {}, context = {}) => {
   const normalized = patternPath(path).replace(/\[\]$/, "");
-  if (unusedField(type, path, parent)) return "UNUSED";
+  if (unusedField(type, path, parent, context)) return "UNUSED";
   if (internalField(type, path)) return "INTERNAL";
   if (rendered[type]?.includes(normalized)) return "RENDERED";
   throw new Error(`Unclassified editable CMS field: ${type}.${normalized}`);
@@ -92,17 +101,20 @@ const bindings = {
 
 const hash = value => createHash("sha1").update(value).digest("hex");
 const patternPath = path => path.replace(/\[\d+\]/g, "[]");
-const unusedField = (type, field, parent = {}) => {
+const unusedField = (type, field, parent = {}, context = {}) => {
   if (internalField(type, field)) return false;
   if ((unused[type] || []).includes(patternPath(field))) return true;
-  if (type === "about" && /\.(?:label|value)$/.test(field)) return /^(cpu|gpu)$/i.test(String(parent.label || "").trim());
+  if (type === "about" && /\.value$/.test(field)) return /^(cpu|gpu)$/i.test(String(parent.label || "").trim());
   if (type === "package" && /^(?:checkedBullets|uncheckedBullets)$/.test(field)) return /^(?:vertex essentials|performance vertex overhaul|performance vertex max|xoc(?:\s*\/\s*extreme overclocking)?)$/i.test(parent.title || "");
   if (type === "package" && field === "description") return /^(?:performance vertex max|xoc(?:\s*\/\s*extreme overclocking)?)$/i.test(parent.title || "");
-  if (type === "faqSection" && /\.(?:question|answer)$/.test(field)) return /(?:refund|money[- ]back).*warranty|warranty.*(?:refund|money[- ]back)|free re[-\s]?optimization|(?:re[-\s]?xoc|rexoc).*free|upgrade pc each 6 months|change a part before the 6[-\s]?month period/i.test(parent.question || "");
+  if (type === "faqSection" && /\.answer$/.test(field)) return /(?:refund|money[- ]back).*warranty|warranty.*(?:refund|money[- ]back)|free re[-\s]?optimization|(?:re[-\s]?xoc|rexoc).*free|upgrade pc each 6 months|change a part before the 6[-\s]?month period/i.test(parent.question || "");
   if (type === "terms" && /\.content$/.test(field)) return /payments and refunds|rescheduling policy|cancellations and rescheduling/i.test(parent.heading || "");
-  if (type === "terms" && /\.heading$/.test(field)) return /rescheduling policy|cancellations and rescheduling/i.test(parent.heading || "");
+  if (type === "meetTheTeam" && Object.hasOwn(context, "variant")) {
+    if (/\.(platformBadge|ctaLabel|ctaUrl)$/.test(field)) return context.variant !== "ambassador";
+    if (/\.tags(?:\[\d+\])?$/.test(field)) return context.variant === "ambassador";
+  }
   if (type === "meetTheTeam" && /\.bio$/.test(field)) return /^(?:wanted|candi)$/i.test(String(parent.name || "").trim());
-  if (type === "services" && /^benchPages\[\d+\]\.games\[\d+\]\./.test(field)) return /^overwatch(?:\s+2)?$/i.test(String(parent.gameTitle || "").trim());
+  if (type === "services" && /^benchPages\[\d+\]\.games\[\d+\]\./.test(field) && !/\.gameTitle$/.test(field)) return /^overwatch(?:\s+2)?$/i.test(String(parent.gameTitle || "").trim());
   return false;
 };
 
@@ -118,20 +130,21 @@ const schemaFields = (fields, prefix = "") => fields.flatMap(field => {
 async function buildDocument({ schema, current, marker, origin, upload, reference, preserveUnused = false }) {
   const cases = [];
   const mark = path => `${marker}-${schema.name}-${path.replace(/[^a-z0-9]/gi, "-")}`;
-  const fields = async (definitions, previous, prefix = "") => {
+  const fields = async (definitions, previous, prefix = "", context = {}) => {
     const object = structuredClone(previous || {});
+    const fieldContext = definitions.some(field => field.name === "variant") ? { ...context, get variant() { return object.variant; } } : context;
     for (const field of definitions) {
       const path = `${prefix}${field.name}`;
       if (field.readOnly && !field.preserveStoredValue) continue;
-      if (preserveUnused && unusedField(schema.name, path, object)) continue;
-      object[field.name] = await value(field, previous?.[field.name], path);
+      if (preserveUnused && unusedField(schema.name, path, object, fieldContext)) continue;
+      object[field.name] = await value(field, previous?.[field.name], path, fieldContext);
     }
     return object;
   };
-  const value = async (field, previous, path) => {
+  const value = async (field, previous, path, context) => {
     const token = mark(path);
     let next;
-    if (field.type === "object") next = await fields(field.fields || [], previous, `${path}.`);
+    if (field.type === "object") next = await fields(field.fields || [], previous, `${path}.`, context);
     else if (field.type === "array") {
       const item = field.of?.[0];
       if (item?.type === "block") {
@@ -142,8 +155,7 @@ async function buildDocument({ schema, current, marker, origin, upload, referenc
         const count = schema.name === "meetTheTeam" && path === "sections" || schema.name === "services" && path === "benchPages" ? 2 : 1;
         next = [];
         for (let index = 0; index < count; index++) {
-          const row = await fields(item.fields || [], { ...(previous?.[index] || {}), _key: hash(`${path}-${index}`), _type: item.name || "object" }, `${path}[${index}].`);
-          if (schema.name === "meetTheTeam" && path === "sections") row.variant = (preserveUnused ? index : !index) ? "ambassador" : "standard";
+          const row = await fields(item.fields || [], { ...(previous?.[index] || {}), _key: hash(`${path}-${index}`), _type: item.name || "object" }, `${path}[${index}].`, context);
           next.push(row);
         }
       } else if (item?.type === "reference") {
@@ -157,6 +169,7 @@ async function buildDocument({ schema, current, marker, origin, upload, referenc
     } else if (["image", "file"].includes(field.type)) next = { _type: field.type, asset: { _type: "reference", _ref: await upload(field.type, token) } };
     else if (field.type === "reference") next = { _type: "reference", _ref: await reference(token) };
     else if (field.type === "slug") next = { _type: "slug", current: token.toLowerCase().slice(0, 80) };
+    else if (schema.name === "meetTheTeam" && /sections\[\d+\]\.variant$/.test(path)) { const index = Number(path.match(/\[(\d+)\]/)[1]); next = (preserveUnused ? index : !index) ? "ambassador" : "standard"; }
     else if (field.options?.list) { const option = field.options.list[preserveUnused ? field.options.list.length - 1 : 0]; next = option.value ?? option; }
     else if (field.type === "boolean") next = preserveUnused;
     else if (field.type === "number") next = schema.name === "coupon" && path === "discountPercent" ? (preserveUnused ? 37 : 11) : Math.min(field.max ?? 999999, Math.max(field.min ?? 0, (preserveUnused ? 1000 : 100) + Number.parseInt(hash(path).slice(0, 3), 16)));
@@ -173,7 +186,6 @@ async function buildDocument({ schema, current, marker, origin, upload, referenc
     return next;
   };
   const document = await fields(schema.fields, current);
-  if (schema.name === "meetTheTeam") for (const item of cases.filter(item => /sections\[\d+\]\.variant$/.test(item.path))) item.value = item.token = get(document, item.path);
   if (schema.name === "services") {
     const fallback = structuredClone(document.benchPages[0].games[0]);
     fallback._key = "metric-fallback";
@@ -186,4 +198,9 @@ async function buildDocument({ schema, current, marker, origin, upload, referenc
 
 const get = (document, path) => path.replace(/\[(\d+)\]/g, ".$1").split(".").filter(Boolean).reduce((value, key) => value?.[key], document);
 
-module.exports = { unused, rendered, internal, operationalReadOnly, bindings, internalField, classify, unusedField, schemaFields, buildDocument, patternPath, get };
+const contextFor = (document, path) => {
+  const match = path.match(/^sections\[(\d+)\]\.cards/);
+  return match ? { variant: document.sections?.[Number(match[1])]?.variant || "standard" } : {};
+};
+
+module.exports = { contextFor, unused, rendered, internal, overrideKeys, operationalReadOnly, bindings, internalField, classify, unusedField, schemaFields, buildDocument, patternPath, get };

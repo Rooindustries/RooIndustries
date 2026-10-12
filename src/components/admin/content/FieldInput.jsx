@@ -7,7 +7,8 @@ import AssetInput from "./AssetInput";
 import PortableTextInput from "./PortableTextInput";
 import ReferenceInput from "./ReferenceInput";
 import { newKey, pathLabel } from "./documentPaths";
-import { fieldUsage } from "../../../lib/cms/fieldUsage.js";
+import { fieldUsage, fieldUsageContext, UNUSED_FIELD_NOTE } from "../../../lib/cms/fieldUsage.js";
+import { findStoredRow, rowRemovalProtected, storedFieldAtPath } from "../../../lib/cms/contentPreservation.js";
 import {
   defaultsFor,
   fromLocalDateTimeInput,
@@ -73,7 +74,9 @@ const itemTypeFor = (field, item) =>
   (field.of || []).find((candidate) => candidate.type === item?._type) ||
   field.of?.[0];
 
-function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria }) {
+function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria, context }) {
+  const editor = useEditor();
+  const stored = storedFieldAtPath(editor.baseline, editor.document, path);
   const items = Array.isArray(value) ? value : [];
   const [openKeys, setOpenKeys] = useState(() => new Set());
   const ofTypes = field.of || [];
@@ -152,6 +155,10 @@ function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria
         const key = item && typeof item === "object" ? item._key || `index-${index}` : `index-${index}`;
         const isObject = itemType?.type === "object";
         const open = readOnly || !isObject || openKeys.has(key);
+        const prior = findStoredRow(stored.value, item, itemType?.fields);
+        const protectedRow = isObject && (rowRemovalProtected(prior, itemType.fields, stored.context) ||
+          !item?._key && !prior && stored.value?.some(row => !row?._key && rowRemovalProtected(row, itemType.fields, stored.context)));
+        const removalHelp = helpId([...itemPath, "_remove"]);
         return (
           <div key={key} className={styles.arrayItem}>
             <div className={styles.arrayItemHeader}>
@@ -200,12 +207,13 @@ function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria
                   <button type="button" className={styles.iconButton} aria-label="Move down" title="Move down" onClick={() => move(index, 1)} disabled={index === items.length - 1}>
                     <ArrowDown size={16} aria-hidden="true" />
                   </button>
-                  <button type="button" className={styles.iconButtonDanger} aria-label="Remove item" title="Remove item" onClick={() => remove(index)}>
+                  <button type="button" className={styles.iconButtonDanger} aria-label="Remove item" title="Remove item" disabled={protectedRow} aria-describedby={protectedRow ? removalHelp : undefined} onClick={() => remove(index)}>
                     <Trash2 size={16} aria-hidden="true" />
                   </button>
                 </span>
               ) : null}
             </div>
+            {protectedRow ? <p id={removalHelp} className={styles.fieldHelp}>{UNUSED_FIELD_NOTE}</p> : null}
             {isObject && open ? (
               <div className={styles.arrayItemBody}>
                 <ObjectFields
@@ -213,6 +221,7 @@ function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria
                   path={itemPath}
                   value={item}
                   readOnly={readOnly}
+                  context={context}
                   onChange={(next) => {
                     const copy = items.slice();
                     copy[index] = next;
@@ -239,12 +248,13 @@ function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria
   );
 }
 
-export function ObjectFields({ fields, path, value, onChange, readOnly }) {
+export function ObjectFields({ fields, path, value, onChange, readOnly, context }) {
   const current = value && typeof value === "object" ? value : {};
+  const fieldContext = fieldUsageContext(fields, current, context);
   return (
     <div className={styles.objectFields}>
       {fields.map((definition) => {
-        const field = fieldUsage(definition, current);
+        const field = fieldUsage(definition, current, fieldContext);
         if (isFieldHidden(field, current)) return null;
         return (
           <ValueInput
@@ -253,6 +263,7 @@ export function ObjectFields({ fields, path, value, onChange, readOnly }) {
             path={[...path, field.name]}
             value={current[field.name]}
             parent={current}
+            context={fieldContext}
             readOnly={readOnly || field.readOnly === true}
             onChange={(next) => {
               const copy = { ...current };
@@ -267,7 +278,7 @@ export function ObjectFields({ fields, path, value, onChange, readOnly }) {
   );
 }
 
-export function ValueInput({ field, path, value, parent, onChange, readOnly = false, bare = false }) {
+export function ValueInput({ field, path, value, parent, onChange, readOnly = false, bare = false, context }) {
   const id = useId();
   const { errorsByPath } = useEditor();
   const invalid = (errorsByPath.get(pathLabel(path)) || []).length > 0;
@@ -299,13 +310,13 @@ export function ValueInput({ field, path, value, parent, onChange, readOnly = fa
   }
 
   if (type === "array") {
-    return wrap(<ArrayInput field={field} path={path} value={value} onChange={onChange} readOnly={readOnly} inputId={id} inputAria={inputAria} />);
+    return wrap(<ArrayInput field={field} path={path} value={value} onChange={onChange} readOnly={readOnly} inputId={id} inputAria={inputAria} context={context} />);
   }
 
   if (type === "object") {
     return wrap(
       <div id={id} className={styles.nestedObject} role="group" aria-label={field.title || field.name} aria-disabled={readOnly || undefined} {...inputAria}>
-        <ObjectFields fields={field.fields || []} path={path} value={value} onChange={onChange} readOnly={readOnly} />
+        <ObjectFields fields={field.fields || []} path={path} value={value} onChange={onChange} readOnly={readOnly} context={context} />
       </div>
     );
   }

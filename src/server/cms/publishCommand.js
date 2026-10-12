@@ -1,14 +1,14 @@
 import crypto from "node:crypto";
 import { validateContentDocument, createContentDefaults } from "../../lib/cms/contentSchema.js";
 import { stableCmsJson } from "../../lib/globalCmsContract.js";
-import { isUnusedField } from "../../lib/cms/fieldUsage.js";
+import { UNUSED_FIELD_NOTE } from "../../lib/cms/fieldUsage.js";
+import { CMS_SYSTEM_FIELDS as system, preserveContentDocument, removedProtectedRows } from "../../lib/cms/contentPreservation.js";
 import { clearSupabasePublicContentCache } from "../content/publicContent.js";
 import { contentType, documentId, loadDocument } from "./documents.js";
 import { cmsError, rpcData, validationError } from "./errors.js";
 import { assertGlobalCmsWritesAllowed } from "./writeControl.js";
 
 const counters = new Set(["timesUsed", "activeReservations", "redemptionCount", "autoDeactivatedByRedemptionId", "autoDeactivatedAt"]);
-const system = new Set(["_id", "_type", "_rev", "_createdAt", "_updatedAt", "_createdBy", "_originalId", "_system"]);
 const hash = value => crypto.createHash("sha256").update(stableCmsJson(value)).digest("hex");
 const uuid = value => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 export const createIntentDocumentId = intent => {
@@ -28,49 +28,6 @@ const refuseEnrichment = (value, path = "$", depth = 0) => {
     refuseEnrichment(item, `${path}.${key}`, depth + 1);
   }
 };
-const mergeStoredExtras = (value, current, known) => {
-  if (!plain(value)) return value;
-  const output = { ...value };
-  for (const [key, item] of Object.entries(current || {})) if (!known.has(key) && !key.startsWith("_supabase") && output[key] === undefined) output[key] = item;
-  return output;
-};
-const preserveBlock = (value, current) => {
-  const block = mergeStoredExtras(value, current, new Set(["style", "listItem", "level", "children", "markDefs"]));
-  for (const [name, known] of [["children", ["text", "marks"]], ["markDefs", ["href"]]]) if (Array.isArray(block[name])) block[name] = block[name].map(item => mergeStoredExtras(item, current?.[name]?.find(old => old?._key === item?._key), new Set(known)));
-  return block;
-};
-const preservedDocument = (input, current, fields, seed, path = "$", root = true) => {
-  if (!plain(input)) return input;
-  const output = { ...input };
-  const known = new Set(fields.map(field => field.name));
-  for (const [key, value] of Object.entries(current || {})) if (!known.has(key) && !(root && system.has(key)) && !key.startsWith("_supabase") && output[key] === undefined) output[key] = value;
-  for (const field of fields) {
-    if (field.readOnly || isUnusedField(field, input)) {
-      if (field.preserveStoredValue && current && Object.hasOwn(current, field.name)) output[field.name] = current[field.name];
-      else delete output[field.name];
-      continue;
-    }
-    const value = output[field.name];
-    const prior = current?.[field.name];
-    if (field.type === "object" && plain(value)) output[field.name] = preservedDocument(value, prior, field.fields || [], seed, `${path}.${field.name}`, false);
-    if (["image", "file", "reference", "slug"].includes(field.type) && plain(value)) {
-      const known = new Set(field.type === "reference" ? ["_ref", "_weak"] : field.type === "slug" ? ["current"] : ["asset", "crop", "hotspot"]);
-      output[field.name] = mergeStoredExtras(value, prior, known);
-      if (value.asset) output[field.name].asset = mergeStoredExtras(value.asset, prior?.asset, new Set(["_ref", "_weak"]));
-      if (value.crop) output[field.name].crop = mergeStoredExtras(value.crop, prior?.crop, new Set(["top", "bottom", "left", "right"]));
-      if (value.hotspot) output[field.name].hotspot = mergeStoredExtras(value.hotspot, prior?.hotspot, new Set(["x", "y", "width", "height"]));
-    }
-    if (field.type === "array" && Array.isArray(value)) output[field.name] = value.map((item, index) => {
-      if (!plain(item)) return item;
-      const previous = item._key ? prior?.find?.(entry => entry?._key === item._key) : prior?.[index];
-      const candidate = field.of?.find(type => type.name === item._type || type.type === item._type) || field.of?.[0];
-      const next = candidate?.type === "object" ? preservedDocument(item, previous, candidate.fields || [], seed, `${path}.${field.name}[${index}]`, false) : candidate?.type === "block" ? preserveBlock(item, previous) : mergeStoredExtras(item, previous, new Set(["_ref", "_weak"]));
-      if (!next._key && stableCmsJson(item) !== stableCmsJson(previous)) next._key = hash({ seed, path: `${path}.${field.name}[${index}]`, item }).slice(0, 20);
-      return next;
-    });
-  }
-  return output;
-};
 const committed = (result, id) => {
   const record = result?.results?.find?.(entry => entry?._id === id || entry?.id === id) || result?.results?.[0];
   const revision = record?._rev || record?.document?._rev;
@@ -89,6 +46,9 @@ const prepareCmsCommand = (body, actor) => {
   if (creating && body.expectedRevision !== undefined) throw validationError("$.expectedRevision", "Create cannot supply a loaded revision.");
   if (!creating && body.createIntentId !== undefined) throw validationError("$.createIntentId", "Create intent applies only to create.");
   const id = creating ? schema.fixedId || createIntentDocumentId(body.createIntentId) : documentId(body.documentId);
+  if (body.type === "faqSection" && ((body.operation === "delete" && id === "faq") || (creating && [body.documentId, body.document?._id].some(value => value !== undefined && value !== "faq")))) {
+    throw cmsError(body.operation === "delete" ? "The canonical FAQ document cannot be deleted." : "Only the canonical FAQ document can be created.", 409, "CMS_CANONICAL_FAQ_PROTECTED");
+  }
   if (creating && body.documentId !== undefined && body.documentId !== id) throw validationError("$.documentId", "The server derives the new identity from the create intent.");
   if (body.expectedRevision !== undefined && (typeof body.expectedRevision !== "string" || body.expectedRevision.length > 128)) throw validationError("$.expectedRevision", "A loaded revision is required.");
   let document = null;
@@ -109,7 +69,7 @@ const prepareCmsCommand = (body, actor) => {
 export const getCreateCommandStatus = async ({ body, supabaseClient, actor = "admin:key" } = {}) => {
   const { schema, creating, id, document, requestHash, lookup } = prepareCmsCommand(body, actor);
   if (!creating) throw validationError("$.operation", "Only create commands have a creation status.");
-  const validation = validateContentDocument(body.type, preservedDocument(document, null, schema.fields, requestHash));
+  const validation = validateContentDocument(body.type, preserveContentDocument(document, null, schema.fields, (path, item) => hash({ seed: requestHash, path, item }).slice(0, 20)));
   if (!validation.ok) throw cmsError("Content validation failed.", 400, "CMS_VALIDATION_FAILED", validation.errors);
   const receipt = rpcData(await supabaseClient.rpc("roo_cms_publish_command_result", lookup), "Receipt lookup");
   if (!receipt || receipt.replayed !== true) throw cmsError("Create command was not published.", 404, "CMS_NOT_FOUND");
@@ -132,7 +92,9 @@ export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = proc
   const current = await loadDocument(supabaseClient, id);
   if (current && current._type !== body.type) throw cmsError("Document type conflicts with its stored identity.", 409, "CMS_TYPE_MISMATCH", { currentRevision: current._rev });
   if (document) {
-    document = preservedDocument(document, current, schema.fields, requestHash);
+    document = preserveContentDocument(document, current, schema.fields, (path, item) => hash({ seed: requestHash, path, item }).slice(0, 20));
+    const removed = removedProtectedRows(current, document, schema.fields);
+    if (removed.length) throw cmsError(`This row cannot be removed. ${UNUSED_FIELD_NOTE}`, 409, "CMS_UNUSED_ROW_PROTECTED", { paths: removed });
     const validation = validateContentDocument(body.type, document, { current });
     if (!validation.ok) throw cmsError("Content validation failed.", 400, "CMS_VALIDATION_FAILED", validation.errors);
     document = { ...document, _id: id, _type: body.type };

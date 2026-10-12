@@ -22,15 +22,28 @@ const unused = {
 };
 
 const conditional = {
-  about: { "recordDetails[].label": "hardwareStat", "recordDetails[].value": "hardwareStat" },
+  about: { "recordDetails[].value": "hardwareStat" },
   package: { description: "package", checkedBullets: "package", uncheckedBullets: "package" },
-  faqSection: { "questions[].question": "faq", "questions[].answer": "faq" },
-  terms: { "sections[].heading": "terms", "sections[].content": "terms" },
-  meetTheTeam: { "sections[].cards[].bio": "team" },
-  services: Object.fromEntries(["gameTitle", "gameLogo", "beforeFps", "afterFps", "metricLabel", "gpu", "cpu", "ram"].map(name => [`benchPages[].games[].${name}`, "overwatch"])),
+  faqSection: { "questions[].answer": "faq" },
+  terms: { "sections[].content": "terms" },
+  meetTheTeam: { "sections[].cards[].bio": "team", "sections[].cards[].platformBadge": "standardCard", "sections[].cards[].ctaLabel": "standardCard", "sections[].cards[].ctaUrl": "standardCard", "sections[].cards[].tags": "ambassadorCard" },
+  services: Object.fromEntries(["gameLogo", "beforeFps", "afterFps", "metricLabel", "gpu", "cpu", "ram"].map(name => [`benchPages[].games[].${name}`, "overwatch"])),
 };
 
-export const isUnusedField = (field, parent = {}) => {
+const overrideKeys = {
+  about: ["recordDetails[].label"],
+  faqSection: ["questions[].question"],
+  package: ["title"],
+  meetTheTeam: ["sections[].cards[].name", "sections[].variant"],
+  services: ["benchPages[].games[].gameTitle"],
+  terms: ["sections[].heading"],
+};
+
+export const fieldUsageContext = (fields, value, context = {}) => fields.some(field => field.name === "variant")
+  ? { ...context, variant: value?.variant }
+  : context;
+
+export const isUnusedField = (field, parent = {}, context = {}) => {
   if (field.unusedOnSite) return true;
   switch (field.unusedWhen) {
     case "package": {
@@ -44,8 +57,10 @@ export const isUnusedField = (field, parent = {}) => {
     case "terms": {
       const probe = { ...parent, content: [] };
       const result = policyContent.applyTermsPolicyOverrides({ sections: [probe] }).sections[0];
-      return field.name === "content" ? result.content !== probe.content : result.heading !== probe.heading;
+      return result.content !== probe.content;
     }
+    case "standardCard": return context.variant !== "ambassador";
+    case "ambassadorCard": return context.variant === "ambassador";
     case "team": return /^(wanted|candi)$/i.test(String(parent.name || "").trim());
     case "hardwareStat": return /^(cpu|gpu)$/i.test(String(parent.label || "").trim());
     case "overwatch": return /^overwatch(?:\s+2)?$/i.test(String(parent.gameTitle || "").trim());
@@ -53,13 +68,14 @@ export const isUnusedField = (field, parent = {}) => {
   }
 };
 
-export const fieldUsage = (field, parent) => isUnusedField(field, parent)
+export const fieldUsage = (field, parent, context) => isUnusedField(field, parent, context)
   ? { ...field, readOnly: true, description: UNUSED_FIELD_NOTE }
   : field;
 
 export const markFieldUsage = schema => {
   const visit = (fields, prefix = "") => fields.forEach(field => {
     const path = `${prefix}${field.name}`;
+    if (overrideKeys[schema.name]?.includes(path)) field.overrideKey = true;
     if (unused[schema.name]?.includes(path)) Object.assign(field, { unusedOnSite: true, readOnly: true, preserveStoredValue: true, description: UNUSED_FIELD_NOTE });
     if (conditional[schema.name]?.[path]) Object.assign(field, { unusedWhen: conditional[schema.name][path], preserveStoredValue: true });
     if (field.fields) visit(field.fields, `${path}.`);

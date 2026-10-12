@@ -1,6 +1,6 @@
 import { UPGRADE_LINK_SLUG_PATTERN } from "../globalCmsContract.js";
 import { isValidEmail } from "../emailValidation.js";
-import { isUnusedField, markFieldUsage } from "./fieldUsage.js";
+import { isUnusedField, markFieldUsage, fieldUsageContext } from "./fieldUsage.js";
 
 const definitions = [
   {
@@ -1061,10 +1061,7 @@ const definitions = [
       {
         "name": "tagline",
         "title": "Tagline",
-        "type": "string",
-        "readOnly": true,
-        "preserveStoredValue": true,
-        "description": "Not shown on the site yet. Edits here won't appear."
+        "type": "string"
       },
       {
         "name": "headingLine1",
@@ -1108,18 +1105,12 @@ const definitions = [
       {
         "name": "ctaNoteIcon",
         "title": "CTA Note Icon",
-        "type": "string",
-        "readOnly": true,
-        "preserveStoredValue": true,
-        "description": "Not shown on the site yet. Edits here won't appear."
+        "type": "string"
       },
       {
         "name": "bullets",
         "title": "Bottom Bullet Points",
         "type": "array",
-        "readOnly": true,
-        "preserveStoredValue": true,
-        "description": "Not shown on the site yet. Edits here won't appear.",
         "of": [
           {
             "type": "string"
@@ -2570,9 +2561,10 @@ export const validateContentDocument = (typeName, document, { current } = {}) =>
     if (value._key !== undefined && (typeof value._key !== "string" || !keyPattern.test(value._key))) fail(`${path}._key`, "A valid item key is required.");
     if (!value._key && !equal(value, previous)) fail(`${path}._key`, "New object items require a stable key.");
   };
-  const object = (fields, value, previous, path, root = false) => {
+  const object = (fields, value, previous, path, root = false, context = {}) => {
+    const fieldContext = fieldUsageContext(fields, value, context);
     unknown(value, new Set(fields.map(field => field.name)), previous, path, root);
-    fields.forEach(field => validate(field, value[field.name], previous?.[field.name], `${path}.${field.name}`, value));
+    fields.forEach(field => validate(field, value[field.name], previous?.[field.name], `${path}.${field.name}`, value, fieldContext));
   };
   const reference = (value, previous, path, kind) => {
     if (!plainObject(value) || typeof value._ref !== "string" || !refPattern.test(value._ref) || /^(drafts|versions)\./.test(value._ref)) { fail(path, "A published document reference is required."); return; }
@@ -2610,9 +2602,9 @@ export const validateContentDocument = (typeName, document, { current } = {}) =>
       if (span._type !== "span" || typeof span.text !== "string" || !Array.isArray(span.marks) || span.marks.some(mark => !PORTABLE_TEXT_DEFAULTS.decorators.includes(mark) && !definitionKeys.has(mark))) fail(p, "A span with valid text and marks is required.");
     });
   };
-  const validate = (field, value, previous, path, parent) => {
+  const validate = (field, value, previous, path, parent, context) => {
     if (field.readOnly && !field.preserveStoredValue) return;
-    if (isUnusedField(field, parent) && (value === undefined || previous !== undefined)) return;
+    if (isUnusedField(field, parent, context) && (value === undefined || previous !== undefined)) return;
     if (field.required && !hasValue(value)) fail(path, "This field is required.");
     if (field.customRule === "tool.downloadUrl" && parent.downloadMode === "external" && !value) fail(path, "An external download URL is required.");
     if (field.customRule === "tool.downloadFile" && parent.downloadMode === "hosted" && !value) fail(path, "A hosted download file is required.");
@@ -2650,7 +2642,7 @@ export const validateContentDocument = (typeName, document, { current } = {}) =>
     }
     if (type === "object") {
       if (!plainObject(value)) fail(path, "An object is required.");
-      else object(field.fields || [], value, previous, path);
+      else object(field.fields || [], value, previous, path, false, context);
     }
     if (type === "array") {
       if (!Array.isArray(value)) { fail(path, "An array is required."); return; }
@@ -2664,7 +2656,7 @@ export const validateContentDocument = (typeName, document, { current } = {}) =>
         const candidate = (field.of || []).find(f => f.type === item?._type || f.name === item?._type) || field.of?.[0];
         if (!candidate) { fail(p, "Unsupported array item."); return; }
         if (candidate.type === "block") block(item, prior, p);
-        else validate(candidate, item, prior, p, parent);
+        else validate(candidate, item, prior, p, parent, context);
       });
     }
   };

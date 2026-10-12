@@ -5,6 +5,7 @@ const { createHash, randomUUID } = require("node:crypto");
 const { CONTENT_TYPES } = require("../src/lib/cms/contentSchema.js");
 const { PUBLIC_CONTENT_RESOURCES } = require("../src/lib/publicContentQueries.js");
 const { ALL_PUBLIC_ROUTES } = require("../src/lib/routes.js");
+const { MONEY_BACK_FAQ_QUESTION, MONEY_BACK_FAQ_ANSWER } = require("../src/lib/policyContent.js");
 const fieldContract = require("./fixtures/cms-field-contract.cjs");
 
 const ADMIN_KEY = "synthetic-admin-key";
@@ -115,7 +116,8 @@ test("ROO-66 public fixture HTML and API stay identical", async ({ page, request
   test.skip(process.env.ROO_TEST_DEV === "1", "Public byte comparison requires a production build.");
   const buildId = await fs.readFile(path.join(testInfo.config.metadata.toolingDistDir, "BUILD_ID"), "utf8");
   const normalize = html => html.split(buildId.trim()).join("BUILD_ID")
-    .replace(/(\/_next\/static\/[^"'\s<>\\]*?)[a-f0-9]{8,64}(?=\.(?:js|css))/g, "$1BUILD_HASH");
+    .replace(/(\/_next\/static\/[^"'\s<>\\]*?)[a-f0-9]{8,64}(?=\.(?:js|css))/g, "$1BUILD_HASH")
+    .replace(/^(<!DOCTYPE html>)<!--[A-Za-z0-9_-]+-->/, "$1<!--BUILD_ID-->");
   const snapshot = { pages: {}, api: {} };
   for (const pathname of [...ALL_PUBLIC_ROUTES.filter(pathname => pathname !== "/tourney"), "/upgrade/fixture-upgrade", "/downloads/fixture-download"]) {
     expect((await request.get(pathname)).status()).toBe(200);
@@ -170,7 +172,7 @@ const expectUnused = async (page, type, fieldPath) => {
   for (const control of await controls.all()) expect(await control.evaluate(node => node.readOnly || node.disabled || node.getAttribute("aria-disabled") === "true")).toBe(true);
 };
 
-const publishDraft = async (page, schema, original, document) => {
+const publishDraft = async (page, schema, original, document, beforePublish) => {
   await expect(page.getByRole("navigation", { name: "Content types" })).toBeVisible();
   await page.evaluate(({ original, document }) => {
     localStorage.setItem(`roo-content-draft:v1:doc:${original.document._id}`, JSON.stringify({ document, assets: original.assets, baseRevision: original.revision, documentId: original.document._id, type: original.document._type, savedAt: new Date().toISOString() }));
@@ -182,6 +184,7 @@ const publishDraft = async (page, schema, original, document) => {
     await page.getByRole("region", { name: `${schema.title} list`, exact: true }).getByRole("button").filter({ hasText: title }).first().click();
   }
   await page.getByRole("button", { name: "Restore my changes", exact: true }).click();
+  await beforePublish?.();
   await page.getByRole("button", { name: "Publish", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
 };
@@ -198,6 +201,11 @@ test("ROO-66 every schema field has an explicit rendered, internal or unused con
       if (fieldContract.operationalReadOnly[schema.name]?.includes(path)) { expect(field.readOnly).toBe(true); continue; }
       const usage = fieldContract.classify(schema.name, path);
       const internal = fieldContract.internal[schema.name]?.[path];
+      if (fieldContract.overrideKeys[schema.name]?.includes(path)) {
+        expect(usage, `${schema.name}.${path} selects public behavior`).toBe("RENDERED");
+        expect(field.overrideKey).toBe(true);
+        expect(field.unusedWhen, `${schema.name}.${path} must never be frozen`).toBeUndefined();
+      }
       if (usage === "RENDERED") expect(field.readOnly, `${schema.name}.${path} must remain editable`).not.toBe(true);
       if (internal) {
         expect(internal.consumer).toMatch(/^src\/.+:\d+$/);
@@ -272,17 +280,22 @@ for (const schema of CONTENT_TYPES.filter(type => !["footer", "siteSettings"].in
     await prepareFieldFixture(request, baseURL, seed.document);
     const original = await cms(request, `/api/admin/content/documents/${entry._id}`);
     const pending = await fieldContract.buildDocument({ schema, current: original.document, marker, origin: baseURL, upload, reference, preserveUnused: true });
-    const usage = item => fieldContract.classify(schema.name, item.path, fieldContract.get(pending.document, item.path.replace(/\.?[^.[\]]+$/, "")) || pending.document);
+    const usage = item => fieldContract.classify(schema.name, item.path, fieldContract.get(pending.document, item.path.replace(/\.?[^.[\]]+$/, "")) || pending.document, fieldContract.contextFor(pending.document, item.path));
     await login(page);
     await choose(page, schema.title);
     if (!schema.singleton) await page.getByRole("region", { name: `${schema.title} list`, exact: true }).getByRole("button").filter({ hasText: original.document[schema.preview.title] || original.document._id }).first().click();
     await expandEditor(page);
     const unusedResults = [];
-    for (const item of seed.cases.filter(item => !item.bare && fieldContract.unusedField(schema.name, item.path, fieldContract.get(original.document, item.path.replace(/\.?[^.[\]]+$/, "")) || original.document))) {
-      await expectUnused(page, schema.name, item.path);
+    const checkedBeforeRestore = new Set();
+    for (const item of seed.cases.filter(item => !item.bare && fieldContract.unusedField(schema.name, item.path, fieldContract.get(pending.document, item.path.replace(/\.?[^.[\]]+$/, "")) || pending.document, fieldContract.contextFor(pending.document, item.path)))) {
       unusedResults.push(item.path);
+      if (fieldContract.unused[schema.name]?.some(parent => fieldContract.patternPath(item.path).startsWith(`${parent}[].`))) {
+        await expectUnused(page, schema.name, item.path);
+        checkedBeforeRestore.add(item.path);
+      }
     }
     if (!pending.cases.length) {
+      for (const path of unusedResults) await expectUnused(page, schema.name, path);
       await expect(page.getByRole("button", { name: "Publish", exact: true })).toBeDisabled();
       await evidence(page, testInfo, { type: schema.name, unused: unusedResults });
       return;
@@ -294,7 +307,10 @@ for (const schema of CONTENT_TYPES.filter(type => !["footer", "siteSettings"].in
       if (parent) delete parent[last];
     }
     if (schema.fields.some(field => field.name === "sortOrder")) await prepareFieldFixture(request, baseURL, { ...pending.document, _id: `${entry._id}-order-peer`, title: `${marker}-order-peer`, sortOrder: pending.document.sortOrder - 1 });
-    await publishDraft(page, schema, original, pending.document);
+    await publishDraft(page, schema, original, pending.document, async () => {
+      await expandEditor(page);
+      for (const path of unusedResults) if (!checkedBeforeRestore.has(path)) await expectUnused(page, schema.name, path);
+    });
     const stored = await cms(request, `/api/admin/content/documents/${entry._id}`);
     for (const path of unusedResults) expect(fieldContract.get(stored.document, path)).toEqual(fieldContract.get(original.document, path));
     const internalCases = pending.cases.filter(item => !item.bare && usage(item) === "INTERNAL");
@@ -436,25 +452,311 @@ for (const schema of CONTENT_TYPES.filter(type => !["footer", "siteSettings"].in
   });
 }
 
-test("ROO-66 conditional overrides stay read-only and preserve legacy values", async ({ page, request, baseURL }, testInfo) => {
+for (const fixture of [
+  { name: "refund/warranty FAQ", type: "faqSection", path: "questions", group: "Questions", key: "question", label: "Question", match: "Refund and warranty?", next: "Money-back and warranty?", fields: [{ name: "answer", label: "Answer", value: "Submitted new answer café 日本語" }], seed: { questions: [{ _key: "ordinary", question: "Fixture ordinary question?", answer: "Fixture ordinary answer" }] } },
+  { name: "Overwatch benchmark", type: "services", path: "benchPages[0].games", group: "Games (3 per page recommended)", key: "gameTitle", label: "Game Title", match: "Overwatch 2", next: "Overwatch", fields: [{ name: "beforeFps", label: "Before FPS", value: 123 }, { name: "afterFps", label: "Optimized FPS", value: 234 }, { name: "metricLabel", label: "Avg/low Badge", value: "Submitted new metric" }, { name: "gpu", label: "GPU", value: "Submitted new GPU" }, { name: "cpu", label: "CPU", value: "Submitted new CPU" }, { name: "ram", label: "RAM", value: "Submitted new RAM" }], seed: { benchPages: [{ _key: "bench", games: [{ _key: "ordinary", gameTitle: "Fixture ordinary game", beforeFps: 100, afterFps: 150 }] }] } },
+  ...["CPU", "GPU"].map(label => ({ name: `${label} hardware stat`, type: "about", path: "recordDetails", group: "Record Details", key: "label", label: "Label", match: label, next: label === "CPU" ? "GPU" : "CPU", fields: [{ name: "value", label: "Value", value: `Submitted new ${label} café 日本語` }], seed: { recordDetails: [{ _key: "ordinary", label: "RANK", value: "#31" }] } })),
+]) {
+  test(`ROO-66 a new ${fixture.name} keeps submitted fields and its override key`, async ({ page, request, baseURL }, testInfo) => {
+    const schema = CONTENT_TYPES.find(type => type.name === fixture.type);
+    const list = await cms(request, `/api/admin/content/documents?type=${fixture.type}`);
+    const id = schema.fixedId || list.documents[0]._id;
+    const initial = await cms(request, `/api/admin/content/documents/${id}`);
+    await prepareFieldFixture(request, baseURL, { ...initial.document, ...fixture.seed });
+    await login(page); await choose(page, schema.title); await expandEditor(page);
+    const group = page.getByRole("group", { name: fixture.group, exact: true });
+    await group.getByRole("button", { name: "Add item", exact: true }).click();
+    for (const field of fixture.fields) await group.getByLabel(field.label, { exact: true }).last().fill(String(field.value));
+    const key = group.getByLabel(fixture.label, { exact: true }).last();
+    await key.fill(fixture.match);
+    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+    let stored = await cms(request, `/api/admin/content/documents/${id}`);
+    const created = fieldContract.get(stored.document, fixture.path)[1];
+    expect(created[fixture.key]).toBe(fixture.match);
+    for (const field of fixture.fields) expect(created[field.name], `New ${fixture.name} must not lose ${field.name}`).toBe(field.value);
+    expect(fieldContract.get(stored.document, fixture.path)[0]).toEqual(fieldContract.get(fixture.seed, fixture.path)[0]);
+    await expandEditor(page);
+    await expect(key).toBeEditable();
+    for (const field of fixture.fields) await expectUnused(page, fixture.type, `${fixture.path}[1].${field.name}`);
+    const resource = fieldContract.bindings[fixture.type].resource;
+    let publicData;
+    await expect.poll(async () => {
+      const response = await request.get(`/api/content/${resource}`);
+      expect(response.ok(), await response.text()).toBe(true);
+      publicData = (await response.json()).data;
+      return fixture.type === "faqSection" ? publicData.length : fieldContract.get(publicData, `${fixture.path}[1].${fixture.key}`);
+    }, { timeout: 75000, intervals: [100, 500, 1000] }).toBe(fixture.type === "faqSection" ? 2 : fixture.match);
+    const publicPage = await page.context().newPage();
+    try {
+      await publicPage.goto(fixture.type === "faqSection" ? "/faq" : "/");
+      if (fixture.type === "faqSection") {
+        expect(publicData[1]).toMatchObject({ question: MONEY_BACK_FAQ_QUESTION, answer: MONEY_BACK_FAQ_ANSWER });
+        await publicPage.getByRole("button").filter({ hasText: MONEY_BACK_FAQ_QUESTION }).click();
+        await expect(publicPage.getByText(MONEY_BACK_FAQ_ANSWER, { exact: true })).toBeVisible();
+        expect(publicData.every(row => row.question?.trim())).toBe(true);
+      } else if (fixture.type === "services") {
+        const benchmark = publicPage.getByRole("article", { name: "Overwatch 2 benchmark", exact: true });
+        await expect(benchmark).toHaveCount(1);
+        await expect(benchmark.getByText("200", { exact: true })).toBeVisible();
+        await expect(benchmark.getByText("450", { exact: true })).toBeVisible();
+        await expect(benchmark).toContainText("RTX 4080");
+        await expect(benchmark).not.toContainText("Submitted new");
+      } else {
+        expect(publicData.recordDetails[1]).toMatchObject({ label: fixture.match, value: fixture.fields[0].value });
+        const summary = publicPage.locator(".ri-proof-summary");
+        await expect(summary.locator("dt")).toHaveText(["RANK"]);
+        await expect(summary.locator("dd")).toHaveText(["#31"]);
+      }
+      await publicPage.screenshot({ path: testInfo.outputPath("public-override.png"), fullPage: true });
+    } finally { await publicPage.close(); }
+    await key.fill(fixture.next);
+    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+    stored = await cms(request, `/api/admin/content/documents/${id}`);
+    expect(fieldContract.get(stored.document, `${fixture.path}[1].${fixture.key}`)).toBe(fixture.next);
+    await expandEditor(page);
+    for (const field of fixture.fields) {
+      expect(fieldContract.get(stored.document, `${fixture.path}[1].${field.name}`)).toBe(field.value);
+      await expectUnused(page, fixture.type, `${fixture.path}[1].${field.name}`);
+    }
+    const ordinaryKey = `Fixture ordinary key ${randomUUID()}`;
+    await key.fill(ordinaryKey);
+    const dependent = group.getByLabel(fixture.fields[0].label, { exact: true }).last();
+    await expect(dependent).toBeEditable();
+    const ordinaryValue = typeof fixture.fields[0].value === "number" ? 777 : `Published ordinary value ${randomUUID()}`;
+    await dependent.fill(String(ordinaryValue));
+    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+    stored = await cms(request, `/api/admin/content/documents/${id}`);
+    expect(fieldContract.get(stored.document, `${fixture.path}[1].${fixture.key}`)).toBe(ordinaryKey);
+    expect(fieldContract.get(stored.document, `${fixture.path}[1].${fixture.fields[0].name}`)).toBe(ordinaryValue);
+    await expect.poll(async () => {
+      const response = await request.get(`/api/content/${resource}`);
+      const data = (await response.json()).data;
+      return fixture.type === "faqSection" ? data[1].question : fieldContract.get(data, `${fixture.path}[1].${fixture.key}`);
+    }, { timeout: 75000, intervals: [100, 500, 1000] }).toBe(ordinaryKey);
+    await expandEditor(page);
+    await evidence(page, testInfo, { created, publicData, ordinaryKey, ordinaryValue, finalRow: fieldContract.get(stored.document, fixture.path)[1] });
+  });
+}
+
+for (const matchingSelector of [false, true]) {
+  test(`ROO-66 two-tab reconciliation retains A's draft after B ${matchingSelector ? "publishes the same selector with a different preserved answer" : "changes the original ordinary answer"}`, async ({ page, context, browser, request, baseURL }, testInfo) => {
+    const id = "faq";
+    const initial = await cms(request, `/api/admin/content/documents/${id}`);
+    await prepareFieldFixture(request, baseURL, { ...initial.document, questions: [{ _key: "ordinary", question: "Fixture ordinary question?", answer: "Original ordinary answer café" }] });
+    const original = await cms(request, `/api/admin/content/documents/${id}`);
+    await login(page); await choose(page, "FAQ"); await expandEditor(page);
+    const selector = "Refund and warranty?";
+    await page.getByLabel("Question", { exact: true }).fill(selector);
+    await page.clock.install();
+    const pending = await hold(page, "**/api/admin/content/publish", { forward: false });
+    const second = await browser.newContext({ baseURL, javaScriptEnabled: true });
+    const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+    const marker = await (await request.get(`http://127.0.0.1:${Number(new URL(baseURL).port) + 6}/fixture`)).json();
+    await guardBrowserContext(second, marker.origins);
+    await second.addCookies(await context.cookies());
+    const tabB = await second.newPage();
+    try {
+      await page.getByRole("button", { name: "Publish", exact: true }).click(); await pending.arrived;
+      await tabB.goto("/admin/content"); await choose(tabB, "FAQ"); await expandEditor(tabB);
+      await tabB.getByLabel("Answer", { exact: true }).fill("B's concurrent ordinary answer 日本語");
+      await tabB.getByRole("button", { name: "Publish", exact: true }).click();
+      await expect(tabB.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+      if (matchingSelector) {
+        await expandEditor(tabB);
+        await tabB.getByLabel("Question", { exact: true }).fill(selector);
+        await tabB.getByRole("button", { name: "Publish", exact: true }).click();
+        await expect(tabB.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+      }
+      const stored = await cms(request, `/api/admin/content/documents/${id}`);
+      expect(stored.document.questions[0].answer).toBe("B's concurrent ordinary answer 日本語");
+      expect(stored.document.questions[0].question).toBe(matchingSelector ? selector : "Fixture ordinary question?");
+      await page.clock.fastForward(31000);
+      await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
+      await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
+      const draft = await page.evaluate(id => JSON.parse(localStorage.getItem(`roo-content-draft:v1:doc:${id}`)), id);
+      expect(draft.baseRevision).toBe(original.revision);
+      expect(draft.document.questions[0]).toMatchObject({ question: selector, answer: original.document.questions[0].answer });
+      await evidence(page, testInfo, { matchingSelector, stored, draft });
+    } finally { await pending.release(); await second.close(); }
+  });
+}
+
+for (const operation of ["delete canonical", "create extra"]) {
+  test(`ROO-66 a stale editor cannot ${operation} FAQ through a publish command`, async ({ page, request, baseURL }, testInfo) => {
+    const original = await cms(request, "/api/admin/content/documents/faq");
+    const legacy = await cms(request, "/api/admin/content/documents/fixture-faq-legacy");
+    const command = operation === "delete canonical"
+      ? { operation: "delete", type: "faqSection", documentId: "faq", expectedRevision: original.revision }
+      : { operation: "create", type: "faqSection", documentId: "fixture-extra-faq", createIntentId: randomUUID(), document: { _id: "fixture-extra-faq", questions: [] } };
+    const response = await request.post("/api/admin/content/publish", { headers: { "x-admin-key": ADMIN_KEY }, data: command });
+    try {
+      expect(response.status(), await response.text()).toBe(409);
+      expect((await response.json()).error).toMatch(/canonical FAQ/i);
+      expect(await cms(request, "/api/admin/content/documents/faq")).toEqual(original);
+      expect(await cms(request, "/api/admin/content/documents/fixture-faq-legacy")).toEqual(legacy);
+      await login(page); await choose(page, "FAQ");
+      await evidence(page, testInfo, { operation, status: response.status(), original, legacy });
+    } finally {
+      if (operation === "delete canonical" && response.ok()) expect((await request.post(`http://127.0.0.1:${Number(new URL(baseURL).port) + 6}/faq-create-fixture/legacy`)).ok()).toBe(true);
+    }
+  });
+}
+
+for (const entryPoint of ["editor", "publish command"]) {
+  test(`ROO-66 ${entryPoint} protects an unused hardware row and permits removing rendered rows`, async ({ page, request, baseURL }, testInfo) => {
+    const id = "tooling-about";
+    const initial = await cms(request, `/api/admin/content/documents/${id}`);
+    await prepareFieldFixture(request, baseURL, { ...initial.document, recordDetails: [
+      { _key: "cpu", label: "CPU", value: "Legacy protected CPU café", sub: "Legacy protected sub 日本語" },
+      { _key: "score", label: "SCORE", value: "12345" },
+    ] });
+    const original = await cms(request, `/api/admin/content/documents/${id}`);
+    await login(page); await choose(page, "About Section"); await expandEditor(page);
+    if (entryPoint === "editor") {
+      await expect(page.getByLabel("Label", { exact: true }).first()).toBeEditable();
+      const remove = page.getByRole("button", { name: "CPU", exact: true }).locator("..").getByRole("button", { name: "Remove item", exact: true });
+      await expect(remove).toBeDisabled();
+      const description = await remove.getAttribute("aria-describedby");
+      expect(description).toBeTruthy();
+      await expect(page.locator(`[id="${description}"]`)).toHaveText(UNUSED_NOTE);
+      const ordinary = page.getByRole("button", { name: "SCORE", exact: true }).locator("..").getByRole("button", { name: "Remove item", exact: true });
+      await expect(ordinary).toBeEnabled(); await ordinary.click();
+      await page.getByRole("button", { name: "Publish", exact: true }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+      expect((await cms(request, `/api/admin/content/documents/${id}`)).document.recordDetails).toEqual([original.document.recordDetails[0]]);
+    } else {
+      for (const document of [{ ...original.document, recordDetails: [original.document.recordDetails[1]] }, { ...original.document, recordDetails: undefined }]) {
+        const response = await request.post("/api/admin/content/publish", { headers: { "x-admin-key": ADMIN_KEY }, data: { operation: "replace", type: "about", documentId: id, expectedRevision: original.revision, document } });
+        expect(response.status(), await response.text()).toBe(409);
+        expect((await response.json()).error).toContain(UNUSED_NOTE);
+        expect(await cms(request, `/api/admin/content/documents/${id}`)).toEqual(original);
+      }
+      await cms(request, "/api/admin/content/publish", { operation: "replace", type: "about", documentId: id, expectedRevision: original.revision, document: { ...original.document, recordDetails: [original.document.recordDetails[0]] } });
+      expect((await cms(request, `/api/admin/content/documents/${id}`)).document.recordDetails).toEqual([original.document.recordDetails[0]]);
+    }
+    await evidence(page, testInfo, { entryPoint, original });
+  });
+}
+
+test("ROO-66 protected legacy rows without item keys cannot be erased by shifting ordinary rows", async ({ page, request, baseURL }, testInfo) => {
+  const id = "tooling-about";
+  const initial = await cms(request, `/api/admin/content/documents/${id}`);
+  await prepareFieldFixture(request, baseURL, { ...initial.document, recordDetails: [
+    { label: "CPU", value: "Legacy unkeyed CPU", sub: "Legacy unkeyed sub" },
+    { label: "SCORE", value: "12345" },
+  ] });
+  const original = await cms(request, `/api/admin/content/documents/${id}`);
+  const response = await request.post("/api/admin/content/publish", { headers: { "x-admin-key": ADMIN_KEY }, data: {
+    operation: "replace", type: "about", documentId: id, expectedRevision: original.revision,
+    document: { ...original.document, recordDetails: [original.document.recordDetails[1]] },
+  } });
+  expect(response.status(), await response.text()).toBe(409);
+  expect(await cms(request, `/api/admin/content/documents/${id}`)).toEqual(original);
+  await cms(request, "/api/admin/content/publish", { operation: "replace", type: "about", documentId: id, expectedRevision: original.revision, document: { ...original.document, recordDetails: [original.document.recordDetails[0]] } });
+  expect((await cms(request, `/api/admin/content/documents/${id}`)).document.recordDetails).toEqual([original.document.recordDetails[0]]);
+  await login(page); await choose(page, "About Section"); await expandEditor(page);
+  await expect(page.getByRole("button", { name: "CPU", exact: true }).locator("..").getByRole("button", { name: "Remove item", exact: true })).toBeDisabled();
+  await evidence(page, testInfo, { original, status: response.status() });
+});
+
+for (const variant of ["standard", "ambassador"]) {
+  test(`ROO-66 ${variant} cards freeze only unused variant fields and update immediately on a style switch`, async ({ page, request, baseURL }, testInfo) => {
+    const schema = CONTENT_TYPES.find(type => type.name === "meetTheTeam");
+    const id = "tooling-meetTheTeam";
+    const initial = await cms(request, `/api/admin/content/documents/${id}`);
+    const card = { _key: "member", name: `Variant fixture ${variant}`, title: "Fixture role", bio: "Fixture biography", initials: "VF", tags: ["Legacy fixture tag"], platformBadge: "Legacy fixture platform", ctaLabel: "Legacy fixture CTA", ctaUrl: `${baseURL}/cms-marker/legacy-variant-cta` };
+    await prepareFieldFixture(request, baseURL, { ...initial.document, showFounder: false, sections: [{ _key: "section", title: "Fixture section", variant, cards: [card] }] });
+    const original = await cms(request, `/api/admin/content/documents/${id}`);
+    await login(page); await choose(page, schema.title); await expandEditor(page);
+    const unused = variant === "standard" ? ["platformBadge", "ctaLabel", "ctaUrl"] : ["tags"];
+    for (const field of unused) await expectUnused(page, schema.name, `sections[0].cards[0].${field}`);
+    const document = structuredClone(original.document);
+    document.sections[0].cards[0].name += " published";
+    for (const field of unused) document.sections[0].cards[0][field] = field === "tags" ? ["Attempted unused tag"] : field === "ctaUrl" ? `${baseURL}/cms-marker/attempted-variant-cta` : "Attempted unused value";
+    await publishDraft(page, schema, original, document);
+    let stored = await cms(request, `/api/admin/content/documents/${id}`);
+    for (const field of unused) expect(stored.document.sections[0].cards[0][field]).toEqual(card[field]);
+    await expandEditor(page);
+    const style = page.getByLabel("Card Style", { exact: true });
+    await expect(style).toBeEnabled();
+    const nextVariant = variant === "standard" ? "ambassador" : "standard";
+    await style.selectOption(nextVariant);
+    const cards = page.getByRole("group", { name: "Cards", exact: true });
+    const token = `variant-${randomUUID()}`;
+    if (nextVariant === "ambassador") {
+      for (const [label, value] of [["Platform Badge", `${token}-platform`], ["CTA Label", `${token}-cta`], ["CTA URL", `${baseURL}/cms-marker/${token}`]]) {
+        await expect(cards.getByLabel(label, { exact: true })).toBeEditable();
+        await cards.getByLabel(label, { exact: true }).fill(value);
+      }
+      await expectUnused(page, schema.name, "sections[0].cards[0].tags");
+    } else {
+      const tags = cards.getByRole("group", { name: "Tags", exact: true });
+      await expect(tags.getByRole("textbox").first()).toBeEditable();
+      await tags.getByRole("textbox").first().fill(`${token}-tag`);
+      for (const field of ["platformBadge", "ctaLabel", "ctaUrl"]) await expectUnused(page, schema.name, `sections[0].cards[0].${field}`);
+    }
+    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+    stored = await cms(request, `/api/admin/content/documents/${id}`);
+    expect(stored.document.sections[0].variant).toBe(nextVariant);
+    const publicPage = await page.context().newPage();
+    try {
+      await publicPage.goto("/meet-the-team");
+      if (nextVariant === "ambassador") {
+        await expect(publicPage.getByText(`${token}-platform`, { exact: true })).toBeVisible();
+        await expect(publicPage.getByRole("link", { name: `${token}-cta`, exact: true })).toHaveAttribute("href", `${baseURL}/cms-marker/${token}`);
+        await expect(publicPage.getByText(card.tags[0], { exact: true })).toHaveCount(0);
+      } else {
+        await expect(publicPage.getByText(`${token}-tag`, { exact: true })).toBeVisible();
+        await expect(publicPage.getByText(card.platformBadge, { exact: true })).toHaveCount(0);
+        await expect(publicPage.getByRole("link", { name: card.ctaLabel, exact: true })).toHaveCount(0);
+      }
+      await publicPage.screenshot({ path: testInfo.outputPath("public-variant.png"), fullPage: true });
+    } finally { await publicPage.close(); }
+    await evidence(page, testInfo, { variant, nextVariant, unused, stored });
+  });
+}
+
+test("ROO-66 a missing legacy unused value never blanks its submitted replacement", async ({ page, request, baseURL }, testInfo) => {
+  const id = "tooling-about";
+  const current = await cms(request, `/api/admin/content/documents/${id}`);
+  await prepareFieldFixture(request, baseURL, { ...current.document, recordDetails: [{ _key: "cpu", label: "CPU", value: "Stored CPU value" }] });
+  const original = await cms(request, `/api/admin/content/documents/${id}`);
+  const document = structuredClone(original.document);
+  document.recordDetails[0].sub = "First stored unused subtext café 日本語";
+  document.recordDetails[0].value = "Attempted overwrite of stored value";
+  await cms(request, "/api/admin/content/publish", { operation: "replace", type: "about", documentId: id, expectedRevision: original.revision, document });
+  const stored = await cms(request, `/api/admin/content/documents/${id}`);
+  expect(stored.document.recordDetails[0]).toEqual({ _key: "cpu", label: "CPU", value: "Stored CPU value", sub: document.recordDetails[0].sub });
+  await login(page); await choose(page, "About Section"); await expandEditor(page);
+  await expectUnused(page, "about", "recordDetails[0].sub");
+  await expectUnused(page, "about", "recordDetails[0].value");
+  await expect(page.getByLabel("Label", { exact: true })).toBeEditable();
+  await evidence(page, testInfo, { original: original.document.recordDetails[0], stored: stored.document.recordDetails[0] });
+});
+
+test("ROO-66 override keys stay editable and dependent fields preserve legacy values", async ({ page, request, baseURL }, testInfo) => {
   test.setTimeout(180000);
   const block = text => [{ _key: "legacy-block", _type: "block", style: "normal", markDefs: [], children: [{ _key: "legacy-span", _type: "span", text, marks: [] }] }];
   const fixtures = [
-    { type: "about", seed: { recordDetails: [{ _key: "cpu", label: "CPU", value: "Legacy CPU café", sub: "Legacy CPU detail" }, { _key: "gpu", label: "GPU", value: "Legacy GPU 日本語", sub: "Legacy GPU detail" }] }, paths: ["recordDetails[0].label", "recordDetails[0].value", "recordDetails[1].label", "recordDetails[1].value"], used: "recordTitle", value: "Published fixture proof" },
+    { type: "about", seed: { recordDetails: [{ _key: "cpu", label: "CPU", value: "Legacy CPU café", sub: "Legacy CPU detail" }, { _key: "gpu", label: "GPU", value: "Legacy GPU 日本語", sub: "Legacy GPU detail" }] }, paths: ["recordDetails[0].value", "recordDetails[0].sub", "recordDetails[1].value", "recordDetails[1].sub"], keys: [["recordDetails[0].label", "GPU"], ["recordDetails[1].label", "CPU"]], used: "recordTitle", value: "Published fixture proof" },
     { type: "package", seed: { title: "XOC / Extreme Overclocking", description: "Legacy package café", checkedBullets: ["Legacy checked"], uncheckedBullets: ["Legacy unchecked"] }, paths: ["description", "checkedBullets", "uncheckedBullets"], used: "price", value: "$321.67" },
     { type: "faqSection", seed: { questions: [
       { _key: "money-back", question: "Refund and warranty?", answer: "Legacy warranty café" },
       { _key: "free-retune", question: "Free reoptimization?", answer: "Legacy retune 日本語" },
       { _key: "ordinary", question: "Fixture ordinary question?", answer: "Fixture ordinary answer" },
-    ] }, paths: ["questions[0].question", "questions[0].answer", "questions[1].question", "questions[1].answer"], used: "questions[2].answer", value: "Published ordinary answer" },
+    ] }, paths: ["questions[0].answer", "questions[1].answer"], keys: [["questions[0].question", `Money-back and warranty? ${randomUUID()}`], ["questions[1].question", `Free reoptimization? ${randomUUID()}`]], used: "questions[2].answer", value: "Published ordinary answer" },
     { type: "terms", seed: { sections: [
       { _key: "refunds", heading: "Payments and refunds", content: block("Legacy refund café") },
       { _key: "reschedule", heading: "Rescheduling policy", content: block("Legacy cancellation 日本語") },
-    ] }, paths: ["sections[0].content", "sections[1].heading", "sections[1].content"], used: "title", value: "Published fixture terms" },
+    ] }, paths: ["sections[0].content", "sections[1].content"], keys: [["sections[1].heading", `Cancellations and rescheduling ${randomUUID()}`]], used: "title", value: "Published fixture terms" },
     { type: "meetTheTeam", seed: { sections: [{ _key: "team", title: "Fixture team", variant: "standard", cards: [
       { _key: "wanted", name: "Wanted", bio: "Legacy Wanted café" }, { _key: "candi", name: "Candi", bio: "Legacy Candi 日本語" },
     ] }] }, paths: ["sections[0].cards[0].bio", "sections[0].cards[1].bio"], used: "heroTitle", value: "Published fixture team" },
-    { type: "services", seed: { benchPages: [{ _key: "bench", games: [{ _key: "ovw", gameTitle: " Overwatch 2 ", beforeFps: 123, afterFps: 234, metricLabel: "Legacy metric", gpu: "Legacy GPU", cpu: "Legacy CPU", ram: "Legacy RAM" }] }] }, paths: ["benchPages[0].games[0].gameTitle", "benchPages[0].games[0].beforeFps", "benchPages[0].games[0].afterFps", "benchPages[0].games[0].metricLabel", "benchPages[0].games[0].gpu", "benchPages[0].games[0].cpu", "benchPages[0].games[0].ram", "benchPages[0].games[0].gameLogo"], used: "benchBeforeLabel", value: "Published fixture before" },
+    { type: "services", seed: { benchPages: [{ _key: "bench", games: [{ _key: "ovw", gameTitle: " Overwatch 2 ", beforeFps: 123, afterFps: 234, metricLabel: "Legacy metric", gpu: "Legacy GPU", cpu: "Legacy CPU", ram: "Legacy RAM" }] }] }, keys: [["benchPages[0].games[0].gameTitle", "Overwatch"]], paths: ["benchPages[0].games[0].beforeFps", "benchPages[0].games[0].afterFps", "benchPages[0].games[0].metricLabel", "benchPages[0].games[0].gpu", "benchPages[0].games[0].cpu", "benchPages[0].games[0].ram", "benchPages[0].games[0].gameLogo"], used: "benchBeforeLabel", value: "Published fixture before" },
   ];
   const results = [];
   await login(page);
@@ -471,20 +773,27 @@ test("ROO-66 conditional overrides stay read-only and preserve legacy values", a
     if (!schema.singleton) await page.getByRole("region", { name: `${schema.title} list`, exact: true }).getByRole("button").filter({ hasText: original.document[schema.preview.title] }).first().click();
     await expandEditor(page);
     for (const fieldPath of item.paths) await expectUnused(page, item.type, fieldPath);
+    for (const [fieldPath] of item.keys || []) {
+      const definition = fieldContract.schemaFields(schema.fields).find(field => field.path === fieldContract.patternPath(fieldPath)).field;
+      const index = Number([...fieldPath.matchAll(/\[(\d+)\]/g)].at(-1)?.[1] || 0);
+      await expect(page.getByLabel(definition.title, { exact: true }).nth(index)).toBeEditable();
+      expect(await page.locator(`[id="content-help-${encodeURIComponent(fieldPath)}"]`).allTextContents()).not.toContain(UNUSED_NOTE);
+    }
     const pending = structuredClone(original.document);
     const set = (path, value) => { const keys = path.replace(/\[(\d+)\]/g, ".$1").split("."); const last = keys.pop(); const parent = keys.reduce((object, key) => object[key], pending); if (value === undefined) delete parent[last]; else parent[last] = value; };
     set(item.used, item.value);
-    for (const fieldPath of item.paths) if (!/(question|heading|gameTitle|label)$/.test(fieldPath)) set(fieldPath, undefined);
+    for (const [fieldPath, value] of item.keys || []) set(fieldPath, value);
+    for (const fieldPath of item.paths) set(fieldPath, undefined);
     await publishDraft(page, schema, original, pending);
     const stored = await cms(request, `/api/admin/content/documents/${id}`);
     for (const fieldPath of item.paths) expect(fieldContract.get(stored.document, fieldPath)).toEqual(fieldContract.get(original.document, fieldPath));
     expect(fieldContract.get(stored.document, item.used)).toBe(item.value);
     await expandEditor(page);
-    for (const fieldPath of item.paths.filter(path => /(question|heading|gameTitle|label)$/.test(path))) {
-      await expect(page.getByRole("button", { name: fieldContract.get(original.document, fieldPath).trim(), exact: true })).toBeVisible();
-      await expectUnused(page, item.type, fieldPath);
+    for (const [fieldPath, value] of item.keys || []) {
+      expect(fieldContract.get(stored.document, fieldPath)).toBe(value);
+      await expect(page.getByRole("button", { name: value, exact: true })).toBeVisible();
     }
-    results.push({ type: item.type, preserved: item.paths, published: item.used });
+    results.push({ type: item.type, preserved: item.paths, keys: item.keys, published: item.used });
   }
   await evidence(page, testInfo, { conditionalOverrides: results });
 });
@@ -608,21 +917,23 @@ test("ROO-66 publishing a used hero field preserves every legacy unused hero val
 });
 
 for (const submitted of ["changed", "omitted"]) {
-  test(`ROO-66 publishing with ${submitted} unused values keeps stored headings intact`, async ({ page, request }, testInfo) => {
+  test(`ROO-66 publishing with ${submitted} unused values keeps stored headings intact`, async ({ page, request, baseURL }, testInfo) => {
     const results = [];
-    for (const [type, field, usedField] of [
+    for (const [type, field, otherUnusedField] of [
       ["packagesSettings", "heading", "badgeText"], ["faqSettings", "title", "eyebrow"],
       ["services", "heading", "subheading"], ["supportedGames", "title", "subtitle"], ["proReviewsCarousel", "title", "subtitle"],
     ]) {
       const id = `tooling-${type}`;
+      const current = await cms(request, `/api/admin/content/documents/${id}`);
+      await prepareFieldFixture(request, baseURL, { ...current.document, [otherUnusedField]: "Legacy unused sibling" });
       const original = await cms(request, `/api/admin/content/documents/${id}`);
-      const document = { ...original.document, [usedField]: `Unrelated ${submitted} publish` };
+      const document = { ...original.document, [otherUnusedField]: `Unrelated ${submitted} publish` };
       if (submitted === "changed") document[field] = "Attempted overwrite";
       else delete document[field];
       await cms(request, "/api/admin/content/publish", { operation: "replace", type, documentId: id, expectedRevision: original.revision, document });
       const stored = await cms(request, `/api/admin/content/documents/${id}`);
       expect(stored.document[field]).toEqual(original.document[field]);
-      expect(stored.document[usedField]).toBe(original.document[usedField]);
+      expect(stored.document[otherUnusedField]).toBe(original.document[otherUnusedField]);
       results.push({ type, field, value: stored.document[field], revision: stored.revision });
     }
     await login(page); await choose(page, "Packages Section");
@@ -1054,6 +1365,9 @@ test("create receipts reconcile a committed fixed-ID singleton after its respons
     expect(response.ok(), await response.text()).toBe(true);
     const receipt = (await response.json()).data;
     expect(receipt).toMatchObject({ committed: true, documentId: "6d8a3646-0ed2-44b5-ad45-c5c9d578126a" });
+    const stored = await cms(request, `/api/admin/content/documents/${receipt.documentId}`);
+    expect(stored.document).toMatchObject({ backendOwner: "supabase", cutoverGeneration: expect.any(Number) });
+    await fs.writeFile(testInfo.outputPath("creation-content.json"), JSON.stringify({ submitted: submitted.document, stored: stored.document, receipt }, null, 2));
     const beforeLookup = await contentCounts(request, control);
     await page.clock.fastForward(31000);
     await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
