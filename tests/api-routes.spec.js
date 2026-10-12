@@ -309,11 +309,21 @@ test.describe("referral session status", () => {
 
   test.describe("login page", () => {
     test.use({ javaScriptEnabled: true });
+    test("a remembered identifier alone does not select remember me", async ({ page, baseURL }) => {
+      await apiFixture.configureApiFixture(baseURL, { reset: true, session: "unavailable" });
+      await page.addInitScript(() => sessionStorage.setItem("refLoginCode", "fixture-creator"));
+      await page.goto("/referrals/login");
+      await expect(page.locator("#ref-login-identifier")).toHaveValue("fixture-creator");
+      await expect(page.locator("#ref-login-remember")).not.toBeChecked();
+    });
     test("keeps remembered login state and the cookie when verification is unavailable", async ({ page, context, baseURL }, testInfo) => {
       await apiFixture.configureApiFixture(baseURL, { reset: true, session: "unavailable" });
       const cookie = apiFixture.referralSessionCookie();
       await context.addCookies([{ name: "ref_session", value: cookie, url: baseURL, httpOnly: true, sameSite: "Lax" }]);
-      await page.addInitScript(() => sessionStorage.setItem("refLoginCode", "fixture-creator"));
+      await page.addInitScript(() => {
+        sessionStorage.setItem("refLoginCode", "fixture-creator");
+        sessionStorage.setItem("refLoginRememberMe", "true");
+      });
       const requests = [];
       page.on("request", request => requests.push({ url: request.url(), method: request.method() }));
       const responsePromise = page.waitForResponse(response => response.url().endsWith("/api/ref/sessionStatus"));
