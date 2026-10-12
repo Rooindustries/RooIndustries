@@ -134,10 +134,13 @@ export const getPaidAmount = (booking) => {
   return toMoney(booking?.packagePrice);
 };
 
-export const getRetainedUpgradeCredit = async ({ booking, client }) => {
+export const getRetainedUpgradeCredit = async ({ booking, client, creditSources = null }) => {
   const records = booking.paymentRecordId
     ? [await client.fetch(`*[_type == "paymentRecord" && _id == $id][0]{...}`, { id: booking.paymentRecordId })]
     : await client.fetch(`*[_type == "paymentRecord" && bookingId == $bookingId]{...}`, { bookingId: booking._id });
+  if (Array.isArray(creditSources) && Array.isArray(records)) {
+    creditSources.push(...records.filter(record => record?._id));
+  }
   const hasSettledRefund =
     (booking.refundedAmount != null && Number(booking.refundedAmount) !== 0) ||
     ["partial", "full"].includes(booking.refundStatus) ||
@@ -229,13 +232,14 @@ export async function resolveUpgradeContext({
   originalOrderId = "",
   packageTitle = "",
   client = pricingClient,
+  forFinalization = false,
 }) {
   const normalizedUpgradeTitle = String(packageTitle || "")
     .replace(/\s*\(upgrade\)\s*$/i, "")
     .trim();
   const normalizedTargetTitle = normalizePackageTitle(normalizedUpgradeTitle);
 
-  const booking = await client.fetch(
+  let booking = await client.fetch(
     `*[_type == "booking" && _id == $id][0]{...}`,
     { id: originalOrderId }
   );
@@ -285,22 +289,36 @@ export async function resolveUpgradeContext({
   if (!Array.isArray(paidBookings) || !paidBookings.some(entry => entry?._id === booking._id)) throw creditError();
   let totalPaid = 0;
   const retainedBookings = [];
+  const creditSources = forFinalization ? [] : null;
   for (const entry of paidBookings) {
-    const credit = await getRetainedUpgradeCredit({ booking: entry, client });
+    const paidEntry = forFinalization
+      ? await client.fetch(`*[_type == "booking" && _id == $id][0]{...}`, { id: entry._id }) : entry;
+    if (forFinalization && !["captured", "completed"].includes(String(paidEntry?.status || "").toLowerCase())) {
+      if (entry._id === booking._id) {
+        throw createApiError(400, "Only paid bookings can be upgraded.", "original_booking_unpaid");
+      }
+      continue;
+    }
+    if (forFinalization && paidEntry._id !== rootOrderId && paidEntry.originalOrderId !== rootOrderId) throw creditError();
+    if (forFinalization) {
+      creditSources.push(paidEntry);
+      if (paidEntry._id === booking._id) booking = paidEntry;
+    }
+    const credit = await getRetainedUpgradeCredit({ booking: paidEntry, client, creditSources });
     if (credit === null) {
       if (entry._id === booking._id) {
         throw createApiError(400, "Only paid bookings can be upgraded.", "original_booking_unpaid");
       }
       continue;
     }
-    retainedBookings.push(entry);
+    retainedBookings.push(paidEntry);
     totalPaid += credit;
   }
   const alreadyTarget = retainedBookings.some(
     (entry) => normalizePackageTitle(entry?.packageTitle) === normalizedTargetTitle
   );
 
-  if (alreadyTarget) {
+  if (alreadyTarget && !forFinalization) {
     throw createApiError(
       400,
       "This order already matches the target package.",
@@ -309,7 +327,7 @@ export async function resolveUpgradeContext({
   }
 
   const upgradePrice = Math.max(0, toMoney(targetPrice - totalPaid));
-  if (upgradePrice <= 0) {
+  if (upgradePrice <= 0 && !forFinalization) {
     throw createApiError(400, "Unable to resolve package pricing on server.", "package_pricing_missing");
   }
 
@@ -321,8 +339,36 @@ export async function resolveUpgradeContext({
     targetPrice,
     totalPaid: toMoney(totalPaid),
     upgradePrice,
+    ...(forFinalization ? { creditSources } : {}),
   };
 }
+
+export const resolveCapturedUpgradeFunding = async ({ record, client }) => {
+  let context;
+  try {
+    context = await resolveUpgradeContext({
+      originalOrderId: record.bookingPayload.originalOrderId,
+      packageTitle: record.bookingPayload.packageTitle,
+      client,
+      forFinalization: true,
+    });
+  } catch (error) {
+    if (error.status === 400) {
+      throw createApiError(409, "The original booking changed after checkout.", "upgrade_credit_changed_after_quote");
+    }
+    throw error;
+  }
+  const captured = creditSubunits(record.pricingSnapshot.netAmount);
+  const approvedDiscount = creditSubunits(record.pricingSnapshot.grossAmount) - captured;
+  const required = Math.max(0, creditSubunits(context.upgradePrice) - approvedDiscount);
+  if (required > captured) {
+    const error = createApiError(409, "The retained upgrade credit changed after checkout.", "upgrade_credit_changed_after_quote");
+    error.capturedAmount = captured / 100;
+    error.requiredAmount = required / 100;
+    throw error;
+  }
+  return context;
+};
 
 export async function resolveBookingPricing({
   packageTitle,

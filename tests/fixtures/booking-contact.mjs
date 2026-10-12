@@ -24,6 +24,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     DODO_PAYMENTS_WEBHOOK_KEY: 'whsec_Zml4dHVyZS1vbmx5',
     DODO_PAYMENTS_PRODUCT_ID: 'pdt_fixture', DODO_PAYMENTS_RETURN_URL: `${base}/handoff`,
     PAYMENT_SESSION_SECRET: 'fixture-only-payment-session', HOLD_TOKEN_SECRET: 'fixture-only-hold',
+    CRON_SECRET: 'fixture-only-cron',
     REF_SESSION_SECRET: 'fixture-only-ref-session', RESEND_API_KEY: 're_fixture',
     FROM_EMAIL: 'noreply@example.invalid', OWNER_EMAIL: 'owner@example.invalid',
   });
@@ -138,6 +139,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       '/api/payment/quote': '../../src/server/api/payment/quote.js',
       '/api/payment/finalize': '../../src/server/api/payment/finalize.js',
       '/api/payment/status': '../../src/server/api/payment/status.js',
+      '/api/payment/reconcile': '../../src/server/api/payment/reconcile.js',
       '/api/payment/webhook/dodo': '../../src/server/api/payment/webhookDodo.js',
       '/api/ref/getUpgradeInfo': '../../src/server/api/ref/getUpgradeInfo.js',
       '/api/ref/createBooking': '../../src/server/api/ref/createBooking.js',
@@ -248,9 +250,8 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       assert.ok(Object.keys(values).every(key => ['tax', 'total_amount'].includes(key)));
       paymentAmountOverrides = { ...values };
     };
-    const refundPayment = async (paymentId, refunds, eventId) => {
-      paymentRefunds.set(paymentId, refunds);
-      const body = { business_id: 'business_fixture', type: 'refund.succeeded',
+    const dodoWebhook = async (paymentId, type, eventId) => {
+      const body = { business_id: 'business_fixture', type,
         timestamp: new Date().toISOString(), data: { payment_id: paymentId } };
       const timestamp = String(Math.floor(Date.now() / 1000));
       const signature = createHmac('sha256', Buffer.from('fixture-only'))
@@ -259,8 +260,13 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
         'webhook-id': eventId, 'webhook-timestamp': timestamp, 'webhook-signature': `v1,${signature}`,
       });
     };
+    const refundPayment = async (paymentId, refunds, eventId) => {
+      paymentRefunds.set(paymentId, refunds);
+      return dodoWebhook(paymentId, 'refund.succeeded', eventId);
+    };
     return { post, start, hold, snapshot, recordFor, seedUpgrade, commerce, details, evidence, save, stop,
-      setPaymentTax, setPaymentTaxInclusive, setPaymentAmountOverrides, refundPayment };
+      setPaymentTax, setPaymentTaxInclusive, setPaymentAmountOverrides, refundPayment, dodoWebhook,
+      setRequestHook: database.setRequestHook };
   } catch (error) {
     await stop();
     throw error;

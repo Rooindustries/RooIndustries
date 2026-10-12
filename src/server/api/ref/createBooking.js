@@ -4,7 +4,7 @@ import { createDataClient as createClient } from "../../data/documentClient.js";
 import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
 import { validateBookingContact } from "../../../lib/bookingContactValidation.js";
 import { verifyHoldToken } from "../../booking/holdToken.js";
-import { resolveBookingPricing, resolveUpgradeContext } from "./pricing.js";
+import { resolveBookingPricing, resolveCapturedUpgradeFunding, resolveUpgradeContext } from "./pricing.js";
 import {
   buildDeterministicBookingId,
   buildSlotHoldId,
@@ -1510,6 +1510,8 @@ export default async function handler(req, res) {
       }
     }
 
+    const upgradeFunding = isInternalPaymentFinalization && isUpgrade
+      ? await resolveCapturedUpgradeFunding({ record: internalPaymentRecord, client: writeClient }) : null;
     let couponReservation = null;
     if (
       couponCode &&
@@ -1642,6 +1644,7 @@ export default async function handler(req, res) {
             },
           }
         : null,
+      creditSources: upgradeFunding?.creditSources || [],
       allowMissingHold:
         slotReservationState === "reconciled_after_expired_hold" ||
         slotReservationState === "reconciled_after_missing_hold",
@@ -1657,6 +1660,8 @@ export default async function handler(req, res) {
     logSafeError("Booking creation failed", err);
     return res
       .status(status)
-      .json({ error: status < 500 ? message : "Booking could not be completed.", ...(status === 409 && err?.code === "payment_currency_mismatch" ? { code: err.code } : {}) });
+      .json({ error: status < 500 ? message : "Booking could not be completed.", ...(status === 409 &&
+        ["payment_currency_mismatch", "upgrade_credit_changed_after_quote", "upgrade_credit_unverified"].includes(err?.code)
+        ? { code: err.code } : {}) });
   }
 }

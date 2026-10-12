@@ -127,6 +127,52 @@ test('retained upgrade credit over HTTP with PostgreSQL', { timeout: 300000 }, a
   };
   const partialRefund = (record, id) => ({ refund_id: id, payment_id: record.providerPaymentId,
     status: 'succeeded', amount: 550, currency: 'USD', is_partial: true });
+  const openNativeUpgrade = async (changes = {}) => {
+    const original = await nativeCapture();
+    const payload = { ...original.payload, ...changes };
+    const started = await fixture.start(payload);
+    assert.equal(started.status, 200, JSON.stringify(started));
+    const record = await commerce.fetch('*[_type == "paymentRecord" && providerOrderId == $id][0]',
+      { id: started.body.providerPayload.orderId });
+    return { original, payload, started, record };
+  };
+  const refundOriginal = async (scenario, id) => {
+    const response = await fixture.refundPayment(scenario.original.record.providerPaymentId,
+      [{ ...partialRefund(scenario.original.record, id), amount: 2000 }], `event_${id}`);
+    assert.equal(response.status, 200, JSON.stringify(response));
+  };
+  const finalizeUpgrade = async (scenario, via, result) => {
+    if (via === 'recovery') {
+      const previous = new Date(Date.now() - 120_000).toISOString();
+      await commerce.patch(scenario.record._id).set({ createdAt: previous, updatedAt: previous,
+        lastAttemptAt: previous, nextRecoveryAt: '' }).commit();
+      result.finalize = await post('/api/payment/reconcile', {}, 'fixture-only-cron');
+    } else if (via === 'webhook') {
+      result.finalize = await fixture.dodoWebhook(`payment_${scenario.record.providerOrderId}`,
+        'payment.succeeded', `upgrade_paid_${scenario.record._id}`);
+    } else {
+      result.finalize = await post('/api/payment/finalize', {}, scenario.started.body.paymentAccessToken);
+    }
+    return commerce.getDocument(scenario.record._id);
+  };
+  const assertUpgradeIntact = async (scenario, record, result) => {
+    result.paymentRecord = record;
+    result.bookings = await commerce.fetch('*[_type == "booking" && paymentRecordId == $id]', { id: record._id });
+    assert.equal(record.status, 'needs_recovery');
+    assert.equal(record.verificationState, 'server_verified');
+    assert.equal(record.pricingSnapshot.netAmount, 45);
+    assert.equal(record.providerPublicData.totalAmount, 4500);
+    assert.equal(record.providerPaymentId, `payment_${scenario.record.providerOrderId}`);
+    assert.equal(record.providerOrderId, scenario.record.providerOrderId);
+    assert.equal(record.refundState || '', '');
+    assert.equal(record.refundProcessedAmountInSubunits || 0, 0);
+    assert.equal(record.bookingId || '', '');
+    assert.equal(record.finalizationLeaseId || '', '');
+    assert.equal(record.reconciliationRecoveryTerminal, true);
+    assert.equal(record.nextRecoveryAt || '', '');
+    assert.deepEqual(result.bookings, []);
+    assert.ok(!evidence.providerRequests.some(request => request.method === 'POST' && request.path === '/refunds'));
+  };
 
   try {
     const baselineSource = execFileSync('git', ['show', `${baselineCommit}:src/server/api/ref/pricing.js`], {
@@ -134,6 +180,127 @@ test('retained upgrade credit over HTTP with PostgreSQL', { timeout: 300000 }, a
     }).replace(/from "(\.\.?\/[^\"]+)"/g, (_, path) =>
       `from "${new URL(path, new URL('../src/server/api/ref/pricing.js', import.meta.url)).href}"`);
     baseline = await import(`data:text/javascript;base64,${Buffer.from(baselineSource).toString('base64')}`);
+    for (const via of ['client', 'webhook', 'recovery']) {
+      await check(`${via}: a $20 refund after a $45 upgrade checkout holds the captured payment for review`, async result => {
+        const scenario = await openNativeUpgrade();
+        assert.equal(scenario.original.record.pricingSnapshot.netAmount, 54.95);
+        assert.equal(scenario.record.pricingSnapshot.netAmount, 45);
+        await refundOriginal(scenario, `refund_before_upgrade_${via}`);
+        result.lookup = await post('/api/ref/getUpgradeInfo', { id: scenario.original.original._id,
+          email: scenario.original.original.email });
+        assert.equal(result.lookup.status, 200, JSON.stringify(result.lookup));
+        assert.equal(result.lookup.body.upgradePrice, 65);
+        const originalError = console.error;
+        result.logs = [];
+        let record;
+        try {
+          console.error = (...args) => { result.logs.push(args); originalError(...args); };
+          record = await finalizeUpgrade(scenario, via, result);
+        } finally {
+          console.error = originalError;
+        }
+        assert.equal(result.finalize.status, 200, JSON.stringify(result.finalize));
+        await assertUpgradeIntact(scenario, record, result);
+        assert.equal(record.recoveryReason, 'upgrade_credit_changed_after_quote');
+        assert.ok(result.logs.some(([, metadata]) => metadata?.code === 'upgrade_credit_changed_after_quote'));
+        result.status = await post('/api/payment/status', {}, scenario.started.body.paymentAccessToken);
+        assert.equal(result.status.body.ok, true);
+        assert.equal(result.status.body.manualReviewRequired, true);
+        assert.match(result.status.body.recoveryReason, /payment.*received.*contact/i);
+        for (const replay of ['client', 'webhook', 'recovery']) {
+          const repeated = await finalizeUpgrade(scenario, replay, { });
+          assert.equal(repeated.status, 'needs_recovery');
+          assert.equal(repeated.bookingId || '', '');
+          assert.equal(repeated.pricingSnapshot.netAmount, 45);
+        }
+        result.bookings = await commerce.fetch('*[_type == "booking" && paymentRecordId == $id]', { id: record._id });
+        assert.deepEqual(result.bookings, []);
+      });
+      await check(`${via}: an unchanged $45 upgrade still books normally`, async result => {
+        const scenario = await openNativeUpgrade();
+        const record = await finalizeUpgrade(scenario, via, result);
+        assert.equal(result.finalize.status, 200, JSON.stringify(result.finalize));
+        assert.equal(record.status, 'booked');
+        const booking = await commerce.getDocument(record.bookingId);
+        assert.equal(booking.status, 'captured');
+        assert.equal(booking.netAmount, 45);
+        assert.equal(booking.originalOrderId, scenario.original.original._id);
+      });
+    }
+    for (const [via, unverified] of [['client', false], ['webhook', false], ['recovery', false], ['client', true]]) {
+      await check(`${via}: a late upgrade capture with ${unverified ? 'unverifiable' : 'reduced'} credit stays in owner review`, async result => {
+        const scenario = await openNativeUpgrade();
+        await refundOriginal(scenario, `refund_late_upgrade_${via}_${unverified}`);
+        if (unverified) {
+          const original = await commerce.getDocument(scenario.original.record._id);
+          await commerce.patch(original._id).set({ providerPublicData: { ...original.providerPublicData, taxAmount: null } }).commit();
+        }
+        await commerce.patch(scenario.record._id).set({ status: 'abandoned',
+          lateCaptureWatchUntil: new Date(Date.now() + 120_000).toISOString() }).commit();
+        const record = await finalizeUpgrade(scenario, via, result);
+        assert.equal(result.finalize.status, unverified ? 409 : 200, JSON.stringify(result.finalize));
+        await assertUpgradeIntact(scenario, record, result);
+        assert.equal(record.recoveryReason, unverified ? 'upgrade_credit_unverified' : 'upgrade_credit_changed_after_quote');
+      });
+    }
+    await check('a refund on an unrelated booking does not block the captured upgrade', async result => {
+      const scenario = await openNativeUpgrade();
+      const other = await nativeCapture();
+      await refundOriginal({ original: other }, 'refund_unrelated_upgrade');
+      const record = await finalizeUpgrade(scenario, 'client', result);
+      assert.equal(record.status, 'booked');
+      assert.equal((await commerce.getDocument(record.bookingId)).netAmount, 45);
+    });
+    await check('an unchanged upgrade preserves the discount approved at checkout', async result => {
+      const scenario = await openNativeUpgrade({ couponCode: 'FIXTUREPAID' });
+      assert.equal(scenario.record.pricingSnapshot.grossAmount, 45);
+      assert.equal(scenario.record.pricingSnapshot.netAmount, 40.5);
+      const record = await finalizeUpgrade(scenario, 'client', result);
+      assert.equal(record.status, 'booked');
+      assert.equal((await commerce.getDocument(record.bookingId)).netAmount, 40.5);
+    });
+    for (const credit of [74.95, 99.95]) {
+      await check(`a captured upgrade still books when the retained credit rises to $${credit}`, async result => {
+        const scenario = await openNativeUpgrade();
+        await commerce.patch(scenario.original.original._id).set({ netAmount: credit }).commit();
+        const record = await finalizeUpgrade(scenario, 'client', result);
+        assert.equal(record.status, 'booked');
+        assert.equal((await commerce.getDocument(record.bookingId)).netAmount, 45);
+      });
+    }
+    await check('unverifiable credit at finalization preserves the capture and returns contact-us 409', async result => {
+      const scenario = await openNativeUpgrade();
+      await refundOriginal(scenario, 'refund_unknown_credit_upgrade');
+      const original = await commerce.getDocument(scenario.original.record._id);
+      await commerce.patch(original._id).set({ providerPublicData: { ...original.providerPublicData, taxAmount: null } }).commit();
+      const record = await finalizeUpgrade(scenario, 'client', result);
+      assert.equal(result.finalize.status, 409, JSON.stringify(result.finalize));
+      assert.equal(result.finalize.body.code, 'upgrade_credit_unverified');
+      assert.match(result.finalize.body.error, /contact us to upgrade this booking/i);
+      await assertUpgradeIntact(scenario, record, result);
+    });
+    await check('a refund settling during the final booking write cannot grant an underpaid upgrade', async result => {
+      const scenario = await openNativeUpgrade();
+      let refunded = false;
+      fixture.setRequestHook(async (phase, request) => {
+        if (phase !== 'before' || !request.body?.p_mutations?.some(mutation =>
+          mutation.document?._type === 'booking' && mutation.document.originalOrderId === scenario.original.original._id)) return;
+        fixture.setRequestHook(null);
+        await refundOriginal(scenario, 'refund_during_upgrade_commit');
+        refunded = true;
+      });
+      try {
+        result.first = await post('/api/payment/finalize', {}, scenario.started.body.paymentAccessToken);
+      } finally {
+        fixture.setRequestHook(null);
+      }
+      assert.equal(refunded, true);
+      let record = await commerce.getDocument(scenario.record._id);
+      assert.equal(record.bookingId || '', '');
+      record = await finalizeUpgrade(scenario, 'client', result);
+      await assertUpgradeIntact(scenario, record, result);
+      assert.equal(record.recoveryReason, 'upgrade_credit_changed_after_quote');
+    });
     for (const [name, options] of [
       ['historical Dodo without total or tax evidence', { provider: 'dodo', payment: {
         verificationState: '', providerPublicData: { currency: 'USD' },

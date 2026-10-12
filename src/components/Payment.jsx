@@ -1131,6 +1131,7 @@ export default function Payment({ hideFooter = false }) {
       }
 
       const nextStatus = String(data?.status || "").trim().toLowerCase();
+      if (data?.manualReviewRequired === true) return data;
       if (
         nextStatus === "booked" ||
         nextStatus === "email_partial" ||
@@ -1176,6 +1177,10 @@ export default function Payment({ hideFooter = false }) {
       });
       if (!operation.current()) return { terminal: true, stale: true };
       const resumedStatus = String(data?.status || "").trim().toLowerCase();
+      if (response.ok && data?.manualReviewRequired === true) {
+        showBanner("info", data.recoveryReason, { persistent: true });
+        return { ...paymentSession, result: data, terminal: true };
+      }
       if (
         response.ok &&
         (resumedStatus === "booked" || resumedStatus === "email_partial")
@@ -1333,6 +1338,10 @@ export default function Payment({ hideFooter = false }) {
 
       const status = String(data?.status || "").trim().toLowerCase();
       const isFinalizedStatus = status === "booked" || status === "email_partial";
+      if (response.ok && data?.manualReviewRequired === true) {
+        showBanner("info", data.recoveryReason, { persistent: true });
+        return data;
+      }
 
       if (!response.ok && response.status !== 202 && !isFinalizedStatus) {
         throw new Error(data?.error || "Unable to finalize payment.");
@@ -1355,6 +1364,10 @@ export default function Payment({ hideFooter = false }) {
         const settled = await pollPaymentUntilTerminal(paymentAccessToken, operation);
         if (!operation.current()) return null;
         const settledStatus = String(settled?.status || "").trim().toLowerCase();
+        if (settled?.manualReviewRequired === true) {
+          showBanner("info", settled.recoveryReason, { persistent: true });
+          return settled;
+        }
         if (settledStatus === "booked" || settledStatus === "email_partial") {
           navigate("/payment-success", {
             state: buildFinalizeNavigation(settled, operation),

@@ -83,6 +83,12 @@ const patchRevision = (transaction, document, mutate) =>
     return mutate(patch.ifRevisionId(document._rev));
   });
 
+const appendCreditGuards = (transaction, documents, paymentRecordId) => {
+  for (const document of new Map(documents.map(document => [document._id, document])).values()) {
+    if (document._id !== paymentRecordId) patchRevision(transaction, document, patch => patch.set({}));
+  }
+};
+
 const commitCommerceTransaction = ({ client, transaction, commandId }) =>
   client?.backend === "supabase"
     ? transaction.commit({ commandId })
@@ -125,6 +131,7 @@ export const commitBookingTransaction = async ({
   referralId = "",
   paymentProofClaim = null,
   paymentRecordMutation = null,
+  creditSources = [],
   allowMissingHold = false,
 }) => {
   if (!client) throw new Error("Booking transaction requires a document client.");
@@ -177,6 +184,7 @@ export const commitBookingTransaction = async ({
     updatedAt: now,
   };
   const transaction = client.transaction().create(bookingDocument);
+  appendCreditGuards(transaction, creditSources, paymentRecordMutation?.id);
 
   if (slotLockId) {
     const lockValues = {
@@ -280,6 +288,7 @@ export const createRequiresRescheduleBooking = async ({
   notify = true,
   paymentProofClaim = null,
   paymentRecordMutation = null,
+  creditSources = [],
   couponReservation = null,
   referralId = "",
   paymentHold = null,
@@ -386,6 +395,7 @@ export const createRequiresRescheduleBooking = async ({
   try {
     const now = new Date().toISOString();
     const transaction = client.transaction().create(booking).create(recoveryCase);
+    appendCreditGuards(transaction, creditSources, paymentRecordMutation?.id);
 
     if (proofClaim?._id) {
       if (proofClaim._rev) {
