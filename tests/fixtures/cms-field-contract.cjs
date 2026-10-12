@@ -1,22 +1,98 @@
 const { createHash } = require("node:crypto");
 
 const unused = {
-  about: ["recordImage", "recordNote", "recordDetails[].sub"],
-  bookingSettings: ["maxDaysAheadBooking", "ownerEmail"],
-  coupon: ["title", "notes"],
+  about: ["recordNote"],
+  bookingSettings: ["maxDaysAheadBooking"],
+  coupon: ["notes"],
   discordBanner: ["text", "mobileText"],
-  faqSettings: ["eyebrow", "title", "subtitle"],
-  footer: ["title", "subtitle", "description", "availability"],
+  faqSettings: ["eyebrow", "subtitle"],
+  footer: ["subtitle", "description", "availability"],
   hero: ["tagline", "ctaNoteIcon", "bullets"],
-  howItWorks: ["steps[].faqText", "steps[].faqLink", "steps[].iconType"],
   meetTheTeam: ["seoTitle", "seoDescription"],
-  packagesSettings: ["heading", "badgeText", "subheading", "dividerText"],
-  proReviewsCarousel: ["title", "subtitle"],
-  review: ["title"],
-  services: ["heading", "subheading", "cards", "cards[].title", "cards[].description", "cards[].iconType", "cards[].customIcon", "benchAfterLabel"],
+  packagesSettings: ["badgeText", "subheading", "dividerText"],
+  proReviewsCarousel: ["subtitle"],
+  services: ["subheading", "cards[].customIcon", "benchAfterLabel"],
   siteSettings: ["siteMode"],
-  supportedGames: ["title", "subtitle", "showAllLabel", "showLessLabel"],
+  supportedGames: ["subtitle", "showAllLabel", "showLessLabel"],
   terms: ["lastUpdated"],
+};
+
+const rendered = {
+  about: ["recordTitle", "recordBadgeText", "recordSubtitle", "recordButtonText", "recordDetails", "recordDetails[].label", "recordDetails[].value", "recordLink"],
+  benchmark: ["title", "subtitle", "sortOrder", "beforeImage", "afterImage", "reviewImage"],
+  bookingSettings: ["packageDateSlots", "packageDateSlots[].package", "packageDateSlots[].dateSlots", "packageDateSlots[].dateSlots[].date", "packageDateSlots[].dateSlots[].times", "dateSlots", "dateSlots[].date", "dateSlots[].times", "vertexEssentialsDateSlots", "vertexEssentialsDateSlots[].date", "vertexEssentialsDateSlots[].times", "xocDateSlots", "xocDateSlots[].date", "xocDateSlots[].times"],
+  contact: ["title", "subtitle", "email", "formId"],
+  coupon: ["code", "discountType", "discountPercent", "discountAmount", "eligiblePackages", "isActive", "canCombineWithReferral", "validFrom", "validTo", "maxUses"],
+  discordBanner: ["link"],
+  faqSection: ["questions", "questions[].question", "questions[].answer"],
+  faqSettings: [],
+  footer: [],
+  hero: ["headingLine1", "headingLine2", "description", "subtext", "ctaPrimaryText", "ctaSecondaryText", "ctaNote"],
+  howItWorks: ["title", "subtitle", "steps", "steps[].badge", "steps[].title", "steps[].text"],
+  meetTheTeam: ["heroTitle", "heroSubtitle", "showFounder", "founder", "founder.badgeText", "founder.name", "founder.title", "founder.bio", "founder.avatar", "founder.stats", "founder.stats[].value", "founder.stats[].label", "founder.tags", "founder.socialLinks", "founder.socialLinks[].label", "founder.socialLinks[].url", "founder.socialLinks[].icon", "sections", "sections[].title", "sections[].variant", "sections[].cards", "sections[].cards[].name", "sections[].cards[].title", "sections[].cards[].bio", "sections[].cards[].avatar", "sections[].cards[].initials", "sections[].cards[].tags", "sections[].cards[].platformBadge", "sections[].cards[].ctaLabel", "sections[].cards[].ctaUrl", "footer", "footer.note", "footer.buttonText", "footer.buttonUrl", "footer.showDiscordIcon"],
+  package: ["title", "price", "description", "order", "tag", "tagGoldGlow", "checkedBullets", "uncheckedBullets", "features", "buttonText", "detailsButtonText", "isHighlighted"],
+  packagesSettings: [],
+  privacyPolicy: ["title", "sections", "sections[].heading", "sections[].content", "sections[].content[].markDefs[].href", "lastUpdated"],
+  proReviewsCarousel: ["reviews", "reviews[].pfp", "reviews[].isVip", "reviews[].name", "reviews[].profession", "reviews[].game", "reviews[].optimizationResult", "reviews[].text", "reviews[].rating"],
+  referralBox: ["heading", "description", "emailPlaceholder", "startButtonText", "loginButtonText", "registerPath", "loginPath"],
+  review: ["image", "alt"],
+  services: ["benchMetricLabel", "benchBeforeLabel", "benchBadgeSuffix", "benchPagePrefix", "benchPages", "benchPages[].games", "benchPages[].games[].gameTitle", "benchPages[].games[].gameLogo", "benchPages[].games[].beforeFps", "benchPages[].games[].afterFps", "benchPages[].games[].metricLabel", "benchPages[].games[].gpu", "benchPages[].games[].cpu", "benchPages[].games[].ram"],
+  siteSettings: [],
+  supportedGames: ["featuredGames", "featuredGames[].title", "featuredGames[].coverImage", "moreGames", "moreGames[].title", "moreGames[].coverImage"],
+  terms: ["title", "sections", "sections[].heading", "sections[].content", "sections[].content[].markDefs[].href"],
+  tool: ["title", "sortOrder", "category", "shortDescription", "icon", "downloadMode", "downloadUrl", "downloadFile", "officialSite", "downloadNote"],
+  upgradeLink: ["title", "slug", "targetPackage", "intro"],
+};
+
+const internal = {
+  about: {
+    recordImage: { kind: "previewImage", consumer: "src/server/cms/documents.js:41" },
+    "recordDetails[].sub": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63" },
+    "recordDetails[].label": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63", when: "hardwareStat" },
+  },
+  bookingSettings: { ownerEmail: { kind: "ownerNotification", consumer: "src/server/api/ref/bookingEmails.js:222" } },
+  coupon: { title: { kind: "documentTitle", consumer: "src/components/admin/content/ContentAdmin.jsx:834" } },
+  faqSettings: { title: { kind: "documentTitle", consumer: "src/components/admin/content/ContentAdmin.jsx:870" } },
+  footer: { title: { kind: "documentTitle", consumer: "src/server/cms/documents.js:45" } },
+  howItWorks: {
+    "steps[].faqText": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63" },
+    "steps[].faqLink": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63" },
+    "steps[].iconType": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63" },
+  },
+  packagesSettings: { heading: { kind: "documentTitle", consumer: "src/components/admin/content/ContentAdmin.jsx:870" } },
+  proReviewsCarousel: { title: { kind: "documentTitle", consumer: "src/components/admin/content/ContentAdmin.jsx:870" } },
+  review: { title: { kind: "documentTitle", consumer: "src/components/admin/content/ContentAdmin.jsx:834" } },
+  services: {
+    heading: { kind: "documentTitle", consumer: "src/components/admin/content/ContentAdmin.jsx:870" },
+    cards: { kind: "rowCollection", consumer: "src/components/admin/content/FieldInput.jsx:149" },
+    "cards[].title": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63" },
+    "cards[].description": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63" },
+    "cards[].iconType": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63" },
+    "benchPages[].games[].gameTitle": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63", when: "overwatch" },
+  },
+  supportedGames: { title: { kind: "documentTitle", consumer: "src/components/admin/content/ContentAdmin.jsx:870" } },
+  faqSection: { "questions[].question": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63", when: "faq" } },
+  terms: { "sections[].heading": { kind: "rowSummary", consumer: "src/components/admin/content/FieldInput.jsx:63", when: "terms" } },
+};
+
+const operationalReadOnly = { coupon: ["timesUsed", "activeReservations", "autoDeactivatedByRedemptionId", "autoDeactivatedAt", "redemptionCount"] };
+
+const internalField = (type, path, parent = {}) => {
+  const entry = internal[type]?.[patternPath(path)];
+  if (!entry?.when) return entry;
+  const matches = entry.when === "hardwareStat" ? /^(cpu|gpu)$/i.test(String(parent.label || "").trim())
+    : entry.when === "overwatch" ? /^overwatch(?:\s+2)?$/i.test(String(parent.gameTitle || "").trim())
+    : entry.when === "terms" ? /rescheduling policy|cancellations and rescheduling/i.test(parent.heading || "")
+    : /(?:refund|money[- ]back).*warranty|warranty.*(?:refund|money[- ]back)|free re[-\s]?optimization|(?:re[-\s]?xoc|rexoc).*free|upgrade pc each 6 months|change a part before the 6[-\s]?month period/i.test(parent.question || "");
+  return matches ? entry : undefined;
+};
+
+const classify = (type, path, parent = {}) => {
+  const normalized = patternPath(path).replace(/\[\]$/, "");
+  if (unusedField(type, path, parent)) return "UNUSED";
+  if (internalField(type, path, parent)) return "INTERNAL";
+  if (rendered[type]?.includes(normalized)) return "RENDERED";
+  throw new Error(`Unclassified editable CMS field: ${type}.${normalized}`);
 };
 
 const bindings = {
@@ -49,6 +125,7 @@ const bindings = {
 const hash = value => createHash("sha1").update(value).digest("hex");
 const patternPath = path => path.replace(/\[\d+\]/g, "[]");
 const unusedField = (type, field, parent = {}) => {
+  if (internalField(type, field, parent)) return false;
   if ((unused[type] || []).includes(patternPath(field))) return true;
   if (type === "about" && /\.(?:label|value)$/.test(field)) return /^(cpu|gpu)$/i.test(String(parent.label || "").trim());
   if (type === "package" && /^(?:checkedBullets|uncheckedBullets)$/.test(field)) return /^(?:vertex essentials|performance vertex overhaul|performance vertex max|xoc(?:\s*\/\s*extreme overclocking)?)$/i.test(parent.title || "");
@@ -141,4 +218,4 @@ async function buildDocument({ schema, current, marker, origin, upload, referenc
 
 const get = (document, path) => path.replace(/\[(\d+)\]/g, ".$1").split(".").filter(Boolean).reduce((value, key) => value?.[key], document);
 
-module.exports = { unused, bindings, unusedField, schemaFields, buildDocument, patternPath, get };
+module.exports = { unused, rendered, internal, operationalReadOnly, bindings, internalField, classify, unusedField, schemaFields, buildDocument, patternPath, get };

@@ -1006,10 +1006,7 @@ const definitions = [
       {
         "name": "title",
         "title": "Heading",
-        "type": "string",
-        "readOnly": true,
-        "preserveStoredValue": true,
-        "description": "Not shown on the site yet. Edits here won't appear."
+        "type": "string"
       },
       {
         "name": "subtitle",
@@ -1627,10 +1624,7 @@ const definitions = [
       {
         "name": "heading",
         "title": "Heading",
-        "type": "string",
-        "readOnly": true,
-        "preserveStoredValue": true,
-        "description": "Not shown on the site yet. Edits here won't appear."
+        "type": "string"
       },
       {
         "name": "badgeText",
@@ -1755,10 +1749,7 @@ const definitions = [
       {
         "name": "title",
         "title": "Section Title",
-        "type": "string",
-        "readOnly": true,
-        "preserveStoredValue": true,
-        "description": "Not shown on the site yet. Edits here won't appear."
+        "type": "string"
       },
       {
         "name": "subtitle",
@@ -1954,10 +1945,7 @@ const definitions = [
       {
         "name": "heading",
         "title": "Heading",
-        "type": "string",
-        "readOnly": true,
-        "preserveStoredValue": true,
-        "description": "Not shown on the site yet. Edits here won't appear."
+        "type": "string"
       },
       {
         "name": "subheading",
@@ -2212,9 +2200,6 @@ const definitions = [
         "name": "title",
         "title": "Title",
         "type": "string",
-        "readOnly": true,
-        "preserveStoredValue": true,
-        "description": "Not shown on the site yet. Edits here won't appear.",
         "initialValue": "Supported Games"
       },
       {
