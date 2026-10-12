@@ -1,8 +1,5 @@
 import { createDataClient as createClient } from "../../data/documentClient.js";
-import {
-  getPaidAmount,
-  resolveUpgradeContext,
-} from "./pricing.js";
+import { resolveUpgradeContext } from "./pricing.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import packageContent from "../../../lib/packageContent.js";
 import packagePricing from "../../../lib/packagePricing.js";
@@ -292,10 +289,7 @@ export default async function handler(req, res) {
       client,
     });
     const targetPriceNum = parseMoney(upgradeContext.targetPackage.price);
-    const originalPaid = upgradeContext.paidBookings.reduce(
-      (sum, entry) => sum + getPaidAmount(entry),
-      0
-    );
+    const originalPaid = upgradeContext.totalPaid;
     const upgradePrice = Math.max(0, +upgradeContext.upgradePrice.toFixed(2));
 
     const packagePayload = {

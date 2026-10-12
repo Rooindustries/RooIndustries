@@ -8,7 +8,10 @@ for (const key of [
   if (process.env[key] !== undefined) env[key] = process.env[key];
 }
 
-const result = spawnSync(process.execPath, ['--test', 'tests/booking-contact.mjs'], {
+const testFile = process.argv.includes('--upgrade-credit')
+  ? 'tests/upgrade-credit.mjs'
+  : 'tests/booking-contact.mjs';
+const result = spawnSync(process.execPath, ['--test', testFile], {
   cwd: new URL('..', import.meta.url),
   env,
   stdio: 'inherit',
