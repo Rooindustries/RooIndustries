@@ -26,12 +26,13 @@ export default function PaymentSuccess() {
     >
       {receipt && <BookingEmailDispatchEffect />}
       <motion.h1
+        key={receipt ? "confirmation-heading" : "neutral-heading"}
         className="min-h-10 text-4xl font-bold text-accent drop-shadow-[0_0_20px_rgba(56,189,248,0.5)]"
         variants={containerVariants}
       >
         {receipt ? "Payment Successful" : "Looking for your booking?"}
       </motion.h1>
-      <motion.p className="mt-4 min-h-12 text-ink-secondary" variants={containerVariants}>
+      <motion.p key={receipt ? "confirmation-body" : "neutral-body"} className="mt-4 min-h-12 text-ink-secondary" variants={containerVariants}>
         {receipt ? (
           <>
             Your payment was processed and your booking is confirmed. You&apos;ll
