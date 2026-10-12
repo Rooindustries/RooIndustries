@@ -398,7 +398,10 @@ const businessSmoke = async () => {
   const waitForMarker = async (locator, timeout = 3000) => {
     try {
       await locator.first().waitFor({ state: "visible", timeout });
-    } catch {}
+      return { visible: true };
+    } catch (error) {
+      return { visible: false, error: error.message };
+    }
   };
 
   const bookingPage = await browser.newPage({
@@ -409,16 +412,14 @@ const businessSmoke = async () => {
   await bookingPage.goto(`${BASE_URL}/booking`, {
     waitUntil: "domcontentloaded",
   });
-  await waitForMarker(
+  const bookingMarker = await waitForMarker(
     bookingPage.getByRole("heading", { name: "Schedule Your Session" }),
     5000
   );
+  writeFile("phase1-booking-heading.json", `${JSON.stringify(bookingMarker)}\n`);
   checks.push({
     check: "booking_renders_schedule_title",
-    pass:
-      (await bookingPage
-        .getByRole("heading", { name: "Schedule Your Session" })
-        .count()) >= 1,
+    pass: bookingMarker.visible,
   });
   await bookingPage.close();
 

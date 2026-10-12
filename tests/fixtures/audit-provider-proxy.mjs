@@ -9,7 +9,7 @@ export function auditProviderProxyOrigin(baseURL) {
   return localOrigin(target.origin);
 }
 
-export async function startAuditProviderProxy(baseURL, { status, body }) {
+export async function startAuditProviderProxy(baseURL, { status, body, bookingHtml }) {
   refuseEnvFiles();
   const upstream = localOrigin(baseURL);
   const origin = auditProviderProxyOrigin(upstream);
@@ -17,6 +17,11 @@ export async function startAuditProviderProxy(baseURL, { status, body }) {
     const target = new URL(request.url, upstream);
     if (target.origin !== upstream) {
       response.writeHead(400).end();
+      return;
+    }
+    if (target.pathname === "/booking" && typeof bookingHtml === "string") {
+      response.writeHead(200, { "Content-Type": "text/html" });
+      response.end(bookingHtml);
       return;
     }
     if (target.pathname === "/api/payment/providers") {

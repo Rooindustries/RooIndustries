@@ -36,6 +36,7 @@ test("runtime business checks accept the declared read-only provider contract", 
   const result = await runAudit(baseURL, ["--check", "business"]);
   await testInfo.attach("runtime-output", { body: result.output, contentType: "text/plain" });
   await testInfo.attach("business-smoke", { body: await fs.readFile("audit/phase1-business-smoke.md"), contentType: "text/markdown" });
+  await testInfo.attach("booking-heading", { body: await fs.readFile("audit/phase1-booking-heading.json"), contentType: "application/json" });
   expect(result.code, result.output).toBe(0);
   const providerConfig = JSON.parse(await fs.readFile("audit/phase1-provider-config.json", "utf8"));
   await testInfo.attach("provider-response", { body: JSON.stringify(providerConfig), contentType: "application/json" });
@@ -45,6 +46,23 @@ test("runtime business checks accept the declared read-only provider contract", 
     body: { ok: false, error: "This preview does not create bookings or accept payments." },
   });
   expect(Object.keys(providerConfig.body).sort()).toEqual(["error", "ok"]);
+});
+
+test("runtime business checks reject a missing booking heading", async ({ baseURL }, testInfo) => {
+  const proxy = await proxyFixture.startAuditProviderProxy(baseURL, {
+    status: 503,
+    body: { ok: false, error: "This preview does not create bookings or accept payments." },
+    bookingHtml: "<!doctype html><html><body><main>Booking is unavailable.</main></body></html>",
+  });
+  try {
+    const result = await runAudit(proxy.origin, ["--check", "business"]);
+    const report = await fs.readFile("audit/phase1-business-smoke.md", "utf8");
+    await testInfo.attach("business-smoke", { body: report, contentType: "text/markdown" });
+    expect(result.code, result.output).toBe(1);
+    expect(report).toContain("booking_renders_schedule_title: FAIL");
+  } finally {
+    await proxy.close();
+  }
 });
 
 test("runtime business checks do not infer target mode from a 503 response", async ({ baseURL }, testInfo) => {
