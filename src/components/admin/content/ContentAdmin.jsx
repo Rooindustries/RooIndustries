@@ -322,7 +322,8 @@ export default function ContentAdmin() {
     if (!isCurrentSelection(selectedGeneration)) return;
     setLoadingDocument(false);
     if (selected?.singleton && items) {
-      if (items.length > 0) await openDocument(items[0]._id);
+      const document = selected.fixedId ? items.find(item => item._id === selected.fixedId) : items[0];
+      if (document) await openDocument(document._id);
       else startNewDocument(name, listNewDrafts(name)[0] || null);
     }
   };
@@ -425,8 +426,8 @@ export default function ContentAdmin() {
   );
 
   const editorContext = useMemo(
-    () => ({ api, assets, registerAsset, loadReferenceOptions, errorsByPath, captureEditTarget, applyAtTarget, beginUpload, endUpload }),
-    [api, assets, registerAsset, loadReferenceOptions, errorsByPath, captureEditTarget, applyAtTarget, beginUpload, endUpload]
+    () => ({ api, assets, registerAsset, loadReferenceOptions, errorsByPath, captureEditTarget, applyAtTarget, beginUpload, endUpload, baseline: session?.documentId ? baseline : null, document: working }),
+    [api, assets, registerAsset, loadReferenceOptions, errorsByPath, captureEditTarget, applyAtTarget, beginUpload, endUpload, session?.documentId, baseline, working]
   );
 
   const finishPublication = async (pending, documentId) => {
@@ -871,6 +872,7 @@ export default function ContentAdmin() {
                     {session.documentId ? "Published" : "Not published yet"}
                     {dirty ? <span className={styles.dirtyTag}>Unpublished changes</span> : null}
                   </p>
+                  {type.description ? <p className={styles.fieldHelp}>{type.description}</p> : null}
                 </div>
                 <div className={styles.editorActions}>
                   {session.documentId ? (
@@ -887,7 +889,7 @@ export default function ContentAdmin() {
                     type="button"
                     className={styles.primaryButton}
                     onClick={publish}
-                    disabled={saving || pendingPublication || locking || loadingDocument || uploadsInFlight > 0 || (!dirty && Boolean(session.documentId))}
+                    disabled={saving || pendingPublication || locking || loadingDocument || uploadsInFlight > 0 || type.fields.every(field => field.readOnly) || (!dirty && Boolean(session.documentId))}
                     title={uploadsInFlight > 0 ? "Wait for the upload to finish" : undefined}
                   >
                     <Save size={16} aria-hidden="true" />

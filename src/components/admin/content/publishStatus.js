@@ -1,4 +1,6 @@
-const systemFields = new Set(["_id", "_type", "_rev", "_createdAt", "_updatedAt", "_createdBy", "_originalId", "_system"]);
+import { CMS_SYSTEM_FIELDS, preserveContentDocument, removedProtectedRows } from "../../../lib/cms/contentPreservation.js";
+import { createContentDefaults } from "../../../lib/cms/contentSchema.js";
+import { GLOBAL_COMMERCE_CONTENT_TYPES } from "../../../lib/globalCmsContract.js";
 
 const namedFields = names => names.map(name => ({ name }));
 const assetFields = [
@@ -28,7 +30,7 @@ const collectRemovedPaths = (baseline, submitted, field, path = []) => {
   }
   if (!baseline || typeof baseline !== "object" || !submitted || typeof submitted !== "object") return [];
   return (field.fields || structuredFields[field.type] || []).flatMap(child => {
-    if (child.readOnly || baseline[child.name] === undefined) return [];
+    if (child.readOnly && !child.preserveStoredValue || baseline[child.name] === undefined) return [];
     const nextPath = [...path, child.name];
     return submitted[child.name] === undefined
       ? [nextPath]
@@ -37,7 +39,7 @@ const collectRemovedPaths = (baseline, submitted, field, path = []) => {
 };
 
 export const removedContentPaths = (baseline, submitted, schema) =>
-  collectRemovedPaths(baseline, submitted, schema);
+  collectRemovedPaths(baseline, preserveContentDocument(submitted, baseline, schema.fields), schema);
 
 const hasPath = (document, path) => {
   let current = document;
@@ -58,9 +60,13 @@ const sameContent = (expected, actual, fields = [], root = false) => {
   }
   if (expected && typeof expected === "object") {
     if (!actual || typeof actual !== "object" || Array.isArray(actual)) return false;
-    const ignored = new Set(fields.filter(field => field.readOnly).map(field => field.name));
-    for (const key of Object.keys(expected)) {
-      if (ignored.has(key) || (root && systemFields.has(key)) || (key === "_key" && expected[key] === undefined)) continue;
+    const generated = new Set(fields.filter(field => field.readOnly && !field.preserveStoredValue).map(field => field.name));
+    if (root && GLOBAL_COMMERCE_CONTENT_TYPES.includes(actual._type)) {
+      generated.add("backendOwner");
+      generated.add("cutoverGeneration");
+    }
+    for (const key of new Set([...Object.keys(expected), ...Object.keys(actual)])) {
+      if (generated.has(key) || (root && CMS_SYSTEM_FIELDS.has(key)) || (key === "_key" && expected[key] === undefined)) continue;
       const field = fields.find(field => field.name === key);
       if (!sameContent(expected[key], actual[key], field?.type === "array" ? field.of : field?.fields)) return false;
     }
@@ -78,8 +84,11 @@ export const publishedContentMatches = (data, session, submitted, schema, remove
   const document = data?.document;
   const id = session.documentId || data?.documentId;
   if (!session.documentId && (!hasCommittedCreateReceipt(data?.receipt, session) || data.receipt.documentId !== id || data.receipt.revision !== data.revision)) return false;
+  const input = session.documentId ? submitted : { ...createContentDefaults(session.type), ...submitted };
+  const expected = preserveContentDocument(JSON.parse(JSON.stringify(input)), session.documentId ? session.baseline : null, schema.fields);
+  if (removedProtectedRows(session.documentId ? session.baseline : null, expected, schema.fields).length) return false;
   return typeof id === "string" && document?._id === id && document._type === session.type &&
     typeof data.revision === "string" && data.revision.length > 0 && data.revision === document._rev &&
-    data.revision !== session.revision && sameContent(JSON.parse(JSON.stringify(submitted)), document, schema.fields, true) &&
+    data.revision !== session.revision && sameContent(expected, document, schema.fields, true) &&
     removedPaths.every(path => !hasPath(document, path));
 };
