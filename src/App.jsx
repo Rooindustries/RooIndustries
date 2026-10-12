@@ -20,6 +20,8 @@ import Home from "./legacyPages/Home";
 import AboutPage from "./legacyPages/About";
 import Packages from "./legacyPages/Packages";
 import FaqPage from "./legacyPages/Faq";
+import PaymentSuccess from "./legacyPages/PaymentSuccess";
+import Thankyou from "./legacyPages/Thankyou";
 import {
   consumeRouteTransitionIntent,
   isHomeSectionHash,
@@ -55,8 +57,6 @@ const Benchmarks = lazy(() => import("./legacyPages/Benchmarks"));
 const Terms = lazy(() => import("./legacyPages/Terms"));
 const Book = lazy(() => import("./legacyPages/Book"));
 const Payment = lazy(() => import("./legacyPages/Payment"));
-const PaymentSuccess = lazy(() => import("./legacyPages/PaymentSuccess"));
-const Thankyou = lazy(() => import("./legacyPages/Thankyou"));
 const UpgradeXoc = lazy(() => import("./legacyPages/UpgradeXoc"));
 const Upgrade = lazy(() => import("./legacyPages/Upgrade"));
 const Download = lazy(() => import("./legacyPages/Download"));
@@ -638,7 +638,11 @@ export function AppContent({
       </div>
       {isFlowRoute && (
         <Suspense fallback={null}>
-          <BookingModal open onClose={closeBookingModal}>
+          <BookingModal
+            open
+            onClose={closeBookingModal}
+            skipInitialSizeAnimation={isPaymentSuccessRoute || isThankYouRoute}
+          >
             <Suspense fallback={<RouteFallback />}>
               {isPaymentSuccessRoute ? (
                 <PaymentSuccess hideFooter />

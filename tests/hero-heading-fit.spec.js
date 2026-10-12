@@ -38,6 +38,10 @@ for (const route of ["/payment-success", "/thank-you"]) {
     localOrigin(manifest.contentURL);
     const context = await browser.newContext({ javaScriptEnabled: true, viewport: viewports[1], serviceWorkers: "block" });
     await guardBrowserContext(context, [baseURL, manifest.contentURL]);
+    await context.addInitScript(() => history.replaceState({
+      ...history.state,
+      usr: { bookingConfirmation: { bookingId: "fixture-hero-return" } },
+    }, ""));
     const page = await context.newPage();
     const pageErrors = [];
     page.on("pageerror", error => pageErrors.push(error.message));
