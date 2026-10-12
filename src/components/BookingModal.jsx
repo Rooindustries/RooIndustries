@@ -3,12 +3,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useLowPerformanceMode } from "../lib/performanceMode";
 import { isTopDialog, useDialogFocus } from "../lib/useDialogFocus";
 
-export default function BookingModal({ open, onClose, children }) {
+export default function BookingModal({ open, onClose, children, skipInitialSizeAnimation = false }) {
   const contentRef = useRef(null);
   // Focus trapping and outside-click detection need the unscaled dialog boundary, including the close button.
   const wrapperRef = useRef(null);
   const closeButtonRef = useRef(null);
   const layoutFrameRef = useRef(0);
+  const sizeTransitionEnabledRef = useRef(!skipInitialSizeAnimation);
   const lastLayoutRef = useRef({
     scale: 1,
     renderWidth: 1150,
@@ -130,6 +131,14 @@ export default function BookingModal({ open, onClose, children }) {
     };
   }, [isMobile, children, open]);
 
+  useLayoutEffect(() => {
+    if (sizeTransitionEnabledRef.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      sizeTransitionEnabledRef.current = true;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     const originalStyleBody = window.getComputedStyle(document.body).overflow;
@@ -229,7 +238,7 @@ export default function BookingModal({ open, onClose, children }) {
                 height: wrapperSize.height 
               }}
               layout={!lowPerformanceMode}
-              transition={springTransition}
+              transition={sizeTransitionEnabledRef.current ? springTransition : { duration: 0 }}
             >
               {/* Anchor the close button to the unscaled dialog so it stays aligned and retains its 44px touch target. */}
               <button
