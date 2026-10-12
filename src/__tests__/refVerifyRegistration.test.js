@@ -74,7 +74,7 @@ const pendingReferral = {
 
 describe("referral registration confirmation", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
     mockRequireRateLimit.mockResolvedValue(true);
     mockCommit.mockResolvedValue({ _rev: "revision-two" });
     const chain = {
@@ -176,28 +176,66 @@ describe("referral registration confirmation", () => {
     expect(mockSetReferralSessionCookie).not.toHaveBeenCalled();
   });
 
-  test("does not create a session when account activation is incomplete", async () => {
-    mockFetch.mockResolvedValueOnce(pendingReferral);
-    mockCreateVerifiedSupabaseBrowserSession.mockRejectedValue(
-      Object.assign(new Error("inactive"), {
-        code: "CREATOR_ACCOUNT_INACTIVE",
-        status: 409,
-        statusCode: 409,
-      })
-    );
-    const response = createResponse();
+  test.each(["account creation", "activation commit"])(
+    "keeps %s failures retryable before activation is confirmed",
+    async (stage) => {
+      mockFetch.mockResolvedValueOnce(pendingReferral);
+      const operation = stage === "account creation" ? mockCreateSupabaseCreatorAccount : mockCommit;
+      operation.mockRejectedValue(new Error("Synthetic activation outage"));
+      const response = createResponse();
 
-    await handler(
-      { method: "POST", body: { token: "C".repeat(43) }, headers: {} },
-      response
-    );
+      await handler(
+        { method: "POST", body: { token: "C".repeat(43) }, headers: {} },
+        response
+      );
 
-    expect(response.statusCode).toBe(503);
-    expect(response.body).toEqual({
-      ok: false,
-      error: "Account confirmation is temporarily unavailable. Please try again.",
-    });
-    expect(mockInstallLegacySupabaseSession).not.toHaveBeenCalled();
-    expect(mockSetReferralSessionCookie).not.toHaveBeenCalled();
-  });
+      expect(response.statusCode).toBe(503);
+      expect(response.body.ok).toBe(false);
+      expect(response.body.requiresLogin).toBeUndefined();
+      expect(mockCreateVerifiedSupabaseBrowserSession).not.toHaveBeenCalled();
+      expect(mockSetReferralSessionCookie).not.toHaveBeenCalled();
+    }
+  );
+
+  test.each(["inactive account", "session grant", "session install", "missing session", "referral cookie"])(
+    "preserves confirmed registration when %s prevents automatic sign-in",
+    async (stage) => {
+      mockFetch.mockResolvedValueOnce(pendingReferral);
+      if (stage === "inactive account") {
+        mockCreateVerifiedSupabaseBrowserSession.mockRejectedValue(
+          Object.assign(new Error("inactive"), {
+            code: "CREATOR_ACCOUNT_INACTIVE",
+            status: 409,
+            statusCode: 409,
+          })
+        );
+      } else if (stage === "session grant") {
+        mockCreateVerifiedSupabaseBrowserSession.mockRejectedValue(new Error("Synthetic grant outage"));
+      } else if (stage === "session install") {
+        mockInstallLegacySupabaseSession.mockRejectedValue(new Error("Synthetic installation outage"));
+      } else if (stage === "missing session") {
+        mockInstallLegacySupabaseSession.mockResolvedValue(false);
+      } else {
+        mockSetReferralSessionCookie.mockImplementation(() => { throw new Error("Synthetic cookie failure"); });
+      }
+      const response = createResponse();
+
+      await handler(
+        { method: "POST", body: { token: "C".repeat(43) }, headers: {} },
+        response
+      );
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toEqual({
+        ok: true,
+        requiresLogin: true,
+      });
+      expect(mockCommit).toHaveBeenCalled();
+      expect(response.headers["Cache-Control"]).toBe("private, no-store");
+      if (["inactive account", "session grant"].includes(stage)) {
+        expect(mockInstallLegacySupabaseSession).not.toHaveBeenCalled();
+      }
+      if (stage !== "referral cookie") expect(mockSetReferralSessionCookie).not.toHaveBeenCalled();
+    }
+  );
 });

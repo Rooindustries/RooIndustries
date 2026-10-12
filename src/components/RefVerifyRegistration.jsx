@@ -1,6 +1,6 @@
 import { readBrowserStorage, removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 const TOKEN_KEY = "referral_registration_verification";
 
@@ -67,7 +67,13 @@ export default function RefVerifyRegistration() {
           return;
         }
         removeBrowserStorage("sessionStorage", TOKEN_KEY);
-        setState({ status: "success", message: "Email confirmed. Your creator account is ready." });
+        setState({
+          status: "success",
+          requiresLogin: data.requiresLogin === true,
+          message: data.requiresLogin === true
+            ? "Your account is confirmed. Sign in to open your creator dashboard."
+            : "Email confirmed. Your creator account is ready.",
+        });
       })
       .catch(() => {
         setState({ status: "error", message: "Confirmation is temporarily unavailable. Please try again." });
@@ -84,7 +90,14 @@ export default function RefVerifyRegistration() {
         >
           {state.message}
         </p>
-        {state.status === "success" ? (
+        {state.status === "success" && state.requiresLogin ? (
+          <Link
+            className="mt-6 block w-full rounded-xl bg-accent-strong py-3 font-semibold text-white"
+            to="/referrals/login?notice=email-confirmed"
+          >
+            Sign in
+          </Link>
+        ) : state.status === "success" ? (
           <button
             className="mt-6 w-full rounded-xl bg-accent-strong py-3 font-semibold text-white"
             onClick={() => navigate("/referrals/dashboard")}
