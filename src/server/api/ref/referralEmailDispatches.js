@@ -61,14 +61,26 @@ const createResendClient = (env = process.env) => {
   return apiKey ? new Resend(apiKey) : null;
 };
 
-const resolveBaseUrl = (env = process.env) =>
-  String(
+const resolveBaseUrl = (env = process.env) => {
+  const baseUrl = String(
     env.NEXT_PUBLIC_BASE_URL ||
       env.SITE_URL ||
       "https://www.rooindustries.com"
-  )
-    .trim()
-    .replace(/\/+$/, "");
+  );
+  const runtime = String(env.VERCEL_ENV || "").trim().toLowerCase() ||
+    (String(env.NODE_ENV || "").trim().toLowerCase() === "production" ? "production" : "development");
+  if (runtime === "production" && ![
+    "https://www.rooindustries.com", "https://www.rooindustries.com/",
+    "https://rooindustries.com", "https://rooindustries.com/",
+  ].includes(baseUrl)) {
+    const error = Object.assign(new Error("Referral email link origin is not allowed."), {
+      code: "email_link_origin_invalid",
+    });
+    logSafeError("Referral email link origin refused", error);
+    throw error;
+  }
+  return baseUrl.trim().replace(/\/+$/, "");
+};
 
 const resolveFromAddress = (env = process.env) =>
   String(env.FROM_EMAIL || "onboarding@resend.dev").trim();
@@ -96,7 +108,9 @@ export const enqueueReferralEmailMutation = async ({
   name = "",
   expiresAt,
   adminClient = createSupabaseAdminClient(),
+  env = process.env,
 } = {}) => {
+  resolveBaseUrl(env);
   const email = normalizeEmail(recipientEmail);
   const kind = normalizeDispatchKind(dispatchKind);
   const result = requireRpcData(
@@ -122,14 +136,17 @@ export const requeueReferralEmailDispatch = async ({
   referralId,
   dispatchKind,
   adminClient = createSupabaseAdminClient(),
-} = {}) =>
-  requireRpcData(
+  env = process.env,
+} = {}) => {
+  resolveBaseUrl(env);
+  return requireRpcData(
     await adminClient.rpc("roo_requeue_referral_email_dispatch", {
       p_referral_id: String(referralId || "").trim(),
       p_dispatch_kind: normalizeDispatchKind(dispatchKind),
     }),
     "referral email recovery"
   ) || null;
+};
 
 const renderDispatch = ({ dispatch, env = process.env }) => {
   const kind = normalizeDispatchKind(dispatch?.dispatch_kind);
@@ -211,12 +228,12 @@ const sendClaimedDispatch = async ({
   env,
 }) => {
   try {
+    const rendered = renderDispatch({ dispatch, env });
     if (!resendClient) {
       const error = new Error("Referral email provider is not configured.");
       error.code = "email_provider_unconfigured";
       throw error;
     }
-    const rendered = renderDispatch({ dispatch, env });
     const result = await withDeadline(
       resendClient.emails.send(
         {
@@ -241,7 +258,7 @@ const sendClaimedDispatch = async ({
     });
     return { sent: 1, retry: 0, deadLetter: 0 };
   } catch (error) {
-    logSafeError("Referral email delivery failed", error);
+    if (error?.code !== "email_link_origin_invalid") logSafeError("Referral email delivery failed", error);
     const completion = await completeDispatch({
       adminClient,
       dispatch,
@@ -263,6 +280,7 @@ export const deliverReferralEmailDispatch = async ({
   resendClient = createResendClient(),
   env = process.env,
 } = {}) => {
+  resolveBaseUrl(env);
   const leaseId = crypto.randomUUID();
   const dispatch = requireRpcData(
     await adminClient.rpc("roo_claim_referral_email_dispatch", {
@@ -301,6 +319,7 @@ export const reconcileReferralEmailDispatches = async ({
   resendClient = createResendClient(),
   env = process.env,
 } = {}) => {
+  resolveBaseUrl(env);
   const leaseId = crypto.randomUUID();
   const dispatches = requireRpcData(
     await adminClient.rpc("roo_claim_referral_email_dispatches", {
@@ -346,7 +365,6 @@ export const sendReferralEmailDirect = async ({
   resendClient = createResendClient(),
   env = process.env,
 } = {}) => {
-  if (!resendClient) throw new Error("Referral email provider is not configured.");
   const idempotencyKey = buildReferralEmailIdempotencyKey({
     dispatchKind,
     referralId,
@@ -361,6 +379,7 @@ export const sendReferralEmailDirect = async ({
     },
     env,
   });
+  if (!resendClient) throw new Error("Referral email provider is not configured.");
   const result = await resendClient.emails.send(
     {
       from: resolveFromAddress(env),

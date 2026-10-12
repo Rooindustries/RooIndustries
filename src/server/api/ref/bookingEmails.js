@@ -4,6 +4,8 @@ import crypto from "crypto";
 import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
 import { formatAppointmentTime } from "../../email/appointmentTime.js";
 import { isIdempotencyPayloadConflict } from "../../email/resendOutcome.js";
+import { getPaymentRecordById } from "../payment/paymentRecord.js";
+import { parseMoneySubunits, toSubunits } from "../payment/providerClients.js";
 import {
   claimEmailDispatchPair,
   completeEmailDispatch,
@@ -239,7 +241,7 @@ export const getBookingForEmailDispatch = async ({
   const normalizedBookingId = String(bookingId || "").trim();
   if (!normalizedBookingId) return null;
 
-  return client.fetch(
+  const booking = await client.fetch(
     `*[_type == "booking" && _id == $id][0]{
       _id,
       _rev,
@@ -259,6 +261,13 @@ export const getBookingForEmailDispatch = async ({
       grossAmount,
       netAmount,
       currency,
+      paymentProvider,
+      paymentRecordId,
+      dodoCheckoutSessionId,
+      dodoPaymentId,
+      paypalOrderId,
+      razorpayOrderId,
+      razorpayPaymentId,
       couponCode,
       couponDiscountPercent,
       couponDiscountAmount,
@@ -289,6 +298,29 @@ export const getBookingForEmailDispatch = async ({
     }`,
     { id: normalizedBookingId }
   );
+  if (!booking?.paymentRecordId || !["dodo", "paypal", "razorpay"].includes(booking.paymentProvider)) return booking;
+  try {
+    const payment = await getPaymentRecordById(client, booking.paymentRecordId);
+    const orderId = booking.paymentProvider === "dodo" ? booking.dodoCheckoutSessionId
+      : booking.paymentProvider === "paypal" ? booking.paypalOrderId : booking.razorpayOrderId;
+    const paymentId = booking.paymentProvider === "dodo" ? booking.dodoPaymentId : booking.razorpayPaymentId;
+    if (payment?._id !== booking.paymentRecordId || payment.provider !== booking.paymentProvider ||
+        payment.verificationState !== "server_verified" ||
+        (payment.bookingId && payment.bookingId !== booking._id) ||
+        !orderId || payment.providerOrderId !== orderId || !payment.providerPaymentId ||
+        (booking.paymentProvider !== "paypal" && !paymentId) ||
+        (paymentId && payment.providerPaymentId !== paymentId)) return booking;
+    const currency = booking.paymentProvider === "dodo" ? payment.providerPublicData?.currency : payment.pricingSnapshot?.currency;
+    if (typeof currency !== "string" || !/^[A-Z]{3}$/.test(currency)) return booking;
+    const amountInSubunits = booking.paymentProvider === "dodo"
+      ? payment.providerPublicData?.totalAmount
+      : parseMoneySubunits(payment.pricingSnapshot?.netAmount, currency);
+    if (!Number.isSafeInteger(amountInSubunits) || amountInSubunits <= 0) return booking;
+    return { ...booking, capturedPayment: { amount: amountInSubunits / toSubunits(1, currency), currency } };
+  } catch (error) {
+    logSafeError("Booking captured payment lookup failed", error);
+    return booking;
+  }
 };
 
 export const buildDeferredEmailDispatch = ({ booking = {} }) => {
@@ -362,6 +394,10 @@ const buildBookingFieldGroups = (booking = {}) => {
           ? `${formatMoney(booking.netAmount, currency)} (was ${formatMoney(booking.grossAmount, currency)})`
           : priceDisplay !== "-" ? priceDisplay : booking.packagePrice || "-",
     },
+    ...(booking.capturedPayment ? [{
+      label: "Amount paid",
+      value: `${formatMoney(booking.capturedPayment.amount, booking.capturedPayment.currency)} ${booking.capturedPayment.currency}`,
+    }] : []),
     { label: "Discord", value: booking.discord || "-" },
     { label: "Email", value: booking.email || booking.payerEmail || "-" },
     { label: "Main Game", value: booking.mainGame || "-" },

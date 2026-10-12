@@ -81,7 +81,7 @@ for (const [name, viewport] of [["desktop", { width: 1440, height: 900 }], ["mob
     for (const item of capture.captured.map((item, index) => ({ ...item, ...rendered[index] }))) {
       check(item.scrollWidth, `${item.case}: ${item.payload.to}`).toBeLessThanOrEqual(viewport.width);
     }
-    for (const caseName of ["normal", "long-fields", "recovery-usd", "recovery-long-fields", "registration_verification-long-name", "password_reset-long-name"]) {
+    for (const caseName of ["normal", "paid-tax", "free", "paid-total-missing", "long-fields", "recovery-usd", "recovery-long-fields", "registration_verification-long-name", "password_reset-long-name"]) {
       for (const item of messages(caseName)) {
         const frame = page.locator(`#email-${item.index}`);
         await frame.evaluate(element => { element.style.visibility = "visible"; });
@@ -97,6 +97,18 @@ for (const [name, viewport] of [["desktop", { width: 1440, height: 900 }], ["mob
       }
     }
     for (const item of messages("free")) check(item.fields.Price).toBe("$0.00 (was $84.99)");
+    for (const caseName of ["paid-tax", "paid-partial-refund", "paid-record-authority", "deterministic-booking"]) {
+      for (const item of messages(caseName)) {
+        check(item.fields.Price, caseName).toBe("$84.99");
+        check(item.fields["Amount paid"], caseName).toBe("$101.99 USD");
+      }
+    }
+    for (const caseName of ["paid-paypal", "paid-razorpay", "paid-record-currency"]) {
+      for (const item of messages(caseName)) check(item.fields["Amount paid"], caseName).toBe(caseName === "paid-record-currency" ? "€101.99 EUR" : "€84.99 EUR");
+    }
+    for (const caseName of ["free", "paid-total-missing", "paid-total-null", "paid-total-empty", "paid-total-invalid", "paid-total-nan", "paid-total-infinity", "paid-no-record", "paid-unverified", "paid-wrong-record", "paid-wrong-booking", "paid-wrong-provider", "paid-wrong-order", "paid-wrong-payment", "paid-no-currency", "paid-quote-only", "paid-paypal-unverified", "paid-razorpay-unverified", "paid-paypal-no-currency", "paid-razorpay-no-currency", "paid-paypal-wrong-order", "paid-razorpay-wrong-order"]) {
+      for (const item of messages(caseName)) check(item.fields["Amount paid"], caseName).toBeUndefined();
+    }
     for (const item of messages("missing-title")) check(item.payload.subject).not.toMatch(/\b(null|undefined)\b/);
     for (const [currency, symbol] of [["usd", "$"], ["eur", "€"], ["gbp", "£"]]) {
       for (const item of messages(`money-${currency}`)) {
