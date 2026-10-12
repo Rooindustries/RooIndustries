@@ -38,8 +38,19 @@ async function run() {
       expect: (response, body, hostDrift) =>
         response.status === 200 &&
         !hostDrift &&
+        /application\/json/i.test(response.headers.get("content-type") || "") &&
         body?.ok === true &&
-        typeof body?.providers === "object",
+        ["dodo", "razorpay", "paypal"].every(name =>
+          typeof body?.providers?.[name]?.enabled === "boolean" &&
+          typeof body?.providers?.[name]?.mode === "string" &&
+          body.providers[name].mode.length > 0
+        ) &&
+        typeof body?.providers?.paypal?.clientId === "string" &&
+        (body?.providers?.razorpay?.disabledReason === undefined ||
+          typeof body.providers.razorpay.disabledReason === "string") &&
+        ["production", "preview", "development"].includes(body?.environment?.runtime) &&
+        typeof body?.environment?.previewPaymentsEnabled === "boolean" &&
+        typeof body?.environment?.livePaymentsEnabled === "boolean",
     },
     {
       route: "/api/holdSlot",
@@ -81,6 +92,15 @@ async function run() {
         body?.reason === "not_found",
     },
     {
+      route: "/api/ref/validateCoupon?code=",
+      method: "GET",
+      expect: (response, body, hostDrift) =>
+        response.status === 400 &&
+        !hostDrift &&
+        body?.ok === false &&
+        body?.error === "Missing coupon code.",
+    },
+    {
       route: "/api/ref/createBooking",
       method: "POST",
       body: {},
@@ -91,31 +111,55 @@ async function run() {
         typeof body?.error === "string",
     },
     {
-      route: "/api/ref/getUpgradeInfo?id=nonexistent&email=test%40example.com",
-      method: "GET",
+      route: "/api/ref/getUpgradeInfo",
+      method: "POST",
+      body: { id: "nonexistent", email: "test@fixture.invalid" },
       expect: (response, body, hostDrift) =>
         response.status === 404 &&
         !hostDrift &&
-        body?.ok === false,
+        body?.ok === false &&
+        body?.error === "No booking found with that Order ID.",
+    },
+    {
+      route: "/api/ref/getUpgradeInfo",
+      method: "POST",
+      body: {},
+      expect: (response, body, hostDrift) =>
+        response.status === 400 &&
+        !hostDrift &&
+        body?.ok === false &&
+        body?.error === "Missing Order ID (bookingId).",
+    },
+    {
+      route: "/api/ref/getUpgradeInfo?id=nonexistent&email=test%40fixture.invalid",
+      method: "GET",
+      expect: (response, body, hostDrift) =>
+        response.status === 405 &&
+        !hostDrift &&
+        body?.ok === false &&
+        body?.error === "Method not allowed",
     },
     {
       route: "/api/razorpay/createOrder",
       method: "POST",
       body: {},
       expect: (response, body, hostDrift) =>
-        (response.status === 400 || response.status === 500) &&
+        response.status === 410 &&
         !hostDrift &&
-        typeof body?.ok === "boolean",
+        body?.ok === false &&
+        body?.code === "legacy_order_creation_retired" &&
+        body?.message === "This checkout session expired. Please restart checkout.",
     },
     {
       route: "/api/razorpay/verify",
       method: "POST",
       body: {},
       expect: (response, body, hostDrift) =>
-        response.status === 400 &&
+        response.status === 410 &&
         !hostDrift &&
         /application\/json/i.test(response.headers.get("content-type") || "") &&
-        typeof body?.ok === "boolean",
+        body?.ok === false &&
+        body?.message === "This checkout session expired. Please restart checkout.",
     },
     {
       route: "/api/ref/cronSyncAll",
@@ -180,6 +224,8 @@ async function run() {
     const hostDrift = !response.url.startsWith(BASE_URL);
     rows.push({
       route: check.route,
+      method: check.method,
+      request_body: check.body ? JSON.stringify(check.body) : "",
       status: response.status,
       final_url: response.url,
       host_drift: hostDrift,
@@ -190,12 +236,15 @@ async function run() {
       motherboards_array: Array.isArray(body?.motherboards),
       rams_array: Array.isArray(body?.rams),
       non_empty_keys: body ? Object.keys(body).length > 0 : false,
+      response_body: JSON.stringify(body),
       pass: check.expect(response, body, hostDrift),
     });
   }
 
   const headers = [
     "route",
+    "method",
+    "request_body",
     "status",
     "final_url",
     "host_drift",
@@ -205,6 +254,7 @@ async function run() {
     "motherboards_array",
     "rams_array",
     "non_empty_keys",
+    "response_body",
     "pass",
   ];
 
