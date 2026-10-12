@@ -1,6 +1,7 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import BookingForm from "../components/BookingForm";
-import Footer from "../components/Footer";
+
+const Footer = lazy(() => import("../components/Footer"));
 
 export default function Book({ hideFooter = false, compact = false }) {
   const padY = compact ? "pt-2 pb-6" : "pt-32 pb-24";
@@ -20,7 +21,7 @@ export default function Book({ hideFooter = false, compact = false }) {
         </h2>
         <BookingForm />
       </section>
-      {!hideFooter && <Footer />}
+      {!hideFooter && <Suspense fallback={null}><Footer /></Suspense>}
     </>
   );
 }

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, lazy, Suspense, startTransition } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Shield, ShieldCheck } from "lucide-react";
+import { getWarrantyCallout } from "../lib/packageWarranty";
 import PriceDisplay from "./PriceDisplay";
 import {
   fetchHomeSectionData,
@@ -19,16 +19,10 @@ const PackageDetailsModal = lazy(loadPackageDetails);
 
 const REFERRAL_STORAGE_KEY = "referral_session";
 const AVAILABILITY_REFRESH_INTERVAL_MS = 60_000;
-const { buildPackageOffer, buildPackageOffers } = packageContent;
+const { buildPackageOffers } = packageContent;
 const { HOME_COPY } = homeCopy;
 
-export const getWarrantyCallout = (pkg) => {
-  const offer = pkg?.warranty ? pkg : buildPackageOffer(pkg);
-  return {
-    ...offer.warranty,
-    Icon: offer.isTopPackage ? ShieldCheck : Shield,
-  };
-};
+export { getWarrantyCallout };
 
 export default function Packages({
   initialPackages = null,

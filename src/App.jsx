@@ -297,9 +297,11 @@ export function AppContent({
   initialRouteComponent = null,
   initialRoutePath = null,
   initialHomeComponent = null,
+  initialBookingModalComponent = null,
   routeShell = "browser",
 }) {
   const InitialRouteComponent = initialRouteComponent;
+  const FlowModal = initialBookingModalComponent || BookingModal;
   const [, setIsModalOpen] = useState(false);
   const [showRouteTransition, setShowRouteTransition] = useState(false);
   const [storedBackground, setStoredBackground] = useState(null);
@@ -652,7 +654,7 @@ export function AppContent({
       </div>
       {isFlowRoute && (
         <Suspense fallback={null}>
-          <BookingModal open onClose={closeBookingModal}>
+          <FlowModal open onClose={closeBookingModal}>
             <Suspense fallback={<RouteFallback />}>
               {initialRoutePath === pathName && InitialRouteComponent ? (
                 <InitialRouteComponent hideFooter compact={isBookingRoute} />
@@ -666,7 +668,7 @@ export function AppContent({
                 <Book hideFooter compact />
               )}
             </Suspense>
-          </BookingModal>
+          </FlowModal>
         </Suspense>
       )}
       <PerfDebugRuntime />
