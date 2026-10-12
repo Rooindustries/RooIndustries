@@ -18,25 +18,9 @@ declare
   v_receipt record;
   v_recipient text;
   v_unknown boolean;
+  v_receipt_repair boolean := false;
 begin
   if v_inactive then
-    if v_was_inactive and (
-      (nullif(p_document->>'emailDispatchLeaseId', '') is not null
-        and p_document->>'emailDispatchLeaseId' is distinct from p_previous->>'emailDispatchLeaseId')
-      or p_document->>'emailDispatchClientFirstAttemptAt' is distinct from p_previous->>'emailDispatchClientFirstAttemptAt'
-      or p_document->>'emailDispatchOwnerFirstAttemptAt' is distinct from p_previous->>'emailDispatchOwnerFirstAttemptAt'
-    ) then
-      raise exception 'inactive booking cannot acquire an email transport lease' using errcode = '40001';
-    end if;
-    if v_was_inactive then
-      foreach v_field in array array['emailDispatchAttemptCount', 'emailDispatchLastAttemptAt',
-        'emailDispatchClientFirstAttemptAt', 'emailDispatchOwnerFirstAttemptAt'] loop
-        v_document := v_document - v_field;
-        if v_previous ? v_field then
-          v_document := v_document || jsonb_build_object(v_field, v_previous->v_field);
-        end if;
-      end loop;
-    end if;
     for v_receipt in
       select dispatch.recipient_type, dispatch.sent_at, dispatch.provider_message_id
       from commerce.email_dispatches dispatch
@@ -48,12 +32,30 @@ begin
       if nullif(v_document->>('emailDispatch' || v_recipient || 'SentAt'), '') is null
         and v_receipt.sent_at is not null then
         v_document := v_document || jsonb_build_object('emailDispatch' || v_recipient || 'SentAt', v_receipt.sent_at);
+        v_receipt_repair := true;
       end if;
       if nullif(v_document->>('emailDispatch' || v_recipient || 'ProviderId'), '') is null
         and v_receipt.provider_message_id is not null then
         v_document := v_document || jsonb_build_object('emailDispatch' || v_recipient || 'ProviderId', v_receipt.provider_message_id);
       end if;
     end loop;
+    if v_was_inactive and (
+      (nullif(p_document->>'emailDispatchLeaseId', '') is not null
+        and p_document->>'emailDispatchLeaseId' is distinct from p_previous->>'emailDispatchLeaseId')
+      or p_document->>'emailDispatchClientFirstAttemptAt' is distinct from p_previous->>'emailDispatchClientFirstAttemptAt'
+      or p_document->>'emailDispatchOwnerFirstAttemptAt' is distinct from p_previous->>'emailDispatchOwnerFirstAttemptAt'
+    ) and not v_receipt_repair then
+      raise exception 'inactive booking cannot acquire an email transport lease' using errcode = '40001';
+    end if;
+    if v_was_inactive then
+      foreach v_field in array array['emailDispatchAttemptCount', 'emailDispatchLastAttemptAt',
+        'emailDispatchClientFirstAttemptAt', 'emailDispatchOwnerFirstAttemptAt'] loop
+        v_document := v_document - v_field;
+        if v_previous ? v_field then
+          v_document := v_document || jsonb_build_object(v_field, v_previous->v_field);
+        end if;
+      end loop;
+    end if;
     v_unknown := lower(btrim(coalesce(v_document->>'emailDispatchStatus', '')))
       in ('delivery_unknown', 'historical_unknown')
       or lower(btrim(coalesce(v_previous->>'emailDispatchStatus', '')))
@@ -368,7 +370,7 @@ begin
       'sent_at', v_dispatch.sent_at
     );
   end if;
-  if v_dispatch.lease_id is distinct from v_lease_id and not (
+  if v_dispatch.lease_id is distinct from v_lease_id and not coalesce((
     v_dispatch.status = 'failed' and v_dispatch.last_error_code = 'booking_inactive'
     and (v_dispatch.payload->>'booking_inactive_lease_id' = v_lease_id or exists (
       select 1 from commerce.bookings booking
@@ -377,7 +379,7 @@ begin
         and source.payload->>'emailDispatchLeaseId' = v_lease_id
         and migration.try_timestamptz(source.payload->>'emailDispatchLeaseExpiresAt') > now()
     ))
-  ) then
+  ), false) then
     raise exception 'email dispatch lease conflict'
       using errcode = '40001';
   end if;
