@@ -9,7 +9,7 @@ import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
 import { authorizeCronRequest } from "../cronAuth.js";
 import createBookingHandler from "../ref/createBooking.js";
 import { createCommerceWriteClient } from "../ref/documentStore.js";
-import { resolvePaymentQuote } from "../ref/pricing.js";
+import { resolveCapturedUpgradeFunding, resolvePaymentQuote } from "../ref/pricing.js";
 import { resolvePaymentCurrency } from "../ref/bookingRefunds.js";
 import {
   freezeUpgradeIntent,
@@ -457,8 +457,15 @@ const buildRecordPricingFingerprint = ({
         : DEFAULT_RAZORPAY_CURRENCY),
   });
 
+const isUpgradeCreditReview = (record = {}) =>
+  record.status === PAYMENT_STATUS_NEEDS_RECOVERY && record.reconciliationRecoveryTerminal === true &&
+  ["upgrade_credit_changed_after_quote", "upgrade_credit_unverified"].includes(record.recoveryReason);
+
 const getPublicRecoveryMessage = (record = {}) => {
   const status = String(record.status || "").trim().toLowerCase();
+  if (isUpgradeCreditReview(record) && record.recoveryReason === "upgrade_credit_changed_after_quote") {
+    return "Your payment was received. Roo Industries will contact you about your upgrade.";
+  }
   if (record.reconciliationRecoveryTerminal === true) {
     return "This payment requires manual review. Please contact Roo Industries.";
   }
@@ -539,7 +546,26 @@ const buildPublicStatusBody = (record = {}) => ({
   emailDispatch: buildPublicEmailDispatch(record.emailDispatch),
   emailDispatchToken: String(record.emailDispatchToken || "").trim(),
   analyticsReceipt: buildSalesReceipt(record),
+  ...(isUpgradeCreditReview(record) && record.recoveryReason === "upgrade_credit_changed_after_quote"
+    ? { manualReviewRequired: true } : {}),
 });
+
+const buildUpgradeCreditReviewResult = (record) => {
+  const unverified = record.recoveryReason === "upgrade_credit_unverified";
+  return {
+    ok: !unverified,
+    httpStatus: unverified ? 409 : 200,
+    paymentRecord: record,
+    response: {
+      ...buildPublicStatusBody(record),
+      ...(unverified ? {
+        ok: false,
+        code: "upgrade_credit_unverified",
+        error: "Please contact us to upgrade this booking. The original payment and refund amounts could not be verified.",
+      } : {}),
+    },
+  };
+};
 
 const resolvePaymentRecordSuccessStatus = (emailDispatch = {}) =>
   emailDispatch?.allSent === false
@@ -1906,6 +1932,38 @@ const markRetryableFinalizeFailure = async ({
   };
 };
 
+const holdCapturedUpgradeForReview = async ({ client, record, source, error }) => {
+  const operation = await currentPaymentOperation({ client, record });
+  const current = operation.record;
+  if (isUpgradeCreditReview(current)) return buildUpgradeCreditReviewResult(current);
+  if (!operation.owned || (isPaymentTerminalStatus(current.status) && current.status !== PAYMENT_STATUS_NEEDS_RECOVERY)) {
+    return currentPaymentOperationResult(current);
+  }
+  let held;
+  try {
+    held = await patchPaymentRecord({ client, record: current, set: {
+      status: PAYMENT_STATUS_NEEDS_RECOVERY,
+      recoveryReason: error.code,
+      recoveryCategory: "booking_finalize",
+      recoveryHttpStatus: 409,
+      providerRecoveryTerminal: true,
+      providerRecoveryTerminalReason: error.code,
+      reconciliationRecoveryTerminal: true,
+      nextRecoveryAt: "",
+      finalizationLeaseId: "",
+      finalizationLeaseExpiresAt: "",
+      source,
+    }, event: buildPaymentRecordEvent({ status: PAYMENT_STATUS_NEEDS_RECOVERY, source,
+      reason: error.code, data: { capturedAmount: error.capturedAmount, requiredAmount: error.requiredAmount } }) });
+  } catch (conflict) {
+    if (!isConflictError(conflict)) throw conflict;
+    const current = await getPaymentRecordById(client, record._id);
+    return isUpgradeCreditReview(current) ? buildUpgradeCreditReviewResult(current) : currentPaymentOperationResult(current);
+  }
+  logSafeError(`Captured upgrade requires owner review: ${held._id}`, error);
+  return buildUpgradeCreditReviewResult(held);
+};
+
 const rejectUntrustedFinalizeAttempt = async ({
   client,
   record,
@@ -2098,6 +2156,7 @@ const finalizePaymentRecordInternal = async ({
       },
     };
   }
+  if (isUpgradeCreditReview(record)) return buildUpgradeCreditReviewResult(record);
 
   const shouldRetryEmailDispatch = shouldRetryEmailPartialDispatch({
     record,
@@ -2339,6 +2398,7 @@ const finalizePaymentRecordInternal = async ({
         paymentProofClaim: proofClaim,
       });
       if (recovered?._id) {
+        if (isUpgradeCreditReview(recovered)) return buildUpgradeCreditReviewResult(recovered);
         return {
           ok: true,
           httpStatus: 200,
@@ -2404,6 +2464,10 @@ const finalizePaymentRecordInternal = async ({
     preserveHistoricalAccounting:
       workingRecord.historicalBookingReconstruction === true,
   });
+  if (["upgrade_credit_changed_after_quote", "upgrade_credit_unverified"].includes(result.body?.code)) {
+    return holdCapturedUpgradeForReview({ client, record: workingRecord, source: normalizedSource,
+      error: Object.assign(new Error(result.body.error), { code: result.body.code }) });
+  }
 
   if (result.body?.bookingId && (
     (result.status >= 200 && result.status < 300) ||
@@ -3853,6 +3917,17 @@ const recoverCapturedPaymentAsReschedule = async ({
   providerData = {},
   paymentProofClaim = null,
 }) => {
+  if (isUpgradeCreditReview(record)) return record;
+  let upgradeFunding = null;
+  if (String(record.bookingPayload?.originalOrderId || "").trim()) {
+    try {
+      upgradeFunding = await resolveCapturedUpgradeFunding({ record, client });
+    } catch (error) {
+      if (!["upgrade_credit_changed_after_quote", "upgrade_credit_unverified"].includes(error.code)) throw error;
+      const held = await holdCapturedUpgradeForReview({ client, record, source: "reconcile", error });
+      return held.paymentRecord;
+    }
+  }
   const handler =
     createRequiresRescheduleBooking || (await loadRequiresRescheduleHandler());
   if (typeof handler !== "function") return null;
@@ -3996,6 +4071,7 @@ const recoverCapturedPaymentAsReschedule = async ({
     recovery = await handler({
       client,
       paymentRecord: recoveryRecord,
+      creditSources: upgradeFunding?.creditSources || [],
       reason: normalizedReason,
       notify: false,
       paymentProofClaim: proofClaim,
@@ -5944,7 +6020,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       }
     }
   }
-  if (record.providerRecoveryTerminal === true && payment.status === "succeeded" && !terminalDispute) {
+  if (record.providerRecoveryTerminal === true && payment.status === "succeeded" && !terminalDispute && !isUpgradeCreditReview(record)) {
     record = await patchPaymentRecord({ client, record, set: { providerRecoveryTerminal: false } });
   }
 
