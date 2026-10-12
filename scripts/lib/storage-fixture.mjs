@@ -40,7 +40,7 @@ const terminate = async child => {
   } finally { clearTimeout(timer); }
 };
 
-export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storage-api-v1.79.33'), pgBin = '/tmp/roo-request-pg17/runtime/usr/lib/postgresql/17/bin', postgrestBin = '/tmp/roo-request-postgrest/postgrest', libraryPath = process.env.LD_LIBRARY_PATH, signedUploadExpirationSeconds = 120, commerceRepairMigration = true, fullMigrationChain = false, afterMigrations, ports = {}, additionalOrigins = [] } = {}) {
+export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storage-api-v1.79.33'), pgBin = '/tmp/roo-request-pg17/runtime/usr/lib/postgresql/17/bin', postgrestBin = '/tmp/roo-request-postgrest/postgrest', libraryPath = process.env.LD_LIBRARY_PATH || '/tmp/roo-request-pg17/runtime/usr/lib/x86_64-linux-gnu', signedUploadExpirationSeconds = 120, commerceRepairMigration = true, fullMigrationChain = false, afterMigrations, ports = {}, additionalOrigins = [] } = {}) {
   assert.equal(process.env.ROO_TEST_HOST || host, host, 'Storage fixture is an internal loopback-only stack');
   assert.equal(process.env.ROO_TEST_POSTGRES_HOST || host, host);
   assert.ok(Number.isSafeInteger(signedUploadExpirationSeconds) && signedUploadExpirationSeconds > 0 && signedUploadExpirationSeconds <= 7200);
