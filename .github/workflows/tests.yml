@@ -100,10 +100,12 @@ jobs:
       NEXT_DIST_DIR: .next-e2e-native-admin
       BOOKING_CONTACT_PORT: "3220"
       BOOKING_ROUTE_PORT: "3225"
-      TMPDIR: ${{ runner.temp }}
-      STORAGE_SOURCE: ${{ runner.temp }}/roo-storage-api-v1.79.33
       AT_SPI_BUS_ADDRESS: unix:path=/dev/null
     steps:
+      - name: Use the runner temp directory
+        run: |
+          echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "STORAGE_SOURCE=$RUNNER_TEMP/roo-storage-api-v1.79.33" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
