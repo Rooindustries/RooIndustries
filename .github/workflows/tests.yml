@@ -88,3 +88,77 @@ jobs:
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  native:
+    name: Native PostgreSQL 17 suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ROO_TEST_HOST: 127.0.0.1
+      PW_PORT: "3211"
+      PW_SERVER_ID: native
+      NEXT_DIST_DIR: .next-e2e-native-admin
+      BOOKING_CONTACT_PORT: "3220"
+      BOOKING_ROUTE_PORT: "3225"
+      TMPDIR: ${{ runner.temp }}
+      STORAGE_SOURCE: ${{ runner.temp }}/roo-storage-api-v1.79.33
+      AT_SPI_BUS_ADDRESS: unix:path=/dev/null
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Install PostgreSQL 17 and PostgREST 16.4
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends postgresql-17
+          mkdir -p "$RUNNER_TEMP/postgrest"
+          curl --fail --silent --show-error --location https://github.com/PostgREST/postgrest/releases/download/v16.4/postgrest-v16.4-linux-static-x86-64.tar.xz -o "$RUNNER_TEMP/postgrest.tar.xz"
+          echo "b47ecc82fce1dcebbbc4183d839e52f07f7630c9d7ad0f54db753d1939299354  $RUNNER_TEMP/postgrest.tar.xz" | sha256sum --check
+          tar -xJf "$RUNNER_TEMP/postgrest.tar.xz" -C "$RUNNER_TEMP/postgrest"
+          /usr/lib/postgresql/17/bin/postgres --version
+          test "$("$RUNNER_TEMP/postgrest/postgrest" --version)" = "PostgREST 16.4"
+          echo "PG_BIN=/usr/lib/postgresql/17/bin" >> "$GITHUB_ENV"
+          echo "POSTGREST_BIN=$RUNNER_TEMP/postgrest/postgrest" >> "$GITHUB_ENV"
+      - name: Build the pinned native Storage fixture
+        run: |
+          git clone --depth 1 --branch v1.79.33 https://github.com/supabase/storage.git "$STORAGE_SOURCE"
+          test "$(git -C "$STORAGE_SOURCE" rev-parse HEAD)" = "2379ad5493f06bcf3bb5f044b844e292b98df4a0"
+          npx --yes npm@11.12.1 ci --prefix "$STORAGE_SOURCE"
+          npx --yes npm@11.12.1 run build --prefix "$STORAGE_SOURCE"
+      - name: Run native admin CMS suite
+        run: xvfb-run -a npx playwright test -c playwright.admin.config.js
+      - name: Run all four native booking-hold browser cases
+        env:
+          NEXT_DIST_DIR: .next-e2e-native-booking
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-booking-hold.json
+        run: |
+          xvfb-run -a npx playwright test tests/booking-hold.spec.js --project=chromium --output=test-results/booking-hold-e2e --reporter=line,json
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const { stats } = require('./test-results/native-booking-hold.json');
+          assert.equal(stats.expected, 4, 'All four native booking-hold cases must pass');
+          assert.equal(stats.skipped, 0, 'Native booking-hold cases must not skip');
+          assert.equal(stats.unexpected, 0);
+          assert.equal(stats.flaky, 0);
+          NODE
+      - name: Run booking-contact PostgreSQL 17 suite
+        run: npm run test:booking-contact
+      - name: Run booking hold API suite
+        run: npm run test:booking:holds
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-native
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 7
