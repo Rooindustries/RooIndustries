@@ -4340,6 +4340,9 @@ export const reconcilePaymentSessions = async ({
       const confirmationBooking = confirmationPending && record.bookingId
         ? await getBookingForEmailDispatch({ client, bookingId: record.bookingId }) : null;
       const inactiveConfirmation = !!confirmationBooking && !isBookingBlockingStatus(confirmationBooking.status);
+      if (inactiveConfirmation && isBookingEmailSuppressed(record.emailDispatch) &&
+          record.emailDispatchRequired !== true && record.refundRequiresBookingSync !== true &&
+          record.resourceReleasePending !== true) continue;
       const localRecovery =
         (record.refundRequiresBookingSync === true &&
           (record.refundState !== "partial" || !!String(record.bookingId || "").trim())) ||

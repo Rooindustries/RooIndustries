@@ -63,6 +63,7 @@ export async function createBookingContactFixture() {
     const { createSweepPostgresFixture } = await import('../../scripts/lib/sweep-postgres-fixture.mjs');
     database = await createSweepPostgresFixture({
       fullMigrationChain: true,
+      excludedMigrations: (process.env.ROO_TEST_EXCLUDED_MIGRATIONS || '').split(',').filter(Boolean),
       ports: { postgres: port + 2, rest: port + 3, proxy: port + 1 },
       pgBin: process.env.PG_BIN || execFileSync('pg_config', ['--bindir'], { encoding: 'utf8' }).trim(),
       postgrestBin: process.env.POSTGREST_BIN || 'postgrest',
@@ -70,6 +71,7 @@ export async function createBookingContactFixture() {
     evidence.database = {
       version: database.postgresVersion, postgrest: database.postgrestVersion,
       migrations: database.manifest.length,
+      excludedMigrations: (process.env.ROO_TEST_EXCLUDED_MIGRATIONS || '').split(',').filter(Boolean),
     };
     Object.assign(process.env, {
       SUPABASE_URL: database.origin, SUPABASE_SERVICE_ROLE_KEY: database.token,
@@ -77,6 +79,11 @@ export async function createBookingContactFixture() {
     });
     const sessions = new Map();
     database.setProviderHandler(async request => {
+      if (request.path === '/emails') {
+        request.bookings = await database.sql`select legacy_sanity_id as id, payload->>'status' as status
+          from migration.source_documents where document_type = 'booking' and not tombstoned
+          and position('>' || legacy_sanity_id || '<' in ${request.body.html || ''}) > 0`;
+      }
       evidence.providerRequests.push(request);
       if (request.path === '/products/pdt_fixture') return { body: {
         product_id: 'pdt_fixture', is_recurring: false,

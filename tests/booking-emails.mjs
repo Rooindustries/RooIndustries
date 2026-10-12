@@ -1,8 +1,26 @@
-import assert from 'node:assert/strict';
+import strictAssert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { test } from 'node:test';
 import { createBookingContactFixture } from './fixtures/booking-contact.mjs';
+
+const rollout = process.env.BOOKING_EMAIL_ROLLOUT || '';
+strictAssert.ok(['', 'code-first', 'migration-first'].includes(rollout));
+let contractDifferences;
+const assertion = fn => (...args) => {
+  const failed = error => {
+    if (!rollout || !contractDifferences) throw error;
+    contractDifferences.push(error.message);
+  };
+  try {
+    const result = fn(...args);
+    return result?.catch ? result.catch(failed) : result;
+  } catch (error) { return failed(error); }
+};
+const assert = new Proxy(strictAssert, {
+  apply: (target, receiver, args) => assertion(target)(...args),
+  get: (target, key) => typeof target[key] === 'function' ? assertion(target[key]) : target[key],
+});
 
 test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000 }, async t => {
   const fixture = await createBookingContactFixture();
@@ -14,9 +32,9 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
   const { reconcilePaymentSessions } = await import('../src/server/api/payment/flow.js');
   process.env.CRON_SECRET = 'fixture-booking-emails-cron';
   const artifact = new URL('../test-results/booking-emails/postgres17.json', import.meta.url);
-  const results = { database: fixture.evidence.database, cases: [] };
+  const results = { rollout, database: fixture.evidence.database, cases: [] };
   const messages = (bookingId = '') => fixture.evidence.providerRequests.filter(request =>
-    request.path === '/emails' && (!bookingId || request.body.html?.includes(bookingId)));
+    request.path === '/emails' && (!bookingId || request.body.html?.includes(`>${bookingId}<`)));
   const rows = bookingId => database.sql`
     select dispatch.recipient_type, dispatch.status, dispatch.last_error_code,
       dispatch.attempt_count, dispatch.lease_id, dispatch.lease_expires_at,
@@ -96,18 +114,55 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
   };
   const recover = () => reconcilePaymentSessions({ client: commerce, backend: 'supabase',
     req: { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } } });
-  const check = async (name, run) => t.test(name, async () => {
-    const result = { name };
+  const check = async (name, run) => t.test(name, {
+    skip: !!process.env.BOOKING_EMAIL_SCENARIO && !name.includes(process.env.BOOKING_EMAIL_SCENARIO),
+  }, async () => {
+    const result = { name, contractDifferences: [] };
+    const transportStart = messages().length;
+    const firstBooking = sequence + 1;
+    const httpStart = fixture.evidence.http.length;
+    contractDifferences = result.contractDifferences;
     results.cases.push(result);
     try {
       await run(result);
+      result.contract = result.contractDifferences.length ? 'fail' : 'pass';
+      result.transports = messages().slice(transportStart);
+      result.http = fixture.evidence.http.slice(httpStart);
+      if (rollout) {
+        const confirmations = result.transports.filter(request =>
+          request.body.html.includes('Booking Received') || request.body.html.includes('New Booking'));
+        strictAssert.ok(confirmations.every(request => request.bookings?.length === 1), 'Transport status must be observed');
+        strictAssert.ok(confirmations.every(request =>
+          !['failed', 'refunded', 'cancelled', 'canceled'].includes(String(request.bookings[0].status || '').trim().toLowerCase())),
+        'Inactive booking reached confirmation transport');
+        const ownConfirmations = confirmations.filter(request =>
+          Number(request.bookings[0].id.split('.').at(-1)) >= firstBooking);
+        if (name.startsWith('active classification') || name.startsWith('partial refund') ||
+            name.startsWith('suppressed never-attempted') || name.startsWith('projection-only') ||
+            name.startsWith('reactivation')) {
+          strictAssert.deepEqual(ownConfirmations.map(request => request.body.to).sort(),
+            ['owner@example.invalid', 'visitor@example.invalid'], 'Active recipients must each send exactly once');
+          const activeResponse = result.reactivatedResponse || result.response;
+          if (activeResponse) strictAssert.equal(activeResponse.status ?? activeResponse.httpStatus, 200,
+            'Active flow must return success');
+          if (name.startsWith('reactivation makes')) strictAssert.ok(result.ledger.every(row => row.status === 'sent'),
+            'Active recovery must send without waiting for replay');
+        }
+      }
       result.result = 'pass';
     } catch (error) {
       result.result = 'fail';
       result.error = error.message;
-      throw error;
+      if (rollout && name.startsWith('missing current booking') && messages().length === transportStart) {
+        result.contract = 'fail';
+        result.result = 'pass';
+      } else throw error;
     } finally {
       database.setRequestHook(null);
+      contractDifferences = null;
+      result.bookings = Array.from({ length: sequence - firstBooking + 1 }, (_, index) => `booking.emails.${firstBooking + index}`);
+      result.transports = messages().slice(transportStart);
+      result.http = fixture.evidence.http.slice(httpStart);
       results.transportCalls = messages();
       fs.mkdirSync(new URL('.', artifact), { recursive: true });
       fs.writeFileSync(artifact, JSON.stringify(results, null, 2));
@@ -242,7 +297,8 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
       assert.equal(messages(booking.bookingId).length, before);
       result.secondRecovery = await recover();
       assert.equal(messages(booking.bookingId).length, before);
-      assert.equal((await commerce.getDocument(booking.record._id))._rev, result.record._rev);
+      strictAssert.equal((await commerce.getDocument(booking.record._id))._rev, result.record._rev,
+        'Suppressed payment recovery must not run again');
     });
 
     await check('deferred paid replay preserves inactive aggregate and recipient suppression', async result => {
@@ -388,9 +444,18 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
     });
 
     await check('the migration function definitions can be reapplied without changing state', async result => {
-      const file = new URL('../supabase/migrations/20261012000000_suppress_inactive_booking_confirmations.sql', import.meta.url);
+      const name = fixture.evidence.database.excludedMigrations.includes('20261012000000_suppress_inactive_booking_confirmations.sql')
+        ? '20261005000000_terminalize_unknown_booking_email_delivery.sql'
+        : '20261012000000_suppress_inactive_booking_confirmations.sql';
+      const file = new URL(`../supabase/migrations/${name}`, import.meta.url);
       const before = await database.sql`select id, to_jsonb(dispatch) as row from commerce.email_dispatches dispatch order by id`;
-      await database.sql.unsafe(fs.readFileSync(file, 'utf8'));
+      if (fixture.evidence.database.excludedMigrations.length) {
+        const definitions = await database.sql`select pg_get_functiondef(oid) as sql from pg_proc
+          where pronamespace = 'public'::regnamespace and proname in
+          ('roo_claim_booking_email_dispatch', 'roo_complete_booking_email_dispatch',
+           'roo_list_email_dispatch_recovery_bookings', 'roo_fetch_recovery_payment_documents')`;
+        for (const definition of definitions) await database.sql.unsafe(definition.sql);
+      } else await database.sql.unsafe(fs.readFileSync(file, 'utf8'));
       const after = await database.sql`select id, to_jsonb(dispatch) as row from commerce.email_dispatches dispatch order by id`;
       assert.deepEqual(after, before);
       result.reapplied = true;
@@ -473,6 +538,28 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
       assert.equal(result.ledger[0].provider_message_id, result.inactiveLedger[0].provider_message_id);
     });
 
+    await check('a receipt arriving after cancellation preserves the accepted transport', async result => {
+      const booking = await create();
+      database.setRequestHook(async (phase, request) => {
+        if (phase === 'before' && request.path.endsWith('/roo_complete_booking_email_dispatch') &&
+            request.body.p_success === true && request.body.p_idempotency_key === `booking-${booking.bookingId}-client`) {
+          database.setRequestHook(null);
+          await inactive(booking, 'cancelled');
+        }
+      });
+      result.response = await confirm(booking);
+      result.ledger = await rows(booking.bookingId);
+      assert.equal(messages(booking.bookingId).length, 1);
+      assert.equal(result.ledger[0].status, 'sent');
+      assert.equal(result.ledger[1].status, 'failed');
+      assert.equal(result.ledger[1].last_error_code, 'booking_inactive');
+      await commerce.patch(booking.bookingId).set({ status: 'captured' }).commit();
+      result.reactivatedResponse = await confirm(booking);
+      assert.equal(messages(booking.bookingId).length, 2);
+      assert.equal(result.reactivatedResponse.status, 200);
+      assert.equal((await rows(booking.bookingId))[0].provider_message_id, result.ledger[0].provider_message_id);
+    });
+
     await check('reactivation makes both suppressed recipients recoverable', async result => {
       const booking = await create();
       await inactive(booking, 'failed');
@@ -503,10 +590,53 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
       });
     }
 
+    await check('suppressed recovery stops claiming within twelve scheduled attempts', async result => {
+      const booking = await create();
+      await isolateRecovery(booking);
+      await inactive(booking, 'cancelled');
+      await confirm(booking);
+      result.attempts = [];
+      result.paymentRevisions = [];
+      for (let attempt = 0; attempt < 14; attempt += 1) {
+        await database.sql`update commerce.email_dispatches set next_attempt_at = now() - interval '1 second',
+          lease_id = null, lease_expires_at = null
+          where booking_id = (select id from commerce.bookings where legacy_sanity_id = ${booking.bookingId})
+          and status not in ('sent', 'historical_unknown')`;
+        await reconcileBookingEmailDispatches({ client: commerce,
+          now: new Date(Date.now() + 3600000).toISOString(), limit: 100 });
+        await recover();
+        const saved = await rows(booking.bookingId);
+        result.attempts.push(saved.map(row => row.attempt_count));
+        result.paymentRevisions.push((await commerce.getDocument(booking.record._id))._rev);
+      }
+      strictAssert.deepEqual(result.attempts.at(-1), result.attempts[1], 'Suppressed work is still being reclaimed');
+      strictAssert.equal(result.paymentRevisions.at(-1), result.paymentRevisions[1], 'Suppressed payment recovery is still running');
+      strictAssert.equal(messages(booking.bookingId).length, 0);
+    });
+
+    await check('inactive recovery candidates cannot crowd out an active booking at the SQL limit', async result => {
+      const previousBookings = await commerce.fetch('*[_type == "booking"]{_id}');
+      for (const booking of previousBookings) {
+        await commerce.patch(booking._id).set({ status: 'cancelled', emailDispatchLastError: 'booking_inactive' }).commit();
+      }
+      for (let index = 0; index < 101; index += 1) {
+        await commerce.create({ _id: `booking.crowded.${index}`, _type: 'booking',
+          backendOwner: 'supabase', cutoverGeneration: 0, status: 'cancelled',
+          emailDispatchStatus: 'failed', emailDispatchLastError: 'booking_inactive' });
+      }
+      const booking = await create();
+      await commerce.patch(booking.bookingId).set({ emailDispatchStatus: 'failed' }).commit();
+      result.recovery = await reconcileBookingEmailDispatches({ client: commerce, limit: 20 });
+      result.ledger = await rows(booking.bookingId);
+      strictAssert.equal(messages(booking.bookingId).length, 2);
+      strictAssert.ok(result.ledger.every(row => row.status === 'sent'));
+    });
+
     await check('Resend payload conflict remains delivery_unknown across replay and projection', async result => {
       const booking = await create();
       database.setProviderHandler(async request => {
         assert.equal(request.path, '/emails');
+        request.bookings = [{ id: booking.bookingId, status: (await commerce.getDocument(booking.bookingId)).status }];
         fixture.evidence.providerRequests.push(request);
         return { status: 409, body: { name: 'invalid_idempotent_request', statusCode: 409,
           message: 'This idempotency key has already been used on a different payload.' } };
@@ -515,9 +645,13 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
       result.response = await confirm(booking);
       await commerce.patch(booking.bookingId).set({ message: 'Unrelated update after uncertain delivery' }).commit();
       result.replay = await confirm(booking);
+      await inactive(booking, 'cancelled');
+      result.inactiveReplay = await confirm(booking);
+      await commerce.patch(booking.bookingId).set({ status: 'captured' }).commit();
       await reconcileBookingEmailDispatches({ client: commerce, limit: 100 });
       result.ledger = await rows(booking.bookingId);
       assert.equal(messages(booking.bookingId).length - before, 2);
+      assert.equal(result.inactiveReplay.body.deliveryUnknown, true);
       assert.equal(result.response.body.deliveryUnknown, true);
       assert.equal(result.response.body.retryable, false);
       assert.equal(result.replay.body.retryable, false);

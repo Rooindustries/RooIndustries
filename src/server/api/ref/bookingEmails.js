@@ -420,8 +420,12 @@ const buildBookingFieldGroups = (booking = {}) => {
 
 const suppressBookingConfirmation = async ({ client, booking }) => {
   const leaseId = crypto.randomUUID();
+  const recipientTypes = booking.emailDispatchLastError === "booking_inactive"
+    ? [["customer", "Client"], ["owner", "Owner"]].filter(([, name]) =>
+      !booking[`emailDispatch${name}SentAt`] && booking[`emailDispatch${name}ProviderId`]).map(([type]) => type)
+    : ["customer", "owner"];
   const ledger = await claimEmailDispatchPair({ client, bookingId: booking._id,
-    dispatchKind: "booking_confirmation", leaseId });
+    dispatchKind: "booking_confirmation", leaseId, recipientTypes });
   const dispatch = buildEmailDispatchState();
   dispatch.deliveryEnabled = hasEmailDeliveryConfig();
   for (const [name, entry, sentAt] of [
@@ -447,7 +451,7 @@ const suppressBookingConfirmation = async ({ client, booking }) => {
         if (entry.providerMessageId) receipts[`emailDispatch${name}ProviderId`] = entry.providerMessageId;
       }
     }
-    await client.patch(current._id).ifRevisionId(current._rev).set({
+    const values = {
       ...receipts,
       emailDispatchStatus: deliveryUnknown ? "delivery_unknown"
         : dispatch.client.sent && dispatch.owner.sent ? "sent"
@@ -455,7 +459,10 @@ const suppressBookingConfirmation = async ({ client, booking }) => {
       emailDispatchLastError: deliveryUnknown ? "email_delivery_unknown" : "booking_inactive",
       emailDispatchDeferred: false, emailDispatchNextAttemptAt: "",
       emailDispatchLeaseId: "", emailDispatchLeaseExpiresAt: "",
-    }).commit();
+    };
+    if (Object.entries(values).some(([key, value]) => current[key] !== value)) {
+      await client.patch(current._id).ifRevisionId(current._rev).set(values).commit();
+    }
   }
   return { httpStatus: deliveryUnknown ? 503 : 409, body: {
     ok: false, bookingId: booking._id, retryable: false, deliveryUnknown,
@@ -899,7 +906,7 @@ export const reconcileBookingEmailDispatches = async ({
     client,
     dispatchKind: "booking_confirmation",
     now,
-    limit,
+    limit: 100,
   });
   const bookings = Array.isArray(ledgerBookingIds)
     ? await client.fetch(
@@ -926,7 +933,21 @@ export const reconcileBookingEmailDispatches = async ({
     : Array.isArray(bookings)
       ? bookings
       : [];
-  const selected = ordered.slice(0, Math.max(1, Math.min(20, Number(limit) || 20)));
+  const eligible = ordered.filter(booking =>
+    isBookingBlockingStatus(booking.status) || booking.emailDispatchLastError !== "booking_inactive" ||
+    ["Client", "Owner"].some(name => !booking[`emailDispatch${name}SentAt`] && booking[`emailDispatch${name}ProviderId`]));
+  if (ledgerBookingIds?.length === 100 && eligible.length < Math.min(20, Number(limit) || 20)) {
+    const additional = await client.fetch(`*[_type == "booking"
+      && emailDispatchStatus in ["partial", "failed", "retry"]
+      && emailDispatchLastError != "booking_inactive"
+      && (!defined(emailDispatchNextAttemptAt) || emailDispatchNextAttemptAt == "" || emailDispatchNextAttemptAt <= $now)
+      && (!defined(emailDispatchClientSentAt) || !defined(emailDispatchOwnerSentAt))
+    ] | order(emailDispatchNextAttemptAt asc, _updatedAt asc)[0...20]{...}`, { now });
+    for (const booking of additional || []) {
+      if (!byId.has(booking._id)) eligible.push(booking);
+    }
+  }
+  const selected = eligible.slice(0, Math.max(1, Math.min(20, Number(limit) || 20)));
   for (const booking of selected) {
     summary.scanned += 1;
     const result = await sendBookingEmailsForBooking({

@@ -1,6 +1,136 @@
 set lock_timeout = '5s';
 set statement_timeout = '120s';
 
+create or replace function commerce.normalize_booking_confirmation_source(p_previous jsonb, p_document jsonb)
+returns jsonb
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_previous jsonb := coalesce(p_previous, '{}'::jsonb);
+  v_document jsonb := p_document;
+  v_inactive boolean := lower(btrim(coalesce(p_document->>'status', '')))
+    in ('failed', 'refunded', 'cancelled', 'canceled');
+  v_was_inactive boolean := lower(btrim(coalesce(p_previous->>'status', '')))
+    in ('failed', 'refunded', 'cancelled', 'canceled');
+  v_field text;
+  v_receipt record;
+  v_recipient text;
+  v_unknown boolean;
+begin
+  if v_inactive then
+    if v_was_inactive and (
+      (nullif(p_document->>'emailDispatchLeaseId', '') is not null
+        and p_document->>'emailDispatchLeaseId' is distinct from p_previous->>'emailDispatchLeaseId')
+      or p_document->>'emailDispatchClientFirstAttemptAt' is distinct from p_previous->>'emailDispatchClientFirstAttemptAt'
+      or p_document->>'emailDispatchOwnerFirstAttemptAt' is distinct from p_previous->>'emailDispatchOwnerFirstAttemptAt'
+    ) then
+      raise exception 'inactive booking cannot acquire an email transport lease' using errcode = '40001';
+    end if;
+    if v_was_inactive then
+      foreach v_field in array array['emailDispatchAttemptCount', 'emailDispatchLastAttemptAt',
+        'emailDispatchClientFirstAttemptAt', 'emailDispatchOwnerFirstAttemptAt'] loop
+        v_document := v_document - v_field;
+        if v_previous ? v_field then
+          v_document := v_document || jsonb_build_object(v_field, v_previous->v_field);
+        end if;
+      end loop;
+    end if;
+    for v_receipt in
+      select dispatch.recipient_type, dispatch.sent_at, dispatch.provider_message_id
+      from commerce.email_dispatches dispatch
+      join commerce.bookings booking on booking.id = dispatch.booking_id
+      where booking.legacy_sanity_id = v_document->>'_id'
+        and dispatch.dispatch_kind = 'booking_confirmation' and dispatch.status = 'sent'
+    loop
+      v_recipient := case when v_receipt.recipient_type = 'customer' then 'Client' else 'Owner' end;
+      if nullif(v_document->>('emailDispatch' || v_recipient || 'SentAt'), '') is null
+        and v_receipt.sent_at is not null then
+        v_document := v_document || jsonb_build_object('emailDispatch' || v_recipient || 'SentAt', v_receipt.sent_at);
+      end if;
+      if nullif(v_document->>('emailDispatch' || v_recipient || 'ProviderId'), '') is null
+        and v_receipt.provider_message_id is not null then
+        v_document := v_document || jsonb_build_object('emailDispatch' || v_recipient || 'ProviderId', v_receipt.provider_message_id);
+      end if;
+    end loop;
+    v_unknown := lower(btrim(coalesce(v_document->>'emailDispatchStatus', '')))
+      in ('delivery_unknown', 'historical_unknown')
+      or lower(btrim(coalesce(v_previous->>'emailDispatchStatus', '')))
+        in ('delivery_unknown', 'historical_unknown');
+    v_document := v_document || jsonb_build_object(
+      'emailDispatchStatus', case
+        when nullif(v_document->>'emailDispatchClientSentAt', '') is not null
+          and nullif(v_document->>'emailDispatchOwnerSentAt', '') is not null then 'sent'
+        when v_unknown then 'delivery_unknown'
+        when nullif(v_document->>'emailDispatchClientSentAt', '') is not null
+          or nullif(v_document->>'emailDispatchOwnerSentAt', '') is not null then 'partial'
+        else 'failed' end,
+      'emailDispatchLastError', case when v_unknown then 'email_delivery_unknown' else 'booking_inactive' end,
+      'emailDispatchLeaseId', '', 'emailDispatchLeaseExpiresAt', '',
+      'emailDispatchNextAttemptAt', '', 'emailDispatchDeferred', false
+    );
+  elsif v_was_inactive then
+    if lower(btrim(coalesce(v_document->>'emailDispatchStatus', '')))
+        not in ('delivery_unknown', 'historical_unknown') then
+      if (nullif(v_previous->>'emailDispatchClientSentAt', '') is null
+          and nullif(v_previous->>'emailDispatchClientFirstAttemptAt', '') is null)
+        or (nullif(v_previous->>'emailDispatchOwnerSentAt', '') is null
+          and nullif(v_previous->>'emailDispatchOwnerFirstAttemptAt', '') is null) then
+        v_document := v_document || '{"emailDispatchAttemptCount":0}'::jsonb;
+      end if;
+      if v_document->>'emailDispatchLastError' = 'booking_inactive' then
+        v_document := v_document || '{"emailDispatchLastError":""}'::jsonb;
+      end if;
+    end if;
+    v_document := v_document || '{"emailDispatchLeaseId":"","emailDispatchLeaseExpiresAt":"","emailDispatchNextAttemptAt":""}'::jsonb;
+  end if;
+  return v_document;
+end;
+$$;
+
+create or replace function commerce.guard_booking_confirmation_source()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if new.document_type = 'booking' and not new.tombstoned then
+    new.payload := commerce.normalize_booking_confirmation_source(
+      case when tg_op = 'UPDATE' then old.payload else '{}'::jsonb end, new.payload);
+    new.source_hash := encode(extensions.digest(new.payload::text, 'sha256'), 'hex');
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists guard_booking_confirmation_source on migration.source_documents;
+create trigger guard_booking_confirmation_source
+before insert or update of payload on migration.source_documents
+for each row execute function commerce.guard_booking_confirmation_source();
+
+do $migration$
+declare
+  definition text := pg_get_functiondef('migration.roo_apply_commerce_document_mutations_unbounded(text,jsonb,integer)'::regprocedure);
+  anchor text := '    v_now := clock_timestamp();';
+begin
+  if position('commerce.normalize_booking_confirmation_source' in definition) = 0 then
+    if (length(definition) - length(replace(definition, anchor, ''))) / length(anchor) <> 1 then
+      raise exception 'booking confirmation migration: expected document mutation anchor once';
+    end if;
+    execute replace(definition, anchor, $replacement$    if v_type = 'booking' then
+      v_payload := commerce.normalize_booking_confirmation_source(v_current.payload, v_payload);
+    end if;
+$replacement$ || anchor);
+  end if;
+end;
+$migration$;
+
+revoke all on function commerce.normalize_booking_confirmation_source(jsonb, jsonb) from public, anon, authenticated;
+grant execute on function commerce.normalize_booking_confirmation_source(jsonb, jsonb) to service_role;
+revoke all on function commerce.guard_booking_confirmation_source() from public, anon, authenticated;
+
 create or replace function commerce.booking_confirmation_is_inactive(p_booking_id uuid)
 returns boolean
 language sql
@@ -43,6 +173,9 @@ begin
       new.status := 'failed';
       new.last_error_code := 'booking_inactive';
       new.payload := coalesce(new.payload, '{}'::jsonb) || '{"booking_inactive":true}'::jsonb;
+      if tg_op = 'UPDATE' and old.lease_id is not null then
+        new.payload := new.payload || jsonb_build_object('booking_inactive_lease_id', old.lease_id);
+      end if;
       new.lease_id := null;
       new.lease_expires_at := null;
       new.next_attempt_at := null;
@@ -237,13 +370,13 @@ begin
   end if;
   if v_dispatch.lease_id is distinct from v_lease_id and not (
     v_dispatch.status = 'failed' and v_dispatch.last_error_code = 'booking_inactive'
-    and exists (
+    and (v_dispatch.payload->>'booking_inactive_lease_id' = v_lease_id or exists (
       select 1 from commerce.bookings booking
       join migration.source_documents source on source.legacy_sanity_id = booking.legacy_sanity_id
       where booking.id = v_dispatch.booking_id and not source.tombstoned
         and source.payload->>'emailDispatchLeaseId' = v_lease_id
         and migration.try_timestamptz(source.payload->>'emailDispatchLeaseExpiresAt') > now()
-    )
+    ))
   ) then
     raise exception 'email dispatch lease conflict'
       using errcode = '40001';
