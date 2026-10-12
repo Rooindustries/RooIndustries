@@ -117,14 +117,35 @@ const refundSubunits = (refund) => {
 };
 
 export const getPaidAmount = (booking) => {
-  const amount = booking?.netAmount ?? booking?.grossAmount ?? booking?.packagePrice;
-  return creditSubunits(amount) / 100;
+  if (
+    typeof booking?.netAmount === "number" &&
+    !Number.isNaN(booking.netAmount)
+  ) {
+    return booking.netAmount;
+  }
+
+  if (
+    typeof booking?.grossAmount === "number" &&
+    !Number.isNaN(booking.grossAmount)
+  ) {
+    return booking.grossAmount;
+  }
+
+  return toMoney(booking?.packagePrice);
 };
 
 export const getRetainedUpgradeCredit = async ({ booking, client }) => {
   const records = booking.paymentRecordId
     ? [await client.fetch(`*[_type == "paymentRecord" && _id == $id][0]{...}`, { id: booking.paymentRecordId })]
-    : await client.fetch(`*[_type == "paymentRecord" && bookingId == $bookingId][0...2]{...}`, { bookingId: booking._id });
+    : await client.fetch(`*[_type == "paymentRecord" && bookingId == $bookingId]{...}`, { bookingId: booking._id });
+  const hasSettledRefund =
+    (booking.refundedAmount != null && Number(booking.refundedAmount) !== 0) ||
+    ["partial", "full"].includes(booking.refundStatus) ||
+    (Array.isArray(records) && records.some(record =>
+      ["partial", "full"].includes(record?.refundState) || record?.status === "refunded" ||
+      Number(record?.refundProcessedAmountInSubunits) > 0 ||
+      (Array.isArray(record?.refunds) && record.refunds.some(refund => refund?.status === "processed"))));
+  if (!hasSettledRefund) return getPaidAmount(booking);
   if (records && !Array.isArray(records)) throw creditError();
   if (records?.length > 1 || (booking.paymentRecordId && !records?.[0]?._id)) throw creditError();
   const record = records?.[0] || null;
@@ -180,8 +201,7 @@ export const getRetainedUpgradeCredit = async ({ booking, client }) => {
   if ((booking.refundStatus === "partial" || record?.refundState === "partial") && refunded === 0) throw creditError();
   if (!record && bookingRefunded > 0) throw creditError();
   if (refunded > 0 && !["paypal", "razorpay", "dodo"].includes(provider)) throw creditError();
-  if ((refunded > 0 || provider === "dodo") &&
-      (record?.verificationState !== "server_verified" || record.pricingSnapshot?.netAmount == null)) throw creditError();
+  if (record?.verificationState !== "server_verified" || record.pricingSnapshot?.netAmount == null) throw creditError();
 
   const publicData = record?.providerPublicData || {};
   const tax = publicData.taxAmount ?? (provider === "dodo" ? null : 0);
@@ -274,10 +294,8 @@ export async function resolveUpgradeContext({
       continue;
     }
     retainedBookings.push(entry);
-    totalPaid += Math.round(credit * 100);
+    totalPaid += credit;
   }
-  if (!Number.isSafeInteger(totalPaid)) throw creditError();
-  totalPaid /= 100;
   const alreadyTarget = retainedBookings.some(
     (entry) => normalizePackageTitle(entry?.packageTitle) === normalizedTargetTitle
   );
