@@ -9,6 +9,7 @@ import {
   claimEmailDispatchPair,
   completeEmailDispatch,
   listEmailDispatchRecoveryBookingIds,
+  readTerminalBookingEmailDispatches,
 } from "../../supabase/emailDispatchLedger.js";
 
 const writeClient = createClient({}, { domain: "commerce" });
@@ -422,10 +423,12 @@ const suppressBookingConfirmation = async ({ client, booking }) => {
   const leaseId = crypto.randomUUID();
   const recipientTypes = booking.emailDispatchLastError === "booking_inactive"
     ? [["customer", "Client"], ["owner", "Owner"]].filter(([, name]) =>
-      !booking[`emailDispatch${name}SentAt`] && booking[`emailDispatch${name}ProviderId`]).map(([type]) => type)
+      !booking[`emailDispatch${name}SentAt`]).map(([type]) => type)
     : ["customer", "owner"];
-  const ledger = await claimEmailDispatchPair({ client, bookingId: booking._id,
-    dispatchKind: "booking_confirmation", leaseId, recipientTypes });
+  const ledger = booking.emailDispatchLastError === "booking_inactive"
+    ? await readTerminalBookingEmailDispatches({ client, bookingId: booking._id, recipientTypes })
+    : await claimEmailDispatchPair({ client, bookingId: booking._id,
+      dispatchKind: "booking_confirmation", leaseId, recipientTypes });
   const dispatch = buildEmailDispatchState();
   dispatch.deliveryEnabled = hasEmailDeliveryConfig();
   for (const [name, entry, sentAt] of [
@@ -446,9 +449,13 @@ const suppressBookingConfirmation = async ({ client, booking }) => {
   if (current?._rev && !isBookingBlockingStatus(current.status)) {
     const receipts = {};
     for (const [name, entry] of [["Client", ledger?.customer], ["Owner", ledger?.owner]]) {
-      if (entry?.sent && !current[`emailDispatch${name}SentAt`] && entry.sentAt) {
-        receipts[`emailDispatch${name}SentAt`] = entry.sentAt;
-        if (entry.providerMessageId) receipts[`emailDispatch${name}ProviderId`] = entry.providerMessageId;
+      if (entry?.sent) {
+        if (!current[`emailDispatch${name}SentAt`]) {
+          receipts[`emailDispatch${name}SentAt`] = entry.sentAt || new Date().toISOString();
+        }
+        if (!current[`emailDispatch${name}ProviderId`] && entry.providerMessageId) {
+          receipts[`emailDispatch${name}ProviderId`] = entry.providerMessageId;
+        }
       }
     }
     const values = {
@@ -933,9 +940,14 @@ export const reconcileBookingEmailDispatches = async ({
     : Array.isArray(bookings)
       ? bookings
       : [];
-  const eligible = ordered.filter(booking =>
-    isBookingBlockingStatus(booking.status) || booking.emailDispatchLastError !== "booking_inactive" ||
-    ["Client", "Owner"].some(name => !booking[`emailDispatch${name}SentAt`] && booking[`emailDispatch${name}ProviderId`]));
+  const eligible = (await Promise.all(ordered.map(async booking => {
+    if (isBookingBlockingStatus(booking.status) || booking.emailDispatchLastError !== "booking_inactive") return booking;
+    if (!Array.isArray(ledgerBookingIds)) return null;
+    const recipientTypes = [["customer", "Client"], ["owner", "Owner"]]
+      .filter(([, name]) => !booking[`emailDispatch${name}SentAt`]).map(([type]) => type);
+    const ledger = await readTerminalBookingEmailDispatches({ client, bookingId: booking._id, recipientTypes });
+    return Object.values(ledger || {}).some(entry => entry?.sent) ? booking : null;
+  }))).filter(Boolean);
   if (ledgerBookingIds?.length === 100 && eligible.length < Math.min(20, Number(limit) || 20)) {
     const additional = await client.fetch(`*[_type == "booking"
       && emailDispatchStatus in ["partial", "failed", "retry"]

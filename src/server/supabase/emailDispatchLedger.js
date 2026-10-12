@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+
 const normalizeDispatch = (value = {}) => ({
   claimed: value?.claimed === true,
   sent: value?.sent === true,
@@ -82,6 +84,30 @@ export const completeEmailDispatch = async ({
     claimed: false,
     in_progress: false,
   });
+};
+
+export const readTerminalBookingEmailDispatches = async ({
+  client,
+  bookingId,
+  recipientTypes = ["customer", "owner"],
+} = {}) => {
+  if (!hasAuthoritativeEmailLedger(client)) return null;
+  const leaseId = `receipt-read-${crypto.randomUUID()}`;
+  const entries = await Promise.all(recipientTypes.map(async recipientType => {
+    const idempotencyKey = `booking-${String(bookingId || "").trim()}-${recipientType === "customer" ? "client" : "owner"}`;
+    for (const success of [true, false]) {
+      try {
+        const dispatch = await completeEmailDispatch({
+          client, dispatch: { idempotencyKey }, leaseId, success,
+        });
+        return [recipientType, dispatch];
+      } catch (error) {
+        if (error.code !== "40001") throw error;
+      }
+    }
+    return [recipientType, normalizeDispatch()];
+  }));
+  return Object.fromEntries(entries);
 };
 
 export const listEmailDispatchRecoveryBookingIds = async ({

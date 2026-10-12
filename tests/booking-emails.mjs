@@ -731,6 +731,75 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
       assert.equal((await rows(booking.bookingId))[0].provider_message_id, result.ledger[0].provider_message_id);
     });
 
+    for (const repair of ['reconciliation', 'confirmation replay']) {
+      for (const providerReceipt of [true, false]) {
+        await check(`late accepted customer receipt repairs missing source fields through ${repair}, provider receipt ${providerReceipt}`, async result => {
+          const booking = await create();
+          let receiptRecorded = false;
+          const hook = async (phase, request) => {
+            if (!receiptRecorded && request.path.endsWith('/roo_complete_booking_email_dispatch') &&
+                request.body.p_success === true && request.body.p_idempotency_key === `booking-${booking.bookingId}-client`) {
+              if (phase === 'before') {
+                strictAssert.equal(messages(booking.bookingId).length, 1);
+                database.setRequestHook(null);
+                await inactive(booking, 'cancelled');
+                await commerce.patch(booking.bookingId).set({ emailDispatchStatus: 'failed',
+                  emailDispatchLastError: 'booking_inactive', emailDispatchDeferred: false,
+                  emailDispatchNextAttemptAt: '' }).commit();
+                database.setRequestHook(hook);
+              } else {
+                receiptRecorded = true;
+                result.completion = request.response;
+              }
+            }
+            if (receiptRecorded && phase === 'before' && request.path.endsWith('/roo_apply_commerce_document_mutations')) {
+              throw new Error('Fixture process interrupted after ledger receipt completion');
+            }
+          };
+          database.setRequestHook(hook);
+          result.interruptedResponse = await confirm(booking);
+          database.setRequestHook(null);
+          strictAssert.equal(receiptRecorded, true);
+          if (!providerReceipt) {
+            await database.sql`update commerce.email_dispatches set provider_message_id = null
+              where idempotency_key = ${`booking-${booking.bookingId}-client`}`;
+          }
+          result.before = await commerce.getDocument(booking.bookingId);
+          result.beforeLedger = await rows(booking.bookingId);
+          strictAssert.equal(result.before.status, 'cancelled');
+          strictAssert.equal(result.before.emailDispatchStatus, 'failed');
+          strictAssert.equal(result.before.emailDispatchLastError, 'booking_inactive');
+          strictAssert.ok(!result.before.emailDispatchClientSentAt && !result.before.emailDispatchClientProviderId);
+          strictAssert.equal(result.beforeLedger[0].status, 'sent');
+          const { data, error } = await database.client.rpc('roo_list_email_dispatch_recovery_bookings', {
+            p_dispatch_kind: 'booking_confirmation', p_now: new Date().toISOString(), p_limit: 100,
+          });
+          strictAssert.equal(error, null);
+          strictAssert.ok(data.includes(booking.bookingId));
+          if (repair === 'reconciliation') {
+            result.recovery = await reconcileBookingEmailDispatches({ client: commerce, limit: 100 });
+            strictAssert.ok(result.recovery.scanned > 0);
+          } else result.response = await confirm(booking);
+          result.booking = await commerce.getDocument(booking.bookingId);
+          result.ledger = await rows(booking.bookingId);
+          strictAssert.equal(new Date(result.booking.emailDispatchClientSentAt).toISOString(),
+            new Date(result.beforeLedger[0].sent_at).toISOString());
+          strictAssert.equal(result.booking.emailDispatchClientProviderId || '', result.beforeLedger[0].provider_message_id || '');
+          strictAssert.equal(result.booking.emailDispatchStatus, 'partial');
+          strictAssert.ok(!result.booking.emailDispatchOwnerSentAt);
+          strictAssert.equal(result.ledger[0].status, 'sent');
+          strictAssert.equal(new Date(result.ledger[0].sent_at).getTime(), new Date(result.beforeLedger[0].sent_at).getTime());
+          strictAssert.equal(result.ledger[0].provider_message_id, result.beforeLedger[0].provider_message_id);
+          strictAssert.deepEqual(result.ledger.map(row => row.attempt_count), result.beforeLedger.map(row => row.attempt_count));
+          strictAssert.equal(result.booking.emailDispatchAttemptCount, result.before.emailDispatchAttemptCount);
+          await confirm(booking);
+          await reconcileBookingEmailDispatches({ client: commerce, limit: 100 });
+          strictAssert.equal(messages(booking.bookingId).length, 1);
+          strictAssert.equal(messages(booking.bookingId)[0].body.to, 'visitor@example.invalid');
+        });
+      }
+    }
+
     await check('reactivation makes both suppressed recipients recoverable', async result => {
       const booking = await create();
       await inactive(booking, 'failed');
