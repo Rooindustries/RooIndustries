@@ -17,6 +17,7 @@ import {
 } from "../ref/upgradeIntentToken.js";
 import { getBookingSettings, isSlotAllowedForPackage } from "../../booking/slotPolicy.js";
 import { issueHoldToken, verifyHoldToken } from "../../booking/holdToken.js";
+import { isBookingBlockingStatus } from "../../booking/bookingStatus.js";
 import providerConfig from "./providerConfig.js";
 import { createPayPalOrder, createRazorpayOrder, DEFAULT_PAYPAL_CURRENCY, DEFAULT_RAZORPAY_CURRENCY, getPayPalRefundCaptureId, inspectPayPalCapture, inspectPayPalOrder, inspectRazorpayOrder, inspectRazorpayPayment, parseMoneySubunits, toSubunits, verifyPayPalOrder, verifyPayPalWebhookSignature, verifyRazorpayPayment, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from "./providerClients.js";
 import {
@@ -68,7 +69,7 @@ import {
 import { selectPaymentAuthority, resolveWebhookBackend, createPaymentBackendClient } from "./backend.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 
-import { isEmailDeliveryUnknown } from "../ref/bookingEmails.js";
+import { getBookingForEmailDispatch, isBookingEmailSuppressed, isEmailDeliveryUnknown } from "../ref/bookingEmails.js";
 
 export { authorizeCronRequest };
 
@@ -290,15 +291,17 @@ const getLegacySuccessStatus = (emailDispatch = {}) =>
 
 const isEmailDispatchComplete = (emailDispatch = {}) => {
   const dispatch = normalizeObject(emailDispatch);
+  if (isBookingEmailSuppressed(dispatch)) return false;
   if (dispatch.allSent === true &&
       (dispatch.client?.sent === undefined || dispatch.client.sent === true) &&
       (dispatch.owner?.sent === undefined || dispatch.owner.sent === true)) return true;
   return dispatch.client?.sent === true && dispatch.owner?.sent === true;
 };
 
-const shouldRetryEmailPartialDispatch = ({ record, source = "" }) => {
+const shouldRetryEmailPartialDispatch = ({ record, source = "", booking = null }) => {
   const status = String(record?.status || "").trim().toLowerCase();
   if (record?.requiresReschedule === true || record?.emailDeliveryReviewRequired === true) return false;
+  if (isBookingEmailSuppressed(record?.emailDispatch) && (!booking || !isBookingBlockingStatus(booking.status))) return false;
   const emailRecoveryPending =
     status === PAYMENT_STATUS_EMAIL_PARTIAL ||
     (status === PAYMENT_STATUS_BOOKED && record?.emailDispatchRequired === true);
@@ -2386,9 +2389,11 @@ const finalizePaymentRecordInternal = async ({
 
   if (result.body?.bookingId && (
     (result.status >= 200 && result.status < 300) ||
-    (result.status === 503 && result.body.emailDispatch?.allSent === false)
+    (result.status === 503 && result.body.emailDispatch?.allSent === false) ||
+    isBookingEmailSuppressed(result.body)
   )) {
     const deliveryUnknown = isEmailDeliveryUnknown(result.body);
+    const bookingInactive = !deliveryUnknown && isBookingEmailSuppressed(result.body);
     const nextStatus = deliveryUnknown ? PAYMENT_STATUS_BOOKED : getLegacySuccessStatus(result.body?.emailDispatch);
     const bookingId = String(result.body.bookingId || "").trim();
     const bookingDoc = await client.fetch(
@@ -2424,9 +2429,10 @@ const finalizePaymentRecordInternal = async ({
         nextRecord = current;
         break;
       }
-      const complete = isEmailDispatchComplete(current.emailDispatch);
+      const complete = !bookingInactive && isEmailDispatchComplete(current.emailDispatch);
       const completionDispatch = complete ? current.emailDispatch : normalizeObject(result.body?.emailDispatch);
       const completionUnknown = !complete && (current.emailDeliveryReviewRequired === true || deliveryUnknown);
+      const completionSuppressed = !complete && !completionUnknown && bookingInactive;
       const completionStatus = complete || completionUnknown ? PAYMENT_STATUS_BOOKED : nextStatus;
       try {
         nextRecord = await patchPaymentRecord({
@@ -2435,7 +2441,8 @@ const finalizePaymentRecordInternal = async ({
           set: {
             status: completionStatus,
             bookingId,
-            recoveryReason: current.providerRefundDetailsMissing === true ? "provider_partial_refund_details_missing_owner_review"
+            recoveryReason: completionSuppressed ? "booking_inactive"
+              : current.providerRefundDetailsMissing === true ? "provider_partial_refund_details_missing_owner_review"
               : completionUnknown ? "booking_email_delivery_review_required" : "",
             recoveryAttemptCount: 0,
             ...buildRecoveryCompletionState(current),
@@ -2444,9 +2451,9 @@ const finalizePaymentRecordInternal = async ({
             finalizationLeaseExpiresAt: "",
             emailDispatch: completionDispatch,
             emailDispatchToken: String(
-              complete ? "" : result.body?.emailDispatchToken || ""
+              complete || completionUnknown || completionSuppressed ? "" : result.body?.emailDispatchToken || ""
             ).trim(),
-            emailDispatchRequired: completionStatus === PAYMENT_STATUS_EMAIL_PARTIAL,
+            emailDispatchRequired: completionStatus === PAYMENT_STATUS_EMAIL_PARTIAL && !completionSuppressed,
             emailDeliveryReviewRequired: completionUnknown,
             verificationState: String(
               bookingDoc?.paymentVerificationState || workingRecord.verificationState || ""
@@ -4327,12 +4334,18 @@ export const reconcilePaymentSessions = async ({
       if (record.providerRecoveryTerminal === true &&
           ["payment_currency_mismatch", "payment_currency_invalid"].includes(record.providerRecoveryTerminalReason)) continue;
       const localStatus = String(record.status || "").trim().toLowerCase();
+      const confirmationPending = record.requiresReschedule !== true &&
+        (localStatus === PAYMENT_STATUS_EMAIL_PARTIAL ||
+          (localStatus === PAYMENT_STATUS_BOOKED && record.emailDispatchRequired === true));
+      const confirmationBooking = confirmationPending && record.bookingId
+        ? await getBookingForEmailDispatch({ client, bookingId: record.bookingId }) : null;
+      const inactiveConfirmation = !!confirmationBooking && !isBookingBlockingStatus(confirmationBooking.status);
       const localRecovery =
         (record.refundRequiresBookingSync === true &&
           (record.refundState !== "partial" || !!String(record.bookingId || "").trim())) ||
         record.resourceReleasePending === true ||
         (localStatus === PAYMENT_STATUS_EMAIL_PARTIAL && record.requiresReschedule === true) ||
-        shouldRetryEmailPartialDispatch({ record, source: "reconcile" });
+        inactiveConfirmation || shouldRetryEmailPartialDispatch({ record, source: "reconcile", booking: confirmationBooking });
       if (record.provider === "dodo" && !localRecovery && (!dodoEnabled || record.providerRecoveryTerminal === true)) continue;
       summary.scanned += 1;
       const ageMinutes = getPaymentAgeMinutes(record);
@@ -4505,6 +4518,7 @@ export const reconcilePaymentSessions = async ({
       const shouldRetryEmailDispatch = shouldRetryEmailPartialDispatch({
         record,
         source: "reconcile",
+        booking: confirmationBooking,
       });
 
       if (
@@ -4514,7 +4528,7 @@ export const reconcilePaymentSessions = async ({
           status === PAYMENT_STATUS_EMAIL_PARTIAL &&
           record.requiresReschedule === true
         ) &&
-        !shouldRetryEmailDispatch
+        !shouldRetryEmailDispatch && !inactiveConfirmation
       ) {
         continue;
       }
@@ -4540,23 +4554,26 @@ export const reconcilePaymentSessions = async ({
         continue;
       }
 
-      if (record.provider === "dodo" && shouldRetryEmailDispatch) {
+      if ((record.provider === "dodo" && shouldRetryEmailDispatch) || inactiveConfirmation) {
         const { sendBookingEmailsForBooking } = await import("../ref/bookingEmails.js");
         const emailed = await sendBookingEmailsForBooking({ bookingId: record.bookingId, client });
         const complete = isEmailDispatchComplete(emailed.body?.emailDispatch);
         const deliveryUnknown = isEmailDeliveryUnknown(emailed.body);
-        const recoveryAttemptCount = complete || deliveryUnknown ? 0 : Number(record.recoveryAttemptCount || 0) + 1;
+        const bookingInactive = !deliveryUnknown && isBookingEmailSuppressed(emailed.body);
+        const settled = complete || deliveryUnknown || bookingInactive;
+        const recoveryAttemptCount = bookingInactive ? Number(record.recoveryAttemptCount || 0)
+          : settled ? 0 : Number(record.recoveryAttemptCount || 0) + 1;
         try {
           await patchPaymentRecord({ client, record, set: {
             status: complete || deliveryUnknown ? PAYMENT_STATUS_BOOKED : PAYMENT_STATUS_EMAIL_PARTIAL,
-            emailDispatchRequired: !complete && !deliveryUnknown,
+            emailDispatchRequired: !settled,
             emailDeliveryReviewRequired: deliveryUnknown,
-            emailDispatchToken: complete ? "" : record.emailDispatchToken || "",
+            emailDispatchToken: settled ? "" : record.emailDispatchToken || "",
             ...(emailed.body?.emailDispatch ? { emailDispatch: emailed.body.emailDispatch } : {}),
             recoveryAttemptCount,
-            ...(complete || deliveryUnknown ? buildRecoveryCompletionState(record) : {}),
-            recoveryReason: deliveryUnknown ? "booking_email_delivery_review_required" : complete ? "" : "booking_email_retry_pending",
-            nextRecoveryAt: complete || deliveryUnknown ? "" : getNextPaymentRecoveryAt(recoveryAttemptCount),
+            ...(settled ? buildRecoveryCompletionState(record) : {}),
+            recoveryReason: bookingInactive ? "booking_inactive" : deliveryUnknown ? "booking_email_delivery_review_required" : complete ? "" : "booking_email_retry_pending",
+            nextRecoveryAt: settled ? "" : getNextPaymentRecoveryAt(recoveryAttemptCount),
           } });
         } catch (error) {
           if (!isConflictError(error)) throw error;

@@ -943,6 +943,11 @@ export default async function handler(req, res) {
       const allEmailsAlreadySent =
         !!booking.emailDispatchClientSentAt && !!booking.emailDispatchOwnerSentAt;
 
+      if (!isBookingBlockingStatus(booking.status)) {
+        const result = await sendBookingEmailsForBooking({ bookingId: booking._id, client: writeClient });
+        return res.status(result.httpStatus).json(result.body);
+      }
+
       if (
         deferEmailDispatchRequested &&
         canIssueBookingEmailDispatchToken() &&
@@ -953,11 +958,12 @@ export default async function handler(req, res) {
           emailDispatchDeferred: true,
           emailDispatchStatus: "pending",
           emailDispatchQueuedAt: queuedAt,
-          emailDispatchLastError: "",
+          emailDispatchLastError: booking.emailDispatchLastError === "booking_inactive" ? "booking_inactive" : "",
         };
         const patchedBooking =
           (await writeClient
             .patch(booking._id)
+            .ifRevisionId(booking._rev)
             .set(patchValues)
             .commit()) || {
             ...booking,

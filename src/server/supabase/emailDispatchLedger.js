@@ -3,6 +3,7 @@ const normalizeDispatch = (value = {}) => ({
   sent: value?.sent === true,
   historicalUnknown: value?.historical_unknown === true,
   inactive: value?.booking_inactive === true,
+  previouslySuppressed: value?.previously_suppressed === true,
   inProgress: value?.in_progress === true,
   idempotencyKey: String(value?.idempotency_key || "").trim(),
   providerMessageId: String(value?.provider_message_id || "").trim(),

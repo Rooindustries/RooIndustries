@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 const BOOKING_CONFIRMATION_STORAGE_KEY = "booking_confirmation_state";
 const TERMINAL_FAILURE_STATUSES = new Set([400, 401, 403, 404]);
@@ -25,6 +25,7 @@ const clearStoredBookingConfirmation = () => {
 
 export default function BookingEmailDispatchEffect() {
   const location = useLocation();
+  const navigate = useNavigate();
   const attemptedKeyRef = useRef("");
   const historyUsrState =
     typeof window !== "undefined" ? window.history?.state?.usr : null;
@@ -67,8 +68,14 @@ export default function BookingEmailDispatchEffect() {
           (body?.emailDispatch?.client?.sent === true &&
             body?.emailDispatch?.owner?.sent === true);
 
-        if (allSent || TERMINAL_FAILURE_STATUSES.has(response.status)) {
+        if (allSent || TERMINAL_FAILURE_STATUSES.has(response.status) || body?.code === "booking_inactive") {
           clearStoredBookingConfirmation();
+          if (navState.bookingConfirmation) {
+            const nextState = { ...navState };
+            delete nextState.bookingConfirmation;
+            navigate({ pathname: location.pathname, search: location.search, hash: location.hash },
+              { replace: true, state: nextState });
+          }
           return;
         }
 
@@ -82,7 +89,7 @@ export default function BookingEmailDispatchEffect() {
     return () => {
       cancelled = true;
     };
-  }, [bookingId, emailDispatchToken]);
+  }, [bookingId, emailDispatchToken, navigate, location.pathname, location.search, location.hash]);
 
   return null;
 }

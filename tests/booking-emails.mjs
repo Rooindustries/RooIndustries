@@ -8,11 +8,15 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
   const fixture = await createBookingContactFixture();
   const { commerce, database } = fixture;
   const { applyBookingRefund, applyBookingStatusTransition } = await import('../src/server/api/ref/bookingRefunds.js');
-  const { reconcileBookingEmailDispatches, dispatchRescheduleNotifications } = await import('../src/server/api/ref/bookingEmails.js');
+  const { reconcileBookingEmailDispatches, dispatchRescheduleNotifications,
+    sendBookingEmailsForBooking, getBookingForEmailDispatch } = await import('../src/server/api/ref/bookingEmails.js');
   const { issueBookingEmailDispatchToken } = await import('../src/server/api/ref/bookingEmailDispatchToken.js');
+  const { reconcilePaymentSessions } = await import('../src/server/api/payment/flow.js');
+  process.env.CRON_SECRET = 'fixture-booking-emails-cron';
   const artifact = new URL('../test-results/booking-emails/postgres17.json', import.meta.url);
   const results = { database: fixture.evidence.database, cases: [] };
-  const messages = () => fixture.evidence.providerRequests.filter(request => request.path === '/emails');
+  const messages = (bookingId = '') => fixture.evidence.providerRequests.filter(request =>
+    request.path === '/emails' && (!bookingId || request.body.html?.includes(bookingId)));
   const rows = bookingId => database.sql`
     select dispatch.recipient_type, dispatch.status, dispatch.last_error_code,
       dispatch.attempt_count, dispatch.lease_id, dispatch.lease_expires_at,
@@ -22,13 +26,15 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
     where booking.legacy_sanity_id = ${bookingId} and dispatch.dispatch_kind = 'booking_confirmation'
     order by dispatch.recipient_type`;
   let sequence = 0;
-  const create = async () => {
+  const createdRecordIds = [];
+  const create = async ({ provider = 'dodo' } = {}) => {
     const id = ++sequence;
     const bookingId = `booking.emails.${id}`;
     const paymentRecordId = `paymentRecord.emails.${id}`;
     const booking = await commerce.create({
       _id: bookingId, _type: 'booking', backendOwner: 'supabase', cutoverGeneration: 0,
-      ...fixture.details, status: 'captured', paymentProvider: 'dodo', paymentRecordId,
+      ...fixture.details, status: 'captured', paymentProvider: provider, paymentRecordId,
+      ...(provider === 'paypal' ? { paypalOrderId: `order_emails_${id}` } : {}),
       packageTitle: 'Vertex Essentials', packagePrice: '$29.95',
       currency: 'USD', grossAmount: 29.95, netAmount: 29.95, dodoTotalAmount: 29.95,
       startTimeUTC: new Date(Date.UTC(2099, 0, id, 4, 30)).toISOString(),
@@ -38,11 +44,13 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
     });
     const record = await commerce.create({
       _id: paymentRecordId, _type: 'paymentRecord', backendOwner: 'supabase', cutoverGeneration: 0,
-      provider: 'dodo', status: 'email_partial', bookingId, emailDispatchRequired: true,
-      providerOrderId: `session_emails_${id}`, providerPaymentId: `payment_emails_${id}`,
+      provider, status: 'email_partial', bookingId, emailDispatchRequired: true,
+      providerOrderId: provider === 'paypal' ? `order_emails_${id}` : `session_emails_${id}`,
+      providerPaymentId: `payment_emails_${id}`,
       bookingPayload: { ...fixture.details, packageTitle: booking.packageTitle, netAmount: 29.95, currency: 'USD' },
       providerPublicData: { totalAmount: 2995, currency: 'USD' },
     });
+    createdRecordIds.push(record._id);
     return { bookingId, record, emailDispatchToken: issueBookingEmailDispatchToken({
       bookingId, email: booking.email, backend: 'supabase', cutoverGeneration: 0,
     }) };
@@ -54,7 +62,7 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
     if (status === 'refunded') {
       await applyBookingRefund({ client: commerce, paymentRecord: booking.record,
         refund: { full: true, id: `refund-${booking.bookingId}`, amount: 29.95, currency: 'USD' } });
-    } else if (status === 'canceled') {
+    } else if (status === 'canceled' || status !== status.trim()) {
       await commerce.patch(booking.bookingId).set({ status }).commit();
     } else {
       await transition(booking.bookingId, status);
@@ -70,6 +78,24 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
       }
     }
   };
+  const recoveryCandidates = async () => {
+    const { data, error } = await database.client.rpc('roo_fetch_recovery_payment_documents', {
+      p_backend: 'supabase', p_statuses: ['started', 'captured_client', 'captured_webhook',
+        'finalizing', 'email_partial', 'needs_recovery'], p_refunded_status: 'refunded',
+      p_booked_status: 'booked', p_abandoned_status: 'abandoned',
+      p_now: new Date().toISOString(), p_limit: 100, p_dodo_enabled: true,
+    });
+    assert.equal(error, null);
+    return data.map(record => record._id);
+  };
+  const isolateRecovery = async booking => {
+    for (const id of createdRecordIds.filter(id => id !== booking.record._id)) {
+      await commerce.patch(id).set({ status: 'booked', emailDispatchRequired: false,
+        nextRecoveryAt: '', refundRequiresBookingSync: false, resourceReleasePending: false }).commit();
+    }
+  };
+  const recover = () => reconcilePaymentSessions({ client: commerce, backend: 'supabase',
+    req: { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } } });
   const check = async (name, run) => t.test(name, async () => {
     const result = { name };
     results.cases.push(result);
@@ -89,14 +115,14 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
   });
 
   try {
-    for (const status of ['refunded', 'cancelled', 'failed', 'canceled']) {
+    for (const status of ['refunded', 'cancelled', 'failed', 'canceled', ' cancelled ']) {
       await check(`${status}: signed confirmation suppresses both recipients`, async result => {
         const booking = await create();
-        const before = messages().length;
+        const before = messages(booking.bookingId).length;
         await inactive(booking, status);
         result.response = await confirm(booking);
         result.ledger = await rows(booking.bookingId);
-        result.transportCalls = messages().slice(before);
+        result.transportCalls = messages(booking.bookingId).slice(before);
         assert.equal(result.transportCalls.length, 0);
         assertSuppressed(result.ledger);
         assert.equal(result.response.body.ok, false);
@@ -108,7 +134,7 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
         const booking = await create();
         await inactive(booking, status);
         await confirm(booking);
-        const before = messages().length;
+        const before = messages(booking.bookingId).length;
         const saved = await rows(booking.bookingId);
         await commerce.patch(booking.bookingId).set({ message: 'Unrelated booking update' }).commit();
         await database.sql`select migration.project_commerce_extensions(array[${booking.bookingId}])`;
@@ -125,7 +151,7 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
           result.claims.push(data);
         }
         result.ledger = await rows(booking.bookingId);
-        assert.equal(messages().length, before);
+        assert.equal(messages(booking.bookingId).length, before);
         assertSuppressed(result.ledger);
         assert.deepEqual(result.ledger.map(row => row.attempt_count), saved.map(row => row.attempt_count));
         assert.ok(result.claims.every(claim => claim.claimed === false && claim.in_progress === false));
@@ -133,17 +159,255 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
       });
     }
 
+    await check('inactive confirmation rows are terminal at first projection and with a live foreign lease', async result => {
+      const booking = await create();
+      await commerce.patch(booking.bookingId).set({
+        emailDispatchLeaseId: 'foreign-live-lease',
+        emailDispatchLeaseExpiresAt: new Date(Date.now() + 60000).toISOString(),
+        status: ' cancelled ',
+      }).commit();
+      result.projected = await rows(booking.bookingId);
+      const { data, error } = await database.client.rpc('roo_claim_booking_email_dispatch', {
+        p_booking_legacy_id: booking.bookingId, p_dispatch_kind: 'booking_confirmation',
+        p_recipient_type: 'customer', p_lease_id: 'new-dispatch-lease', p_lease_seconds: 120,
+      });
+      assert.equal(error, null);
+      result.claim = data;
+      assertSuppressed(result.projected);
+      assert.equal(data.claimed, false);
+      assert.equal(data.in_progress, false);
+      assert.equal(data.booking_inactive, true);
+    });
+
+    await check('email recovery excludes unattempted inactive work and keeps sent timestamp repair', async result => {
+      const booking = await create();
+      await inactive(booking, 'cancelled');
+      const { data, error } = await database.client.rpc('roo_list_email_dispatch_recovery_bookings', {
+        p_dispatch_kind: 'booking_confirmation', p_now: new Date().toISOString(), p_limit: 100,
+      });
+      assert.equal(error, null);
+      result.candidates = data;
+      assert.ok(!data.includes(booking.bookingId));
+      await commerce.patch(booking.bookingId).set({ status: 'captured' }).commit();
+      await confirm(booking);
+      await commerce.patch(booking.bookingId).unset(['emailDispatchClientSentAt']).commit();
+      const repaired = await reconcileBookingEmailDispatches({ client: commerce, limit: 100 });
+      result.repaired = repaired;
+      assert.ok((await commerce.getDocument(booking.bookingId)).emailDispatchClientSentAt);
+      const sentCalls = messages(booking.bookingId).length;
+      await commerce.patch(booking.bookingId).unset(['emailDispatchClientSentAt']).commit();
+      await inactive(booking, 'cancelled');
+      await reconcileBookingEmailDispatches({ client: commerce, limit: 100 });
+      assert.ok((await commerce.getDocument(booking.bookingId)).emailDispatchClientSentAt);
+      assert.equal(messages(booking.bookingId).length, sentCalls);
+    });
+
+    await check('payment recovery excludes inactive confirmations but retains independent recovery duties', async result => {
+      const active = await create();
+      const inactiveBooking = await create();
+      const refund = await create();
+      const release = await create();
+      const reschedule = await create();
+      for (const booking of [inactiveBooking, refund, release, reschedule]) await inactive(booking, ' cancelled ');
+      await commerce.patch(refund.record._id).set({ status: 'refunded', refundRequiresBookingSync: true }).commit();
+      await commerce.patch(release.record._id).set({ status: 'abandoned', resourceReleasePending: true }).commit();
+      await commerce.patch(reschedule.record._id).set({ requiresReschedule: true }).commit();
+      result.candidates = await recoveryCandidates();
+      assert.ok(result.candidates.includes(active.record._id));
+      assert.ok(!result.candidates.includes(inactiveBooking.record._id));
+      for (const booking of [refund, release, reschedule]) assert.ok(result.candidates.includes(booking.record._id));
+    });
+
+    await check('payment recovery terminalizes a status flip after candidate selection without retrying', async result => {
+      const booking = await create();
+      await isolateRecovery(booking);
+      await commerce.patch(booking.record._id).set({ recoveryAttemptCount: 3 }).commit();
+      let changed = false;
+      database.setRequestHook(async (phase, request) => {
+        if (!changed && phase === 'after' && request.path.endsWith('/roo_fetch_recovery_payment_documents')) {
+          changed = true;
+          await inactive(booking, 'cancelled');
+        }
+      });
+      const before = messages(booking.bookingId).length;
+      result.recovery = await recover();
+      assert.equal(changed, true);
+      result.record = await commerce.getDocument(booking.record._id);
+      assert.equal(result.record.emailDispatchRequired, false);
+      assert.equal(result.record.recoveryAttemptCount, 3);
+      assert.equal(result.record.nextRecoveryAt || '', '');
+      assert.equal(result.record.recoveryReason, 'booking_inactive');
+      assert.equal(result.record.emailDeliveryReviewRequired, false);
+      assert.equal(result.record.emailDispatch.allSent, false);
+      assert.equal(messages(booking.bookingId).length, before);
+      result.secondRecovery = await recover();
+      assert.equal(messages(booking.bookingId).length, before);
+      assert.equal((await commerce.getDocument(booking.record._id))._rev, result.record._rev);
+    });
+
+    await check('deferred paid replay preserves inactive aggregate and recipient suppression', async result => {
+      const booking = await create({ provider: 'paypal' });
+      await inactive(booking, 'cancelled');
+      await confirm(booking);
+      const saved = await commerce.getDocument(booking.bookingId);
+      result.response = await fixture.post('/api/ref/createBooking', { ...fixture.details,
+        packageTitle: saved.packageTitle, packagePrice: saved.packagePrice,
+        paymentProvider: 'paypal', paypalOrderId: saved.paypalOrderId, status: 'captured',
+        startTimeUTC: saved.startTimeUTC, deferEmailsUntilConfirmation: true });
+      result.booking = await commerce.getDocument(booking.bookingId);
+      result.ledger = await rows(booking.bookingId);
+      assert.equal(result.booking.emailDispatchStatus, 'failed');
+      assert.equal(result.booking.emailDispatchLastError, 'booking_inactive');
+      assert.equal(result.booking.emailDispatchNextAttemptAt || '', '');
+      assertSuppressed(result.ledger);
+    });
+
+    for (const unavailable of ['configuration', 'recipients']) {
+      await check(`inactive suppression precedes missing ${unavailable}`, async result => {
+        const booking = await create();
+        const previousFrom = process.env.FROM_EMAIL;
+        const previousOwner = process.env.OWNER_EMAIL;
+        try {
+          if (unavailable === 'configuration') process.env.FROM_EMAIL = '';
+          else {
+            process.env.OWNER_EMAIL = '';
+            await commerce.patch(booking.bookingId).set({ email: '', payerEmail: '' }).commit();
+            await database.sql`update migration.source_documents set payload = payload - 'ownerEmail'
+              where document_type = 'bookingSettings'`;
+          }
+          await inactive(booking, 'cancelled');
+          const before = await commerce.getDocument(booking.bookingId);
+          const calls = messages(booking.bookingId).length;
+          result.response = await sendBookingEmailsForBooking({ client: commerce, bookingId: booking.bookingId });
+          result.booking = await commerce.getDocument(booking.bookingId);
+          assert.equal(result.response.body.code, 'booking_inactive');
+          assert.equal(result.response.body.retryable, false);
+          assert.equal(result.response.body.emailDispatch.allSent, false);
+          assert.equal(result.booking.emailDispatchAttemptCount || 0, before.emailDispatchAttemptCount || 0);
+          assert.equal(result.booking.emailDispatchLastAttemptAt, before.emailDispatchLastAttemptAt);
+          assert.equal(result.booking.emailDispatchClientFirstAttemptAt, before.emailDispatchClientFirstAttemptAt);
+          assert.equal(result.booking.emailDispatchOwnerFirstAttemptAt, before.emailDispatchOwnerFirstAttemptAt);
+          assert.equal(messages(booking.bookingId).length, calls);
+        } finally {
+          process.env.FROM_EMAIL = previousFrom;
+          process.env.OWNER_EMAIL = previousOwner;
+          await database.sql`update migration.source_documents set payload = payload || '{"ownerEmail":"owner@example.invalid"}'::jsonb
+            where document_type = 'bookingSettings'`;
+        }
+      });
+    }
+
+    await check('suppressed never-attempted recipients do not inherit a 25-hour booking attempt on reactivation', async result => {
+      const booking = await create();
+      const lastAttemptAt = new Date(Date.now() - 25 * 3600000).toISOString();
+      await commerce.patch(booking.bookingId).set({ status: 'failed', emailDispatchAttemptCount: 4,
+        emailDispatchLastAttemptAt: lastAttemptAt }).commit();
+      await confirm(booking);
+      const suppressed = await commerce.getDocument(booking.bookingId);
+      assert.equal(suppressed.emailDispatchLastAttemptAt, lastAttemptAt);
+      assert.equal(suppressed.emailDispatchAttemptCount, 4);
+      assert.ok(!suppressed.emailDispatchClientFirstAttemptAt && !suppressed.emailDispatchOwnerFirstAttemptAt);
+      const before = messages(booking.bookingId).length;
+      await commerce.patch(booking.bookingId).set({ status: 'captured' }).commit();
+      result.response = await confirm(booking);
+      result.ledger = await rows(booking.bookingId);
+      assert.equal(result.response.body.deliveryUnknown, false);
+      assert.equal(result.response.body.emailDispatch.allSent, true);
+      assert.equal(messages(booking.bookingId).length - before, 2);
+    });
+
+    await check('a genuine previous recipient attempt remains delivery_unknown after suppression and reactivation', async result => {
+      const booking = await create();
+      const firstAttemptAt = new Date(Date.now() - 25 * 3600000).toISOString();
+      await commerce.patch(booking.bookingId).set({ status: 'failed', emailDispatchAttemptCount: 4,
+        emailDispatchLastAttemptAt: firstAttemptAt, emailDispatchClientFirstAttemptAt: firstAttemptAt,
+        emailDispatchOwnerFirstAttemptAt: firstAttemptAt }).commit();
+      await confirm(booking);
+      const before = messages(booking.bookingId).length;
+      await commerce.patch(booking.bookingId).set({ status: 'captured' }).commit();
+      result.response = await confirm(booking);
+      assert.equal(result.response.body.deliveryUnknown, true);
+      assert.equal(messages(booking.bookingId).length, before);
+      assert.equal((await commerce.getDocument(booking.bookingId)).emailDispatchClientFirstAttemptAt, firstAttemptAt);
+    });
+
+    await check('projection-only suppression does not age out an unattempted recipient after reactivation', async result => {
+      const booking = await create();
+      await commerce.patch(booking.bookingId).set({ status: 'failed', emailDispatchAttemptCount: 4,
+        emailDispatchLastAttemptAt: new Date(Date.now() - 25 * 3600000).toISOString() }).commit();
+      assertSuppressed(await rows(booking.bookingId));
+      await commerce.patch(booking.bookingId).set({ status: 'captured' }).commit();
+      const before = messages(booking.bookingId).length;
+      result.response = await confirm(booking);
+      assert.equal(result.response.body.deliveryUnknown, false);
+      assert.equal(messages(booking.bookingId).length - before, 2);
+    });
+
+    await check('missing current booking cannot dispatch a supplied stale booking snapshot', async result => {
+      const booking = await create();
+      const supplied = await commerce.getDocument(booking.bookingId);
+      const before = messages(booking.bookingId).length;
+      result.lookup = await getBookingForEmailDispatch({ client: commerce, bookingId: 'booking.emails.missing' });
+      result.response = await sendBookingEmailsForBooking({ client: commerce, bookingId: 'booking.emails.missing',
+        booking: { ...supplied, _id: 'booking.emails.missing' } });
+      assert.equal(result.lookup, null);
+      assert.equal(result.response.httpStatus, 404);
+      assert.equal(messages(booking.bookingId).length, before);
+    });
+
+    await check('status update between the transport read and revision patch sends nothing and terminalizes', async result => {
+      const booking = await create();
+      const before = messages(booking.bookingId).length;
+      let claims = 0;
+      let flipped = false;
+      database.setRequestHook(async (phase, request) => {
+        if (phase !== 'after') return;
+        if (request.path.endsWith('/roo_claim_booking_email_dispatch')) claims += 1;
+        if (claims === 2 && !flipped && request.path.endsWith('/roo_fetch_shadow_documents_targeted') &&
+            request.body.p_document_types?.includes('booking')) {
+          flipped = true;
+          await inactive(booking, 'cancelled');
+        }
+      });
+      result.response = await confirm(booking);
+      assert.equal(flipped, true);
+      assert.equal(messages(booking.bookingId).length, before);
+      assert.equal(result.response.body.code, 'booking_inactive');
+      assert.equal(result.response.body.retryable, false);
+      result.ledger = await rows(booking.bookingId);
+      assertSuppressed(result.ledger);
+      assert.equal((await commerce.getDocument(booking.bookingId)).emailDispatchAttemptCount || 0, 0);
+    });
+
+    await check('a refunded booking still cannot be reactivated by the status transition API', async result => {
+      const booking = await create();
+      await inactive(booking, 'refunded');
+      await assert.rejects(transition(booking.bookingId, 'captured'), error => error.code === 'refunded_booking_terminal');
+      result.booking = await commerce.getDocument(booking.bookingId);
+      assert.equal(result.booking.status, 'refunded');
+    });
+
+    await check('the migration function definitions can be reapplied without changing state', async result => {
+      const file = new URL('../supabase/migrations/20261012000000_suppress_inactive_booking_confirmations.sql', import.meta.url);
+      const before = await database.sql`select id, to_jsonb(dispatch) as row from commerce.email_dispatches dispatch order by id`;
+      await database.sql.unsafe(fs.readFileSync(file, 'utf8'));
+      const after = await database.sql`select id, to_jsonb(dispatch) as row from commerce.email_dispatches dispatch order by id`;
+      assert.deepEqual(after, before);
+      result.reapplied = true;
+      result.migrations = database.manifest.length;
+    });
+
     for (const status of ['pending', 'captured', 'completed', '', null, 'unknown']) {
       await check(`active classification ${JSON.stringify(status)} sends each recipient once`, async result => {
         const booking = await create();
         await commerce.patch(booking.bookingId).set({ status }).commit();
-        const before = messages().length;
+        const before = messages(booking.bookingId).length;
         result.response = await confirm(booking);
         result.replay = await confirm(booking);
         result.ledger = await rows(booking.bookingId);
         assert.equal(result.response.status, 200, JSON.stringify(result.response));
         assert.equal(result.response.body.emailDispatch.allSent, true);
-        assert.equal(messages().length - before, 2);
+        assert.equal(messages(booking.bookingId).length - before, 2);
         assert.ok(result.ledger.every(row => row.status === 'sent' && row.sent_at && row.provider_message_id));
       });
     }
@@ -155,19 +419,19 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
       result.booking = await commerce.getDocument(booking.bookingId);
       assert.equal(result.booking.status, 'captured');
       assert.equal(result.booking.refundStatus, 'partial');
-      const before = messages().length;
+      const before = messages(booking.bookingId).length;
       result.response = await confirm(booking);
       await confirm(booking);
       assert.equal(result.response.status, 200);
-      assert.equal(messages().length - before, 2);
+      assert.equal(messages(booking.bookingId).length - before, 2);
     });
 
     await check('status flip after both claims suppresses transport', async result => {
       const booking = await create();
-      const before = messages().length;
+      const before = messages(booking.bookingId).length;
       let claimed = 0;
       database.setRequestHook(async (phase, request) => {
-        if (phase === 'after' && request.path.endsWith('/roo_claim_booking_email_dispatch') &&
+        if (claimed < 2 && phase === 'after' && request.path.endsWith('/roo_claim_booking_email_dispatch') &&
             request.body.p_booking_legacy_id === booking.bookingId) {
           claimed += 1;
           if (claimed === 2) await inactive(booking, 'cancelled');
@@ -176,7 +440,7 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
       result.response = await confirm(booking);
       assert.equal(claimed, 2);
       result.ledger = await rows(booking.bookingId);
-      assert.equal(messages().length, before);
+      assert.equal(messages(booking.bookingId).length, before);
       assertSuppressed(result.ledger);
       assert.equal(result.response.body.ok, false);
       assert.equal(result.response.body.retryable, false);
@@ -184,7 +448,7 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
 
     await check('reactivation sends only the recipient suppressed after the first send', async result => {
       const booking = await create();
-      const before = messages().length;
+      const before = messages(booking.bookingId).length;
       database.setRequestHook(async (phase, request) => {
         if (phase === 'after' && request.path.endsWith('/roo_complete_booking_email_dispatch') &&
             request.body.p_success === true && request.body.p_idempotency_key === `booking-${booking.bookingId}-client`) {
@@ -194,7 +458,7 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
       });
       result.firstResponse = await confirm(booking);
       result.inactiveLedger = await rows(booking.bookingId);
-      assert.equal(messages().length - before, 1);
+      assert.equal(messages(booking.bookingId).length - before, 1);
       assert.equal(result.inactiveLedger[0].status, 'sent');
       assert.equal(result.inactiveLedger[1].status, 'failed');
       assert.equal(result.inactiveLedger[1].last_error_code, 'booking_inactive');
@@ -203,7 +467,7 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
       await confirm(booking);
       result.ledger = await rows(booking.bookingId);
       assert.equal(result.reactivatedResponse.status, 200, JSON.stringify(result.reactivatedResponse));
-      assert.deepEqual(messages().slice(before).map(request => request.body.to),
+      assert.deepEqual(messages(booking.bookingId).slice(before).map(request => request.body.to),
         ['visitor@example.invalid', 'owner@example.invalid']);
       assert.ok(result.ledger.every(row => row.status === 'sent'));
       assert.equal(result.ledger[0].provider_message_id, result.inactiveLedger[0].provider_message_id);
@@ -213,14 +477,14 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
       const booking = await create();
       await inactive(booking, 'failed');
       await confirm(booking);
-      const before = messages().length;
+      const before = messages(booking.bookingId).length;
       await commerce.patch(booking.bookingId).set({ status: 'captured' }).commit();
       result.recovery = await reconcileBookingEmailDispatches({ client: commerce, limit: 100 });
       result.ledger = await rows(booking.bookingId);
-      assert.equal(messages().length - before, 2);
+      assert.equal(messages(booking.bookingId).length - before, 2);
       assert.ok(result.ledger.every(row => row.status === 'sent'));
       await confirm(booking);
-      assert.equal(messages().length - before, 2);
+      assert.equal(messages(booking.bookingId).length - before, 2);
     });
 
     for (const status of ['cancelled', 'refunded']) {
@@ -230,9 +494,9 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
         await confirm(booking);
         await commerce.patch(booking.bookingId).set({ requiresReschedule: true,
           originalRequestedStartTimeUTC: '2099-01-05T04:30:00.000Z' }).commit();
-        const before = messages().length;
+        const before = messages(booking.bookingId).length;
         result.response = await dispatchRescheduleNotifications({ client: commerce, bookingId: booking.bookingId });
-        result.messages = messages().slice(before);
+        result.messages = messages(booking.bookingId).slice(before);
         assert.equal(result.messages.length, 2);
         assert.ok(result.messages.every(request => !request.body.html.includes('Booking Received')));
         assert.equal(result.response.ok, true);
@@ -247,13 +511,13 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
         return { status: 409, body: { name: 'invalid_idempotent_request', statusCode: 409,
           message: 'This idempotency key has already been used on a different payload.' } };
       });
-      const before = messages().length;
+      const before = messages(booking.bookingId).length;
       result.response = await confirm(booking);
       await commerce.patch(booking.bookingId).set({ message: 'Unrelated update after uncertain delivery' }).commit();
       result.replay = await confirm(booking);
       await reconcileBookingEmailDispatches({ client: commerce, limit: 100 });
       result.ledger = await rows(booking.bookingId);
-      assert.equal(messages().length - before, 2);
+      assert.equal(messages(booking.bookingId).length - before, 2);
       assert.equal(result.response.body.deliveryUnknown, true);
       assert.equal(result.response.body.retryable, false);
       assert.equal(result.replay.body.retryable, false);
