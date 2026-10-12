@@ -17,9 +17,13 @@ const readStoredBookingConfirmation = () => {
   return null;
 };
 
-const clearStoredBookingConfirmation = () => {
+const writeStoredBookingConfirmation = (confirmation) => {
   try {
-    sessionStorage.removeItem(BOOKING_CONFIRMATION_STORAGE_KEY);
+    if (confirmation) {
+      sessionStorage.setItem(BOOKING_CONFIRMATION_STORAGE_KEY, JSON.stringify(confirmation));
+    } else {
+      sessionStorage.removeItem(BOOKING_CONFIRMATION_STORAGE_KEY);
+    }
   } catch {}
 };
 
@@ -63,19 +67,26 @@ export default function BookingEmailDispatchEffect() {
         if (cancelled) return;
 
         const body = await response.json().catch(() => ({}));
+        if (cancelled) return;
         const allSent =
           body?.emailDispatch?.allSent === true ||
           (body?.emailDispatch?.client?.sent === true &&
             body?.emailDispatch?.owner?.sent === true);
 
-        if (allSent || TERMINAL_FAILURE_STATUSES.has(response.status) || body?.code === "booking_inactive") {
-          clearStoredBookingConfirmation();
-          if (navState.bookingConfirmation) {
-            const nextState = { ...navState };
+        const inactive = body?.code === "booking_inactive";
+        if (allSent || TERMINAL_FAILURE_STATUSES.has(response.status) || inactive) {
+          const nextState = { ...navState };
+          if (inactive) {
+            writeStoredBookingConfirmation(null);
             delete nextState.bookingConfirmation;
-            navigate({ pathname: location.pathname, search: location.search, hash: location.hash },
-              { replace: true, state: nextState });
+          } else {
+            const receipt = { ...bookingConfirmation, bookingId };
+            delete receipt.emailDispatchToken;
+            writeStoredBookingConfirmation(receipt);
+            nextState.bookingConfirmation = receipt;
           }
+          navigate({ pathname: location.pathname, search: location.search, hash: location.hash },
+            { replace: true, state: nextState });
           return;
         }
 

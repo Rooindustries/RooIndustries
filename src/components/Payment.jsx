@@ -173,7 +173,7 @@ export default function Payment({ hideFooter = false }) {
 
   const writeStoredBookingConfirmation = (confirmation) => {
     try {
-      if (!confirmation?.bookingId || !confirmation?.emailDispatchToken) {
+      if (!confirmation?.bookingId) {
         sessionStorage.removeItem(BOOKING_CONFIRMATION_STORAGE_KEY);
         return;
       }
@@ -182,7 +182,7 @@ export default function Payment({ hideFooter = false }) {
         BOOKING_CONFIRMATION_STORAGE_KEY,
         JSON.stringify({
           bookingId: confirmation.bookingId,
-          emailDispatchToken: confirmation.emailDispatchToken,
+          ...(confirmation.emailDispatchToken ? { emailDispatchToken: confirmation.emailDispatchToken } : {}),
         })
       );
     } catch {}
@@ -249,14 +249,14 @@ export default function Payment({ hideFooter = false }) {
       window.dispatchEvent(new CustomEvent("hold-state", { detail: null }));
     } catch {}
 
-    if (!bookingId || !emailDispatchToken) {
+    if (!bookingId) {
       writeStoredBookingConfirmation(null);
       return baseState;
     }
 
     const bookingConfirmation = {
       bookingId,
-      emailDispatchToken,
+      ...(emailDispatchToken ? { emailDispatchToken } : {}),
     };
 
     writeStoredBookingConfirmation(bookingConfirmation);

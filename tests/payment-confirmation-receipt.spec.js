@@ -85,6 +85,14 @@ test.beforeEach(async ({ page, flow }) => {
       ]) {
         if (node) nodeScopes.set(node, { scope: "modal-shell", selector });
       }
+      if (["/booking", "/payment"].includes(location.pathname)) {
+        for (const node of dialog?.querySelectorAll("*") || []) {
+          if (!nodeScopes.has(node)) nodeScopes.set(node, {
+            scope: "checkout-content",
+            selector: node.id ? "#" + node.id : '[role="dialog"] ' + node.tagName.toLowerCase(),
+          });
+        }
+      }
       const heading = dialog?.querySelector("h1");
       if (!heading || !["Looking for your booking?", "Payment Successful", "Thank You!"].includes(heading.textContent.trim())) return;
       const panel = heading.closest("section");
@@ -191,7 +199,7 @@ async function capture(page, testInfo, name) {
   for (const shift of metrics.shifts) {
     shift.panelSource = shift.sources.some(source => source.scope === "receipt-panel");
     shift.afterReceiptDecision = metrics.receiptDecisionAt !== null && shift.time >= metrics.receiptDecisionAt;
-    shift.excludedModalTransition = shift.sources.length > 0 && shift.sources.every(source => source.scope === "modal-shell");
+    shift.excludedModalTransition = shift.sources.length > 0 && shift.sources.every(source => ["modal-shell", "checkout-content"].includes(source.scope));
   }
   metrics.receiptShifts = metrics.shifts.filter(shift => shift.value > 0 &&
     (shift.panelSource || (shift.afterReceiptDecision && !shift.excludedModalTransition)));
@@ -209,10 +217,12 @@ function assertReceiptLayout(metrics) {
   expect(metrics.receiptShifts).toEqual([]);
 }
 
-function watchErrors(page) {
+function watchErrors(page, expectedEmailStatus = 0) {
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   page.on("console", message => {
+    if (expectedEmailStatus >= 400 && message.location().url.endsWith("/api/ref/sendBookingEmails") &&
+        message.text().startsWith("Failed to load resource:") && message.text().includes(`status of ${expectedEmailStatus}`)) return;
     if (message.type() === "error" || /hydrat|server html|getServerSnapshot|#418/i.test(message.text())) errors.push(message.text());
   });
   return errors;
@@ -250,13 +260,15 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         const errors = watchErrors(page);
         let finalizeRoute;
         const bookingConfirmation = { bookingId: `fixture-${kind}-receipt`, emailDispatchToken: `fixture-${kind}-email-token` };
+        const completed = { ok: true, status: "email_partial", ...bookingConfirmation,
+          emailDispatch: { allSent: false, client: { sent: false }, owner: { sent: false } } };
         const quote = { grossAmount: 84.99, netAmount: 0, isFree: true };
         const providers = { dodo: { enabled: true, mode: "test" }, paypal: { enabled: false }, razorpay: { enabled: false } };
         if (kind === "free") {
           await page.route("**/api/payment/quote", route => route.fulfill({ json: { ok: true, quoteFingerprint: "fixture-free-quote", providers, quote } }));
           await page.route("**/api/payment/start", route => {
             expect(route.request().postDataJSON().provider).toBe("free");
-            return route.fulfill({ json: { ok: true, status: "booked", ...bookingConfirmation, quote } });
+            return route.fulfill({ json: { ...completed, quote } });
           });
         } else {
           await page.route("**/api/payment/finalize", route => {
@@ -276,12 +288,13 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await page.evaluate(() => document.fonts.ready);
         await page.waitForTimeout(1000);
         await page.evaluate(() => window.__resetConfirmationMetrics());
-        if (kind === "paid") await finalizeRoute.fulfill({ json: { ok: true, status: "booked", ...bookingConfirmation } });
+        if (kind === "paid") await finalizeRoute.fulfill({ json: completed });
         if (kind === "free") await page.getByRole("button", { name: "Confirm Free Booking", exact: true }).click();
         await expect(page).toHaveURL(new RegExp(`${route}$`));
         await expect(page.getByRole("heading", { level: 1, name: heading, exact: true })).toBeVisible();
         await expect(page.getByRole("link", { name: "Back to Home", exact: true })).toBeVisible();
-        expect(await page.evaluate(() => window.history.state.usr.bookingConfirmation)).toEqual(bookingConfirmation);
+        await expect.poll(() => page.evaluate(() => window.history.state.usr.bookingConfirmation)).toEqual({ bookingId: bookingConfirmation.bookingId });
+        expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("booking_confirmation_state")))).toEqual({ bookingId: bookingConfirmation.bookingId });
         const arrival = await capture(page, testInfo, "arrival");
         expect(arrival.h1Count).toBe(1);
         assertReceiptLayout(arrival);
@@ -296,8 +309,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         expect(reloaded.sectionHeights).toHaveLength(1);
         assertReceiptLayout(reloaded);
         expect((await response.text()).includes(neutralHeading)).toBe(true);
-        expect(await page.evaluate(() => window.history.state.usr.bookingConfirmation)).toEqual(bookingConfirmation);
-        await expect.poll(() => flow.state.calls.filter(call => call.path === "/api/ref/sendBookingEmails").length).toBe(2);
+        expect(await page.evaluate(() => window.history.state.usr.bookingConfirmation)).toEqual({ bookingId: bookingConfirmation.bookingId });
+        expect(flow.state.calls.filter(call => call.path === "/api/ref/sendBookingEmails")).toHaveLength(1);
         expect(errors).toEqual([]);
       });
 
@@ -363,6 +376,160 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await expect(page.getByRole("heading", { level: 1, name: neutralHeading, exact: true })).toBeVisible();
         await expect(page.locator("h1")).toHaveCount(1);
         assertReceiptLayout(await capture(page, testInfo, "unavailable"));
+        expect(flow.state.calls.filter(call => call.path === "/api/ref/sendBookingEmails")).toEqual([]);
+        expect(errors).toEqual([]);
+      });
+    }
+
+    for (const { route, heading } of pages) {
+      for (const outcome of ["delivered", 400, 401, 403, 404, "booking_inactive"]) {
+        test(`${route} email cleanup ${outcome} preserves only active receipts`, async ({ page }, testInfo) => {
+          const errors = watchErrors(page, outcome === "booking_inactive" ? 409 : typeof outcome === "number" ? outcome : 0);
+          const receipt = { bookingId: "fixture-email-cleanup", emailDispatchToken: "fixture-email-retry" };
+          let dispatchRoute;
+          let dispatchCalls = 0;
+          await page.addInitScript(confirmation => {
+            if (sessionStorage.getItem("fixture-confirmation-seeded")) return;
+            sessionStorage.setItem("fixture-confirmation-seeded", "1");
+            sessionStorage.setItem("booking_confirmation_state", JSON.stringify(confirmation));
+            history.replaceState({ ...history.state, usr: { bookingConfirmation: confirmation, modal: true, backgroundLocation: { pathname: "/" }, retained: "fixture-retained" } }, "");
+          }, receipt);
+          await page.route("**/api/ref/sendBookingEmails", request => {
+            expect(request.request().postDataJSON()).toEqual(receipt);
+            dispatchCalls += 1;
+            dispatchRoute = request;
+          });
+          await page.goto(route, { waitUntil: "domcontentloaded" });
+          await expect(page.getByRole("heading", { level: 1, name: heading, exact: true })).toBeVisible();
+          await expect.poll(() => Boolean(dispatchRoute)).toBe(true);
+          assertReceiptLayout(await capture(page, testInfo, "before-email-cleanup"));
+          const stateBefore = await page.evaluate(() => history.state.usr);
+          await page.evaluate(() => window.__resetConfirmationMetrics());
+          const inactive = outcome === "booking_inactive";
+          const delivered = outcome === "delivered";
+          await dispatchRoute.fulfill({ status: inactive ? 409 : delivered ? 200 : outcome, json: delivered
+            ? { ok: true, emailDispatch: { allSent: true, client: { sent: true }, owner: { sent: true } } }
+            : inactive ? { ok: false, code: "booking_inactive", retryable: false, emailDispatch: { allSent: false, client: { sent: false }, owner: { sent: false } } }
+              : { ok: false, error: "Booking email confirmation is not authorized." } });
+          await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("booking_confirmation_state"))))
+            .toEqual(inactive ? null : { bookingId: receipt.bookingId });
+          const stateAfter = { ...stateBefore };
+          if (inactive) delete stateAfter.bookingConfirmation;
+          else stateAfter.bookingConfirmation = { bookingId: receipt.bookingId };
+          await expect.poll(() => page.evaluate(() => history.state.usr)).toEqual(stateAfter);
+          const expectedHeading = inactive ? neutralHeading : heading;
+          await expect(page.getByRole("heading", { level: 1, name: expectedHeading, exact: true })).toBeVisible();
+          const cleaned = await capture(page, testInfo, "after-email-cleanup");
+          expect(cleaned.h1Count).toBe(1);
+          assertReceiptLayout(cleaned);
+          if (!inactive) expect(cleaned.headings).not.toContain(neutralHeading);
+          await page.reload({ waitUntil: "networkidle" });
+          await expect(page.getByRole("heading", { level: 1, name: expectedHeading, exact: true })).toBeVisible();
+          const reloaded = await capture(page, testInfo, "cleanup-reload");
+          expect(reloaded.h1Count).toBe(1);
+          assertReceiptLayout(reloaded);
+          expect(await page.evaluate(() => history.state.usr)).toEqual(stateAfter);
+          expect(dispatchCalls).toBe(1);
+          expect(errors).toEqual([]);
+        });
+      }
+    }
+
+    for (const completion of ["Dodo finalize", "free booking", "recovery poll", "webhook completed", "captured payment"]) {
+      test(`${completion} keeps a tokenless receipt on arrival and reload`, async ({ page, flow }, testInfo) => {
+        const errors = watchErrors(page);
+        const free = completion === "free booking";
+        const route = free ? "/thank-you" : "/payment-success";
+        const heading = free ? "Thank You!" : "Payment Successful";
+        const bookingId = `fixture-${completion.replaceAll(" ", "-")}`;
+        const completed = {
+          ok: true, status: "booked", provider: free ? "free" : "dodo", bookingId,
+          emailDispatch: { allSent: true, client: { sent: true }, owner: { sent: true } },
+          emailDispatchToken: "",
+        };
+        let finalizeRoute;
+        let statusCalls = 0;
+        let cancelCalls = 0;
+        if (free) {
+          const quote = { grossAmount: 84.99, netAmount: 0, isFree: true };
+          await page.route("**/api/payment/quote", request => request.fulfill({ json: {
+            ok: true, quoteFingerprint: "fixture-free-quote", quote,
+            providers: { dodo: { enabled: true, mode: "test" }, paypal: { enabled: false }, razorpay: { enabled: false } },
+          } }));
+          await page.route("**/api/payment/start", request => {
+            expect(request.request().postDataJSON().provider).toBe("free");
+            return request.fulfill({ json: { ...completed, quote } });
+          });
+        } else {
+          await page.route("**/api/payment/finalize", request => {
+            expect(request.request().headers().authorization).toBe("Bearer fixture-payment");
+            finalizeRoute = request;
+          });
+          if (completion === "recovery poll") {
+            await page.route("**/api/payment/status", request => {
+              expect(request.request().headers().authorization).toBe("Bearer fixture-payment");
+              statusCalls += 1;
+              return request.fulfill({ json: {
+                ...completed, recoveryReason: "", nextRecoveryAt: "", sessionExpiresAt: "",
+                refundState: "", refundRequiresBookingSync: false, analyticsReceipt: null,
+              } });
+            });
+          }
+          if (completion === "webhook completed") {
+            await page.route("**/api/payment/start", request => request.fulfill({ json: completed }));
+          }
+          if (completion === "captured payment") {
+            await page.route("**/api/payment/cancel", request => {
+              expect(request.request().headers().authorization).toBe("Bearer fixture-payment");
+              cancelCalls += 1;
+              return request.fulfill({ json: { ...completed, captured: true } });
+            });
+          }
+        }
+        await flow.review();
+        await flow.payment();
+        if (!free && completion !== "webhook completed") {
+          await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+          await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+          if (completion === "captured payment") {
+            await page.evaluate(() => {
+              const hold = JSON.parse(sessionStorage.getItem("my_slot_hold"));
+              sessionStorage.setItem("my_slot_hold", JSON.stringify({ ...hold, phase: "payment_pending" }));
+            });
+            await page.goto("/booking", { waitUntil: "networkidle" });
+            await expect(page.getByRole("button", { name: "Release payment", exact: true })).toBeVisible();
+          } else {
+            await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
+            await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
+            await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
+          }
+        }
+        await page.evaluate(() => document.fonts.ready);
+        await page.waitForTimeout(1000);
+        await page.evaluate(() => window.__resetConfirmationMetrics());
+        if (free) await page.getByRole("button", { name: "Confirm Free Booking", exact: true }).click();
+        else if (completion === "webhook completed") await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+        else if (completion === "captured payment") await page.getByRole("button", { name: "Release payment", exact: true }).click();
+        else await finalizeRoute.fulfill({ status: completion === "recovery poll" ? 202 : 200, json: completion === "recovery poll"
+          ? { ok: true, status: "needs_recovery", bookingId: "", emailDispatchToken: "" } : completed });
+        await expect(page).toHaveURL(new RegExp(`${route}$`));
+        await expect(page.getByRole("heading", { level: 1, name: heading, exact: true })).toBeVisible();
+        const arrival = await capture(page, testInfo, "tokenless-arrival");
+        expect(arrival.h1Count).toBe(1);
+        expect(arrival.headings).not.toContain(neutralHeading);
+        assertReceiptLayout(arrival);
+        expect(await page.evaluate(() => history.state.usr.bookingConfirmation)).toEqual({ bookingId });
+        expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("booking_confirmation_state")))).toEqual({ bookingId });
+        expect(flow.state.calls.filter(call => call.path === "/api/ref/sendBookingEmails")).toEqual([]);
+        if (completion === "recovery poll") expect(statusCalls).toBe(1);
+        if (completion === "captured payment") expect(cancelCalls).toBe(1);
+        await page.evaluate(() => sessionStorage.removeItem("booking_confirmation_state"));
+        await page.reload({ waitUntil: "networkidle" });
+        await expect(page.getByRole("heading", { level: 1, name: heading, exact: true })).toBeVisible();
+        const reloaded = await capture(page, testInfo, "tokenless-reload");
+        expect(reloaded.h1Count).toBe(1);
+        assertReceiptLayout(reloaded);
+        expect(await page.evaluate(() => history.state.usr.bookingConfirmation)).toEqual({ bookingId });
         expect(flow.state.calls.filter(call => call.path === "/api/ref/sendBookingEmails")).toEqual([]);
         expect(errors).toEqual([]);
       });
