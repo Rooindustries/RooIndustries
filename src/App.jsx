@@ -16,10 +16,6 @@ import ReservationBanner from "./components/ReservationBanner";
 import IntercomMessenger from "./components/IntercomMessenger";
 import { subscribePerfDebugChanges, syncPerfDebugFromEnvironment } from "./lib/perfDebug";
 import { initializePerformanceProfile } from "./lib/performanceProfile";
-import Home from "./legacyPages/Home";
-import AboutPage from "./legacyPages/About";
-import Packages from "./legacyPages/Packages";
-import FaqPage from "./legacyPages/Faq";
 import PaymentSuccess from "./legacyPages/PaymentSuccess";
 import Thankyou from "./legacyPages/Thankyou";
 import {
@@ -33,6 +29,10 @@ import { whenUserInteracts } from "./lib/firstInteraction";
 import { migrateCheckoutStorageToSession } from "./lib/checkoutStorage";
 import { getPublicContent } from "./lib/publicContentClient";
 
+const Home = lazy(() => import("./legacyPages/Home"));
+const AboutPage = lazy(() => import("./legacyPages/About"));
+const Packages = lazy(() => import("./legacyPages/Packages"));
+const FaqPage = lazy(() => import("./legacyPages/Faq"));
 const Contact = lazy(() => import("./legacyPages/Contact"));
 const Privacy = lazy(async () => {
   const [{ default: Page }, initialData] = await Promise.all([
@@ -165,8 +165,9 @@ function AnimatedRoutes({
   initialHomeData,
   initialRouteData,
   heroHeadingTag,
-  initialRouteContent,
+  initialRouteComponent,
   initialRoutePath,
+  initialHomeComponent,
 }) {
   const baseLocation = useLocation();
   const location = routesLocation || baseLocation;
@@ -180,113 +181,127 @@ function AnimatedRoutes({
     }
   }, [baseLocation.key, initialEntryKey]);
 
-  return (
-    <div key={motionKey} className="w-full flex flex-col flex-1">
+  const renderPage = (node) => {
+    if (baseLocation.key !== initialEntryKey) return node;
+    const Page = initialRoutePath === location.pathname
+      ? initialRouteComponent
+      : location.pathname === "/" ? initialHomeComponent : null;
+    return Page ? <Page {...node.props} /> : node;
+  };
+
+  const routes = (
+      <div key={motionKey} className="w-full flex flex-col flex-1">
         <Routes location={location}>
-          <Route path="/" element={<Home initialData={initialHomeData} heroHeadingTag={heroHeadingTag} />} />
+          <Route path="/" element={renderPage(<Home initialData={initialHomeData} heroHeadingTag={heroHeadingTag} />)} />
           <Route
             path="/packages"
-            element={<Packages initialData={initialRouteData?.packages || null} />}
+            element={renderPage(<Packages initialData={initialRouteData?.packages || null} />)}
           />
           <Route
             path="/benchmarks"
-            element={withRouteSuspense(
+            element={renderPage(
               <Benchmarks
                 setIsModalOpen={setIsModalOpen}
                 initialData={initialRouteData?.benchmarks || null}
               />
             )}
           />
-          <Route path="/about" element={<AboutPage />} />
-          <Route path="/privacy" element={initialRoutePath === "/privacy" && initialRouteContent ? initialRouteContent : <Privacy initialData={initialRouteData?.privacy || null} />} />
-          <Route path="/terms" element={withRouteSuspense(<Terms />)} />
+          <Route path="/about" element={renderPage(<AboutPage />)} />
+          <Route path="/privacy" element={renderPage(<Privacy initialData={initialRouteData?.privacy || null} />)} />
+          <Route path="/terms" element={renderPage(<Terms />)} />
           <Route
             path="/reviews"
-            element={withRouteSuspense(<Reviews setIsModalOpen={setIsModalOpen} initialData={initialContent?.reviewsGallery || null} />)}
+            element={renderPage(<Reviews setIsModalOpen={setIsModalOpen} initialData={initialContent?.reviewsGallery || null} />)}
           />
-          <Route path="/booking" element={withRouteSuspense(<Book />)} />
-          <Route path="/contact" element={initialRoutePath === "/contact" && initialRouteContent ? initialRouteContent : <Contact initialData={initialRouteData?.contact || null} />} />
+          <Route path="/booking" element={renderPage(<Book />)} />
+          <Route path="/contact" element={renderPage(<Contact initialData={initialRouteData?.contact || null} />)} />
           <Route
             path="/faq"
-            element={<FaqPage initialData={initialHomeData} />}
+            element={renderPage(<FaqPage initialData={initialHomeData} />)}
           />
           <Route path="/discord" element={<RedirectToDiscord />} />
-          <Route path="/payment" element={withRouteSuspense(<Payment />)} />
+          <Route path="/payment" element={renderPage(<Payment />)} />
           <Route
             path="/payment-success"
-            element={withRouteSuspense(<PaymentSuccess />)}
+            element={renderPage(<PaymentSuccess />)}
           />
-          <Route path="/thank-you" element={withRouteSuspense(<Thankyou />)} />
+          <Route path="/thank-you" element={renderPage(<Thankyou />)} />
           <Route
             path="/tools"
-            element={withRouteSuspense(
+            element={renderPage(
               <Tools initialData={initialContent?.tools || null} />
             )}
           />
           <Route
             path="/meet-the-team"
-            element={withRouteSuspense(
+            element={renderPage(
               <MeetTheTeam initialData={initialRouteData?.meetTheTeam || null} />
             )}
           />
           <Route
             path="/upgrade/:slug"
-            element={withRouteSuspense(<Upgrade />)}
+            element={renderPage(<Upgrade />)}
           />
           <Route
             path="/upgrade-xoc"
-            element={withRouteSuspense(<UpgradeXoc />)}
+            element={renderPage(<UpgradeXoc />)}
           />
           <Route
             path="/downloads/:slug"
-            element={withRouteSuspense(<Download />)}
+            element={renderPage(<Download />)}
           />
 
           <Route
             path="/referrals/login"
-            element={withRouteSuspense(<RefLogin />)}
+            element={renderPage(<RefLogin />)}
           />
           <Route
             path="/referrals/dashboard"
-            element={withRouteSuspense(<RefDashboard />)}
+            element={renderPage(<RefDashboard />)}
           />
           <Route
             path="/referrals/change-password"
-            element={withRouteSuspense(<RefChangePassword />)}
+            element={renderPage(<RefChangePassword />)}
           />
           <Route
             path="/referrals/forgot"
-            element={withRouteSuspense(<RefForgot />)}
+            element={renderPage(<RefForgot />)}
           />
           <Route
             path="/referrals/reset"
-            element={withRouteSuspense(<RefReset />)}
+            element={renderPage(<RefReset />)}
           />
           <Route
             path="/referrals/register"
-            element={withRouteSuspense(<RefRegister />)}
+            element={renderPage(<RefRegister />)}
           />
           <Route
             path="/referrals/verify"
-            element={withRouteSuspense(<RefVerifyRegistration />)}
+            element={renderPage(<RefVerifyRegistration />)}
           />
           <Route
             path="/referrals/Register"
             element={<Navigate to="/referrals/register" replace />}
           />
-          <Route path="*" element={withRouteSuspense(<NotFound />)} />
+          <Route path="*" element={renderPage(<NotFound />)} />
         </Routes>
-    </div>
+      </div>
   );
+
+  return initialRouteComponent || initialHomeComponent ? routes : withRouteSuspense(routes);
 }
 
 export function AppContent({
   initialHomeData = null,
   initialRouteData = null,
-  initialRouteContent = null,
+  initialRouteComponent = null,
   initialRoutePath = null,
+  initialHomeComponent = null,
+  initialBookingModalComponent = null,
   routeShell = "browser",
 }) {
+  const InitialRouteComponent = initialRouteComponent;
+  const FlowModal = initialBookingModalComponent || BookingModal;
   const [, setIsModalOpen] = useState(false);
   const [showRouteTransition, setShowRouteTransition] = useState(false);
   const [storedBackground, setStoredBackground] = useState(null);
@@ -631,20 +646,23 @@ export function AppContent({
             initialHomeData={initialHomeData}
             initialRouteData={initialRouteData}
             heroHeadingTag={isPaymentSuccessRoute || isThankYouRoute ? "h2" : "h1"}
-            initialRouteContent={initialRouteContent}
+            initialRouteComponent={initialRouteComponent}
             initialRoutePath={initialRoutePath}
+            initialHomeComponent={initialHomeComponent}
           />
         </main>
       </div>
       {isFlowRoute && (
         <Suspense fallback={null}>
-          <BookingModal
+          <FlowModal
             open
             onClose={closeBookingModal}
             skipInitialSizeAnimation={isPaymentSuccessRoute || isThankYouRoute}
           >
             <Suspense fallback={<RouteFallback />}>
-              {isPaymentSuccessRoute ? (
+              {initialRoutePath === pathName && InitialRouteComponent ? (
+                <InitialRouteComponent hideFooter compact={isBookingRoute} />
+              ) : isPaymentSuccessRoute ? (
                 <PaymentSuccess hideFooter />
               ) : isThankYouRoute ? (
                 <Thankyou hideFooter />
@@ -654,7 +672,7 @@ export function AppContent({
                 <Book hideFooter compact />
               )}
             </Suspense>
-          </BookingModal>
+          </FlowModal>
         </Suspense>
       )}
       <PerfDebugRuntime />

@@ -11,7 +11,9 @@ export default function LegacyRoutePage({
   searchParams,
   initialHomeData = null,
   initialRouteData = null,
-  initialRouteContent = null,
+  initialRouteComponent = null,
+  initialHomeComponent = null,
+  initialBookingModalComponent = null,
 }) {
   const query = sanitizeBrowserSearch(pathname, buildQueryString(searchParams));
   // Keep initial server/client entry deterministic; hash intent is handled post-mount.
@@ -22,7 +24,9 @@ export default function LegacyRoutePage({
       <AppContent
         initialHomeData={initialHomeData}
         initialRouteData={initialRouteData}
-        initialRouteContent={initialRouteContent}
+        initialRouteComponent={initialRouteComponent}
+        initialHomeComponent={initialHomeComponent}
+        initialBookingModalComponent={initialBookingModalComponent}
         initialRoutePath={pathname}
         routeShell="memory"
       />

@@ -105,6 +105,19 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  webpack(config, { isServer, dev }) {
+    if (!isServer && !dev) {
+      config.optimization.splitChunks.cacheGroups.default = false;
+      config.optimization.splitChunks.cacheGroups.rooMotion = {
+        test: /[\\/]node_modules[\\/](?:framer-motion|motion-dom|motion-utils)[\\/]/,
+        name: "roo-motion",
+        chunks: "all",
+        priority: 30,
+        enforce: true,
+      };
+    }
+    return config;
+  },
   async redirects() {
     return [
       { source: '/tourney/:page(bracket|roster)', destination: '/tourney', permanent: true },

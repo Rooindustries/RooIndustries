@@ -1,3 +1,4 @@
+import Tools from "@/src/next/entries/Tools";
 import RouteRenderer from "@/src/next/RouteRenderer";
 import seo from "@/src/lib/seo";
 import { fetchPublicContent } from "@/src/server/content/publicContent";
@@ -14,7 +15,7 @@ export default async function Page({ searchParams }) {
   }
   return (
     <div style={{ minHeight: "700px" }}>
-      <RouteRenderer pathname="/tools" searchParams={searchParams} initialRouteData={{ tools }} />
+      <RouteRenderer entry={Tools} pathname="/tools" searchParams={searchParams} initialRouteData={{ tools }} />
     </div>
   );
 }
