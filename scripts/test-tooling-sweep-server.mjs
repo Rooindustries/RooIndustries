@@ -26,6 +26,7 @@ const env = {
   PATH: process.env.PATH,
   HOME: process.env.HOME,
   CI: "true",
+  VERCEL_ENV: "preview",
   TZ: "UTC",
   TOURNEY_DATABASE_MODE: "memory",
   DATA_PRIMARY_BACKEND: "supabase",

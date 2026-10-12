@@ -29,6 +29,33 @@ async function configure(baseURL, data) {
 async function signIn(context, baseURL) {
   await context.addCookies([{ name: 'ref_session', value: fixture.referralSessionCookie(), url: baseURL, httpOnly: true, sameSite: 'Lax' }]);
 }
+
+test('creator session follows login and logout', async ({ page, context }, testInfo) => {
+  const protocol = await context.newCDPSession(page);
+  const blockedCookies = [];
+  await protocol.send('Network.enable');
+  protocol.on('Network.responseReceivedExtraInfo', event => {
+    for (const cookie of event.blockedCookies || []) blockedCookies.push(cookie.blockedReasons);
+  });
+  await page.goto('/referrals/login');
+  await page.locator('#ref-login-identifier').fill('fixture-creator');
+  await page.locator('#ref-login-password').fill('Synthetic-password1!');
+  const loginResponse = page.waitForResponse(response => response.url().endsWith('/api/ref/login'));
+  await page.getByRole('button', { name: 'Login', exact: true }).click();
+  const response = await loginResponse;
+  await testInfo.attach('session-cookie-state', { body: JSON.stringify({
+    status: response.status(),
+    secureContext: await page.evaluate(() => window.isSecureContext),
+    secureCookie: Boolean((await response.headerValue('set-cookie'))?.includes('Secure')),
+    blockedCookies,
+    cookies: (await context.cookies()).map(({ name, secure }) => ({ name, secure })),
+  }), contentType: 'application/json' });
+  expect(response.status()).toBe(200);
+  await expect.poll(async () => (await context.cookies()).some(cookie => cookie.name === 'ref_session')).toBe(true);
+  const logout = await page.evaluate(async () => (await fetch('/api/ref/logout', { method: 'POST' })).status);
+  expect(logout).toBe(200);
+  expect((await context.cookies()).some(cookie => cookie.name === 'ref_session')).toBe(false);
+});
 async function record(page, testInfo, label, values = {}, fullPage = true) {
   const details = { url: page.url(), viewport: page.viewportSize(), ...values };
   fs.mkdirSync(testInfo.outputDir, { recursive: true });
