@@ -1966,14 +1966,13 @@ export default function BookingForm({ isMobile }) {
     const emailDispatchToken = String(data.emailDispatchToken || "").trim();
     if (
       !["booked", "email_partial"].includes(status) ||
-      !bookingId ||
-      !emailDispatchToken
+      !bookingId
     ) {
       returnToPayment();
       return;
     }
 
-    const bookingConfirmation = { bookingId, emailDispatchToken };
+    const bookingConfirmation = { bookingId, ...(emailDispatchToken ? { emailDispatchToken } : {}) };
     try {
       sessionStorage.setItem(
         BOOKING_CONFIRMATION_STORAGE_KEY,
