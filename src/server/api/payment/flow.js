@@ -84,6 +84,22 @@ const normalizeObject = (value) =>
 
 const nowIso = () => new Date().toISOString();
 
+const getDodoCaptureAmountUpdates = (record, { totalAmount, taxAmount }) => {
+  const updates = {};
+  for (const [field, amount] of Object.entries({ totalAmount, taxAmount })) {
+    const previous = record.providerPublicData?.[field];
+    if (!Number.isSafeInteger(amount) || amount < 0 || previous === amount) continue;
+    if (Number.isSafeInteger(previous)) {
+      const name = field === "taxAmount" ? "tax" : "total";
+      logSafeError(`Dodo capture ${name} changed: ${record._id}`, Object.assign(new Error(), {
+        code: `dodo_capture_${name}_changed`,
+      }));
+    }
+    updates[field] = amount;
+  }
+  return updates;
+};
+
 const buildRecoveryFailureState = (record) => {
   const normalizeCount = (value) => {
     const count = Number(value);
@@ -2247,6 +2263,8 @@ const finalizePaymentRecordInternal = async ({
   }
 
   const captureStatus = resolveClientSourceStatus(normalizedSource);
+  const captureAmountUpdates = workingRecord.provider === "dodo"
+    ? getDodoCaptureAmountUpdates(workingRecord, verification) : {};
   try {
     workingRecord = await patchPaymentRecord({
       client,
@@ -2274,8 +2292,8 @@ const finalizePaymentRecordInternal = async ({
           nextRecoveryAt: "",
         } : {}),
         paymentProofClaimId: String(proofClaim?._id || "").trim(),
-        ...(workingRecord.provider === "dodo" && Number.isSafeInteger(verification.totalAmount) ? {
-          providerPublicData: { ...workingRecord.providerPublicData, totalAmount: verification.totalAmount, taxAmount: verification.taxAmount },
+        ...(Object.keys(captureAmountUpdates).length ? {
+          providerPublicData: { ...workingRecord.providerPublicData, ...captureAmountUpdates },
         } : {}),
       },
       event: buildPaymentRecordEvent({
@@ -5883,13 +5901,13 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     return { httpStatus: 503, body: { ok: false, code: "dodo_refund_details_pending",
       error: "Refund details are temporarily unavailable." } };
   }
-  if (payment.status === "succeeded" &&
-      (record.providerPublicData?.totalAmount !== payment.total_amount ||
-        record.providerPublicData?.taxAmount !== (payment.tax ?? null))) {
+  let captureAmountUpdates = payment.status === "succeeded"
+    ? getDodoCaptureAmountUpdates(record, { totalAmount: payment.total_amount, taxAmount: payment.tax }) : {};
+  if (Object.keys(captureAmountUpdates).length) {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         record = await patchPaymentRecord({ client, record, set: {
-          providerPublicData: { ...record.providerPublicData, totalAmount: payment.total_amount, taxAmount: payment.tax ?? null },
+          providerPublicData: { ...record.providerPublicData, ...captureAmountUpdates },
         } });
         break;
       } catch (error) {
@@ -5899,8 +5917,9 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
         record = current;
         const currentValidation = validateDodoPayment({ record, payment });
         if (!currentValidation.ok) return { httpStatus: 409, body: { ok: false, code: currentValidation.reason } };
-        if (record.providerPublicData?.totalAmount === payment.total_amount &&
-            record.providerPublicData?.taxAmount === (payment.tax ?? null)) break;
+        captureAmountUpdates = getDodoCaptureAmountUpdates(record,
+          { totalAmount: payment.total_amount, taxAmount: payment.tax });
+        if (!Object.keys(captureAmountUpdates).length) break;
         if (attempt === 2) return { httpStatus: 202, body: buildPublicStatusBody(record) };
       }
     }

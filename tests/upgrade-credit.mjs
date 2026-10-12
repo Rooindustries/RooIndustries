@@ -103,6 +103,30 @@ test('retained upgrade credit over HTTP with PostgreSQL', { timeout: 300000 }, a
     result.noMutation = isDeepStrictEqual(before, await snapshot());
     assert.ok(result.noMutation, 'Rejected upgrade mutated commerce state or contacted a provider');
   };
+  const nativeCapture = async ({ taxInclusive = false } = {}) => {
+    const bookingPayload = await fixture.hold({ packageTitle: 'Performance Vertex Overhaul' });
+    const started = await fixture.start(bookingPayload);
+    assert.equal(started.status, 200, JSON.stringify(started));
+    if (taxInclusive) {
+      const record = await commerce.fetch('*[_type == "paymentRecord" && providerOrderId == $id][0]',
+        { id: started.body.providerPayload.orderId });
+      await commerce.patch(record._id).set({
+        providerPublicData: { ...record.providerPublicData, taxInclusive: true },
+      }).commit();
+    }
+    const finalized = await post('/api/payment/finalize', {}, started.body.paymentAccessToken);
+    assert.equal(finalized.status, 200, JSON.stringify(finalized));
+    const record = await commerce.fetch('*[_type == "paymentRecord" && providerOrderId == $id][0]',
+      { id: started.body.providerPayload.orderId });
+    const lookup = await post('/api/ref/getUpgradeInfo', { id: finalized.body.bookingId, email: bookingPayload.email });
+    assert.equal(lookup.status, 200, JSON.stringify(lookup));
+    return { record, started, original: { _id: finalized.body.bookingId, email: bookingPayload.email },
+      payload: { originalOrderId: finalized.body.bookingId, packageTitle: lookup.body.targetPackage.title,
+        email: bookingPayload.email, upgradeIntentToken: lookup.body.upgradeIntentToken,
+        deferEmailsUntilConfirmation: true } };
+  };
+  const partialRefund = (record, id) => ({ refund_id: id, payment_id: record.providerPaymentId,
+    status: 'succeeded', amount: 550, currency: 'USD', is_partial: true });
 
   try {
     const baselineSource = execFileSync('git', ['show', `${baselineCommit}:src/server/api/ref/pricing.js`], {
@@ -416,6 +440,118 @@ test('retained upgrade credit over HTTP with PostgreSQL', { timeout: 300000 }, a
         fixture.setPaymentTax(0);
       }
     });
+    for (const [name, tax] of [['omitted', undefined], ['null', null]]) {
+      await check(`a later Dodo retrieve with ${name} tax preserves capture evidence and refund credit`, async result => {
+        fixture.setPaymentTax(500);
+        fixture.setPaymentTaxInclusive(true);
+        try {
+          const scenario = await nativeCapture({ taxInclusive: true });
+          assert.equal(scenario.record.providerPublicData.taxAmount, 500);
+          assert.equal(scenario.record.providerPublicData.totalAmount, 5495);
+          fixture.setPaymentAmountOverrides({ tax });
+          result.retrieve = await post('/api/payment/finalize', {}, scenario.started.body.paymentAccessToken);
+          assert.equal(result.retrieve.status, 200, JSON.stringify(result.retrieve));
+          const refreshed = await commerce.getDocument(scenario.record._id);
+          result.retrievePublicData = refreshed.providerPublicData;
+          result.retrieveDidNotPatch = refreshed._rev === scenario.record._rev;
+          const refund = partialRefund(scenario.record, `refund_tax_${name}`);
+          result.refund = await fixture.refundPayment(scenario.record.providerPaymentId, [refund], `event_tax_${name}`);
+          assert.equal(result.refund.status, 200, JSON.stringify(result.refund));
+          await price(scenario, result, 44.95);
+          assert.equal(refreshed.providerPublicData.taxAmount, 500);
+          assert.equal(refreshed.providerPublicData.totalAmount, 5495);
+          assert.ok(result.retrieveDidNotPatch, 'Omitted tax caused an unnecessary payment-record patch');
+        } finally {
+          fixture.setPaymentTax(0);
+          fixture.setPaymentTaxInclusive(false);
+          fixture.setPaymentAmountOverrides({});
+        }
+      });
+    }
+    await check('a changed Dodo tax amount is logged and the retrieved integers replace stored amounts', async result => {
+      fixture.setPaymentTax(550);
+      const originalError = console.error;
+      try {
+        const scenario = await nativeCapture();
+        assert.equal(scenario.record.providerPublicData.taxAmount, 550);
+        assert.equal(scenario.record.providerPublicData.totalAmount, 6045);
+        fixture.setPaymentTax(650);
+        result.logs = [];
+        console.error = (...args) => { result.logs.push(args); originalError(...args); };
+        result.retrieve = await post('/api/payment/finalize', {}, scenario.started.body.paymentAccessToken);
+        assert.equal(result.retrieve.status, 200, JSON.stringify(result.retrieve));
+        const refreshed = await commerce.getDocument(scenario.record._id);
+        assert.equal(refreshed.providerPublicData.taxAmount, 650);
+        assert.equal(refreshed.providerPublicData.totalAmount, 6145);
+        const logged = result.logs.find(([, metadata]) => metadata?.code === 'dodo_capture_tax_changed');
+        assert.ok(logged, 'Changed verified tax was not logged');
+        assert.ok(logged[0].includes(scenario.record._id));
+        assert.deepEqual(logged[1], { name: 'Error', code: 'dodo_capture_tax_changed', status: 0 });
+        const refund = partialRefund(scenario.record, 'refund_changed_tax');
+        result.refund = await fixture.refundPayment(scenario.record.providerPaymentId, [refund], 'event_changed_tax');
+        assert.equal(result.refund.status, 200, JSON.stringify(result.refund));
+        await price(scenario, result, 50.03);
+      } finally {
+        console.error = originalError;
+        fixture.setPaymentTax(0);
+      }
+    });
+    await check('Dodo finalize retry preserves stored capture tax when verification omits it', async result => {
+      fixture.setPaymentTax(500);
+      fixture.setPaymentTaxInclusive(true);
+      try {
+        const bookingPayload = await fixture.hold({ packageTitle: 'Performance Vertex Overhaul' });
+        const started = await fixture.start(bookingPayload);
+        assert.equal(started.status, 200, JSON.stringify(started));
+        let record = await commerce.fetch('*[_type == "paymentRecord" && providerOrderId == $id][0]',
+          { id: started.body.providerPayload.orderId });
+        record = await commerce.patch(record._id).set({ status: 'needs_recovery', verificationState: 'server_verified',
+          providerPaymentId: `payment_${started.body.providerPayload.orderId}`,
+          providerPublicData: { ...record.providerPublicData, taxInclusive: true, taxAmount: 500, totalAmount: 5495 },
+        }).commit();
+        fixture.setPaymentAmountOverrides({ tax: undefined });
+        result.finalize = await post('/api/payment/finalize', {}, started.body.paymentAccessToken);
+        assert.equal(result.finalize.status, 200, JSON.stringify(result.finalize));
+        const saved = await commerce.getDocument(record._id);
+        result.finalizedPublicData = saved.providerPublicData;
+        assert.equal(saved.providerPublicData.taxAmount, 500);
+        assert.equal(saved.providerPublicData.totalAmount, 5495);
+        const lookup = await post('/api/ref/getUpgradeInfo', { id: result.finalize.body.bookingId, email: bookingPayload.email });
+        assert.equal(lookup.status, 200, JSON.stringify(lookup));
+        const scenario = { original: { _id: result.finalize.body.bookingId, email: bookingPayload.email },
+          payload: { originalOrderId: result.finalize.body.bookingId, packageTitle: lookup.body.targetPackage.title,
+            email: bookingPayload.email, upgradeIntentToken: lookup.body.upgradeIntentToken,
+            deferEmailsUntilConfirmation: true } };
+        result.refund = await fixture.refundPayment(saved.providerPaymentId,
+          [partialRefund(saved, 'refund_finalize_missing_tax')], 'event_finalize_missing_tax');
+        assert.equal(result.refund.status, 200, JSON.stringify(result.refund));
+        await price(scenario, result, 44.95);
+      } finally {
+        fixture.setPaymentTax(0);
+        fixture.setPaymentTaxInclusive(false);
+        fixture.setPaymentAmountOverrides({});
+      }
+    });
+    for (const [name, total] of [['omitted', undefined], ['null', null]]) {
+      await check(`a Dodo retrieve with ${name} total refuses without erasing stored amounts`, async result => {
+        fixture.setPaymentTax(500);
+        fixture.setPaymentTaxInclusive(true);
+        try {
+          const scenario = await nativeCapture({ taxInclusive: true });
+          fixture.setPaymentAmountOverrides({ total_amount: total });
+          result.retrieve = await post('/api/payment/finalize', {}, scenario.started.body.paymentAccessToken);
+          assert.equal(result.retrieve.status, 409, JSON.stringify(result.retrieve));
+          const refreshed = await commerce.getDocument(scenario.record._id);
+          assert.equal(refreshed.providerPublicData.totalAmount, 5495);
+          assert.equal(refreshed.providerPublicData.taxAmount, 500);
+          assert.equal(refreshed._rev, scenario.record._rev);
+        } finally {
+          fixture.setPaymentTax(0);
+          fixture.setPaymentTaxInclusive(false);
+          fixture.setPaymentAmountOverrides({});
+        }
+      });
+    }
     await check('all requests stayed in the guarded fixture', async () => {
       assert.deepEqual(evidence.blocked, []);
     });

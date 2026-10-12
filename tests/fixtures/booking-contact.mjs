@@ -80,6 +80,8 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     const sessions = new Map();
     const paymentRefunds = new Map();
     let paymentTax = 0;
+    let paymentTaxInclusive = false;
+    let paymentAmountOverrides = {};
     database.setProviderHandler(async request => {
       evidence.providerRequests.push(request);
       if (request.path === '/products/pdt_fixture') return { body: {
@@ -103,12 +105,13 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
         assert.ok(session, 'Unknown synthetic payment');
         const refunds = paymentRefunds.get(paymentId) || [];
         const settled = refunds.filter(refund => refund.status === 'succeeded').reduce((sum, refund) => sum + refund.amount, 0);
-        const total = session.product_cart[0].amount + paymentTax;
+        const total = session.product_cart[0].amount + (paymentTaxInclusive ? 0 : paymentTax);
         return { body: {
           payment_id: paymentId, checkout_session_id: id, metadata: session.metadata,
           status: 'succeeded', total_amount: total, tax: paymentTax, currency: 'USD',
           product_cart: session.product_cart, refunds, disputes: [], refund_status: settled >= total ? 'full' : settled > 0 ? 'partial' : null,
           customer: session.customer,
+          ...paymentAmountOverrides,
         } };
       }
       if (request.path === '/emails') return { body: { id: `email_fixture_${evidence.providerRequests.length}` } };
@@ -237,6 +240,14 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       assert.ok(Number.isSafeInteger(amount) && amount >= 0);
       paymentTax = amount;
     };
+    const setPaymentTaxInclusive = value => {
+      assert.equal(typeof value, 'boolean');
+      paymentTaxInclusive = value;
+    };
+    const setPaymentAmountOverrides = values => {
+      assert.ok(Object.keys(values).every(key => ['tax', 'total_amount'].includes(key)));
+      paymentAmountOverrides = { ...values };
+    };
     const refundPayment = async (paymentId, refunds, eventId) => {
       paymentRefunds.set(paymentId, refunds);
       const body = { business_id: 'business_fixture', type: 'refund.succeeded',
@@ -248,7 +259,8 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
         'webhook-id': eventId, 'webhook-timestamp': timestamp, 'webhook-signature': `v1,${signature}`,
       });
     };
-    return { post, start, hold, snapshot, recordFor, seedUpgrade, commerce, details, evidence, save, stop, setPaymentTax, refundPayment };
+    return { post, start, hold, snapshot, recordFor, seedUpgrade, commerce, details, evidence, save, stop,
+      setPaymentTax, setPaymentTaxInclusive, setPaymentAmountOverrides, refundPayment };
   } catch (error) {
     await stop();
     throw error;
