@@ -69,8 +69,8 @@ const sourceHash = fingerprint.digest("hex");
 const manifestPath = path.join(dist, "tooling-build.json");
 let active;
 let stopping = false;
-const execute = args => new Promise((resolve, reject) => {
-  active = spawn(process.execPath, args, { env, stdio: "inherit" });
+const execute = (args, executionEnv = env) => new Promise((resolve, reject) => {
+  active = spawn(process.execPath, args, { env: executionEnv, stdio: "inherit" });
   active.once("error", reject);
   active.once("exit", (code, signal) => code === 0 ? resolve() : reject(new Error(`Test server exited ${signal || code}.`)));
 });
@@ -92,8 +92,9 @@ try {
     await execute([next, "dev", "--hostname", testHost, "--port", target.port]);
   } else {
     if (!fs.existsSync(path.join(dist, "BUILD_ID"))) {
-      await execute(["scripts/validate-runtime-env.js"]);
-      await execute([next, "build"]);
+      const buildEnv = { ...env, VERCEL_ENV: "development" };
+      await execute(["scripts/validate-runtime-env.js"], buildEnv);
+      await execute([next, "build"], buildEnv);
       fs.writeFileSync(manifestPath, JSON.stringify({ version: 1, sourceHash, baseURL, contentURL, contentSha256: fixture.evidence.contentSha256 }));
     }
     await execute([next, "start", "--hostname", testHost, "--port", target.port]);
