@@ -16,12 +16,16 @@ test.beforeAll(async ({ baseURL }) => {
 test.afterAll(() => restoreGuard?.());
 test.beforeEach(async ({ baseURL, context }) => {
   await fixture.configureApiFixture(baseURL, { reset: true });
-  await fixture.requestRoute(fixture.apiFixtureOrigin(baseURL), '/__portal', { data: { reset: true } });
+  await configure(baseURL, { reset: true });
   const { guardBrowserContext } = await import('../scripts/lib/test-target-safety.mjs');
   await guardBrowserContext(context, [baseURL, fixture.apiFixtureOrigin(baseURL)]);
 });
 
-const configure = (baseURL, data) => fixture.requestRoute(fixture.apiFixtureOrigin(baseURL), '/__portal', { data });
+async function configure(baseURL, data) {
+  const response = await fixture.requestRoute(fixture.apiFixtureOrigin(baseURL), '/__portal', { data });
+  if (response.status !== 200) throw new Error(`Creator portal fixture configuration failed (${response.status}): ${await response.text()}`);
+  return response;
+}
 async function signIn(context, baseURL) {
   await context.addCookies([{ name: 'ref_session', value: fixture.referralSessionCookie(), url: baseURL, httpOnly: true, sameSite: 'Lax' }]);
 }
