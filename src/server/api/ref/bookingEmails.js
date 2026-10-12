@@ -6,6 +6,7 @@ import { formatAppointmentTime } from "../../email/appointmentTime.js";
 import { isIdempotencyPayloadConflict } from "../../email/resendOutcome.js";
 import { getPaymentRecordById } from "../payment/paymentRecord.js";
 import { parseMoneySubunits, toSubunits } from "../payment/providerClients.js";
+import { isBookingBlockingStatus } from "../../booking/bookingStatus.js";
 import {
   claimEmailDispatchPair,
   completeEmailDispatch,
@@ -26,6 +27,11 @@ export const isEmailDeliveryUnknown = (outcome = {}) =>
     outcome.emailDispatch?.client?.skippedReason, outcome.emailDispatch?.owner?.skippedReason,
     ...(Array.isArray(outcome.errors) ? outcome.errors : [])].some(reason => DELIVERY_UNKNOWN_REASONS.has(reason));
 
+export const isBookingEmailSuppressed = (outcome = {}) =>
+  outcome?.code === "booking_inactive" || outcome?.suppressed === true || outcome?.emailDispatch?.suppressed === true ||
+  [outcome?.client?.skippedReason, outcome?.owner?.skippedReason,
+    outcome?.emailDispatch?.client?.skippedReason, outcome?.emailDispatch?.owner?.skippedReason].includes("booking_inactive");
+
 export const DISCORD_INVITE_URL = "https://discord.com/invite/qs5HKNyazD";
 export const OWNER_TZ_NAME = "Asia/Kolkata";
 const DEFAULT_LOGO_URL = "https://www.rooindustries.com/embed_logo.png";
@@ -41,7 +47,7 @@ const createResendClient = () => {
 
 const resend = createResendClient();
 
-const sendEmailAtLease = async ({ client, booking, leaseId, recovery = false, recipient }, message, options) => {
+const sendEmailAtLease = async ({ client, booking, leaseId, recovery = false, recipient, previouslySuppressed = false }, message, options) => {
   const prefix = recovery ? "recoveryNotification" : "emailDispatch";
   const recipientPrefix = recovery ? `recovery${recipient}` : `emailDispatch${recipient}`;
   const firstAttemptField = `${recipientPrefix}FirstAttemptAt`;
@@ -51,8 +57,12 @@ const sendEmailAtLease = async ({ client, booking, leaseId, recovery = false, re
       !Number.isFinite(leaseExpiresAt) || leaseExpiresAt <= Date.now()) {
     throw Object.assign(new Error("Email dispatch lease changed."), { code: "email_dispatch_lease_changed", status: 409 });
   }
+  if (!recovery && !isBookingBlockingStatus(current.status)) {
+    return { data: null, error: { code: "booking_inactive" } };
+  }
   const firstAttemptAt = current[firstAttemptField] ||
-    (Number(booking[`${prefix}AttemptCount`] || 0) > 0
+    (Number(booking[`${prefix}AttemptCount`] || 0) > 0 &&
+      (recovery || (!previouslySuppressed && booking.emailDispatchLastError !== "booking_inactive"))
       ? booking[`${prefix}LastAttemptAt`] || "unknown"
       : new Date().toISOString());
   const age = Date.now() - new Date(firstAttemptAt).getTime();
@@ -60,7 +70,14 @@ const sendEmailAtLease = async ({ client, booking, leaseId, recovery = false, re
     logSafeError("Booking email requires delivery review", { code: "email_delivery_unknown", status: 409 });
     return { data: null, error: { code: "email_delivery_unknown" } };
   }
-  await client.patch(current._id).ifRevisionId(current._rev).set({ [firstAttemptField]: firstAttemptAt }).commit();
+  let attemptPatch = client.patch(current._id).ifRevisionId(current._rev).set({ [firstAttemptField]: firstAttemptAt });
+  if (!recovery) {
+    attemptPatch = attemptPatch.set({ emailDispatchLastAttemptAt: new Date().toISOString() });
+    if (Number(current.emailDispatchAttemptCount || 0) <= Number(booking.emailDispatchAttemptCount || 0)) {
+      attemptPatch = attemptPatch.setIfMissing({ emailDispatchAttemptCount: 0 }).inc({ emailDispatchAttemptCount: 1 });
+    }
+  }
+  await attemptPatch.commit();
   const result = await resend.emails.send(message, options);
   if (isIdempotencyPayloadConflict(result)) {
     logSafeError("Booking email requires delivery review", { code: "email_delivery_unknown", status: 409 });
@@ -247,6 +264,7 @@ export const getBookingForEmailDispatch = async ({
       _rev,
       backendOwner,
       cutoverGeneration,
+      status,
       discord,
       email,
       payerEmail,
@@ -346,18 +364,6 @@ export const buildDeferredEmailDispatch = ({ booking = {} }) => {
   return dispatch;
 };
 
-const hasRenderableBookingEmailFields = (booking = {}) =>
-  !!booking?._id &&
-  !!String(booking.packageTitle || "").trim() &&
-  !!String(booking.packagePrice || "").trim() &&
-  !!String(booking.hostDate || "").trim() &&
-  !!String(booking.hostTime || "").trim() &&
-  !!String(booking.hostTimeZone || "").trim() &&
-  !!String(booking.displayDate || "").trim() &&
-  !!String(booking.displayTime || "").trim() &&
-  !!String(booking.localTimeZone || "").trim() &&
-  !!String(booking.email || booking.payerEmail || "").trim();
-
 const buildBookingFieldGroups = (booking = {}) => {
   const siteName = process.env.SITE_NAME || "Roo Industries";
   const logoUrl = resolveLogoUrl();
@@ -448,17 +454,60 @@ const buildBookingFieldGroups = (booking = {}) => {
   };
 };
 
-export const sendBookingEmailsForBooking = async ({
-  bookingId,
-  client = writeClient,
-  booking = null,
-}) => {
-  const suppliedBooking =
-    booking && booking._id === bookingId && hasRenderableBookingEmailFields(booking)
-      ? booking
-      : null;
-  const resolvedBooking =
-    (await getBookingForEmailDispatch({ bookingId, client })) || suppliedBooking;
+const suppressBookingConfirmation = async ({ client, booking }) => {
+  const leaseId = crypto.randomUUID();
+  const recipientTypes = booking.emailDispatchLastError === "booking_inactive"
+    ? [["customer", "Client"], ["owner", "Owner"]].filter(([, name]) =>
+      !booking[`emailDispatch${name}SentAt`] && booking[`emailDispatch${name}ProviderId`]).map(([type]) => type)
+    : ["customer", "owner"];
+  const ledger = await claimEmailDispatchPair({ client, bookingId: booking._id,
+    dispatchKind: "booking_confirmation", leaseId, recipientTypes });
+  const dispatch = buildEmailDispatchState();
+  dispatch.deliveryEnabled = hasEmailDeliveryConfig();
+  for (const [name, entry, sentAt] of [
+    ["client", ledger?.customer, booking.emailDispatchClientSentAt],
+    ["owner", ledger?.owner, booking.emailDispatchOwnerSentAt],
+  ]) {
+    dispatch[name].sent = !!sentAt || entry?.sent === true;
+    dispatch[name].skippedReason = dispatch[name].sent ? "already_sent"
+      : entry?.historicalUnknown ? "historical_delivery_unknown" : "booking_inactive";
+    if (entry?.claimed) {
+      await recordEmailLedgerOutcome({ client, dispatch: entry, leaseId, success: false, errorCode: "booking_inactive" });
+    }
+  }
+  dispatch.allSent = false;
+  const deliveryUnknown = isEmailDeliveryUnknown({ ...dispatch, ledger });
+  dispatch.suppressed = !deliveryUnknown;
+  const current = await getBookingForEmailDispatch({ client, bookingId: booking._id });
+  if (current?._rev && !isBookingBlockingStatus(current.status)) {
+    const receipts = {};
+    for (const [name, entry] of [["Client", ledger?.customer], ["Owner", ledger?.owner]]) {
+      if (entry?.sent && !current[`emailDispatch${name}SentAt`] && entry.sentAt) {
+        receipts[`emailDispatch${name}SentAt`] = entry.sentAt;
+        if (entry.providerMessageId) receipts[`emailDispatch${name}ProviderId`] = entry.providerMessageId;
+      }
+    }
+    const values = {
+      ...receipts,
+      emailDispatchStatus: deliveryUnknown ? "delivery_unknown"
+        : dispatch.client.sent && dispatch.owner.sent ? "sent"
+          : dispatch.client.sent || dispatch.owner.sent ? "partial" : "failed",
+      emailDispatchLastError: deliveryUnknown ? "email_delivery_unknown" : "booking_inactive",
+      emailDispatchDeferred: false, emailDispatchNextAttemptAt: "",
+      emailDispatchLeaseId: "", emailDispatchLeaseExpiresAt: "",
+    };
+    if (Object.entries(values).some(([key, value]) => current[key] !== value)) {
+      await client.patch(current._id).ifRevisionId(current._rev).set(values).commit();
+    }
+  }
+  return { httpStatus: deliveryUnknown ? 503 : 409, body: {
+    ok: false, bookingId: booking._id, retryable: false, deliveryUnknown,
+    ...(deliveryUnknown ? {} : { code: "booking_inactive" }), emailDispatch: dispatch,
+  } };
+};
+
+export const sendBookingEmailsForBooking = async ({ bookingId, client = writeClient }) => {
+  const resolvedBooking = await getBookingForEmailDispatch({ bookingId, client });
 
   if (!resolvedBooking?._id) {
     return {
@@ -489,6 +538,10 @@ export const sendBookingEmailsForBooking = async ({
     if (!dispatch.owner.sent) dispatch.owner.skippedReason = "historical_delivery_unknown";
     return { httpStatus: 503, body: { ok: false, bookingId: resolvedBooking._id,
       retryable: false, deliveryUnknown: true, emailDispatch: dispatch } };
+  }
+
+  if (!isBookingBlockingStatus(resolvedBooking.status)) {
+    return suppressBookingConfirmation({ client, booking: resolvedBooking });
   }
 
   const dispatch = buildEmailDispatchState();
@@ -528,10 +581,7 @@ export const sendBookingEmailsForBooking = async ({
       .set({
         emailDispatchLeaseId: leaseId,
         emailDispatchLeaseExpiresAt: leaseExpiresAt,
-        emailDispatchLastAttemptAt: now,
       })
-      .setIfMissing({ emailDispatchAttemptCount: 0 })
-      .inc({ emailDispatchAttemptCount: 1 })
       .commit();
   } catch (error) {
     if (Number(error?.statusCode || error?.status || 0) === 409) {
@@ -610,7 +660,6 @@ export const sendBookingEmailsForBooking = async ({
   }
 
   const patchValues = {
-    emailDispatchLastAttemptAt: now,
     emailDispatchLastError: "",
   };
 
@@ -645,26 +694,31 @@ export const sendBookingEmailsForBooking = async ({
     dispatch.owner.sent = ownerAlreadySent;
     dispatch.client.skippedReason = clientAlreadySent
       ? "already_sent"
-      : ledger?.customer?.historicalUnknown ? "historical_delivery_unknown" : "delivery_disabled";
+      : ledger?.customer?.inactive ? "booking_inactive"
+        : ledger?.customer?.historicalUnknown ? "historical_delivery_unknown" : "delivery_disabled";
     dispatch.owner.skippedReason = ownerAlreadySent
       ? "already_sent"
-      : ledger?.owner?.historicalUnknown ? "historical_delivery_unknown" : "delivery_disabled";
+      : ledger?.owner?.inactive ? "booking_inactive"
+        : ledger?.owner?.historicalUnknown ? "historical_delivery_unknown" : "delivery_disabled";
     dispatch.allSent = dispatch.client.sent && dispatch.owner.sent;
     const deliveryUnknown = isEmailDeliveryUnknown({ ...dispatch, ledger });
-    patchValues.emailDispatchStatus = deliveryUnknown ? "delivery_unknown" : dispatch.allSent ? "sent" : "delivery_disabled";
+    const bookingInactive = dispatch.client.skippedReason === "booking_inactive" || dispatch.owner.skippedReason === "booking_inactive";
+    patchValues.emailDispatchStatus = deliveryUnknown ? "delivery_unknown" : dispatch.allSent ? "sent" : bookingInactive ? "failed" : "delivery_disabled";
+    if (bookingInactive) patchValues.emailDispatchLastError = "booking_inactive";
     patchValues.emailDispatchDeferred = false;
     patchValues.emailDispatchLeaseId = "";
     patchValues.emailDispatchLeaseExpiresAt = "";
-    patchValues.emailDispatchNextAttemptAt = dispatch.allSent || deliveryUnknown
+    patchValues.emailDispatchNextAttemptAt = dispatch.allSent || deliveryUnknown || bookingInactive
       ? ""
       : new Date(nowMs + 5 * 60 * 1000).toISOString();
     await client.patch(resolvedBooking._id).set(patchValues).commit();
     return {
-      httpStatus: dispatch.allSent ? 200 : 503,
+      httpStatus: dispatch.allSent ? 200 : bookingInactive ? 409 : 503,
       body: {
         ok: dispatch.allSent,
         bookingId: resolvedBooking._id,
-        retryable: !dispatch.allSent && !deliveryUnknown,
+        retryable: !dispatch.allSent && !deliveryUnknown && !bookingInactive,
+        ...(bookingInactive ? { code: "booking_inactive" } : {}),
         deliveryUnknown,
         emailDispatch: dispatch,
       },
@@ -676,6 +730,8 @@ export const sendBookingEmailsForBooking = async ({
     dispatch.client.skippedReason = "already_sent";
   } else if (ledger?.customer?.historicalUnknown) {
     dispatch.client.skippedReason = "historical_delivery_unknown";
+  } else if (ledger?.customer?.inactive) {
+    dispatch.client.skippedReason = "booking_inactive";
   } else if (ledger && !ledger.customer?.claimed) {
     dispatch.client.skippedReason = "dispatch_in_progress";
   } else if (!clientRecipient) {
@@ -684,7 +740,7 @@ export const sendBookingEmailsForBooking = async ({
     dispatch.client.attempted = true;
     try {
       const { data, error } = await sendEmailAtLease(
-        { client, booking: resolvedBooking, leaseId, recipient: "Client" },
+        { client, booking: resolvedBooking, leaseId, recipient: "Client", previouslySuppressed: ledger?.customer?.previouslySuppressed },
         {
           from,
           to: clientRecipient,
@@ -709,6 +765,7 @@ export const sendBookingEmailsForBooking = async ({
       if (error) {
         const errorCode = getSafeErrorCode(error, "resend_client_error");
         dispatch.client.skippedReason = errorCode;
+        if (errorCode === "booking_inactive") dispatch.client.attempted = false;
         await recordEmailLedgerOutcome({
           client,
           dispatch: ledger?.customer,
@@ -752,6 +809,8 @@ export const sendBookingEmailsForBooking = async ({
     dispatch.owner.skippedReason = "already_sent";
   } else if (ledger?.owner?.historicalUnknown) {
     dispatch.owner.skippedReason = "historical_delivery_unknown";
+  } else if (ledger?.owner?.inactive) {
+    dispatch.owner.skippedReason = "booking_inactive";
   } else if (ledger && !ledger.owner?.claimed) {
     dispatch.owner.skippedReason = "dispatch_in_progress";
   } else if (!owner) {
@@ -760,7 +819,7 @@ export const sendBookingEmailsForBooking = async ({
     dispatch.owner.attempted = true;
     try {
       const { data, error } = await sendEmailAtLease(
-        { client, booking: resolvedBooking, leaseId, recipient: "Owner" },
+        { client, booking: resolvedBooking, leaseId, recipient: "Owner", previouslySuppressed: ledger?.owner?.previouslySuppressed },
         {
           from,
           to: owner,
@@ -783,6 +842,7 @@ export const sendBookingEmailsForBooking = async ({
       if (error) {
         const errorCode = getSafeErrorCode(error, "resend_owner_error");
         dispatch.owner.skippedReason = errorCode;
+        if (errorCode === "booking_inactive") dispatch.owner.attempted = false;
         await recordEmailLedgerOutcome({
           client,
           dispatch: ledger?.owner,
@@ -827,6 +887,7 @@ export const sendBookingEmailsForBooking = async ({
   dispatch.allSent = dispatch.client.sent && dispatch.owner.sent;
   dispatch.deferred = false;
   const deliveryUnknown = isEmailDeliveryUnknown({ ...dispatch, ledger });
+  const bookingInactive = dispatch.client.skippedReason === "booking_inactive" || dispatch.owner.skippedReason === "booking_inactive";
 
   patchValues.emailDispatchStatus = deliveryUnknown ? "delivery_unknown" : dispatch.allSent
     ? "sent"
@@ -834,10 +895,10 @@ export const sendBookingEmailsForBooking = async ({
       ? "partial"
       : "failed";
   patchValues.emailDispatchDeferred = false;
-  patchValues.emailDispatchLastError = lastErrors;
+  patchValues.emailDispatchLastError = bookingInactive ? "booking_inactive" : lastErrors;
   patchValues.emailDispatchLeaseId = "";
   patchValues.emailDispatchLeaseExpiresAt = "";
-  patchValues.emailDispatchNextAttemptAt = dispatch.allSent || deliveryUnknown
+  patchValues.emailDispatchNextAttemptAt = dispatch.allSent || deliveryUnknown || bookingInactive
     ? ""
     : new Date(nowMs + 5 * 60 * 1000).toISOString();
 
@@ -845,6 +906,12 @@ export const sendBookingEmailsForBooking = async ({
     bookingId: resolvedBooking._id,
     client,
   });
+  if (!latestBooking?._id) {
+    return { httpStatus: 404, body: { ok: false, error: "Booking not found." } };
+  }
+  if (!isBookingBlockingStatus(latestBooking.status)) {
+    return suppressBookingConfirmation({ client, booking: latestBooking });
+  }
   if (!latestBooking?.emailDispatchLeaseId || latestBooking.emailDispatchLeaseId === leaseId) {
     let completionPatch = client.patch(resolvedBooking._id);
     if (latestBooking?._rev && typeof completionPatch.ifRevisionId === "function") {
@@ -854,11 +921,12 @@ export const sendBookingEmailsForBooking = async ({
   }
 
   return {
-    httpStatus: dispatch.allSent ? 200 : 503,
+    httpStatus: dispatch.allSent ? 200 : bookingInactive ? 409 : 503,
     body: {
       ok: dispatch.allSent,
       bookingId: resolvedBooking._id,
-      retryable: !dispatch.allSent && !deliveryUnknown,
+      retryable: !dispatch.allSent && !deliveryUnknown && !bookingInactive,
+      ...(bookingInactive ? { code: "booking_inactive" } : {}),
       deliveryUnknown,
       emailDispatch: dispatch,
     },
@@ -874,7 +942,7 @@ export const reconcileBookingEmailDispatches = async ({
     client,
     dispatchKind: "booking_confirmation",
     now,
-    limit,
+    limit: 100,
   });
   const bookings = Array.isArray(ledgerBookingIds)
     ? await client.fetch(
@@ -901,7 +969,21 @@ export const reconcileBookingEmailDispatches = async ({
     : Array.isArray(bookings)
       ? bookings
       : [];
-  const selected = ordered.slice(0, Math.max(1, Math.min(20, Number(limit) || 20)));
+  const eligible = ordered.filter(booking =>
+    isBookingBlockingStatus(booking.status) || booking.emailDispatchLastError !== "booking_inactive" ||
+    ["Client", "Owner"].some(name => !booking[`emailDispatch${name}SentAt`] && booking[`emailDispatch${name}ProviderId`]));
+  if (ledgerBookingIds?.length === 100 && eligible.length < Math.min(20, Number(limit) || 20)) {
+    const additional = await client.fetch(`*[_type == "booking"
+      && emailDispatchStatus in ["partial", "failed", "retry"]
+      && emailDispatchLastError != "booking_inactive"
+      && (!defined(emailDispatchNextAttemptAt) || emailDispatchNextAttemptAt == "" || emailDispatchNextAttemptAt <= $now)
+      && (!defined(emailDispatchClientSentAt) || !defined(emailDispatchOwnerSentAt))
+    ] | order(emailDispatchNextAttemptAt asc, _updatedAt asc)[0...20]{...}`, { now });
+    for (const booking of additional || []) {
+      if (!byId.has(booking._id)) eligible.push(booking);
+    }
+  }
+  const selected = eligible.slice(0, Math.max(1, Math.min(20, Number(limit) || 20)));
   for (const booking of selected) {
     summary.scanned += 1;
     const result = await sendBookingEmailsForBooking({

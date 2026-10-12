@@ -21,6 +21,7 @@ import { logSafeError } from "../../safeErrorLog.js";
 import {
   buildDeferredEmailDispatch,
   getBookingForEmailDispatch,
+  isBookingEmailSuppressed,
   sendBookingEmailsForBooking,
 } from "./bookingEmails.js";
 import {
@@ -46,6 +47,8 @@ import {
   mergePaymentRecordEvents,
   PAYMENT_RECORD_TYPE,
   PAYMENT_STATUS_BOOKED,
+  PAYMENT_STATUS_FAILED,
+  PAYMENT_STATUS_ABANDONED,
   PAYMENT_STATUS_EMAIL_PARTIAL,
   PAYMENT_STATUS_REFUNDED,
   stableHash,
@@ -606,6 +609,7 @@ export default async function handler(req, res) {
         buildDeferredEmailDispatch({
           booking: bookingDoc,
         });
+      const confirmationSuppressed = isBookingEmailSuppressed(resolvedEmailDispatch);
       const nextStatus = resolvePaymentRecordStatus(resolvedEmailDispatch);
       const recordId =
         String(existingRecord?._id || paymentRecordId || "").trim() ||
@@ -723,7 +727,14 @@ export default async function handler(req, res) {
                 ).trim(),
               }),
         emailDispatch: resolvedEmailDispatch,
-        emailDispatchToken: String(emailDispatchToken || "").trim(),
+        emailDispatchToken: String(confirmationSuppressed ? "" : emailDispatchToken || "").trim(),
+        ...(confirmationSuppressed ? {
+          emailDispatchRequired: false,
+          emailDeliveryReviewRequired: resolvedEmailDispatch.deliveryUnknown === true,
+          recoveryReason: resolvedEmailDispatch.deliveryUnknown === true
+            ? "booking_email_delivery_review_required" : "booking_inactive",
+          nextRecoveryAt: "",
+        } : {}),
         events: mergePaymentRecordEvents(existingRecord?.events || [], nextEvent),
         createdAt: existingRecord?.createdAt || now,
         updatedAt: now,
@@ -780,7 +791,7 @@ export default async function handler(req, res) {
         }
       }
 
-      const recordSet = { ...doc };
+      let recordSet = { ...doc };
       delete recordSet._id;
       delete recordSet._type;
       if (existingRecord?.bookingPayload &&
@@ -795,8 +806,16 @@ export default async function handler(req, res) {
       }
 
       if (existingRecord?._id) {
-        if (existingRecord.status === PAYMENT_STATUS_REFUNDED) {
-          return existingRecord;
+        const recordStatus = String(existingRecord.status || "").trim().toLowerCase();
+        if (recordStatus === PAYMENT_STATUS_REFUNDED && !confirmationSuppressed) return existingRecord;
+        if (confirmationSuppressed && [PAYMENT_STATUS_REFUNDED, PAYMENT_STATUS_FAILED,
+            PAYMENT_STATUS_ABANDONED].includes(recordStatus)) {
+          recordSet = {
+            emailDispatch: resolvedEmailDispatch,
+            emailDispatchRequired: false,
+            emailDispatchToken: "",
+            emailDeliveryReviewRequired: resolvedEmailDispatch.deliveryUnknown === true,
+          };
         }
         let recordPatch = writeClient.patch(existingRecord._id);
         if (
@@ -868,6 +887,25 @@ export default async function handler(req, res) {
         `*[_type == $type && _id == $id][0]`,
         { type: PAYMENT_RECORD_TYPE, id: recordId }
       );
+    };
+    const respondWithBookingEmails = async ({ booking, idempotent }) => {
+      const sendResult = await sendBookingEmailsForBooking({ bookingId: booking._id, client: writeClient });
+      if (sendResult.httpStatus === 404) return res.status(404).json(sendResult.body);
+      const suppressed = isBookingEmailSuppressed(sendResult.body) ||
+        (!isBookingBlockingStatus(booking.status) && sendResult.body?.deliveryUnknown === true);
+      const emailDispatch = suppressed ? {
+        ...sendResult.body?.emailDispatch,
+        suppressed: true, deferred: false, allSent: false,
+        deliveryUnknown: sendResult.body?.deliveryUnknown === true,
+        client: { attempted: false, sent: false, skippedReason: "booking_inactive" },
+        owner: { attempted: false, sent: false, skippedReason: "booking_inactive" },
+      } : sendResult.body?.emailDispatch || null;
+      await syncPaidPaymentRecordForBooking({ bookingId: booking._id, emailDispatch,
+        source: idempotent ? "legacy-idempotent" : "legacy" });
+      return res.status(suppressed ? 200 : sendResult.httpStatus).json({
+        ...buildBookingSuccessResponse({ bookingId: booking._id, idempotent, emailDispatch }),
+        ...(suppressed && sendResult.body?.deliveryUnknown === true ? { deliveryUnknown: true } : {}),
+      });
     };
     const respondWithStoredBooking = async ({ bookingId, idempotent = false }) => {
       const normalizedBookingId = String(bookingId || "").trim();
@@ -943,26 +981,38 @@ export default async function handler(req, res) {
       const allEmailsAlreadySent =
         !!booking.emailDispatchClientSentAt && !!booking.emailDispatchOwnerSentAt;
 
+      if (!isBookingBlockingStatus(booking.status)) {
+        return respondWithBookingEmails({ booking, idempotent });
+      }
+
       if (
         deferEmailDispatchRequested &&
         canIssueBookingEmailDispatchToken() &&
         !allEmailsAlreadySent
       ) {
-        const queuedAt = booking.emailDispatchQueuedAt || new Date().toISOString();
-        const patchValues = {
-          emailDispatchDeferred: true,
-          emailDispatchStatus: "pending",
-          emailDispatchQueuedAt: queuedAt,
-          emailDispatchLastError: "",
-        };
-        const patchedBooking =
-          (await writeClient
-            .patch(booking._id)
-            .set(patchValues)
-            .commit()) || {
-            ...booking,
-            ...patchValues,
+        let patchedBooking = booking;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const patchValues = {
+            emailDispatchDeferred: true,
+            emailDispatchStatus: "pending",
+            emailDispatchQueuedAt: patchedBooking.emailDispatchQueuedAt || new Date().toISOString(),
+            emailDispatchLastError: patchedBooking.emailDispatchLastError === "booking_inactive" ? "booking_inactive" : "",
           };
+          try {
+            patchedBooking = (await writeClient.patch(patchedBooking._id)
+              .ifRevisionId(patchedBooking._rev).set(patchValues).commit()) || { ...patchedBooking, ...patchValues };
+            break;
+          } catch (error) {
+            if (Number(error?.statusCode || error?.status || 0) !== 409 && error?.code !== "40001") throw error;
+            if (attempt === 1) break;
+            patchedBooking = await getBookingForEmailDispatch({ bookingId: booking._id, client: writeClient });
+            if (!patchedBooking?._id) return res.status(409).json({ error: "Stored booking is no longer available." });
+            if (!isBookingBlockingStatus(patchedBooking.status) ||
+                (patchedBooking.emailDispatchClientSentAt && patchedBooking.emailDispatchOwnerSentAt)) {
+              return respondWithBookingEmails({ booking: patchedBooking, idempotent });
+            }
+          }
+        }
         const deferredEmailDispatch = buildDeferredEmailDispatch({
           booking: patchedBooking,
         });
@@ -971,8 +1021,8 @@ export default async function handler(req, res) {
           email: String(
             patchedBooking.email || patchedBooking.payerEmail || ""
           ).trim(),
-          backend: resolveStoreBackend(booking.backendOwner),
-          cutoverGeneration: Number(booking.cutoverGeneration || 0),
+          backend: resolveStoreBackend(patchedBooking.backendOwner),
+          cutoverGeneration: Number(patchedBooking.cutoverGeneration || 0),
         });
         await syncPaidPaymentRecordForBooking({
           bookingId: booking._id,
@@ -991,24 +1041,7 @@ export default async function handler(req, res) {
         );
       }
 
-      const sendResult = await sendBookingEmailsForBooking({
-        bookingId: booking._id,
-        booking,
-        client: writeClient,
-      });
-      await syncPaidPaymentRecordForBooking({
-        bookingId: booking._id,
-        emailDispatch: sendResult.body?.emailDispatch || null,
-        source: idempotent ? "legacy-idempotent" : "legacy",
-      });
-
-      return res.status(sendResult.httpStatus).json(
-        buildBookingSuccessResponse({
-          bookingId: booking._id,
-          idempotent,
-          emailDispatch: sendResult.body?.emailDispatch || null,
-        })
-      );
+      return respondWithBookingEmails({ booking, idempotent });
     };
 
     if (paymentProvider === "free") {
@@ -1061,8 +1094,9 @@ export default async function handler(req, res) {
 
     if (paymentProvider === "razorpay" && razorpayPaymentId) {
       const existingByRazorpay = await writeClient.fetch(
-        `*[_type == "booking" && razorpayPaymentId == $razorpayPaymentId][0]{_id}`,
-        { razorpayPaymentId }
+        `*[_type == "booking" && razorpayPaymentId == $razorpayPaymentId
+          && razorpayPaymentId in $paymentIds][0]{_id}`,
+        { razorpayPaymentId, paymentIds: [razorpayPaymentId] }
       );
       if (existingByRazorpay?._id) {
         return await respondWithStoredBooking({

@@ -72,7 +72,7 @@ const freePort = async (requested = 0) => {
   return port;
 };
 
-export const createSweepPostgresFixture = async ({ commerceRepairMigration = true, fullMigrationChain = false, beforeMigrations, pgBin: requestedPgBin, postgrestBin: requestedPostgrestBin, libraryPath, ports = {} } = {}) => {
+export const createSweepPostgresFixture = async ({ commerceRepairMigration = true, fullMigrationChain = false, excludedMigrations = [], beforeMigrations, pgBin: requestedPgBin, postgrestBin: requestedPostgrestBin, libraryPath, ports = {} } = {}) => {
   assert.equal(process.env.ROO_TEST_POSTGRES_HOST || host, host);
   const pgBin = requestedPgBin || process.env.PG_BIN || '/tmp/roo-request-pg17/runtime/usr/lib/postgresql/17/bin';
   const postgrestBin = requestedPostgrestBin || process.env.POSTGREST_BIN || '/tmp/roo-request-postgrest/postgrest';
@@ -126,7 +126,9 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
     if (fullMigrationChain) {
       migrationConnection = await sql.reserve();
       try {
-        for (const name of fs.readdirSync(migrationDir).filter(name => name.endsWith('.sql')).sort()) await apply(name);
+      const names = fs.readdirSync(migrationDir).filter(name => name.endsWith('.sql')).sort();
+      assert.ok(excludedMigrations.every(name => names.includes(name)), 'Excluded migration must exist');
+      for (const name of names.filter(name => !excludedMigrations.includes(name))) await apply(name);
       } finally { migrationConnection.release(); migrationConnection = null; }
     } else {
     for(const name of [

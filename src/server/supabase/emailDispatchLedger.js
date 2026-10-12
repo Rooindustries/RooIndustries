@@ -2,6 +2,8 @@ const normalizeDispatch = (value = {}) => ({
   claimed: value?.claimed === true,
   sent: value?.sent === true,
   historicalUnknown: value?.historical_unknown === true,
+  inactive: value?.booking_inactive === true,
+  previouslySuppressed: value?.previously_suppressed === true,
   inProgress: value?.in_progress === true,
   idempotencyKey: String(value?.idempotency_key || "").trim(),
   providerMessageId: String(value?.provider_message_id || "").trim(),
@@ -26,12 +28,13 @@ export const claimEmailDispatchPair = async ({
   bookingId,
   dispatchKind,
   leaseId,
+  recipientTypes = ["customer", "owner"],
 } = {}) => {
   if (!hasAuthoritativeEmailLedger(client)) return null;
   const target = client.shadowClient;
-  const [customer, owner] = await Promise.all(
-    ["customer", "owner"].map((recipientType) =>
-      requireRpc({
+  const entries = await Promise.all(
+    recipientTypes.map(async (recipientType) => {
+      const value = await requireRpc({
         client: target,
         name: "roo_claim_booking_email_dispatch",
         parameters: {
@@ -41,13 +44,11 @@ export const claimEmailDispatchPair = async ({
           p_lease_id: String(leaseId || "").trim(),
           p_lease_seconds: 120,
         },
-      })
-    )
+      });
+      return [recipientType, normalizeDispatch(value)];
+    })
   );
-  return {
-    customer: normalizeDispatch(customer),
-    owner: normalizeDispatch(owner),
-  };
+  return Object.fromEntries(entries);
 };
 
 export const completeEmailDispatch = async ({
