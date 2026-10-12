@@ -58,6 +58,18 @@ test("cold homepage excludes Contact and PortableText scripts", async ({ page },
   }
 });
 
+for (const route of ["/reviews", "/tools", "/packages"]) {
+  test(`cold ${route} excludes booking confirmation scripts`, async ({ page }, testInfo) => {
+    const scripts = captureScripts(page);
+    await page.goto(route);
+    await settle(page);
+    const loaded = await scripts();
+    const confirmationScripts = loaded.filter(({ body }) => body.includes("Looking for your booking?"));
+    await attachJson(testInfo, "requested-scripts", loaded.map(({ url }) => url));
+    expect(confirmationScripts.map(({ url }) => url)).toEqual([]);
+  });
+}
+
 for (const [route, title] of [["/contact", "Get In Touch"], ["/privacy", "Privacy Policy"]]) {
   for (let run = 1; run <= 3; run++) {
     test(`${route} direct entry is complete and stable, load ${run}`, async ({ page }, testInfo) => {

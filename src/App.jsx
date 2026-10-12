@@ -16,8 +16,7 @@ import ReservationBanner from "./components/ReservationBanner";
 import IntercomMessenger from "./components/IntercomMessenger";
 import { subscribePerfDebugChanges, syncPerfDebugFromEnvironment } from "./lib/perfDebug";
 import { initializePerformanceProfile } from "./lib/performanceProfile";
-import PaymentSuccess from "./legacyPages/PaymentSuccess";
-import Thankyou from "./legacyPages/Thankyou";
+import { getConfirmationPage, preloadConfirmationPage } from "./lib/confirmationPages";
 import {
   consumeRouteTransitionIntent,
   isHomeSectionHash,
@@ -57,6 +56,8 @@ const Benchmarks = lazy(() => import("./legacyPages/Benchmarks"));
 const Terms = lazy(() => import("./legacyPages/Terms"));
 const Book = lazy(() => import("./legacyPages/Book"));
 const Payment = lazy(() => import("./legacyPages/Payment"));
+const LazyPaymentSuccess = lazy(() => preloadConfirmationPage("paid"));
+const LazyThankyou = lazy(() => preloadConfirmationPage("free"));
 const UpgradeXoc = lazy(() => import("./legacyPages/UpgradeXoc"));
 const Upgrade = lazy(() => import("./legacyPages/Upgrade"));
 const Download = lazy(() => import("./legacyPages/Download"));
@@ -175,6 +176,8 @@ function AnimatedRoutes({
   const [initialEntryKey, setInitialEntryKey] = useState(baseLocation.key);
   const [hydrated, setHydrated] = useState(false);
   const initialContent = baseLocation.key === initialEntryKey ? initialRouteData : null;
+  const PaymentSuccess = getConfirmationPage("paid") || LazyPaymentSuccess;
+  const Thankyou = getConfirmationPage("free") || LazyThankyou;
   const EagerPage = initialRoutePath === location.pathname
     ? initialRouteComponent
     : location.pathname === "/" ? initialHomeComponent : null;
@@ -307,6 +310,8 @@ export function AppContent({
   routeShell = "browser",
 }) {
   const InitialRouteComponent = initialRouteComponent;
+  const PaymentSuccess = getConfirmationPage("paid") || LazyPaymentSuccess;
+  const Thankyou = getConfirmationPage("free") || LazyThankyou;
   const FlowModal = initialBookingModalComponent || BookingModal;
   const [, setIsModalOpen] = useState(false);
   const [showRouteTransition, setShowRouteTransition] = useState(false);

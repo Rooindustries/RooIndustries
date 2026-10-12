@@ -7,6 +7,7 @@ import { WalletCards } from "lucide-react";
 import packagePricing from "../lib/packagePricing";
 import { captureSalesAttribution, sanitizeSalesAttribution } from "../lib/salesAttribution";
 import { trackConfirmedPurchase } from "../lib/analytics";
+import { preloadConfirmationPage, preloadConfirmationPages } from "../lib/confirmationPages";
 import {
   calculateCheckoutDiscounts,
   formatCouponValue,
@@ -104,6 +105,9 @@ function PayPalCheckout({ children }) {
 }
 
 export default function Payment({ hideFooter = false }) {
+  useEffect(() => {
+    preloadConfirmationPages().catch(() => {});
+  }, []);
   const location = useLocation();
   const navigate = useNavigate();
   const [hydrated, setHydrated] = useState(false);
@@ -1009,10 +1013,7 @@ export default function Payment({ hideFooter = false }) {
       if (!operation.current()) return;
       if (data?.captured) {
         if (["booked", "email_partial"].includes(String(data.status || "").toLowerCase())) {
-          navigate("/payment-success", {
-            state: buildFinalizeNavigation(data, operation),
-            replace: true,
-          });
+          await navigateToConfirmation("paid", data, operation);
           return;
         }
         showBanner("info", "Your payment was received and is being finalized.");
@@ -1069,6 +1070,15 @@ export default function Payment({ hideFooter = false }) {
     clearPaymentSession("", operation.token);
     operation.token = "";
     return buildConfirmationNavigationState(responseBody);
+  };
+
+  const navigateToConfirmation = async (kind, responseBody, operation) => {
+    await preloadConfirmationPage(kind);
+    if (!operation.current()) return;
+    const state = kind === "paid"
+      ? buildFinalizeNavigation(responseBody, operation)
+      : buildConfirmationNavigationState(responseBody);
+    navigate(kind === "paid" ? "/payment-success" : "/thank-you", { state, replace: true });
   };
 
   const fetchJson = async (
@@ -1185,10 +1195,7 @@ export default function Payment({ hideFooter = false }) {
         response.ok &&
         (resumedStatus === "booked" || resumedStatus === "email_partial")
       ) {
-        navigate("/payment-success", {
-          state: buildFinalizeNavigation(data, operation),
-          replace: true,
-        });
+        await navigateToConfirmation("paid", data, operation);
         return { ...paymentSession, result: data, terminal: true };
       }
       if (
@@ -1294,10 +1301,7 @@ export default function Payment({ hideFooter = false }) {
         provider !== "free" &&
         (returnedStatus === "booked" || returnedStatus === "email_partial")
       ) {
-        navigate("/payment-success", {
-          state: buildFinalizeNavigation(data, operation),
-          replace: true,
-        });
+        await navigateToConfirmation("paid", data, operation);
         return { ...nextSession, terminal: true };
       }
       if (provider !== "free") {
@@ -1348,10 +1352,7 @@ export default function Payment({ hideFooter = false }) {
       }
 
       if (isFinalizedStatus) {
-        navigate("/payment-success", {
-          state: buildFinalizeNavigation(data, operation),
-          replace: true,
-        });
+        await navigateToConfirmation("paid", data, operation);
         return data;
       }
 
@@ -1369,10 +1370,7 @@ export default function Payment({ hideFooter = false }) {
           return settled;
         }
         if (settledStatus === "booked" || settledStatus === "email_partial") {
-          navigate("/payment-success", {
-            state: buildFinalizeNavigation(settled, operation),
-            replace: true,
-          });
+          await navigateToConfirmation("paid", settled, operation);
           return settled;
         }
 
@@ -1602,10 +1600,7 @@ export default function Payment({ hideFooter = false }) {
         throw new Error(data.error || "Could not save your free booking.");
       }
 
-      navigate("/thank-you", {
-        state: buildConfirmationNavigationState(data),
-        replace: true,
-      });
+      await navigateToConfirmation("free", data, operation);
     } catch (err) {
       if (!operation.current()) return;
       console.error("Free booking failed");
