@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense, lazy, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, Suspense, lazy, useRef } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -26,8 +26,9 @@ import { sanitizeBrowserSearch } from "./lib/browserSearch";
 import { prefetchHomeSectionData } from "./lib/homeSectionData";
 import { whenUserInteracts } from "./lib/firstInteraction";
 import { migrateCheckoutStorageToSession } from "./lib/checkoutStorage";
-import { getPublicContent } from "./lib/publicContentClient";
+import { getPublicContent, getPublicContentPendingCount } from "./lib/publicContentClient";
 import { useBookingDialogPending } from "./lib/bookingDialogHold";
+import { setVisibleTimeout } from "./lib/visibleTimeout";
 
 const Home = lazy(() => import("./legacyPages/Home"));
 const AboutPage = lazy(() => import("./legacyPages/About"));
@@ -68,6 +69,7 @@ const MeetTheTeam = lazy(() => import("./legacyPages/MeetTheTeam"));
 const NotFound = lazy(() => import("./legacyPages/NotFound"));
 
 const INTERCOM_DISABLED_ROUTES = ["/booking", "/payment"];
+const BACKGROUND_READY_MAX_WAIT_MS = 3000;
 
 const isReferralVerificationHash = (hash) => {
   const params = new URLSearchParams(String(hash || "").replace(/^#/, ""));
@@ -199,7 +201,7 @@ function AnimatedRoutes({
   };
 
   const routes = (
-      <div key={motionKey} className="w-full flex flex-col flex-1">
+      <div key={motionKey} data-route-key={motionKey} className="w-full flex flex-col flex-1">
         <Routes location={location}>
           <Route path="/" element={renderPage(<Home initialData={initialHomeData} heroHeadingTag={heroHeadingTag} />)} />
           <Route
@@ -609,6 +611,47 @@ export function AppContent({
       : null;
   const routesLocation = backgroundLocation || fallbackLocation || location;
   const routesKey = `${routesLocation.pathname}${routesLocation.search || ""}`;
+  const initialRoutesPathRef = useRef(routesLocation.pathname);
+  const [backgroundReveal, setBackgroundReveal] = useState({ key: null, held: false });
+  if (
+    backgroundReveal.key === null &&
+    isFlowRoute &&
+    loadedOnFlowRouteRef.current &&
+    routesLocation.pathname !== initialRoutesPathRef.current
+  ) {
+    setBackgroundReveal({ key: routesKey, held: true });
+  } else if (backgroundReveal.held && !isFlowRoute) {
+    setBackgroundReveal({ ...backgroundReveal, held: false });
+  }
+  const backgroundHeld = backgroundReveal.held && isFlowRoute && backgroundReveal.key === routesKey;
+
+  useLayoutEffect(() => {
+    if (!backgroundHeld) return undefined;
+    const key = backgroundReveal.key;
+    let frame = 0;
+    let lastHeight = -1;
+    let stableFrames = 0;
+    const reveal = () =>
+      setBackgroundReveal(current => (current.key === key && current.held ? { ...current, held: false } : current));
+    const check = () => {
+      const main = document.getElementById("main-content");
+      const mounted = main?.querySelector("[data-route-key]")?.dataset.routeKey === key;
+      const height = main ? main.getBoundingClientRect().height : -1;
+      stableFrames = mounted && getPublicContentPendingCount() === 0 && height === lastHeight ? stableFrames + 1 : 0;
+      lastHeight = height;
+      if (stableFrames >= 2) {
+        reveal();
+        return;
+      }
+      frame = requestAnimationFrame(check);
+    };
+    frame = requestAnimationFrame(check);
+    const cancelMaxWait = setVisibleTimeout(reveal, BACKGROUND_READY_MAX_WAIT_MS);
+    return () => {
+      cancelAnimationFrame(frame);
+      cancelMaxWait();
+    };
+  }, [backgroundHeld, backgroundReveal.key]);
 
   const closeBookingModal = () => {
     const target = backgroundLocation || {
@@ -654,7 +697,7 @@ export function AppContent({
         <main
           id="main-content"
           tabIndex={-1}
-          className="relative z-10 flex flex-col flex-1 focus:outline-none"
+          className={`relative z-10 flex flex-col flex-1 focus:outline-none${backgroundHeld ? " invisible" : ""}`}
           style={{ paddingTop: "var(--header-offset)" }}
         >
           <AnimatedRoutes
