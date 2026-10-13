@@ -120,6 +120,16 @@ async function settledDialogLayout(page, testInfo, name) {
 const focusIsInDialog = page => page.evaluate(() =>
   Boolean(document.activeElement?.closest('[role="dialog"].ri-booking')));
 
+const overrideTabVisibility = (page, initial) => page.addInitScript(state => {
+  let visibility = state;
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
+  window.__setTabVisibility = next => {
+    visibility = next;
+    document.dispatchEvent(new Event("visibilitychange"));
+    return performance.now();
+  };
+}, initial);
+
 async function dialogShownAfterMount(page) {
   await page.waitForFunction(() => {
     const { visibility, mountedAt } = window.__bookingDialogLayout;
@@ -228,27 +238,44 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
 
     test("the booking dialog stays hidden in a background tab until the tab is shown", async ({ page, flow }, testInfo) => {
       const errors = watchErrors(page);
-      await page.addInitScript(() => {
-        let visibility = "hidden";
-        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
-        window.__showTab = () => {
-          visibility = "visible";
-          document.dispatchEvent(new Event("visibilitychange"));
-          return performance.now();
-        };
-      });
+      await overrideTabVisibility(page, "hidden");
       flow.state.failures["/api/bookingAvailability"] = "timeout";
       await page.goto("/booking");
       await page.waitForFunction(() => window.__bookingDialogLayout.mountedAt !== null);
       await page.waitForTimeout(2500);
       await expect(page.locator('[role="dialog"].ri-booking')).toHaveClass(/\binvisible\b/);
-      const tabShownAt = await page.evaluate(() => window.__showTab());
+      const tabShownAt = await page.evaluate(() => window.__setTabVisibility("visible"));
       await page.waitForFunction(() => window.__bookingDialogLayout.visibility.some(entry => entry.visible), null, { polling: 50 });
       const dialogShownAt = await page.evaluate(() => window.__bookingDialogLayout.visibility.find(entry => entry.visible).time);
       expect(dialogShownAt).toBeGreaterThan(tabShownAt);
       expect(dialogShownAt - tabShownAt).toBeLessThanOrEqual(readyMaxWaitMs + 250);
       expect(await focusIsInDialog(page)).toBe(true);
       await testInfo.attach("dialog-shown", { body: JSON.stringify({ tabShownAt, dialogShownAt, afterTabShownMs: dialogShownAt - tabShownAt }), contentType: "application/json" });
+      expect(errors).toEqual([]);
+    });
+
+    test("the booking dialog pauses its wait while the tab is in the background", async ({ page, flow }, testInfo) => {
+      const errors = watchErrors(page);
+      await overrideTabVisibility(page, "visible");
+      flow.state.failures["/api/bookingAvailability"] = "timeout";
+      await page.goto("/booking");
+      await page.waitForFunction(() => window.__bookingDialogLayout.mountedAt !== null);
+      const tabHiddenAt = await page.evaluate(() => new Promise(resolve => {
+        const wait = window.__bookingDialogLayout.mountedAt + 500 - performance.now();
+        setTimeout(() => resolve(window.__setTabVisibility("hidden")), Math.max(0, wait));
+      }));
+      await page.waitForTimeout(2500);
+      await expect(page.locator('[role="dialog"].ri-booking')).toHaveClass(/\binvisible\b/);
+      const tabShownAt = await page.evaluate(() => window.__setTabVisibility("visible"));
+      await page.waitForFunction(() => window.__bookingDialogLayout.visibility.some(entry => entry.visible), null, { polling: 50 });
+      const { dialogShownAt, mountedAt } = await page.evaluate(() => ({
+        dialogShownAt: window.__bookingDialogLayout.visibility.find(entry => entry.visible).time,
+        mountedAt: window.__bookingDialogLayout.mountedAt,
+      }));
+      expect(dialogShownAt - tabShownAt).toBeGreaterThanOrEqual(900);
+      expect(dialogShownAt - tabShownAt).toBeLessThanOrEqual(1300);
+      expect(await focusIsInDialog(page)).toBe(true);
+      await testInfo.attach("dialog-shown", { body: JSON.stringify({ mountedAt, tabHiddenAt, tabShownAt, dialogShownAt, visibleBeforeHiddenMs: tabHiddenAt - mountedAt, afterTabShownMs: dialogShownAt - tabShownAt }), contentType: "application/json" });
       expect(errors).toEqual([]);
     });
 
