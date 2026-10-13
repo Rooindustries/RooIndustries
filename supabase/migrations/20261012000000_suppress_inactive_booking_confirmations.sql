@@ -533,14 +533,14 @@ as $$
       and (
         payment.provider != 'dodo'
         or (p_dodo_enabled and coalesce(source.payload->>'providerRecoveryTerminal', 'false') != 'true')
-        or (payment.status = lower(p_refunded_status) and payment.refund_requires_booking_sync)
+        or (payment.refund_requires_booking_sync)
         or payment.resource_release_pending
         or (payment.status = 'email_partial' and source.payload->>'requiresReschedule' = 'true')
         or (payment.status in ('email_partial', lower(p_booked_status)) and payment.email_dispatch_required)
       )
       and (
         payment.status = any(coalesce(p_statuses, '{}'::text[]))
-        or (payment.status = lower(p_refunded_status) and payment.refund_requires_booking_sync)
+        or (payment.refund_requires_booking_sync)
         or (payment.status = lower(p_booked_status) and payment.email_dispatch_required)
         or (payment.status = lower(p_abandoned_status)
           and (payment.resource_release_pending or payment.late_capture_watch_until is not null))
