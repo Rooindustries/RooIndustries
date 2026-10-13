@@ -157,6 +157,8 @@ jobs:
         run: npm run test:booking-contact
       - name: Run booking hold API suite
         run: npm run test:booking:holds
+      - name: Run payment persistence sweep on the full migration chain
+        run: node scripts/test-payment-persistence-sweep.mjs --full-chain
       - uses: actions/upload-artifact@v4
         if: always()
         with:
