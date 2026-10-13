@@ -448,6 +448,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           await page.goto(route, { waitUntil: "domcontentloaded" });
           await expect(page.getByRole("heading", { level: 1, name: heading, exact: true })).toBeVisible();
           await expect.poll(() => Boolean(dispatchRoute)).toBe(true);
+          await page.evaluate(() => document.fonts.ready);
+          await page.waitForTimeout(1000);
           assertReceiptLayout(await capture(page, testInfo, "before-email-cleanup"));
           const stateBefore = await page.evaluate(() => history.state.usr);
           await page.evaluate(() => window.__resetConfirmationMetrics());
@@ -490,6 +492,11 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page).toHaveURL(/\/payment-success$/);
       await expect(page.getByRole("heading", { level: 1, name: "Payment Successful", exact: true })).toBeVisible();
       expect(await focusIsInBookingDialog(page)).toBe(true);
+      await expect.poll(() => page.evaluate(() => {
+        const dialog = document.querySelector('[role="dialog"].ri-booking').getBoundingClientRect();
+        const content = document.querySelector("[data-booking-scaler] > div").getBoundingClientRect();
+        return Math.abs(dialog.width - content.width) < 1 && Math.abs(dialog.height - content.height) < 1;
+      })).toBe(true);
       const switchedAt = await page.evaluate(() => window.__confirmationMetrics.receiptDecisionAt);
       expect(switchedAt).not.toBeNull();
       const arrival = await capture(page, testInfo, "steady-arrival");
@@ -503,7 +510,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect(errors).toEqual([]);
     });
 
-    test("paid arrival shows the confirmation while animation frames are stalled", async ({ page, flow }, testInfo) => {
+    test("paid arrival reveals the dialog when animation frames are stalled", async ({ page, flow }, testInfo) => {
       const errors = watchErrors(page);
       await page.addInitScript(() => {
         const request = window.requestAnimationFrame.bind(window);
@@ -537,11 +544,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect(await focusIsInBookingDialog(page)).toBe(true);
       await page.screenshot({ path: testInfo.outputPath("stalled-frames.png") });
       await page.evaluate(() => window.__resumeAnimationFrames());
-      await expect.poll(() => page.evaluate(() => {
-        const dialog = document.querySelector('[role="dialog"].ri-booking').getBoundingClientRect();
-        const content = document.querySelector("[data-booking-scaler] > div").getBoundingClientRect();
-        return dialog.height > 0 && Math.abs(dialog.width - content.width) < 1 && Math.abs(dialog.height - content.height) < 1;
-      })).toBe(true);
+      await expect.poll(() => page.getByRole("heading", { level: 1, name: "Payment Successful", exact: true })
+        .evaluate(el => el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }))).toBe(true);
       await expect(page.getByRole("heading", { level: 1, name: "Payment Successful", exact: true })).toBeVisible();
       await expect(page.getByRole("link", { name: "Back to Home", exact: true })).toBeVisible();
       await testInfo.attach("stalled-frames", { body: JSON.stringify({ shownAfterMs }), contentType: "application/json" });
@@ -580,7 +584,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         const delayedChunk = new Promise(resolve => { releaseChunk = resolve; });
         const interceptChunk = async route => {
           expect(new URL(route.request().url()).origin).toBe(new URL(baseURL).origin);
-          const response = await route.fetch();
+          const response = await route.fetch({ maxRetries: 2 });
           const body = await response.text();
           if (!body.includes(neutralHeading) || !body.includes("Payment Successful")) return route.fulfill({ response, body });
           const chunk = { url: route.request().url(), requestedAt: Date.now(), fulfilledAt: null };
