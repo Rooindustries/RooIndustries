@@ -119,12 +119,12 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
       }
     }
   };
-  const recoveryCandidates = async () => {
+  const recoveryCandidates = async ({ dodoEnabled = true } = {}) => {
     const { data, error } = await database.client.rpc('roo_fetch_recovery_payment_documents', {
       p_backend: 'supabase', p_statuses: ['started', 'captured_client', 'captured_webhook',
         'finalizing', 'email_partial', 'needs_recovery'], p_refunded_status: 'refunded',
       p_booked_status: 'booked', p_abandoned_status: 'abandoned',
-      p_now: new Date().toISOString(), p_limit: 100, p_dodo_enabled: true,
+      p_now: new Date().toISOString(), p_limit: 100, p_dodo_enabled: dodoEnabled,
     });
     assert.equal(error, null);
     return data.map(record => record._id);
@@ -284,16 +284,23 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
       const active = await create();
       const inactiveBooking = await create();
       const refund = await create();
+      const partialRefund = await create();
       const release = await create();
       const reschedule = await create();
       for (const booking of [inactiveBooking, refund, release, reschedule]) await inactive(booking, ' cancelled ');
       await commerce.patch(refund.record._id).set({ status: 'refunded', refundRequiresBookingSync: true }).commit();
+      await commerce.patch(partialRefund.record._id).set({ status: 'booked', refundState: 'partial',
+        refundRequiresBookingSync: true, emailDispatchRequired: false }).commit();
       await commerce.patch(release.record._id).set({ status: 'abandoned', resourceReleasePending: true }).commit();
       await commerce.patch(reschedule.record._id).set({ requiresReschedule: true }).commit();
       result.candidates = await recoveryCandidates();
       assert.ok(result.candidates.includes(active.record._id));
       assert.ok(!result.candidates.includes(inactiveBooking.record._id));
       for (const booking of [refund, release, reschedule]) assert.ok(result.candidates.includes(booking.record._id));
+      assert.ok(result.candidates.includes(partialRefund.record._id), 'booked payment awaiting partial refund sync');
+      result.candidatesWithDodoDisabled = await recoveryCandidates({ dodoEnabled: false });
+      assert.ok(result.candidatesWithDodoDisabled.includes(partialRefund.record._id),
+        'booked payment awaiting partial refund sync with Dodo recovery disabled');
     });
 
     await check('payment recovery terminalizes a status flip after candidate selection without retrying', async result => {
