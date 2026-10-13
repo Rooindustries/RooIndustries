@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useLowPerformanceMode } from "../lib/performanceMode";
 import { isTopDialog, useDialogFocus } from "../lib/useDialogFocus";
 
-export default function BookingModal({ open, onClose, children, skipInitialSizeAnimation = false }) {
+export default function BookingModal({ open, onClose, children, skipInitialSizeAnimation = false, contentKey }) {
   const contentRef = useRef(null);
   // Focus trapping and outside-click detection need the unscaled dialog boundary, including the close button.
   const wrapperRef = useRef(null);
@@ -21,9 +21,16 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
   const [isMobile, setIsMobile] = useState(false);
   const [renderWidth, setRenderWidth] = useState(1150);
   const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
+  const [contentSwitch, setContentSwitch] = useState({ contentKey, revealPending: false });
+  const restoreFocusRef = useRef(false);
+  if (contentSwitch.contentKey !== contentKey) {
+    setContentSwitch({ contentKey, revealPending: open });
+  }
+  const contentRevealed = !contentSwitch.revealPending;
 
   const MOBILE_PADDING_Y = 80;
   const DESKTOP_PADDING_Y = 36;
+  const CONTENT_REVEAL_FALLBACK_MS = 300;
 
   useLayoutEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 780px)");
@@ -129,7 +136,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       observer.disconnect();
       clearanceObserver.disconnect();
     };
-  }, [isMobile, children, open]);
+  }, [isMobile, children, open, contentKey]);
 
   useLayoutEffect(() => {
     if (sizeTransitionEnabledRef.current) return;
@@ -138,6 +145,57 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     });
     return () => window.cancelAnimationFrame(frame);
   }, []);
+
+  useLayoutEffect(() => {
+    if (!contentSwitch.revealPending) return undefined;
+    const reveal = () =>
+      setContentSwitch((current) =>
+        current === contentSwitch ? { ...current, revealPending: false } : current
+      );
+    if (!open) {
+      reveal();
+      return undefined;
+    }
+
+    let frame = 0;
+    const revealWhenLayoutApplied = () => {
+      const wrapper = wrapperRef.current?.getBoundingClientRect();
+      const content = contentRef.current?.getBoundingClientRect();
+      const { wrapperWidth, wrapperHeight } = lastLayoutRef.current;
+      const layoutApplied =
+        wrapper &&
+        content &&
+        wrapperHeight > 0 &&
+        Math.abs(wrapper.width - wrapperWidth) < 1 &&
+        Math.abs(wrapper.height - wrapperHeight) < 1 &&
+        Math.abs(content.width - wrapperWidth) < 1 &&
+        Math.abs(content.height - wrapperHeight) < 1;
+      if (layoutApplied) {
+        reveal();
+        return;
+      }
+      frame = window.requestAnimationFrame(revealWhenLayoutApplied);
+    };
+    frame = window.requestAnimationFrame(revealWhenLayoutApplied);
+    const fallback = window.setTimeout(reveal, CONTENT_REVEAL_FALLBACK_MS);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(fallback);
+    };
+  }, [contentSwitch, open]);
+
+  useLayoutEffect(() => {
+    if (contentSwitch.revealPending) {
+      restoreFocusRef.current = true;
+      return;
+    }
+    if (!restoreFocusRef.current) return;
+    restoreFocusRef.current = false;
+    if (!open || !isTopDialog(wrapperRef)) return;
+    if (wrapperRef.current?.contains(document.activeElement)) return;
+    closeButtonRef.current?.focus();
+  }, [contentSwitch, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -171,8 +229,10 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     ease: [0.4, 0, 0.2, 1],
   };
 
+  const scalerTransition = lowPerformanceMode ? fadeTransition : springTransition;
+
   const handleGlobalClick = (e) => {
-    if (!isTopDialog(wrapperRef)) return;
+    if (!contentRevealed || !isTopDialog(wrapperRef)) return;
     const dialogRoot = wrapperRef.current || contentRef.current;
     if (dialogRoot && dialogRoot.contains(e.target)) {
       return;
@@ -224,11 +284,12 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
             
             {/* Keep the close button inside the aria-modal subtree. This wrapper tracks the visible dialog; the inner scaler only transforms its contents. */}
             <motion.div
+              key={contentKey}
               ref={wrapperRef}
               role="dialog"
               aria-modal="true"
               aria-label="Schedule your session"
-              className="ri-booking m-auto relative"
+              className={`ri-booking m-auto relative${contentRevealed ? "" : " invisible"}`}
               initial={{
                 width: wrapperSize.width, 
                 height: wrapperSize.height 
@@ -238,7 +299,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
                 height: wrapperSize.height 
               }}
               layout={!lowPerformanceMode}
-              transition={sizeTransitionEnabledRef.current ? springTransition : { duration: 0 }}
+              transition={contentRevealed && sizeTransitionEnabledRef.current ? springTransition : { duration: 0 }}
             >
               {/* Anchor the close button to the unscaled dialog so it stays aligned and retains its 44px touch target. */}
               <button
@@ -274,7 +335,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
                     ? { scale: dynamicScale, opacity: 0 }
                     : { scale: dynamicScale * 0.95 }
                 }
-                transition={lowPerformanceMode ? fadeTransition : springTransition}
+                transition={contentRevealed ? scalerTransition : { ...scalerTransition, scale: { duration: 0 } }}
               >
                 <div
                   ref={contentRef}

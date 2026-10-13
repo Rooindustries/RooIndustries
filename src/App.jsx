@@ -360,6 +360,11 @@ export function AppContent({
     isPaymentRoute ||
     isPaymentSuccessRoute ||
     isThankYouRoute;
+  const flowContentKey = isPaymentSuccessRoute || isThankYouRoute ? pathName : "checkout";
+  const loadedOnFlowRouteRef = useRef(isFlowRoute);
+  useEffect(() => {
+    if (!isFlowRoute) loadedOnFlowRouteRef.current = false;
+  }, [isFlowRoute]);
 
   useEffect(() => {
     migrateCheckoutStorageToSession();
@@ -668,10 +673,11 @@ export function AppContent({
           <FlowModal
             open
             onClose={closeBookingModal}
-            skipInitialSizeAnimation={isPaymentSuccessRoute || isThankYouRoute}
+            skipInitialSizeAnimation={isPaymentSuccessRoute || isThankYouRoute || loadedOnFlowRouteRef.current}
+            contentKey={flowContentKey}
           >
             <Suspense
-              key={isPaymentSuccessRoute || isThankYouRoute ? pathName : "checkout"}
+              key={flowContentKey}
               fallback={<RouteFallback />}
             >
               {initialRoutePath === pathName && InitialRouteComponent ? (
