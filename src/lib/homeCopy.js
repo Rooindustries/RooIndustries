@@ -149,7 +149,7 @@ const withOverwatchCreatorBenchmark = (benchPages = []) => {
 const keyed = (sourceItems = [], canonicalItems = []) =>
   canonicalItems.map((item, index) => ({
     ...item,
-    _key: sourceItems[index]?._key || item._key || `copy-${index}`,
+    _key: sourceItems?.[index]?._key || item._key || `copy-${index}`,
   }));
 
 const resolveHeroCopy = (value) =>

@@ -101,7 +101,13 @@ async function fetchFlowPageHomeData() {
     timer = setTimeout(() => resolve(null), FLOW_PAGE_HOME_DATA_WAIT_MS);
   });
   try {
-    return await Promise.race([fetchHomePageData(), timedOut]);
+    return await Promise.race([
+      fetchHomePageData().catch(() => {
+        console.warn("[content] flow page home fetch failed");
+        return null;
+      }),
+      timedOut,
+    ]);
   } finally {
     clearTimeout(timer);
   }

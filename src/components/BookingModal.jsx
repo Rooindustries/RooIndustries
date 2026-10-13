@@ -4,6 +4,20 @@ import { BookingDialogHoldContext } from "../lib/bookingDialogHold";
 import { useLowPerformanceMode } from "../lib/performanceMode";
 import { isTopDialog, useDialogFocus } from "../lib/useDialogFocus";
 
+const setVisibleTimeout = (callback, ms) => {
+  let timer = 0;
+  const start = () => {
+    if (timer || document.visibilityState !== "visible") return;
+    timer = window.setTimeout(callback, ms);
+  };
+  document.addEventListener("visibilitychange", start);
+  start();
+  return () => {
+    document.removeEventListener("visibilitychange", start);
+    window.clearTimeout(timer);
+  };
+};
+
 export default function BookingModal({ open, onClose, children, skipInitialSizeAnimation = false, contentKey }) {
   const contentRef = useRef(null);
   // Focus trapping and outside-click detection need the unscaled dialog boundary, including the close button.
@@ -24,6 +38,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
   const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
   const [contentSwitch, setContentSwitch] = useState({ contentKey, revealPending: false });
   const restoreFocusRef = useRef(false);
+  const lastFocusedInDialogRef = useRef(null);
   if (contentSwitch.contentKey !== contentKey) {
     setContentSwitch({ contentKey, revealPending: open });
   }
@@ -170,8 +185,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
 
   useLayoutEffect(() => {
     if (!awaitingContent) return undefined;
-    const maxWait = window.setTimeout(stopAwaitingContent, CONTENT_READY_MAX_WAIT_MS);
-    return () => window.clearTimeout(maxWait);
+    return setVisibleTimeout(stopAwaitingContent, CONTENT_READY_MAX_WAIT_MS);
   }, [awaitingContent, stopAwaitingContent]);
 
   useLayoutEffect(() => {
@@ -213,11 +227,11 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       frame = window.requestAnimationFrame(revealWhenLayoutApplied);
     };
     frame = window.requestAnimationFrame(revealWhenLayoutApplied);
-    const fallback = window.setTimeout(reveal, CONTENT_REVEAL_FALLBACK_MS);
+    const cancelFallback = setVisibleTimeout(reveal, CONTENT_REVEAL_FALLBACK_MS);
 
     return () => {
       window.cancelAnimationFrame(frame);
-      window.clearTimeout(fallback);
+      cancelFallback();
     };
   }, [contentSwitch, open]);
 
@@ -232,6 +246,22 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     if (wrapperRef.current?.contains(document.activeElement)) return;
     closeButtonRef.current?.focus();
   }, [contentSwitch, open]);
+
+  useLayoutEffect(() => {
+    const trackFocus = (event) => {
+      lastFocusedInDialogRef.current = wrapperRef.current?.contains(event.target) ? event.target : null;
+    };
+    document.addEventListener("focusin", trackFocus);
+    return () => document.removeEventListener("focusin", trackFocus);
+  }, []);
+
+  useEffect(() => {
+    if (!open || !contentRevealed) return;
+    if (!lastFocusedInDialogRef.current || lastFocusedInDialogRef.current.isConnected) return;
+    if (document.activeElement !== document.body || !isTopDialog(wrapperRef)) return;
+    closeButtonRef.current?.focus({ preventScroll: true });
+    lastFocusedInDialogRef.current = null;
+  });
 
   useEffect(() => {
     if (!open) return;

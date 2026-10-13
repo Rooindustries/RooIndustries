@@ -226,6 +226,32 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect(errors).toEqual([]);
     });
 
+    test("the booking dialog stays hidden in a background tab until the tab is shown", async ({ page, flow }, testInfo) => {
+      const errors = watchErrors(page);
+      await page.addInitScript(() => {
+        let visibility = "hidden";
+        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
+        window.__showTab = () => {
+          visibility = "visible";
+          document.dispatchEvent(new Event("visibilitychange"));
+          return performance.now();
+        };
+      });
+      flow.state.failures["/api/bookingAvailability"] = "timeout";
+      await page.goto("/booking");
+      await page.waitForFunction(() => window.__bookingDialogLayout.mountedAt !== null);
+      await page.waitForTimeout(2500);
+      await expect(page.locator('[role="dialog"].ri-booking')).toHaveClass(/\binvisible\b/);
+      const tabShownAt = await page.evaluate(() => window.__showTab());
+      await page.waitForFunction(() => window.__bookingDialogLayout.visibility.some(entry => entry.visible), null, { polling: 50 });
+      const dialogShownAt = await page.evaluate(() => window.__bookingDialogLayout.visibility.find(entry => entry.visible).time);
+      expect(dialogShownAt).toBeGreaterThan(tabShownAt);
+      expect(dialogShownAt - tabShownAt).toBeLessThanOrEqual(readyMaxWaitMs + 250);
+      expect(await focusIsInDialog(page)).toBe(true);
+      await testInfo.attach("dialog-shown", { body: JSON.stringify({ tabShownAt, dialogShownAt, afterTabShownMs: dialogShownAt - tabShownAt }), contentType: "application/json" });
+      expect(errors).toEqual([]);
+    });
+
     test("opening booking from the home page still animates the dialog open", async ({ page, flow }, testInfo) => {
       await page.goto("/");
       await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
@@ -248,6 +274,35 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
       const layout = await settledDialogLayout(page, testInfo, "reopen");
       expect(grewOpenFromNothing(layout)).toBe(true);
+      expect(errors).toEqual([]);
+    });
+
+    test("focus stays in the dialog when booking continues to payment", async ({ page, flow }) => {
+      const errors = watchErrors(page);
+      await flow.review();
+      await flow.payment();
+      await expect.poll(() => focusIsInDialog(page)).toBe(true);
+      expect(errors).toEqual([]);
+    });
+
+    test("clicking plain text in the dialog does not move focus to the close button", async ({ page, flow }) => {
+      const errors = watchErrors(page);
+      const focusedElement = () => page.evaluate(() =>
+        document.activeElement === document.body ? "body" : document.activeElement?.id || document.activeElement?.tagName);
+      await flow.reserve();
+      const dialog = page.locator('[role="dialog"].ri-booking');
+      await page.getByRole("textbox", { name: "Booking email", exact: true }).focus();
+      expect(await focusIsInDialog(page)).toBe(true);
+      await dialog.getByRole("heading", { name: "Schedule Your Session", exact: true }).click();
+      expect(await focusedElement()).toBe("body");
+      const sizeBeforeResize = await dialog.boundingBox();
+      await page.setViewportSize({ width: viewport.width - 10, height: viewport.height - 40 });
+      await expect.poll(async () => {
+        const size = await dialog.boundingBox();
+        return size.width !== sizeBeforeResize.width || size.height !== sizeBeforeResize.height;
+      }).toBe(true);
+      await page.waitForTimeout(2500);
+      expect(await focusedElement()).toBe("body");
       expect(errors).toEqual([]);
     });
   });
