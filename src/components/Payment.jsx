@@ -348,7 +348,7 @@ export default function Payment({ hideFooter = false }) {
   };
 
   const backToBookingState = {
-    backgroundLocation: modalBackground || location,
+    ...(modalBackground ? { backgroundLocation: modalBackground } : {}),
     modal: true,
     ...navState,
   };
@@ -458,9 +458,10 @@ export default function Payment({ hideFooter = false }) {
         "error",
         "Your reserved slot expired. Please select a new time before completing your booking."
       );
+      const background = navState.backgroundLocation || readStoredBackground();
       navigate("/booking", {
         state: {
-          backgroundLocation: navState.backgroundLocation || location,
+          ...(background ? { backgroundLocation: background } : {}),
           modal: true,
           ...navState,
         },

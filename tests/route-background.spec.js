@@ -108,3 +108,35 @@ for (const origin of ["/packages", "/reviews"]) {
     }
   });
 }
+
+test.describe("payment step", () => {
+  test.use({ timezoneId: "Asia/Kolkata" });
+
+  test("an expired slot after reloading the payment step does not trap the customer in the booking dialog", async ({ page, flow }) => {
+    flow.state.holdMs = 15000;
+    await flow.review();
+    await flow.payment();
+    await page.evaluate(() => sessionStorage.setItem("flow_background_location", JSON.stringify({ pathname: "/reviews", search: "", hash: "" })));
+    await page.reload();
+    await expect(page.locator("#main-content").getByRole("heading", { name: "Community Reviews", exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog").getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 25000 });
+    await expect(page).toHaveURL(url => url.pathname === "/");
+    await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("flow_background_location")).pathname)).toBe("/");
+  });
+
+  test("a payment step opened in a second tab does not trap the customer when its slot expires", async ({ page, context, flow }) => {
+    flow.state.holdMs = 15000;
+    await flow.review();
+    await flow.payment();
+    const checkout = await page.evaluate(() => Object.entries(sessionStorage));
+    const other = await context.newPage();
+    await other.goto("/__test/checkout-handoff");
+    await other.evaluate(entries => entries.forEach(([key, value]) => sessionStorage.setItem(key, value)), checkout);
+    await other.goto("/payment");
+    await expect(other.getByRole("dialog").getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+    await expect(other.getByRole("dialog")).toHaveCount(0, { timeout: 25000 });
+    await expect(other).toHaveURL(url => url.pathname === "/");
+    await expect.poll(() => other.evaluate(() => JSON.parse(sessionStorage.getItem("flow_background_location")).pathname)).toBe("/");
+  });
+});
