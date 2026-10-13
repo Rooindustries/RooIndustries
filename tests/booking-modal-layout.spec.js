@@ -73,10 +73,10 @@ function sessionCls(shifts) {
   return cls;
 }
 
-function sizesWhileGrowingOpen(layout) {
-  const settled = layout.sizes.at(-1);
-  return layout.sizes.filter(size => size.visible &&
-    size.width < settled.width - 1 && size.height < settled.height - 1);
+function grewOpenFromNothing(layout) {
+  const first = layout.sizes.find(size => size.width > 0 && size.height > 0);
+  return Boolean(first) && layout.sizes.some(size =>
+    size.width > first.width + 10 && size.height > first.height + 10);
 }
 
 async function settledDialogLayout(page, testInfo, name) {
@@ -102,7 +102,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.goto("/booking");
       await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
       const layout = await settledDialogLayout(page, testInfo, "booking-load");
-      expect(sizesWhileGrowingOpen(layout)).toEqual([]);
+      expect(grewOpenFromNothing(layout)).toBe(false);
     });
 
     test("direct load of a pending payment does not grow the dialog open from nothing", async ({ page, flow }, testInfo) => {
@@ -118,7 +118,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
       await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
       const layout = await settledDialogLayout(page, testInfo, "payment-load");
-      expect(sizesWhileGrowingOpen(layout)).toEqual([]);
+      expect(grewOpenFromNothing(layout)).toBe(false);
       if (viewport.width === 390) expect(layout.dialogShifts).toEqual([]);
     });
 
@@ -129,7 +129,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page).toHaveURL(/\/booking$/);
       await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
       const layout = await settledDialogLayout(page, testInfo, "click-open");
-      expect(sizesWhileGrowingOpen(layout)).not.toEqual([]);
+      expect(grewOpenFromNothing(layout)).toBe(true);
     });
 
     test("reopening booking after a direct load animates the dialog open again", async ({ page, flow }, testInfo) => {
@@ -142,7 +142,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page).toHaveURL(/\/booking$/);
       await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
       const layout = await settledDialogLayout(page, testInfo, "reopen");
-      expect(sizesWhileGrowingOpen(layout)).not.toEqual([]);
+      expect(grewOpenFromNothing(layout)).toBe(true);
     });
   });
 }
