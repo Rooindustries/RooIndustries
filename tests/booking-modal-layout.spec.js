@@ -13,8 +13,20 @@ test.use({
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    const layout = window.__bookingDialogLayout = { shifts: [], sizes: [] };
+    const layout = window.__bookingDialogLayout = { shifts: [], sizes: [], visibility: [], mountedAt: null };
     const selector = '[role="dialog"].ri-booking';
+    let visible = false;
+    const sampleVisibility = () => {
+      const dialog = document.querySelector(selector);
+      const nowVisible = Boolean(dialog?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
+      if (nowVisible !== visible) {
+        visible = nowVisible;
+        layout.visibility.push({ time: performance.now(), visible });
+      }
+      if (layout.mountedAt === null && document.body?.style.overflow === "hidden") layout.mountedAt = performance.now();
+      requestAnimationFrame(sampleVisibility);
+    };
+    requestAnimationFrame(sampleVisibility);
     const watched = new WeakSet();
     const sizeObserver = new ResizeObserver(entries => {
       for (const { target, contentRect } of entries) {
@@ -55,6 +67,17 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+const readyMaxWaitMs = 1500;
+
+function watchErrors(page) {
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  page.on("console", message => {
+    if (message.type() === "error" || /hydrat|server html|getServerSnapshot|#418/i.test(message.text())) errors.push(message.text());
+  });
+  return errors;
+}
+
 function sessionCls(shifts) {
   let cls = 0;
   let session = 0;
@@ -94,32 +117,113 @@ async function settledDialogLayout(page, testInfo, name) {
   return layout;
 }
 
+const focusIsInDialog = page => page.evaluate(() =>
+  Boolean(document.activeElement?.closest('[role="dialog"].ri-booking')));
+
+async function dialogShownAfterMount(page) {
+  await page.waitForFunction(() => {
+    const { visibility, mountedAt } = window.__bookingDialogLayout;
+    return mountedAt !== null && visibility.some(entry => entry.visible);
+  }, null, { polling: 50 });
+  const { visibility, mountedAt } = await page.evaluate(() => window.__bookingDialogLayout);
+  const shownAt = visibility.find(entry => entry.visible)?.time;
+  return { shownAt, mountedAt, afterMountMs: shownAt - mountedAt };
+}
+
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test.describe(`${viewport.width}px`, () => {
     test.use({ viewport });
 
-    test("direct load of /booking does not grow the dialog open from nothing", async ({ page, flow }, testInfo) => {
+    for (const delay of [0, 400]) {
+      test(`direct load of /booking${delay ? " with slower availability" : ""} does not shift the page`, async ({ page, flow }, testInfo) => {
+        const errors = watchErrors(page);
+        if (delay) await page.route("**/api/bookingAvailability", async route => {
+          await new Promise(resolve => setTimeout(resolve, delay));
+          await route.fallback();
+        });
+        await page.goto("/booking");
+        await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+        const layout = await settledDialogLayout(page, testInfo, "booking-load");
+        expect(grewOpenFromNothing(layout)).toBe(false);
+        expect(layout.dialogShifts).toEqual([]);
+        expect(layout.cls).toBeLessThan(0.1);
+        expect(await focusIsInDialog(page)).toBe(true);
+        expect(errors).toEqual([]);
+      });
+    }
+
+    for (const delay of [0, 400]) {
+      test(`direct load of a pending payment${delay ? " with slower checkout requests" : ""} does not shift the page`, async ({ page, flow }, testInfo) => {
+        const errors = watchErrors(page);
+        let finalizeRoute;
+        await page.route("**/api/payment/finalize", route => {
+          finalizeRoute = route;
+        });
+        await flow.review();
+        await flow.payment();
+        await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+        await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+        if (delay) await page.route(/\/api\/payment\/(quote|providers)$/, async route => {
+          await new Promise(resolve => setTimeout(resolve, delay));
+          await route.fallback();
+        });
+        await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
+        await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
+        await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
+        await expect(page.getByText("Price confirmed for this session.", { exact: true })).toBeVisible();
+        const layout = await settledDialogLayout(page, testInfo, "payment-load");
+        expect(grewOpenFromNothing(layout)).toBe(false);
+        expect(layout.dialogShifts).toEqual([]);
+        expect(layout.cls).toBeLessThan(0.1);
+        expect(await focusIsInDialog(page)).toBe(true);
+        expect(errors).toEqual([]);
+      });
+    }
+
+    for (const route of ["/payment-success", "/thank-you"]) {
+      test(`direct load of ${route} does not shift the page`, async ({ page, flow }, testInfo) => {
+        const errors = watchErrors(page);
+        await page.goto(route);
+        await expect(page.getByRole("heading", { level: 1, name: "Looking for your booking?", exact: true })).toBeVisible();
+        const layout = await settledDialogLayout(page, testInfo, "confirmation-load");
+        expect(layout.dialogShifts).toEqual([]);
+        expect(layout.cls).toBeLessThan(0.1);
+        expect(await focusIsInDialog(page)).toBe(true);
+        expect(errors).toEqual([]);
+      });
+    }
+
+    test("slow availability shows the booking dialog in its loading state", async ({ page, flow }, testInfo) => {
+      const errors = watchErrors(page);
+      await page.route("**/api/bookingAvailability", async route => {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        await route.fallback();
+      });
       await page.goto("/booking");
+      await expect(page.getByRole("dialog").getByText("Loading...", { exact: true })).toBeVisible();
+      const shown = await dialogShownAfterMount(page);
+      expect(shown.afterMountMs).toBeLessThanOrEqual(readyMaxWaitMs + 250);
       await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
-      const layout = await settledDialogLayout(page, testInfo, "booking-load");
-      expect(grewOpenFromNothing(layout)).toBe(false);
+      await settledDialogLayout(page, testInfo, "slow-availability");
+      await testInfo.attach("dialog-shown", { body: JSON.stringify(shown), contentType: "application/json" });
+      await page.goto("/");
+      await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+      await page.locator('a[href="/booking"]').first().click();
+      await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+      await settledDialogLayout(page, testInfo, "slow-availability-click-open");
+      expect(errors).toEqual([]);
     });
 
-    test("direct load of a pending payment does not grow the dialog open from nothing", async ({ page, flow }, testInfo) => {
-      let finalizeRoute;
-      await page.route("**/api/payment/finalize", route => {
-        finalizeRoute = route;
-      });
-      await flow.review();
-      await flow.payment();
-      await page.getByRole("button", { name: "Pay your way", exact: true }).click();
-      await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
-      await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
-      await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
-      await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
-      const layout = await settledDialogLayout(page, testInfo, "payment-load");
-      expect(grewOpenFromNothing(layout)).toBe(false);
-      if (viewport.width === 390) expect(layout.dialogShifts).toEqual([]);
+    test("the booking dialog appears when availability never arrives", async ({ page, flow }, testInfo) => {
+      const errors = watchErrors(page);
+      flow.state.failures["/api/bookingAvailability"] = "timeout";
+      await page.goto("/booking");
+      await expect(page.getByRole("dialog").getByText("Loading...", { exact: true })).toBeVisible();
+      const shown = await dialogShownAfterMount(page);
+      expect(shown.afterMountMs).toBeLessThanOrEqual(readyMaxWaitMs + 250);
+      expect(await focusIsInDialog(page)).toBe(true);
+      await testInfo.attach("dialog-shown", { body: JSON.stringify(shown), contentType: "application/json" });
+      expect(errors).toEqual([]);
     });
 
     test("opening booking from the home page still animates the dialog open", async ({ page, flow }, testInfo) => {
@@ -133,6 +237,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     });
 
     test("reopening booking after a direct load animates the dialog open again", async ({ page, flow }, testInfo) => {
+      const errors = watchErrors(page);
       await page.goto("/booking");
       await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
       await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
@@ -143,6 +248,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
       const layout = await settledDialogLayout(page, testInfo, "reopen");
       expect(grewOpenFromNothing(layout)).toBe(true);
+      expect(errors).toEqual([]);
     });
   });
 }

@@ -8,6 +8,7 @@ import packagePricing from "../lib/packagePricing";
 import { captureSalesAttribution, sanitizeSalesAttribution } from "../lib/salesAttribution";
 import { trackConfirmedPurchase } from "../lib/analytics";
 import { preloadConfirmationPage, preloadConfirmationPages } from "../lib/confirmationPages";
+import { useBookingDialogPending } from "../lib/bookingDialogHold";
 import {
   calculateCheckoutDiscounts,
   formatCouponValue,
@@ -433,6 +434,7 @@ export default function Payment({ hideFooter = false }) {
   const [serverQuote, setServerQuote] = useState(null);
   const [quoteFingerprint, setQuoteFingerprint] = useState("");
   const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteSettled, setQuoteSettled] = useState(false);
   const [quoteRetryCount, setQuoteRetryCount] = useState(0);
 
   const showBanner = (type, text, options = {}) => {
@@ -508,6 +510,8 @@ export default function Payment({ hideFooter = false }) {
     razorpay: { enabled: false, mode: "unknown", disabledReason: "" },
     paypal: { enabled: false, mode: "unknown", clientId: "" },
   });
+  const [providersSettled, setProvidersSettled] = useState(false);
+  useBookingDialogPending(!hydrated || !providersSettled || (Boolean(packageTitle) && !quoteSettled));
   const [showInternalPayments, setShowInternalPayments] = useState(false);
   const [paymentSession, setPaymentSession] = useState(null);
   const [paymentStatusBusy, setPaymentStatusBusy] = useState(false);
@@ -675,7 +679,10 @@ export default function Payment({ hideFooter = false }) {
       })
       .finally(() => {
         if (timeoutId) clearTimeout(timeoutId);
-        if (active) setQuoteLoading(false);
+        if (active) {
+          setQuoteLoading(false);
+          setQuoteSettled(true);
+        }
       });
 
     return () => {
@@ -871,6 +878,9 @@ export default function Payment({ hideFooter = false }) {
             },
           }));
         }
+      })
+      .finally(() => {
+        if (active) setProvidersSettled(true);
       });
 
     return () => {
