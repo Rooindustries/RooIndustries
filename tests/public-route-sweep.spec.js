@@ -69,8 +69,6 @@ function routeInventory() {
   const sitemapScript = fs.readFileSync(path.join(root, "scripts", "generate-sitemap.js"), "utf8");
   const extra = sitemapScript.match(/EXTRA_INDEXABLE_ROUTES\s*=\s*\[([^\]]*)\]/)?.[1] || "";
   for (const match of extra.matchAll(/["'](\/[^"']*)["']/g)) add(match[1], "scripts/generate-sitemap.js extra route");
-  const sitemap = fs.readFileSync(path.join(root, "public", "sitemap.xml"), "utf8");
-  for (const match of sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)) add(new URL(match[1]).pathname, "public/sitemap.xml");
   for (const source of ["src/components/Navbar.jsx", "src/components/Footer.jsx", "app/tourney/TourneyShared.jsx", "app/tourney/TourneyFooter.jsx"]) {
     const text = fs.readFileSync(path.join(root, source), "utf8");
     for (const match of text.matchAll(/(?:href|to)=["'](\/[^"']*)["']/g)) add(match[1], source);
@@ -282,7 +280,7 @@ test.afterAll(async () => {
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test.describe(`${viewport.width}x${viewport.height}`, () => {
     test.use({ javaScriptEnabled: true, viewport, serviceWorkers: "block" });
-    test("public routes and signed-out gates", async ({ browser, baseURL }, testInfo) => {
+    test("public routes and signed-out gates", async ({ browser, baseURL, request }, testInfo) => {
       test.setTimeout(240000);
       const { localOrigin, refuseEnvFiles } = await import("../scripts/lib/test-target-safety.mjs");
       refuseEnvFiles(root);
@@ -296,6 +294,14 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect(inventory.unresolvedDynamicRoutes).toEqual([]);
       fs.mkdirSync(output, { recursive: true });
       const queue = [...inventory.routes];
+      const sitemap = await request.get("/sitemap.xml");
+      expect(sitemap.status()).toBe(200);
+      const sitemapRoutes = [...(await sitemap.text()).matchAll(/<loc>([^<]+)<\/loc>/g)]
+        .map(match => new URL(match[1]).pathname.replace(/\/$/, "") || "/");
+      expect(sitemapRoutes).toEqual(expect.arrayContaining(INDEXABLE_ROUTES));
+      for (const route of sitemapRoutes) {
+        if (!queue.some(entry => entry.route === route)) queue.push({ route, sources: ["served sitemap.xml"] });
+      }
       const seen = new Set();
       const linkCache = new Map();
       const report = { viewport, baseURL, startedAt: new Date().toISOString(), complete: false, sourceHash: manifest.sourceHash, fixtureContentHash: manifest.contentSha256, records: [], problems: [], metadataDuplicates: [] };

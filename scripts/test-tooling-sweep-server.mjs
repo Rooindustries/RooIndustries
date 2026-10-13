@@ -88,6 +88,8 @@ if (development) {
 }
 const fixture = await createToolingContentFixture({ origin: contentURL, artifact: process.env.TOOLING_CONTENT_ARTIFACT, apiRoutes });
 try {
+  await execute(["scripts/generate-sitemap.js"]);
+  await execute(["scripts/generate-robots.js"], { ...env, VERCEL_ENV: "production" });
   if (development) {
     await execute([next, "dev", "--hostname", testHost, "--port", target.port]);
   } else {

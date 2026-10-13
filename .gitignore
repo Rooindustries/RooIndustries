@@ -17,6 +17,10 @@
 /output
 /audit/
 
+# Generated before each build.
+/public/robots.txt
+/public/sitemap.xml
+
 # misc
 .env*
 .env
