@@ -36,9 +36,22 @@ test.beforeEach(async ({ page, flow }) => {
       panelChanges: [],
       panelLayoutChecks: 0,
       fallbackSeen: false,
+      dialogResizes: [],
     };
     const nodeScopes = new WeakMap();
     const panels = new Set();
+    const dialogSizes = new WeakMap();
+    const dialogObserver = new ResizeObserver(entries => {
+      for (const { target, contentRect } of entries) {
+        if (!target.isConnected) continue;
+        const size = `${Math.round(contentRect.width)}x${Math.round(contentRect.height)}`;
+        const previous = dialogSizes.get(target);
+        dialogSizes.set(target, size);
+        if (previous && previous !== size) metrics.dialogResizes.push({
+          time: performance.now(), from: previous, to: size, visible: getComputedStyle(target).visibility === "visible",
+        });
+      }
+    });
     let panelLayouts = new WeakMap();
     let awaitingReceiptDecision = false;
     const position = node => {
@@ -77,6 +90,10 @@ test.beforeEach(async ({ page, flow }) => {
     const identifyNodes = () => {
       const dialog = document.querySelector('[role="dialog"].ri-booking');
       const scaler = dialog?.querySelector('[data-booking-scaler]');
+      if (dialog && !dialogSizes.has(dialog)) {
+        dialogSizes.set(dialog, "");
+        dialogObserver.observe(dialog);
+      }
       for (const [node, selector] of [
         [dialog, '[role="dialog"].ri-booking'],
         [scaler, '[data-booking-scaler]'],
@@ -140,7 +157,7 @@ test.beforeEach(async ({ page, flow }) => {
     layoutObserver.observe({ type: "layout-shift", buffered: true });
     window.__resetConfirmationMetrics = () => {
       layoutObserver.takeRecords();
-      Object.assign(metrics, { cls: 0, shifts: [], headings: [], sectionHeights: [], receiptDecisionAt: null, panelLayouts: [], panelChanges: [], panelLayoutChecks: 0, fallbackSeen: false });
+      Object.assign(metrics, { cls: 0, shifts: [], headings: [], sectionHeights: [], receiptDecisionAt: null, panelLayouts: [], panelChanges: [], panelLayoutChecks: 0, fallbackSeen: false, dialogResizes: [] });
       panelLayouts = new WeakMap();
       awaitingReceiptDecision = true;
       sessionValue = 0;
@@ -228,6 +245,31 @@ function watchErrors(page, expectedEmailStatus = 0) {
   return errors;
 }
 
+async function openPendingPaidCheckout(page, flow) {
+  let finalizeRoute;
+  await page.route("**/api/payment/finalize", route => {
+    expect(route.request().headers().authorization).toBe("Bearer fixture-payment");
+    finalizeRoute = route;
+  });
+  await flow.review();
+  await flow.payment();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+  await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
+  await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
+  await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  await page.waitForTimeout(1000);
+  return bookingId => finalizeRoute.fulfill({ json: {
+    ok: true, status: "booked", provider: "dodo", bookingId,
+    emailDispatch: { allSent: true, client: { sent: true }, owner: { sent: true } },
+    emailDispatchToken: "",
+  } });
+}
+
+const focusIsInBookingDialog = page => page.evaluate(() =>
+  Boolean(document.activeElement?.closest('[role="dialog"].ri-booking')));
+
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test.describe(`${viewport.width}px`, () => {
     test.use({ viewport });
@@ -294,6 +336,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await expect(page).toHaveURL(new RegExp(`${route}$`), { timeout: 1000 });
         await testInfo.attach("arrival-navigation", { body: JSON.stringify({ elapsedMs: Date.now() - completedAt }), contentType: "application/json" });
         await expect(page.getByRole("heading", { level: 1, name: heading, exact: true })).toBeVisible();
+        expect(await focusIsInBookingDialog(page)).toBe(true);
         await expect(page.getByRole("link", { name: "Back to Home", exact: true })).toBeVisible();
         await expect.poll(() => page.evaluate(() => window.history.state.usr.bookingConfirmation)).toEqual({ bookingId: bookingConfirmation.bookingId });
         expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("booking_confirmation_state")))).toEqual({ bookingId: bookingConfirmation.bookingId });
@@ -405,6 +448,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           await page.goto(route, { waitUntil: "domcontentloaded" });
           await expect(page.getByRole("heading", { level: 1, name: heading, exact: true })).toBeVisible();
           await expect.poll(() => Boolean(dispatchRoute)).toBe(true);
+          await page.evaluate(() => document.fonts.ready);
+          await page.waitForTimeout(1000);
           assertReceiptLayout(await capture(page, testInfo, "before-email-cleanup"));
           const stateBefore = await page.evaluate(() => history.state.usr);
           await page.evaluate(() => window.__resetConfirmationMetrics());
@@ -438,6 +483,75 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       }
     }
 
+    test("paid arrival swaps checkout for the confirmation without moving the dialog", async ({ page, flow }, testInfo) => {
+      const errors = watchErrors(page);
+      const completePayment = await openPendingPaidCheckout(page, flow);
+      await page.screenshot({ path: testInfo.outputPath("checkout.png") });
+      await page.evaluate(() => window.__resetConfirmationMetrics());
+      await completePayment("fixture-paid-steady-dialog");
+      await expect(page).toHaveURL(/\/payment-success$/);
+      await expect(page.getByRole("heading", { level: 1, name: "Payment Successful", exact: true })).toBeVisible();
+      expect(await focusIsInBookingDialog(page)).toBe(true);
+      await expect.poll(() => page.evaluate(() => {
+        const dialog = document.querySelector('[role="dialog"].ri-booking').getBoundingClientRect();
+        const content = document.querySelector("[data-booking-scaler] > div").getBoundingClientRect();
+        return Math.abs(dialog.width - content.width) < 1 && Math.abs(dialog.height - content.height) < 1;
+      })).toBe(true);
+      const switchedAt = await page.evaluate(() => window.__confirmationMetrics.receiptDecisionAt);
+      expect(switchedAt).not.toBeNull();
+      const arrival = await capture(page, testInfo, "steady-arrival");
+      expect(arrival.fallbackSeen).toBe(false);
+      expect(arrival.shifts.filter(shift => shift.time >= switchedAt && shift.sources.some(source =>
+        !source.element || ["modal-shell", "checkout-content"].includes(source.scope)))).toEqual([]);
+      expect(arrival.dialogResizes.filter(resize => resize.time >= switchedAt && resize.visible)).toEqual([]);
+      expect(arrival.cls).toBeLessThan(0.1);
+      assertReceiptLayout(arrival);
+      expect(await focusIsInBookingDialog(page)).toBe(true);
+      expect(errors).toEqual([]);
+    });
+
+    test("paid arrival reveals the dialog when animation frames are stalled", async ({ page, flow }, testInfo) => {
+      const errors = watchErrors(page);
+      await page.addInitScript(() => {
+        const request = window.requestAnimationFrame.bind(window);
+        const cancel = window.cancelAnimationFrame.bind(window);
+        const stalled = new Map();
+        const resumed = new Map();
+        let stalledHandle = 0;
+        window.requestAnimationFrame = callback => {
+          if (!window.__animationFramesStalled) return request(callback);
+          stalledHandle -= 1;
+          stalled.set(stalledHandle, callback);
+          return stalledHandle;
+        };
+        window.cancelAnimationFrame = handle => {
+          if (!stalled.delete(handle)) cancel(resumed.get(handle) ?? handle);
+        };
+        window.__resumeAnimationFrames = () => {
+          window.__animationFramesStalled = false;
+          for (const [handle, callback] of stalled) resumed.set(handle, request(callback));
+          stalled.clear();
+        };
+      });
+      const completePayment = await openPendingPaidCheckout(page, flow);
+      await page.evaluate(() => { window.__animationFramesStalled = true; });
+      const completedAt = Date.now();
+      await completePayment("fixture-paid-stalled-frames");
+      await expect(page).toHaveURL(/\/payment-success$/);
+      await expect(page.getByRole("heading", { level: 1, name: "Payment Successful", exact: true })).toBeVisible();
+      const shownAfterMs = Date.now() - completedAt;
+      expect(await page.evaluate(() => window.__animationFramesStalled)).toBe(true);
+      expect(await focusIsInBookingDialog(page)).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath("stalled-frames.png") });
+      await page.evaluate(() => window.__resumeAnimationFrames());
+      await expect.poll(() => page.getByRole("heading", { level: 1, name: "Payment Successful", exact: true })
+        .evaluate(el => el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }))).toBe(true);
+      await expect(page.getByRole("heading", { level: 1, name: "Payment Successful", exact: true })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Back to Home", exact: true })).toBeVisible();
+      await testInfo.attach("stalled-frames", { body: JSON.stringify({ shownAfterMs }), contentType: "application/json" });
+      expect(errors).toEqual([]);
+    });
+
     for (const chunkState of ["failed", "delayed"]) {
       test(`paid arrival leaves checkout with a ${chunkState} confirmation chunk`, async ({ page, flow, baseURL }, testInfo) => {
         const pageErrors = [];
@@ -470,7 +584,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         const delayedChunk = new Promise(resolve => { releaseChunk = resolve; });
         const interceptChunk = async route => {
           expect(new URL(route.request().url()).origin).toBe(new URL(baseURL).origin);
-          const response = await route.fetch();
+          const response = await route.fetch({ maxRetries: 2 });
           const body = await response.text();
           if (!body.includes(neutralHeading) || !body.includes("Payment Successful")) return route.fulfill({ response, body });
           const chunk = { url: route.request().url(), requestedAt: Date.now(), fulfilledAt: null };
@@ -487,6 +601,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
           await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
           await expect.poll(() => chunks.length).toBeGreaterThan(0);
+          await page.evaluate(() => document.fonts.ready);
+          await page.waitForTimeout(1000);
+          await page.evaluate(() => window.__resetConfirmationMetrics());
           const completedAt = Date.now();
           await finalizeRoute.fulfill({ json: completed });
           await expect(page).toHaveURL(/\/payment-success$/, { timeout: 3000 });
@@ -508,6 +625,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           }), contentType: "application/json" });
           expect(unhandledRejections).toEqual([]);
           expect(pageErrors).toEqual([]);
+          await capture(page, testInfo, `${chunkState}-chunk-arrival`);
           if (chunkState === "failed") {
             await page.unroute("**/_next/static/chunks/**", interceptChunk);
             await page.getByRole("button", { name: "Reload page", exact: true }).click();
@@ -603,6 +721,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           ? { ok: true, status: "needs_recovery", bookingId: "", emailDispatchToken: "" } : completed });
         await expect(page).toHaveURL(new RegExp(`${route}$`));
         await expect(page.getByRole("heading", { level: 1, name: heading, exact: true })).toBeVisible();
+        expect(await focusIsInBookingDialog(page)).toBe(true);
         const arrival = await capture(page, testInfo, "tokenless-arrival");
         expect(arrival.h1Count).toBe(1);
         expect(arrival.headings).not.toContain(neutralHeading);
