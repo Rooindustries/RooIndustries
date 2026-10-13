@@ -249,6 +249,8 @@ try {
   });
   const next = path.join(root, "node_modules/next/dist/bin/next");
   console.log(`Guarded native CMS fixture: ${baseURL}`);
+  await execute(["scripts/generate-sitemap.js"]);
+  await execute(["scripts/generate-robots.js"]);
   if (process.env.ROO_TEST_DEV === "1") await execute([next, "dev", "--hostname", target.hostname, "--port", target.port]);
   else {
     await execute(["scripts/validate-runtime-env.js"]);

@@ -8,9 +8,10 @@ const vercelEnv =
   process.env.REACT_APP_VERCEL_ENV;
 const nodeEnv = process.env.NODE_ENV;
 const isNonProdEnv =
-  vercelEnv && vercelEnv !== "production"
+  process.argv.includes("--development") ||
+  (vercelEnv && vercelEnv !== "production"
     ? true
-    : nodeEnv === "development" || nodeEnv === "test";
+    : nodeEnv === "development" || nodeEnv === "test");
 const isProduction = !isNonProdEnv;
 
 const lines = isProduction

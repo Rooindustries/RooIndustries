@@ -40,6 +40,7 @@
     "sharp": "0.35.5"
   },
   "scripts": {
+    "predev": "node scripts/generate-sitemap.js && node scripts/generate-robots.js --development",
     "dev": "next dev",
     "start": "next start",
     "prebuild": "node scripts/validate-runtime-env.js && node scripts/generate-sitemap.js && node scripts/generate-robots.js",
