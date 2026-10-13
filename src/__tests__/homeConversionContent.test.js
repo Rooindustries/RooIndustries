@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const {
   HOME_COPY,
+  applyHomePageCopyOverrides,
   applyHomeSectionCopyOverride,
 } = require("../lib/homeCopy");
 
@@ -49,6 +50,20 @@ describe("homepage conversion content", () => {
       fs.existsSync(path.join(__dirname, "../../public/overwatch-2-logo.svg"))
     ).toBe(true);
     expect(services.benchPages[0].games[1].gameTitle).toBe("VALORANT");
+  });
+
+  test("keeps the built-in benefit cards when the services document has none", () => {
+    const { services } = applyHomePageCopyOverrides({ services: { cards: null } });
+
+    expect(services.cards).toHaveLength(HOME_COPY.services.cards.length);
+    expect(services.cards.every((card) => card._key)).toBe(true);
+  });
+
+  test("keeps the built-in steps when the how-it-works document has none", () => {
+    const { howItWorks } = applyHomePageCopyOverrides({ howItWorks: { steps: null } });
+
+    expect(howItWorks.steps).toHaveLength(HOME_COPY.howItWorks.steps.length);
+    expect(howItWorks.steps.every((step) => step._key)).toBe(true);
   });
 
   test("removes the expired tournament banner and embeds proof with benefits", () => {

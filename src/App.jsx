@@ -27,6 +27,7 @@ import { prefetchHomeSectionData } from "./lib/homeSectionData";
 import { whenUserInteracts } from "./lib/firstInteraction";
 import { migrateCheckoutStorageToSession } from "./lib/checkoutStorage";
 import { getPublicContent } from "./lib/publicContentClient";
+import { useBookingDialogPending } from "./lib/bookingDialogHold";
 
 const Home = lazy(() => import("./legacyPages/Home"));
 const AboutPage = lazy(() => import("./legacyPages/About"));
@@ -130,9 +131,10 @@ const IntercomRuntime = ({ disabledRoutes, disabled }) => {
   );
 };
 
-const RouteFallback = () => (
-  <div className="pt-16 text-center text-ink-secondary text-sm">Loading...</div>
-);
+const RouteFallback = () => {
+  useBookingDialogPending(true);
+  return <div className="pt-16 text-center text-ink-secondary text-sm">Loading...</div>;
+};
 
 const withRouteSuspense = (node, fallback = <RouteFallback />) => (
   <Suspense fallback={fallback}>{node}</Suspense>
@@ -480,7 +482,7 @@ export function AppContent({
       cancelScheduled = () => window.clearTimeout(timeoutId);
     };
 
-    if (initialHomeData && location.pathname === "/") {
+    if (initialHomeData) {
       whenUserInteracts().then(schedulePrefetch);
     } else {
       schedulePrefetch();

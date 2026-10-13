@@ -93,6 +93,26 @@ async function fetchHomePageData() {
   });
 }
 
+const FLOW_PAGE_HOME_DATA_WAIT_MS = 1000;
+
+async function fetchFlowPageHomeData() {
+  let timer;
+  const timedOut = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(null), FLOW_PAGE_HOME_DATA_WAIT_MS);
+  });
+  try {
+    return await Promise.race([
+      fetchHomePageData().catch(() => {
+        console.warn("[content] flow page home fetch failed");
+        return null;
+      }),
+      timedOut,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchHeroCopy() {
   try {
     const fetchContent = await createPublicContentFetcher();
@@ -116,5 +136,6 @@ module.exports = {
   fetchPrivacyPolicy,
   fetchFaqQuestions,
   fetchHomePageData,
+  fetchFlowPageHomeData,
   fetchHeroCopy,
 };

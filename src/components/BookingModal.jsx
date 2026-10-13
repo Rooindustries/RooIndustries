@@ -1,7 +1,36 @@
-import React, { useEffect, useRef, useState, useLayoutEffect } from "react";
+import React, { useCallback, useEffect, useRef, useState, useLayoutEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { BookingDialogHoldContext } from "../lib/bookingDialogHold";
 import { useLowPerformanceMode } from "../lib/performanceMode";
 import { isTopDialog, useDialogFocus } from "../lib/useDialogFocus";
+
+const setVisibleTimeout = (callback, ms) => {
+  let timer = 0;
+  let remaining = ms;
+  let startedAt = 0;
+  let fired = false;
+  const sync = () => {
+    if (fired) return;
+    if (document.visibilityState === "visible") {
+      if (timer) return;
+      startedAt = performance.now();
+      timer = window.setTimeout(() => {
+        fired = true;
+        callback();
+      }, remaining);
+    } else if (timer) {
+      window.clearTimeout(timer);
+      timer = 0;
+      remaining = Math.max(0, remaining - (performance.now() - startedAt));
+    }
+  };
+  document.addEventListener("visibilitychange", sync);
+  sync();
+  return () => {
+    document.removeEventListener("visibilitychange", sync);
+    window.clearTimeout(timer);
+  };
+};
 
 export default function BookingModal({ open, onClose, children, skipInitialSizeAnimation = false, contentKey }) {
   const contentRef = useRef(null);
@@ -23,14 +52,36 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
   const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
   const [contentSwitch, setContentSwitch] = useState({ contentKey, revealPending: false });
   const restoreFocusRef = useRef(false);
+  const lastFocusedInDialogRef = useRef(null);
   if (contentSwitch.contentKey !== contentKey) {
     setContentSwitch({ contentKey, revealPending: open });
   }
-  const contentRevealed = !contentSwitch.revealPending;
+  const [awaitingContent, setAwaitingContent] = useState(skipInitialSizeAnimation);
+  const [holdCount, setHoldCount] = useState(0);
+  const holdCountRef = useRef(0);
+  const contentRevealed = !awaitingContent && !contentSwitch.revealPending;
 
   const MOBILE_PADDING_Y = 80;
   const DESKTOP_PADDING_Y = 36;
   const CONTENT_REVEAL_FALLBACK_MS = 300;
+  const CONTENT_READY_MAX_WAIT_MS = 1500;
+
+  const hold = useCallback(() => {
+    let released = false;
+    holdCountRef.current += 1;
+    setHoldCount(holdCountRef.current);
+    return () => {
+      if (released) return;
+      released = true;
+      holdCountRef.current -= 1;
+      setHoldCount(holdCountRef.current);
+    };
+  }, []);
+
+  const stopAwaitingContent = useCallback(() => {
+    setAwaitingContent(false);
+    setContentSwitch((current) => ({ ...current, revealPending: true }));
+  }, []);
 
   useLayoutEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 780px)");
@@ -147,6 +198,19 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
   }, []);
 
   useLayoutEffect(() => {
+    if (!awaitingContent) return undefined;
+    return setVisibleTimeout(stopAwaitingContent, CONTENT_READY_MAX_WAIT_MS);
+  }, [awaitingContent, stopAwaitingContent]);
+
+  useLayoutEffect(() => {
+    if (!awaitingContent || holdCount > 0) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      if (holdCountRef.current === 0) stopAwaitingContent();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [awaitingContent, holdCount, stopAwaitingContent]);
+
+  useLayoutEffect(() => {
     if (!contentSwitch.revealPending) return undefined;
     const reveal = () =>
       setContentSwitch((current) =>
@@ -177,11 +241,11 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       frame = window.requestAnimationFrame(revealWhenLayoutApplied);
     };
     frame = window.requestAnimationFrame(revealWhenLayoutApplied);
-    const fallback = window.setTimeout(reveal, CONTENT_REVEAL_FALLBACK_MS);
+    const cancelFallback = setVisibleTimeout(reveal, CONTENT_REVEAL_FALLBACK_MS);
 
     return () => {
       window.cancelAnimationFrame(frame);
-      window.clearTimeout(fallback);
+      cancelFallback();
     };
   }, [contentSwitch, open]);
 
@@ -196,6 +260,22 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     if (wrapperRef.current?.contains(document.activeElement)) return;
     closeButtonRef.current?.focus();
   }, [contentSwitch, open]);
+
+  useLayoutEffect(() => {
+    const trackFocus = (event) => {
+      lastFocusedInDialogRef.current = wrapperRef.current?.contains(event.target) ? event.target : null;
+    };
+    document.addEventListener("focusin", trackFocus);
+    return () => document.removeEventListener("focusin", trackFocus);
+  }, []);
+
+  useEffect(() => {
+    if (!open || !contentRevealed) return;
+    if (!lastFocusedInDialogRef.current || lastFocusedInDialogRef.current.isConnected) return;
+    if (document.activeElement !== document.body || !isTopDialog(wrapperRef)) return;
+    closeButtonRef.current?.focus({ preventScroll: true });
+    lastFocusedInDialogRef.current = null;
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -342,12 +422,14 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
                   id={isMobile ? "booking-mobile-override" : undefined}
                   style={{ width: renderWidth, position: 'relative' }}
                 >
-                  {React.Children.map(children, child => {
-                    if (React.isValidElement(child)) {
-                      return React.cloneElement(child, { isMobile });
-                    }
-                    return child;
-                  })}
+                  <BookingDialogHoldContext.Provider value={hold}>
+                    {React.Children.map(children, child => {
+                      if (React.isValidElement(child)) {
+                        return React.cloneElement(child, { isMobile });
+                      }
+                      return child;
+                    })}
+                  </BookingDialogHoldContext.Provider>
                 </div>
               </motion.div>
             </motion.div>

@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import { createPortal } from "react-dom";
 import { useDialogFocus } from "../lib/useDialogFocus";
+import { useBookingDialogPending } from "../lib/bookingDialogHold";
 import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { getPublicContent } from "../lib/publicContentClient";
 import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
@@ -1514,6 +1515,8 @@ export default function BookingForm({ isMobile }) {
       setMonth(new Date(initialDate.getFullYear(), initialDate.getMonth(), 1));
     }
   }, [settings, selectedDate, localSlotMap, earliestAvailableSlot, startOfToday]);
+
+  useBookingDialogPending(settings ? !selectedDate && Boolean(localSlotMap) : !settingsError);
 
   const handleChange = (e) => {
     if (isPaymentPendingHold) return;
