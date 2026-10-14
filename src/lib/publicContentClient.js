@@ -13,16 +13,24 @@ const buildPublicContentUrl = (resource, params = {}) => {
   return `${url.pathname}${url.search}`;
 };
 
+let pendingRequests = 0;
+export const getPublicContentPendingCount = () => pendingRequests;
+
 export const getPublicContent = async (resource, params = {}, options = {}) => {
-  const response = await fetch(buildPublicContentUrl(resource, params), {
-    method: "GET",
-    credentials: "same-origin",
-    headers: { Accept: "application/json" },
-    ...(options.signal ? { signal: options.signal } : {}),
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || body?.ok !== true) {
-    throw new Error(body?.error || "Public content could not be loaded.");
+  pendingRequests += 1;
+  try {
+    const response = await fetch(buildPublicContentUrl(resource, params), {
+      method: "GET",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body?.ok !== true) {
+      throw new Error(body?.error || "Public content could not be loaded.");
+    }
+    return body.data ?? null;
+  } finally {
+    pendingRequests -= 1;
   }
-  return body.data ?? null;
 };

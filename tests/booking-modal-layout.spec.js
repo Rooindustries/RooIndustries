@@ -13,15 +13,22 @@ test.use({
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    const layout = window.__bookingDialogLayout = { shifts: [], sizes: [], visibility: [], mountedAt: null };
+    const layout = window.__bookingDialogLayout = { shifts: [], sizes: [], visibility: [], mainVisibility: [], mountedAt: null };
     const selector = '[role="dialog"].ri-booking';
     let visible = false;
+    let mainVisible = null;
     const sampleVisibility = () => {
       const dialog = document.querySelector(selector);
       const nowVisible = Boolean(dialog?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
       if (nowVisible !== visible) {
         visible = nowVisible;
         layout.visibility.push({ time: performance.now(), visible });
+      }
+      const main = document.getElementById("main-content");
+      const mainNowVisible = Boolean(main?.checkVisibility({ checkVisibilityCSS: true }));
+      if (main && mainNowVisible !== mainVisible) {
+        mainVisible = mainNowVisible;
+        layout.mainVisibility.push({ time: performance.now(), visible: mainNowVisible });
       }
       if (layout.mountedAt === null && document.body?.style.overflow === "hidden") layout.mountedAt = performance.now();
       requestAnimationFrame(sampleVisibility);
@@ -68,6 +75,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 const readyMaxWaitMs = 1500;
+const backgroundReadyMaxWaitMs = 3000;
 
 function watchErrors(page) {
   const errors = [];
@@ -129,6 +137,28 @@ const overrideTabVisibility = (page, initial) => page.addInitScript(state => {
     return performance.now();
   };
 }, initial);
+
+async function returnFromPaymentOver(page, flow, background, search = "") {
+  let finalizeRoute;
+  await page.route("**/api/payment/finalize", route => {
+    finalizeRoute = route;
+  });
+  await flow.review();
+  await flow.payment();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+  await page.evaluate(([pathname, search]) => sessionStorage.setItem("flow_background_location",
+    JSON.stringify({ pathname, search, hash: "" })), [background, search]);
+  await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
+  await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
+  await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
+}
+
+const settledBackground = page => page.waitForFunction(() => {
+  const { shifts, mainVisibility } = window.__bookingDialogLayout;
+  return mainVisibility.at(-1)?.visible === true &&
+    performance.now() - Math.max(shifts.at(-1)?.time ?? 0, mainVisibility.at(-1).time) >= 1500;
+}, null, { polling: 100 });
 
 async function dialogShownAfterMount(page) {
   await page.waitForFunction(() => {
@@ -276,6 +306,72 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect(dialogShownAt - tabShownAt).toBeLessThanOrEqual(1300);
       expect(await focusIsInDialog(page)).toBe(true);
       await testInfo.attach("dialog-shown", { body: JSON.stringify({ mountedAt, tabHiddenAt, tabShownAt, dialogShownAt, visibleBeforeHiddenMs: tabHiddenAt - mountedAt, afterTabShownMs: dialogShownAt - tabShownAt }), contentType: "application/json" });
+      expect(errors).toEqual([]);
+    });
+
+    for (const [background, delay] of [["/reviews", 0], ["/reviews", 400], ["/tools", 0]]) {
+      test(`returning from payment over a stored ${background} background${delay ? " with slow content" : ""} does not shift the page`, async ({ page, flow }, testInfo) => {
+        const errors = watchErrors(page);
+        if (delay) await page.route("**/api/content/reviews-gallery**", async route => {
+          await new Promise(resolve => setTimeout(resolve, delay));
+          await route.fallback();
+        });
+        await returnFromPaymentOver(page, flow, background);
+        await expect(page.locator("#main-content").getByRole("heading", {
+          level: 1, name: background === "/reviews" ? "Community Reviews" : "All Tools & Utilities", exact: true,
+        })).toBeVisible();
+        await settledBackground(page);
+        const layout = await settledDialogLayout(page, testInfo, `stored${background.replace("/", "-")}${delay ? "-slow" : ""}`);
+        expect(layout.cls).toBeLessThan(0.1);
+        expect(layout.dialogShifts).toEqual([]);
+        expect(errors).toEqual([]);
+      });
+    }
+
+    test("returning from payment over a stored home page with a referral query keeps the page visible", async ({ page, flow }, testInfo) => {
+      const errors = watchErrors(page);
+      await returnFromPaymentOver(page, flow, "/", "?ref=fixture-creator");
+      await settledBackground(page);
+      const layout = await settledDialogLayout(page, testInfo, "stored-home-ref");
+      expect(layout.mainVisibility.filter(entry => !entry.visible)).toEqual([]);
+      expect(layout.cls).toBeLessThan(0.1);
+      expect(layout.dialogShifts).toEqual([]);
+      expect(errors).toEqual([]);
+    });
+
+    test("a stored background whose content never arrives appears at the wait cap", async ({ page, flow }) => {
+      const errors = watchErrors(page);
+      await page.route("**/api/content/reviews-gallery**", () => {});
+      await returnFromPaymentOver(page, flow, "/reviews");
+      const held = await page.waitForFunction(() => {
+        const { mainVisibility } = window.__bookingDialogLayout;
+        const hidden = mainVisibility.findIndex(entry => !entry.visible);
+        const shown = hidden < 0 ? undefined : mainVisibility.slice(hidden + 1).find(entry => entry.visible);
+        return shown ? { hiddenAt: mainVisibility[hidden].time, shownAt: shown.time } : false;
+      }, null, { polling: 50, timeout: 7000 });
+      const { hiddenAt, shownAt } = await held.jsonValue();
+      expect(shownAt - hiddenAt).toBeLessThanOrEqual(backgroundReadyMaxWaitMs + 250);
+      expect(shownAt - hiddenAt).toBeGreaterThanOrEqual(backgroundReadyMaxWaitMs - 100);
+      await expect(page.locator("#main-content").getByRole("heading", { level: 1, name: "Community Reviews", exact: true })).toBeVisible();
+      expect(errors).toEqual([]);
+    });
+
+    test("closing the dialog while the stored background is loading shows the page at once", async ({ page, flow }) => {
+      const errors = watchErrors(page);
+      await page.route("**/api/content/reviews-gallery**", () => {});
+      await returnFromPaymentOver(page, flow, "/reviews");
+      const close = page.getByRole("dialog").getByRole("button", { name: "Close", exact: true });
+      await expect(close).toBeVisible();
+      const closing = await page.evaluate(() => ({
+        mainVisible: window.__bookingDialogLayout.mainVisibility.at(-1).visible, time: performance.now(),
+      }));
+      expect(closing.mainVisible).toBe(false);
+      await close.click();
+      await expect(page).toHaveURL(/\/reviews$/);
+      await expect(page.locator("#main-content")).toBeVisible({ timeout: 300 });
+      await page.waitForTimeout(2000);
+      expect(await page.evaluate(time => window.__bookingDialogLayout.mainVisibility
+        .filter(entry => !entry.visible && entry.time > time), closing.time)).toEqual([]);
       expect(errors).toEqual([]);
     });
 
