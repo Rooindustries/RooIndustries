@@ -1145,7 +1145,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-referral-draft:")))).toEqual([]);
     });
 
-    test("Bugbot publication response lost accepts server defaults", async ({ page, request }, testInfo) => {
+    test("publication response lost accepts server defaults", async ({ page, request }, testInfo) => {
       await login(page); await choose(page, "Benchmark");
       await page.getByRole("region", { name: "Benchmark list" }).getByRole("button", { name: "New", exact: true }).click();
       const title = `  Defaulted benchmark café 日本語 ${viewport.width}  `;
@@ -1175,7 +1175,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       } finally { await pending.release(); }
     });
 
-    test("Bugbot newer referral edits rebase after an in-flight save", async ({ page, request }, testInfo) => {
+    test("newer referral edits rebase after an in-flight save", async ({ page, request }, testInfo) => {
       const creator = (await creators(request))[2];
       await openReferrals(page); await selectCreator(page, creator);
       await page.getByLabel("Creator commission percentage").fill("9.75");
