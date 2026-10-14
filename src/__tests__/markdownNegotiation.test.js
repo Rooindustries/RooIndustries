@@ -39,10 +39,11 @@ describe("Markdown content negotiation", () => {
     expect(response.headers.get("vary")).toBe("Accept, Accept-Encoding");
     if (expected === "markdown") {
       expect(response.headers.get("x-middleware-rewrite")).toBe("https://www.rooindustries.com/markdown?path=%2F");
+      expect(response.headers.get("vercel-cdn-cache-control")).toBe("no-store");
     } else {
       expect(response.headers.get("x-middleware-next")).toBe("1");
       expect(response.headers.get("cdn-cache-control")).toBe("no-store");
-      expect(response.headers.get("vercel-cdn-cache-control")).toBe("no-store");
+      expect(response.headers.get("vercel-cdn-cache-control")).toBeNull();
     }
   });
 
