@@ -64,6 +64,7 @@ export function middleware(req) {
     !req.headers.has("next-router-state-tree") &&
     !req.headers.has("next-action");
   if (!isDocument) return NextResponse.next({ request: { headers } });
+  if (!headers.get("user-agent")) headers.set("user-agent", "Mozilla/5.0");
 
   const negotiator = new Negotiator({ headers: { accept: req.headers.get("accept") ?? undefined } });
   if (MARKDOWN_PATHS.includes(pathname)) {
