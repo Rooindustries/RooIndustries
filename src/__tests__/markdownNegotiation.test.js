@@ -39,11 +39,19 @@ describe("Markdown content negotiation", () => {
     expect(response.headers.get("vary")).toBe("Accept, Accept-Encoding");
     if (expected === "markdown") {
       expect(response.headers.get("x-middleware-rewrite")).toBe("https://www.rooindustries.com/markdown?path=%2F");
+      expect(response.headers.get("vercel-cdn-cache-control")).toBe("no-store");
     } else {
       expect(response.headers.get("x-middleware-next")).toBe("1");
       expect(response.headers.get("cdn-cache-control")).toBe("no-store");
-      expect(response.headers.get("vercel-cdn-cache-control")).toBe("no-store");
+      expect(response.headers.get("vercel-cdn-cache-control")).toBeNull();
     }
+  });
+
+  test.each(["/about", "/contact", "/privacy"])("keeps the %s HTML out of the CDN cache", (path) => {
+    const response = middleware(request(path, "text/html"));
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("cdn-cache-control")).toBe("no-store");
+    expect(response.headers.get("vercel-cdn-cache-control")).toBe("no-store");
   });
 
   test.each(["application/json", "", "text/html;q=0,text/markdown;q=0", "text/markdown; charset=iso-8859-1"])("rejects unsupported %s", (accept) => {
@@ -76,6 +84,13 @@ describe("Markdown content negotiation", () => {
     const response = middleware(request("/?email=private&ref=partner", "text/markdown"));
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe("https://www.rooindustries.com/?ref=partner");
+  });
+
+  test("keeps privacy redirects out of the CDN cache", () => {
+    const response = middleware(request("/?token=abc", "text/html"));
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://www.rooindustries.com/");
+    expect(response.headers.get("vercel-cdn-cache-control")).toBe("no-store");
   });
 
   test("leaves known routes to the router and marks only the missing-page representation", () => {

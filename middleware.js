@@ -38,7 +38,9 @@ export function middleware(req) {
       }
     }
     if (changed) {
-      return NextResponse.redirect(url, 307);
+      const response = NextResponse.redirect(url, 307);
+      response.headers.set("Vercel-CDN-Cache-Control", "no-store");
+      return response;
     }
   }
 
@@ -85,6 +87,7 @@ export function middleware(req) {
       url.searchParams.set("path", pathname);
       const response = NextResponse.rewrite(url, { request: { headers } });
       response.headers.set("Vary", MARKDOWN_VARY);
+      response.headers.set("Vercel-CDN-Cache-Control", "no-store");
       return response;
     }
   }
@@ -98,7 +101,9 @@ export function middleware(req) {
   }
   if (MARKDOWN_PATHS.includes(pathname)) {
     response.headers.set("CDN-Cache-Control", "no-store");
-    response.headers.set("Vercel-CDN-Cache-Control", "no-store");
+    if (pathname !== "/") {
+      response.headers.set("Vercel-CDN-Cache-Control", "no-store");
+    }
   }
   return response;
 }
