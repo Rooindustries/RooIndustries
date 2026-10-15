@@ -116,6 +116,7 @@ test("a referral link keeps its code and campaign and applies the referral in bo
   await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: `Remove referral code ${REFERRAL}`, exact: true })).toBeVisible();
   await flow.payment();
+  await expect.poll(() => flow.state.calls.some(({ path: called }) => called === "/api/payment/quote")).toBe(true);
   const quote = flow.state.calls.filter(({ path: called }) => called === "/api/payment/quote").at(-1)?.body ?? null;
   await record(testInfo, "home-referral", {
     referralSession: await page.evaluate(() => sessionStorage.getItem("referral_session")),
