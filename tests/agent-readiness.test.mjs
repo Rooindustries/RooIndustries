@@ -13,7 +13,7 @@ const get = (path, accept = "text/html", method = "GET") => fetch(new URL(path, 
 const contentHtml = (html) => html.replace(/<(script|style|nav|footer)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
 const textContent = (html) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 const hasAcceptVary = (response) => assert.ok(response.headers.get("vary")?.toLowerCase().split(/,\s*/).includes("accept"));
-const isPrebuiltHome = (response) => new URL(response.url).pathname === "/" && response.headers.get("x-nextjs-prerender") === "1";
+const isPrebuiltHome = (response) => new URL(response.url).pathname === "/" && (response.headers.get("x-nextjs-prerender") || "").split(",").map((value) => value.trim()).includes("1");
 const hasSafeCache = (response) => {
   if (response.headers.get("content-type")?.startsWith("text/html")) {
     if (isPrebuiltHome(response)) assert.match(response.headers.get("cache-control") || "", /^s-maxage=\d+, stale-while-revalidate=\d+$/);
