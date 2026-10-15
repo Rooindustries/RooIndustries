@@ -13,9 +13,11 @@ const get = (path, accept = "text/html", method = "GET") => fetch(new URL(path, 
 const contentHtml = (html) => html.replace(/<(script|style|nav|footer)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
 const textContent = (html) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 const hasAcceptVary = (response) => assert.ok(response.headers.get("vary")?.toLowerCase().split(/,\s*/).includes("accept"));
+const isPrebuiltHome = (response) => new URL(response.url).pathname === "/" && (response.headers.get("x-nextjs-prerender") || "").split(",").map((value) => value.trim()).includes("1");
 const hasSafeCache = (response) => {
   if (response.headers.get("content-type")?.startsWith("text/html")) {
-    assert.match(response.headers.get("cache-control") || "", /no-store|no-cache|max-age=0/);
+    if (isPrebuiltHome(response)) assert.match(response.headers.get("cache-control") || "", /^s-maxage=\d+, stale-while-revalidate=\d+$/);
+    else assert.match(response.headers.get("cache-control") || "", /no-store|no-cache|max-age=0/);
   } else {
     hasAcceptVary(response);
   }
@@ -30,7 +32,7 @@ for (const path of ["/", "/about", "/contact", "/privacy"]) {
       hasSafeCache(response);
       const body = await response.text();
       if (accept === "text/html") {
-        assert.equal(response.headers.get("cdn-cache-control"), "no-store");
+        assert.equal(response.headers.get("cdn-cache-control"), path === "/" ? null : "no-store");
         const html = contentHtml(body);
         const headings = [...html.matchAll(/<h([1-6])\b[^>]*>/gi)].map((match) => Number(match[1]));
         assert.equal(headings[0], 1);

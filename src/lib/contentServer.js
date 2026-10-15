@@ -1,7 +1,7 @@
 const { applyHomePageCopyOverrides, resolveHeroCopy } = require("./homeCopy");
 const { buildPackageOffers, normalizeFaqQuestions } = require("./packageContent");
 
-const createPublicContentFetcher = async () => {
+const createPublicContentFetcher = async ({ fresh = false } = {}) => {
   const [{ fetchPublicContent }, { resolveSupabaseRuntimePolicy }] =
     await Promise.all([
       import("../server/content/publicContent.js"),
@@ -13,6 +13,7 @@ const createPublicContentFetcher = async () => {
       resource,
       backend,
       searchParams: new URLSearchParams(),
+      fresh,
     });
 };
 
@@ -35,19 +36,28 @@ async function fetchFaqQuestions() {
   }
 }
 
-async function fetchHomePageData() {
+const refuseHomeFallback = async (error) => {
+  const { logSafeError } = await import("../server/safeErrorLog.js");
+  logSafeError("Home content unavailable; keeping the previous page", error);
+  throw error;
+};
+
+async function fetchHomePageData({ fresh = false, requireContent = false } = {}) {
   let fetchContent;
   try {
-    fetchContent = await createPublicContentFetcher();
-  } catch {
+    fetchContent = await createPublicContentFetcher({ fresh });
+  } catch (error) {
+    if (requireContent) await refuseHomeFallback(error);
     console.warn("[content] home fetch failed");
     fetchContent = async () => null;
   }
+  const failed = new Set();
   const safeFetch = async (resource, fallback) => {
     try {
       const data = await fetchContent(resource);
       return data ?? fallback;
     } catch {
+      failed.add(resource);
       console.warn("[content] home fetch failed");
       return fallback;
     }
@@ -76,6 +86,9 @@ async function fetchHomePageData() {
     safeFetch("faq-settings", null),
     safeFetch("faq-questions", []),
   ]);
+  if (requireContent && failed.has("hero") && failed.has("packages-list")) {
+    await refuseHomeFallback(Object.assign(new Error("Home content is unavailable."), { code: "HOME_CONTENT_UNAVAILABLE" }));
+  }
 
   return applyHomePageCopyOverrides({
     hero: resolveHeroCopy(hero),

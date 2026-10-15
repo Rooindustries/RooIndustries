@@ -93,11 +93,14 @@ try {
   if (development) {
     await execute([next, "dev", "--hostname", testHost, "--port", target.port]);
   } else {
-    if (!fs.existsSync(path.join(dist, "BUILD_ID"))) {
+    const content = { contentSha256: fixture.evidence.contentSha256, contentResponse: process.env.TOOLING_CLS_RESPONSE || "success" };
+    const built = fs.existsSync(path.join(dist, "BUILD_ID")) ? JSON.parse(fs.readFileSync(manifestPath, "utf8")) : null;
+    if (!built || built.contentSha256 !== content.contentSha256 || built.contentResponse !== content.contentResponse) {
+      if (built) console.log("Fixture content differs from the reused build; rebuilding.");
       const buildEnv = { ...env, VERCEL_ENV: "development" };
       await execute(["scripts/validate-runtime-env.js"], buildEnv);
       await execute([next, "build"], buildEnv);
-      fs.writeFileSync(manifestPath, JSON.stringify({ version: 1, sourceHash, baseURL, contentURL, contentSha256: fixture.evidence.contentSha256 }));
+      fs.writeFileSync(manifestPath, JSON.stringify({ version: 1, sourceHash, baseURL, contentURL, ...content }));
     }
     await execute([next, "start", "--hostname", testHost, "--port", target.port]);
   }
