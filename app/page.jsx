@@ -4,7 +4,10 @@ import JsonLd from "@/src/next/JsonLd";
 import seo from "@/src/lib/seo";
 import contentServer from "@/src/lib/contentServer";
 
-export default async function Page({ searchParams }) {
+export const dynamic = "force-static";
+export const revalidate = 60;
+
+export default async function Page() {
   const homePageData = await contentServer.fetchHomePageData();
 
   return (
@@ -13,7 +16,7 @@ export default async function Page({ searchParams }) {
       <JsonLd data={seo.buildHomePageJsonLd(homePageData?.hero)} />
       <RouteRenderer entry={Home}
         pathname="/"
-        searchParams={searchParams}
+        searchParams={{}}
         initialHomeData={homePageData}
       />
     </>

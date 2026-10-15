@@ -100,11 +100,9 @@ export function middleware(req) {
   if (!ASSET_EXTENSION.test(pathname)) {
     response.headers.set("Vary", MARKDOWN_VARY);
   }
-  if (MARKDOWN_PATHS.includes(pathname)) {
+  if (MARKDOWN_PATHS.includes(pathname) && pathname !== "/") {
     response.headers.set("CDN-Cache-Control", "no-store");
-    if (pathname !== "/") {
-      response.headers.set("Vercel-CDN-Cache-Control", "no-store");
-    }
+    response.headers.set("Vercel-CDN-Cache-Control", "no-store");
   }
   return response;
 }

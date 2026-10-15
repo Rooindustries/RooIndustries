@@ -325,6 +325,15 @@ export function AppContent({
   const navigate = useNavigate();
   const navigationType = useNavigationType();
   const historyInitializedRef = useRef(false);
+  const initialLocationKeyRef = useRef(location.key);
+  const readInitialBrowserSearch = (loc) =>
+    routeShell === "memory" &&
+    !loc.search &&
+    loc.key === initialLocationKeyRef.current &&
+    typeof window !== "undefined" &&
+    window.location.pathname === (loc.pathname || "/")
+      ? sanitizeBrowserSearch(loc.pathname || "/", window.location.search)
+      : "";
   const lastRouteKeyRef = useRef("");
   const pathName = location.pathname || "";
   const FLOW_BACKGROUND_KEY = "flow_background_location";
@@ -528,10 +537,7 @@ export function AppContent({
           : location.pathname === "/referrals/reset" && isReferralResetHash(rawHash)
             ? rawHash
             : "";
-    const sanitizedSearch = sanitizeBrowserSearch(
-      location.pathname || "/",
-      location.search || ""
-    );
+    const sanitizedSearch = sanitizeBrowserSearch(location.pathname || "/", location.search || "") || readInitialBrowserSearch(location);
     const nextUrl = `${location.pathname || "/"}${sanitizedSearch}${keepHash}`;
     const currentUrl = `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
 
@@ -588,7 +594,7 @@ export function AppContent({
     if (!isFlowRoute) {
       const currentBackground = {
         pathname: location.pathname,
-        search: location.search || "",
+        search: location.search || readInitialBrowserSearch(location),
         hash: location.hash || "",
       };
       writeStoredBackground(currentBackground);
