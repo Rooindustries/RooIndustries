@@ -103,7 +103,7 @@ const validateAllowedParameters = (resource, searchParams) => {
   }
 };
 
-const loadSupabasePublicContent = async ({ resource, query, params }) => {
+const loadSupabasePublicContent = async ({ resource, query, params, fresh = false }) => {
   if (Object.keys(params).length > 0) {
     const data = await createPublicContentClient({
       resource,
@@ -114,8 +114,8 @@ const loadSupabasePublicContent = async ({ resource, query, params }) => {
   const key = `${resource}:${JSON.stringify(params)}`;
   const now = Date.now();
   const cached = supabaseContentCache.get(key);
-  if (cached?.hasData && cached.expiresAt > now) return cached.data;
-  if (cached?.pending) return cached.pending;
+  if (!fresh && cached?.hasData && cached.expiresAt > now) return cached.data;
+  if (!fresh && cached?.pending) return cached.pending;
 
   const pending = createPublicContentClient({ resource })
     .fetch(query, params)
@@ -156,6 +156,7 @@ export const clearSupabasePublicContentCache = () => {
 export const fetchPublicContent = async ({
   resource,
   searchParams,
+  fresh = false,
 }) => {
   const query = Object.hasOwn(PUBLIC_CONTENT_QUERIES, resource) ? PUBLIC_CONTENT_QUERIES[resource] : null;
   if (!query) {
@@ -171,6 +172,6 @@ export const fetchPublicContent = async ({
       : resource === "upgrade-link"
         ? { slug: parseSlug(searchParams) }
         : {};
-  const data = await loadSupabasePublicContent({ resource, query, params });
+  const data = await loadSupabasePublicContent({ resource, query, params, fresh });
   return applyPublicPolicyOverrides(resource, resource === "tools" ? stableToolDownloadLinks(data) : data);
 };

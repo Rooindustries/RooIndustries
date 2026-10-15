@@ -110,6 +110,8 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
   let revision = 0;
   let enqueueDelayMs = 0;
   let emailDelayMs = 0;
+  let contentOutage = false;
+  const changedContent = new Set();
   const emails = [];
   const mutate = mutations => {
     if (!Array.isArray(mutations) || !mutations.length) throw new Error('Missing fixture mutations.');
@@ -141,7 +143,29 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       const call = { method: req.method, path: url.pathname, body, status: 503, rows: 0, receivedAt: Date.now(), delayMs: 0 };
       res.once('finish', () => { call.respondedAt = Date.now(); persist(); });
       evidence.requests.push(call);
-      if (apiRoutes && url.pathname === '/__fixture' && ['GET', 'POST'].includes(req.method)) {
+      if (url.pathname === '/__content' && req.method === 'POST') {
+        if (body.reset === true) {
+          for (const id of changedContent) {
+            const index = documents.findIndex(value => value._id === id);
+            const initial = initialDocuments.find(value => value._id === id);
+            if (index >= 0 && initial) documents[index] = structuredClone(initial);
+          }
+          changedContent.clear();
+          contentOutage = false;
+        }
+        if (body.outage !== undefined) {
+          if (typeof body.outage !== 'boolean') throw new Error('Invalid fixture content outage.');
+          contentOutage = body.outage;
+        }
+        if (body.patch !== undefined) {
+          const index = documents.findIndex(value => value._id === body.patch?._id);
+          if (index < 0 || Object.keys(body.patch).some(key => key.startsWith('_') && key !== '_id')) throw new Error('Invalid fixture content patch.');
+          documents[index] = { ...documents[index], ...body.patch, _rev: `tooling-fixture-${++revision}` };
+          changedContent.add(body.patch._id);
+        }
+        call.status = 200;
+        json(res, 200, { outage: contentOutage, changed: [...changedContent] });
+      } else if (apiRoutes && url.pathname === '/__fixture' && ['GET', 'POST'].includes(req.method)) {
         if (req.method === 'POST') {
           if (body.reset === true) {
             documents.splice(0, documents.length, ...structuredClone(initialDocuments));
@@ -185,6 +209,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         call.status = 200;
         json(res, 200, { delivery, session, documents, requests: evidence.requests, emails });
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_fetch_shadow_documents_targeted') {
+        if (contentOutage) throw Object.assign(new Error('Synthetic content outage.'), { status: 503, code: 'FIXTURE_CONTENT_OUTAGE' });
         const scopedIds = apiRoutes && body.p_document_types === null && Array.isArray(body.p_ids) && body.p_ids.length > 0;
         if ((!scopedIds && (!Array.isArray(body.p_document_types) || !body.p_document_types.length)) || !Array.isArray(body.p_filters) || !Number.isInteger(body.p_limit) || body.p_limit < 1 || body.p_limit > 1000 || body.p_ids !== null && !Array.isArray(body.p_ids)) throw new Error('Invalid fixture read scope.');
         if (apiRoutes && delivery === 'lookup_failed' && body.p_document_types?.includes('referral')) throw Object.assign(new Error('Synthetic referral lookup outage.'), { status: 503, code: 'FIXTURE_LOOKUP_UNAVAILABLE' });

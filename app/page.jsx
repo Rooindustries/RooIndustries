@@ -8,7 +8,10 @@ export const dynamic = "force-static";
 export const revalidate = 60;
 
 export default async function Page() {
-  const homePageData = await contentServer.fetchHomePageData();
+  const homePageData = await contentServer.fetchHomePageData({
+    fresh: true,
+    requireContent: process.env.NEXT_PHASE !== "phase-production-build",
+  });
 
   return (
     <>

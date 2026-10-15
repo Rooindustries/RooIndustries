@@ -7,7 +7,9 @@ export const preferredRegion = "dub1";
 export const dynamic = "force-dynamic";
 
 export const POST = (request, context) => handleCmsRequest(request, context, async ({ request, params, body, client, env, signal, actor }) => {
-  const result = await executeGlobalCmsCommand({ body, supabaseClient: client, env, actor });
-  revalidatePath("/");
-  return result;
+  try {
+    return await executeGlobalCmsCommand({ body, supabaseClient: client, env, actor });
+  } finally {
+    revalidatePath("/");
+  }
 }, { write: true });

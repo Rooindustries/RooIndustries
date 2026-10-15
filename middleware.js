@@ -63,6 +63,21 @@ export function middleware(req) {
     !req.headers.has("rsc") &&
     !req.headers.has("next-router-state-tree") &&
     !req.headers.has("next-action");
+  if (pathname === "/" && ["GET", "HEAD"].includes(req.method) && !req.headers.has("next-action") &&
+    [...req.nextUrl.searchParams.keys()].some((key) => key !== "_rsc")) {
+    const prefersHtml = !isDocument ||
+      new Negotiator({ headers: { accept: req.headers.get("accept") ?? undefined } })
+        .mediaType(["text/html; charset=utf-8", "text/markdown; charset=utf-8"]) === "text/html; charset=utf-8";
+    if (prefersHtml) {
+      const url = req.nextUrl.clone();
+      url.search = "";
+      for (const value of req.nextUrl.searchParams.getAll("_rsc")) url.searchParams.append("_rsc", value);
+      if (isDocument && !headers.get("user-agent")) headers.set("user-agent", "Mozilla/5.0");
+      const response = NextResponse.rewrite(url, { request: { headers } });
+      if (isDocument) response.headers.set("Vary", MARKDOWN_VARY);
+      return response;
+    }
+  }
   if (!isDocument) return NextResponse.next({ request: { headers } });
   if (!headers.get("user-agent")) headers.set("user-agent", "Mozilla/5.0");
 

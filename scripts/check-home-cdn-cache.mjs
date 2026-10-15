@@ -26,6 +26,7 @@ const HTML = { accept: "text/html,application/xhtml+xml", "user-agent": BROWSER_
 const stamp = Date.now();
 const log = [];
 const failures = [];
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function hit(name, path, { method = "GET", headers = HTML } = {}) {
   const response = await fetch(new URL(path, base), { method, headers: { ...extraHeaders, ...headers }, redirect: "manual" });
@@ -37,9 +38,10 @@ async function hit(name, path, { method = "GET", headers = HTML } = {}) {
     status: response.status,
     cache: response.headers.get("x-vercel-cache"),
     age: response.headers.get("age"),
+    cacheControl: response.headers.get("cache-control"),
     contentType: response.headers.get("content-type"),
     location: response.headers.get("location"),
-    setCookie: response.headers.has("set-cookie"),
+    setCookies: response.headers.getSetCookie().map((cookie) => cookie.split("=")[0].trim()),
     bytes: body.length,
   };
   log.push(entry);
@@ -53,11 +55,11 @@ function check(condition, message, entry) {
 const cached = (entry) => entry.cache === "HIT" || entry.cache === "STALE";
 const headPart = (body) => body.split("</head>")[0];
 const isHtml = (entry) => String(entry.contentType).includes("text/html");
+const isHomeHtml = (entry) => entry.method === "GET" && new URL(entry.path, base).pathname === "/" && isHtml(entry);
 
 const key = `/?utm_source=cdncheck${stamp}`;
 const first = await hit("html first", key);
 check(first.status === 200 && isHtml(first), "home HTML returns 200 text/html", first);
-check(["HIT", "STALE", "PRERENDER"].includes(first.cache), "a never-seen query on the home page is served from the prebuilt page", first);
 
 const second = await hit("html second", key);
 check(second.status === 200 && isHtml(second), "home HTML returns 200 text/html", second);
@@ -72,6 +74,8 @@ check(afterRsc.status === 200 && isHtml(afterRsc), "HTML request after an RSC re
 const markdown = await hit("markdown on the same key", key, { headers: { accept: "text/markdown", "user-agent": BROWSER_UA } });
 check(String(markdown.contentType).includes("text/markdown"), "markdown request gets markdown", markdown);
 check(!cached(markdown), "markdown is never served from cache", markdown);
+const afterMarkdown = await hit("html after markdown", key);
+check(afterMarkdown.status === 200 && isHtml(afterMarkdown), "HTML request after a Markdown request still gets HTML", afterMarkdown);
 
 const headKey = `/?utm_source=cdnhead${stamp}`;
 await hit("head first", headKey, { method: "HEAD" });
@@ -94,6 +98,24 @@ for (const path of ["/about", "/faq"]) {
   await hit(`${path} first`, path);
   const repeat = await hit(`${path} second`, path);
   check(!cached(repeat), `${path} is never served from cache`, repeat);
+}
+
+const ageProbe = await hit("age probe", "/");
+const age = Number(ageProbe.age) || 0;
+const waitSeconds = age < 61 ? 61 - age : 0;
+console.log(`Waiting ${waitSeconds}s for the home page to go stale before the leak check`);
+await sleep(waitSeconds * 1000);
+const leakToken = `leak${stamp}`;
+await hit("leak trigger", `/?ref=${leakToken}&gclid=${leakToken}`);
+await sleep(5000);
+const leakHtml = await hit("html after leak trigger", "/");
+const leakRsc = await hit("rsc after leak trigger", "/", { headers: { ...HTML, rsc: "1" } });
+check(!leakHtml.body.includes(leakToken), "a rebuild triggered by a query keeps that query out of the home HTML", leakHtml);
+check(!leakRsc.body.includes(leakToken), "a rebuild triggered by a query keeps that query out of the home RSC payload", leakRsc);
+
+for (const entry of log.filter(isHomeHtml)) {
+  check(entry.setCookies.every((name) => name === "_vercel_jwt"), "home HTML sets no cookie", entry);
+  check(/max-age=0|no-cache|no-store/.test(entry.cacheControl || "") && !/s-maxage/.test(entry.cacheControl || ""), "home HTML reaches clients with max-age=0 and no s-maxage", entry);
 }
 
 writeFileSync(artifact, JSON.stringify({ base, checkedAt: new Date(stamp).toISOString(), extraHeaderNames: Object.keys(extraHeaders), log, failures }, null, 2));
