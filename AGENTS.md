@@ -25,3 +25,13 @@ Only files a maintainer can run or read on purpose belong in the repository. Nev
 - `git status` shows only the files the change needs. Delete scratch files instead of renaming or parking them.
 - Every new script runs from a clean checkout without machine-specific paths; fixture locations come from environment variables with documented defaults.
 - Branch names use the `servi/` prefix with a short description, for example `servi/review-carousel-loop`.
+
+## Cursor Cloud specific instructions
+
+Cloud agents for this repository group also have LeanClientOptimizer and RooTourney checked out beside this repo. Install dependencies with `npm ci` in this repo and in RooTourney, and `python3 -m pip install --user -r tools/validation/requirements.txt` in LeanClientOptimizer.
+
+Boot serves local fixtures. They do not use a production Supabase project.
+
+- This site listens at http://127.0.0.1:3211. `npm test` is the unit suite. `BASE_URL=http://127.0.0.1:3211 npm run test:agent-readiness` checks the running site.
+- RooTourney listens at http://0.0.0.0:3253. Open `/tourney/login` on that host. Sign in as `browser-owner` with password `CloudAgentOwner!234567890`. Owner controls are at `/tourney/manage`. `npm test` is the unit suite. End-to-end runs need `PG_BIN=/usr/lib/postgresql/17/bin`.
+- LeanClientOptimizer on Linux: `python3 tools/validation/check_baseline.py`. The desktop app and PowerShell regressions need Windows.
