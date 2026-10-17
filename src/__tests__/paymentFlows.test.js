@@ -108,6 +108,7 @@ describe("payment session UI", () => {
         return response({
           ok: true,
           providers: {
+            dodo: { enabled: false, mode: "missing" },
             razorpay: {
               enabled: false,
               mode: "live",

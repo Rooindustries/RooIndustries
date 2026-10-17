@@ -1169,6 +1169,9 @@ describe("booking calendar UI", () => {
       await screen.findByText(/payment method released/i)
     ).toBeInTheDocument();
     expectActiveStep("Review & pay", "Step 3 of 3");
+    await waitFor(() =>
+      expect(within(screen.getByText("Total").closest("div")).getByText("$54.95")).toBeInTheDocument()
+    );
     expect(
       screen.getByRole("button", { name: /^continue to payment$/i })
     ).toBeInTheDocument();
@@ -1456,6 +1459,9 @@ describe("booking calendar UI", () => {
       await screen.findByRole("button", { name: /^review before payment$/i })
     );
 
+    await waitFor(() =>
+      expect(within(screen.getByText("Total").closest("div")).getByText("$54.95")).toBeInTheDocument()
+    );
     await screen.findByRole("button", { name: /^continue to payment$/i });
     expect(screen.getByText(VALID_FORM.discord)).toBeInTheDocument();
     expect(screen.getByText(VALID_FORM.email)).toBeInTheDocument();
@@ -1478,6 +1484,9 @@ describe("booking calendar UI", () => {
     ).not.toBeInTheDocument();
     expect(screen.getByText("90-day warranty included")).toBeInTheDocument();
 
+    await waitFor(() =>
+      expect(within(screen.getByText("Total").closest("div")).getByText("$54.95")).toBeInTheDocument()
+    );
     await userEvent.click(
       screen.getByRole("button", { name: /^continue to payment$/i })
     );
@@ -1517,6 +1526,9 @@ describe("booking calendar UI", () => {
     );
     await userEvent.type(screen.getByPlaceholderText("Enter code"), "SAVE10{enter}");
 
+    await waitFor(() =>
+      expect(within(screen.getByText("Total").closest("div")).getByText("$44.95")).toBeInTheDocument()
+    );
     expect(
       await screen.findByRole("button", { name: /^continue to payment$/i })
     ).toBeInTheDocument();
@@ -1542,6 +1554,9 @@ describe("booking calendar UI", () => {
     await userEvent.click(screen.getByRole("button", { name: /^back$/i }));
     await userEvent.click(
       await screen.findByRole("button", { name: /^review before payment$/i })
+    );
+    await waitFor(() =>
+      expect(within(screen.getByText("Total").closest("div")).getByText("$44.95")).toBeInTheDocument()
     );
     expect(
       await screen.findByRole("button", { name: /^continue to payment$/i })
@@ -1590,11 +1605,17 @@ describe("booking calendar UI", () => {
       })
     );
     await userEvent.type(screen.getByPlaceholderText("Enter code"), "SAVE10{enter}");
+    await waitFor(() =>
+      expect(within(screen.getByText("Total").closest("div")).getByText("$44.95")).toBeInTheDocument()
+    );
     await screen.findByRole("button", { name: /^continue to payment$/i });
     await userEvent.click(
       screen.getByRole("button", { name: /remove coupon code save10/i })
     );
 
+    await waitFor(() =>
+      expect(within(screen.getByText("Total").closest("div")).getByText("$54.95")).toBeInTheDocument()
+    );
     expect(
       screen.getByRole("button", { name: /^continue to payment$/i })
     ).toBeInTheDocument();
@@ -1629,6 +1650,9 @@ describe("booking calendar UI", () => {
     expect(sessionStorage.getItem("referral_session")).toBeNull();
     expect(screen.queryByText(/expiredcreator ·/i)).not.toBeInTheDocument();
 
+    await waitFor(() =>
+      expect(within(screen.getByText("Total").closest("div")).getByText("$54.95")).toBeInTheDocument()
+    );
     await userEvent.click(
       screen.getByRole("button", { name: /^continue to payment$/i })
     );
@@ -1660,6 +1684,9 @@ describe("booking calendar UI", () => {
       referral: CREATOR_REFERRAL,
       coupon: STACKING_COUPON,
     });
+    await waitFor(() =>
+      expect(within(screen.getByText("Total").closest("div")).getByText("$46.98")).toBeInTheDocument()
+    );
     const payButton = await screen.findByRole("button", {
       name: "Continue to payment",
     });
@@ -1705,6 +1732,9 @@ describe("booking calendar UI", () => {
     render(<BookingForm />);
 
     expect(await screen.findByText("SAVE10 · −$10.00")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(screen.getByText("Total").closest("div")).getByText("$44.95")).toBeInTheDocument()
+    );
     expect(
       screen.getByRole("button", { name: /^continue to payment$/i })
     ).toBeInTheDocument();
@@ -1739,6 +1769,9 @@ describe("booking calendar UI", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/validation.*unavailable/i);
     expect(JSON.parse(sessionStorage.getItem("booking_draft")).packages[OVERHAUL_PACKAGE.title].checkoutCodes).toEqual(checkoutCodes);
     if (type === "referral") expect(sessionStorage.getItem("referral_session")).toBe("creator");
+    await waitFor(() =>
+      expect(within(screen.getByText("Total").closest("div")).getByText("$54.95")).toBeInTheDocument()
+    );
     expect(screen.getByRole("button", { name: /^continue to payment$/i })).toBeEnabled();
     unavailable = false;
     await userEvent.click(screen.getByRole("button", { name: /^apply$/i }));
@@ -1778,6 +1811,9 @@ describe("booking calendar UI", () => {
     );
     expect(screen.queryByText("SAVE10 · −$10.00")).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Enter code")).toHaveValue("");
+    await waitFor(() =>
+      expect(within(screen.getByText("Total").closest("div")).getByText("$54.95")).toBeInTheDocument()
+    );
     expect(
       screen.getByRole("button", { name: /^continue to payment$/i })
     ).toBeInTheDocument();
@@ -1787,6 +1823,9 @@ describe("booking calendar UI", () => {
       ].checkoutCodes.coupon
     ).toBeNull();
 
+    await waitFor(() =>
+      expect(within(screen.getByText("Total").closest("div")).getByText("$54.95")).toBeInTheDocument()
+    );
     await userEvent.click(
       screen.getByRole("button", { name: /^continue to payment$/i })
     );
@@ -1835,6 +1874,9 @@ describe("booking calendar UI", () => {
       dismissedReferralCode: "",
     });
 
+    await waitFor(() =>
+      expect(within(screen.getByText("Total").closest("div")).getByText("$0.00")).toBeInTheDocument()
+    );
     await userEvent.click(
       screen.getByRole("button", { name: /^continue to payment$/i })
     );
@@ -1866,6 +1908,7 @@ describe("booking calendar UI", () => {
     expect(
       await screen.findByRole("button", { name: /^continue to payment$/i })
     ).toBeInTheDocument();
+    expect(within(screen.getByText("Total").closest("div")).queryByText("$0.01")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /\$0\.01/i }))
       .not.toBeInTheDocument();
     expect(screen.getByText("Confirmed on payment page")).toBeInTheDocument();
@@ -2129,6 +2172,9 @@ describe("booking calendar UI", () => {
 
     render(<BookingForm />);
 
+    await waitFor(() =>
+      expect(within(screen.getByText("Total").closest("div")).getByText("$54.95")).toBeInTheDocument()
+    );
     await userEvent.click(
       await screen.findByRole("button", { name: /^continue to payment$/i })
     );

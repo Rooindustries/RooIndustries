@@ -6,7 +6,9 @@ export default function RefForgot() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
-  const [acknowledged, setAcknowledged] = useState(false);
+  const [acknowledgedEmail, setAcknowledgedEmail] = useState("");
+  const submittedEmailRef = useRef("");
+  const acknowledged = Boolean(acknowledgedEmail) && email === acknowledgedEmail;
   const statusRef = useRef(null);
 
   useEffect(() => {
@@ -22,21 +24,23 @@ export default function RefForgot() {
     e.preventDefault();
     if (!email) return showToast("error", "Enter your email");
 
+    const submittedEmail = email;
+    submittedEmailRef.current = submittedEmail;
     setLoading(true);
-    setAcknowledged(false);
+    setAcknowledgedEmail("");
     setToast(null);
 
     try {
       const res = await fetch("/api/ref/forgot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email: submittedEmail }),
       });
 
       const data = await res.json();
 
       if (data.ok) {
-        setAcknowledged(true);
+        if (submittedEmailRef.current === submittedEmail) setAcknowledgedEmail(submittedEmail);
       } else {
         showToast("error", data.error || "Failed to send link");
       }
@@ -80,7 +84,11 @@ export default function RefForgot() {
                        outline-none focus:border-info-border transition text-base text-ink"
             placeholder="you@example.com"
             value={email}
-            onChange={(e) => setEmail(e.target.value.trim())}
+            onChange={(e) => {
+              submittedEmailRef.current = "";
+              setAcknowledgedEmail("");
+              setEmail(e.target.value.trim());
+            }}
           />
         </div>
 

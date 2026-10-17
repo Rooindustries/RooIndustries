@@ -497,6 +497,7 @@ export default function BookingForm({ isMobile }) {
 
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedSlot, setSelectedSlot] = useState(null);
+  const [slotAvailabilityNotice, setSlotAvailabilityNotice] = useState("");
 
   const [month, setMonth] = useState(new Date());
   const [loading, setLoading] = useState(false);
@@ -1607,6 +1608,21 @@ export default function BookingForm({ isMobile }) {
     holdCountdownMs !== null &&
     (holdCountdownMs > 0 || isPaymentPendingHold);
   hasActiveHoldRef.current = hasActiveHold;
+  const selectedSlotAvailable = Boolean(selectedSlot && (
+    availableSlots.some((slot) => slot.slotId === selectedSlot.slotId) ||
+    (hasActiveHold && myHold.startTimeUTC === selectedSlot.utcStart.toISOString())
+  ));
+
+  useEffect(() => {
+    if (!availabilityReady || settingsError || !selectedSlot) return;
+    if (!selectedSlotAvailable) {
+      setSelectedSlot(null);
+      setSlotAvailabilityNotice("That time is no longer available. Please pick another.");
+    } else {
+      setSlotAvailabilityNotice("");
+    }
+  }, [availabilityReady, settingsError, selectedSlot, selectedSlotAvailable]);
+
   const reviewDateTimeLabel = useMemo(() => {
     if (!selectedSlot?.utcStart) return "";
     const utcStart = new Date(selectedSlot.utcStart);
@@ -2165,6 +2181,7 @@ export default function BookingForm({ isMobile }) {
       }
       return;
     }
+    if (!recheckingPayment && (availabilityLoading || (selectedSlot && !selectedSlotAvailable))) return;
     if (!recheckingPayment && (!selectedDate || !selectedSlot)) {
       setErrorStep1("Please select a date and time before continuing.");
       return;
@@ -2523,6 +2540,9 @@ export default function BookingForm({ isMobile }) {
                     onRelease={() => releaseHold(true)}
                     className="mb-6 text-left"
                   />
+                  {slotAvailabilityNotice && (
+                    <p role="status" className="mb-4 text-warning-text">{slotAvailabilityNotice}</p>
+                  )}
                   {!earliestAvailableSlot ? (
                     <div role="status" className="rounded-xl border border-line-input bg-surface-input p-6 text-ink-secondary">
                       <p>There are no open times to book right now.</p>
@@ -2540,7 +2560,6 @@ export default function BookingForm({ isMobile }) {
                     </div>
                   ) : (
                     <>
-                  {earliestAvailableSlot && (
                     <button
                       type="button"
                       onClick={handleEarliestSlotClick}
@@ -2553,7 +2572,6 @@ export default function BookingForm({ isMobile }) {
                       )}{" "}
                       at {earliestAvailableSlot.localLabel}
                     </button>
-                  )}
 
                   {availabilityReady && !availableMonths.includes(shownMonth) && nextAvailableMonth !== undefined && (
                     <div role="status" className="mb-6 text-ink-secondary">
@@ -2814,10 +2832,10 @@ export default function BookingForm({ isMobile }) {
                     <button
                       onClick={handleLockAndGoNext}
                       aria-disabled={
-                        !selectedDate || !selectedSlot || lockingSlot
+                        !selectedDate || !selectedSlot || !selectedSlotAvailable || availabilityLoading || lockingSlot
                       }
                       className={`ri-booking-primary glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
-                        !selectedDate || !selectedSlot || lockingSlot
+                        !selectedDate || !selectedSlot || !selectedSlotAvailable || availabilityLoading || lockingSlot
                           ? "opacity-60"
                           : ""
                       } ${isMobile ? "" : ""}`}
