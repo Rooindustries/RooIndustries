@@ -154,7 +154,8 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           contentOutage = false;
         }
         if (body.outage !== undefined) {
-          if (typeof body.outage !== 'boolean') throw new Error('Invalid fixture content outage.');
+          const documentTypes = Array.isArray(body.outage) && body.outage.length > 0 && body.outage.every(type => typeof type === 'string' && type);
+          if (typeof body.outage !== 'boolean' && !documentTypes) throw new Error('Invalid fixture content outage.');
           contentOutage = body.outage;
         }
         if (body.patch !== undefined) {
@@ -209,7 +210,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         call.status = 200;
         json(res, 200, { delivery, session, documents, requests: evidence.requests, emails });
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_fetch_shadow_documents_targeted') {
-        if (contentOutage) throw Object.assign(new Error('Synthetic content outage.'), { status: 503, code: 'FIXTURE_CONTENT_OUTAGE' });
+        if (contentOutage === true || (Array.isArray(contentOutage) && body.p_document_types?.some(type => contentOutage.includes(type)))) throw Object.assign(new Error('Synthetic content outage.'), { status: 503, code: 'FIXTURE_CONTENT_OUTAGE' });
         const scopedIds = apiRoutes && body.p_document_types === null && Array.isArray(body.p_ids) && body.p_ids.length > 0;
         if ((!scopedIds && (!Array.isArray(body.p_document_types) || !body.p_document_types.length)) || !Array.isArray(body.p_filters) || !Number.isInteger(body.p_limit) || body.p_limit < 1 || body.p_limit > 1000 || body.p_ids !== null && !Array.isArray(body.p_ids)) throw new Error('Invalid fixture read scope.');
         if (apiRoutes && delivery === 'lookup_failed' && body.p_document_types?.includes('referral')) throw Object.assign(new Error('Synthetic referral lookup outage.'), { status: 503, code: 'FIXTURE_LOOKUP_UNAVAILABLE' });
