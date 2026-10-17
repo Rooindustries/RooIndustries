@@ -207,13 +207,23 @@ test("going back and forward over booking keeps the home page mounted and the re
 
 test("closing booking opened from a referral link returns to the same link", async ({ page, flow }, testInfo) => {
   void flow;
+  await page.addInitScript(() => {
+    document.addEventListener("DOMContentLoaded", () => {
+      window.__homeBeforeBooking = document.querySelector("#top h1");
+    });
+  });
   await bookFromHome(page);
   await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.waitForTimeout(500);
   const address = await page.evaluate(() => `${window.location.pathname}${window.location.search}`);
-  await record(testInfo, "home-close", { address });
+  const pageNode = await page.evaluate(() => ({
+    connected: window.__homeBeforeBooking.isConnected,
+    same: document.querySelector("#top h1") === window.__homeBeforeBooking,
+  }));
+  await record(testInfo, "home-close", { address, ...pageNode });
   expect(address).toBe(`/?ref=${REFERRAL}&utm_source=discord`);
+  expect(pageNode).toEqual({ connected: true, same: true });
 });
 
 test.describe("rebuilds of the prebuilt home page", () => {
