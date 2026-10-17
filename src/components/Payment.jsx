@@ -1,3 +1,4 @@
+import { clearBookingConfirmation, createBookingConfirmation } from "../lib/confirmationReceipt";
 import { writeBrowserStorage, removeBrowserStorage } from "../lib/browserStorage";
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
@@ -107,6 +108,7 @@ function PayPalCheckout({ children }) {
 }
 
 export default function Payment({ hideFooter = false }) {
+  useEffect(() => { clearBookingConfirmation(); }, []);
   useEffect(() => {
     preloadConfirmationPages().catch(() => {});
   }, []);
@@ -187,6 +189,7 @@ export default function Payment({ hideFooter = false }) {
       sessionStorage.setItem(
         BOOKING_CONFIRMATION_STORAGE_KEY,
         JSON.stringify({
+          ...confirmation,
           bookingId: confirmation.bookingId,
           ...(confirmation.emailDispatchToken ? { emailDispatchToken: confirmation.emailDispatchToken } : {}),
         })
@@ -245,9 +248,6 @@ export default function Payment({ hideFooter = false }) {
     trackConfirmedPurchase(responseBody.analyticsReceipt);
     const baseState = getModalFlowState();
     const bookingId = String(responseBody?.bookingId || "").trim();
-    const emailDispatchToken = String(
-      responseBody?.emailDispatchToken || ""
-    ).trim();
 
     writeStoredCheckout(null);
     try {
@@ -260,10 +260,7 @@ export default function Payment({ hideFooter = false }) {
       return baseState;
     }
 
-    const bookingConfirmation = {
-      bookingId,
-      ...(emailDispatchToken ? { emailDispatchToken } : {}),
-    };
+    const bookingConfirmation = createBookingConfirmation(responseBody);
 
     writeStoredBookingConfirmation(bookingConfirmation);
     return {

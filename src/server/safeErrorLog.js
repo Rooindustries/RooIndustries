@@ -19,3 +19,7 @@ export const getSafeErrorCode = (error, fallback = "server_error") => {
 export const logSafeError = (label, error) => {
   console.error(String(label || "Server error"), getSafeErrorMetadata(error));
 };
+
+export const logSafeWarn = (label, error) => {
+  console.warn(String(label || "Server warning"), getSafeErrorMetadata(error));
+};

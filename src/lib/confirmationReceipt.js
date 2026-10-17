@@ -1,3 +1,4 @@
+import { asBookingSummary } from "./bookingSummary";
 import { useSyncExternalStore } from "react";
 import { useLocation } from "react-router-dom";
 
@@ -11,8 +12,8 @@ const asReceipt = (value) =>
     : null;
 
 const readConfirmationReceipt = (state, hydrated) => {
-  const receipt = asReceipt(state?.bookingConfirmation);
-  if (receipt || !hydrated || typeof window === "undefined") return receipt;
+  if (state) return asReceipt(state.bookingConfirmation);
+  if (!hydrated || typeof window === "undefined") return null;
 
   const historyReceipt = asReceipt(window.history.state?.usr?.bookingConfirmation);
   if (historyReceipt) return historyReceipt;
@@ -28,4 +29,38 @@ export const useConfirmationReceipt = () => {
   const location = useLocation();
   const hydrated = useSyncExternalStore(subscribe, clientSnapshot, serverSnapshot);
   return readConfirmationReceipt(location.state, hydrated);
+};
+
+const summaryPrefix = "booking_confirmation_summary:";
+
+export const clearBookingConfirmation = () => {
+  try {
+    const keys = Object.keys(window.sessionStorage).filter(key => key.startsWith(summaryPrefix));
+    for (const key of keys) window.sessionStorage.removeItem(key);
+    window.sessionStorage.removeItem("booking_confirmation_state");
+  } catch {}
+};
+
+export const createBookingConfirmation = body => {
+  const bookingId = typeof body?.bookingId === "string" ? body.bookingId.trim() : "";
+  if (!bookingId) return null;
+  const bookingSummary = asBookingSummary(body.bookingSummary, bookingId);
+  const requiresReschedule = body.requiresReschedule === true || /reschedul/i.test(String(body.recoveryReason || ""));
+  const receipt = {
+    bookingId,
+    ...(Object.prototype.hasOwnProperty.call(body, "bookingSummary") ? { bookingSummary: requiresReschedule ? null : bookingSummary } : {}),
+    ...(requiresReschedule ? { requiresReschedule: true } : {}),
+    ...(body.emailDispatchToken ? { emailDispatchToken: body.emailDispatchToken } : {}),
+  };
+  try {
+    window.sessionStorage.setItem(`${summaryPrefix}${bookingId}`, JSON.stringify(requiresReschedule ? null : bookingSummary));
+    window.sessionStorage.setItem("booking_confirmation_state", JSON.stringify(receipt));
+  } catch {}
+  return receipt;
+};
+
+export const readBookingConfirmationSummary = receipt => {
+  if (!receipt || receipt.requiresReschedule) return null;
+  if (Object.prototype.hasOwnProperty.call(receipt, "bookingSummary")) return asBookingSummary(receipt.bookingSummary, receipt.bookingId);
+  try { return asBookingSummary(JSON.parse(window.sessionStorage.getItem(`${summaryPrefix}${receipt.bookingId}`)), receipt.bookingId); } catch { return null; }
 };

@@ -18,6 +18,10 @@ const legacyVendorEnvironment=process.argv.includes('--leftover-vendor-env');
 const sourceText=name=>fs.readFileSync(path.join(process.cwd(),name),'utf8');
 const a1Mode=process.argv.includes('--a1')||process.argv.some(v=>v.startsWith('--scenario=')&&v.includes('a1-'));
 const restores=[];
+const summaryWarnings = [];
+const originalWarn = console.warn;
+console.warn = (...values) => { summaryWarnings.push(values); originalWarn(...values); };
+restores.push(() => { console.warn = originalWarn; });
 for(const key of Object.keys(process.env))if(/^(SANITY|SUPABASE|PAYPAL|RAZORPAY|DODO|REACT_APP_|NEXT_PUBLIC_|ALLOW_LIVE_|RESEND|BOOKING_EMAIL|FROM_EMAIL|OWNER_EMAIL|DATA_|COMMERCE_|VERCEL_ENV|REF_SESSION|CRON_|RATE_LIMIT_|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|http_proxy|https_proxy|all_proxy|NODE_USE_ENV_PROXY)/.test(key))delete process.env[key];
 process.env.RESEND_API_KEY='re_fixture';
 if(a1Mode||process.argv.includes('--a2'))Object.assign(process.env,{FROM_EMAIL:'noreply@example.invalid',OWNER_EMAIL:'owner@example.invalid'});
@@ -163,8 +167,27 @@ try{
       window.runScenario=async()=>{let resolveCapture;const capture=new Promise(resolve=>resolveCapture=resolve);const pending=onApprove({orderID:'order-fixture'},{order:{capture:()=>capture}});await Promise.resolve();current=false;document.getElementById('state').textContent='Checkout view closed before capture response';const updatesAtClose=uiUpdates.length;resolveCapture({id:'order-fixture',payer:{email_address:'customer@example.invalid'}});await pending;const proof={stale:true,updatesAtClose,updatesAfterClose:uiUpdates.slice(updatesAtClose),renderedState:document.getElementById('state').textContent};window.a1Proof=proof;document.getElementById('proof').textContent=JSON.stringify(proof,null,2);await fetch('/a1-ui-complete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(proof)});return proof;};document.getElementById('run').onclick=()=>window.runScenario();</script></body></html>`;
       res.writeHead(200,{'content-type':'text/html'});res.end(html);return;
     }
-    if(req.url.startsWith('/flow/')){const input=raw?JSON.parse(raw):{},args={...input,client:commerce};const action=req.url.slice(6);let result;
-      if(action==='paypal')result=await flow.handlePayPalWebhook(args);else if(action==='razorpay')result=await flow.handleRazorpayWebhook(args);else if(action==='dodo')result=await flow.handleDodoWebhook(args);else if(action==='finalize')result=await flow.finalizePaymentSession(args);else if(action==='cancel')result=await flow.cancelPaymentSession(args);else if(action==='reconcile')result=await flow.reconcilePaymentSessions({client:commerce,req:{headers:{authorization:'Bearer fixture-cron'}}});else if(action==='start')result=await flow.startPaymentSession(args);else throw new Error(`Unknown action ${action}`);res.writeHead(result.httpStatus,{'content-type':'application/json'});res.end(JSON.stringify(result.body));return;}
+    if (req.url === '/start-route') {
+      const { default: handler } = await import('../src/server/api/payment/start.js');
+      const response = { status(code) { this.statusCode = code; return this; }, setHeader(name, value) { res.setHeader(name, value); }, json(body) { res.writeHead(this.statusCode || 200, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); return this; } };
+      await handler({ method: 'POST', headers: {}, body: JSON.parse(raw) }, response);
+      return;
+    }
+    if(req.url.startsWith('/flow/')){const input=raw?JSON.parse(raw):{};
+      const override = input.confirmationReadOverride;
+      const summaryClient = override ? new Proxy(commerce, { get(target, key) {
+        if (key === 'fetch') return async (query, params) => {
+          if (override.failBookingRead && query.includes('_type == "booking"')) throw new Error('Synthetic booking read failure');
+          if (override.hold && params?.id === override.hold._id && query.includes('slotHold')) return override.hold;
+          const result = await target.fetch(query, params);
+          if (result?._id === recordId && override.record) return { ...result, ...override.record };
+          if (result?._id === bookingId && override.booking) return { ...result, ...override.booking };
+          return result;
+        };
+        return target[key];
+      } }) : commerce;
+      const args={...input,client:summaryClient};const action=req.url.slice(6);let result;
+      if(action==='paypal')result=await flow.handlePayPalWebhook(args);else if(action==='razorpay')result=await flow.handleRazorpayWebhook(args);else if(action==='dodo')result=await flow.handleDodoWebhook(args);else if(action==='finalize')result=await flow.finalizePaymentSession(args);else if(action==='cancel')result=await flow.cancelPaymentSession(args);else if(action==='reconcile')result=await flow.reconcilePaymentSessions({client:commerce,req:{headers:{authorization:'Bearer fixture-cron'}}});else if(action==='start')result=await flow.startPaymentSession(args);else if(action==='status')result=await flow.getPaymentStatus(args);else throw new Error(`Unknown action ${action}`);res.writeHead(result.httpStatus,{'content-type':'application/json'});res.end(JSON.stringify(result.body));return;}
     if(req.url==='/booking'){const {default:handler}=await import('../src/server/api/ref/createBooking.js');const input=JSON.parse(raw),response={status(code){this.statusCode=code;return this;},json(body){res.writeHead(this.statusCode||200,{'content-type':'application/json'});res.end(JSON.stringify(body));return this;},setHeader(){}};await handler({method:'POST',headers:{},body:input.body,internalContext:input.internal?{documentClient:commerce,backendOwner:'supabase',cutoverGeneration:0,paymentFinalizeSource:'reconcile'}:undefined},response);return;}
     if(req.url==='/reconcile-route'){const {default:handler}=await import('../src/server/api/payment/reconcile.js');const response={status(code){this.statusCode=code;return this;},json(body){res.writeHead(this.statusCode||200,{'content-type':'application/json'});res.end(JSON.stringify(body));return this;},setHeader(){}};await handler({method:'POST',headers:{authorization:'Bearer fixture-cron'}},response);return;}
     if(req.url==='/identities'){const {POST}=await import('../app/api/auth/identities/route.js');const result=await POST(new Request(`${origin}/identities`,{method:req.method,headers:req.headers,body:raw}));res.writeHead(result.status,Object.fromEntries(result.headers));res.end(await result.text());return;}
@@ -285,12 +308,15 @@ try{
       res.writeHead(201,{'content-type':'application/json'});res.end(JSON.stringify(body));return true;
     };
     paypalOrder.status='CREATED';paypalOrder.purchase_units[0].amount={value,currency_code:'USD'};paypalOrder.purchase_units[0].payments={captures:[]};
-    const started=await requestFlow('start',{body:input});assert.equal(started.status,200,JSON.stringify(started));
+    const holdSnapshot = variant === 'browser' ? (await row(input.bookingPayload.slotHoldId)).payload : null;
+    const browserResponse = variant === 'browser' ? await fetch(`${origin}/start-route`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }) : null;
+    const started = browserResponse ? { status: browserResponse.status, body: await browserResponse.json(), cacheControl: browserResponse.headers.get('cache-control') } : await requestFlow('start', { body: input });
+    assert.equal(started.status,200,JSON.stringify(started));
     const [payment]=await commerce.fetch('*[_type == "paymentRecord"]');assert.ok(payment?._id);
     paypalOrder.status='COMPLETED';paypalOrder.purchase_units[0].payments={captures:[{id:'capture-fixture',status:'COMPLETED',amount:{value,currency_code:'USD'}}]};
     razorpayPayment.amount=amount;dodoPayment.metadata={paymentRecordId:payment._id};dodoPayment.total_amount=amount;
     const proof=provider==='paypal'?{paypalOrderId:'order-fixture',paypalPaymentId:'capture-fixture'}:provider==='razorpay'?{razorpayOrderId:'order-fixture',razorpayPaymentId:'payment-fixture',razorpaySignature:crypto.createHmac('sha256','fixture-secret').update('order-fixture|payment-fixture').digest('hex')}:{};
-    return{input,quote,started,id:payment._id,proof};
+    return{input,quote,started,id:payment._id,proof,holdSnapshot};
   };
   const a1Hook=async provider=>requestFlow(provider,{req:provider==='paypal'?paypalReq('PAYMENT.CAPTURE.COMPLETED',{id:'capture-fixture',supplementary_data:{related_ids:{order_id:'order-fixture'}}}):provider==='razorpay'?razorReq('payment.captured',{payment:{entity:razorpayPayment}}):dodoReq()});
   for (const mode of ['complete', 'partial', 'missing-details']) await run(`recovery-reschedule-created-${mode}`, async () => {
@@ -1503,6 +1529,111 @@ try{
     return { result, requested: 'payment-fixture', received: 'other-payment' };
   });
 
+  await run('confirmation-summary-policy', async () => {
+    const appointment = { startTimeUTC: '2026-03-08T07:30:00.000Z', localTimeZone: 'America/New_York', paymentRecordId: recordId };
+    const payment = await seed('paypal', 'booked', { booking: appointment });
+    const expected = { bookingId, packageTitle: 'Vertex Essentials', startTimeUTC: appointment.startTimeUTC, localTimeZone: appointment.localTimeZone };
+    const responses = [];
+    const check = async (recordChanges, bookingChanges, visible) => {
+      const originalRecord = await record(), originalBooking = (await row(bookingId)).payload;
+      const current = { ...originalRecord, status: 'booked', requiresReschedule: false, refundState: '', dodoDisputeActive: false, dodoDisputes: [], ...recordChanges };
+      const booking = { ...originalBooking, status: 'captured', refundStatus: '', requiresReschedule: false, recoveryStatus: '', dodoDisputeActive: false, dodoDisputes: [], ...appointment, ...bookingChanges };
+      const warningCount = summaryWarnings.length;
+      const result = await requestFlow('status', { paymentAccessToken: tokenFor(payment), confirmationReadOverride: { record: current, booking } });
+      const warnings = summaryWarnings.slice(warningCount);
+      if (booking.paymentRecordId === 'paymentRecord.other') assert.equal(warnings.length, current.duplicatePaymentRecord ? 0 : 1);
+      assert.equal(JSON.stringify(warnings).includes('customer@example.invalid'), false);
+      responses.push({ recordChanges, bookingChanges, expectedVisible: visible, response: result.body, warnings });
+      assert.deepEqual(result.body.bookingSummary, visible ? { ...expected, localTimeZone: booking.localTimeZone } : null, JSON.stringify(responses.at(-1)));
+    };
+    const initial = await requestFlow('status', { paymentAccessToken: tokenFor(payment) });
+    assert.deepEqual(initial.body.bookingSummary, expected);
+    for (const status of ['booked', 'email_partial', 'started', 'captured_client', 'captured_webhook', 'finalizing', 'verified_server', 'needs_recovery', 'failed', 'refunded', 'abandoned']) await check({ status }, {}, ['booked', 'email_partial'].includes(status));
+    for (const status of ['pending', 'captured', 'completed', 'failed', 'cancelled', 'canceled', 'refunded', 'unknown', '']) await check({}, { status }, ['pending', 'captured', 'completed'].includes(status));
+    for (const field of ['emailDeliveryReviewRequired', 'providerRecoveryTerminal', 'reconciliationRecoveryTerminal']) await check({ [field]: true }, {}, true);
+    for (const state of ['pending', 'review', 'failed', 'partial', 'full']) { await check({ refundState: state }, {}, state !== 'full'); await check({}, { refundStatus: state }, state !== 'full'); }
+    await check({ requiresReschedule: true }, {}, false);
+    await check({}, { requiresReschedule: true }, false);
+    await check({}, { recoveryStatus: 'requires_reschedule' }, false);
+    await check({}, { startTimeUTC: '', originalRequestedStartTimeUTC: appointment.startTimeUTC }, false);
+    for (const instant of ['tomorrow', '2026-02-30T10:00:00Z', '2026-01-01', '']) await check({}, { startTimeUTC: instant }, false);
+    for (const zone of ['Invalid/Zone', '', null]) await check({}, { localTimeZone: zone }, false);
+    await check({ bookingPayload: { originalOrderId: 'booking.original' } }, {}, true);
+    await check({}, { localTimeZone: 'Asia/Calcutta' }, true);
+    await check({}, { backendOwner: 'sanity' }, true);
+    await check({ cutoverGeneration: undefined }, { cutoverGeneration: undefined }, true);
+    await check({}, { cutoverGeneration: 1 }, false);
+    await check({}, { paymentRecordId: 'paymentRecord.other' }, false);
+    await check({ duplicatePaymentRecord: true, canonicalPaymentRecordId: 'paymentRecord.other' }, { paymentRecordId: 'paymentRecord.other' }, false);
+    for (const status of ['dispute_opened', 'dispute_challenged', 'dispute_lost', 'dispute_accepted', 'dispute_expired', 'dispute_won', 'dispute_cancelled']) {
+      const visible = ['dispute_won', 'dispute_cancelled'].includes(status);
+      await check({ dodoDisputes: [{ status }] }, {}, visible);
+      await check({}, { dodoDisputes: [{ status }] }, visible);
+    }
+    await check({ dodoDisputeActive: true }, {}, false); await check({}, { dodoDisputeActive: true }, false);
+    const failure = await requestFlow('status', { paymentAccessToken: tokenFor(payment), confirmationReadOverride: { failBookingRead: true } });
+    assert.equal(failure.status, 200); assert.equal(failure.body.bookingId, bookingId); assert.equal(failure.body.bookingSummary, null);
+    return { paymentRecord: await record(), booking: (await row(bookingId)).payload, initial, responses, failure };
+  });
+  await run('confirmation-summary-authorization', async () => {
+    const payment = await seed('paypal', 'booked', { booking: { paymentRecordId: recordId, startTimeUTC: '2026-01-01T00:30:00.000Z', localTimeZone: 'UTC' } });
+    await commerce.create({ _id: 'booking.other-browser', _type: 'booking', paymentRecordId: 'paymentRecord.other-browser', status: 'captured', packageTitle: 'Other customer package', startTimeUTC: '2026-01-01T00:30:00.000Z', localTimeZone: 'UTC' });
+    const result = await requestFlow('status', { paymentAccessToken: tokenFor(payment), query: { bookingId: 'booking.other-browser', paymentRecordId: 'paymentRecord.other-browser' } });
+    assert.equal(result.body.bookingSummary.bookingId, bookingId);
+    const missing = await requestFlow('status', { paymentAccessToken: '', query: { bookingId } });
+    const forged = await requestFlow('status', { paymentAccessToken: tokenFor(payment) + 'x', query: { bookingId } });
+    assert.equal(missing.status, 401); assert.ok(forged.status >= 400); assert.ok(!forged.body.bookingSummary);
+    const upgradeDenied = await requestFlow('start', { body: { provider: 'free', bookingPayload: { originalOrderId: 'booking.other-browser', email: 'customer@example.invalid', packageTitle: 'Vertex Essentials', upgradeIntentToken: 'invalid-intent' } } });
+    assert.equal(upgradeDenied.status, 403);
+    assert.equal(upgradeDenied.body.code, 'upgrade_intent_invalid');
+    assert.equal(Object.hasOwn(upgradeDenied.body, 'bookingSummary'), false);
+    const finalized = await requestFlow('finalize', { paymentAccessToken: tokenFor(payment), body: { bookingId: 'booking.other-browser' } });
+    assert.equal(finalized.body.bookingSummary.bookingId, bookingId);
+    await commerce.patch(recordId).set({ bookingId: 'booking.other-browser' }).commit();
+    const mismatch = await requestFlow('status', { paymentAccessToken: tokenFor(payment) });
+    assert.equal(mismatch.body.bookingSummary, null);
+    assert.equal(JSON.stringify(mismatch.body).includes('Other customer package'), false);
+    await commerce.create({ ...payment, _id: 'paymentRecord.other-browser', _rev: undefined, providerOrderId: 'order-other-browser', providerPaymentId: 'capture-other-browser', providerIdempotencyKey: 'fixture-key-other-browser', sessionScope: 'fixture-session-other-browser', bookingId: 'booking.other-browser' });
+    await commerce.patch(recordId).set({ duplicatePaymentRecord: true, canonicalPaymentRecordId: 'paymentRecord.other-browser' }).commit();
+    const warningCount = summaryWarnings.length;
+    const duplicate = await requestFlow('status', { paymentAccessToken: tokenFor(payment) });
+    assert.equal(duplicate.body.bookingSummary, null);
+    assert.equal(summaryWarnings.length, warningCount);
+    return { paymentRecord: payment, booking: (await row(bookingId)).payload, result, missing, forged, upgradeDenied, finalized, mismatch, duplicate };
+  });
+  await run('confirmation-summary-free-and-replay', async () => {
+    const checkout = await a1Start('free', 'browser');
+    const payment = (await row(checkout.id)).payload;
+    const booking = (await row(payment.bookingId)).payload;
+    const response = await requestFlow('status', { paymentAccessToken: tokenFor(payment) });
+    assert.equal(response.body.bookingSummary.bookingId, booking._id);
+    assert.equal(response.body.bookingSummary.packageTitle, booking.packageTitle);
+    assert.equal(checkout.started.body.bookingSummary.bookingId, booking._id);
+    assert.equal(checkout.started.cacheControl, 'private, no-store');
+    const replay = await requestFlow('start', { body: checkout.input, confirmationReadOverride: { hold: checkout.holdSnapshot } });
+    assert.equal(replay.status, 200, JSON.stringify(replay));
+    assert.equal(replay.body.bookingSummary.bookingId, booking._id);
+    return { paymentRecord: payment, booking, response, free: checkout.started, replay };
+  });
+  await run('confirmation-summary-captured-cancel', async () => {
+    const checkout = await a1Start('paypal');
+    const initial = (await row(checkout.id)).payload;
+    const cancelled = await requestFlow('cancel', { paymentAccessToken: tokenFor(initial) });
+    const payment = (await row(checkout.id)).payload;
+    const booking = (await row(payment.bookingId)).payload;
+    assert.equal(cancelled.status, 200, JSON.stringify(cancelled));
+    assert.equal(cancelled.body.captured, true);
+    assert.equal(cancelled.body.bookingSummary.bookingId, booking._id);
+    const webhook = await a1Hook('paypal');
+    assert.equal(Object.hasOwn(webhook.body, 'bookingSummary'), false);
+    await reset();
+    const finalizing = await a1Start('paypal');
+    const current = (await row(finalizing.id)).payload;
+    const finalized = await requestFlow('finalize', { paymentAccessToken: tokenFor(current), body: finalizing.proof });
+    assert.equal(finalized.status, 200, JSON.stringify(finalized));
+    assert.equal(finalized.body.bookingSummary.bookingId, (await row(finalizing.id)).payload.bookingId);
+    return { paymentRecord: payment, booking, cancelled, webhook, finalized };
+  });
   assert.ok(evidence.scenarios.length,'Unknown named scenario');if(only)assert.equal(evidence.scenarios.length,new Set(only).size,'Unknown selected payment scenario');assert.equal(blockedNetwork,0);
   evidence.modules=Object.fromEntries(['@supabase/supabase-js','@supabase/ssr','postgres','dodopayments'].map(name=>[name,JSON.parse(fs.readFileSync(path.join(process.cwd(),'node_modules',name,'package.json'),'utf8')).version]));
   evidence.sourceHashes=Object.fromEntries(['src/server/api/payment/flow.js','src/server/api/payment/providerClients.js','src/server/api/payment/dodoProvider.js','src/server/api/ref/createBooking.js','src/server/api/ref/bookingCommit.js','src/server/api/payment/reconcile.js','src/server/api/ref/bookingEmails.js','src/components/Payment.jsx','src/server/api/ref/bookingRefunds.js','scripts/test-payment-persistence-sweep.mjs','scripts/lib/sweep-postgres-fixture.mjs','supabase/migrations/20261005000500_project_booking_payment_currency_subunits.sql'].map(name=>[name,crypto.createHash('sha256').update(sourceText(name)).digest('hex')]));

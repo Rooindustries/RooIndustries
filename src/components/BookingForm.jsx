@@ -1,3 +1,4 @@
+import { clearBookingConfirmation, createBookingConfirmation } from "../lib/confirmationReceipt";
 import React, {
   useCallback,
   useContext,
@@ -480,6 +481,7 @@ function BookingStepActions({ children, className }) {
 }
 
 export default function BookingForm() {
+  useEffect(() => { clearBookingConfirmation(); }, []);
   const formRootRef = useRef(null);
   const handleHomeSectionLink = useHomeSectionLinkHandler();
   const location = useLocation();
@@ -2016,7 +2018,6 @@ export default function BookingForm() {
   const showCapturedPaymentResult = (data = {}) => {
     const status = String(data.status || "").trim().toLowerCase();
     const bookingId = String(data.bookingId || "").trim();
-    const emailDispatchToken = String(data.emailDispatchToken || "").trim();
     if (
       !["booked", "email_partial"].includes(status) ||
       !bookingId
@@ -2025,7 +2026,7 @@ export default function BookingForm() {
       return;
     }
 
-    const bookingConfirmation = { bookingId, ...(emailDispatchToken ? { emailDispatchToken } : {}) };
+    const bookingConfirmation = createBookingConfirmation(data);
     try {
       sessionStorage.setItem(
         BOOKING_CONFIRMATION_STORAGE_KEY,
