@@ -1,3 +1,4 @@
+import { clearBookingConfirmation, createBookingConfirmation } from "../lib/confirmationReceipt";
 import { writeBrowserStorage, removeBrowserStorage } from "../lib/browserStorage";
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
@@ -107,6 +108,7 @@ function PayPalCheckout({ children }) {
 }
 
 export default function Payment({ hideFooter = false }) {
+  useEffect(() => { clearBookingConfirmation(); }, []);
   useEffect(() => {
     preloadConfirmationPages().catch(() => {});
   }, []);
@@ -128,7 +130,6 @@ export default function Payment({ hideFooter = false }) {
 
   const REFERRAL_STORAGE_KEY = "referral_session";
   const FLOW_BACKGROUND_KEY = "flow_background_location";
-  const BOOKING_CONFIRMATION_STORAGE_KEY = "booking_confirmation_state";
   const PAYMENT_SESSION_STORAGE_KEY = "payment_session_state";
   const CHECKOUT_BOOKING_STORAGE_KEY = "checkout_booking_state";
   const INTERNAL_PAYMENTS_KEY = "roo_internal_payments";
@@ -174,23 +175,6 @@ export default function Payment({ hideFooter = false }) {
       } else {
         sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
       }
-    } catch {}
-  };
-
-  const writeStoredBookingConfirmation = (confirmation) => {
-    try {
-      if (!confirmation?.bookingId) {
-        sessionStorage.removeItem(BOOKING_CONFIRMATION_STORAGE_KEY);
-        return;
-      }
-
-      sessionStorage.setItem(
-        BOOKING_CONFIRMATION_STORAGE_KEY,
-        JSON.stringify({
-          bookingId: confirmation.bookingId,
-          ...(confirmation.emailDispatchToken ? { emailDispatchToken: confirmation.emailDispatchToken } : {}),
-        })
-      );
     } catch {}
   };
 
@@ -245,9 +229,6 @@ export default function Payment({ hideFooter = false }) {
     trackConfirmedPurchase(responseBody.analyticsReceipt);
     const baseState = getModalFlowState();
     const bookingId = String(responseBody?.bookingId || "").trim();
-    const emailDispatchToken = String(
-      responseBody?.emailDispatchToken || ""
-    ).trim();
 
     writeStoredCheckout(null);
     try {
@@ -256,16 +237,12 @@ export default function Payment({ hideFooter = false }) {
     } catch {}
 
     if (!bookingId) {
-      writeStoredBookingConfirmation(null);
+      clearBookingConfirmation();
       return baseState;
     }
 
-    const bookingConfirmation = {
-      bookingId,
-      ...(emailDispatchToken ? { emailDispatchToken } : {}),
-    };
+    const bookingConfirmation = createBookingConfirmation(responseBody);
 
-    writeStoredBookingConfirmation(bookingConfirmation);
     return {
       ...(baseState || {}),
       bookingConfirmation,

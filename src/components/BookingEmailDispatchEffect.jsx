@@ -1,3 +1,4 @@
+import { asConfirmationReceipt, clearBookingConfirmation } from "../lib/confirmationReceipt";
 import React, { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -10,7 +11,7 @@ const readStoredBookingConfirmation = () => {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed?.bookingId && parsed?.emailDispatchToken) {
-      return parsed;
+      return asConfirmationReceipt(parsed);
     }
   } catch {}
 
@@ -30,12 +31,12 @@ const writeStoredBookingConfirmation = (confirmation) => {
 export default function BookingEmailDispatchEffect() {
   const location = useLocation();
   const navigate = useNavigate();
-  const attemptedKeyRef = useRef("");
+  const requestRef = useRef(null);
   const historyUsrState =
     typeof window !== "undefined" ? window.history?.state?.usr : null;
   const navState = location.state || historyUsrState || {};
   const bookingConfirmation =
-    navState.bookingConfirmation || readStoredBookingConfirmation();
+    asConfirmationReceipt(navState.bookingConfirmation) || readStoredBookingConfirmation();
   const bookingId = String(bookingConfirmation?.bookingId || "").trim();
   const emailDispatchToken = String(
     bookingConfirmation?.emailDispatchToken || ""
@@ -47,37 +48,35 @@ export default function BookingEmailDispatchEffect() {
     }
 
     const attemptKey = `${bookingId}:${emailDispatchToken}`;
-    if (attemptedKeyRef.current === attemptKey) {
-      return;
+    let request = requestRef.current;
+    if (request?.key !== attemptKey) {
+      request = {
+        key: attemptKey,
+        promise: fetch("/api/ref/sendBookingEmails", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bookingId, emailDispatchToken }),
+          keepalive: true,
+        }).then(async response => ({
+          status: response.status,
+          body: await response.json().catch(() => ({})),
+        })),
+      };
+      requestRef.current = request;
     }
-    attemptedKeyRef.current = attemptKey;
-
     let cancelled = false;
-
-    fetch("/api/ref/sendBookingEmails", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        bookingId,
-        emailDispatchToken,
-      }),
-      keepalive: true,
-    })
-      .then(async (response) => {
-        if (cancelled) return;
-
-        const body = await response.json().catch(() => ({}));
+    request.promise
+      .then(({ status, body }) => {
         if (cancelled) return;
         const allSent =
           body?.emailDispatch?.allSent === true ||
           (body?.emailDispatch?.client?.sent === true &&
             body?.emailDispatch?.owner?.sent === true);
-
         const inactive = body?.code === "booking_inactive";
-        if (allSent || TERMINAL_FAILURE_STATUSES.has(response.status) || inactive) {
+        if (allSent || TERMINAL_FAILURE_STATUSES.has(status) || inactive) {
           const nextState = { ...navState };
           if (inactive) {
-            writeStoredBookingConfirmation(null);
+            clearBookingConfirmation();
             delete nextState.bookingConfirmation;
           } else {
             const receipt = { ...bookingConfirmation, bookingId };
@@ -89,12 +88,11 @@ export default function BookingEmailDispatchEffect() {
             { replace: true, state: nextState });
           return;
         }
-
-        attemptedKeyRef.current = "";
+        if (requestRef.current === request) requestRef.current = null;
       })
       .catch(() => {
         if (cancelled) return;
-        attemptedKeyRef.current = "";
+        if (requestRef.current === request) requestRef.current = null;
       });
 
     return () => {

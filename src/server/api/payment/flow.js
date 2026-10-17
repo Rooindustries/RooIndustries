@@ -1,3 +1,4 @@
+import { buildBrowserCompletionBody } from "./bookingSummary.js";
 import envValue from "../../supabase/envValue.cjs";
 const { resolveStoreBackend } = envValue;
 import { createDodoCheckout, inspectDodoCheckout, retrieveDodoPayment, retrieveDodoRefund, validateDodoPayment, verifyDodoCapture, unwrapDodoWebhook } from "./dodoProvider.js";
@@ -3350,7 +3351,7 @@ export const startPaymentSession = async ({
       return {
         httpStatus: 200,
         body: {
-          ...buildPublicStatusBody(refreshed),
+          ...await buildBrowserCompletionBody({ client, record: refreshed, body: buildPublicStatusBody(refreshed) }),
           provider,
           quote: buildQuotePayload(quote),
           quoteFingerprint: currentQuoteFingerprint,
@@ -3371,7 +3372,7 @@ export const startPaymentSession = async ({
       return {
         httpStatus: finalized.httpStatus,
         body: {
-          ...finalized.response,
+          ...await buildBrowserCompletionBody({ client, record: refreshed, body: finalized.response }),
           provider,
           quote: buildQuotePayload(quote),
           quoteFingerprint: currentQuoteFingerprint,
@@ -3387,6 +3388,7 @@ export const startPaymentSession = async ({
       body: {
         ok: true,
         status: PAYMENT_STATUS_STARTED,
+        bookingSummary: null,
         provider,
         quote: buildQuotePayload(quote),
         quoteFingerprint: currentQuoteFingerprint,
@@ -3459,7 +3461,8 @@ export const finalizePaymentSession = async ({
   const binding = validateImmutableProviderBinding({ record, providerData: flatProviderData });
   if (!binding.ok) return { httpStatus: 409, body: { ok: false, code: binding.reason } };
   if (record.provider === "dodo") {
-    return refreshDodoPayment({ client, record, source: "reconcile" });
+    const result = await refreshDodoPayment({ client, record, source: "reconcile" });
+    return { ...result, body: await buildBrowserCompletionBody({ client, record, body: result.body }) };
   }
 
   const terminalStatus = String(record?.status || "").trim().toLowerCase();
@@ -3476,7 +3479,7 @@ export const finalizePaymentSession = async ({
     return {
       httpStatus: completed ? 200 : 409,
       body: {
-        ...buildPublicStatusBody(record),
+        ...await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record) }),
         ok: completed,
         ...(completed ? {} : { error: "Payment session is already terminal." }),
       },
@@ -3492,7 +3495,7 @@ export const finalizePaymentSession = async ({
 
   return {
     httpStatus: finalized.httpStatus,
-    body: finalized.response,
+    body: await buildBrowserCompletionBody({ client, record, body: finalized.response }),
   };
 };
 
@@ -3525,10 +3528,20 @@ export const cancelPaymentSession = async ({
     return {
       httpStatus: 200,
       body: {
-        ...buildPublicStatusBody(record),
+        ...await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record) }),
         ok: true,
         cancelled: true,
         refreshedHold: normalizeObject(record.cancelledHoldSnapshot),
+      },
+    };
+  }
+  if (status === PAYMENT_STATUS_BOOKED || status === PAYMENT_STATUS_EMAIL_PARTIAL) {
+    return {
+      httpStatus: 200,
+      body: {
+        ...await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record) }),
+        cancelled: false,
+        captured: true,
       },
     };
   }
@@ -3536,7 +3549,7 @@ export const cancelPaymentSession = async ({
     return {
       httpStatus: 409,
       body: {
-        ...buildPublicStatusBody(record),
+        ...await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record) }),
         ok: false,
         error: "This payment session can no longer be changed.",
       },
@@ -3554,7 +3567,7 @@ export const cancelPaymentSession = async ({
     return {
       httpStatus: finalized.httpStatus,
       body: {
-        ...finalized.response,
+        ...await buildBrowserCompletionBody({ client, record, body: finalized.response }),
         cancelled: false,
         captured: true,
       },
@@ -3625,7 +3638,7 @@ export const cancelPaymentSession = async ({
       return {
         httpStatus: captured ? 200 : 409,
         body: {
-          ...buildPublicStatusBody(record),
+          ...await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record) }),
           ok: captured,
           captured,
           cancelled: false,
@@ -4299,7 +4312,7 @@ export const getPaymentStatus = async ({
   }
   return {
     httpStatus: 200,
-    body: buildPublicStatusBody(resolved.record),
+    body: await buildBrowserCompletionBody({ client, record: resolved.record, body: buildPublicStatusBody(resolved.record) }),
   };
 };
 
