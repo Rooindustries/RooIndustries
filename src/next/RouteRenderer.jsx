@@ -6,6 +6,7 @@ export default async function RouteRenderer({
   searchParams,
   initialHomeData = null,
   initialRouteData = null,
+  notFound = false,
   entry: Entry = LegacyRoutePage,
 }) {
   const resolvedSearchParams = await searchParams;
@@ -18,6 +19,7 @@ export default async function RouteRenderer({
         searchParams={resolvedSearchParams}
         initialHomeData={initialHomeData}
         initialRouteData={initialRouteData}
+        notFound={notFound}
       />
     </>
   );

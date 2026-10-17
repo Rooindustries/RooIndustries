@@ -173,10 +173,11 @@ function AnimatedRoutes({
   initialRouteComponent,
   initialRoutePath,
   initialHomeComponent,
+  notFound,
 }) {
   const baseLocation = useLocation();
   const location = routesLocation || baseLocation;
-  const motionKey = routeKey || `${location.pathname}${location.pathname === "/" ? "" : location.search || ""}`;
+  const motionKey = routeKey || location.pathname;
   const [initialEntryKey, setInitialEntryKey] = useState(baseLocation.key);
   const [hydrated, setHydrated] = useState(false);
   const initialContent = baseLocation.key === initialEntryKey ? initialRouteData : null;
@@ -202,6 +203,11 @@ function AnimatedRoutes({
 
   const routes = (
       <div key={motionKey} data-route-key={motionKey} className="w-full flex flex-col flex-1">
+        {notFound && location.pathname === initialRoutePath ? (
+          <Routes location={location}>
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        ) : (
         <Routes location={location}>
           <Route path="/" element={renderPage(<Home initialData={initialHomeData} heroHeadingTag={heroHeadingTag} />)} />
           <Route
@@ -296,6 +302,7 @@ function AnimatedRoutes({
           />
           <Route path="*" element={renderPage(<NotFound />)} />
         </Routes>
+        )}
       </div>
   );
 
@@ -312,6 +319,7 @@ export function AppContent({
   initialHomeComponent = null,
   initialBookingModalComponent = null,
   routeShell = "browser",
+  notFound = false,
 }) {
   const InitialRouteComponent = initialRouteComponent;
   const PaymentSuccess = getConfirmationPage("paid") || LazyPaymentSuccess;
@@ -325,12 +333,6 @@ export function AppContent({
   const navigate = useNavigate();
   const navigationType = useNavigationType();
   const historyInitializedRef = useRef(false);
-  const initialLocationKeyRef = useRef(location.key);
-  const initialBrowserSearchRef = useRef(null);
-  const withInitialSearch = (loc) =>
-    loc && !loc.search && loc.key === initialLocationKeyRef.current && initialBrowserSearchRef.current
-      ? { ...loc, search: initialBrowserSearchRef.current }
-      : loc;
   const lastRouteKeyRef = useRef("");
   const pathName = location.pathname || "";
   const FLOW_BACKGROUND_KEY = "flow_background_location";
@@ -361,10 +363,10 @@ export function AppContent({
     } catch {}
   };
 
-  const isBookingRoute = pathName.startsWith("/booking");
+  const isBookingRoute = pathName === "/booking";
   const isPaymentRoute = pathName === "/payment";
-  const isPaymentSuccessRoute = pathName.startsWith("/payment-success");
-  const isThankYouRoute = pathName.startsWith("/thank-you");
+  const isPaymentSuccessRoute = pathName === "/payment-success";
+  const isThankYouRoute = pathName === "/thank-you";
   const isFlowRoute =
     isBookingRoute ||
     isPaymentRoute ||
@@ -519,13 +521,6 @@ export function AppContent({
   }, [navigate, routeShell]);
 
   useEffect(() => {
-    initialBrowserSearchRef.current =
-      routeShell === "memory" && !location.search && window.location.pathname === (location.pathname || "/")
-        ? sanitizeBrowserSearch(location.pathname || "/", window.location.search)
-        : "";
-  }, []);
-
-  useEffect(() => {
     if (typeof window === "undefined") return;
 
     const rawHash = location.hash || (
@@ -541,7 +536,7 @@ export function AppContent({
           : location.pathname === "/referrals/reset" && isReferralResetHash(rawHash)
             ? rawHash
             : "";
-    const sanitizedSearch = sanitizeBrowserSearch(location.pathname || "/", withInitialSearch(location).search || "");
+    const sanitizedSearch = sanitizeBrowserSearch(location.pathname || "/", location.search || "");
     const nextUrl = `${location.pathname || "/"}${sanitizedSearch}${keepHash}`;
     const currentUrl = `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
 
@@ -589,7 +584,7 @@ export function AppContent({
   }, [isFlowRoute, location.hash, location.pathname, location.search, location.state]);
 
   useEffect(() => {
-    const stateBackground = withInitialSearch(location.state?.backgroundLocation);
+    const stateBackground = location.state?.backgroundLocation;
     if (stateBackground?.pathname) {
       writeStoredBackground(stateBackground);
       setStoredBackground(stateBackground);
@@ -598,7 +593,7 @@ export function AppContent({
     if (!isFlowRoute) {
       const currentBackground = {
         pathname: location.pathname,
-        search: withInitialSearch(location).search || "",
+        search: location.search || "",
         hash: location.hash || "",
       };
       writeStoredBackground(currentBackground);
@@ -611,7 +606,7 @@ export function AppContent({
 
   const backgroundLocation =
     location.state && location.state.backgroundLocation
-      ? withInitialSearch(location.state.backgroundLocation)
+      ? location.state.backgroundLocation
       : isFlowRoute
       ? storedBackground
       : null;
@@ -620,7 +615,7 @@ export function AppContent({
       ? { ...location, pathname: "/", search: "", hash: "" }
       : null;
   const routesLocation = backgroundLocation || fallbackLocation || location;
-  const routesKey = `${routesLocation.pathname}${routesLocation.pathname === "/" ? "" : routesLocation.search || ""}`;
+  const routesKey = routesLocation.pathname;
   const initialRoutesPathRef = useRef(routesLocation.pathname);
   const [backgroundReveal, setBackgroundReveal] = useState({ key: null, held: false });
   if (
@@ -720,6 +715,7 @@ export function AppContent({
             initialRouteComponent={initialRouteComponent}
             initialRoutePath={initialRoutePath}
             initialHomeComponent={initialHomeComponent}
+            notFound={notFound}
           />
         </main>
       </div>
