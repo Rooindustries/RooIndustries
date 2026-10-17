@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 
 const titleFromSlug = (slug) =>
   String(slug || "")
@@ -116,9 +116,15 @@ export default function DownloadGate() {
         </div>
 
         {error && (
-          <p role="alert" className="mb-4 text-sm text-danger-text bg-danger-soft border border-danger-border rounded-md px-3 py-2">
-            {error}
-          </p>
+          <>
+            <p role="alert" className="mb-3 text-sm text-danger-text bg-danger-soft border border-danger-border rounded-md px-3 py-2">
+              {error}
+            </p>
+            <p className="mb-4 text-sm text-ink-secondary">
+              Your order ID is in your booking confirmation email. Can't find it?{" "}
+              <Link to="/contact" className="inline-flex min-h-11 items-center text-accent underline underline-offset-4">Contact us</Link>
+            </p>
+          </>
         )}
 
         {success && (

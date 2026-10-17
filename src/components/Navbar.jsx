@@ -89,6 +89,7 @@ export default function Navbar({ routeShell = "browser" }) {
   // Keep initial server/client markup identical, then upgrade to animated mode on mount.
   const [smallLogoMode, setSmallLogoMode] = useState("static");
   const proofDropdownRef = useRef(null);
+  const mobileMenuButtonRef = useRef(null);
   const referralsDropdownRef = useRef(null);
   const headerRef = useRef(null);
   const navRowRef = useRef(null);
@@ -389,6 +390,20 @@ export default function Navbar({ routeShell = "browser" }) {
       }
     }
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleEscape = (event) => {
+      if (event.key !== "Escape" || window.matchMedia("(min-width: 768px)").matches) return;
+      event.preventDefault();
+      setOpen(false);
+      setProofOpen(false);
+      setReferralsOpen(false);
+      mobileMenuButtonRef.current?.focus();
+    };
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [open]);
 
   useEffect(() => {
     if ((!proofOpen && !referralsOpen) || typeof window === "undefined") return;
@@ -812,6 +827,7 @@ export default function Navbar({ routeShell = "browser" }) {
             </a>
 
             <button
+              ref={mobileMenuButtonRef}
               type="button"
               onClick={() =>
                 setOpen((v) => {

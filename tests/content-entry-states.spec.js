@@ -42,7 +42,7 @@ for (const [route, resource, heading] of [
       expect(clientDelayCount).toBe(1);
       await expect(page.locator("#main-content section [aria-hidden='true']")).toHaveCount(0);
       if (route === "/tools") {
-        await expect(page.getByText("No tools configured yet. Add tools in the content editor.")).toBeVisible();
+        await expect(page.getByText("Couldn't load the tools.")).toBeVisible();
         await expect(page.locator("main article")).toHaveCount(0);
       } else {
         await expect(page.locator("main section figure")).toHaveCount(0);
@@ -85,7 +85,7 @@ for (const [route, resource, heading] of [
       const populated = process.env.TOOLING_CLS_CONTENT === "1" && responseState !== "failed";
       if (route === "/tools") {
         await expect(page.locator("main article")).toHaveCount(populated ? 4 : 0);
-        if (!populated) await expect(page.getByText("No tools configured yet. Add tools in the content editor.")).toBeVisible();
+        if (!populated) await expect(page.getByText(responseState === "failed" ? "Couldn't load the tools." : "No tools are listed right now.")).toBeVisible();
       } else {
         await expect(page.locator("main section figure img")).toHaveCount(populated ? 2 : 0);
       }
