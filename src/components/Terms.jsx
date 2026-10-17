@@ -3,8 +3,8 @@ import { normalizePolicyLink } from "../lib/policyLinks";
 import { PortableText } from "@portabletext/react";
 import { getPublicContent } from "../lib/publicContentClient";
 
-export default function Terms() {
-  const [data, setData] = useState(null);
+export default function Terms({ initialData = null }) {
+  const [data, setData] = useState(initialData);
 
   useEffect(() => {
     getPublicContent("terms")
