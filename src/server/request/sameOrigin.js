@@ -3,6 +3,13 @@ const CANONICAL_WEB_HOSTS = new Set([
   "www.rooindustries.com",
 ]);
 
+const LOOPBACK_HOSTNAME = /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])$/;
+
+const comparableOrigin = (url) =>
+  LOOPBACK_HOSTNAME.test(url.hostname)
+    ? `${url.protocol}//localhost${url.port ? `:${url.port}` : ""}`
+    : url.origin;
+
 const isCanonicalWebOriginPair = (left, right) =>
   left.protocol === "https:" &&
   right.protocol === "https:" &&
@@ -48,7 +55,7 @@ export const isSameOriginMutation = (request) => {
       }
       const forwardedOrigin = forwardedRequestOrigin(request, requestUrl);
       return Boolean(
-        originUrl.origin === requestUrl.origin ||
+        comparableOrigin(originUrl) === comparableOrigin(requestUrl) ||
         isCanonicalWebOriginPair(originUrl, requestUrl) ||
         (isCanonicalWebOrigin(originUrl) &&
           forwardedOrigin &&
