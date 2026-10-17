@@ -131,6 +131,25 @@ for (const [name, viewport] of [
       await footer.screenshot({ path: testInfo.outputPath("footer-landmark.png") });
     });
 
+    test("every public page has one h1 inside main", async ({ page }, testInfo) => {
+      const records = [];
+      for (const route of ["/", "/packages", "/reviews", "/tools", "/faq", "/about", "/contact", "/meet-the-team", "/benchmarks", "/privacy", "/terms"]) {
+        await page.goto(route, { waitUntil: "networkidle" });
+        const headings = await page.locator("h1").evaluateAll(elements => elements.map(element => ({
+          text: element.textContent,
+          insideMain: Boolean(element.closest("main#main-content")),
+        })));
+        records.push({ route, viewport, headings });
+        await expect.soft(page.locator("h1"), route).toHaveCount(1, { timeout: 1000 });
+        await expect.soft(page.locator("main#main-content h1"), route).toHaveCount(1, { timeout: 1000 });
+        if (route === "/packages") {
+          await expect.soft(page.locator("main#main-content h1"), route).toHaveText("PC Game Optimization Packages", { timeout: 1000 });
+        }
+      }
+      await testInfo.attach("page-headings", { body: JSON.stringify(records, null, 2), contentType: "application/json" });
+      await page.screenshot({ path: testInfo.outputPath("public-page.png"), fullPage: true });
+    });
+
     test("referral action text meets contrast in Roo Blue", async ({ page }, testInfo) => {
       await page.addInitScript(() => localStorage.setItem("roo-theme", "default"));
       await page.goto("/referrals/login", { waitUntil: "networkidle" });
