@@ -89,6 +89,40 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  routes:
+    name: Playwright creator portal and API routes
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ROO_TEST_HOST: 127.0.0.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run API route suite
+        env:
+          PW_PORT: "3231"
+          PW_SERVER_ID: routes-api
+        run: xvfb-run -a npm run test:api:routes
+      - name: Run creator portal suite
+        env:
+          PW_PORT: "3241"
+          PW_SERVER_ID: routes-portal
+        run: xvfb-run -a npm run test:creator:portal
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-results-routes
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
   native:
     name: Native PostgreSQL 17 suites
     runs-on: ubuntu-latest
