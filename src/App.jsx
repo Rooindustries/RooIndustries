@@ -226,7 +226,7 @@ function AnimatedRoutes({
           />
           <Route path="/about" element={renderPage(<AboutPage />)} />
           <Route path="/privacy" element={renderPage(<Privacy initialData={initialRouteData?.privacy || null} />)} />
-          <Route path="/terms" element={renderPage(<Terms />)} />
+          <Route path="/terms" element={renderPage(<Terms initialData={initialRouteData?.terms || null} />)} />
           <Route
             path="/reviews"
             element={renderPage(<Reviews setIsModalOpen={setIsModalOpen} initialData={initialContent?.reviewsGallery || null} />)}
