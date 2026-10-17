@@ -82,7 +82,7 @@ function PayPalCheckout({ children }) {
         </p>
         <button
           type="button"
-          className="glow-button h-10 w-full rounded-lg px-4 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-border"
+          className="glow-button h-11 w-full rounded-lg px-4 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-border"
           onClick={() => dispatch({ type: "resetOptions", value: options })}
         >
           Retry PayPal
@@ -93,14 +93,14 @@ function PayPalCheckout({ children }) {
 
   if (!isResolved) {
     return (
-      <p role="status" className="flex h-10 items-center justify-center text-xs text-ink-secondary">
+      <p role="status" className="flex h-11 items-center justify-center text-xs text-ink-secondary">
         Loading PayPal…
       </p>
     );
   }
 
   return (
-    <div className="paypal-checkout-shell relative z-0 h-10 w-full overflow-hidden rounded-lg bg-transparent [&_iframe]:!rounded-[4px] [&_iframe]:!border-0 [&_iframe]:!bg-transparent [&_iframe]:!outline-0 [&_iframe]:!shadow-none">
+    <div className="paypal-checkout-shell relative z-0 h-11 w-full overflow-hidden rounded-lg bg-transparent [&_iframe]:!rounded-[4px] [&_iframe]:!border-0 [&_iframe]:!bg-transparent [&_iframe]:!outline-0 [&_iframe]:!shadow-none">
       {children}
     </div>
   );
@@ -1788,7 +1788,7 @@ export default function Payment({ hideFooter = false }) {
 
   return (
     <motion.section
-      className="relative z-10 py-4 px-6 max-w-3xl mx-auto text-ink"
+      className="booking-payment relative z-10 max-w-3xl mx-auto text-ink"
       variants={containerVariants}
       initial="hidden"
       animate="visible"
@@ -2123,14 +2123,14 @@ export default function Payment({ hideFooter = false }) {
                     <div className="flex h-8 w-20 items-center justify-center text-ink" aria-hidden="true">
                       <WalletCards size={36} strokeWidth={1.5} />
                     </div>
-                    <p className="whitespace-nowrap text-xs font-medium text-ink-secondary sm:text-sm">
+                    <p className="text-xs font-medium text-ink-secondary sm:text-sm">
                       {finalAmount >= 50.01 ? "Cards, crypto & Klarna" : "Cards & crypto"}
                     </p>
                   </div>
                   <div className="flex w-full shrink-0 flex-col gap-2 md:w-52">
                     <button type="button" onClick={handleDodoCheckout}
                       disabled={!canSubmitBooking || payingDodo || paymentStatusBusy || cancellingPayment || quoteLoading || !quoteFingerprint || !providerIsAvailableForSession("dodo")}
-                      className="glow-button inline-flex h-10 w-full items-center justify-center whitespace-nowrap rounded-lg px-4 text-sm font-semibold disabled:opacity-60">
+                      className="glow-button inline-flex h-11 w-full items-center justify-center whitespace-nowrap rounded-lg px-4 text-sm font-semibold disabled:opacity-60">
                       {payingDodo ? "Opening checkout..." : lockedProvider === "dodo" ? "Resume checkout" : "Pay your way"}
                     </button>
                     {lockedProvider === "dodo" && (
@@ -2163,7 +2163,7 @@ export default function Payment({ hideFooter = false }) {
                     className="h-8 w-20 object-contain"
                   />
                   <div>
-                    <p className="whitespace-nowrap text-xs font-medium text-ink-secondary sm:text-sm">
+                    <p className="text-xs font-medium text-ink-secondary sm:text-sm">
                       {razorpayTemporarilyDisabled
                         ? "Temporarily unavailable"
                         : "Razorpay"}
@@ -2181,7 +2181,7 @@ export default function Payment({ hideFooter = false }) {
                     !canUseRazorpay ||
                     !providerIsAvailableForSession("razorpay")
                   }
-                  className="glow-button h-10 w-full shrink-0 whitespace-nowrap rounded-lg px-4 text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 md:w-52"
+                  className="glow-button h-11 w-full shrink-0 whitespace-nowrap rounded-lg px-4 text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 md:w-52"
                 >
                   {payingRzp || paymentStatusBusy
                     ? "Processing..."
@@ -2231,7 +2231,7 @@ export default function Payment({ hideFooter = false }) {
                       decoding="async"
                       className="h-8 w-20 object-contain"
                     />
-                    <p className="whitespace-nowrap text-xs font-medium text-ink-secondary sm:text-sm">
+                    <p className="text-xs font-medium text-ink-secondary sm:text-sm">
                       Secure global payments
                     </p>
                   </div>
@@ -2260,7 +2260,7 @@ export default function Payment({ hideFooter = false }) {
                             color: "blue",
                             shape: "rect",
                             label: "pay",
-                            height: 40,
+                            height: 44,
                             tagline: false,
                           }}
                           onClick={(data, actions) => {

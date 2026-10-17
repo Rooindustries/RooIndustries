@@ -18,7 +18,7 @@ export default function PaymentSuccess() {
 
   return (
     <motion.section
-      className="pt-40 text-center text-ink max-w-lg mx-auto"
+      className="booking-confirmation-panel text-center text-ink max-w-lg mx-auto"
       variants={containerVariants}
       initial="hidden"
       animate="visible"

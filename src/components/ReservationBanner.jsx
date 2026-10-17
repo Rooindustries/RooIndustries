@@ -72,7 +72,7 @@ const broadcastHold = (payload) => {
   }
 };
 
-export default function ReservationBanner() {
+export default function ReservationBanner({ hidden = false, inline = false, inlineContainer = null }) {
   const nav = useNavigate();
   const location = useLocation();
   const [hold, setHold] = useState(null);
@@ -223,7 +223,7 @@ export default function ReservationBanner() {
     }
   };
 
-  const shouldRender = hold && countdown !== null && countdown > 0 && path !== "/booking";
+  const shouldRender = !hidden && hold && countdown !== null && countdown > 0 && path !== "/booking";
 
   const bannerRef = useRef(null);
 
@@ -232,7 +232,7 @@ export default function ReservationBanner() {
   useEffect(() => {
     if (typeof document === "undefined") return undefined;
     const root = document.documentElement;
-    if (!shouldRender) {
+    if (!shouldRender || inline) {
       root.style.removeProperty("--reservation-banner-clearance");
       document.body.style.removeProperty("padding-bottom");
       return undefined;
@@ -260,7 +260,7 @@ export default function ReservationBanner() {
       root.style.removeProperty("--reservation-banner-clearance");
       document.body.style.removeProperty("padding-bottom");
     };
-  }, [shouldRender]);
+  }, [shouldRender, inline, inlineContainer]);
 
   const continueBooking = () => {
     if (String(hold?.phase || "").trim().toLowerCase() === "payment_pending" && !paymentInOtherTab) {
@@ -361,8 +361,8 @@ export default function ReservationBanner() {
       : "text-center flex-none"
     : "text-left flex-1";
 
-  const titleSizeClass = isMobileWidth ? "text-xs sm:text-sm" : "text-base";
-  const subtitleSizeClass = isMobileWidth ? "text-[11px] sm:text-[12px]" : "text-sm";
+  const titleSizeClass = inline ? "text-sm" : isMobileWidth ? "text-xs sm:text-sm" : "text-base";
+  const subtitleSizeClass = inline ? "text-sm" : isMobileWidth ? "text-[11px] sm:text-[12px]" : "text-sm";
   const buttonTextSizeClass = isMobileWidth ? "text-[11px] sm:text-xs" : "text-sm";
   const gapClass = isDesktopWidth ? "gap-3" : "gap-2 sm:gap-2.5";
   const buttonGapClass = isDesktopWidth ? "gap-2.5" : "gap-1.5 sm:gap-2";
@@ -374,17 +374,14 @@ export default function ReservationBanner() {
     return null;
   }
 
-  if (!shouldRender) {
+  if (!shouldRender || (inline && !inlineContainer)) {
     return null;
   }
 
-  return createPortal(
-    <div
-      className={`pointer-events-none fixed inset-x-0 z-[9999] flex ${alignmentClass} ${containerSpacingClass}`}
-    >
+  const banner = (
       <div
             ref={bannerRef}
-            className={`
+            className={inline ? "reservation-banner-surface mb-6 flex w-full flex-wrap items-center gap-4 rounded-xl border border-line-input bg-surface-input p-4" : `
               pointer-events-auto relative overflow-hidden
               ${bannerWidthClass}
               rounded-2xl 
@@ -395,15 +392,15 @@ export default function ReservationBanner() {
             `}
       >
         <div
-          className={`min-w-0 z-10 ${textAlignmentClass} lg:flex lg:items-baseline lg:gap-2.5`}
+          className={`min-w-0 z-10 ${inline ? "flex-1" : textAlignmentClass} lg:flex lg:items-baseline lg:gap-2.5`}
         >
-          <p className={`font-semibold text-ink truncate drop-shadow-md ${titleSizeClass}`}>
+          <p className={`font-semibold text-ink ${inline ? "" : "truncate"} drop-shadow-md ${titleSizeClass}`}>
             Slot {holdLocalTimeLabel || "-"}
             {hold?.packageTitle
               ? ` · ${getPublicPackageTitle(hold.packageTitle)}`
               : ""}
           </p>
-          <p className={`text-info-text truncate drop-shadow-sm ${subtitleSizeClass}`}>
+          <p className={`text-info-text ${inline ? "" : "truncate"} drop-shadow-sm ${subtitleSizeClass}`}>
             Expires in {formatCountdown(countdown)}
           </p>
         </div>
@@ -423,6 +420,7 @@ export default function ReservationBanner() {
           {!isPaymentScreen && (
               <button
                 type="button"
+                data-reservation-continue="true"
                 onClick={continueBooking}
                 className={`rounded-lg border border-info-border bg-info-soft px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-info-text hover:bg-info-soft transition whitespace-nowrap shadow-sm`}
               >
@@ -433,7 +431,14 @@ export default function ReservationBanner() {
           )}
         </div>
       </div>
-    </div>,
-    document.body
+  );
+
+  return createPortal(
+    inline ? banner : (
+      <div className={`pointer-events-none fixed inset-x-0 z-[9999] flex ${alignmentClass} ${containerSpacingClass}`}>
+        {banner}
+      </div>
+    ),
+    inline ? inlineContainer : document.body
   );
 }

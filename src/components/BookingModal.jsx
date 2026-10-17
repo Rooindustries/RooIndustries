@@ -1,41 +1,127 @@
-import React, { useCallback, useEffect, useRef, useState, useLayoutEffect } from "react";
+import { useCallback, useEffect, useRef, useState, useLayoutEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { BookingDialogHoldContext } from "../lib/bookingDialogHold";
+import { BookingDialogActionsContext, BookingDialogHoldContext, BookingDialogReadyContext } from "../lib/bookingDialogHold";
 import { useLowPerformanceMode } from "../lib/performanceMode";
 import { isTopDialog, useDialogFocus } from "../lib/useDialogFocus";
 import { setVisibleTimeout } from "../lib/visibleTimeout";
 
-export default function BookingModal({ open, onClose, children, skipInitialSizeAnimation = false, contentKey }) {
+export function BookingDialogBody({ children, bodyRef, className = "", onFocusCapture }) {
+  return (
+    <div
+      ref={bodyRef}
+      className={`booking-dialog-body${className ? ` ${className}` : ""}`}
+      style={{ paddingBlock: "var(--booking-body-padding)", paddingInline: "var(--booking-body-padding-inline, var(--booking-body-padding))" }}
+      role="region"
+      aria-label="Booking details"
+      onFocusCapture={onFocusCapture}
+    >
+      {children}
+    </div>
+  );
+}
+
+export default function BookingModal({ open, onClose, children, skipInitialSizeAnimation = false, contentKey, routePath, reservationRef }) {
   const contentRef = useRef(null);
   // Focus trapping and outside-click detection need the unscaled dialog boundary, including the close button.
   const wrapperRef = useRef(null);
   const closeButtonRef = useRef(null);
-  const layoutFrameRef = useRef(0);
-  const sizeTransitionEnabledRef = useRef(!skipInitialSizeAnimation);
+  const stageRef = useRef(null);
+  const bodyRef = useRef(null);
+  const [actionsHost, setActionsHost] = useState(null);
+  const [introComplete, setIntroComplete] = useState(skipInitialSizeAnimation);
+  const [introStarted, setIntroStarted] = useState(skipInitialSizeAnimation);
+  const [stageVisible, setStageVisible] = useState(false);
   const lastLayoutRef = useRef({
-    scale: 1,
-    renderWidth: 1150,
     wrapperWidth: 0,
     wrapperHeight: 0,
   });
   const lowPerformanceMode = useLowPerformanceMode();
-  const [dynamicScale, setDynamicScale] = useState(1);
-  const [isMobile, setIsMobile] = useState(false);
-  const [renderWidth, setRenderWidth] = useState(1150);
+  const [viewport, setViewport] = useState(null);
   const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
   const [contentSwitch, setContentSwitch] = useState({ contentKey, revealPending: false });
-  const restoreFocusRef = useRef(false);
+  const restoreFocusRef = useRef(true);
   const lastFocusedInDialogRef = useRef(null);
   if (contentSwitch.contentKey !== contentKey) {
     setContentSwitch({ contentKey, revealPending: open });
   }
   const [awaitingContent, setAwaitingContent] = useState(skipInitialSizeAnimation);
+  const [contentHydrated, setContentHydrated] = useState(false);
+  const markContentHydrated = useCallback(() => setContentHydrated(true), []);
   const [holdCount, setHoldCount] = useState(0);
   const holdCountRef = useRef(0);
   const contentRevealed = !awaitingContent && !contentSwitch.revealPending;
+  const introOffset = skipInitialSizeAnimation || introStarted || introComplete ? 0 : 48;
 
-  const MOBILE_PADDING_Y = 80;
-  const DESKTOP_PADDING_Y = 36;
+  const revealFocusedControl = useCallback((target) => {
+    const body = bodyRef.current;
+    if (!body?.contains(target) || target === body) return;
+    const viewport = body.getBoundingClientRect();
+    if (!viewport.height) return;
+    const control = target.getBoundingClientRect();
+    const actions = body.dataset.bookingActionsPinned === "true" ? body.querySelector(".booking-step-actions") : null;
+    if (actions?.contains(target)) return;
+    const bottom = Math.min(viewport.bottom, actions?.getBoundingClientRect().top ?? viewport.bottom);
+    const descriptions = (target.getAttribute("aria-describedby") || "").split(/\s+/)
+      .map(id => document.getElementById(id))
+      .filter(node => node && body.contains(node))
+      .map(node => node.getBoundingClientRect());
+    const controlBottom = Math.max(control.bottom, ...descriptions.map(rect => rect.bottom));
+    if (control.top < viewport.top + 8) {
+      body.scrollTop -= viewport.top + 8 - control.top;
+    } else if (controlBottom > bottom - 8) {
+      body.scrollTop += controlBottom - bottom + 8;
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (!open || !body) return undefined;
+    let actions = null;
+    const reservation = body.querySelector("[data-booking-reservation]");
+    let reservationCard = null;
+    const updateHeight = () => {
+      if (routePath !== "/payment") {
+        reservation?.style.removeProperty("min-height");
+      } else if (reservationCard) {
+        const style = getComputedStyle(reservationCard);
+        const height = reservationCard.getBoundingClientRect().height + parseFloat(style.marginTop) + parseFloat(style.marginBottom);
+        reservation.style.minHeight = `${height}px`;
+      }
+      const height = actions?.offsetHeight || 0;
+      const pinned = height > 0 && body.clientHeight >= Math.max(360, height * 2.5);
+      const nextHeight = `${pinned ? height : 0}px`;
+      const changed = body.style.getPropertyValue("--booking-actions-height") !== nextHeight || body.dataset.bookingActionsPinned !== String(pinned);
+      body.style.setProperty("--booking-actions-height", nextHeight);
+      body.dataset.bookingActionsPinned = String(pinned);
+      if (changed) revealFocusedControl(document.activeElement);
+    };
+    const resizeObserver = new ResizeObserver(updateHeight);
+    const observeActions = (mutations = []) => {
+      const nextActions = body.querySelector(".booking-step-actions");
+      const nextCard = reservation?.firstElementChild || null;
+      if (nextActions !== actions || nextCard !== reservationCard) {
+        resizeObserver.disconnect();
+        resizeObserver.observe(body);
+        actions = nextActions;
+        reservationCard = nextCard;
+        if (actions) resizeObserver.observe(actions);
+        if (reservationCard) resizeObserver.observe(reservationCard);
+      }
+      updateHeight();
+      if (mutations.some(mutation => mutation.type === "attributes" && mutation.target === document.activeElement)) {
+        revealFocusedControl(document.activeElement);
+      }
+    };
+    const observer = new MutationObserver(observeActions);
+    observer.observe(body, { childList: true, subtree: true, attributes: true, attributeFilter: ["aria-describedby"] });
+    resizeObserver.observe(body);
+    observeActions();
+    return () => {
+      observer.disconnect();
+      resizeObserver.disconnect();
+    };
+  }, [open, revealFocusedControl, routePath]);
+
   const CONTENT_REVEAL_FALLBACK_MS = 300;
   const CONTENT_READY_MAX_WAIT_MS = 1500;
 
@@ -57,118 +143,34 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
   }, []);
 
   useLayoutEffect(() => {
-    const mediaQuery = window.matchMedia("(max-width: 780px)");
-    setIsMobile(mediaQuery.matches);
-
-    const handler = (e) => setIsMobile(e.matches);
-    mediaQuery.addEventListener("change", handler);
-    return () => mediaQuery.removeEventListener("change", handler);
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!open) return; 
-
+    if (!open) return undefined;
     const calculateLayout = () => {
+      const visual = window.visualViewport;
       const width = document.documentElement.clientWidth || window.innerWidth;
-      const height = window.innerHeight;
-      const currentIsMobile = isMobile || width < 780;
-
-      const paddingY = currentIsMobile ? MOBILE_PADDING_Y : DESKTOP_PADDING_Y;
-      const DESKTOP_SCALE_BOOST = 1.03;
-      // Reserve the floating banner’s footprint so the modal scales into the space above it.
-      const bannerClearance =
-        parseFloat(
-          getComputedStyle(document.documentElement).getPropertyValue(
-            "--reservation-banner-clearance"
-          )
-        ) || 0;
-
-      let scale = 1;
-      let baseWidth = 0;
-
-      if (currentIsMobile) {
-        baseWidth = Math.max(width, 550);
-        scale = width / baseWidth;
-        scale = Math.min(scale, 1.0);
-      } else {
-        baseWidth = 1150; 
-        const widthScale = (width * 0.95) / baseWidth;
-
-        let heightScale = 1.5;
-        if (contentRef.current) {
-          const contentH = contentRef.current.offsetHeight;
-          const availableH = height - paddingY - bannerClearance;
-          heightScale = availableH / contentH;
-        }
-
-        scale = Math.min(widthScale, heightScale);
-        scale *= DESKTOP_SCALE_BOOST;
-      }
-
-      scale = Math.min(Math.max(scale, 0.5), 1.2);
-
+      const height = visual?.height || window.innerHeight;
+      const style = getComputedStyle(stageRef.current);
       const nextLayout = {
-        scale,
-        renderWidth: baseWidth,
-        wrapperWidth: contentRef.current ? baseWidth * scale : 0,
-        wrapperHeight: contentRef.current
-          ? contentRef.current.offsetHeight * scale
-          : 0,
+        wrapperWidth: Math.min(960, width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)),
+        wrapperHeight: Math.max(0, height - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)),
       };
-      const prevLayout = lastLayoutRef.current;
-      const changed =
-        Math.abs(prevLayout.scale - nextLayout.scale) > 0.005 ||
-        Math.abs(prevLayout.renderWidth - nextLayout.renderWidth) >= 1 ||
-        Math.abs(prevLayout.wrapperWidth - nextLayout.wrapperWidth) >= 1 ||
-        Math.abs(prevLayout.wrapperHeight - nextLayout.wrapperHeight) >= 1;
-
-      if (!changed) {
-        return;
-      }
-
       lastLayoutRef.current = nextLayout;
-      setDynamicScale(nextLayout.scale);
-      setRenderWidth(nextLayout.renderWidth);
-      setWrapperSize({
-        width: nextLayout.wrapperWidth,
-        height: nextLayout.wrapperHeight,
-      });
+      setWrapperSize({ width: nextLayout.wrapperWidth, height: nextLayout.wrapperHeight });
+      setViewport({ width, height, top: visual?.offsetTop || 0, left: 0 });
     };
-
-    const scheduleLayout = () => {
-      window.cancelAnimationFrame(layoutFrameRef.current);
-      layoutFrameRef.current = window.requestAnimationFrame(calculateLayout);
-    };
-
     calculateLayout();
-    window.addEventListener("resize", scheduleLayout);
-
-    const observer = new ResizeObserver(() => scheduleLayout());
-    if (contentRef.current) observer.observe(contentRef.current);
-
-    // Recalculate layout when the banner changes its published footprint.
-    const clearanceObserver = new MutationObserver(scheduleLayout);
-    clearanceObserver.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["style"],
-    });
-
+    window.addEventListener("resize", calculateLayout);
+    window.visualViewport?.addEventListener("resize", calculateLayout);
+    window.visualViewport?.addEventListener("scroll", calculateLayout);
     return () => {
-      window.removeEventListener("resize", scheduleLayout);
-      window.cancelAnimationFrame(layoutFrameRef.current);
-      layoutFrameRef.current = 0;
-      observer.disconnect();
-      clearanceObserver.disconnect();
+      window.removeEventListener("resize", calculateLayout);
+      window.visualViewport?.removeEventListener("resize", calculateLayout);
+      window.visualViewport?.removeEventListener("scroll", calculateLayout);
     };
-  }, [isMobile, children, open, contentKey]);
+  }, [open]);
 
   useLayoutEffect(() => {
-    if (sizeTransitionEnabledRef.current) return;
-    const frame = window.requestAnimationFrame(() => {
-      sizeTransitionEnabledRef.current = true;
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
+  }, [contentKey, routePath]);
 
   useLayoutEffect(() => {
     if (!awaitingContent) return undefined;
@@ -176,12 +178,11 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
   }, [awaitingContent, stopAwaitingContent]);
 
   useLayoutEffect(() => {
-    if (!awaitingContent || holdCount > 0) return undefined;
-    const frame = window.requestAnimationFrame(() => {
+    if (!awaitingContent || !contentHydrated || holdCount > 0) return undefined;
+    return setVisibleTimeout(() => {
       if (holdCountRef.current === 0) stopAwaitingContent();
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [awaitingContent, holdCount, stopAwaitingContent]);
+    }, 0);
+  }, [awaitingContent, contentHydrated, holdCount, stopAwaitingContent]);
 
   useLayoutEffect(() => {
     if (!contentSwitch.revealPending) return undefined;
@@ -198,7 +199,8 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     const revealWhenLayoutApplied = () => {
       const wrapper = wrapperRef.current?.getBoundingClientRect();
       const content = contentRef.current?.getBoundingClientRect();
-      const { wrapperWidth, wrapperHeight } = lastLayoutRef.current;
+      const wrapperWidth = Math.max(0, lastLayoutRef.current.wrapperWidth - introOffset);
+      const wrapperHeight = Math.max(0, lastLayoutRef.current.wrapperHeight - introOffset);
       const layoutApplied =
         wrapper &&
         content &&
@@ -220,19 +222,27 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       window.cancelAnimationFrame(frame);
       cancelFallback();
     };
-  }, [contentSwitch, open]);
+  }, [contentSwitch, open, introOffset]);
+
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!open || !contentRevealed || introStarted || introComplete || skipInitialSizeAnimation || !stage) return undefined;
+    if (!stageVisible && Number(getComputedStyle(stage).opacity) <= 0) return undefined;
+    const frame = window.requestAnimationFrame(() => setIntroStarted(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, contentRevealed, introStarted, introComplete, skipInitialSizeAnimation, stageVisible]);
 
   useLayoutEffect(() => {
     if (contentSwitch.revealPending) {
       restoreFocusRef.current = true;
       return;
     }
-    if (!restoreFocusRef.current) return;
+    if (!restoreFocusRef.current || !introComplete || !contentRevealed || !wrapperRef.current) return;
     restoreFocusRef.current = false;
     if (!open || !isTopDialog(wrapperRef)) return;
     if (wrapperRef.current?.contains(document.activeElement)) return;
     closeButtonRef.current?.focus();
-  }, [contentSwitch, open]);
+  }, [contentSwitch, open, introComplete, contentRevealed]);
 
   useLayoutEffect(() => {
     const trackFocus = (event) => {
@@ -266,23 +276,10 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
 
   useDialogFocus({ open, dialogRef: wrapperRef, initialFocusRef: closeButtonRef, onClose });
 
-  const springTransition = {
-    ...(lowPerformanceMode
-      ? { duration: 0.16, ease: [0.2, 0, 0, 1] }
-      : {
-          type: "spring",
-          stiffness: 260,
-          damping: 30,
-          mass: 1,
-        }),
-  };
-
   const fadeTransition = {
     duration: lowPerformanceMode ? 0.16 : 0.35,
     ease: [0.4, 0, 0.2, 1],
   };
-
-  const scalerTransition = lowPerformanceMode ? fadeTransition : springTransition;
 
   const handleGlobalClick = (e) => {
     if (!contentRevealed || !isTopDialog(wrapperRef)) return;
@@ -293,118 +290,84 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     onClose?.();
   };
 
-  const paddingBlockValue = (isMobile ? MOBILE_PADDING_Y : DESKTOP_PADDING_Y) / 2;
-
   return (
     <AnimatePresence>
       {open && (
-        <motion.div 
-          className={`
-            fixed inset-0 z-[70] 
-            ${isMobile 
-              ? "overflow-y-auto overflow-x-hidden" 
-              : "overflow-hidden"
-            } 
-          `}
+        <motion.div
+          ref={stageRef}
+          className="booking-dialog-stage fixed z-[70] flex items-center justify-center overflow-hidden"
+          style={viewport || { inset: 0 }}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={fadeTransition}
+          onUpdate={skipInitialSizeAnimation || introComplete ? undefined : ({ opacity }) => {
+            if (!stageVisible && Number(opacity) > 0) setStageVisible(true);
+          }}
           onClick={handleGlobalClick}
         >
-          {isMobile && (
-            <style>{`
-              #booking-mobile-override .sm\\:flex-row { flex-direction: column !important; }
-              #booking-mobile-override .sm\\:grid-cols-2 { grid-template-columns: repeat(1, minmax(0, 1fr)) !important; }
-              #booking-mobile-override .sm\\:grid-cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
-              #booking-mobile-override .sm\\:col-span-2 { grid-column: span 1 / span 1 !important; }
-              #booking-mobile-override .sm\\:w-64 { width: 100% !important; }
-            `}</style>
-          )}
-
-          <div 
+          <div
             className="booking-modal-overlay glass-overlay low-perf-overlay fixed inset-0"
             style={{ pointerEvents: "none" }}
           />
-
-          <div 
-            className="min-h-full w-full flex flex-col cursor-pointer"
-            style={{
-              paddingTop: paddingBlockValue,
-              paddingBottom: `calc(${paddingBlockValue}px + var(--reservation-banner-clearance, 0px))`,
-            }}
-          >
-            
-            {/* Keep the close button inside the aria-modal subtree. This wrapper tracks the visible dialog; the inner scaler only transforms its contents. */}
+          <div className="relative h-full w-full">
             <motion.div
-              key={contentKey}
               ref={wrapperRef}
               role="dialog"
               aria-modal="true"
               aria-label="Schedule your session"
-              className={`ri-booking m-auto relative${contentRevealed ? "" : " invisible"}`}
-              initial={{
-                width: wrapperSize.width, 
-                height: wrapperSize.height 
+              className={`ri-booking booking-dialog-frame absolute left-1/2 top-1/2 overflow-hidden rounded-2xl bg-panel shadow-glow-strong ring-1 ring-line-input${contentRevealed ? "" : " invisible"}`}
+              initial={false}
+              style={{ "--booking-intro-offset": `${introOffset}px`, x: "-50%", y: "-50%" }}
+              animate={wrapperSize.width > 0 ? { width: Math.max(0, wrapperSize.width - introOffset), height: Math.max(0, wrapperSize.height - introOffset) } : {}}
+              transition={{ duration: introStarted && !introComplete && !skipInitialSizeAnimation ? 0.2 : 0, ease: [0.2, 0, 0, 1] }}
+              onAnimationComplete={() => {
+                const wrapper = wrapperRef.current?.getBoundingClientRect();
+                if ((!skipInitialSizeAnimation && (!introStarted || !contentRevealed)) || !wrapper ||
+                    Math.abs(wrapper.width - lastLayoutRef.current.wrapperWidth) >= 1 ||
+                    Math.abs(wrapper.height - lastLayoutRef.current.wrapperHeight) >= 1) return;
+                setIntroComplete(true);
+                revealFocusedControl(document.activeElement);
               }}
-              animate={{ 
-                width: wrapperSize.width, 
-                height: wrapperSize.height 
-              }}
-              layout={!lowPerformanceMode}
-              transition={contentRevealed && sizeTransitionEnabledRef.current ? springTransition : { duration: 0 }}
             >
-              {/* Anchor the close button to the unscaled dialog so it stays aligned and retains its 44px touch target. */}
               <button
                 id="booking-modal-close"
                 aria-label="Close"
-                className="absolute right-1 top-1 z-50 flex h-11 w-11 items-center justify-center text-info-text hover:text-white transition text-3xl leading-none opacity-80 hover:opacity-100"
+                className="absolute left-0 top-0 z-50 flex h-11 w-11 items-center justify-center rounded-lg text-info-text hover:text-white text-3xl leading-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-info-border"
+                style={{ transform: "translate(calc(100cqw - 52px), 8px)" }}
                 ref={closeButtonRef}
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
+                onClick={(event) => {
+                  event.stopPropagation();
                   onClose();
                 }}
               >
                 <span aria-hidden="true">×</span>
               </button>
-
-              <motion.div
+              <div
                 data-booking-scaler="true"
-                className="shadow-none outline-none overflow-visible absolute top-0 left-0 origin-top-left cursor-default"
-                
-                initial={
-                  lowPerformanceMode
-                    ? { scale: dynamicScale, opacity: 0 }
-                    : { scale: dynamicScale * 0.95 }
-                }
-                animate={
-                  lowPerformanceMode
-                    ? { scale: dynamicScale, opacity: 1 }
-                    : { scale: dynamicScale }
-                }
-                exit={
-                  lowPerformanceMode
-                    ? { scale: dynamicScale, opacity: 0 }
-                    : { scale: dynamicScale * 0.95 }
-                }
-                transition={contentRevealed ? scalerTransition : { ...scalerTransition, scale: { duration: 0 } }}
+                className="absolute left-0 top-0 cursor-default"
+                style={{ width: "100%", height: "100%" }}
               >
-                <div
-                  ref={contentRef}
-                  id={isMobile ? "booking-mobile-override" : undefined}
-                  style={{ width: renderWidth, position: 'relative' }}
-                >
-                  <BookingDialogHoldContext.Provider value={hold}>
-                    {React.Children.map(children, child => {
-                      if (React.isValidElement(child)) {
-                        return React.cloneElement(child, { isMobile });
-                      }
-                      return child;
-                    })}
-                  </BookingDialogHoldContext.Provider>
+                <div ref={contentRef} className="booking-dialog-viewport">
+                  <div aria-hidden="true" />
+                  <BookingDialogBody
+                    bodyRef={bodyRef}
+                    className={introComplete ? "" : "invisible"}
+                    onFocusCapture={(event) => revealFocusedControl(event.target)}
+                  >
+                    <div ref={reservationRef} data-booking-reservation="true" />
+                    <BookingDialogReadyContext.Provider value={markContentHydrated}>
+                      <BookingDialogHoldContext.Provider value={hold}>
+                        <BookingDialogActionsContext.Provider value={actionsHost}>
+                          {children}
+                        </BookingDialogActionsContext.Provider>
+                      </BookingDialogHoldContext.Provider>
+                    </BookingDialogReadyContext.Provider>
+                    <div ref={setActionsHost} className="booking-dialog-actions-host" />
+                  </BookingDialogBody>
                 </div>
-              </motion.div>
+              </div>
             </motion.div>
           </div>
         </motion.div>

@@ -7,6 +7,22 @@ const providers = {
 };
 
 const test = base.extend({
+  cpuThrottling: [async ({ page, browserName }, use, testInfo) => {
+    const rate = Number(process.env.PW_CPU_THROTTLING_RATE || 1);
+    if (!Number.isFinite(rate) || rate < 1) throw new Error("Invalid CPU throttling rate.");
+    if (rate === 1) return use();
+    if (browserName !== "chromium") throw new Error("CPU throttling requires Chromium.");
+    const session = await page.context().newCDPSession(page);
+    await session.send("Emulation.setCPUThrottlingRate", { rate });
+    await testInfo.attach("cpu-throttling", {
+      body: JSON.stringify({ rate, browserName }), contentType: "application/json",
+    });
+    try {
+      await use();
+    } finally {
+      await session.detach();
+    }
+  }, { auto: true }],
   flow: async ({ page, context, baseURL }, use, testInfo) => {
     const { guardBrowserContext } = await import("../../scripts/lib/test-target-safety.mjs");
     const contentURL = new URL(baseURL);

@@ -8,14 +8,14 @@ export default function Book({ hideFooter = false, compact = false }) {
   useEffect(() => {
     preloadConfirmationPages().catch(() => {});
   }, []);
-  const padY = compact ? "pt-2 pb-6" : "pt-32 pb-24";
+  const padY = compact ? "p-0" : "pt-32 pb-24";
   const titleMargin = compact ? "mb-4" : "mb-10";
   const titleSize = compact ? "text-3xl sm:text-4xl" : "text-4xl sm:text-5xl";
 
   return (
     <>
       <section
-        className={`ri-booking relative z-10 ${padY} px-6 text-ink text-center`}
+        className={`ri-booking relative z-10 ${padY} ${compact ? "" : "px-6"} text-ink text-center`}
         style={{ margin: 0 }}
       >
         <h2
