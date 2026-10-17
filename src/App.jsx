@@ -329,6 +329,7 @@ export function AppContent({
   const [, setIsModalOpen] = useState(false);
   const [showRouteTransition, setShowRouteTransition] = useState(false);
   const [storedBackground, setStoredBackground] = useState(null);
+  const [paymentHoldContainer, setPaymentHoldContainer] = useState(null);
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -698,7 +699,7 @@ export function AppContent({
         <div className="app-bg-radial-layer absolute inset-0"></div>
 
         <Navbar routeShell={routeShell} />
-        <ReservationBanner hidden={isFlowRoute} />
+        <ReservationBanner hidden={isFlowRoute && !isPaymentRoute} inline={isPaymentRoute} inlineContainer={paymentHoldContainer} />
 
         <main
           id="main-content"
@@ -727,6 +728,8 @@ export function AppContent({
             onClose={closeBookingModal}
             skipInitialSizeAnimation={isPaymentSuccessRoute || isThankYouRoute || loadedOnFlowRouteRef.current}
             contentKey={flowContentKey}
+            routePath={location.pathname}
+            reservationRef={setPaymentHoldContainer}
           >
             <Suspense
               key={flowContentKey}

@@ -1,5 +1,6 @@
 import React, {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -7,12 +8,12 @@ import React, {
 } from "react";
 import { createPortal } from "react-dom";
 import { useDialogFocus } from "../lib/useDialogFocus";
-import { useBookingDialogPending } from "../lib/bookingDialogHold";
+import { BookingDialogActionsContext, useBookingDialogPending } from "../lib/bookingDialogHold";
 import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { getPublicContent } from "../lib/publicContentClient";
 import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
 import { useLocation, useNavigate, Link } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useIsPresent } from "framer-motion";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
@@ -469,6 +470,14 @@ const getUtcDateFromHold = (hold) => {
   const fromStart = new Date(hold.startTimeUTC);
   return Number.isNaN(fromStart.getTime()) ? null : fromStart;
 };
+
+function BookingStepActions({ children, className }) {
+  const host = useContext(BookingDialogActionsContext);
+  const present = useIsPresent();
+  if (!present) return null;
+  const content = <div className={`booking-step-actions w-full ${className}`}>{children}</div>;
+  return host ? createPortal(content, host) : content;
+}
 
 export default function BookingForm() {
   const formRootRef = useRef(null);
@@ -2804,8 +2813,8 @@ export default function BookingForm() {
                     </>
                   )}
 
-                  <div className="booking-step-actions mt-10">
-                    <div className="flex flex-col items-center justify-center gap-4 md:flex-row">
+                  <BookingStepActions className="mt-10 max-w-3xl mx-auto">
+                    <div className="booking-slot-actions">
                       <button
                         type="button"
                         onClick={() => {
@@ -2813,7 +2822,7 @@ export default function BookingForm() {
                           setModalPackage(planPackage || selectedPackage);
                           setShowVertexModal(true);
                         }}
-                        className={`ri-booking-secondary glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 inline-flex items-center justify-center gap-2`}
+                        className={`ri-booking-secondary glow-button w-full py-3 rounded-lg font-semibold text-lg transition-all duration-300 inline-flex items-center justify-center gap-2`}
                       >
                         View My Plan
                         <span className="glow-line glow-line-top" />
@@ -2827,7 +2836,7 @@ export default function BookingForm() {
                         aria-disabled={
                           !selectedDate || !selectedSlot || !selectedSlotAvailable || availabilityLoading || lockingSlot
                         }
-                        className={`ri-booking-primary glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
+                        className={`ri-booking-primary glow-button w-full py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
                           !selectedDate || !selectedSlot || !selectedSlotAvailable || availabilityLoading || lockingSlot
                             ? "opacity-60"
                             : ""
@@ -2844,7 +2853,7 @@ export default function BookingForm() {
                     {errorStep1 && (
                       <p role="alert" className="text-danger-text mt-3 text-sm">{errorStep1}</p>
                     )}
-                  </div>
+                  </BookingStepActions>
                 </motion.div>
               )}
 
@@ -2888,7 +2897,6 @@ export default function BookingForm() {
                     <input
                       id="booking-discord"
                       name="discord"
-                      aria-label="Discord username"
                       placeholder="Discord (e.g. Servi#1234 or @Servi)"
                       onChange={handleChange}
                       value={form.discord}
@@ -2899,7 +2907,6 @@ export default function BookingForm() {
                       id="booking-email"
                       name="email"
                       ref={emailInputRef}
-                      aria-label="Booking email"
                       aria-invalid={emailError ? "true" : undefined}
                       aria-describedby={emailError ? "booking-email-error" : undefined}
                       type="email"
@@ -2920,7 +2927,6 @@ export default function BookingForm() {
                     <input
                       id="booking-specs"
                       name="specs"
-                      aria-label="PC specifications"
                       placeholder="PC Specs"
                       onChange={handleChange}
                       value={form.specs}
@@ -2930,7 +2936,6 @@ export default function BookingForm() {
                     <input
                       id="booking-mainGame"
                       name="mainGame"
-                      aria-label="Main game or application"
                       placeholder="Main use case (Game/Apps)"
                       onChange={handleChange}
                       value={form.mainGame}
@@ -2940,7 +2945,6 @@ export default function BookingForm() {
                     <textarea
                       id="booking-notes"
                       name="notes"
-                      aria-label="Extra booking requirements"
                       placeholder="Any extra requirements?"
                       onChange={handleChange}
                       value={form.notes}
@@ -2957,8 +2961,8 @@ export default function BookingForm() {
                     Read the FAQ <span className="sr-only">(opens in a new tab)</span>
                   </a>
 
-                  <div className="booking-step-actions mt-6">
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <BookingStepActions className="mt-6 max-w-4xl mx-auto">
+                    <div className="booking-actions-grid grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <button
                         type="button"
                         onClick={() => setStep(1)}
@@ -2983,7 +2987,7 @@ export default function BookingForm() {
                     {errorStep2 && (
                       <p role="alert" className="mt-3 text-sm text-danger-text">{errorStep2}</p>
                     )}
-                  </div>
+                  </BookingStepActions>
                 </motion.div>
               )}
 
@@ -3206,19 +3210,19 @@ export default function BookingForm() {
                     </dl>
                   </div>
 
-                  <div className="booking-step-actions mt-6">
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <BookingStepActions className="mt-6 max-w-3xl mx-auto">
+                    <div className="booking-actions-grid grid grid-cols-1 gap-4 sm:grid-cols-2">
                       {isPaymentPendingHold ? (
                         paymentInOtherTab ? (
                           <>
-                            <p role="alert" className="text-sm text-info-text sm:col-span-2">
+                            <p role="alert" className="text-sm text-info-text booking-actions-wide">
                               Payment already started in another tab. Continue payment there. Your reservation and details are saved.
                             </p>
                             <button
                               type="button"
                               onClick={() => handleLockAndGoNext(true)}
                               disabled={lockingSlot}
-                              className="w-full min-w-0 rounded-lg bg-surface-input py-3 font-semibold transition hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60 sm:col-span-2"
+                              className="w-full min-w-0 rounded-lg bg-surface-input py-3 font-semibold transition hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60 booking-actions-wide"
                             >
                               {lockingSlot ? "Checking reservation..." : "Check again"}
                             </button>
@@ -3295,7 +3299,7 @@ export default function BookingForm() {
                     {errorStep2 && (
                       <p role="alert" className="mt-3 text-sm text-danger-text">{errorStep2}</p>
                     )}
-                  </div>
+                  </BookingStepActions>
                 </motion.div>
               )}
             </AnimatePresence>

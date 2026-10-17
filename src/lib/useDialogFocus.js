@@ -46,7 +46,19 @@ export function useDialogFocus({ open, dialogRef, initialFocusRef, onClose, dism
       const wasTop = isTopDialog(dialogRef);
       const index = dialogs.lastIndexOf(dialogRef);
       if (index >= 0) dialogs.splice(index, 1);
-      if (wasTop && previousFocus?.isConnected) previousFocus.focus();
+      if (wasTop) {
+        const parent = dialogs.at(-1)?.current;
+        const opener = previousFocus?.isConnected && previousFocus !== document.body && previousFocus !== document.documentElement && previousFocus.id !== "main-content" ? previousFocus : null;
+        const target = opener || parent?.querySelector("[data-autofocus], button, input") || parent ||
+          document.querySelector("[data-reservation-continue]") || document.getElementById("main-content");
+        target?.focus({ preventScroll: true });
+        if (!opener && !parent && target?.id === "main-content") {
+          window.requestAnimationFrame(() => {
+            if (dialogs.length || (document.activeElement !== target && document.activeElement !== document.body)) return;
+            document.querySelector("[data-reservation-continue]")?.focus({ preventScroll: true });
+          });
+        }
+      }
     };
   }, [dialogRef, dismissible, initialFocusRef, open]);
 }

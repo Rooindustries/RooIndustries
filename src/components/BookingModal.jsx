@@ -1,17 +1,33 @@
-import React, { useCallback, useEffect, useRef, useState, useLayoutEffect } from "react";
+import { useCallback, useEffect, useRef, useState, useLayoutEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { BookingDialogHoldContext, BookingDialogReadyContext } from "../lib/bookingDialogHold";
+import { BookingDialogActionsContext, BookingDialogHoldContext, BookingDialogReadyContext } from "../lib/bookingDialogHold";
 import { useLowPerformanceMode } from "../lib/performanceMode";
 import { isTopDialog, useDialogFocus } from "../lib/useDialogFocus";
 import { setVisibleTimeout } from "../lib/visibleTimeout";
 
-export default function BookingModal({ open, onClose, children, skipInitialSizeAnimation = false, contentKey }) {
+export function BookingDialogBody({ children, bodyRef, className = "", onFocusCapture }) {
+  return (
+    <div
+      ref={bodyRef}
+      className={`booking-dialog-body${className ? ` ${className}` : ""}`}
+      style={{ paddingBlock: "var(--booking-body-padding)", paddingInline: "var(--booking-body-padding-inline, var(--booking-body-padding))" }}
+      role="region"
+      aria-label="Booking details"
+      onFocusCapture={onFocusCapture}
+    >
+      {children}
+    </div>
+  );
+}
+
+export default function BookingModal({ open, onClose, children, skipInitialSizeAnimation = false, contentKey, routePath, reservationRef }) {
   const contentRef = useRef(null);
   // Focus trapping and outside-click detection need the unscaled dialog boundary, including the close button.
   const wrapperRef = useRef(null);
   const closeButtonRef = useRef(null);
   const stageRef = useRef(null);
   const bodyRef = useRef(null);
+  const [actionsHost, setActionsHost] = useState(null);
   const [introComplete, setIntroComplete] = useState(skipInitialSizeAnimation);
   const lastLayoutRef = useRef({
     wrapperWidth: 0,
@@ -39,7 +55,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     const viewport = body.getBoundingClientRect();
     if (!viewport.height) return;
     const control = target.getBoundingClientRect();
-    const actions = body.querySelector(".booking-step-actions");
+    const actions = body.dataset.bookingActionsPinned === "true" ? body.querySelector(".booking-step-actions") : null;
     if (actions?.contains(target)) return;
     const bottom = Math.min(viewport.bottom, actions?.getBoundingClientRect().top ?? viewport.bottom);
     const descriptions = (target.getAttribute("aria-describedby") || "").split(/\s+/)
@@ -58,28 +74,50 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     const body = bodyRef.current;
     if (!open || !body) return undefined;
     let actions = null;
+    const reservation = body.querySelector("[data-booking-reservation]");
+    let reservationCard = null;
     const updateHeight = () => {
-      body.style.setProperty("--booking-actions-height", `${actions?.offsetHeight || 0}px`);
-      revealFocusedControl(document.activeElement);
+      if (routePath !== "/payment") {
+        reservation?.style.removeProperty("min-height");
+      } else if (reservationCard) {
+        const style = getComputedStyle(reservationCard);
+        const height = reservationCard.getBoundingClientRect().height + parseFloat(style.marginTop) + parseFloat(style.marginBottom);
+        reservation.style.minHeight = `${height}px`;
+      }
+      const height = actions?.offsetHeight || 0;
+      const pinned = height > 0 && body.clientHeight >= Math.max(360, height * 2.5);
+      const nextHeight = `${pinned ? height : 0}px`;
+      const changed = body.style.getPropertyValue("--booking-actions-height") !== nextHeight || body.dataset.bookingActionsPinned !== String(pinned);
+      body.style.setProperty("--booking-actions-height", nextHeight);
+      body.dataset.bookingActionsPinned = String(pinned);
+      if (changed) revealFocusedControl(document.activeElement);
     };
     const resizeObserver = new ResizeObserver(updateHeight);
-    const observeActions = () => {
+    const observeActions = (mutations = []) => {
       const nextActions = body.querySelector(".booking-step-actions");
-      if (nextActions !== actions) {
+      const nextCard = reservation?.firstElementChild || null;
+      if (nextActions !== actions || nextCard !== reservationCard) {
         resizeObserver.disconnect();
+        resizeObserver.observe(body);
         actions = nextActions;
+        reservationCard = nextCard;
         if (actions) resizeObserver.observe(actions);
+        if (reservationCard) resizeObserver.observe(reservationCard);
       }
       updateHeight();
+      if (mutations.some(mutation => mutation.type === "attributes" && mutation.target === document.activeElement)) {
+        revealFocusedControl(document.activeElement);
+      }
     };
     const observer = new MutationObserver(observeActions);
     observer.observe(body, { childList: true, subtree: true, attributes: true, attributeFilter: ["aria-describedby"] });
+    resizeObserver.observe(body);
     observeActions();
     return () => {
       observer.disconnect();
       resizeObserver.disconnect();
     };
-  }, [open, revealFocusedControl]);
+  }, [open, revealFocusedControl, routePath]);
 
   const CONTENT_REVEAL_FALLBACK_MS = 300;
   const CONTENT_READY_MAX_WAIT_MS = 1500;
@@ -105,7 +143,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     if (!open) return undefined;
     const calculateLayout = () => {
       const visual = window.visualViewport;
-      const width = Math.min(document.documentElement.clientWidth || window.innerWidth, visual?.width || window.innerWidth);
+      const width = document.documentElement.clientWidth || window.innerWidth;
       const height = visual?.height || window.innerHeight;
       const style = getComputedStyle(stageRef.current);
       const nextLayout = {
@@ -114,7 +152,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       };
       lastLayoutRef.current = nextLayout;
       setWrapperSize({ width: nextLayout.wrapperWidth, height: nextLayout.wrapperHeight });
-      setViewport({ width, height, top: visual?.offsetTop || 0, left: visual?.offsetLeft || 0 });
+      setViewport({ width, height, top: visual?.offsetTop || 0, left: 0 });
     };
     calculateLayout();
     window.addEventListener("resize", calculateLayout);
@@ -129,7 +167,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
 
   useLayoutEffect(() => {
     if (bodyRef.current) bodyRef.current.scrollTop = 0;
-  }, [contentKey]);
+  }, [contentKey, routePath]);
 
   useLayoutEffect(() => {
     if (!awaitingContent) return undefined;
@@ -288,23 +326,25 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
             <div
               data-booking-scaler="true"
               className="absolute left-0 top-0 cursor-default"
-              style={{ width: wrapperSize.width || "100%", height: wrapperSize.height || "100%" }}
+              style={{ width: "100%", height: "100%" }}
             >
               <div ref={contentRef} className="booking-dialog-viewport">
                 <div aria-hidden="true" />
-                <div
-                  ref={bodyRef}
-                  className={`booking-dialog-body${introComplete ? "" : " invisible"}`}
-                  role="region"
-                  aria-label="Booking details"
+                <BookingDialogBody
+                  bodyRef={bodyRef}
+                  className={introComplete ? "" : "invisible"}
                   onFocusCapture={(event) => revealFocusedControl(event.target)}
                 >
+                  <div ref={reservationRef} data-booking-reservation="true" />
                   <BookingDialogReadyContext.Provider value={markContentHydrated}>
                     <BookingDialogHoldContext.Provider value={hold}>
-                      {children}
+                      <BookingDialogActionsContext.Provider value={actionsHost}>
+                        {children}
+                      </BookingDialogActionsContext.Provider>
                     </BookingDialogHoldContext.Provider>
                   </BookingDialogReadyContext.Provider>
-                </div>
+                  <div ref={setActionsHost} className="booking-dialog-actions-host" />
+                </BookingDialogBody>
               </div>
             </div>
           </motion.div>

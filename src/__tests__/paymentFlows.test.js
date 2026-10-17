@@ -2,6 +2,7 @@ import React from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Payment from "../components/Payment";
+import { BookingDialogBody } from "../components/BookingModal";
 
 let paypalButtonsProps = null;
 let mockLocation = {
@@ -63,14 +64,14 @@ const bookingFixture = (overrides = {}) => ({
   ...overrides,
 });
 
-const renderPayment = (bookingData, search = "") => {
+const renderPayment = (bookingData, search = "", inDialog = false) => {
   __setMockLocation({
     pathname: "/payment",
     search,
     hash: "",
     state: { bookingData },
   });
-  return render(<Payment />);
+  return render(inDialog ? <BookingDialogBody><Payment /></BookingDialogBody> : <Payment />);
 };
 
 const loadRazorpay = async () => {
@@ -289,7 +290,7 @@ describe("payment session UI", () => {
       return response({ ok: true });
     });
 
-    renderPayment(bookingFixture());
+    renderPayment(bookingFixture(), "", true);
     await waitFor(() => expect(paypalButtonsProps?.disabled).toBe(false));
     const razorpayButton = screen.getByRole("button", {
       name: "Pay with Razorpay",
@@ -319,8 +320,11 @@ describe("payment session UI", () => {
     expect(paypalShell.className).toContain("[&_iframe]:!outline-0");
     expect(paypalShell.className).not.toContain(`[&_iframe]:!outline-${"none"}`);
     expect(
-      screen.getByRole("link", { name: /back to booking/i }).closest("section")
-    ).toHaveClass("booking-payment");
+      screen.getByRole("link", { name: /back to booking/i }).closest(".booking-dialog-body")
+    ).toHaveStyle({
+      paddingBlock: "var(--booking-body-padding)",
+      paddingInline: "var(--booking-body-padding-inline, var(--booking-body-padding))",
+    });
 
     const clientCreate = jest.fn();
     let orderId;

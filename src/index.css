@@ -3053,6 +3053,8 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
 }
 
 .booking-dialog-frame {
+  container-type: inline-size;
+  container-name: booking-frame;
   flex: none;
   width: calc(min(960px, 100%) - var(--booking-intro-offset, 0px));
   height: calc(100% - var(--booking-intro-offset, 0px));
@@ -3076,7 +3078,6 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
   scroll-padding-block: 8px calc(var(--booking-actions-height, 0px) + var(--booking-body-padding) + 8px);
   scrollbar-gutter: stable;
   scrollbar-width: thin;
-  padding: var(--booking-body-padding);
   font-size: 16px;
   line-height: 24px;
 }
@@ -3117,9 +3118,16 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
   padding: 0;
 }
 
+.booking-dialog-actions-host {
+  display: contents;
+}
+
+[data-booking-reservation] {
+  display: flow-root;
+}
+
 .booking-dialog-body .booking-step-actions {
-  position: sticky;
-  bottom: 0;
+  position: relative;
   z-index: 20;
   padding: 12px var(--booking-body-padding);
   border-top: 1px solid var(--color-border-input);
@@ -3127,7 +3135,12 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
   box-shadow: 0 -8px 20px rgba(0, 0, 0, 0.2);
 }
 
-.booking-dialog-body .booking-step-actions::after {
+.booking-dialog-body[data-booking-actions-pinned="true"] .booking-step-actions {
+  position: sticky;
+  bottom: 0;
+}
+
+.booking-dialog-body[data-booking-actions-pinned="true"] .booking-step-actions::after {
   content: "";
   position: absolute;
   top: 100%;
@@ -3135,6 +3148,27 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
   right: 0;
   height: var(--booking-body-padding);
   background: var(--gradient-panel);
+}
+
+.booking-slot-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.booking-actions-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.booking-dialog-body .booking-actions-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.booking-actions-wide {
+  grid-column: 1 / -1;
 }
 
 .booking-calendar-layout {
@@ -3185,7 +3219,9 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
   .booking-dialog-stage {
     padding: calc(24px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left));
   }
+}
 
+@container booking-frame (min-width: 700px) {
   .booking-dialog-body {
     --booking-body-padding: 24px;
   }
@@ -3199,9 +3235,24 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
   }
 }
 
-@media (min-width: 1024px) {
+@container booking-frame (min-width: 900px) {
   .booking-slot-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container booking-frame (min-width: 640px) {
+  .booking-slot-actions {
+    flex-direction: row;
+  }
+
+  .booking-slot-actions > button {
+    width: 16rem;
+    max-width: 100%;
+  }
+
+  .booking-dialog-body .booking-actions-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -3210,10 +3261,11 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
   }
+}
 
+@container booking-frame (max-width: 359px) {
   .booking-dialog-body {
-    padding-left: 0;
-    padding-right: 0;
+    --booking-body-padding-inline: 0px;
   }
 
   .booking-calendar-grid {

@@ -97,6 +97,36 @@ async function captureStep(page, testInfo, name) {
   return metrics;
 }
 
+async function controlBounds(target) {
+  return target.evaluate(node => {
+    const body = node.closest(".booking-dialog-body");
+    const rect = element => {
+      const box = element.getBoundingClientRect();
+      return { top: box.top, bottom: box.bottom, left: box.left, right: box.right, width: box.width, height: box.height };
+    };
+    const actions = body.querySelector(".booking-step-actions");
+    return { control: rect(node), body: rect(body), actions: actions ? { ...rect(actions), position: getComputedStyle(actions).position } : null, scrollTop: body.scrollTop };
+  });
+}
+
+function expectInsideBody(bounds) {
+  expect.soft(bounds.control.top).toBeGreaterThanOrEqual(bounds.body.top);
+  expect.soft(bounds.control.bottom).toBeLessThanOrEqual(bounds.body.bottom);
+  expect.soft(bounds.control.left).toBeGreaterThanOrEqual(bounds.body.left);
+  expect.soft(bounds.control.right).toBeLessThanOrEqual(bounds.body.right);
+}
+
+async function mockVisualViewport(page, values) {
+  await page.addInitScript(values => {
+    const visual = Object.assign(new EventTarget(), { offsetTop: 0, offsetLeft: 0, scale: 1 }, values);
+    Object.defineProperty(window, "visualViewport", { configurable: true, value: visual });
+    window.__setBookingViewport = next => {
+      Object.assign(visual, next);
+      visual.dispatchEvent(new Event("resize"));
+    };
+  }, values);
+}
+
 function sessionCls(shifts) {
   let cls = 0, session = 0, start = 0, last = 0;
   for (const shift of shifts.filter(shift => !shift.hadRecentInput)) {
@@ -111,6 +141,64 @@ function sessionCls(shifts) {
 for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 }, { width: 1440, height: 900 }]) {
   test.describe(`${viewport.width}x${viewport.height}`, () => {
     test.use({ viewport, hasTouch: viewport.width < 768 });
+
+    test("clearing a settled hold preserves checkout geometry until the route changes", async ({ page, flow }, testInfo) => {
+      await flow.review();
+      await flow.payment();
+      await ready(page);
+      const heading = page.getByRole("heading", { name: "Complete Payment", exact: true });
+      const before = await heading.boundingBox();
+      await page.waitForTimeout(700);
+      await expect(page.locator(dialogSelector).getByRole("button", { name: "Release", exact: true })).toBeVisible();
+      await page.evaluate(() => {
+        window.__dialogShifts = [];
+        window.dispatchEvent(new CustomEvent("hold-state", { detail: null }));
+      });
+      await page.waitForTimeout(200);
+      const after = await heading.boundingBox();
+      const shifts = await page.evaluate(() => window.__dialogShifts);
+      await save(page, testInfo, "settled-hold-layout", { before, after, cls: sessionCls(shifts), shifts });
+      await expect(page).toHaveURL(/\/payment$/);
+      await expect(page.locator(dialogSelector).getByRole("button", { name: "Release", exact: true })).toHaveCount(0);
+      expect.soft(after).toEqual(before);
+      expect.soft(sessionCls(shifts)).toBeLessThanOrEqual(0.000001);
+    });
+
+    test("payment resets review scrolling and keeps the reservation countdown and release", async ({ page, flow }, testInfo) => {
+      await flow.review();
+      const body = page.locator(`${dialogSelector} .booking-dialog-body`);
+      await body.evaluate(node => { node.scrollTop = node.scrollHeight; });
+      const reviewScrollTop = await body.evaluate(node => node.scrollTop);
+      expect(reviewScrollTop).toBeGreaterThan(0);
+      await flow.payment();
+      await ready(page);
+      const heading = page.getByRole("heading", { name: "Complete Payment", exact: true });
+      const bounds = await controlBounds(heading);
+      const padding = await body.evaluate(node => {
+        const style = getComputedStyle(node);
+        return { top: parseFloat(style.paddingTop), right: parseFloat(style.paddingRight), bottom: parseFloat(style.paddingBottom), left: parseFloat(style.paddingLeft) };
+      });
+      const reservation = body.getByText(/^Slot 10:00 AM/);
+      const release = body.getByRole("button", { name: "Release", exact: true });
+      await save(page, testInfo, "payment-reservation", { reviewScrollTop, ...bounds, padding, reservationCount: await reservation.count(), releaseCount: await release.count() });
+      expect.soft(bounds.scrollTop).toBe(0);
+      expectInsideBody(bounds);
+      const expectedPadding = viewport.width < 768 ? 8 : 24;
+      expect.soft(padding).toEqual({ top: expectedPadding, right: expectedPadding, bottom: expectedPadding, left: expectedPadding });
+      await expect(reservation).toBeVisible();
+      await expect(body.getByText(/^Expires in \d+:\d{2}$/)).toBeVisible();
+      await expect(release).toBeVisible();
+      const hold = await page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold")));
+      await release.click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(page.locator("#main-content")).toBeFocused();
+      const released = flow.state.calls.filter(call => call.path === "/api/releaseHold");
+      const storage = await page.evaluate(() => ({ hold: sessionStorage.getItem("my_slot_hold"), draft: sessionStorage.getItem("booking_draft") }));
+      await save(page, testInfo, "payment-released", { released, storage });
+      expect(released).toHaveLength(1);
+      expect(released[0].body).toEqual({ holdId: hold.holdId, holdToken: hold.holdToken });
+      expect(storage).toEqual({ hold: null, draft: null });
+    });
 
     test("step actions stay visible while slots totals and field errors scroll above them", async ({ page, flow }, testInfo) => {
       flow.state.slots[0].times = Array.from({ length: 16 }, (_, index) => `${String(index + 8).padStart(2, "0")}:00`);
@@ -392,8 +480,11 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 
       expect(result.confirmationCls).toBeLessThan(0.1);
       const baselineDir = process.env.ROO_SIZING_BASELINE_DIR;
       if (baselineDir) {
+        const baselineRoot = await fs.stat(baselineDir).catch(() => null);
+        expect(baselineRoot?.isDirectory(), `Missing CLS baseline directory: ${baselineDir}`).toBe(true);
         const directories = await fs.readdir(baselineDir);
         const directory = directories.find(name => name.includes(`${viewport.width}x${viewport.height}`) && name.includes("open-step-changes"));
+        expect(directory, `Missing CLS baseline for ${viewport.width}x${viewport.height} in ${baselineDir}`).toBeDefined();
         const baseline = JSON.parse(await fs.readFile(path.join(baselineDir, directory, "session-cls.json"), "utf8"));
         expect(result.checkoutCls).toBeLessThanOrEqual(baseline.checkoutCls + 0.000001);
         expect(result.confirmationCls).toBeLessThanOrEqual(baseline.confirmationCls + 0.000001);
@@ -401,3 +492,134 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 
     });
   });
 }
+
+for (const scenario of [
+  { width: 844, height: 390 },
+  { width: 390, height: 568, longTitle: true },
+  { width: 320, height: 568, keyboardHeight: 260 },
+]) {
+  test.describe(`${scenario.width}x${scenario.height}${scenario.keyboardHeight ? " with keyboard" : ""}`, () => {
+    test.use({ viewport: { width: scenario.width, height: scenario.height }, hasTouch: true });
+
+    test("short bodies keep actions reachable and invalid fields uncovered", async ({ page, flow }, testInfo) => {
+      if (scenario.keyboardHeight) await mockVisualViewport(page, { width: scenario.width, height: scenario.height });
+      if (scenario.longTitle) {
+        const title = `Performance booking ${"ExtendedPackageName".repeat(24)}`;
+        await page.addInitScript(title => sessionStorage.setItem("booking_draft", JSON.stringify({ lastTitle: title, packages: { [title]: { selectedPackage: { title, price: "$84.99" } } } })), title);
+      }
+      flow.state.slots[0].times = Array.from({ length: 16 }, (_, index) => `${String(index + 8).padStart(2, "0")}:00`);
+      await flow.booking();
+      const next = page.getByRole("button", { name: "Next", exact: true }).last();
+      if (scenario.longTitle) {
+        await page.locator(`${dialogSelector} .booking-dialog-body`).evaluate(node => { node.scrollTop = 0; });
+        await ready(page);
+        const initial = await controlBounds(next);
+        await save(page, testInfo, "long-title-initial-action", initial);
+        expectInsideBody(initial);
+      }
+      await next.evaluate(node => node.scrollIntoView({ block: "end" }));
+      await ready(page);
+      const slotBounds = await controlBounds(next);
+      await save(page, testInfo, "short-slot-action", slotBounds);
+      expectInsideBody(slotBounds);
+      if (slotBounds.body.height < 360) expect.soft(slotBounds.actions.position).not.toBe("sticky");
+      await page.getByRole("button", { name: "11:00 PM", exact: true }).click();
+      await next.click();
+      await flow.details("invalid-email");
+      if (scenario.keyboardHeight) {
+        await page.evaluate(height => window.__setBookingViewport({ height }), scenario.keyboardHeight);
+        await page.waitForTimeout(250);
+      }
+      const review = page.getByRole("button", { name: "Review before payment", exact: true });
+      await review.evaluate(node => node.scrollIntoView({ block: "end" }));
+      await ready(page);
+      const detailsBounds = await controlBounds(review);
+      await save(page, testInfo, "short-details-action", detailsBounds);
+      expectInsideBody(detailsBounds);
+      if (detailsBounds.body.height < 360) expect.soft(detailsBounds.actions.position).not.toBe("sticky");
+      await review.click();
+      const email = page.getByRole("textbox", { name: "Booking email", exact: true });
+      await expect(email).toBeFocused();
+      await expect(email).toHaveAttribute("aria-invalid", "true");
+      await ready(page);
+      const field = await controlBounds(email);
+      const error = await controlBounds(page.locator("#booking-email-error"));
+      await save(page, testInfo, "short-invalid-field", { field, error, visualHeight: scenario.keyboardHeight || scenario.height });
+      expectInsideBody(field);
+      expectInsideBody(error);
+      if (field.actions.position === "sticky") {
+        expect.soft(field.control.bottom).toBeLessThanOrEqual(field.actions.top);
+        expect.soft(error.control.bottom).toBeLessThanOrEqual(error.actions.top);
+      }
+      await email.fill("visitor@example.invalid");
+      await review.click();
+      await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+      const payment = page.getByRole("button", { name: "Continue to payment", exact: true });
+      await payment.evaluate(node => node.scrollIntoView({ block: "end" }));
+      await ready(page);
+      const reviewBounds = await controlBounds(payment);
+      await save(page, testInfo, "short-review-action", reviewBounds);
+      expectInsideBody(reviewBounds);
+    });
+  });
+}
+
+test.describe("narrow frames and reservation focus", () => {
+  test.use({ viewport: { width: 768, height: 1024 } });
+
+  test("pinch zoom keeps the frame width tied to the layout viewport", async ({ page, flow }, testInfo) => {
+    await mockVisualViewport(page, { width: 384, height: 512, scale: 2 });
+    await flow.booking();
+    await ready(page);
+    const metrics = await measure(page);
+    await save(page, testInfo, "pinch-layout-width", metrics);
+    expect(metrics.frame.width).toBeGreaterThan(650);
+    expect(metrics.horizontalOverflow).toEqual({ document: 0, frame: 0, body: 0 });
+  });
+
+  test("a 336 pixel frame stacks the calendar and slots without clipping", async ({ page, flow }, testInfo) => {
+    await flow.booking();
+    await ready(page);
+    await page.locator(dialogSelector).evaluate(node => { node.style.width = "336px"; });
+    await page.waitForTimeout(250);
+    const layout = await page.locator(".booking-calendar-layout").evaluate(node => {
+      const rect = element => { const box = element.getBoundingClientRect(); return { top: box.top, bottom: box.bottom, left: box.left, right: box.right, width: box.width }; };
+      return { calendar: rect(node.children[0]), slots: rect(node.children[1]), body: rect(node.closest(".booking-dialog-body")), columns: getComputedStyle(node).gridTemplateColumns };
+    });
+    const metrics = await measure(page);
+    await save(page, testInfo, "narrow-frame", { layout, metrics });
+    expect.soft(metrics.horizontalOverflow).toEqual({ document: 0, frame: 0, body: 0 });
+    expect.soft(layout.slots.top).toBeGreaterThanOrEqual(layout.calendar.bottom);
+    for (const child of [layout.calendar, layout.slots]) {
+      expect.soft(child.left).toBeGreaterThanOrEqual(layout.body.left);
+      expect.soft(child.right).toBeLessThanOrEqual(layout.body.right);
+    }
+  });
+
+  test("closing a reopened reservation restores focus to the replacement Continue button", async ({ page, flow }, testInfo) => {
+    await flow.reserve();
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    const resume = page.getByRole("button", { name: "Continue booking", exact: true });
+    await expect(resume).toBeVisible();
+    await resume.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(resume).toBeVisible();
+    await save(page, testInfo, "reservation-return-focus", await page.evaluate(() => ({ tag: document.activeElement.tagName, text: document.activeElement.textContent.slice(0, 200) })));
+    await expect(resume).toBeFocused();
+  });
+
+  test("details accessible names come from their visible labels", async ({ page, flow }, testInfo) => {
+    await flow.reserve();
+    const labels = [];
+    for (const [name, text] of fields) {
+      const input = page.locator(`#booking-${name}`);
+      labels.push({ name, expected: text, override: await input.getAttribute("aria-label") });
+      await expect.soft(input).toHaveAccessibleName(text);
+      await expect.soft(input).not.toHaveAttribute("aria-label");
+    }
+    await save(page, testInfo, "visible-accessible-labels", labels);
+  });
+});

@@ -2113,7 +2113,7 @@ describe("booking calendar UI", () => {
     );
     expect(screen.queryByText("What matters most?")).not.toBeInTheDocument();
     await userEvent.type(
-      screen.getByLabelText("Extra booking requirements"),
+      screen.getByLabelText("Extra booking requirements (optional)"),
       " please"
     );
     await waitFor(() => {
