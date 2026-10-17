@@ -72,7 +72,7 @@ const broadcastHold = (payload) => {
   }
 };
 
-export default function ReservationBanner() {
+export default function ReservationBanner({ hidden = false }) {
   const nav = useNavigate();
   const location = useLocation();
   const [hold, setHold] = useState(null);
@@ -223,7 +223,7 @@ export default function ReservationBanner() {
     }
   };
 
-  const shouldRender = hold && countdown !== null && countdown > 0 && path !== "/booking";
+  const shouldRender = !hidden && hold && countdown !== null && countdown > 0 && path !== "/booking";
 
   const bannerRef = useRef(null);
 

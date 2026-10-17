@@ -13,6 +13,7 @@ import { isProductionBrowser } from "./lib/productionBrowser";
 import SalesTelemetry from "./components/SalesTelemetry";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import ReservationBanner from "./components/ReservationBanner";
+import { BookingDialogReady } from "./lib/bookingDialogHold";
 import IntercomMessenger from "./components/IntercomMessenger";
 import { subscribePerfDebugChanges, syncPerfDebugFromEnvironment } from "./lib/perfDebug";
 import { initializePerformanceProfile } from "./lib/performanceProfile";
@@ -697,7 +698,7 @@ export function AppContent({
         <div className="app-bg-radial-layer absolute inset-0"></div>
 
         <Navbar routeShell={routeShell} />
-        <ReservationBanner />
+        <ReservationBanner hidden={isFlowRoute} />
 
         <main
           id="main-content"
@@ -742,6 +743,7 @@ export function AppContent({
               ) : (
                 <Book hideFooter compact />
               )}
+              <BookingDialogReady />
             </Suspense>
           </FlowModal>
         </Suspense>

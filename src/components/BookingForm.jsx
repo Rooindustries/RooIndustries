@@ -303,7 +303,7 @@ function BookingStepTracker({ step }) {
         </div>
         <span
           aria-hidden="true"
-          className="absolute top-2 text-[11px] font-medium text-accent transition-all duration-300"
+          className="absolute top-2 whitespace-nowrap text-sm font-medium text-accent transition-all duration-300"
           style={{
             left: STEP_PROGRESS_WIDTHS[step],
             transform: step === 3 ? "translateX(-100%)" : "translateX(-50%)",
@@ -470,7 +470,8 @@ const getUtcDateFromHold = (hold) => {
   return Number.isNaN(fromStart.getTime()) ? null : fromStart;
 };
 
-export default function BookingForm({ isMobile }) {
+export default function BookingForm() {
+  const formRootRef = useRef(null);
   const handleHomeSectionLink = useHomeSectionLinkHandler();
   const location = useLocation();
   const navigate = useNavigate();
@@ -483,6 +484,10 @@ export default function BookingForm({ isMobile }) {
   }, [location.search]);
 
   const [step, setStep] = useState(1);
+  useEffect(() => {
+    const body = formRootRef.current?.closest(".booking-dialog-body");
+    if (body) body.scrollTop = 0;
+  }, [step]);
   const [settings, setSettings] = useState(null);
   const [settingsError, setSettingsError] = useState("");
   const [settingsReloadKey, setSettingsReloadKey] = useState(0);
@@ -2442,10 +2447,9 @@ export default function BookingForm({ isMobile }) {
   };
 
   const modalContainerVariants = {
-    hidden: { opacity: 0, scale: 0.95, y: 15 },
+    hidden: { opacity: 0, y: 15 },
     visible: {
       opacity: 1,
-      scale: 1,
       y: 0,
       transition: {
         type: "spring",
@@ -2458,7 +2462,6 @@ export default function BookingForm({ isMobile }) {
     },
     exit: {
       opacity: 0,
-      scale: 0.95,
       y: 15,
       transition: { duration: 0.2 },
     },
@@ -2476,6 +2479,7 @@ export default function BookingForm({ isMobile }) {
   return (
     <>
       <div
+        ref={formRootRef}
         className={`ri-booking text-ink transition-opacity duration-300 ${
           pageFadeIn ? "opacity-100" : "opacity-0"
         }`}
@@ -2521,7 +2525,7 @@ export default function BookingForm({ isMobile }) {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3, ease: "easeInOut" }}
-                  className="max-w-3xl mx-auto bg-surface-card border border-line-input rounded-2xl p-8 text-center shadow-[0_0_25px_rgba(14,165,233,0.15)]"
+                  className="booking-step-panel max-w-3xl mx-auto bg-surface-card rounded-2xl text-center shadow-[0_0_25px_rgba(14,165,233,0.15)]"
                 >
                   <BookingStepTracker step={1} />
                   <h3 className="text-accent text-lg font-semibold mb-2">
@@ -2587,11 +2591,9 @@ export default function BookingForm({ isMobile }) {
                   )}
 
                   <div
-                    className={`flex flex-col gap-8 justify-center ${
-                      isMobile ? "" : "sm:flex-row"
-                    }`}
+                    className="booking-calendar-layout"
                   >
-                    <div>
+                    <div className="booking-calendar">
                       <div className="flex justify-between items-center mb-4">
                         <button
                           aria-label="Previous month"
@@ -2633,7 +2635,7 @@ export default function BookingForm({ isMobile }) {
                         </button>
                       </div>
 
-                      <div className="grid grid-cols-7 gap-2 text-sm text-accent mb-2">
+                      <div className="booking-calendar-grid text-sm text-accent mb-2">
                         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
                           (d) => (
                             <div key={d} className="font-semibold text-accent">
@@ -2643,7 +2645,7 @@ export default function BookingForm({ isMobile }) {
                         )}
                       </div>
 
-                      <div className="grid grid-cols-7 gap-2 text-sm">
+                      <div className="booking-calendar-grid text-sm">
                         {Array(startOfMonth.getDay())
                           .fill(null)
                           .map((_, i) => (
@@ -2744,11 +2746,7 @@ export default function BookingForm({ isMobile }) {
                         </p>
 
                         <div
-                          className={`grid gap-3 ${
-                            isMobile
-                              ? "grid-cols-2"
-                              : "grid-cols-2 sm:grid-cols-3"
-                          }`}
+                          className="booking-slot-grid"
                         >
                           {times.map((t) => {
                             const isMyHold =
@@ -2806,51 +2804,47 @@ export default function BookingForm({ isMobile }) {
                     </>
                   )}
 
-                  <div
-                    className={`flex flex-col items-center justify-center gap-4 mt-10 ${
-                      isMobile ? "" : "sm:flex-row"
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setModalMode("view");
-                        setModalPackage(planPackage || selectedPackage);
-                        setShowVertexModal(true);
-                      }}
-                      className={`ri-booking-secondary glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 inline-flex items-center justify-center gap-2 ${
-                        isMobile ? "" : ""
-                      }`}
-                    >
-                      View My Plan
-                      <span className="glow-line glow-line-top" />
-                      <span className="glow-line glow-line-right" />
-                      <span className="glow-line glow-line-bottom" />
-                      <span className="glow-line glow-line-left" />
-                    </button>
+                  <div className="booking-step-actions mt-10">
+                    <div className="flex flex-col items-center justify-center gap-4 md:flex-row">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModalMode("view");
+                          setModalPackage(planPackage || selectedPackage);
+                          setShowVertexModal(true);
+                        }}
+                        className={`ri-booking-secondary glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 inline-flex items-center justify-center gap-2`}
+                      >
+                        View My Plan
+                        <span className="glow-line glow-line-top" />
+                        <span className="glow-line glow-line-right" />
+                        <span className="glow-line glow-line-bottom" />
+                        <span className="glow-line glow-line-left" />
+                      </button>
 
-                    <button
-                      onClick={handleLockAndGoNext}
-                      aria-disabled={
-                        !selectedDate || !selectedSlot || !selectedSlotAvailable || availabilityLoading || lockingSlot
-                      }
-                      className={`ri-booking-primary glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
-                        !selectedDate || !selectedSlot || !selectedSlotAvailable || availabilityLoading || lockingSlot
-                          ? "opacity-60"
-                          : ""
-                      } ${isMobile ? "" : ""}`}
-                    >
-                      {lockingSlot ? "Reserving..." : "Next"}
-                      <span className="glow-line glow-line-top" />
-                      <span className="glow-line glow-line-right" />
-                      <span className="glow-line glow-line-bottom" />
-                      <span className="glow-line glow-line-left" />
-                    </button>
+                      <button
+                        onClick={handleLockAndGoNext}
+                        aria-disabled={
+                          !selectedDate || !selectedSlot || !selectedSlotAvailable || availabilityLoading || lockingSlot
+                        }
+                        className={`ri-booking-primary glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
+                          !selectedDate || !selectedSlot || !selectedSlotAvailable || availabilityLoading || lockingSlot
+                            ? "opacity-60"
+                            : ""
+                        }`}
+                      >
+                        {lockingSlot ? "Reserving..." : "Next"}
+                        <span className="glow-line glow-line-top" />
+                        <span className="glow-line glow-line-right" />
+                        <span className="glow-line glow-line-bottom" />
+                        <span className="glow-line glow-line-left" />
+                      </button>
+                    </div>
+
+                    {errorStep1 && (
+                      <p role="alert" className="text-danger-text mt-3 text-sm">{errorStep1}</p>
+                    )}
                   </div>
-
-                  {errorStep1 && (
-                    <p role="alert" className="text-danger-text mt-3 text-sm">{errorStep1}</p>
-                  )}
                 </motion.div>
               )}
 
@@ -2861,7 +2855,7 @@ export default function BookingForm({ isMobile }) {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3, ease: "easeInOut" }}
-                  className="max-w-4xl mx-auto bg-surface-card border border-line-input rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)]"
+                  className="booking-step-panel max-w-4xl mx-auto bg-surface-card rounded-2xl shadow-[0_0_25px_rgba(14,165,233,0.15)]"
                 >
                   <BookingStepTracker step={2} />
                   <HoldBanner
@@ -2890,7 +2884,9 @@ export default function BookingForm({ isMobile }) {
                   </div>
 
                   <div className="space-y-4">
+                    <label htmlFor="booking-discord" className="block text-left text-sm font-semibold text-ink">Discord username</label>
                     <input
+                      id="booking-discord"
                       name="discord"
                       aria-label="Discord username"
                       placeholder="Discord (e.g. Servi#1234 or @Servi)"
@@ -2898,7 +2894,9 @@ export default function BookingForm({ isMobile }) {
                       value={form.discord}
                       className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
                     />
+                    <label htmlFor="booking-email" className="block text-left text-sm font-semibold text-ink">Booking email</label>
                     <input
+                      id="booking-email"
                       name="email"
                       ref={emailInputRef}
                       aria-label="Booking email"
@@ -2918,7 +2916,9 @@ export default function BookingForm({ isMobile }) {
                         {emailError}
                       </p>
                     )}
+                    <label htmlFor="booking-specs" className="block text-left text-sm font-semibold text-ink">PC specifications</label>
                     <input
+                      id="booking-specs"
                       name="specs"
                       aria-label="PC specifications"
                       placeholder="PC Specs"
@@ -2926,7 +2926,9 @@ export default function BookingForm({ isMobile }) {
                       value={form.specs}
                       className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
                     />
+                    <label htmlFor="booking-mainGame" className="block text-left text-sm font-semibold text-ink">Main game or application</label>
                     <input
+                      id="booking-mainGame"
                       name="mainGame"
                       aria-label="Main game or application"
                       placeholder="Main use case (Game/Apps)"
@@ -2934,7 +2936,9 @@ export default function BookingForm({ isMobile }) {
                       value={form.mainGame}
                       className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
                     />
+                    <label htmlFor="booking-notes" className="block text-left text-sm font-semibold text-ink">Extra booking requirements (optional)</label>
                     <textarea
+                      id="booking-notes"
                       name="notes"
                       aria-label="Extra booking requirements"
                       placeholder="Any extra requirements?"
@@ -2953,31 +2957,33 @@ export default function BookingForm({ isMobile }) {
                     Read the FAQ <span className="sr-only">(opens in a new tab)</span>
                   </a>
 
-                  <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      onClick={() => setStep(1)}
-                      className="w-full min-w-0 bg-surface-input hover:bg-surface-hover py-3 rounded-lg font-semibold transition"
-                    >
-                      Back
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleReviewBeforePayment}
-                      className={`ri-booking-primary glow-button w-full min-w-0 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2 ${
-                        !isStep2Complete ? "opacity-60 cursor-not-allowed" : ""
-                      }`}
-                    >
-                      Review before payment
-                      <span className="glow-line glow-line-top" />
-                      <span className="glow-line glow-line-right" />
-                      <span className="glow-line glow-line-bottom" />
-                      <span className="glow-line glow-line-left" />
-                    </button>
+                  <div className="booking-step-actions mt-6">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => setStep(1)}
+                        className="w-full min-w-0 bg-surface-input hover:bg-surface-hover py-3 rounded-lg font-semibold transition"
+                      >
+                        Back
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleReviewBeforePayment}
+                        className={`ri-booking-primary glow-button w-full min-w-0 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2 ${
+                          !isStep2Complete ? "opacity-60 cursor-not-allowed" : ""
+                        }`}
+                      >
+                        Review before payment
+                        <span className="glow-line glow-line-top" />
+                        <span className="glow-line glow-line-right" />
+                        <span className="glow-line glow-line-bottom" />
+                        <span className="glow-line glow-line-left" />
+                      </button>
+                    </div>
+                    {errorStep2 && (
+                      <p role="alert" className="mt-3 text-sm text-danger-text">{errorStep2}</p>
+                    )}
                   </div>
-                  {errorStep2 && (
-                    <p role="alert" className="mt-3 text-sm text-danger-text">{errorStep2}</p>
-                  )}
                 </motion.div>
               )}
 
@@ -2988,7 +2994,7 @@ export default function BookingForm({ isMobile }) {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3, ease: "easeInOut" }}
-                  className="max-w-3xl mx-auto bg-surface-card border border-line-input rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)]"
+                  className="booking-step-panel max-w-3xl mx-auto bg-surface-card rounded-2xl shadow-[0_0_25px_rgba(14,165,233,0.15)]"
                 >
                   <BookingStepTracker step={3} />
                   <HoldBanner
@@ -3034,13 +3040,15 @@ export default function BookingForm({ isMobile }) {
                           {reviewDateTimeLabel || "Not selected"}
                         </dd>
                         {!isPaymentPendingHold && (
-                          <button
-                            type="button"
-                            onClick={() => setStep(1)}
-                            className="justify-self-start text-xs font-semibold text-accent underline underline-offset-2 transition hover:text-info-text sm:justify-self-end"
-                          >
-                            Edit
-                          </button>
+                          <dd className="flex justify-self-start sm:justify-self-end">
+                            <button
+                              type="button"
+                              onClick={() => setStep(1)}
+                              className="text-xs font-semibold text-accent underline underline-offset-2 transition hover:text-info-text"
+                            >
+                              Edit
+                            </button>
+                          </dd>
                         )}
                       </div>
                       <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
@@ -3198,94 +3206,96 @@ export default function BookingForm({ isMobile }) {
                     </dl>
                   </div>
 
-                  <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    {isPaymentPendingHold ? (
-                      paymentInOtherTab ? (
+                  <div className="booking-step-actions mt-6">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      {isPaymentPendingHold ? (
+                        paymentInOtherTab ? (
+                          <>
+                            <p role="alert" className="text-sm text-info-text sm:col-span-2">
+                              Payment already started in another tab. Continue payment there. Your reservation and details are saved.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => handleLockAndGoNext(true)}
+                              disabled={lockingSlot}
+                              className="w-full min-w-0 rounded-lg bg-surface-input py-3 font-semibold transition hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60 sm:col-span-2"
+                            >
+                              {lockingSlot ? "Checking reservation..." : "Check again"}
+                            </button>
+                          </>
+                        ) : (
                         <>
-                          <p role="alert" className="text-sm text-info-text sm:col-span-2">
-                            Payment already started in another tab. Continue payment there. Your reservation and details are saved.
-                          </p>
                           <button
                             type="button"
-                            onClick={() => handleLockAndGoNext(true)}
-                            disabled={lockingSlot}
-                            className="w-full min-w-0 rounded-lg bg-surface-input py-3 font-semibold transition hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60 sm:col-span-2"
+                            onClick={releasePaymentSession}
+                            disabled={releasingPayment}
+                            className="w-full min-w-0 rounded-lg border border-danger-border bg-danger-soft py-3 font-semibold text-danger-text transition hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60"
                           >
-                            {lockingSlot ? "Checking reservation..." : "Check again"}
+                            {releasingPayment
+                              ? "Checking payment..."
+                              : "Release payment"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={returnToPayment}
+                            className="ri-booking-primary glow-button inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg py-3 font-semibold transition"
+                          >
+                            Return to payment
+                            <span className="glow-line glow-line-top" />
+                            <span className="glow-line glow-line-right" />
+                            <span className="glow-line glow-line-bottom" />
+                            <span className="glow-line glow-line-left" />
                           </button>
                         </>
+                        )
                       ) : (
-                      <>
-                        <button
-                          type="button"
-                          onClick={releasePaymentSession}
-                          disabled={releasingPayment}
-                          className="w-full min-w-0 rounded-lg border border-danger-border bg-danger-soft py-3 font-semibold text-danger-text transition hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60"
-                        >
-                          {releasingPayment
-                            ? "Checking payment..."
-                            : "Release payment"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={returnToPayment}
-                          className="ri-booking-primary glow-button inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg py-3 font-semibold transition"
-                        >
-                          Return to payment
-                          <span className="glow-line glow-line-top" />
-                          <span className="glow-line glow-line-right" />
-                          <span className="glow-line glow-line-bottom" />
-                          <span className="glow-line glow-line-left" />
-                        </button>
-                      </>
-                      )
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setStep(2)}
-                          className="w-full min-w-0 bg-surface-input hover:bg-surface-hover py-3 rounded-lg font-semibold transition"
-                        >
-                          Back
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handlePay}
-                          disabled={
-                            validatingCode || !!restoredCodeCandidates
-                          }
-                          className={`ri-booking-primary glow-button inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg py-3 font-semibold transition ${
-                            loading || validatingCode || restoredCodeCandidates
-                              ? "cursor-wait opacity-60"
-                              : ""
-                          }`}
-                        >
-                          {loading
-                            ? "Preparing payment..."
-                            : validatingCode || restoredCodeCandidates
-                            ? "Checking code..."
-                            : "Continue to payment"}
-                          <span className="glow-line glow-line-top" />
-                          <span className="glow-line glow-line-right" />
-                          <span className="glow-line glow-line-bottom" />
-                          <span className="glow-line glow-line-left" />
-                        </button>
-                      </>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setStep(2)}
+                            className="w-full min-w-0 bg-surface-input hover:bg-surface-hover py-3 rounded-lg font-semibold transition"
+                          >
+                            Back
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handlePay}
+                            disabled={
+                              validatingCode || !!restoredCodeCandidates
+                            }
+                            className={`ri-booking-primary glow-button inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg py-3 font-semibold transition ${
+                              loading || validatingCode || restoredCodeCandidates
+                                ? "cursor-wait opacity-60"
+                                : ""
+                            }`}
+                          >
+                            {loading
+                              ? "Preparing payment..."
+                              : validatingCode || restoredCodeCandidates
+                              ? "Checking code..."
+                              : "Continue to payment"}
+                            <span className="glow-line glow-line-top" />
+                            <span className="glow-line glow-line-right" />
+                            <span className="glow-line glow-line-bottom" />
+                            <span className="glow-line glow-line-left" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    {!isPaymentPendingHold && (
+                      <p className="mt-3 text-center text-xs text-ink-muted">
+                        No charge until you confirm on the payment page.
+                      </p>
+                    )}
+                    {paymentReleaseStatus && (
+                      <p className="mt-3 text-sm text-success-text">
+                        {paymentReleaseStatus}
+                      </p>
+                    )}
+                    {errorStep2 && (
+                      <p role="alert" className="mt-3 text-sm text-danger-text">{errorStep2}</p>
                     )}
                   </div>
-                  {!isPaymentPendingHold && (
-                    <p className="mt-3 text-center text-xs text-ink-muted">
-                      No charge until you confirm on the payment page.
-                    </p>
-                  )}
-                  {paymentReleaseStatus && (
-                    <p className="mt-3 text-sm text-success-text">
-                      {paymentReleaseStatus}
-                    </p>
-                  )}
-                  {errorStep2 && (
-                    <p role="alert" className="mt-3 text-sm text-danger-text">{errorStep2}</p>
-                  )}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -3317,14 +3327,14 @@ export default function BookingForm({ isMobile }) {
                   tabIndex={-1}
                   variants={modalContainerVariants}
                   // Inherit initial/animate from the parent.
-                  className="relative w-full max-w-md bg-panel border border-info-border rounded-2xl shadow-glow-strong p-6 text-center transition-all duration-500 ease-in-out hover:shadow-glow-strong"
+                  className="booking-plan-dialog relative w-full max-w-md bg-panel border border-info-border rounded-2xl shadow-glow-strong p-6 text-center transition-all duration-500 ease-in-out hover:shadow-glow-strong"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <motion.button
                     aria-label="Close"
                     ref={planCloseRef}
                     variants={itemVariants}
-                    className="absolute right-3 top-3 text-info-text hover:text-white transition text-2xl z-10"
+                    className="absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-lg text-info-text hover:text-white transition text-2xl z-10"
                     onClick={closePlan}
                   >
                     ×
