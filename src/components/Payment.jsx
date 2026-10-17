@@ -408,6 +408,7 @@ export default function Payment({ hideFooter = false }) {
   const [preApplyingCodes, setPreApplyingCodes] = useState(true);
 
   const [banner, setBanner] = useState(null);
+  const bannerRef = useRef(null);
   const [serverQuote, setServerQuote] = useState(null);
   const [quoteFingerprint, setQuoteFingerprint] = useState("");
   const [quoteLoading, setQuoteLoading] = useState(false);
@@ -416,11 +417,17 @@ export default function Payment({ hideFooter = false }) {
 
   const showBanner = (type, text, options = {}) => {
     setBanner({ type, text, ...options });
-    if (options.persistent) return;
+    if (options.persistent || type === "error") return;
     setTimeout(() => {
       setBanner((prev) => (prev?.text === text ? null : prev));
     }, 4000);
   };
+
+  useEffect(() => {
+    if (banner?.type === "error" && banner.text) {
+      bannerRef.current?.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [banner]);
 
   useEffect(() => {
     if (!holdExpiresAt || processingDodoReturn) return;
@@ -1784,10 +1791,11 @@ export default function Payment({ hideFooter = false }) {
       <motion.div variants={itemVariants}>
         {banner && banner.text && (
           <div
+            ref={bannerRef}
             role={banner.type === "error" ? "alert" : "status"}
             aria-live={banner.type === "error" ? "assertive" : "polite"}
             aria-atomic="true"
-            className={`mt-6 rounded-xl border px-4 py-3 text-sm flex items-center gap-3 shadow-[0_0_25px_rgba(15,23,42,0.8)] ${
+            className={`mt-6 scroll-mt-6 rounded-xl border px-4 py-3 text-sm flex items-center gap-3 shadow-[0_0_25px_rgba(15,23,42,0.8)] ${
               banner.type === "error"
                 ? "border-danger-border bg-danger-soft text-danger-text"
                 : banner.type === "success"
