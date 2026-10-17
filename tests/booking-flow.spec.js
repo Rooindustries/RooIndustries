@@ -324,7 +324,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await expect(page.getByRole("alert").filter({ hasText: /validation.*unavailable|unable to validate/i })).toBeVisible({ timeout: 20000 });
         await expect(page.getByRole("textbox", { name: "Referral or coupon code", exact: true })).toBeEnabled();
         await expect(page.getByRole("button", { name: "Apply", exact: true })).toBeEnabled();
-        await expect(page.getByRole("button", { name: /^Pay \$/ })).toBeEnabled();
+        await expect(page.getByRole("button", { name: "Continue to payment", exact: true })).toBeEnabled();
         await flow.payment();
         await expect(page.getByRole("button", { name: "Pay your way", exact: true })).toBeEnabled();
         const quote = flow.state.calls.find(({ path }) => path === "/api/payment/quote").body;
@@ -332,7 +332,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         expect(quote.referralCode || "").toBe("");
         await page.goto("/booking?ref=friend");
         await expect(page.getByRole("alert").filter({ hasText: /validation.*unavailable|unable to validate/i })).toBeVisible({ timeout: 20000 });
-        await expect(page.getByRole("button", { name: /^Pay \$/ })).toBeEnabled();
+        await expect(page.getByRole("button", { name: "Continue to payment", exact: true })).toBeEnabled();
       });
     }
 
@@ -349,7 +349,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         expect(await page.evaluate(() => Object.values(JSON.parse(sessionStorage.getItem("booking_draft")).packages)[0].checkoutCodes)).toEqual(savedCodes);
         if (type === "referral") expect(await page.evaluate(() => sessionStorage.getItem("referral_session"))).toBe(code);
         await expect(page.getByRole("button", { name: /^Remove (referral|coupon) code/ })).toHaveCount(0);
-        await expect(page.getByRole("button", { name: /^Pay \$/ })).toBeEnabled();
+        await expect(page.getByRole("button", { name: "Continue to payment", exact: true })).toBeEnabled();
         delete flow.state.failures[type === "referral" ? "/api/ref/validateReferral" : "/api/ref/validateCoupon"];
         await page.getByRole("button", { name: "Apply", exact: true }).click();
         await expect(page.getByRole("button", { name: `Remove ${type} code ${code}`, exact: true })).toBeVisible();
@@ -368,7 +368,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page.getByRole("alert").filter({ hasText: "Invalid referral or coupon code." })).toBeVisible();
       flow.state.collision = true;
       await flow.codeInput("  FrIeNd  ");
-      await expect(page.getByRole("button", { name: /^Pay \$/ })).toBeEnabled();
+      await expect(page.getByRole("button", { name: "Continue to payment", exact: true })).toBeEnabled();
       await flow.payment();
       await expect.poll(() => flow.state.calls.filter(({ path }) => path === "/api/payment/quote").length).toBeGreaterThan(0);
       const quote = flow.state.calls.filter(({ path }) => path === "/api/payment/quote").at(-1).body;
@@ -377,7 +377,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       flow.state.failures["/api/ref/validateReferral"] = 503;
       await page.goto("/booking");
       await expect(page.getByRole("alert").filter({ hasText: /validation.*unavailable|unable to validate/i })).toBeVisible();
-      await expect(page.getByRole("button", { name: /^Pay \$/ })).toBeEnabled();
+      await expect(page.getByRole("button", { name: "Continue to payment", exact: true })).toBeEnabled();
     });
 
     for (const stalled of ["coupon", "referral"]) {
@@ -394,7 +394,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           await expect(page.getByRole("button", { name: /^Remove (referral|coupon) code/ })).toHaveCount(0);
           await expect(page.getByRole("textbox", { name: "Referral or coupon code", exact: true })).toBeEnabled();
         }
-        await expect(page.getByRole("button", { name: /^Pay \$/ })).toBeEnabled();
+        await expect(page.getByRole("button", { name: "Continue to payment", exact: true })).toBeEnabled();
         await flow.payment();
         await expect.poll(() => flow.state.calls.filter(({ path }) => path === "/api/payment/quote").length).toBeGreaterThan(0);
         const quote = flow.state.calls.filter(({ path }) => path === "/api/payment/quote").at(-1).body;

@@ -108,6 +108,7 @@ describe("payment session UI", () => {
         return response({
           ok: true,
           providers: {
+            dodo: { enabled: false, mode: "missing" },
             razorpay: {
               enabled: false,
               mode: "live",
@@ -134,7 +135,7 @@ describe("payment session UI", () => {
       )
     ).toBeNull();
     expect(
-      await screen.findByText(/temporarily unavailable while we update/i)
+      await screen.findByText(/Online payment is unavailable right now/i)
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /temporarily unavailable/i })

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 export default function RefForgot() {
@@ -6,6 +6,14 @@ export default function RefForgot() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
+  const [acknowledgedEmail, setAcknowledgedEmail] = useState("");
+  const submittedEmailRef = useRef("");
+  const acknowledged = Boolean(acknowledgedEmail) && email === acknowledgedEmail;
+  const statusRef = useRef(null);
+
+  useEffect(() => {
+    if (acknowledged) statusRef.current?.scrollIntoView({ block: "nearest" });
+  }, [acknowledged]);
 
   function showToast(type, message) {
     setToast({ type, message });
@@ -16,20 +24,23 @@ export default function RefForgot() {
     e.preventDefault();
     if (!email) return showToast("error", "Enter your email");
 
+    const submittedEmail = email;
+    submittedEmailRef.current = submittedEmail;
     setLoading(true);
+    setAcknowledgedEmail("");
+    setToast(null);
 
     try {
       const res = await fetch("/api/ref/forgot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email: submittedEmail }),
       });
 
       const data = await res.json();
 
       if (data.ok) {
-        showToast("success", data.message);
-        setEmail("");
+        if (submittedEmailRef.current === submittedEmail) setAcknowledgedEmail(submittedEmail);
       } else {
         showToast("error", data.error || "Failed to send link");
       }
@@ -73,9 +84,19 @@ export default function RefForgot() {
                        outline-none focus:border-info-border transition text-base text-ink"
             placeholder="you@example.com"
             value={email}
-            onChange={(e) => setEmail(e.target.value.trim())}
+            onChange={(e) => {
+              submittedEmailRef.current = "";
+              setAcknowledgedEmail("");
+              setEmail(e.target.value.trim());
+            }}
           />
         </div>
+
+        {acknowledged && (
+          <p ref={statusRef} role="status" className="rounded-xl border border-success-border bg-success-soft p-4 text-sm text-success-text">
+            If an account matches that email, we've sent a reset link. Check your inbox and spam folder.
+          </p>
+        )}
 
         <button
           type="submit"

@@ -95,6 +95,40 @@ async function submitRegistration(page, email = 'new@fixture.invalid', code = 'n
   await page.getByRole('button', { name: 'Register', exact: true }).click();
 }
 
+test("reset acknowledgment persists without clearing or resending the email", async ({ page, context, baseURL }, testInfo) => {
+  let sends = 0;
+  try {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const fixture = await import("./fixtures/api-routes.mjs");
+    await fixture.configureApiFixture(baseURL, { reset: true });
+    const response = await fixture.requestRoute(fixture.apiFixtureOrigin(baseURL), "/__portal", { data: { reset: true } });
+    expect(response.status).toBe(200);
+    await context.unroute("**/*");
+    const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+    const local = new URL(baseURL);
+    local.hostname = "localhost";
+    await guardBrowserContext(context, [baseURL, local.origin, fixture.apiFixtureOrigin(baseURL)]);
+    page.on("request", request => { if (new URL(request.url()).pathname === "/api/ref/forgot") sends += 1; });
+    const message = "If an account matches that email, we've sent a reset link. Check your inbox and spam folder.";
+    for (const email of ["creator@fixture.invalid", "unknown@fixture.invalid"]) {
+      await page.goto(`${local.origin}/referrals/forgot`);
+      await page.getByLabel("Creator Email", { exact: true }).fill(email);
+      const sent = page.waitForResponse(r => new URL(r.url()).pathname === "/api/ref/forgot");
+      await page.getByRole("button", { name: "Send Reset Link", exact: true }).click();
+      expect((await sent).status()).toBe(200);
+      const status = page.getByRole("status").filter({ hasText: message });
+      await expect(status).toBeInViewport();
+      await expect(page.getByLabel("Creator Email", { exact: true })).toHaveValue(email);
+      await page.waitForTimeout(3400);
+      await expect(status).toBeVisible();
+      await expect(page.getByRole("button", { name: "Send Reset Link", exact: true })).toBeEnabled();
+    }
+    expect(sends).toBe(2);
+  } finally {
+    await record(page, testInfo, "reset-email-acknowledgment", { sends });
+  }
+});
+
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   const size = viewport.width === 390 ? 'mobile' : 'desktop';
   test.describe(size, () => {
@@ -215,8 +249,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(email).toHaveValue('creator@fixture.invalid');
       await page.unroute('**/api/ref/forgot');
       await page.getByRole('button', { name: 'Send Reset Link', exact: true }).click();
-      await expect(page.locator('#main-content').getByRole('status')).toHaveText('If email exists, link sent.');
-      await expect(email).toHaveValue('');
+      await expect(page.locator('#main-content').getByRole('status')).toHaveText("If an account matches that email, we've sent a reset link. Check your inbox and spam folder.");
+      await expect(email).toHaveValue('creator@fixture.invalid');
       await record(page, testInfo, `announced-outcomes-${size}`);
     });
 

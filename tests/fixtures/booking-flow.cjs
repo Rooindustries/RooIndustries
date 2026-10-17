@@ -149,7 +149,7 @@ const test = base.extend({
       await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
     };
     const payment = async () => {
-      await page.getByRole("button", { name: /^Pay \$/ }).click();
+      await page.getByRole("button", { name: "Continue to payment", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
     };
     const codeInput = async (code) => {

@@ -512,6 +512,7 @@ export default function Payment({ hideFooter = false }) {
     paypal: { enabled: false, mode: "unknown", clientId: "" },
   });
   const [providersSettled, setProvidersSettled] = useState(false);
+  const [providerAvailabilityKnown, setProviderAvailabilityKnown] = useState(false);
   useBookingDialogPending(!hydrated || !providersSettled || (Boolean(packageTitle) && !quoteSettled));
   const [showInternalPayments, setShowInternalPayments] = useState(false);
   const [paymentSession, setPaymentSession] = useState(null);
@@ -540,6 +541,7 @@ export default function Payment({ hideFooter = false }) {
     razorpayTemporarilyDisabled ||
     String(providerConfig?.razorpay?.mode || "unknown") !== "unknown";
   const canUsePaypal = hasPaypalClientId && !!providerConfig?.paypal?.enabled;
+  const onlinePaymentUnavailable = providerAvailabilityKnown && !providerConfig.dodo?.enabled && !canUseRazorpay && !providerConfig.paypal?.enabled;
   const shouldRenderPaypalBlock =
     !!providerConfig?.paypal?.enabled || showInternalPayments;
   const canDisplayPaypalMethod = shouldRenderPaypalBlock && canUsePaypal;
@@ -662,6 +664,9 @@ export default function Payment({ hideFooter = false }) {
           String(data.quoteFingerprint || data.fingerprint || "").trim()
         );
         if (data.providers) {
+          setProviderAvailabilityKnown(["dodo", "razorpay", "paypal"].every(
+            (provider) => typeof data.providers[provider]?.enabled === "boolean"
+          ));
           setProviderConfig((current) => ({ ...current, ...data.providers }));
         }
       })
@@ -849,6 +854,9 @@ export default function Payment({ hideFooter = false }) {
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("bad_status"))))
       .then((data) => {
         if (!active || !data?.ok || !data?.providers) return;
+        setProviderAvailabilityKnown(["dodo", "razorpay", "paypal"].every(
+          (provider) => typeof data.providers[provider]?.enabled === "boolean"
+        ));
         setProviderConfig({
           dodo: { enabled: !!data.providers?.dodo?.enabled, mode: data.providers?.dodo?.mode || "missing" },
           razorpay: {
@@ -2188,13 +2196,19 @@ export default function Payment({ hideFooter = false }) {
                   <span className="glow-line glow-line-left" />
                 </button>
               </div>
-              {razorpayTemporarilyDisabled ? (
+              {onlinePaymentUnavailable ? (
+                <p role="status" className="mt-2 rounded-lg border border-warning-border bg-warning-soft px-4 py-3 text-sm font-medium text-warning-text">
+                  Online payment is unavailable right now.{" "}
+                  <Link to="/contact" className="inline-flex min-h-11 items-center underline underline-offset-4">Contact us</Link>{" "}
+                  to finish your booking.
+                </p>
+              ) : razorpayTemporarilyDisabled ? (
                 <p
                   role="status"
                   className="mt-2 rounded-lg border border-warning-border bg-warning-soft px-4 py-3 text-sm font-medium text-warning-text"
                 >
                   Razorpay is temporarily unavailable while we update the merchant
-                  display name. Please use PayPal for now.
+                  display name.{(providerConfig.dodo?.enabled || canUsePaypal) && " Please use another payment option."}
                 </p>
               ) : (
                 razorpayAvailabilityKnown &&

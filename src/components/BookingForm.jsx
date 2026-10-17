@@ -486,12 +486,18 @@ export default function BookingForm({ isMobile }) {
   const [settings, setSettings] = useState(null);
   const [settingsError, setSettingsError] = useState("");
   const [settingsReloadKey, setSettingsReloadKey] = useState(0);
+  const [availabilityLoading, setAvailabilityLoading] = useState(true);
   const availabilityFetchMountedRef = useRef(false);
   const availabilityFetchInFlightRef = useRef(false);
   const lastAvailabilityFetchAtRef = useRef(0);
+  const reloadAvailability = useCallback(() => {
+    setAvailabilityLoading(true);
+    setSettingsReloadKey((key) => key + 1);
+  }, []);
 
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedSlot, setSelectedSlot] = useState(null);
+  const [slotAvailabilityNotice, setSlotAvailabilityNotice] = useState("");
 
   const [month, setMonth] = useState(new Date());
   const [loading, setLoading] = useState(false);
@@ -980,7 +986,7 @@ export default function BookingForm({ isMobile }) {
     if (hasBase) return baseMap;
     if (hasEssentials) return essentialsMap;
     if (hasXoc) return xocMap;
-    return null;
+    return {};
   }, [settings, isXoc, isVertexEssentials, selectedPackage.title]);
 
   const localSlotMap = useMemo(() => {
@@ -1023,8 +1029,10 @@ export default function BookingForm({ isMobile }) {
     return map;
   }, [dateSlotMap, localSlotFormatters]);
 
-  const earliestAvailableSlot = useMemo(() => {
-    if (!settings || !localSlotMap) return null;
+  const availabilityReady = localSlotMap !== null && !availabilityLoading;
+
+  const availableSlots = useMemo(() => {
+    if (!settings || !localSlotMap) return [];
 
     const bookedSet = new Set();
     const heldMap = new Map();
@@ -1039,7 +1047,7 @@ export default function BookingForm({ isMobile }) {
     });
 
     const now = new Date();
-    const available = Object.values(localSlotMap)
+    return Object.values(localSlotMap)
       .flat()
       .filter((slot) => {
         const holdId = heldMap.get(slot.slotId);
@@ -1051,15 +1059,26 @@ export default function BookingForm({ isMobile }) {
         );
       })
       .sort((left, right) => left.utcStart - right.utcStart);
+  }, [localSlotMap, myHold?.holdId, settings]);
 
-    const earliest = available[0];
+  const earliestAvailableSlot = useMemo(() => {
+    const earliest = availableSlots[0];
     if (!earliest) return null;
     const localDateKey = getLocalDateKey(earliest.utcStart, localSlotFormatters.date);
     const localDate = localDateKey ? new Date(localDateKey) : null;
     if (!localDate || Number.isNaN(localDate.getTime())) return null;
     localDate.setHours(0, 0, 0, 0);
     return { ...earliest, localDate };
-  }, [localSlotMap, myHold?.holdId, settings, localSlotFormatters]);
+  }, [availableSlots, localSlotFormatters]);
+
+  const availableMonths = useMemo(() => [
+    ...new Set(availableSlots.map((slot) => {
+      const date = new Date(getLocalDateKey(slot.utcStart, localSlotFormatters.date));
+      return new Date(date.getFullYear(), date.getMonth(), 1).getTime();
+    })),
+  ], [availableSlots, localSlotFormatters]);
+  const shownMonth = new Date(month.getFullYear(), month.getMonth(), 1).getTime();
+  const nextAvailableMonth = availableMonths.find((value) => value > shownMonth);
 
   const isDateAllowed = (dateObj) => {
     if (!settings) return false;
@@ -1086,6 +1105,7 @@ export default function BookingForm({ isMobile }) {
     if (availabilityFetchInFlightRef.current) return;
 
     availabilityFetchInFlightRef.current = true;
+    setAvailabilityLoading(true);
     lastAvailabilityFetchAtRef.current = Date.now();
     setSettingsError("");
 
@@ -1113,6 +1133,7 @@ export default function BookingForm({ isMobile }) {
       }
     } finally {
       availabilityFetchInFlightRef.current = false;
+      if (availabilityFetchMountedRef.current) setAvailabilityLoading(false);
     }
   }, []);
 
@@ -1136,7 +1157,7 @@ export default function BookingForm({ isMobile }) {
       }
 
       lastAvailabilityFetchAtRef.current = now;
-      setSettingsReloadKey((key) => key + 1);
+      reloadAvailability();
     };
 
     window.addEventListener("focus", requestAvailabilityRefresh);
@@ -1149,7 +1170,7 @@ export default function BookingForm({ isMobile }) {
       window.removeEventListener("focus", requestAvailabilityRefresh);
       window.clearInterval(intervalId);
     };
-  }, [step]);
+  }, [step, reloadAvailability]);
 
   useEffect(() => {
     setPageFadeIn(false);
@@ -1587,6 +1608,21 @@ export default function BookingForm({ isMobile }) {
     holdCountdownMs !== null &&
     (holdCountdownMs > 0 || isPaymentPendingHold);
   hasActiveHoldRef.current = hasActiveHold;
+  const selectedSlotAvailable = Boolean(selectedSlot && (
+    availableSlots.some((slot) => slot.slotId === selectedSlot.slotId) ||
+    (hasActiveHold && myHold.startTimeUTC === selectedSlot.utcStart.toISOString())
+  ));
+
+  useEffect(() => {
+    if (!availabilityReady || settingsError || !selectedSlot) return;
+    if (!selectedSlotAvailable) {
+      setSelectedSlot(null);
+      setSlotAvailabilityNotice("That time is no longer available. Please pick another.");
+    } else {
+      setSlotAvailabilityNotice("");
+    }
+  }, [availabilityReady, settingsError, selectedSlot, selectedSlotAvailable]);
+
   const reviewDateTimeLabel = useMemo(() => {
     if (!selectedSlot?.utcStart) return "";
     const utcStart = new Date(selectedSlot.utcStart);
@@ -2145,6 +2181,7 @@ export default function BookingForm({ isMobile }) {
       }
       return;
     }
+    if (!recheckingPayment && (availabilityLoading || (selectedSlot && !selectedSlotAvailable))) return;
     if (!recheckingPayment && (!selectedDate || !selectedSlot)) {
       setErrorStep1("Please select a date and time before continuing.");
       return;
@@ -2443,7 +2480,7 @@ export default function BookingForm({ isMobile }) {
           pageFadeIn ? "opacity-100" : "opacity-0"
         }`}
       >
-        {!settings ? (
+        {!settings || (step === 1 && !availabilityReady && !earliestAvailableSlot) ? (
           <div className="mt-20 flex flex-col items-center gap-3 text-center">
             <div className="text-accent">
               {settingsError || "Loading..."}
@@ -2451,7 +2488,7 @@ export default function BookingForm({ isMobile }) {
             {settingsError && (
               <button
                 type="button"
-                onClick={() => setSettingsReloadKey((key) => key + 1)}
+                onClick={reloadAvailability}
                 className="rounded-lg border border-info-border bg-info-soft px-4 py-2 text-sm font-semibold text-info-text transition hover:bg-surface-hover-accent focus:outline-none focus:ring-2 focus:ring-[color:var(--color-focus-ring)]"
               >
                 Retry
@@ -2503,7 +2540,26 @@ export default function BookingForm({ isMobile }) {
                     onRelease={() => releaseHold(true)}
                     className="mb-6 text-left"
                   />
-                  {earliestAvailableSlot && (
+                  {slotAvailabilityNotice && (
+                    <p role="status" className="mb-4 text-warning-text">{slotAvailabilityNotice}</p>
+                  )}
+                  {!earliestAvailableSlot ? (
+                    <div role="status" className="rounded-xl border border-line-input bg-surface-input p-6 text-ink-secondary">
+                      <p>There are no open times to book right now.</p>
+                      {settingsError && <p role="alert" className="mt-3 text-danger-text">{settingsError}</p>}
+                      <div className="mt-4 flex flex-wrap items-center justify-center gap-4">
+                        <button
+                          type="button"
+                          onClick={reloadAvailability}
+                          className="min-h-11 rounded-lg border border-info-border bg-info-soft px-4 py-2 font-semibold text-info-text hover:bg-surface-hover-accent"
+                        >
+                          Check again
+                        </button>
+                        <Link to="/contact" className="inline-flex min-h-11 items-center text-accent underline underline-offset-4">Contact us</Link>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
                     <button
                       type="button"
                       onClick={handleEarliestSlotClick}
@@ -2516,6 +2572,18 @@ export default function BookingForm({ isMobile }) {
                       )}{" "}
                       at {earliestAvailableSlot.localLabel}
                     </button>
+
+                  {availabilityReady && !availableMonths.includes(shownMonth) && nextAvailableMonth !== undefined && (
+                    <div role="status" className="mb-6 text-ink-secondary">
+                      <p>No open times in {month.toLocaleString("default", { month: "long" })}.</p>
+                      <button
+                        type="button"
+                        onClick={() => setMonth(new Date(nextAvailableMonth))}
+                        className="mt-3 min-h-11 rounded-lg border border-info-border bg-info-soft px-4 py-2 font-semibold text-info-text hover:bg-surface-hover-accent"
+                      >
+                        Go to {new Date(nextAvailableMonth).toLocaleString("default", { month: "long", year: "numeric" })}
+                      </button>
+                    </div>
                   )}
 
                   <div
@@ -2735,6 +2803,9 @@ export default function BookingForm({ isMobile }) {
                     )}
                   </div>
 
+                    </>
+                  )}
+
                   <div
                     className={`flex flex-col items-center justify-center gap-4 mt-10 ${
                       isMobile ? "" : "sm:flex-row"
@@ -2761,10 +2832,10 @@ export default function BookingForm({ isMobile }) {
                     <button
                       onClick={handleLockAndGoNext}
                       aria-disabled={
-                        !selectedDate || !selectedSlot || lockingSlot
+                        !selectedDate || !selectedSlot || !selectedSlotAvailable || availabilityLoading || lockingSlot
                       }
                       className={`ri-booking-primary glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
-                        !selectedDate || !selectedSlot || lockingSlot
+                        !selectedDate || !selectedSlot || !selectedSlotAvailable || availabilityLoading || lockingSlot
                           ? "opacity-60"
                           : ""
                       } ${isMobile ? "" : ""}`}
@@ -2873,10 +2944,14 @@ export default function BookingForm({ isMobile }) {
                     />
                   </div>
 
-                  <p className="mt-6 text-xs text-accent">
-                    Please read the FAQ before booking. It answers everything you
-                    need to know.
-                  </p>
+                  <a
+                    href="/#faq"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-6 inline-flex min-h-11 items-center text-sm text-accent underline underline-offset-4"
+                  >
+                    Read the FAQ <span className="sr-only">(opens in a new tab)</span>
+                  </a>
 
                   <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <button
@@ -3189,8 +3264,6 @@ export default function BookingForm({ isMobile }) {
                             ? "Preparing payment..."
                             : validatingCode || restoredCodeCandidates
                             ? "Checking code..."
-                            : reviewTotal
-                            ? `Pay ${reviewTotal}`
                             : "Continue to payment"}
                           <span className="glow-line glow-line-top" />
                           <span className="glow-line glow-line-right" />

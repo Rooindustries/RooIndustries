@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getPublicContent } from "../lib/publicContentClient";
+import { Link } from "react-router-dom";
 
 const FOCUSABLE_SELECTOR = [
   "button:not([disabled])",
@@ -26,6 +27,8 @@ const normalizeTools = (tools) => tools.map((tool) => ({
 export default function Tools({ initialData = null }) {
   const [tools, setTools] = useState(() => Array.isArray(initialData) ? normalizeTools(initialData) : []);
   const [loading, setLoading] = useState(() => !Array.isArray(initialData));
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [pendingDownload, setPendingDownload] = useState(null);
   const [downloadFadeOut, setDownloadFadeOut] = useState(false);
@@ -41,6 +44,8 @@ export default function Tools({ initialData = null }) {
     let cancelled = false;
 
     async function fetchTools() {
+      setLoading(true);
+      setLoadError(false);
       try {
         const data = await getPublicContent("tools");
         if (!cancelled) {
@@ -49,7 +54,10 @@ export default function Tools({ initialData = null }) {
         }
       } catch (err) {
         console.error("Error fetching tools:", err);
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoadError(true);
+          setLoading(false);
+        }
       }
     }
 
@@ -57,7 +65,7 @@ export default function Tools({ initialData = null }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   useEffect(() => {
     const body = document.body;
@@ -204,9 +212,21 @@ export default function Tools({ initialData = null }) {
         </p>
       </header>
 
-      {!loading && tools.length === 0 ? (
-        <div className="mt-16 text-center text-ink-secondary">
-          No tools configured yet. Add tools in the content editor.
+      {!loading && loadError ? (
+        <div role="alert" className="mt-16 text-center text-ink-secondary">
+          <p>Couldn't load the tools.</p>
+          <button
+            type="button"
+            onClick={() => setReloadKey((key) => key + 1)}
+            className="mt-4 min-h-11 rounded-lg border border-info-border bg-info-soft px-4 py-2 font-semibold text-info-text hover:bg-surface-hover-accent"
+          >
+            Retry
+          </button>
+        </div>
+      ) : !loading && tools.length === 0 ? (
+        <div role="status" className="mt-16 text-center text-ink-secondary">
+          <p>No tools are listed right now.</p>
+          <Link to="/#faq" className="mt-3 inline-flex min-h-11 items-center text-accent underline underline-offset-4">Read the FAQ</Link>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
