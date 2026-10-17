@@ -1671,13 +1671,13 @@ try{
   await run('confirmation-summary-settled-cancel', async () => {
     const responses = {};
     const unchanged = [];
-    for (const status of ['booked', 'email_partial', 'refunded', 'failed', 'abandoned', 'needs_recovery']) {
+    for (const status of ['booked', 'email_partial', 'refunded', 'failed', 'abandoned', 'needs_recovery', 'finalizing', 'verified_server']) {
       await reset();
       const input = await startInput();
       const settled = ['booked', 'email_partial'].includes(status);
       const pending = status === 'email_partial';
       await commerce.patch(input.bookingPayload.slotHoldId).set({
-        phase: settled || status === 'needs_recovery' ? 'consumed' : 'released',
+        phase: ['finalizing', 'verified_server'].includes(status) ? 'payment_pending' : settled || status === 'needs_recovery' ? 'consumed' : 'released',
       }).commit();
       const payment = await seed('dodo', status, {
         booking: {
@@ -1690,7 +1690,7 @@ try{
         },
         record: {
           bookingPayload: input.bookingPayload,
-          bookingId: ['abandoned', 'needs_recovery'].includes(status) ? '' : bookingId,
+          bookingId: ['abandoned', 'needs_recovery', 'finalizing', 'verified_server'].includes(status) ? '' : bookingId,
           refundState: status === 'refunded' ? 'full' : '',
           emailDispatch: { allSent: !pending, client: { sent: !pending }, owner: { sent: true } },
           emailDispatchToken: pending ? 'fixture-email-token' : '',
@@ -1738,7 +1738,14 @@ try{
       } else {
         assert.equal(result.status, 409);
         assert.equal(result.body.ok, false);
-        assert.equal(result.body.error, 'This payment session can no longer be changed.');
+        const generic = 'This payment session can no longer be changed.';
+        if (status === 'verified_server') {
+          assert.equal(result.body.recoveryReason, '');
+          assert.equal(result.body.error, generic);
+        } else {
+          assert.ok(result.body.recoveryReason);
+          assert.equal(result.body.error, result.body.recoveryReason);
+        }
         assert.equal(Object.hasOwn(result.body, 'captured'), false);
       }
     }
