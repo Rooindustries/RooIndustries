@@ -80,6 +80,13 @@ test.describe("Route smoke", () => {
       await expect(page.locator("body")).toContainText(/not found|404/i);
     });
   }
+  test("tourney results are a prebuilt page", async ({ request }) => {
+    const response = await request.get("/tourney", { headers: { accept: "text/html" }, maxRedirects: 0 });
+    expect(response.status()).toBe(200);
+    expect(response.headers()["x-nextjs-prerender"]).toMatch(/^1(, 1)*$/);
+    expect(response.headers()["cache-control"]).not.toMatch(/private|no-store/);
+    expect(await response.text()).toContain("tourney-podium");
+  });
   for (const route of ["bracket", "roster"]) {
     test(`legacy tourney ${route} redirects to results`, async ({ page }) => {
       const response = await page.goto(`/tourney/${route}`);
