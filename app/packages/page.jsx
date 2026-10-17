@@ -20,7 +20,6 @@ export default async function Page({ searchParams }) {
   return (
     <>
       <JsonLd data={seo.buildOfferCatalogJsonLd(packagesList)} />
-      <h1 className="sr-only">PC Game Optimization Packages</h1>
       <RouteRenderer
         entry={Packages}
         pathname="/packages"
