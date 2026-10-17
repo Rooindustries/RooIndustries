@@ -326,10 +326,15 @@ export function AppContent({
   const navigationType = useNavigationType();
   const historyInitializedRef = useRef(false);
   const initialLocationKeyRef = useRef(location.key);
+  const initialBrowserPathRef = useRef(null);
   const initialBrowserSearchRef = useRef(null);
-  const withInitialSearch = (loc) =>
-    loc && !loc.search && loc.key === initialLocationKeyRef.current && initialBrowserSearchRef.current
-      ? { ...loc, search: initialBrowserSearchRef.current }
+  const withInitialBrowserLocation = (loc) =>
+    loc && loc.key === initialLocationKeyRef.current && (initialBrowserPathRef.current || initialBrowserSearchRef.current)
+      ? {
+          ...loc,
+          pathname: initialBrowserPathRef.current || loc.pathname,
+          search: loc.search || initialBrowserSearchRef.current,
+        }
       : loc;
   const lastRouteKeyRef = useRef("");
   const pathName = location.pathname || "";
@@ -519,9 +524,12 @@ export function AppContent({
   }, [navigate, routeShell]);
 
   useEffect(() => {
+    if (routeShell === "memory" && location.pathname === "/__missing__") {
+      initialBrowserPathRef.current = window.location.pathname;
+    }
     initialBrowserSearchRef.current =
-      routeShell === "memory" && !location.search && window.location.pathname === (location.pathname || "/")
-        ? sanitizeBrowserSearch(location.pathname || "/", window.location.search)
+      routeShell === "memory" && !location.search && (initialBrowserPathRef.current || window.location.pathname === (location.pathname || "/"))
+        ? sanitizeBrowserSearch(window.location.pathname, window.location.search)
         : "";
   }, []);
 
@@ -541,8 +549,9 @@ export function AppContent({
           : location.pathname === "/referrals/reset" && isReferralResetHash(rawHash)
             ? rawHash
             : "";
-    const sanitizedSearch = sanitizeBrowserSearch(location.pathname || "/", withInitialSearch(location).search || "");
-    const nextUrl = `${location.pathname || "/"}${sanitizedSearch}${keepHash}`;
+    const browserLocation = withInitialBrowserLocation(location);
+    const sanitizedSearch = sanitizeBrowserSearch(browserLocation.pathname || "/", browserLocation.search || "");
+    const nextUrl = `${browserLocation.pathname || "/"}${sanitizedSearch}${keepHash}`;
     const currentUrl = `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
 
     if (routeShell === "memory") {
@@ -589,16 +598,17 @@ export function AppContent({
   }, [isFlowRoute, location.hash, location.pathname, location.search, location.state]);
 
   useEffect(() => {
-    const stateBackground = withInitialSearch(location.state?.backgroundLocation);
+    const stateBackground = withInitialBrowserLocation(location.state?.backgroundLocation);
     if (stateBackground?.pathname) {
       writeStoredBackground(stateBackground);
       setStoredBackground(stateBackground);
       return;
     }
     if (!isFlowRoute) {
+      const browserLocation = withInitialBrowserLocation(location);
       const currentBackground = {
-        pathname: location.pathname,
-        search: withInitialSearch(location).search || "",
+        pathname: browserLocation.pathname,
+        search: browserLocation.search || "",
         hash: location.hash || "",
       };
       writeStoredBackground(currentBackground);
@@ -611,7 +621,7 @@ export function AppContent({
 
   const backgroundLocation =
     location.state && location.state.backgroundLocation
-      ? withInitialSearch(location.state.backgroundLocation)
+      ? location.state.backgroundLocation
       : isFlowRoute
       ? storedBackground
       : null;
@@ -664,7 +674,7 @@ export function AppContent({
   }, [backgroundHeld, backgroundReveal.key]);
 
   const closeBookingModal = () => {
-    const target = backgroundLocation || {
+    const target = withInitialBrowserLocation(backgroundLocation) || {
       pathname: "/",
       search: "",
       hash: "",
