@@ -111,8 +111,10 @@ describe("FaqSection", () => {
     );
 
     expect(
-      screen.queryByText(/windows-side optimization once every 6 months/i)
-    ).not.toBeInTheDocument();
+      screen
+        .getByText(/windows-side optimization once every 6 months/i)
+        .closest("[hidden]")
+    ).not.toBeNull();
 
     act(() => {
       window.dispatchEvent(
@@ -124,8 +126,10 @@ describe("FaqSection", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/windows-side optimization once every 6 months/i)
-      ).toBeInTheDocument();
+        screen
+          .getByText(/windows-side optimization once every 6 months/i)
+          .closest("[hidden]")
+      ).toBeNull();
     });
 
     expect(mockAlignToHashTarget).toHaveBeenCalledWith(
