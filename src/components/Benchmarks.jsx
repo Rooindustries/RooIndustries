@@ -6,8 +6,8 @@ import ImageZoomModal from "../components/ImageZoomModal";
 const BENCHMARK_IMAGE_WIDTHS = [480, 768, 960, 1280];
 const REVIEW_IMAGE_WIDTHS = [480, 768, 960];
 
-export default function Benchmarks({ setIsModalOpen = () => {} }) {
-  const [benchmarks, setBenchmarks] = useState([]);
+export default function Benchmarks({ initialData = null, setIsModalOpen = () => {} }) {
+  const [benchmarks, setBenchmarks] = useState(() => (Array.isArray(initialData) ? initialData : []));
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedAlt, setSelectedAlt] = useState("");
 
@@ -38,7 +38,9 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
 
   useEffect(() => {
     getPublicContent("benchmarks")
-      .then(setBenchmarks)
+      .then((rows) => {
+        if (Array.isArray(rows)) setBenchmarks(rows);
+      })
       .catch(console.error);
   }, []);
 
