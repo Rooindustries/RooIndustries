@@ -685,11 +685,11 @@ const TourneyNav = () => (
     <div className="tourney-nav-line" aria-hidden="true" />
     <div className="tourney-nav-inner">
       <div className="tourney-nav-row">
-        <a className="tourney-brand" href="/" aria-label="Roo Industries home">
+        <a className="tourney-brand" href="/" aria-labelledby="tourney-brand-name">
           <span className="tourney-brand-logo">
             <img src="/favicon-96x96.png" alt="" width="56" height="56" />
           </span>
-          <span className="tourney-brand-copy">
+          <span className="tourney-brand-copy" id="tourney-brand-name">
             <strong>Roo Industries</strong>
             <span>6v6 Legacy Series</span>
           </span>

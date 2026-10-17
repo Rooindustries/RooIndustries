@@ -462,7 +462,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.reload();
       await expect(page.getByText("Loading upgrade link...", { exact: true })).toBeVisible();
       const aborted = flow.state.aborted.filter((path) => path === "/api/content/upgrade-link").length;
-      await page.getByRole("link", { name: "Go to Roo Industries home", exact: true }).click();
+      await page.getByRole("link", { name: "Roo Industries Precision Performance Engineering", exact: true }).click();
       await expect.poll(() => flow.state.aborted.filter((path) => path === "/api/content/upgrade-link").length).toBeGreaterThan(aborted);
     });
 
@@ -483,7 +483,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await check.click();
         await expect(page.getByRole("button", { name: "Checking...", exact: true })).toBeDisabled();
         const aborted = flow.state.aborted.filter((path) => path === "/api/ref/getUpgradeInfo").length;
-        await page.getByRole("link", { name: "Go to Roo Industries home", exact: true }).click();
+        await page.getByRole("link", { name: "Roo Industries Precision Performance Engineering", exact: true }).click();
         await expect.poll(() => flow.state.aborted.filter((path) => path === "/api/ref/getUpgradeInfo").length).toBeGreaterThan(aborted);
       });
     }
