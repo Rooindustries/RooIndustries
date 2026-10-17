@@ -58,6 +58,8 @@ export function middleware(req) {
 
   const headers = new Headers(req.headers);
   headers.delete("x-roo-missing-format");
+  headers.set("x-roo-request-path", pathname);
+  headers.set("x-roo-request-search", req.nextUrl.search);
   const isDocument = ["GET", "HEAD"].includes(req.method) &&
     !pathname.startsWith("/api/") &&
     !req.headers.has("rsc") &&

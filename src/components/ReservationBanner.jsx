@@ -80,7 +80,7 @@ export default function ReservationBanner() {
   const path = location.pathname || "";
   const isMobileWidth = useIsMobileWidth();
   const isDesktopWidth = !isMobileWidth;
-  const isPaymentScreen = path.startsWith("/payment");
+  const isPaymentScreen = path === "/payment" || path === "/payment-success";
   const checkoutBooking = readStoredCheckoutBooking();
   const hasMatchingCheckoutBooking =
     hold && checkoutBooking?.slotHoldId === hold.holdId &&
@@ -173,7 +173,7 @@ export default function ReservationBanner() {
           return false;
         }
         const shouldRedirectHome =
-          path.startsWith("/payment") || path.startsWith("/booking");
+          path === "/payment" || path === "/payment-success" || path === "/booking";
         releaseHold(true, shouldRedirectHome);
         return false;
       }
@@ -204,13 +204,7 @@ export default function ReservationBanner() {
     removeBrowserStorage("sessionStorage", BOOKING_DRAFT_KEY);
     broadcastHold(null);
     if (redirect) {
-      const pathName = location.pathname || "";
-      const goHome = () => nav("/", { replace: false });
-      if (pathName.startsWith("/payment") || pathName.startsWith("/booking")) {
-        goHome();
-      } else {
-        goHome();
-      }
+      nav("/", { replace: false });
     }
     if (clearOnly) return;
     try {
@@ -229,7 +223,7 @@ export default function ReservationBanner() {
     }
   };
 
-  const shouldRender = hold && countdown !== null && countdown > 0 && !path.startsWith("/booking");
+  const shouldRender = hold && countdown !== null && countdown > 0 && path !== "/booking";
 
   const bannerRef = useRef(null);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { AppContent } from "../App";
 import { buildQueryString } from "./routeQuery";
@@ -14,10 +14,15 @@ export default function LegacyRoutePage({
   initialRouteComponent = null,
   initialHomeComponent = null,
   initialBookingModalComponent = null,
+  notFound = false,
 }) {
-  const query = sanitizeBrowserSearch(pathname, buildQueryString(searchParams));
-  // Keep initial server/client entry deterministic; hash intent is handled post-mount.
-  const initialEntry = `${pathname}${query}`;
+  const [initialEntry] = useState(() => {
+    const serverQuery = sanitizeBrowserSearch(pathname, buildQueryString(searchParams));
+    const query = !serverQuery && typeof window !== "undefined" && window.location.pathname === pathname
+      ? sanitizeBrowserSearch(pathname, window.location.search)
+      : serverQuery;
+    return `${pathname}${query}`;
+  });
 
   return (
     <MemoryRouter initialEntries={[initialEntry]}>
@@ -29,6 +34,7 @@ export default function LegacyRoutePage({
         initialBookingModalComponent={initialBookingModalComponent}
         initialRoutePath={pathname}
         routeShell="memory"
+        notFound={notFound}
       />
     </MemoryRouter>
   );

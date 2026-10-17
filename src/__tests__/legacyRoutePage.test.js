@@ -3,6 +3,7 @@ const { cleanup, render } = require("@testing-library/react");
 
 const loadLegacyRoutePage = () => {
   jest.resetModules();
+  jest.doMock("react", () => React);
 
   const MemoryRouter = jest.fn(({ children }) => children);
   const AppContent = jest.fn(() => null);
