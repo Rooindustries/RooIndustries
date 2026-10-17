@@ -178,7 +178,6 @@ try{
       const summaryClient = override ? new Proxy(commerce, { get(target, key) {
         if (key === 'fetch') return async (query, params) => {
           if (override.failBookingRead && query.includes('_type == "booking"')) throw new Error('Synthetic booking read failure');
-          if (override.hold && params?.id === override.hold._id && query.includes('slotHold')) return override.hold;
           const result = await target.fetch(query, params);
           if (result?._id === recordId && override.record) return { ...result, ...override.record };
           if (result?._id === bookingId && override.booking) return { ...result, ...override.booking };
@@ -285,6 +284,22 @@ try{
   const a1Start=async(provider='paypal',variant='normal')=>{
     fixture.setRequestHook(async(phase,request)=>{if(phase==='after'&&(request.status>=400||request.response?.ok===false||request.response?.error)){evidence.databaseErrors||=[];evidence.databaseErrors.push({scenario:scenarioNumber,response:request.response});}});
     const input=await startInput();input.provider=provider;input.bookingPayload.message='Original note';emailFailure=variant==='email-failure';
+    if (variant === 'upgrade') {
+      const original = { ...input.bookingPayload, _id: 'booking.original', _type: 'booking',
+        backendOwner: 'supabase', cutoverGeneration: 0, status: 'captured',
+        packagePrice: '$9.99', grossAmount: 9.99, netAmount: 9.99, paymentProvider: 'paypal',
+        paypalOrderId: 'order-original', startTimeUTC: '2099-02-01T00:30:00.000Z', localTimeZone: 'Pacific/Honolulu' };
+      delete original.slotHoldId;
+      delete original.slotHoldToken;
+      await commerce.create(original);
+      const target = { _id: 'package.fixture-upgrade', _type: 'package', title: 'Fixture Upgrade', price: '$19.98' };
+      const existing = await documents.getDocument(target._id);
+      if (existing) await documents.patch(target._id).set(target).commit();
+      else await documents.create(target);
+      const { issueUpgradeIntentToken } = await import('../src/server/api/ref/upgradeIntentToken.js');
+      input.bookingPayload = { originalOrderId: original._id, packageTitle: target.title, email: original.email,
+        upgradeIntentToken: issueUpgradeIntentToken({ bookingId: original._id, email: original.email, targetPackageTitle: target.title, backend: 'supabase', cutoverGeneration: 0 }) };
+    }
     if(variant==='referral'){
       const referral={_id:'referral.a1',_type:'referral',slug:{_type:'slug',current:'fixture'},registrationStatus:'verified',currentDiscountPercent:0,currentCommissionPercent:10,totalSales:0,totalEarnings:0,backendOwner:'supabase',cutoverGeneration:0};
       const current=await documents.getDocument(referral._id);if(current)await documents.patch(referral._id).ifRevisionId(current._rev).set(referral).commit();else await documents.create(referral);
@@ -308,7 +323,6 @@ try{
       res.writeHead(201,{'content-type':'application/json'});res.end(JSON.stringify(body));return true;
     };
     paypalOrder.status='CREATED';paypalOrder.purchase_units[0].amount={value,currency_code:'USD'};paypalOrder.purchase_units[0].payments={captures:[]};
-    const holdSnapshot = variant === 'browser' ? (await row(input.bookingPayload.slotHoldId)).payload : null;
     const browserResponse = variant === 'browser' ? await fetch(`${origin}/start-route`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }) : null;
     const started = browserResponse ? { status: browserResponse.status, body: await browserResponse.json(), cacheControl: browserResponse.headers.get('cache-control') } : await requestFlow('start', { body: input });
     assert.equal(started.status,200,JSON.stringify(started));
@@ -316,7 +330,7 @@ try{
     paypalOrder.status='COMPLETED';paypalOrder.purchase_units[0].payments={captures:[{id:'capture-fixture',status:'COMPLETED',amount:{value,currency_code:'USD'}}]};
     razorpayPayment.amount=amount;dodoPayment.metadata={paymentRecordId:payment._id};dodoPayment.total_amount=amount;
     const proof=provider==='paypal'?{paypalOrderId:'order-fixture',paypalPaymentId:'capture-fixture'}:provider==='razorpay'?{razorpayOrderId:'order-fixture',razorpayPaymentId:'payment-fixture',razorpaySignature:crypto.createHmac('sha256','fixture-secret').update('order-fixture|payment-fixture').digest('hex')}:{};
-    return{input,quote,started,id:payment._id,proof,holdSnapshot};
+    return{input,quote,started,id:payment._id,proof};
   };
   const a1Hook=async provider=>requestFlow(provider,{req:provider==='paypal'?paypalReq('PAYMENT.CAPTURE.COMPLETED',{id:'capture-fixture',supplementary_data:{related_ids:{order_id:'order-fixture'}}}):provider==='razorpay'?razorReq('payment.captured',{payment:{entity:razorpayPayment}}):dodoReq()});
   for (const mode of ['complete', 'partial', 'missing-details']) await run(`recovery-reschedule-created-${mode}`, async () => {
@@ -1561,7 +1575,6 @@ try{
     await check({ bookingPayload: { originalOrderId: 'booking.original' } }, {}, true);
     await check({}, { localTimeZone: 'Asia/Calcutta' }, true);
     await check({}, { backendOwner: 'sanity' }, true);
-    await check({ cutoverGeneration: undefined }, { cutoverGeneration: undefined }, true);
     await check({}, { cutoverGeneration: 1 }, false);
     await check({}, { paymentRecordId: 'paymentRecord.other' }, false);
     await check({ duplicatePaymentRecord: true, canonicalPaymentRecordId: 'paymentRecord.other' }, { paymentRecordId: 'paymentRecord.other' }, false);
@@ -1571,9 +1584,14 @@ try{
       await check({}, { dodoDisputes: [{ status }] }, visible);
     }
     await check({ dodoDisputeActive: true }, {}, false); await check({}, { dodoDisputeActive: true }, false);
+    await sql`update migration.source_documents set payload = payload - 'cutoverGeneration' where legacy_sanity_id in (${recordId}, ${bookingId})`;
+    const missingGenerationRows = { paymentRecord: (await row(recordId)).payload, booking: (await row(bookingId)).payload };
+    for (const stored of Object.values(missingGenerationRows)) assert.equal(Object.hasOwn(stored, 'cutoverGeneration'), false);
+    const missingGeneration = await requestFlow('status', { paymentAccessToken: tokenFor(payment) });
+    assert.deepEqual(missingGeneration.body.bookingSummary, expected);
     const failure = await requestFlow('status', { paymentAccessToken: tokenFor(payment), confirmationReadOverride: { failBookingRead: true } });
     assert.equal(failure.status, 200); assert.equal(failure.body.bookingId, bookingId); assert.equal(failure.body.bookingSummary, null);
-    return { paymentRecord: await record(), booking: (await row(bookingId)).payload, initial, responses, failure };
+    return { paymentRecord: await record(), booking: (await row(bookingId)).payload, initial, responses, missingGenerationRows, missingGeneration, failure };
   });
   await run('confirmation-summary-authorization', async () => {
     const payment = await seed('paypal', 'booked', { booking: { paymentRecordId: recordId, startTimeUTC: '2026-01-01T00:30:00.000Z', localTimeZone: 'UTC' } });
@@ -1610,10 +1628,31 @@ try{
     assert.equal(response.body.bookingSummary.packageTitle, booking.packageTitle);
     assert.equal(checkout.started.body.bookingSummary.bookingId, booking._id);
     assert.equal(checkout.started.cacheControl, 'private, no-store');
-    const replay = await requestFlow('start', { body: checkout.input, confirmationReadOverride: { hold: checkout.holdSnapshot } });
-    assert.equal(replay.status, 200, JSON.stringify(replay));
-    assert.equal(replay.body.bookingSummary.bookingId, booking._id);
+    const beforeReplay = await snapshot({ receipts: true });
+    const replay = await requestFlow('start', { body: checkout.input });
+    assert.deepEqual(await snapshot({ receipts: true }), beforeReplay);
+    assert.equal(replay.status, 409, JSON.stringify(replay));
+    assert.equal(replay.body.error, 'Your slot reservation expired.');
+    assert.equal(Object.hasOwn(replay.body, 'bookingSummary'), false);
     return { paymentRecord: payment, booking, response, free: checkout.started, replay };
+  });
+  await run('confirmation-summary-upgrade-completion', async () => {
+    const checkout = await a1Start('paypal', 'upgrade');
+    const originalBefore = (await row('booking.original')).payload;
+    const paymentBefore = (await row(checkout.id)).payload;
+    const finalized = await requestFlow('finalize', { paymentAccessToken: tokenFor(paymentBefore), body: checkout.proof });
+    assert.equal(finalized.status, 200, JSON.stringify(finalized));
+    const payment = (await row(checkout.id)).payload;
+    const booking = (await row(payment.bookingId)).payload;
+    assert.notEqual(booking._id, originalBefore._id);
+    assert.equal(booking.originalOrderId, originalBefore._id);
+    assert.equal(booking.paymentRecordId, payment._id);
+    assert.notEqual(booking.packageTitle, originalBefore.packageTitle);
+    assert.deepEqual(finalized.body.bookingSummary, { bookingId: booking._id, packageTitle: booking.packageTitle, startTimeUTC: booking.startTimeUTC, localTimeZone: booking.localTimeZone });
+    assert.notEqual(finalized.body.bookingSummary.bookingId, originalBefore._id);
+    const recovered = await requestFlow('status', { paymentAccessToken: tokenFor(payment) });
+    assert.deepEqual(recovered.body.bookingSummary, finalized.body.bookingSummary);
+    return { originalBefore, originalAfter: (await row(originalBefore._id)).payload, payment, booking, finalized, recovered };
   });
   await run('confirmation-summary-captured-cancel', async () => {
     const checkout = await a1Start('paypal');

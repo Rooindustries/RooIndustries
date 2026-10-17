@@ -6,20 +6,20 @@ const subscribe = () => () => {};
 const clientSnapshot = () => true;
 const serverSnapshot = () => false;
 
-const asReceipt = (value) =>
+export const asConfirmationReceipt = (value) =>
   typeof value?.bookingId === "string" && value.bookingId.trim()
-    ? value
+    ? { bookingId: value.bookingId.trim(), ...(value.emailDispatchToken ? { emailDispatchToken: value.emailDispatchToken } : {}) }
     : null;
 
 const readConfirmationReceipt = (state, hydrated) => {
-  if (state) return asReceipt(state.bookingConfirmation);
+  if (state) return asConfirmationReceipt(state.bookingConfirmation);
   if (!hydrated || typeof window === "undefined") return null;
 
-  const historyReceipt = asReceipt(window.history.state?.usr?.bookingConfirmation);
+  const historyReceipt = asConfirmationReceipt(window.history.state?.usr?.bookingConfirmation);
   if (historyReceipt) return historyReceipt;
 
   try {
-    return asReceipt(JSON.parse(window.sessionStorage.getItem("booking_confirmation_state")));
+    return asConfirmationReceipt(JSON.parse(window.sessionStorage.getItem("booking_confirmation_state")));
   } catch {
     return null;
   }
@@ -32,6 +32,7 @@ export const useConfirmationReceipt = () => {
 };
 
 const summaryPrefix = "booking_confirmation_summary:";
+const reschedulePrefix = "booking_confirmation_reschedule:";
 
 export const clearBookingConfirmation = () => {
   try {
@@ -42,25 +43,29 @@ export const clearBookingConfirmation = () => {
 };
 
 export const createBookingConfirmation = body => {
-  const bookingId = typeof body?.bookingId === "string" ? body.bookingId.trim() : "";
-  if (!bookingId) return null;
+  const receipt = asConfirmationReceipt(body);
+  if (!receipt) return null;
+  const { bookingId } = receipt;
   const bookingSummary = asBookingSummary(body.bookingSummary, bookingId);
   const requiresReschedule = body.requiresReschedule === true || /reschedul/i.test(String(body.recoveryReason || ""));
-  const receipt = {
-    bookingId,
-    ...(Object.prototype.hasOwnProperty.call(body, "bookingSummary") ? { bookingSummary: requiresReschedule ? null : bookingSummary } : {}),
-    ...(requiresReschedule ? { requiresReschedule: true } : {}),
-    ...(body.emailDispatchToken ? { emailDispatchToken: body.emailDispatchToken } : {}),
-  };
   try {
+    window.sessionStorage.removeItem(`${summaryPrefix}${bookingId}`);
+    if (requiresReschedule) window.sessionStorage.setItem(`${reschedulePrefix}${bookingId}`, "true");
+    else window.sessionStorage.removeItem(`${reschedulePrefix}${bookingId}`);
     window.sessionStorage.setItem(`${summaryPrefix}${bookingId}`, JSON.stringify(requiresReschedule ? null : bookingSummary));
     window.sessionStorage.setItem("booking_confirmation_state", JSON.stringify(receipt));
-  } catch {}
+  } catch {
+    if (requiresReschedule) return null;
+  }
   return receipt;
 };
 
 export const readBookingConfirmationSummary = receipt => {
-  if (!receipt || receipt.requiresReschedule) return null;
-  if (Object.prototype.hasOwnProperty.call(receipt, "bookingSummary")) return asBookingSummary(receipt.bookingSummary, receipt.bookingId);
+  if (!receipt || readBookingConfirmationReschedule(receipt)) return null;
   try { return asBookingSummary(JSON.parse(window.sessionStorage.getItem(`${summaryPrefix}${receipt.bookingId}`)), receipt.bookingId); } catch { return null; }
+};
+
+export const readBookingConfirmationReschedule = receipt => {
+  if (!receipt) return false;
+  try { return window.sessionStorage.getItem(`${reschedulePrefix}${receipt.bookingId}`) === "true"; } catch { return false; }
 };

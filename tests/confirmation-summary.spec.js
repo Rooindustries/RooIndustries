@@ -39,6 +39,36 @@ test.afterEach(async ({ page }, info) => {
   await record(page, info, "result", { status: info.status, url: page.url(), errors: info.errors.map(error => error.message), requests: page.confirmationRequests, stored: await page.evaluate(() => { try { return { receipt: sessionStorage.getItem("booking_confirmation_state"), history: window.history.state }; } catch { return null; } }), text: await page.locator("body").innerText().catch(() => "Page unavailable") });
 });
 
+for (const invalidation of ["new checkout", "explicit null"]) test(`history cannot restore an appointment after ${invalidation}`, async ({ page, flow }, info) => {
+  await flow.review();
+  await flow.payment();
+  await page.route("**/api/payment/start", route => route.fulfill({ json: complete({ provider: "dodo" }) }));
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await assertSummary(page);
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("booking_confirmation_state"))?.emailDispatchToken || null)).toBeNull();
+  await page.getByRole("link", { name: "Back to Home", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  if (invalidation === "new checkout") {
+    await page.locator('a[href="/booking"]').first().click();
+    await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+    await expect.poll(() => page.evaluate(id => sessionStorage.getItem(`booking_confirmation_summary:${id}`), bookingId)).toBeNull();
+    await page.goBack();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  } else {
+    await page.evaluate(id => sessionStorage.setItem(`booking_confirmation_summary:${id}`, "null"), bookingId);
+  }
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Payment Successful", exact: true })).toBeVisible();
+  await expect(page.getByText(bookingId, { exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog").getByText(summary.packageTitle, { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("dialog").getByText(/America\/New_York/)).toHaveCount(0);
+  await expect(page.getByText("Check your confirmation email for the package and appointment details.", { exact: true })).toBeVisible();
+  const receipt = await page.evaluate(() => history.state.usr.bookingConfirmation);
+  expect(receipt).toEqual({ bookingId });
+  await record(page, info, "history-invalidation", { invalidation, receipt });
+});
+
 for (const kind of ["paid", "free", "status recovery", "session replay", "captured cancel", "captured booking"]) {
   test(`${kind} completion shows the authorized reference and appointment`, async ({ page, flow }, info) => {
     const body = complete();
@@ -101,7 +131,8 @@ for (const kind of ["paid", "free", "status recovery", "session replay", "captur
 for (const reject of [false, true]) test(`copy reference ${reject ? "rejection keeps a manual path" : "writes the exact order ID"}`, async ({ page, flow }, info) => {
   void flow;
   await page.addInitScript(({ receipt, reject }) => {
-    sessionStorage.setItem("booking_confirmation_state", JSON.stringify(receipt));
+    sessionStorage.setItem("booking_confirmation_state", JSON.stringify({ bookingId: receipt.bookingId }));
+    sessionStorage.setItem(`booking_confirmation_summary:${receipt.bookingId}`, JSON.stringify(receipt.bookingSummary));
     Object.defineProperty(navigator, "clipboard", { value: { writeText: async value => { if (reject) throw new Error("Clipboard unavailable"); window.__copiedReference = value; } } });
   }, { receipt: { bookingId, bookingSummary: summary }, reject });
   await page.goto("/payment-success");
@@ -119,7 +150,10 @@ for (const sample of [
   { instant: "2026-03-08T07:30:00.000Z", zone: "America/New_York", date: "March 8, 2026", time: "3:30 AM", offset: "UTC-04:00" },
 ]) test(`appointment uses its timezone at ${sample.instant}`, async ({ page, flow }, info) => {
   void flow;
-  await page.addInitScript(receipt => sessionStorage.setItem("booking_confirmation_state", JSON.stringify(receipt)), { bookingId, bookingSummary: { ...summary, startTimeUTC: sample.instant, localTimeZone: sample.zone } });
+  await page.addInitScript(receipt => {
+    sessionStorage.setItem("booking_confirmation_state", JSON.stringify({ bookingId: receipt.bookingId }));
+    sessionStorage.setItem(`booking_confirmation_summary:${receipt.bookingId}`, JSON.stringify(receipt.bookingSummary));
+  }, { bookingId, bookingSummary: { ...summary, startTimeUTC: sample.instant, localTimeZone: sample.zone } });
   await page.goto("/payment-success");
   await record(page, info, "timezone", { sample, text: await page.getByRole("dialog").innerText() });
   await expect(page.getByText(new RegExp(`${sample.date}.*${sample.time}`))).toBeVisible();
@@ -129,13 +163,15 @@ for (const sample of [
 for (const state of ["missing", "mismatch", "malformed", "explicit null", "blocked", "inactive", "reschedule", "reference only"]) test(`${state} confirmation never shows unrelated appointment data`, async ({ page, flow }, info) => {
   void flow;
   await page.addInitScript(({ bookingId, summary, state }) => {
-    const receipt = { bookingId, emailDispatchToken: state === "inactive" ? "fixture-inactive" : "", bookingSummary: summary };
-    if (state === "mismatch") receipt.bookingSummary = { ...summary, bookingId: "booking.other-browser", packageTitle: "Unrelated package" };
-    if (state === "malformed") receipt.bookingSummary = { ...summary, startTimeUTC: "2026-02-30T10:00:00Z", localTimeZone: "Invalid/Zone" };
-    if (["explicit null", "reference only", "reschedule"].includes(state)) receipt.bookingSummary = null;
-    if (state === "reschedule") receipt.requiresReschedule = true;
+    const receipt = { bookingId, ...(state === "inactive" ? { emailDispatchToken: "fixture-inactive" } : {}) };
+    let cachedSummary = summary;
+    if (state === "mismatch") cachedSummary = { ...summary, bookingId: "booking.other-browser", packageTitle: "Unrelated package" };
+    if (state === "malformed") cachedSummary = { ...summary, startTimeUTC: "2026-02-30T10:00:00Z", localTimeZone: "Invalid/Zone" };
+    if (["explicit null", "reference only", "reschedule"].includes(state)) cachedSummary = null;
+    if (state === "explicit null") receipt.bookingSummary = summary;
+    if (state === "reschedule") sessionStorage.setItem(`booking_confirmation_reschedule:${bookingId}`, "true");
     if (state !== "missing") sessionStorage.setItem("booking_confirmation_state", JSON.stringify(receipt));
-    sessionStorage.setItem(`booking_confirmation_summary:${bookingId}`, JSON.stringify(state === "explicit null" ? summary : { ...summary, bookingId: "booking.other-browser", packageTitle: "Unrelated package" }));
+    sessionStorage.setItem(`booking_confirmation_summary:${bookingId}`, JSON.stringify(cachedSummary));
     if (state === "blocked") { sessionStorage.clear(); Storage.prototype.getItem = () => { throw new Error("Storage unavailable"); }; Storage.prototype.setItem = () => { throw new Error("Storage unavailable"); }; }
   }, { bookingId, summary, state });
   if (state === "inactive") await page.route("**/api/ref/sendBookingEmails", route => route.fulfill({ status: 409, json: { ok: false, code: "booking_inactive" } }));
@@ -161,7 +197,8 @@ for (const state of ["missing", "mismatch", "malformed", "explicit null", "block
 test("copy acknowledgment follows the reference restored from history", async ({ page, flow }, info) => {
   void flow;
   await page.addInitScript(receipt => {
-    sessionStorage.setItem("booking_confirmation_state", JSON.stringify(receipt));
+    sessionStorage.setItem("booking_confirmation_state", JSON.stringify({ bookingId: receipt.bookingId }));
+    sessionStorage.setItem(`booking_confirmation_summary:${receipt.bookingId}`, JSON.stringify(receipt.bookingSummary));
     Object.defineProperty(navigator, "clipboard", { value: { writeText: async value => { window.__copiedReference = value; } } });
   }, { bookingId, bookingSummary: summary });
   await page.goto("/payment-success");
@@ -170,7 +207,8 @@ test("copy acknowledgment follows the reference restored from history", async ({
   await expect(dialog.getByRole("status")).toHaveText("Copied.");
   const nextId = "booking.next-confirmation";
   await page.evaluate(({ nextId, summary }) => {
-    const state = { ...history.state, __rooLegacy: true, usr: { bookingConfirmation: { bookingId: nextId, bookingSummary: { ...summary, bookingId: nextId } } } };
+    sessionStorage.setItem(`booking_confirmation_summary:${nextId}`, JSON.stringify({ ...summary, bookingId: nextId }));
+    const state = { ...history.state, __rooLegacy: true, usr: { bookingConfirmation: { bookingId: nextId } } };
     history.pushState(state, "", location.href);
     dispatchEvent(new PopStateEvent("popstate", { state }));
   }, { nextId, summary });
@@ -179,4 +217,28 @@ test("copy acknowledgment follows the reference restored from history", async ({
   await dialog.getByRole("button", { name: "Copy", exact: true }).click();
   expect(await page.evaluate(() => window.__copiedReference)).toBe(nextId);
   await record(page, info, "restored-reference", { nextId, copied: await page.evaluate(() => window.__copiedReference) });
+});
+
+test("reschedule completion keeps its recovery wording after reload and another checkout", async ({ page, flow }, info) => {
+  await flow.review();
+  await flow.payment();
+  await page.route("**/api/payment/start", route => route.fulfill({ json: complete({ provider: "dodo", requiresReschedule: true, bookingSummary: null }) }));
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  const message = "Your payment went through, but we couldn't confirm the time you selected. Reply to our email or contact us and we'll arrange another time.";
+  await expect(page.getByText(message, { exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("booking_confirmation_state"))?.emailDispatchToken || null)).toBeNull();
+  await page.reload();
+  await expect(page.getByText(message, { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Back to Home", exact: true }).click();
+  await page.locator('a[href="/booking"]').first().click();
+  await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.goBack();
+  await expect(page.getByText(message, { exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog").getByText(/booking is confirmed/)).toHaveCount(0);
+  const receipt = await page.evaluate(() => history.state.usr.bookingConfirmation);
+  expect(receipt).toEqual({ bookingId });
+  await record(page, info, "reschedule-history", { receipt });
 });

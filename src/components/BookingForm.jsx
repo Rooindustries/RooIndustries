@@ -57,7 +57,6 @@ const FORM_PREFILL_KEY = "booking_form_prefill";
 const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = BOOKING_DRAFT_STORAGE_KEY;
 const PAYMENT_SESSION_STORAGE_KEY = "payment_session_state";
-const BOOKING_CONFIRMATION_STORAGE_KEY = "booking_confirmation_state";
 const SESSION_STATE_KEY = "booking_modal_state";
 const REFERRAL_STORAGE_KEY = "referral_session";
 const INVALID_CHECKOUT_CODE_MESSAGE = "Invalid referral or coupon code.";
@@ -2028,10 +2027,6 @@ export default function BookingForm() {
 
     const bookingConfirmation = createBookingConfirmation(data);
     try {
-      sessionStorage.setItem(
-        BOOKING_CONFIRMATION_STORAGE_KEY,
-        JSON.stringify(bookingConfirmation)
-      );
       sessionStorage.removeItem(PAYMENT_SESSION_STORAGE_KEY);
       sessionStorage.removeItem(CHECKOUT_BOOKING_STORAGE_KEY);
     } catch {

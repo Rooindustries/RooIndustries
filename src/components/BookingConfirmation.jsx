@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import BookingEmailDispatchEffect from "./BookingEmailDispatchEffect";
-import { readBookingConfirmationSummary, useConfirmationReceipt } from "../lib/confirmationReceipt";
+import { readBookingConfirmationReschedule, readBookingConfirmationSummary, useConfirmationReceipt } from "../lib/confirmationReceipt";
 import { formatBookingAppointment } from "../lib/bookingSummary";
 
 export default function BookingConfirmation({ free = false }) {
   const receipt = useConfirmationReceipt();
+  const requiresReschedule = readBookingConfirmationReschedule(receipt);
   const summary = readBookingConfirmationSummary(receipt);
   const appointment = summary ? formatBookingAppointment(summary) : null;
   const [copyResult, setCopyResult] = useState(null);
@@ -26,7 +27,7 @@ export default function BookingConfirmation({ free = false }) {
         {receipt ? free ? "Thank You!" : "Payment Successful" : "Looking for your booking?"}
       </h1>
       <p key={receipt ? "confirmation-body" : "neutral-body"} className="mt-4 min-h-12 text-ink-secondary">
-        {!receipt ? "This page shows your confirmation right after checkout. If you've booked with us, your confirmation email has the details." : receipt.requiresReschedule ? "Your payment went through, but we couldn't confirm the time you selected. Reply to our email or contact us and we'll arrange another time." : free ? "Your booking has been confirmed. You'll receive a confirmation email shortly." : "Your payment was processed and your booking is confirmed. You'll receive a confirmation email shortly."}
+        {!receipt ? "This page shows your confirmation right after checkout. If you've booked with us, your confirmation email has the details." : requiresReschedule ? "Your payment went through, but we couldn't confirm the time you selected. Reply to our email or contact us and we'll arrange another time." : free ? "Your booking has been confirmed. You'll receive a confirmation email shortly." : "Your payment was processed and your booking is confirmed. You'll receive a confirmation email shortly."}
       </p>
       <div className="mt-6 min-h-[25rem] text-left">
         {receipt && <>

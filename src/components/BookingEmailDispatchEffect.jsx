@@ -1,4 +1,4 @@
-import { clearBookingConfirmation } from "../lib/confirmationReceipt";
+import { asConfirmationReceipt, clearBookingConfirmation } from "../lib/confirmationReceipt";
 import React, { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -11,7 +11,7 @@ const readStoredBookingConfirmation = () => {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed?.bookingId && parsed?.emailDispatchToken) {
-      return parsed;
+      return asConfirmationReceipt(parsed);
     }
   } catch {}
 
@@ -36,7 +36,7 @@ export default function BookingEmailDispatchEffect() {
     typeof window !== "undefined" ? window.history?.state?.usr : null;
   const navState = location.state || historyUsrState || {};
   const bookingConfirmation =
-    navState.bookingConfirmation || readStoredBookingConfirmation();
+    asConfirmationReceipt(navState.bookingConfirmation) || readStoredBookingConfirmation();
   const bookingId = String(bookingConfirmation?.bookingId || "").trim();
   const emailDispatchToken = String(
     bookingConfirmation?.emailDispatchToken || ""
