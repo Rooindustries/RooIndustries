@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import BookingEmailDispatchEffect from "./BookingEmailDispatchEffect";
-import { readBookingConfirmationReschedule, readBookingConfirmationSummary, useConfirmationReceipt } from "../lib/confirmationReceipt";
+import { readBookingConfirmationSummary, useConfirmationReceipt } from "../lib/confirmationReceipt";
 import { formatBookingAppointment } from "../lib/bookingSummary";
 
 export default function BookingConfirmation({ free = false }) {
   const receipt = useConfirmationReceipt();
-  const requiresReschedule = readBookingConfirmationReschedule(receipt);
+  const requiresReschedule = receipt?.requiresReschedule === true;
   const summary = readBookingConfirmationSummary(receipt);
   const appointment = summary ? formatBookingAppointment(summary) : null;
   const [copyResult, setCopyResult] = useState(null);

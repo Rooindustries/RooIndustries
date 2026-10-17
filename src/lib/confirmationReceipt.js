@@ -8,7 +8,7 @@ const serverSnapshot = () => false;
 
 export const asConfirmationReceipt = (value) =>
   typeof value?.bookingId === "string" && value.bookingId.trim()
-    ? { bookingId: value.bookingId.trim(), ...(value.emailDispatchToken ? { emailDispatchToken: value.emailDispatchToken } : {}) }
+    ? { bookingId: value.bookingId.trim(), ...(value.emailDispatchToken ? { emailDispatchToken: value.emailDispatchToken } : {}), ...(value.requiresReschedule === true ? { requiresReschedule: true } : {}) }
     : null;
 
 const readConfirmationReceipt = (state, hydrated) => {
@@ -32,7 +32,6 @@ export const useConfirmationReceipt = () => {
 };
 
 const summaryPrefix = "booking_confirmation_summary:";
-const reschedulePrefix = "booking_confirmation_reschedule:";
 
 export const clearBookingConfirmation = () => {
   try {
@@ -43,29 +42,20 @@ export const clearBookingConfirmation = () => {
 };
 
 export const createBookingConfirmation = body => {
-  const receipt = asConfirmationReceipt(body);
+  const requiresReschedule = body?.requiresReschedule === true || /reschedul/i.test(String(body?.recoveryReason || ""));
+  const receipt = asConfirmationReceipt({ ...body, requiresReschedule });
   if (!receipt) return null;
   const { bookingId } = receipt;
   const bookingSummary = asBookingSummary(body.bookingSummary, bookingId);
-  const requiresReschedule = body.requiresReschedule === true || /reschedul/i.test(String(body.recoveryReason || ""));
   try {
     window.sessionStorage.removeItem(`${summaryPrefix}${bookingId}`);
-    if (requiresReschedule) window.sessionStorage.setItem(`${reschedulePrefix}${bookingId}`, "true");
-    else window.sessionStorage.removeItem(`${reschedulePrefix}${bookingId}`);
     window.sessionStorage.setItem(`${summaryPrefix}${bookingId}`, JSON.stringify(requiresReschedule ? null : bookingSummary));
     window.sessionStorage.setItem("booking_confirmation_state", JSON.stringify(receipt));
-  } catch {
-    if (requiresReschedule) return null;
-  }
+  } catch {}
   return receipt;
 };
 
 export const readBookingConfirmationSummary = receipt => {
-  if (!receipt || readBookingConfirmationReschedule(receipt)) return null;
+  if (!receipt || receipt.requiresReschedule) return null;
   try { return asBookingSummary(JSON.parse(window.sessionStorage.getItem(`${summaryPrefix}${receipt.bookingId}`)), receipt.bookingId); } catch { return null; }
-};
-
-export const readBookingConfirmationReschedule = receipt => {
-  if (!receipt) return false;
-  try { return window.sessionStorage.getItem(`${reschedulePrefix}${receipt.bookingId}`) === "true"; } catch { return false; }
 };

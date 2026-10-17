@@ -39,6 +39,38 @@ test.afterEach(async ({ page }, info) => {
   await record(page, info, "result", { status: info.status, url: page.url(), errors: info.errors.map(error => error.message), requests: page.confirmationRequests, stored: await page.evaluate(() => { try { return { receipt: sessionStorage.getItem("booking_confirmation_state"), history: window.history.state }; } catch { return null; } }), text: await page.locator("body").innerText().catch(() => "Page unavailable") });
 });
 
+for (const failure of ["write fails", "storage blocked"]) for (const reschedule of [true, false]) test(`${reschedule ? "reschedule" : "paid"} completion keeps the reference when ${failure}`, async ({ page, flow }, info) => {
+  await flow.review();
+  await flow.payment();
+  await page.route("**/api/payment/start", route => route.fulfill({ json: complete({ provider: "dodo", ...(reschedule ? { requiresReschedule: true, bookingSummary: null } : {}) }) }));
+  const breakStorage = failure => {
+    Storage.prototype.setItem = () => { throw new DOMException("Storage unavailable", "QuotaExceededError"); };
+    if (failure === "storage blocked") {
+      Storage.prototype.getItem = () => { throw new DOMException("Storage unavailable", "SecurityError"); };
+      Storage.prototype.removeItem = () => { throw new DOMException("Storage unavailable", "SecurityError"); };
+    }
+  };
+  await page.addInitScript(breakStorage, failure);
+  await page.evaluate(breakStorage, failure);
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  for (const reload of [false, true]) {
+    if (reload) await page.reload();
+    await expect(page.getByRole("heading", { name: "Payment Successful", exact: true })).toBeVisible();
+    await expect(page.getByText(bookingId, { exact: true })).toBeVisible();
+    await expect(page.getByText("Looking for your booking?", { exact: true })).toHaveCount(0);
+    if (reschedule) {
+      await expect(page.getByText("Your payment went through, but we couldn't confirm the time you selected. Reply to our email or contact us and we'll arrange another time.", { exact: true })).toBeVisible();
+      await expect(page.getByText(/booking is confirmed/)).toHaveCount(0);
+      await expect(page.getByRole("dialog").getByText(summary.packageTitle, { exact: true })).toHaveCount(0);
+    } else {
+      await expect(page.getByText("Check your confirmation email for the package and appointment details.", { exact: true })).toBeVisible();
+    }
+    await expect.poll(() => page.evaluate(() => history.state?.usr?.bookingConfirmation)).toEqual({ bookingId, ...(reschedule ? { requiresReschedule: true } : {}) });
+  }
+  const receipt = await page.evaluate(() => history.state.usr.bookingConfirmation);
+  await record(page, info, "storage-failure", { failure, reschedule, receipt });
+});
+
 for (const invalidation of ["new checkout", "explicit null"]) test(`history cannot restore an appointment after ${invalidation}`, async ({ page, flow }, info) => {
   await flow.review();
   await flow.payment();
@@ -169,7 +201,7 @@ for (const state of ["missing", "mismatch", "malformed", "explicit null", "block
     if (state === "malformed") cachedSummary = { ...summary, startTimeUTC: "2026-02-30T10:00:00Z", localTimeZone: "Invalid/Zone" };
     if (["explicit null", "reference only", "reschedule"].includes(state)) cachedSummary = null;
     if (state === "explicit null") receipt.bookingSummary = summary;
-    if (state === "reschedule") sessionStorage.setItem(`booking_confirmation_reschedule:${bookingId}`, "true");
+    if (state === "reschedule") receipt.requiresReschedule = true;
     if (state !== "missing") sessionStorage.setItem("booking_confirmation_state", JSON.stringify(receipt));
     sessionStorage.setItem(`booking_confirmation_summary:${bookingId}`, JSON.stringify(cachedSummary));
     if (state === "blocked") { sessionStorage.clear(); Storage.prototype.getItem = () => { throw new Error("Storage unavailable"); }; Storage.prototype.setItem = () => { throw new Error("Storage unavailable"); }; }
@@ -239,6 +271,6 @@ test("reschedule completion keeps its recovery wording after reload and another 
   await expect(page.getByText(message, { exact: true })).toBeVisible();
   await expect(page.getByRole("dialog").getByText(/booking is confirmed/)).toHaveCount(0);
   const receipt = await page.evaluate(() => history.state.usr.bookingConfirmation);
-  expect(receipt).toEqual({ bookingId });
+  expect(receipt).toEqual({ bookingId, requiresReschedule: true });
   await record(page, info, "reschedule-history", { receipt });
 });
