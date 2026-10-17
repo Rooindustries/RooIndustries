@@ -13,5 +13,12 @@ export default async function NotFound() {
     ? requestedPath
     : "/__missing__";
   const search = requestHeaders.get("x-roo-request-search") || "";
-  return <RouteRenderer pathname={path} searchParams={Object.fromEntries(new URLSearchParams(search))} notFound />;
+  const query = new URLSearchParams(search);
+  const searchParams = Object.fromEntries(
+    [...new Set(query.keys())].map((key) => {
+      const values = query.getAll(key);
+      return [key, values.length > 1 ? values : values[0]];
+    })
+  );
+  return <RouteRenderer pathname={path} searchParams={searchParams} notFound />;
 }

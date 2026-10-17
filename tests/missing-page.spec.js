@@ -48,6 +48,18 @@ test("a missing page keeps its requested path and campaign after hydration", asy
   await expect(page.locator("[data-route-key]")).toHaveAttribute("data-route-key", missingPath);
 });
 
+test("a missing page keeps repeated campaign values after hydration", async ({ page }) => {
+  const requested = `${missingPath}?utm_source=a&utm_source=b`;
+  const response = await page.goto(requested);
+  expect(response.status()).toBe(404);
+  await hydrated(page);
+  await expect(page.getByRole("heading", { name: "404", exact: true })).toBeVisible();
+  await expect.poll(() => address(page)).toBe(requested);
+  const values = await page.evaluate(() => new URLSearchParams(window.location.search).getAll("utm_source"));
+  page.__missingPage.steps.push({ step: "hydrated repeated campaign", address: await address(page), values });
+  expect(values).toEqual(["a", "b"]);
+});
+
 test("going home and back restores the requested missing page in the same document", async ({ page }) => {
   await page.goto(campaignPath);
   await hydrated(page);
@@ -248,6 +260,25 @@ test("a wrong-case page renders the server not-found page on its initial entry",
   await expect(page.locator("#main-content h1")).toHaveText("404");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect.poll(() => address(page)).toBe("/FAQ");
+});
+
+test("a wrong-case page stays not-found after going home and back", async ({ page }) => {
+  const response = await page.goto("/FAQ");
+  expect(response.status()).toBe(404);
+  await hydrated(page);
+  await expect(page.locator("#main-content h1")).toHaveText("404");
+  await page.evaluate(() => { window.__wrongCaseDocument = true; });
+  page.__missingPage.steps.push({ step: "wrong-case page", address: await address(page) });
+  await page.getByRole("link", { name: "Back to Home", exact: true }).click();
+  await expect(page.locator("#top h1")).toBeVisible();
+  await expect.poll(() => address(page)).toBe("/");
+  page.__missingPage.steps.push({ step: "home", address: await address(page) });
+  await page.goBack();
+  await expect.poll(() => address(page)).toBe("/FAQ");
+  await expect(page.locator("#main-content h1")).toHaveText("404");
+  await expect(page.locator("#main-content").getByRole("heading", { name: "Questions Players Ask First", exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => window.__wrongCaseDocument)).toBe(true);
+  page.__missingPage.steps.push({ step: "back to wrong-case page", address: await address(page) });
 });
 
 test("a missing page ignores supplied request-location headers", async ({ page }) => {

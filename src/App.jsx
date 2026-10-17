@@ -203,7 +203,7 @@ function AnimatedRoutes({
 
   const routes = (
       <div key={motionKey} data-route-key={motionKey} className="w-full flex flex-col flex-1">
-        {notFound && baseLocation.key === initialEntryKey ? (
+        {notFound && location.pathname === initialRoutePath ? (
           <Routes location={location}>
             <Route path="*" element={<NotFound />} />
           </Routes>
