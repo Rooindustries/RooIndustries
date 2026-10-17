@@ -29,6 +29,8 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
   const bodyRef = useRef(null);
   const [actionsHost, setActionsHost] = useState(null);
   const [introComplete, setIntroComplete] = useState(skipInitialSizeAnimation);
+  const [introStarted, setIntroStarted] = useState(skipInitialSizeAnimation);
+  const [stageVisible, setStageVisible] = useState(false);
   const lastLayoutRef = useRef({
     wrapperWidth: 0,
     wrapperHeight: 0,
@@ -48,6 +50,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
   const [holdCount, setHoldCount] = useState(0);
   const holdCountRef = useRef(0);
   const contentRevealed = !awaitingContent && !contentSwitch.revealPending;
+  const introOffset = skipInitialSizeAnimation || introStarted || introComplete ? 0 : 48;
 
   const revealFocusedControl = useCallback((target) => {
     const body = bodyRef.current;
@@ -196,7 +199,8 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     const revealWhenLayoutApplied = () => {
       const wrapper = wrapperRef.current?.getBoundingClientRect();
       const content = contentRef.current?.getBoundingClientRect();
-      const { wrapperWidth, wrapperHeight } = lastLayoutRef.current;
+      const wrapperWidth = Math.max(0, lastLayoutRef.current.wrapperWidth - introOffset);
+      const wrapperHeight = Math.max(0, lastLayoutRef.current.wrapperHeight - introOffset);
       const layoutApplied =
         wrapper &&
         content &&
@@ -218,7 +222,15 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       window.cancelAnimationFrame(frame);
       cancelFallback();
     };
-  }, [contentSwitch, open]);
+  }, [contentSwitch, open, introOffset]);
+
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!open || !contentRevealed || introStarted || introComplete || skipInitialSizeAnimation || !stage) return undefined;
+    if (!stageVisible && Number(getComputedStyle(stage).opacity) <= 0) return undefined;
+    const frame = window.requestAnimationFrame(() => setIntroStarted(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, contentRevealed, introStarted, introComplete, skipInitialSizeAnimation, stageVisible]);
 
   useLayoutEffect(() => {
     if (contentSwitch.revealPending) {
@@ -289,65 +301,75 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={fadeTransition}
+          onUpdate={skipInitialSizeAnimation || introComplete ? undefined : ({ opacity }) => {
+            if (!stageVisible && Number(opacity) > 0) setStageVisible(true);
+          }}
           onClick={handleGlobalClick}
         >
           <div
             className="booking-modal-overlay glass-overlay low-perf-overlay fixed inset-0"
             style={{ pointerEvents: "none" }}
           />
-          <motion.div
-            ref={wrapperRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Schedule your session"
-            className={`ri-booking booking-dialog-frame relative overflow-hidden rounded-2xl bg-panel shadow-glow-strong ring-1 ring-line-input${contentRevealed ? "" : " invisible"}`}
-            initial={false}
-            style={{ "--booking-intro-offset": skipInitialSizeAnimation ? "0px" : "16px" }}
-            animate={wrapperSize.width > 0 ? { width: wrapperSize.width, height: wrapperSize.height } : {}}
-            transition={{ duration: introComplete ? 0 : 0.16, ease: [0.2, 0, 0, 1] }}
-            onAnimationComplete={() => {
-              setIntroComplete(true);
-              revealFocusedControl(document.activeElement);
-            }}
-          >
-            <button
-              id="booking-modal-close"
-              aria-label="Close"
-              className="absolute right-2 top-2 z-50 flex h-11 w-11 items-center justify-center rounded-lg text-info-text hover:text-white text-3xl leading-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-info-border"
-              ref={closeButtonRef}
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onClose();
+          <div className="relative h-full w-full">
+            <motion.div
+              ref={wrapperRef}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Schedule your session"
+              className={`ri-booking booking-dialog-frame absolute left-1/2 top-1/2 overflow-hidden rounded-2xl bg-panel shadow-glow-strong ring-1 ring-line-input${contentRevealed ? "" : " invisible"}`}
+              initial={false}
+              style={{ "--booking-intro-offset": `${introOffset}px`, x: "-50%", y: "-50%" }}
+              animate={wrapperSize.width > 0 ? { width: Math.max(0, wrapperSize.width - introOffset), height: Math.max(0, wrapperSize.height - introOffset) } : {}}
+              transition={{ duration: introStarted && !introComplete && !skipInitialSizeAnimation ? 0.2 : 0, ease: [0.2, 0, 0, 1] }}
+              onAnimationComplete={() => {
+                const wrapper = wrapperRef.current?.getBoundingClientRect();
+                if ((!skipInitialSizeAnimation && (!introStarted || !contentRevealed)) || !wrapper ||
+                    Math.abs(wrapper.width - lastLayoutRef.current.wrapperWidth) >= 1 ||
+                    Math.abs(wrapper.height - lastLayoutRef.current.wrapperHeight) >= 1) return;
+                setIntroComplete(true);
+                revealFocusedControl(document.activeElement);
               }}
             >
-              <span aria-hidden="true">×</span>
-            </button>
-            <div
-              data-booking-scaler="true"
-              className="absolute left-0 top-0 cursor-default"
-              style={{ width: "100%", height: "100%" }}
-            >
-              <div ref={contentRef} className="booking-dialog-viewport">
-                <div aria-hidden="true" />
-                <BookingDialogBody
-                  bodyRef={bodyRef}
-                  className={introComplete ? "" : "invisible"}
-                  onFocusCapture={(event) => revealFocusedControl(event.target)}
-                >
-                  <div ref={reservationRef} data-booking-reservation="true" />
-                  <BookingDialogReadyContext.Provider value={markContentHydrated}>
-                    <BookingDialogHoldContext.Provider value={hold}>
-                      <BookingDialogActionsContext.Provider value={actionsHost}>
-                        {children}
-                      </BookingDialogActionsContext.Provider>
-                    </BookingDialogHoldContext.Provider>
-                  </BookingDialogReadyContext.Provider>
-                  <div ref={setActionsHost} className="booking-dialog-actions-host" />
-                </BookingDialogBody>
+              <button
+                id="booking-modal-close"
+                aria-label="Close"
+                className="absolute left-0 top-0 z-50 flex h-11 w-11 items-center justify-center rounded-lg text-info-text hover:text-white text-3xl leading-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-info-border"
+                style={{ transform: "translate(calc(100cqw - 52px), 8px)" }}
+                ref={closeButtonRef}
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onClose();
+                }}
+              >
+                <span aria-hidden="true">×</span>
+              </button>
+              <div
+                data-booking-scaler="true"
+                className="absolute left-0 top-0 cursor-default"
+                style={{ width: "100%", height: "100%" }}
+              >
+                <div ref={contentRef} className="booking-dialog-viewport">
+                  <div aria-hidden="true" />
+                  <BookingDialogBody
+                    bodyRef={bodyRef}
+                    className={introComplete ? "" : "invisible"}
+                    onFocusCapture={(event) => revealFocusedControl(event.target)}
+                  >
+                    <div ref={reservationRef} data-booking-reservation="true" />
+                    <BookingDialogReadyContext.Provider value={markContentHydrated}>
+                      <BookingDialogHoldContext.Provider value={hold}>
+                        <BookingDialogActionsContext.Provider value={actionsHost}>
+                          {children}
+                        </BookingDialogActionsContext.Provider>
+                      </BookingDialogHoldContext.Provider>
+                    </BookingDialogReadyContext.Provider>
+                    <div ref={setActionsHost} className="booking-dialog-actions-host" />
+                  </BookingDialogBody>
+                </div>
               </div>
-            </div>
-          </motion.div>
+            </motion.div>
+          </div>
         </motion.div>
       )}
     </AnimatePresence>

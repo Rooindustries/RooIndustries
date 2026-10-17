@@ -32,6 +32,10 @@ test.beforeEach(async ({ page }) => {
         value: entry.value,
         time: entry.startTime,
         hadRecentInput: entry.hadRecentInput,
+        dialog: entry.sources.some(source => {
+          const node = source.node?.nodeType === Node.TEXT_NODE ? source.node.parentElement : source.node;
+          return Boolean(node?.closest('[role="dialog"].ri-booking'));
+        }),
       });
     }).observe({ type: "layout-shift", buffered: true });
   });
@@ -424,8 +428,8 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 
       await page.waitForTimeout(200);
       const reopenSizes = await page.evaluate(() => window.__dialogSizes);
       await save(page, testInfo, "reservation-reopen", { sizes: reopenSizes });
-      expect.soft(reopenSizes.at(-1).width - reopenSizes[0].width).toBeLessThanOrEqual(16);
-      expect.soft(reopenSizes.at(-1).height - reopenSizes[0].height).toBeLessThanOrEqual(16);
+      expect.soft(reopenSizes.at(-1).width - reopenSizes[0].width).toBe(48);
+      expect.soft(reopenSizes.at(-1).height - reopenSizes[0].height).toBe(48);
       await page.reload();
       await expect(email).toHaveValue("visitor@example.invalid");
       await captureLabels("reloaded-labels");
@@ -436,6 +440,33 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 
       await page.keyboard.press("Tab");
       await expect(close).toBeFocused();
       await save(page, testInfo, "labels-and-focus", { states, activeElement: await close.evaluate(node => node === document.activeElement) });
+    });
+
+    test("a delayed entry grows without layout shifts under CPU throttling", async ({ page, flow }, testInfo) => {
+      void flow;
+      const session = await page.context().newCDPSession(page);
+      await session.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+      try {
+        await page.addInitScript(() => document.addEventListener("click", event => {
+          if (!event.target.closest('a[href="/booking"]')) return;
+          const end = performance.now() + 600;
+          while (performance.now() < end) {}
+        }, { capture: true }));
+        await page.goto("/");
+        await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+        await page.evaluate(() => { window.__dialogShifts = []; });
+        await page.locator('a[href="/booking"]').first().click();
+        await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+        await page.waitForTimeout(650);
+        const result = await page.evaluate(() => ({ shifts: window.__dialogShifts, sizes: window.__dialogSizes }));
+        result.cls = sessionCls(result.shifts.filter(shift => shift.dialog));
+        await save(page, testInfo, "delayed-entry-cls", result);
+        expect(result.sizes.at(-1).width - result.sizes[0].width).toBe(48);
+        expect(result.sizes.at(-1).height - result.sizes[0].height).toBe(48);
+        expect(result.cls).toBe(0);
+      } finally {
+        await session.detach();
+      }
     });
 
     test("open step changes payment arrival and confirmation keep session CLS at baseline", async ({ page, flow }, testInfo) => {
@@ -588,6 +619,9 @@ test.describe("narrow frames and reservation focus", () => {
     });
     const metrics = await measure(page);
     await save(page, testInfo, "narrow-frame", { layout, metrics });
+    const close = metrics.targets.find(target => target.name === "Close");
+    expect.soft(close.x).toBeGreaterThanOrEqual(metrics.frame.x);
+    expect.soft(close.x + close.width).toBeLessThanOrEqual(metrics.frame.x + metrics.frame.width);
     expect.soft(metrics.horizontalOverflow).toEqual({ document: 0, frame: 0, body: 0 });
     expect.soft(layout.slots.top).toBeGreaterThanOrEqual(layout.calendar.bottom);
     for (const child of [layout.calendar, layout.slots]) {
