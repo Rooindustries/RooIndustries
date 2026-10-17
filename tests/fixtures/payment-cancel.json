@@ -1,0 +1,180 @@
+{
+  "booked": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "status": "booked",
+      "provider": "dodo",
+      "bookingId": "booking.fixture",
+      "recoveryReason": "",
+      "nextRecoveryAt": "",
+      "sessionExpiresAt": "2099-01-01T10:00:00.000Z",
+      "refundState": "",
+      "refundRequiresBookingSync": false,
+      "emailDispatch": {
+        "allSent": true,
+        "client": {
+          "sent": true
+        },
+        "owner": {
+          "sent": true
+        }
+      },
+      "emailDispatchToken": "",
+      "analyticsReceipt": null,
+      "bookingSummary": {
+        "bookingId": "booking.fixture",
+        "packageTitle": "Fixture Payment",
+        "startTimeUTC": "2099-01-01T10:00:00.000Z",
+        "localTimeZone": "Asia/Kolkata"
+      },
+      "requiresReschedule": false,
+      "cancelled": false,
+      "captured": true
+    }
+  },
+  "email_partial": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "status": "email_partial",
+      "provider": "dodo",
+      "bookingId": "booking.fixture",
+      "recoveryReason": "",
+      "nextRecoveryAt": "",
+      "sessionExpiresAt": "2099-01-01T10:00:00.000Z",
+      "refundState": "",
+      "refundRequiresBookingSync": false,
+      "emailDispatch": {
+        "allSent": false,
+        "client": {
+          "sent": false
+        },
+        "owner": {
+          "sent": true
+        }
+      },
+      "emailDispatchToken": "fixture-email-token",
+      "analyticsReceipt": null,
+      "bookingSummary": null,
+      "requiresReschedule": false,
+      "cancelled": false,
+      "captured": true
+    }
+  },
+  "refunded": {
+    "status": 409,
+    "body": {
+      "ok": false,
+      "status": "refunded",
+      "provider": "dodo",
+      "bookingId": "booking.fixture",
+      "recoveryReason": "This payment has been refunded.",
+      "nextRecoveryAt": "",
+      "sessionExpiresAt": "2099-01-01T10:00:00.000Z",
+      "refundState": "full",
+      "refundRequiresBookingSync": false,
+      "emailDispatch": {
+        "allSent": true,
+        "client": {
+          "sent": true
+        },
+        "owner": {
+          "sent": true
+        }
+      },
+      "emailDispatchToken": "",
+      "analyticsReceipt": null,
+      "bookingSummary": null,
+      "requiresReschedule": false,
+      "error": "This payment session can no longer be changed."
+    }
+  },
+  "failed": {
+    "status": 409,
+    "body": {
+      "ok": false,
+      "status": "failed",
+      "provider": "dodo",
+      "bookingId": "booking.fixture",
+      "recoveryReason": "Payment could not be completed.",
+      "nextRecoveryAt": "",
+      "sessionExpiresAt": "2099-01-01T10:00:00.000Z",
+      "refundState": "",
+      "refundRequiresBookingSync": false,
+      "emailDispatch": {
+        "allSent": true,
+        "client": {
+          "sent": true
+        },
+        "owner": {
+          "sent": true
+        }
+      },
+      "emailDispatchToken": "",
+      "analyticsReceipt": null,
+      "bookingSummary": null,
+      "requiresReschedule": false,
+      "error": "This payment session can no longer be changed."
+    }
+  },
+  "abandoned": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "status": "abandoned",
+      "provider": "dodo",
+      "bookingId": "",
+      "recoveryReason": "This payment session was released and is no longer payable.",
+      "nextRecoveryAt": "",
+      "sessionExpiresAt": "2099-01-01T10:00:00.000Z",
+      "refundState": "",
+      "refundRequiresBookingSync": false,
+      "emailDispatch": {
+        "allSent": true,
+        "client": {
+          "sent": true
+        },
+        "owner": {
+          "sent": true
+        }
+      },
+      "emailDispatchToken": "",
+      "analyticsReceipt": null,
+      "bookingSummary": null,
+      "requiresReschedule": false,
+      "cancelled": true,
+      "refreshedHold": {
+        "slotHoldId": "slotHold.fixture"
+      }
+    }
+  },
+  "needs_recovery": {
+    "status": 409,
+    "body": {
+      "ok": false,
+      "status": "needs_recovery",
+      "provider": "dodo",
+      "bookingId": "",
+      "recoveryReason": "Payment confirmation is taking longer than expected. Please keep this session and try the status check again shortly.",
+      "nextRecoveryAt": "",
+      "sessionExpiresAt": "2099-01-01T10:00:00.000Z",
+      "refundState": "",
+      "refundRequiresBookingSync": false,
+      "emailDispatch": {
+        "allSent": true,
+        "client": {
+          "sent": true
+        },
+        "owner": {
+          "sent": true
+        }
+      },
+      "emailDispatchToken": "",
+      "analyticsReceipt": null,
+      "bookingSummary": null,
+      "requiresReschedule": false,
+      "error": "This payment session can no longer be changed."
+    }
+  }
+}

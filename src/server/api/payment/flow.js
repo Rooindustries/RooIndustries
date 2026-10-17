@@ -3535,6 +3535,16 @@ export const cancelPaymentSession = async ({
       },
     };
   }
+  if (status === PAYMENT_STATUS_BOOKED || status === PAYMENT_STATUS_EMAIL_PARTIAL) {
+    return {
+      httpStatus: 200,
+      body: {
+        ...await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record) }),
+        cancelled: false,
+        captured: true,
+      },
+    };
+  }
   if (isPaymentTerminalStatus(status) || status !== PAYMENT_STATUS_STARTED) {
     return {
       httpStatus: 409,

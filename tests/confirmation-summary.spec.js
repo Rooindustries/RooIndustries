@@ -1,6 +1,7 @@
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const cancelResponses = require("./fixtures/payment-cancel.json");
 
 test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", actionTimeout: 10000, reducedMotion: "reduce", trace: "off", video: "off" });
 const bookingId = "booking.summary-order";
@@ -101,6 +102,90 @@ for (const invalidation of ["new checkout", "explicit null"]) test(`history cann
   await record(page, info, "history-invalidation", { invalidation, receipt });
 });
 
+for (const sample of [
+  { client: "booking", status: "booked" },
+  { client: "booking", status: "email_partial" },
+  { client: "payment", status: "booked" },
+  { client: "booking", status: "refunded" },
+  { client: "payment", status: "refunded" },
+  { client: "booking", status: "needs_recovery" },
+  { client: "payment", status: "needs_recovery" },
+]) test(`${sample.client} cancellation with ${sample.status} keeps the payment outcome`, async ({ page, flow }, info) => {
+  const result = cancelResponses[sample.status];
+  const requests = [];
+  await page.route("**/api/payment/cancel", route => {
+    expect(route.request().headers().authorization).toBe("Bearer fixture-payment");
+    requests.push(route.request().postDataJSON());
+    return route.fulfill({ status: result.status, json: result.body });
+  });
+  await flow.review();
+  await flow.payment();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page).toHaveURL(/checkout-handoff$/);
+  if (sample.client === "booking") {
+    await page.evaluate(() => {
+      const hold = JSON.parse(sessionStorage.getItem("my_slot_hold"));
+      sessionStorage.setItem("my_slot_hold", JSON.stringify({ ...hold, phase: "payment_pending" }));
+    });
+    await page.goto("/booking");
+  } else {
+    await page.goto("/payment");
+  }
+  await page.getByRole("button", { name: sample.client === "booking" ? "Release payment" : "Change payment method", exact: true }).click();
+  await expect.poll(() => requests.length).toBe(1);
+  if (!["booked", "email_partial"].includes(sample.status)) {
+    await expect(page).toHaveURL(new RegExp(`/${sample.client === "booking" ? "booking" : "payment"}$`));
+    await expect(page.getByText("This payment session can no longer be changed.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Payment Successful", exact: true })).toHaveCount(0);
+    expect(page.confirmationRequests).toEqual([]);
+    if (sample.status === "needs_recovery") await expect(page.getByText(result.body.recoveryReason, { exact: true })).toHaveCount(0);
+  } else {
+    await expect(page).toHaveURL(/\/payment-success$/);
+    await expect(page.getByRole("heading", { name: "Payment Successful", exact: true })).toBeVisible();
+    await expect(page.getByText(result.body.bookingId, { exact: true })).toBeVisible();
+    await expect(page.getByText("Looking for your booking?", { exact: true })).toHaveCount(0);
+    if (sample.status === "email_partial") {
+      await expect(page.getByText("Check your confirmation email for the package and appointment details.", { exact: true })).toBeVisible();
+    } else {
+      await expect(page.getByRole("dialog").getByText(result.body.bookingSummary.packageTitle, { exact: true })).toBeVisible();
+    }
+    await expect.poll(() => page.evaluate(() => history.state.usr.bookingConfirmation?.emailDispatchToken || null)).toBeNull();
+    await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("booking_confirmation_state"))?.emailDispatchToken || null)).toBeNull();
+  }
+  await record(page, info, "cancel-outcome", { sample, response: result, text: await page.getByRole("dialog").innerText() });
+});
+
+for (const capability of ["unsupported offset", "missing offset part"]) test(`paid confirmation renders with ${capability}`, async ({ page, flow }, info) => {
+  void flow;
+  await page.addInitScript(({ bookingId, summary, capability }) => {
+    sessionStorage.setItem("booking_confirmation_state", JSON.stringify({ bookingId }));
+    sessionStorage.setItem(`booking_confirmation_summary:${bookingId}`, JSON.stringify(summary));
+    const NativeDateTimeFormat = Intl.DateTimeFormat;
+    Intl.DateTimeFormat = new Proxy(NativeDateTimeFormat, {
+      construct(target, args) {
+        if (args[1]?.timeZoneName === "longOffset" && capability === "unsupported offset") throw new RangeError("Unsupported timeZoneName");
+        const formatter = Reflect.construct(target, args);
+        if (args[1]?.timeZoneName === "longOffset" && capability === "missing offset part") {
+          const formatToParts = formatter.formatToParts.bind(formatter);
+          formatter.formatToParts = value => formatToParts(value).filter(part => part.type !== "timeZoneName");
+        }
+        return formatter;
+      },
+    });
+  }, { bookingId, summary, capability });
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto("/payment-success");
+  await expect(page.getByRole("heading", { name: "Payment Successful", exact: true })).toBeVisible();
+  await expect(page.getByText(bookingId, { exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog").getByText(summary.packageTitle, { exact: true })).toBeVisible();
+  await expect(page.getByText(/March 8, 2026.*3:30 AM/)).toBeVisible();
+  await expect(page.getByRole("dialog").getByText(summary.localTimeZone, { exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog").getByText(/UTC[+-]/)).toHaveCount(0);
+  expect(errors).toEqual([]);
+  await record(page, info, "timezone-fallback", { capability, errors, text: await page.getByRole("dialog").innerText() });
+});
+
 for (const kind of ["paid", "free", "status recovery", "session replay", "captured cancel", "captured booking"]) {
   test(`${kind} completion shows the authorized reference and appointment`, async ({ page, flow }, info) => {
     const body = complete();
@@ -177,6 +262,7 @@ for (const reject of [false, true]) test(`copy reference ${reject ? "rejection k
 });
 
 for (const sample of [
+  { instant: "2026-01-01T00:00:00.000Z", zone: "UTC", date: "January 1, 2026", time: "12:00 AM", offset: "UTC+00:00" },
   { instant: "2026-01-01T00:30:00.000Z", zone: "Pacific/Honolulu", date: "December 31, 2025", time: "2:30 PM", offset: "UTC-10:00" },
   { instant: "2026-03-08T06:30:00.000Z", zone: "America/New_York", date: "March 8, 2026", time: "1:30 AM", offset: "UTC-05:00" },
   { instant: "2026-03-08T07:30:00.000Z", zone: "America/New_York", date: "March 8, 2026", time: "3:30 AM", offset: "UTC-04:00" },

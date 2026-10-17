@@ -21,6 +21,11 @@ export const formatBookingAppointment = summary => {
   const date = new Date(summary.startTimeUTC);
   const options = { timeZone: summary.localTimeZone, year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" };
   const dateTime = new Intl.DateTimeFormat("en-US", options).format(date);
-  const offset = new Intl.DateTimeFormat("en-US", { timeZone: summary.localTimeZone, timeZoneName: "longOffset" }).formatToParts(date).find(part => part.type === "timeZoneName").value.replace("GMT", "UTC");
-  return { dateTime, zone: `${summary.localTimeZone} · ${offset === "UTC" ? "UTC+00:00" : offset}` };
+  let offset = "";
+  try {
+    offset = new Intl.DateTimeFormat("en-US", { timeZone: summary.localTimeZone, timeZoneName: "longOffset" })
+      .formatToParts(date).find(part => part.type === "timeZoneName")?.value.replace("GMT", "UTC") || "";
+  } catch {}
+  if (offset === "UTC") offset = "UTC+00:00";
+  return { dateTime, zone: offset ? `${summary.localTimeZone} · ${offset}` : summary.localTimeZone };
 };

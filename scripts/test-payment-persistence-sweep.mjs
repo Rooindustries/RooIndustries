@@ -167,6 +167,20 @@ try{
       window.runScenario=async()=>{let resolveCapture;const capture=new Promise(resolve=>resolveCapture=resolve);const pending=onApprove({orderID:'order-fixture'},{order:{capture:()=>capture}});await Promise.resolve();current=false;document.getElementById('state').textContent='Checkout view closed before capture response';const updatesAtClose=uiUpdates.length;resolveCapture({id:'order-fixture',payer:{email_address:'customer@example.invalid'}});await pending;const proof={stale:true,updatesAtClose,updatesAfterClose:uiUpdates.slice(updatesAtClose),renderedState:document.getElementById('state').textContent};window.a1Proof=proof;document.getElementById('proof').textContent=JSON.stringify(proof,null,2);await fetch('/a1-ui-complete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(proof)});return proof;};document.getElementById('run').onclick=()=>window.runScenario();</script></body></html>`;
       res.writeHead(200,{'content-type':'text/html'});res.end(html);return;
     }
+    if (req.url === '/cancel-route') {
+      const { default: handler } = await import('../src/server/api/payment/cancel.js');
+      const response = {
+        status(code) { this.statusCode = code; return this; },
+        setHeader(name, value) { res.setHeader(name, value); },
+        json(body) {
+          res.writeHead(this.statusCode || 200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(body));
+          return this;
+        },
+      };
+      await handler({ method: 'POST', headers: req.headers, body: JSON.parse(raw) }, response);
+      return;
+    }
     if (req.url === '/start-route') {
       const { default: handler } = await import('../src/server/api/payment/start.js');
       const response = { status(code) { this.statusCode = code; return this; }, setHeader(name, value) { res.setHeader(name, value); }, json(body) { res.writeHead(this.statusCode || 200, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); return this; } };
@@ -1654,6 +1668,84 @@ try{
     assert.deepEqual(recovered.body.bookingSummary, finalized.body.bookingSummary);
     return { originalBefore, originalAfter: (await row(originalBefore._id)).payload, payment, booking, finalized, recovered };
   });
+  await run('confirmation-summary-settled-cancel', async () => {
+    const responses = {};
+    const unchanged = [];
+    for (const status of ['booked', 'email_partial', 'refunded', 'failed', 'abandoned', 'needs_recovery']) {
+      await reset();
+      const input = await startInput();
+      const settled = ['booked', 'email_partial'].includes(status);
+      const pending = status === 'email_partial';
+      await commerce.patch(input.bookingPayload.slotHoldId).set({
+        phase: settled || status === 'needs_recovery' ? 'consumed' : 'released',
+      }).commit();
+      const payment = await seed('dodo', status, {
+        booking: {
+          ...input.bookingPayload,
+          paymentRecordId: recordId,
+          status: settled ? 'captured' : status === 'refunded' ? 'refunded' : 'failed',
+          localTimeZone: pending ? '' : input.bookingPayload.localTimeZone,
+          emailDispatchClientSentAt: pending ? '' : '2026-01-01T00:00:00.000Z',
+          emailDispatchOwnerSentAt: '2026-01-01T00:00:00.000Z',
+        },
+        record: {
+          bookingPayload: input.bookingPayload,
+          bookingId: ['abandoned', 'needs_recovery'].includes(status) ? '' : bookingId,
+          refundState: status === 'refunded' ? 'full' : '',
+          emailDispatch: { allSent: !pending, client: { sent: !pending }, owner: { sent: true } },
+          emailDispatchToken: pending ? 'fixture-email-token' : '',
+          cancelledHoldSnapshot: status === 'abandoned' ? { slotHoldId: input.bookingPayload.slotHoldId } : {},
+        },
+      });
+      const before = {
+        stored: await snapshot({ receipts: true }),
+        emailDispatches: await sql`select to_jsonb(dispatch) as row from commerce.email_dispatches dispatch order by id`,
+      };
+      const response = await fetch(`${origin}/cancel-route`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${tokenFor(payment)}` },
+        body: '{}',
+      });
+      const result = { status: response.status, body: await response.json() };
+      assert.deepEqual({
+        stored: await snapshot({ receipts: true }),
+        emailDispatches: await sql`select to_jsonb(dispatch) as row from commerce.email_dispatches dispatch order by id`,
+      }, before, `${status} cancellation changed stored data`);
+      unchanged.push(status);
+      responses[status] = result;
+      assert.equal(result.body.status, status);
+      assert.equal(result.body.bookingId, payment.bookingId);
+      assert.equal(result.body.emailDispatchToken, payment.emailDispatchToken);
+      assert.deepEqual(result.body.bookingSummary, settled && !pending ? {
+        bookingId,
+        packageTitle: input.bookingPayload.packageTitle,
+        startTimeUTC: input.bookingPayload.startTimeUTC,
+        localTimeZone: input.bookingPayload.localTimeZone,
+      } : null);
+    }
+    fs.writeFileSync(`${artifact}.cancel-responses.json`, `${JSON.stringify(responses, null, 2)}\n`);
+    for (const [status, result] of Object.entries(responses)) {
+      if (['booked', 'email_partial'].includes(status)) {
+        assert.equal(result.status, 200, JSON.stringify(result));
+        assert.equal(result.body.ok, true);
+        assert.equal(result.body.captured, true);
+        assert.equal(result.body.cancelled, false);
+      } else if (status === 'abandoned') {
+        assert.equal(result.status, 200);
+        assert.equal(result.body.ok, true);
+        assert.equal(result.body.cancelled, true);
+        assert.equal(Object.hasOwn(result.body, 'captured'), false);
+      } else {
+        assert.equal(result.status, 409);
+        assert.equal(result.body.ok, false);
+        assert.equal(result.body.error, 'This payment session can no longer be changed.');
+        assert.equal(Object.hasOwn(result.body, 'captured'), false);
+      }
+    }
+    assert.deepEqual(responses, JSON.parse(sourceText('tests/fixtures/payment-cancel.json')));
+    return { responses, unchanged };
+  });
+
   await run('confirmation-summary-captured-cancel', async () => {
     const checkout = await a1Start('paypal');
     const initial = (await row(checkout.id)).payload;
