@@ -362,9 +362,12 @@ export default function RefReset() {
           return;
         }
         if (!response.ok || !data.ok) {
-          if (editVersionRef.current === version) {
+          const linkRejected = response.status === 401 || response.status === 403 ||
+            (response.status === 400 && data.error !== NEW_PASSWORD_REQUIREMENT);
+          if (linkRejected || editVersionRef.current === version) {
             setOutcome({
               type: "error",
+              ...(linkRejected ? { kind: "link" } : {}),
               message:
                 data.error ||
                 "Password update could not be completed. Please try again.",

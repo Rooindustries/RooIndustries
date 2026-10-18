@@ -319,6 +319,44 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       }, 'reset');
     });
 
+    test('a recovery link the server rejects stays explained after password edits', async ({ page }, testInfo) => {
+      for (const [status, message] of [[400, 'Invalid or expired reset link'], [401, 'This recovery session is invalid or expired. Request a new link.']]) {
+        await page.goto('about:blank');
+        await page.goto('/referrals/reset#token=' + 'a'.repeat(64));
+        const next = page.getByLabel('New Password', { exact: true });
+        const confirm = page.getByLabel('Confirm Password', { exact: true });
+        await next.fill('Different-password3!');
+        await confirm.fill('Different-password3!');
+        let edited;
+        const changed = new Promise(resolve => { edited = resolve; });
+        await page.route('**/api/ref/reset', async route => {
+          await changed;
+          await route.fulfill({ status, json: { ok: false, error: message } });
+        });
+        const requested = page.waitForRequest('**/api/ref/reset');
+        const response = page.waitForResponse('**/api/ref/reset');
+        response.catch(() => {});
+        try {
+          await page.getByRole('button', { name: 'Update Password', exact: true }).click();
+          await requested;
+          await next.fill('Replacement-password2!');
+          await confirm.fill('Replacement-password2!');
+          edited();
+          await (await response).finished();
+          const alert = page.locator('#main-content').getByRole('alert').filter({ hasText: message });
+          await expect(alert).toBeVisible();
+          await next.fill('Another-password4!');
+          await page.waitForTimeout(500);
+          await expect(alert).toBeVisible();
+          await record(page, testInfo, `reset-link-rejected-${status}-${size}`, { status, matchingAlerts: await alert.count() });
+        } finally {
+          edited();
+          await response.catch(() => {});
+          await page.unroute('**/api/ref/reset');
+        }
+      }
+    });
+
     test("a late login doesn't pull the creator away from another portal page", async ({ page, context, baseURL }, testInfo) => {
       for (const stage of ['response', 'session', 'timer']) {
         await context.clearCookies();
