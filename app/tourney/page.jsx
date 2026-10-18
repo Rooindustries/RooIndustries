@@ -5,6 +5,7 @@ import { tourneyResults as results } from "../../src/lib/tourneyResults";
 import "./results.css";
 
 export const metadata = seo.getMetadataForPath("/tourney");
+export const dynamic = "force-static";
 
 function PodiumFinish({ place, label, team, medal }) {
   return (
