@@ -405,6 +405,7 @@ export default function Payment({ hideFooter = false }) {
   const [couponInput, setCouponInput] = useState("");
   const [coupon, setCoupon] = useState(null);
   const [validatingCoupon, setValidatingCoupon] = useState(false);
+  const checkingCode = validating || validatingCoupon;
   const [couponError, setCouponError] = useState("");
   const [preApplyingCodes, setPreApplyingCodes] = useState(true);
 
@@ -1461,7 +1462,7 @@ export default function Payment({ hideFooter = false }) {
   }, [hydrated, location.search, paymentSession]);
 
   async function validateReferral(code) {
-    if (creatingFree) return;
+    if (creatingFree || validating || validatingCoupon) return;
     const normalizedCode = String(code || "").trim();
     if (!normalizedCode) {
       setReferral(null);
@@ -1529,7 +1530,7 @@ export default function Payment({ hideFooter = false }) {
   }
 
   async function validateCoupon(code) {
-    if (creatingFree) return;
+    if (creatingFree || validating || validatingCoupon) return;
     const normalizedCode = String(code || "").trim();
     if (!normalizedCode) {
       setCoupon(null);
@@ -1953,7 +1954,7 @@ export default function Payment({ hideFooter = false }) {
                     setReferralInput(e.target.value.trim());
                     if (referralError) setReferralError("");
                   }}
-                  disabled={creatingFree || preApplyingCodes || !!lockedProvider}
+                  disabled={creatingFree || preApplyingCodes || checkingCode || !!lockedProvider}
                   aria-invalid={referralError ? "true" : "false"}
                   aria-describedby={
                     referralError ? "payment-referral-code-error" : undefined
@@ -1964,7 +1965,7 @@ export default function Payment({ hideFooter = false }) {
 
                 <button
                   onClick={() => validateReferral(referralInput)}
-                  disabled={creatingFree || preApplyingCodes || validating || !!lockedProvider}
+                  disabled={creatingFree || preApplyingCodes || checkingCode || !!lockedProvider}
                   className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
                 >
                   {validating ? "Checking..." : "Apply"}
@@ -2001,7 +2002,7 @@ export default function Payment({ hideFooter = false }) {
                     setCouponInput(e.target.value.trim());
                     if (couponError) setCouponError("");
                   }}
-                  disabled={creatingFree || preApplyingCodes || !!lockedProvider}
+                  disabled={creatingFree || preApplyingCodes || checkingCode || !!lockedProvider}
                   aria-invalid={couponError ? "true" : "false"}
                   aria-describedby={
                     couponError ? "payment-coupon-code-error" : undefined
@@ -2013,7 +2014,7 @@ export default function Payment({ hideFooter = false }) {
                 <button
                   onClick={() => validateCoupon(couponInput)}
                   disabled={
-                    creatingFree || preApplyingCodes || validatingCoupon || !!lockedProvider
+                    creatingFree || preApplyingCodes || checkingCode || !!lockedProvider
                   }
                   className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
                 >
@@ -2027,12 +2028,12 @@ export default function Payment({ hideFooter = false }) {
                 {coupon && (
                   <button
                     onClick={() => {
-                      if (creatingFree) return;
+                      if (creatingFree || validating || validatingCoupon) return;
                       setCoupon(null);
                       setCouponInput("");
                       setCouponError("");
                     }}
-                    disabled={creatingFree || !!lockedProvider}
+                    disabled={creatingFree || checkingCode || !!lockedProvider}
                     className="text-xs text-ink-secondary underline underline-offset-2"
                   >
                     Remove coupon
