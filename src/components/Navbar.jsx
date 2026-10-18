@@ -564,12 +564,11 @@ export default function Navbar({ routeShell = "browser" }) {
             <Link to="/"
               onClick={handleHomeClick}
               className="flex min-w-0 items-center gap-3 select-none"
-              aria-label="Go to Roo Industries home"
             >
               <div className="relative h-14 w-14 grid place-items-center overflow-hidden rounded-xl">
                 <img
                   src="/favicon-96x96.png"
-                  alt="Roo Industries"
+                  alt=""
                   className={smallLogoStaticClassName}
                   loading="eager"
                   fetchPriority="high"
@@ -605,12 +604,11 @@ export default function Navbar({ routeShell = "browser" }) {
               to="/"
               onClick={handleHomeClick}
               className="flex min-w-0 flex-1 items-center gap-1.5 select-none md:hidden min-[360px]:gap-2"
-              aria-label="Go to Roo Industries home"
             >
               <div className="relative grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-lg min-[360px]:h-10 min-[360px]:w-10 sm:h-12 sm:w-12 sm:rounded-xl">
                 <img
                   src="/favicon-96x96.png"
-                  alt="Roo Industries"
+                  alt=""
                   className="h-8 w-8 rounded-lg object-contain drop-shadow-none min-[360px]:h-10 min-[360px]:w-10 sm:h-12 sm:w-12 sm:rounded-xl"
                   loading="eager"
                   fetchPriority="high"

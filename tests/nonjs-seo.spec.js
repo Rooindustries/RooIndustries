@@ -16,6 +16,19 @@ const routes = [
 ];
 
 test.describe("Non-JS crawlability", () => {
+  test("/packages keeps its h1 inside main without JavaScript", async ({ page }, testInfo) => {
+    await page.goto("/packages", { waitUntil: "domcontentloaded" });
+    await testInfo.attach("packages-headings", {
+      body: JSON.stringify(await page.locator("h1").evaluateAll(elements => elements.map(element => ({
+        text: element.textContent,
+        insideMain: Boolean(element.closest("main#main-content")),
+      }))), null, 2),
+      contentType: "application/json",
+    });
+    await expect(page.locator("main#main-content h1")).toHaveText("PC Game Optimization Packages", { timeout: 1000 });
+    await expect(page.locator("h1")).toHaveCount(1);
+  });
+
   for (const route of routes) {
     test(`renders meaningful HTML for ${route}`, async ({ page }) => {
       await page.goto(route, { waitUntil: "domcontentloaded" });
