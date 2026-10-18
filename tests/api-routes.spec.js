@@ -197,6 +197,22 @@ test.describe("referral reset acknowledgement", () => {
     expect(state.requests.some(call => call.path.endsWith("/roo_enqueue_referral_email_mutation"))).toBe(false);
   });
 
+  test("same-origin guard treats loopback aliases as one origin and rejects others", async ({ baseURL }) => {
+    await apiFixture.configureApiFixture(baseURL, { reset: true });
+    const { port } = new URL(baseURL);
+    const send = origin => apiFixture.requestRoute(baseURL, "/api/ref/forgot", { data: { email: "unknown@fixture.invalid" }, headers: { Origin: origin } });
+    for (const origin of [`http://foreign.fixture.invalid:${port}`, `http://127.0.0.1:${Number(port) + 2}`, `https://localhost:${port}`]) {
+      const response = await send(origin);
+      expect(response.status, origin).toBe(403);
+      expect(await response.json(), origin).toMatchObject({ code: "cross_origin_rejected" });
+    }
+    for (const origin of [`http://localhost:${port}`, `http://127.0.0.1:${port}`, `http://[::1]:${port}`]) {
+      const response = await send(origin);
+      expect(response.status, origin).toBe(200);
+      expect(await response.json(), origin).toEqual(acknowledgement);
+    }
+  });
+
   test.describe("forgot page", () => {
     test.use({ javaScriptEnabled: true });
     test("shows the API acknowledgement after requesting a reset", async ({ page, baseURL }, testInfo) => {
@@ -208,8 +224,10 @@ test.describe("referral reset acknowledgement", () => {
       const response = await responsePromise;
       const body = await response.json();
       await testInfo.attach("reset-page-response", { body: JSON.stringify(body), contentType: "application/json" });
-      await expect(page.getByText(body.message, { exact: true })).toBeVisible();
-      await expect(page.getByPlaceholder("you@example.com")).toHaveValue("");
+      expect(response.status(), JSON.stringify(body)).toBe(200);
+      expect(body).toEqual(acknowledgement);
+      await expect(page.getByRole("status").filter({ hasText: "If an account matches that email, we've sent a reset link. Check your inbox and spam folder." })).toBeVisible();
+      await expect(page.getByPlaceholder("you@example.com")).toHaveValue(apiFixture.referralEmail);
       await expect(page.getByRole("button", { name: "Send Reset Link", exact: true })).toBeEnabled();
       await page.screenshot({ path: "test-results/api-routes/forgot-page.png" });
     });

@@ -3551,7 +3551,7 @@ export const cancelPaymentSession = async ({
       body: {
         ...await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record) }),
         ok: false,
-        error: "This payment session can no longer be changed.",
+        error: getPublicRecoveryMessage(record) || "This payment session can no longer be changed.",
       },
     };
   }

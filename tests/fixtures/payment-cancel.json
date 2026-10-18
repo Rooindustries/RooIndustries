@@ -87,7 +87,7 @@
       "analyticsReceipt": null,
       "bookingSummary": null,
       "requiresReschedule": false,
-      "error": "This payment session can no longer be changed."
+      "error": "This payment has been refunded."
     }
   },
   "failed": {
@@ -115,7 +115,7 @@
       "analyticsReceipt": null,
       "bookingSummary": null,
       "requiresReschedule": false,
-      "error": "This payment session can no longer be changed."
+      "error": "Payment could not be completed."
     }
   },
   "abandoned": {
@@ -157,6 +157,62 @@
       "provider": "dodo",
       "bookingId": "",
       "recoveryReason": "Payment confirmation is taking longer than expected. Please keep this session and try the status check again shortly.",
+      "nextRecoveryAt": "",
+      "sessionExpiresAt": "2099-01-01T10:00:00.000Z",
+      "refundState": "",
+      "refundRequiresBookingSync": false,
+      "emailDispatch": {
+        "allSent": true,
+        "client": {
+          "sent": true
+        },
+        "owner": {
+          "sent": true
+        }
+      },
+      "emailDispatchToken": "",
+      "analyticsReceipt": null,
+      "bookingSummary": null,
+      "requiresReschedule": false,
+      "error": "Payment confirmation is taking longer than expected. Please keep this session and try the status check again shortly."
+    }
+  },
+  "finalizing": {
+    "status": 409,
+    "body": {
+      "ok": false,
+      "status": "finalizing",
+      "provider": "dodo",
+      "bookingId": "",
+      "recoveryReason": "Payment confirmation is taking longer than expected. Please keep this session and try the status check again shortly.",
+      "nextRecoveryAt": "",
+      "sessionExpiresAt": "2099-01-01T10:00:00.000Z",
+      "refundState": "",
+      "refundRequiresBookingSync": false,
+      "emailDispatch": {
+        "allSent": true,
+        "client": {
+          "sent": true
+        },
+        "owner": {
+          "sent": true
+        }
+      },
+      "emailDispatchToken": "",
+      "analyticsReceipt": null,
+      "bookingSummary": null,
+      "requiresReschedule": false,
+      "error": "Payment confirmation is taking longer than expected. Please keep this session and try the status check again shortly."
+    }
+  },
+  "verified_server": {
+    "status": 409,
+    "body": {
+      "ok": false,
+      "status": "verified_server",
+      "provider": "dodo",
+      "bookingId": "",
+      "recoveryReason": "",
       "nextRecoveryAt": "",
       "sessionExpiresAt": "2099-01-01T10:00:00.000Z",
       "refundState": "",

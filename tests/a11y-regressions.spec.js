@@ -120,6 +120,32 @@ for (const [name, viewport] of [
       expect(Math.abs((await position()) - focusedStart)).toBeLessThanOrEqual(1);
     });
 
+    test("benchmark before and after labels meet contrast", async ({ page, baseURL }, testInfo) => {
+      const image = { _type: "image", asset: { _type: "reference", _ref: "image-contrast-probe", _supabaseUrl: new URL("/favicon-96x96.png", baseURL).href }, dimensions: { width: 96, height: 96 } };
+      await page.route("**/api/content/benchmarks", route => route.fulfill({ json: { ok: true, data: [{ title: "Contrast Probe", beforeImage: image, afterImage: image }] } }));
+      await page.goto("/benchmarks", { waitUntil: "networkidle" });
+      const ratios = [];
+      for (const label of ["BEFORE", "AFTER"]) {
+        const badge = page.getByText(label, { exact: true }).first();
+        await expect(badge).toBeVisible();
+        ratios.push(await badge.evaluate((element, text) => {
+          const channels = value => value.match(/[\d.]+/g).slice(0, 3).map(Number);
+          const luminance = rgb => {
+            const [r, g, b] = rgb.map(channel => {
+              const value = channel / 255;
+              return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+            });
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          };
+          const style = getComputedStyle(element);
+          const [light, dark] = [luminance(channels(style.color)), luminance(channels(style.backgroundColor))].sort((a, b) => b - a);
+          return { text, color: style.color, background: style.backgroundColor, ratio: (light + 0.05) / (dark + 0.05) };
+        }, label));
+      }
+      await testInfo.attach("benchmark-label-contrast", { body: JSON.stringify(ratios, null, 2), contentType: "application/json" });
+      for (const { text, ratio } of ratios) expect(ratio, text).toBeGreaterThanOrEqual(4.5);
+    });
+
     test("footer navigation has a distinct landmark name", async ({ page }, testInfo) => {
       await page.goto("/packages", { waitUntil: "networkidle" });
       const footer = page.locator("footer").last();
