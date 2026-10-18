@@ -101,6 +101,27 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       }, image.id.replace('image-', 'review-'))),
     );
   }
+  const benchmarkImages = [
+    { id: 'image-benchmark-before', width: 960, height: 540, storagePath: 'images/benchmark-before.svg' },
+    { id: 'image-benchmark-after', width: 800, height: 450, storagePath: 'images/benchmark-after.svg' },
+  ].map(image => ({ ...image, body: `<svg xmlns="http://www.w3.org/2000/svg" width="${image.width}" height="${image.height}"><rect width="100%" height="100%" fill="#18202c"/><text x="24" y="48" fill="white" font-size="24">Synthetic benchmark</text></svg>` }));
+  documents.push(
+    document('benchmark', {
+      title: 'Fixture Benchmark Alpha',
+      subtitle: 'Synthetic before and after results for Alpha.',
+      sortOrder: 10,
+      beforeImage: { _type: 'image', asset: { _type: 'reference', _ref: benchmarkImages[0].id } },
+      afterImage: { _type: 'image', asset: { _type: 'reference', _ref: benchmarkImages[1].id } },
+    }, 'tooling-benchmark-z-alpha'),
+    document('benchmark', {
+      title: 'Fixture Benchmark Beta',
+      subtitle: 'Synthetic before and after results for Beta.',
+      sortOrder: 20,
+      beforeImage: { _type: 'image', asset: { _type: 'reference', _ref: benchmarkImages[0].id } },
+      afterImage: { _type: 'image', asset: { _type: 'reference', _ref: benchmarkImages[1].id } },
+    }, 'tooling-benchmark-a-beta'),
+  );
+  const images = [...layoutImages, ...benchmarkImages];
   const initialDocuments = structuredClone(documents);
   const dispatches = new Map();
   const rateLimits = new Map();
@@ -233,7 +254,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         }
         rows = rows.sort((a, b) => a._id < b._id ? -1 : a._id > b._id ? 1 : 0).slice(0, body.p_limit); call.status = 200; call.rows = rows.length; json(res, 200, rows);
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_asset_manifest_for_refs') {
-        const assets = layoutImages.filter(image => body.p_asset_ids?.includes(image.id)).map(image => ({
+        const assets = images.filter(image => body.p_asset_ids?.includes(image.id)).map(image => ({
           legacy_sanity_asset_id: image.id,
           storage_bucket: 'site-content-public',
           storage_path: image.storagePath,
@@ -243,8 +264,8 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           height: image.height,
         }));
         call.status = 200; json(res, 200, assets);
-      } else if (req.method === 'GET' && layoutImages.some(image => url.pathname === `/storage/v1/object/public/site-content-public/${image.storagePath}`)) {
-        const image = layoutImages.find(image => url.pathname.endsWith(image.storagePath));
+      } else if (req.method === 'GET' && images.some(image => url.pathname === `/storage/v1/object/public/site-content-public/${image.storagePath}`)) {
+        const image = images.find(image => url.pathname.endsWith(image.storagePath));
         call.status = 200;
         res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' });
         res.end(image.body);
