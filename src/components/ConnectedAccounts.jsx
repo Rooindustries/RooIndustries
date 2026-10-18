@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import SupabaseSocialLogin from "./SupabaseSocialLogin";
+import { requestDeadline } from "../lib/clientRequest";
 
 const allProviders = ["google", "discord"];
 
@@ -36,12 +37,14 @@ export default function ConnectedAccounts({
 
   const load = useCallback(async () => {
     setState((current) => ({ ...current, loading: true, error: "" }));
+    const signal = requestDeadline();
     try {
       const response = await fetch(
         `/api/auth/identities?flow=${encodeURIComponent(flow)}`,
-        { cache: "no-store" }
+        { cache: "no-store", signal }
       );
       const data = await response.json().catch(() => ({}));
+      if (signal.aborted) throw signal.reason;
       if (!mounted.current) return;
       if (response.ok && data.ok) {
         setState({ ...data, loading: false, error: "" });
@@ -57,7 +60,9 @@ export default function ConnectedAccounts({
       if (mounted.current) {
         setState({
           loading: false,
-          error: "Account connections are temporarily unavailable.",
+          error: signal.aborted
+            ? "Account connections are taking too long to load."
+            : "Account connections are temporarily unavailable.",
         });
         setLinkProof(null);
       }
@@ -141,9 +146,11 @@ export default function ConnectedAccounts({
     setBusy(true);
     setMessage("");
     passwordError.current = "";
+    const signal = requestDeadline();
     try {
       const response = await fetch("/api/auth/reauth", {
         method: "POST",
+        signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           flow,
@@ -152,6 +159,7 @@ export default function ConnectedAccounts({
         }),
       });
       const data = await response.json().catch(() => ({}));
+      if (signal.aborted) throw signal.reason;
       if (!response.ok || !data.ok) {
         if (data.reason === "password_incorrect") {
           setLinkProof(null);
@@ -170,7 +178,9 @@ export default function ConnectedAccounts({
       );
     } catch (error) {
       setLinkProof(null);
-      setMessage(error.message || "Unable to confirm your identity.");
+      setMessage(signal.aborted
+        ? "Confirming your identity took too long. Please try again."
+        : error.message || "Unable to confirm your identity.");
     } finally {
       setBusy(false);
     }
@@ -181,14 +191,18 @@ export default function ConnectedAccounts({
     setBusy(true);
     setMessage("");
     passwordError.current = "";
+    let stage = "reauth";
+    let stageSignal = null;
     try {
       if (linked.has("email") && !password) {
         showPasswordError(version, "Enter your current password, then select Unlink.");
         return;
       }
       if (password) {
+        stageSignal = requestDeadline();
         const reauthResponse = await fetch("/api/auth/reauth", {
           method: "POST",
+          signal: stageSignal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             flow,
@@ -198,6 +212,7 @@ export default function ConnectedAccounts({
           }),
         });
         const reauthData = await reauthResponse.json().catch(() => ({}));
+        if (stageSignal.aborted) throw stageSignal.reason;
         if (!reauthResponse.ok || !reauthData.ok) {
           if (reauthData.reason === "password_incorrect") {
             showPasswordError(version, reauthData.error || "Unable to confirm your identity.");
@@ -206,12 +221,16 @@ export default function ConnectedAccounts({
           throw new Error(reauthData.error || "Unable to confirm your identity.");
         }
       }
+      stage = "unlink";
+      stageSignal = requestDeadline();
       const response = await fetch("/api/auth/identities", {
         method: "POST",
+        signal: stageSignal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ flow, provider }),
       });
       const data = await response.json().catch(() => ({}));
+      if (stageSignal.aborted) throw stageSignal.reason;
       if (!response.ok || !data.ok) throw new Error(data.error || "Unable to unlink this account.");
       setPassword("");
       if (data.syncPending) {
@@ -219,14 +238,17 @@ export default function ConnectedAccounts({
         setMessage(`${provider[0].toUpperCase() + provider.slice(1)} unlinking is completing.`);
         const resume = async (attempt = 0) => {
           if (!mounted.current) return;
+          const signal = requestDeadline();
           try {
             const retry = await fetch(
               `/api/auth/identities?flow=${encodeURIComponent(flow)}`,
               {
                 cache: "no-store",
+                signal,
               }
             );
             const retryData = await retry.json().catch(() => ({}));
+            if (signal.aborted) throw signal.reason;
             if (!mounted.current) return;
             const retryProviders = new Set(retryData.unlinkableProviders || []);
             if (retry.ok && retryData.ok && !retryProviders.has(provider)) {
@@ -257,7 +279,11 @@ export default function ConnectedAccounts({
         setMessage(`${provider[0].toUpperCase() + provider.slice(1)} was unlinked.`);
       }
     } catch (error) {
-      setMessage(error.message || "Unable to unlink this account.");
+      setMessage(stageSignal?.aborted
+        ? stage === "reauth"
+          ? "Confirming your identity took too long. Please try again."
+          : "We couldn't confirm the unlink. Reload the page to check your connected accounts."
+        : error.message || "Unable to unlink this account.");
     } finally {
       setBusy(false);
     }
