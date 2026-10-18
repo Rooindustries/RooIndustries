@@ -41,6 +41,7 @@ export default function ReferralCreatorEditor() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const errorRef = useRef(null);
   const [notice, setNotice] = useState("");
   const [unlocked, setUnlocked] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -76,6 +77,10 @@ export default function ReferralCreatorEditor() {
     if (!saved) setError("Your creator draft could not be saved in this browser. Keep this page open until you save it.");
     return saved;
   };
+
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [error]);
 
   useEffect(() => {
     const beforeunload = (event) => {
@@ -402,7 +407,7 @@ export default function ReferralCreatorEditor() {
         </button>
       </header>
 
-      {error ? <p className={styles.error} role="alert">{error}</p> : null}
+      {error ? <p ref={errorRef} className={styles.error} role="alert">{error}</p> : null}
       {notice ? <p className={styles.notice} role="status"><Check size={17} />{notice}</p> : null}
       {draftConflict ? <p className={styles.error} role="alert">Local draft conflict: {draftConflict.invalid ? "the saved draft could not be read." : `the draft's base version ${draftConflict.baseVersion} does not match the current saved version.`} The saved draft is kept on this device. Discard it before editing the current terms.</p> : null}
 

@@ -942,9 +942,98 @@ for (const submitted of ["changed", "omitted"]) {
   });
 }
 
+const messagePlacement = locator => locator.evaluate(element => {
+  const rect = element.getBoundingClientRect();
+  const headers = [...document.querySelectorAll("header, [role='banner']")].map(header => {
+    const box = header.getBoundingClientRect();
+    return { position: getComputedStyle(header).position, top: box.top, bottom: box.bottom, height: box.height };
+  });
+  const headerBottom = Math.max(0, ...headers.filter(header => ["fixed", "sticky"].includes(header.position) && header.top <= 0 && header.bottom > 0).map(header => header.bottom));
+  return { top: rect.top, bottom: rect.bottom, viewportHeight: innerHeight, headerBottom, headers, pixelTolerance: 1, inView: rect.top >= headerBottom - 1 && rect.bottom <= innerHeight + 1 };
+});
+const positionAction = locator => locator.evaluate(element => window.scrollBy({ top: element.getBoundingClientRect().top - 12, behavior: "instant" }));
+const expectMessageInView = async (page, testInfo, message, details) => {
+  let geometry;
+  try {
+    await expect.poll(async () => { geometry = await messagePlacement(message); return geometry.inView; }).toBe(true);
+  } finally {
+    await evidence(page, testInfo, { ...details, geometry });
+    await page.screenshot({ path: testInfo.outputPath("viewport.png"), animations: "disabled" });
+  }
+};
+
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test.describe(`${viewport.width}px`, () => {
     test.use({ viewport });
+
+    for (const status of [423, 503]) test(`CMS ${status} failure banners are brought into view`, async ({ page }, testInfo) => {
+      await login(page); await hero(page);
+      const text = `Draft kept after ${status} at ${viewport.width} ${randomUUID()}`;
+      await page.getByLabel("Main Heading (Line 1)", { exact: true }).fill(text);
+      await page.route("**/api/admin/content/publish", route => route.fulfill({ status, json: { ok: false, ...(status === 423 ? { code: "CMS_WRITES_PAUSED" } : {}), error: "Publishing is temporarily unavailable." } }));
+      const publish = page.getByRole("button", { name: "Publish", exact: true });
+      await positionAction(publish);
+      await publish.click();
+      const message = page.getByRole("alert").filter({ hasText: status === 423 ? "Publishing is paused on this deployment." : "Not published. Retry when you are ready" });
+      await expect(message).toBeVisible();
+      const draft = await page.evaluate(id => JSON.parse(localStorage.getItem(`roo-content-draft:v1:doc:${id}`)), HERO_ID);
+      expect(draft?.document.headingLine1).toBe(text);
+      await expectMessageInView(page, testInfo, message, { status, draftKey: `roo-content-draft:v1:doc:${HERO_ID}`, draftKept: true });
+    });
+
+    test("referral failure banners are brought into view", async ({ page, request }, testInfo) => {
+      const creator = (await creators(request))[0];
+      await openReferrals(page); await selectCreator(page, creator);
+      const reason = "Service failure check; existing creator settings unchanged.";
+      await page.getByRole("textbox", { name: "Reason for change", exact: true }).fill(reason);
+      await page.route("**/api/admin/referral-creators", route => route.request().method() === "PATCH" ? route.fulfill({ status: 503, json: { ok: false, error: "Creator settings could not be saved right now." } }) : route.fallback());
+      const save = page.getByRole("button", { name: "Save creator settings", exact: true });
+      await positionAction(save);
+      await save.click();
+      const message = page.getByRole("alert").filter({ hasText: "Creator settings could not be saved right now." });
+      await expect(message).toBeVisible();
+      await expect(page.getByRole("textbox", { name: "Reason for change", exact: true })).toHaveValue(reason);
+      await expectMessageInView(page, testInfo, message, { status: 503, reasonKept: true });
+    });
+
+    test("CMS success notices do not scroll the editor", async ({ page }, testInfo) => {
+      await login(page); await hero(page);
+      await page.getByLabel("Main Heading (Line 1)", { exact: true }).fill(`Successful publish ${randomUUID()}`);
+      const publish = page.getByRole("button", { name: "Publish", exact: true });
+      await page.evaluate(() => {
+        document.documentElement.style.overflowAnchor = "none";
+        document.body.style.minHeight = `${document.documentElement.scrollHeight}px`;
+      });
+      await positionAction(publish);
+      const before = await page.evaluate(() => scrollY);
+      expect(before).toBeGreaterThan(0);
+      await publish.click();
+      await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+      await page.waitForTimeout(300);
+      const after = await page.evaluate(() => scrollY);
+      await evidence(page, testInfo, { before, after, delta: after - before, layoutAnchoring: false, scrollRangeHeld: true });
+      expect(Math.abs(after - before)).toBeLessThanOrEqual(3);
+    });
+
+    test("referral success notices do not scroll the editor", async ({ page, request }, testInfo) => {
+      const creator = (await creators(request))[0];
+      await openReferrals(page); await selectCreator(page, creator);
+      await page.getByRole("textbox", { name: "Reason for change", exact: true }).fill("Successful save check; existing creator settings unchanged.");
+      const save = page.getByRole("button", { name: "Save creator settings", exact: true });
+      await page.evaluate(() => {
+        document.documentElement.style.overflowAnchor = "none";
+        document.body.style.minHeight = `${document.documentElement.scrollHeight}px`;
+      });
+      await positionAction(save);
+      const before = await page.evaluate(() => scrollY);
+      expect(before).toBeGreaterThan(0);
+      await save.click();
+      await expect(page.getByRole("status").filter({ hasText: "Saved in Supabase." })).toBeVisible();
+      await page.waitForTimeout(300);
+      const after = await page.evaluate(() => scrollY);
+      await evidence(page, testInfo, { before, after, delta: after - before, layoutAnchoring: false, scrollRangeHeld: true });
+      expect(Math.abs(after - before)).toBeLessThanOrEqual(3);
+    });
 
     test("CMS sign-in ignores credential errors after the fields change", async ({ page }, testInfo) => {
       await page.goto("/admin/content");
