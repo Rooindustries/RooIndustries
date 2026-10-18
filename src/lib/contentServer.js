@@ -145,7 +145,17 @@ async function fetchPrivacyPolicy() {
   }
 }
 
+async function fetchTerms() {
+  try {
+    const fetchContent = await createPublicContentFetcher();
+    return await fetchContent("terms");
+  } catch {
+    return null;
+  }
+}
+
 module.exports = {
+  fetchTerms,
   fetchPrivacyPolicy,
   fetchFaqQuestions,
   fetchHomePageData,

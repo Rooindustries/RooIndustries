@@ -312,6 +312,7 @@ export default function FaqSection({
                 >
                   {pagedQuestions.map((q, idx) => {
                     const isAnswerOpen = openQuestions[q.id] || false;
+                    const answerId = `${q.id}-answer`;
                     const questionNumber = safePage * QUESTIONS_PER_PAGE + idx + 1;
 
                     return (
@@ -326,6 +327,7 @@ export default function FaqSection({
                           onClick={() => toggleQuestion(q.id)}
                           className="w-full flex items-start justify-between gap-3 text-left"
                           aria-expanded={isAnswerOpen}
+                          aria-controls={answerId}
                         >
                           <div className="flex-1 text-[15px] sm:text-[16px] font-semibold text-ink">
                             <span className="ri-faq-number mr-2 text-info-text font-semibold">
@@ -342,22 +344,29 @@ export default function FaqSection({
                           </motion.span>
                         </button>
 
-                        <AnimatePresence>
-                          {isAnswerOpen && (
-                            <motion.div
-                              key="answer"
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: "auto", opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="pt-2 text-ink-secondary leading-relaxed font-normal">
-                                {q.answer}
-                              </div>
-                            </motion.div>
+                        <div id={answerId}>
+                          <AnimatePresence>
+                            {isAnswerOpen && (
+                              <motion.div
+                                key="answer"
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.3, ease: "easeOut" }}
+                                className="overflow-hidden"
+                              >
+                                <div className="pt-2 text-ink-secondary leading-relaxed font-normal">
+                                  {q.answer}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                          {!isAnswerOpen && (
+                            <div hidden className="pt-2 text-ink-secondary leading-relaxed font-normal">
+                              {q.answer}
+                            </div>
                           )}
-                        </AnimatePresence>
+                        </div>
                       </motion.div>
                     );
                   })}
