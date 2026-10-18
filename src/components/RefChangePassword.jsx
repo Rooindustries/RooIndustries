@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../lib/passwordPolicy";
 import { useReferralAccount } from "../lib/useReferralAccount";
@@ -17,6 +17,17 @@ export default function RefChangePassword() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [outcome, setOutcome] = useState(null);
+  const editVersionRef = useRef(0);
+  const mountedRef = useRef(true);
+  const navTimerRef = useRef(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearTimeout(navTimerRef.current);
+    };
+  }, []);
 
   if (checking) return <p role="status" className="pt-32 text-center text-ink">Checking your account...</p>;
   if (accountError) return (
@@ -45,6 +56,7 @@ export default function RefChangePassword() {
       return;
     }
 
+    const version = editVersionRef.current;
     setLoading(true);
     setOutcome(null);
 
@@ -60,10 +72,12 @@ export default function RefChangePassword() {
       });
       const reauth = await reauthResponse.json().catch(() => ({}));
       if (!reauthResponse.ok || !reauth.ok) {
-        setOutcome({
-          type: "error",
-          message: reauth.error || "Current password is incorrect.",
-        });
+        if (editVersionRef.current === version) {
+          setOutcome({
+            type: "error",
+            message: reauth.error || "Current password is incorrect.",
+          });
+        }
         return;
       }
       const res = await fetch("/api/ref/hashPassword", {
@@ -84,13 +98,15 @@ export default function RefChangePassword() {
 
       if (!res.ok || !data.ok) {
         if (res.status === 401) {
-          nav("/referrals/login");
+          if (mountedRef.current) nav("/referrals/login");
           return;
         }
-        setOutcome({
-          type: "error",
-          message: data.error || "Password update could not be completed.",
-        });
+        if (editVersionRef.current === version) {
+          setOutcome({
+            type: "error",
+            message: data.error || "Password update could not be completed.",
+          });
+        }
         return;
       }
 
@@ -101,16 +117,20 @@ export default function RefChangePassword() {
       setCurrentPassword("");
       setPass1("");
       setPass2("");
-      setTimeout(
-        () => nav("/referrals/login?notice=password-updated"),
-        1500
-      );
+      if (mountedRef.current) {
+        navTimerRef.current = setTimeout(() => {
+          if (!mountedRef.current) return;
+          nav("/referrals/login?notice=password-updated");
+        }, 1500);
+      }
     } catch {
       console.error("Referral password change failed");
-      setOutcome({
-        type: "error",
-        message: "Password update could not be completed. Please try again.",
-      });
+      if (editVersionRef.current === version) {
+        setOutcome({
+          type: "error",
+          message: "Password update could not be completed. Please try again.",
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -142,7 +162,11 @@ export default function RefChangePassword() {
                        outline-none focus:border-info-border transition text-base"
             placeholder="Enter current password"
             value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
+            onChange={(e) => {
+              editVersionRef.current += 1;
+              setOutcome(current => current?.type === "error" ? null : current);
+              setCurrentPassword(e.target.value);
+            }}
           />
         </div>
 
@@ -162,7 +186,11 @@ export default function RefChangePassword() {
                        outline-none focus:border-info-border transition text-base"
             placeholder="Enter new password"
             value={pass1}
-            onChange={(e) => setPass1(e.target.value)}
+            onChange={(e) => {
+              editVersionRef.current += 1;
+              setOutcome(current => current?.type === "error" ? null : current);
+              setPass1(e.target.value);
+            }}
           />
           <p id="ref-change-password-requirement" className="mt-2 text-xs text-ink-muted">
             {NEW_PASSWORD_REQUIREMENT}
@@ -184,7 +212,11 @@ export default function RefChangePassword() {
                        outline-none focus:border-info-border transition text-base"
             placeholder="Confirm new password"
             value={pass2}
-            onChange={(e) => setPass2(e.target.value)}
+            onChange={(e) => {
+              editVersionRef.current += 1;
+              setOutcome(current => current?.type === "error" ? null : current);
+              setPass2(e.target.value);
+            }}
           />
         </div>
 

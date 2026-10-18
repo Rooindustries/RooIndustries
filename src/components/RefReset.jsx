@@ -149,6 +149,7 @@ export default function RefReset() {
   const [pass2, setPass2] = useState("");
   const [loading, setLoading] = useState(false);
   const [outcome, setOutcome] = useState(null);
+  const editVersionRef = useRef(0);
 
   useEffect(() => {
     mounted.current = true;
@@ -299,6 +300,7 @@ export default function RefReset() {
       return;
     }
 
+    const version = editVersionRef.current;
     const entry = initialization.current;
     const current = () => mounted.current && initialization.current === entry && activeLink.current === entry.key;
     if (!tokenReady || !mode || !current()) return;
@@ -321,7 +323,7 @@ export default function RefReset() {
             });
           } catch (error) {
             if (!current()) return;
-            setOutcome({ type: "error", message: error?.name === "TimeoutError"
+            setOutcome({ type: "error", kind: "link", message: error?.name === "TimeoutError"
               ? "Checking your recovery session took too long. Please try again."
               : "This recovery session changed or expired. Open your recovery link again." });
             return;
@@ -360,12 +362,14 @@ export default function RefReset() {
           return;
         }
         if (!response.ok || !data.ok) {
-          setOutcome({
-            type: "error",
-            message:
-              data.error ||
-              "Password update could not be completed. Please try again.",
-          });
+          if (editVersionRef.current === version) {
+            setOutcome({
+              type: "error",
+              message:
+                data.error ||
+                "Password update could not be completed. Please try again.",
+            });
+          }
           return;
         }
 
@@ -381,13 +385,15 @@ export default function RefReset() {
     } catch (error) {
       if (!current()) return;
       console.error("Referral password reset failed");
-      setOutcome({
-        type: "error",
-        message:
-          error?.name === "AbortError"
-            ? "Password update took too long. Please try again."
-            : "Password update could not be completed. Please try again.",
-      });
+      if (editVersionRef.current === version) {
+        setOutcome({
+          type: "error",
+          message:
+            error?.name === "AbortError"
+              ? "Password update took too long. Please try again."
+              : "Password update could not be completed. Please try again.",
+        });
+      }
     } finally {
       if (current()) setLoading(false);
     }
@@ -442,7 +448,11 @@ export default function RefReset() {
                        outline-none focus:border-info-border transition text-base text-ink"
             placeholder="Enter new password"
             value={pass1}
-            onChange={(event) => setPass1(event.target.value)}
+            onChange={(event) => {
+              editVersionRef.current += 1;
+              setOutcome(current => current?.type === "error" && current.kind !== "link" ? null : current);
+              setPass1(event.target.value);
+            }}
           />
           <p id="ref-reset-password-requirement" className="mt-2 text-xs text-ink-muted">
             {NEW_PASSWORD_REQUIREMENT}
@@ -463,7 +473,11 @@ export default function RefReset() {
                        outline-none focus:border-info-border transition text-base text-ink"
             placeholder="Confirm new password"
             value={pass2}
-            onChange={(event) => setPass2(event.target.value)}
+            onChange={(event) => {
+              editVersionRef.current += 1;
+              setOutcome(current => current?.type === "error" && current.kind !== "link" ? null : current);
+              setPass2(event.target.value);
+            }}
           />
         </div>
 
