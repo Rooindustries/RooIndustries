@@ -30,6 +30,26 @@ async function signIn(context, baseURL) {
   await context.addCookies([{ name: 'ref_session', value: fixture.referralSessionCookie(), url: baseURL, httpOnly: true, sameSite: 'Lax' }]);
 }
 
+async function holdAccountReply(page, endpoint, reply) {
+  let unblock, seen, finished;
+  let received = false;
+  const gate = new Promise(resolve => { unblock = resolve; });
+  const arrived = new Promise(resolve => { seen = resolve; });
+  const completed = new Promise(resolve => { finished = resolve; });
+  const handler = async route => {
+    received = true;
+    seen(route.request().postDataJSON());
+    await gate;
+    try { await (reply === 'abort' ? route.abort('failed') : route.fulfill(reply)); } finally { finished(); }
+  };
+  await page.route(`**${endpoint}`, handler);
+  return { arrived, release: async () => {
+    unblock();
+    if (received) await completed;
+    await page.unroute(`**${endpoint}`, handler);
+  } };
+}
+
 test('creator session follows login and logout', async ({ page, context }, testInfo) => {
   const protocol = await context.newCDPSession(page);
   const blockedCookies = [];
@@ -299,6 +319,65 @@ test.describe('replacement confirmation links in the same tab', () => {
   });
 });
 
+test('an upstream Auth outage stays explained after a connected-account password edit', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route('**/api/auth/identities?flow=referral', route => route.fulfill({ json: { ok: true, domainAccount: true, providers: ['email', 'google'], unlinkableProviders: ['email', 'google'] } }));
+  await page.goto('/referrals/login');
+  await page.getByLabel('Referral code or login email', { exact: true }).fill('fixture-creator');
+  await page.getByLabel('Password', { exact: true }).fill('Synthetic-password1!');
+  await page.getByRole('button', { name: 'Login', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Welcome, Synthetic Creator' })).toBeVisible();
+  const incorrect = await page.evaluate(async () => {
+    const response = await fetch('/api/auth/reauth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ flow: 'referral', purpose: 'link_identity', password: 'Earlier-wrong-password1!' }) });
+    return { status: response.status, body: await response.json() };
+  });
+  expect(incorrect).toEqual({ status: 401, body: { ok: false, error: 'Password is incorrect.', reason: 'password_incorrect' } });
+  await configure(baseURL, { settings: { authUnavailable: true } });
+  let unblock, seen, finished;
+  const gate = new Promise(resolve => { unblock = resolve; });
+  const arrived = new Promise(resolve => { seen = resolve; });
+  const completed = new Promise(resolve => { finished = resolve; });
+  const handler = async route => {
+    const requestHeaders = await route.request().allHeaders();
+    const response = await fixture.requestRoute(baseURL, '/api/auth/reauth', {
+      data: route.request().postDataJSON(),
+      headers: { cookie: requestHeaders.cookie || '', origin: baseURL },
+    });
+    const body = await response.json();
+    const headers = {};
+    const cookie = response.headers.get('set-cookie');
+    if (cookie) headers['set-cookie'] = cookie;
+    seen({ status: response.status, body });
+    await gate;
+    try { await route.fulfill({ status: response.status, headers, json: body }); } finally { finished(); }
+  };
+  await page.route('**/api/auth/reauth', handler);
+  const password = page.getByLabel('Current password', { exact: true });
+  const confirm = page.getByRole('button', { name: 'Confirm identity', exact: true });
+  try {
+    await password.fill('Synthetic-password1!');
+    await confirm.click();
+    const reauth = await arrived;
+    await password.fill('Edited-before-outage-reply2!');
+    unblock();
+    await completed;
+    await expect(confirm).toBeEnabled();
+    const state = await (await configure(baseURL, {})).json();
+    const tokenReplies = state.requests.filter(call => call.path === '/auth/v1/token').map(call => call.status);
+    const messages = await page.locator('section[aria-labelledby="referral-connections-title"]').getByRole('status').allTextContents();
+    await record(page, testInfo, 'connected-auth-outage', { incorrect, tokenReplies, reauth, messagesAfterPasswordEdit: messages });
+    expect(tokenReplies).toContain(503);
+    expect(reauth).toEqual({ status: 503, body: { ok: false, error: 'Reauthentication is temporarily unavailable.' } });
+    const notice = page.getByRole('status').filter({ hasText: 'Reauthentication is temporarily unavailable.' });
+    await expect(notice).toBeVisible();
+    await password.fill('Edited-after-outage-reply3!');
+    await expect(notice).toBeVisible();
+  } finally {
+    unblock();
+    await page.unroute('**/api/auth/reauth', handler);
+  }
+});
+
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   const size = viewport.width === 390 ? 'mobile' : 'desktop';
   test.describe(size, () => {
@@ -424,6 +503,138 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await record(page, testInfo, `announced-outcomes-${size}`);
     });
 
+    test('connected-account password errors follow the current password', async ({ page, context, baseURL }, testInfo) => {
+      await signIn(context, baseURL);
+      await page.route('**/api/auth/identities?flow=referral', route => route.fulfill({ json: { ok: true, domainAccount: true, providers: ['email', 'google'], unlinkableProviders: ['email', 'google'] } }));
+      await page.goto('/referrals/dashboard');
+      const password = page.getByLabel('Current password', { exact: true });
+      const confirm = page.getByRole('button', { name: 'Confirm identity', exact: true });
+      const error = page.getByRole('status').filter({ hasText: 'Password is incorrect.' });
+      const reply = { status: 401, json: { ok: false, error: 'Password is incorrect.', reason: 'password_incorrect' } };
+      const held = await holdAccountReply(page, '/api/auth/reauth', reply);
+      try {
+        await password.fill('Earlier-wrong-password1!');
+        await confirm.click();
+        expect(await held.arrived).toMatchObject({ purpose: 'link_identity', password: 'Earlier-wrong-password1!' });
+        await password.fill('Current-password2!');
+        const response = page.waitForResponse('**/api/auth/reauth');
+        await held.release();
+        await (await response).finished();
+        await expect(confirm).toBeEnabled();
+        await page.waitForTimeout(250);
+        await expect(error).toHaveCount(0);
+      } finally { await held.release(); }
+      await page.route('**/api/auth/reauth', route => route.fulfill(reply));
+      await confirm.click();
+      await expect(error).toBeVisible();
+      await password.fill('Another-current-password3!');
+      await expect(error).toHaveCount(0);
+      await record(page, testInfo, `connected-password-errors-${size}`, { staleReplyShown: false, currentErrorClearedOnEdit: true });
+    });
+
+    test('connected-account security errors survive password edits', async ({ page, context, baseURL }, testInfo) => {
+      await signIn(context, baseURL);
+      await page.route('**/api/auth/identities?flow=referral', route => route.fulfill({ json: { ok: true, domainAccount: true, providers: ['email', 'google'], unlinkableProviders: ['email', 'google'] } }));
+      await page.goto('/referrals/dashboard');
+      const password = page.getByLabel('Current password', { exact: true });
+      const observed = [];
+      for (const [status, message] of [
+        [401, 'Sign in again before changing account security.'],
+        [429, 'Too many attempts. Try again shortly.'],
+        [503, 'Reauthentication is temporarily unavailable.'],
+        [400, 'Reauthentication request is invalid.'],
+      ]) {
+        const held = await holdAccountReply(page, '/api/auth/reauth', { status, json: { ok: false, error: message } });
+        try {
+          await password.fill('Submitted-password1!');
+          await page.getByRole('button', { name: 'Confirm identity', exact: true }).click();
+          await held.arrived;
+          await password.fill('Edited-before-reply2!');
+          await held.release();
+          const notice = page.getByRole('status').filter({ hasText: message });
+          await expect(notice).toBeVisible();
+          await password.fill('Edited-after-reply3!');
+          await expect(notice).toBeVisible();
+          observed.push({ status, message, retainedAfterEdit: true });
+        } finally { await held.release(); }
+      }
+      await record(page, testInfo, `connected-security-errors-${size}`, { observed });
+    });
+
+    test('unlink password errors follow the current password without hiding operation errors', async ({ page, context, baseURL }, testInfo) => {
+      await signIn(context, baseURL);
+      let unlinkPosts = 0;
+      await page.route('**/api/auth/identities?flow=referral', route => route.fulfill({ json: { ok: true, domainAccount: true, providers: ['email', 'google'], unlinkableProviders: ['email', 'google'] } }));
+      await page.goto('/referrals/dashboard');
+      const password = page.getByLabel('Current password', { exact: true });
+      const unlink = page.getByRole('button', { name: 'Unlink google', exact: true });
+      const localError = page.getByRole('status').filter({ hasText: 'Enter your current password, then select Unlink.' });
+      await unlink.click();
+      await expect(localError).toBeVisible();
+      await password.fill('Earlier-wrong-password1!');
+      await expect(localError).toHaveCount(0);
+      const held = await holdAccountReply(page, '/api/auth/reauth', { status: 401, json: { ok: false, error: 'Password is incorrect.', reason: 'password_incorrect' } });
+      page.on('request', request => { if (new URL(request.url()).pathname === '/api/auth/identities' && request.method() === 'POST') unlinkPosts += 1; });
+      try {
+        await unlink.click();
+        expect(await held.arrived).toMatchObject({ purpose: 'unlink_identity', provider: 'google' });
+        await password.fill('Current-password2!');
+        await held.release();
+        await expect(unlink).toBeEnabled();
+        await page.waitForTimeout(250);
+        await expect(page.getByRole('status').filter({ hasText: 'Password is incorrect.' })).toHaveCount(0);
+        expect(unlinkPosts).toBe(0);
+      } finally { await held.release(); }
+      await page.route('**/api/auth/reauth', route => route.fulfill({ json: { ok: true } }));
+      const operation = await holdAccountReply(page, '/api/auth/identities', { status: 409, json: { ok: false, error: 'Synthetic unlink operation conflict.' } });
+      try {
+        await unlink.click();
+        await operation.arrived;
+        await password.fill('Edited-during-unlink3!');
+        await operation.release();
+        const error = page.getByRole('status').filter({ hasText: 'Synthetic unlink operation conflict.' });
+        await expect(error).toBeVisible();
+        await password.fill('Edited-after-unlink4!');
+        await expect(error).toBeVisible();
+        expect(unlinkPosts).toBe(1);
+        await expect(page.getByText('Google: Linked', { exact: false })).toBeVisible();
+      } finally { await operation.release(); }
+      await record(page, testInfo, `unlink-password-errors-${size}`, { localErrorClearedOnEdit: true, stalePasswordErrorShown: false, unlinkPosts, operationErrorRetained: true });
+    });
+
+    for (const [label, reply, message] of [
+      ['503', { status: 503, json: { ok: false, error: 'Reauthentication is temporarily unavailable.' } }, 'Reauthentication is temporarily unavailable.'],
+      ['network', 'abort', 'Password update could not be completed. Please try again.'],
+    ]) test(`change-password service errors survive password edits (${label})`, async ({ page, context, baseURL }, testInfo) => {
+      await signIn(context, baseURL);
+      await openForm(page, '/referrals/change-password', '/api/ref/getData');
+      const current = page.getByLabel('Current Password', { exact: true });
+      const password = page.getByLabel('New Password', { exact: true });
+      const confirm = page.getByLabel('Confirm Password', { exact: true });
+      await current.fill('Synthetic-password1!');
+      await password.fill('Replacement-password2!');
+      await confirm.fill('Replacement-password2!');
+      let passwordUpdates = 0;
+      page.on('request', request => { if (new URL(request.url()).pathname === '/api/ref/hashPassword') passwordUpdates += 1; });
+      const held = await holdAccountReply(page, '/api/auth/reauth', reply);
+      try {
+        await page.getByRole('button', { name: 'Save Password', exact: true }).click();
+        expect(await held.arrived).toMatchObject({ flow: 'referral', purpose: 'change_password' });
+        await current.fill('Edited-before-service-reply2!');
+        await held.release();
+        const alert = page.locator('#main-content').getByRole('alert').filter({ hasText: message });
+        await expect(alert).toBeVisible();
+        for (const [field, value] of [[current, 'Synthetic-password1!'], [password, 'Replacement-password3!'], [confirm, 'Replacement-password3!']]) {
+          await field.fill(value);
+          await expect(alert).toBeVisible();
+        }
+        await expect(page.getByRole('button', { name: 'Save Password', exact: true })).toBeEnabled();
+        expect(passwordUpdates).toBe(0);
+        await expect(page).toHaveURL(/\/referrals\/change-password$/);
+        await record(page, testInfo, `change-password-service-error-${label}-${size}`, { retainedBeforeAndAfterReply: true, fieldsEditedAfterReply: ['current', 'new', 'confirm'], passwordUpdates });
+      } finally { await held.release(); }
+    });
+
     test('account forms ignore errors from earlier submissions', async ({ page, context, baseURL }, testInfo) => {
       const failAfterEdit = async (endpoint, message, buttonName, edit, label) => {
         let edited;
@@ -431,7 +642,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await page.route(`**${endpoint}`, async route => {
           await new Promise(resolve => setTimeout(resolve, 800));
           await changed;
-          await route.fulfill({ status: endpoint === '/api/ref/reset' ? 409 : 401, json: { ok: false, error: message } });
+          await route.fulfill({ status: endpoint === '/api/ref/reset' ? 409 : 401, json: { ok: false, error: message, ...(endpoint === '/api/auth/reauth' ? { reason: 'password_incorrect' } : {}) } });
         });
         const requested = page.waitForRequest(`**${endpoint}`);
         const response = page.waitForResponse(`**${endpoint}`);

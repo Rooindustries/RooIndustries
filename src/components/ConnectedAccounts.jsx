@@ -31,6 +31,8 @@ export default function ConnectedAccounts({
   const proofExpiryTimer = useRef(null);
   const unlinkPollTimer = useRef(null);
   const mounted = useRef(false);
+  const passwordEdit = useRef(0);
+  const passwordError = useRef("");
 
   const load = useCallback(async () => {
     setState((current) => ({ ...current, loading: true, error: "" }));
@@ -128,9 +130,17 @@ export default function ConnectedAccounts({
   const canUnlink = (state.unlinkableProviders || []).length > 1;
   const unlinkable = new Set(state.unlinkableProviders || []);
 
+  const showPasswordError = (version, text) => {
+    if (passwordEdit.current !== version) return;
+    passwordError.current = text;
+    setMessage(text);
+  };
+
   const confirmPassword = async () => {
+    const version = passwordEdit.current;
     setBusy(true);
     setMessage("");
+    passwordError.current = "";
     try {
       const response = await fetch("/api/auth/reauth", {
         method: "POST",
@@ -142,7 +152,14 @@ export default function ConnectedAccounts({
         }),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.ok) throw new Error(data.error || "Unable to confirm your identity.");
+      if (!response.ok || !data.ok) {
+        if (data.reason === "password_incorrect") {
+          setLinkProof(null);
+          showPasswordError(version, data.error || "Unable to confirm your identity.");
+          return;
+        }
+        throw new Error(data.error || "Unable to confirm your identity.");
+      }
       if (!data.expiresAt || Date.parse(data.expiresAt) <= Date.now()) {
         throw new Error("Identity confirmation did not return a valid expiry.");
       }
@@ -160,11 +177,14 @@ export default function ConnectedAccounts({
   };
 
   const unlink = async (provider) => {
+    const version = passwordEdit.current;
     setBusy(true);
     setMessage("");
+    passwordError.current = "";
     try {
       if (linked.has("email") && !password) {
-        throw new Error("Enter your current password, then select Unlink.");
+        showPasswordError(version, "Enter your current password, then select Unlink.");
+        return;
       }
       if (password) {
         const reauthResponse = await fetch("/api/auth/reauth", {
@@ -179,6 +199,10 @@ export default function ConnectedAccounts({
         });
         const reauthData = await reauthResponse.json().catch(() => ({}));
         if (!reauthResponse.ok || !reauthData.ok) {
+          if (reauthData.reason === "password_incorrect") {
+            showPasswordError(version, reauthData.error || "Unable to confirm your identity.");
+            return;
+          }
           throw new Error(reauthData.error || "Unable to confirm your identity.");
         }
       }
@@ -294,7 +318,15 @@ export default function ConnectedAccounts({
             aria-label="Current password"
             autoComplete="current-password"
             className={"min-h-[44px] flex-1 rounded-xl border border-line-input bg-surface-input px-3 text-sm text-ink"}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={(event) => {
+              passwordEdit.current += 1;
+              setPassword(event.target.value);
+              const stale = passwordError.current;
+              if (stale) {
+                passwordError.current = "";
+                setMessage((current) => (current === stale ? "" : current));
+              }
+            }}
             placeholder="Current password"
             type="password"
             value={password}
