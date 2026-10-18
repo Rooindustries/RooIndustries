@@ -145,7 +145,23 @@ async function fetchPrivacyPolicy() {
   }
 }
 
+async function fetchBenchmarks({ requireContent = false } = {}) {
+  try {
+    const fetchContent = await createPublicContentFetcher({ fresh: true });
+    const rows = await fetchContent("benchmarks");
+    return Array.isArray(rows) ? rows : [];
+  } catch (error) {
+    if (requireContent) {
+      const { logSafeError } = await import("../server/safeErrorLog.js");
+      logSafeError("Benchmarks content unavailable; keeping the previous page", error);
+      throw error;
+    }
+    return null;
+  }
+}
+
 module.exports = {
+  fetchBenchmarks,
   fetchPrivacyPolicy,
   fetchFaqQuestions,
   fetchHomePageData,
