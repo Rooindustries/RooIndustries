@@ -110,6 +110,8 @@ for (const sample of [
   { client: "payment", status: "refunded" },
   { client: "booking", status: "needs_recovery" },
   { client: "payment", status: "needs_recovery" },
+  { client: "booking", status: "finalizing" },
+  { client: "payment", status: "finalizing" },
 ]) test(`${sample.client} cancellation with ${sample.status} keeps the payment outcome`, async ({ page, flow }, info) => {
   const result = cancelResponses[sample.status];
   const requests = [];
@@ -135,10 +137,11 @@ for (const sample of [
   await expect.poll(() => requests.length).toBe(1);
   if (!["booked", "email_partial"].includes(sample.status)) {
     await expect(page).toHaveURL(new RegExp(`/${sample.client === "booking" ? "booking" : "payment"}$`));
-    await expect(page.getByText("This payment session can no longer be changed.", { exact: true })).toBeVisible();
+    expect(result.body.error).toBe(result.body.recoveryReason);
+    await expect(page.getByText(result.body.recoveryReason, { exact: true })).toBeVisible();
+    await expect(page.getByText("This payment session can no longer be changed.", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Payment Successful", exact: true })).toHaveCount(0);
     expect(page.confirmationRequests).toEqual([]);
-    if (sample.status === "needs_recovery") await expect(page.getByText(result.body.recoveryReason, { exact: true })).toHaveCount(0);
   } else {
     await expect(page).toHaveURL(/\/payment-success$/);
     await expect(page.getByRole("heading", { name: "Payment Successful", exact: true })).toBeVisible();
