@@ -7,7 +7,9 @@ import {
   readStoredCheckoutBooking,
 } from "../lib/checkoutStorage";
 import packagePricing from "../lib/packagePricing";
+import { classifyHoldResponse } from "../lib/holdResponse";
 import { CHECKOUT_CONFIRMATION_EVENT, isCheckoutConfirmationPending } from "../lib/checkoutConfirmation";
+import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
 
 const { getPublicPackageTitle } = packagePricing;
 
@@ -78,8 +80,13 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
   const location = useLocation();
   const [hold, setHold] = useState(null);
   const [countdown, setCountdown] = useState(null);
+  const [releasing, setReleasing] = useState(false);
+  const [releaseError, setReleaseError] = useState("");
+  const currentHoldRef = useRef(null);
   const [confirmationVersion, setConfirmationVersion] = useState(0);
   const path = location.pathname || "";
+  const pathRef = useRef(path);
+  pathRef.current = path;
   const isMobileWidth = useIsMobileWidth();
   const isDesktopWidth = !isMobileWidth;
   const isPaymentScreen = path === "/payment" || path === "/payment-success";
@@ -113,6 +120,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
           }
           normalizedHold.startTimeUTC = utcDate.toISOString();
           sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
+          currentHoldRef.current = normalizedHold;
           setHold(normalizedHold);
           broadcastHold(normalizedHold);
         } else {
@@ -142,15 +150,18 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
         const utcDate = getUtcDateFromHold(normalizedHold);
         if (!utcDate) {
           removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);
+          currentHoldRef.current = null;
           setHold(null);
           return;
         }
         normalizedHold.startTimeUTC = utcDate.toISOString();
         writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
+        currentHoldRef.current = normalizedHold;
         setHold(normalizedHold);
         return;
       }
       removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);
+      currentHoldRef.current = null;
       setHold(null);
     };
     window.addEventListener("hold-state", handler);
@@ -164,6 +175,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
   }, []);
 
   useEffect(() => {
+    setReleaseError("");
     if (!hold?.expiresAt) {
       setCountdown(null);
       return;
@@ -207,31 +219,76 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
     return formatLocalTime(utcDate);
   }, [hold]);
 
-  const releaseHold = async (clearOnly = false, redirect = false) => {
-    if (!hold) return;
-    const holdIdToDelete = hold.holdId;
-    const holdTokenToDelete = hold.holdToken;
+  const readDraft = () => {
+    try {
+      return sessionStorage.getItem(BOOKING_DRAFT_KEY);
+    } catch {
+      return null;
+    }
+  };
+
+  const clearReservation = (redirect, { keepDraft = false } = {}) => {
+    currentHoldRef.current = null;
     setHold(null);
     removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);
-    removeBrowserStorage("sessionStorage", BOOKING_DRAFT_KEY);
+    if (!keepDraft) removeBrowserStorage("sessionStorage", BOOKING_DRAFT_KEY);
     broadcastHold(null);
     if (redirect) {
       nav("/", { replace: false });
     }
-    if (clearOnly) return;
+  };
+
+  const releaseHold = async (clearOnly = false, redirect = false) => {
+    if (!hold) return;
+    if (clearOnly) {
+      clearReservation(redirect);
+      return;
+    }
+    if (releasing) return;
+    const target = hold;
+    const startPath = pathRef.current;
+    const startDraft = readDraft();
+    setReleaseError("");
+    setReleasing(true);
+    const hasExpired = () => Date.parse(target.expiresAt) <= Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CLIENT_REQUEST_TIMEOUT_MS);
+    let outcome;
+    let serverMessage = "";
     try {
-      fetch("/api/releaseHold", {
+      const response = await fetch("/api/releaseHold", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          holdId: holdIdToDelete,
-          holdToken: holdTokenToDelete,
+          holdId: target.holdId,
+          holdToken: target.holdToken,
         }),
-      }).catch(() =>
-        console.error("Failed to release hold on server")
-      );
+        signal: controller.signal,
+      });
+      const data = await response.json().catch(() => null);
+      const message = data?.message || data?.error;
+      if (response.status === 409 && typeof message === "string") serverMessage = message;
+      outcome = classifyHoldResponse({
+        endpoint: "release",
+        status: response.status,
+        ok: response.ok && data?.ok === true,
+        expired: hasExpired(),
+      });
     } catch {
       console.error("Failed to release hold on server");
+      outcome = classifyHoldResponse({ endpoint: "release", networkError: true, expired: hasExpired() });
+    } finally {
+      clearTimeout(timeout);
+      setReleasing(false);
+    }
+    if (
+      currentHoldRef.current?.holdId !== target.holdId ||
+      currentHoldRef.current?.holdToken !== target.holdToken
+    ) return;
+    if (outcome === "clear") {
+      clearReservation(redirect && pathRef.current === startPath, { keepDraft: readDraft() !== startDraft });
+    } else {
+      setReleaseError(serverMessage || "We couldn't release this slot. Your reservation and details are still saved. Please try again.");
     }
   };
 
@@ -275,6 +332,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
   }, [shouldRender, inline, inlineContainer]);
 
   const continueBooking = () => {
+    if (releasing) return;
     if (String(hold?.phase || "").trim().toLowerCase() === "payment_pending" && !paymentInOtherTab) {
       const bookingData = readStoredCheckoutBooking();
       nav("/payment", {
@@ -404,17 +462,20 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
             `}
       >
         <div
-          className={`min-w-0 z-10 ${inline ? "flex-1" : textAlignmentClass} lg:flex lg:items-baseline lg:gap-2.5`}
+          className={`min-w-0 z-10 ${inline ? "flex-1" : textAlignmentClass}`}
         >
-          <p className={`font-semibold text-ink ${inline ? "" : "truncate"} drop-shadow-md ${titleSizeClass}`}>
-            Slot {holdLocalTimeLabel || "-"}
-            {hold?.packageTitle
-              ? ` · ${getPublicPackageTitle(hold.packageTitle)}`
-              : ""}
-          </p>
-          <p className={`text-info-text ${inline ? "" : "truncate"} drop-shadow-sm ${subtitleSizeClass}`}>
-            Expires in {formatCountdown(countdown)}
-          </p>
+          <div className="lg:flex lg:items-baseline lg:gap-2.5">
+            <p className={`font-semibold text-ink ${inline ? "" : "truncate"} drop-shadow-md ${titleSizeClass}`}>
+              Slot {holdLocalTimeLabel || "-"}
+              {hold?.packageTitle
+                ? ` · ${getPublicPackageTitle(hold.packageTitle)}`
+                : ""}
+            </p>
+            <p className={`text-info-text ${inline ? "" : "truncate"} drop-shadow-sm ${subtitleSizeClass}`}>
+              Expires in {formatCountdown(countdown)}
+            </p>
+          </div>
+          {releaseError && <p role="alert" className="text-danger-text text-xs">{releaseError}</p>}
         </div>
 
         <div className={`flex items-center ${buttonWrapClass} z-10 lg:flex-none ${buttonGapClass} ${buttonJustifyClass}`}>
@@ -423,9 +484,10 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
             <button
               type="button"
               onClick={() => releaseHold(false, true)}
+              disabled={releasing}
               className={`rounded-lg border border-danger-border bg-danger-soft px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-danger-text hover:bg-danger-soft transition shadow-sm`}
             >
-              Release
+              {releasing ? "Releasing..." : "Release"}
             </button>
           )}
 
@@ -434,6 +496,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
                 type="button"
                 data-reservation-continue="true"
                 onClick={continueBooking}
+                disabled={releasing}
                 className={`rounded-lg border border-info-border bg-info-soft px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-info-text hover:bg-info-soft transition whitespace-nowrap shadow-sm`}
               >
                 {String(hold?.phase || "").trim().toLowerCase() === "payment_pending"
