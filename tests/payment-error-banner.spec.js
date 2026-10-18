@@ -53,6 +53,34 @@ for (const viewport of [null, { width: 390, height: 844 }]) {
     await alert.getByRole("button", { name: "Close", exact: true }).click();
     await expect(alert).toHaveCount(0);
   });
+
+  for (const action of ["Check payment status", "Resume checkout"]) {
+    test(`payment recovery instructions raised below the banner are brought into view after ${action}${viewport ? " on mobile" : ""}`, async ({ page, flow }, info) => {
+      await page.setViewportSize(viewport || { width: 1440, height: 900 });
+      await flow.upgrade();
+      await page.getByRole("button", { name: "Check eligibility", exact: true }).click();
+      await page.getByRole("button", { name: "Proceed to Payment", exact: true }).click();
+      await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+      await expect(page).toHaveURL(/checkout-handoff$/);
+      await page.goto("/payment");
+      const message = "Your payment was received. Roo Industries will contact you about your upgrade.";
+      const response = {
+        status: 200,
+        json: { ok: true, status: "needs_recovery", provider: "dodo", manualReviewRequired: true, recoveryReason: message },
+      };
+      await page.route("**/api/payment/finalize", route => route.fulfill(response));
+      await page.route("**/api/payment/status", route => route.fulfill(response));
+      await page.getByRole("button", { name: action, exact: true }).click();
+      const status = page.getByRole("status").filter({ hasText: message });
+      await expect(status).toBeVisible();
+      await expect.poll(() => settled(status)).toBe(true);
+      await expect.poll(() => placement(status).then(result => result.inView)).toBe(true);
+      await page.waitForTimeout(5000);
+      await expect(status).toBeVisible();
+      expect(await placement(status)).toMatchObject({ inView: true });
+      await page.screenshot({ path: info.outputPath("payment-recovery-in-view.png") });
+    });
+  }
 }
 
 test("payment success banner still clears itself", async ({ page, flow }) => {
