@@ -253,7 +253,7 @@ function AnimatedRoutes({
           <Route
             path="/meet-the-team"
             element={renderPage(
-              <MeetTheTeam initialData={initialRouteData?.meetTheTeam || null} />
+              <MeetTheTeam initialData={initialContent?.meetTheTeam || null} />
             )}
           />
           <Route

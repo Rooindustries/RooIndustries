@@ -70,7 +70,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
     document('services', { heading: 'Synthetic benefits', cards: [] }),
     document('howItWorks', { title: 'How It Works', steps: [] }),
     document('packagesSettings', {}),
-    document('meetTheTeam', { heroTitle: 'Meet the Team', heroSubtitle: 'Synthetic local team', showFounder: false, sections: [] }),
+    document('meetTheTeam', { heroTitle: 'Meet the Team', heroSubtitle: 'Synthetic local team', showFounder: true, founder: { name: 'Fixture Founder', title: 'Synthetic founder', bio: 'Synthetic founder bio for the local team page.' }, sections: [{ _key: 'tooling-team-crew', title: 'Synthetic Crew', variant: 'standard', cards: [{ _key: 'tooling-team-alpha', name: 'Fixture Member Alpha', title: 'Synthetic tuner', bio: 'Synthetic bio for the first team card.' }, { _key: 'tooling-team-beta', name: 'Fixture Member Beta', title: 'Synthetic support', bio: 'Synthetic bio for the second team card.' }] }] }),
     document('bookingSettings', { dateSlots: [{ date: '2099-01-05', times: ['10:00', '11:00'] }], xocDateSlots: [], vertexEssentialsDateSlots: [], packageDateSlots: [] }, '6d8a3646-0ed2-44b5-ad45-c5c9d578126a'),
   ];
   if (apiRoutes) {
