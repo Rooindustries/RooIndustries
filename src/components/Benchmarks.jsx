@@ -86,7 +86,7 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="border-2 border-danger-border rounded-lg p-2">
-                  <div className="bg-danger text-white text-xs font-bold px-2 py-1 inline-block rounded mb-2">
+                  <div className="bg-danger text-black text-xs font-bold px-2 py-1 inline-block rounded mb-2">
                     BEFORE
                   </div>
                   <figure className="m-0">
