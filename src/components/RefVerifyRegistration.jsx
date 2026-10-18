@@ -17,7 +17,8 @@ const readVerificationToken = ({ hash }) => {
 export default function RefVerifyRegistration() {
   const location = useLocation();
   const navigate = useNavigate();
-  const attempt = useRef(null);
+  const requests = useRef(new Map());
+  const currentToken = useRef("");
   const [verificationLocation, setVerificationLocation] = useState(() => ({
     hash:
       (typeof window !== "undefined" ? window.location.hash : "") ||
@@ -57,51 +58,63 @@ export default function RefVerifyRegistration() {
         verificationLocation.pathname
       );
     }
+    currentToken.current = token;
     if (!token) {
-      attempt.current = null;
       setState({ status: "error", message: "This confirmation link is missing or invalid." });
       return;
     }
-    if (attempt.current?.pending && attempt.current.token === token) return;
-    const entry = { token, pending: true };
-    attempt.current = entry;
-    const current = () => attempt.current === entry;
-    setState({ status: "working", message: "Confirming your email…" });
-    fetch("/api/ref/verifyRegistration", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
-    })
-      .then(async (response) => ({
-        ok: response.ok,
-        status: response.status,
-        data: await response.json().catch(() => ({})),
-      }))
-      .then(({ ok, status, data }) => {
-        if (!current()) return;
-        if (!ok || data.ok !== true) {
-          if (status === 400) removeBrowserStorage("sessionStorage", TOKEN_KEY);
-          setState({
-            status: "error",
-            message: data.error || "This confirmation link is invalid or expired.",
-          });
-          return;
-        }
+    const releaseStoredToken = () => {
+      if (readBrowserStorage("sessionStorage", TOKEN_KEY) === token) {
         removeBrowserStorage("sessionStorage", TOKEN_KEY);
-        setState({
-          status: "success",
-          requiresLogin: data.requiresLogin === true,
-          message: data.requiresLogin === true
-            ? "Your account is confirmed. Sign in to open your creator dashboard."
-            : "Email confirmed. Your creator account is ready.",
+      }
+    };
+    let request = requests.current.get(token);
+    if (!request || request.outcome?.status === "error") {
+      const entry = { outcome: null };
+      entry.promise = fetch("/api/ref/verifyRegistration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      })
+        .then(async (response) => ({
+          ok: response.ok,
+          status: response.status,
+          data: await response.json().catch(() => ({})),
+        }))
+        .then(({ ok, status, data }) => {
+          if (!ok || data.ok !== true) {
+            if (status === 400) releaseStoredToken();
+            return {
+              status: "error",
+              message: data.error || "This confirmation link is invalid or expired.",
+            };
+          }
+          releaseStoredToken();
+          return {
+            status: "success",
+            requiresLogin: data.requiresLogin === true,
+            message: data.requiresLogin === true
+              ? "Your account is confirmed. Sign in to open your creator dashboard."
+              : "Email confirmed. Your creator account is ready.",
+          };
+        })
+        .catch(() => ({ status: "error", message: "Confirmation is temporarily unavailable. Please try again." }))
+        .then((outcome) => {
+          entry.outcome = outcome;
+          return outcome;
         });
-      })
-      .catch(() => {
-        if (current()) setState({ status: "error", message: "Confirmation is temporarily unavailable. Please try again." });
-      })
-      .finally(() => {
-        entry.pending = false;
-      });
+      requests.current.set(token, entry);
+      request = entry;
+    }
+    if (request.outcome) {
+      releaseStoredToken();
+      setState(request.outcome);
+      return;
+    }
+    setState({ status: "working", message: "Confirming your email…" });
+    request.promise.then((outcome) => {
+      if (currentToken.current === token) setState(outcome);
+    });
   }, [verificationLocation]);
 
   return (

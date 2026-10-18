@@ -238,6 +238,65 @@ test.describe('replacement confirmation links in the same tab', () => {
       await page.unrouteAll({ behavior: 'wait' });
     }
   });
+
+  test('reopening a confirmed link keeps the confirmation', async ({ page }, testInfo) => {
+    const tokens = collectTokens(page);
+    await page.goto('/referrals/verify#token=' + fresh);
+    await expect(page.getByRole('status')).toContainText('Email confirmed');
+    await page.evaluate(() => { window.__verifyDocument = true; });
+    await page.goto('/referrals/verify#token=' + fresh);
+    await expect.poll(() => new URL(page.url()).hash).toBe('');
+    await page.waitForTimeout(500);
+    const storedToken = await page.evaluate(key => sessionStorage.getItem(key), storageKey);
+    await record(page, testInfo, 'verify-reopened-confirmed-link', { postCount: tokens.length, storedTokenCleared: storedToken === null });
+    await expect(page.getByRole('status')).toContainText('Email confirmed');
+    await expect(page.getByRole('button', { name: 'Open dashboard', exact: true })).toBeVisible();
+    expect(tokens).toEqual([fresh]);
+    expect(await page.evaluate(() => window.__verifyDocument)).toBe(true);
+    expect(storedToken).toBeNull();
+  });
+
+  test('returning to a link that is still confirming does not send it again', async ({ page }, testInfo) => {
+    const tokens = collectTokens(page);
+    const release = {};
+    const held = {
+      [fresh]: new Promise(resolve => { release[fresh] = resolve; }),
+      [stale]: new Promise(resolve => { release[stale] = resolve; }),
+    };
+    await page.route(endpoint, async route => {
+      const token = route.request().postDataJSON().token;
+      await held[token];
+      if (token === stale) await route.fulfill({ status: 400, json: { ok: false, error: 'Invalid or expired confirmation link.' } });
+      else await route.fallback();
+    });
+    const staleResponse = page.waitForResponse(response => response.url().endsWith('/api/ref/verifyRegistration') && response.request().postDataJSON().token === stale);
+    staleResponse.catch(() => {});
+    try {
+      await page.goto('/referrals/verify#token=' + fresh);
+      await expect.poll(() => tokens).toEqual([fresh]);
+      await page.evaluate(() => { window.__verifyDocument = true; });
+      await page.goto('/referrals/verify#token=' + stale);
+      await expect.poll(() => tokens).toEqual([fresh, stale]);
+      await page.goto('/referrals/verify#token=' + fresh);
+      await expect.poll(() => new URL(page.url()).hash).toBe('');
+      release[stale]();
+      await (await staleResponse).finished();
+      await page.waitForTimeout(300);
+      const storedToken = await page.evaluate(key => sessionStorage.getItem(key), storageKey);
+      await expect(page.getByRole('status')).toContainText('Confirming your email');
+      expect(storedToken).toBe(fresh);
+      release[fresh]();
+      await expect(page.getByRole('status')).toContainText('Email confirmed');
+      await record(page, testInfo, 'verify-returned-pending-link', { postCount: tokens.length });
+      expect(tokens).toEqual([fresh, stale]);
+      expect(await page.evaluate(key => sessionStorage.getItem(key), storageKey)).toBeNull();
+      expect(await page.evaluate(() => window.__verifyDocument)).toBe(true);
+    } finally {
+      release[fresh]();
+      release[stale]();
+      await page.unrouteAll({ behavior: 'wait' });
+    }
+  });
 });
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
