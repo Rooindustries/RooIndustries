@@ -4,10 +4,12 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 const TOKEN_KEY = "referral_registration_verification";
 
+const readFragmentToken = (hash) =>
+  String(new URLSearchParams(String(hash || "").replace(/^#/, "")).get("token") || "").trim();
+
 const readVerificationToken = ({ hash }) => {
   if (typeof window === "undefined") return "";
-  const fragment = new URLSearchParams(String(hash || "").replace(/^#/, ""));
-  const fragmentToken = String(fragment.get("token") || "").trim();
+  const fragmentToken = readFragmentToken(hash);
   if (fragmentToken) writeBrowserStorage("sessionStorage", TOKEN_KEY, fragmentToken);
   return fragmentToken || readBrowserStorage("sessionStorage", TOKEN_KEY) || "";
 };
@@ -15,8 +17,8 @@ const readVerificationToken = ({ hash }) => {
 export default function RefVerifyRegistration() {
   const location = useLocation();
   const navigate = useNavigate();
-  const started = useRef(false);
-  const [verificationLocation] = useState(() => ({
+  const attempt = useRef(null);
+  const [verificationLocation, setVerificationLocation] = useState(() => ({
     hash:
       (typeof window !== "undefined" ? window.location.hash : "") ||
       location.hash ||
@@ -30,8 +32,20 @@ export default function RefVerifyRegistration() {
   const [state, setState] = useState({ status: "working", message: "Confirming your email…" });
 
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
+    const adoptLink = () => {
+      const next = {
+        hash: window.location.hash,
+        pathname: window.location.pathname,
+        search: window.location.search,
+      };
+      if (next.pathname !== verificationLocation.pathname || !readFragmentToken(next.hash)) return;
+      setVerificationLocation(next);
+    };
+    window.addEventListener("hashchange", adoptLink);
+    return () => window.removeEventListener("hashchange", adoptLink);
+  }, [verificationLocation.pathname]);
+
+  useEffect(() => {
     const token = readVerificationToken(verificationLocation);
     if (
       window.location.pathname === verificationLocation.pathname &&
@@ -44,9 +58,15 @@ export default function RefVerifyRegistration() {
       );
     }
     if (!token) {
+      attempt.current = null;
       setState({ status: "error", message: "This confirmation link is missing or invalid." });
       return;
     }
+    if (attempt.current?.pending && attempt.current.token === token) return;
+    const entry = { token, pending: true };
+    attempt.current = entry;
+    const current = () => attempt.current === entry;
+    setState({ status: "working", message: "Confirming your email…" });
     fetch("/api/ref/verifyRegistration", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -58,6 +78,7 @@ export default function RefVerifyRegistration() {
         data: await response.json().catch(() => ({})),
       }))
       .then(({ ok, status, data }) => {
+        if (!current()) return;
         if (!ok || data.ok !== true) {
           if (status === 400) removeBrowserStorage("sessionStorage", TOKEN_KEY);
           setState({
@@ -76,7 +97,10 @@ export default function RefVerifyRegistration() {
         });
       })
       .catch(() => {
-        setState({ status: "error", message: "Confirmation is temporarily unavailable. Please try again." });
+        if (current()) setState({ status: "error", message: "Confirmation is temporarily unavailable. Please try again." });
+      })
+      .finally(() => {
+        entry.pending = false;
       });
   }, [verificationLocation]);
 
