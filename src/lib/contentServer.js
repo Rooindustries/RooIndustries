@@ -36,13 +36,20 @@ async function fetchFaqQuestions() {
   }
 }
 
-const refuseHomeFallback = async (error) => {
+const refuseContentFallback = async (message, error) => {
   const { logSafeError } = await import("../server/safeErrorLog.js");
-  logSafeError("Home content unavailable; keeping the previous page", error);
+  logSafeError(message, error);
   throw error;
 };
 
-async function fetchHomePageData({ fresh = false, requireContent = false } = {}) {
+const refuseHomeFallback = (error) =>
+  refuseContentFallback("Home content unavailable; keeping the previous page", error);
+
+async function fetchHomePageData({
+  fresh = false,
+  requireContent = false,
+  requiredResources = [],
+} = {}) {
   let fetchContent;
   try {
     fetchContent = await createPublicContentFetcher({ fresh });
@@ -86,8 +93,15 @@ async function fetchHomePageData({ fresh = false, requireContent = false } = {})
     safeFetch("faq-settings", null),
     safeFetch("faq-questions", []),
   ]);
-  if (requireContent && failed.has("hero") && failed.has("packages-list")) {
+  if (requireContent && requiredResources.length === 0 && failed.has("hero") && failed.has("packages-list")) {
     await refuseHomeFallback(Object.assign(new Error("Home content is unavailable."), { code: "HOME_CONTENT_UNAVAILABLE" }));
+  }
+  const missingResources = requiredResources.filter((resource) => failed.has(resource));
+  if (requireContent && missingResources.length > 0) {
+    await refuseContentFallback(
+      "Page content unavailable; keeping the previous page",
+      Object.assign(new Error("Page content is unavailable."), { code: "PAGE_CONTENT_UNAVAILABLE", resources: missingResources })
+    );
   }
 
   return applyHomePageCopyOverrides({
@@ -169,6 +183,31 @@ async function fetchBenchmarks({ requireContent = false } = {}) {
   }
 }
 
+async function fetchPackagesPageData({ requireContent = false } = {}) {
+  const refuse = (error) =>
+    refuseContentFallback("Packages content unavailable; keeping the previous page", error);
+  let fetchContent;
+  try {
+    fetchContent = await createPublicContentFetcher({ fresh: true });
+  } catch (error) {
+    if (requireContent) await refuse(error);
+    return { packagesList: null, packagesSettings: null };
+  }
+  const read = async (resource) => {
+    try {
+      return await fetchContent(resource);
+    } catch (error) {
+      if (requireContent) await refuse(error);
+      return null;
+    }
+  };
+  const [packagesList, packagesSettings] = await Promise.all([
+    read("packages-list"),
+    read("packages-settings"),
+  ]);
+  return { packagesList, packagesSettings };
+}
+
 module.exports = {
   fetchBenchmarks,
   fetchTerms,
@@ -177,4 +216,5 @@ module.exports = {
   fetchHomePageData,
   fetchFlowPageHomeData,
   fetchHeroCopy,
+  fetchPackagesPageData,
 };
