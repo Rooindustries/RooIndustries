@@ -426,7 +426,7 @@ export default function Payment({ hideFooter = false }) {
   };
 
   useEffect(() => {
-    if (banner?.type === "error" && banner.text) {
+    if (banner?.text && (banner.type === "error" || banner.persistent)) {
       bannerRef.current?.scrollIntoView?.({ block: "nearest" });
     }
   }, [banner]);
