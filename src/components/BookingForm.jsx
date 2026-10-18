@@ -549,6 +549,7 @@ export default function BookingForm() {
   const [dismissedReferralCode, setDismissedReferralCode] = useState("");
   const [restoredCodeCandidates, setRestoredCodeCandidates] = useState(null);
   const autoReferralAttemptRef = useRef("");
+  const manualCodeAttemptRef = useRef(0);
   const hasActiveHoldRef = useRef(false);
 
   const [showVertexModal, setShowVertexModal] = useState(false);
@@ -1730,12 +1731,14 @@ export default function BookingForm() {
     }
 
     const validationHold = currentHoldRef.current;
+    const attempt = ++manualCodeAttemptRef.current;
     setValidatingCode(true);
     setCodeError("");
 
     try {
       const result = await resolveCheckoutCode(code, selectedPackage.title);
-      if (!mountedRef.current || !hasActiveHoldRef.current || isPaymentPendingHold) return;
+      if (!mountedRef.current || manualCodeAttemptRef.current !== attempt ||
+        !hasActiveHoldRef.current || isPaymentPendingHold) return;
       if (currentHoldRef.current?.holdId !== validationHold?.holdId ||
         currentHoldRef.current?.holdToken !== validationHold?.holdToken) return;
       if (!result.ok) {
@@ -1749,7 +1752,7 @@ export default function BookingForm() {
       }
       applyResolvedCoupon(result.value);
     } finally {
-      setValidatingCode(false);
+      if (manualCodeAttemptRef.current === attempt) setValidatingCode(false);
     }
   };
 
@@ -2003,6 +2006,8 @@ export default function BookingForm() {
     setEmailError("");
     hasActiveHoldRef.current = false;
     currentHoldRef.current = null;
+    manualCodeAttemptRef.current += 1;
+    setValidatingCode(false);
     setMyHold(null);
     if (clearStorage) {
       removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);

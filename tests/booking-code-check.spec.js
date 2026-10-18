@@ -187,6 +187,8 @@ test("a manual code reply from a released slot leaves the replacement booking al
     const replacementHold = await page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold")));
     expect(replacementHold.holdId).not.toBe(originalHold.holdId);
     expect((await draft(page)).form.email).toBe("updated@example.invalid");
+    await expect(page.getByRole("button", { name: "Continue to payment", exact: true })).toBeEnabled({ timeout: 1000 });
+    await expect(page.getByRole("button", { name: "Edit details", exact: true })).toBeEnabled();
     held.release();
     await (await held.response).finished();
     await page.waitForTimeout(300);
