@@ -23,7 +23,7 @@ for (const mode of modes) {
   const env = {
     ...process.env,
     PW_SERVER_ID: `${serverId}-${mode.name}`,
-    NEXT_DIST_DIR: dist,
+    NEXT_DIST_DIR: `${dist}-${mode.name}`,
     TOOLING_CLS_CONTENT: mode.content,
     TOOLING_CLS_RESPONSE: mode.response,
     TOOLING_CONTENT_ARTIFACT: path.join(artifactDir, "fixture.json"),

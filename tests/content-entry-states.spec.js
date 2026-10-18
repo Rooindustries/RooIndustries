@@ -82,9 +82,10 @@ for (const [route, resource, heading] of [
       await expect(page.locator("#main-content section [aria-hidden='true']")).toHaveCount(0);
       expect(await page.evaluate(() => window.__contentNavigationMarker)).toBe("same-document");
       expect(requests).toHaveLength(1);
-      const populated = process.env.TOOLING_CLS_CONTENT === "1" && responseState !== "failed";
+      const populated = (process.env.TOOLING_CLS_CONTENT === "1" || (route === "/tools" && process.env.TOOLING_CLS_CONTENT !== "0")) && responseState !== "failed";
       if (route === "/tools") {
-        await expect(page.locator("main article")).toHaveCount(populated ? 4 : 0);
+        const toolCount = process.env.TOOLING_CLS_CONTENT === "1" ? 4 : 1;
+        await expect(page.locator("main article")).toHaveCount(populated ? toolCount : 0);
         if (!populated) await expect(page.getByText(responseState === "failed" ? "Couldn't load the tools." : "No tools are listed right now.")).toBeVisible();
       } else {
         await expect(page.locator("main section figure img")).toHaveCount(populated ? 2 : 0);

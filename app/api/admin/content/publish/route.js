@@ -10,8 +10,6 @@ export const POST = (request, context) => handleCmsRequest(request, context, asy
   try {
     return await executeGlobalCmsCommand({ body, supabaseClient: client, env, actor });
   } finally {
-    revalidatePath("/");
-    revalidatePath("/packages");
-    revalidatePath("/faq");
+    revalidatePath("/", "layout");
   }
 }, { write: true });

@@ -159,11 +159,12 @@ async function fetchPrivacyPolicy() {
   }
 }
 
-async function fetchTerms() {
+async function fetchStaticPageContent(resource, { requireContent = false } = {}) {
   try {
-    const fetchContent = await createPublicContentFetcher();
-    return await fetchContent("terms");
-  } catch {
+    const fetchContent = await createPublicContentFetcher({ fresh: true });
+    return await fetchContent(resource);
+  } catch (error) {
+    if (requireContent) await refuseContentFallback("Page content unavailable; keeping the previous page", error);
     return null;
   }
 }
@@ -210,7 +211,7 @@ async function fetchPackagesPageData({ requireContent = false } = {}) {
 
 module.exports = {
   fetchBenchmarks,
-  fetchTerms,
+  fetchStaticPageContent,
   fetchPrivacyPolicy,
   fetchFaqQuestions,
   fetchHomePageData,
