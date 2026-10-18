@@ -25,13 +25,17 @@ export default function RefRegister() {
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
+  const [formError, setFormError] = useState("");
   const [socialIdentity, setSocialIdentity] = useState(null);
   const [verificationPending, setVerificationPending] = useState(false);
   const availabilityVersion = useRef(0);
+  const submittingRef = useRef(false);
+  const editVersionRef = useRef(0);
 
   function showToast(type, message) {
-    setToast({ type, message });
-    setTimeout(() => setToast(null), 2800);
+    const next = { type, message };
+    setToast(next);
+    setTimeout(() => setToast((current) => (current === next ? null : current)), 2800);
   }
   useEffect(() => {
     try {
@@ -94,6 +98,8 @@ export default function RefRegister() {
 
   async function handleRegister(e) {
     e.preventDefault();
+    if (submittingRef.current) return;
+    setFormError("");
 
     const trimmedDiscordUsername = discordUsername.trim();
     const trimmedEmail = email.trim().toLowerCase();
@@ -108,66 +114,69 @@ export default function RefRegister() {
       (!socialIdentity && !password) ||
       (!socialIdentity && !confirm)
     ) {
-      showToast("error", "Please fill in all fields.");
+      setFormError("Please fill in all fields.");
       return;
     }
 
     const emailRegex = /\S+@\S+\.\S+/;
     if (!emailRegex.test(trimmedEmail)) {
-      showToast("error", "Please enter a valid login email address.");
+      setFormError("Please enter a valid login email address.");
       return;
     }
 
     if (!emailRegex.test(trimmedPaypalEmail)) {
-      showToast("error", "Please enter a valid PayPal email address.");
+      setFormError("Please enter a valid PayPal email address.");
       return;
     }
 
     if (!socialIdentity && password !== confirm) {
-      showToast("error", "Passwords do not match.");
+      setFormError("Passwords do not match.");
       return;
     }
 
     if ((!socialIdentity || password) && !isValidNewPassword(password)) {
-      showToast("error", NEW_PASSWORD_REQUIREMENT);
+      setFormError(NEW_PASSWORD_REQUIREMENT);
       return;
     }
 
     if (slugAvailable === false) {
-      showToast("error", "Referral code is already taken.");
+      setFormError("Referral code is already taken.");
       return;
     }
-    if (slugAvailable === null) {
-      try {
-        const resCheck = await fetch(
-          `/api/ref/validateReferral?code=${encodeURIComponent(
-            trimmedSlug
-          )}&purpose=registration`
-        );
-        const dataCheck = await resCheck.json();
-        const availability = resolveReferralCodeAvailability(
-          resCheck,
-          dataCheck
-        );
-        if (availability === false) {
-          setSlugAvailable(false);
-          showToast("error", "Referral code is already taken.");
-          return;
-        } else if (availability === true) {
-          setSlugAvailable(true);
-        } else {
-          showToast("error", "Could not validate referral code. Try again.");
+    const version = editVersionRef.current;
+    submittingRef.current = true;
+    setLoading(true);
+    let redirecting = false;
+    try {
+      if (slugAvailable === null) {
+        try {
+          const resCheck = await fetch(
+            `/api/ref/validateReferral?code=${encodeURIComponent(
+              trimmedSlug
+            )}&purpose=registration`
+          );
+          const dataCheck = await resCheck.json();
+          const availability = resolveReferralCodeAvailability(
+            resCheck,
+            dataCheck
+          );
+          if (availability === false) {
+            if (editVersionRef.current === version) {
+              setSlugAvailable(false);
+              setFormError("Referral code is already taken.");
+            }
+            return;
+          } else if (availability === true) {
+            if (editVersionRef.current === version) setSlugAvailable(true);
+          } else {
+            if (editVersionRef.current === version) setFormError("Could not validate referral code. Try again.");
+            return;
+          }
+        } catch (err) {
+          if (editVersionRef.current === version) setFormError("Could not validate referral code. Try again.");
           return;
         }
-      } catch (err) {
-        showToast("error", "Could not validate referral code. Try again.");
-        return;
       }
-    }
-
-    setLoading(true);
-
-    try {
       const res = await fetch("/api/ref/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -188,8 +197,7 @@ export default function RefRegister() {
           availabilityVersion.current += 1;
           setSlugAvailable(null);
         }
-        showToast("error", data.error || "Registration failed.");
-        setLoading(false);
+        if (editVersionRef.current === version) setFormError(data.error || "Registration failed.");
         return;
       }
 
@@ -199,19 +207,22 @@ export default function RefRegister() {
         setConfirm("");
         setVerificationPending(true);
         showToast("success", "Check your email to finish creating the account.");
-        setLoading(false);
         return;
       }
 
+      redirecting = true;
       showToast("success", "Registered! Redirecting to dashboard...");
       removeBrowserStorage("sessionStorage", REFERRAL_SIGNUP_DRAFT);
       setTimeout(() => nav("/referrals/dashboard"), 900);
     } catch {
       console.error("Referral registration failed");
-      showToast("error", "Server error.");
+      if (editVersionRef.current === version) setFormError("Server error.");
+    } finally {
+      if (!redirecting) {
+        submittingRef.current = false;
+        setLoading(false);
+      }
     }
-
-    setLoading(false);
   }
 
   return (
@@ -253,7 +264,11 @@ export default function RefRegister() {
             id="ref-register-discord"
             name="discordUsername"
             value={discordUsername}
-            onChange={(e) => setDiscordUsername(e.target.value)}
+            onChange={(e) => {
+              setFormError("");
+              editVersionRef.current += 1;
+              setDiscordUsername(e.target.value);
+            }}
             placeholder="e.g. @serviroo"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
           />
@@ -271,7 +286,11 @@ export default function RefRegister() {
             name="email"
             type="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setFormError("");
+              editVersionRef.current += 1;
+              setEmail(e.target.value);
+            }}
             readOnly={Boolean(socialIdentity)}
             placeholder="Email you sign in with"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
@@ -293,7 +312,11 @@ export default function RefRegister() {
             name="paypalEmail"
             type="email"
             value={paypalEmail}
-            onChange={(e) => setPaypalEmail(e.target.value)}
+            onChange={(e) => {
+              setFormError("");
+              editVersionRef.current += 1;
+              setPaypalEmail(e.target.value);
+            }}
             placeholder="Email used for your PayPal account"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
           />
@@ -310,7 +333,11 @@ export default function RefRegister() {
             id="ref-register-slug"
             name="slug"
             value={slug}
-            onChange={(e) => setSlug(e.target.value)}
+            onChange={(e) => {
+              setFormError("");
+              editVersionRef.current += 1;
+              setSlug(e.target.value);
+            }}
             placeholder="Custom referral code (e.g. yourname)"
             className={`w-full p-4 mt-1 bg-surface-input border rounded-xl outline-none focus:border-info-border transition text-base ${
               slugAvailable === false ? "border-danger-border" : "border-line-input"
@@ -337,7 +364,11 @@ export default function RefRegister() {
             minLength={10}
             aria-describedby="ref-register-password-requirement"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setFormError("");
+              editVersionRef.current += 1;
+              setPassword(e.target.value);
+            }}
             placeholder="Enter password"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
           />
@@ -355,7 +386,11 @@ export default function RefRegister() {
             name="confirmPassword"
             type="password"
             value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
+            onChange={(e) => {
+              setFormError("");
+              editVersionRef.current += 1;
+              setConfirm(e.target.value);
+            }}
             placeholder="Confirm password"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
           />
@@ -374,6 +409,9 @@ export default function RefRegister() {
           <span className="glow-line glow-line-bottom" />
           <span className="glow-line glow-line-left" />
         </button>
+        {formError && (
+          <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-danger-text">{formError}</p>
+        )}
       </form>
 
       {toast && (
