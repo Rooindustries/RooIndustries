@@ -65,18 +65,19 @@ const selectCreator = async (page, creator) => {
   await page.locator("aside").getByRole("button").filter({ hasText: creator.referral_code }).click();
   await expect(page.getByRole("heading", { name: creator.name, exact: true })).toBeVisible();
 };
-const hold = async (page, pattern, { forward = true, method } = {}) => {
+const hold = async (page, pattern, { forward = true, method, reply } = {}) => {
   let release, seen, finished;
   const blocked = new Promise(resolve => { release = resolve; });
   const arrived = new Promise(resolve => { seen = resolve; });
   const completed = new Promise(resolve => { finished = resolve; });
   const handler = async route => {
     if (method && route.request().method() !== method) return route.fallback();
-    const response = forward ? await route.fetch() : null;
+    const response = forward && !reply ? await route.fetch() : null;
     seen(response);
     await blocked;
     try {
-      if (response) await route.fulfill({ response });
+      if (reply) await route.fulfill(reply);
+      else if (response) await route.fulfill({ response });
       else await route.abort("timedout");
     } catch { /* The client deadline can abort an intentionally held response. */ }
     finished();
@@ -944,6 +945,78 @@ for (const submitted of ["changed", "omitted"]) {
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test.describe(`${viewport.width}px`, () => {
     test.use({ viewport });
+
+    test("CMS sign-in ignores credential errors after the fields change", async ({ page }, testInfo) => {
+      await page.goto("/admin/content");
+      const email = page.getByLabel("Email", { exact: true });
+      const password = page.getByLabel("Password", { exact: true });
+      const signIn = page.getByRole("button", { name: "Sign in", exact: true });
+      const error = page.getByRole("alert").filter({ hasText: "Email or password was not accepted." });
+      for (const field of [email, password]) {
+        await email.fill(EMAIL);
+        await password.fill("Earlier-wrong-password1!");
+        const pending = await hold(page, "**/api/admin/content/session", { method: "POST", reply: { status: 401, json: { ok: false, error: "Invalid credentials." } } });
+        try {
+          await signIn.click();
+          await pending.arrived;
+          await field.fill(field === email ? "current@example.invalid" : "Current-password2!");
+          await pending.release();
+          await expect(signIn).toBeEnabled();
+          await page.waitForTimeout(250);
+          await expect(error).toHaveCount(0);
+        } finally { await pending.release(); }
+      }
+      await evidence(page, testInfo, { credentialErrorsShownAfterEdit: false, fieldsChecked: ["email", "password"] });
+    });
+
+    test("CMS sign-in clears the current credential error on typing", async ({ page }, testInfo) => {
+      await page.route("**/api/admin/content/session", route => route.request().method() === "POST"
+        ? route.fulfill({ status: 401, json: { ok: false, error: "Invalid credentials." } })
+        : route.fallback());
+      await page.goto("/admin/content");
+      const email = page.getByLabel("Email", { exact: true });
+      const password = page.getByLabel("Password", { exact: true });
+      const error = page.getByRole("alert").filter({ hasText: "Email or password was not accepted." });
+      await email.fill(EMAIL);
+      await password.fill("Earlier-wrong-password1!");
+      for (const field of [email, password]) {
+        await page.getByRole("button", { name: "Sign in", exact: true }).click();
+        await expect(error).toBeVisible();
+        await field.fill(field === email ? "current@example.invalid" : "Current-password2!");
+        await expect(error).toHaveCount(0);
+      }
+      await evidence(page, testInfo, { currentCredentialErrorCleared: true, fieldsChecked: ["email", "password"] });
+    });
+
+    test("CMS sign-in service errors survive credential edits", async ({ page }, testInfo) => {
+      await page.goto("/admin/content");
+      const email = page.getByLabel("Email", { exact: true });
+      const password = page.getByLabel("Password", { exact: true });
+      const observed = [];
+      for (const [status, code, message, expected] of [
+        [429, "", "Rate limited.", "Too many attempts. Wait a minute and try again."],
+        [503, "", "Synthetic CMS sign-in outage.", "Synthetic CMS sign-in outage."],
+        [400, "", "Synthetic invalid sign-in request.", "Synthetic invalid sign-in request."],
+        [503, "ADMIN_NOT_CONFIGURED", "Configuration missing.", "The content admin is not configured on this deployment."],
+      ]) {
+        await email.fill(EMAIL);
+        await password.fill("Submitted-password1!");
+        const pending = await hold(page, "**/api/admin/content/session", { method: "POST", reply: { status, json: { ok: false, code, error: message } } });
+        try {
+          await page.getByRole("button", { name: "Sign in", exact: true }).click();
+          await pending.arrived;
+          await password.fill("Edited-before-reply2!");
+          await pending.release();
+          const notice = page.getByRole("alert").filter({ hasText: expected });
+          await expect(notice).toBeVisible();
+          await email.fill("current@example.invalid");
+          await password.fill("Edited-after-reply3!");
+          await expect(notice).toBeVisible();
+          observed.push({ status, code, expected, retainedAfterEdit: true });
+        } finally { await pending.release(); }
+      }
+      await evidence(page, testInfo, { observed });
+    });
 
     for (const source of ["list", "document", "publish", "history"]) {
       test(`#1 late ${source} cannot change the selected editor`, async ({ page, request }, testInfo) => {

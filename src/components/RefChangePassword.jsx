@@ -72,10 +72,18 @@ export default function RefChangePassword() {
       });
       const reauth = await reauthResponse.json().catch(() => ({}));
       if (!reauthResponse.ok || !reauth.ok) {
-        if (editVersionRef.current === version) {
+        if (reauth.reason === "password_incorrect") {
+          if (editVersionRef.current === version) {
+            setOutcome({
+              type: "error",
+              message: reauth.error || "Current password is incorrect.",
+            });
+          }
+        } else {
           setOutcome({
             type: "error",
-            message: reauth.error || "Current password is incorrect.",
+            kind: "service",
+            message: reauth.error || "We couldn't confirm your current password. Please try again.",
           });
         }
         return;
@@ -164,7 +172,7 @@ export default function RefChangePassword() {
             value={currentPassword}
             onChange={(e) => {
               editVersionRef.current += 1;
-              setOutcome(current => current?.type === "error" ? null : current);
+              setOutcome(current => current?.type === "error" && current.kind !== "service" ? null : current);
               setCurrentPassword(e.target.value);
             }}
           />
@@ -188,7 +196,7 @@ export default function RefChangePassword() {
             value={pass1}
             onChange={(e) => {
               editVersionRef.current += 1;
-              setOutcome(current => current?.type === "error" ? null : current);
+              setOutcome(current => current?.type === "error" && current.kind !== "service" ? null : current);
               setPass1(e.target.value);
             }}
           />
@@ -214,7 +222,7 @@ export default function RefChangePassword() {
             value={pass2}
             onChange={(e) => {
               editVersionRef.current += 1;
-              setOutcome(current => current?.type === "error" ? null : current);
+              setOutcome(current => current?.type === "error" && current.kind !== "service" ? null : current);
               setPass2(e.target.value);
             }}
           />

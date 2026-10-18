@@ -27,6 +27,15 @@ const purposes = new Set([
 const providers = new Set(["google", "discord"]);
 const flows = new Set(["referral"]);
 const slots = new Set(["", "primary", "secondary"]);
+const isInvalidCredentials = (error) =>
+  error?.code === "invalid_credentials" ||
+  (!error?.code && Number(error?.status) === 400 && /invalid login credentials/i.test(String(error?.message || "")));
+
+const isUnavailableSignIn = (error) => {
+  const status = Number(error?.status || 0);
+  return error?.name === "AuthRetryableFetchError" || !status || status >= 500;
+};
+
 const noStore = (response) => {
   response.headers.set("Cache-Control", "private, no-store");
   return response;
@@ -118,9 +127,25 @@ export async function POST(request) {
     const authenticatedAccount = signedIn.data?.user?.id
       ? await resolveSupabaseAccountByUserId({ userId: signedIn.data.user.id })
       : null;
-    if (signedIn.error || authenticatedAccount?.principal_id !== identity.account.principal_id) {
+    const signInError = signedIn.error;
+    if (signInError && isUnavailableSignIn(signInError)) {
+      return failedReauth({
+        error: "Reauthentication is temporarily unavailable.",
+        slot,
+        status: 503,
+      });
+    }
+    if (signInError && Number(signInError.status) === 429) {
+      return failedReauth({
+        error: "Too many attempts. Try again shortly.",
+        slot,
+        status: 429,
+      });
+    }
+    if (signInError || authenticatedAccount?.principal_id !== identity.account.principal_id) {
       return failedReauth({
         error: "Password is incorrect.",
+        ...(isInvalidCredentials(signInError) ? { extra: { reason: "password_incorrect" } } : {}),
         slot,
         status: 401,
       });

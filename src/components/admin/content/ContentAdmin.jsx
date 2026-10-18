@@ -58,6 +58,8 @@ export default function ContentAdmin() {
   const [unlocked, setUnlocked] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [gateError, setGateError] = useState("");
+  const credentialEdit = useRef(0);
+  const credentialError = useRef("");
   const api = useMemo(() => createAdminApi(), []);
 
   const [typeName, setTypeName] = useState("");
@@ -331,8 +333,10 @@ export default function ContentAdmin() {
   const unlock = async (event) => {
     event.preventDefault();
     const selectedGeneration = advanceSelection();
+    const version = credentialEdit.current;
     setUnlocking(true);
     setGateError("");
+    credentialError.current = "";
     try {
       await api.signIn({ email, password });
       if (!isCurrentSelection(selectedGeneration)) return;
@@ -340,15 +344,19 @@ export default function ContentAdmin() {
       setUnlocked(true);
     } catch (error) {
       if (!isCurrentSelection(selectedGeneration)) return;
-      setGateError(
-        error instanceof AdminApiError && error.status === 401
-          ? "Email or password was not accepted."
-          : error instanceof AdminApiError && error.code === "ADMIN_NOT_CONFIGURED"
+      if (error instanceof AdminApiError && error.status === 401) {
+        if (credentialEdit.current !== version) return;
+        credentialError.current = "Email or password was not accepted.";
+        setGateError(credentialError.current);
+      } else {
+        setGateError(
+          error instanceof AdminApiError && error.code === "ADMIN_NOT_CONFIGURED"
             ? "The content admin is not configured on this deployment."
             : error instanceof AdminApiError && error.status === 429
               ? "Too many attempts. Wait a minute and try again."
               : error.message
-      );
+        );
+      }
     } finally {
       if (isCurrentSelection(selectedGeneration)) setUnlocking(false);
     }
@@ -661,9 +669,25 @@ export default function ContentAdmin() {
           </p>
           <form className={styles.accessForm} onSubmit={unlock}>
             <label htmlFor="content-admin-email">Email</label>
-            <input id="content-admin-email" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} maxLength={254} required />
+            <input id="content-admin-email" type="email" autoComplete="username" value={email} onChange={event => {
+              credentialEdit.current += 1;
+              setEmail(event.target.value);
+              const stale = credentialError.current;
+              if (stale) {
+                credentialError.current = "";
+                setGateError(current => current === stale ? "" : current);
+              }
+            }} maxLength={254} required />
             <label htmlFor="content-admin-password">Password</label>
-            <input id="content-admin-password" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} maxLength={128} required />
+            <input id="content-admin-password" type="password" autoComplete="current-password" value={password} onChange={event => {
+              credentialEdit.current += 1;
+              setPassword(event.target.value);
+              const stale = credentialError.current;
+              if (stale) {
+                credentialError.current = "";
+                setGateError(current => current === stale ? "" : current);
+              }
+            }} maxLength={128} required />
             <button type="submit" className={styles.primaryButton} disabled={unlocking || !email.trim() || !password}>
               {unlocking ? "Signing in…" : "Sign in"}
             </button>
