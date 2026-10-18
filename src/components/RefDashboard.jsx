@@ -6,6 +6,7 @@ import packageContent from "../lib/packageContent";
 import ConnectedAccounts from "./ConnectedAccounts";
 import { useReferralAccount } from "../lib/useReferralAccount";
 import { useDialogFocus } from "../lib/useDialogFocus";
+import { requestDeadline } from "../lib/clientRequest";
 
 const { normalizePackageText } = packageContent;
 
@@ -67,6 +68,7 @@ export default function RefDashboard() {
   const [payout, setPayout] = useState(null);
   const [payoutLoading, setPayoutLoading] = useState(true);
   const [payoutError, setPayoutError] = useState(null);
+  const [payoutReload, setPayoutReload] = useState(0);
   const [showLogsModal, setShowLogsModal] = useState(false);
   const [closingLogsModal, setClosingLogsModal] = useState(false);
   const [logsModalAnimatingIn, setLogsModalAnimatingIn] = useState(false);
@@ -91,11 +93,13 @@ export default function RefDashboard() {
     if (!creator) return undefined;
     let active = true;
     const loadPayouts = async () => {
+      const signal = requestDeadline();
       try {
         setPayoutLoading(true);
         setPayoutError(null);
-        const res = await fetch("/api/ref/payouts");
+        const res = await fetch("/api/ref/payouts", { signal });
         const data = await res.json();
+        if (signal.aborted) throw signal.reason;
         if (!active) return;
 
         if (!data.ok) {
@@ -109,14 +113,16 @@ export default function RefDashboard() {
         if (!active) return;
         console.error("Referral payout loading failed");
         setPayout(null);
-        setPayoutError("Could not load payout data.");
+        setPayoutError(signal.aborted
+          ? "Payout data is taking too long to load."
+          : "Could not load payout data.");
       } finally {
         if (active) setPayoutLoading(false);
       }
     };
     loadPayouts();
     return () => { active = false; };
-  }, [creator]);
+  }, [creator, payoutReload]);
 
   function showToast(type, message) {
     const next = { type, message };
@@ -294,10 +300,12 @@ export default function RefDashboard() {
     const version = editVersionRef.current;
 
     setSaving(true);
+    const signal = requestDeadline();
 
     try {
       const res = await fetch("/api/ref/updateSplit", {
         method: "POST",
+        signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           commissionPercent: commission,
@@ -306,12 +314,15 @@ export default function RefDashboard() {
       });
 
       const result = await res.json();
+      if (signal.aborted) throw signal.reason;
       if (!result.ok) {
         if (editVersionRef.current === version) setFormError(result.error || "Failed to save");
       } else showToast("success", "Saved successfully!");
     } catch {
       console.error("Referral settings save failed");
-      if (editVersionRef.current === version) setFormError("Server error");
+      if (signal.aborted) {
+        setFormError("We couldn't confirm your settings were saved. Reload the page to check them before saving again.");
+      } else if (editVersionRef.current === version) setFormError("Server error");
     }
     setSaving(false);
   }
@@ -586,7 +597,14 @@ export default function RefDashboard() {
 
         {payoutError && (
           <div className="bg-danger-soft border border-danger-border text-danger-text text-sm rounded-xl px-3 py-2">
-            {payoutError}
+            <p>{payoutError}</p>
+            <button
+              onClick={() => setPayoutReload(n => n + 1)}
+              disabled={payoutLoading}
+              className="mt-2 underline font-semibold"
+            >
+              Retry
+            </button>
           </div>
         )}
 

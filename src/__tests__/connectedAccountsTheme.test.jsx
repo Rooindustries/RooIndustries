@@ -149,7 +149,7 @@ describe("Referral connected accounts", () => {
     expect(global.fetch).toHaveBeenNthCalledWith(
       4,
       "/api/auth/identities?flow=referral",
-      { cache: "no-store" }
+      expect.objectContaining({ cache: "no-store", signal: expect.any(AbortSignal) })
     );
     expect(global.fetch).toHaveBeenCalledTimes(4);
     jest.useRealTimers();
