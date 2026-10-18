@@ -5,9 +5,15 @@ import seo from "@/src/lib/seo";
 import { fetchHomePageData } from "@/src/lib/contentServer";
 
 export const metadata = seo.getMetadataForPath("/faq");
+export const dynamic = "force-static";
+export const revalidate = 60;
 
-export default async function Page({ searchParams }) {
-  const initialHomeData = await fetchHomePageData();
+export default async function Page() {
+  const initialHomeData = await fetchHomePageData({
+    fresh: true,
+    requireContent: process.env.NEXT_PHASE !== "phase-production-build",
+    requiredResources: ["faq-questions"],
+  });
   const faqJsonLd = seo.buildFaqJsonLd(initialHomeData.faqQuestions);
   return (
     <>
@@ -25,7 +31,7 @@ export default async function Page({ searchParams }) {
       </noscript>
       <RouteRenderer entry={Faq}
         pathname="/faq"
-        searchParams={searchParams}
+        searchParams={{}}
         initialHomeData={initialHomeData}
       />
     </>
