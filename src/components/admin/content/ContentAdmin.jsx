@@ -76,6 +76,7 @@ export default function ContentAdmin() {
 
   const [errors, setErrors] = useState([]);
   const [banner, setBanner] = useState(null);
+  const bannerRef = useRef(null);
   const [notice, setNotice] = useState("");
   const [conflict, setConflict] = useState(null);
   const [recovery, setRecovery] = useState(null);
@@ -115,6 +116,10 @@ export default function ContentAdmin() {
   }, []);
 
   useEffect(() => () => { selection.current += 1; }, []);
+
+  useEffect(() => {
+    if (banner?.text && !banner.summary) bannerRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [banner]);
 
   const handleAuthFailure = useCallback((error) => {
     if (error instanceof AdminApiError && (error.status === 401 || error.code === "ADMIN_NOT_CONFIGURED")) {
@@ -725,7 +730,7 @@ export default function ContentAdmin() {
 
       {draftError ? <p className={styles.error} role="alert">{draftError}</p> : null}
       {banner && !banner.summary ? (
-        <div className={banner.tone === "warning" ? styles.warningBox : styles.errorSummary} role="alert">
+        <div ref={bannerRef} className={banner.tone === "warning" ? styles.warningBox : styles.errorSummary} role="alert">
           <p>{banner.text}</p>
           {banner.retry ? <button type="button" className={styles.secondaryButton} onClick={retryFailure} disabled={saving || locking || loadingDocument}>Retry</button> : null}
         </div>
