@@ -9,6 +9,7 @@ import {
 import packagePricing from "../lib/packagePricing";
 import { classifyHoldResponse } from "../lib/holdResponse";
 import { CHECKOUT_CONFIRMATION_EVENT, isCheckoutConfirmationPending } from "../lib/checkoutConfirmation";
+import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
 
 const { getPublicPackageTitle } = packagePricing;
 
@@ -84,6 +85,8 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
   const currentHoldRef = useRef(null);
   const [confirmationVersion, setConfirmationVersion] = useState(0);
   const path = location.pathname || "";
+  const pathRef = useRef(path);
+  pathRef.current = path;
   const isMobileWidth = useIsMobileWidth();
   const isDesktopWidth = !isMobileWidth;
   const isPaymentScreen = path === "/payment" || path === "/payment-success";
@@ -216,11 +219,19 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
     return formatLocalTime(utcDate);
   }, [hold]);
 
-  const clearReservation = (redirect) => {
+  const readDraft = () => {
+    try {
+      return sessionStorage.getItem(BOOKING_DRAFT_KEY);
+    } catch {
+      return null;
+    }
+  };
+
+  const clearReservation = (redirect, { keepDraft = false } = {}) => {
     currentHoldRef.current = null;
     setHold(null);
     removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);
-    removeBrowserStorage("sessionStorage", BOOKING_DRAFT_KEY);
+    if (!keepDraft) removeBrowserStorage("sessionStorage", BOOKING_DRAFT_KEY);
     broadcastHold(null);
     if (redirect) {
       nav("/", { replace: false });
@@ -235,9 +246,13 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
     }
     if (releasing) return;
     const target = hold;
+    const startPath = pathRef.current;
+    const startDraft = readDraft();
     setReleaseError("");
     setReleasing(true);
     const hasExpired = () => Date.parse(target.expiresAt) <= Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CLIENT_REQUEST_TIMEOUT_MS);
     let outcome;
     let serverMessage = "";
     try {
@@ -248,6 +263,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
           holdId: target.holdId,
           holdToken: target.holdToken,
         }),
+        signal: controller.signal,
       });
       const data = await response.json().catch(() => null);
       const message = data?.message || data?.error;
@@ -262,6 +278,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
       console.error("Failed to release hold on server");
       outcome = classifyHoldResponse({ endpoint: "release", networkError: true, expired: hasExpired() });
     } finally {
+      clearTimeout(timeout);
       setReleasing(false);
     }
     if (
@@ -269,7 +286,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
       currentHoldRef.current?.holdToken !== target.holdToken
     ) return;
     if (outcome === "clear") {
-      clearReservation(redirect);
+      clearReservation(redirect && pathRef.current === startPath, { keepDraft: readDraft() !== startDraft });
     } else {
       setReleaseError(serverMessage || "We couldn't release this slot. Your reservation and details are still saved. Please try again.");
     }
@@ -315,6 +332,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
   }, [shouldRender, inline, inlineContainer]);
 
   const continueBooking = () => {
+    if (releasing) return;
     if (String(hold?.phase || "").trim().toLowerCase() === "payment_pending" && !paymentInOtherTab) {
       const bookingData = readStoredCheckoutBooking();
       nav("/payment", {
@@ -478,6 +496,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
                 type="button"
                 data-reservation-continue="true"
                 onClick={continueBooking}
+                disabled={releasing}
                 className={`rounded-lg border border-info-border bg-info-soft px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-info-text hover:bg-info-soft transition whitespace-nowrap shadow-sm`}
               >
                 {String(hold?.phase || "").trim().toLowerCase() === "payment_pending"

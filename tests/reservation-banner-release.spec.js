@@ -117,6 +117,92 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       }
     });
 
+    test("continue booking is unavailable while a release is pending", async ({ page, flow }) => {
+      await flow.reserve();
+      await flow.details();
+      await closeBooking(page);
+      const original = await savedReservation(page);
+      let respond;
+      const response = new Promise(resolve => { respond = resolve; });
+      await page.route("**/api/releaseHold", async route => {
+        await response;
+        await route.fulfill({ status: 200, json: { ok: true } });
+      });
+      try {
+        await releaseButton(page).click();
+        const continueButton = banner(page).getByRole("button", { name: "Continue booking", exact: true });
+        await expect(continueButton).toBeDisabled({ timeout: 2000 });
+        await continueButton.click({ force: true });
+        await expect(page).toHaveURL(url => url.pathname === "/");
+        await expect(page.getByRole("dialog")).toHaveCount(0);
+        expect(await savedReservation(page)).toEqual(original);
+        respond();
+        await expect.poll(() => savedReservation(page)).toEqual({ hold: null, draft: null });
+        await expect(banner(page)).toHaveCount(0);
+      } finally {
+        respond();
+        await page.unrouteAll({ behavior: "wait" });
+      }
+    });
+
+    test("a release that finishes after the customer resumed booking keeps their new details", async ({ page, flow }) => {
+      await flow.reserve();
+      await flow.details();
+      await closeBooking(page);
+      let respond;
+      const response = new Promise(resolve => { respond = resolve; });
+      await page.route("**/api/releaseHold", async route => {
+        await response;
+        await route.fulfill({ status: 200, json: { ok: true } });
+      });
+      try {
+        await releaseButton(page).click();
+        await expect(banner(page).getByRole("button", { name: "Releasing...", exact: true })).toBeDisabled();
+        await page.locator('a[href="/booking"]').first().click();
+        await expect(page).toHaveURL(url => url.pathname === "/booking");
+        const email = page.getByRole("textbox", { name: "Booking email", exact: true });
+        await expect(email).toBeVisible();
+        await email.fill("updated@example.invalid");
+        await expect.poll(async () => {
+          const { draft } = await savedReservation(page);
+          return draft?.packages?.[draft.lastTitle]?.form?.email;
+        }).toBe("updated@example.invalid");
+        respond();
+        await expect.poll(async () => (await savedReservation(page)).hold).toBeNull();
+        await page.waitForTimeout(1000);
+        await expect(page).toHaveURL(url => url.pathname === "/booking");
+        const { draft } = await savedReservation(page);
+        expect(draft.packages[draft.lastTitle].form.email).toBe("updated@example.invalid");
+      } finally {
+        respond();
+        await page.unrouteAll({ behavior: "wait" });
+      }
+    });
+
+    test("a stalled release gives up and keeps the reservation", async ({ page, flow }, info) => {
+      await page.clock.install();
+      await flow.reserve();
+      await flow.details();
+      await closeBooking(page);
+      await page.clock.pauseAt(new Date(Date.now() + 10000));
+      const original = await savedReservation(page);
+      flow.state.failures["/api/releaseHold"] = "timeout";
+      await releaseButton(page).click();
+      await expect.poll(() => flow.state.calls.filter(call => call.path === "/api/releaseHold").length).toBe(1);
+      await page.clock.runFor(8100);
+      await expectReadable(page, savedMessage);
+      await expect(releaseButton(page)).toBeEnabled();
+      await expect(banner(page).getByRole("button", { name: "Continue booking", exact: true })).toBeEnabled();
+      expect(await savedReservation(page)).toEqual(original);
+      await expect.poll(() => flow.state.aborted).toContain("/api/releaseHold");
+      await page.screenshot({ path: info.outputPath("reservation-release-timeout.png"), animations: "disabled" });
+      delete flow.state.failures["/api/releaseHold"];
+      await releaseButton(page).click();
+      await expect.poll(() => savedReservation(page)).toEqual({ hold: null, draft: null });
+      await expect(banner(page)).toHaveCount(0);
+      expect(flow.state.calls.filter(call => call.path === "/api/releaseHold")).toHaveLength(2);
+    });
+
     test("the inline payment reservation keeps its release error readable", async ({ page, flow }, info) => {
       await flow.review();
       await flow.payment();
