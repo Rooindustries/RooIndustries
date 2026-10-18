@@ -474,6 +474,13 @@ function BookingStepActions({ children, className }) {
 export default function BookingForm() {
   useEffect(() => { clearBookingConfirmation(); }, []);
   const formRootRef = useRef(null);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const handleHomeSectionLink = useHomeSectionLinkHandler();
   const location = useLocation();
   const navigate = useNavigate();
@@ -1722,12 +1729,15 @@ export default function BookingForm() {
       return;
     }
 
+    const validationHold = currentHoldRef.current;
     setValidatingCode(true);
     setCodeError("");
 
     try {
       const result = await resolveCheckoutCode(code, selectedPackage.title);
-      if (!hasActiveHoldRef.current || isPaymentPendingHold) return;
+      if (!mountedRef.current || !hasActiveHoldRef.current || isPaymentPendingHold) return;
+      if (currentHoldRef.current?.holdId !== validationHold?.holdId ||
+        currentHoldRef.current?.holdToken !== validationHold?.holdToken) return;
       if (!result.ok) {
         setCodeError(result.error || INVALID_CHECKOUT_CODE_MESSAGE);
         return;
@@ -1744,7 +1754,7 @@ export default function BookingForm() {
   };
 
   const removeAppliedReferral = () => {
-    if (isPaymentPendingHold) return;
+    if (isPaymentPendingHold || validatingCode) return;
     const removedCode = String(appliedReferral?.code || "").trim();
     autoReferralAttemptRef.current = "";
     setAppliedReferral(null);
@@ -1758,7 +1768,7 @@ export default function BookingForm() {
   };
 
   const removeAppliedCoupon = () => {
-    if (isPaymentPendingHold) return;
+    if (isPaymentPendingHold || validatingCode) return;
     setAppliedCoupon(null);
     persistCheckoutCodes({
       referral: sanitizeReferralForCheckout(appliedReferral),
@@ -1778,6 +1788,7 @@ export default function BookingForm() {
     }
 
     let active = true;
+    let settled = false;
     setValidatingCode(true);
     setCodeError("");
 
@@ -1871,11 +1882,13 @@ export default function BookingForm() {
     };
 
     restoreValidatedCodes().finally(() => {
+      settled = true;
       if (active) setValidatingCode(false);
     });
 
     return () => {
       active = false;
+      if (!settled) setValidatingCode(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -1911,6 +1924,7 @@ export default function BookingForm() {
     if (autoReferralAttemptRef.current === attemptKey) return;
     autoReferralAttemptRef.current = attemptKey;
     let active = true;
+    let settled = false;
     setValidatingCode(true);
 
     resolveCheckoutCode(autoCode, selectedPackage.title)
@@ -1962,11 +1976,15 @@ export default function BookingForm() {
       })
       .catch(() => {})
       .finally(() => {
+        settled = true;
         if (active) setValidatingCode(false);
       });
 
     return () => {
       active = false;
+      if (settled) return;
+      if (autoReferralAttemptRef.current === attemptKey) autoReferralAttemptRef.current = "";
+      setValidatingCode(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -3020,8 +3038,9 @@ export default function BookingForm() {
                       {!isPaymentPendingHold && (
                         <button
                           type="button"
-                          onClick={() => setStep(2)}
-                          className="text-xs font-semibold text-accent underline underline-offset-2 transition hover:text-info-text"
+                          disabled={validatingCode}
+                          onClick={() => { if (validatingCode) return; setStep(2); }}
+                          className="text-xs font-semibold text-accent underline underline-offset-2 transition hover:text-info-text disabled:cursor-wait disabled:opacity-60"
                         >
                           Edit details
                         </button>
@@ -3049,8 +3068,9 @@ export default function BookingForm() {
                           <dd className="flex justify-self-start sm:justify-self-end">
                             <button
                               type="button"
-                              onClick={() => setStep(1)}
-                              className="text-xs font-semibold text-accent underline underline-offset-2 transition hover:text-info-text"
+                              disabled={validatingCode}
+                              onClick={() => { if (validatingCode) return; setStep(1); }}
+                              className="text-xs font-semibold text-accent underline underline-offset-2 transition hover:text-info-text disabled:cursor-wait disabled:opacity-60"
                             >
                               Edit
                             </button>
@@ -3103,8 +3123,9 @@ export default function BookingForm() {
                               <button
                                 type="button"
                                 onClick={removeAppliedReferral}
+                                disabled={validatingCode}
                                 aria-label={`Remove referral code ${appliedReferral.code}`}
-                                className="text-sm font-semibold text-ink-muted transition hover:text-danger-text"
+                                className="text-sm font-semibold text-ink-muted transition hover:text-danger-text disabled:cursor-wait disabled:opacity-60"
                               >
                                 ×
                               </button>
@@ -3124,8 +3145,9 @@ export default function BookingForm() {
                               <button
                                 type="button"
                                 onClick={removeAppliedCoupon}
+                                disabled={validatingCode}
                                 aria-label={`Remove coupon code ${appliedCoupon.code}`}
-                                className="text-sm font-semibold text-ink-muted transition hover:text-danger-text"
+                                className="text-sm font-semibold text-ink-muted transition hover:text-danger-text disabled:cursor-wait disabled:opacity-60"
                               >
                                 ×
                               </button>
@@ -3258,8 +3280,9 @@ export default function BookingForm() {
                         <>
                           <button
                             type="button"
-                            onClick={() => setStep(2)}
-                            className="w-full min-w-0 bg-surface-input hover:bg-surface-hover py-3 rounded-lg font-semibold transition"
+                            disabled={validatingCode}
+                            onClick={() => { if (validatingCode) return; setStep(2); }}
+                            className="w-full min-w-0 bg-surface-input hover:bg-surface-hover py-3 rounded-lg font-semibold transition disabled:cursor-wait disabled:opacity-60"
                           >
                             Back
                           </button>
