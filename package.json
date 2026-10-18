@@ -93,6 +93,7 @@
     "export:supabase:commerce:encrypted": "node scripts/export-supabase-commerce-encrypted.mjs",
     "check:seo": "node scripts/check-seo.js",
     "test:seo:structured-data": "playwright test tests/structured-data.spec.js --project=chromium",
+    "test:static:revalidation": "cross-env TOOLING_STATIC_REVALIDATION=1 playwright test tests/static-pages-revalidation.spec.js --project=chromium",
     "check:budgets": "node scripts/check-budgets.js",
     "test:seo:nonjs": "playwright test tests/nonjs-seo.spec.js",
     "test:smoke:routes": "playwright test tests/routes-smoke.spec.js",
