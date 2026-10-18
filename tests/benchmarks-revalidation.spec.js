@@ -32,7 +32,7 @@ test("/benchmarks keeps its last results when revalidation cannot read the CMS",
     expect(trigger.status).toBe(200);
     expect(trigger.cache).toBe("STALE");
     expect(trigger.titles).toEqual(titles);
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    await expect.poll(async () => (await read("waiting for the failed revalidation to settle")).cache, { timeout: 20000 }).toBe("HIT");
     const after = await read("after the failed revalidation");
     expect(after.status).toBe(200);
     expect(after.titles).toEqual(titles);
