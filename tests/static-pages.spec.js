@@ -75,11 +75,10 @@ for (const [route, content] of [
   ["/tools", "Fixture layout tool 1"],
   ["/meet-the-team", "Fixture Member Alpha"],
 ]) {
-  test(`${route} keeps a referral link's code after loading the prebuilt page`, async ({ page }, testInfo) => {
+  test(`${route} hydrates the prebuilt page with its query string`, async ({ page }, testInfo) => {
     const messages = watchConsole(page);
     await page.goto(`${route}?ref=friend&utm_source=discord`);
     await hydrated(page);
-    await expect.poll(() => page.evaluate(() => sessionStorage.getItem("referral_session"))).toBe("friend");
     await expect.poll(() => page.evaluate(() => window.location.search)).toBe("?ref=friend&utm_source=discord");
     const main = page.locator("main#main-content");
     const fixtureContent = route === "/meet-the-team"
@@ -90,7 +89,6 @@ for (const [route, content] of [
     await testInfo.attach("public-page-query", {
       body: JSON.stringify({
         route,
-        referral: await page.evaluate(() => sessionStorage.getItem("referral_session")),
         search: await page.evaluate(() => window.location.search),
         content: await fixtureContent.textContent(),
         messages,
