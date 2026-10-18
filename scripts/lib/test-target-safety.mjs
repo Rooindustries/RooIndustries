@@ -266,6 +266,11 @@ export function prepareTestTarget({ browser = false } = {}) {
 
 export async function guardBrowserContext(context, origins) {
   const allowed = new Set(origins.map(localOrigin));
+  const contentAssetOrigins = new Set([...allowed].map(origin => {
+    const url = new URL(origin);
+    url.port = process.env.TOOLING_CONTENT_PORT || String(Number(url.port) + 1);
+    return url.origin;
+  }));
   const evidence = { staticAssets: [], unexpectedRequests: [] };
   const record = (kind, request) => {
     const entry = { url: request.url(), method: request.method(), resourceType: request.resourceType(), action: kind, time: new Date().toISOString() };
@@ -276,6 +281,8 @@ export async function guardBrowserContext(context, origins) {
     const request = route.request();
     const url = new URL(request.url());
     if (allowed.has(url.origin) && !url.username && !url.password) return route.continue();
+    if (contentAssetOrigins.has(url.origin) && !url.username && !url.password && request.method() === "GET" &&
+        request.resourceType() === "image" && url.pathname.startsWith("/storage/v1/")) return route.continue();
     if (request.url() === "https://razorpay.com/assets/razorpay-logo.svg" && request.method() === "GET" && request.resourceType() === "image") {
       record("fulfilled-static-asset", request);
       return route.fulfill({ status: 200, contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1"><rect width="1" height="1" fill="none"/></svg>' });
