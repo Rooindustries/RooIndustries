@@ -65,7 +65,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
     document('faqSection', { questions: [...content('faq-questions'), ...Array.from({ length: 12 }, (_, index) => ({ _key: `tooling-question-${index}`, question: `Synthetic local question ${index + 1}`, answer: `This synthetic answer verifies that question ${index + 1} appears in the server-rendered FAQ without requiring a browser content request.` }))] }, 'faq'),
     document('privacyPolicy', privacy),
     document('terms', policy('Terms of Service')),
-    document('contact', { title: 'Get In Touch', formId: '' }),
+    document('contact', { title: 'Get In Touch', subtitle: 'Synthetic local contact information.', formId: '' }),
     document('about', { recordTitle: 'Synthetic local results', recordSubtitle: 'Local fixture content', recordDetails: [] }),
     document('services', { heading: 'Synthetic benefits', cards: [] }),
     document('howItWorks', { title: 'How It Works', steps: [] }),
@@ -85,16 +85,18 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
     { id: 'image-cls-wide', width: 800, height: 400, storagePath: 'images/cls-wide.svg' },
     { id: 'image-cls-tall', width: 600, height: 900, storagePath: 'images/cls-tall.svg' },
   ].map(image => ({ ...image, body: `<svg xmlns="http://www.w3.org/2000/svg" width="${image.width}" height="${image.height}"><rect width="100%" height="100%" fill="#18202c"/><text x="24" y="48" fill="white" font-size="24">Synthetic review</text></svg>` })) : [];
+  documents.push(
+    ...Array.from({ length: layoutImages.length ? 4 : 1 }, (_, index) => document('tool', {
+      title: `Fixture layout tool ${index + 1}`,
+      shortDescription: 'Synthetic tool content for layout stability checks.',
+      category: 'Benchmark',
+      downloadMode: 'external',
+      downloadUrl: '/favicon-96x96.png',
+      sortOrder: index,
+    }, `tooling-cls-tool-${index}`)),
+  );
   if (layoutImages.length) {
     documents.push(
-      ...Array.from({ length: 4 }, (_, index) => document('tool', {
-        title: `Fixture layout tool ${index + 1}`,
-        shortDescription: 'Synthetic tool content for layout stability checks.',
-        category: 'Benchmark',
-        downloadMode: 'external',
-        downloadUrl: '/favicon-96x96.png',
-        sortOrder: index,
-      }, `tooling-cls-tool-${index}`)),
       ...layoutImages.map(image => document('review', {
         alt: `Fixture layout review ${image.width} by ${image.height}`,
         image: { _type: 'image', asset: { _type: 'reference', _ref: image.id } },
