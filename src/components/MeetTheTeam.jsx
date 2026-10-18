@@ -292,10 +292,11 @@ const Tag = ({ label, size = "sm" }) => {
   return <span className={`${baseClasses} ${sizeClasses}`}>{label}</span>;
 };
 
-export default function MeetTheTeam({ onSeoData }) {
-  const [rawData, setRawData] = useState(null);
+export default function MeetTheTeam({ onSeoData, initialData = null }) {
+  const [rawData, setRawData] = useState(initialData);
 
   useEffect(() => {
+    if (initialData) return;
     getPublicContent("team")
       .then(setRawData)
       .catch(console.error);
