@@ -25,13 +25,15 @@ export default function RefRegister() {
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
+  const [formError, setFormError] = useState("");
   const [socialIdentity, setSocialIdentity] = useState(null);
   const [verificationPending, setVerificationPending] = useState(false);
   const availabilityVersion = useRef(0);
 
   function showToast(type, message) {
-    setToast({ type, message });
-    setTimeout(() => setToast(null), 2800);
+    const next = { type, message };
+    setToast(next);
+    setTimeout(() => setToast((current) => (current === next ? null : current)), 2800);
   }
   useEffect(() => {
     try {
@@ -94,6 +96,7 @@ export default function RefRegister() {
 
   async function handleRegister(e) {
     e.preventDefault();
+    setFormError("");
 
     const trimmedDiscordUsername = discordUsername.trim();
     const trimmedEmail = email.trim().toLowerCase();
@@ -108,33 +111,33 @@ export default function RefRegister() {
       (!socialIdentity && !password) ||
       (!socialIdentity && !confirm)
     ) {
-      showToast("error", "Please fill in all fields.");
+      setFormError("Please fill in all fields.");
       return;
     }
 
     const emailRegex = /\S+@\S+\.\S+/;
     if (!emailRegex.test(trimmedEmail)) {
-      showToast("error", "Please enter a valid login email address.");
+      setFormError("Please enter a valid login email address.");
       return;
     }
 
     if (!emailRegex.test(trimmedPaypalEmail)) {
-      showToast("error", "Please enter a valid PayPal email address.");
+      setFormError("Please enter a valid PayPal email address.");
       return;
     }
 
     if (!socialIdentity && password !== confirm) {
-      showToast("error", "Passwords do not match.");
+      setFormError("Passwords do not match.");
       return;
     }
 
     if ((!socialIdentity || password) && !isValidNewPassword(password)) {
-      showToast("error", NEW_PASSWORD_REQUIREMENT);
+      setFormError(NEW_PASSWORD_REQUIREMENT);
       return;
     }
 
     if (slugAvailable === false) {
-      showToast("error", "Referral code is already taken.");
+      setFormError("Referral code is already taken.");
       return;
     }
     if (slugAvailable === null) {
@@ -151,16 +154,16 @@ export default function RefRegister() {
         );
         if (availability === false) {
           setSlugAvailable(false);
-          showToast("error", "Referral code is already taken.");
+          setFormError("Referral code is already taken.");
           return;
         } else if (availability === true) {
           setSlugAvailable(true);
         } else {
-          showToast("error", "Could not validate referral code. Try again.");
+          setFormError("Could not validate referral code. Try again.");
           return;
         }
       } catch (err) {
-        showToast("error", "Could not validate referral code. Try again.");
+        setFormError("Could not validate referral code. Try again.");
         return;
       }
     }
@@ -188,7 +191,7 @@ export default function RefRegister() {
           availabilityVersion.current += 1;
           setSlugAvailable(null);
         }
-        showToast("error", data.error || "Registration failed.");
+        setFormError(data.error || "Registration failed.");
         setLoading(false);
         return;
       }
@@ -208,7 +211,7 @@ export default function RefRegister() {
       setTimeout(() => nav("/referrals/dashboard"), 900);
     } catch {
       console.error("Referral registration failed");
-      showToast("error", "Server error.");
+      setFormError("Server error.");
     }
 
     setLoading(false);
@@ -253,7 +256,10 @@ export default function RefRegister() {
             id="ref-register-discord"
             name="discordUsername"
             value={discordUsername}
-            onChange={(e) => setDiscordUsername(e.target.value)}
+            onChange={(e) => {
+              setFormError("");
+              setDiscordUsername(e.target.value);
+            }}
             placeholder="e.g. @serviroo"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
           />
@@ -271,7 +277,10 @@ export default function RefRegister() {
             name="email"
             type="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setFormError("");
+              setEmail(e.target.value);
+            }}
             readOnly={Boolean(socialIdentity)}
             placeholder="Email you sign in with"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
@@ -293,7 +302,10 @@ export default function RefRegister() {
             name="paypalEmail"
             type="email"
             value={paypalEmail}
-            onChange={(e) => setPaypalEmail(e.target.value)}
+            onChange={(e) => {
+              setFormError("");
+              setPaypalEmail(e.target.value);
+            }}
             placeholder="Email used for your PayPal account"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
           />
@@ -310,7 +322,10 @@ export default function RefRegister() {
             id="ref-register-slug"
             name="slug"
             value={slug}
-            onChange={(e) => setSlug(e.target.value)}
+            onChange={(e) => {
+              setFormError("");
+              setSlug(e.target.value);
+            }}
             placeholder="Custom referral code (e.g. yourname)"
             className={`w-full p-4 mt-1 bg-surface-input border rounded-xl outline-none focus:border-info-border transition text-base ${
               slugAvailable === false ? "border-danger-border" : "border-line-input"
@@ -337,7 +352,10 @@ export default function RefRegister() {
             minLength={10}
             aria-describedby="ref-register-password-requirement"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setFormError("");
+              setPassword(e.target.value);
+            }}
             placeholder="Enter password"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
           />
@@ -355,7 +373,10 @@ export default function RefRegister() {
             name="confirmPassword"
             type="password"
             value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
+            onChange={(e) => {
+              setFormError("");
+              setConfirm(e.target.value);
+            }}
             placeholder="Confirm password"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
           />
@@ -374,6 +395,9 @@ export default function RefRegister() {
           <span className="glow-line glow-line-bottom" />
           <span className="glow-line glow-line-left" />
         </button>
+        {formError && (
+          <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-danger-text">{formError}</p>
+        )}
       </form>
 
       {toast && (

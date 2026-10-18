@@ -79,6 +79,7 @@ export default function RefDashboard() {
   const [logoutError, setLogoutError] = useState("");
 
   const [toast, setToast] = useState(null);
+  const [formError, setFormError] = useState("");
   const [authNotice] = useState(() => resolveAuthNotice(location.search));
   const noScrollbarStyles = `
     .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -117,8 +118,9 @@ export default function RefDashboard() {
   }, [creator]);
 
   function showToast(type, message) {
-    setToast({ type, message });
-    setTimeout(() => setToast(null), 2500);
+    const next = { type, message };
+    setToast(next);
+    setTimeout(() => setToast((current) => (current === next ? null : current)), 2500);
   }
 
   const toMoneyNumber = (value) => {
@@ -266,6 +268,7 @@ export default function RefDashboard() {
     "bg-surface-input border border-line-input rounded-xl p-4 h-full flex flex-col justify-between";
 
   function adjustCommission(delta) {
+    setFormError("");
     if (!unlocked) return;
     const newVal = (Math.round(commission * 100) + delta * 100) / 100;
     if (newVal < 0) return;
@@ -274,6 +277,7 @@ export default function RefDashboard() {
   }
 
   function adjustDiscount(delta) {
+    setFormError("");
     if (!unlocked) return;
     const newVal = (Math.round(discount * 100) + delta * 100) / 100;
     if (newVal < 0) return;
@@ -282,6 +286,7 @@ export default function RefDashboard() {
   }
 
   async function save() {
+    setFormError("");
     if (invalid || !unlocked) return;
 
     setSaving(true);
@@ -297,11 +302,11 @@ export default function RefDashboard() {
       });
 
       const result = await res.json();
-      if (!result.ok) showToast("error", result.error || "Failed to save");
+      if (!result.ok) setFormError(result.error || "Failed to save");
       else showToast("success", "Saved successfully!");
     } catch {
       console.error("Referral settings save failed");
-      showToast("error", "Server error");
+      setFormError("Server error");
     }
     setSaving(false);
   }
@@ -550,6 +555,9 @@ export default function RefDashboard() {
         >
           {saving ? "Saving..." : "Save Settings"}
         </button>
+        {formError && (
+          <p role="alert" className="text-sm text-danger-text">{formError}</p>
+        )}
       </div>
 
 

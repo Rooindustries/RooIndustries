@@ -6,6 +6,7 @@ export default function RefForgot() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
+  const [formError, setFormError] = useState("");
   const [acknowledgedEmail, setAcknowledgedEmail] = useState("");
   const submittedEmailRef = useRef("");
   const acknowledged = Boolean(acknowledgedEmail) && email === acknowledgedEmail;
@@ -16,13 +17,15 @@ export default function RefForgot() {
   }, [acknowledged]);
 
   function showToast(type, message) {
-    setToast({ type, message });
-    setTimeout(() => setToast(null), 3000);
+    const next = { type, message };
+    setToast(next);
+    setTimeout(() => setToast((current) => (current === next ? null : current)), 3000);
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!email) return showToast("error", "Enter your email");
+    setFormError("");
+    if (!email) return setFormError("Enter your email");
 
     const submittedEmail = email;
     submittedEmailRef.current = submittedEmail;
@@ -42,11 +45,11 @@ export default function RefForgot() {
       if (data.ok) {
         if (submittedEmailRef.current === submittedEmail) setAcknowledgedEmail(submittedEmail);
       } else {
-        showToast("error", data.error || "Failed to send link");
+        setFormError(data.error || "Failed to send link");
       }
     } catch {
       console.error("Referral reset request failed");
-      showToast("error", "Server error.");
+      setFormError("Server error.");
     }
 
     setLoading(false);
@@ -85,6 +88,7 @@ export default function RefForgot() {
             placeholder="you@example.com"
             value={email}
             onChange={(e) => {
+              setFormError("");
               submittedEmailRef.current = "";
               setAcknowledgedEmail("");
               setEmail(e.target.value.trim());
@@ -109,6 +113,9 @@ export default function RefForgot() {
         >
           {loading ? "Sending..." : "Send Reset Link"}
         </button>
+        {formError && (
+          <p role="alert" className="text-sm text-danger-text">{formError}</p>
+        )}
 
         <button
           type="button"

@@ -254,6 +254,74 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await record(page, testInfo, `announced-outcomes-${size}`);
     });
 
+    test('form errors stay next to their submit button until the creator acts', async ({ page, context, baseURL }, testInfo) => {
+      const persistentError = async (message, buttonName, label) => {
+        const alert = page.locator('#main-content').getByRole('alert').filter({ hasText: message });
+        const button = page.getByRole('button', { name: buttonName, exact: true });
+        await expect(alert).toHaveText(message);
+        await expect(alert).toBeVisible();
+        await page.waitForTimeout(5000);
+        await expect(alert).toBeVisible();
+        await alert.scrollIntoViewIfNeeded();
+        const [errorBox, buttonBox] = await Promise.all([alert.boundingBox(), button.boundingBox()]);
+        expect(errorBox).not.toBeNull();
+        expect(buttonBox).not.toBeNull();
+        const intersects = errorBox.x < buttonBox.x + buttonBox.width &&
+          errorBox.x + errorBox.width > buttonBox.x &&
+          errorBox.y < buttonBox.y + buttonBox.height &&
+          errorBox.y + errorBox.height > buttonBox.y;
+        expect(intersects).toBe(false);
+        expect(errorBox.y).toBeGreaterThanOrEqual(buttonBox.y + buttonBox.height);
+        await record(page, testInfo, `${label}-inline-error-${size}`, { message, errorBox, buttonBox, intersects });
+        return alert;
+      };
+
+      await openForm(page, '/referrals/register', '/api/auth/identities');
+      await fillRegistration(page);
+      const confirm = page.getByLabel('Confirm Password', { exact: true });
+      await confirm.fill('Different-password1!');
+      await page.getByRole('button', { name: 'Register', exact: true }).click();
+      const registrationError = await persistentError('Passwords do not match.', 'Register', 'registration');
+      await confirm.fill('Synthetic-password1!');
+      await expect(registrationError).toHaveCount(0);
+
+      await signIn(context, baseURL);
+      await page.goto('/referrals/dashboard');
+      const commission = page.getByText('Commission (%)', { exact: true }).locator('..');
+      const discount = page.getByText('Viewer Discount (%)', { exact: true }).locator('..');
+      await page.route('**/api/ref/updateSplit', route => route.fulfill({ status: 409, json: { ok: false, error: 'Synthetic split conflict.' } }));
+      await commission.getByRole('button', { name: '+', exact: true }).click();
+      await page.getByRole('button', { name: 'Save Settings', exact: true }).click();
+      const splitError = await persistentError('Synthetic split conflict.', 'Save Settings', 'settings');
+      await discount.getByRole('button', { name: '+', exact: true }).click();
+      await expect(splitError).toHaveCount(0);
+      await page.unroute('**/api/ref/updateSplit');
+
+      await page.goto('/referrals/forgot');
+      await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+      const email = page.getByLabel('Creator Email', { exact: true });
+      await email.fill('creator@fixture.invalid');
+      await page.route('**/api/ref/forgot', route => route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic forgot outage.' } }));
+      await page.getByRole('button', { name: 'Send Reset Link', exact: true }).click();
+      const forgotError = await persistentError('Synthetic forgot outage.', 'Send Reset Link', 'forgot');
+      await email.fill('changed@fixture.invalid');
+      await expect(forgotError).toHaveCount(0);
+
+      await page.goto('/referrals/dashboard');
+      await commission.getByRole('button', { name: '+', exact: true }).click();
+      await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: baseURL });
+      await page.getByRole('button', { name: 'Copy', exact: true }).click();
+      await expect(page.getByRole('status').filter({ hasText: 'Referral link copied!' })).toBeVisible();
+      await page.waitForTimeout(1500);
+      await page.getByRole('button', { name: 'Save Settings', exact: true }).click();
+      const saved = page.getByRole('status').filter({ hasText: 'Saved successfully!' });
+      await expect(saved).toBeVisible();
+      await page.waitForTimeout(1500);
+      await expect(saved).toBeVisible();
+      await record(page, testInfo, `newer-toast-${size}`, { message: await saved.innerText(), millisecondsAfterSave: 1500 });
+      await expect(saved).toHaveCount(0, { timeout: 4000 });
+    });
+
     test('decimal percentage adjustment remains acceptable to the API', async ({ page, context, baseURL }, testInfo) => {
       await configure(baseURL, { documents: [{ _id: 'tooling-referral', currentCommissionPercent: 1.1, currentDiscountPercent: 0 }] });
       await signIn(context, baseURL);
