@@ -8,6 +8,7 @@ import {
 } from "../lib/checkoutStorage";
 import packagePricing from "../lib/packagePricing";
 import { classifyHoldResponse } from "../lib/holdResponse";
+import { CHECKOUT_CONFIRMATION_EVENT, isCheckoutConfirmationPending } from "../lib/checkoutConfirmation";
 
 const { getPublicPackageTitle } = packagePricing;
 
@@ -81,6 +82,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
   const [releasing, setReleasing] = useState(false);
   const [releaseError, setReleaseError] = useState("");
   const currentHoldRef = useRef(null);
+  const [confirmationVersion, setConfirmationVersion] = useState(0);
   const path = location.pathname || "";
   const isMobileWidth = useIsMobileWidth();
   const isDesktopWidth = !isMobileWidth;
@@ -164,6 +166,12 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
   }, []);
 
   useEffect(() => {
+    const handler = () => setConfirmationVersion(version => version + 1);
+    window.addEventListener(CHECKOUT_CONFIRMATION_EVENT, handler);
+    return () => window.removeEventListener(CHECKOUT_CONFIRMATION_EVENT, handler);
+  }, []);
+
+  useEffect(() => {
     setReleaseError("");
     if (!hold?.expiresAt) {
       setCountdown(null);
@@ -177,6 +185,10 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
     const tick = () => {
       const diff = expiresAtMs - Date.now();
       if (diff <= 0) {
+        if (isCheckoutConfirmationPending()) {
+          setCountdown(0);
+          return false;
+        }
         if (hold.phase === "payment_pending" && paymentInOtherTab) {
           setCountdown(0);
           return false;
@@ -195,7 +207,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
       if (!ok) clearInterval(id);
     }, 1000);
     return () => clearInterval(id);
-  }, [hold, path, paymentInOtherTab]);
+  }, [hold, path, paymentInOtherTab, confirmationVersion]);
 
   const holdLocalTimeLabel = useMemo(() => {
     if (!hold) return "";

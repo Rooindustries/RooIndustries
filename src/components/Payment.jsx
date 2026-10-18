@@ -10,6 +10,7 @@ import { captureSalesAttribution, sanitizeSalesAttribution } from "../lib/salesA
 import { trackConfirmedPurchase } from "../lib/analytics";
 import { preloadConfirmationPage, preloadConfirmationPages } from "../lib/confirmationPages";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
+import { beginCheckoutConfirmation } from "../lib/checkoutConfirmation";
 import {
   calculateCheckoutDiscounts,
   formatCouponValue,
@@ -409,6 +410,7 @@ export default function Payment({ hideFooter = false }) {
 
   const [banner, setBanner] = useState(null);
   const bannerRef = useRef(null);
+  const [creatingFree, setCreatingFree] = useState(false);
   const [serverQuote, setServerQuote] = useState(null);
   const [quoteFingerprint, setQuoteFingerprint] = useState("");
   const [quoteLoading, setQuoteLoading] = useState(false);
@@ -430,7 +432,7 @@ export default function Payment({ hideFooter = false }) {
   }, [banner]);
 
   useEffect(() => {
-    if (!holdExpiresAt || processingDodoReturn) return;
+    if (!holdExpiresAt || processingDodoReturn || creatingFree) return;
     const expiresAtMs = new Date(holdExpiresAt).getTime();
     if (!Number.isFinite(expiresAtMs)) return;
 
@@ -468,7 +470,7 @@ export default function Payment({ hideFooter = false }) {
 
     scheduleExpiry();
     return () => clearTimeout(timeoutId);
-  }, [holdExpiresAt, processingDodoReturn, navigate, navState, location]);
+  }, [holdExpiresAt, processingDodoReturn, creatingFree, navigate, navState, location]);
 
   const {
     referralPercent,
@@ -529,8 +531,6 @@ export default function Payment({ hideFooter = false }) {
   const shouldRenderPaypalBlock =
     !!providerConfig?.paypal?.enabled || showInternalPayments;
   const canDisplayPaypalMethod = shouldRenderPaypalBlock && canUsePaypal;
-
-  const [creatingFree, setCreatingFree] = useState(false);
 
   const buildCheckoutPayload = () => ({
     ...bookingData,
@@ -1461,6 +1461,7 @@ export default function Payment({ hideFooter = false }) {
   }, [hydrated, location.search, paymentSession]);
 
   async function validateReferral(code) {
+    if (creatingFree) return;
     const normalizedCode = String(code || "").trim();
     if (!normalizedCode) {
       setReferral(null);
@@ -1528,6 +1529,7 @@ export default function Payment({ hideFooter = false }) {
   }
 
   async function validateCoupon(code) {
+    if (creatingFree) return;
     const normalizedCode = String(code || "").trim();
     if (!normalizedCode) {
       setCoupon(null);
@@ -1594,10 +1596,12 @@ export default function Payment({ hideFooter = false }) {
     const operation = createPaymentOperation();
     if (!operation.current()) return;
     if (!isFree) return;
+    if (validating || validatingCoupon) return;
     if (!ensureSlotBeforeAction()) return;
 
+    setCreatingFree(true);
+    const endConfirmation = beginCheckoutConfirmation();
     try {
-      setCreatingFree(true);
       showBanner("info", "Confirming your free booking...");
       const session = await startSessionCheckout("free", operation);
       if (!operation.current() || session?.stale) return;
@@ -1616,7 +1620,12 @@ export default function Payment({ hideFooter = false }) {
         err?.message ||
           "Something went wrong saving your free booking. Please contact support."
       );
+      if (holdExpiresAt && new Date(holdExpiresAt).getTime() <= Date.now()) {
+        holdExpiryHandledRef.current = true;
+        navigate("/", { replace: true });
+      }
     } finally {
+      endConfirmation();
       if (operation.current()) setCreatingFree(false);
     }
   }
@@ -1944,7 +1953,7 @@ export default function Payment({ hideFooter = false }) {
                     setReferralInput(e.target.value.trim());
                     if (referralError) setReferralError("");
                   }}
-                  disabled={preApplyingCodes || !!lockedProvider}
+                  disabled={creatingFree || preApplyingCodes || !!lockedProvider}
                   aria-invalid={referralError ? "true" : "false"}
                   aria-describedby={
                     referralError ? "payment-referral-code-error" : undefined
@@ -1955,7 +1964,7 @@ export default function Payment({ hideFooter = false }) {
 
                 <button
                   onClick={() => validateReferral(referralInput)}
-                  disabled={preApplyingCodes || validating || !!lockedProvider}
+                  disabled={creatingFree || preApplyingCodes || validating || !!lockedProvider}
                   className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
                 >
                   {validating ? "Checking..." : "Apply"}
@@ -1992,7 +2001,7 @@ export default function Payment({ hideFooter = false }) {
                     setCouponInput(e.target.value.trim());
                     if (couponError) setCouponError("");
                   }}
-                  disabled={preApplyingCodes || !!lockedProvider}
+                  disabled={creatingFree || preApplyingCodes || !!lockedProvider}
                   aria-invalid={couponError ? "true" : "false"}
                   aria-describedby={
                     couponError ? "payment-coupon-code-error" : undefined
@@ -2004,7 +2013,7 @@ export default function Payment({ hideFooter = false }) {
                 <button
                   onClick={() => validateCoupon(couponInput)}
                   disabled={
-                    preApplyingCodes || validatingCoupon || !!lockedProvider
+                    creatingFree || preApplyingCodes || validatingCoupon || !!lockedProvider
                   }
                   className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
                 >
@@ -2018,11 +2027,12 @@ export default function Payment({ hideFooter = false }) {
                 {coupon && (
                   <button
                     onClick={() => {
+                      if (creatingFree) return;
                       setCoupon(null);
                       setCouponInput("");
                       setCouponError("");
                     }}
-                    disabled={!!lockedProvider}
+                    disabled={creatingFree || !!lockedProvider}
                     className="text-xs text-ink-secondary underline underline-offset-2"
                   >
                     Remove coupon
@@ -2089,7 +2099,7 @@ export default function Payment({ hideFooter = false }) {
               </p>
               <button
                 onClick={handleFreeBooking}
-                disabled={creatingFree || quoteLoading || !quoteFingerprint}
+                disabled={creatingFree || validating || validatingCoupon || quoteLoading || !quoteFingerprint}
                 className="glow-button px-4 py-3 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
               >
                 {creatingFree ? "Confirming..." : "Confirm Free Booking"}
