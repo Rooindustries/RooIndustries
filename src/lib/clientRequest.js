@@ -1,5 +1,15 @@
 export const CLIENT_REQUEST_TIMEOUT_MS = 8000;
 
+export const requestDeadline = (timeoutMs = CLIENT_REQUEST_TIMEOUT_MS) => {
+  if (typeof AbortSignal.timeout === "function") return AbortSignal.timeout(timeoutMs);
+  const controller = new AbortController();
+  setTimeout(
+    () => controller.abort(new DOMException("Request timed out.", "TimeoutError")),
+    timeoutMs
+  );
+  return controller.signal;
+};
+
 export const fetchJsonWithTimeout = async (
   url,
   options = {},

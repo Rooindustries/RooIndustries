@@ -1,5 +1,6 @@
 const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
+const http = require('node:http');
 let fixture;
 let restoreGuard;
 
@@ -316,6 +317,178 @@ test.describe('replacement confirmation links in the same tab', () => {
       release[stale]();
       await page.unrouteAll({ behavior: 'wait' });
     }
+  });
+});
+
+test.describe('portal requests that stall', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test.beforeEach(async ({ page, context, baseURL }) => {
+    await signIn(context, baseURL);
+    await page.route('**/api/auth/identities?flow=referral', route => route.fulfill({ json: { ok: true, domainAccount: true, providers: ['email', 'google'], unlinkableProviders: ['email', 'google'] } }));
+  });
+
+  const stall = async (page, endpoint, method) => {
+    let unblock, seen, finished;
+    let count = 0;
+    const gate = new Promise(resolve => { unblock = resolve; });
+    const arrived = new Promise(resolve => { seen = resolve; });
+    const completed = new Promise(resolve => { finished = resolve; });
+    const handler = async route => {
+      if (route.request().method() !== method) return route.fallback();
+      count += 1;
+      seen();
+      await gate;
+      try { await route.abort(); } catch {} finally { finished(); }
+    };
+    await page.route(`**${endpoint}`, handler);
+    return { arrived, count: () => count, release: async () => {
+      unblock();
+      if (count) await completed;
+      await page.unroute(`**${endpoint}`, handler);
+    } };
+  };
+
+  test('stalled payouts can be retried', async ({ page }, testInfo) => {
+    const held = await stall(page, '/api/ref/payouts', 'GET');
+    try {
+      await page.goto('/referrals/dashboard');
+      await held.arrived;
+      const message = page.getByText('Payout data is taking too long to load.', { exact: true });
+      await expect(message).toBeVisible({ timeout: 12000 });
+      const retry = message.locator('..').getByRole('button', { name: 'Retry', exact: true });
+      await expect(retry).toBeEnabled();
+      expect(held.count()).toBe(1);
+      await record(page, testInfo, 'stalled-payouts', { timedOut: true, requestsBeforeRetry: held.count() });
+      await held.release();
+      await retry.click();
+      await expect(page.getByText('Total earned', { exact: true })).toBeVisible();
+      await expect(message).toHaveCount(0);
+    } finally { await held.release(); }
+  });
+
+  test('stalled account connections can be retried', async ({ page }, testInfo) => {
+    const held = await stall(page, '/api/auth/identities?flow=referral', 'GET');
+    try {
+      await page.goto('/referrals/dashboard');
+      await held.arrived;
+      const message = page.getByRole('alert').filter({ hasText: 'Account connections are taking too long to load.' });
+      await expect(message).toBeVisible({ timeout: 12000 });
+      const panel = page.locator('section[aria-labelledby="referral-connections-title"]');
+      const retry = panel.getByRole('button', { name: 'Retry', exact: true });
+      await expect(retry).toBeEnabled();
+      expect(held.count()).toBe(1);
+      await record(page, testInfo, 'stalled-identities', { timedOut: true, requestsBeforeRetry: held.count() });
+      await held.release();
+      await retry.click();
+      await expect(panel.getByRole('heading', { name: 'Connected accounts', exact: true })).toBeVisible();
+      await expect(panel.getByText('Google: Linked', { exact: false })).toBeVisible();
+      await expect(message).toHaveCount(0);
+    } finally { await held.release(); }
+  });
+
+  test('stalled settings save reports an unknown outcome', async ({ page }, testInfo) => {
+    const held = await stall(page, '/api/ref/updateSplit', 'POST');
+    try {
+      await page.goto('/referrals/dashboard');
+      const commission = page.getByText('Commission (%)', { exact: true }).locator('..');
+      await commission.getByRole('button', { name: '+', exact: true }).click();
+      await page.getByRole('button', { name: 'Save Settings', exact: true }).click();
+      await held.arrived;
+      await commission.getByRole('button', { name: '+', exact: true }).click();
+      const message = page.getByRole('alert').filter({ hasText: "We couldn't confirm your settings were saved. Reload the page to check them before saving again." });
+      await expect(message).toBeVisible({ timeout: 12000 });
+      await expect(page.getByRole('button', { name: 'Save Settings', exact: true })).toBeEnabled();
+      await page.waitForTimeout(350);
+      expect(held.count()).toBe(1);
+      await expect(page.getByRole('status').filter({ hasText: 'Saved successfully!' })).toHaveCount(0);
+      await record(page, testInfo, 'stalled-settings', { editWhilePending: true, unknownOutcomeShown: true, requests: held.count() });
+    } finally { await held.release(); }
+  });
+
+  test('a settings save with a stalled response body reports an unknown outcome', async ({ page, context, baseURL }, testInfo) => {
+    const target = new URL(baseURL);
+    target.port = String(Number(target.port) + 2);
+    let requests = 0;
+    const server = http.createServer((request, response) => {
+      if (request.method !== 'POST' || request.url !== '/api/ref/updateSplit') {
+        response.writeHead(404).end();
+        return;
+      }
+      requests += 1;
+      request.resume();
+      response.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': new URL(baseURL).origin,
+        'Access-Control-Allow-Credentials': 'true',
+      });
+      response.write('{"ok":');
+    });
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(Number(target.port), '0.0.0.0', resolve);
+    });
+    const forward = route => route.continue({ url: `${target.origin}/api/ref/updateSplit` });
+    try {
+      const { guardBrowserContext } = await import('../scripts/lib/test-target-safety.mjs');
+      await context.unroute('**/*');
+      await guardBrowserContext(context, [baseURL, fixture.apiFixtureOrigin(baseURL), target.origin]);
+      await page.route('**/api/ref/updateSplit', forward);
+      await page.goto('/referrals/dashboard');
+      await page.getByText('Commission (%)', { exact: true }).locator('..').getByRole('button', { name: '+', exact: true }).click();
+      const headers = page.waitForResponse(response => new URL(response.url()).pathname === '/api/ref/updateSplit');
+      await page.getByRole('button', { name: 'Save Settings', exact: true }).click();
+      expect((await headers).status()).toBe(200);
+      const message = page.getByRole('alert').filter({ hasText: "We couldn't confirm your settings were saved. Reload the page to check them before saving again." });
+      await expect(message).toBeVisible({ timeout: 12000 });
+      await expect(page.getByRole('button', { name: 'Save Settings', exact: true })).toBeEnabled();
+      await expect(page.getByRole('status').filter({ hasText: 'Saved successfully!' })).toHaveCount(0);
+      expect(requests).toBe(1);
+      await record(page, testInfo, 'stalled-settings-body', { headersStatus: 200, bodyCompleted: false, requests, unknownOutcomeShown: true });
+    } finally {
+      await page.unroute('**/api/ref/updateSplit', forward);
+      await new Promise(resolve => {
+        server.close(resolve);
+        server.closeAllConnections();
+      });
+    }
+  });
+
+  test('stalled identity confirmation can be tried again', async ({ page }, testInfo) => {
+    const held = await stall(page, '/api/auth/reauth', 'POST');
+    try {
+      await page.goto('/referrals/dashboard');
+      await page.getByLabel('Current password', { exact: true }).fill('Synthetic-password1!');
+      const confirm = page.getByRole('button', { name: 'Confirm identity', exact: true });
+      await confirm.click();
+      await held.arrived;
+      await page.getByLabel('Current password', { exact: true }).fill('Edited-while-pending2!');
+      const message = page.getByRole('status').filter({ hasText: 'Confirming your identity took too long. Please try again.' });
+      await expect(message).toBeVisible({ timeout: 12000 });
+      await expect(confirm).toBeEnabled();
+      await page.waitForTimeout(350);
+      expect(held.count()).toBe(1);
+      await record(page, testInfo, 'stalled-confirm-identity', { timedOut: true, requests: held.count(), retryEnabled: true });
+    } finally { await held.release(); }
+  });
+
+  test('stalled unlink reports an unknown outcome', async ({ page }, testInfo) => {
+    await page.route('**/api/auth/reauth', route => route.fulfill({ json: { ok: true } }));
+    const held = await stall(page, '/api/auth/identities', 'POST');
+    try {
+      await page.goto('/referrals/dashboard');
+      await page.getByLabel('Current password', { exact: true }).fill('Synthetic-password1!');
+      const unlink = page.getByRole('button', { name: 'Unlink google', exact: true });
+      await unlink.click();
+      await held.arrived;
+      const message = page.getByRole('status').filter({ hasText: "We couldn't confirm the unlink. Reload the page to check your connected accounts." });
+      await expect(message).toBeVisible({ timeout: 12000 });
+      await expect(unlink).toBeEnabled();
+      await expect(page.getByText('Google: Linked', { exact: false })).toBeVisible();
+      await page.waitForTimeout(350);
+      expect(held.count()).toBe(1);
+      await record(page, testInfo, 'stalled-unlink', { unknownOutcomeShown: true, requests: held.count(), unlinkEnabled: true });
+    } finally { await held.release(); }
   });
 });
 
