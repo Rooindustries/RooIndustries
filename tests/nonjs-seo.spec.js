@@ -29,6 +29,24 @@ test.describe("Non-JS crawlability", () => {
     await expect(page.locator("h1")).toHaveCount(1);
   });
 
+  test("/terms renders the CMS terms without JavaScript", async ({ page }, testInfo) => {
+    const response = await page.goto("/terms", { waitUntil: "networkidle" });
+    const main = page.locator("main#main-content");
+    await testInfo.attach("terms-server-content", {
+      body: JSON.stringify({
+        status: response.status(),
+        headings: await main.locator("h1, h2").allTextContents(),
+        text: await main.innerText(),
+      }, null, 2),
+      contentType: "application/json",
+    });
+    await expect(main.locator("h1")).toHaveText("Terms of Service");
+    await expect(main.locator("h2")).toContainText(["Synthetic local information"]);
+    await expect(main).toContainText("This is synthetic privacy content for an isolated local Roo Industries application test.");
+    await expect(page.locator("h1")).toHaveCount(1);
+    await expect(page.locator('section[aria-label="No-JS SEO fallback"]')).toHaveCount(0);
+  });
+
   for (const route of routes) {
     test(`renders meaningful HTML for ${route}`, async ({ page }) => {
       await page.goto(route, { waitUntil: "domcontentloaded" });
