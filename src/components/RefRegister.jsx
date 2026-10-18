@@ -29,6 +29,8 @@ export default function RefRegister() {
   const [socialIdentity, setSocialIdentity] = useState(null);
   const [verificationPending, setVerificationPending] = useState(false);
   const availabilityVersion = useRef(0);
+  const submittingRef = useRef(false);
+  const editVersionRef = useRef(0);
 
   function showToast(type, message) {
     const next = { type, message };
@@ -96,6 +98,7 @@ export default function RefRegister() {
 
   async function handleRegister(e) {
     e.preventDefault();
+    if (submittingRef.current) return;
     setFormError("");
 
     const trimmedDiscordUsername = discordUsername.trim();
@@ -140,37 +143,40 @@ export default function RefRegister() {
       setFormError("Referral code is already taken.");
       return;
     }
-    if (slugAvailable === null) {
-      try {
-        const resCheck = await fetch(
-          `/api/ref/validateReferral?code=${encodeURIComponent(
-            trimmedSlug
-          )}&purpose=registration`
-        );
-        const dataCheck = await resCheck.json();
-        const availability = resolveReferralCodeAvailability(
-          resCheck,
-          dataCheck
-        );
-        if (availability === false) {
-          setSlugAvailable(false);
-          setFormError("Referral code is already taken.");
-          return;
-        } else if (availability === true) {
-          setSlugAvailable(true);
-        } else {
-          setFormError("Could not validate referral code. Try again.");
+    const version = editVersionRef.current;
+    submittingRef.current = true;
+    setLoading(true);
+    let redirecting = false;
+    try {
+      if (slugAvailable === null) {
+        try {
+          const resCheck = await fetch(
+            `/api/ref/validateReferral?code=${encodeURIComponent(
+              trimmedSlug
+            )}&purpose=registration`
+          );
+          const dataCheck = await resCheck.json();
+          const availability = resolveReferralCodeAvailability(
+            resCheck,
+            dataCheck
+          );
+          if (availability === false) {
+            if (editVersionRef.current === version) {
+              setSlugAvailable(false);
+              setFormError("Referral code is already taken.");
+            }
+            return;
+          } else if (availability === true) {
+            if (editVersionRef.current === version) setSlugAvailable(true);
+          } else {
+            if (editVersionRef.current === version) setFormError("Could not validate referral code. Try again.");
+            return;
+          }
+        } catch (err) {
+          if (editVersionRef.current === version) setFormError("Could not validate referral code. Try again.");
           return;
         }
-      } catch (err) {
-        setFormError("Could not validate referral code. Try again.");
-        return;
       }
-    }
-
-    setLoading(true);
-
-    try {
       const res = await fetch("/api/ref/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -191,8 +197,7 @@ export default function RefRegister() {
           availabilityVersion.current += 1;
           setSlugAvailable(null);
         }
-        setFormError(data.error || "Registration failed.");
-        setLoading(false);
+        if (editVersionRef.current === version) setFormError(data.error || "Registration failed.");
         return;
       }
 
@@ -202,19 +207,22 @@ export default function RefRegister() {
         setConfirm("");
         setVerificationPending(true);
         showToast("success", "Check your email to finish creating the account.");
-        setLoading(false);
         return;
       }
 
+      redirecting = true;
       showToast("success", "Registered! Redirecting to dashboard...");
       removeBrowserStorage("sessionStorage", REFERRAL_SIGNUP_DRAFT);
       setTimeout(() => nav("/referrals/dashboard"), 900);
     } catch {
       console.error("Referral registration failed");
-      setFormError("Server error.");
+      if (editVersionRef.current === version) setFormError("Server error.");
+    } finally {
+      if (!redirecting) {
+        submittingRef.current = false;
+        setLoading(false);
+      }
     }
-
-    setLoading(false);
   }
 
   return (
@@ -258,6 +266,7 @@ export default function RefRegister() {
             value={discordUsername}
             onChange={(e) => {
               setFormError("");
+              editVersionRef.current += 1;
               setDiscordUsername(e.target.value);
             }}
             placeholder="e.g. @serviroo"
@@ -279,6 +288,7 @@ export default function RefRegister() {
             value={email}
             onChange={(e) => {
               setFormError("");
+              editVersionRef.current += 1;
               setEmail(e.target.value);
             }}
             readOnly={Boolean(socialIdentity)}
@@ -304,6 +314,7 @@ export default function RefRegister() {
             value={paypalEmail}
             onChange={(e) => {
               setFormError("");
+              editVersionRef.current += 1;
               setPaypalEmail(e.target.value);
             }}
             placeholder="Email used for your PayPal account"
@@ -324,6 +335,7 @@ export default function RefRegister() {
             value={slug}
             onChange={(e) => {
               setFormError("");
+              editVersionRef.current += 1;
               setSlug(e.target.value);
             }}
             placeholder="Custom referral code (e.g. yourname)"
@@ -354,6 +366,7 @@ export default function RefRegister() {
             value={password}
             onChange={(e) => {
               setFormError("");
+              editVersionRef.current += 1;
               setPassword(e.target.value);
             }}
             placeholder="Enter password"
@@ -375,6 +388,7 @@ export default function RefRegister() {
             value={confirm}
             onChange={(e) => {
               setFormError("");
+              editVersionRef.current += 1;
               setConfirm(e.target.value);
             }}
             placeholder="Confirm password"

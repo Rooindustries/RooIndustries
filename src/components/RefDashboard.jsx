@@ -80,6 +80,7 @@ export default function RefDashboard() {
 
   const [toast, setToast] = useState(null);
   const [formError, setFormError] = useState("");
+  const editVersionRef = useRef(0);
   const [authNotice] = useState(() => resolveAuthNotice(location.search));
   const noScrollbarStyles = `
     .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -269,6 +270,7 @@ export default function RefDashboard() {
 
   function adjustCommission(delta) {
     setFormError("");
+    editVersionRef.current += 1;
     if (!unlocked) return;
     const newVal = (Math.round(commission * 100) + delta * 100) / 100;
     if (newVal < 0) return;
@@ -278,6 +280,7 @@ export default function RefDashboard() {
 
   function adjustDiscount(delta) {
     setFormError("");
+    editVersionRef.current += 1;
     if (!unlocked) return;
     const newVal = (Math.round(discount * 100) + delta * 100) / 100;
     if (newVal < 0) return;
@@ -288,6 +291,7 @@ export default function RefDashboard() {
   async function save() {
     setFormError("");
     if (invalid || !unlocked) return;
+    const version = editVersionRef.current;
 
     setSaving(true);
 
@@ -302,11 +306,12 @@ export default function RefDashboard() {
       });
 
       const result = await res.json();
-      if (!result.ok) setFormError(result.error || "Failed to save");
-      else showToast("success", "Saved successfully!");
+      if (!result.ok) {
+        if (editVersionRef.current === version) setFormError(result.error || "Failed to save");
+      } else showToast("success", "Saved successfully!");
     } catch {
       console.error("Referral settings save failed");
-      setFormError("Server error");
+      if (editVersionRef.current === version) setFormError("Server error");
     }
     setSaving(false);
   }

@@ -45,11 +45,11 @@ export default function RefForgot() {
       if (data.ok) {
         if (submittedEmailRef.current === submittedEmail) setAcknowledgedEmail(submittedEmail);
       } else {
-        setFormError(data.error || "Failed to send link");
+        if (submittedEmailRef.current === submittedEmail) setFormError(data.error || "Failed to send link");
       }
     } catch {
       console.error("Referral reset request failed");
-      setFormError("Server error.");
+      if (submittedEmailRef.current === submittedEmail) setFormError("Server error.");
     }
 
     setLoading(false);

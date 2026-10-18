@@ -306,20 +306,145 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       const forgotError = await persistentError('Synthetic forgot outage.', 'Send Reset Link', 'forgot');
       await email.fill('changed@fixture.invalid');
       await expect(forgotError).toHaveCount(0);
+    });
 
+    test('a double-clicked registration submits once and shows no stale error', async ({ page }, testInfo) => {
+      let submitting = false;
+      let validationRequests = 0;
+      let registrationPosts = 0;
+      await page.route('**/api/ref/validateReferral*', async route => {
+        if (!submitting) {
+          await route.fulfill({ status: 503, json: { ok: false, reason: 'unavailable' } });
+          return;
+        }
+        validationRequests += 1;
+        await new Promise(resolve => setTimeout(resolve, 800));
+        await route.fulfill({ status: 200, json: { ok: false, reason: 'available', error: 'Not found' } });
+      });
+      await page.route('**/api/ref/register', route => {
+        registrationPosts += 1;
+        return route.fulfill({ status: 202, json: { ok: true, pendingVerification: true } });
+      });
+      await openForm(page, '/referrals/register', '/api/auth/identities');
+      const backgroundCheck = page.waitForResponse('**/api/ref/validateReferral*');
+      await fillRegistration(page);
+      expect((await backgroundCheck).status()).toBe(503);
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+      submitting = true;
+      await page.getByRole('button', { name: 'Register', exact: true }).dblclick();
+      const notice = page.getByText('Check your email and use the confirmation link to finish creating your account.', { exact: true });
+      await expect(notice).toBeVisible();
+      await expect.poll(() => registrationPosts).toBe(validationRequests);
+      expect(validationRequests).toBe(1);
+      expect(registrationPosts).toBe(1);
+      await expect(page.locator('#main-content').getByRole('alert')).toHaveCount(0);
+      await record(page, testInfo, `serialized-registration-${size}`, { validationRequests, registrationPosts, notice: await notice.innerText() });
+    });
+
+    test('a newer toast keeps its own timeout after a slow save', async ({ page, context, baseURL }, testInfo) => {
+      await signIn(context, baseURL);
+      const start = new Date();
+      await page.clock.install({ time: start });
       await page.goto('/referrals/dashboard');
+      await expect(page.getByText('Auto-updated', { exact: true })).toBeVisible();
+      const commission = page.getByText('Commission (%)', { exact: true }).locator('..');
       await commission.getByRole('button', { name: '+', exact: true }).click();
       await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: baseURL });
+      await page.clock.pauseAt(new Date(start.getTime() + 60 * 60 * 1000));
+      await page.route('**/api/ref/updateSplit', async route => {
+        await new Promise(resolve => setTimeout(resolve, 1200));
+        await route.fallback();
+      });
       await page.getByRole('button', { name: 'Copy', exact: true }).click();
       await expect(page.getByRole('status').filter({ hasText: 'Referral link copied!' })).toBeVisible();
-      await page.waitForTimeout(1500);
+      const copiedAt = await page.evaluate(() => Date.now());
+      await page.clock.runFor(1500);
       await page.getByRole('button', { name: 'Save Settings', exact: true }).click();
       const saved = page.getByRole('status').filter({ hasText: 'Saved successfully!' });
       await expect(saved).toBeVisible();
-      await page.waitForTimeout(1500);
+      const savedAt = await page.evaluate(() => Date.now());
+      expect(savedAt - copiedAt).toBe(1500);
+      await page.clock.runFor(1500);
       await expect(saved).toBeVisible();
-      await record(page, testInfo, `newer-toast-${size}`, { message: await saved.innerText(), millisecondsAfterSave: 1500 });
-      await expect(saved).toHaveCount(0, { timeout: 4000 });
+      await record(page, testInfo, `newer-toast-${size}`, { message: await saved.innerText(), copiedAt, savedAt, checkedAt: await page.evaluate(() => Date.now()) });
+      await page.clock.runFor(1100);
+      await expect(saved).toHaveCount(0);
+    });
+
+    test('edited forms ignore errors from earlier submissions', async ({ page, context, baseURL }, testInfo) => {
+      const failAfterEdit = async (path, message, buttonName, edit, label) => {
+        await page.route(`**${path}`, async route => {
+          await new Promise(resolve => setTimeout(resolve, 800));
+          await route.fulfill({ status: 503, json: { ok: false, error: message } });
+        });
+        const request = page.waitForRequest(request => new URL(request.url()).pathname === path && request.method() === 'POST');
+        const response = page.waitForResponse(response => new URL(response.url()).pathname === path);
+        const button = page.getByRole('button', { name: buttonName, exact: true });
+        await button.click();
+        await request;
+        await edit();
+        const result = await response;
+        await result.finished();
+        expect(result.status()).toBe(503);
+        await expect(button).toBeEnabled();
+        const alert = page.locator('#main-content').getByRole('alert').filter({ hasText: message });
+        await expect(alert).toHaveCount(0);
+        await record(page, testInfo, `${label}-edited-during-submit-${size}`, { status: result.status(), message, matchingAlerts: await alert.count() });
+      };
+
+      let checkingSubmission = false;
+      let editedCheckFinished;
+      const editedCheck = new Promise(resolve => { editedCheckFinished = resolve; });
+      await page.route('**/api/ref/validateReferral*', async route => {
+        const code = new URL(route.request().url()).searchParams.get('code');
+        if (code === 'edited-creator') {
+          await route.fulfill({ status: 200, json: { ok: false, reason: 'available' } });
+          editedCheckFinished();
+        } else if (checkingSubmission) {
+          await new Promise(resolve => setTimeout(resolve, 800));
+          await editedCheck;
+          await route.fulfill({ status: 200, json: { ok: false, reason: 'reserved' } });
+        } else {
+          await route.fulfill({ status: 503, json: { ok: false, reason: 'unavailable' } });
+        }
+      });
+      await openForm(page, '/referrals/register', '/api/auth/identities');
+      const backgroundCheck = page.waitForResponse('**/api/ref/validateReferral*');
+      await fillRegistration(page);
+      await (await backgroundCheck).finished();
+      checkingSubmission = true;
+      const checking = page.waitForRequest('**/api/ref/validateReferral*');
+      const checked = page.waitForResponse(response => new URL(response.url()).searchParams.get('code') === 'new-creator');
+      await page.getByRole('button', { name: 'Register', exact: true }).click();
+      await checking;
+      await page.getByLabel('Referral Code', { exact: true }).fill('edited-creator');
+      await (await checked).finished();
+      await expect(page.getByRole('button', { name: 'Register', exact: true })).toBeEnabled();
+      await expect(page.getByText('Referral code is available.', { exact: true })).toBeVisible();
+      await expect(page.getByText('This referral code is already taken.', { exact: true })).toHaveCount(0);
+      await expect(page.locator('#main-content').getByRole('alert')).toHaveCount(0);
+      await record(page, testInfo, `referral-code-edited-during-submit-${size}`, { editedCode: 'edited-creator', previousCodeAvailability: 'reserved' });
+      await page.unroute('**/api/ref/validateReferral*');
+
+      await openForm(page, '/referrals/register', '/api/auth/identities');
+      await fillRegistration(page);
+      await failAfterEdit('/api/ref/register', 'Synthetic earlier registration failure.', 'Register',
+        () => page.getByLabel('Discord Username', { exact: true }).fill('edited-user'), 'registration');
+
+      await page.goto('/referrals/forgot');
+      await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+      const email = page.getByLabel('Creator Email', { exact: true });
+      await email.fill('creator@fixture.invalid');
+      await failAfterEdit('/api/ref/forgot', 'Synthetic earlier forgot failure.', 'Send Reset Link',
+        () => email.fill('edited@fixture.invalid'), 'forgot');
+
+      await signIn(context, baseURL);
+      await page.goto('/referrals/dashboard');
+      const commission = page.getByText('Commission (%)', { exact: true }).locator('..');
+      const discount = page.getByText('Viewer Discount (%)', { exact: true }).locator('..');
+      await commission.getByRole('button', { name: '+', exact: true }).click();
+      await failAfterEdit('/api/ref/updateSplit', 'Synthetic earlier split failure.', 'Save Settings',
+        () => discount.getByRole('button', { name: '+', exact: true }).click(), 'settings');
     });
 
     test('decimal percentage adjustment remains acceptable to the API', async ({ page, context, baseURL }, testInfo) => {
