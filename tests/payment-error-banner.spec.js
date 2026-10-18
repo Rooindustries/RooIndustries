@@ -28,6 +28,13 @@ const placement = locator => locator.evaluate(element => {
   };
 });
 
+const settled = locator => locator.evaluate(element => {
+  for (let node = element; node; node = node.parentElement) {
+    if (Number(getComputedStyle(node).opacity) < 0.999) return false;
+  }
+  return true;
+});
+
 for (const viewport of [null, { width: 390, height: 844 }]) {
   test(`payment error raised below the banner is brought into view and stays${viewport ? " on mobile" : ""}`, async ({ page, flow }, info) => {
     if (viewport) await page.setViewportSize(viewport);
@@ -37,11 +44,12 @@ for (const viewport of [null, { width: 390, height: 844 }]) {
     });
     const alert = page.getByRole("alert").filter({ hasText: recoveryMessage });
     await expect(alert).toBeVisible();
+    await expect.poll(() => settled(alert)).toBe(true);
     await expect.poll(() => placement(alert).then(result => result.inView)).toBe(true);
-    await page.screenshot({ path: info.outputPath("payment-error-in-view.png") });
     await page.waitForTimeout(5000);
     await expect(alert).toBeVisible();
     expect(await placement(alert)).toMatchObject({ inView: true });
+    await page.screenshot({ path: info.outputPath("payment-error-in-view.png") });
     await alert.getByRole("button", { name: "Close", exact: true }).click();
     await expect(alert).toHaveCount(0);
   });
@@ -62,5 +70,6 @@ test("payment success banner still clears itself", async ({ page, flow }) => {
   });
   const status = page.getByRole("status").filter({ hasText: "Payment method released. Choose a payment method below." });
   await expect(status).toBeVisible();
+  await expect.poll(() => settled(status)).toBe(true);
   await expect(status).toHaveCount(0, { timeout: 6000 });
 });
