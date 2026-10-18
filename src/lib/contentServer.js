@@ -93,7 +93,7 @@ async function fetchHomePageData({
     safeFetch("faq-settings", null),
     safeFetch("faq-questions", []),
   ]);
-  if (requireContent && failed.has("hero") && failed.has("packages-list")) {
+  if (requireContent && requiredResources.length === 0 && failed.has("hero") && failed.has("packages-list")) {
     await refuseHomeFallback(Object.assign(new Error("Home content is unavailable."), { code: "HOME_CONTENT_UNAVAILABLE" }));
   }
   const missingResources = requiredResources.filter((resource) => failed.has(resource));
