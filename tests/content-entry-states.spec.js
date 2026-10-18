@@ -82,7 +82,7 @@ for (const [route, resource, heading] of [
       await expect(page.locator("#main-content section [aria-hidden='true']")).toHaveCount(0);
       expect(await page.evaluate(() => window.__contentNavigationMarker)).toBe("same-document");
       expect(requests).toHaveLength(1);
-      const populated = (route === "/tools" || process.env.TOOLING_CLS_CONTENT === "1") && responseState !== "failed";
+      const populated = (process.env.TOOLING_CLS_CONTENT === "1" || (route === "/tools" && process.env.TOOLING_CLS_CONTENT !== "0")) && responseState !== "failed";
       if (route === "/tools") {
         const toolCount = process.env.TOOLING_CLS_CONTENT === "1" ? 4 : 1;
         await expect(page.locator("main article")).toHaveCount(populated ? toolCount : 0);

@@ -88,7 +88,8 @@ for (const [route, resource, heading] of [
           serverRequests = fixture.requests.filter((entry) => entry.body?.p_document_types?.includes(documentType));
           expect(serverRequests.length).toBeGreaterThan(0);
           if (width === 1440 && run === 1) {
-            expect(serverRequests.some(entry => entry.receivedAt >= navigationStartedAt)).toBe(true);
+            if (route === "/tools") expect(await response.headerValue("x-nextjs-prerender")).toMatch(/^1(, 1)*$/);
+            else expect(serverRequests.some(entry => entry.receivedAt >= navigationStartedAt)).toBe(true);
           }
           for (const entry of serverRequests) {
             expect(entry.delayMs).toBe(650);
