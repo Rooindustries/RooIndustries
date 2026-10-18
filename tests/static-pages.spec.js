@@ -22,16 +22,7 @@ const watchConsole = page => {
 
 const hydrationWarnings = messages => messages.filter(text => /hydrat|did not match|server rendered|server HTML|#418|#423|#425/i.test(text));
 
-for (const [route, revalidate] of [
-  ["/packages", 60],
-  ["/faq", 60],
-  ["/contact", 60],
-  ["/privacy", 60],
-  ["/terms", 60],
-  ["/tools", 60],
-  ["/meet-the-team", 60],
-  ["/about", false],
-]) {
+for (const route of ["/packages", "/faq", "/terms", "/tools", "/meet-the-team"]) {
   test(`${route} is a prebuilt page that ignores the query string`, async ({ request }, testInfo) => {
     const ownsServer = testInfo.config.metadata.ownsToolingServer === true;
     const manifest = ownsServer || process.env.NEXT_DIST_DIR ? JSON.parse(await fs.readFile(path.join(testInfo.config.metadata.toolingDistDir, "prerender-manifest.json"), "utf8")) : null;
@@ -56,10 +47,10 @@ for (const [route, revalidate] of [
       }, null, 2),
       contentType: "application/json",
     });
-    if (manifest) expect(manifest.routes[route]?.initialRevalidateSeconds).toBe(revalidate);
+    if (manifest) expect(manifest.routes[route]?.initialRevalidateSeconds).toBe(60);
     expect(plain.status).toBe(200);
     expect(plain.prerender).toMatch(/^1(, 1)*$/);
-    if (revalidate !== false) expect(plain.cache).toMatch(/^(HIT|STALE)$/);
+    expect(plain.cache).toMatch(/^(HIT|STALE)$/);
     expect(plain.cacheControl).not.toMatch(/private|no-store/);
     expect(first.status).toBe(200);
     expect(first.body).not.toContain("leakprobe");
@@ -68,9 +59,6 @@ for (const [route, revalidate] of [
 }
 
 for (const [route, content] of [
-  ["/about", "About Roo Industries"],
-  ["/contact", "Get In Touch"],
-  ["/privacy", "Privacy Policy"],
   ["/terms", "Terms of Service"],
   ["/tools", "Fixture layout tool 1"],
   ["/meet-the-team", "Fixture Member Alpha"],

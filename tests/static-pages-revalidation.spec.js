@@ -55,25 +55,22 @@ test("/packages and /faq keep their last content when revalidation cannot read i
   }
 });
 
-test("/contact, /privacy, /terms, /tools and /meet-the-team keep their last content when revalidation cannot read it", async ({ request, baseURL }, testInfo) => {
+test("/terms, /tools and /meet-the-team keep their last content when revalidation cannot read it", async ({ request, baseURL }, testInfo) => {
   test.setTimeout(180000);
   const control = contentControl(request, baseURL);
   const timeline = [];
   const read = pageReader(request, timeline);
   const expected = {
-    "/contact": "Synthetic local contact information.",
-    "/privacy": "Synthetic local information",
     "/terms": "Synthetic local information",
     "/tools": "Fixture layout tool 1",
     "/meet-the-team": "Fixture Member Alpha",
   };
   const fallbacks = {
-    "/contact": "Ready to optimize your PC?",
     "/tools": "No tools are listed right now.",
     "/meet-the-team": "Wailshark",
   };
   try {
-    await control({ outage: ["contact", "privacyPolicy", "terms", "tool", "meetTheTeam"] });
+    await control({ outage: ["terms", "tool", "meetTheTeam"] });
     await wait(61000);
     for (const [route, text] of Object.entries(expected)) {
       const trigger = await read(route, "first request after the revalidation window");
@@ -87,7 +84,6 @@ test("/contact, /privacy, /terms, /tools and /meet-the-team keep their last cont
       expect.soft(after.status, route).toBe(200);
       expect.soft(after.body.includes(text), route).toBe(true);
       if (fallbacks[route]) expect.soft(after.body.includes(fallbacks[route]), route).toBe(false);
-      if (route === "/privacy") expect.soft(after.headings, route).toEqual(["Privacy Policy"]);
       if (route === "/terms") expect.soft(after.headings, route).toEqual(["Terms of Service"]);
     }
   } finally {

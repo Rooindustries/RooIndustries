@@ -4,13 +4,12 @@ import JsonLd from "@/src/next/JsonLd";
 import seo from "@/src/lib/seo";
 
 export const metadata = seo.getMetadataForPath("/about");
-export const dynamic = "force-static";
 
-export default function Page() {
+export default function Page({ searchParams }) {
   return (
     <>
       <JsonLd data={seo.buildOrganizationJsonLd()} />
-      <RouteRenderer entry={AboutPage} pathname="/about" searchParams={{}} />
+      <RouteRenderer entry={AboutPage} pathname="/about" searchParams={searchParams} />
     </>
   );
 }
