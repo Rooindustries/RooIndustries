@@ -14,6 +14,58 @@ for (const [name, viewport] of [
   test.describe(name, () => {
     test.use({ viewport });
 
+    test("brand link is named by its visible text", async ({ page }, testInfo) => {
+      const records = [];
+      for (const route of ["/", "/reviews", "/tools", "/packages", "/faq", "/about", "/tourney"]) {
+        await page.goto(route, { waitUntil: "networkidle" });
+        const brand = page.locator('header a[href="/"]:visible').filter({
+          has: page.locator('img[src="/favicon-96x96.png"]'),
+        });
+        const expected = route === "/tourney"
+          ? "Roo Industries 6v6 Legacy Series"
+          : "Roo Industries Precision Performance Engineering";
+        await expect(brand, route).toHaveCount(1);
+        records.push({ route, viewport, snapshot: await brand.ariaSnapshot() });
+        await expect.soft(brand, route).toHaveAccessibleName(expected, { timeout: 1000 });
+        await expect(brand, route).toHaveAttribute("href", "/");
+        await expect(brand.locator("img").first(), route).toBeVisible();
+        expect(await brand.locator("img").first().evaluate(image => image.complete && image.naturalWidth > 0), route).toBe(true);
+        if (route === "/" || route === "/tourney") {
+          await testInfo.attach(`brand-${route === "/" ? "home" : "tourney"}`, {
+            body: await brand.screenshot(), contentType: "image/png",
+          });
+        }
+      }
+      await testInfo.attach("brand-names", { body: JSON.stringify(records, null, 2), contentType: "application/json" });
+    });
+
+    test("interactive aria-labels contain their visible text", async ({ page }, testInfo) => {
+      const violations = [];
+      for (const route of ["/", "/reviews", "/tools", "/packages", "/faq", "/about", "/tourney"]) {
+        await page.goto(route, { waitUntil: "networkidle" });
+        const flagged = await page.locator('a[aria-label], button[aria-label], [role="button"][aria-label], [role="link"][aria-label]').evaluateAll(elements => {
+          const normalize = value => value.toLowerCase().replace(/\s+/g, " ").replace(/[^\p{L}\p{N}]/gu, "");
+          return elements.filter(element => element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })).flatMap(element => {
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+            const text = [];
+            while (walker.nextNode()) {
+              const node = walker.currentNode;
+              if (!node.parentElement.closest(".sr-only, [hidden]") && node.parentElement.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
+                text.push(node.textContent);
+              }
+            }
+            const visibleText = text.join(" ").replace(/\s+/g, " ").trim();
+            const label = element.getAttribute("aria-label");
+            if (!/[\p{L}\p{N}]/u.test(visibleText) || normalize(label).includes(normalize(visibleText))) return [];
+            return [{ label, visibleText, html: element.outerHTML }];
+          });
+        });
+        violations.push(...flagged.map(element => ({ route, viewport, ...element })));
+      }
+      await testInfo.attach("label-mismatches", { body: JSON.stringify(violations, null, 2), contentType: "application/json" });
+      expect(violations).toEqual([]);
+    });
+
     test("package prices expose current and previous prices as text", async ({ page }, testInfo) => {
       await page.goto("/packages", { waitUntil: "networkidle" });
       const prices = page.locator(".ri-package-card .ri-price-current");
@@ -77,6 +129,25 @@ for (const [name, viewport] of [
       await expect(page.getByRole("navigation", { name: "Footer", exact: true })).toHaveCount(1);
 
       await footer.screenshot({ path: testInfo.outputPath("footer-landmark.png") });
+    });
+
+    test("every public page has one h1 inside main", async ({ page }, testInfo) => {
+      const records = [];
+      for (const route of ["/", "/packages", "/reviews", "/tools", "/faq", "/about", "/contact", "/meet-the-team", "/benchmarks", "/privacy", "/terms"]) {
+        await page.goto(route, { waitUntil: "networkidle" });
+        const headings = await page.locator("h1").evaluateAll(elements => elements.map(element => ({
+          text: element.textContent,
+          insideMain: Boolean(element.closest("main#main-content")),
+        })));
+        records.push({ route, viewport, headings });
+        await expect.soft(page.locator("h1"), route).toHaveCount(1, { timeout: 1000 });
+        await expect.soft(page.locator("main#main-content h1"), route).toHaveCount(1, { timeout: 1000 });
+        if (route === "/packages") {
+          await expect.soft(page.locator("main#main-content h1"), route).toHaveText("PC Game Optimization Packages", { timeout: 1000 });
+        }
+      }
+      await testInfo.attach("page-headings", { body: JSON.stringify(records, null, 2), contentType: "application/json" });
+      await page.screenshot({ path: testInfo.outputPath("public-page.png"), fullPage: true });
     });
 
     test("referral action text meets contrast in Roo Blue", async ({ page }, testInfo) => {
