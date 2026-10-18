@@ -129,6 +129,176 @@ test("reset acknowledgment persists without clearing or resending the email", as
   }
 });
 
+test.describe('replacement confirmation links in the same tab', () => {
+  const stale = 'c'.repeat(43);
+  const fresh = 'b'.repeat(43);
+  const storageKey = 'referral_registration_verification';
+  const endpoint = '**/api/ref/verifyRegistration';
+  const collectTokens = page => {
+    const tokens = [];
+    page.on('request', request => {
+      if (new URL(request.url()).pathname === '/api/ref/verifyRegistration' && request.method() === 'POST') {
+        tokens.push(request.postDataJSON().token);
+      }
+    });
+    return tokens;
+  };
+
+  test('a replacement link opened after a failed one is confirmed', async ({ page }, testInfo) => {
+    const tokens = collectTokens(page);
+    await page.goto('/referrals/verify#token=' + stale);
+    await expect(page.getByRole('status')).toContainText('Invalid or expired confirmation link');
+    expect(new URL(page.url()).hash).toBe('');
+    await page.evaluate(() => { window.__verifyDocument = true; });
+    await page.goto('/referrals/verify#token=' + fresh);
+    await expect(page.getByRole('status')).toContainText('Email confirmed');
+    const documentReused = await page.evaluate(() => window.__verifyDocument === true);
+    const storedToken = await page.evaluate(key => sessionStorage.getItem(key), storageKey);
+    await record(page, testInfo, 'verify-replacement-link', { documentReused, postCount: tokens.length, storedTokenCleared: storedToken === null });
+    expect(documentReused).toBe(true);
+    expect(new URL(page.url()).hash).toBe('');
+    expect(storedToken).toBeNull();
+    expect(tokens).toEqual([stale, fresh]);
+  });
+
+  test('a late reply for the earlier link changes nothing', async ({ page }, testInfo) => {
+    const tokens = collectTokens(page);
+    let releaseStale;
+    let releaseFresh;
+    const staleHeld = new Promise(resolve => { releaseStale = resolve; });
+    const freshHeld = new Promise(resolve => { releaseFresh = resolve; });
+    await page.route(endpoint, async route => {
+      if (route.request().postDataJSON().token === stale) {
+        await staleHeld;
+        await route.fulfill({ status: 400, json: { ok: false, error: 'Invalid or expired confirmation link.' } });
+      } else {
+        await freshHeld;
+        await route.fallback();
+      }
+    });
+    const staleResponse = page.waitForResponse(response => response.url().endsWith('/api/ref/verifyRegistration') && response.request().postDataJSON().token === stale);
+    const freshResponse = page.waitForResponse(response => response.url().endsWith('/api/ref/verifyRegistration') && response.request().postDataJSON().token === fresh);
+    staleResponse.catch(() => {});
+    freshResponse.catch(() => {});
+    try {
+      await page.goto('/referrals/verify#token=' + stale);
+      await expect(page.getByRole('status')).toContainText('Confirming your email');
+      await page.evaluate(() => { window.__verifyDocument = true; });
+      await page.goto('/referrals/verify#token=' + fresh);
+      await expect.poll(() => tokens).toEqual([stale, fresh]);
+      releaseStale();
+      const response = await staleResponse;
+      expect(response.status()).toBe(400);
+      await response.finished();
+      await page.waitForTimeout(300);
+      const storedToken = await page.evaluate(key => sessionStorage.getItem(key), storageKey);
+      await record(page, testInfo, 'verify-earlier-reply', { postCount: tokens.length, storedTokenMatchesFresh: storedToken === fresh });
+      await expect(page.getByRole('status')).toContainText('Confirming your email');
+      expect(storedToken).toBe(fresh);
+      releaseFresh();
+      await expect(page.getByRole('status')).toContainText('Email confirmed');
+      expect(await page.evaluate(key => sessionStorage.getItem(key), storageKey)).toBeNull();
+      expect(await page.evaluate(() => window.__verifyDocument)).toBe(true);
+      expect(new URL(page.url()).hash).toBe('');
+      await record(page, testInfo, 'verify-current-link', { documentReused: true, postCount: tokens.length, storedTokenCleared: true });
+    } finally {
+      releaseStale();
+      releaseFresh();
+      if (tokens.includes(stale)) await staleResponse.then(response => response.finished()).catch(() => {});
+      if (tokens.includes(fresh)) await freshResponse.then(response => response.finished()).catch(() => {});
+      await page.unrouteAll({ behavior: 'wait' });
+    }
+  });
+
+  test('the same link opened again while confirming is sent once', async ({ page }, testInfo) => {
+    const tokens = collectTokens(page);
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    await page.route(endpoint, async route => { await held; await route.fallback(); });
+    const response = page.waitForResponse(endpoint);
+    response.catch(() => {});
+    try {
+      await page.goto('/referrals/verify#token=' + fresh);
+      await expect.poll(() => tokens).toEqual([fresh]);
+      await expect(page.getByRole('status')).toContainText('Confirming your email');
+      await page.evaluate(() => { window.__verifyDocument = true; });
+      await page.goto('/referrals/verify#token=' + fresh);
+      await expect.poll(() => new URL(page.url()).hash).toBe('');
+      release();
+      await expect(page.getByRole('status')).not.toContainText('Confirming your email');
+      await record(page, testInfo, 'verify-pending-same-link', { documentReused: await page.evaluate(() => window.__verifyDocument === true), postCount: tokens.length });
+      expect(tokens).toEqual([fresh]);
+      await expect(page.getByRole('status')).toContainText('Email confirmed');
+      expect(await page.evaluate(() => window.__verifyDocument)).toBe(true);
+      expect(new URL(page.url()).hash).toBe('');
+      expect(await page.evaluate(key => sessionStorage.getItem(key), storageKey)).toBeNull();
+    } finally {
+      release();
+      if (tokens.length) await response.then(result => result.finished()).catch(() => {});
+      await page.unrouteAll({ behavior: 'wait' });
+    }
+  });
+
+  test('reopening a confirmed link keeps the confirmation', async ({ page }, testInfo) => {
+    const tokens = collectTokens(page);
+    await page.goto('/referrals/verify#token=' + fresh);
+    await expect(page.getByRole('status')).toContainText('Email confirmed');
+    await page.evaluate(() => { window.__verifyDocument = true; });
+    await page.goto('/referrals/verify#token=' + fresh);
+    await expect.poll(() => new URL(page.url()).hash).toBe('');
+    await page.waitForTimeout(500);
+    const storedToken = await page.evaluate(key => sessionStorage.getItem(key), storageKey);
+    await record(page, testInfo, 'verify-reopened-confirmed-link', { postCount: tokens.length, storedTokenCleared: storedToken === null });
+    await expect(page.getByRole('status')).toContainText('Email confirmed');
+    await expect(page.getByRole('button', { name: 'Open dashboard', exact: true })).toBeVisible();
+    expect(tokens).toEqual([fresh]);
+    expect(await page.evaluate(() => window.__verifyDocument)).toBe(true);
+    expect(storedToken).toBeNull();
+  });
+
+  test('returning to a link that is still confirming does not send it again', async ({ page }, testInfo) => {
+    const tokens = collectTokens(page);
+    const release = {};
+    const held = {
+      [fresh]: new Promise(resolve => { release[fresh] = resolve; }),
+      [stale]: new Promise(resolve => { release[stale] = resolve; }),
+    };
+    await page.route(endpoint, async route => {
+      const token = route.request().postDataJSON().token;
+      await held[token];
+      if (token === stale) await route.fulfill({ status: 400, json: { ok: false, error: 'Invalid or expired confirmation link.' } });
+      else await route.fallback();
+    });
+    const staleResponse = page.waitForResponse(response => response.url().endsWith('/api/ref/verifyRegistration') && response.request().postDataJSON().token === stale);
+    staleResponse.catch(() => {});
+    try {
+      await page.goto('/referrals/verify#token=' + fresh);
+      await expect.poll(() => tokens).toEqual([fresh]);
+      await page.evaluate(() => { window.__verifyDocument = true; });
+      await page.goto('/referrals/verify#token=' + stale);
+      await expect.poll(() => tokens).toEqual([fresh, stale]);
+      await page.goto('/referrals/verify#token=' + fresh);
+      await expect.poll(() => new URL(page.url()).hash).toBe('');
+      release[stale]();
+      await (await staleResponse).finished();
+      await page.waitForTimeout(300);
+      const storedToken = await page.evaluate(key => sessionStorage.getItem(key), storageKey);
+      await expect(page.getByRole('status')).toContainText('Confirming your email');
+      expect(storedToken).toBe(fresh);
+      release[fresh]();
+      await expect(page.getByRole('status')).toContainText('Email confirmed');
+      await record(page, testInfo, 'verify-returned-pending-link', { postCount: tokens.length });
+      expect(tokens).toEqual([fresh, stale]);
+      expect(await page.evaluate(key => sessionStorage.getItem(key), storageKey)).toBeNull();
+      expect(await page.evaluate(() => window.__verifyDocument)).toBe(true);
+    } finally {
+      release[fresh]();
+      release[stale]();
+      await page.unrouteAll({ behavior: 'wait' });
+    }
+  });
+});
+
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   const size = viewport.width === 390 ? 'mobile' : 'desktop';
   test.describe(size, () => {
@@ -252,6 +422,155 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page.locator('#main-content').getByRole('status')).toHaveText("If an account matches that email, we've sent a reset link. Check your inbox and spam folder.");
       await expect(email).toHaveValue('creator@fixture.invalid');
       await record(page, testInfo, `announced-outcomes-${size}`);
+    });
+
+    test('account forms ignore errors from earlier submissions', async ({ page, context, baseURL }, testInfo) => {
+      const failAfterEdit = async (endpoint, message, buttonName, edit, label) => {
+        let edited;
+        const changed = new Promise(resolve => { edited = resolve; });
+        await page.route(`**${endpoint}`, async route => {
+          await new Promise(resolve => setTimeout(resolve, 800));
+          await changed;
+          await route.fulfill({ status: endpoint === '/api/ref/reset' ? 409 : 401, json: { ok: false, error: message } });
+        });
+        const requested = page.waitForRequest(`**${endpoint}`);
+        const response = page.waitForResponse(`**${endpoint}`);
+        response.catch(() => {});
+        try {
+          const button = page.getByRole('button', { name: buttonName, exact: true });
+          await button.click();
+          await requested;
+          await edit();
+          edited();
+          const result = await response;
+          await result.finished();
+          await expect(button).toBeEnabled();
+          await page.waitForTimeout(5000);
+          const alert = page.locator('#main-content').getByRole('alert').filter({ hasText: message });
+          await record(page, testInfo, `account-earlier-error-${label}-${size}`, { status: result.status(), matchingAlerts: await alert.count() });
+          await expect(alert).toHaveCount(0);
+        } finally {
+          edited();
+          await response.catch(() => {});
+          await page.unroute(`**${endpoint}`);
+        }
+      };
+      await openForm(page, '/referrals/login', '/api/ref/sessionStatus');
+      const identifier = page.getByLabel('Referral code or login email', { exact: true });
+      const password = page.getByLabel('Password', { exact: true });
+      await identifier.fill('fixture-creator');
+      await password.fill('Wrong-password1!');
+      await page.route('**/api/ref/login', route => route.fulfill({ status: 401, json: { ok: false, error: 'Synthetic current login failure.' } }));
+      await page.getByRole('button', { name: 'Login', exact: true }).click();
+      const currentError = page.locator('#main-content').getByRole('alert').filter({ hasText: 'Synthetic current login failure.' });
+      await expect(currentError).toBeVisible();
+      await password.fill('Synthetic-password1!');
+      await expect(currentError).toHaveCount(0);
+      await page.unroute('**/api/ref/login');
+      await failAfterEdit('/api/ref/login', 'Synthetic earlier login failure.', 'Login', async () => {
+        await identifier.fill('edited-creator');
+        await password.fill('Edited-password3!');
+      }, 'login');
+
+      await signIn(context, baseURL);
+      await openForm(page, '/referrals/change-password', '/api/ref/getData');
+      await page.getByLabel('Current Password', { exact: true }).fill('Wrong-password1!');
+      await page.getByLabel('New Password', { exact: true }).fill('Replacement-password2!');
+      await page.getByLabel('Confirm Password', { exact: true }).fill('Replacement-password2!');
+      await failAfterEdit('/api/auth/reauth', 'Password is incorrect.', 'Save Password',
+        () => page.getByLabel('Current Password', { exact: true }).fill('Synthetic-password1!'), 'change-password');
+
+      await page.goto('/referrals/reset#token=' + 'a'.repeat(64));
+      await page.getByLabel('New Password', { exact: true }).fill('Different-password3!');
+      await page.getByLabel('Confirm Password', { exact: true }).fill('Different-password3!');
+      await failAfterEdit('/api/ref/reset', 'This reset link was already used with a different password.', 'Update Password', async () => {
+        await page.getByLabel('New Password', { exact: true }).fill('Replacement-password2!');
+        await page.getByLabel('Confirm Password', { exact: true }).fill('Replacement-password2!');
+      }, 'reset');
+    });
+
+    test('a recovery link the server rejects stays explained after password edits', async ({ page }, testInfo) => {
+      for (const [status, message] of [[400, 'Invalid or expired reset link'], [401, 'This recovery session is invalid or expired. Request a new link.']]) {
+        await page.goto('about:blank');
+        await page.goto('/referrals/reset#token=' + 'a'.repeat(64));
+        const next = page.getByLabel('New Password', { exact: true });
+        const confirm = page.getByLabel('Confirm Password', { exact: true });
+        await next.fill('Different-password3!');
+        await confirm.fill('Different-password3!');
+        let edited;
+        const changed = new Promise(resolve => { edited = resolve; });
+        await page.route('**/api/ref/reset', async route => {
+          await changed;
+          await route.fulfill({ status, json: { ok: false, error: message } });
+        });
+        const requested = page.waitForRequest('**/api/ref/reset');
+        const response = page.waitForResponse('**/api/ref/reset');
+        response.catch(() => {});
+        try {
+          await page.getByRole('button', { name: 'Update Password', exact: true }).click();
+          await requested;
+          await next.fill('Replacement-password2!');
+          await confirm.fill('Replacement-password2!');
+          edited();
+          await (await response).finished();
+          const alert = page.locator('#main-content').getByRole('alert').filter({ hasText: message });
+          await expect(alert).toBeVisible();
+          await next.fill('Another-password4!');
+          await page.waitForTimeout(500);
+          await expect(alert).toBeVisible();
+          await record(page, testInfo, `reset-link-rejected-${status}-${size}`, { status, matchingAlerts: await alert.count() });
+        } finally {
+          edited();
+          await response.catch(() => {});
+          await page.unroute('**/api/ref/reset');
+        }
+      }
+    });
+
+    test("a late login doesn't pull the creator away from another portal page", async ({ page, context, baseURL }, testInfo) => {
+      for (const stage of ['response', 'session', 'timer']) {
+        await context.clearCookies();
+        if (stage === 'timer') await page.clock.install();
+        if (stage === 'session') await signIn(context, baseURL);
+        else await openForm(page, '/referrals/login', '/api/ref/sessionStatus');
+        if (stage === 'timer') await page.clock.pauseAt(new Date(Date.now() + 1000));
+        const endpoint = stage === 'session' ? '/api/ref/sessionStatus' : '/api/ref/login';
+        let respond;
+        const held = new Promise(resolve => { respond = resolve; });
+        await page.route(`**${endpoint}`, async route => { await held; await route.continue(); });
+        const requested = page.waitForRequest(`**${endpoint}`);
+        const completed = page.waitForResponse(`**${endpoint}`);
+        completed.catch(() => {});
+        try {
+          if (stage === 'session') await page.goto('/referrals/login');
+          else {
+            await page.getByLabel('Referral code or login email', { exact: true }).fill('fixture-creator');
+            await page.getByLabel('Password', { exact: true }).fill('Synthetic-password1!');
+            if (stage === 'timer') respond();
+            await page.getByRole('button', { name: 'Login', exact: true }).click();
+          }
+          await requested;
+          if (stage === 'timer') await expect(page.locator('#main-content').getByRole('status')).toHaveText('Login successful.');
+          await page.getByRole('button', { name: 'Forgot your password?', exact: true }).click();
+          await expect(page.getByLabel('Creator Email', { exact: true })).toBeVisible();
+          respond();
+          const response = await completed;
+          await response.finished();
+          expect(response.status()).toBe(200);
+          expect((await response.json())[stage === 'session' ? 'authenticated' : 'ok']).toBe(true);
+          if (stage === 'timer') await page.clock.runFor(1600);
+          else await page.waitForTimeout(1600);
+          const cookiePresent = (await context.cookies()).some(cookie => cookie.name === 'ref_session');
+          await record(page, testInfo, `late-login-${stage}-${size}`, { cookiePresent });
+          await expect(page).toHaveURL(url => url.pathname === '/referrals/forgot');
+          await expect(page.getByLabel('Creator Email', { exact: true })).toBeVisible();
+          expect(cookiePresent).toBe(true);
+        } finally {
+          respond();
+          await completed.catch(() => {});
+          await page.unroute(`**${endpoint}`);
+        }
+      }
     });
 
     test('form errors stay next to their submit button until the creator acts', async ({ page, context, baseURL }, testInfo) => {

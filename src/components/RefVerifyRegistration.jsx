@@ -4,10 +4,12 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 const TOKEN_KEY = "referral_registration_verification";
 
+const readFragmentToken = (hash) =>
+  String(new URLSearchParams(String(hash || "").replace(/^#/, "")).get("token") || "").trim();
+
 const readVerificationToken = ({ hash }) => {
   if (typeof window === "undefined") return "";
-  const fragment = new URLSearchParams(String(hash || "").replace(/^#/, ""));
-  const fragmentToken = String(fragment.get("token") || "").trim();
+  const fragmentToken = readFragmentToken(hash);
   if (fragmentToken) writeBrowserStorage("sessionStorage", TOKEN_KEY, fragmentToken);
   return fragmentToken || readBrowserStorage("sessionStorage", TOKEN_KEY) || "";
 };
@@ -15,8 +17,9 @@ const readVerificationToken = ({ hash }) => {
 export default function RefVerifyRegistration() {
   const location = useLocation();
   const navigate = useNavigate();
-  const started = useRef(false);
-  const [verificationLocation] = useState(() => ({
+  const requests = useRef(new Map());
+  const currentToken = useRef("");
+  const [verificationLocation, setVerificationLocation] = useState(() => ({
     hash:
       (typeof window !== "undefined" ? window.location.hash : "") ||
       location.hash ||
@@ -30,8 +33,20 @@ export default function RefVerifyRegistration() {
   const [state, setState] = useState({ status: "working", message: "Confirming your email…" });
 
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
+    const adoptLink = () => {
+      const next = {
+        hash: window.location.hash,
+        pathname: window.location.pathname,
+        search: window.location.search,
+      };
+      if (next.pathname !== verificationLocation.pathname || !readFragmentToken(next.hash)) return;
+      setVerificationLocation(next);
+    };
+    window.addEventListener("hashchange", adoptLink);
+    return () => window.removeEventListener("hashchange", adoptLink);
+  }, [verificationLocation.pathname]);
+
+  useEffect(() => {
     const token = readVerificationToken(verificationLocation);
     if (
       window.location.pathname === verificationLocation.pathname &&
@@ -43,41 +58,63 @@ export default function RefVerifyRegistration() {
         verificationLocation.pathname
       );
     }
+    currentToken.current = token;
     if (!token) {
       setState({ status: "error", message: "This confirmation link is missing or invalid." });
       return;
     }
-    fetch("/api/ref/verifyRegistration", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
-    })
-      .then(async (response) => ({
-        ok: response.ok,
-        status: response.status,
-        data: await response.json().catch(() => ({})),
-      }))
-      .then(({ ok, status, data }) => {
-        if (!ok || data.ok !== true) {
-          if (status === 400) removeBrowserStorage("sessionStorage", TOKEN_KEY);
-          setState({
-            status: "error",
-            message: data.error || "This confirmation link is invalid or expired.",
-          });
-          return;
-        }
+    const releaseStoredToken = () => {
+      if (readBrowserStorage("sessionStorage", TOKEN_KEY) === token) {
         removeBrowserStorage("sessionStorage", TOKEN_KEY);
-        setState({
-          status: "success",
-          requiresLogin: data.requiresLogin === true,
-          message: data.requiresLogin === true
-            ? "Your account is confirmed. Sign in to open your creator dashboard."
-            : "Email confirmed. Your creator account is ready.",
-        });
+      }
+    };
+    let request = requests.current.get(token);
+    if (!request || request.outcome?.status === "error") {
+      const entry = { outcome: null };
+      entry.promise = fetch("/api/ref/verifyRegistration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
       })
-      .catch(() => {
-        setState({ status: "error", message: "Confirmation is temporarily unavailable. Please try again." });
-      });
+        .then(async (response) => ({
+          ok: response.ok,
+          status: response.status,
+          data: await response.json().catch(() => ({})),
+        }))
+        .then(({ ok, status, data }) => {
+          if (!ok || data.ok !== true) {
+            if (status === 400) releaseStoredToken();
+            return {
+              status: "error",
+              message: data.error || "This confirmation link is invalid or expired.",
+            };
+          }
+          releaseStoredToken();
+          return {
+            status: "success",
+            requiresLogin: data.requiresLogin === true,
+            message: data.requiresLogin === true
+              ? "Your account is confirmed. Sign in to open your creator dashboard."
+              : "Email confirmed. Your creator account is ready.",
+          };
+        })
+        .catch(() => ({ status: "error", message: "Confirmation is temporarily unavailable. Please try again." }))
+        .then((outcome) => {
+          entry.outcome = outcome;
+          return outcome;
+        });
+      requests.current.set(token, entry);
+      request = entry;
+    }
+    if (request.outcome) {
+      releaseStoredToken();
+      setState(request.outcome);
+      return;
+    }
+    setState({ status: "working", message: "Confirming your email…" });
+    request.promise.then((outcome) => {
+      if (currentToken.current === token) setState(outcome);
+    });
   }, [verificationLocation]);
 
   return (

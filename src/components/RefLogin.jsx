@@ -82,6 +82,17 @@ export default function RefLogin() {
   const [linkDiscord, setLinkDiscord] = useState(false);
   const [linkProvider, setLinkProvider] = useState("discord");
   const identifierInputRef = useRef(null);
+  const editVersionRef = useRef(0);
+  const mountedRef = useRef(true);
+  const navTimerRef = useRef(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearTimeout(navTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     const query = new URLSearchParams(location.search);
@@ -139,7 +150,7 @@ export default function RefLogin() {
         const sessionRes = await fetch("/api/ref/sessionStatus");
         if (sessionRes.ok) {
           const session = await sessionRes.json();
-          if (!session?.authenticated) return;
+          if (!session?.authenticated || !mountedRef.current) return;
           nav("/referrals/dashboard");
         }
       } catch {}
@@ -161,6 +172,7 @@ export default function RefLogin() {
       return;
     }
 
+    const version = editVersionRef.current;
     setLoading(true);
     setOutcome(null);
 
@@ -184,10 +196,12 @@ export default function RefLogin() {
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) {
-        setOutcome({
-          type: "error",
-          message: data.error || "Login could not be completed. Please try again.",
-        });
+        if (editVersionRef.current === version) {
+          setOutcome({
+            type: "error",
+            message: data.error || "Login could not be completed. Please try again.",
+          });
+        }
         return;
       }
 
@@ -202,29 +216,39 @@ export default function RefLogin() {
         const message = socialLinked
           ? linkSuccessMessage(linkedProvider)
           : data.discordLinkError || linkFailedMessage(requestedProvider);
-        setOutcome({ type: socialLinked ? "success" : "error", message });
-        setTimeout(
-          () =>
+        if (socialLinked || editVersionRef.current === version) {
+          setOutcome({ type: socialLinked ? "success" : "error", message });
+        }
+        if (mountedRef.current) {
+          navTimerRef.current = setTimeout(() => {
+            if (!mountedRef.current) return;
             nav(
               `/referrals/dashboard?notice=${
                 socialLinked
                   ? `${linkedProvider}-linked`
                   : `${requestedProvider}-link-failed`
               }`
-            ),
-          900
-        );
+            );
+          }, 900);
+        }
         return;
       }
 
       setOutcome({ type: "success", message: "Login successful." });
-      setTimeout(() => nav("/referrals/dashboard"), 500);
+      if (mountedRef.current) {
+        navTimerRef.current = setTimeout(() => {
+          if (!mountedRef.current) return;
+          nav("/referrals/dashboard");
+        }, 500);
+      }
     } catch {
       console.error("Referral login failed");
-      setOutcome({
-        type: "error",
-        message: "Login could not be completed. Please try again.",
-      });
+      if (editVersionRef.current === version) {
+        setOutcome({
+          type: "error",
+          message: "Login could not be completed. Please try again.",
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -261,7 +285,11 @@ export default function RefLogin() {
             placeholder="Referral code or login email"
             ref={identifierInputRef}
             value={code}
-            onChange={(e) => setCode(e.target.value.trim())}
+            onChange={(e) => {
+              editVersionRef.current += 1;
+              setOutcome(current => current?.type === "error" ? null : current);
+              setCode(e.target.value.trim());
+            }}
           />
         </div>
 
@@ -275,7 +303,11 @@ export default function RefLogin() {
                        outline-none focus:border-info-border transition text-base"
             placeholder="Enter your password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              editVersionRef.current += 1;
+              setOutcome(current => current?.type === "error" ? null : current);
+              setPassword(e.target.value);
+            }}
           />
         </div>
 
@@ -290,6 +322,8 @@ export default function RefLogin() {
               type="checkbox"
               checked={rememberMe}
               onChange={(e) => {
+                editVersionRef.current += 1;
+                setOutcome(current => current?.type === "error" ? null : current);
                 setRememberMe(e.target.checked);
                 writeBrowserStorage("sessionStorage", "refLoginRememberMe", String(e.target.checked));
               }}
