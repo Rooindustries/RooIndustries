@@ -133,12 +133,11 @@ export default function RefChangePassword() {
       }
     } catch {
       console.error("Referral password change failed");
-      if (editVersionRef.current === version) {
-        setOutcome({
-          type: "error",
-          message: "Password update could not be completed. Please try again.",
-        });
-      }
+      setOutcome({
+        type: "error",
+        kind: "service",
+        message: "Password update could not be completed. Please try again.",
+      });
     } finally {
       setLoading(false);
     }

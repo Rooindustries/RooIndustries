@@ -40,7 +40,7 @@ async function holdAccountReply(page, endpoint, reply) {
     received = true;
     seen(route.request().postDataJSON());
     await gate;
-    try { await route.fulfill(reply); } finally { finished(); }
+    try { await (reply === 'abort' ? route.abort('failed') : route.fulfill(reply)); } finally { finished(); }
   };
   await page.route(`**${endpoint}`, handler);
   return { arrived, release: async () => {
@@ -602,7 +602,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await record(page, testInfo, `unlink-password-errors-${size}`, { localErrorClearedOnEdit: true, stalePasswordErrorShown: false, unlinkPosts, operationErrorRetained: true });
     });
 
-    test('change-password service errors survive password edits', async ({ page, context, baseURL }, testInfo) => {
+    for (const [label, reply, message] of [
+      ['503', { status: 503, json: { ok: false, error: 'Reauthentication is temporarily unavailable.' } }, 'Reauthentication is temporarily unavailable.'],
+      ['network', 'abort', 'Password update could not be completed. Please try again.'],
+    ]) test(`change-password service errors survive password edits (${label})`, async ({ page, context, baseURL }, testInfo) => {
       await signIn(context, baseURL);
       await openForm(page, '/referrals/change-password', '/api/ref/getData');
       const current = page.getByLabel('Current Password', { exact: true });
@@ -613,13 +616,13 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await confirm.fill('Replacement-password2!');
       let passwordUpdates = 0;
       page.on('request', request => { if (new URL(request.url()).pathname === '/api/ref/hashPassword') passwordUpdates += 1; });
-      const held = await holdAccountReply(page, '/api/auth/reauth', { status: 503, json: { ok: false, error: 'Reauthentication is temporarily unavailable.' } });
+      const held = await holdAccountReply(page, '/api/auth/reauth', reply);
       try {
         await page.getByRole('button', { name: 'Save Password', exact: true }).click();
         expect(await held.arrived).toMatchObject({ flow: 'referral', purpose: 'change_password' });
         await current.fill('Edited-before-service-reply2!');
         await held.release();
-        const alert = page.locator('#main-content').getByRole('alert').filter({ hasText: 'Reauthentication is temporarily unavailable.' });
+        const alert = page.locator('#main-content').getByRole('alert').filter({ hasText: message });
         await expect(alert).toBeVisible();
         for (const [field, value] of [[current, 'Synthetic-password1!'], [password, 'Replacement-password3!'], [confirm, 'Replacement-password3!']]) {
           await field.fill(value);
@@ -628,7 +631,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await expect(page.getByRole('button', { name: 'Save Password', exact: true })).toBeEnabled();
         expect(passwordUpdates).toBe(0);
         await expect(page).toHaveURL(/\/referrals\/change-password$/);
-        await record(page, testInfo, `change-password-service-error-${size}`, { retainedBeforeAndAfterReply: true, fieldsEditedAfterReply: ['current', 'new', 'confirm'], passwordUpdates });
+        await record(page, testInfo, `change-password-service-error-${label}-${size}`, { retainedBeforeAndAfterReply: true, fieldsEditedAfterReply: ['current', 'new', 'confirm'], passwordUpdates });
       } finally { await held.release(); }
     });
 
