@@ -1579,6 +1579,7 @@ export default function BookingForm() {
   ]);
 
   const handleDayClick = (day) => {
+    if (lockingSlot) return;
     if (isPaymentPendingHold) return;
     const date = new Date(month.getFullYear(), month.getMonth(), day);
     date.setHours(0, 0, 0, 0);
@@ -1595,6 +1596,7 @@ export default function BookingForm() {
   };
 
   const handleEarliestSlotClick = () => {
+    if (lockingSlot) return;
     if (!earliestAvailableSlot || isPaymentPendingHold) return;
     const date = new Date(earliestAvailableSlot.localDate);
     setMonth(new Date(date.getFullYear(), date.getMonth(), 1));
@@ -2564,7 +2566,8 @@ export default function BookingForm() {
                     <button
                       type="button"
                       onClick={handleEarliestSlotClick}
-                      className="mb-6 rounded-lg border border-info-border bg-info-soft px-4 py-2 text-sm font-semibold text-info-text transition hover:bg-surface-hover-accent"
+                      disabled={lockingSlot}
+                      className="mb-6 rounded-lg border border-info-border bg-info-soft px-4 py-2 text-sm font-semibold text-info-text transition hover:bg-surface-hover-accent disabled:cursor-wait disabled:opacity-60"
                     >
                       Earliest available:{" "}
                       {formatShortLocalDate(
@@ -2579,8 +2582,12 @@ export default function BookingForm() {
                       <p>No open times in {month.toLocaleString("default", { month: "long" })}.</p>
                       <button
                         type="button"
-                        onClick={() => setMonth(new Date(nextAvailableMonth))}
-                        className="mt-3 min-h-11 rounded-lg border border-info-border bg-info-soft px-4 py-2 font-semibold text-info-text hover:bg-surface-hover-accent"
+                        onClick={() => {
+                          if (lockingSlot) return;
+                          setMonth(new Date(nextAvailableMonth));
+                        }}
+                        disabled={lockingSlot}
+                        className="mt-3 min-h-11 rounded-lg border border-info-border bg-info-soft px-4 py-2 font-semibold text-info-text hover:bg-surface-hover-accent disabled:cursor-wait disabled:opacity-60"
                       >
                         Go to {new Date(nextAvailableMonth).toLocaleString("default", { month: "long", year: "numeric" })}
                       </button>
@@ -2595,16 +2602,18 @@ export default function BookingForm() {
                         <button
                           aria-label="Previous month"
                           type="button"
-                          onClick={() =>
+                          onClick={() => {
+                            if (lockingSlot) return;
                             setMonth(
                               new Date(
                                 month.getFullYear(),
                                 month.getMonth() - 1,
                                 1
                               )
-                            )
-                          }
-                          className="text-accent hover:text-accent transition"
+                            );
+                          }}
+                          disabled={lockingSlot}
+                          className="text-accent hover:text-accent transition disabled:cursor-wait disabled:opacity-60"
                         >
                           ‹
                         </button>
@@ -2617,16 +2626,18 @@ export default function BookingForm() {
                         <button
                           aria-label="Next month"
                           type="button"
-                          onClick={() =>
+                          onClick={() => {
+                            if (lockingSlot) return;
                             setMonth(
                               new Date(
                                 month.getFullYear(),
                                 month.getMonth() + 1,
                                 1
                               )
-                            )
-                          }
-                          className="text-accent hover:text-accent transition"
+                            );
+                          }}
+                          disabled={lockingSlot}
+                          className="text-accent hover:text-accent transition disabled:cursor-wait disabled:opacity-60"
                         >
                           ›
                         </button>
@@ -2657,7 +2668,7 @@ export default function BookingForm() {
                           );
                           date.setHours(0, 0, 0, 0);
 
-                          const disabled = !isDateAllowed(date);
+                          const disabled = lockingSlot || !isDateAllowed(date);
                           const isSelected =
                             selectedDate && isSameDay(date, selectedDate);
 
@@ -2689,7 +2700,7 @@ export default function BookingForm() {
                               }
                               disabled={disabled}
                               onClick={() => handleDayClick(day)}
-                              className={`p-2 rounded-lg transition-all duration-200 flex flex-col items-center justify-center ${
+                              className={`p-2 rounded-lg transition-all duration-200 flex flex-col items-center justify-center ${lockingSlot ? "cursor-wait opacity-60" : ""} ${
                                 isSelected
                                   ? "bg-accent-strong text-accent-contrast shadow-glow-soft"
                                   : disabled
@@ -2753,6 +2764,7 @@ export default function BookingForm() {
                               <button
                                 key={t.slotId}
                                 onClick={() => {
+                                  if (lockingSlot) return;
                                   if (isMyHold) {
                                     setSelectedSlot(t);
                                     setPreventHoldAutoload(false);
@@ -2767,8 +2779,8 @@ export default function BookingForm() {
                                     setPreventHoldAutoload(false);
                                   }
                                 }}
-                                disabled={t.disabled && !isMyHold}
-                                className={`py-2 rounded-lg border transition-all duration-200 ${
+                                disabled={lockingSlot || (t.disabled && !isMyHold)}
+                                className={`py-2 rounded-lg border transition-all duration-200 ${lockingSlot ? "cursor-wait opacity-60" : ""} ${
                                   t.isUnavailable
                                     ? "bg-surface-input border-line-soft text-ink-muted cursor-not-allowed opacity-60"
                                     : t.isExpiredHold
@@ -2806,11 +2818,13 @@ export default function BookingForm() {
                       <button
                         type="button"
                         onClick={() => {
+                          if (lockingSlot) return;
                           setModalMode("view");
                           setModalPackage(planPackage || selectedPackage);
                           setShowVertexModal(true);
                         }}
-                        className={`ri-booking-secondary glow-button w-full py-3 rounded-lg font-semibold text-lg transition-all duration-300 inline-flex items-center justify-center gap-2`}
+                        disabled={lockingSlot}
+                        className={`ri-booking-secondary glow-button w-full py-3 rounded-lg font-semibold text-lg transition-all duration-300 inline-flex items-center justify-center gap-2 disabled:cursor-wait disabled:opacity-60`}
                       >
                         View My Plan
                         <span className="glow-line glow-line-top" />
@@ -3384,6 +3398,7 @@ export default function BookingForm() {
                       <button
                         type="button"
                         onClick={() => {
+                          if (lockingSlot) return;
                           document.body.classList.remove("is-modal-blur");
                           setShowVertexModal(false);
                           setErrorStep2("");
@@ -3442,7 +3457,8 @@ export default function BookingForm() {
                                 }
                           );
                         }}
-                        className="ri-booking-primary glow-button w-full mt-6 py-3 rounded-lg font-semibold text-white shadow-[0_0_20px_rgba(56,189,248,0.4)] inline-flex items-center justify-center gap-2 opacity-90 hover:opacity-100"
+                        disabled={lockingSlot}
+                        className="ri-booking-primary glow-button w-full mt-6 py-3 rounded-lg font-semibold text-white shadow-[0_0_20px_rgba(56,189,248,0.4)] inline-flex items-center justify-center gap-2 opacity-90 hover:opacity-100 disabled:cursor-wait disabled:opacity-60"
                         style={{ transition: "opacity 0.9s ease-in-out" }}
                       >
                         {displayPackage?.buttonText || "Book Now"}
