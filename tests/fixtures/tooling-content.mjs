@@ -70,7 +70,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
     document('services', { heading: 'Synthetic benefits', cards: [] }),
     document('howItWorks', { title: 'How It Works', steps: [] }),
     document('packagesSettings', {}),
-    document('meetTheTeam', { heroTitle: 'Meet the Team', heroSubtitle: 'Synthetic local team', showFounder: false, sections: [] }),
+    document('meetTheTeam', { heroTitle: 'Meet the Team', heroSubtitle: 'Synthetic local team', showFounder: true, founder: { name: 'Fixture Founder', title: 'Synthetic founder', bio: 'Synthetic founder bio for the local team page.' }, sections: [{ _key: 'tooling-team-crew', title: 'Synthetic Crew', variant: 'standard', cards: [{ _key: 'tooling-team-alpha', name: 'Fixture Member Alpha', title: 'Synthetic tuner', bio: 'Synthetic bio for the first team card.' }, { _key: 'tooling-team-beta', name: 'Fixture Member Beta', title: 'Synthetic support', bio: 'Synthetic bio for the second team card.' }] }] }),
     document('bookingSettings', { dateSlots: [{ date: '2099-01-05', times: ['10:00', '11:00'] }], xocDateSlots: [], vertexEssentialsDateSlots: [], packageDateSlots: [] }, '6d8a3646-0ed2-44b5-ad45-c5c9d578126a'),
   ];
   if (apiRoutes) {
@@ -101,6 +101,27 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       }, image.id.replace('image-', 'review-'))),
     );
   }
+  const benchmarkImages = [
+    { id: 'image-benchmark-before', width: 960, height: 540, storagePath: 'images/benchmark-before.svg' },
+    { id: 'image-benchmark-after', width: 800, height: 450, storagePath: 'images/benchmark-after.svg' },
+  ].map(image => ({ ...image, body: `<svg xmlns="http://www.w3.org/2000/svg" width="${image.width}" height="${image.height}"><rect width="100%" height="100%" fill="#18202c"/><text x="24" y="48" fill="white" font-size="24">Synthetic benchmark</text></svg>` }));
+  documents.push(
+    document('benchmark', {
+      title: 'Fixture Benchmark Alpha',
+      subtitle: 'Synthetic before and after results for Alpha.',
+      sortOrder: 10,
+      beforeImage: { _type: 'image', asset: { _type: 'reference', _ref: benchmarkImages[0].id } },
+      afterImage: { _type: 'image', asset: { _type: 'reference', _ref: benchmarkImages[1].id } },
+    }, 'tooling-benchmark-z-alpha'),
+    document('benchmark', {
+      title: 'Fixture Benchmark Beta',
+      subtitle: 'Synthetic before and after results for Beta.',
+      sortOrder: 20,
+      beforeImage: { _type: 'image', asset: { _type: 'reference', _ref: benchmarkImages[0].id } },
+      afterImage: { _type: 'image', asset: { _type: 'reference', _ref: benchmarkImages[1].id } },
+    }, 'tooling-benchmark-a-beta'),
+  );
+  const images = [...layoutImages, ...benchmarkImages];
   const initialDocuments = structuredClone(documents);
   const dispatches = new Map();
   const rateLimits = new Map();
@@ -154,7 +175,8 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           contentOutage = false;
         }
         if (body.outage !== undefined) {
-          if (typeof body.outage !== 'boolean') throw new Error('Invalid fixture content outage.');
+          const documentTypes = Array.isArray(body.outage) && body.outage.length > 0 && body.outage.every(type => typeof type === 'string' && type);
+          if (typeof body.outage !== 'boolean' && !documentTypes) throw new Error('Invalid fixture content outage.');
           contentOutage = body.outage;
         }
         if (body.patch !== undefined) {
@@ -209,7 +231,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         call.status = 200;
         json(res, 200, { delivery, session, documents, requests: evidence.requests, emails });
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_fetch_shadow_documents_targeted') {
-        if (contentOutage) throw Object.assign(new Error('Synthetic content outage.'), { status: 503, code: 'FIXTURE_CONTENT_OUTAGE' });
+        if (contentOutage === true || (Array.isArray(contentOutage) && body.p_document_types?.some(type => contentOutage.includes(type)))) throw Object.assign(new Error('Synthetic content outage.'), { status: 503, code: 'FIXTURE_CONTENT_OUTAGE' });
         const scopedIds = apiRoutes && body.p_document_types === null && Array.isArray(body.p_ids) && body.p_ids.length > 0;
         if ((!scopedIds && (!Array.isArray(body.p_document_types) || !body.p_document_types.length)) || !Array.isArray(body.p_filters) || !Number.isInteger(body.p_limit) || body.p_limit < 1 || body.p_limit > 1000 || body.p_ids !== null && !Array.isArray(body.p_ids)) throw new Error('Invalid fixture read scope.');
         if (apiRoutes && delivery === 'lookup_failed' && body.p_document_types?.includes('referral')) throw Object.assign(new Error('Synthetic referral lookup outage.'), { status: 503, code: 'FIXTURE_LOOKUP_UNAVAILABLE' });
@@ -233,7 +255,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         }
         rows = rows.sort((a, b) => a._id < b._id ? -1 : a._id > b._id ? 1 : 0).slice(0, body.p_limit); call.status = 200; call.rows = rows.length; json(res, 200, rows);
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_asset_manifest_for_refs') {
-        const assets = layoutImages.filter(image => body.p_asset_ids?.includes(image.id)).map(image => ({
+        const assets = images.filter(image => body.p_asset_ids?.includes(image.id)).map(image => ({
           legacy_sanity_asset_id: image.id,
           storage_bucket: 'site-content-public',
           storage_path: image.storagePath,
@@ -243,8 +265,8 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           height: image.height,
         }));
         call.status = 200; json(res, 200, assets);
-      } else if (req.method === 'GET' && layoutImages.some(image => url.pathname === `/storage/v1/object/public/site-content-public/${image.storagePath}`)) {
-        const image = layoutImages.find(image => url.pathname.endsWith(image.storagePath));
+      } else if (req.method === 'GET' && images.some(image => url.pathname === `/storage/v1/object/public/site-content-public/${image.storagePath}`)) {
+        const image = images.find(image => url.pathname.endsWith(image.storagePath));
         call.status = 200;
         res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' });
         res.end(image.body);

@@ -47,6 +47,33 @@ test.describe("Non-JS crawlability", () => {
     await expect(page.locator('section[aria-label="No-JS SEO fallback"]')).toHaveCount(0);
   });
 
+  test("/benchmarks renders benchmark results without JavaScript", async ({ page }, testInfo) => {
+    await page.goto("/benchmarks", { waitUntil: "networkidle" });
+    const main = page.locator("main#main-content");
+    const titles = ["Fixture Benchmark Alpha", "Fixture Benchmark Beta"];
+    const images = await main.locator("figure img").evaluateAll(items => items.map(image => ({
+      alt: image.alt,
+      src: image.getAttribute("src"),
+      width: image.getAttribute("width"),
+      height: image.getAttribute("height"),
+    })));
+    await testInfo.attach("benchmarks-server-content", {
+      body: JSON.stringify({ headings: await main.locator("h2").allTextContents(), images }, null, 2),
+      contentType: "application/json",
+    });
+    await expect(main.locator("h2")).toHaveText(titles);
+    for (const title of titles) {
+      for (const phase of ["before", "after"]) {
+        const image = main.getByAltText(`${title} benchmark ${phase} optimization`, { exact: true });
+        await expect(image).toHaveCount(1);
+        await expect(image).toHaveAttribute("src", /.+/);
+        await expect(image).toHaveAttribute("width", /^[1-9]\d*$/);
+        await expect(image).toHaveAttribute("height", /^[1-9]\d*$/);
+      }
+    }
+    await expect(page.locator('section[aria-label="No-JS SEO fallback"]')).toHaveCount(0);
+  });
+
   for (const route of routes) {
     test(`renders meaningful HTML for ${route}`, async ({ page }) => {
       await page.goto(route, { waitUntil: "domcontentloaded" });

@@ -1,15 +1,7 @@
 const routeCopy = {
-  "/benchmarks": {
-    title: "Benchmark Results",
-    body: "Review before and after FPS numbers from real Roo Industries sessions.",
-  },
   "/reviews": {
     title: "Client Reviews & Results",
     body: "Read what players say after their FPS climbs, input lag drops, and games feel smoother.",
-  },
-  "/meet-the-team": {
-    title: "Meet The Team",
-    body: "Meet the people behind Roo Industries FPS tuning, BIOS work, Windows setup, and game-specific performance sessions.",
   },
   "/tools": {
     title: "Free PC Tools & Downloads",
