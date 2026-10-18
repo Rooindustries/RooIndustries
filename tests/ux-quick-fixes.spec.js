@@ -199,7 +199,7 @@ test("a rejected download offers help without losing the entered order", async (
   await page.getByLabel("Booking email", { exact: true }).fill("visitor@example.invalid");
   await page.getByLabel("Order ID", { exact: true }).fill("booking.example");
   await page.getByRole("button", { name: "Verify and Download", exact: true }).click();
-  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page.locator("main").getByRole("alert")).toHaveText("Could not verify this order. Check the Order ID and booking email.");
   await expect(page.getByText("Your order ID is in your booking confirmation email. Can't find it?", { exact: false }))
     .toHaveText("Your order ID is in your booking confirmation email. Can't find it? Contact us");
   await expect(page.getByRole("link", { name: "Contact us", exact: true })).toHaveAttribute("href", "/contact");
