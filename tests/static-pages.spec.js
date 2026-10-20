@@ -30,10 +30,18 @@ const readPrerenderManifest = async testInfo => {
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-const leakedInto = async (request, route, probe) => {
-  const html = await (await request.get(route, { headers: { accept: "text/html" } })).text();
-  const rsc = await (await request.get(route, { headers: { accept: "text/html", rsc: "1" } })).text();
-  return { htmlLeaked: html.includes(probe), rscLeaked: rsc.includes(probe) };
+const readRebuiltPage = async (request, route) => {
+  const deadline = Date.now() + 30000;
+  for (;;) {
+    const response = await request.get(route, { headers: { accept: "text/html" } });
+    const html = await response.text();
+    const rebuilt = response.headers()["x-nextjs-cache"] === "HIT";
+    if (rebuilt || Date.now() > deadline) {
+      const rsc = await (await request.get(route, { headers: { accept: "text/html", rsc: "1" } })).text();
+      return { rebuilt, htmlLeaked: html.includes("leakprobe"), rscLeaked: rsc.includes("leakprobe") };
+    }
+    await wait(1000);
+  }
 };
 
 test("the middleware query strip covers exactly the prebuilt pages", async ({}, testInfo) => {
@@ -146,8 +154,7 @@ test("a background rebuild triggered by a query keeps that query out of every re
         if (response.headers()["x-nextjs-cache"] === "STALE") trigger = { status: response.status(), at: Date.now() };
         else await wait(1000);
       }
-      await wait(3000);
-      return { visit, route, method, trigger, ...(await leakedInto(request, route, probe)) };
+      return { visit, route, method, trigger, ...(await readRebuiltPage(request, route)) };
     })));
   }
   await testInfo.attach("query-rebuild-leak", { body: JSON.stringify(results, null, 2), contentType: "application/json" });
@@ -155,6 +162,7 @@ test("a background rebuild triggered by a query keeps that query out of every re
   for (const result of results) {
     const label = `${result.visit} ${result.method} ${result.route}`;
     expect(result.trigger, label).not.toBeNull();
+    expect(result.rebuilt, label).toBe(true);
     expect(result.htmlLeaked, label).toBe(false);
     expect(result.rscLeaked, label).toBe(false);
   }

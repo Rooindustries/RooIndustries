@@ -170,15 +170,21 @@ for (const route of PREBUILT_ROUTES) {
       const probe = `leakprobe${randomUUID()}`;
       const response = await request.fetch(`${route}?ref=${probe}&gclid=${probe}`, { method, headers, maxRedirects: 0 });
       await response.body();
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      const html = await (await request.get(route, { headers: { accept: "text/html" } })).text();
+      const deadline = Date.now() + 30000;
+      let page;
+      do {
+        if (page) await new Promise(resolve => setTimeout(resolve, 1000));
+        page = await request.get(route, { headers: { accept: "text/html" } });
+      } while (page.headers()["x-nextjs-cache"] !== "HIT" && Date.now() < deadline);
+      const html = await page.text();
       const rsc = await (await request.get(route, { headers: { accept: "text/html", rsc: "1" } })).text();
-      results.push({ visit, status: response.status(), cache: response.headers()["x-nextjs-cache"] ?? null, htmlLeaked: html.includes(probe), rscLeaked: rsc.includes(probe) });
+      results.push({ visit, status: response.status(), cache: response.headers()["x-nextjs-cache"] ?? null, rebuilt: page.headers()["x-nextjs-cache"] === "HIT", htmlLeaked: html.includes("leakprobe"), rscLeaked: rsc.includes("leakprobe") });
     }
     await testInfo.attach("publish-query-leak", { body: JSON.stringify({ route, results }, null, 2), contentType: "application/json" });
     for (const result of results) {
       expect(result.status, result.visit).toBe(200);
       expect(result.cache, result.visit).toMatch(/^(MISS|STALE)$/);
+      expect(result.rebuilt, result.visit).toBe(true);
       expect(result.htmlLeaked, result.visit).toBe(false);
       expect(result.rscLeaked, result.visit).toBe(false);
     }

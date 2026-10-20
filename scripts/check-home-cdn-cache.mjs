@@ -191,8 +191,8 @@ await Promise.all(REVALIDATING_ROUTES.map(async (path) => {
   const leakRsc = await readRebuilt(`${path} rsc after leak trigger`, path, { ...HTML, rsc: "1" }, trigger.at);
   check(leakHtml.rebuilt && isHtml(leakHtml), `${path} HTML is served from the rebuilt page after the leak trigger`, leakHtml);
   check(leakRsc.rebuilt && String(leakRsc.contentType).includes("text/x-component"), `${path} RSC is served from the rebuilt page after the leak trigger`, leakRsc);
-  check(!leakHtml.body.includes(leakToken), `a rebuild triggered by a query keeps that query out of the ${path} HTML`, leakHtml);
-  check(!leakRsc.body.includes(leakToken), `a rebuild triggered by a query keeps that query out of the ${path} RSC payload`, leakRsc);
+  check(!leakHtml.body.includes(String(stamp)), `a rebuild triggered by a query keeps this check's queries out of the ${path} HTML`, leakHtml);
+  check(!leakRsc.body.includes(String(stamp)), `a rebuild triggered by a query keeps this check's queries out of the ${path} RSC payload`, leakRsc);
 }));
 
 for (const entry of log.filter(isPrebuiltHtml)) {
