@@ -23,7 +23,7 @@ const assert = new Proxy(strictAssert, {
 });
 
 test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000 }, async t => {
-  const fixture = await createBookingContactFixture();
+  const fixture = await createBookingContactFixture({ artifactName: 'booking-emails' });
   const { commerce, database } = fixture;
   const { applyBookingRefund, applyBookingStatusTransition } = await import('../src/server/api/ref/bookingRefunds.js');
   const { reconcileBookingEmailDispatches, dispatchRescheduleNotifications,

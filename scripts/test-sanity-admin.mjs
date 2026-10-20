@@ -2,12 +2,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { registerHooks } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { start } from './lib/storage-fixture.mjs';
 const root = path.resolve('.');
+globalThis.rooRevalidations = new AsyncLocalStorage();
+const nextCacheStub = `data:text/javascript,${encodeURIComponent('export const revalidatePath = (...args) => { globalThis.rooRevalidations.getStore()?.push(args); };')}`;
 registerHooks({ resolve(specifier, context, next) {
+  if (specifier === 'next/cache') return { url: nextCacheStub, shortCircuit: true };
   if (specifier.startsWith('@/')) specifier = pathToFileURL(path.join(root, specifier.slice(2))).href;
   try { return next(specifier, context); } catch (error) {
     if (error.code === 'ERR_MODULE_NOT_FOUND' && (specifier.startsWith('.') || specifier.startsWith('file:')) && !path.extname(specifier)) return next(specifier + '.js', context);
@@ -26,7 +30,14 @@ const completed = new Map();
 try {
   for (const key of Object.keys(process.env)) if (/(^|_)SANITY_/.test(key)) delete process.env[key];
   if(selected==='all')artifact.schema=JSON.parse(execFileSync(process.execPath,['scripts/test-sanity-admin-schema.mjs','--scenario=schema'],{encoding:'utf8'}).trim());
-  fixture = await start({ fullMigrationChain: true, signedUploadExpirationSeconds: 2 });
+  fixture = await start({
+    fullMigrationChain: true,
+    signedUploadExpirationSeconds: 2,
+    ...(process.env.STORAGE_SOURCE ? { storageSource: process.env.STORAGE_SOURCE } : {}),
+    ...(process.env.PG_BIN ? { pgBin: process.env.PG_BIN } : {}),
+    ...(process.env.POSTGREST_BIN ? { postgrestBin: process.env.POSTGREST_BIN } : {}),
+    ...(process.env.LD_LIBRARY_PATH ? { libraryPath: process.env.LD_LIBRARY_PATH } : {}),
+  });
   artifact.versions = fixture.versions;
   artifact.runtime = { storageScratch: fixture.scratch, databaseScratch: fixture.databaseScratch, postgresPid: Number(fs.readFileSync(path.join(fixture.databaseScratch, 'data/postmaster.pid'), 'utf8').split('\n')[0]), postgrestPid: fixture.postgrestPid };
   fs.mkdirSync('test-results/sanity-admin', { recursive: true }); fs.writeFileSync(`test-results/sanity-admin/${selected}.json`, JSON.stringify(sanitize(artifact), null, 2) + '\n');
@@ -52,7 +63,12 @@ try {
     observed(name, { status: response.status, result: sanitize(result) });
     return { status: response.status, ...result };
   };
-  const publish = body => call('publish', body);
+  const publish = async body => {
+    const revalidated = [];
+    const result = await globalThis.rooRevalidations.run(revalidated, () => call('publish', body));
+    assert.deepEqual(revalidated, [['/', 'layout']], 'Every publish revalidates the root layout');
+    return result;
+  };
   const create = (type, document, createIntentId = crypto.randomUUID()) => publish({ operation: 'create', type, document, createIntentId });
   const detail = id => call('documents/[id]', undefined, { id });
   const assertError = (result, status, code) => { assert.equal(result.status, status, JSON.stringify(result)); assert.equal(result.ok, false); assert.equal(result.code, code); assert.equal(result.data, undefined); };
