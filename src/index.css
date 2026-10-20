@@ -2797,8 +2797,14 @@ html.low-performance-mode #how-it-works .deferred-section-content {
   content-visibility: visible;
 }
 
-html.low-performance-mode *:not(.glow-line):not(.ri-engineer-status-pulse) {
+html.low-performance-mode *:not(.glow-line):not(.ri-engineer-status-pulse):not(.ri-reveal) {
   animation: none !important;
+  filter: none !important;
+  -webkit-filter: none !important;
+  transition-property: opacity, transform !important;
+}
+
+html.low-performance-mode .ri-reveal {
   filter: none !important;
   -webkit-filter: none !important;
   transition-property: opacity, transform !important;
@@ -3276,4 +3282,48 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
 
 .booking-dialog-body label + :is(input, textarea) {
   margin-top: 4px;
+}
+
+@keyframes riReveal {
+  from {
+    opacity: 0;
+    transform: var(--ri-reveal-from, translateY(16px));
+  }
+}
+
+.ri-reveal {
+  animation: riReveal var(--ri-reveal-duration, 0.4s) ease-out var(--ri-reveal-delay, 0s) backwards;
+}
+
+.ri-reveal[data-reveal-wait] {
+  animation: none;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ri-reveal {
+    animation: none;
+  }
+
+  .ri-reveal[data-reveal-wait] {
+    opacity: 1;
+  }
+}
+
+html.perf-reduced-motion-mode .ri-reveal {
+  animation: none;
+}
+
+html.perf-reduced-motion-mode .ri-reveal[data-reveal-wait] {
+  opacity: 1;
+}
+
+@media print {
+  .ri-reveal {
+    animation: none;
+  }
+
+  .ri-reveal[data-reveal-wait] {
+    opacity: 1;
+  }
 }
