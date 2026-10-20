@@ -166,27 +166,34 @@ for (const path of PREBUILT_ROUTES.filter((route) => !PREBUILT_PATHS.includes(ro
 
 const leakToken = `leak${stamp}`;
 const triggerRebuild = async (path) => {
-  let trigger;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    trigger = await hit(`${path} leak trigger ${attempt}`, `${path}?ref=${leakToken}&gclid=${leakToken}`);
-    if (trigger.status !== 200 || trigger.cache === "STALE") return trigger;
+  for (let attempt = 1; ; attempt += 1) {
+    const at = Date.now();
+    const trigger = await hit(`${path} leak trigger ${attempt}`, `${path}?ref=${leakToken}&gclid=${leakToken}`);
+    if (trigger.status !== 200 || trigger.cache === "STALE" || attempt === 3) return { ...trigger, at };
     const age = Number(trigger.age) || 0;
     await sleep((age < 61 ? 62 - age : 2) * 1000);
   }
-  return trigger;
+};
+const readRebuilt = async (name, path, headers, since) => {
+  for (let attempt = 1; ; attempt += 1) {
+    const entry = await hit(`${name} ${attempt}`, path, { headers });
+    const rebuilt = entry.status === 200 && entry.cache === "HIT" && entry.age !== null && Number(entry.age) <= Math.ceil((Date.now() - since) / 1000);
+    if (rebuilt || attempt === 30) return { ...entry, rebuilt };
+    await sleep(2000);
+  }
 };
 console.log("Waiting for each revalidating page to go stale before the leak check");
-const triggers = await Promise.all(REVALIDATING_ROUTES.map(triggerRebuild));
-await sleep(5000);
-for (const [index, path] of REVALIDATING_ROUTES.entries()) {
-  check(triggers[index].status === 200 && triggers[index].cache === "STALE", `the ${path} leak trigger reached a stale page and started a rebuild`, triggers[index]);
-  const leakHtml = await hit(`${path} html after leak trigger`, path);
-  const leakRsc = await hit(`${path} rsc after leak trigger`, path, { headers: { ...HTML, rsc: "1" } });
-  check(leakHtml.status === 200 && isHtml(leakHtml), `${path} HTML after the leak trigger is a full page`, leakHtml);
-  check(leakRsc.status === 200 && String(leakRsc.contentType).includes("text/x-component"), `${path} RSC after the leak trigger is an RSC payload`, leakRsc);
+await Promise.all(REVALIDATING_ROUTES.map(async (path) => {
+  const trigger = await triggerRebuild(path);
+  check(trigger.status === 200 && trigger.cache === "STALE", `the ${path} leak trigger reached a stale page and started a rebuild`, trigger);
+  if (trigger.cache !== "STALE") return;
+  const leakHtml = await readRebuilt(`${path} html after leak trigger`, path, HTML, trigger.at);
+  const leakRsc = await readRebuilt(`${path} rsc after leak trigger`, path, { ...HTML, rsc: "1" }, trigger.at);
+  check(leakHtml.rebuilt && isHtml(leakHtml), `${path} HTML is served from the rebuilt page after the leak trigger`, leakHtml);
+  check(leakRsc.rebuilt && String(leakRsc.contentType).includes("text/x-component"), `${path} RSC is served from the rebuilt page after the leak trigger`, leakRsc);
   check(!leakHtml.body.includes(leakToken), `a rebuild triggered by a query keeps that query out of the ${path} HTML`, leakHtml);
   check(!leakRsc.body.includes(leakToken), `a rebuild triggered by a query keeps that query out of the ${path} RSC payload`, leakRsc);
-}
+}));
 
 for (const entry of log.filter(isPrebuiltHtml)) {
   const pathname = new URL(entry.path, base).pathname;
