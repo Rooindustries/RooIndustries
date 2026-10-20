@@ -2164,8 +2164,9 @@ export default function BookingForm() {
       }
       const refreshed = data.refreshedHold;
       if (!refreshed?.slotHoldId || !refreshed?.slotHoldToken) {
+        markHoldExpired();
         clearHoldState(true);
-        setErrorStep1("The reservation expired. Please choose the slot again.");
+        setErrorStep1(RESERVATION_EXPIRED_ERROR);
         return;
       }
       const nextHold = {
