@@ -93,3 +93,17 @@ export function scrubEvent(event) {
 export function monitoringEnvironment() {
   return process.env.NEXT_PUBLIC_VERCEL_ENV || process.env.VERCEL_ENV || process.env.NODE_ENV;
 }
+
+export function envelopeHeaderScrubber(dsn, environment) {
+  const publicKey = new URL(dsn).username;
+  return (envelope) => {
+    const header = Array.isArray(envelope) ? envelope[0] : undefined;
+    if (!header?.trace) return;
+    const traceId = header.trace.trace_id;
+    if (typeof traceId === "string" && /^[0-9a-f]{32}$/.test(traceId)) {
+      header.trace = { trace_id: traceId, public_key: publicKey, ...(environment ? { environment } : {}) };
+    } else {
+      delete header.trace;
+    }
+  };
+}

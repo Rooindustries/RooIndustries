@@ -1,22 +1,25 @@
 import { captureException, init } from "@sentry/nextjs";
 import {
   NO_DATA_COLLECTION,
+  envelopeHeaderScrubber,
   monitoringEnvironment,
   scrubBreadcrumb,
   scrubEvent,
 } from "./scrub";
 
 export function startServerMonitoring(dsn) {
-  init({
+  const client = init({
     dsn,
     environment: monitoringEnvironment(),
     tracesSampleRate: 0.05,
     traceLifecycle: "static",
+    tracePropagationTargets: [],
     dataCollection: NO_DATA_COLLECTION,
     beforeSend: scrubEvent,
     beforeSendTransaction: scrubEvent,
     beforeBreadcrumb: scrubBreadcrumb,
   });
+  client?.on("beforeEnvelope", envelopeHeaderScrubber(dsn, monitoringEnvironment()));
   globalThis[Symbol.for("roo.reportServerError")] = (label, error, metadata) => {
     const report = new Error(label);
     report.name = metadata.name;
