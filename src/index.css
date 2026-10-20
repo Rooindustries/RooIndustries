@@ -3295,12 +3295,25 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
   animation: riReveal var(--ri-reveal-duration, 0.4s) ease-out var(--ri-reveal-delay, 0s) backwards;
 }
 
+.ri-reveal[data-reveal-wait] {
+  animation: none;
+  opacity: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ri-reveal {
     animation: none;
+  }
+
+  .ri-reveal[data-reveal-wait] {
+    opacity: 1;
   }
 }
 
 html.perf-reduced-motion-mode .ri-reveal {
   animation: none;
+}
+
+html.perf-reduced-motion-mode .ri-reveal[data-reveal-wait] {
+  opacity: 1;
 }

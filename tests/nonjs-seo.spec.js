@@ -92,7 +92,7 @@ test.describe("Non-JS crawlability", () => {
     });
   }
 
-  test("/ keeps the proof card fade and visibility once JavaScript loads", async ({ browser, baseURL }, testInfo) => {
+  test("/ fades the proof card in when it scrolls into view once JavaScript loads", async ({ browser, baseURL }, testInfo) => {
     const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
     for (const reducedMotion of ["no-preference", "reduce"]) {
       const context = await browser.newContext({ baseURL, javaScriptEnabled: true, reducedMotion, viewport: { width: 390, height: 844 } });
@@ -102,18 +102,29 @@ test.describe("Non-JS crawlability", () => {
         await page.goto("/", { waitUntil: "load" });
         await page.waitForFunction(() => document.documentElement.classList.contains("low-performance-mode"));
         const card = page.locator("main#main-content .ri-proof-card");
-        const state = () => card.evaluate(element => ({
+        await page.waitForTimeout(1000);
+        const offscreen = await card.evaluate(element => getComputedStyle(element).opacity);
+        expect(offscreen).toBe(reducedMotion === "reduce" ? "1" : "0");
+        await expect(card).toHaveAttribute("data-reveal-wait", "");
+        const animations = await card.evaluate(element => new Promise(resolve => {
+          const observer = new MutationObserver(() => {
+            if (element.hasAttribute("data-reveal-wait")) return;
+            observer.disconnect();
+            resolve(element.getAnimations().map(animation => animation.animationName));
+          });
+          observer.observe(element, { attributes: true });
+          element.scrollIntoView({ block: "center" });
+        }));
+        await expect.poll(() => card.evaluate(element => getComputedStyle(element).opacity), { timeout: 3000 }).toBe("1");
+        await page.waitForTimeout(1000);
+        const settled = await card.evaluate(element => ({
           opacity: getComputedStyle(element).opacity,
-          animation: getComputedStyle(element).animationName,
           rootClasses: document.documentElement.className,
         }));
-        await expect.poll(async () => (await state()).opacity, { timeout: 3000 }).toBe("1");
-        const settled = await state();
-        await testInfo.attach(`proof-card-js-${reducedMotion}`, { body: JSON.stringify(settled, null, 2), contentType: "application/json" });
+        await testInfo.attach(`proof-card-js-${reducedMotion}`, { body: JSON.stringify({ offscreen, animations, settled }, null, 2), contentType: "application/json" });
+        expect(animations).toEqual(reducedMotion === "reduce" ? [] : ["riReveal"]);
+        expect(settled.opacity).toBe("1");
         expect(settled.rootClasses).toContain("low-performance-mode");
-        expect(settled.animation).toBe(reducedMotion === "reduce" ? "none" : "riReveal");
-        await page.waitForTimeout(1000);
-        expect((await state()).opacity).toBe("1");
       } finally {
         await context.close();
       }

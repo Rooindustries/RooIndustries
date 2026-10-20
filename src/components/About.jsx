@@ -16,6 +16,19 @@ const RC = {
   "--rc-cta-end":     "var(--color-accent)",
 };
 
+const revealWhenInView = (node) => {
+  if (!node || typeof IntersectionObserver === "undefined") return undefined;
+  if (node.getBoundingClientRect().top < window.innerHeight) return undefined;
+  node.setAttribute("data-reveal-wait", "");
+  const observer = new IntersectionObserver((entries) => {
+    if (!entries.some((entry) => entry.isIntersecting)) return;
+    node.removeAttribute("data-reveal-wait");
+    observer.disconnect();
+  }, { rootMargin: "0px 0px -80px 0px" });
+  observer.observe(node);
+  return () => observer.disconnect();
+};
+
 export default function About({ initialData = null, compact = false }) {
   const [aboutData, setAboutData] = useState(() => initialData);
 
@@ -94,6 +107,7 @@ export default function About({ initialData = null, compact = false }) {
     return (
       <section id="about" className="mx-auto h-full w-full max-w-sm text-center">
         <div
+          ref={revealWhenInView}
           className="ri-proof-card ri-reveal relative flex h-full flex-col overflow-hidden rounded-xl p-3"
           style={{
             ...RC,
@@ -149,6 +163,7 @@ export default function About({ initialData = null, compact = false }) {
     >
       <div className="mt-6">
         <div
+          ref={revealWhenInView}
           className="ri-proof-card ri-reveal relative mx-auto max-w-6xl overflow-hidden rounded-2xl"
           style={{
             ...RC,
@@ -215,6 +230,7 @@ export default function About({ initialData = null, compact = false }) {
                   {specStats.map((detail, index) => (
                     <div
                       key={detail?._key || `${detail?.label || "detail"}-${index}`}
+                      ref={revealWhenInView}
                       className="ri-reveal flex flex-wrap items-baseline justify-center gap-2 sm:gap-4 py-2.5 lg:justify-start"
                       style={{
                         ...(index > 0 ? { borderTop: "1px solid var(--rc-border-sub)" } : {}),
