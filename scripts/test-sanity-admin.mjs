@@ -7,7 +7,10 @@ import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { start } from './lib/storage-fixture.mjs';
 const root = path.resolve('.');
+globalThis.rooRevalidatedPaths = [];
+const nextCacheStub = `data:text/javascript,${encodeURIComponent('export const revalidatePath = (...args) => { globalThis.rooRevalidatedPaths.push(args); };')}`;
 registerHooks({ resolve(specifier, context, next) {
+  if (specifier === 'next/cache') return { url: nextCacheStub, shortCircuit: true };
   if (specifier.startsWith('@/')) specifier = pathToFileURL(path.join(root, specifier.slice(2))).href;
   try { return next(specifier, context); } catch (error) {
     if (error.code === 'ERR_MODULE_NOT_FOUND' && (specifier.startsWith('.') || specifier.startsWith('file:')) && !path.extname(specifier)) return next(specifier + '.js', context);
@@ -52,7 +55,12 @@ try {
     observed(name, { status: response.status, result: sanitize(result) });
     return { status: response.status, ...result };
   };
-  const publish = body => call('publish', body);
+  const publish = async body => {
+    const before = globalThis.rooRevalidatedPaths.length;
+    const result = await call('publish', body);
+    assert.deepEqual(globalThis.rooRevalidatedPaths.slice(before), [['/', 'layout']], 'Every publish revalidates the root layout');
+    return result;
+  };
   const create = (type, document, createIntentId = crypto.randomUUID()) => publish({ operation: 'create', type, document, createIntentId });
   const detail = id => call('documents/[id]', undefined, { id });
   const assertError = (result, status, code) => { assert.equal(result.status, status, JSON.stringify(result)); assert.equal(result.ok, false); assert.equal(result.code, code); assert.equal(result.data, undefined); };

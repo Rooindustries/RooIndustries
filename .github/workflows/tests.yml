@@ -159,6 +159,18 @@ jobs:
         run: npm run test:booking:holds
       - name: Run payment persistence sweep on the full migration chain
         run: node scripts/test-payment-persistence-sweep.mjs --full-chain
+      - name: Run the remaining PostgreSQL 17 suites
+        run: |
+          baseline=$(sed -n "s/.*const baselineCommit = '\([0-9a-f]\{40\}\)'.*/\1/p" tests/upgrade-credit.mjs)
+          git fetch --no-tags --depth=1 origin "$baseline"
+          failed=()
+          for suite in booking-hold upgrade-credit emails:postgres17 payment-recovery:postgres17 referral:postgres17 referral-social:postgres17 backend-integrity:postgres17 referral-authority:postgres17 referral-email:postgres17 referral-integrity:postgres17 account-domain:postgres17 commerce-readiness:postgres17 referral-email:origins tooling:safety; do
+            npm run "test:$suite" || failed+=("$suite")
+          done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "Failed suites: ${failed[*]}"
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
