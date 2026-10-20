@@ -1,5 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import routes from "../src/lib/routes.js";
+import rscCanonicalUrl from "./lib/rsc-canonical-url.cjs";
 
 const base = process.argv[2];
 const artifact = process.argv[3] || "test-results/home-cdn-cache-check.json";
@@ -63,7 +65,9 @@ const isMarkdown = (entry) => String(entry.contentType).includes("text/markdown"
 const variesOnAccept = (entry) => String(entry.vary || "").toLowerCase().split(/,\s*/).includes("accept");
 const MARKDOWN = { accept: "text/markdown", "user-agent": BROWSER_UA };
 const PREBUILT_PATHS = ["/", "/about", "/contact", "/privacy"];
-const isPrebuiltHtml = (entry) => entry.method === "GET" && PREBUILT_PATHS.includes(new URL(entry.path, base).pathname) && isHtml(entry);
+const { PREBUILT_ROUTES } = routes;
+const REVALIDATING_ROUTES = PREBUILT_ROUTES.filter((path) => path !== "/tourney");
+const isPrebuiltHtml = (entry) => entry.method === "GET" && PREBUILT_ROUTES.includes(new URL(entry.path, base).pathname) && isHtml(entry);
 
 const key = `/?utm_source=cdncheck${stamp}`;
 const first = await hit("html first", key);
@@ -147,23 +151,50 @@ for (const path of PREBUILT_PATHS) {
   }
 }
 
-let waitSeconds = 0;
-for (const path of PREBUILT_PATHS) {
-  const ageProbe = await hit(`${path} age probe`, path);
-  const age = Number(ageProbe.age) || 0;
-  waitSeconds = Math.max(waitSeconds, age < 61 ? 62 - age : 62);
+for (const path of PREBUILT_ROUTES.filter((route) => !PREBUILT_PATHS.includes(route))) {
+  const pageKey = `${path}?utm_source=cdncheck${stamp}&ref=cdncheck`;
+  const first = await hit(`${path} html`, pageKey);
+  const repeat = await hit(`${path} html again`, pageKey);
+  check(cached(repeat), `a repeated ${path} HTML request is served from cache`, repeat);
+  const rsc = await hit(`${path} rsc`, pageKey, { headers: { ...HTML, rsc: "1" } });
+  check(rsc.status === 200 && String(rsc.contentType).includes("text/x-component"), `${path} RSC request gets an RSC payload`, rsc);
+  const headKey = `${path}?utm_source=cdnhead${stamp}`;
+  const head = await hit(`${path} head`, headKey, { method: "HEAD" });
+  check(head.status === 200 && isHtml(head), `HEAD ${path} gets text/html`, head);
+  const afterHead = await hit(`${path} get after head`, headKey);
+  for (const entry of [first, repeat, afterHead]) check(entry.status === 200 && isHtml(entry) && entry.bytes > 10000, `${path} HTML request gets the full HTML page`, entry);
 }
-console.log(`Waiting ${waitSeconds}s for the prebuilt pages to go stale before the leak check`);
-await sleep(waitSeconds * 1000);
+
 const leakToken = `leak${stamp}`;
-for (const path of PREBUILT_PATHS) await hit(`${path} leak trigger`, `${path}?ref=${leakToken}&gclid=${leakToken}`);
-await sleep(5000);
-for (const path of PREBUILT_PATHS) {
-  const leakHtml = await hit(`${path} html after leak trigger`, path);
-  const leakRsc = await hit(`${path} rsc after leak trigger`, path, { headers: { ...HTML, rsc: "1" } });
-  check(!leakHtml.body.includes(leakToken), `a rebuild triggered by a query keeps that query out of the ${path} HTML`, leakHtml);
-  check(!leakRsc.body.includes(leakToken), `a rebuild triggered by a query keeps that query out of the ${path} RSC payload`, leakRsc);
-}
+const triggerRebuild = async (path) => {
+  for (let attempt = 1; ; attempt += 1) {
+    const at = Date.now();
+    const trigger = await hit(`${path} leak trigger ${attempt}`, `${path}?ref=${leakToken}&gclid=${leakToken}`);
+    if (trigger.status !== 200 || trigger.cache === "STALE" || attempt === 3) return { ...trigger, at };
+    const age = Number(trigger.age) || 0;
+    await sleep((age < 61 ? 62 - age : 2) * 1000);
+  }
+};
+const readRebuilt = async (name, path, headers, since) => {
+  for (let attempt = 1; ; attempt += 1) {
+    const poll = await hit(`${name} poll ${attempt}`, `${path}?ref=${leakToken}&gclid=${leakToken}`, { headers });
+    const rebuilt = poll.status === 200 && poll.cache === "HIT" && poll.age !== null && Number(poll.age) <= Math.ceil((Date.now() - since) / 1000);
+    if (rebuilt || attempt === 30) return { ...(await hit(name, path, { headers })), rebuilt };
+    await sleep(2000);
+  }
+};
+console.log("Waiting for each revalidating page to go stale before the leak check");
+await Promise.all(REVALIDATING_ROUTES.map(async (path) => {
+  const trigger = await triggerRebuild(path);
+  check(trigger.status === 200 && trigger.cache === "STALE", `the ${path} leak trigger reached a stale page and started a rebuild`, trigger);
+  if (trigger.cache !== "STALE") return;
+  const leakHtml = await readRebuilt(`${path} html after leak trigger`, path, HTML, trigger.at);
+  const leakRsc = await readRebuilt(`${path} rsc after leak trigger`, path, { ...HTML, rsc: "1" }, trigger.at);
+  check(leakHtml.rebuilt && isHtml(leakHtml), `${path} HTML is served from the rebuilt page after the leak trigger`, leakHtml);
+  check(leakRsc.rebuilt && String(leakRsc.contentType).includes("text/x-component"), `${path} RSC is served from the rebuilt page after the leak trigger`, leakRsc);
+  check(!rscCanonicalUrl.withoutCanonicalUrl(leakHtml.body).includes(String(stamp)), `a rebuild triggered by a query keeps this check's queries out of the ${path} HTML`, leakHtml);
+  check(!rscCanonicalUrl.withoutCanonicalUrl(leakRsc.body).includes(String(stamp)), `a rebuild triggered by a query keeps this check's queries out of the ${path} RSC payload`, leakRsc);
+}));
 
 for (const entry of log.filter(isPrebuiltHtml)) {
   const pathname = new URL(entry.path, base).pathname;
