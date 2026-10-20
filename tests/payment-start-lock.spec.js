@@ -314,6 +314,8 @@ test("a free booking can't be confirmed while a paid checkout is starting", asyn
   expect(starts).toEqual(["dodo"]);
 
   release();
-  await expect(page).toHaveURL(/checkout-handoff$/);
+  await expect(confirmFree).toBeEnabled();
+  await expect(page).toHaveURL(/\/payment$/);
   expect(starts).toEqual(["dodo"]);
+  expect(await page.evaluate(() => sessionStorage.getItem("payment_session_state"))).toBeNull();
 });
