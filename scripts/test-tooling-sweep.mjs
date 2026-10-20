@@ -313,7 +313,7 @@ await run('fix-b-config', async () => {
   return {cases,loopbackAllowlist:['127.0.0.1','localhost','[::1]'],lighthouseDefault:lighthouse.ci.collect.url,lighthouseEnvScript:scripts['audit:lighthouse'],missingRehearsalArguments:{exit:missing.status,stderr:missing.stderr},productionRequests:0};
 });
 await run('native-cms-and-download-token', async () => {
-  const result=spawnSync(process.execPath,['scripts/test-sanity-admin.mjs','--scenario=create-replay-lost-response-revisions'],{cwd:root,encoding:'utf8',timeout:120000,env:{PATH:process.env.PATH,HOME:process.env.HOME,NODE_ENV:'test',ROO_TEST_HOST:testHost}});
+  const result=spawnSync(process.execPath,['scripts/test-sanity-admin.mjs','--scenario=create-replay-lost-response-revisions'],{cwd:root,encoding:'utf8',timeout:120000,env:{PATH:process.env.PATH,HOME:process.env.HOME,NODE_ENV:'test',ROO_TEST_HOST:testHost,...Object.fromEntries(['TMPDIR','STORAGE_SOURCE','PG_BIN','POSTGREST_BIN','LD_LIBRARY_PATH'].filter(key=>process.env[key]).map(key=>[key,process.env[key]]))}});
   assert.equal(result.status,0,result.stderr+result.stdout);
   const proof=JSON.parse(fs.readFileSync('test-results/sanity-admin/create-replay-lost-response-revisions.json','utf8'));
   assert.equal(proof.passed,true);assert.equal(proof.cleanup.stopped,true);
