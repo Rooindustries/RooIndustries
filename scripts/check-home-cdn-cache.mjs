@@ -1,8 +1,9 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 const base = process.argv[2];
-const artifact = process.argv[3] || "home-cdn-cache-check.json";
-const usage = "Usage: node scripts/check-home-cdn-cache.mjs https://<deployment host> [artifact.json] ['{\"header\":\"value\"}']";
+const artifact = process.argv[3] || "test-results/home-cdn-cache-check.json";
+const usage = "Usage: npm run check:cdn -- https://<deployment host> [artifact.json] ['{\"header\":\"value\"}']";
 if (!base || !/^https:\/\//.test(base)) {
   console.error(usage);
   process.exit(2);
@@ -170,6 +171,7 @@ for (const entry of log.filter(isPrebuiltHtml)) {
   check(/max-age=0|no-cache|no-store/.test(entry.cacheControl || "") && !/s-maxage/.test(entry.cacheControl || ""), `${pathname} HTML reaches clients with max-age=0 and no s-maxage`, entry);
 }
 
+mkdirSync(dirname(artifact), { recursive: true });
 writeFileSync(artifact, JSON.stringify({ base, checkedAt: new Date(stamp).toISOString(), extraHeaderNames: Object.keys(extraHeaders), log, failures }, null, 2));
 for (const entry of log) console.log(`${entry.name.padEnd(40)} ${entry.method.padEnd(4)} ${entry.status} ${String(entry.cache).padEnd(9)} ${String(entry.contentType || "").padEnd(32)} vary: ${entry.vary || ""}`);
 if (failures.length) {
