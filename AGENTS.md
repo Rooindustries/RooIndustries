@@ -15,9 +15,9 @@ rooindustries.com sells remote PC game optimization to competitive players and s
 A change is done when it works everywhere its behavior reaches. Say which of these applied:
 
 - **Screens.** Phones (360 and 390 px wide) and desktop.
-- **Pages.** Every route in `src/lib/routes.js`, plus `/BIOSGuide`, the `/discord` redirect, `/upgrade/[slug]`, `/downloads/[slug]`, `/admin/*` and the 404 page.
+- **Pages.** Every `page.jsx` under `app/` (the routes in `src/lib/routes.js` plus the `/discord` redirect, `/upgrade/[slug]`, `/downloads/[slug]` and `/admin/*`), the static `/BIOSGuide` and the 404 page.
 - **Flows.** Packages, the booking dialog, `/payment`, then `/payment-success` or `/thank-you`; a `?ref=` link through to a paid booking; an admin publish through to the public page after revalidation.
-- **APIs and webhooks.** Everything under `app/api/`, including the payment provider webhooks.
+- **Route handlers.** Every `route.js` under `app/`: the APIs and payment provider webhooks in `app/api/`, the creator sign-in callback at `/auth/callback` and the Markdown routes.
 - **Formats.** The HTML page, its Markdown variant where one exists, `sitemap.xml`, `robots.txt` and `llms.txt`.
 - **Emails.** Booking emails (`src/server/api/ref/`) and creator account emails (`src/server/email/`).
 - **Tests.** CI runs Jest, the Playwright suites and the Postgres 17 suites (`.github/workflows/tests.yml`). Run the ones your change touches locally first.
