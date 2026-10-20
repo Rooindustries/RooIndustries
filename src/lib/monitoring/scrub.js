@@ -16,6 +16,7 @@ export const NO_DATA_COLLECTION = {
   databaseQueryData: false,
   queues: false,
   stackFrameVariables: false,
+  frameContextLines: 0,
 };
 
 function passesLuhn(digits) {
@@ -85,6 +86,7 @@ export function scrubEvent(event) {
     for (const frame of value.stacktrace?.frames ?? []) {
       if (frame.filename) frame.filename = withoutQuery(frame.filename);
       if (frame.abs_path) frame.abs_path = withoutQuery(frame.abs_path);
+      if (frame.module) frame.module = withoutQuery(frame.module);
     }
     if (value.value) value.value = scrubText(value.value);
   }
