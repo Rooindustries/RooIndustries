@@ -280,53 +280,7 @@ const buildOrganizationJsonLd = () => ({
   },
 });
 
-const buildHomePageJsonLd = (hero = HOME_COPY.hero) => ({
-  "@context": "https://schema.org",
-  "@graph": [
-    {
-      "@type": "WebSite",
-      "@id": `${siteUrl}/#website`,
-      name: SITE_NAME,
-      url: siteUrl,
-      publisher: {
-        "@id": `${siteUrl}/#organization`,
-      },
-    },
-    {
-      "@type": "WebPage",
-      "@id": `${siteUrl}/#webpage`,
-      url: siteUrl,
-      name: "Roo Industries | PC Game Optimization",
-      headline: `${hero.headingLine1} ${hero.headingLine2}`,
-      description:
-        "Roo Industries tunes BIOS, Windows, memory, GPU, and game settings around the games players actually play for smoother ranked games, higher FPS, lower input lag, and cleaner frametimes.",
-      isPartOf: {
-        "@id": `${siteUrl}/#website`,
-      },
-      publisher: {
-        "@id": `${siteUrl}/#organization`,
-      },
-      mainEntity: {
-        "@id": `${siteUrl}/#pc-game-optimization-service`,
-      },
-    },
-    {
-      "@type": "Service",
-      "@id": `${siteUrl}/#pc-game-optimization-service`,
-      name: "Remote PC Game Optimization",
-      serviceType: "PC game optimization",
-      url: siteUrl,
-      provider: {
-        "@id": `${siteUrl}/#organization`,
-      },
-      areaServed: "Worldwide",
-      description:
-        "Remote optimization for BIOS, Windows, memory, GPU, RAM, and in-game settings focused on FPS, input lag, frametime stability, and ranked-game performance.",
-    },
-  ],
-});
-
-const buildOfferCatalogJsonLd = (packages = []) => {
+const buildOfferCatalog = (packages = []) => {
   const itemListElement = buildPackageOffers(packages).flatMap((pkg) => {
     const { price } = getPackagePricePresentation(
       pkg.title,
@@ -345,12 +299,73 @@ const buildOfferCatalogJsonLd = (packages = []) => {
   });
   if (!itemListElement.length) return null;
   return {
-    "@context": "https://schema.org",
     "@type": "OfferCatalog",
     "@id": `${siteUrl}/packages#offer-catalog`,
     name: "PC Game Optimization Packages",
     url: `${siteUrl}/packages`,
     itemListElement,
+  };
+};
+
+const buildServiceNode = (catalog) => ({
+  "@type": "Service",
+  "@id": `${siteUrl}/#pc-game-optimization-service`,
+  name: "Remote PC Game Optimization",
+  serviceType: "PC game optimization",
+  url: siteUrl,
+  provider: {
+    "@id": `${siteUrl}/#organization`,
+  },
+  areaServed: "Worldwide",
+  description:
+    "Remote optimization for BIOS, Windows, memory, GPU, RAM, and in-game settings focused on FPS, input lag, frametime stability, and ranked-game performance.",
+  ...(catalog ? { hasOfferCatalog: { "@id": catalog["@id"] } } : {}),
+});
+
+const buildHomePageJsonLd = (hero = HOME_COPY.hero, packages = []) => {
+  const catalog = buildOfferCatalog(packages);
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": `${siteUrl}/#website`,
+        name: SITE_NAME,
+        url: siteUrl,
+        publisher: {
+          "@id": `${siteUrl}/#organization`,
+        },
+      },
+      {
+        "@type": "WebPage",
+        "@id": `${siteUrl}/#webpage`,
+        url: siteUrl,
+        name: "Roo Industries | PC Game Optimization",
+        headline: `${hero.headingLine1} ${hero.headingLine2}`,
+        description:
+          "Roo Industries tunes BIOS, Windows, memory, GPU, and game settings around the games players actually play for smoother ranked games, higher FPS, lower input lag, and cleaner frametimes.",
+        isPartOf: {
+          "@id": `${siteUrl}/#website`,
+        },
+        publisher: {
+          "@id": `${siteUrl}/#organization`,
+        },
+        mainEntity: {
+          "@id": `${siteUrl}/#pc-game-optimization-service`,
+        },
+      },
+      buildServiceNode(catalog),
+      ...(catalog ? [catalog] : []),
+    ],
+  };
+};
+
+const buildOfferCatalogJsonLd = (packages = []) => {
+  const catalog = buildOfferCatalog(packages);
+  if (!catalog) return null;
+  return {
+    "@context": "https://schema.org",
+    "@graph": [buildServiceNode(catalog), catalog],
   };
 };
 
