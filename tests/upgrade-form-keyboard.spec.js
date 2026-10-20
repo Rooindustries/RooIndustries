@@ -19,6 +19,9 @@ for (const route of ["/upgrade/max", "/upgrade-xoc"]) {
       await email.press("Enter");
       await expect(page.getByRole("alert").filter({ hasText: "Please enter the Order ID from your confirmation email." })).toBeVisible();
       await expect(order).toHaveAccessibleDescription(/booking email \(labelled "Order ID"\)/);
+      await expect(order).toHaveAttribute("aria-invalid", "true");
+      await expect(order).toHaveAccessibleDescription(/Please enter the Order ID from your confirmation email\./);
+      await expect(email).not.toHaveAttribute("aria-invalid", "true");
       const [emailBox, labelBox, orderBox] = await Promise.all([
         email.boundingBox(),
         page.getByText("Enter your Order ID", { exact: true }).boundingBox(),
@@ -26,6 +29,20 @@ for (const route of ["/upgrade/max", "/upgrade-xoc"]) {
       ]);
       expect(labelBox.y).toBeGreaterThan(emailBox.y + emailBox.height);
       expect(labelBox.y).toBeLessThan(orderBox.y);
+    });
+
+    test("a missing booking email marks the email field", async ({ page, flow }) => {
+      await flow.upgrade(route);
+      const email = page.getByRole("textbox", { name: "Booking email", exact: true });
+      const order = page.getByRole("textbox", { name: "Enter your Order ID", exact: true });
+      await email.fill("");
+      await order.press("Enter");
+      await expect(page.getByRole("alert").filter({ hasText: "Please enter the email used on the original booking." })).toBeVisible();
+      await expect(email).toHaveAttribute("aria-invalid", "true");
+      await expect(email).toHaveAccessibleDescription("Please enter the email used on the original booking.");
+      await expect(order).not.toHaveAttribute("aria-invalid", "true");
+      await email.fill("visitor@example.invalid");
+      await expect(email).not.toHaveAttribute("aria-invalid", "true");
     });
   });
 }

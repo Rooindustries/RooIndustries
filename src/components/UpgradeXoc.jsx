@@ -35,6 +35,8 @@ export default function UpgradeXoc() {
   const [loading, setLoading] = useState(false);
   const [eligibility, setUpgradeInfo] = useState(null);
   const [error, setError] = useState(null);
+  const [errorField, setErrorField] = useState(null);
+  const fieldInError = error ? errorField : null;
   const eligibilityAbortRef = useRef(null);
   useEffect(() => () => eligibilityAbortRef.current?.abort(), []);
 
@@ -45,15 +47,18 @@ export default function UpgradeXoc() {
 
   async function handleCheckOrder() {
     setError(null);
+    setErrorField(null);
     setUpgradeInfo(null);
 
     const trimmed = orderId.trim();
     if (!trimmed) {
+      setErrorField("order");
       setError("Please enter the Order ID from your confirmation email. ");
       return;
     }
     const trimmedEmail = orderEmail.trim();
     if (!trimmedEmail) {
+      setErrorField("email");
       setError("Please enter the email used on the original booking.");
       return;
     }
@@ -179,6 +184,8 @@ export default function UpgradeXoc() {
           </label>
           <input
             id="upgrade-booking-email"
+            aria-invalid={fieldInError === "email" ? "true" : undefined}
+            aria-describedby={fieldInError === "email" ? "upgrade-order-error" : undefined}
             value={orderEmail}
             onChange={(e) => {
               setOrderEmail(e.target.value);
@@ -204,7 +211,8 @@ export default function UpgradeXoc() {
         <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
           <input
             id="upgrade-order-id"
-            aria-describedby="upgrade-order-id-help"
+            aria-invalid={fieldInError === "order" ? "true" : undefined}
+            aria-describedby={fieldInError === "order" ? "upgrade-order-id-help upgrade-order-error" : "upgrade-order-id-help"}
             value={orderId}
             onChange={(e) => {
               setOrderId(e.target.value);
@@ -228,7 +236,7 @@ export default function UpgradeXoc() {
         </div>
 
         {error && (
-          <p role="alert" className="mt-3 text-sm text-danger-text bg-danger-soft border border-danger-border rounded-md px-3 py-2">
+          <p id="upgrade-order-error" role="alert" className="mt-3 text-sm text-danger-text bg-danger-soft border border-danger-border rounded-md px-3 py-2">
             {error}
           </p>
         )}
