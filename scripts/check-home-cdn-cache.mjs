@@ -176,9 +176,9 @@ const triggerRebuild = async (path) => {
 };
 const readRebuilt = async (name, path, headers, since) => {
   for (let attempt = 1; ; attempt += 1) {
-    const entry = await hit(`${name} ${attempt}`, path, { headers });
-    const rebuilt = entry.status === 200 && entry.cache === "HIT" && entry.age !== null && Number(entry.age) <= Math.ceil((Date.now() - since) / 1000);
-    if (rebuilt || attempt === 30) return { ...entry, rebuilt };
+    const poll = await hit(`${name} poll ${attempt}`, `${path}?ref=${leakToken}&gclid=${leakToken}`, { headers });
+    const rebuilt = poll.status === 200 && poll.cache === "HIT" && poll.age !== null && Number(poll.age) <= Math.ceil((Date.now() - since) / 1000);
+    if (rebuilt || attempt === 30) return { ...(await hit(name, path, { headers })), rebuilt };
     await sleep(2000);
   }
 };
