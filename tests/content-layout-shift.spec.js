@@ -62,7 +62,6 @@ for (const [route, resource, heading] of [
           }));
           await request.fallback();
         });
-        const navigationStartedAt = Date.now();
         const response = await page.goto(route, { waitUntil: "load" });
         expect(response.status()).toBe(200);
         await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
@@ -87,10 +86,7 @@ for (const [route, resource, heading] of [
           const documentType = route === "/tools" ? "tool" : "review";
           serverRequests = fixture.requests.filter((entry) => entry.body?.p_document_types?.includes(documentType));
           expect(serverRequests.length).toBeGreaterThan(0);
-          if (width === 1440 && run === 1) {
-            if (route === "/tools") expect(await response.headerValue("x-nextjs-prerender")).toMatch(/^1(, 1)*$/);
-            else expect(serverRequests.some(entry => entry.receivedAt >= navigationStartedAt)).toBe(true);
-          }
+          if (width === 1440 && run === 1) expect(await response.headerValue("x-nextjs-prerender")).toMatch(/^1(, 1)*$/);
           for (const entry of serverRequests) {
             expect(entry.delayMs).toBe(650);
             expect(entry.respondedAt - entry.receivedAt).toBeGreaterThanOrEqual(650);

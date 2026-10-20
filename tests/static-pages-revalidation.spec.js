@@ -3,6 +3,7 @@ const { test, expect } = require("@playwright/test");
 test.skip(process.env.TOOLING_STATIC_REVALIDATION !== "1", "Needs its own server with a cold content cache: npm run test:static:revalidation.");
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+const reviewsGallery = body => body.match(/\\"reviewsGallery\\":(null|\[\]?)/)?.[1] ?? null;
 
 const contentControl = (request, baseURL) => async data => {
   const contentURL = new URL(baseURL);
@@ -55,7 +56,7 @@ test("/packages and /faq keep their last content when revalidation cannot read i
   }
 });
 
-test("/about, /contact, /privacy, /terms, /tools and /meet-the-team keep their last content when revalidation cannot read it", async ({ request, baseURL }, testInfo) => {
+test("/about, /contact, /privacy, /terms, /tools, /meet-the-team and /reviews keep their last content when revalidation cannot read it", async ({ request, baseURL }, testInfo) => {
   test.setTimeout(180000);
   const control = contentControl(request, baseURL);
   const timeline = [];
@@ -67,6 +68,7 @@ test("/about, /contact, /privacy, /terms, /tools and /meet-the-team keep their l
     "/terms": "Synthetic local information",
     "/tools": "Fixture layout tool 1",
     "/meet-the-team": "Fixture Member Alpha",
+    "/reviews": "Community Reviews",
   };
   const fallbacks = {
     "/contact": "Ready to optimize your PC?",
@@ -74,13 +76,14 @@ test("/about, /contact, /privacy, /terms, /tools and /meet-the-team keep their l
     "/meet-the-team": "Wailshark",
   };
   try {
-    await control({ outage: ["contact", "privacyPolicy", "terms", "tool", "meetTheTeam"] });
+    await control({ outage: ["contact", "privacyPolicy", "terms", "tool", "meetTheTeam", "review"] });
     await wait(61000);
     for (const [route, text] of Object.entries(expected)) {
       const trigger = await read(route, "first request after the revalidation window");
       expect(trigger.status, route).toBe(200);
       expect(trigger.cache, route).toBe("STALE");
       expect(trigger.body, route).toContain(text);
+      if (route === "/reviews") expect(reviewsGallery(trigger.body), route).toBe("[]");
     }
     for (const [route, text] of Object.entries(expected)) {
       await expect.poll(async () => (await read(route, "waiting for the failed revalidation to settle")).cache, { timeout: 20000 }).toBe("HIT");
@@ -90,6 +93,7 @@ test("/about, /contact, /privacy, /terms, /tools and /meet-the-team keep their l
       if (fallbacks[route]) expect.soft(after.body.includes(fallbacks[route]), route).toBe(false);
       if (route === "/privacy") expect.soft(after.headings, route).toEqual(["Privacy Policy"]);
       if (route === "/terms") expect.soft(after.headings, route).toEqual(["Terms of Service"]);
+      if (route === "/reviews") expect.soft(reviewsGallery(after.body), route).toBe("[]");
     }
   } finally {
     await control({ reset: true });

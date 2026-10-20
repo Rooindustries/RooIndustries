@@ -132,7 +132,7 @@ test.describe("home page caching", () => {
     expect(redirect.value("vercel-cdn-cache-control")).toBe("no-store");
   });
 
-  for (const path of ["/about", "/contact", "/privacy"]) {
+  for (const path of ["/about", "/contact", "/privacy", "/reviews"]) {
     for (const method of ["GET", "HEAD"]) {
       test(`${method} ${path} gets the same caching as /`, async ({ request }, testInfo) => {
         const name = `${path.slice(1)}-${method.toLowerCase()}`;
@@ -153,7 +153,7 @@ test.describe("home page caching", () => {
     }
   }
 
-  for (const path of ["/booking", "/payment", "/faq", "/reviews"]) {
+  for (const path of ["/booking", "/payment", "/faq"]) {
     test(`${path} is not cached at the CDN`, async ({ request }, testInfo) => {
       const page = await served(request, testInfo, `page${path.replace(/\//g, "-")}`, path);
       expect(page.value("vercel-cdn-cache-control") ?? "").not.toContain("s-maxage");
