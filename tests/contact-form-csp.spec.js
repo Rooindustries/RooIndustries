@@ -24,7 +24,7 @@ test.beforeEach(async ({ context, baseURL }) => {
   });
 });
 
-for (const outcome of ["success", "error"]) {
+for (const outcome of ["success", "error", "form-error", "offline"]) {
   test(`contact submission reaches Formspree and shows ${outcome}`, async ({ page, baseURL }, testInfo) => {
     const submissions = [];
     const fields = {
@@ -48,13 +48,19 @@ for (const outcome of ["success", "error"]) {
       }
       expect(request.method()).toBe("POST");
       submissions.push({ url: request.url(), body: request.postData() });
+      if (outcome === "offline") {
+        await route.abort("internetdisconnected");
+        return;
+      }
       await route.fulfill({
-        status: outcome === "success" ? 200 : 422,
+        status: outcome === "success" ? 200 : outcome === "form-error" ? 403 : 422,
         contentType: "application/json",
         headers: { "access-control-allow-origin": new URL(baseURL).origin },
         body: JSON.stringify(outcome === "success"
           ? { next: "/contact", ok: true }
-          : { errors: [{ field: "email", code: "TYPE_EMAIL", message: "Synthetic email error" }] }),
+          : outcome === "form-error"
+            ? { errors: [{ code: "FORM_DISABLED", message: "Synthetic form error" }] }
+            : { errors: [{ field: "email", code: "TYPE_EMAIL", message: "Synthetic email error" }] }),
       });
     });
 
@@ -73,8 +79,14 @@ for (const outcome of ["success", "error"]) {
       }
       if (outcome === "success") {
         await expect(page.getByText("Thank you! Your message has been sent.")).toBeVisible();
-      } else {
+      } else if (outcome === "error") {
         await expect(page.getByText("Synthetic email error", { exact: false })).toBeVisible();
+        await expect(page.locator("form").getByRole("alert")).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Send Message", exact: true })).toBeEnabled();
+      } else {
+        await expect(page.locator("form").getByRole("alert")).toContainText("Your message didn't send");
+        await expect(page.locator("form").getByRole("alert")).toContainText("serviroo@rooindustries.com");
+        await expect(page.getByPlaceholder("Tell me about your PC and what you'd like to optimize...", { exact: true })).toHaveValue(fields.message);
         await expect(page.getByRole("button", { name: "Send Message", exact: true })).toBeEnabled();
       }
       expect(await page.evaluate(() => window.__contactCspViolations)).toEqual([]);

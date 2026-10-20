@@ -24,7 +24,7 @@ import { getPublicContent } from "../lib/publicContentClient";
 jest.mock("@formspree/react", () => ({
   ValidationError: () => null,
   useForm: () => [
-    { errors: [], submitting: false, succeeded: false },
+    { errors: null, submitting: false, succeeded: false },
     jest.fn(),
   ],
 }));
