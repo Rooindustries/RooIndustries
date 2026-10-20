@@ -164,20 +164,26 @@ for (const path of PREBUILT_ROUTES.filter((route) => !PREBUILT_PATHS.includes(ro
   for (const entry of [first, repeat, afterHead]) check(entry.status === 200 && isHtml(entry) && entry.bytes > 10000, `${path} HTML request gets the full HTML page`, entry);
 }
 
-let waitSeconds = 0;
-for (const path of REVALIDATING_ROUTES) {
-  const ageProbe = await hit(`${path} age probe`, path);
-  const age = Number(ageProbe.age) || 0;
-  waitSeconds = Math.max(waitSeconds, age < 61 ? 62 - age : 62);
-}
-console.log(`Waiting ${waitSeconds}s for the prebuilt pages to go stale before the leak check`);
-await sleep(waitSeconds * 1000);
 const leakToken = `leak${stamp}`;
-for (const path of REVALIDATING_ROUTES) await hit(`${path} leak trigger`, `${path}?ref=${leakToken}&gclid=${leakToken}`);
+const triggerRebuild = async (path) => {
+  let trigger;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    trigger = await hit(`${path} leak trigger ${attempt}`, `${path}?ref=${leakToken}&gclid=${leakToken}`);
+    if (trigger.status !== 200 || trigger.cache === "STALE") return trigger;
+    const age = Number(trigger.age) || 0;
+    await sleep((age < 61 ? 62 - age : 2) * 1000);
+  }
+  return trigger;
+};
+console.log("Waiting for each revalidating page to go stale before the leak check");
+const triggers = await Promise.all(REVALIDATING_ROUTES.map(triggerRebuild));
 await sleep(5000);
-for (const path of REVALIDATING_ROUTES) {
+for (const [index, path] of REVALIDATING_ROUTES.entries()) {
+  check(triggers[index].status === 200 && triggers[index].cache === "STALE", `the ${path} leak trigger reached a stale page and started a rebuild`, triggers[index]);
   const leakHtml = await hit(`${path} html after leak trigger`, path);
   const leakRsc = await hit(`${path} rsc after leak trigger`, path, { headers: { ...HTML, rsc: "1" } });
+  check(leakHtml.status === 200 && isHtml(leakHtml), `${path} HTML after the leak trigger is a full page`, leakHtml);
+  check(leakRsc.status === 200 && String(leakRsc.contentType).includes("text/x-component"), `${path} RSC after the leak trigger is an RSC payload`, leakRsc);
   check(!leakHtml.body.includes(leakToken), `a rebuild triggered by a query keeps that query out of the ${path} HTML`, leakHtml);
   check(!leakRsc.body.includes(leakToken), `a rebuild triggered by a query keeps that query out of the ${path} RSC payload`, leakRsc);
 }
