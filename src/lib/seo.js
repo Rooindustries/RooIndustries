@@ -283,7 +283,8 @@ const buildOrganizationJsonLd = () => ({
 const parseUsdAmount = (value) => {
   if (/[€£₹]/.test(String(value || ""))) return null;
   const amount = toMoney(value);
-  return amount > 0 ? String(amount) : null;
+  const shown = Number(String(value || "").replace(/[\s,$]/g, ""));
+  return amount > 0 && shown === amount ? String(amount) : null;
 };
 
 const buildOfferCatalog = (packages = []) => {
