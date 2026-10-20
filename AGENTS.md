@@ -39,8 +39,9 @@ A file is a money path when a payment, booking, hold, price, discount, referral 
 - `app/api/payment/`, `app/api/holdSlot/`, `app/api/releaseHold/`, `app/api/ref/`, `app/api/admin/referral-creators/`
 - `src/server/api/payment/`, `src/server/booking/`, `src/server/api/ref/`, `src/server/referrals/`
 - `src/server/commerce/`, `src/server/data/documentClient.js`, `src/server/supabase/` (the stores those decisions read and write)
-- `src/lib/packagePricing.js`, `src/lib/checkoutStorage.js`, `src/lib/checkoutCodes.js`, `src/lib/salesAttribution.ts`
-- `src/components/BookingForm.jsx`, `BookingModal.jsx`, `Packages.jsx`, `Payment.jsx`, `PaymentSuccess.jsx`, `ReservationBanner.jsx`
+- `src/lib/packagePricing.js`, `src/lib/checkoutStorage.js`, `src/lib/checkoutCodes.js`, `src/lib/salesAttribution.ts`, `src/lib/useUpgradeEligibility.js`
+- `src/components/BookingForm.jsx`, `BookingModal.jsx`, `Packages.jsx`, `Payment.jsx`, `PaymentSuccess.jsx`, `ReservationBanner.jsx`, `UpgradeLink.jsx`, `UpgradeXoc.jsx`, `RefDashboard.jsx`
+- `src/components/admin/ReferralCreatorEditor.jsx`
 - `src/next/AppClientRuntime.jsx` (referral capture) and `middleware.js` (its query handling reaches `?ref`)
 - `supabase/migrations/` and the `crons` in `vercel.json`
 
@@ -65,7 +66,7 @@ A PR that touches one:
 - The passive referral lives in `sessionStorage["referral_session"]` (`src/lib/checkoutStorage.js:125-134`). There is no visitor attribution cookie; `REF_SESSION_COOKIE` is the creator portal login (`src/server/api/ref/auth.js:5,124-137,158`).
   - An applied code is also copied into the booking draft (`booking_draft.packages[<package>].checkoutCodes.referral`) and the checkout state (`checkout_booking_state.referralCode`). (`src/components/BookingForm.jsx:1283-1297,1303-1313,2377,2405`)
   - Analytics attribution is a separate journey snapshot, not a copy of the applied code. Applying another code doesn't update it, so a booking can send `referralCode` B with an analytics `creatorCode` A. (`src/lib/salesAttribution.ts:53-68`, `src/components/BookingForm.jsx:2381`)
-  - A fresh tab, window or browser starts empty. A same-origin page this tab opens with its opener kept gets a copy of this tab's session storage; one opened with `rel="noopener"`, like the booking FAQ link (`src/components/BookingForm.jsx:3005-3008`), starts empty. A restored session keeps its own. ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage))
+  - An independently opened tab or window, with no session to restore, starts empty. A same-origin tab or window opened with its opener kept initially copies that opener's session storage; one opened with `rel="noopener"`, like the booking FAQ link (`src/components/BookingForm.jsx:3005-3008`), starts empty. A restored session keeps its own. ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage))
 - At the site runtime and the packages section, a non-empty `?ref=` replaces the stored code, and an empty or missing `?ref` leaves it alone. The capture points:
   - the site runtime, outside `/booking`, `/payment`, `/payment-success` and `/thank-you` (`src/next/AppClientRuntime.jsx:10,82`);
   - the packages section, on mount (`src/components/Packages.jsx:107-117`);
@@ -99,7 +100,10 @@ A PR that touches one:
 - A slot with an active booking lock or a blocking booking can't be held. This is rechecked after the hold read. (`src/server/booking/holdSlot.js:304-311,318-335`)
 - A slot that has already started can't be held. (`src/server/booking/holdSlot.js:337-342`)
 - A hold lasts 20 minutes, and starting a payment resets it to 20 minutes from payment start. (`src/server/booking/holdSlot.js:23,344`, `src/server/api/payment/paymentRecord.js:23`, `src/server/api/payment/flow.js:2899,3016-3025`)
-- The client's refresh and release calls refuse an unexpired hold in `payment_pending`. (`src/server/booking/releaseHold.js:67-72`, `src/server/booking/holdSlot.js:132-136,257-266,358-367`) An expired one is no longer active, so it can be reclaimed with a fresh nonce like any expired hold. (`src/server/booking/holdSlot.js:28-36,346,415-442`)
+- Payment-pending holds have separate guards for each client operation:
+  - Release requires an unexpired matching token; with that token, `payment_pending` returns 409 without checking the stored hold expiry. (`src/server/booking/releaseHold.js:56-72`, `src/server/booking/holdToken.js:75-89`)
+  - A move to a different slot returns 409 when a matching, unexpired previous token proves ownership of a `payment_pending` hold. An expired token does not pass that guard; acquiring another available slot does not release the previous pending hold. (`src/server/booking/holdSlot.js:105-147,243-266,462-466`, `src/server/booking/holdToken.js:75-89`)
+  - Same-slot refresh refuses `payment_pending` while the stored hold is active. An expired target hold can be reclaimed with a fresh nonce, subject to the other slot and booking checks. (`src/server/booking/holdSlot.js:28-36,346-367,415-442`)
   - A provider-confirmed unpaid cancellation (the visitor changes payment method) reopens its own unexpired hold with a new nonce. (`src/server/api/payment/flow.js:3502-3576,3680-3693,3730-3785`, `src/server/api/payment/cancel.js:9-14`) If that hold has expired, the payment is abandoned and the slot released, with no new hold. (`src/server/api/payment/flow.js:3661-3677`) Upgrades have no slot hold.
 - Each hold generation (hold id plus nonce) has at most one payment record, and a second start for it reuses that record. (`src/server/api/payment/paymentRecord.js:136-137`, `src/server/api/payment/flow.js:1273,1291-1300,2860-2878`)
 - An ordinary booking commits only against an active, unexpired hold for the same time, package, payment record and backend. (`src/server/api/ref/bookingCommit.js:59-77,166-169`) The exceptions:
