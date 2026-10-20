@@ -23,6 +23,9 @@ import { getWarrantyCallout } from "../lib/packageWarranty";
 import {
   BOOKING_DRAFT_STORAGE_KEY,
   CHECKOUT_BOOKING_STORAGE_KEY,
+  clearReferralDismissal,
+  dismissReferralCode,
+  isReferralDismissed,
   persistBookingPackageSelection,
   readStoredCheckoutBooking,
   updateStoredCheckoutHold,
@@ -651,10 +654,15 @@ export default function BookingForm() {
       const normalizedDismissed = dismissedReferralCode.toLowerCase();
       if (
         referralQuery.code &&
-        referralQuery.code.toLowerCase() !== normalizedDismissed
+        referralQuery.code.toLowerCase() !== normalizedDismissed &&
+        !isReferralDismissed(referralQuery.code)
       ) {
         sessionStorage.setItem(REFERRAL_STORAGE_KEY, referralQuery.code);
-      } else if (referralQuery.present || normalizedDismissed) {
+      } else if (
+        referralQuery.present ||
+        (normalizedDismissed &&
+          String(sessionStorage.getItem(REFERRAL_STORAGE_KEY) || "").trim().toLowerCase() === normalizedDismissed)
+      ) {
         sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
       }
     } catch {
@@ -1709,6 +1717,7 @@ export default function BookingForm() {
     setAppliedReferral(safeReferral);
     setAppliedCoupon(nextCoupon);
     setDismissedReferralCode("");
+    clearReferralDismissal();
     storeReferralSession(safeReferral.code || codeInput.trim());
     persistCheckoutCodes({ referral: safeReferral, coupon: nextCoupon });
     closeCodeEntry();
@@ -1778,7 +1787,7 @@ export default function BookingForm() {
     autoReferralAttemptRef.current = "";
     setAppliedReferral(null);
     setDismissedReferralCode(removedCode);
-    storeReferralSession("");
+    dismissReferralCode(removedCode);
     persistCheckoutCodes({
       referral: null,
       coupon: sanitizeCouponForCheckout(appliedCoupon),
@@ -1934,7 +1943,8 @@ export default function BookingForm() {
     const autoCode = referralQuery.code || storedReferral;
     if (
       !autoCode ||
-      autoCode.toLowerCase() === dismissedReferralCode.toLowerCase()
+      autoCode.toLowerCase() === dismissedReferralCode.toLowerCase() ||
+      isReferralDismissed(autoCode)
     ) {
       return;
     }

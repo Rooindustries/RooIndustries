@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { isProductionBrowser } from "../lib/productionBrowser";
 import { Analytics } from "@vercel/analytics/react";
@@ -70,19 +70,41 @@ export const loadSeorceScript = ({
   return true;
 };
 
-function ReferralCapture() {
+const referralAddress = (pathname, search) => `${pathname}|${new URLSearchParams(search || "").get("ref") || ""}`;
+
+function ReferralCapture({ restoredAddress }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const lastReferral = useRef(null);
 
   useEffect(() => {
-    if (pathname && !CHECKOUT_PATHS.includes(pathname)) rememberReferralFromSearch(searchParams?.toString());
-  }, [pathname, searchParams]);
+    if (!pathname || CHECKOUT_PATHS.includes(pathname)) return;
+    const search = searchParams?.toString() || "";
+    const address = referralAddress(pathname, search);
+    if (address !== referralAddress(window.location.pathname, window.location.search)) return;
+    const restored = address === restoredAddress.current;
+    if (!restored) restoredAddress.current = null;
+    const referral = String(new URLSearchParams(search).get("ref") || "").trim();
+    if (!referral) return;
+    const seen = referral === lastReferral.current;
+    lastReferral.current = referral;
+    if (!seen && !restored) rememberReferralFromSearch(search);
+  }, [pathname, searchParams, restoredAddress]);
 
   return null;
 }
 
 export default function AppClientRuntime() {
   const [analyticsEnabled, setAnalyticsEnabled] = useState(false);
+  const restoredAddress = useRef(null);
+
+  useLayoutEffect(() => {
+    const rememberRestoredAddress = () => {
+      restoredAddress.current = referralAddress(window.location.pathname, window.location.search);
+    };
+    window.addEventListener("popstate", rememberRestoredAddress, true);
+    return () => window.removeEventListener("popstate", rememberRestoredAddress, true);
+  }, []);
 
   useEffect(() => {
     setAnalyticsEnabled(isProductionBrowser());
@@ -107,7 +129,7 @@ export default function AppClientRuntime() {
   return (
     <>
       <Suspense fallback={null}>
-        <ReferralCapture />
+        <ReferralCapture restoredAddress={restoredAddress} />
       </Suspense>
       {analyticsEnabled ? <Analytics beforeSend={sanitizeAnalyticsEvent} /> : null}
     </>

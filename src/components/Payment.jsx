@@ -11,6 +11,7 @@ import { trackConfirmedPurchase } from "../lib/analytics";
 import { preloadConfirmationPage, preloadConfirmationPages } from "../lib/confirmationPages";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
 import { beginCheckoutConfirmation } from "../lib/checkoutConfirmation";
+import { clearReferralDismissal, dismissReferralCode, isReferralDismissed } from "../lib/checkoutStorage";
 import {
   calculateCheckoutDiscounts,
   formatCouponValue,
@@ -704,9 +705,14 @@ export default function Payment({ hideFooter = false }) {
     if (!hydrated || !packageTitle) return;
 
     const params = new URLSearchParams(location.search);
-    const referralCode = String(
-      params.get("ref") || bookingData.referralCode || readStoredReferral() || ""
-    ).trim();
+    const referralCode =
+      [
+        params.get("ref"),
+        bookingData.referralCode,
+        readStoredReferral(),
+      ]
+        .map((code) => String(code || "").trim())
+        .find((code) => code && !isReferralDismissed(code)) || "";
     const couponCode = String(bookingData.couponCode || "").trim();
     let active = true;
     setPreApplyingCodes(true);
@@ -1501,6 +1507,7 @@ export default function Payment({ hideFooter = false }) {
     if (creatingFree || validating || validatingCoupon) return;
     const normalizedCode = String(code || "").trim();
     if (!normalizedCode) {
+      if (referral?.code) dismissReferralCode(referral.code);
       setReferral(null);
       setReferralError("");
       writeStoredReferral("");
@@ -1546,6 +1553,7 @@ export default function Payment({ hideFooter = false }) {
       }
       setReferral(safeReferral);
       setReferralInput(safeReferral.code);
+      clearReferralDismissal();
       writeStoredReferral(safeReferral.code);
       if (coupon?.canCombineWithReferral === false) {
         setCoupon(null);
@@ -1592,6 +1600,7 @@ export default function Payment({ hideFooter = false }) {
         }
         setReferral(safeReferral);
         setReferralInput(safeReferral.code);
+        clearReferralDismissal();
         writeStoredReferral(safeReferral.code);
         setCoupon(null);
         setCouponInput("");

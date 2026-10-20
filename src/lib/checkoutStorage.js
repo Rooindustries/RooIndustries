@@ -123,12 +123,40 @@ export const migrateCheckoutStorageToSession = () => {
 };
 
 const REFERRAL_SESSION_STORAGE_KEY = "referral_session";
+const REFERRAL_DISMISSED_STORAGE_KEY = "referral_dismissed";
+
+export const isReferralDismissed = (code) => {
+  if (typeof window === "undefined") return false;
+  const normalized = String(code || "").trim().toLowerCase();
+  if (!normalized) return false;
+  try {
+    return String(window.sessionStorage.getItem(REFERRAL_DISMISSED_STORAGE_KEY) || "").trim().toLowerCase() === normalized;
+  } catch {
+    return true;
+  }
+};
 
 export const rememberReferralFromSearch = (search) => {
   if (typeof window === "undefined") return;
   const code = String(new URLSearchParams(search || "").get("ref") || "").trim();
-  if (!code) return;
+  if (!code || isReferralDismissed(code)) return;
   try {
     window.sessionStorage.setItem(REFERRAL_SESSION_STORAGE_KEY, code);
+  } catch {}
+};
+
+export const dismissReferralCode = (code) => {
+  if (typeof window === "undefined") return;
+  try {
+    const normalized = String(code || "").trim();
+    if (normalized) window.sessionStorage.setItem(REFERRAL_DISMISSED_STORAGE_KEY, normalized);
+    window.sessionStorage.removeItem(REFERRAL_SESSION_STORAGE_KEY);
+  } catch {}
+};
+
+export const clearReferralDismissal = () => {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(REFERRAL_DISMISSED_STORAGE_KEY);
   } catch {}
 };

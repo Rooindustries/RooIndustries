@@ -10,14 +10,13 @@ import {
 import homeCopy from "../lib/homeCopy";
 import packageContent from "../lib/packageContent";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
-import { persistBookingPackageSelection } from "../lib/checkoutStorage";
+import { persistBookingPackageSelection, rememberReferralFromSearch } from "../lib/checkoutStorage";
 import { trackEvent } from "../lib/analytics";
 import { getSessionAvailability } from "../lib/sessionAvailability";
 
 const loadPackageDetails = () => import("./PackageDetailsModal");
 const PackageDetailsModal = lazy(loadPackageDetails);
 
-const REFERRAL_STORAGE_KEY = "referral_session";
 const AVAILABILITY_REFRESH_INTERVAL_MS = 60_000;
 const { buildPackageOffers } = packageContent;
 const { HOME_COPY } = homeCopy;
@@ -105,16 +104,7 @@ export default function Packages({
   };
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const ref = params.get("ref");
-
-    if (ref) {
-      try {
-        sessionStorage.setItem(REFERRAL_STORAGE_KEY, ref);
-      } catch (e) {
-        console.error("Failed to store referral from link:", e);
-      }
-    }
+    rememberReferralFromSearch(window.location.search);
 
     if (packages.length === 0) {
       const cachedPackages = readHomeSectionData(HOME_SECTION_DATA_KEYS.packagesList);
