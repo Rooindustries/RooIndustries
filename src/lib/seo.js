@@ -22,7 +22,7 @@ const routeMeta = {
   "/benchmarks": {
     title: "Before & After PC Optimization Benchmarks | Roo Industries",
     description:
-      "Before and after benchmark screenshots from real Roo Industries tuning sessions, each one shown next to that client's own review of how their PC runs now.",
+      "Before and after benchmark screenshots from real Roo Industries tuning sessions, run on the clients' own PCs. No lab rigs, just the numbers they got.",
     noindex: false,
   },
   "/reviews": {
