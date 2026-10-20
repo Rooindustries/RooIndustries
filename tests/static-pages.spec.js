@@ -91,28 +91,35 @@ for (const [route, content] of [
 }
 
 test("a rebuild triggered by a query keeps that query out of /about, /contact and /privacy", async ({ request }, testInfo) => {
-  test.setTimeout(180000);
+  test.setTimeout(240000);
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-  const results = await Promise.all(["/about", "/contact", "/privacy"].map(async route => {
-    const probe = `leakprobe${route.slice(1)}${Date.now()}`;
-    const deadline = Date.now() + 75000;
-    let trigger = null;
-    while (!trigger && Date.now() < deadline) {
-      const response = await request.get(`${route}?ref=${probe}&gclid=${probe}`, { headers: { accept: "text/html" }, maxRedirects: 0 });
-      await response.body();
-      if (response.headers()["x-nextjs-cache"] === "STALE") trigger = { status: response.status(), at: Date.now() };
-      else await wait(1000);
-    }
-    await wait(3000);
-    const html = await (await request.get(route, { headers: { accept: "text/html" } })).text();
-    const rsc = await (await request.get(route, { headers: { accept: "text/html", rsc: "1" } })).text();
-    return { route, trigger, htmlLeaked: html.includes(probe), rscLeaked: rsc.includes(probe) };
-  }));
+  const results = [];
+  for (const [visit, triggers] of [
+    ["page", { "/about": ["GET", {}], "/contact": ["GET", {}], "/privacy": ["GET", {}] }],
+    ["next-action header", { "/about": ["GET", { "next-action": "x" }], "/contact": ["HEAD", { "next-action": "x" }], "/privacy": ["GET", { "next-action": "x" }] }],
+  ]) {
+    results.push(...await Promise.all(Object.entries(triggers).map(async ([route, [method, headers]]) => {
+      const probe = `leakprobe${route.slice(1)}${Date.now()}`;
+      const deadline = Date.now() + 75000;
+      let trigger = null;
+      while (!trigger && Date.now() < deadline) {
+        const response = await request.fetch(`${route}?ref=${probe}&gclid=${probe}`, { method, headers: { accept: "text/html", ...headers }, maxRedirects: 0 });
+        await response.body();
+        if (response.headers()["x-nextjs-cache"] === "STALE") trigger = { status: response.status(), at: Date.now() };
+        else await wait(1000);
+      }
+      await wait(3000);
+      const html = await (await request.get(route, { headers: { accept: "text/html" } })).text();
+      const rsc = await (await request.get(route, { headers: { accept: "text/html", rsc: "1" } })).text();
+      return { visit, route, method, trigger, htmlLeaked: html.includes(probe), rscLeaked: rsc.includes(probe) };
+    })));
+  }
   await testInfo.attach("query-rebuild-leak", { body: JSON.stringify(results, null, 2), contentType: "application/json" });
   for (const result of results) {
-    expect(result.trigger, result.route).not.toBeNull();
-    expect(result.htmlLeaked, result.route).toBe(false);
-    expect(result.rscLeaked, result.route).toBe(false);
+    const label = `${result.visit} ${result.method} ${result.route}`;
+    expect(result.trigger, label).not.toBeNull();
+    expect(result.htmlLeaked, label).toBe(false);
+    expect(result.rscLeaked, label).toBe(false);
   }
 });
 

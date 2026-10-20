@@ -39,6 +39,7 @@ async function hit(name, path, { method = "GET", headers = HTML } = {}) {
     cache: response.headers.get("x-vercel-cache"),
     age: response.headers.get("age"),
     cacheControl: response.headers.get("cache-control"),
+    cdnCacheControl: response.headers.get("cdn-cache-control"),
     contentType: response.headers.get("content-type"),
     vary: response.headers.get("vary"),
     location: response.headers.get("location"),
@@ -53,7 +54,8 @@ function check(condition, message, entry) {
   if (!condition) failures.push({ message, entry: { ...entry, body: undefined } });
 }
 
-const cached = (entry) => entry.cache === "HIT" || entry.cache === "STALE";
+const cached = (entry) => ["HIT", "STALE", "PRERENDER"].includes(entry.cache);
+const noStore = (entry) => /no-store/.test(entry.cacheControl || "") && /no-store/.test(entry.cdnCacheControl || "no-store");
 const headPart = (body) => body.split("</head>")[0];
 const isHtml = (entry) => String(entry.contentType).includes("text/html");
 const isMarkdown = (entry) => String(entry.contentType).includes("text/markdown");
@@ -127,7 +129,7 @@ for (const path of PREBUILT_PATHS) {
   for (const name of ["first", "second"]) {
     const unsupported = await hit(`${path} json ${name}`, unsupportedKey, { headers: { accept: "application/json", "user-agent": BROWSER_UA } });
     check(unsupported.status === 406, `${path} answers an unsupported Accept with 406`, unsupported);
-    check(!cached(unsupported), `the ${path} 406 is never served from cache`, unsupported);
+    check(!cached(unsupported) && noStore(unsupported), `the ${path} 406 is never cached`, unsupported);
     check(variesOnAccept(unsupported), `the ${path} 406 varies on Accept`, unsupported);
   }
   html.push(await hit(`${path} html after 406`, unsupportedKey));
@@ -139,7 +141,7 @@ for (const path of PREBUILT_PATHS) {
   }
   for (const entry of markdown) {
     check(entry.status === 200 && isMarkdown(entry), `${path} Markdown request gets Markdown`, entry);
-    check(!cached(entry), `${path} Markdown is never served from cache`, entry);
+    check(!cached(entry) && noStore(entry), `${path} Markdown is never cached`, entry);
     check(variesOnAccept(entry), `${path} Markdown varies on Accept`, entry);
   }
 }

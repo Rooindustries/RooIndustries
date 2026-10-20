@@ -65,7 +65,7 @@ export function middleware(req) {
     !req.headers.has("rsc") &&
     !req.headers.has("next-router-state-tree") &&
     !req.headers.has("next-action");
-  if (MARKDOWN_PATHS.includes(pathname) && ["GET", "HEAD"].includes(req.method) && !req.headers.has("next-action") &&
+  if (MARKDOWN_PATHS.includes(pathname) && ["GET", "HEAD"].includes(req.method) &&
     [...req.nextUrl.searchParams.keys()].some((key) => key !== "_rsc")) {
     const prefersHtml = !isDocument ||
       new Negotiator({ headers: { accept: req.headers.get("accept") ?? undefined } })
