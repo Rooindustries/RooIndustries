@@ -11,6 +11,7 @@ export function startServerMonitoring(dsn) {
     dsn,
     environment: monitoringEnvironment(),
     tracesSampleRate: 0.05,
+    traceLifecycle: "static",
     dataCollection: NO_DATA_COLLECTION,
     beforeSend: scrubEvent,
     beforeSendTransaction: scrubEvent,
