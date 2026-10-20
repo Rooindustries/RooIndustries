@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
 import { getPublicContent } from "../lib/publicContentClient";
+import { Link } from "react-router-dom";
 import ImageZoomModal from "../components/ImageZoomModal";
 
 const BENCHMARK_IMAGE_WIDTHS = [480, 768, 960, 1280];
@@ -58,8 +59,12 @@ export default function Benchmarks({ initialData = null, setIsModalOpen = () => 
       <h1 className="text-4xl sm:text-5xl font-extrabold text-center mb-2 text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
         Performance Benchmarks
       </h1>
-      <p className="text-center text-ink-secondary mb-12">
+      <p className="text-center text-ink-secondary">
         Real results from real tuning.
+      </p>
+      <p className="text-center text-ink-secondary mb-12">
+        Want numbers like these on your own PC?{" "}
+        <Link to="/packages" className="inline-flex min-h-11 items-center text-accent underline underline-offset-4">See the packages</Link>
       </p>
 
       <div className="py-5 px-4 max-w-7xl mx-auto text-ink">
