@@ -11,7 +11,7 @@ import { trackConfirmedPurchase } from "../lib/analytics";
 import { preloadConfirmationPage, preloadConfirmationPages } from "../lib/confirmationPages";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
 import { beginCheckoutConfirmation } from "../lib/checkoutConfirmation";
-import { clearReferralDismissal, dismissReferralCode, isReferralDismissed } from "../lib/checkoutStorage";
+import { clearReferralDismissal, dismissReferralCode, isReferralDismissed, REFERRAL_STORAGE_ERROR } from "../lib/checkoutStorage";
 import {
   calculateCheckoutDiscounts,
   formatCouponValue,
@@ -749,6 +749,11 @@ export default function Payment({ hideFooter = false }) {
         if (result.type === "referral") {
           const safeReferral = sanitizeReferralForCheckout(result.value);
           if (!safeReferral) return;
+          if (isReferralDismissed(safeReferral.code)) {
+            if (source === "referral") nextReferralInput = "";
+            else nextCouponInput = "";
+            return;
+          }
           nextReferral = safeReferral;
           nextReferralInput = safeReferral.code;
           if (source === "coupon") {
@@ -1507,7 +1512,10 @@ export default function Payment({ hideFooter = false }) {
     if (creatingFree || validating || validatingCoupon) return;
     const normalizedCode = String(code || "").trim();
     if (!normalizedCode) {
-      if (referral?.code) dismissReferralCode(referral.code);
+      if (referral?.code && !dismissReferralCode(referral.code)) {
+        setReferralError(REFERRAL_STORAGE_ERROR);
+        return;
+      }
       setReferral(null);
       setReferralError("");
       writeStoredReferral("");
@@ -1551,9 +1559,12 @@ export default function Payment({ hideFooter = false }) {
         setReferralError("Invalid or inactive referral code.");
         return;
       }
+      if (!clearReferralDismissal(safeReferral.code)) {
+        setReferralError(REFERRAL_STORAGE_ERROR);
+        return;
+      }
       setReferral(safeReferral);
       setReferralInput(safeReferral.code);
-      clearReferralDismissal();
       writeStoredReferral(safeReferral.code);
       if (coupon?.canCombineWithReferral === false) {
         setCoupon(null);
@@ -1598,9 +1609,12 @@ export default function Payment({ hideFooter = false }) {
           setCouponError("Invalid coupon code.");
           return;
         }
+        if (!clearReferralDismissal(safeReferral.code)) {
+          setCouponError(REFERRAL_STORAGE_ERROR);
+          return;
+        }
         setReferral(safeReferral);
         setReferralInput(safeReferral.code);
-        clearReferralDismissal();
         writeStoredReferral(safeReferral.code);
         setCoupon(null);
         setCouponInput("");

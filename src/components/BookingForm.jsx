@@ -23,6 +23,7 @@ import { getWarrantyCallout } from "../lib/packageWarranty";
 import {
   BOOKING_DRAFT_STORAGE_KEY,
   CHECKOUT_BOOKING_STORAGE_KEY,
+  REFERRAL_STORAGE_ERROR,
   clearReferralDismissal,
   dismissReferralCode,
   isReferralDismissed,
@@ -654,14 +655,14 @@ export default function BookingForm() {
       const normalizedDismissed = dismissedReferralCode.toLowerCase();
       if (
         referralQuery.code &&
-        referralQuery.code.toLowerCase() !== normalizedDismissed &&
-        !isReferralDismissed(referralQuery.code)
+        !isReferralDismissed(referralQuery.code, dismissedReferralCode)
       ) {
         sessionStorage.setItem(REFERRAL_STORAGE_KEY, referralQuery.code);
       } else if (
         referralQuery.present ||
         (normalizedDismissed &&
-          String(sessionStorage.getItem(REFERRAL_STORAGE_KEY) || "").trim().toLowerCase() === normalizedDismissed)
+          String(sessionStorage.getItem(REFERRAL_STORAGE_KEY) || "").trim().toLowerCase() === normalizedDismissed &&
+          isReferralDismissed(normalizedDismissed, dismissedReferralCode))
       ) {
         sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
       }
@@ -1710,6 +1711,10 @@ export default function BookingForm() {
       setCodeError(INVALID_CHECKOUT_CODE_MESSAGE);
       return;
     }
+    if (!clearReferralDismissal(safeReferral.code)) {
+      setCodeError(REFERRAL_STORAGE_ERROR);
+      return;
+    }
     const nextCoupon =
       appliedCoupon?.canCombineWithReferral === false
         ? null
@@ -1717,7 +1722,6 @@ export default function BookingForm() {
     setAppliedReferral(safeReferral);
     setAppliedCoupon(nextCoupon);
     setDismissedReferralCode("");
-    clearReferralDismissal();
     storeReferralSession(safeReferral.code || codeInput.trim());
     persistCheckoutCodes({ referral: safeReferral, coupon: nextCoupon });
     closeCodeEntry();
@@ -1784,10 +1788,15 @@ export default function BookingForm() {
   const removeAppliedReferral = () => {
     if (isPaymentPendingHold || validatingCode) return;
     const removedCode = String(appliedReferral?.code || "").trim();
+    if (!dismissReferralCode(removedCode)) {
+      setCodeEntryOpen(true);
+      setCodeError(REFERRAL_STORAGE_ERROR);
+      return;
+    }
     autoReferralAttemptRef.current = "";
+    setCodeError("");
     setAppliedReferral(null);
     setDismissedReferralCode(removedCode);
-    dismissReferralCode(removedCode);
     persistCheckoutCodes({
       referral: null,
       coupon: sanitizeCouponForCheckout(appliedCoupon),
@@ -1849,6 +1858,7 @@ export default function BookingForm() {
             invalidCodeFound = true;
             return;
           }
+          if (isReferralDismissed(safeReferral.code, nextDismissedCode)) return;
           nextReferral = safeReferral;
           nextDismissedCode = "";
           if (nextCoupon?.canCombineWithReferral === false) {
@@ -1869,7 +1879,7 @@ export default function BookingForm() {
       };
 
       const referralCode = restoredCodeCandidates.referralCode;
-      if (referralCode) {
+      if (referralCode && !isReferralDismissed(referralCode, nextDismissedCode)) {
         const result = await resolveCheckoutCode(
           referralCode,
           selectedPackage.title
@@ -1943,8 +1953,7 @@ export default function BookingForm() {
     const autoCode = referralQuery.code || storedReferral;
     if (
       !autoCode ||
-      autoCode.toLowerCase() === dismissedReferralCode.toLowerCase() ||
-      isReferralDismissed(autoCode)
+      isReferralDismissed(autoCode, dismissedReferralCode)
     ) {
       return;
     }
@@ -1993,7 +2002,7 @@ export default function BookingForm() {
         }
 
         const safeReferral = sanitizeReferralForCheckout(result.value);
-        if (!safeReferral) return;
+        if (!safeReferral || isReferralDismissed(safeReferral.code, dismissedReferralCode)) return;
         const nextCoupon =
           appliedCoupon?.canCombineWithReferral === false
             ? null

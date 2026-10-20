@@ -10,7 +10,7 @@ import {
 import homeCopy from "../lib/homeCopy";
 import packageContent from "../lib/packageContent";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
-import { persistBookingPackageSelection, rememberReferralFromSearch } from "../lib/checkoutStorage";
+import { persistBookingPackageSelection } from "../lib/checkoutStorage";
 import { trackEvent } from "../lib/analytics";
 import { getSessionAvailability } from "../lib/sessionAvailability";
 
@@ -104,8 +104,6 @@ export default function Packages({
   };
 
   useEffect(() => {
-    rememberReferralFromSearch(window.location.search);
-
     if (packages.length === 0) {
       const cachedPackages = readHomeSectionData(HOME_SECTION_DATA_KEYS.packagesList);
       if (Array.isArray(cachedPackages)) {

@@ -125,12 +125,50 @@ export const migrateCheckoutStorageToSession = () => {
 const REFERRAL_SESSION_STORAGE_KEY = "referral_session";
 const REFERRAL_DISMISSED_STORAGE_KEY = "referral_dismissed";
 
-export const isReferralDismissed = (code) => {
+export const REFERRAL_STORAGE_ERROR =
+  "Couldn't save this code change. Please try again.";
+
+const readReferralIntent = () => {
+  const raw = window.sessionStorage.getItem(REFERRAL_DISMISSED_STORAGE_KEY);
+  const intent = raw === null ? {} : JSON.parse(raw);
+  if (
+    !intent ||
+    typeof intent !== "object" ||
+    Array.isArray(intent) ||
+    Object.values(intent).some(
+      (status) => !["available", "applied", "removed"].includes(status)
+    )
+  ) {
+    throw new Error("Invalid referral intent.");
+  }
+  return intent;
+};
+
+export const isReferralDismissed = (code, legacyDismissedCode = "") => {
   if (typeof window === "undefined") return false;
   const normalized = String(code || "").trim().toLowerCase();
   if (!normalized) return false;
   try {
-    return String(window.sessionStorage.getItem(REFERRAL_DISMISSED_STORAGE_KEY) || "").trim().toLowerCase() === normalized;
+    const intent = readReferralIntent();
+    const status = Object.hasOwn(intent, normalized) ? intent[normalized] : undefined;
+    if (status === "removed") return true;
+    if (
+      status !== "applied" &&
+      normalized === String(legacyDismissedCode || "").trim().toLowerCase()
+    ) {
+      window.sessionStorage.setItem(
+        REFERRAL_DISMISSED_STORAGE_KEY,
+        JSON.stringify({ ...intent, [normalized]: "removed" })
+      );
+      return true;
+    }
+    if (!status) {
+      window.sessionStorage.setItem(
+        REFERRAL_DISMISSED_STORAGE_KEY,
+        JSON.stringify({ ...intent, [normalized]: "available" })
+      );
+    }
+    return false;
   } catch {
     return true;
   }
@@ -146,17 +184,38 @@ export const rememberReferralFromSearch = (search) => {
 };
 
 export const dismissReferralCode = (code) => {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") return false;
+  const normalized = String(code || "").trim().toLowerCase();
+  if (!normalized) return false;
   try {
-    const normalized = String(code || "").trim();
-    if (normalized) window.sessionStorage.setItem(REFERRAL_DISMISSED_STORAGE_KEY, normalized);
-    window.sessionStorage.removeItem(REFERRAL_SESSION_STORAGE_KEY);
+    const intent = readReferralIntent();
+    window.sessionStorage.setItem(
+      REFERRAL_DISMISSED_STORAGE_KEY,
+      JSON.stringify({ ...intent, [normalized]: "removed" })
+    );
+  } catch {
+    return false;
+  }
+  try {
+    if (String(window.sessionStorage.getItem(REFERRAL_SESSION_STORAGE_KEY) || "").trim().toLowerCase() === normalized) {
+      window.sessionStorage.removeItem(REFERRAL_SESSION_STORAGE_KEY);
+    }
   } catch {}
+  return true;
 };
 
-export const clearReferralDismissal = () => {
-  if (typeof window === "undefined") return;
+export const clearReferralDismissal = (code) => {
+  if (typeof window === "undefined") return false;
+  const normalized = String(code || "").trim().toLowerCase();
+  if (!normalized) return false;
   try {
-    window.sessionStorage.removeItem(REFERRAL_DISMISSED_STORAGE_KEY);
-  } catch {}
+    const intent = readReferralIntent();
+    window.sessionStorage.setItem(
+      REFERRAL_DISMISSED_STORAGE_KEY,
+      JSON.stringify({ ...intent, [normalized]: "applied" })
+    );
+    return true;
+  } catch (error) {
+    return error?.name === "SecurityError";
+  }
 };

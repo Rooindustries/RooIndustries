@@ -75,7 +75,7 @@ const referralAddress = (pathname, search) => `${pathname}|${new URLSearchParams
 function ReferralCapture({ restoredAddress }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const lastReferral = useRef(null);
+  const lastPublicAddress = useRef(null);
 
   useEffect(() => {
     if (!pathname || CHECKOUT_PATHS.includes(pathname)) return;
@@ -84,11 +84,10 @@ function ReferralCapture({ restoredAddress }) {
     if (address !== referralAddress(window.location.pathname, window.location.search)) return;
     const restored = address === restoredAddress.current;
     if (!restored) restoredAddress.current = null;
+    const seen = address === lastPublicAddress.current;
+    lastPublicAddress.current = address;
     const referral = String(new URLSearchParams(search).get("ref") || "").trim();
-    if (!referral) return;
-    const seen = referral === lastReferral.current;
-    lastReferral.current = referral;
-    if (!seen && !restored) rememberReferralFromSearch(search);
+    if (referral && !seen && !restored) rememberReferralFromSearch(search);
   }, [pathname, searchParams, restoredAddress]);
 
   return null;
