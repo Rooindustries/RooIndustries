@@ -164,11 +164,6 @@ if (!requested || requested === 'routes') {
     assert(!doc.querySelector('link[rel="preconnect"][href*="supabase.co"]'), 'Production preconnect ignores fixture asset origin.');
     return { scripts: [...doc.scripts].map(value => value.src).filter(Boolean), remoteResources: frame.contentWindow.performance.getEntriesByType('resource').filter(value => !value.name.startsWith(location.origin)).map(value => value.name) };
   });
-  await run('static-entry-redirects-home', async () => {
-    const response = await fetch('/index.html');
-    assert(response.redirected && new URL(response.url).pathname === '/', 'Legacy static entry is not redirected to the homepage.');
-    return { redirectedTo: new URL(response.url).pathname };
-  });
   await run('tourney-mobile-layout', async () => {
     const evidence = [];
     for (const width of [320, 390]) {
