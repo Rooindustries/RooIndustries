@@ -968,8 +968,18 @@ export default function Payment({ hideFooter = false }) {
     const sessionHoldToken = String(
       session?.result?.refreshedHold?.slotHoldToken || session?.result?.hold?.slotHoldToken || ""
     ).trim();
-    const currentHoldToken = String(sessionHold?.slotHoldToken || bookingData?.slotHoldToken || "").trim();
-    return !sessionHoldToken || !currentHoldToken || sessionHoldToken === currentHoldToken;
+    if (!sessionHoldToken) return true;
+    let storedHoldToken = "";
+    try {
+      storedHoldToken = JSON.parse(sessionStorage.getItem("my_slot_hold") || "null")?.holdToken;
+    } catch {}
+    const currentHoldTokens = [
+      sessionHold?.slotHoldToken,
+      storedHoldToken,
+      readStoredCheckout()?.slotHoldToken,
+      bookingData?.slotHoldToken,
+    ].map((token) => String(token || "").trim()).filter(Boolean);
+    return !currentHoldTokens.length || currentHoldTokens.includes(sessionHoldToken);
   };
 
   const clearPaymentSession = (terminalStatus = "", expectedToken = "") => {
