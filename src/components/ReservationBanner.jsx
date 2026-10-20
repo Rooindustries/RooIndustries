@@ -192,13 +192,12 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
           setCountdown(0);
           return false;
         }
-        if (hold.phase === "payment_pending" && paymentInOtherTab) {
+        const flowOwnsExpiry = path === "/booking" || path === "/payment";
+        if ((hold.phase === "payment_pending" && paymentInOtherTab) || flowOwnsExpiry) {
           setCountdown(0);
           return false;
         }
-        const shouldRedirectHome =
-          path === "/payment" || path === "/payment-success" || path === "/booking";
-        releaseHold(true, shouldRedirectHome);
+        releaseHold(true);
         return false;
       }
       setCountdown(diff);
@@ -241,7 +240,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
   const releaseHold = async (clearOnly = false, redirect = false) => {
     if (!hold) return;
     if (clearOnly) {
-      clearReservation(redirect);
+      clearReservation(redirect, { keepDraft: true });
       return;
     }
     if (releasing) return;

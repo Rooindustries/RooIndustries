@@ -68,6 +68,7 @@ const REASSURANCE_COPY =
   "You won't be charged until you confirm on the payment page.";
 const PAYMENT_PENDING_EXPIRY_ERROR =
   "This reservation expired while payment is still pending. Return to payment to check its status or release payment to try again.";
+const RESERVATION_EXPIRED_ERROR = "The reservation expired. Please choose a slot again.";
 const CALENDAR_AVAILABILITY_LABELS = Object.freeze({
   green: "fully available",
   yellow: "limited slots",
@@ -807,6 +808,7 @@ export default function BookingForm() {
           broadcastHold(normalizedHold);
         } else {
           sessionStorage.removeItem(HOLD_STORAGE_KEY);
+          setErrorStep1(RESERVATION_EXPIRED_ERROR);
         }
       }
     } catch {
@@ -890,7 +892,9 @@ export default function BookingForm() {
             ? "This reservation expired. Use Check again to choose a slot again."
             : PAYMENT_PENDING_EXPIRY_ERROR);
         } else {
-          releaseHold();
+          releaseHold().then((released) => {
+            if (released) setErrorStep1(RESERVATION_EXPIRED_ERROR);
+          });
         }
         return false;
       }
@@ -2194,7 +2198,7 @@ export default function BookingForm() {
     if (recheckingPayment && new Date(myHold.expiresAt).getTime() <= Date.now()) {
       clearHoldState(true);
       setErrorStep2("");
-      setErrorStep1("The reservation expired. Please choose a slot again.");
+      setErrorStep1(RESERVATION_EXPIRED_ERROR);
       return;
     }
     if (isPaymentPendingHold && !recheckingPayment) {
