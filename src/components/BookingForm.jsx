@@ -25,8 +25,13 @@ import {
   CHECKOUT_BOOKING_STORAGE_KEY,
   REFERRAL_STORAGE_ERROR,
   clearReferralDismissal,
+  clearStoredReferral,
   dismissReferralCode,
   isReferralDismissed,
+  recordAutomaticReferral,
+  referralScope,
+  resetReferralChoice,
+  selectStoredReferral,
   persistBookingPackageSelection,
   readStoredCheckoutBooking,
   updateStoredCheckoutHold,
@@ -63,7 +68,6 @@ const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = BOOKING_DRAFT_STORAGE_KEY;
 const PAYMENT_SESSION_STORAGE_KEY = "payment_session_state";
 const SESSION_STATE_KEY = "booking_modal_state";
-const REFERRAL_STORAGE_KEY = "referral_session";
 const INVALID_CHECKOUT_CODE_MESSAGE = "Invalid referral or coupon code.";
 const BOOKING_FETCH_TIMEOUT_MS = CLIENT_REQUEST_TIMEOUT_MS;
 const AVAILABILITY_REFRESH_INTERVAL_MS = 60_000;
@@ -101,13 +105,6 @@ const normalizeForm = (value = {}) => ({
   mainGame: typeof value.mainGame === "string" ? value.mainGame : "",
   notes: typeof value.notes === "string" ? value.notes : "",
 });
-const readReferralFromSession = () => {
-  try {
-    return sessionStorage.getItem(REFERRAL_STORAGE_KEY) || "";
-  } catch {
-    return "";
-  }
-};
 const formatUsd = (value) => `$${toMoney(value).toFixed(2)}`;
 const getDraftKey = (pkg) => (pkg?.title ? pkg.title : "_default");
 const isDraftEmpty = (formObj) =>
@@ -600,6 +597,11 @@ export default function BookingForm() {
   const prevPackageDataRef = useRef(selectedPackage);
   const [draftLoading, setDraftLoading] = useState(true);
   const [myHold, setMyHold] = useState(null);
+  const [holdLoading, setHoldLoading] = useState(true);
+  const restoredHoldIdRef = useRef(null);
+  const scope = referralScope(selectedPackage.title);
+  const [referralReadyScope, setReferralReadyScope] = useState("");
+  const referralReadyScopeRef = useRef("");
   const currentHoldRef = useRef(myHold);
   currentHoldRef.current = myHold;
   const releaseInFlightRef = useRef(false);
@@ -648,28 +650,6 @@ export default function BookingForm() {
       return <React.Fragment key={`upgrade-text-${idx}`}>{part}</React.Fragment>;
     });
   };
-
-  // Persist referral from URL into session storage; clear only if explicitly blank
-  useEffect(() => {
-    try {
-      const normalizedDismissed = dismissedReferralCode.toLowerCase();
-      if (
-        referralQuery.code &&
-        !isReferralDismissed(referralQuery.code, dismissedReferralCode)
-      ) {
-        sessionStorage.setItem(REFERRAL_STORAGE_KEY, referralQuery.code);
-      } else if (
-        referralQuery.present ||
-        (normalizedDismissed &&
-          String(sessionStorage.getItem(REFERRAL_STORAGE_KEY) || "").trim().toLowerCase() === normalizedDismissed &&
-          isReferralDismissed(normalizedDismissed, dismissedReferralCode))
-      ) {
-        sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
-      }
-    } catch {
-      console.error("Failed to persist referral session");
-    }
-  }, [dismissedReferralCode, referralQuery]);
 
   useEffect(() => {
     const prevTitle = prevPackageRef.current;
@@ -771,13 +751,31 @@ export default function BookingForm() {
 
   // If no active reservation, reset and clear persisted data so we land on times
   useEffect(() => {
-    if (draftLoading) return;
+    if (draftLoading || holdLoading || restoredSessionPackageTitle !== selectedPackage.title) return;
     if (myHold) {
+      if (restoredHoldIdRef.current === myHold.holdId &&
+        (!myHold.packageTitle || myHold.packageTitle === selectedPackage.title)) {
+        referralReadyScopeRef.current = scope;
+        setReferralReadyScope(scope);
+      }
       clearedNoHoldRef.current = false;
       return;
     }
     if (clearedNoHoldRef.current) return;
 
+    restoredHoldIdRef.current = null;
+    const ready = resetReferralChoice(scope);
+    referralReadyScopeRef.current = ready ? scope : "";
+    setReferralReadyScope(ready ? scope : "");
+    if (!ready) {
+      setCodeEntryOpen(true);
+      setCodeError(REFERRAL_STORAGE_ERROR);
+    }
+    setRestoredCodeCandidates(null);
+    autoReferralAttemptRef.current = "";
+    setDismissedReferralCode("");
+    setAppliedReferral(null);
+    setAppliedCoupon(null);
     const key = getDraftKey(selectedPackage);
     clearDraftForPackage(key);
     setForm(createFreshForm());
@@ -789,7 +787,7 @@ export default function BookingForm() {
     } catch {
       console.error("Failed to clear session state");
     }
-  }, [draftLoading, myHold, selectedPackage]);
+  }, [draftLoading, holdLoading, myHold, restoredSessionPackageTitle, scope, selectedPackage]);
 
   useEffect(() => {
     try {
@@ -815,6 +813,7 @@ export default function BookingForm() {
           }
           normalizedHold.startTimeUTC = utcDate.toISOString();
           sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
+          restoredHoldIdRef.current = normalizedHold.holdId;
           setMyHold(normalizedHold);
           broadcastHold(normalizedHold);
         } else {
@@ -823,6 +822,8 @@ export default function BookingForm() {
       }
     } catch {
       console.error("Failed to restore slot reservation");
+    } finally {
+      setHoldLoading(false);
     }
   }, []);
 
@@ -1693,25 +1694,13 @@ export default function BookingForm() {
     setCodeError("");
   };
 
-  const storeReferralSession = (code) => {
-    try {
-      if (code) {
-        sessionStorage.setItem(REFERRAL_STORAGE_KEY, code);
-      } else {
-        sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
-      }
-    } catch {
-      console.error("Failed to persist referral session");
-    }
-  };
-
   const applyResolvedReferral = (referral) => {
     const safeReferral = sanitizeReferralForCheckout(referral);
     if (!safeReferral) {
       setCodeError(INVALID_CHECKOUT_CODE_MESSAGE);
       return;
     }
-    if (!clearReferralDismissal(safeReferral.code)) {
+    if (!clearReferralDismissal(safeReferral.code, scope)) {
       setCodeError(REFERRAL_STORAGE_ERROR);
       return;
     }
@@ -1722,7 +1711,8 @@ export default function BookingForm() {
     setAppliedReferral(safeReferral);
     setAppliedCoupon(nextCoupon);
     setDismissedReferralCode("");
-    storeReferralSession(safeReferral.code || codeInput.trim());
+    referralReadyScopeRef.current = scope;
+    setReferralReadyScope(scope);
     persistCheckoutCodes({ referral: safeReferral, coupon: nextCoupon });
     closeCodeEntry();
   };
@@ -1816,6 +1806,7 @@ export default function BookingForm() {
 
   useEffect(() => {
     if (
+      draftLoading || holdLoading || referralReadyScope !== scope ||
       !restoredCodeCandidates ||
       !hasActiveHold ||
       isPaymentPendingHold ||
@@ -1835,6 +1826,12 @@ export default function BookingForm() {
       let nextDismissedCode = restoredCodeCandidates.dismissedCode || "";
       let invalidCodeFound = false;
       let unavailableCode = "";
+      let storageFailed = false;
+      const candidates = [restoredCodeCandidates.referralCode, restoredCodeCandidates.couponCode];
+      const stillSelected = (input, canonical = "") => {
+        const current = selectStoredReferral(scope, candidates, nextDismissedCode);
+        return current === input.toLowerCase() || (canonical && current === canonical.toLowerCase());
+      };
 
       const applyResult = (result, sourceType, sourceCode) => {
         if (!result?.ok) {
@@ -1848,6 +1845,7 @@ export default function BookingForm() {
           invalidCodeFound = true;
           if (sourceType === "referral") {
             nextDismissedCode = sourceCode;
+            clearStoredReferral(sourceCode);
           }
           return;
         }
@@ -1858,7 +1856,12 @@ export default function BookingForm() {
             invalidCodeFound = true;
             return;
           }
-          if (isReferralDismissed(safeReferral.code, nextDismissedCode)) return;
+          if (!stillSelected(sourceCode, safeReferral.code) ||
+            isReferralDismissed(safeReferral.code, nextDismissedCode)) return;
+          if (!recordAutomaticReferral(safeReferral.code, scope)) {
+            storageFailed = true;
+            return;
+          }
           nextReferral = safeReferral;
           nextDismissedCode = "";
           if (nextCoupon?.canCombineWithReferral === false) {
@@ -1878,13 +1881,15 @@ export default function BookingForm() {
         nextCoupon = safeCoupon;
       };
 
-      const referralCode = restoredCodeCandidates.referralCode;
-      if (referralCode && !isReferralDismissed(referralCode, nextDismissedCode)) {
+      const referralCode = selectStoredReferral(scope, [restoredCodeCandidates.referralCode], nextDismissedCode);
+      if (referralCode) {
         const result = await resolveCheckoutCode(
           referralCode,
           selectedPackage.title
         );
         if (!active || !hasActiveHoldRef.current) return;
+        const canonical = result?.ok && result.type === "referral" ? result.value?.code || "" : "";
+        if (!stillSelected(referralCode, canonical)) return;
         applyResult(result, "referral", referralCode);
       }
 
@@ -1899,11 +1904,12 @@ export default function BookingForm() {
       }
 
       if (!active || !hasActiveHoldRef.current) return;
+      if (nextReferral && (!stillSelected(nextReferral.code) ||
+        isReferralDismissed(nextReferral.code, nextDismissedCode))) return;
       setAppliedReferral(nextReferral);
       setAppliedCoupon(nextCoupon);
       setDismissedReferralCode(nextDismissedCode);
       if (!unavailableCode) {
-        storeReferralSession(nextReferral?.code || "");
         persistCheckoutCodes({
           referral: nextReferral,
           coupon: nextCoupon,
@@ -1912,10 +1918,10 @@ export default function BookingForm() {
       }
       setRestoredCodeCandidates(null);
 
-      if (unavailableCode || invalidCodeFound) {
+      if (storageFailed || unavailableCode || invalidCodeFound) {
         setCodeEntryOpen(true);
         if (unavailableCode) setCodeInput(unavailableCode);
-        setCodeError(unavailableCode ? CODE_VALIDATION_UNAVAILABLE_MESSAGE : INVALID_CHECKOUT_CODE_MESSAGE);
+        setCodeError(storageFailed ? REFERRAL_STORAGE_ERROR : unavailableCode ? CODE_VALIDATION_UNAVAILABLE_MESSAGE : INVALID_CHECKOUT_CODE_MESSAGE);
       }
     };
 
@@ -1930,6 +1936,10 @@ export default function BookingForm() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    draftLoading,
+    holdLoading,
+    referralReadyScope,
+    scope,
     hasActiveHold,
     isPaymentPendingHold,
     restoredCodeCandidates,
@@ -1939,7 +1949,7 @@ export default function BookingForm() {
 
   useEffect(() => {
     if (
-      draftLoading ||
+      draftLoading || holdLoading || referralReadyScope !== scope ||
       restoredCodeCandidates ||
       step !== 3 ||
       !hasActiveHold ||
@@ -1949,12 +1959,9 @@ export default function BookingForm() {
       return;
     }
 
-    const storedReferral = readReferralFromSession();
-    const autoCode = referralQuery.code || storedReferral;
-    if (
-      !autoCode ||
-      isReferralDismissed(autoCode, dismissedReferralCode)
-    ) {
+    const candidates = [referralQuery.code];
+    const autoCode = selectStoredReferral(scope, candidates, dismissedReferralCode);
+    if (!autoCode) {
       return;
     }
 
@@ -1968,11 +1975,14 @@ export default function BookingForm() {
     resolveCheckoutCode(autoCode, selectedPackage.title)
       .then((result) => {
         if (!active || !hasActiveHoldRef.current) return;
+        const selected = selectStoredReferral(scope, candidates, dismissedReferralCode);
+        const canonical = result?.ok && result.type === "referral" ? result.value?.code || "" : "";
+        if (selected !== autoCode.toLowerCase() && selected !== canonical.toLowerCase()) return;
         if (!result?.ok) {
           const nextCoupon = sanitizeCouponForCheckout(appliedCoupon);
           if (!result?.unavailable) {
             setDismissedReferralCode(autoCode);
-            storeReferralSession("");
+            clearStoredReferral(autoCode);
             persistCheckoutCodes({
               referral: null,
               coupon: nextCoupon,
@@ -2003,13 +2013,19 @@ export default function BookingForm() {
 
         const safeReferral = sanitizeReferralForCheckout(result.value);
         if (!safeReferral || isReferralDismissed(safeReferral.code, dismissedReferralCode)) return;
+        const current = selectStoredReferral(scope, candidates, dismissedReferralCode);
+        if (current !== autoCode.toLowerCase() && current !== safeReferral.code.toLowerCase()) return;
+        if (!recordAutomaticReferral(safeReferral.code, scope)) {
+          setCodeEntryOpen(true);
+          setCodeError(REFERRAL_STORAGE_ERROR);
+          return;
+        }
         const nextCoupon =
           appliedCoupon?.canCombineWithReferral === false
             ? null
             : sanitizeCouponForCheckout(appliedCoupon);
         setAppliedReferral(safeReferral);
         setAppliedCoupon(nextCoupon);
-        storeReferralSession(safeReferral.code || autoCode);
         persistCheckoutCodes({ referral: safeReferral, coupon: nextCoupon });
       })
       .catch(() => {})
@@ -2028,6 +2044,9 @@ export default function BookingForm() {
   }, [
     appliedReferral,
     dismissedReferralCode,
+    holdLoading,
+    referralReadyScope,
+    scope,
     draftLoading,
     hasActiveHold,
     isPaymentPendingHold,
@@ -2335,6 +2354,15 @@ export default function BookingForm() {
         phase: "active",
       };
 
+      if (!previousHoldId && referralReadyScopeRef.current !== scope) {
+        const ready = resetReferralChoice(scope);
+        referralReadyScopeRef.current = ready ? scope : "";
+        setReferralReadyScope(ready ? scope : "");
+        if (!ready) {
+          setCodeEntryOpen(true);
+          setCodeError(REFERRAL_STORAGE_ERROR);
+        }
+      }
       setMyHold(newHold);
       writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(newHold));
       broadcastHold(newHold);

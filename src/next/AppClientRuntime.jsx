@@ -6,7 +6,11 @@ import { isProductionBrowser } from "../lib/productionBrowser";
 import { Analytics } from "@vercel/analytics/react";
 import { sanitizeAnalyticsEvent } from "../lib/salesAttribution";
 import { initializePerformanceProfile } from "../lib/performanceProfile";
-import { rememberReferralFromSearch } from "../lib/checkoutStorage";
+import {
+  clearStoredReferral,
+  readStoredReferral,
+  rememberReferralFromSearch,
+} from "../lib/checkoutStorage";
 
 const CHECKOUT_PATHS = ["/booking", "/payment", "/payment-success", "/thank-you"];
 const SEORCE_PROJECT_ID = "6a2e76bf3f9dac8c30e27b89";
@@ -70,23 +74,43 @@ export const loadSeorceScript = ({
   return true;
 };
 
-const referralAddress = (pathname, search) => `${pathname}|${new URLSearchParams(search || "").get("ref") || ""}`;
+const referralAddress = (pathname, search) => {
+  const params = new URLSearchParams(search || "");
+  return JSON.stringify([pathname, params.has("ref"), params.get("ref") || ""]);
+};
 
 function ReferralCapture({ restoredAddress }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const lastAddress = useRef(null);
   const lastPublicAddress = useRef(null);
 
-  useEffect(() => {
-    if (!pathname || CHECKOUT_PATHS.includes(pathname)) return;
+  useLayoutEffect(() => {
+    if (!pathname) return;
     const search = searchParams?.toString() || "";
     const address = referralAddress(pathname, search);
     if (address !== referralAddress(window.location.pathname, window.location.search)) return;
-    const restored = address === restoredAddress.current;
+    const previous = lastAddress.current;
+    lastAddress.current = address;
+    let initialType = "";
+    if (previous === null) {
+      try {
+        initialType = window.performance.getEntriesByType("navigation")[0]?.type || "";
+      } catch {}
+    }
+    const restored = address === restoredAddress.current ||
+      (previous === null && initialType !== "navigate");
     if (!restored) restoredAddress.current = null;
+    const params = new URLSearchParams(search);
+    const referral = String(params.get("ref") || "").trim();
+    if (CHECKOUT_PATHS.includes(pathname)) {
+      if (pathname !== "/booking" || previous === address || restored) return;
+      if (referral) rememberReferralFromSearch(search);
+      else if (params.has("ref")) clearStoredReferral(readStoredReferral());
+      return;
+    }
     const seen = address === lastPublicAddress.current;
     lastPublicAddress.current = address;
-    const referral = String(new URLSearchParams(search).get("ref") || "").trim();
     if (referral && !seen && !restored) rememberReferralFromSearch(search);
   }, [pathname, searchParams, restoredAddress]);
 
