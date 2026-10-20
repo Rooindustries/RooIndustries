@@ -31,11 +31,14 @@ jobs:
           BASE_URL: http://127.0.0.1:3211
           TOOLING_NETWORK_GUARD: "1"
           NODE_OPTIONS: --import=${{ github.workspace }}/scripts/lib/test-target-safety.mjs
+      - run: npm run test:tooling:dependencies
+      - run: npm run check:seo
+      - run: npm run check:supabase:migrations
 
   playwright:
     name: Playwright ${{ matrix.suite.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -65,6 +68,7 @@ jobs:
       PW_PORT: "3211"
       PW_SERVER_ID: ci
       NEXT_DIST_DIR: .next-e2e-ci
+      TOOLING_API_ROUTES: "0"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -90,6 +94,8 @@ jobs:
           curl --fail --silent "$BASE_URL" > /dev/null
           if [ "$PW_SUITE" = "rest-1" ]; then
             TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:agent-readiness
+            TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:traffic-recovery
+            TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:tourney-retirement:phases
           fi
           xvfb-run -a npx playwright test --pass-with-no-tests ${PW_SHARD:+--shard="$PW_SHARD"} "$PW_FILES"
       - uses: actions/upload-artifact@v4
@@ -224,4 +230,40 @@ jobs:
           name: test-results-native
           path: test-results/
           if-no-files-found: error
+          retention-days: 7
+
+  revalidation:
+    name: Playwright revalidation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ROO_TEST_HOST: 127.0.0.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run benchmarks revalidation suite
+        id: benchmarks-revalidation
+        env:
+          PW_PORT: "3251"
+          PW_SERVER_ID: revalidation-benchmarks
+        run: xvfb-run -a npm run test:benchmarks:revalidation -- --output=test-results/benchmarks-revalidation
+      - name: Run static pages revalidation suite
+        if: ${{ !cancelled() && (success() || steps.benchmarks-revalidation.outcome == 'failure') }}
+        env:
+          PW_PORT: "3261"
+          PW_SERVER_ID: revalidation-static
+        run: xvfb-run -a npm run test:static:revalidation -- --output=test-results/static-revalidation
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-results-revalidation
+          path: test-results/
+          if-no-files-found: ignore
           retention-days: 7
