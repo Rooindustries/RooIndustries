@@ -9,10 +9,10 @@ const routes = fs.readdirSync("app", { recursive: true })
   .concat("/BIOSGuide", "/404").sort();
 
 const expectedTypes = {
-  "/": ["Organization", "WebSite", "WebPage", "Service"],
+  "/": ["Organization", "WebSite", "WebPage", "Service", "OfferCatalog"],
   "/about": ["Organization"],
   "/faq": ["FAQPage"],
-  "/packages": ["OfferCatalog"],
+  "/packages": ["Service", "OfferCatalog"],
   "/BIOSGuide": ["Article"],
 };
 
@@ -103,12 +103,12 @@ for (const route of routes) {
   });
 }
 
-test("homepage markup does not advertise undisplayed catalog or FAQ content", async ({ page }, testInfo) => {
+test("homepage markup advertises its displayed packages but no FAQ or ratings", async ({ page }, testInfo) => {
   await page.goto("/");
   const scripts = await extract(page);
   const all = nodes(scripts);
   await attach(testInfo, "homepage", scripts);
-  expect(all.filter(node => ["OfferCatalog", "FAQPage", "Review", "AggregateRating"].includes(node["@type"]))).toEqual([]);
+  expect(all.filter(node => ["FAQPage", "Review", "AggregateRating"].includes(node["@type"]))).toEqual([]);
   const webpage = all.find(node => node["@type"] === "WebPage");
   expect(webpage.headline).toBe(normalize(await page.locator("h1").first().innerText()));
 });
@@ -130,26 +130,31 @@ test("FAQ markup matches every full answer rendered without JavaScript", async (
   await attach(testInfo, "faq-content", { faq, visible });
 });
 
-test("catalog offers use the displayed package names, current prices and USD", async ({ page }, testInfo) => {
-  await page.goto("/packages");
-  const catalog = nodes(await extract(page)).find(node => node["@type"] === "OfferCatalog");
-  expect(catalog).toBeDefined();
-  const visible = await page.locator(".ri-package-card").evaluateAll(cards => cards.map(card => ({
-    name: card.querySelector("h3").textContent,
-    price: card.querySelector(".ri-price-current").textContent,
-  })));
-  expect(visible.length).toBeGreaterThan(0);
-  expect(catalog.itemListElement).toHaveLength(visible.length);
-  for (const [index, item] of catalog.itemListElement.entries()) {
-    expect(item["@type"]).toBe("Offer");
-    expect(item.itemOffered["@type"]).toBe("Service");
-    expect(item.itemOffered.name).toBe(visible[index].name);
-    expect(visible[index].price).toMatch(/^\$[\d,.]+$/);
-    expect(Number(item.price)).toBe(Number(visible[index].price.replace(/[$,]/g, "")));
-    expect(item.priceCurrency).toBe("USD");
-  }
-  await attach(testInfo, "package-offers", { catalog, visible });
-});
+for (const route of ["/", "/packages"]) {
+  test(`${route} catalog offers use the displayed package names, current prices and USD`, async ({ page }, testInfo) => {
+    await page.goto(route);
+    const all = nodes(await extract(page));
+    const catalog = all.find(node => node["@type"] === "OfferCatalog");
+    expect(catalog).toBeDefined();
+    const service = all.find(node => node["@type"] === "Service" && node["@id"]);
+    expect(service.hasOfferCatalog).toEqual({ "@id": catalog["@id"] });
+    const visible = await page.locator(".ri-package-card").evaluateAll(cards => cards.map(card => ({
+      name: card.querySelector("h3").textContent,
+      price: card.querySelector(".ri-price-current").textContent,
+    })));
+    expect(visible.length).toBeGreaterThan(0);
+    expect(catalog.itemListElement).toHaveLength(visible.length);
+    for (const [index, item] of catalog.itemListElement.entries()) {
+      expect(item["@type"]).toBe("Offer");
+      expect(item.itemOffered["@type"]).toBe("Service");
+      expect(item.itemOffered.name).toBe(visible[index].name);
+      expect(visible[index].price).toMatch(/^\$[\d,.]+$/);
+      expect(Number(item.price)).toBe(Number(visible[index].price.replace(/[$,]/g, "")));
+      expect(item.priceCurrency).toBe("USD");
+    }
+    await attach(testInfo, "package-offers", { route, catalog, visible });
+  });
+}
 
 test("entity IDs resolve consistently across all public pages", async ({ page }, testInfo) => {
   const all = [];
