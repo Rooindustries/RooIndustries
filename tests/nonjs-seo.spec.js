@@ -106,6 +106,12 @@ test.describe("Non-JS crawlability", () => {
         const offscreen = await card.evaluate(element => getComputedStyle(element).opacity);
         expect(offscreen).toBe(reducedMotion === "reduce" ? "1" : "0");
         await expect(card).toHaveAttribute("data-reveal-wait", "");
+        await page.emulateMedia({ media: "print" });
+        const printed = await card.evaluate(element => getComputedStyle(element).opacity);
+        await page.emulateMedia({ media: "screen" });
+        expect(printed).toBe("1");
+        expect(await card.evaluate(element => getComputedStyle(element).opacity)).toBe(offscreen);
+        await expect(card).toHaveAttribute("data-reveal-wait", "");
         const animations = await card.evaluate(element => new Promise(resolve => {
           const observer = new MutationObserver(() => {
             if (element.hasAttribute("data-reveal-wait")) return;
