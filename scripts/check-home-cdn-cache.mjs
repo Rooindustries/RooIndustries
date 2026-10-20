@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import routes from "../src/lib/routes.js";
 
 const base = process.argv[2];
 const artifact = process.argv[3] || "test-results/home-cdn-cache-check.json";
@@ -63,7 +64,9 @@ const isMarkdown = (entry) => String(entry.contentType).includes("text/markdown"
 const variesOnAccept = (entry) => String(entry.vary || "").toLowerCase().split(/,\s*/).includes("accept");
 const MARKDOWN = { accept: "text/markdown", "user-agent": BROWSER_UA };
 const PREBUILT_PATHS = ["/", "/about", "/contact", "/privacy"];
-const isPrebuiltHtml = (entry) => entry.method === "GET" && PREBUILT_PATHS.includes(new URL(entry.path, base).pathname) && isHtml(entry);
+const { PREBUILT_ROUTES } = routes;
+const REVALIDATING_ROUTES = PREBUILT_ROUTES.filter((path) => path !== "/tourney");
+const isPrebuiltHtml = (entry) => entry.method === "GET" && PREBUILT_ROUTES.includes(new URL(entry.path, base).pathname) && isHtml(entry);
 
 const key = `/?utm_source=cdncheck${stamp}`;
 const first = await hit("html first", key);
@@ -147,8 +150,22 @@ for (const path of PREBUILT_PATHS) {
   }
 }
 
+for (const path of PREBUILT_ROUTES.filter((route) => !PREBUILT_PATHS.includes(route))) {
+  const pageKey = `${path}?utm_source=cdncheck${stamp}&ref=cdncheck`;
+  const first = await hit(`${path} html`, pageKey);
+  const repeat = await hit(`${path} html again`, pageKey);
+  check(cached(repeat), `a repeated ${path} HTML request is served from cache`, repeat);
+  const rsc = await hit(`${path} rsc`, pageKey, { headers: { ...HTML, rsc: "1" } });
+  check(rsc.status === 200 && String(rsc.contentType).includes("text/x-component"), `${path} RSC request gets an RSC payload`, rsc);
+  const headKey = `${path}?utm_source=cdnhead${stamp}`;
+  const head = await hit(`${path} head`, headKey, { method: "HEAD" });
+  check(head.status === 200 && isHtml(head), `HEAD ${path} gets text/html`, head);
+  const afterHead = await hit(`${path} get after head`, headKey);
+  for (const entry of [first, repeat, afterHead]) check(entry.status === 200 && isHtml(entry) && entry.bytes > 10000, `${path} HTML request gets the full HTML page`, entry);
+}
+
 let waitSeconds = 0;
-for (const path of PREBUILT_PATHS) {
+for (const path of REVALIDATING_ROUTES) {
   const ageProbe = await hit(`${path} age probe`, path);
   const age = Number(ageProbe.age) || 0;
   waitSeconds = Math.max(waitSeconds, age < 61 ? 62 - age : 62);
@@ -156,9 +173,9 @@ for (const path of PREBUILT_PATHS) {
 console.log(`Waiting ${waitSeconds}s for the prebuilt pages to go stale before the leak check`);
 await sleep(waitSeconds * 1000);
 const leakToken = `leak${stamp}`;
-for (const path of PREBUILT_PATHS) await hit(`${path} leak trigger`, `${path}?ref=${leakToken}&gclid=${leakToken}`);
+for (const path of REVALIDATING_ROUTES) await hit(`${path} leak trigger`, `${path}?ref=${leakToken}&gclid=${leakToken}`);
 await sleep(5000);
-for (const path of PREBUILT_PATHS) {
+for (const path of REVALIDATING_ROUTES) {
   const leakHtml = await hit(`${path} html after leak trigger`, path);
   const leakRsc = await hit(`${path} rsc after leak trigger`, path, { headers: { ...HTML, rsc: "1" } });
   check(!leakHtml.body.includes(leakToken), `a rebuild triggered by a query keeps that query out of the ${path} HTML`, leakHtml);
