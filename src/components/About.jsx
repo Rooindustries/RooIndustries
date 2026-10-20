@@ -18,7 +18,8 @@ const RC = {
 
 const revealWhenInView = (node) => {
   if (!node || typeof IntersectionObserver === "undefined") return undefined;
-  if (node.getBoundingClientRect().top < window.innerHeight) return undefined;
+  const rect = node.getBoundingClientRect();
+  if (rect.top < window.innerHeight && rect.bottom > 0) return undefined;
   node.setAttribute("data-reveal-wait", "");
   const observer = new IntersectionObserver((entries) => {
     if (!entries.some((entry) => entry.isIntersecting)) return;

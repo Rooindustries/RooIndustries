@@ -103,6 +103,8 @@ test.describe("Non-JS crawlability", () => {
         await page.waitForFunction(() => document.documentElement.classList.contains("low-performance-mode"));
         const card = page.locator("main#main-content .ri-proof-card");
         await page.waitForTimeout(1000);
+        const fold = await card.evaluate(element => ({ top: element.getBoundingClientRect().top, innerHeight }));
+        expect(fold.top).toBeGreaterThan(fold.innerHeight);
         const offscreen = await card.evaluate(element => getComputedStyle(element).opacity);
         expect(offscreen).toBe(reducedMotion === "reduce" ? "1" : "0");
         await expect(card).toHaveAttribute("data-reveal-wait", "");
@@ -134,6 +136,46 @@ test.describe("Non-JS crawlability", () => {
       } finally {
         await context.close();
       }
+    }
+  });
+
+  test("/ fades the proof card in when a visitor scrolls past it before JavaScript loads", async ({ browser, baseURL }, testInfo) => {
+    const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+    const context = await browser.newContext({ baseURL, javaScriptEnabled: true, viewport: { width: 390, height: 844 } });
+    try {
+      await guardBrowserContext(context, [baseURL]);
+      const page = await context.newPage();
+      let releaseScripts;
+      const scriptsHeld = new Promise(resolve => { releaseScripts = resolve; });
+      await page.route(/\/_next\/static\/chunks\/.*\.js(\?.*)?$/, async route => {
+        await scriptsHeld;
+        await route.continue();
+      });
+      await page.goto("/", { waitUntil: "commit" });
+      await page.locator("main#main-content .ri-proof-card").waitFor({ state: "attached" });
+      await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }));
+      await expect.poll(() => page.evaluate(() => document.querySelector("main#main-content .ri-proof-card").getBoundingClientRect().bottom)).toBeLessThanOrEqual(0);
+      releaseScripts();
+      await page.waitForFunction(() => document.documentElement.classList.contains("low-performance-mode"));
+      const card = page.locator("main#main-content .ri-proof-card");
+      await page.waitForTimeout(1000);
+      const above = await card.evaluate(element => element.getBoundingClientRect().bottom);
+      expect(above).toBeLessThanOrEqual(0);
+      await expect(card).toHaveAttribute("data-reveal-wait", "");
+      const animations = await card.evaluate(element => new Promise(resolve => {
+        const observer = new MutationObserver(() => {
+          if (element.hasAttribute("data-reveal-wait")) return;
+          observer.disconnect();
+          resolve(element.getAnimations().map(animation => animation.animationName));
+        });
+        observer.observe(element, { attributes: true });
+        element.scrollIntoView({ block: "center" });
+      }));
+      await expect.poll(() => card.evaluate(element => getComputedStyle(element).opacity), { timeout: 3000 }).toBe("1");
+      await testInfo.attach("proof-card-js-from-below", { body: JSON.stringify({ above, animations }, null, 2), contentType: "application/json" });
+      expect(animations).toEqual(["riReveal"]);
+    } finally {
+      await context.close();
     }
   });
 
