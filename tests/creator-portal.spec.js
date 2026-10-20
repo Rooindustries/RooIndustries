@@ -551,6 +551,88 @@ test('an upstream Auth outage stays explained after a connected-account password
   }
 });
 
+for (const viewport of [{ width: 360, height: 740 }, { width: 390, height: 844 }]) {
+  test.describe(`${viewport.width}px`, () => {
+    test.use({ viewport });
+
+    test('the longest accepted creator name and code fit the dashboard', async ({ page, context, baseURL }, testInfo) => {
+      const name = 'competitiveplayer'.padEnd(80, '0123456789');
+      const code = 'longreferralcode'.padEnd(50, '0123456789');
+      await signIn(context, baseURL);
+      await page.goto('/referrals/forgot');
+      const account = await page.evaluate(async () => (await fetch('/api/ref/getData', { cache: 'no-store' })).json());
+      expect(account.ok).toBe(true);
+      await page.route('**/api/ref/getData', route => route.fulfill({ json: { ...account, referral: { ...account.referral, name, slug: { current: code } } } }));
+      const payouts = await page.evaluate(async () => (await fetch('/api/ref/payouts', { cache: 'no-store' })).json());
+      expect(payouts.logs.xoc.length).toBeGreaterThan(0);
+      expect(payouts.logs.vertex.length).toBeGreaterThan(0);
+      const note = 'PayPal receipt: https://www.paypal.com/activity/payment/5HG1234567890123A?ref=creator-dashboard-receipt';
+      const withNote = entries => entries.map(entry => ({ ...entry, note }));
+      await page.route('**/api/ref/payouts', route => route.fulfill({ json: { ...payouts, logs: { ...payouts.logs, xoc: withNote(payouts.logs.xoc), vertex: withNote(payouts.logs.vertex) } } }));
+      await page.goto('/referrals/dashboard');
+      const heading = page.getByRole('heading', { name: `Welcome, ${name}`, exact: true });
+      await expect(heading).toBeVisible();
+      await expect(page.getByText('Total earned', { exact: true })).toBeVisible();
+      const layout = await page.evaluate(() => {
+        const rect = element => {
+          const box = element.getBoundingClientRect();
+          return { left: Math.round(box.left), right: Math.round(box.right) };
+        };
+        const heading = document.querySelector('main h1');
+        const code = [...document.querySelectorAll('main p')].find(p => p.textContent.startsWith('Referral Code:'));
+        const earned = [...document.querySelectorAll('main p, main span, main div')].find(node => node.textContent.trim() === 'Total earned');
+        return {
+          width: innerWidth,
+          documentWidth: document.documentElement.scrollWidth,
+          section: rect(heading.closest('section')),
+          heading: rect(heading),
+          headingOverflow: heading.scrollWidth - heading.clientWidth,
+          code: rect(code),
+          codeOverflow: code.scrollWidth - code.clientWidth,
+          codeText: rect(code.querySelector('b')),
+          earned: rect(earned),
+        };
+      });
+      await record(page, testInfo, `dashboard-long-name-${viewport.width}`, { name, code, layout });
+      expect(layout.documentWidth).toBeLessThanOrEqual(viewport.width + 1);
+      for (const key of ['section', 'heading', 'code', 'codeText', 'earned']) {
+        expect(layout[key].left, key).toBeGreaterThanOrEqual(-1);
+        expect(layout[key].right, key).toBeLessThanOrEqual(viewport.width + 1);
+      }
+      expect(layout.headingOverflow).toBeLessThanOrEqual(1);
+      expect(layout.codeOverflow).toBeLessThanOrEqual(1);
+
+      await page.getByRole('button', { name: 'View my payment logs', exact: true }).click();
+      await expect(page.getByText('Vertex Max payments', { exact: true })).toBeVisible();
+      const logs = await page.evaluate(noteText => ['Vertex Max payments', 'Vertex payments'].map(title => {
+        const column = [...document.querySelectorAll('p')].find(p => p.textContent.trim() === title).parentElement.parentElement;
+        const bounds = column.getBoundingClientRect();
+        const notes = [...column.querySelectorAll('p')].filter(p => p.textContent === noteText);
+        return {
+          title,
+          left: Math.round(bounds.left),
+          right: Math.round(bounds.right),
+          overflow: column.scrollWidth - column.clientWidth,
+          rows: notes.map(p => {
+            const date = p.parentElement.nextElementSibling;
+            return { note: Math.round(p.getBoundingClientRect().right), date: Math.round(date.getBoundingClientRect().right) };
+          }),
+        };
+      }), note);
+      await record(page, testInfo, `dashboard-long-note-${viewport.width}`, { note, logs });
+      for (const column of logs) {
+        expect(column.rows.length, column.title).toBeGreaterThan(0);
+        expect(column.overflow, column.title).toBeLessThanOrEqual(1);
+        expect(column.right, column.title).toBeLessThanOrEqual(viewport.width + 1);
+        for (const row of column.rows) {
+          expect(row.note, column.title).toBeLessThanOrEqual(column.right + 1);
+          expect(row.date, column.title).toBeLessThanOrEqual(column.right + 1);
+        }
+      }
+    });
+  });
+}
+
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   const size = viewport.width === 390 ? 'mobile' : 'desktop';
   test.describe(size, () => {

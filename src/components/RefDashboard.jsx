@@ -420,8 +420,8 @@ export default function RefDashboard() {
   return (
     <>
       <style>{noScrollbarStyles}</style>
-      <section className="pt-28 px-6 max-w-xl mx-auto text-ink mb-20">
-      <h1 className="text-4xl font-extrabold text-center text-accent drop-shadow">
+      <section className="pt-28 px-6 w-full max-w-xl mx-auto text-ink mb-20">
+      <h1 className="text-4xl font-extrabold text-center text-accent drop-shadow break-words">
         Welcome, {creator.name}
       </h1>
 
@@ -439,7 +439,7 @@ export default function RefDashboard() {
         </div>
       ) : null}
 
-      <p className="mt-1 text-center opacity-70">
+      <p className="mt-1 text-center opacity-70 break-words">
         Referral Code: <b className="text-accent">{referralCode}</b>
       </p>
 
@@ -816,19 +816,19 @@ export default function RefDashboard() {
                     logs.xoc.map((entry) => (
                       <div
                         key={entry._key || entry.paidOn}
-                        className="bg-surface-card border border-line-input rounded-lg px-3 py-2 flex items-center justify-between"
+                        className="bg-surface-card border border-line-input rounded-lg px-3 py-2 flex items-center justify-between gap-3"
                       >
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-sm font-semibold text-info-text">
                             {formatCurrency(entry.amount)}
                           </p>
                           {entry.note && (
-                            <p className="text-xs text-ink-muted">
+                            <p className="text-xs text-ink-muted break-words">
                               {entry.note}
                             </p>
                           )}
                         </div>
-                        <span className="text-xs text-ink-muted">
+                        <span className="shrink-0 text-xs text-ink-muted">
                           {formatDate(entry.paidOn)}
                         </span>
                       </div>
@@ -855,19 +855,19 @@ export default function RefDashboard() {
                     logs.vertex.map((entry) => (
                       <div
                         key={entry._key || entry.paidOn}
-                        className="bg-surface-card border border-line-input rounded-lg px-3 py-2 flex items-center justify-between"
+                        className="bg-surface-card border border-line-input rounded-lg px-3 py-2 flex items-center justify-between gap-3"
                       >
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-sm font-semibold text-info-text">
                             {formatCurrency(entry.amount)}
                           </p>
                           {entry.note && (
-                            <p className="text-xs text-ink-muted">
+                            <p className="text-xs text-ink-muted break-words">
                               {entry.note}
                             </p>
                           )}
                         </div>
-                        <span className="text-xs text-ink-muted">
+                        <span className="shrink-0 text-xs text-ink-muted">
                           {formatDate(entry.paidOn)}
                         </span>
                       </div>
