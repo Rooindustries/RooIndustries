@@ -182,6 +182,13 @@ export default function Contact({ initialData = null }) {
             />
           </div>
 
+          {state.errors?.getFormErrors().length ? (
+            <p role="alert" className="text-sm text-danger-text">
+              Your message didn't send. Please try again, or email{" "}
+              {contactData?.email || "serviroo@rooindustries.com"} directly.
+            </p>
+          ) : null}
+
           <button
             type="submit"
             disabled={!configReady || state.submitting}
