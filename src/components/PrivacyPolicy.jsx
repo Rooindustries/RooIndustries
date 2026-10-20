@@ -35,7 +35,9 @@ export default function PrivacyPolicy({ initialData = null }) {
 
   useEffect(() => {
     getPublicContent("privacy-policy")
-      .then(setData)
+      .then((next) => {
+        if (next) setData(next);
+      })
       .catch(console.error);
   }, []);
 

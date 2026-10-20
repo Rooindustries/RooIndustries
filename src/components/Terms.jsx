@@ -8,7 +8,9 @@ export default function Terms({ initialData = null }) {
 
   useEffect(() => {
     getPublicContent("terms")
-      .then(setData)
+      .then((next) => {
+        if (next) setData(next);
+      })
       .catch(console.error);
   }, []);
 

@@ -97,7 +97,7 @@ test("/about, /contact, /privacy, /terms, /tools and /meet-the-team keep their l
   }
 });
 
-test("/contact, /privacy, /terms and /meet-the-team keep their last content when the CMS returns no document", async ({ request, baseURL }, testInfo) => {
+test("/contact, /privacy, /terms and /meet-the-team keep their last content when the CMS returns no document", async ({ request, baseURL, browser }, testInfo) => {
   test.setTimeout(180000);
   const control = contentControl(request, baseURL);
   const timeline = [];
@@ -125,6 +125,24 @@ test("/contact, /privacy, /terms and /meet-the-team keep their last content when
       if (route === "/contact") expect.soft(after.body.includes("Ready to optimize your PC?"), route).toBe(false);
       if (route === "/privacy") expect.soft(after.headings, route).toEqual(["Privacy Policy"]);
       if (route === "/terms") expect.soft(after.headings, route).toEqual(["Terms of Service"]);
+    }
+    const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+    const context = await browser.newContext({ javaScriptEnabled: true, serviceWorkers: "block" });
+    try {
+      await guardBrowserContext(context, [baseURL]);
+      const page = await context.newPage();
+      for (const [route, resource, heading] of [["/privacy", "privacy-policy", "Privacy Policy"], ["/terms", "terms", "Terms of Service"]]) {
+        const refetch = page.waitForResponse(response => new URL(response.url()).pathname === `/api/content/${resource}`);
+        await page.goto(route);
+        const body = await (await refetch).json();
+        timeline.push({ route, step: "browser refetch without a document", refetch: body });
+        expect(body.data, route).toBeNull();
+        await page.waitForTimeout(500);
+        await expect(page.locator("main").getByRole("heading", { name: heading, exact: true }), route).toBeVisible();
+        await expect(page.locator("main"), route).toContainText(expected[route]);
+      }
+    } finally {
+      await context.close();
     }
   } finally {
     await control({ reset: true });
