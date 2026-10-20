@@ -44,11 +44,19 @@ jobs:
             files: 'section-nav\.spec\.js'
           - name: booking
             files: 'booking-flow\.spec\.js'
-          - name: rest
+          - name: rest-1
             files: '^(?!.*(section-nav|booking-flow)\.spec\.js$).*'
+            shard: 1/3
+          - name: rest-2
+            files: '^(?!.*(section-nav|booking-flow)\.spec\.js$).*'
+            shard: 2/3
+          - name: rest-3
+            files: '^(?!.*(section-nav|booking-flow)\.spec\.js$).*'
+            shard: 3/3
     env:
       PW_FILES: ${{ matrix.suite.files }}
       PW_SUITE: ${{ matrix.suite.name }}
+      PW_SHARD: ${{ matrix.suite.shard }}
       ROO_TEST_HOST: 127.0.0.1
       BASE_URL: http://127.0.0.1:3211
       PW_PORT: "3211"
@@ -77,10 +85,10 @@ jobs:
             sleep 1
           done
           curl --fail --silent "$BASE_URL" > /dev/null
-          if [ "$PW_SUITE" = "rest" ]; then
+          if [ "$PW_SUITE" = "rest-1" ]; then
             TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:agent-readiness
           fi
-          xvfb-run -a npx playwright test --pass-with-no-tests "$PW_FILES"
+          xvfb-run -a npx playwright test --pass-with-no-tests ${PW_SHARD:+--shard="$PW_SHARD"} "$PW_FILES"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
