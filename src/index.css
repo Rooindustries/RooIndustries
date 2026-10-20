@@ -2797,8 +2797,14 @@ html.low-performance-mode #how-it-works .deferred-section-content {
   content-visibility: visible;
 }
 
-html.low-performance-mode *:not(.glow-line):not(.ri-engineer-status-pulse) {
+html.low-performance-mode *:not(.glow-line):not(.ri-engineer-status-pulse):not(.ri-reveal) {
   animation: none !important;
+  filter: none !important;
+  -webkit-filter: none !important;
+  transition-property: opacity, transform !important;
+}
+
+html.low-performance-mode .ri-reveal {
   filter: none !important;
   -webkit-filter: none !important;
   transition-property: opacity, transform !important;

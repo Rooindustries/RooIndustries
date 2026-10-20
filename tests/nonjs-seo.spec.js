@@ -92,7 +92,7 @@ test.describe("Non-JS crawlability", () => {
     });
   }
 
-  test("/ keeps the proof card visible once JavaScript loads", async ({ browser, baseURL }, testInfo) => {
+  test("/ keeps the proof card fade and visibility once JavaScript loads", async ({ browser, baseURL }, testInfo) => {
     const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
     for (const reducedMotion of ["no-preference", "reduce"]) {
       const context = await browser.newContext({ baseURL, javaScriptEnabled: true, reducedMotion, viewport: { width: 390, height: 844 } });
@@ -100,6 +100,7 @@ test.describe("Non-JS crawlability", () => {
         await guardBrowserContext(context, [baseURL]);
         const page = await context.newPage();
         await page.goto("/", { waitUntil: "load" });
+        await page.waitForFunction(() => document.documentElement.classList.contains("low-performance-mode"));
         const card = page.locator("main#main-content .ri-proof-card");
         const state = () => card.evaluate(element => ({
           opacity: getComputedStyle(element).opacity,
@@ -109,7 +110,8 @@ test.describe("Non-JS crawlability", () => {
         await expect.poll(async () => (await state()).opacity, { timeout: 3000 }).toBe("1");
         const settled = await state();
         await testInfo.attach(`proof-card-js-${reducedMotion}`, { body: JSON.stringify(settled, null, 2), contentType: "application/json" });
-        if (reducedMotion === "reduce") expect(settled.animation).toBe("none");
+        expect(settled.rootClasses).toContain("low-performance-mode");
+        expect(settled.animation).toBe(reducedMotion === "reduce" ? "none" : "riReveal");
         await page.waitForTimeout(1000);
         expect((await state()).opacity).toBe("1");
       } finally {
