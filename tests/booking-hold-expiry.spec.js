@@ -47,6 +47,31 @@ test("expiry on the payment page returns to slot selection with the reason", asy
   await reserveAgainKeepsDetails(page, flow);
 });
 
+for (const route of ["/booking", "/payment"]) {
+  test(`reloading ${route} after the reservation expired keeps the typed details`, async ({ page, flow }) => {
+    if (route === "/payment") {
+      await flow.review();
+      await flow.payment();
+    } else {
+      await flow.reserve();
+      await flow.details();
+    }
+    await page.evaluate(() => {
+      const expiresAt = new Date(Date.now() - 60000).toISOString();
+      const hold = JSON.parse(sessionStorage.getItem("my_slot_hold"));
+      sessionStorage.setItem("my_slot_hold", JSON.stringify({ ...hold, expiresAt }));
+      const checkout = JSON.parse(sessionStorage.getItem("checkout_booking_state") || "null");
+      if (checkout) sessionStorage.setItem("checkout_booking_state", JSON.stringify({ ...checkout, slotHoldExpiresAt: expiresAt }));
+    });
+    await page.reload();
+    await expect(page).toHaveURL(/\/booking$/);
+    await expect(page.getByRole("dialog").getByRole("alert").filter({ hasText: expiredMessage })).toBeVisible();
+    expect(await storedHold(page)).toBeNull();
+    expect(await draftEmail(page)).toBe("visitor@example.invalid");
+    await reserveAgainKeepsDetails(page, flow);
+  });
+}
+
 test("same-tab payment expiry on the booking step stays in the booking flow", async ({ page, flow }) => {
   await page.clock.install();
   await flow.reserve();

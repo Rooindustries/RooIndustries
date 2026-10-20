@@ -16,6 +16,7 @@ const { getPublicPackageTitle } = packagePricing;
 const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = "booking_draft";
 const MOBILE_MAX_WIDTH = 780;
+const flowOwnsHoldExpiry = (pathname) => pathname === "/booking" || pathname === "/payment";
 
 const useIsMobileWidth = (maxWidth = MOBILE_MAX_WIDTH) => {
   const [isMobileWidth, setIsMobileWidth] = useState(false);
@@ -123,7 +124,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
           currentHoldRef.current = normalizedHold;
           setHold(normalizedHold);
           broadcastHold(normalizedHold);
-        } else {
+        } else if (!flowOwnsHoldExpiry(pathRef.current)) {
           sessionStorage.removeItem(HOLD_STORAGE_KEY);
         }
       }
@@ -192,8 +193,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
           setCountdown(0);
           return false;
         }
-        const flowOwnsExpiry = path === "/booking" || path === "/payment";
-        if ((hold.phase === "payment_pending" && paymentInOtherTab) || flowOwnsExpiry) {
+        if ((hold.phase === "payment_pending" && paymentInOtherTab) || flowOwnsHoldExpiry(path)) {
           setCountdown(0);
           return false;
         }
