@@ -46,13 +46,16 @@ jobs:
             files: 'booking-flow\.spec\.js'
           - name: rest-1
             files: '^(?!.*(section-nav|booking-flow)\.spec\.js$).*'
-            shard: 1/3
+            shard: 1/4
           - name: rest-2
             files: '^(?!.*(section-nav|booking-flow)\.spec\.js$).*'
-            shard: 2/3
+            shard: 2/4
           - name: rest-3
             files: '^(?!.*(section-nav|booking-flow)\.spec\.js$).*'
-            shard: 3/3
+            shard: 3/4
+          - name: rest-4
+            files: '^(?!.*(section-nav|booking-flow)\.spec\.js$).*'
+            shard: 4/4
     env:
       PW_FILES: ${{ matrix.suite.files }}
       PW_SUITE: ${{ matrix.suite.name }}
