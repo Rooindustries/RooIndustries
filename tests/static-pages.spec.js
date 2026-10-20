@@ -152,7 +152,7 @@ test("a background rebuild triggered by a query keeps that query out of every re
       const deadline = Date.now() + 75000;
       let trigger = null;
       while (!trigger && Date.now() < deadline) {
-        const response = await request.fetch(`${route}?ref=${probe}&gclid=${probe}`, { method, headers: { accept: "text/html", ...headers }, maxRedirects: 0 });
+        const response = await request.fetch(`${route}?ref=${probe}&gclid=${probe}&p=${probe}&c=${probe}&c=${probe}`, { method, headers: { accept: "text/html", ...headers }, maxRedirects: 0 });
         await response.body();
         if (response.headers()["x-nextjs-cache"] === "STALE") trigger = { status: response.status(), at: Date.now() };
         else await wait(1000);
