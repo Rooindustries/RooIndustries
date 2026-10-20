@@ -171,7 +171,7 @@ test("/faq publishes its own changes while unrelated home content is unavailable
   }
 });
 
-test("/ and /packages list an offer for every card after a CMS price edit with a space", async ({ request, baseURL }, testInfo) => {
+test("/ and /packages list an offer for every card after CMS price edits without a dollar sign or with a space", async ({ request, baseURL }, testInfo) => {
   test.setTimeout(180000);
   const control = contentControl(request, baseURL);
   const timeline = [];
@@ -182,19 +182,20 @@ test("/ and /packages list an offer for every card after a CMS price edit with a
     .filter(node => node["@type"] === "OfferCatalog")
     .flatMap(node => node.itemListElement.map(offer => offer.price));
   try {
+    await control({ patch: { _id: "tooling-package-0", price: "84.99" } });
     await control({ patch: { _id: "tooling-package-1", price: "$ 139.95" } });
     await wait(61000);
     for (const route of ["/", "/packages"]) {
       expect((await read(route, "first request after the price edit")).status).toBe(200);
       await expect.poll(async () => {
         const page = await read(route, "waiting for the edited price");
-        return page.cache === "HIT" && page.body.includes("$ 139.95");
+        return page.cache === "HIT" && page.body.includes("$ 139.95") && page.body.includes(">84.99<");
       }, { timeout: 20000 }).toBe(true);
       const { body } = await read(route, "after the price edit");
       const cards = body.match(/class="ri-package-card /g) || [];
       expect(cards.length).toBeGreaterThan(1);
       expect(offers(body)).toHaveLength(cards.length);
-      expect(offers(body)).toContain("139.95");
+      expect(offers(body)).toEqual(expect.arrayContaining(["84.99", "139.95"]));
     }
   } finally {
     await control({ reset: true });

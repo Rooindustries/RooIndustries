@@ -281,8 +281,10 @@ const buildOrganizationJsonLd = () => ({
 });
 
 const parseUsdAmount = (value) => {
-  const amount = String(value || "").replace(/\s+/g, "").match(/^\$(\d+(?:,\d{3})*(?:\.\d{1,2})?)$/);
-  return amount ? amount[1].replace(/,/g, "") : null;
+  const match = String(value || "").replace(/\s+/g, "").match(/^(?:USD|US)?\$?((?:\d{1,3}(?:,\d{3})+|\d+)?(?:\.\d+)?)(?:USD)?$/i);
+  const amount = match?.[1] ? Number(match[1].replace(/,/g, "")) : NaN;
+  if (!Number.isFinite(amount) || amount <= 0 || Math.abs(Math.round(amount * 100) - amount * 100) > 1e-6) return null;
+  return String(Math.round(amount * 100) / 100);
 };
 
 const buildOfferCatalog = (packages = []) => {
