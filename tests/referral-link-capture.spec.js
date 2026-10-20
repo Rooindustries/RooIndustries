@@ -4,7 +4,7 @@ test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", viewport: { widt
 
 const storedReferral = page => page.evaluate(() => sessionStorage.getItem("referral_session"));
 
-for (const landing of ["/?ref=friend", "/reviews?ref=friend"]) {
+for (const landing of ["/?ref=friend", "/reviews?ref=friend", "/tourney?ref=friend"]) {
   test(`a creator link to ${landing.split("?")[0]} keeps the code for a booking started elsewhere`, async ({ page, flow }) => {
     await page.goto(landing);
     await expect.poll(() => storedReferral(page)).toBe("friend");
