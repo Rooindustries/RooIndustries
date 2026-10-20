@@ -26,7 +26,7 @@ import {
 import { sanitizeBrowserSearch } from "./lib/browserSearch";
 import { prefetchHomeSectionData } from "./lib/homeSectionData";
 import { whenUserInteracts } from "./lib/firstInteraction";
-import { migrateCheckoutStorageToSession } from "./lib/checkoutStorage";
+import { migrateCheckoutStorageToSession, rememberReferralFromSearch } from "./lib/checkoutStorage";
 import { getPublicContent, getPublicContentPendingCount } from "./lib/publicContentClient";
 import { useBookingDialogPending } from "./lib/bookingDialogHold";
 import { setVisibleTimeout } from "./lib/visibleTimeout";
@@ -383,6 +383,7 @@ export function AppContent({
   useEffect(() => {
     migrateCheckoutStorageToSession();
     initializePerformanceProfile();
+    if (!loadedOnFlowRouteRef.current) rememberReferralFromSearch(window.location.search);
   }, []);
 
 
