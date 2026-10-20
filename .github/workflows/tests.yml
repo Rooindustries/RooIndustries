@@ -231,3 +231,39 @@ jobs:
           path: test-results/
           if-no-files-found: error
           retention-days: 7
+
+  revalidation:
+    name: Playwright revalidation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ROO_TEST_HOST: 127.0.0.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run benchmarks revalidation suite
+        id: benchmarks-revalidation
+        env:
+          PW_PORT: "3251"
+          PW_SERVER_ID: revalidation-benchmarks
+        run: xvfb-run -a npm run test:benchmarks:revalidation -- --output=test-results/benchmarks-revalidation
+      - name: Run static pages revalidation suite
+        if: ${{ !cancelled() && (success() || steps.benchmarks-revalidation.outcome == 'failure') }}
+        env:
+          PW_PORT: "3261"
+          PW_SERVER_ID: revalidation-static
+        run: xvfb-run -a npm run test:static:revalidation -- --output=test-results/static-revalidation
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-results-revalidation
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
