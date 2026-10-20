@@ -35,3 +35,27 @@ for (const javaScriptEnabled of [true, false]) {
     });
   });
 }
+
+test.describe("How It Works videos", () => {
+  test.use({ javaScriptEnabled: true });
+
+  test("a video that can't start playing leaves its poster showing", async ({ page }) => {
+    await page.route("**/videos/**", route => route.abort());
+    await page.goto("/");
+    const cards = page.locator(".ri-hiw-video");
+    await expect(cards).toHaveCount(4);
+    for (const card of await cards.all()) {
+      await card.locator("img").scrollIntoViewIfNeeded();
+      await expect.poll(() => card.locator("img").evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true);
+      await expect(card.locator("video")).toHaveCSS("opacity", "0");
+    }
+  });
+
+  test("a video shows once it plays", async ({ page }) => {
+    await page.goto("/");
+    const card = page.locator(".ri-hiw-video").first();
+    await card.locator("img").scrollIntoViewIfNeeded();
+    await expect.poll(() => card.locator("video").evaluate(video => !video.paused && video.readyState >= 3), { timeout: 15000 }).toBe(true);
+    await expect(card.locator("video")).toHaveCSS("opacity", "1");
+  });
+});

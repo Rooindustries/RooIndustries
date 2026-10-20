@@ -62,6 +62,7 @@ export default function HowItWorks({ initialData = null }) {
   const VideoBadge = ({ name, pauseVideos }) => {
     const cardRef = useRef(null);
     const videoRef = useRef(null);
+    const [playing, setPlaying] = useState(false);
 
     useEffect(() => {
       const node = videoRef.current;
@@ -126,12 +127,13 @@ export default function HowItWorks({ initialData = null }) {
         />
         <video
           ref={videoRef}
-          className="absolute inset-0 w-full h-full object-cover"
+          className={`absolute inset-0 w-full h-full object-cover${playing ? "" : " opacity-0"}`}
           loop
           muted
           playsInline
           preload="none"
           fetchPriority="low"
+          onPlaying={() => setPlaying(true)}
         >
           <source src={webm} type="video/webm" />
           <source src={mp4} type="video/mp4" />
