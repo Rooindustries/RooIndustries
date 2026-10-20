@@ -51,25 +51,28 @@ A PR that touches one:
 3. Lists every entry point into the changed behavior, each with an E2E case: full page load, in-app navigation, Back and Forward, second tab, API, webhook, cron and retry. It also lists every state its data can be in.
 4. Shows each new E2E failing against the base branch locally, then merges it together with the fix once it passes.
 5. For data from a provider (Dodo, Supabase), lists every field and documented state with the code that handles it.
-6. Runs the booking-to-payment chain locally before merge:
-   - `npm run test:booking-flow`
-   - `node scripts/test-payment-persistence-sweep.mjs --full-chain`, with Postgres 17 set up as in the native CI job
-   - the referral suites, when credit changes
+6. Runs these locally before merge, and says which links of the chain they cover:
+   - `npm run test:booking-flow`: the browser flow from the packages to the payment handoff. Fixtures answer the hold, quote and start, and it ends at a synthetic checkout handoff, so it never confirms a paid booking or a credit. (`tests/fixtures/booking-flow.cjs:71-89,131-141`)
+   - `node scripts/test-payment-persistence-sweep.mjs --full-chain`, with Postgres 17 set up as in the native CI job: the payment flow functions against a real database on the full migration chain. It calls them through its own fixture router, not the Next webhook route (`scripts/test-payment-persistence-sweep.mjs:203`). Additional start, completion and referral scenario groups require `--a1` or `--a2` (`:19,40-48`).
+   - the referral suites, when credit changes.
+   - **NOT ENFORCED (ROO-507):** no test runs the whole chain: booking, Dodo checkout, a signed webhook through `app/api/payment/webhook/dodo/route.js`, the confirmed booking and the creator's credit. Until one does, a money-path PR names the links its tests leave out.
 7. Gets a Sol review briefed with the diff, these invariants and the entry points, and asks it to break each one (up to 5 rounds).
 8. Gets a read-only production smoke after deploy.
 9. Gives every bug found a one-line root cause and a new invariant line or regression E2E.
 
 ### Referral attribution
 
-- The passive referral lives in `sessionStorage["referral_session"]`. There is no visitor attribution cookie; `REF_SESSION_COOKIE` is the creator portal login. (`src/lib/checkoutStorage.js:125-134`)
-  - An applied code is also copied into the booking draft (`booking_draft.checkoutCodes.referral`), the checkout state (`checkout_booking_state.referralCode`) and the analytics attribution. (`src/components/BookingForm.jsx:1303-1313,2377-2405`, `src/lib/salesAttribution.ts:53-68`)
-  - A fresh tab, window or browser starts empty. A window this tab opens gets a copy of its session storage, and a restored session keeps its own.
-- At each capture point, a non-empty `?ref=` replaces the stored code, and an empty or missing `?ref` leaves it alone. The capture points:
+- The passive referral lives in `sessionStorage["referral_session"]` (`src/lib/checkoutStorage.js:125-134`). There is no visitor attribution cookie; `REF_SESSION_COOKIE` is the creator portal login (`src/server/api/ref/auth.js:5,124-137,158`).
+  - An applied code is also copied into the booking draft (`booking_draft.packages[<package>].checkoutCodes.referral`) and the checkout state (`checkout_booking_state.referralCode`). (`src/components/BookingForm.jsx:1283-1297,1303-1313,2377,2405`)
+  - Analytics attribution is a separate journey snapshot, not a copy of the applied code. Applying another code doesn't update it, so a booking can send `referralCode` B with an analytics `creatorCode` A. (`src/lib/salesAttribution.ts:53-68`, `src/components/BookingForm.jsx:2381`)
+  - A fresh tab, window or browser starts empty. A same-origin page this tab opens with its opener kept gets a copy of this tab's session storage; one opened with `rel="noopener"`, like the booking FAQ link (`src/components/BookingForm.jsx:3005-3008`), starts empty. A restored session keeps its own. ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage))
+- At the site runtime and the packages section, a non-empty `?ref=` replaces the stored code, and an empty or missing `?ref` leaves it alone. The capture points:
   - the site runtime, outside `/booking`, `/payment`, `/payment-success` and `/thank-you` (`src/next/AppClientRuntime.jsx:10,82`);
   - the packages section, on mount (`src/components/Packages.jsx:107-117`);
-  - `/booking`, on every change of its query (`src/components/BookingForm.jsx:487-495,648-663`).
+  - `/booking`, on every change of its query or of the draft's removed code, with its own rules below (`src/components/BookingForm.jsx:487-495,648-663`).
 - **NOT ENFORCED (ROO-475, fixed by #242):** the site runtime captures only once per document (`src/next/AppClientRuntime.jsx:81-83`). So an in-app move to a public page carrying `?ref=` keeps the older code or none, unless that page is `/booking` or mounts the packages section.
 - `/booking?ref=X` stores X unless X is the code the visitor removed in this booking draft. `/booking?ref=` with a blank value clears the stored code. (`src/components/BookingForm.jsx:487-495,648-663`)
+- **NOT ENFORCED (fixed by #242):** while the draft remembers a removed code, every `/booking` visit clears the stored code, even with no `?ref` and even when it's another creator's (`src/components/BookingForm.jsx:649-663`). So remove A, follow creator B's link, reopen booking, and B's code is gone before the auto-apply.
 - A booking sends only a referral the server validated in this session. The review step auto-applies `?ref` or the stored code once per package and code, and only while a hold is active and no referral is applied. (`src/components/BookingForm.jsx:1921-1990,2377,2405`)
 - An invalid code is dropped and remembered as dismissed. A code that can't be checked right now (validation unavailable) is kept so the visitor can retry. (`src/components/BookingForm.jsx:1952-1964`)
 - The draft remembers one removed code at a time, and the auto-apply skips it.
@@ -96,19 +99,19 @@ A PR that touches one:
 - A slot with an active booking lock or a blocking booking can't be held. This is rechecked after the hold read. (`src/server/booking/holdSlot.js:304-311,318-335`)
 - A slot that has already started can't be held. (`src/server/booking/holdSlot.js:337-342`)
 - A hold lasts 20 minutes, and starting a payment resets it to 20 minutes from payment start. (`src/server/booking/holdSlot.js:23,344`, `src/server/api/payment/paymentRecord.js:23`, `src/server/api/payment/flow.js:2899,3016-3025`)
-- The client's refresh and release calls refuse a hold in `payment_pending`. (`src/server/booking/releaseHold.js:67-72`, `src/server/booking/holdSlot.js:132-136,257-266,358-367`)
-  - A provider-confirmed unpaid cancellation (the visitor changes payment method) reopens the hold with a new nonce. (`src/server/api/payment/flow.js:3502-3576,3680-3693,3730-3785`, `src/server/api/payment/cancel.js:9-14`)
+- The client's refresh and release calls refuse an unexpired hold in `payment_pending`. (`src/server/booking/releaseHold.js:67-72`, `src/server/booking/holdSlot.js:132-136,257-266,358-367`) An expired one is no longer active, so it can be reclaimed with a fresh nonce like any expired hold. (`src/server/booking/holdSlot.js:28-36,346,415-442`)
+  - A provider-confirmed unpaid cancellation (the visitor changes payment method) reopens its own unexpired hold with a new nonce. (`src/server/api/payment/flow.js:3502-3576,3680-3693,3730-3785`, `src/server/api/payment/cancel.js:9-14`) If that hold has expired, the payment is abandoned and the slot released, with no new hold. (`src/server/api/payment/flow.js:3661-3677`) Upgrades have no slot hold.
 - Each hold generation (hold id plus nonce) has at most one payment record, and a second start for it reuses that record. (`src/server/api/payment/paymentRecord.js:136-137`, `src/server/api/payment/flow.js:1273,1291-1300,2860-2878`)
 - An ordinary booking commits only against an active, unexpired hold for the same time, package, payment record and backend. (`src/server/api/ref/bookingCommit.js:59-77,166-169`) The exceptions:
   - upgrades book with no slot (`src/server/api/ref/createBooking.js:1660`);
   - a verified paid capture whose hold expired or vanished books the slot if it's still free (`src/server/api/ref/createBooking.js:1450-1478,1682-1684`);
-  - reschedule records carry no slot.
+  - reschedule records carry no slot: they keep only `originalRequestedStartTimeUTC`, with no start time or slot lock (`src/server/api/ref/bookingCommit.js:306-374`).
 - A booking is recorded at most once per payment:
   - it has a deterministic id with a replay check (`src/server/api/ref/bookingCommit.js:138-146,268-276`);
   - one payment proof can't fund two bookings (`:162-165`);
   - the slot lock and the hold consumption commit in one transaction (`:186-215,261-266`).
 - A recognized, validated capture whose booking fails on a slot conflict or a payload problem becomes a "requires reschedule" booking. This happens from the 5-minute reconcile (`vercel.json:66`, `src/server/api/payment/flow.js:4779-4789,4892-4917`) and from a late capture after abandonment (`:2384-2400`). The record is built at `:4027-4060`.
-- **NOT ENFORCED (capture without a booking):** some captures end with neither a booking nor a reschedule record:
+- **NOT ENFORCED (capture without a booking, ROO-499):** some captures end with neither a booking nor a reschedule record:
   - owner-review states, such as upgrade credit that dropped after capture (`src/server/api/payment/flow.js:1936-1965,3933-3942`);
   - exhausted retries: 12 failed finalizes set `reconciliationRecoveryTerminal` (`:105-117,1870-1911`), and reconcile then skips the record (`:4347`).
 - A definitive unpaid abandonment tries to release the hold and the coupon reservation. If the release fails it keeps `resourceReleasePending` and retries. (`src/server/api/payment/flow.js:1687,1746-1752,1781,2634,2696-2732`)
@@ -133,7 +136,7 @@ Creating a checkout:
 Validating a payment, on every path (webhook, return page, reconcile):
 
 - `payment_id`, `checkout_session_id`, `metadata.paymentRecordId` and any stored payment id must all match the record. A missing one fails the match. (`src/server/api/payment/dodoProvider.js:86-90`)
-- The payment must be in the record's Dodo environment. (`src/server/api/payment/dodoProvider.js:91-93`)
+- The record's Dodo environment (test or live) must be the server's current one, whose key the payment is read with. (`src/server/api/payment/dodoProvider.js:91-93`)
 - The currency must be USD and equal to the record's. (`src/server/api/payment/dodoProvider.js:94-95`)
 - `total_amount` minus any added tax must equal the quoted `netAmount` in cents. Missing tax counts as 0, and tax must be between 0 and the total. (`src/server/api/payment/dodoProvider.js:96-102`)
 - A succeeded payment must have exactly one cart line, with quantity 1, for the recorded product. A missing cart fails. (`src/server/api/payment/dodoProvider.js:103-106`)
@@ -143,21 +146,22 @@ Validating a payment, on every path (webhook, return page, reconcile):
   - It becomes `needs_recovery` with `providerRecoveryTerminal`, and reconcile skips it from then on. (`src/server/api/payment/flow.js:4441-4442,4459,4465-4472`)
   - Or the webhook acknowledges a binding mismatch with 200 (`:6141`).
   - The same silent end applies to lost, accepted or expired disputes (`:5883,5936`), upgrade-credit reviews (`:1945-1964`) and refunds with incomplete details (`:5990-5996`).
-- **NOT ENFORCED (rare):** a payment without `metadata.paymentRecordId`, such as one through the product's public buy link, is acknowledged and dropped. (`src/server/api/payment/flow.js:6122`)
+- **NOT ENFORCED (rare, ROO-498):** a payment without `metadata.paymentRecordId`, such as one through the product's public buy link, is acknowledged and dropped. (`src/server/api/payment/flow.js:6122`)
+- Fields read from a payment: `payment_id`, `status`, `total_amount`, `tax`, `currency`, `checkout_session_id`, `metadata.paymentRecordId`, `product_cart`, `refund_status`, `refunds` and `disputes`. `customer.email` is kept only as a fallback contact email for a recovered booking (`src/server/api/payment/dodoProvider.js:159`, `src/server/api/ref/bookingCommit.js:334`). No money decision reads any other field (customer, billing, card and payment method details, brand and business ids, discounts, settlement amounts), so none of them can change one.
 
 Payment statuses:
 
-- `succeeded` finalizes the booking, or takes the reschedule path. (`src/server/api/payment/flow.js:6080-6085`)
+- `succeeded` goes to finalization after refunds and disputes are handled: a fully refunded payment stops there, and so does an active dispute (`src/server/api/payment/flow.js:6070-6079`). Finalization then books, takes the reschedule path, or stops in owner review or exhausted retries, as in "capture without a booking" above. (`:6080-6085`)
 - `failed` and `cancelled` end the record and release its resources, unless a booking exists or a dispute is active. (`src/server/api/payment/flow.js:6053-6068`)
-- `requires_payment_method` counts as unpaid. Reconcile abandons the record once the session expires. (`src/server/api/payment/dodoProvider.js:129`, `src/server/api/payment/flow.js:4604,5859-5861`)
+- `requires_payment_method` counts as unpaid. Reconcile abandons the record once it is older than the 20-minute payment hold. (`src/server/api/payment/dodoProvider.js:128-129`, `src/server/api/payment/paymentRecord.js:23`, `src/server/api/payment/flow.js:4822-4829`)
 - `processing`, `requires_customer_action`, `requires_merchant_action`, `requires_confirmation`, `requires_capture`, `partially_captured`, `partially_captured_and_capturable`, and a null status are pending.
-  - The webhook answers 503 so Dodo re-delivers. (`src/server/api/payment/dodoProvider.js:128-129`, `src/server/api/payment/flow.js:6087-6090,6145-6147`)
-  - A later success after the hold expired takes the reschedule path.
-  - ACH Direct Debit stays `processing` for up to four business days. Its final success or failure arrives as its own event, and the 5-minute reconcile also re-reads it.
+  - For a checkout still in progress the webhook answers 503 so Dodo re-delivers. A record already booked or refunded answers 200. (`src/server/api/payment/dodoProvider.js:128-129`, `src/server/api/payment/flow.js:6087-6090,6145-6147`)
+  - A later success after the hold expired still books the slot if it's free, as in the expired-hold exception under Bookings and holds (`src/server/api/ref/createBooking.js:1450-1478,1682-1684`, `src/server/api/ref/bookingCommit.js:68-74`). If the slot is taken, it becomes a "requires reschedule" booking.
+  - ACH Direct Debit can stay `processing` for days ([Dodo ACH](https://docs.dodopayments.com/features/payment-methods/ach)). Its final success or failure arrives as its own event, and the 5-minute reconcile re-reads it; once its hold has expired, only the hold is released. (`src/server/api/payment/flow.js:4463-4485,4848-4854`)
 
 Refunds:
 
-- A null `refund_status` means no refund.
+- A null `refund_status` means no succeeded refund; pending, failed or review refunds can still exist, and `refunds` is read either way. ([Dodo payment schema](https://docs.dodopayments.com/api-reference/payments/get-payments-1), `src/server/api/payment/flow.js:5953-5980`)
 - A `succeeded` refund must match the payment, with a positive amount no larger than the total and the same currency, before it's applied. A missing amount or currency is fetched from Dodo first. (`src/server/api/payment/flow.js:5982-6006,6041-6052`)
 - `failed`, `pending` and `review` are recorded with no accounting change. Any other status gets a 409, and Dodo retries. (`src/server/api/payment/flow.js:5955-5980`)
 - `refund_status: full` with succeeded refunds below the total, or `partial` with none succeeded, answers 503 and waits for the details. (`src/server/api/payment/flow.js:6007-6012`)
@@ -165,8 +169,8 @@ Refunds:
 Disputes:
 
 - All seven dispute statuses and three stages are validated, and each dispute's id, payment id and currency must match the payment. Anything else gets a 409. (`src/server/api/payment/flow.js:5870-5876`)
-- An open dispute takes the booking to `pending`, zeroes the commission and puts the record in `needs_recovery`. Open means any status except `dispute_won` and `dispute_cancelled`. (`src/server/api/payment/flow.js:5884-5885,5909-5925,5939`)
-- `dispute_won` and `dispute_cancelled` restore the booking status, and the commission returns at the retained share. (`src/server/api/payment/flow.js:5916-5921`)
+- An open dispute moves a `captured` or `completed` booking to `pending`, zeroes the commission and puts the record in `needs_recovery`. A cancelled booking stays cancelled, and a fully refunded booking isn't touched. Open means any status except `dispute_won` and `dispute_cancelled`. (`src/server/api/payment/flow.js:5884-5888,5906-5925,5939`)
+- `dispute_won` and `dispute_cancelled` restore the earlier status only if the booking is still `pending` with its dispute flag set, so an admin's cancellation in between stands. The commission returns at the retained share either way; a cancelled booking still earns nothing, since earnings count only `captured` and `completed`. (`src/server/api/payment/flow.js:5908-5921`, `src/server/api/ref/payoutUtils.js:87-93`)
 - A disputed payment never finalizes a booking. (`src/server/api/payment/dodoProvider.js:147-149`, `src/server/api/payment/flow.js:6073-6079`)
 
 Webhook delivery:
@@ -175,8 +179,9 @@ Webhook delivery:
 - A webhook without `webhook-id` is refused. (`src/server/api/payment/flow.js:6101-6102`)
 - Payload state is never trusted. The payment is re-read from Dodo by `data.payment_id`, so stale or out-of-order events act on the latest state. (`src/server/api/payment/flow.js:6108-6121`)
 - Only these event types are processed: `payment.succeeded`, `payment.failed`, `payment.processing`, `payment.cancelled`, `refund.succeeded`, `refund.failed` and `dispute.*`. Every other event gets 200 and is ignored. (`src/server/api/payment/flow.js:6103-6104`)
-- Each Dodo `webhook-id` has exactly one receipt. (`src/server/api/payment/paymentRecord.js:183-194`, `src/server/api/payment/flow.js:1599-1636,6129-6136`)
-  - A repeat with an unchanged fetched state answers 200.
+- Each claimed Dodo `webhook-id` has one receipt. Ignored event types and payments with no matching record return before a receipt is made. (`src/server/api/payment/paymentRecord.js:183-194`, `src/server/api/payment/flow.js:1599-1636,6103-6104,6122,6129-6136`)
+  - A repeat whose receipt is already `processed` with an unchanged fetched state answers 200. (`src/server/api/payment/flow.js:1625-1627`)
+  - A receipt released as `retryable` (an earlier delivery answered non-2xx) is claimed and processed again even with an unchanged state, so an unfinished effect gets retried. (`src/server/api/payment/flow.js:1668-1680`)
   - A changed state is processed again, thanks to the stored hash.
   - A different type or identity under the same id is a binding conflict (409).
   - A receipt held by a concurrent delivery (120-second lease) answers 503 at once.
