@@ -274,15 +274,15 @@ export default function UpgradeLink() {
         </div>
       )}
 
-        <div className="mt-8 rounded-2xl border border-line-input bg-surface-card shadow-[var(--shadow-card-glow-info)] backdrop-blur-md p-6 sm:p-7">
-          <label htmlFor={`${formId}-order`} className="block text-sm font-semibold mb-2">
-            Enter your Order ID
-          </label>
-          <p className="text-xs text-ink-muted mb-3">
-            You can find this in your Roo Industries booking email (labelled
-            "Order ID").
-          </p>
-          <div className="mb-3">
+        <form
+          noValidate
+          onSubmit={(event) => {
+            event.preventDefault();
+            handleCheckOrder();
+          }}
+          className="mt-8 rounded-2xl border border-line-input bg-surface-card shadow-[var(--shadow-card-glow-info)] backdrop-blur-md p-6 sm:p-7"
+        >
+          <div className="mb-4">
             <label htmlFor={`${formId}-email`} className="block text-sm font-semibold mb-2">
               Booking email
             </label>
@@ -300,9 +300,17 @@ export default function UpgradeLink() {
               autoComplete="email"
             />
           </div>
+          <label htmlFor={`${formId}-order`} className="block text-sm font-semibold mb-2">
+            Enter your Order ID
+          </label>
+          <p id={`${formId}-order-help`} className="text-xs text-ink-muted mb-3">
+            You can find this in your Roo Industries booking email (labelled
+            "Order ID").
+          </p>
           <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
             <input
               id={`${formId}-order`}
+              aria-describedby={`${formId}-order-help`}
               value={orderId}
               onChange={(e) => {
                 setOrderId(e.target.value);
@@ -313,7 +321,7 @@ export default function UpgradeLink() {
               className="flex-1 bg-surface-input border border-line-input rounded-md px-3 py-2 outline-none text-sm"
             />
             <button
-              onClick={handleCheckOrder}
+              type="submit"
               disabled={loading || linkLoading || !!linkError}
               className="glow-button px-4 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
             >
@@ -326,11 +334,11 @@ export default function UpgradeLink() {
           </div>
 
           {error && (
-            <p className="mt-3 text-sm text-danger-text bg-danger-soft border border-danger-border rounded-md px-3 py-2">
+            <p role="alert" className="mt-3 text-sm text-danger-text bg-danger-soft border border-danger-border rounded-md px-3 py-2">
               {error}
             </p>
           )}
-        </div>
+        </form>
 
       {upgradeInfo && (
         <div className="mt-8 rounded-2xl border border-success-border bg-success-soft shadow-success-soft backdrop-blur-lg p-6 sm:p-7">
