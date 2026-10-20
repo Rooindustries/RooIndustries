@@ -1,4 +1,5 @@
-import RouteRenderer from "@/src/next/RouteRenderer";
+import NotFoundEntry from "@/src/next/NotFoundEntry";
+import SeoFallback from "@/src/next/SeoFallback";
 import seo from "@/src/lib/seo";
 import { connection } from "next/server";
 import { headers } from "next/headers";
@@ -20,5 +21,10 @@ export default async function NotFound() {
       return [key, values.length > 1 ? values : values[0]];
     })
   );
-  return <RouteRenderer pathname={path} searchParams={searchParams} notFound />;
+  return (
+    <>
+      <SeoFallback pathname={path} />
+      <NotFoundEntry pathname={path} searchParams={searchParams} initialHomeData={null} initialRouteData={null} notFound />
+    </>
+  );
 }
