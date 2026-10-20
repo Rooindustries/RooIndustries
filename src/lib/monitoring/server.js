@@ -11,7 +11,7 @@ export function startServerMonitoring(dsn) {
   const client = init({
     dsn,
     environment: monitoringEnvironment(),
-    tracesSampleRate: 0.05,
+    tracesSampler: () => Math.random() < 0.05,
     traceLifecycle: "static",
     tracePropagationTargets: [],
     dataCollection: NO_DATA_COLLECTION,
