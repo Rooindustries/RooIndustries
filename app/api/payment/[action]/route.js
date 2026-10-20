@@ -3,6 +3,7 @@ import finalize from "../../../../src/server/api/payment/finalize.js";
 import providers from "../../../../src/server/api/payment/providers.js";
 import quote from "../../../../src/server/api/payment/quote.js";
 import reconcile from "../../../../src/server/api/payment/reconcile.js";
+import report from "../../../../src/server/api/payment/reconcileReport.js";
 import start from "../../../../src/server/api/payment/start.js";
 import status from "../../../../src/server/api/payment/status.js";
 import cancel from "../../../../src/server/api/payment/cancel.js";
@@ -19,6 +20,7 @@ const ACTION_HANDLERS = {
   providers,
   quote,
   reconcile,
+  report,
   start,
   status,
 };
@@ -46,7 +48,7 @@ async function handle(request, context, methodOverride) {
     handler: publicHandler,
     methodOverride,
   });
-  if (action !== "reconcile") {
+  if (action !== "reconcile" && action !== "report") {
     const metricResponse = response.clone();
     try {
       after(() =>
@@ -60,7 +62,7 @@ async function handle(request, context, methodOverride) {
     } catch {}
 
   }
-  if (action === "cancel" || action === "finalize" || action === "status") {
+  if (action === "cancel" || action === "finalize" || action === "report" || action === "status") {
     response.headers.set("cache-control", "private, no-store");
     response.headers.set("pragma", "no-cache");
   }
