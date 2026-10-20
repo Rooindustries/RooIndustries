@@ -134,6 +134,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
   let enqueueDelayMs = 0;
   let emailDelayMs = 0;
   let contentOutage = false;
+  let contentMissing = [];
   const changedContent = new Set();
   const emails = [];
   const mutate = mutations => {
@@ -175,11 +176,16 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           }
           changedContent.clear();
           contentOutage = false;
+          contentMissing = [];
         }
         if (body.outage !== undefined) {
           const documentTypes = Array.isArray(body.outage) && body.outage.length > 0 && body.outage.every(type => typeof type === 'string' && type);
           if (typeof body.outage !== 'boolean' && !documentTypes) throw new Error('Invalid fixture content outage.');
           contentOutage = body.outage;
+        }
+        if (body.missing !== undefined) {
+          if (!Array.isArray(body.missing) || !body.missing.every(type => typeof type === 'string' && type)) throw new Error('Invalid fixture missing content.');
+          contentMissing = body.missing;
         }
         if (body.patch !== undefined) {
           const index = documents.findIndex(value => value._id === body.patch?._id);
@@ -188,7 +194,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           changedContent.add(body.patch._id);
         }
         call.status = 200;
-        json(res, 200, { outage: contentOutage, changed: [...changedContent] });
+        json(res, 200, { outage: contentOutage, missing: contentMissing, changed: [...changedContent] });
       } else if (apiRoutes && url.pathname === '/__fixture' && ['GET', 'POST'].includes(req.method)) {
         if (req.method === 'POST') {
           if (body.reset === true) {
@@ -250,7 +256,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
             return;
           }
         }
-        let rows = documents.filter(row => (!body.p_document_types || body.p_document_types.includes(row._type)) && (!body.p_ids || body.p_ids.includes(row._id)));
+        let rows = documents.filter(row => !contentMissing.includes(row._type) && (!body.p_document_types || body.p_document_types.includes(row._type)) && (!body.p_ids || body.p_ids.includes(row._id)));
         for (const filter of body.p_filters) {
           if (!['eq', 'ieq', 'in'].includes(filter.op) || typeof filter.path !== 'string') throw new Error('Unsupported fixture filter.');
           rows = rows.filter(row => { const value = filter.path.split('.').reduce((item, key) => item?.[key], row); return filter.op === 'in' ? Array.isArray(filter.value) && filter.value.includes(value) : filter.op === 'ieq' ? String(value).toLowerCase() === String(filter.value).toLowerCase() : value === filter.value; });

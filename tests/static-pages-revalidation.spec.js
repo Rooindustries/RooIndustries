@@ -97,6 +97,41 @@ test("/about, /contact, /privacy, /terms, /tools and /meet-the-team keep their l
   }
 });
 
+test("/contact, /privacy, /terms and /meet-the-team keep their last content when the CMS returns no document", async ({ request, baseURL }, testInfo) => {
+  test.setTimeout(180000);
+  const control = contentControl(request, baseURL);
+  const timeline = [];
+  const read = pageReader(request, timeline);
+  const expected = {
+    "/contact": "Synthetic local contact information.",
+    "/privacy": "Synthetic local information",
+    "/terms": "Synthetic local information",
+    "/meet-the-team": "Fixture Member Alpha",
+  };
+  try {
+    await control({ missing: ["contact", "privacyPolicy", "terms", "meetTheTeam"] });
+    await wait(61000);
+    for (const [route, text] of Object.entries(expected)) {
+      const trigger = await read(route, "first request after the revalidation window");
+      expect(trigger.status, route).toBe(200);
+      expect(trigger.cache, route).toBe("STALE");
+      expect(trigger.body, route).toContain(text);
+    }
+    for (const [route, text] of Object.entries(expected)) {
+      await expect.poll(async () => (await read(route, "waiting for the revalidation to settle")).cache, { timeout: 20000 }).toBe("HIT");
+      const after = await read(route, "after the revalidation without a document");
+      expect.soft(after.status, route).toBe(200);
+      expect.soft(after.body.includes(text), route).toBe(true);
+      if (route === "/contact") expect.soft(after.body.includes("Ready to optimize your PC?"), route).toBe(false);
+      if (route === "/privacy") expect.soft(after.headings, route).toEqual(["Privacy Policy"]);
+      if (route === "/terms") expect.soft(after.headings, route).toEqual(["Terms of Service"]);
+    }
+  } finally {
+    await control({ reset: true });
+    await testInfo.attach("static-pages-missing-document", { body: JSON.stringify(timeline, null, 2), contentType: "application/json" });
+  }
+});
+
 test("/faq publishes its own changes while unrelated home content is unavailable", async ({ request, baseURL }, testInfo) => {
   test.setTimeout(180000);
   const control = contentControl(request, baseURL);
