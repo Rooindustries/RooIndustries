@@ -30,15 +30,17 @@ const readPrerenderManifest = async testInfo => {
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-const readRebuiltPage = async (request, route) => {
+const readRebuiltPage = async (request, route, revalidateSeconds) => {
   const deadline = Date.now() + 30000;
   for (;;) {
     const response = await request.get(route, { headers: { accept: "text/html" } });
     const html = await response.text();
-    const rebuilt = response.headers()["x-nextjs-cache"] === "HIT";
-    if (rebuilt || Date.now() > deadline) {
+    const cacheControl = response.headers()["cache-control"] ?? null;
+    const fresh = response.headers()["x-nextjs-cache"] === "HIT";
+    if (fresh || Date.now() > deadline) {
       const rsc = await (await request.get(route, { headers: { accept: "text/html", rsc: "1" } })).text();
-      return { rebuilt, htmlLeaked: html.includes("leakprobe"), rscLeaked: rsc.includes("leakprobe") };
+      const rebuilt = fresh && new RegExp(`^s-maxage=${revalidateSeconds}(,|$)`).test(cacheControl ?? "");
+      return { rebuilt, cacheControl, htmlLeaked: html.includes("leakprobe"), rscLeaked: rsc.includes("leakprobe") };
     }
     await wait(1000);
   }
@@ -154,7 +156,7 @@ test("a background rebuild triggered by a query keeps that query out of every re
         if (response.headers()["x-nextjs-cache"] === "STALE") trigger = { status: response.status(), at: Date.now() };
         else await wait(1000);
       }
-      return { visit, route, method, trigger, ...(await readRebuiltPage(request, route)) };
+      return { visit, route, method, trigger, ...(await readRebuiltPage(request, route, manifest.routes[route].initialRevalidateSeconds)) };
     })));
   }
   await testInfo.attach("query-rebuild-leak", { body: JSON.stringify(results, null, 2), contentType: "application/json" });

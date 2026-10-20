@@ -158,6 +158,8 @@ test("ROO-66 public fixture HTML and API stay identical", async ({ page, request
 for (const route of PREBUILT_ROUTES) {
   test(`ROO-297 the first visit after a publish keeps its query string out of ${route}`, async ({ request }, testInfo) => {
     test.skip(process.env.ROO_TEST_DEV === "1", "Prebuilt pages need a production build.");
+    const manifest = JSON.parse(await fs.readFile(path.join(testInfo.config.metadata.toolingDistDir, "prerender-manifest.json"), "utf8"));
+    const revalidateSeconds = manifest.routes[route].initialRevalidateSeconds === false ? 31536000 : manifest.routes[route].initialRevalidateSeconds;
     const results = [];
     for (const [visit, method, headers] of [
       ["page", "GET", { accept: "text/html" }],
@@ -178,7 +180,9 @@ for (const route of PREBUILT_ROUTES) {
       } while (page.headers()["x-nextjs-cache"] !== "HIT" && Date.now() < deadline);
       const html = await page.text();
       const rsc = await (await request.get(route, { headers: { accept: "text/html", rsc: "1" } })).text();
-      results.push({ visit, status: response.status(), cache: response.headers()["x-nextjs-cache"] ?? null, rebuilt: page.headers()["x-nextjs-cache"] === "HIT", htmlLeaked: html.includes("leakprobe"), rscLeaked: rsc.includes("leakprobe") });
+      const cacheControl = page.headers()["cache-control"] ?? null;
+      const rebuilt = page.headers()["x-nextjs-cache"] === "HIT" && new RegExp(`^s-maxage=${revalidateSeconds}(,|$)`).test(cacheControl ?? "");
+      results.push({ visit, status: response.status(), cache: response.headers()["x-nextjs-cache"] ?? null, rebuilt, cacheControl, htmlLeaked: html.includes("leakprobe"), rscLeaked: rsc.includes("leakprobe") });
     }
     await testInfo.attach("publish-query-leak", { body: JSON.stringify({ route, results }, null, 2), contentType: "application/json" });
     for (const result of results) {

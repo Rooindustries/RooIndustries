@@ -57,7 +57,8 @@ test.describe("home page caching", () => {
       const campaign = await served(request, testInfo, `${name}-utm`, `${path}?utm_source=newsletter&ref=friend`);
       expect(campaign.status).toBe(200);
       if (path === "/") expect(campaign.value("cache-control")).toMatch(HOME_CACHE);
-      for (const key of ["cache-control", "cdn-cache-control", "vercel-cdn-cache-control", "content-type", "vary", "x-nextjs-prerender", "set-cookie"]) {
+      for (const response of [plain, campaign]) expect(response.value("x-nextjs-prerender")).toMatch(/^1(, 1)*$/);
+      for (const key of ["cache-control", "cdn-cache-control", "vercel-cdn-cache-control", "content-type", "vary", "set-cookie"]) {
         expect(campaign.value(key), key).toBe(plain.value(key));
       }
     });
