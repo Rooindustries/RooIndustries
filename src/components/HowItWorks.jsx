@@ -116,6 +116,14 @@ export default function HowItWorks({ initialData = null }) {
                    shadow-[var(--shadow-card-glow-info)]
                    w-[calc(100%+0.75rem)] sm:w-[calc(100%+1rem)] -mx-1.5 sm:-mx-2 aspect-video sm:aspect-[16/10]"
       >
+        <img
+          src={poster}
+          alt=""
+          aria-hidden="true"
+          loading="lazy"
+          decoding="async"
+          className="absolute inset-0 w-full h-full object-cover"
+        />
         <video
           ref={videoRef}
           className="absolute inset-0 w-full h-full object-cover"
@@ -124,7 +132,6 @@ export default function HowItWorks({ initialData = null }) {
           playsInline
           preload="none"
           fetchPriority="low"
-          poster={poster}
         >
           <source src={webm} type="video/webm" />
           <source src={mp4} type="video/mp4" />
