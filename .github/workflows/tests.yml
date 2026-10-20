@@ -106,15 +106,17 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - name: Run API route suite
+        id: api-routes
         env:
           PW_PORT: "3231"
           PW_SERVER_ID: routes-api
-        run: xvfb-run -a npm run test:api:routes
+        run: xvfb-run -a npm run test:api:routes -- --output=test-results/api-routes
       - name: Run creator portal suite
+        if: ${{ !cancelled() && (success() || steps.api-routes.outcome == 'failure') }}
         env:
           PW_PORT: "3241"
           PW_SERVER_ID: routes-portal
-        run: xvfb-run -a npm run test:creator:portal
+        run: xvfb-run -a npm run test:creator:portal -- --output=test-results/creator-portal
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
