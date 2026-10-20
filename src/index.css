@@ -3277,3 +3277,24 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
 .booking-dialog-body label + :is(input, textarea) {
   margin-top: 4px;
 }
+
+@keyframes riReveal {
+  from {
+    opacity: 0;
+    transform: var(--ri-reveal-from, translateY(16px));
+  }
+}
+
+.ri-reveal {
+  animation: riReveal var(--ri-reveal-duration, 0.4s) ease-out var(--ri-reveal-delay, 0s) backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ri-reveal {
+    animation: none;
+  }
+}
+
+html.perf-reduced-motion-mode .ri-reveal {
+  animation: none;
+}

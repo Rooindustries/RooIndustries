@@ -74,6 +74,50 @@ test.describe("Non-JS crawlability", () => {
     await expect(page.locator('section[aria-label="No-JS SEO fallback"]')).toHaveCount(0);
   });
 
+  for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 }]) {
+    test(`/ shows the proof card without JavaScript at ${viewport.width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize(viewport);
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+      const card = page.locator("main#main-content .ri-proof-card");
+      const opacity = () => card.evaluate(element => getComputedStyle(element).opacity);
+      await expect(card).toHaveCount(1);
+      await expect.poll(opacity, { timeout: 3000 }).toBe("1");
+      const animation = await card.evaluate(element => getComputedStyle(element).animationName);
+      await testInfo.attach("proof-card-nojs", {
+        body: JSON.stringify({ viewport, opacity: await opacity(), animation, text: await card.innerText() }, null, 2),
+        contentType: "application/json",
+      });
+      expect(animation).toBe("riReveal");
+      await expect(card.locator(".ri-proof-cta")).toBeVisible();
+    });
+  }
+
+  test("/ keeps the proof card visible once JavaScript loads", async ({ browser, baseURL }, testInfo) => {
+    const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+    for (const reducedMotion of ["no-preference", "reduce"]) {
+      const context = await browser.newContext({ baseURL, javaScriptEnabled: true, reducedMotion, viewport: { width: 390, height: 844 } });
+      try {
+        await guardBrowserContext(context, [baseURL]);
+        const page = await context.newPage();
+        await page.goto("/", { waitUntil: "load" });
+        const card = page.locator("main#main-content .ri-proof-card");
+        const state = () => card.evaluate(element => ({
+          opacity: getComputedStyle(element).opacity,
+          animation: getComputedStyle(element).animationName,
+          rootClasses: document.documentElement.className,
+        }));
+        await expect.poll(async () => (await state()).opacity, { timeout: 3000 }).toBe("1");
+        const settled = await state();
+        await testInfo.attach(`proof-card-js-${reducedMotion}`, { body: JSON.stringify(settled, null, 2), contentType: "application/json" });
+        if (reducedMotion === "reduce") expect(settled.animation).toBe("none");
+        await page.waitForTimeout(1000);
+        expect((await state()).opacity).toBe("1");
+      } finally {
+        await context.close();
+      }
+    }
+  });
+
   for (const route of routes) {
     test(`renders meaningful HTML for ${route}`, async ({ page }) => {
       await page.goto(route, { waitUntil: "domcontentloaded" });

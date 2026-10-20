@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { motion } from "framer-motion";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 
 /* Record card design tokens — all theme accents derive from the active palette. */
@@ -94,17 +93,14 @@ export default function About({ initialData = null, compact = false }) {
 
     return (
       <section id="about" className="mx-auto h-full w-full max-w-sm text-center">
-        <motion.div
-          className="ri-proof-card relative flex h-full flex-col overflow-hidden rounded-xl p-3"
+        <div
+          className="ri-proof-card ri-reveal relative flex h-full flex-col overflow-hidden rounded-xl p-3"
           style={{
             ...RC,
+            "--ri-reveal-from": "translateY(16px)",
             background: "linear-gradient(135deg, var(--rc-bg), var(--rc-bg-mid), var(--rc-bg-deep))",
             border: "1px solid var(--rc-border)",
           }}
-          initial={{ opacity: 0, y: 16 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-80px" }}
-          transition={{ duration: 0.4, ease: "easeOut" }}
         >
           <p className="text-[10px] font-bold uppercase leading-3 tracking-[0.2em]" style={{ color: "var(--rc-accent)" }}>
             {recordBadgeText}
@@ -141,7 +137,7 @@ export default function About({ initialData = null, compact = false }) {
             </a>
             <span className="ri-proof-note shrink-0 text-[10px] font-semibold">{compactRecordNote}</span>
           </div>
-        </motion.div>
+        </div>
       </section>
     );
   }
@@ -152,17 +148,14 @@ export default function About({ initialData = null, compact = false }) {
       className="mx-auto max-w-6xl pt-4 sm:pt-6 pb-16 px-4 sm:px-6 text-center"
     >
       <div className="mt-6">
-        <motion.div
-          className="ri-proof-card relative mx-auto max-w-6xl overflow-hidden rounded-2xl"
+        <div
+          className="ri-proof-card ri-reveal relative mx-auto max-w-6xl overflow-hidden rounded-2xl"
           style={{
             ...RC,
+            "--ri-reveal-from": "translateY(20px)",
             background: "linear-gradient(135deg, var(--rc-bg), var(--rc-bg-mid), var(--rc-bg-deep))",
             border: "1px solid var(--rc-border)",
           }}
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-80px" }}
-          transition={{ duration: 0.4, ease: "easeOut" }}
         >
           <div
             className="absolute inset-x-0 top-0 h-px"
@@ -220,14 +213,15 @@ export default function About({ initialData = null, compact = false }) {
               {specStats.length > 0 && (
                 <div className="flex-1 flex flex-col items-center justify-center lg:items-stretch">
                   {specStats.map((detail, index) => (
-                    <motion.div
+                    <div
                       key={detail?._key || `${detail?.label || "detail"}-${index}`}
-                      className="flex flex-wrap items-baseline justify-center gap-2 sm:gap-4 py-2.5 lg:justify-start"
-                      style={index > 0 ? { borderTop: "1px solid var(--rc-border-sub)" } : undefined}
-                      initial={{ opacity: 0, x: -12 }}
-                      whileInView={{ opacity: 1, x: 0 }}
-                      viewport={{ once: true }}
-                      transition={{ duration: 0.3, delay: 0.1 + index * 0.06, ease: "easeOut" }}
+                      className="ri-reveal flex flex-wrap items-baseline justify-center gap-2 sm:gap-4 py-2.5 lg:justify-start"
+                      style={{
+                        ...(index > 0 ? { borderTop: "1px solid var(--rc-border-sub)" } : {}),
+                        "--ri-reveal-from": "translateX(-12px)",
+                        "--ri-reveal-duration": "0.3s",
+                        "--ri-reveal-delay": `${0.1 + index * 0.06}s`,
+                      }}
                     >
                       <span className="shrink-0 text-center text-[11px] font-semibold uppercase tracking-[0.2em] lg:w-14 lg:text-left" style={{ color: "var(--rc-text-muted)" }}>
                         {detail?.label || ""}
@@ -235,7 +229,7 @@ export default function About({ initialData = null, compact = false }) {
                       <span className="text-center text-sm sm:text-base font-semibold lg:truncate lg:text-left" style={{ color: "var(--rc-text)" }}>
                         {detail?.value || ""}
                       </span>
-                    </motion.div>
+                    </div>
                   ))}
                 </div>
               )}
@@ -250,7 +244,7 @@ export default function About({ initialData = null, compact = false }) {
               </p>
             )}
           </div>
-        </motion.div>
+        </div>
       </div>
 
       <div className="h-3" />
