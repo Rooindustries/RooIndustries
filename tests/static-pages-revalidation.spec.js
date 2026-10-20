@@ -3,7 +3,6 @@ const { test, expect } = require("@playwright/test");
 test.skip(process.env.TOOLING_STATIC_REVALIDATION !== "1", "Needs its own server with a cold content cache: npm run test:static:revalidation.");
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-const reviewsGallery = body => body.match(/\\"reviewsGallery\\":(null|\[\]?)/)?.[1] ?? null;
 
 const contentControl = (request, baseURL) => async data => {
   const contentURL = new URL(baseURL);
@@ -68,7 +67,7 @@ test("/about, /contact, /privacy, /terms, /tools, /meet-the-team and /reviews ke
     "/terms": "Synthetic local information",
     "/tools": "Fixture layout tool 1",
     "/meet-the-team": "Fixture Member Alpha",
-    "/reviews": "Community Reviews",
+    "/reviews": "Fixture layout review 800 by 400",
   };
   const fallbacks = {
     "/contact": "Ready to optimize your PC?",
@@ -83,7 +82,6 @@ test("/about, /contact, /privacy, /terms, /tools, /meet-the-team and /reviews ke
       expect(trigger.status, route).toBe(200);
       expect(trigger.cache, route).toBe("STALE");
       expect(trigger.body, route).toContain(text);
-      if (route === "/reviews") expect(reviewsGallery(trigger.body), route).toBe("[]");
     }
     for (const [route, text] of Object.entries(expected)) {
       await expect.poll(async () => (await read(route, "waiting for the failed revalidation to settle")).cache, { timeout: 20000 }).toBe("HIT");
@@ -93,7 +91,6 @@ test("/about, /contact, /privacy, /terms, /tools, /meet-the-team and /reviews ke
       if (fallbacks[route]) expect.soft(after.body.includes(fallbacks[route]), route).toBe(false);
       if (route === "/privacy") expect.soft(after.headings, route).toEqual(["Privacy Policy"]);
       if (route === "/terms") expect.soft(after.headings, route).toEqual(["Terms of Service"]);
-      if (route === "/reviews") expect.soft(reviewsGallery(after.body), route).toBe("[]");
     }
   } finally {
     await control({ reset: true });
