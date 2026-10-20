@@ -133,6 +133,56 @@ test("homepage rating matches the stars on the review cards it renders", async (
   await attach(testInfo, "homepage-rating", { rating, stars });
 });
 
+test.describe("home structured data during in-app navigation", () => {
+  test.use({ javaScriptEnabled: true });
+
+  test("home rating leaves with the review cards and returns once on Back", async ({ page, baseURL }, testInfo) => {
+    const documents = [];
+    page.on("request", request => {
+      if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documents.push(request.url());
+    });
+    const snapshot = async () => {
+      const all = nodes(await extract(page));
+      return {
+        url: page.url(),
+        history: await page.evaluate(() => ({
+          nextEntry: window.history.state?.__NA,
+          legacyEntry: window.history.state?.__rooLegacy,
+        })),
+        cards: await page.locator(".ri-review-card").count(),
+        ratings: all.filter(node => node["@type"] === "AggregateRating"),
+        services: all.filter(node => node["@type"] === "Service" && node.hasOfferCatalog),
+      };
+    };
+
+    await page.goto("/");
+    await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+    const home = await snapshot();
+    expect(home.ratings).toHaveLength(1);
+    expect(home.services).toHaveLength(1);
+    expect(home.cards).toBeGreaterThan(0);
+
+    await page.locator(".ri-packages-review-link").click();
+    await expect(page).toHaveURL(`${baseURL}/reviews`);
+    await expect(page.locator('main [data-route-key="/reviews"]')).toBeVisible();
+    await expect(page.locator(".ri-review-card")).toHaveCount(0);
+    const reviews = await snapshot();
+    await attach(testInfo, "home-navigation", { home, reviews, documents });
+    await expect.poll(async () => (await snapshot()).ratings).toHaveLength(0);
+    await expect.poll(async () => (await snapshot()).services).toHaveLength(0);
+
+    await page.goBack();
+    await expect(page).toHaveURL(`${baseURL}/`);
+    await expect(page.locator('main [data-route-key="/"]')).toBeVisible();
+    await expect.poll(async () => (await snapshot()).ratings).toEqual(home.ratings);
+    const restored = await snapshot();
+    expect(restored.services).toEqual(home.services);
+    expect(restored.cards).toBeGreaterThan(0);
+    expect(documents).toEqual([`${baseURL}/`]);
+    await attach(testInfo, "home-navigation-restored", { home, reviews, restored, documents });
+  });
+});
+
 test("FAQ markup matches every full answer rendered without JavaScript", async ({ page }, testInfo) => {
   await page.goto("/faq");
   const faq = nodes(await extract(page)).find(node => node["@type"] === "FAQPage");

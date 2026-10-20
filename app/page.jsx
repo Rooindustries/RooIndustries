@@ -16,17 +16,15 @@ export default async function Page() {
   return (
     <>
       <JsonLd data={seo.buildOrganizationJsonLd()} />
-      <JsonLd
-        data={seo.buildHomePageJsonLd(
-          homePageData?.hero,
-          homePageData?.packagesList,
-          homePageData?.reviews?.reviews
-        )}
-      />
       <RouteRenderer entry={Home}
         pathname="/"
         searchParams={{}}
         initialHomeData={homePageData}
+        routeJsonLd={seo.buildHomePageJsonLd(
+          homePageData?.hero,
+          homePageData?.packagesList,
+          homePageData?.reviews?.reviews
+        )}
       />
     </>
   );
