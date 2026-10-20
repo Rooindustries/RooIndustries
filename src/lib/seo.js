@@ -1,7 +1,7 @@
 const { NOINDEX_ROUTES } = require("./routes");
 const { HOME_COPY } = require("./homeCopy");
 const { buildPackageOffers } = require("./packageContent");
-const { getPackagePricePresentation } = require("./packagePricing");
+const { getPackagePricePresentation, toMoney } = require("./packagePricing");
 
 const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || "https://www.rooindustries.com").replace(/\/$/, "");
 
@@ -281,10 +281,8 @@ const buildOrganizationJsonLd = () => ({
 });
 
 const parseUsdAmount = (value) => {
-  const match = String(value || "").replace(/\s+/g, "").match(/^(?:USD|US)?\$?((?:\d{1,3}(?:,\d{3})+|\d+)?(?:\.\d+)?)(?:USD)?$/i);
-  const amount = match?.[1] ? Number(match[1].replace(/,/g, "")) : NaN;
-  if (!Number.isFinite(amount) || amount <= 0 || Math.abs(Math.round(amount * 100) - amount * 100) > 1e-6) return null;
-  return String(Math.round(amount * 100) / 100);
+  const amount = toMoney(value);
+  return amount > 0 ? String(amount) : null;
 };
 
 const buildOfferCatalog = (packages = []) => {
