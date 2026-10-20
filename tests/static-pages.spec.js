@@ -53,7 +53,7 @@ test("the middleware query strip covers exactly the prebuilt pages", async ({}, 
   expect(Object.keys(manifest.routes).sort()).toEqual([...PREBUILT_ROUTES].sort());
 });
 
-for (const route of ["/packages", "/faq", "/about", "/contact", "/privacy", "/terms", "/tools", "/meet-the-team", "/benchmarks"]) {
+for (const route of ["/packages", "/faq", "/about", "/contact", "/privacy", "/terms", "/tools", "/meet-the-team", "/benchmarks", "/reviews"]) {
   test(`${route} is a prebuilt page that ignores the query string`, async ({ request }, testInfo) => {
     const manifest = await readPrerenderManifest(testInfo);
     const read = async url => {
@@ -96,6 +96,7 @@ for (const [route, content] of [
   ["/terms", "Terms of Service"],
   ["/tools", "Fixture layout tool 1"],
   ["/meet-the-team", "Fixture Member Alpha"],
+  ["/reviews", "Community Reviews"],
 ]) {
   test(`${route} hydrates the prebuilt page with its query string`, async ({ page }, testInfo) => {
     const messages = watchConsole(page);

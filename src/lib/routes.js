@@ -29,7 +29,7 @@ const NOINDEX_ROUTES = [
 ];
 
 const STATIC_ROUTES = [...INDEXABLE_ROUTES];
-const PREBUILT_ROUTES = INDEXABLE_ROUTES.filter((route) => route !== "/reviews");
+const PREBUILT_ROUTES = [...INDEXABLE_ROUTES];
 const ALL_PUBLIC_ROUTES = [...INDEXABLE_ROUTES, ...NOINDEX_ROUTES];
 
 module.exports = {

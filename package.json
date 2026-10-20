@@ -96,7 +96,7 @@
     "check:cdn": "node scripts/check-home-cdn-cache.mjs",
     "test:seo:structured-data": "playwright test tests/structured-data.spec.js --project=chromium",
     "test:benchmarks:revalidation": "cross-env TOOLING_BENCHMARKS_REVALIDATION=1 playwright test tests/benchmarks-revalidation.spec.js --project=chromium",
-    "test:static:revalidation": "cross-env TOOLING_STATIC_REVALIDATION=1 playwright test tests/static-pages-revalidation.spec.js --project=chromium",
+    "test:static:revalidation": "cross-env TOOLING_STATIC_REVALIDATION=1 TOOLING_CLS_CONTENT=1 playwright test tests/static-pages-revalidation.spec.js --project=chromium",
     "check:budgets": "node scripts/check-budgets.js",
     "test:seo:nonjs": "playwright test tests/nonjs-seo.spec.js",
     "test:smoke:routes": "playwright test tests/routes-smoke.spec.js",
