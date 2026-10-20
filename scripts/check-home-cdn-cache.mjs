@@ -40,6 +40,7 @@ async function hit(name, path, { method = "GET", headers = HTML } = {}) {
     age: response.headers.get("age"),
     cacheControl: response.headers.get("cache-control"),
     contentType: response.headers.get("content-type"),
+    vary: response.headers.get("vary"),
     location: response.headers.get("location"),
     setCookies: response.headers.getSetCookie().map((cookie) => cookie.split("=")[0].trim()),
     bytes: body.length,
@@ -55,6 +56,9 @@ function check(condition, message, entry) {
 const cached = (entry) => entry.cache === "HIT" || entry.cache === "STALE";
 const headPart = (body) => body.split("</head>")[0];
 const isHtml = (entry) => String(entry.contentType).includes("text/html");
+const isMarkdown = (entry) => String(entry.contentType).includes("text/markdown");
+const variesOnAccept = (entry) => String(entry.vary || "").toLowerCase().split(/,\s*/).includes("accept");
+const MARKDOWN = { accept: "text/markdown", "user-agent": BROWSER_UA };
 const PREBUILT_PATHS = ["/", "/about", "/contact", "/privacy"];
 const isPrebuiltHtml = (entry) => entry.method === "GET" && PREBUILT_PATHS.includes(new URL(entry.path, base).pathname) && isHtml(entry);
 
@@ -95,18 +99,49 @@ for (const name of ["token first", "token second"]) {
   check(!cached(redirect), "the private-parameter redirect is never served from cache", redirect);
 }
 
-for (const path of PREBUILT_PATHS.slice(1)) {
-  const pageKey = `${path}?utm_source=cdncheck${stamp}`;
-  const pageFirst = await hit(`${path} html first`, pageKey);
-  check(pageFirst.status === 200 && isHtml(pageFirst), `${path} HTML returns 200 text/html`, pageFirst);
-  const pageSecond = await hit(`${path} html second`, pageKey);
-  check(pageSecond.status === 200 && isHtml(pageSecond), `${path} HTML returns 200 text/html`, pageSecond);
-  check(cached(pageSecond), `a repeated ${path} HTML request is served from cache`, pageSecond);
-  const pageMarkdown = await hit(`${path} markdown`, pageKey, { headers: { accept: "text/markdown", "user-agent": BROWSER_UA } });
-  check(String(pageMarkdown.contentType).includes("text/markdown"), `${path} markdown request gets markdown`, pageMarkdown);
-  check(!cached(pageMarkdown), `${path} markdown is never served from cache`, pageMarkdown);
-  const pageAfterMarkdown = await hit(`${path} html after markdown`, pageKey);
-  check(pageAfterMarkdown.status === 200 && isHtml(pageAfterMarkdown), `${path} HTML request after a Markdown request still gets HTML`, pageAfterMarkdown);
+let homeHtmlVary;
+for (const path of PREBUILT_PATHS) {
+  const htmlFirst = `${path}?utm_source=cdnhtmlfirst${stamp}`;
+  const html = [await hit(`${path} html`, htmlFirst)];
+  const repeat = await hit(`${path} html again`, htmlFirst);
+  html.push(repeat);
+  check(cached(repeat), `a repeated ${path} HTML request is served from cache`, repeat);
+  const markdown = [await hit(`${path} markdown after html`, htmlFirst, { headers: MARKDOWN })];
+  html.push(await hit(`${path} html after markdown`, htmlFirst));
+  const rsc = await hit(`${path} rsc`, htmlFirst, { headers: { ...HTML, rsc: "1" } });
+  check(rsc.status === 200 && String(rsc.contentType).includes("text/x-component"), `${path} RSC request gets an RSC payload`, rsc);
+  html.push(await hit(`${path} html after rsc`, htmlFirst));
+
+  const markdownFirst = `${path}?utm_source=cdnmarkdownfirst${stamp}`;
+  markdown.push(await hit(`${path} markdown first`, markdownFirst, { headers: MARKDOWN }));
+  html.push(await hit(`${path} html after markdown first`, markdownFirst));
+  markdown.push(await hit(`${path} markdown after html`, markdownFirst, { headers: MARKDOWN }));
+
+  const headKey = `${path}?utm_source=cdnhead${stamp}`;
+  const headHtml = await hit(`${path} head html`, headKey, { method: "HEAD" });
+  check(headHtml.status === 200 && isHtml(headHtml), `HEAD ${path} gets text/html`, headHtml);
+  markdown.push(await hit(`${path} head markdown`, headKey, { method: "HEAD", headers: MARKDOWN }));
+  html.push(await hit(`${path} get after head`, headKey));
+
+  const unsupportedKey = `${path}?utm_source=cdnunsupported${stamp}`;
+  for (const name of ["first", "second"]) {
+    const unsupported = await hit(`${path} json ${name}`, unsupportedKey, { headers: { accept: "application/json", "user-agent": BROWSER_UA } });
+    check(unsupported.status === 406, `${path} answers an unsupported Accept with 406`, unsupported);
+    check(!cached(unsupported), `the ${path} 406 is never served from cache`, unsupported);
+    check(variesOnAccept(unsupported), `the ${path} 406 varies on Accept`, unsupported);
+  }
+  html.push(await hit(`${path} html after 406`, unsupportedKey));
+
+  for (const entry of html) {
+    check(entry.status === 200 && isHtml(entry) && entry.bytes > 10000, `${path} HTML request gets the full HTML page`, entry);
+    if (path === "/" && homeHtmlVary === undefined) homeHtmlVary = entry.vary;
+    check(entry.vary === homeHtmlVary, `${path} HTML varies like / HTML`, entry);
+  }
+  for (const entry of markdown) {
+    check(entry.status === 200 && isMarkdown(entry), `${path} Markdown request gets Markdown`, entry);
+    check(!cached(entry), `${path} Markdown is never served from cache`, entry);
+    check(variesOnAccept(entry), `${path} Markdown varies on Accept`, entry);
+  }
 }
 
 let waitSeconds = 0;
@@ -134,7 +169,7 @@ for (const entry of log.filter(isPrebuiltHtml)) {
 }
 
 writeFileSync(artifact, JSON.stringify({ base, checkedAt: new Date(stamp).toISOString(), extraHeaderNames: Object.keys(extraHeaders), log, failures }, null, 2));
-for (const entry of log) console.log(`${entry.name.padEnd(28)} ${entry.status} ${String(entry.cache).padEnd(9)} ${entry.contentType || ""}`);
+for (const entry of log) console.log(`${entry.name.padEnd(40)} ${entry.method.padEnd(4)} ${entry.status} ${String(entry.cache).padEnd(9)} ${String(entry.contentType || "").padEnd(32)} vary: ${entry.vary || ""}`);
 if (failures.length) {
   for (const failure of failures) console.error(`FAIL ${failure.message}`);
   process.exit(1);
