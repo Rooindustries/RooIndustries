@@ -3,6 +3,7 @@ const CARD = /\b\d(?:[ -]?\d){12,18}\b/g;
 const QUERY = /((?:https?:\/\/|\/)[^\s?#"'<>]*)\?[^\s#"'<>]+/g;
 const SENSITIVE_KEY =
   /pass|token|secret|cookie|session|auth|signature|email|phone|address|card|cvv|cvc|iban|upi|vpa|billing|payment_?method|customer/i;
+const NAME_KEY = /^(?:full|first|last|display|customer|user)_?name$|^handle$|discord/i;
 
 export const NO_DATA_COLLECTION = {
   userInfo: false,
@@ -43,7 +44,7 @@ function scrubValue(value, depth = 0) {
   if (Array.isArray(value)) return value.map((item) => scrubValue(item, depth + 1));
   const copy = {};
   for (const [key, item] of Object.entries(value)) {
-    copy[key] = SENSITIVE_KEY.test(key) ? "[Filtered]" : scrubValue(item, depth + 1);
+    copy[key] = SENSITIVE_KEY.test(key) || NAME_KEY.test(key) ? "[Filtered]" : scrubValue(item, depth + 1);
   }
   return copy;
 }

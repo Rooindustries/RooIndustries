@@ -10,6 +10,7 @@ export function startBrowserMonitoring(dsn) {
   init({
     dsn,
     environment: monitoringEnvironment(),
+    tunnel: "/api/client-report",
     dataCollection: NO_DATA_COLLECTION,
     beforeSend: scrubEvent,
     beforeBreadcrumb: scrubBreadcrumb,

@@ -178,7 +178,6 @@ export default withSentryConfig(nextConfig, {
   project: "rooindustries-website",
   silent: true,
   telemetry: false,
-  tunnelRoute: true,
   sourcemaps: { disable: true },
   release: { create: false },
   bundleSizeOptimizations: { excludeDebugStatements: true },
