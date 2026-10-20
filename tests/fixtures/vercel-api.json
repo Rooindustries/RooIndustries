@@ -1,0 +1,144 @@
+{
+  "teams": [
+    { "id": "team_rooFixture", "slug": "roo-industries", "name": "Roo Industries" }
+  ],
+  "project": {
+    "id": "prj_rooFixture",
+    "name": "rooindustries",
+    "accountId": "team_rooFixture",
+    "autoAssignCustomDomains": true,
+    "lastAliasRequest": {
+      "type": "promote",
+      "jobStatus": "succeeded",
+      "fromDeploymentId": "dpl_previous",
+      "toDeploymentId": "dpl_live",
+      "requestedAt": 1760980000000
+    },
+    "lastRollbackTarget": null
+  },
+  "aliases": {
+    "www.rooindustries.com": {
+      "uid": "alias_www",
+      "alias": "www.rooindustries.com",
+      "created": "2026-01-10T10:00:00.000Z",
+      "deploymentId": "dpl_live",
+      "projectId": "prj_rooFixture",
+      "redirect": null
+    }
+  },
+  "deployments": [
+    {
+      "uid": "dpl_live",
+      "name": "rooindustries",
+      "url": "rooindustries-live-roo-industries.vercel.app",
+      "created": 1760990000000,
+      "createdAt": 1760990000000,
+      "ready": 1760990100000,
+      "state": "READY",
+      "readyState": "READY",
+      "readySubstate": "PROMOTED",
+      "target": "production",
+      "projectId": "prj_rooFixture",
+      "isRollbackCandidate": true,
+      "softDeletedByRetention": false,
+      "type": "LAMBDAS",
+      "source": "git",
+      "creator": { "uid": "user_fixture", "username": "serviroo" },
+      "inspectorUrl": "https://vercel.com/roo-industries/rooindustries/live",
+      "meta": {
+        "githubCommitSha": "1111111111111111111111111111111111111111",
+        "githubCommitMessage": "fix: the deploy that is live now"
+      }
+    },
+    {
+      "uid": "dpl_error",
+      "name": "rooindustries",
+      "url": "rooindustries-error-roo-industries.vercel.app",
+      "created": 1760985000000,
+      "createdAt": 1760985000000,
+      "state": "ERROR",
+      "readyState": "ERROR",
+      "target": "production",
+      "projectId": "prj_rooFixture",
+      "isRollbackCandidate": false,
+      "softDeletedByRetention": false,
+      "type": "LAMBDAS",
+      "source": "git",
+      "creator": { "uid": "user_fixture", "username": "serviroo" },
+      "inspectorUrl": "https://vercel.com/roo-industries/rooindustries/error",
+      "meta": {
+        "githubCommitSha": "2222222222222222222222222222222222222222",
+        "githubCommitMessage": "fix: a build that failed"
+      }
+    },
+    {
+      "uid": "dpl_preview",
+      "name": "rooindustries",
+      "url": "rooindustries-preview-roo-industries.vercel.app",
+      "created": 1760983000000,
+      "createdAt": 1760983000000,
+      "ready": 1760983100000,
+      "state": "READY",
+      "readyState": "READY",
+      "readySubstate": "STAGED",
+      "target": null,
+      "projectId": "prj_rooFixture",
+      "isRollbackCandidate": false,
+      "softDeletedByRetention": false,
+      "type": "LAMBDAS",
+      "source": "git",
+      "creator": { "uid": "user_fixture", "username": "serviroo" },
+      "inspectorUrl": "https://vercel.com/roo-industries/rooindustries/preview",
+      "meta": {
+        "githubCommitSha": "3333333333333333333333333333333333333333",
+        "githubCommitMessage": "feat: a preview branch"
+      }
+    },
+    {
+      "uid": "dpl_previous",
+      "name": "rooindustries",
+      "url": "rooindustries-previous-roo-industries.vercel.app",
+      "created": 1760980000000,
+      "createdAt": 1760980000000,
+      "ready": 1760980100000,
+      "state": "READY",
+      "readyState": "READY",
+      "readySubstate": "PROMOTED",
+      "target": "production",
+      "projectId": "prj_rooFixture",
+      "isRollbackCandidate": true,
+      "softDeletedByRetention": false,
+      "type": "LAMBDAS",
+      "source": "git",
+      "creator": { "uid": "user_fixture", "username": "serviroo" },
+      "inspectorUrl": "https://vercel.com/roo-industries/rooindustries/previous",
+      "meta": {
+        "githubCommitSha": "4444444444444444444444444444444444444444",
+        "githubCommitMessage": "perf: the deploy before the live one"
+      }
+    },
+    {
+      "uid": "dpl_older",
+      "name": "rooindustries",
+      "url": "rooindustries-older-roo-industries.vercel.app",
+      "created": 1760970000000,
+      "createdAt": 1760970000000,
+      "ready": 1760970100000,
+      "state": "READY",
+      "readyState": "READY",
+      "readySubstate": "PROMOTED",
+      "target": "production",
+      "projectId": "prj_rooFixture",
+      "isRollbackCandidate": true,
+      "softDeletedByRetention": false,
+      "type": "LAMBDAS",
+      "source": "git",
+      "creator": { "uid": "user_fixture", "username": "serviroo" },
+      "inspectorUrl": "https://vercel.com/roo-industries/rooindustries/older",
+      "meta": {
+        "githubCommitSha": "5555555555555555555555555555555555555555",
+        "githubCommitMessage": "fix: an older deploy"
+      }
+    }
+  ]
+}

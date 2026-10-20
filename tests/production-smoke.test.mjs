@@ -1,0 +1,187 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { packages, startSite } from "./fixtures/fake-site.mjs";
+import { DOMAIN, TOKEN, startVercel } from "./fixtures/fake-vercel.mjs";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const script = path.join(root, "scripts/production-smoke.mjs");
+
+const run = (args) => new Promise(resolve => {
+  const child = spawn(process.execPath, [script, ...args], {
+    cwd: root,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, SMOKE_RETRY_MS: "50", PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH },
+  });
+  let output = "";
+  child.stdout.on("data", chunk => { output += chunk; });
+  child.stderr.on("data", chunk => { output += chunk; });
+  child.on("close", code => resolve({ code, output }));
+});
+
+const withSite = async (overrides, body) => {
+  const site = await startSite(overrides);
+  try {
+    await body(site, await run(["--base", site.base]));
+  } finally {
+    await site.close();
+  }
+};
+
+test("a healthy site passes every money-path check with GET requests only", () => withSite({ packages: { postOnLoad: true } }, (site, result) => {
+  assert.equal(result.code, 0, result.output);
+  for (const name of ["page /", "page /packages", "page /booking", "page /payment", "booking availability", "package prices", "referral capture"]) {
+    assert.match(result.output, new RegExp(`ok\\s+${name.replace("/", "\\/")}`));
+  }
+  assert.deepEqual(site.requests.filter(request => request.method !== "GET"), []);
+}));
+
+test("a money page that fails is a money-path failure", () => withSite({ status: { "/payment": 500 } }, (site, result) => {
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /FAIL\s+page \/payment.*500/);
+}));
+
+test("booking availability that isn't ok is a money-path failure", () => withSite({ availability: { ok: false, error: "unavailable" } }, (site, result) => {
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /FAIL\s+booking availability/);
+}));
+
+test("package cards without a price are a money-path failure", () => withSite({
+  packages: { cards: [{ name: "Vertex Essentials", price: "" }, packages[1]] },
+}, (site, result) => {
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /FAIL\s+package prices/);
+}));
+
+test("structured data prices that disagree with the cards are a money-path failure", () => withSite({
+  packages: { offers: [{ name: "Vertex Essentials", price: "$19.95" }, packages[1]] },
+}, (site, result) => {
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /FAIL\s+package prices/);
+}));
+
+test("a ?ref link that isn't remembered is a money-path failure", () => withSite({ packages: { storeReferral: false } }, (site, result) => {
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /FAIL\s+referral capture/);
+}));
+
+test("a brief outage on one page is retried before it counts", () => withSite({ failFirst: { "/booking": 1 } }, (site, result) => {
+  assert.equal(result.code, 0, result.output);
+  assert.equal(site.requests.filter(request => request.path === "/booking").length, 2);
+}));
+
+for (const base of ["https://example.com", "https://rooindustries.com.attacker.example", "ftp://127.0.0.1"]) {
+  test(`refuses to smoke ${base}`, async () => {
+    const result = await run(["--base", base]);
+    assert.equal(result.code, 1, result.output);
+    assert.match(result.output, /Refusing/);
+  });
+}
+
+test("refuses unknown options", async () => {
+  const result = await run(["--bse", "https://www.rooindustries.com"]);
+  assert.equal(result.code, 1, result.output);
+});
+
+const gate = path.join(root, "scripts/production-deploy-gate.mjs");
+const LIVE_URL = "https://rooindustries-live-roo-industries.vercel.app";
+const PREVIOUS_URL = "https://rooindustries-previous-roo-industries.vercel.app";
+
+const runGate = (env) => new Promise(resolve => {
+  const childEnv = {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
+    SMOKE_RETRY_MS: "50",
+    GATE_LIVE_ATTEMPTS: "2",
+    GATE_LIVE_WAIT_MS: "20",
+    ROLLBACK_VERIFY_INTERVAL_MS: "20",
+    ROLLBACK_VERIFY_TIMEOUT_MS: "400",
+    ...env,
+  };
+  for (const key of Object.keys(childEnv)) if (childEnv[key] === undefined) delete childEnv[key];
+  const child = spawn(process.execPath, [gate], { cwd: root, env: childEnv });
+  let output = "";
+  child.stdout.on("data", chunk => { output += chunk; });
+  child.stderr.on("data", chunk => { output += chunk; });
+  child.on("close", code => resolve({ code, output }));
+});
+
+const withGate = async ({ site: siteOverrides, vercel: vercelOptions } = {}, body) => {
+  const site = await startSite(siteOverrides);
+  const vercel = await startVercel(vercelOptions);
+  try {
+    const exec = (env = {}) => runGate({ VERCEL_TOKEN: TOKEN, VERCEL_API_URL: vercel.origin, SMOKE_BASE_URL: site.base, DEPLOYMENT_URL: LIVE_URL, ...env });
+    await body({ site, vercel, exec });
+  } finally {
+    await site.close();
+    await vercel.close();
+  }
+};
+
+const vercelChanges = vercel => vercel.requests.filter(request => request.method !== "GET");
+
+test("deploy gate: a healthy live deployment passes and nothing is rolled back", () => withGate({}, async ({ site, vercel, exec }) => {
+  const result = await exec();
+  assert.equal(result.code, 0, result.output);
+  assert.ok(site.requests.length > 0);
+  assert.deepEqual(vercelChanges(vercel), []);
+}));
+
+test("deploy gate: a money-path failure on the live deployment rolls production back once", () => withGate({ site: { status: { "/payment": 500 } } }, async ({ vercel, exec }) => {
+  const result = await exec();
+  assert.equal(result.code, 1, result.output);
+  const changes = vercelChanges(vercel);
+  assert.equal(changes.length, 1);
+  assert.equal(changes[0].path, "/v1/projects/prj_rooFixture/rollback/dpl_previous");
+  assert.match(changes[0].query.description, /Money-path smoke failed/);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
+  assert.match(result.output, /--undo/);
+}));
+
+test("deploy gate: a deployment that never serves production still gets production smoked, without a rollback", () => withGate({ site: { status: { "/payment": 500 } } }, async ({ site, vercel, exec }) => {
+  const result = await exec({ DEPLOYMENT_URL: PREVIOUS_URL });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /not serving production/);
+  assert.match(result.output, /nothing was rolled back/);
+  assert.ok(site.requests.length > 0);
+  assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
+}));
+
+test("deploy gate: a healthy production passes even when this deployment isn't the live one", () => withGate({}, async ({ vercel, exec }) => {
+  const result = await exec({ DEPLOYMENT_URL: PREVIOUS_URL });
+  assert.equal(result.code, 0, result.output);
+  assert.deepEqual(vercelChanges(vercel), []);
+}));
+
+test("deploy gate: without VERCEL_TOKEN a failure is reported but nothing is rolled back", () => withGate({ site: { status: { "/payment": 500 } } }, async ({ vercel, exec }) => {
+  const result = await exec({ VERCEL_TOKEN: undefined });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /not rolled back/);
+  assert.deepEqual(vercel.requests, []);
+}));
+
+test("deploy gate: a smoke that can't run doesn't roll anything back", () => withGate({}, async ({ vercel, exec }) => {
+  const result = await exec({ SMOKE_BASE_URL: "https://example.com" });
+  assert.equal(result.code, 1, result.output);
+  assert.deepEqual(vercelChanges(vercel), []);
+}));
+
+test("deploy gate: an already rolled-back production is never rolled back further", () => withGate({
+  site: { status: { "/payment": 500 } },
+  vercel: { tweak: state => { state.project.autoAssignCustomDomains = false; } },
+}, async ({ vercel, exec }) => {
+  const result = await exec();
+  assert.equal(result.code, 1, result.output);
+  assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
+}));
+
+test("deploy gate: refuses to run without the deployment URL", () => withGate({}, async ({ site, vercel, exec }) => {
+  const result = await exec({ DEPLOYMENT_URL: undefined });
+  assert.equal(result.code, 1, result.output);
+  assert.deepEqual(site.requests, []);
+  assert.deepEqual(vercel.requests, []);
+}));

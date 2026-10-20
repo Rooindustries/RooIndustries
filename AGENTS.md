@@ -26,7 +26,16 @@ A change is done when it works everywhere its behavior reaches. Say which of the
 
 - Small PRs, one fix each. Two fixes are two PRs.
 - Run the affected suites locally, then push once per round. Every push restarts CI.
-- Tests talk only to local fixtures: `scripts/test-tooling-sweep-server.mjs` refuses env files and outbound requests outside its allowed local fixture origins. Never point a test or script at production.
+- Tests talk only to local fixtures: `scripts/test-tooling-sweep-server.mjs` refuses env files and outbound requests outside its allowed local fixture origins. Never point a test or script at production. The one exception is `npm run smoke:production`, which sends read-only GET requests to www.rooindustries.com.
+- After every production deploy, `.github/workflows/production-smoke.yml` runs `npm run deploy:gate`: it smokes the money path (the money pages, booking availability, package prices, `?ref` capture) and, if that fails while the new deployment is live, rolls production back one step.
+- Undo a bad deploy by hand with `VERCEL_TOKEN=… npm run deploy:rollback` (`-- --dry-run` to preview). A rollback pins production to the older deployment, so new deploys stay off the domain until `npm run deploy:rollback -- --undo` promotes the newest one.
+
+## Invariants
+
+- A rollback or undo only points production at a deployment that the Vercel API shows, at that moment, as READY, target production, in this project and not deleted. A rollback target must also be one Vercel lists as a rollback candidate and older than the live deployment. Anything else is refused, never swapped for another target.
+- The rollback tooling reads its credential from `VERCEL_TOKEN` only (the repo secret in CI), never from env files, and never prints it. `--dry-run` and `--status` change nothing, and an unknown option is refused.
+- The automatic rollback acts only when the deployment that failed the smoke is live, is the newest production deployment and production isn't already rolled back. So it goes back at most one step per bad deploy and never touches a newer deploy.
+- The production smoke sends GET requests only; its browser blocks any other method. It exits 2 only for a money-path failure, the only result that can trigger a rollback, and 1 when it can't run.
 
 ## Repository rules
 
