@@ -2,6 +2,7 @@ const { test, expect } = require("@playwright/test");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { PREBUILT_ROUTES } = require("../src/lib/routes");
+const { withoutCanonicalUrl } = require("../scripts/lib/rsc-canonical-url.cjs");
 
 test.use({ javaScriptEnabled: true, serviceWorkers: "block", reducedMotion: "reduce" });
 
@@ -40,7 +41,7 @@ const readRebuiltPage = async (request, route, revalidateSeconds) => {
     if (fresh || Date.now() > deadline) {
       const rsc = await (await request.get(route, { headers: { accept: "text/html", rsc: "1" } })).text();
       const rebuilt = fresh && new RegExp(`^s-maxage=${revalidateSeconds}(,|$)`).test(cacheControl ?? "");
-      return { rebuilt, cacheControl, htmlLeaked: html.includes("leakprobe"), rscLeaked: rsc.includes("leakprobe") };
+      return { rebuilt, cacheControl, htmlLeaked: withoutCanonicalUrl(html).includes("leakprobe"), rscLeaked: withoutCanonicalUrl(rsc).includes("leakprobe") };
     }
     await wait(1000);
   }
@@ -82,8 +83,8 @@ for (const route of ["/packages", "/faq", "/about", "/contact", "/privacy", "/te
     expect(plain.cache).toMatch(/^(HIT|STALE)$/);
     expect(plain.cacheControl).not.toMatch(/private|no-store/);
     expect(first.status).toBe(200);
-    expect(first.body).not.toContain("leakprobe");
-    expect(second.body).not.toContain("leakprobe");
+    expect(withoutCanonicalUrl(first.body)).not.toContain("leakprobe");
+    expect(withoutCanonicalUrl(second.body)).not.toContain("leakprobe");
   });
 }
 

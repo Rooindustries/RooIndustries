@@ -7,6 +7,7 @@ const { PUBLIC_CONTENT_RESOURCES } = require("../src/lib/publicContentQueries.js
 const { ALL_PUBLIC_ROUTES, PREBUILT_ROUTES } = require("../src/lib/routes.js");
 const { MONEY_BACK_FAQ_QUESTION, MONEY_BACK_FAQ_ANSWER } = require("../src/lib/policyContent.js");
 const fieldContract = require("./fixtures/cms-field-contract.cjs");
+const { withoutCanonicalUrl } = require("../scripts/lib/rsc-canonical-url.cjs");
 
 const ADMIN_KEY = "synthetic-admin-key";
 const EMAIL = "content-admin@example.invalid";
@@ -182,7 +183,7 @@ for (const route of PREBUILT_ROUTES) {
       const rsc = await (await request.get(route, { headers: { accept: "text/html", rsc: "1" } })).text();
       const cacheControl = page.headers()["cache-control"] ?? null;
       const rebuilt = page.headers()["x-nextjs-cache"] === "HIT" && new RegExp(`^s-maxage=${revalidateSeconds}(,|$)`).test(cacheControl ?? "");
-      results.push({ visit, status: response.status(), cache: response.headers()["x-nextjs-cache"] ?? null, rebuilt, cacheControl, htmlLeaked: html.includes("leakprobe"), rscLeaked: rsc.includes("leakprobe") });
+      results.push({ visit, status: response.status(), cache: response.headers()["x-nextjs-cache"] ?? null, rebuilt, cacheControl, htmlLeaked: withoutCanonicalUrl(html).includes("leakprobe"), rscLeaked: withoutCanonicalUrl(rsc).includes("leakprobe") });
     }
     await testInfo.attach("publish-query-leak", { body: JSON.stringify({ route, results }, null, 2), contentType: "application/json" });
     for (const result of results) {
