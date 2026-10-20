@@ -280,24 +280,29 @@ const buildOrganizationJsonLd = () => ({
   },
 });
 
+const parseUsdAmount = (value) => {
+  const amount = String(value || "").replace(/\s+/g, "").match(/^\$(\d+(?:,\d{3})*(?:\.\d{1,2})?)$/);
+  return amount ? amount[1].replace(/,/g, "") : null;
+};
+
 const buildOfferCatalog = (packages = []) => {
-  const itemListElement = buildPackageOffers(packages).flatMap((pkg) => {
+  const itemListElement = buildPackageOffers(packages).map((pkg) => {
     const { price } = getPackagePricePresentation(
       pkg.title,
       pkg.price || pkg.compareAtPrice || pkg.originalPrice
     );
-    const amount = String(price).trim().match(/^\$(\d+(?:,\d{3})*(?:\.\d{1,2})?)$/);
-    if (!pkg.title || !amount) return [];
-    return [{
+    const amount = parseUsdAmount(price);
+    if (!pkg.title || !amount) return null;
+    return {
       "@type": "Offer",
       url: `${siteUrl}/packages`,
-      price: amount[1].replace(/,/g, ""),
+      price: amount,
       priceCurrency: "USD",
       seller: { "@id": `${siteUrl}/#organization` },
       itemOffered: { "@type": "Service", name: pkg.title },
-    }];
+    };
   });
-  if (!itemListElement.length) return null;
+  if (!itemListElement.length || itemListElement.includes(null)) return null;
   return {
     "@type": "OfferCatalog",
     "@id": `${siteUrl}/packages#offer-catalog`,
@@ -362,10 +367,9 @@ const buildHomePageJsonLd = (hero = HOME_COPY.hero, packages = []) => {
 
 const buildOfferCatalogJsonLd = (packages = []) => {
   const catalog = buildOfferCatalog(packages);
-  if (!catalog) return null;
   return {
     "@context": "https://schema.org",
-    "@graph": [buildServiceNode(catalog), catalog],
+    "@graph": [buildServiceNode(catalog), ...(catalog ? [catalog] : [])],
   };
 };
 
