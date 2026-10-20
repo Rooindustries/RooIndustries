@@ -24,7 +24,7 @@ A change is done when it works everywhere its behavior reaches. Say which of the
 
 ## Error tracking
 
-Sentry (project `rooindustries-website`) gets Node server and browser errors when `NEXT_PUBLIC_SENTRY_DSN` is set; Vercel sets it for Production and Preview. Middleware (edge) stays without the SDK so it stays light. The browser SDK loads only after a page's first uncaught error or error boundary, so it adds nothing before the first paint, and it sends through a same-origin tunnel route so ad blockers don't drop reports. Events carry no user, cookies, headers, query strings, bodies or local variables, and emails and card numbers in messages are replaced (`src/lib/monitoring/scrub.js`).
+Sentry (project `rooindustries-website`) gets Node server and browser errors when `NEXT_PUBLIC_SENTRY_DSN` is set; Vercel sets it for Production and Preview. Middleware (edge) stays without the SDK so it stays light. The browser SDK loads only after a page's first uncaught error or error boundary, so it adds nothing before the first paint, and it sends through a same-origin tunnel route so ad blockers don't drop reports. Events carry no user, cookies, headers, query strings, bodies or local variables, and emails, card numbers and URL query strings in messages are replaced (`src/lib/monitoring/scrub.js`).
 
 ## How we ship
 

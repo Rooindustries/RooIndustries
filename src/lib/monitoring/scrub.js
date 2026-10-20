@@ -1,5 +1,6 @@
 const EMAIL = /[^\s@<>()[\]{}"'`,;:]+@[^\s@<>()[\]{}"'`,;:]+\.[^\s@<>()[\]{}"'`,;:]{2,}/g;
 const CARD = /\b\d(?:[ -]?\d){12,18}\b/g;
+const QUERY = /((?:https?:\/\/|\/)[^\s?#"'<>]*)\?[^\s#"'<>]+/g;
 const SENSITIVE_KEY =
   /pass|token|secret|cookie|session|auth|signature|email|phone|address|card|cvv|cvc|iban|upi|vpa|billing|payment_?method|customer/i;
 
@@ -31,6 +32,7 @@ function passesLuhn(digits) {
 
 export function scrubText(text) {
   return text
+    .replace(QUERY, "$1?[query]")
     .replace(EMAIL, "[email]")
     .replace(CARD, (match) => (passesLuhn(match.replace(/[ -]/g, "")) ? "[card]" : match));
 }
@@ -57,7 +59,9 @@ export function scrubBreadcrumb(breadcrumb) {
   if (breadcrumb.message) breadcrumb.message = scrubText(breadcrumb.message);
   if (breadcrumb.data) {
     const data = scrubValue(breadcrumb.data);
-    for (const key of ["url", "from", "to"]) if (key in data) data[key] = withoutQuery(data[key]);
+    if (data && typeof data === "object") {
+      for (const key of ["url", "from", "to"]) if (key in data) data[key] = withoutQuery(data[key]);
+    }
     breadcrumb.data = data;
   }
   return breadcrumb;
