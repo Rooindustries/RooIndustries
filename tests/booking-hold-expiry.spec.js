@@ -4,6 +4,7 @@ test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata" });
 
 const expiredMessage = "The reservation expired. Please choose a slot again.";
 const holdLifetime = 21 * 60 * 1000;
+const shortHold = 15000;
 
 const storedHold = page => page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold") || "null"));
 const draftEmail = page => page.evaluate(() => {
@@ -11,30 +12,39 @@ const draftEmail = page => page.evaluate(() => {
   return Object.values(draft?.packages || {}).map(entry => entry?.form?.email).find(Boolean) || null;
 });
 
+const reserveAgainKeepsDetails = async (page, flow) => {
+  flow.state.holds.clear();
+  flow.state.holdMs = 20 * 60 * 1000;
+  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).last().click();
+  await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveValue("visitor@example.invalid");
+  await expect(page.getByRole("textbox", { name: "Discord username", exact: true })).toHaveValue("fixture_visitor");
+};
+
 test("expiry on the details step keeps the booking open with the typed details", async ({ page, flow }) => {
-  await page.clock.install();
+  flow.state.holdMs = shortHold;
   await flow.reserve();
   await flow.details();
   expect(await draftEmail(page)).toBe("visitor@example.invalid");
-  await page.clock.fastForward(holdLifetime);
-  await expect(page.getByRole("alert").filter({ hasText: expiredMessage })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: expiredMessage })).toBeVisible({ timeout: 25000 });
   await expect(page).toHaveURL(/\/booking$/);
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toBeVisible();
   expect(await storedHold(page)).toBeNull();
   expect(await draftEmail(page)).toBe("visitor@example.invalid");
+  await reserveAgainKeepsDetails(page, flow);
 });
 
 test("expiry on the payment page returns to slot selection with the reason", async ({ page, flow }) => {
-  await page.clock.install();
+  flow.state.holdMs = shortHold;
   await flow.review();
   await flow.payment();
-  await page.clock.fastForward(holdLifetime);
-  await expect(page).toHaveURL(/\/booking$/);
+  await expect(page).toHaveURL(/\/booking$/, { timeout: 25000 });
   await expect(page.getByRole("alert").filter({ hasText: expiredMessage })).toBeVisible();
   await expect(page.getByRole("dialog")).toBeVisible();
   expect(await storedHold(page)).toBeNull();
   expect(await draftEmail(page)).toBe("visitor@example.invalid");
+  await reserveAgainKeepsDetails(page, flow);
 });
 
 test("same-tab payment expiry on the booking step stays in the booking flow", async ({ page, flow }) => {

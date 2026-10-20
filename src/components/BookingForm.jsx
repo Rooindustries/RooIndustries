@@ -609,6 +609,7 @@ export default function BookingForm() {
   const [releasingPayment, setReleasingPayment] = useState(false);
   const [paymentReleaseStatus, setPaymentReleaseStatus] = useState("");
   const clearedNoHoldRef = useRef(false);
+  const holdExpiredRef = useRef(false);
   const [restoredSessionPackageTitle, setRestoredSessionPackageTitle] =
     useState("");
 
@@ -763,13 +764,17 @@ export default function BookingForm() {
     if (draftLoading) return;
     if (myHold) {
       clearedNoHoldRef.current = false;
+      holdExpiredRef.current = false;
       return;
     }
     if (clearedNoHoldRef.current) return;
 
-    const key = getDraftKey(selectedPackage);
-    clearDraftForPackage(key);
-    setForm(createFreshForm());
+    if (holdExpiredRef.current) {
+      holdExpiredRef.current = false;
+    } else {
+      clearDraftForPackage(getDraftKey(selectedPackage));
+      setForm(createFreshForm());
+    }
     setSelectedSlot(null);
     setStep(1);
     clearedNoHoldRef.current = true;
@@ -808,6 +813,7 @@ export default function BookingForm() {
           broadcastHold(normalizedHold);
         } else {
           sessionStorage.removeItem(HOLD_STORAGE_KEY);
+          holdExpiredRef.current = true;
           setErrorStep1(RESERVATION_EXPIRED_ERROR);
         }
       }
@@ -892,8 +898,9 @@ export default function BookingForm() {
             ? "This reservation expired. Use Check again to choose a slot again."
             : PAYMENT_PENDING_EXPIRY_ERROR);
         } else {
+          holdExpiredRef.current = true;
           releaseHold().then((released) => {
-            if (released) setErrorStep1(RESERVATION_EXPIRED_ERROR);
+            if (released && !currentHoldRef.current) setErrorStep1(RESERVATION_EXPIRED_ERROR);
           });
         }
         return false;
@@ -2196,6 +2203,7 @@ export default function BookingForm() {
   const handleLockAndGoNext = async (recheckOtherTab = false) => {
     const recheckingPayment = recheckOtherTab === true && paymentInOtherTab;
     if (recheckingPayment && new Date(myHold.expiresAt).getTime() <= Date.now()) {
+      holdExpiredRef.current = true;
       clearHoldState(true);
       setErrorStep2("");
       setErrorStep1(RESERVATION_EXPIRED_ERROR);
