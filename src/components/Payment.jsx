@@ -964,6 +964,14 @@ export default function Payment({ hideFooter = false }) {
     return null;
   };
 
+  const paymentSessionOwnsCurrentHold = (session) => {
+    const sessionHoldToken = String(
+      session?.result?.refreshedHold?.slotHoldToken || session?.result?.hold?.slotHoldToken || ""
+    ).trim();
+    const currentHoldToken = String(sessionHold?.slotHoldToken || bookingData?.slotHoldToken || "").trim();
+    return !sessionHoldToken || !currentHoldToken || sessionHoldToken === currentHoldToken;
+  };
+
   const clearPaymentSession = (terminalStatus = "", expectedToken = "") => {
     const storedSession = readStoredPaymentSession();
     const activeSession = storedSession || paymentSession;
@@ -973,7 +981,8 @@ export default function Payment({ hideFooter = false }) {
     paymentView.session = null;
     clearStoredPaymentSession();
     if (activeSession?.provider !== "dodo" || isUpgrade ||
-        !["failed", "abandoned", "refunded"].includes(terminalStatus)) return false;
+        !["failed", "abandoned", "refunded"].includes(terminalStatus) ||
+        !paymentSessionOwnsCurrentHold(activeSession)) return false;
     const nextCheckout = {
       ...bookingData,
       slotHoldId: "",
@@ -1207,9 +1216,12 @@ export default function Payment({ hideFooter = false }) {
         return { ...paymentSession, result: data, terminal: true };
       }
       if (
-        response.ok &&
-        ["refunded", "failed", "abandoned"].includes(resumedStatus)
+        !response.ok ||
+        !["refunded", "failed", "abandoned"].includes(resumedStatus)
       ) {
+        return paymentSession;
+      }
+      if (paymentSessionOwnsCurrentHold(paymentSession)) {
         const handled = clearPaymentSession(resumedStatus, paymentSession.paymentAccessToken);
         operation.token = "";
         if (handled) {
@@ -1219,7 +1231,8 @@ export default function Payment({ hideFooter = false }) {
           data?.recoveryReason || "This payment session is no longer payable."
         );
       }
-      return paymentSession;
+      clearPaymentSession("", paymentSession.paymentAccessToken);
+      operation.token = "";
     }
 
     if (sessionStartRef.current?.provider === provider && sessionStartRef.current.operation.current()) {
