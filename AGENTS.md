@@ -72,7 +72,7 @@ A PR that touches one:
   - `/booking`, on every change of its query or of the draft's removed code, with its own rules below (`src/components/BookingForm.jsx:487-495,648-663`).
 - **NOT ENFORCED (ROO-475, fixed by #242):** the site runtime captures only once per document (`src/next/AppClientRuntime.jsx:81-83`). So an in-app move to a public page carrying `?ref=` keeps the older code or none, unless that page is `/booking` or mounts the packages section.
 - `/booking?ref=X` stores X unless X is the code the visitor removed in this booking draft. `/booking?ref=` with a blank value clears the stored code. (`src/components/BookingForm.jsx:487-495,648-663`)
-- **NOT ENFORCED (fixed by #242):** while the draft remembers a removed code, every `/booking` visit clears the stored code, even with no `?ref` and even when it's another creator's (`src/components/BookingForm.jsx:649-663`). So remove A, follow creator B's link, reopen booking, and B's code is gone before the auto-apply.
+- **NOT ENFORCED (ROO-475, addressed by open PR #242):** while the draft remembers removed code A, reopening `/booking` without a different nonempty explicit referral clears the stored code, even when it belongs to creator B (`src/components/BookingForm.jsx:649-663`). So remove A, follow B's link on another public page, then reopen `/booking` without `?ref`, and B is cleared before auto-apply. An explicit `/booking?ref=B` stores B instead.
 - A booking sends only a referral the server validated in this session. The review step auto-applies `?ref` or the stored code once per package and code, and only while a hold is active and no referral is applied. (`src/components/BookingForm.jsx:1921-1990,2377,2405`)
 - An invalid code is dropped and remembered as dismissed. A code that can't be checked right now (validation unavailable) is kept so the visitor can retry. (`src/components/BookingForm.jsx:1952-1964`)
 - The draft remembers one removed code at a time, and the auto-apply skips it.
@@ -104,7 +104,7 @@ A PR that touches one:
 - Each hold generation (hold id plus nonce) has at most one payment record, and a second start for it reuses that record. (`src/server/api/payment/paymentRecord.js:136-137`, `src/server/api/payment/flow.js:1273,1291-1300,2860-2878`)
 - An ordinary booking commits only against an active, unexpired hold for the same time, package, payment record and backend. (`src/server/api/ref/bookingCommit.js:59-77,166-169`) The exceptions:
   - upgrades book with no slot (`src/server/api/ref/createBooking.js:1660`);
-  - a verified paid capture whose hold expired or vanished books the slot if it's still free (`src/server/api/ref/createBooking.js:1450-1478,1682-1684`);
+  - a verified paid capture whose hold expired or vanished can book a free slot when its reconciliation proof and remaining commit checks pass (`src/server/api/ref/createBooking.js:1450-1478,1682-1684`, `src/server/api/ref/bookingCommit.js:59-77`). A matching expired hold can pass; a released or replaced hold can fail even while the slot is free;
   - reschedule records carry no slot: they keep only `originalRequestedStartTimeUTC`, with no start time or slot lock (`src/server/api/ref/bookingCommit.js:306-374`).
 - A booking is recorded at most once per payment:
   - it has a deterministic id with a replay check (`src/server/api/ref/bookingCommit.js:138-146,268-276`);
@@ -156,7 +156,7 @@ Payment statuses:
 - `requires_payment_method` counts as unpaid. Reconcile abandons the record once it is older than the 20-minute payment hold. (`src/server/api/payment/dodoProvider.js:128-129`, `src/server/api/payment/paymentRecord.js:23`, `src/server/api/payment/flow.js:4822-4829`)
 - `processing`, `requires_customer_action`, `requires_merchant_action`, `requires_confirmation`, `requires_capture`, `partially_captured`, `partially_captured_and_capturable`, and a null status are pending.
   - For a checkout still in progress the webhook answers 503 so Dodo re-delivers. A record already booked or refunded answers 200. (`src/server/api/payment/dodoProvider.js:128-129`, `src/server/api/payment/flow.js:6087-6090,6145-6147`)
-  - A later success after the hold expired still books the slot if it's free, as in the expired-hold exception under Bookings and holds (`src/server/api/ref/createBooking.js:1450-1478,1682-1684`, `src/server/api/ref/bookingCommit.js:68-74`). If the slot is taken, it becomes a "requires reschedule" booking.
+  - A later success after hold expiry follows the conditional booking exception above. If reconcile already released the hold, booking can fail with `hold_changed` and take recovery/rescheduling even when the slot is free (`src/server/api/payment/flow.js:1709-1738,3828-3840,4848-4854,4901-4917`). An already abandoned checkout takes reschedule recovery (`:2384-2400`); a taken slot also requires rescheduling.
   - ACH Direct Debit can stay `processing` for days ([Dodo ACH](https://docs.dodopayments.com/features/payment-methods/ach)). Its final success or failure arrives as its own event, and the 5-minute reconcile re-reads it; once its hold has expired, only the hold is released. (`src/server/api/payment/flow.js:4463-4485,4848-4854`)
 
 Refunds:
