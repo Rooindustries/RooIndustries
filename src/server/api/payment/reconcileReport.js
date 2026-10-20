@@ -7,6 +7,7 @@ const SETTLE_MINUTES = 30;
 const PAGE_SIZE = 100;
 const MAX_PAGES = 20;
 const MAX_ITEMS = 50;
+const MAX_BOOKING_LOOKUPS = 200;
 const KEPT_BOOKING_STATUSES = ["captured", "completed"];
 const SETTLED_DISPUTE_STATUSES = ["dispute_won", "dispute_cancelled"];
 
@@ -55,8 +56,32 @@ const fetchByIds = async (client, type, ids) => {
 
 const cents = (value) => Math.round(Number(value || 0) * 100);
 
+const readSiteProductIds = (env = process.env) => {
+  const ids = new Set([String(env.DODO_PAYMENTS_PRODUCT_ID || "").trim()]);
+  try {
+    const mapped = JSON.parse(String(env.DODO_PAYMENTS_PRODUCT_IDS || "{}"));
+    for (const id of Object.values(mapped && typeof mapped === "object" ? mapped : {})) ids.add(String(id || "").trim());
+  } catch {}
+  ids.delete("");
+  return ids;
+};
+
+const belongsToSite = (payment, productIds) =>
+  !!String(payment.metadata?.paymentRecordId || "").trim() ||
+  productIds.size === 0 ||
+  (payment.product_cart || []).some((item) => productIds.has(item?.product_id));
+
 const openDispute = (payment) =>
   (payment.disputes || []).some((dispute) => !SETTLED_DISPUTE_STATUSES.includes(dispute?.dispute_status));
+
+const retrieveBookedPayment = async (dodo, paymentId) => {
+  try {
+    return await dodo.payments.retrieve(paymentId);
+  } catch (error) {
+    if (error?.status === 404) return null;
+    throw error;
+  }
+};
 
 const checkBooking = ({ payment, record, booking }) => {
   if (cents(booking.netAmount) !== cents(record.pricingSnapshot?.netAmount)) return "amount_mismatch";
@@ -87,11 +112,12 @@ export const buildReconcileReport = async ({
   const { payments: listed, truncated } = await listDodoPayments({ dodo, from, to });
   if (truncated) report({ id: "dodo-payments", reason: "report_truncated" });
 
+  const productIds = readSiteProductIds();
   const payments = [];
   for (const summary of listed) {
     if (summary?.status && summary.status !== "succeeded") continue;
     const payment = await dodo.payments.retrieve(summary.payment_id);
-    if (payment?.status === "succeeded") payments.push(payment);
+    if (payment?.status === "succeeded" && belongsToSite(payment, productIds)) payments.push(payment);
   }
 
   const records = await fetchByIds(client, "paymentRecord",
@@ -134,12 +160,17 @@ export const buildReconcileReport = async ({
     `*[_type == "booking" && paymentProvider == $provider && status in $statuses]{_id, _createdAt, dodoPaymentId, netAmount}`,
     { provider: "dodo", statuses: KEPT_BOOKING_STATUSES }
   );
+  let lookups = 0;
   for (const booking of dodoBookings || []) {
     const createdAt = Date.parse(booking._createdAt || "");
     if (Number.isFinite(createdAt) && (createdAt < Date.parse(from) || createdAt > Date.parse(to))) continue;
     const paymentId = String(booking.dodoPaymentId || "").trim();
     if (paymentId && seenPaymentIds.has(paymentId)) continue;
-    const payment = paymentId ? await dodo.payments.retrieve(paymentId) : null;
+    if (paymentId && ++lookups > MAX_BOOKING_LOOKUPS) {
+      report({ id: "dodo-bookings", reason: "report_truncated" });
+      break;
+    }
+    const payment = paymentId ? await retrieveBookedPayment(dodo, paymentId) : null;
     if (payment?.status !== "succeeded") {
       report({ id: paymentId || "missing", ref: booking._id, cents: cents(booking.netAmount), currency: "USD", reason: "booking_without_payment" });
     }
