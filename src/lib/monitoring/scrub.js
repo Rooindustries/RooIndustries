@@ -1,4 +1,4 @@
-const EMAIL = /[^\s@<>()[\]{}"'`,;:]+@[^\s@<>()[\]{}"'`,;:]+\.[^\s@<>()[\]{}"'`,;:]{2,}/g;
+const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/g;
 const CARD = /\b\d(?:[ -]?\d){12,18}\b/g;
 const QUERY = /((?:https?:\/\/|\/)[^\s?#"'<>]*)\?[^\s#"'<>]+/g;
 const SENSITIVE_KEY =
@@ -40,7 +40,8 @@ export function scrubText(text) {
 
 function scrubValue(value, depth = 0) {
   if (typeof value === "string") return scrubText(value);
-  if (value === null || typeof value !== "object" || depth > 6) return value;
+  if (value === null || typeof value !== "object") return value;
+  if (depth > 6) return "[Filtered]";
   if (Array.isArray(value)) return value.map((item) => scrubValue(item, depth + 1));
   const copy = {};
   for (const [key, item] of Object.entries(value)) {

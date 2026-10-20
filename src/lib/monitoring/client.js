@@ -1,4 +1,5 @@
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
+const MAX_PENDING = 10;
 let pending = [];
 let sentry = null;
 let loading = false;
@@ -9,20 +10,22 @@ function load() {
   import("./browser")
     .then(({ startBrowserMonitoring }) => {
       sentry = startBrowserMonitoring(dsn);
-      for (const error of pending.splice(0)) sentry.captureException(error);
+      const queued = pending;
+      pending = [];
+      for (const error of queued) sentry.captureException(error);
     })
     .catch(() => {
-      pending = null;
+      loading = false;
     });
 }
 
 export function reportClientError(error) {
-  if (!dsn || !pending) return;
+  if (!dsn) return;
   if (sentry) {
     sentry.captureException(error);
     return;
   }
-  pending.push(error);
+  if (pending.length < MAX_PENDING) pending.push(error);
   load();
 }
 
