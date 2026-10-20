@@ -22,6 +22,10 @@ A change is done when it works everywhere its behavior reaches. Say which of the
 - **Emails.** Booking emails (`src/server/api/ref/`) and creator account emails (`src/server/email/`).
 - **Tests.** CI runs Jest, the Playwright suites and the Postgres 17 suites (`.github/workflows/tests.yml`). Run the ones your change touches locally first.
 
+## Error tracking
+
+Sentry (project `rooindustries-website`) gets server, edge and browser errors when `NEXT_PUBLIC_SENTRY_DSN` is set; Vercel sets it for Production and Preview. The browser SDK loads only after a page's first uncaught error or error boundary, so it adds nothing before the first paint. Events carry no user, cookies, headers, query strings, bodies or local variables, and emails and card numbers in messages are replaced (`src/lib/monitoring/scrub.js`).
+
 ## How we ship
 
 - Small PRs, one fix each. Two fixes are two PRs.
