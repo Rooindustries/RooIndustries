@@ -41,11 +41,11 @@ A file is a money path when a payment, booking, hold, price, discount, referral 
 - `src/server/commerce/`, `src/server/data/documentClient.js`, `src/server/supabase/` (the stores those decisions read and write)
 - `src/lib/packagePricing.js`, `src/lib/checkoutStorage.js`, `src/lib/checkoutCodes.js`, `src/lib/salesAttribution.ts`, `src/lib/useUpgradeEligibility.js`
 - `src/components/BookingForm.jsx`, `BookingModal.jsx`, `Packages.jsx`, `Payment.jsx`, `PaymentSuccess.jsx`, `ReservationBanner.jsx`, `UpgradeLink.jsx`, `UpgradeXoc.jsx`, `RefDashboard.jsx`
-- `src/components/admin/ReferralCreatorEditor.jsx`
+- `src/components/admin/ReferralCreatorEditor.jsx`, `src/components/admin/referralDraftStore.js`
 - `src/next/AppClientRuntime.jsx` (referral capture) and `middleware.js` (its query handling reaches `?ref`)
 - `supabase/migrations/` and the `crons` in `vercel.json`
 
-A PR that touches one:
+Any PR that touches a money path, including a helper outside this list:
 
 1. Is the only open money-path PR. Money-path PRs merge one at a time.
 2. Names the invariants below that it touches.
