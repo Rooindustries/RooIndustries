@@ -281,6 +281,7 @@ const buildOrganizationJsonLd = () => ({
 });
 
 const parseUsdAmount = (value) => {
+  if (/[€£₹]/.test(String(value || ""))) return null;
   const amount = toMoney(value);
   return amount > 0 ? String(amount) : null;
 };
