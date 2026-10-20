@@ -14,25 +14,27 @@ const DEFAULT_DESCRIPTION =
 
 const routeMeta = {
   "/": {
-    title: "Roo Industries | PC Game Optimization",
-    description: DEFAULT_DESCRIPTION,
+    title: "Remote PC Optimization Service for Gamers | Roo Industries",
+    description:
+      "Remote PC optimization for gamers. We tune BIOS, Windows, RAM and game settings for higher FPS, lower input lag and smoother frametimes in the games you play.",
     noindex: false,
   },
   "/benchmarks": {
-    title: "Benchmark Results | Roo Industries",
-    description: "See before and after FPS numbers from real Roo Industries game tuning sessions.",
+    title: "Before & After PC Optimization Benchmarks | Roo Industries",
+    description:
+      "See before and after benchmark screenshots from real Roo Industries PC optimization sessions, each shown next to that player's own review of the result.",
     noindex: false,
   },
   "/reviews": {
-    title: "Client Reviews & Results | Roo Industries Performance Tuning",
+    title: "PC Optimization Reviews & Results | Roo Industries",
     description:
-      "Read how players describe the FPS gains, lower input lag, smoother mouse feel, and cleaner frametimes after real Roo Industries game tuning sessions online.",
+      "Read what players say after Roo Industries PC optimization: higher FPS, lower input lag, smoother mouse feel and cleaner frametimes from real sessions.",
     noindex: false,
   },
   "/faq": {
-    title: "PC Game Optimization FAQ | Roo Industries",
+    title: "FAQ: Remote PC Optimization Sessions | Roo Industries",
     description:
-      "Read the first questions players ask about FPS, input lag, booking, remote access, warranty, and what happens during the session.",
+      "Answers about remote PC optimization: FPS and input lag results, booking, remote access, the warranty, and what happens during your tuning session.",
     noindex: false,
   },
   "/contact": {
@@ -68,9 +70,9 @@ const routeMeta = {
     noindex: false,
   },
   "/packages": {
-    title: "PC Game Optimization Packages | Roo Industries",
+    title: "PC Optimization Packages & Pricing | Roo Industries",
     description:
-      "Compare packages for game settings, FPS tuning, Windows and BIOS work, input lag, and full PC performance tuning.",
+      "Compare PC optimization packages: Windows, BIOS and game tuning in every tier, plus RAM, CPU and GPU overclocking and a 90-day or lifetime warranty.",
     noindex: false,
   },
   "/tourney": {
