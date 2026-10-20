@@ -34,20 +34,22 @@ What must always be true where money moves: payments, bookings and holds, referr
 
 ### Money paths
 
-These files are money paths:
+A file is a money path when a payment, booking, hold, price, discount, referral credit, refund or payout decision reaches it. These are the known ones:
 
-- `app/api/payment/`, `app/api/holdSlot/`, `app/api/releaseHold/`, `app/api/ref/`
-- `src/server/api/payment/`, `src/server/booking/`, `src/server/api/ref/`
-- `src/components/BookingForm.jsx`, `BookingModal.jsx`, `Payment.jsx`, `PaymentSuccess.jsx`, `ReservationBanner.jsx`
-- `src/lib/checkoutStorage.js`, `src/lib/checkoutCodes.js`, `src/lib/salesAttribution.ts`, `src/next/AppClientRuntime.jsx` (referral capture), `middleware.js` (its query handling reaches `?ref`)
+- `app/api/payment/`, `app/api/holdSlot/`, `app/api/releaseHold/`, `app/api/ref/`, `app/api/admin/referral-creators/`
+- `src/server/api/payment/`, `src/server/booking/`, `src/server/api/ref/`, `src/server/referrals/`
+- `src/server/commerce/`, `src/server/data/documentClient.js`, `src/server/supabase/` (the stores those decisions read and write)
+- `src/lib/packagePricing.js`, `src/lib/checkoutStorage.js`, `src/lib/checkoutCodes.js`, `src/lib/salesAttribution.ts`
+- `src/components/BookingForm.jsx`, `BookingModal.jsx`, `Packages.jsx`, `Payment.jsx`, `PaymentSuccess.jsx`, `ReservationBanner.jsx`
+- `src/next/AppClientRuntime.jsx` (referral capture) and `middleware.js` (its query handling reaches `?ref`)
 - `supabase/migrations/` and the `crons` in `vercel.json`
 
 A PR that touches one:
 
 1. Is the only open money-path PR. Money-path PRs merge one at a time.
 2. Names the invariants below that it touches.
-3. Lists every entry point into the changed behavior, each with an E2E case: full page load, in-app navigation, Back, second tab, API, webhook, cron and retry. It also lists every state its data can be in.
-4. Lands a failing E2E on `main` before the fix.
+3. Lists every entry point into the changed behavior, each with an E2E case: full page load, in-app navigation, Back and Forward, second tab, API, webhook, cron and retry. It also lists every state its data can be in.
+4. Shows each new E2E failing against the base branch locally, then merges it together with the fix once it passes.
 5. For data from a provider (Dodo, Supabase), lists every field and documented state with the code that handles it.
 6. Runs the booking-to-payment chain locally before merge:
    - `npm run test:booking-flow`
@@ -59,57 +61,60 @@ A PR that touches one:
 
 ### Referral attribution
 
-- The visitor's code lives only in `sessionStorage["referral_session"]`, for the current tab.
-  - There is no referral cookie; `REF_SESSION_COOKIE` is the creator portal login.
-  - A closed tab, a new tab, a new window or a different browser starts with no code. (`src/lib/checkoutStorage.js:125-134`)
-- A non-empty `?ref=` outside `/booking`, `/payment`, `/payment-success` and `/thank-you` replaces the stored code, so the newest link wins.
-  - An empty or missing `?ref` leaves the stored code alone.
-  - (`src/lib/checkoutStorage.js:127-134`, `src/next/AppClientRuntime.jsx:10,82`, `src/components/Packages.jsx:107-117`)
-- **NOT ENFORCED (ROO-475, fixed by #242):** a code is captured once per document (`src/next/AppClientRuntime.jsx:81-83`).
-  - So an in-app navigation to a `?ref=` URL keeps the older code or none.
-  - Middleware strips the server query on prebuilt pages (`middleware.js:70-80`), and `src/next/LegacyRoutePage.jsx:20-25` builds the route without it.
-- `/booking?ref=X` stores X, unless X is the code the visitor removed in this booking. `/booking?ref=` with a blank value clears the stored code. (`src/components/BookingForm.jsx:487-495,648-663`)
-- A booking sends only a referral the server validated in this session.
-  - The review step auto-applies `?ref` or the stored code once per package and code.
-  - It does that only while a hold is active and no referral is applied. (`src/components/BookingForm.jsx:1921-1990,2377,2405`)
-- An invalid code is dropped and remembered as dismissed.
-  - A code that can't be checked right now (validation unavailable) is kept for the visitor to retry. (`src/components/BookingForm.jsx:1952-1964`)
-- A code the visitor removed stays removed for that booking draft, even when a later link carries the same code. (`src/components/BookingForm.jsx:1775-1788,1936-1940`)
+- The passive referral lives in `sessionStorage["referral_session"]`. There is no visitor attribution cookie; `REF_SESSION_COOKIE` is the creator portal login. (`src/lib/checkoutStorage.js:125-134`)
+  - An applied code is also copied into the booking draft (`booking_draft.checkoutCodes.referral`), the checkout state (`checkout_booking_state.referralCode`) and the analytics attribution. (`src/components/BookingForm.jsx:1303-1313,2377-2405`, `src/lib/salesAttribution.ts:53-68`)
+  - A fresh tab, window or browser starts empty. A window this tab opens gets a copy of its session storage, and a restored session keeps its own.
+- At each capture point, a non-empty `?ref=` replaces the stored code, and an empty or missing `?ref` leaves it alone. The capture points:
+  - the site runtime, outside `/booking`, `/payment`, `/payment-success` and `/thank-you` (`src/next/AppClientRuntime.jsx:10,82`);
+  - the packages section, on mount (`src/components/Packages.jsx:107-117`);
+  - `/booking`, on every change of its query (`src/components/BookingForm.jsx:487-495,648-663`).
+- **NOT ENFORCED (ROO-475, fixed by #242):** the site runtime captures only once per document (`src/next/AppClientRuntime.jsx:81-83`). So an in-app move to a public page carrying `?ref=` keeps the older code or none, unless that page is `/booking` or mounts the packages section.
+- `/booking?ref=X` stores X unless X is the code the visitor removed in this booking draft. `/booking?ref=` with a blank value clears the stored code. (`src/components/BookingForm.jsx:487-495,648-663`)
+- A booking sends only a referral the server validated in this session. The review step auto-applies `?ref` or the stored code once per package and code, and only while a hold is active and no referral is applied. (`src/components/BookingForm.jsx:1921-1990,2377,2405`)
+- An invalid code is dropped and remembered as dismissed. A code that can't be checked right now (validation unavailable) is kept so the visitor can retry. (`src/components/BookingForm.jsx:1952-1964`)
+- The draft remembers one removed code at a time, and the auto-apply skips it.
+  - Applying another code clears that memory (`src/components/BookingForm.jsx:1709-1713`), and removing a code replaces it (`:1775-1785`).
+  - So: remove A, apply B, remove B, then follow A's link, and A applies again. (`:1936-1940`)
 - **NOT ENFORCED (second creator link after a code is applied):** a booking draft restores its applied referral (`src/components/BookingForm.jsx:1229-1272`), and auto-apply skips when one is applied (`:1928`).
   - So creator A's code applied at review, then creator B's link in the same tab, still credits A, even on `/booking?ref=B`.
   - The restore also falls back to the last-used package's draft (`:1245-1247`).
-  - Policy call pending: last click or first applied.
+  - Policy call pending (ROO-510): last click or first applied.
 - On `/payment` the code comes from `?ref`, then the booking's code, then the stored code, in that order. It is re-validated, and an invalid code is cleared from storage. (`src/components/Payment.jsx:697-700,769-773,791`)
 - The server never trusts the client's discount or commission.
   - It resolves the code itself: lowercased slug, creators whose `registrationStatus` isn't `pending_email`.
   - It takes discount and commission from that creator's current percentages. (`src/server/api/ref/pricing.js:227-228,443-463,610-616`)
-- **NOT ENFORCED (unknown or unverified code):** when no creator matches, `effectiveReferralCode` falls back to the raw code at 0% commission (`src/server/api/ref/pricing.js:456-457`).
-  - Earnings match bookings by referral id or by lowercased code (`src/server/api/ref/payoutUtils.js:87-102`).
-  - So bookings made through a creator's link before they verify their email earn them nothing.
-  - A creator who later registers that slug sees those bookings at 0 commission.
-- **NOT ENFORCED (self-referral):** nothing compares the buyer with the creator, so a creator can book with their own code and earn commission. Policy call pending.
-- Commission is frozen on the booking when it's created, and refunds and disputes scale it down (see Refunds and credits). (`src/server/api/ref/createBooking.js:1293-1320,1615-1621`)
+- **NOT ENFORCED (unknown or unverified code):** when no creator matches, `effectiveReferralCode` keeps the raw code at 0% commission (`src/server/api/ref/pricing.js:456-457`). Earnings match bookings by referral id or by lowercased code (`src/server/api/ref/payoutUtils.js:87-102`).
+  - The normal checkout validates codes first and drops unknown ones (`src/server/api/ref/validateReferral.js:93-107`, `src/components/Payment.jsx:719-726`). A raw API request can still store one.
+  - A creator who books before verifying their email gets no credit on those bookings (ROO-512).
+- **NOT ENFORCED (self-referral):** nothing compares the buyer with the creator, so a creator can book with their own code and earn commission. Policy call pending (ROO-511).
+- Commission is frozen on the booking when it's created. (`src/server/api/ref/createBooking.js:1293-1320,1615-1621`)
+  - **NOT ENFORCED:** a PayPal or Razorpay capture recovered as a reschedule booking loses its commission (ROO-520). Only the Dodo branch copies the commission fields (`src/server/api/ref/bookingCommit.js:313-328`); the other branch keeps the referral but not the commission (`:329-374`), so earnings compute 0 (`src/server/api/ref/payoutUtils.js:41-50`).
 
 ### Bookings and holds
 
-- A slot has at most one hold, keyed by its start time, and a held slot is refused to anyone without the hold token. (`src/server/booking/holdSlot.js:241,346-373,433-451`)
-- A slot with an active booking lock or a blocking booking can't be held, and this is rechecked after the hold read. (`src/server/booking/holdSlot.js:304-311,318-335`)
+- A slot has at most one hold, keyed by its start time. A held slot is refused to anyone without the hold token, and an expired hold can be reclaimed. (`src/server/booking/holdSlot.js:241,346-373,415-451`)
+- A slot with an active booking lock or a blocking booking can't be held. This is rechecked after the hold read. (`src/server/booking/holdSlot.js:304-311,318-335`)
 - A slot that has already started can't be held. (`src/server/booking/holdSlot.js:337-342`)
 - A hold lasts 20 minutes, and starting a payment resets it to 20 minutes from payment start. (`src/server/booking/holdSlot.js:23,344`, `src/server/api/payment/paymentRecord.js:23`, `src/server/api/payment/flow.js:2899,3016-3025`)
-- The client can't release, refresh, replace or swap a hold in `payment_pending`. (`src/server/booking/releaseHold.js:67-72`, `src/server/booking/holdSlot.js:132-136,257-266,358-367`)
-- Each hold has at most one payment record, and a second start reuses it. (`src/server/api/payment/flow.js:1273,1291-1300,2860-2878`)
-- A booking commits only against an active, unexpired hold for the same time, package, payment record and backend. The reschedule path is the one exception. (`src/server/api/ref/bookingCommit.js:59-77,166-169`)
+- The client's refresh and release calls refuse a hold in `payment_pending`. (`src/server/booking/releaseHold.js:67-72`, `src/server/booking/holdSlot.js:132-136,257-266,358-367`)
+  - A provider-confirmed unpaid cancellation (the visitor changes payment method) reopens the hold with a new nonce. (`src/server/api/payment/flow.js:3502-3576,3680-3693,3730-3785`, `src/server/api/payment/cancel.js:9-14`)
+- Each hold generation (hold id plus nonce) has at most one payment record, and a second start for it reuses that record. (`src/server/api/payment/paymentRecord.js:136-137`, `src/server/api/payment/flow.js:1273,1291-1300,2860-2878`)
+- An ordinary booking commits only against an active, unexpired hold for the same time, package, payment record and backend. (`src/server/api/ref/bookingCommit.js:59-77,166-169`) The exceptions:
+  - upgrades book with no slot (`src/server/api/ref/createBooking.js:1660`);
+  - a verified paid capture whose hold expired or vanished books the slot if it's still free (`src/server/api/ref/createBooking.js:1450-1478,1682-1684`);
+  - reschedule records carry no slot.
 - A booking is recorded at most once per payment:
-  - it has a deterministic id and a replay check (`src/server/api/ref/bookingCommit.js:138-146,268-276`);
+  - it has a deterministic id with a replay check (`src/server/api/ref/bookingCommit.js:138-146,268-276`);
   - one payment proof can't fund two bookings (`:162-165`);
-  - the slot lock and hold consumption commit in one transaction (`:186-215,261-266`).
-- A captured payment is never dropped when its booking can't commit. It becomes a "requires reschedule" booking:
-  - from the 5-minute reconcile cron (`vercel.json:66`, `src/server/api/payment/flow.js:4779-4789,4892-4917`);
-  - from a late capture after abandonment (`:2384-2400`).
-  - The reschedule record is built at `:4027-4060`.
-- An abandoned or expired payment releases its hold and its coupon reservation. (`src/server/api/payment/flow.js:2634,1781,1687,1746-1752`)
+  - the slot lock and the hold consumption commit in one transaction (`:186-215,261-266`).
+- A recognized, validated capture whose booking fails on a slot conflict or a payload problem becomes a "requires reschedule" booking. This happens from the 5-minute reconcile (`vercel.json:66`, `src/server/api/payment/flow.js:4779-4789,4892-4917`) and from a late capture after abandonment (`:2384-2400`). The record is built at `:4027-4060`.
+- **NOT ENFORCED (capture without a booking):** some captures end with neither a booking nor a reschedule record:
+  - owner-review states, such as upgrade credit that dropped after capture (`src/server/api/payment/flow.js:1936-1965,3933-3942`);
+  - exhausted retries: 12 failed finalizes set `reconciliationRecoveryTerminal` (`:105-117,1870-1911`), and reconcile then skips the record (`:4347`).
+- A definitive unpaid abandonment tries to release the hold and the coupon reservation. If the release fails it keeps `resourceReleasePending` and retries. (`src/server/api/payment/flow.js:1687,1746-1752,1781,2634,2696-2732`)
+  - A payment still pending after its hold expires releases only the hold; its coupon reservation stays. (`src/server/api/payment/flow.js:3828-3840,4848-4854`)
 - **NOT ENFORCED (ROO-225, PR #227 parked):** when the hold expires in the booking dialog or on `/payment`, the visitor should stay in the flow with a reason and keep what they typed.
-  - Today `src/components/ReservationBanner.jsx:199-201` releases the hold, deletes `booking_draft` (`:234`) and sends them to `/` (`:237`) with no message.
+  - Today `src/components/ReservationBanner.jsx:199-201,241-245` clears only the browser's copy of the hold, with no release call. It deletes `booking_draft` (`:234`) and sends them to `/` (`:237`) with no message.
 
 ### Dodo payments and webhooks
 
@@ -117,24 +122,27 @@ Sources: Dodo's [webhook guide](https://docs.dodopayments.com/developer-resource
 
 Creating a checkout:
 
-- The amount charged is the server quote's `netAmount`, never a client value. A start with a stale quote fingerprint is refused. (`src/server/api/payment/flow.js:2961,3228-3253`, `src/server/api/payment/dodoProvider.js:26-27`)
+- The server sets the product amount from the quote's `netAmount`, never from a client value. A start with a stale quote fingerprint is refused. On tax-exclusive products, the customer's total adds tax on top. (`src/server/api/payment/flow.js:2961,2983,3228-3253`, `src/server/api/payment/dodoProvider.js:26-27,49`)
+- A paid quote can't be forced into the free checkout, and a zero-value quote carries zero commission. (`src/server/api/payment/flow.js:3258-3278`, `src/server/api/ref/pricing.js:589-603,660-663`)
+- A payment access token is bound to its record, provider, pricing, backend and generation. (`src/server/api/payment/flow.js:891-944`, `src/server/api/payment/accessToken.js:134-158`)
+- An upgrade intent is bound to its original booking, buyer email, target package, backend and generation when the checkout starts, and is frozen for finalization. (`src/server/api/payment/flow.js:3178-3198`, `src/server/api/ref/createBooking.js:395-407`)
 - A checkout is USD only, with no currency switch, no Dodo discount codes and a locked email. It is idempotent per payment record. (`src/server/api/payment/dodoProvider.js:48-64`, `src/server/api/payment/flow.js:2789-2791`)
 - The Dodo product must be one-time and USD, pay-what-you-want, with the recorded tax mode, no PPP, no discount, and a floor no higher than our amount. Otherwise no checkout is made. (`src/server/api/payment/dodoProvider.js:30-38`)
 - The checkout URL must be https on the Dodo checkout host for the current mode. (`src/server/api/payment/dodoProvider.js:66-72`)
 
 Validating a payment, on every path (webhook, return page, reconcile):
 
-- `payment_id`, `checkout_session_id`, `metadata.paymentRecordId` and any stored payment id must all match the record. (`src/server/api/payment/dodoProvider.js:86-90`)
+- `payment_id`, `checkout_session_id`, `metadata.paymentRecordId` and any stored payment id must all match the record. A missing one fails the match. (`src/server/api/payment/dodoProvider.js:86-90`)
 - The payment must be in the record's Dodo environment. (`src/server/api/payment/dodoProvider.js:91-93`)
 - The currency must be USD and equal to the record's. (`src/server/api/payment/dodoProvider.js:94-95`)
-- `total_amount` minus any added tax must equal the quoted `netAmount` in cents, and the tax must be between 0 and the total. (`src/server/api/payment/dodoProvider.js:96-102`)
-- A succeeded payment must have exactly one cart line, with quantity 1, for the recorded product. (`src/server/api/payment/dodoProvider.js:103-106`)
+- `total_amount` minus any added tax must equal the quoted `netAmount` in cents. Missing tax counts as 0, and tax must be between 0 and the total. (`src/server/api/payment/dodoProvider.js:96-102`)
+- A succeeded payment must have exactly one cart line, with quantity 1, for the recorded product. A missing cart fails. (`src/server/api/payment/dodoProvider.js:103-106`)
+- Refunds and disputes must be arrays. (`src/server/api/payment/dodoProvider.js:107-108`)
 - Payment data from the client is never trusted. The return page triggers a server lookup. (`src/server/api/payment/flow.js:1011`, `src/server/api/payment/dodoProvider.js:137-140`)
-- **NOT ENFORCED (owner alerts):** a captured payment that fails validation or ends in owner review should reach the owner. Today it ends silently.
+- **NOT ENFORCED (owner alerts, ROO-499):** a captured payment that fails validation or ends in owner review should reach the owner. Today it ends silently.
   - It becomes `needs_recovery` with `providerRecoveryTerminal`, and reconcile skips it from then on. (`src/server/api/payment/flow.js:4441-4442,4459,4465-4472`)
   - Or the webhook acknowledges a binding mismatch with 200 (`:6141`).
   - The same silent end applies to lost, accepted or expired disputes (`:5883,5936`), upgrade-credit reviews (`:1945-1964`) and refunds with incomplete details (`:5990-5996`).
-  - Example: Adaptive Currency is switched on in Dodo and a buyer pays in EUR. That paid customer gets no booking and nobody is told.
 - **NOT ENFORCED (rare):** a payment without `metadata.paymentRecordId`, such as one through the product's public buy link, is acknowledged and dropped. (`src/server/api/payment/flow.js:6122`)
 
 Payment statuses:
@@ -142,21 +150,21 @@ Payment statuses:
 - `succeeded` finalizes the booking, or takes the reschedule path. (`src/server/api/payment/flow.js:6080-6085`)
 - `failed` and `cancelled` end the record and release its resources, unless a booking exists or a dispute is active. (`src/server/api/payment/flow.js:6053-6068`)
 - `requires_payment_method` counts as unpaid. Reconcile abandons the record once the session expires. (`src/server/api/payment/dodoProvider.js:129`, `src/server/api/payment/flow.js:4604,5859-5861`)
-- `processing`, `requires_customer_action`, `requires_merchant_action`, `requires_confirmation` and `requires_capture` are pending.
-  - The webhook answers 503 so Dodo re-delivers. (`src/server/api/payment/flow.js:6145-6147`)
+- `processing`, `requires_customer_action`, `requires_merchant_action`, `requires_confirmation`, `requires_capture`, `partially_captured`, `partially_captured_and_capturable`, and a null status are pending.
+  - The webhook answers 503 so Dodo re-delivers. (`src/server/api/payment/dodoProvider.js:128-129`, `src/server/api/payment/flow.js:6087-6090,6145-6147`)
   - A later success after the hold expired takes the reschedule path.
-  - ACH Direct Debit stays `processing` for days and gets a 503 on all 8 deliveries. That is harmless.
-- `partially_captured` and `partially_captured_and_capturable` are pending too. We never request manual capture.
+  - ACH Direct Debit stays `processing` for up to four business days. Its final success or failure arrives as its own event, and the 5-minute reconcile also re-reads it.
 
-Refund statuses:
+Refunds:
 
-- A `succeeded` refund must match the payment, with a positive amount no larger than the total and the same currency, before it's applied. (`src/server/api/payment/flow.js:5982-6006,6041-6052`)
+- A null `refund_status` means no refund.
+- A `succeeded` refund must match the payment, with a positive amount no larger than the total and the same currency, before it's applied. A missing amount or currency is fetched from Dodo first. (`src/server/api/payment/flow.js:5982-6006,6041-6052`)
 - `failed`, `pending` and `review` are recorded with no accounting change. Any other status gets a 409, and Dodo retries. (`src/server/api/payment/flow.js:5955-5980`)
-- If Dodo says `refund_status: full` but the succeeded refunds don't add up to the total, the webhook answers 503 and waits for the details. (`src/server/api/payment/flow.js:6007-6012`)
+- `refund_status: full` with succeeded refunds below the total, or `partial` with none succeeded, answers 503 and waits for the details. (`src/server/api/payment/flow.js:6007-6012`)
 
 Disputes:
 
-- All seven dispute statuses and three stages are validated, and anything else gets a 409. (`src/server/api/payment/flow.js:5870-5876`)
+- All seven dispute statuses and three stages are validated, and each dispute's id, payment id and currency must match the payment. Anything else gets a 409. (`src/server/api/payment/flow.js:5870-5876`)
 - An open dispute takes the booking to `pending`, zeroes the commission and puts the record in `needs_recovery`. Open means any status except `dispute_won` and `dispute_cancelled`. (`src/server/api/payment/flow.js:5884-5885,5909-5925,5939`)
 - `dispute_won` and `dispute_cancelled` restore the booking status, and the commission returns at the retained share. (`src/server/api/payment/flow.js:5916-5921`)
 - A disputed payment never finalizes a booking. (`src/server/api/payment/dodoProvider.js:147-149`, `src/server/api/payment/flow.js:6073-6079`)
@@ -165,13 +173,13 @@ Webhook delivery:
 
 - Every webhook is verified on its raw body before any processing: a Standard Webhooks signature with 5-minute timestamp tolerance. A failure answers 401, 409 or 503. (`src/server/api/payment/flow.js:6094-6100`, `src/server/api/payment/dodoProvider.js:163-167`)
 - A webhook without `webhook-id` is refused. (`src/server/api/payment/flow.js:6101-6102`)
-- Payload state is never trusted. The payment is re-read from Dodo by id, so stale or out-of-order events act on the latest state. (`src/server/api/payment/flow.js:6108-6121`)
+- Payload state is never trusted. The payment is re-read from Dodo by `data.payment_id`, so stale or out-of-order events act on the latest state. (`src/server/api/payment/flow.js:6108-6121`)
 - Only these event types are processed: `payment.succeeded`, `payment.failed`, `payment.processing`, `payment.cancelled`, `refund.succeeded`, `refund.failed` and `dispute.*`. Every other event gets 200 and is ignored. (`src/server/api/payment/flow.js:6103-6104`)
-- Duplicates have no effect:
-  - receipts are keyed by `webhook-id` and type, plus a hash of the fetched payment;
-  - a repeat with an unchanged state answers 200;
-  - a concurrent repeat waits on a 120-second lease and answers 503.
-  - (`src/server/api/payment/flow.js:81,1599-1636,6129-6136`)
+- Each Dodo `webhook-id` has exactly one receipt. (`src/server/api/payment/paymentRecord.js:183-194`, `src/server/api/payment/flow.js:1599-1636,6129-6136`)
+  - A repeat with an unchanged fetched state answers 200.
+  - A changed state is processed again, thanks to the stored hash.
+  - A different type or identity under the same id is a binding conflict (409).
+  - A receipt held by a concurrent delivery (120-second lease) answers 503 at once.
 - A webhook answers 2xx only after its effect is durably recorded, or when it's irrelevant. Otherwise its receipt is released for retry. (`src/server/api/payment/flow.js:6137-6155`)
 
 ### Refunds and credits
@@ -188,17 +196,20 @@ Webhook delivery:
   - Dodo partial refunds through a `refundedAmount` that only goes up.
   - (`src/server/api/ref/bookingRefunds.js:154-158,171-186,211-226`)
 - A Dodo partial refund scales commission to the retained share, or to 0 while a dispute is active. (`src/server/api/ref/bookingRefunds.js:154-168`, `supabase/migrations/20260909090000_add_dodo_payment_provider.sql:25-30`)
-- **NOT ENFORCED:** commission should never exceed the commission on the money we kept.
-  - A PayPal or Razorpay partial refund records `refundedAmount` but keeps the full `commissionAmount` (`src/server/api/ref/bookingRefunds.js:187-201`).
-  - Example: a $20 refund on a $54.95 PayPal booking leaves the creator the full commission.
-- **NOT ENFORCED:** `successfulReferrals` should count only bookings we kept.
+- **NOT ENFORCED (ROO-508):** commission should never exceed the commission on the money we kept. A PayPal or Razorpay partial refund records `refundedAmount` but keeps the full `commissionAmount`. (`src/server/api/ref/bookingRefunds.js:187-201`)
+- **NOT ENFORCED (ROO-509):** `successfulReferrals` should count only bookings we kept.
   - A lost chargeback zeroes commission (`src/server/api/payment/flow.js:5909-5925`) but never decrements the count. Only a full refund does (`src/server/api/ref/bookingRefunds.js:298-302`).
-  - The count unlocks split editing at 5 (`src/server/api/ref/updateSplit.js:71-73`).
-- A coupon's uses never exceed `maxUses`, counting consumed uses plus active reservations. This is checked at reservation and at consumption, under revision guards. (`src/server/api/ref/couponReservations.js:83-88,119-131,193-199`)
-- A coupon reservation belongs to one payment record. A late capture after the reservation was released is still accounted for. (`src/server/api/ref/bookingCommit.js:170-173`, `src/server/api/payment/flow.js:4055-4056`)
-- Upgrade credit counts only paid bookings in the chain, minus settled refunds. A fully refunded original gives no credit, and a non-USD original or a provider mismatch refuses credit. (`src/server/api/ref/pricing.js:144-177,255-264,289-300`)
+  - The count unlocks split editing at 5. (`src/server/api/ref/updateSplit.js:71-73`)
+- A new coupon reservation enforces `maxUses`, counting consumed uses plus active reservations, under revision guards. (`src/server/api/ref/couponReservations.js:83-88,119-131`)
+  - **NOT ENFORCED as a hard ceiling:** a late paid capture consumes its released reservation even when the cap is already reached, and records `capacityExceededAtRecovery`. (`src/server/api/ref/couponReservations.js:188-226`, `src/server/api/ref/bookingCommit.js:416-424`)
+  - Lowering `maxUses` doesn't recheck existing reservations. (`src/server/api/ref/couponReservations.js:232-258`)
+- A coupon reservation belongs to one checkout owner. That is normally its payment record, or the deterministic booking id for legacy and free completion. (`src/server/api/ref/bookingCommit.js:170-173`, `src/server/api/ref/createBooking.js:1571-1576`)
+  - A late capture after the reservation was released is still accounted for. (`src/server/api/payment/flow.js:4055-4056`)
+- Refund-aware upgrade credit counts only paid bookings in the chain, minus settled refunds. A fully refunded original gives no credit, and a non-USD original or a provider mismatch refuses credit. (`src/server/api/ref/pricing.js:152-177,255-264,289-300`)
+  - **NOT ENFORCED (ROO-518):** when nothing was refunded, credit returns the booking's paid amount before the currency, provider and binding checks run. (`src/server/api/ref/pricing.js:144-151`)
 - If the credit dropped after the quote, a captured upgrade is held for owner review instead of booked. (`src/server/api/ref/pricing.js:346-370`, `src/server/api/payment/flow.js:1936-1965,3933-3942`)
-- Each original order has at most one upgrade at a time (the upgrade lock), and the lock is released on refund. (`src/server/api/payment/flow.js:2872-2878,3007`, `src/server/api/ref/bookingRefunds.js:47-60,315-318`)
+- An upgrade lock covers one payment per original booking, target package and upgrade intent. It is released on a full refund. (`src/server/api/payment/flow.js:2872-2878,3007`, `src/server/api/ref/bookingRefunds.js:47-60,315-318`)
+  - **NOT ENFORCED (ROO-519):** each upgrade request gets a new random intent (`src/server/api/ref/getUpgradeInfo.js:310-317`, `src/server/api/ref/upgradeIntentToken.js:43,114`). So two upgrades for the same original booking can run at once and both draw its credit.
 
 ## Repository rules
 
