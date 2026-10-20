@@ -78,6 +78,9 @@ test("the home page is served as a prebuilt page that ignores the query string",
   const ownsServer = testInfo.config.metadata.ownsToolingServer === true;
   const manifest = ownsServer ? JSON.parse(await fs.readFile(path.join(testInfo.config.metadata.toolingDistDir, "prerender-manifest.json"), "utf8")) : null;
   const home = await request.get("/", { headers: { accept: "text/html" }, maxRedirects: 0 });
+  if (home.headers()["x-nextjs-cache"] === "STALE") {
+    await expect.poll(async () => (await request.get("/", { headers: { accept: "text/html" }, maxRedirects: 0 })).headers()["x-nextjs-cache"], { timeout: 20000 }).toBe("HIT");
+  }
   const first = await request.get("/?ref=alpha", { headers: { accept: "text/html" }, maxRedirects: 0 });
   const second = await request.get("/?ref=beta", { headers: { accept: "text/html" }, maxRedirects: 0 });
   const [firstBody, secondBody] = await Promise.all([first.text(), second.text()]);
