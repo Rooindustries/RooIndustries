@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import { isProductionBrowser } from "../lib/productionBrowser";
 import { Analytics } from "@vercel/analytics/react";
 import { sanitizeAnalyticsEvent } from "../lib/salesAttribution";
@@ -69,6 +70,17 @@ export const loadSeorceScript = ({
   return true;
 };
 
+function ReferralCapture() {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    if (pathname && !CHECKOUT_PATHS.includes(pathname)) rememberReferralFromSearch(searchParams?.toString());
+  }, [pathname, searchParams]);
+
+  return null;
+}
+
 export default function AppClientRuntime() {
   const [analyticsEnabled, setAnalyticsEnabled] = useState(false);
 
@@ -78,10 +90,6 @@ export default function AppClientRuntime() {
   useEffect(() => {
     initializePerformanceProfile();
   }, []);
-  useEffect(() => {
-    if (!CHECKOUT_PATHS.includes(window.location.pathname)) rememberReferralFromSearch(window.location.search);
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
     const cleanup = runWhenIdle(() => {
@@ -96,5 +104,12 @@ export default function AppClientRuntime() {
     };
   }, []);
 
-  return analyticsEnabled ? <Analytics beforeSend={sanitizeAnalyticsEvent} /> : null;
+  return (
+    <>
+      <Suspense fallback={null}>
+        <ReferralCapture />
+      </Suspense>
+      {analyticsEnabled ? <Analytics beforeSend={sanitizeAnalyticsEvent} /> : null}
+    </>
+  );
 }

@@ -14,6 +14,22 @@ for (const landing of ["/?ref=friend", "/reviews?ref=friend", "/tourney?ref=frie
   });
 }
 
+for (const [start, previous, target] of [
+  ["/tourney?ref=oldercreator", "oldercreator", "/reviews?ref=friend"],
+  ["/tourney", null, "/about?ref=friend"],
+]) {
+  test(`an in-site move from ${start} to ${target} credits the new creator`, async ({ page, flow }) => {
+    await page.goto(start);
+    await page.waitForFunction(() => Boolean(window.next?.router));
+    await expect.poll(() => storedReferral(page)).toBe(previous);
+    await page.evaluate(href => window.next.router.push(href), target);
+    await expect(page).toHaveURL(new RegExp(`${target.split("?")[0]}(\\?|$)`));
+    await expect.poll(() => storedReferral(page)).toBe("friend");
+    await flow.review();
+    await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+  });
+}
+
 test("a referral removed in the booking dialog stays removed", async ({ page, flow }) => {
   await page.goto("/booking?ref=friend");
   await page.getByRole("button", { name: /^Earliest available:/ }).click();
