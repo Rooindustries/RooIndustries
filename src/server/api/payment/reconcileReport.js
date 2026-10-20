@@ -328,13 +328,13 @@ const checkBooking = ({ payment, record, booking, refunded, pricing }) => {
     booking.referralCode == null
       ? ""
       : typeof booking.referralCode === "string"
-        ? booking.referralCode.trim().toLowerCase()
+        ? booking.referralCode.toLowerCase()
         : null;
   const referralId =
     booking.referral == null
       ? ""
       : typeof booking.referral._ref === "string"
-        ? booking.referral._ref.trim()
+        ? booking.referral._ref
         : null;
   if (referralCode !== pricing.referralCode || referralId !== pricing.referralId)
     return "referral_binding_mismatch";
@@ -348,6 +348,7 @@ const checkBooking = ({ payment, record, booking, refunded, pricing }) => {
     commission === null ||
     commission !== expected ||
     booking.commissionPercent !== pricing.percent ||
+    (refunded > 0 && !fullRefund && !Object.hasOwn(booking, "dodoOriginalCommissionAmount")) ||
     (Object.hasOwn(booking, "dodoOriginalCommissionAmount") &&
       moneyCents(booking.dodoOriginalCommissionAmount) !== pricing.commission)
   )

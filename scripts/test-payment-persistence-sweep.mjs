@@ -546,9 +546,46 @@ try{
       referralCode: ' CREATOR-CORRECT ',
       referral: { _type: 'reference', _ref: ' referral.correct ' },
     }));
+    dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
     dodoList = [dodoSummary()];
-    return expectReport([]);
+    const booking = (await row(bookingId)).payload;
+    const report = await authorizedReport();
+    const earnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    await commerce.patch(bookingId).set({
+      referralCode: 'CREATOR-CORRECT',
+      referral: { _type: 'reference', _ref: 'referral.correct' },
+    }).commit();
+    const control = await authorizedReport();
+    const controlEarnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    const proof = { booking, report, earnings, control, controlEarnings };
+    assert.equal(report.status, 200);
+    assert.equal(earnings.total, 0, JSON.stringify(earnings));
+    assert.equal(control.status, 200);
+    assert.equal(control.body.count, 0, JSON.stringify(control.body));
+    assert.deepEqual(control.body.items, []);
+    assert.equal(controlEarnings.total, 1, JSON.stringify(controlEarnings));
+    assert.deepEqual(reportReasons(report.body), ['referral_binding_mismatch'], JSON.stringify(proof));
+    return proof;
   });
+  for (const [name, changes] of [
+    ['code', { referralCode: ' CREATOR-CORRECT ' }],
+    ['id', { referral: { _type: 'reference', _ref: ' referral.correct ' } }],
+  ]) {
+    await run(`reconcile-report-referral-${name}-padding`, async () => {
+      await seed('dodo', 'booked', dodoBooking(changes));
+      dodoList = [dodoSummary()];
+      const report = await expectReport(['referral_binding_mismatch']);
+      const earnings = await commerce.referralEarnings({
+        referralId: 'referral.correct', referralCode: 'creator-correct',
+      });
+      assert.equal(earnings.total, 1, JSON.stringify(earnings));
+      return { report, earnings };
+    });
+  }
   await run('reconcile-report-referral-id-case-mismatch', async () => {
     await seed('dodo', 'booked', dodoBooking({
       referral: { _type: 'reference', _ref: 'Referral.Correct' },
@@ -587,6 +624,80 @@ try{
     dodoList = [dodoSummary()];
     return expectReport([]);
   });
+  await run('reconcile-report-partial-zero-original-earnings', async () => {
+    await seed('dodo', 'booked', dodoBooking({
+      refundedAmount: 9.98,
+      refundStatus: 'partial',
+      commissionAmount: 0,
+    }));
+    dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+    dodoPayment.refund_status = 'partial';
+    dodoPayment.refunds = [{ ...dodoRefund, amount: 998, is_partial: true }];
+    dodoList = [dodoSummary()];
+    const booking = (await row(bookingId)).payload;
+    assert.equal(Object.hasOwn(booking, 'dodoOriginalCommissionAmount'), false);
+    const report = await authorizedReport();
+    const earnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    await commerce.patch(bookingId).set({ dodoOriginalCommissionAmount: 1 }).commit();
+    const control = await authorizedReport();
+    const controlEarnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    const proof = { booking, provider: dodoPayment, report, earnings, control, controlEarnings };
+    assert.equal(report.status, 200);
+    assert.equal(earnings.total, 1, JSON.stringify(earnings));
+    assert.equal(control.status, 200);
+    assert.equal(control.body.count, 0, JSON.stringify(control.body));
+    assert.deepEqual(control.body.items, []);
+    assert.equal(controlEarnings.total, 0, JSON.stringify(controlEarnings));
+    assert.deepEqual(reportReasons(report.body), ['commission_mismatch'], JSON.stringify(proof));
+    return proof;
+  });
+  await run('reconcile-report-partial-nonzero-original-earnings', async () => {
+    await seed('dodo', 'booked', dodoBooking({
+      refundedAmount: 3.33,
+      refundStatus: 'partial',
+      commissionAmount: 0.67,
+    }));
+    dodoPayment.refund_status = 'partial';
+    dodoPayment.refunds = [{ ...dodoRefund, amount: 333, is_partial: true }];
+    dodoList = [dodoSummary()];
+    const booking = (await row(bookingId)).payload;
+    assert.equal(Object.hasOwn(booking, 'dodoOriginalCommissionAmount'), false);
+    const report = await expectReport(['commission_mismatch']);
+    const earnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    await commerce.patch(bookingId).set({ dodoOriginalCommissionAmount: 1 }).commit();
+    const control = await expectReport([]);
+    const controlEarnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    assert.equal(earnings.total, 0.67, JSON.stringify(earnings));
+    assert.equal(controlEarnings.total, 0.67, JSON.stringify(controlEarnings));
+    return { booking, provider: dodoPayment, report, earnings, control, controlEarnings };
+  });
+  await run('reconcile-report-full-refund-no-original-earnings', async () => {
+    await seed('dodo', 'refunded', dodoBooking({
+      status: 'refunded',
+      refundedAmount: 9.99,
+      refundStatus: 'full',
+      commissionAmount: 0,
+    }));
+    dodoPayment.refund_status = 'full';
+    dodoPayment.refunds = [dodoRefund];
+    dodoList = [dodoSummary()];
+    const booking = (await row(bookingId)).payload;
+    assert.equal(Object.hasOwn(booking, 'dodoOriginalCommissionAmount'), false);
+    const report = await expectReport([]);
+    const earnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    assert.equal(earnings.total, 0, JSON.stringify(earnings));
+    return { booking, provider: dodoPayment, report, earnings };
+  });
   const dodoDispute = (status) => ({
     dispute_id: 'dispute-fixture',
     payment_id: 'payment-fixture',
@@ -594,6 +705,33 @@ try{
     dispute_stage: 'dispute',
     amount: '999',
     currency: 'USD',
+  });
+  await run('reconcile-report-partial-disputed-original-earnings', async () => {
+    await seed('dodo', 'booked', dodoBooking({
+      status: 'pending',
+      dodoDisputeActive: true,
+      refundedAmount: 9.98,
+      refundStatus: 'partial',
+      commissionAmount: 0,
+    }));
+    dodoPayment.refund_status = 'partial';
+    dodoPayment.refunds = [{ ...dodoRefund, amount: 998, is_partial: true }];
+    dodoPayment.disputes = [dodoDispute('dispute_opened')];
+    dodoList = [dodoSummary()];
+    const booking = (await row(bookingId)).payload;
+    assert.equal(Object.hasOwn(booking, 'dodoOriginalCommissionAmount'), false);
+    const report = await expectReport(['commission_mismatch']);
+    const earnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    await commerce.patch(bookingId).set({ dodoOriginalCommissionAmount: 1 }).commit();
+    const control = await expectReport([]);
+    const controlEarnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    assert.equal(earnings.total, 0, JSON.stringify(earnings));
+    assert.equal(controlEarnings.total, 0, JSON.stringify(controlEarnings));
+    return { booking, provider: dodoPayment, report, earnings, control, controlEarnings };
   });
   for (const status of ['dispute_opened', 'dispute_won', 'dispute_cancelled']) {
     await run(`reconcile-report-commission-${status}`, async () => {
@@ -694,7 +832,13 @@ try{
     const report = await reconcileReport();
     assert.equal(report.count, 0, JSON.stringify(report));
     assert.deepEqual(report.items, []);
-    return { count: report.count, from: report.from, to: report.to };
+    const booking = (await row(bookingId)).payload;
+    assert.equal(Object.hasOwn(booking, 'dodoOriginalCommissionAmount'), false);
+    const earnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    assert.equal(earnings.total, 1, JSON.stringify(earnings));
+    return { count: report.count, from: report.from, to: report.to, booking, earnings };
   });
   await run('reconcile-report-payment-without-record', async () => {
     dodoPayment.metadata = {};
@@ -958,6 +1102,7 @@ try{
         refundedAmount: 2.5,
         refundStatus: 'partial',
         commissionAmount: 0.75,
+        dodoOriginalCommissionAmount: 1,
       }),
     );
     dodoRefund = { ...dodoRefund, amount: 250, is_partial: true };
