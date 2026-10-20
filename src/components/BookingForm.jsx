@@ -68,6 +68,7 @@ const REASSURANCE_COPY =
   "You won't be charged until you confirm on the payment page.";
 const PAYMENT_PENDING_EXPIRY_ERROR =
   "This reservation expired while payment is still pending. Return to payment to check its status or release payment to try again.";
+const REQUIRED_DETAIL_FIELDS = ["discord", "email", "specs", "mainGame"];
 const CALENDAR_AVAILABILITY_LABELS = Object.freeze({
   green: "fully available",
   yellow: "limited slots",
@@ -518,6 +519,7 @@ export default function BookingForm() {
   const [errorStep1, setErrorStep1] = useState("");
   const [errorStep2, setErrorStep2] = useState("");
   const [emailError, setEmailError] = useState("");
+  const [showMissingDetails, setShowMissingDetails] = useState(false);
   const emailInputRef = useRef(null);
   useEffect(() => {
     if (emailError && step === 2) emailInputRef.current?.focus();
@@ -920,6 +922,7 @@ export default function BookingForm() {
 
     if (baseFilled) {
       setErrorStep2("");
+      setShowMissingDetails(false);
     }
   };
 
@@ -950,15 +953,18 @@ export default function BookingForm() {
     form.mainGame,
   ]);
 
+  const detailMissing = (name) => showMissingDetails && !form[name].trim();
+  const detailFieldClass = (name) =>
+    `w-full bg-surface-input border ${detailMissing(name) ? "border-danger-border" : "border-line-input"} rounded-lg p-3 focus:outline-none focus:border-info-border transition`;
+
   const getStep2Error = () => {
-    if (
-      !form.discord.trim() ||
-      !form.email.trim() ||
-      !form.specs.trim() ||
-      !form.mainGame.trim()
-    ) {
+    const missingField = REQUIRED_DETAIL_FIELDS.find((name) => !form[name].trim());
+    if (missingField) {
+      setShowMissingDetails(true);
+      document.getElementById(`booking-${missingField}`)?.focus();
       return "Please fill out all required fields.";
     }
+    setShowMissingDetails(false);
 
     if (!isValidEmail(form.email.trim())) {
       setEmailError("Please enter a valid email address.");
@@ -2922,18 +2928,20 @@ export default function BookingForm() {
                     <input
                       id="booking-discord"
                       name="discord"
+                      aria-invalid={detailMissing("discord") ? "true" : undefined}
+                      aria-describedby={detailMissing("discord") ? "booking-details-error" : undefined}
                       placeholder="Discord (e.g. Servi#1234 or @Servi)"
                       onChange={handleChange}
                       value={form.discord}
-                      className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
+                      className={detailFieldClass("discord")}
                     />
                     <label htmlFor="booking-email" className="block text-left text-sm font-semibold text-ink">Booking email</label>
                     <input
                       id="booking-email"
                       name="email"
                       ref={emailInputRef}
-                      aria-invalid={emailError ? "true" : undefined}
-                      aria-describedby={emailError ? "booking-email-error" : undefined}
+                      aria-invalid={emailError || detailMissing("email") ? "true" : undefined}
+                      aria-describedby={emailError ? "booking-email-error" : detailMissing("email") ? "booking-details-error" : undefined}
                       type="email"
                       placeholder="Email"
                       onChange={(event) => {
@@ -2941,7 +2949,7 @@ export default function BookingForm() {
                         if (isValidEmail(event.target.value.trim())) setEmailError("");
                       }}
                       value={form.email}
-                      className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
+                      className={detailFieldClass("email")}
                     />
                     {emailError && (
                       <p id="booking-email-error" className="text-sm text-danger-text">
@@ -2952,19 +2960,23 @@ export default function BookingForm() {
                     <input
                       id="booking-specs"
                       name="specs"
+                      aria-invalid={detailMissing("specs") ? "true" : undefined}
+                      aria-describedby={detailMissing("specs") ? "booking-details-error" : undefined}
                       placeholder="PC Specs"
                       onChange={handleChange}
                       value={form.specs}
-                      className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
+                      className={detailFieldClass("specs")}
                     />
                     <label htmlFor="booking-mainGame" className="block text-left text-sm font-semibold text-ink">Main game or application</label>
                     <input
                       id="booking-mainGame"
                       name="mainGame"
+                      aria-invalid={detailMissing("mainGame") ? "true" : undefined}
+                      aria-describedby={detailMissing("mainGame") ? "booking-details-error" : undefined}
                       placeholder="Main use case (Game/Apps)"
                       onChange={handleChange}
                       value={form.mainGame}
-                      className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
+                      className={detailFieldClass("mainGame")}
                     />
                     <label htmlFor="booking-notes" className="block text-left text-sm font-semibold text-ink">Extra booking requirements (optional)</label>
                     <textarea
@@ -3010,7 +3022,7 @@ export default function BookingForm() {
                       </button>
                     </div>
                     {errorStep2 && (
-                      <p role="alert" className="mt-3 text-sm text-danger-text">{errorStep2}</p>
+                      <p id="booking-details-error" role="alert" className="mt-3 text-sm text-danger-text">{errorStep2}</p>
                     )}
                   </BookingStepActions>
                 </motion.div>
