@@ -4,8 +4,12 @@ import seo from "@/src/lib/seo";
 import contentServer from "@/src/lib/contentServer";
 
 export const metadata = seo.getMetadataForPath("/privacy");
+export const dynamic = "force-static";
+export const revalidate = 60;
 
-export default async function Page({ searchParams }) {
-  const privacy = await contentServer.fetchPrivacyPolicy();
-  return <RouteRenderer entry={Privacy} pathname="/privacy" searchParams={searchParams} initialRouteData={{ privacy }} />;
+export default async function Page() {
+  const privacy = await contentServer.fetchStaticPageContent("privacy-policy", {
+    requireContent: process.env.NEXT_PHASE !== "phase-production-build",
+  });
+  return <RouteRenderer entry={Privacy} pathname="/privacy" searchParams={{}} initialRouteData={{ privacy }} />;
 }

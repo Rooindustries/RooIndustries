@@ -162,7 +162,11 @@ async function fetchPrivacyPolicy() {
 async function fetchStaticPageContent(resource, { requireContent = false } = {}) {
   try {
     const fetchContent = await createPublicContentFetcher({ fresh: true });
-    return await fetchContent(resource);
+    const content = await fetchContent(resource);
+    if (requireContent && content == null) {
+      throw Object.assign(new Error(`No published ${resource} document.`), { code: "PAGE_CONTENT_MISSING" });
+    }
+    return content;
   } catch (error) {
     if (requireContent) await refuseContentFallback("Page content unavailable; keeping the previous page", error);
     return null;

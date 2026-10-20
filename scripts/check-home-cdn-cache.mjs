@@ -1,8 +1,9 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 const base = process.argv[2];
-const artifact = process.argv[3] || "home-cdn-cache-check.json";
-const usage = "Usage: node scripts/check-home-cdn-cache.mjs https://<deployment host> [artifact.json] ['{\"header\":\"value\"}']";
+const artifact = process.argv[3] || "test-results/home-cdn-cache-check.json";
+const usage = "Usage: npm run check:cdn -- https://<deployment host> [artifact.json] ['{\"header\":\"value\"}']";
 if (!base || !/^https:\/\//.test(base)) {
   console.error(usage);
   process.exit(2);
@@ -39,7 +40,9 @@ async function hit(name, path, { method = "GET", headers = HTML } = {}) {
     cache: response.headers.get("x-vercel-cache"),
     age: response.headers.get("age"),
     cacheControl: response.headers.get("cache-control"),
+    cdnCacheControl: response.headers.get("cdn-cache-control"),
     contentType: response.headers.get("content-type"),
+    vary: response.headers.get("vary"),
     location: response.headers.get("location"),
     setCookies: response.headers.getSetCookie().map((cookie) => cookie.split("=")[0].trim()),
     bytes: body.length,
@@ -52,10 +55,15 @@ function check(condition, message, entry) {
   if (!condition) failures.push({ message, entry: { ...entry, body: undefined } });
 }
 
-const cached = (entry) => entry.cache === "HIT" || entry.cache === "STALE";
+const cached = (entry) => ["HIT", "STALE", "PRERENDER"].includes(entry.cache);
+const noStore = (entry) => /no-store/.test(entry.cacheControl || "") && /no-store/.test(entry.cdnCacheControl || "no-store");
 const headPart = (body) => body.split("</head>")[0];
 const isHtml = (entry) => String(entry.contentType).includes("text/html");
-const isHomeHtml = (entry) => entry.method === "GET" && new URL(entry.path, base).pathname === "/" && isHtml(entry);
+const isMarkdown = (entry) => String(entry.contentType).includes("text/markdown");
+const variesOnAccept = (entry) => String(entry.vary || "").toLowerCase().split(/,\s*/).includes("accept");
+const MARKDOWN = { accept: "text/markdown", "user-agent": BROWSER_UA };
+const PREBUILT_PATHS = ["/", "/about", "/contact", "/privacy"];
+const isPrebuiltHtml = (entry) => entry.method === "GET" && PREBUILT_PATHS.includes(new URL(entry.path, base).pathname) && isHtml(entry);
 
 const key = `/?utm_source=cdncheck${stamp}`;
 const first = await hit("html first", key);
@@ -94,32 +102,78 @@ for (const name of ["token first", "token second"]) {
   check(!cached(redirect), "the private-parameter redirect is never served from cache", redirect);
 }
 
-for (const path of ["/about", "/faq"]) {
-  await hit(`${path} first`, path);
-  const repeat = await hit(`${path} second`, path);
-  check(!cached(repeat), `${path} is never served from cache`, repeat);
+let homeHtmlVary;
+for (const path of PREBUILT_PATHS) {
+  const htmlFirst = `${path}?utm_source=cdnhtmlfirst${stamp}`;
+  const html = [await hit(`${path} html`, htmlFirst)];
+  const repeat = await hit(`${path} html again`, htmlFirst);
+  html.push(repeat);
+  check(cached(repeat), `a repeated ${path} HTML request is served from cache`, repeat);
+  const markdown = [await hit(`${path} markdown after html`, htmlFirst, { headers: MARKDOWN })];
+  html.push(await hit(`${path} html after markdown`, htmlFirst));
+  const rsc = await hit(`${path} rsc`, htmlFirst, { headers: { ...HTML, rsc: "1" } });
+  check(rsc.status === 200 && String(rsc.contentType).includes("text/x-component"), `${path} RSC request gets an RSC payload`, rsc);
+  html.push(await hit(`${path} html after rsc`, htmlFirst));
+
+  const markdownFirst = `${path}?utm_source=cdnmarkdownfirst${stamp}`;
+  markdown.push(await hit(`${path} markdown first`, markdownFirst, { headers: MARKDOWN }));
+  html.push(await hit(`${path} html after markdown first`, markdownFirst));
+  markdown.push(await hit(`${path} markdown after html`, markdownFirst, { headers: MARKDOWN }));
+
+  const headKey = `${path}?utm_source=cdnhead${stamp}`;
+  const headHtml = await hit(`${path} head html`, headKey, { method: "HEAD" });
+  check(headHtml.status === 200 && isHtml(headHtml), `HEAD ${path} gets text/html`, headHtml);
+  markdown.push(await hit(`${path} head markdown`, headKey, { method: "HEAD", headers: MARKDOWN }));
+  html.push(await hit(`${path} get after head`, headKey));
+
+  const unsupportedKey = `${path}?utm_source=cdnunsupported${stamp}`;
+  for (const name of ["first", "second"]) {
+    const unsupported = await hit(`${path} json ${name}`, unsupportedKey, { headers: { accept: "application/json", "user-agent": BROWSER_UA } });
+    check(unsupported.status === 406, `${path} answers an unsupported Accept with 406`, unsupported);
+    check(!cached(unsupported) && noStore(unsupported), `the ${path} 406 is never cached`, unsupported);
+    check(variesOnAccept(unsupported), `the ${path} 406 varies on Accept`, unsupported);
+  }
+  html.push(await hit(`${path} html after 406`, unsupportedKey));
+
+  for (const entry of html) {
+    check(entry.status === 200 && isHtml(entry) && entry.bytes > 10000, `${path} HTML request gets the full HTML page`, entry);
+    if (path === "/" && homeHtmlVary === undefined) homeHtmlVary = entry.vary;
+    check(entry.vary === homeHtmlVary, `${path} HTML varies like / HTML`, entry);
+  }
+  for (const entry of markdown) {
+    check(entry.status === 200 && isMarkdown(entry), `${path} Markdown request gets Markdown`, entry);
+    check(!cached(entry) && noStore(entry), `${path} Markdown is never cached`, entry);
+    check(variesOnAccept(entry), `${path} Markdown varies on Accept`, entry);
+  }
 }
 
-const ageProbe = await hit("age probe", "/");
-const age = Number(ageProbe.age) || 0;
-const waitSeconds = age < 61 ? 61 - age : 0;
-console.log(`Waiting ${waitSeconds}s for the home page to go stale before the leak check`);
+let waitSeconds = 0;
+for (const path of PREBUILT_PATHS) {
+  const ageProbe = await hit(`${path} age probe`, path);
+  const age = Number(ageProbe.age) || 0;
+  waitSeconds = Math.max(waitSeconds, age < 61 ? 62 - age : 62);
+}
+console.log(`Waiting ${waitSeconds}s for the prebuilt pages to go stale before the leak check`);
 await sleep(waitSeconds * 1000);
 const leakToken = `leak${stamp}`;
-await hit("leak trigger", `/?ref=${leakToken}&gclid=${leakToken}`);
+for (const path of PREBUILT_PATHS) await hit(`${path} leak trigger`, `${path}?ref=${leakToken}&gclid=${leakToken}`);
 await sleep(5000);
-const leakHtml = await hit("html after leak trigger", "/");
-const leakRsc = await hit("rsc after leak trigger", "/", { headers: { ...HTML, rsc: "1" } });
-check(!leakHtml.body.includes(leakToken), "a rebuild triggered by a query keeps that query out of the home HTML", leakHtml);
-check(!leakRsc.body.includes(leakToken), "a rebuild triggered by a query keeps that query out of the home RSC payload", leakRsc);
-
-for (const entry of log.filter(isHomeHtml)) {
-  check(entry.setCookies.every((name) => name === "_vercel_jwt"), "home HTML sets no cookie", entry);
-  check(/max-age=0|no-cache|no-store/.test(entry.cacheControl || "") && !/s-maxage/.test(entry.cacheControl || ""), "home HTML reaches clients with max-age=0 and no s-maxage", entry);
+for (const path of PREBUILT_PATHS) {
+  const leakHtml = await hit(`${path} html after leak trigger`, path);
+  const leakRsc = await hit(`${path} rsc after leak trigger`, path, { headers: { ...HTML, rsc: "1" } });
+  check(!leakHtml.body.includes(leakToken), `a rebuild triggered by a query keeps that query out of the ${path} HTML`, leakHtml);
+  check(!leakRsc.body.includes(leakToken), `a rebuild triggered by a query keeps that query out of the ${path} RSC payload`, leakRsc);
 }
 
+for (const entry of log.filter(isPrebuiltHtml)) {
+  const pathname = new URL(entry.path, base).pathname;
+  check(entry.setCookies.every((name) => name === "_vercel_jwt"), `${pathname} HTML sets no cookie`, entry);
+  check(/max-age=0|no-cache|no-store/.test(entry.cacheControl || "") && !/s-maxage/.test(entry.cacheControl || ""), `${pathname} HTML reaches clients with max-age=0 and no s-maxage`, entry);
+}
+
+mkdirSync(dirname(artifact), { recursive: true });
 writeFileSync(artifact, JSON.stringify({ base, checkedAt: new Date(stamp).toISOString(), extraHeaderNames: Object.keys(extraHeaders), log, failures }, null, 2));
-for (const entry of log) console.log(`${entry.name.padEnd(28)} ${entry.status} ${String(entry.cache).padEnd(9)} ${entry.contentType || ""}`);
+for (const entry of log) console.log(`${entry.name.padEnd(40)} ${entry.method.padEnd(4)} ${entry.status} ${String(entry.cache).padEnd(9)} ${String(entry.contentType || "").padEnd(32)} vary: ${entry.vary || ""}`);
 if (failures.length) {
   for (const failure of failures) console.error(`FAIL ${failure.message}`);
   process.exit(1);

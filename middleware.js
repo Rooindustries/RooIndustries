@@ -65,7 +65,7 @@ export function middleware(req) {
     !req.headers.has("rsc") &&
     !req.headers.has("next-router-state-tree") &&
     !req.headers.has("next-action");
-  if (pathname === "/" && ["GET", "HEAD"].includes(req.method) && !req.headers.has("next-action") &&
+  if (MARKDOWN_PATHS.includes(pathname) && ["GET", "HEAD"].includes(req.method) &&
     [...req.nextUrl.searchParams.keys()].some((key) => key !== "_rsc")) {
     const prefersHtml = !isDocument ||
       new Negotiator({ headers: { accept: req.headers.get("accept") ?? undefined } })
@@ -116,10 +116,6 @@ export function middleware(req) {
   const response = NextResponse.next({ request: { headers } });
   if (!ASSET_EXTENSION.test(pathname)) {
     response.headers.set("Vary", MARKDOWN_VARY);
-  }
-  if (MARKDOWN_PATHS.includes(pathname) && pathname !== "/") {
-    response.headers.set("CDN-Cache-Control", "no-store");
-    response.headers.set("Vercel-CDN-Cache-Control", "no-store");
   }
   return response;
 }

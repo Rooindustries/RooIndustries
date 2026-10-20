@@ -55,22 +55,26 @@ test("/packages and /faq keep their last content when revalidation cannot read i
   }
 });
 
-test("/terms, /tools and /meet-the-team keep their last content when revalidation cannot read it", async ({ request, baseURL }, testInfo) => {
+test("/about, /contact, /privacy, /terms, /tools and /meet-the-team keep their last content when revalidation cannot read it", async ({ request, baseURL }, testInfo) => {
   test.setTimeout(180000);
   const control = contentControl(request, baseURL);
   const timeline = [];
   const read = pageReader(request, timeline);
   const expected = {
+    "/about": "About Roo Industries",
+    "/contact": "Synthetic local contact information.",
+    "/privacy": "Synthetic local information",
     "/terms": "Synthetic local information",
     "/tools": "Fixture layout tool 1",
     "/meet-the-team": "Fixture Member Alpha",
   };
   const fallbacks = {
+    "/contact": "Ready to optimize your PC?",
     "/tools": "No tools are listed right now.",
     "/meet-the-team": "Wailshark",
   };
   try {
-    await control({ outage: ["terms", "tool", "meetTheTeam"] });
+    await control({ outage: ["contact", "privacyPolicy", "terms", "tool", "meetTheTeam"] });
     await wait(61000);
     for (const [route, text] of Object.entries(expected)) {
       const trigger = await read(route, "first request after the revalidation window");
@@ -84,11 +88,65 @@ test("/terms, /tools and /meet-the-team keep their last content when revalidatio
       expect.soft(after.status, route).toBe(200);
       expect.soft(after.body.includes(text), route).toBe(true);
       if (fallbacks[route]) expect.soft(after.body.includes(fallbacks[route]), route).toBe(false);
+      if (route === "/privacy") expect.soft(after.headings, route).toEqual(["Privacy Policy"]);
       if (route === "/terms") expect.soft(after.headings, route).toEqual(["Terms of Service"]);
     }
   } finally {
     await control({ reset: true });
     await testInfo.attach("static-public-pages-revalidation", { body: JSON.stringify(timeline, null, 2), contentType: "application/json" });
+  }
+});
+
+test("/contact, /privacy, /terms and /meet-the-team keep their last content when the CMS returns no document", async ({ request, baseURL, browser }, testInfo) => {
+  test.setTimeout(180000);
+  const control = contentControl(request, baseURL);
+  const timeline = [];
+  const read = pageReader(request, timeline);
+  const expected = {
+    "/contact": "Synthetic local contact information.",
+    "/privacy": "Synthetic local information",
+    "/terms": "Synthetic local information",
+    "/meet-the-team": "Fixture Member Alpha",
+  };
+  try {
+    await control({ missing: ["contact", "privacyPolicy", "terms", "meetTheTeam"] });
+    await wait(61000);
+    for (const [route, text] of Object.entries(expected)) {
+      const trigger = await read(route, "first request after the revalidation window");
+      expect(trigger.status, route).toBe(200);
+      expect(trigger.cache, route).toBe("STALE");
+      expect(trigger.body, route).toContain(text);
+    }
+    for (const [route, text] of Object.entries(expected)) {
+      await expect.poll(async () => (await read(route, "waiting for the revalidation to settle")).cache, { timeout: 20000 }).toBe("HIT");
+      const after = await read(route, "after the revalidation without a document");
+      expect.soft(after.status, route).toBe(200);
+      expect.soft(after.body.includes(text), route).toBe(true);
+      if (route === "/contact") expect.soft(after.body.includes("Ready to optimize your PC?"), route).toBe(false);
+      if (route === "/privacy") expect.soft(after.headings, route).toEqual(["Privacy Policy"]);
+      if (route === "/terms") expect.soft(after.headings, route).toEqual(["Terms of Service"]);
+    }
+    const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+    const context = await browser.newContext({ javaScriptEnabled: true, serviceWorkers: "block" });
+    try {
+      await guardBrowserContext(context, [baseURL]);
+      const page = await context.newPage();
+      for (const [route, resource, heading] of [["/privacy", "privacy-policy", "Privacy Policy"], ["/terms", "terms", "Terms of Service"]]) {
+        const refetch = page.waitForResponse(response => new URL(response.url()).pathname === `/api/content/${resource}`);
+        await page.goto(route);
+        const body = await (await refetch).json();
+        timeline.push({ route, step: "browser refetch without a document", refetch: body });
+        expect(body.data, route).toBeNull();
+        await page.waitForTimeout(500);
+        await expect(page.locator("main").getByRole("heading", { name: heading, exact: true }), route).toBeVisible();
+        await expect(page.locator("main"), route).toContainText(expected[route]);
+      }
+    } finally {
+      await context.close();
+    }
+  } finally {
+    await control({ reset: true });
+    await testInfo.attach("static-pages-missing-document", { body: JSON.stringify(timeline, null, 2), contentType: "application/json" });
   }
 });
 

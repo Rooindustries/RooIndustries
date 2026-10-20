@@ -99,11 +99,20 @@ test.describe("home page caching", () => {
     expect(ogTags(bare.head)).toEqual(ogTags(browser.head));
   });
 
-  test("the markdown representation of / is not CDN cached", async ({ request }, testInfo) => {
-    const markdown = await served(request, testInfo, "home-markdown", "/", { headers: { accept: "text/markdown" } });
-    expect(markdown.value("content-type")).toContain("text/markdown");
-    expect(markdown.value("vercel-cdn-cache-control")).toBe("no-store");
-  });
+  for (const path of ["/", "/about", "/contact", "/privacy"]) {
+    test(`the markdown representation of ${path} is not CDN cached`, async ({ request }, testInfo) => {
+      const name = path === "/" ? "home" : path.slice(1);
+      for (const [label, url] of [["plain", path], ["campaign", `${path}?utm_source=newsletter`]]) {
+        const markdown = await served(request, testInfo, `${name}-markdown-${label}`, url, { headers: { accept: "text/markdown" } });
+        expect(markdown.status).toBe(200);
+        expect(markdown.value("content-type")).toContain("text/markdown");
+        expect(markdown.value("cache-control")).toContain("no-store");
+        expect(markdown.value("cdn-cache-control")).toBe("no-store");
+        expect(markdown.value("vercel-cdn-cache-control")).toBe("no-store");
+        expect(markdown.value("x-nextjs-prerender")).toBeNull();
+      }
+    });
+  }
 
   test("the redirect that strips private parameters from / is not CDN cached", async ({ request, baseURL }, testInfo) => {
     const redirect = await served(request, testInfo, "home-token", "/?token=abc");
@@ -113,11 +122,24 @@ test.describe("home page caching", () => {
   });
 
   for (const path of ["/about", "/contact", "/privacy"]) {
-    test(`${path} keeps its no-store CDN headers`, async ({ request }, testInfo) => {
-      const page = await served(request, testInfo, `page${path.replace(/\//g, "-")}`, path);
-      expect(page.value("cdn-cache-control")).toBe("no-store");
-      expect(page.value("vercel-cdn-cache-control")).toBe("no-store");
-    });
+    for (const method of ["GET", "HEAD"]) {
+      test(`${method} ${path} gets the same caching as /`, async ({ request }, testInfo) => {
+        const name = `${path.slice(1)}-${method.toLowerCase()}`;
+        const home = await served(request, testInfo, `home-for-${name}`, "/", { method });
+        const pages = [
+          await served(request, testInfo, `page-${name}`, path, { method }),
+          await served(request, testInfo, `page-${name}-utm`, `${path}?utm_source=newsletter`, { method }),
+        ];
+        for (const page of pages) {
+          expect(page.status).toBe(200);
+          expect(page.value("cache-control")).toMatch(HOME_CACHE);
+          expect(page.value("x-nextjs-prerender")).toMatch(/^1(, 1)*$/);
+          for (const key of ["cache-control", "cdn-cache-control", "vercel-cdn-cache-control", "content-type", "vary", "set-cookie"]) {
+            expect(page.value(key), key).toBe(home.value(key));
+          }
+        }
+      });
+    }
   }
 
   for (const path of ["/booking", "/payment", "/faq", "/reviews"]) {
