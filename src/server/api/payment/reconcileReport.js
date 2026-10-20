@@ -148,10 +148,49 @@ const fetchByIds = async (client, type, ids) => {
     if (!Array.isArray(batch)) throw unavailable();
     docs.push(...batch);
   }
-  return new Map(docs.map((doc) => [doc._id, doc]));
+  const found = new Map(docs.map((doc) => [doc._id, doc]));
+  return new Map(unique.map((id) => [id, found.get(id) || null]));
 };
 
 const cents = (value) => Math.round(Number(value || 0) * 100);
+const moneyCents = (value) =>
+  typeof value === "number" &&
+  Number.isFinite(value) &&
+  value >= 0 &&
+  Number.isSafeInteger(Math.round(value * 100))
+    ? Math.round(value * 100)
+    : null;
+
+const frozenPricing = (record) => {
+  const pricing = record.pricingSnapshot;
+  const gross = moneyCents(pricing?.grossAmount);
+  const net = moneyCents(pricing?.netAmount);
+  const commission = moneyCents(pricing?.commissionAmount);
+  const percent = pricing?.commissionPercent;
+  if (
+    gross === null ||
+    net === null ||
+    net > gross ||
+    commission === null ||
+    typeof percent !== "number" ||
+    !Number.isFinite(percent) ||
+    percent < 0 ||
+    percent > 100 ||
+    (percent === 0 && commission !== 0) ||
+    typeof pricing.effectiveReferralCode !== "string" ||
+    typeof pricing.effectiveReferralId !== "string"
+  )
+    return null;
+  const referralCode = pricing.effectiveReferralCode.trim().toLowerCase();
+  const referralId = pricing.effectiveReferralId.trim();
+  if (
+    Boolean(referralCode) !== Boolean(referralId) ||
+    (!referralId && (percent !== 0 || commission !== 0))
+  )
+    return null;
+  return { gross, net, commission, percent, referralCode, referralId };
+};
+
 const inWindow = (value, from, to) => {
   const timestamp = Date.parse(value || "");
   return Number.isFinite(timestamp) && timestamp >= Date.parse(from) && timestamp <= Date.parse(to);
@@ -243,8 +282,9 @@ const refundedCents = async (dodo, payment) => {
   return amount;
 };
 
-const checkBooking = ({ payment, record, booking, refunded }) => {
+const checkBooking = ({ payment, record, booking, refunded, pricing }) => {
   if (
+    String(record.bookingId || "").trim() !== booking._id ||
     booking.paymentProvider !== "dodo" ||
     booking.paymentRecordId !== record._id ||
     booking.dodoPaymentId !== payment.payment_id ||
@@ -252,7 +292,8 @@ const checkBooking = ({ payment, record, booking, refunded }) => {
   )
     return "payment_record_mismatch";
   if (
-    cents(booking.netAmount) !== cents(record.pricingSnapshot?.netAmount) ||
+    moneyCents(booking.grossAmount) !== pricing.gross ||
+    moneyCents(booking.netAmount) !== pricing.net ||
     (booking.dodoTotalAmount != null && cents(booking.dodoTotalAmount) !== payment.total_amount) ||
     (booking.currency != null && booking.currency !== payment.currency)
   )
@@ -283,21 +324,34 @@ const checkBooking = ({ payment, record, booking, refunded }) => {
   if (!fullRefund && !disputed && !KEPT_BOOKING_STATUSES.includes(booking.status))
     return "payment_record_mismatch";
   if (disputed && !["pending", "refunded"].includes(booking.status)) return "dispute_not_applied";
-  const commission = cents(booking.commissionAmount);
-  const original = cents(
-    (Number(booking.grossAmount || 0) * Number(booking.commissionPercent || 0)) / 100,
-  );
-  const ceiling =
-    disputed || !KEPT_BOOKING_STATUSES.includes(booking.status)
+  const referralCode =
+    booking.referralCode == null
+      ? ""
+      : typeof booking.referralCode === "string"
+        ? booking.referralCode.trim().toLowerCase()
+        : null;
+  const referralId =
+    booking.referral == null
+      ? ""
+      : typeof booking.referral._ref === "string"
+        ? booking.referral._ref.trim()
+        : null;
+  if (referralCode !== pricing.referralCode || referralId !== pricing.referralId)
+    return "referral_binding_mismatch";
+  const commission = moneyCents(booking.commissionAmount);
+  const expected =
+    disputed || fullRefund || !KEPT_BOOKING_STATUSES.includes(booking.status)
       ? 0
-      : Math.round(original * (1 - refunded / payment.total_amount));
+      : Math.round(pricing.commission * (1 - refunded / payment.total_amount));
+  if (commission !== null && commission > expected) return "commission_exceeds_kept_share";
   if (
-    !Number.isSafeInteger(commission) ||
-    !Number.isSafeInteger(ceiling) ||
-    commission < 0 ||
-    commission > ceiling
+    commission === null ||
+    commission !== expected ||
+    booking.commissionPercent !== pricing.percent ||
+    (Object.hasOwn(booking, "dodoOriginalCommissionAmount") &&
+      moneyCents(booking.dodoOriginalCommissionAmount) !== pricing.commission)
   )
-    return "commission_exceeds_kept_share";
+    return "commission_mismatch";
   return "";
 };
 
@@ -309,7 +363,21 @@ export const buildReconcileReport = async ({
   const from = new Date(now - WINDOW_HOURS * 3600 * 1000).toISOString();
   const to = new Date(now - SETTLE_MINUTES * 60 * 1000).toISOString();
   const items = [];
-  const report = (entry) => items.push(toItem(entry));
+  const reported = new Set();
+  const report = (entry) => {
+    const item = toItem(entry);
+    const key = JSON.stringify([item.id, item.ref, item.reason]);
+    if (reported.has(key)) return;
+    reported.add(key);
+    items.push(item);
+  };
+  const paymentCache = new Map();
+  const getPayment = async (id, allowMissing = false) => {
+    if (paymentCache.has(id)) return paymentCache.get(id);
+    const payment = await retrievePayment(dodo, id, allowMissing);
+    if (payment) paymentCache.set(id, payment);
+    return payment;
+  };
 
   const { payments: listed, truncated } = await listDodoPayments({
     dodo,
@@ -322,7 +390,7 @@ export const buildReconcileReport = async ({
   const payments = [];
   for (const summary of listed) {
     if (summary?.status && summary.status !== "succeeded") continue;
-    const payment = await retrievePayment(dodo, summary.payment_id);
+    const payment = await getPayment(summary.payment_id);
     if (summary.status === "succeeded" && payment.status !== "succeeded") throw unavailable();
     if (!String(payment.metadata?.paymentRecordId || "").trim() && productIds.size === 0)
       throw unavailable();
@@ -338,34 +406,49 @@ export const buildReconcileReport = async ({
   const bookings = await fetchByIds(
     client,
     "booking",
-    [...records.values()].map((record) => String(record.bookingId || "").trim()),
+    [...records.values()].filter(Boolean).map((record) => String(record.bookingId || "").trim()),
   );
-  const seenPaymentIds = new Set();
   const checkedBookingIds = new Set();
+  const getDocument = async (type, id, cache) => {
+    if (!id) return null;
+    if (!cache.has(id)) {
+      const found = await fetchByIds(client, type, [id]);
+      cache.set(id, found.get(id) || null);
+    }
+    return cache.get(id);
+  };
 
-  for (const payment of payments) {
-    seenPaymentIds.add(payment.payment_id);
+  const auditPayment = async (payment, suppliedBooking = null) => {
     const base = {
       id: payment.payment_id,
       cents: payment.total_amount,
       currency: payment.currency,
     };
     const recordId = String(payment.metadata?.paymentRecordId || "").trim();
-    const record = records.get(recordId);
+    const record = await getDocument("paymentRecord", recordId, records);
     if (!record || record.provider !== "dodo") {
       report({
         ...base,
-        ref: record?._id || "",
+        ref: suppliedBooking?._id || record?._id || "",
         reason: "payment_without_record",
       });
-      continue;
+      return;
+    }
+    if (suppliedBooking && String(record.bookingId || "").trim() !== suppliedBooking._id) {
+      report({ ...base, ref: suppliedBooking._id, reason: "payment_record_mismatch" });
+      return;
     }
     if (
       record.providerRecoveryTerminal === true &&
       String(record.status).toLowerCase() === "needs_recovery"
     ) {
       report({ ...base, ref: record._id, reason: ownerReviewReason(record) });
-      continue;
+      return;
+    }
+    const pricing = frozenPricing(record);
+    if (!pricing) {
+      report({ ...base, ref: record._id, reason: "frozen_pricing_unavailable" });
+      return;
     }
     const validation = validateDodoPayment({
       record,
@@ -373,18 +456,21 @@ export const buildReconcileReport = async ({
     });
     if (!validation.ok) {
       report({ ...base, ref: record._id, reason: validation.reason });
-      continue;
+      return;
     }
-    const booking = bookings.get(String(record.bookingId || "").trim());
+    const booking =
+      suppliedBooking ||
+      (await getDocument("booking", String(record.bookingId || "").trim(), bookings));
     if (!booking) {
       report({ ...base, ref: record._id, reason: "payment_without_booking" });
-      continue;
+      return;
     }
-    checkedBookingIds.add(booking._id);
     const refunded = await refundedCents(dodo, payment);
-    const reason = checkBooking({ payment, record, booking, refunded });
+    const reason = checkBooking({ payment, record, booking, refunded, pricing });
+    checkedBookingIds.add(booking._id);
     if (reason) report({ ...base, ref: booking._id, reason });
-  }
+  };
+  for (const payment of payments) await auditPayment(payment);
 
   const dodoBookings = await readDocuments(client, "booking", {
     filters: [
@@ -407,8 +493,7 @@ export const buildReconcileReport = async ({
       continue;
     if (checkedBookingIds.has(booking._id)) continue;
     const paymentId = String(booking.dodoPaymentId || "").trim();
-    if (paymentId && seenPaymentIds.has(paymentId)) continue;
-    const payment = paymentId ? await retrievePayment(dodo, paymentId, true) : null;
+    const payment = paymentId ? await getPayment(paymentId, true) : null;
     if (payment?.status !== "succeeded") {
       report({
         id: paymentId || "missing",
@@ -417,7 +502,7 @@ export const buildReconcileReport = async ({
         currency: "USD",
         reason: "booking_without_payment",
       });
-    }
+    } else await auditPayment(payment, booking);
   }
 
   const reportedRecords = new Set(items.map((item) => item.ref));
