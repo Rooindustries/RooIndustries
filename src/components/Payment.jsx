@@ -506,8 +506,14 @@ export default function Payment({ hideFooter = false }) {
   const [paymentStatusBusy, setPaymentStatusBusy] = useState(false);
   const [cancellingPayment, setCancellingPayment] = useState(false);
   const sessionStartRef = useRef(null);
-  const [pendingStarts, setPendingStarts] = useState([]);
-  const otherCheckoutStarting = (provider) => pendingStarts.some((start) => start.provider !== provider);
+  const pendingStartsRef = useRef([]);
+  const [, setPendingStartCount] = useState(0);
+  const setPendingStarts = (next) => {
+    pendingStartsRef.current = next;
+    setPendingStartCount(next.length);
+  };
+  const otherCheckoutStarting = (provider) =>
+    pendingStartsRef.current.some((start) => start.provider !== provider);
   const lockedProvider = String(paymentSession?.provider || "").trim();
   const dodoTaxExclusive = lockedProvider === "dodo"
     ? paymentSession?.providerPayload?.taxInclusive === false
@@ -1250,6 +1256,9 @@ export default function Payment({ hideFooter = false }) {
     if (sessionStartRef.current?.provider === provider && sessionStartRef.current.operation.current()) {
       return sessionStartRef.current.promise;
     }
+    if (otherCheckoutStarting(provider)) {
+      throw new Error("Another payment method is still starting. Please wait a moment and try again.");
+    }
 
     const promise = (async () => {
       if (quoteLoading || !quoteFingerprint) {
@@ -1345,7 +1354,7 @@ export default function Payment({ hideFooter = false }) {
     })();
 
     sessionStartRef.current = { provider, promise, operation };
-    setPendingStarts((current) => [...current, { provider, promise }]);
+    setPendingStarts([...pendingStartsRef.current, { provider, promise }]);
 
     try {
       return await promise;
@@ -1354,7 +1363,7 @@ export default function Payment({ hideFooter = false }) {
       throw error;
     } finally {
       if (sessionStartRef.current?.promise === promise) sessionStartRef.current = null;
-      setPendingStarts((current) => current.filter((start) => start.promise !== promise));
+      setPendingStarts(pendingStartsRef.current.filter((start) => start.promise !== promise));
     }
   };
 

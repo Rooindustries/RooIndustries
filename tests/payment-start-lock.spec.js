@@ -131,3 +131,66 @@ test("a newer start that fails fast does not unlock another method while an olde
   releaseFirst();
   await expect(razorpay).toBeEnabled();
 });
+
+const paypalSdkStub = `
+window.paypal = {
+  version: "5.0.0",
+  Buttons(options) {
+    return {
+      isEligible: () => true,
+      render(container) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "Fixture PayPal";
+        button.addEventListener("click", async () => {
+          const result = await options.onClick({}, { resolve: () => "resolved", reject: () => "rejected" });
+          if (result === "resolved") window.__paypalCreateOrder = () => options.createOrder({}, {});
+        });
+        container.appendChild(button);
+        return Promise.resolve();
+      },
+      close: () => Promise.resolve(),
+      updateProps: () => Promise.resolve(),
+    };
+  },
+};
+`;
+
+test("a PayPal order created after another method started checkout is refused", async ({ page, flow }) => {
+  const withPaypal = { ...providers, paypal: { enabled: true, mode: "sandbox", clientId: "fixture-client" } };
+  await page.route(/https:\/\/www\.(sandbox\.)?paypal\.com\/sdk\/js/, route => route.fulfill({
+    contentType: "application/javascript", body: paypalSdkStub,
+  }));
+  await page.route("https://checkout.razorpay.com/v1/checkout.js", route => route.fulfill({
+    contentType: "application/javascript",
+    body: "window.Razorpay = function () { return { open() {}, on() {} }; };",
+  }));
+  await page.route("**/api/payment/providers", route => route.fulfill({ json: { ok: true, providers: withPaypal } }));
+  await page.route("**/api/payment/quote", route => route.fulfill({ json: {
+    ok: true, quoteFingerprint: "fixture-quote", providers: withPaypal,
+    quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
+  } }));
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const starts = [];
+  await page.route("**/api/payment/start", async route => {
+    starts.push(route.request().postDataJSON()?.provider || "unknown");
+    await gate;
+    await route.fallback();
+  });
+
+  await flow.review();
+  await flow.payment();
+  await page.getByRole("button", { name: "Fixture PayPal", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => typeof window.__paypalCreateOrder)).toBe("function");
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect.poll(() => starts.length).toBe(1);
+
+  const created = await page.evaluate(() => window.__paypalCreateOrder().then(() => "created", error => String(error?.message || error)));
+  expect(created).toContain("Another payment method is still starting");
+  expect(starts).toHaveLength(1);
+
+  release();
+  await expect(page).toHaveURL(/checkout-handoff$/);
+  expect(starts).toHaveLength(1);
+});
