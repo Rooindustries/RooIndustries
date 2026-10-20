@@ -22,7 +22,7 @@ const watchConsole = page => {
 
 const hydrationWarnings = messages => messages.filter(text => /hydrat|did not match|server rendered|server HTML|#418|#423|#425/i.test(text));
 
-for (const route of ["/packages", "/faq", "/terms", "/tools", "/meet-the-team"]) {
+for (const route of ["/packages", "/faq", "/about", "/contact", "/privacy", "/terms", "/tools", "/meet-the-team"]) {
   test(`${route} is a prebuilt page that ignores the query string`, async ({ request }, testInfo) => {
     const ownsServer = testInfo.config.metadata.ownsToolingServer === true;
     const manifest = ownsServer || process.env.NEXT_DIST_DIR ? JSON.parse(await fs.readFile(path.join(testInfo.config.metadata.toolingDistDir, "prerender-manifest.json"), "utf8")) : null;
@@ -59,6 +59,9 @@ for (const route of ["/packages", "/faq", "/terms", "/tools", "/meet-the-team"])
 }
 
 for (const [route, content] of [
+  ["/about", "About Roo Industries"],
+  ["/contact", "Get In Touch"],
+  ["/privacy", "Privacy Policy"],
   ["/terms", "Terms of Service"],
   ["/tools", "Fixture layout tool 1"],
   ["/meet-the-team", "Fixture Member Alpha"],
@@ -86,6 +89,32 @@ for (const [route, content] of [
     expect(hydrationWarnings(messages)).toEqual([]);
   });
 }
+
+test("a rebuild triggered by a query keeps that query out of /about, /contact and /privacy", async ({ request }, testInfo) => {
+  test.setTimeout(180000);
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const results = await Promise.all(["/about", "/contact", "/privacy"].map(async route => {
+    const probe = `leakprobe${route.slice(1)}${Date.now()}`;
+    const deadline = Date.now() + 75000;
+    let trigger = null;
+    while (!trigger && Date.now() < deadline) {
+      const response = await request.get(`${route}?ref=${probe}&gclid=${probe}`, { headers: { accept: "text/html" }, maxRedirects: 0 });
+      await response.body();
+      if (response.headers()["x-nextjs-cache"] === "STALE") trigger = { status: response.status(), at: Date.now() };
+      else await wait(1000);
+    }
+    await wait(3000);
+    const html = await (await request.get(route, { headers: { accept: "text/html" } })).text();
+    const rsc = await (await request.get(route, { headers: { accept: "text/html", rsc: "1" } })).text();
+    return { route, trigger, htmlLeaked: html.includes(probe), rscLeaked: rsc.includes(probe) };
+  }));
+  await testInfo.attach("query-rebuild-leak", { body: JSON.stringify(results, null, 2), contentType: "application/json" });
+  for (const result of results) {
+    expect(result.trigger, result.route).not.toBeNull();
+    expect(result.htmlLeaked, result.route).toBe(false);
+    expect(result.rscLeaked, result.route).toBe(false);
+  }
+});
 
 test("/packages keeps a referral link's code after loading the prebuilt page", async ({ page }, testInfo) => {
   const messages = watchConsole(page);

@@ -55,7 +55,8 @@ function check(condition, message, entry) {
 const cached = (entry) => entry.cache === "HIT" || entry.cache === "STALE";
 const headPart = (body) => body.split("</head>")[0];
 const isHtml = (entry) => String(entry.contentType).includes("text/html");
-const isHomeHtml = (entry) => entry.method === "GET" && new URL(entry.path, base).pathname === "/" && isHtml(entry);
+const PREBUILT_PATHS = ["/", "/about", "/contact", "/privacy"];
+const isPrebuiltHtml = (entry) => entry.method === "GET" && PREBUILT_PATHS.includes(new URL(entry.path, base).pathname) && isHtml(entry);
 
 const key = `/?utm_source=cdncheck${stamp}`;
 const first = await hit("html first", key);
@@ -94,28 +95,42 @@ for (const name of ["token first", "token second"]) {
   check(!cached(redirect), "the private-parameter redirect is never served from cache", redirect);
 }
 
-for (const path of ["/about", "/faq"]) {
-  await hit(`${path} first`, path);
-  const repeat = await hit(`${path} second`, path);
-  check(!cached(repeat), `${path} is never served from cache`, repeat);
+for (const path of PREBUILT_PATHS.slice(1)) {
+  const pageKey = `${path}?utm_source=cdncheck${stamp}`;
+  const pageFirst = await hit(`${path} html first`, pageKey);
+  check(pageFirst.status === 200 && isHtml(pageFirst), `${path} HTML returns 200 text/html`, pageFirst);
+  const pageSecond = await hit(`${path} html second`, pageKey);
+  check(pageSecond.status === 200 && isHtml(pageSecond), `${path} HTML returns 200 text/html`, pageSecond);
+  check(cached(pageSecond), `a repeated ${path} HTML request is served from cache`, pageSecond);
+  const pageMarkdown = await hit(`${path} markdown`, pageKey, { headers: { accept: "text/markdown", "user-agent": BROWSER_UA } });
+  check(String(pageMarkdown.contentType).includes("text/markdown"), `${path} markdown request gets markdown`, pageMarkdown);
+  check(!cached(pageMarkdown), `${path} markdown is never served from cache`, pageMarkdown);
+  const pageAfterMarkdown = await hit(`${path} html after markdown`, pageKey);
+  check(pageAfterMarkdown.status === 200 && isHtml(pageAfterMarkdown), `${path} HTML request after a Markdown request still gets HTML`, pageAfterMarkdown);
 }
 
-const ageProbe = await hit("age probe", "/");
-const age = Number(ageProbe.age) || 0;
-const waitSeconds = age < 61 ? 61 - age : 0;
-console.log(`Waiting ${waitSeconds}s for the home page to go stale before the leak check`);
+let waitSeconds = 0;
+for (const path of PREBUILT_PATHS) {
+  const ageProbe = await hit(`${path} age probe`, path);
+  const age = Number(ageProbe.age) || 0;
+  waitSeconds = Math.max(waitSeconds, age < 61 ? 62 - age : 62);
+}
+console.log(`Waiting ${waitSeconds}s for the prebuilt pages to go stale before the leak check`);
 await sleep(waitSeconds * 1000);
 const leakToken = `leak${stamp}`;
-await hit("leak trigger", `/?ref=${leakToken}&gclid=${leakToken}`);
+for (const path of PREBUILT_PATHS) await hit(`${path} leak trigger`, `${path}?ref=${leakToken}&gclid=${leakToken}`);
 await sleep(5000);
-const leakHtml = await hit("html after leak trigger", "/");
-const leakRsc = await hit("rsc after leak trigger", "/", { headers: { ...HTML, rsc: "1" } });
-check(!leakHtml.body.includes(leakToken), "a rebuild triggered by a query keeps that query out of the home HTML", leakHtml);
-check(!leakRsc.body.includes(leakToken), "a rebuild triggered by a query keeps that query out of the home RSC payload", leakRsc);
+for (const path of PREBUILT_PATHS) {
+  const leakHtml = await hit(`${path} html after leak trigger`, path);
+  const leakRsc = await hit(`${path} rsc after leak trigger`, path, { headers: { ...HTML, rsc: "1" } });
+  check(!leakHtml.body.includes(leakToken), `a rebuild triggered by a query keeps that query out of the ${path} HTML`, leakHtml);
+  check(!leakRsc.body.includes(leakToken), `a rebuild triggered by a query keeps that query out of the ${path} RSC payload`, leakRsc);
+}
 
-for (const entry of log.filter(isHomeHtml)) {
-  check(entry.setCookies.every((name) => name === "_vercel_jwt"), "home HTML sets no cookie", entry);
-  check(/max-age=0|no-cache|no-store/.test(entry.cacheControl || "") && !/s-maxage/.test(entry.cacheControl || ""), "home HTML reaches clients with max-age=0 and no s-maxage", entry);
+for (const entry of log.filter(isPrebuiltHtml)) {
+  const pathname = new URL(entry.path, base).pathname;
+  check(entry.setCookies.every((name) => name === "_vercel_jwt"), `${pathname} HTML sets no cookie`, entry);
+  check(/max-age=0|no-cache|no-store/.test(entry.cacheControl || "") && !/s-maxage/.test(entry.cacheControl || ""), `${pathname} HTML reaches clients with max-age=0 and no s-maxage`, entry);
 }
 
 writeFileSync(artifact, JSON.stringify({ base, checkedAt: new Date(stamp).toISOString(), extraHeaderNames: Object.keys(extraHeaders), log, failures }, null, 2));
