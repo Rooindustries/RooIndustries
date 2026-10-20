@@ -82,6 +82,10 @@ export function scrubEvent(event) {
   if (event.message) event.message = scrubText(event.message);
   if (event.logentry) event.logentry = scrubValue(event.logentry);
   for (const value of event.exception?.values ?? []) {
+    for (const frame of value.stacktrace?.frames ?? []) {
+      if (frame.filename) frame.filename = withoutQuery(frame.filename);
+      if (frame.abs_path) frame.abs_path = withoutQuery(frame.abs_path);
+    }
     if (value.value) value.value = scrubText(value.value);
   }
   if (event.breadcrumbs) event.breadcrumbs = event.breadcrumbs.map(scrubBreadcrumb).filter(Boolean);
