@@ -420,8 +420,8 @@ export default function RefDashboard() {
   return (
     <>
       <style>{noScrollbarStyles}</style>
-      <section className="pt-28 px-6 max-w-xl mx-auto text-ink mb-20">
-      <h1 className="text-4xl font-extrabold text-center text-accent drop-shadow">
+      <section className="pt-28 px-6 w-full max-w-xl mx-auto text-ink mb-20">
+      <h1 className="text-4xl font-extrabold text-center text-accent drop-shadow break-words">
         Welcome, {creator.name}
       </h1>
 
@@ -439,7 +439,7 @@ export default function RefDashboard() {
         </div>
       ) : null}
 
-      <p className="mt-1 text-center opacity-70">
+      <p className="mt-1 text-center opacity-70 break-words">
         Referral Code: <b className="text-accent">{referralCode}</b>
       </p>
 

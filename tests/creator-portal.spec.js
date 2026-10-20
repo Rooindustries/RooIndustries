@@ -551,6 +551,50 @@ test('an upstream Auth outage stays explained after a connected-account password
   }
 });
 
+for (const viewport of [{ width: 360, height: 740 }, { width: 390, height: 844 }]) {
+  test.describe(`${viewport.width}px`, () => {
+    test.use({ viewport });
+
+    test('the longest accepted creator name and code fit the dashboard', async ({ page, context, baseURL }, testInfo) => {
+      const name = 'competitiveplayer'.padEnd(80, '0123456789');
+      const code = 'longreferralcode'.padEnd(50, '0123456789');
+      await signIn(context, baseURL);
+      await page.goto('/referrals/forgot');
+      const account = await page.evaluate(async () => (await fetch('/api/ref/getData', { cache: 'no-store' })).json());
+      expect(account.ok).toBe(true);
+      await page.route('**/api/ref/getData', route => route.fulfill({ json: { ...account, referral: { ...account.referral, name, slug: { current: code } } } }));
+      await page.goto('/referrals/dashboard');
+      const heading = page.getByRole('heading', { name: `Welcome, ${name}`, exact: true });
+      await expect(heading).toBeVisible();
+      await expect(page.getByText('Total earned', { exact: true })).toBeVisible();
+      const layout = await page.evaluate(() => {
+        const rect = element => {
+          const box = element.getBoundingClientRect();
+          return { left: Math.round(box.left), right: Math.round(box.right) };
+        };
+        const heading = document.querySelector('main h1');
+        const code = [...document.querySelectorAll('main p')].find(p => p.textContent.startsWith('Referral Code:'));
+        const earned = [...document.querySelectorAll('main p, main span, main div')].find(node => node.textContent.trim() === 'Total earned');
+        return {
+          width: innerWidth,
+          documentWidth: document.documentElement.scrollWidth,
+          section: rect(heading.closest('section')),
+          heading: rect(heading),
+          code: rect(code),
+          codeText: rect(code.querySelector('b')),
+          earned: rect(earned),
+        };
+      });
+      await record(page, testInfo, `dashboard-long-name-${viewport.width}`, { name, code, layout });
+      expect(layout.documentWidth).toBeLessThanOrEqual(viewport.width + 1);
+      for (const key of ['section', 'heading', 'code', 'codeText', 'earned']) {
+        expect(layout[key].left, key).toBeGreaterThanOrEqual(-1);
+        expect(layout[key].right, key).toBeLessThanOrEqual(viewport.width + 1);
+      }
+    });
+  });
+}
+
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   const size = viewport.width === 390 ? 'mobile' : 'desktop';
   test.describe(size, () => {
