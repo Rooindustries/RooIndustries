@@ -127,6 +127,7 @@ const nextConfig = {
         destination: 'https://www.rooindustries.com/:path*',
         permanent: true,
       },
+      { source: '/index.html', destination: '/', permanent: true },
     ];
   },
   async rewrites() {

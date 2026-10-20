@@ -95,6 +95,15 @@ test.describe("Route smoke", () => {
       await expect(page.locator('main[data-tourney-state="results"]')).toBeVisible();
     });
   }
+  test("legacy /index.html entry redirects to the homepage", async ({ page, request }) => {
+    const redirect = await request.get("/index.html?ref=fixture-creator", { maxRedirects: 0 });
+    expect(redirect.status()).toBe(308);
+    expect(redirect.headers()["location"]).toBe("/?ref=fixture-creator");
+    const response = await page.goto("/index.html");
+    expect(response?.status()).toBe(200);
+    expect(new URL(page.url()).pathname).toBe("/");
+    await expect(page.getByRole("heading", { name: /Fixture Hero Heading One/ })).toBeVisible();
+  });
   test("unknown route renders not found", async ({ page }) => {
     const response = await page.goto("/definitely-not-a-real-route");
     expect(response?.status()).toBe(404);
