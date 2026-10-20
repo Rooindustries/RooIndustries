@@ -46,7 +46,7 @@ async function handle(request, context, methodOverride) {
   const response = await runLegacyApiHandler({
     request,
     handler: publicHandler,
-    methodOverride,
+    methodOverride: action === "report" ? request.method : methodOverride,
   });
   if (action !== "reconcile" && action !== "report") {
     const metricResponse = response.clone();
