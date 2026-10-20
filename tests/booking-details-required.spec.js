@@ -37,3 +37,32 @@ test("every empty required detail is marked and the first one is focused", async
   }
   await expect(page.getByRole("textbox", { name: "Extra booking requirements (optional)", exact: true })).not.toHaveAttribute("aria-invalid", "true");
 });
+
+test("continuing from a restored review with a blank detail returns to that field", async ({ page, flow }) => {
+  await flow.review();
+  await page.evaluate(() => {
+    const draft = JSON.parse(sessionStorage.getItem("booking_draft"));
+    for (const entry of Object.values(draft.packages)) if (entry?.form) entry.form.specs = "";
+    sessionStorage.setItem("booking_draft", JSON.stringify(draft));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Continue to payment", exact: true }).click();
+  const specs = page.getByRole("textbox", { name: "PC specifications", exact: true });
+  await expect(specs).toBeFocused();
+  await expect(specs).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByRole("alert").filter({ hasText: message })).toBeVisible();
+});
+
+test("going back and reserving again does not keep stale marks", async ({ page, flow }) => {
+  await flow.reserve();
+  await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+  const discord = page.getByRole("textbox", { name: "Discord username", exact: true });
+  await expect(discord).toHaveAttribute("aria-invalid", "true");
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).last().click();
+  await expect(discord).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: message })).toHaveCount(0);
+  await expect(discord).not.toHaveAttribute("aria-invalid", "true");
+  await expect(discord).not.toHaveAttribute("aria-describedby", "booking-details-error");
+});

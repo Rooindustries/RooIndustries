@@ -69,6 +69,7 @@ const REASSURANCE_COPY =
 const PAYMENT_PENDING_EXPIRY_ERROR =
   "This reservation expired while payment is still pending. Return to payment to check its status or release payment to try again.";
 const REQUIRED_DETAIL_FIELDS = ["discord", "email", "specs", "mainGame"];
+const REQUIRED_DETAILS_ERROR = "Please fill out all required fields.";
 const CALENDAR_AVAILABILITY_LABELS = Object.freeze({
   green: "fully available",
   yellow: "limited slots",
@@ -519,8 +520,8 @@ export default function BookingForm() {
   const [errorStep1, setErrorStep1] = useState("");
   const [errorStep2, setErrorStep2] = useState("");
   const [emailError, setEmailError] = useState("");
-  const [showMissingDetails, setShowMissingDetails] = useState(false);
   const emailInputRef = useRef(null);
+  const pendingDetailFocusRef = useRef("");
   useEffect(() => {
     if (emailError && step === 2) emailInputRef.current?.focus();
   }, [emailError, step]);
@@ -922,7 +923,6 @@ export default function BookingForm() {
 
     if (baseFilled) {
       setErrorStep2("");
-      setShowMissingDetails(false);
     }
   };
 
@@ -953,18 +953,28 @@ export default function BookingForm() {
     form.mainGame,
   ]);
 
-  const detailMissing = (name) => showMissingDetails && !form[name].trim();
+  const detailMissing = (name) => errorStep2 === REQUIRED_DETAILS_ERROR && !form[name].trim();
+  const detailInputRef = (name) => (element) => {
+    if (name === "email") emailInputRef.current = element;
+    if (element && pendingDetailFocusRef.current === name) {
+      pendingDetailFocusRef.current = "";
+      element.focus();
+    }
+  };
   const detailFieldClass = (name) =>
     `w-full bg-surface-input border ${detailMissing(name) ? "border-danger-border" : "border-line-input"} rounded-lg p-3 focus:outline-none focus:border-info-border transition`;
 
   const getStep2Error = () => {
     const missingField = REQUIRED_DETAIL_FIELDS.find((name) => !form[name].trim());
     if (missingField) {
-      setShowMissingDetails(true);
-      document.getElementById(`booking-${missingField}`)?.focus();
-      return "Please fill out all required fields.";
+      pendingDetailFocusRef.current = missingField;
+      const input = document.getElementById(`booking-${missingField}`);
+      if (input) {
+        pendingDetailFocusRef.current = "";
+        input.focus();
+      }
+      return REQUIRED_DETAILS_ERROR;
     }
-    setShowMissingDetails(false);
 
     if (!isValidEmail(form.email.trim())) {
       setEmailError("Please enter a valid email address.");
@@ -2928,6 +2938,7 @@ export default function BookingForm() {
                     <input
                       id="booking-discord"
                       name="discord"
+                      ref={detailInputRef("discord")}
                       aria-invalid={detailMissing("discord") ? "true" : undefined}
                       aria-describedby={detailMissing("discord") ? "booking-details-error" : undefined}
                       placeholder="Discord (e.g. Servi#1234 or @Servi)"
@@ -2939,7 +2950,7 @@ export default function BookingForm() {
                     <input
                       id="booking-email"
                       name="email"
-                      ref={emailInputRef}
+                      ref={detailInputRef("email")}
                       aria-invalid={emailError || detailMissing("email") ? "true" : undefined}
                       aria-describedby={emailError ? "booking-email-error" : detailMissing("email") ? "booking-details-error" : undefined}
                       type="email"
@@ -2960,6 +2971,7 @@ export default function BookingForm() {
                     <input
                       id="booking-specs"
                       name="specs"
+                      ref={detailInputRef("specs")}
                       aria-invalid={detailMissing("specs") ? "true" : undefined}
                       aria-describedby={detailMissing("specs") ? "booking-details-error" : undefined}
                       placeholder="PC Specs"
@@ -2971,6 +2983,7 @@ export default function BookingForm() {
                     <input
                       id="booking-mainGame"
                       name="mainGame"
+                      ref={detailInputRef("mainGame")}
                       aria-invalid={detailMissing("mainGame") ? "true" : undefined}
                       aria-describedby={detailMissing("mainGame") ? "booking-details-error" : undefined}
                       placeholder="Main use case (Game/Apps)"
