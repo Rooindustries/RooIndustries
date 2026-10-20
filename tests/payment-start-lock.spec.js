@@ -86,3 +86,48 @@ test("an older start that finishes late does not unlock another method while a n
   releases[1]();
   await expect(page).toHaveURL(/checkout-handoff$/);
 });
+
+test("a newer start that fails fast does not unlock another method while an older start is still pending", async ({ page, flow }) => {
+  await page.route("https://checkout.razorpay.com/v1/checkout.js", route => route.fulfill({
+    contentType: "application/javascript",
+    body: "window.Razorpay = function () { return { open() {}, on() {} }; };",
+  }));
+  await page.route("**/api/payment/providers", route => route.fulfill({ json: { ok: true, providers } }));
+  await page.route("**/api/payment/quote", route => route.fulfill({ json: {
+    ok: true, quoteFingerprint: `fixture-quote-${route.request().postDataJSON()?.couponCode || "none"}`, providers,
+    quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
+  } }));
+  let releaseFirst;
+  const starts = [];
+  await page.route("**/api/payment/start", async route => {
+    starts.push(route.request().postDataJSON()?.provider || "unknown");
+    if (starts.length === 1) {
+      await new Promise(resolve => { releaseFirst = resolve; });
+      return route.fallback();
+    }
+    return route.fulfill({ status: 409, json: { ok: false, code: "quote_fingerprint_mismatch", error: "The price changed." } });
+  });
+
+  await flow.review();
+  await flow.payment();
+  const razorpay = page.getByRole("button", { name: "Pay with Razorpay", exact: true });
+  await expect(razorpay).toBeEnabled();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect.poll(() => starts.length).toBe(1);
+
+  const coupon = page.locator("#payment-coupon-code");
+  await coupon.fill("save20");
+  await coupon.locator("..").getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Pay your way", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect.poll(() => starts.length).toBe(2);
+  await expect(page.getByText("The price changed. Review the updated total and click again.", { exact: true })).toBeVisible();
+
+  await expect(razorpay).toBeDisabled();
+  await razorpay.click({ force: true });
+  await page.waitForTimeout(500);
+  expect(starts).toHaveLength(2);
+
+  releaseFirst();
+  await expect(razorpay).toBeEnabled();
+});

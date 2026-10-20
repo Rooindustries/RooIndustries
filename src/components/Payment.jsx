@@ -506,8 +506,8 @@ export default function Payment({ hideFooter = false }) {
   const [paymentStatusBusy, setPaymentStatusBusy] = useState(false);
   const [cancellingPayment, setCancellingPayment] = useState(false);
   const sessionStartRef = useRef(null);
-  const [startingCheckout, setStartingCheckout] = useState(null);
-  const otherCheckoutStarting = (provider) => Boolean(startingCheckout) && startingCheckout.provider !== provider;
+  const [pendingStarts, setPendingStarts] = useState([]);
+  const otherCheckoutStarting = (provider) => pendingStarts.some((start) => start.provider !== provider);
   const lockedProvider = String(paymentSession?.provider || "").trim();
   const dodoTaxExclusive = lockedProvider === "dodo"
     ? paymentSession?.providerPayload?.taxInclusive === false
@@ -1345,7 +1345,7 @@ export default function Payment({ hideFooter = false }) {
     })();
 
     sessionStartRef.current = { provider, promise, operation };
-    setStartingCheckout({ provider, promise });
+    setPendingStarts((current) => [...current, { provider, promise }]);
 
     try {
       return await promise;
@@ -1354,7 +1354,7 @@ export default function Payment({ hideFooter = false }) {
       throw error;
     } finally {
       if (sessionStartRef.current?.promise === promise) sessionStartRef.current = null;
-      setStartingCheckout((current) => (current?.promise === promise ? null : current));
+      setPendingStarts((current) => current.filter((start) => start.promise !== promise));
     }
   };
 
