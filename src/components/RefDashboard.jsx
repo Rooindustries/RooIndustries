@@ -816,19 +816,19 @@ export default function RefDashboard() {
                     logs.xoc.map((entry) => (
                       <div
                         key={entry._key || entry.paidOn}
-                        className="bg-surface-card border border-line-input rounded-lg px-3 py-2 flex items-center justify-between"
+                        className="bg-surface-card border border-line-input rounded-lg px-3 py-2 flex items-center justify-between gap-3"
                       >
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-sm font-semibold text-info-text">
                             {formatCurrency(entry.amount)}
                           </p>
                           {entry.note && (
-                            <p className="text-xs text-ink-muted">
+                            <p className="text-xs text-ink-muted break-words">
                               {entry.note}
                             </p>
                           )}
                         </div>
-                        <span className="text-xs text-ink-muted">
+                        <span className="shrink-0 text-xs text-ink-muted">
                           {formatDate(entry.paidOn)}
                         </span>
                       </div>
@@ -855,19 +855,19 @@ export default function RefDashboard() {
                     logs.vertex.map((entry) => (
                       <div
                         key={entry._key || entry.paidOn}
-                        className="bg-surface-card border border-line-input rounded-lg px-3 py-2 flex items-center justify-between"
+                        className="bg-surface-card border border-line-input rounded-lg px-3 py-2 flex items-center justify-between gap-3"
                       >
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-sm font-semibold text-info-text">
                             {formatCurrency(entry.amount)}
                           </p>
                           {entry.note && (
-                            <p className="text-xs text-ink-muted">
+                            <p className="text-xs text-ink-muted break-words">
                               {entry.note}
                             </p>
                           )}
                         </div>
-                        <span className="text-xs text-ink-muted">
+                        <span className="shrink-0 text-xs text-ink-muted">
                           {formatDate(entry.paidOn)}
                         </span>
                       </div>

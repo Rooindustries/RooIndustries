@@ -563,6 +563,12 @@ for (const viewport of [{ width: 360, height: 740 }, { width: 390, height: 844 }
       const account = await page.evaluate(async () => (await fetch('/api/ref/getData', { cache: 'no-store' })).json());
       expect(account.ok).toBe(true);
       await page.route('**/api/ref/getData', route => route.fulfill({ json: { ...account, referral: { ...account.referral, name, slug: { current: code } } } }));
+      const payouts = await page.evaluate(async () => (await fetch('/api/ref/payouts', { cache: 'no-store' })).json());
+      expect(payouts.logs.xoc.length).toBeGreaterThan(0);
+      expect(payouts.logs.vertex.length).toBeGreaterThan(0);
+      const note = 'PayPal receipt: https://www.paypal.com/activity/payment/5HG1234567890123A?ref=creator-dashboard-receipt';
+      const withNote = entries => entries.map(entry => ({ ...entry, note }));
+      await page.route('**/api/ref/payouts', route => route.fulfill({ json: { ...payouts, logs: { ...payouts.logs, xoc: withNote(payouts.logs.xoc), vertex: withNote(payouts.logs.vertex) } } }));
       await page.goto('/referrals/dashboard');
       const heading = page.getByRole('heading', { name: `Welcome, ${name}`, exact: true });
       await expect(heading).toBeVisible();
@@ -580,7 +586,9 @@ for (const viewport of [{ width: 360, height: 740 }, { width: 390, height: 844 }
           documentWidth: document.documentElement.scrollWidth,
           section: rect(heading.closest('section')),
           heading: rect(heading),
+          headingOverflow: heading.scrollWidth - heading.clientWidth,
           code: rect(code),
+          codeOverflow: code.scrollWidth - code.clientWidth,
           codeText: rect(code.querySelector('b')),
           earned: rect(earned),
         };
@@ -590,6 +598,36 @@ for (const viewport of [{ width: 360, height: 740 }, { width: 390, height: 844 }
       for (const key of ['section', 'heading', 'code', 'codeText', 'earned']) {
         expect(layout[key].left, key).toBeGreaterThanOrEqual(-1);
         expect(layout[key].right, key).toBeLessThanOrEqual(viewport.width + 1);
+      }
+      expect(layout.headingOverflow).toBeLessThanOrEqual(1);
+      expect(layout.codeOverflow).toBeLessThanOrEqual(1);
+
+      await page.getByRole('button', { name: 'View my payment logs', exact: true }).click();
+      await expect(page.getByText('Vertex Max payments', { exact: true })).toBeVisible();
+      const logs = await page.evaluate(noteText => ['Vertex Max payments', 'Vertex payments'].map(title => {
+        const column = [...document.querySelectorAll('p')].find(p => p.textContent.trim() === title).parentElement.parentElement;
+        const bounds = column.getBoundingClientRect();
+        const notes = [...column.querySelectorAll('p')].filter(p => p.textContent === noteText);
+        return {
+          title,
+          left: Math.round(bounds.left),
+          right: Math.round(bounds.right),
+          overflow: column.scrollWidth - column.clientWidth,
+          rows: notes.map(p => {
+            const date = p.parentElement.nextElementSibling;
+            return { note: Math.round(p.getBoundingClientRect().right), date: Math.round(date.getBoundingClientRect().right) };
+          }),
+        };
+      }), note);
+      await record(page, testInfo, `dashboard-long-note-${viewport.width}`, { note, logs });
+      for (const column of logs) {
+        expect(column.rows.length, column.title).toBeGreaterThan(0);
+        expect(column.overflow, column.title).toBeLessThanOrEqual(1);
+        expect(column.right, column.title).toBeLessThanOrEqual(viewport.width + 1);
+        for (const row of column.rows) {
+          expect(row.note, column.title).toBeLessThanOrEqual(column.right + 1);
+          expect(row.date, column.title).toBeLessThanOrEqual(column.right + 1);
+        }
       }
     });
   });
