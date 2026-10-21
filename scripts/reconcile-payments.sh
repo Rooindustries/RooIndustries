@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+exec 3>&1
 umask 077
 script_dir=$(cd "$(dirname "$0")" && pwd)
 module_dir="$script_dir/lib"
@@ -72,7 +73,7 @@ finish() {
       items:(if $source[0]!=null then $source[0].items else
         [{key:"scan:source",id:"report",ref:"",amount:"",currency:"",reason:$code}] end)}' > "$work/alert.json"
   mv -f -- "$work/alert.json" "$alert_file"
-  cat "$work/result.json"
+  cat "$work/result.json" >&3
   find "$work" -maxdepth 1 -type f -delete
   rmdir -- "$work"
   exit "$status"

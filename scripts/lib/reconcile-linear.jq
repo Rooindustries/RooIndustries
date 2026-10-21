@@ -155,7 +155,7 @@ def candidates($issues;$checks;$key):
     {issue:$issue,verified:($issue.primary==$key or ($proof!=null and $proof.state!="unknown" and ($proof.keys|index($key)!=null)))}];
 def select_targets($window):
   [.[]|select(.primary|target_key)|select(.invalidMetadata|not)|
-    select((.archivedAt==null and (closed|not)) or .meta.state!="recovered" or (. as $issue | any($window.items[]?;
+    select(.archivedAt!=null or (closed|not) or .meta.state!="recovered" or (. as $issue | any($window.items[]?;
       .key as $key | ($issue.meta.keys|index($key)!=null))))] |
   sort_by(.meta.lastCheckedAt,.uuid) | map(.primary) | ordered_unique;
 def op_item($key;$reason):
@@ -187,7 +187,8 @@ def plan($window;$issues;$checks;$sourceOK;$targetsOK;$coverage;$run;$at):
     any($source[]; .key as $key | candidates($issues;$checks;$key) as $claims |
       ($claims|length)>1 or any($claims[];(.verified|not) or .issue.archivedAt!=null or .issue.statusType=="canceled"))) as $ambiguous |
   [$issues[] as $issue | outcome($checks;$issue) as $proof |
-    select(($issue.invalidMetadata|not) and ($issue.archivedAt!=null or ($issue|closed)) and $issue.meta.state!="recovered") |
+    select(($issue.invalidMetadata|not) and ($issue.archivedAt!=null or ($issue|closed)) and
+      ($issue.meta.state!="recovered" or $issue.archivedAt!=null)) |
     select(($issue.archivedAt==null and $issue.statusType=="completed" and
       $sourceOK and $targetsOK and ($ambiguous|not) and
       $proof!=null and $proof.state=="unresolved")|not) |

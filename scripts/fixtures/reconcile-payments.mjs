@@ -141,6 +141,7 @@ const updateResponse = (update, method, args) => {
 const linear = async (method, args) => {
   current.calls.push({ method, args: structuredClone(args) });
   if (method === 'get_issue' && current.beforeIssueRead) current.beforeIssueRead(args);
+  if (method === 'list_issues' && current.beforeIssueList) current.beforeIssueList(args);
   if (method === 'get_issue' && args.id === 'ROO-498' && current.gate) {
     const gate = current.gate;
     current.gate = null;
@@ -1599,6 +1600,175 @@ try {
       assert.equal((await first).code, 0);
       assert.equal(current.updates.length, 1);
     });
+    await run('archived-recovered-record-recurrence', async (home) => {
+      current.captureIdentity = true;
+      const issue = await firstMismatch(home);
+      const recovery = await recoverIdentity(home, issue);
+      assertRetainedIdentity(recovery, issue, true);
+      assert.equal(metadata(issue).state, 'recovered');
+      assert.deepEqual(metadata(issue).keys, recovered('payment:fixture').keys);
+      issue.archivedAt = iso();
+      const original = structuredClone({ issue, comments: current.comments.filter((comment) => comment.issueId === issue.uuid) });
+      current.identityBefore = original;
+      const previousWrites = writesFor(issue).length;
+      const observation = { ...item('record:record.fixture', 'owner_review_dodo_dispute_lost_owner_review', 'record.fixture'), id: 'fixture' };
+      current.window = windowReport([observation]);
+      current.checks['payment:fixture'] = check('payment:fixture', 'unresolved', [observation], recovered('payment:fixture').keys);
+      for (let index = 0; index < 2; index += 1) {
+        if (index === 1) ageWindow();
+        const result = await invoke(home);
+        assert.equal(result.code, 0);
+        const output = JSON.parse(result.stdout);
+        assert.equal(output.result, 'incomplete', 'An archived recurrence must remain incomplete after its window item ages out');
+        assert.equal(output.complete, false);
+        assert.equal(result.alert.severity, 'amber');
+        assert.deepEqual(result.boundary.sourceRequests.flatMap((request) => request.checks || []), ['payment:fixture']);
+        assert.equal(writesFor(issue).length, previousWrites);
+        assert.deepEqual({ issue, comments: current.comments.filter((comment) => comment.issueId === issue.uuid) }, original);
+        assert.deepEqual(current.issues.filter((entry) => /^(payment|record|booking):/.test(metadata(entry).primary)).map((entry) => entry.uuid), [issue.uuid]);
+      }
+      current.checks['payment:fixture'] = recovered('payment:fixture');
+      const result = await invoke(home);
+      assert.equal(result.code, 0);
+      assert.equal(JSON.parse(result.stdout).result, 'clear');
+      assert.equal(JSON.parse(result.stdout).complete, true);
+      assert.equal(result.alert.severity, 'green');
+      assert.deepEqual(result.boundary.sourceRequests.flatMap((request) => request.checks || []), ['payment:fixture']);
+      assert.equal(writesFor(issue).length, previousWrites);
+      assert.deepEqual({ issue, comments: current.comments.filter((comment) => comment.issueId === issue.uuid) }, original);
+      assert.deepEqual(current.issues.filter((entry) => /^(payment|record|booking):/.test(metadata(entry).primary)).map((entry) => entry.uuid), [issue.uuid]);
+    });
+    await run('archived-recovered-aged-out-unknown', async (home) => {
+      current.captureIdentity = true;
+      const issue = await firstMismatch(home);
+      const recovery = await recoverIdentity(home, issue);
+      assertRetainedIdentity(recovery, issue, true);
+      issue.archivedAt = iso();
+      const original = structuredClone({ issue, comments: current.comments.filter((comment) => comment.issueId === issue.uuid) });
+      current.identityBefore = original;
+      const previousWrites = writesFor(issue).length;
+      ageWindow();
+      current.checks['payment:fixture'] = check('payment:fixture');
+      const result = await invoke(home);
+      assert.equal(result.code, 0);
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.result, 'incomplete');
+      assert.equal(output.complete, false);
+      assert.ok(output.unknown >= 1);
+      assert.equal(result.alert.severity, 'amber');
+      assert.deepEqual(result.boundary.sourceRequests.flatMap((request) => request.checks || []), ['payment:fixture']);
+      assert.equal(writesFor(issue).length, previousWrites);
+      assert.deepEqual({ issue, comments: current.comments.filter((comment) => comment.issueId === issue.uuid) }, original);
+    });
+    await run('archived-recovered-positive-audit', async (home) => {
+      current.captureIdentity = true;
+      const issue = await firstMismatch(home);
+      const recovery = await recoverIdentity(home, issue);
+      assertRetainedIdentity(recovery, issue, true);
+      issue.archivedAt = iso();
+      const original = structuredClone({ issue, comments: current.comments.filter((comment) => comment.issueId === issue.uuid) });
+      current.identityBefore = original;
+      const previousWrites = writesFor(issue).length;
+      for (let index = 0; index < 2; index += 1) {
+        const result = await invoke(home);
+        assert.equal(result.code, 0);
+        assert.equal(JSON.parse(result.stdout).result, 'clear');
+        assert.equal(JSON.parse(result.stdout).complete, true);
+        assert.equal(result.alert.severity, 'green');
+        assert.deepEqual(result.boundary.sourceRequests.flatMap((request) => request.checks || []), ['payment:fixture']);
+        assert.equal(writesFor(issue).length, previousWrites);
+        assert.deepEqual({ issue, comments: current.comments.filter((comment) => comment.issueId === issue.uuid) }, original);
+      }
+    });
+    await run('archived-recovered-target-cap', async (home) => {
+      current.captureIdentity = true;
+      const archivedAt = iso();
+      for (let index = 0; index < 201; index += 1) {
+        const id = 'archived-' + String(index).padStart(3, '0');
+        const primary = 'payment:' + id;
+        const proof = recovered(primary, id);
+        const issue = seedIssue(primary, { archivedAt, status: 'Done', statusType: 'completed' }, { state: 'recovered', keys: proof.keys });
+        issue.description += '\nHuman investigation remains unchanged.';
+        current.checks[primary] = proof;
+      }
+      const original = structuredClone({ issues: current.issues, comments: current.comments });
+      current.identityBefore = original;
+      const result = await invoke(home);
+      assert.equal(result.code, 0);
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.result, 'incomplete');
+      assert.equal(output.complete, false);
+      assert.ok(output.unknown >= 1);
+      assert.equal(result.alert.severity, 'amber');
+      const targets = result.boundary.sourceRequests.flatMap((request) => request.checks || []);
+      assert.equal(targets.length, 200);
+      assert.equal(new Set(targets).size, 200);
+      assert.equal(original.issues.filter((issue) => !targets.includes(metadata(issue).primary)).length, 1);
+      const archivedIds = new Set(original.issues.map((issue) => issue.uuid));
+      assert.deepEqual({ issues: current.issues.filter((issue) => archivedIds.has(issue.uuid)), comments: current.comments.filter((comment) => archivedIds.has(comment.issueId)) }, original);
+      for (const issue of original.issues) assert.equal(writesFor(issue).length, 0);
+      const coverage = current.issues.find((issue) => metadata(issue).primary === 'scan:targets');
+      assert.ok(coverage);
+      assert.equal(coverage.parentId, scope.parentId);
+      assert.equal(coverage.projectId, scope.projectId);
+      assert.equal(coverage.teamId, scope.teamId);
+    });
+    for (const late of [false, true]) {
+      await run(late ? 'retained-registry-late-list-write-failure' : 'retained-registry-list-write-failure', async (home) => {
+        const issue = await firstMismatch(home);
+        const file = registryFile(home);
+        const snapshot = registrySnapshot(home);
+        assert.equal(snapshot.kind, 'file');
+        assert.equal(snapshot.uid, process.getuid());
+        assert.equal(snapshot.mode & 0o077, 0);
+        const before = fs.readFileSync(file, 'utf8');
+        const retained = path.join(home, 'retained-registry-last-good.json');
+        if (late) {
+          seedHumanIssue(null);
+          current.pageSize = 1;
+        }
+        const pageStart = current.listPages.length;
+        let changed = false;
+        current.beforeIssueList = (args) => {
+          if (changed || (late && !args.cursor)) return;
+          changed = true;
+          fs.renameSync(file, retained);
+          fs.mkdirSync(file, { mode: 0o700 });
+          current.registryFault = { kind: 'destination-directory', phase: late ? 'list-cursor-page-persist' : 'list-first-page-persist',
+            uid: process.getuid(), before, retained: fs.readFileSync(retained, 'utf8'), args: structuredClone(args) };
+        };
+        const result = await invoke(home);
+        assert.equal(changed, true);
+        const pages = current.listPages.slice(pageStart);
+        assert.equal(pages.length, late ? 2 : 1);
+        for (const page of pages) assert.equal(page.response.status, 200);
+        assert.equal(Object.hasOwn(pages[0].args, 'cursor'), false);
+        const firstPage = JSON.parse(pages[0].response.body.data.content[0].text);
+        assert.deepEqual(firstPage.issues.map((entry) => entry.uuid), [issue.uuid]);
+        if (late) {
+          assert.equal(firstPage.hasNextPage, true);
+          assert.equal(firstPage.cursor, issue.uuid);
+          assert.equal(pages[1].args.cursor, issue.uuid);
+          assert.equal(current.registryFault.args.cursor, issue.uuid);
+        } else assert.equal(Object.hasOwn(current.registryFault.args, 'cursor'), false);
+        assert.notEqual(result.code, 0);
+        assert.match(result.stderr, /cannot overwrite directory/);
+        assert.ok(result.stdout.trim().length > 0, 'Registry list-page failure must emit one stdout JSON result');
+        const lines = result.stdout.split('\n').filter((line) => line.trim().length > 0);
+        assert.equal(lines.length, 1);
+        const output = JSON.parse(lines[0]);
+        assertIdentityRefusal(result);
+        assert.equal(output.result, 'unavailable');
+        assert.equal(output.complete, false);
+        assert.deepEqual(result.state, { ...output, version: 1 });
+        assert.equal(result.alert.items[0].reason, 'linear_identity_unavailable');
+        assert.equal(result.boundary.registryAfter.kind, 'directory');
+        assert.equal(result.boundary.registryAfter.mode, 0o700);
+        assert.deepEqual(fs.readdirSync(file), []);
+        assert.equal(fs.readFileSync(retained, 'utf8'), before);
+        assert.equal(current.registryFault.retained, before);
+      });
+    }
   }
 } finally {
   for (const child of children) child.kill('SIGTERM');

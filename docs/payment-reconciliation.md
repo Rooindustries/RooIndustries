@@ -28,6 +28,11 @@ the configured scope. Only an identity last verified recovered and closed can
 leave without blocking. Missing or damaged identity state beside prior run
 records also refuses. Restore and verify that state before retrying; deleting
 it is not a reset.
+
+Archived issues stay read-only and remain eligible for a fresh audit on every
+run. Unknown or unaudited results keep the report incomplete, including when
+the 200-target limit is reached.
+
 `ROO_RECONCILE_TOKEN_FILE`, `ROO_RECONCILE_STATE_DIR`,
 `ROO_RECONCILE_ALERT_FILE` and `ROO_RECONCILE_EXECUTOR_BIN` override those
 locations and the CLI executable. The live report URL is fixed.
