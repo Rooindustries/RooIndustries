@@ -20,6 +20,16 @@ const fail = (message) => { throw new Error(`[test-target] ${message}`); };
 const refuseSanityHost = hostname => {
   if (/(^|\.)(sanity\.io|apicdn\.sanity\.io|sanity\.studio)$/i.test(hostname.replace(/\.$/, ''))) fail("Sanity hosts are refused.");
 };
+const remoteBrowserEndpoint = () => {
+  const value = process.env.PW_TEST_CONNECT_WS_ENDPOINT;
+  if (!value) return null;
+  let url;
+  try { url = new URL(value); } catch { fail("Remote browser endpoint must be a local tunnel."); }
+  if (url.protocol !== "ws:" || url.hostname !== "127.0.0.1" || !url.port || url.username || url.password || url.search || url.hash) {
+    fail("Remote browser endpoint must be a local tunnel.");
+  }
+  return url;
+};
 if (process.env.ROO_TEST_HOST && !isPrivateTestHost(process.env.ROO_TEST_HOST)) fail("ROO_TEST_HOST must be a private IP literal.");
 const childGuardImports = new Set([import.meta.url]);
 const childGuardOrigins = [];
@@ -143,6 +153,7 @@ export function installNetworkGuard(origins) {
   for (const name of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "NODE_USE_ENV_PROXY"]) {
     if (process.env[name] && process.env[name] !== "0") fail("Proxy transports are refused for local checks.");
   }
+  const remoteBrowser = remoteBrowserEndpoint();
   const loopbackHosts = ["127.0.0.1", "localhost", "[::1]"];
   const loopbackAliases = origin => {
     const url = new URL(origin);
@@ -176,19 +187,27 @@ export function installNetworkGuard(origins) {
     originals.push(() => { module.request = request; module.get = get; });
     module.request = function(input, options, callback) {
       const settings = typeof input === "object" && !(input instanceof URL) ? input : (typeof options === "object" ? options : {});
-      if (settings.socketPath || settings.createConnection ||
-          (settings.agent && settings.agent !== module.globalAgent && settings.agent.constructor !== module.Agent)) fail("Custom network transports are refused.");
-      const destination = typeof input === "string" || input instanceof URL
-        ? new URL(input) : new URL(`${settings.protocol || protocol}//${settings.hostname || settings.host || "localhost"}:${settings.port || (protocol === "http:" ? 80 : 443)}${settings.path || "/"}`);
-      if (typeof input === "string" || input instanceof URL) {
-        if (settings.hostname || settings.host) destination.hostname = settings.hostname || settings.host;
-        if (settings.port) destination.port = settings.port;
-        if (settings.protocol) destination.protocol = settings.protocol;
-      }
-      check(destination);
-      if (settings.agent && settings.agent !== module.globalAgent) {
-        if (typeof input === "object" && !(input instanceof URL)) input = { ...input, agent: module.globalAgent };
-        else options = { ...settings, agent: module.globalAgent };
+      const tunnel = module === http && remoteBrowser && settings === input && !settings.socketPath && !settings.auth &&
+        (settings.protocol || "http:") === "http:" && (settings.hostname || settings.host) === "127.0.0.1" &&
+        String(settings.port) === remoteBrowser.port && settings.path === remoteBrowser.pathname &&
+        String(settings.method || "GET").toUpperCase() === "GET" &&
+        Object.entries(settings.headers || {}).some(([key, value]) => key.toLowerCase() === "upgrade" && String(value).toLowerCase() === "websocket");
+      if (tunnel) input = { ...input, agent: module.globalAgent, createConnection: undefined };
+      else {
+        if (settings.socketPath || settings.createConnection ||
+            (settings.agent && settings.agent !== module.globalAgent && settings.agent.constructor !== module.Agent)) fail("Custom network transports are refused.");
+        const destination = typeof input === "string" || input instanceof URL
+          ? new URL(input) : new URL(`${settings.protocol || protocol}//${settings.hostname || settings.host || "localhost"}:${settings.port || (protocol === "http:" ? 80 : 443)}${settings.path || "/"}`);
+        if (typeof input === "string" || input instanceof URL) {
+          if (settings.hostname || settings.host) destination.hostname = settings.hostname || settings.host;
+          if (settings.port) destination.port = settings.port;
+          if (settings.protocol) destination.protocol = settings.protocol;
+        }
+        check(destination);
+        if (settings.agent && settings.agent !== module.globalAgent) {
+          if (typeof input === "object" && !(input instanceof URL)) input = { ...input, agent: module.globalAgent };
+          else options = { ...settings, agent: module.globalAgent };
+        }
       }
       const req = request.call(this, input, options, callback);
       const emit = req.emit;
