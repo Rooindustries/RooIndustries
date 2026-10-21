@@ -92,7 +92,8 @@ remember_issue() {
   mv "$work/verified-next.json" "$work/verified.json"
 }
 if [[ -z "$executor" ]]; then executor=$(command -v executor) || fail executor_unavailable; fi
-valid_path "$executor" && [[ -x "$executor" ]] || fail executor_unavailable
+executor=$(realpath -e -- "$executor" 2>/dev/null) || fail executor_unavailable
+valid_path "$executor" && [[ -f "$executor" && -x "$executor" ]] || fail executor_unavailable
 protocol='=https'
 case "${ROO_RECONCILE_TEST_MODE:-0}" in 0|1) ;; *) fail configuration_invalid ;; esac
 if [[ "${ROO_RECONCILE_TEST_MODE:-0}" == 1 ]]; then
@@ -295,6 +296,7 @@ while IFS= read -r action; do
     '[.[]|select(.body|startswith("Payment reconciliation status\n"))] as $owned |
       ($owned|length)==1 and $owned[0].id==$id and $owned[0].body==$body' >/dev/null || fail linear_comment_unverified
   change=$(printf '%s' "$action" | jq -r '.changeState // ""')
+  if [[ "$(printf '%s' "$fresh" | jq -r .statusType)" == canceled ]]; then change=""; fi
   if [[ "$change" == Backlog && "$(printf '%s' "$fresh" | jq -r .statusType)" != completed ]]; then change=""; fi
   if [[ -n "$change" ]]; then
     args=$(jq -nc --arg id "$issue_id" --arg state "$change" '{id:$id,state:$state}')

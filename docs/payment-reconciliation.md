@@ -16,6 +16,8 @@ A clean scan does not close an old issue. The job checks open entities by ID,
 including those outside the 72-hour scan, and closes an issue only after a
 fresh positive audit. Missing entities, partial scans, ambiguous identity and
 failed requests keep issues open. Identity errors need owner investigation.
+Unresolved canceled and archived issues stay in the audit. Their workflow
+states stay unchanged; clearing uncertainty requires fresh positive evidence.
 
 State lives in `~/.local/state/roo-reconcile`. The existing mission-control
 alert is `~/.local/share/mission-control/alerts/site-reconcile.json`.

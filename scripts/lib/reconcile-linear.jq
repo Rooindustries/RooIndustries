@@ -148,8 +148,8 @@ def candidates($issues;$checks;$key):
       or (($issue.meta.keys // [] | index($key)!=null) and ($proof==null or $proof.state!="recovered"))) |
     {issue:$issue,verified:($issue.primary==$key or ($proof!=null and $proof.state!="unknown" and ($proof.keys|index($key)!=null)))}];
 def select_targets($window):
-  [.[]|select(.primary|target_key)|select(.archivedAt==null and (.invalidMetadata|not))|
-    select((closed|not) or (. as $issue | any($window.items[]?;
+  [.[]|select(.primary|target_key)|select(.invalidMetadata|not)|
+    select((.archivedAt==null and (closed|not)) or .meta.state!="recovered" or (. as $issue | any($window.items[]?;
       .key as $key | ($issue.meta.keys|index($key)!=null))))] |
   sort_by(.meta.lastCheckedAt,.uuid) | map(.primary) | ordered_unique;
 def op_item($key;$reason):
@@ -180,7 +180,19 @@ def plan($window;$issues;$checks;$sourceOK;$targetsOK;$coverage;$run;$at):
     ([$issues[]|.primary]|length) != ([$issues[]|.primary]|unique|length) or
     any($source[]; .key as $key | candidates($issues;$checks;$key) as $claims |
       ($claims|length)>1 or any($claims[];(.verified|not) or .issue.archivedAt!=null or .issue.statusType=="canceled"))) as $ambiguous |
-  operation_faults($window;$sourceOK;$targetsOK;$coverage;$ambiguous) as $ops |
+  [$issues[] as $issue | outcome($checks;$issue) as $proof |
+    select(($issue.invalidMetadata|not) and ($issue.archivedAt!=null or ($issue|closed)) and $issue.meta.state!="recovered") |
+    select(($issue.archivedAt==null and $issue.statusType=="completed" and
+      $sourceOK and $targetsOK and ($ambiguous|not) and
+      $proof!=null and $proof.state=="unresolved")|not) |
+    select(($sourceOK and $targetsOK and
+      ([$source[]|.key as $key|select($key==$issue.primary or ($proof!=null and ($proof.keys|index($key)!=null)))]|length)==0 and
+      (if $issue.primary|startswith("scan:") then
+        scan_recovered($issue.primary;$window;$sourceOK;$targetsOK;$coverage;$ambiguous)
+       else $proof!=null and $proof.state=="recovered" end))|not) |
+    $issue] as $held |
+  ($coverage and ($held|length)==0) as $effectiveCoverage |
+  operation_faults($window;$sourceOK;$targetsOK;$effectiveCoverage;$ambiguous) as $ops |
   ($source+$ops|ordered_unique) as $observations |
   [$observations[] as $item | candidates($issues;$checks;$item.key) as $claims |
     {item:$item,claims:$claims,owner:
@@ -191,7 +203,7 @@ def plan($window;$issues;$checks;$sourceOK;$targetsOK;$coverage;$run;$at):
     (any($groups[];(.claims|length)>1 and any(.claims[];.issue.uuid==$issue.uuid))) as $blocked |
     ($sourceOK and $targetsOK and ($negative|length)==0 and ($related|length)==0 and ($blocked|not) and
       (if $issue.primary|startswith("scan:") then
-        scan_recovered($issue.primary;$window;$sourceOK;$targetsOK;$coverage;$ambiguous)
+        scan_recovered($issue.primary;$window;$sourceOK;$targetsOK;$effectiveCoverage;$ambiguous)
        else $proof!=null and $proof.state=="recovered" end)) as $recovered |
     (if ($negative|length)>0 then "unresolved"
      elif $recovered then "recovered"
@@ -210,8 +222,8 @@ def plan($window;$issues;$checks;$sourceOK;$targetsOK;$coverage;$run;$at):
    map(if .[0].issue? != null then .[] else
      {issue:null,primary:.[0].key,observations:.,state:"unresolved",keys:[.[0].key],
       firstSeen:$at,lastSeen:$at,lastCheckedAt:$at,changeState:null} end)) as $actions |
-  ([$actions[]|select(.state=="unknown" or .state=="incomplete")]|length) as $unknown |
-  ($sourceOK and $targetsOK and $coverage and ($ambiguous|not) and $unknown==0 and
+  ([$actions[]|select(.state=="unknown" or .state=="incomplete")|.primary] + [$held[].primary]|unique|length) as $unknown |
+  ($sourceOK and $targetsOK and $effectiveCoverage and ($ambiguous|not) and $unknown==0 and
     $window.complete.payments and $window.complete.bookings and $window.complete.records and $window.complete.items) as $complete |
   {actions:$actions,observations:$observations,ambiguous:$ambiguous,
     metadataInvalid:any($issues[];.invalidMetadata),

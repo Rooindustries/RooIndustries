@@ -101,6 +101,7 @@ const failureFor = (method, args) => current.failures.find((failure) =>
   !failure.used && failure.method === method && (!failure.when || failure.when(args)));
 const linear = async (method, args) => {
   current.calls.push({ method, args: structuredClone(args) });
+  if (method === 'get_issue' && current.beforeIssueRead) current.beforeIssueRead(args);
   if (method === 'get_issue' && args.id === 'ROO-498' && current.gate) {
     const gate = current.gate;
     current.gate = null;
@@ -289,6 +290,7 @@ fs.writeFileSync(path.join(bin, 'executor'), [
   '#!/usr/bin/env bash', 'set -euo pipefail',
   'if [[ "${1:-}" == "--reconcile-test-handshake" ]]; then',
   '  [[ "${2:-}" == "$ROO_RECONCILE_FIXTURE_ORIGIN" ]] || exit 96',
+  '  printf "%s\\n" "$ROO_RECONCILE_FIXTURE_ORIGIN" >> "$ROO_RECONCILE_HANDSHAKE_LOG"',
   '  jq -nc --arg origin "$ROO_RECONCILE_FIXTURE_ORIGIN" \'{rooReconcileFixture:1,origin:$origin}\'',
   '  exit 0', 'fi',
   '[[ "$#" == 7 && "$1" == call && "$2" == tools && "$3" == linear && "$4" == org && "$5" == linear ]] || exit 96',
@@ -310,8 +312,10 @@ const invoke = (home, options = {}) => {
     ROO_RECONCILE_EXECUTOR_BIN: path.join(bin, 'executor'),
     ROO_RECONCILE_REAL_CURL: actualCurl, ROO_RECONCILE_FIXTURE_ORIGIN: origin,
     ROO_RECONCILE_GUARD_BLOCKED: path.join(home, 'blocked'),
+    ROO_RECONCILE_HANDSHAKE_LOG: path.join(home, 'handshakes'),
     ...options.env,
   };
+  if (options.defaultExecutor) delete env.ROO_RECONCILE_EXECUTOR_BIN;
   return new Promise((resolve, reject) => {
     const child = spawn('/bin/bash', [executable], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
     children.add(child);
@@ -324,7 +328,9 @@ const invoke = (home, options = {}) => {
       clearTimeout(timer);
       children.delete(child);
       assert.equal((stdout + stderr).includes(token), false, 'Fixture bearer leaked');
-      const result = { code, signal, stdout, stderr };
+      const alertFile = path.join(home, '.local/share/mission-control/alerts/site-reconcile.json');
+      const result = { code, signal, stdout, stderr,
+        alert: fs.existsSync(alertFile) ? JSON.parse(fs.readFileSync(alertFile, 'utf8')) : null };
       current.runs.push(result);
       resolve(result);
     });
@@ -336,6 +342,26 @@ const metadata = (issue) => {
   return JSON.parse(comments[0].body.split('\n')[1].slice('Reconciliation: '.length));
 };
 const writes = () => current.calls.filter((call) => call.method.startsWith('save_'));
+const writesFor = (issue) => {
+  const commentIds = current.comments.filter((comment) => comment.issueId === issue.uuid).map((comment) => comment.id);
+  return writes().filter((call) =>
+    (call.method === 'save_issue' && call.args.id === issue.uuid) ||
+    (call.method === 'save_comment' && (call.args.issueId === issue.uuid || commentIds.includes(call.args.id))));
+};
+const targetedKeys = () => current.requests.flatMap((request) => request.checks || []);
+const heldKey = 'payment:payment-fixture';
+const seedHeldIssue = (archived = false) => {
+  const issue = seedIssue(heldKey, {
+    status: archived ? 'Done' : 'Canceled', statusType: archived ? 'completed' : 'canceled',
+    archivedAt: archived ? '2026-01-02T00:00:00.000Z' : null,
+  }, { observations: [item(heldKey, 'amount_mismatch', 'booking.fixture')] });
+  issue.description += '\nHuman investigation notes remain unchanged.';
+  current.comments.push({
+    id: crypto.randomUUID(), issueId: issue.uuid, body: 'Human follow-up remains unchanged.',
+    createdAt: iso(), updatedAt: iso(), attachments: [],
+  });
+  return issue;
+};
 const fault = () => item('payment:fixture');
 const run = async (name, fn) => {
   if (selected && !selected.includes(name)) return;
@@ -346,6 +372,7 @@ const run = async (name, fn) => {
   catch (cause) { error = cause.message; }
   const blocked = fs.existsSync(path.join(home, 'blocked')) ? fs.readFileSync(path.join(home, 'blocked'), 'utf8').trim().split('\n').length : 0;
   results.push({ name, passed, error, blockedRequests: blocked, expectedBlockedRequests: current.expectedBlocked || 0, calls: current.calls, sourceRequests: current.requests,
+    handshakes: fs.existsSync(path.join(home, 'handshakes')) ? fs.readFileSync(path.join(home, 'handshakes'), 'utf8').trim().split('\n') : [],
     issues: current.issues, comments: current.comments, updates: current.updates, runs: current.runs });
 };
 try {
@@ -360,6 +387,211 @@ try {
       assert.equal(current.issues.length, 1);
     });
   } else {
+    for (const selection of ['default', 'explicit']) {
+      await run('executor-' + selection + '-symlink', async (home) => {
+        const linkedBin = path.join(home, 'bin');
+        fs.mkdirSync(linkedBin, { mode: 0o700 });
+        const linked = path.join(linkedBin, 'executor');
+        fs.symlinkSync(path.relative(linkedBin, path.join(bin, 'executor')), linked);
+        const env = { PATH: linkedBin + ':' + bin + ':/usr/bin:/bin',
+          ROO_RECONCILE_EXECUTOR_BIN: selection === 'default' ? '' : linked };
+        assert.equal((await invoke(home, { env, defaultExecutor: selection === 'default' })).code, 0);
+        if (selection === 'default') assert.equal((await invoke(home, { env })).code, 0);
+        const expected = selection === 'default' ? 2 : 1;
+        assert.equal(fs.readFileSync(path.join(home, 'handshakes'), 'utf8').trim().split('\n').length, expected);
+        assert.equal(current.requests.length, expected);
+        assert.ok(current.requests.every((request) => request.checks === null));
+        assert.equal(current.updates.length, 1);
+        assert.equal(current.calls[0].method, 'get_issue');
+        assert.deepEqual(current.calls[0].args, { id: 'ROO-498' });
+      });
+    }
+    for (const kind of ['broken', 'nonexecutable']) {
+      await run('executor-' + kind + '-symlink-refused', async (home) => {
+        const target = path.join(home, 'executor-target');
+        if (kind === 'nonexecutable') fs.writeFileSync(target, '#!/bin/bash\nexit 0\n', { mode: 0o600 });
+        const linked = path.join(home, 'executor');
+        fs.symlinkSync('executor-target', linked);
+        const result = await invoke(home, { env: { ROO_RECONCILE_EXECUTOR_BIN: linked } });
+        assert.notEqual(result.code, 0);
+        assert.equal(result.alert.items[0].reason, 'executor_unavailable');
+        assert.equal(current.requests.length, 0);
+        assert.equal(current.calls.length, 0);
+        assert.equal(fs.existsSync(path.join(home, 'handshakes')), false);
+      });
+    }
+    for (const archived of [false, true]) {
+      for (const state of ['unresolved', 'unknown', 'recovered']) {
+        await run((archived ? 'archived-closed' : 'canceled') + '-aged-out-' + state, async (home) => {
+          const issue = seedHeldIssue(archived);
+          const before = structuredClone(issue);
+          const originalComments = structuredClone(current.comments);
+          const observed = item(heldKey, 'amount_mismatch', 'booking.fixture');
+          current.checks[heldKey] = state === 'recovered' ? recovered(heldKey, 'payment-fixture')
+            : check(heldKey, state, state === 'unresolved' ? [observed] : []);
+          const repetitions = archived && state === 'recovered' ? 2 : 1;
+          for (let index = 0; index < repetitions; index += 1) {
+            const result = await invoke(home);
+            assert.equal(result.code, 0);
+            assert.equal(targetedKeys().filter((key) => key === heldKey).length, index + 1);
+            const output = JSON.parse(result.stdout);
+            assert.equal(output.complete, state === 'recovered');
+            assert.equal(output.result, state === 'recovered' ? 'clear' : 'incomplete');
+            assert.equal(output.unknown, state === 'recovered' ? 0 : 1);
+            assert.equal(result.alert.severity, state === 'recovered' ? 'green' : 'amber');
+          }
+          assert.deepEqual(issue, before);
+          assert.equal(current.issues.filter((entry) => entry.description.includes('Reconciliation key: ' + heldKey)).length, 1);
+          assert.equal(writesFor(issue).filter((call) => call.method === 'save_issue').length, 0);
+          if (archived) {
+            assert.deepEqual(current.comments.filter((comment) => comment.issueId === issue.uuid), originalComments);
+            assert.equal(writesFor(issue).length, 0);
+          } else {
+            assert.equal(metadata(issue).state, state);
+            const human = originalComments.find((comment) => !comment.body.startsWith('Payment reconciliation status\n'));
+            assert.deepEqual(current.comments.find((comment) => comment.id === human.id), human);
+          }
+          if (state !== 'recovered') {
+            const coverage = current.issues.find((entry) => entry.description.includes('Reconciliation key: scan:targets'));
+            assert.ok(coverage);
+            assert.equal(coverage.projectId, scope.projectId);
+            assert.equal(coverage.teamId, scope.teamId);
+            assert.equal(coverage.parentId, scope.parentId);
+            assert.match(current.updates[0].body, /incomplete/);
+          }
+          if (state === 'unknown') assert.equal(current.issues.some((entry) => entry.description.includes('Reconciliation key: scan:linear-identity')), false);
+        });
+      }
+    }
+    await run('positively-recovered-done-control', async (home) => {
+      const issue = seedIssue(heldKey, { status: 'Done', statusType: 'completed' },
+        { state: 'recovered', keys: recovered(heldKey, 'payment-fixture').keys });
+      const original = structuredClone({ issue, comments: current.comments });
+      const result = await invoke(home);
+      assert.equal(result.code, 0);
+      assert.equal(JSON.parse(result.stdout).result, 'clear');
+      assert.equal(result.alert.severity, 'green');
+      assert.deepEqual(targetedKeys(), []);
+      assert.deepEqual({ issue, comments: current.comments }, original);
+      assert.equal(writesFor(issue).length, 0);
+    });
+    await run('completed-unknown-audit-held', async (home) => {
+      const issue = seedHeldIssue();
+      issue.status = 'Done';
+      issue.statusType = 'completed';
+      const before = structuredClone(issue);
+      const human = structuredClone(current.comments.find((comment) => !comment.body.startsWith('Payment reconciliation status\n')));
+      current.checks[heldKey] = check(heldKey, 'unknown');
+      const result = await invoke(home);
+      assert.equal(result.code, 0);
+      assert.deepEqual(targetedKeys(), [heldKey]);
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.result, 'incomplete');
+      assert.equal(output.complete, false);
+      assert.equal(output.unknown, 1);
+      assert.equal(result.alert.severity, 'amber');
+      assert.deepEqual(issue, before);
+      assert.equal(metadata(issue).state, 'unknown');
+      assert.equal(writesFor(issue).some((call) => call.method === 'save_issue'), false);
+      assert.deepEqual(current.comments.find((comment) => comment.id === human.id), human);
+      assert.equal(current.issues.filter((entry) => entry.description.split('\n').includes('Reconciliation key: ' + heldKey)).length, 1);
+      assert.ok(current.issues.some((entry) => entry.description.split('\n').includes('Reconciliation key: scan:targets')));
+      assert.equal(current.issues.some((entry) => entry.description.split('\n').includes('Reconciliation key: scan:linear-identity')), false);
+    });
+    await run('completed-identity-scan-held', async (home) => {
+      const issue = seedIssue('scan:identity-invalid', { status: 'Done', statusType: 'completed' });
+      const before = structuredClone({ issue, comments: current.comments });
+      const result = await invoke(home);
+      assert.equal(result.code, 0);
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.result, 'incomplete');
+      assert.equal(output.complete, false);
+      assert.equal(output.unknown, 1);
+      assert.equal(result.alert.severity, 'amber');
+      assert.deepEqual(targetedKeys(), []);
+      assert.deepEqual({ issue, comments: current.comments.filter((comment) => comment.issueId === issue.uuid) }, before);
+      assert.equal(writesFor(issue).length, 0);
+      assert.ok(current.issues.some((entry) => entry.description.split('\n').includes('Reconciliation key: scan:targets')));
+    });
+    await run('canceled-unvisited-under-target-cap', async (home) => {
+      for (let index = 0; index < 200; index += 1) {
+        const key = 'payment:prior-' + index;
+        seedIssue(key);
+        current.checks[key] = recovered(key, 'prior-' + index);
+      }
+      const held = seedHeldIssue();
+      const original = structuredClone({ issue: held, comments: current.comments.filter((comment) => comment.issueId === held.uuid) });
+      const saved = current.comments.find((comment) => comment.issueId === held.uuid && comment.body.startsWith('Payment reconciliation status\n'));
+      const meta = JSON.parse(saved.body.split('\n')[1].slice('Reconciliation: '.length));
+      meta.lastCheckedAt = '2026-01-02T00:00:00.000Z';
+      saved.body = 'Payment reconciliation status\nReconciliation: ' + JSON.stringify(meta);
+      original.comments = structuredClone(current.comments.filter((comment) => comment.issueId === held.uuid));
+      current.checks[heldKey] = recovered(heldKey, 'payment-fixture');
+      const result = await invoke(home);
+      assert.equal(result.code, 0);
+      assert.equal(targetedKeys().length, 200);
+      assert.equal(targetedKeys().includes(heldKey), false);
+      assert.equal(JSON.parse(result.stdout).result, 'incomplete');
+      assert.equal(JSON.parse(result.stdout).unknown, 1);
+      assert.equal(result.alert.severity, 'amber');
+      assert.ok(current.issues.some((issue) => issue.description.includes('Reconciliation key: scan:targets')));
+      assert.deepEqual({ issue: held, comments: current.comments.filter((comment) => comment.issueId === held.uuid) }, original);
+      assert.equal(writesFor(held).length, 0);
+    });
+    for (const archived of [false, true]) {
+      await run((archived ? 'archived' : 'canceled') + '-identity-scan-held', async (home) => {
+        const issue = seedIssue('scan:identity-invalid', {
+          status: archived ? 'Done' : 'Canceled', statusType: archived ? 'completed' : 'canceled',
+          archivedAt: archived ? '2026-01-02T00:00:00.000Z' : null,
+        });
+        const before = structuredClone({ issue, comments: current.comments });
+        const result = await invoke(home);
+        assert.equal(result.code, 0);
+        assert.equal(JSON.parse(result.stdout).result, 'incomplete');
+        assert.equal(JSON.parse(result.stdout).unknown, 1);
+        assert.equal(result.alert.severity, 'amber');
+        assert.ok(current.issues.some((entry) => entry.description.includes('Reconciliation key: scan:targets')));
+        assert.deepEqual({ issue, comments: current.comments.filter((comment) => comment.issueId === issue.uuid) }, before);
+      });
+    }
+    await run('closed-complete-scan-control', async (home) => {
+      const issue = seedIssue('scan:dodo-payments', { status: 'Canceled', statusType: 'canceled' });
+      const before = structuredClone({ issue, comments: current.comments });
+      const result = await invoke(home);
+      assert.equal(result.code, 0);
+      assert.equal(JSON.parse(result.stdout).result, 'clear');
+      assert.equal(result.alert.severity, 'green');
+      assert.deepEqual({ issue, comments: current.comments }, before);
+    });
+    for (const archived of [false, true]) {
+      await run('fresh-' + (archived ? 'archived' : 'canceled') + '-workflow-preserved', async (home) => {
+        const issue = seedIssue(heldKey);
+        const originalComments = structuredClone(current.comments);
+        current.checks[heldKey] = recovered(heldKey, 'payment-fixture');
+        let changed = false;
+        current.beforeIssueRead = (args) => {
+          if (args.id !== issue.uuid || changed) return;
+          changed = true;
+          issue.status = archived ? 'Done' : 'Canceled';
+          issue.statusType = archived ? 'completed' : 'canceled';
+          issue.archivedAt = archived ? iso() : null;
+        };
+        const result = await invoke(home);
+        assert.equal(changed, true);
+        assert.equal(issue.status, archived ? 'Done' : 'Canceled');
+        assert.equal(issue.statusType, archived ? 'completed' : 'canceled');
+        assert.equal(writesFor(issue).some((call) => call.method === 'save_issue'), false);
+        if (archived) {
+          assert.notEqual(result.code, 0);
+          assert.deepEqual(current.comments.filter((comment) => comment.issueId === issue.uuid), originalComments);
+          assert.equal(writesFor(issue).length, 0);
+        } else {
+          assert.equal(result.code, 0);
+          assert.equal(metadata(issue).state, 'recovered');
+          assert.equal(JSON.parse(result.stdout).result, 'clear');
+        }
+      });
+    }
     await run('clean-record', async (home) => {
       assert.equal((await invoke(home)).code, 0);
       assert.equal(current.updates.length, 1);
@@ -438,19 +670,51 @@ try {
     });
     await run('closed-recurrence-reopen', async (home) => {
       const issue = seedIssue('payment:fixture', { status: 'Done', statusType: 'completed' });
+      const originalUUID = issue.uuid;
       current.window = windowReport([fault()]);
       current.checks['payment:fixture'] = check('payment:fixture', 'unresolved', [fault()]);
-      assert.equal((await invoke(home)).code, 0);
-      assert.equal(current.issues.length, 1);
-      assert.equal(issue.status, 'Backlog');
+      for (let index = 0; index < 2; index += 1) {
+        const auditStart = targetedKeys().length;
+        const result = await invoke(home);
+        assert.equal(result.code, 0);
+        assert.equal(current.issues.length, 1);
+        assert.equal(issue.status, 'Backlog');
+        assert.equal(current.issues[0].uuid, originalUUID);
+        assert.equal(current.issues.filter((entry) => entry.description.split('\n').includes('Reconciliation key: payment:fixture')).length, 1);
+        assert.equal(current.issues.some((entry) => entry.description.split('\n').includes('Reconciliation key: scan:targets')), false);
+        const output = JSON.parse(result.stdout);
+        assert.equal(output.result, 'mismatch');
+        assert.equal(output.complete, true);
+        assert.equal(output.unknown, 0);
+        assert.deepEqual(targetedKeys().slice(auditStart), ['payment:fixture']);
+      }
+      assert.equal(current.updates.length, 1);
+      assert.deepEqual(writesFor(issue).filter((call) => call.method === 'save_issue').map((call) => call.args),
+        [{ id: originalUUID, state: 'Backlog' }]);
     });
     await run('closed-alias-needs-fresh-proof', async (home) => {
       const issue = seedIssue('record:record.fixture', { status: 'Done', statusType: 'completed' }, { keys: ['record:record.fixture', 'payment:fixture'] });
+      const originalUUID = issue.uuid;
       current.window = windowReport([fault()]);
       current.checks['record:record.fixture'] = check('record:record.fixture', 'unresolved', [fault()], ['record:record.fixture', 'payment:fixture']);
-      assert.equal((await invoke(home)).code, 0);
-      assert.equal(current.issues.length, 1);
-      assert.equal(issue.status, 'Backlog');
+      for (let index = 0; index < 2; index += 1) {
+        const auditStart = targetedKeys().length;
+        const result = await invoke(home);
+        assert.equal(result.code, 0);
+        assert.equal(current.issues.length, 1);
+        assert.equal(issue.status, 'Backlog');
+        assert.equal(current.issues[0].uuid, originalUUID);
+        assert.equal(current.issues.filter((entry) => entry.description.split('\n').includes('Reconciliation key: record:record.fixture')).length, 1);
+        assert.equal(current.issues.some((entry) => entry.description.split('\n').includes('Reconciliation key: scan:targets')), false);
+        const output = JSON.parse(result.stdout);
+        assert.equal(output.result, 'mismatch');
+        assert.equal(output.complete, true);
+        assert.equal(output.unknown, 0);
+        assert.deepEqual(targetedKeys().slice(auditStart), ['record:record.fixture']);
+      }
+      assert.equal(current.updates.length, 1);
+      assert.deepEqual(writesFor(issue).filter((call) => call.method === 'save_issue').map((call) => call.args),
+        [{ id: originalUUID, state: 'Backlog' }]);
     });
     await run('caps-scans-and-held-identity', async (home) => {
       const identity = seedIssue('scan:identity-invalid');
