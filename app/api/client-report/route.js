@@ -54,7 +54,12 @@ export async function POST(request) {
       headers: { "Content-Type": "application/x-sentry-envelope" },
       signal: AbortSignal.timeout(10000),
     });
-    return empty(response.ok ? 200 : 502);
+    const headers = new Headers();
+    for (const name of ["x-sentry-rate-limits", "retry-after"]) {
+      const value = response.headers.get(name);
+      if (value !== null) headers.set(name, value);
+    }
+    return new Response(null, { status: response.status, headers });
   } catch {
     return empty(502);
   }

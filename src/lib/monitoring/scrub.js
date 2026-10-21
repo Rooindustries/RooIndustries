@@ -1,7 +1,7 @@
 const CARD = /\b\d(?:[ -]?\d){12,18}\b/g;
 const QUERY = /\?[^\s#"'<>]+/g;
 const SENSITIVE_KEY =
-  /pass|token|secret|cookie|session|auth|signature|email|phone|address|card|cvv|cvc|iban|upi|vpa|billing|payment_?method|customer/i;
+  /pass|token|secret|cookie|session|auth|signature|email|phone|address|card|cvv|cvc|iban|upi|vpa|billing|payment|customer/i;
 const NAME_KEY = /^(?:full|first|last|display|customer|user)_?name$|^handle$|discord/i;
 
 export const NO_DATA_COLLECTION = {
@@ -21,6 +21,7 @@ export const NO_DATA_COLLECTION = {
 export function scrubText(text) {
   return text
     .replace(QUERY, "?[query]")
+    .replace(/\/\/[^\s/?#"'<>]*@/g, "//")
     .replace(/\S+/g, (token) => {
       const at = token.indexOf("@");
       const dot = at > 0 ? token.indexOf(".", at + 2) : -1;

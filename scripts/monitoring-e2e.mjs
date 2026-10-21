@@ -10,6 +10,7 @@ import { installNetworkGuard, refuseEnvFiles } from './lib/test-target-safety.mj
 refuseEnvFiles();
 const require = createRequire(import.meta.url);
 const sdkEntry = pathToFileURL(join(dirname(require.resolve('@sentry/nextjs/package.json')), 'build/esm/index.server.js')).href;
+const browserEntry = createRequire(require.resolve('@sentry/nextjs/package.json')).resolve('@sentry/browser');
 registerHooks({
   resolve(specifier, context, next) {
     if (specifier === '@sentry/nextjs') return next(sdkEntry, context);
@@ -50,7 +51,12 @@ const ingest = http.createServer((request, response) => {
     const bytes = Buffer.concat(chunks);
     const body = (request.headers['content-encoding'] === 'gzip' ? gunzipSync(bytes) : bytes).toString();
     received.push({ body, headers: request.headers, path: request.url });
-    response.writeHead(body.includes('fixture-upstream-failure') ? 503 : 200);
+    if (body.includes('fixture-upstream-network-error')) { request.socket.destroy(); return; }
+    response.writeHead(body.includes('fixture-quota-all') ? 429 : body.includes('fixture-upstream-failure') ? 503 : 200, {
+      'Set-Cookie': 'provider-only=fixture-private; Path=/',
+      ...(body.includes('fixture-quota-category') ? { 'X-Sentry-Rate-Limits': '60:error:organization' } : {}),
+      ...(body.includes('fixture-quota-all') ? { 'Retry-After': '60' } : {}),
+    });
     response.end('{}');
   });
 });
@@ -68,14 +74,18 @@ const api = http.createServer(async (request, response) => {
       sdk.withScope(scope => {
         scope.setTransactionName('GET /payment/4242424242424242');
         scope.setExtra('billing', { cvv: 'fixture-private-cvv' });
+        scope.setExtra('payment_details', { amount: 42, currency: 'USD' });
+        scope.setExtra('payment_id', 'fixture-private-payment-id');
         scope.setExtra('buyer@example.com', 'useful diagnostic');
         scope.setExtra('reference', '4242 4242 4242 4243');
         scope.setExtra('4242-4242-4242-4243', 'card-shaped key');
         scope.setExtra('span_id', '4242424242424242');
         scope.setExtra('diagnostic_values', Array(8).fill('a'.repeat(16000)));
+        scope.setExtra('diagnostic_urls', ['http://fixture-user:fixture-secret@localhost/path?token=fixture-url', '//fixture-user:fixture-secret@localhost/path?token=fixture-url', 'http://localhost/path']);
         scope.addEventProcessor(event => ({
           ...event,
           contexts: { ...event.contexts, trace: { trace_id: '0123456789abcdef0123456789abcdef', span_id: '1234567890123456', parent_span_id: '2345678901234567' } },
+          exception: { ...event.exception, values: event.exception?.values?.map(value => ({ ...value, stacktrace: { ...value.stacktrace, frames: [...value.stacktrace?.frames ?? [], { function: 'fixtureCredentials', filename: 'http://fixture-user:fixture-secret@localhost/script.js?token=fixture-url' }] } })) },
         }));
         sdk.captureException(new Error('Fixture SDK buyer@example.com 4242424242424242 play?token=fixture-private-query ?token=fixture-query-only'));
       });
@@ -85,7 +95,7 @@ const api = http.createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
     const result = await relay(new Request(`${origin}/api/client-report`, { method: 'POST', headers: request.headers, body: Buffer.concat(chunks) }));
-    response.writeHead(result.status);
+    response.writeHead(result.status, Object.fromEntries(result.headers));
     response.end();
   } catch (error) {
     console.error(error);
@@ -105,6 +115,8 @@ process.env.SENTRY_RELEASE = 'monitoring-e2e';
 
 try {
   sdk = await import('@sentry/nextjs');
+  const browser = await import(pathToFileURL(browserEntry).href);
+  const { makeFetchTransport } = browser.default ?? browser;
   ({ POST: relay } = await import('../app/api/client-report/route.js'));
   const { startServerMonitoring } = await import('../src/lib/monitoring/server.js');
   ({ logSafeError: reportError } = await import('../src/server/safeErrorLog.js'));
@@ -122,12 +134,42 @@ try {
   check('foreign DSN is refused', (await post(envelope('https://foreign@ingest.invalid/7', 'fixture-foreign'))).status, 400);
   check('cross-origin report is refused', (await post(envelope(dsn, 'fixture-cross'), { origin: 'https://foreign.invalid' })).status, 403);
   check('oversized report is refused', (await post(envelope(dsn, 'x'.repeat(300 * 1024)))).status, 413);
+  const streamedBody = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(envelope(dsn, `fixture-stream-oversize ${'x'.repeat(300 * 1024)}`)));
+      controller.close();
+    },
+  });
+  check('chunked oversized report without Content-Length is refused', (await fetch(`${origin}/api/client-report`, {
+    method: 'POST', headers: { origin, 'content-type': 'text/plain' }, body: streamedBody, duplex: 'half',
+  })).status, 413);
+  check('streamed oversized report never reaches ingest', received.filter(item => item.body.includes('fixture-stream-oversize')).length, 0);
   check('invalid envelope is refused', (await post('not json')).status, 400);
-  check('upstream refusal stays a failure', (await post(envelope(dsn, 'fixture-upstream-failure'))).status, 502);
+  check('upstream failure status is preserved', (await post(envelope(dsn, 'fixture-upstream-failure'))).status, 503);
+  check('upstream connection failure returns 502', (await post(envelope(dsn, 'fixture-upstream-network-error'))).status, 502);
   process.env.NEXT_PUBLIC_SENTRY_DSN = '';
   check('disabled reporting returns 404', (await post(envelope(dsn, 'fixture-disabled'))).status, 404);
   process.env.NEXT_PUBLIC_SENTRY_DSN = dsn;
   check('refused envelopes never reach ingest', received.filter(item => /fixture-(foreign|cross|disabled)/.test(item.body)).length, 0);
+  for (const [kind, status, header, value, forwarded] of [
+    ['category', 200, 'x-sentry-rate-limits', '60:error:organization', 2],
+    ['all', 429, 'retry-after', '60', 1],
+  ]) {
+    const marker = `fixture-quota-${kind}`;
+    const direct = await post(envelope(dsn, `${marker}-direct`));
+    check(`${kind} quota status and header are preserved without provider cookies`, [direct.status, direct.headers.get(header), direct.headers.get('set-cookie')], [status, value, null]);
+    const dropped = [];
+    const transport = makeFetchTransport({ url: `${origin}/api/client-report`, headers: { Origin: origin }, recordDroppedEvent: (...args) => dropped.push(args) }, fetch);
+    const sdkEnvelope = type => [{ dsn }, [[{ type }, type === 'event' ? { message: `${marker}-sdk` } : {
+      type: 'transaction', transaction: `${marker}-sdk`, start_timestamp: Date.now() / 1000, timestamp: Date.now() / 1000,
+      contexts: { trace: { trace_id: 'abcdef0123456789abcdef0123456789', span_id: 'abcdef0123456789', op: 'fixture' } },
+    }]]];
+    await transport.send(sdkEnvelope('event'));
+    await transport.send(sdkEnvelope('event'));
+    await transport.send(sdkEnvelope('transaction'));
+    await transport.flush(5000);
+    check(`${kind} quota makes the real browser SDK stop the correct categories`, [received.filter(item => item.body.includes(`${marker}-sdk`)).length, dropped.some(([reason]) => reason === 'ratelimit_backoff')], [forwarded, true]);
+  }
   const caughtResponse = await fetch(`${origin}/caught`);
   check('caught application failure keeps its status', caughtResponse.status, 500);
   check('caught application failure keeps its generic response', await caughtResponse.text(), 'Unexpected server error.');
@@ -144,7 +186,10 @@ try {
   check('SDK error text and relative queries are scrubbed', reported?.event.exception?.values?.[0]?.value, 'Fixture SDK [email] [card] play?[query] ?[query]');
   check('SDK transaction text is scrubbed', reported?.event.transaction, 'GET /payment/[card]');
   check('payment fields are filtered', reported?.event.extra?.billing, '[Filtered]');
+  check('whole payment records and identifiers are filtered', [reported?.event.extra?.payment_details, reported?.event.extra?.payment_id], ['[Filtered]', '[Filtered]']);
   check('dynamic email keys are scrubbed without losing diagnostics', reported?.event.extra?.['[email]'], 'useful diagnostic');
+  check('absolute and scheme-relative diagnostic URLs lose userinfo', reported?.event.extra?.diagnostic_urls, ['http://localhost/path?[query]', '//localhost/path?[query]', 'http://localhost/path']);
+  check('stack frame URLs lose userinfo and query', reported?.event.exception?.values?.[0]?.stacktrace?.frames?.find(frame => frame.function === 'fixtureCredentials')?.filename, 'http://localhost/script.js');
   check('invalid card-shaped values are scrubbed', reported?.event.extra?.reference, '[card]');
   check('card-shaped keys are scrubbed', reported?.event.extra?.['[card]'], 'card-shaped key');
   check('valid numeric trace identifiers retain their links', reported?.event.contexts?.trace, { trace_id: '0123456789abcdef0123456789abcdef', span_id: '1234567890123456', parent_span_id: '2345678901234567' });
@@ -152,7 +197,7 @@ try {
   check('16KiB tokens remain usable diagnostic data', reported?.event.extra?.diagnostic_values?.map?.(value => value.length), Array(8).fill(16000));
   check('16KiB tokens stay below 250ms of SDK CPU', sdkCpuMs < 250, true);
   check('stack frames remain available', Boolean(reported?.event.exception?.values?.[0]?.stacktrace?.frames?.length), true);
-  check('private values appear nowhere in SDK envelope', ['buyer@example.com', '4242424242424242', '4242 4242 4242 4243', '4242-4242-4242-4243', 'fixture-private-cvv', 'fixture-private-query', 'fixture-query-only'].filter(value => reported?.raw.includes(value)), []);
+  check('private values appear nowhere in SDK envelope', ['buyer@example.com', '4242424242424242', '4242 4242 4242 4243', '4242-4242-4242-4243', 'fixture-private-cvv', 'fixture-private-payment-id', 'fixture-private-query', 'fixture-query-only'].filter(value => reported?.raw.includes(value)), []);
 } catch (error) {
   check('monitoring E2E completes', error.message, null);
 } finally {
