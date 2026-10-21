@@ -1068,12 +1068,16 @@ try {
     await run('positively-recovered-done-control', async (home) => {
       const issue = seedIssue(heldKey, { status: 'Done', statusType: 'completed' },
         { state: 'recovered', keys: recovered(heldKey, 'payment-fixture').keys });
+      current.checks[heldKey] = recovered(heldKey, 'payment-fixture');
       const original = structuredClone({ issue, comments: current.comments });
       const result = await invoke(home);
       assert.equal(result.code, 0);
       assert.equal(JSON.parse(result.stdout).result, 'clear');
+      assert.equal(JSON.parse(result.stdout).complete, true);
       assert.equal(result.alert.severity, 'green');
-      assert.deepEqual(targetedKeys(), []);
+      assert.deepEqual(targetedKeys(), [heldKey]);
+      assert.equal(issue.status, 'Done');
+      assert.equal(issue.uuid, original.issue.uuid);
       assert.deepEqual({ issue, comments: current.comments }, original);
       assert.equal(writesFor(issue).length, 0);
     });
@@ -1769,6 +1773,162 @@ try {
         assert.equal(current.registryFault.retained, before);
       });
     }
+    for (const restoredState of ['unresolved', 'unknown']) {
+      await run(restoredState === 'unresolved' ? 'restored-archived-negative-retained' : 'restored-archived-unknown-held', async (home) => {
+        current.captureIdentity = true;
+        const issue = await firstMismatch(home);
+        const recovery = await recoverIdentity(home, issue);
+        assertRetainedIdentity(recovery, issue, true);
+        assert.equal(metadata(issue).state, 'recovered');
+        const original = structuredClone({ issue, comments: current.comments.filter((comment) => comment.issueId === issue.uuid) });
+        issue.archivedAt = iso();
+        const archived = structuredClone({ issue, comments: current.comments.filter((comment) => comment.issueId === issue.uuid) });
+        current.identityBefore = { recovered: original, archived };
+        const previousWrites = writesFor(issue).length;
+        const observation = { ...item('record:record.fixture', 'owner_review_dodo_dispute_lost_owner_review', 'record.fixture'), id: 'fixture' };
+        current.window = windowReport([observation]);
+        current.checks['payment:fixture'] = check('payment:fixture', 'unresolved', [observation], recovered('payment:fixture').keys);
+        for (let index = 0; index < 2; index += 1) {
+          if (index === 1) ageWindow();
+          const result = await invoke(home);
+          assert.equal(result.code, 0);
+          assert.equal(JSON.parse(result.stdout).result, 'incomplete');
+          assert.equal(JSON.parse(result.stdout).complete, false);
+          assert.equal(result.alert.severity, 'amber');
+          assert.deepEqual(result.boundary.sourceRequests.flatMap((request) => request.checks || []), ['payment:fixture']);
+          assert.equal(writesFor(issue).length, previousWrites);
+          assert.deepEqual({ issue, comments: current.comments.filter((comment) => comment.issueId === issue.uuid) }, archived);
+        }
+        issue.archivedAt = null;
+        if (restoredState === 'unknown') current.checks['payment:fixture'] = check('payment:fixture');
+        current.identityBefore.restored = structuredClone({ issue,
+          comments: current.comments.filter((comment) => comment.issueId === issue.uuid), proof: current.checks['payment:fixture'] });
+        const result = await invoke(home);
+        assert.equal(result.code, 0);
+        const output = JSON.parse(result.stdout);
+        assert.equal(output.result, restoredState === 'unresolved' ? 'mismatch' : 'incomplete', 'A restored financial identity requires fresh own-primary proof');
+        assert.equal(output.complete, restoredState === 'unresolved');
+        assert.equal(output.unknown, restoredState === 'unresolved' ? 0 : 1);
+        assert.equal(result.alert.severity, restoredState === 'unresolved' ? 'red' : 'amber');
+        assert.deepEqual(result.boundary.sourceRequests.flatMap((request) => request.checks || []), ['payment:fixture']);
+        assert.equal(issue.status, restoredState === 'unresolved' ? 'Backlog' : 'Done');
+        assert.equal(metadata(issue).state, restoredState);
+        assert.equal(metadata(issue).primary, 'payment:fixture');
+        assert.equal(issue.uuid, original.issue.uuid);
+        assert.equal(issue.description, original.issue.description);
+        assertRetainedIdentity(result, issue, false);
+        if (restoredState === 'unknown') assert.equal(result.boundary.calls.some((call) => call.method === 'save_issue' && call.args.id === issue.uuid), false);
+        for (const comment of original.comments.filter((entry) => !entry.body.startsWith('Payment reconciliation status\n'))) {
+          assert.deepEqual(current.comments.find((entry) => entry.id === comment.id), comment);
+        }
+        const scans = current.issues.filter((entry) => ['scan:targets', 'scan:linear-identity'].includes(metadata(entry).primary));
+        assert.equal(scans.length, 2);
+        for (const scan of scans) {
+          const unresolved = restoredState === 'unknown' && metadata(scan).primary === 'scan:targets';
+          assert.equal(scan.status, unresolved ? 'Backlog' : 'Done');
+          assert.equal(metadata(scan).state, unresolved ? 'unresolved' : 'recovered');
+        }
+        assert.deepEqual(current.issues.filter((entry) => /^(payment|record|booking):/.test(metadata(entry).primary)).map((entry) => entry.uuid), [issue.uuid]);
+        current.checks['payment:fixture'] = recovered('payment:fixture');
+        const positive = await invoke(home);
+        assert.equal(positive.code, 0);
+        assert.equal(JSON.parse(positive.stdout).result, 'clear');
+        assert.equal(JSON.parse(positive.stdout).complete, true);
+        assert.equal(positive.alert.severity, 'green');
+        assert.deepEqual(positive.boundary.sourceRequests.flatMap((request) => request.checks || []), ['payment:fixture']);
+        assert.equal(issue.status, 'Done');
+        assert.equal(metadata(issue).state, 'recovered');
+        assert.equal(issue.uuid, original.issue.uuid);
+        assert.equal(issue.description, original.issue.description);
+        assertRetainedIdentity(positive, issue, true);
+        for (const comment of original.comments.filter((entry) => !entry.body.startsWith('Payment reconciliation status\n'))) {
+          assert.deepEqual(current.comments.find((entry) => entry.id === comment.id), comment);
+        }
+        for (const scan of scans) assert.equal(scan.status, 'Done');
+        assert.deepEqual(current.issues.filter((entry) => /^(payment|record|booking):/.test(metadata(entry).primary)).map((entry) => entry.uuid), [issue.uuid]);
+      });
+    }
+    await run('closed-recovered-positive-no-activity', async (home) => {
+      current.captureIdentity = true;
+      const issue = await firstMismatch(home);
+      const recovery = await recoverIdentity(home, issue);
+      assertRetainedIdentity(recovery, issue, true);
+      assert.equal(metadata(issue).state, 'recovered');
+      const original = structuredClone({ issue, comments: current.comments.filter((comment) => comment.issueId === issue.uuid) });
+      current.identityBefore = { closed: original, proof: structuredClone(current.checks['payment:fixture']) };
+      const previousWrites = writesFor(issue).length;
+      for (let index = 0; index < 2; index += 1) {
+        const result = await invoke(home);
+        assert.equal(result.code, 0);
+        assert.equal(JSON.parse(result.stdout).result, 'clear');
+        assert.equal(JSON.parse(result.stdout).complete, true);
+        assert.equal(result.alert.severity, 'green');
+        assert.deepEqual(result.boundary.sourceRequests.flatMap((request) => request.checks || []), ['payment:fixture'], 'Closed recovered identities still require an actual fresh target audit');
+        assert.equal(writesFor(issue).length, previousWrites);
+        assert.deepEqual({ issue, comments: current.comments.filter((comment) => comment.issueId === issue.uuid) }, original);
+      }
+      const nextProof = recovered('payment:fixture');
+      nextProof.keys = nextProof.keys.map((key) => key === 'booking:booking.fixture' ? 'booking:booking.fixture-next' : key);
+      current.checks['payment:fixture'] = nextProof;
+      current.identityBefore.nextProof = structuredClone(nextProof);
+      const changed = await invoke(home);
+      assert.equal(changed.code, 0);
+      assert.equal(JSON.parse(changed.stdout).result, 'clear');
+      assert.equal(JSON.parse(changed.stdout).complete, true);
+      assert.equal(changed.alert.severity, 'green');
+      assert.deepEqual(changed.boundary.sourceRequests.flatMap((request) => request.checks || []), ['payment:fixture']);
+      assert.equal(writesFor(issue).length, previousWrites + 1);
+      assert.equal(changed.boundary.calls.filter((call) => call.method === 'save_comment' && call.args.id === original.comments.find((entry) => entry.body.startsWith('Payment reconciliation status\n')).id).length, 1);
+      assert.equal(changed.boundary.calls.some((call) => call.method === 'save_issue' && call.args.id === issue.uuid), false);
+      assert.deepEqual(metadata(issue).keys.slice().sort(), ['payment:fixture', 'record:record.fixture', 'booking:booking.fixture', 'booking:booking.fixture-next'].sort());
+      assert.equal(metadata(issue).state, 'recovered');
+      assert.deepEqual(issue, original.issue);
+      for (const comment of original.comments.filter((entry) => !entry.body.startsWith('Payment reconciliation status\n'))) {
+        assert.deepEqual(current.comments.find((entry) => entry.id === comment.id), comment);
+      }
+      const afterAlias = structuredClone({ issue, comments: current.comments.filter((comment) => comment.issueId === issue.uuid) });
+      current.identityBefore.afterAlias = afterAlias;
+      const unchanged = await invoke(home);
+      assert.equal(unchanged.code, 0);
+      assert.equal(JSON.parse(unchanged.stdout).result, 'clear');
+      assert.equal(JSON.parse(unchanged.stdout).complete, true);
+      assert.equal(unchanged.alert.severity, 'green');
+      assert.deepEqual(unchanged.boundary.sourceRequests.flatMap((request) => request.checks || []), ['payment:fixture']);
+      assert.equal(writesFor(issue).length, previousWrites + 1);
+      assert.deepEqual({ issue, comments: current.comments.filter((comment) => comment.issueId === issue.uuid) }, afterAlias);
+    });
+    await run('closed-recovered-target-cap', async (home) => {
+      current.captureIdentity = true;
+      for (let index = 0; index < 201; index += 1) {
+        const id = 'closed-' + String(index).padStart(3, '0');
+        const primary = 'payment:' + id;
+        const proof = recovered(primary, id);
+        const issue = seedIssue(primary, { status: 'Done', statusType: 'completed' }, { state: 'recovered', keys: proof.keys });
+        issue.description += '\nHuman investigation remains unchanged.';
+        current.checks[primary] = proof;
+      }
+      const original = structuredClone({ issues: current.issues, comments: current.comments });
+      current.identityBefore = { ...original, checks: structuredClone(current.checks) };
+      const result = await invoke(home);
+      assert.equal(result.code, 0);
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.result, 'incomplete', 'A closed recovered identity outside the target cap is not freshly recovered');
+      assert.equal(output.complete, false);
+      assert.equal(output.unknown, 1);
+      assert.equal(result.alert.severity, 'amber');
+      const targets = result.boundary.sourceRequests.flatMap((request) => request.checks || []);
+      assert.equal(targets.length, 200);
+      assert.equal(new Set(targets).size, 200);
+      assert.equal(original.issues.filter((issue) => !targets.includes(metadata(issue).primary)).length, 1);
+      const closedIds = new Set(original.issues.map((issue) => issue.uuid));
+      assert.deepEqual({ issues: current.issues.filter((issue) => closedIds.has(issue.uuid)), comments: current.comments.filter((comment) => closedIds.has(comment.issueId)) }, original);
+      for (const issue of original.issues) assert.equal(writesFor(issue).length, 0);
+      const coverage = current.issues.find((issue) => metadata(issue).primary === 'scan:targets');
+      assert.ok(coverage);
+      assert.equal(coverage.parentId, scope.parentId);
+      assert.equal(coverage.projectId, scope.projectId);
+      assert.equal(coverage.teamId, scope.teamId);
+    });
   }
 } finally {
   for (const child of children) child.kill('SIGTERM');

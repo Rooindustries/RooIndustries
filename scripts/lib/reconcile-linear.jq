@@ -154,9 +154,7 @@ def candidates($issues;$checks;$key):
       or (($issue.meta.keys // [] | index($key)!=null) and ($proof==null or $proof.state!="recovered"))) |
     {issue:$issue,verified:($issue.primary==$key or ($proof!=null and $proof.state!="unknown" and ($proof.keys|index($key)!=null)))}];
 def select_targets($window):
-  [.[]|select(.primary|target_key)|select(.invalidMetadata|not)|
-    select(.archivedAt!=null or (closed|not) or .meta.state!="recovered" or (. as $issue | any($window.items[]?;
-      .key as $key | ($issue.meta.keys|index($key)!=null))))] |
+  [.[]|select(.primary|target_key)|select(.invalidMetadata|not)] |
   sort_by(.meta.lastCheckedAt,.uuid) | map(.primary) | ordered_unique;
 def op_item($key;$reason):
   {key:$key,id:($key|ltrimstr("scan:")),ref:"",amount:"",currency:"",reason:$reason};
@@ -188,7 +186,7 @@ def plan($window;$issues;$checks;$sourceOK;$targetsOK;$coverage;$run;$at):
       ($claims|length)>1 or any($claims[];(.verified|not) or .issue.archivedAt!=null or .issue.statusType=="canceled"))) as $ambiguous |
   [$issues[] as $issue | outcome($checks;$issue) as $proof |
     select(($issue.invalidMetadata|not) and ($issue.archivedAt!=null or ($issue|closed)) and
-      ($issue.meta.state!="recovered" or $issue.archivedAt!=null)) |
+      ($issue.meta.state!="recovered" or ($issue.primary|target_key))) |
     select(($issue.archivedAt==null and $issue.statusType=="completed" and
       $sourceOK and $targetsOK and ($ambiguous|not) and
       $proof!=null and $proof.state=="unresolved")|not) |
@@ -216,10 +214,13 @@ def plan($window;$issues;$checks;$sourceOK;$targetsOK;$coverage;$run;$at):
      elif $recovered then "recovered"
      elif $proof!=null and $proof.state=="unknown" then "unknown"
      else "incomplete" end) as $state |
+    (($issue.meta.keys + ($proof.keys // []) + [$negative[].key])|ordered_unique) as $keys |
     select($issue.archivedAt==null and ($issue.invalidMetadata|not) and
       ((($issue|closed)|not) or ($negative|length)>0 or $proof!=null)) |
+    select((($issue|closed) and $issue.meta.state=="recovered" and $state=="recovered" and
+      (($keys|sort)==($issue.meta.keys|sort)))|not) |
     {issue:$issue,primary:$issue.primary,observations:$negative,state:$state,
-      keys:(($issue.meta.keys + ($proof.keys // []) + [$negative[].key])|ordered_unique),
+      keys:$keys,
       firstSeen:$issue.meta.firstSeen,
       lastSeen:(if ($negative|length)>0 then $at else $issue.meta.lastSeen end),
       lastCheckedAt:(if $proof!=null or ($issue.primary|startswith("scan:")) and $recovered then $at else $issue.meta.lastCheckedAt end),

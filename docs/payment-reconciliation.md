@@ -33,6 +33,11 @@ Archived issues stay read-only and remain eligible for a fresh audit on every
 run. Unknown or unaudited results keep the report incomplete, including when
 the 200-target limit is reached.
 
+Every retained valid financial identity needs a fresh audit each run; the
+200-target limit keeps unaudited identities incomplete.
+Closed recovered issues keep their status comment when fresh positive proof
+leaves their known aliases unchanged.
+
 `ROO_RECONCILE_TOKEN_FILE`, `ROO_RECONCILE_STATE_DIR`,
 `ROO_RECONCILE_ALERT_FILE` and `ROO_RECONCILE_EXECUTOR_BIN` override those
 locations and the CLI executable. The live report URL is fixed.
