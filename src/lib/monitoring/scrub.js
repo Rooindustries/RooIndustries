@@ -1,4 +1,4 @@
-const CARD = /\b\d(?:[\s._-]?\d){12,18}\b/g;
+const CARD = /(^|[^\p{Nd}])(\p{Nd}(?:[\s._-]?\p{Nd}){12,})/gu;
 const QUERY = /\?[^\s#"'<>]+/g;
 const SENSITIVE_KEY =
   /pass|token|secret|cookie|session|auth|signature|email|phone|address|card|cvv|cvc|iban|upi|vpa|billing|payment|customer/i;
@@ -20,20 +20,43 @@ export const NO_DATA_COLLECTION = {
 };
 
 export function scrubText(text) {
-  return text
-    .replace(/\S+/g, (token) => {
-      let dot = token.length;
-      let separator = token.length;
-      for (let i = token.length - 1; i > 0; i--) {
-        if (token[i] === "/" || token[i] === "\\") separator = i;
-        else if (token[i] === ".") dot = i;
-        else if (token[i] === "@" && dot > i + 1 && dot < separator && dot < token.length - 1) return "[email]";
+  const ranges = [];
+  for (const match of text.matchAll(/\S+/g)) {
+    const token = match[0].replace(/%[0-9a-f]{2}/gi, value => String.fromCharCode(Number.parseInt(value.slice(1), 16)));
+    let dot = token.length;
+    let separator = token.length;
+    for (let i = token.length - 1; i > 0; i--) {
+      if (token[i] === "/" || token[i] === "\\") separator = i;
+      else if (token[i] === ".") dot = i;
+      else if (token[i] === "@" && dot > i + 1 && dot < separator && dot < token.length - 1) {
+        ranges.push({ start: match.index, end: match.index + match[0].length, marker: "[email]", priority: 0 });
+        break;
       }
-      return token;
-    })
-    .replace(CARD, "[card]")
-    .replace(QUERY, "?[query]")
-    .replace(/\/\/[^\s/?#"'<>]*@/g, "//");
+    }
+  }
+  for (const match of text.matchAll(CARD)) ranges.push({ start: match.index + match[1].length, end: match.index + match[0].length, marker: "[card]", priority: 3 });
+  for (const match of text.matchAll(QUERY)) ranges.push({ start: match.index + 1, end: match.index + match[0].length, marker: "[query]", priority: 2 });
+  for (const match of text.matchAll(/\/\/[^\s/?#"'<>]*@/g)) ranges.push({ start: match.index + 2, end: match.index + match[0].length, marker: "", priority: 4 });
+  ranges.sort((a, b) => a.start - b.start || b.end - a.end);
+  const merged = [];
+  for (const range of ranges) {
+    const previous = merged[merged.length - 1];
+    if (previous && range.start < previous.end) {
+      previous.end = Math.max(previous.end, range.end);
+      if (range.priority < previous.priority) {
+        previous.marker = range.marker;
+        previous.priority = range.priority;
+      }
+    } else merged.push(range);
+  }
+  const parts = [];
+  let end = 0;
+  for (const range of merged) {
+    parts.push(text.slice(end, range.start), range.marker);
+    end = range.end;
+  }
+  parts.push(text.slice(end));
+  return parts.join("");
 }
 
 function scrubValue(value, depth = 0, path = []) {
@@ -43,12 +66,13 @@ function scrubValue(value, depth = 0, path = []) {
   if (Array.isArray(value)) return value.map((item, index) => scrubValue(item, depth + 1, [...path, index]));
   const trace = path.length === 2 && (path[0] === "contexts" && path[1] === "trace" || path[0] === "spans" && typeof path[1] === "number");
   return Object.fromEntries(Object.entries(value).filter(([key]) => !["headers", "user_agent.original"].includes(key.toLowerCase())).map(([key, item]) => {
+    const eventId = path.length === 0 && key === "event_id" && typeof item === "string" && /^[0-9a-f]{32}$/i.test(item);
     const identifier = trace && typeof item === "string" && (
       (key === "span_id" || key === "parent_span_id") && /^[0-9a-f]{16}$/i.test(item) ||
       key === "trace_id" && /^[0-9a-f]{32}$/i.test(item)
     );
     const release = path.length === 0 && key === "release" && typeof item === "string" && VERSIONED_RELEASE.test(item) && item.replace(CARD, "[card]") === item;
-    return [scrubText(key), identifier || release ? item : SENSITIVE_KEY.test(key) || NAME_KEY.test(key) ? "[Filtered]" : scrubValue(item, depth + 1, [...path, key])];
+    return [scrubText(key), eventId || identifier || release ? item : SENSITIVE_KEY.test(key) || NAME_KEY.test(key) ? "[Filtered]" : scrubValue(item, depth + 1, [...path, key])];
   }));
 }
 
@@ -59,6 +83,7 @@ function withoutQuery(url) {
 }
 
 function networkData(data = {}, description) {
+  data ??= {};
   const target = data["url.full"] ?? data["http.url"] ?? data.url ?? (typeof description === "string" ? description.replace(/^[A-Z]+ /, "") : undefined);
   let url;
   if (typeof target === "string") {
@@ -86,7 +111,8 @@ export function scrubBreadcrumb(breadcrumb) {
     breadcrumb.data = networkData(breadcrumb.data);
     return breadcrumb;
   }
-  if (breadcrumb.message) breadcrumb.message = scrubText(breadcrumb.message);
+  if (typeof breadcrumb.message === "string") breadcrumb.message = scrubText(breadcrumb.message);
+  else delete breadcrumb.message;
   if (breadcrumb.data) {
     const data = scrubValue(breadcrumb.data);
     if (data && typeof data === "object") {

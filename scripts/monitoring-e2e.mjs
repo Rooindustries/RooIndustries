@@ -107,7 +107,7 @@ const ingest = http.createServer((request, response) => {
 const api = http.createServer(async (request, response) => {
   try {
     if (request.url === '/uncaught') {
-      const error = new TypeError('Fixture uncaught buyer@example.com 4242-4242-4242-4242 /play?token=fixture-uncaught-query');
+      const error = new TypeError('Fixture uncaught buyer@example.com 4242-4242-4242-4242 /play?token=fixture-uncaught-query card_4111111111111111 buyer%40example.com');
       const message = error.message;
       await onRequestError(error, { path: '/api/fixture', method: 'GET', headers: { authorization: 'fixture-uncaught-authorization', cookie: 'fixture-uncaught-cookie' } }, { routerKind: 'App Router', routePath: '/api/fixture', routeType: 'route' });
       uncaughtUnchanged = error.message === message && error.name === 'TypeError';
@@ -163,8 +163,14 @@ const api = http.createServer(async (request, response) => {
         scope.setExtra('text_examples', ['@carol@example.com', '@team,john@example.com', 'δοκιμή@παράδειγμα.δοκιμή', 'foo/@bar.com', 'jane.doe//@example.com', 'jane//x@example.com', 'john@gmail?.com', 'jane.doe?@example.com', '4242\u00a04242\u00a04242\u00a04242', '4242\t4242\t4242\t4242', '4242.4242.4242.4242', '4242_4242_4242_4242']);
         scope.setExtra('path_examples', ['file:///app/node_modules/@sentry/core/build/esm/index.js', '/@fs/source/app.js', '/@vite/client.js', `file:///app/${'@scope/'.repeat(1800)}index.js`]);
         scope.setExtra('ordering_examples', ['what?4111 1111 1111 1111', 'lookup?n=4242 4242 4242 4242']);
+        scope.setExtra('identifier_examples', ['card_4111111111111111', 'x4111111111111111y', '4111111111111111_suffix', 'card_4111-1111-1111-1111', 'pan4111 1111 1111 1111end', '🔒x4111 1111 1111 1111y', '41111111111111111225', '４１１１１１１１１１１１１１１１', '٤١١١١١١١١١١١١١١١']);
+        scope.setExtra('encoded_examples', ['buyer%40example.com', '/api/x/buyer%40example.com', 'buyer%40example%2Ecom']);
+        scope.setExtra('probe_x4111111111111111y', 'keep');
+        scope.setExtra('event_id', 'a1234567890123' + 'b'.repeat(18));
+        scope.addBreadcrumb({ category: 'navigation', data: { from: '/api/x/buyer%40example.com', to: '/api/x/buyer%40example%2Ecom' } });
         scope.addEventProcessor(event => ({
           ...event,
+          event_id: 'a1234567890123' + 'b'.repeat(18),
           request: { ...event.request, headers: { 'User-Agent': 'fixture-agent', 'user-agent': 'fixture-agent-lower', Authorization: 'fixture-authorization' } },
           contexts: { ...event.contexts, trace: { trace_id: '0123456789abcdef0123456789abcdef', span_id: '1234567890123456', parent_span_id: '2345678901234567' } },
           exception: { ...event.exception, values: event.exception?.values?.map(value => ({ ...value, stacktrace: { ...value.stacktrace, frames: [...value.stacktrace?.frames ?? [], { function: 'fixtureCredentials', filename: 'http://fixture-user:fixture-secret@localhost/script.js?token=fixture-url' }, { function: 'fixtureScoped', filename: 'file:///app/node_modules/@sentry/core/build/esm/index.js', module: '@sentry/core' }, { function: 'fixtureVite', filename: '/@fs/source/app.js', abs_path: '/@vite/client.js' }] } })) },
@@ -335,6 +341,12 @@ try {
   check('stack frame URLs lose userinfo and query', reported?.event.exception?.values?.[0]?.stacktrace?.frames?.find(frame => frame.function === 'fixtureCredentials')?.filename, 'http://localhost/script.js');
   check('all email prefixes and formatted card values are scrubbed', reported?.event.extra?.text_examples, [...Array(8).fill('[email]'), ...Array(4).fill('[card]')]);
   check('card data is removed before query rewriting can leave fragments', reported?.event.extra?.ordering_examples, ['what?[query]', 'lookup?[query]']);
+  check('identifier-adjacent card values and decimal variants are scrubbed', reported?.event.extra?.identifier_examples, ['card_[card]', 'x[card]y', '[card]_suffix', 'card_[card]', 'pan[card]end', '🔒x[card]y', '[card]', '[card]', '[card]']);
+  check('percent-encoded email tokens are scrubbed', reported?.event.extra?.encoded_examples, Array(3).fill('[email]'));
+  check('encoded navigation paths lose contact data', reported?.event.breadcrumbs?.find(item => item.category === 'navigation')?.data, { from: '[email]', to: '[email]' });
+  check('identifier-adjacent metadata keys are scrubbed', [reported?.event.extra?.['probe_x[card]y'], 'probe_x4111111111111111y' in (reported?.event.extra ?? {})], ['keep', false]);
+  check('root event identifiers and envelope headers keep the same valid identity', [reported?.event.event_id, JSON.parse(reported.raw.split('\n')[0]).event_id], Array(2).fill('a1234567890123' + 'b'.repeat(18)));
+  check('generic metadata named event_id is not exempt', reported?.event.extra?.event_id, 'a[card]' + 'b'.repeat(18));
   check('scoped and Vite paths survive including a long multi-at path', reported?.event.extra?.path_examples, ['file:///app/node_modules/@sentry/core/build/esm/index.js', '/@fs/source/app.js', '/@vite/client.js', `file:///app/${'@scope/'.repeat(1800)}index.js`]);
   const scoped = reported?.event.exception?.values?.[0]?.stacktrace?.frames?.find(frame => frame.function === 'fixtureScoped');
   const vite = reported?.event.exception?.values?.[0]?.stacktrace?.frames?.find(frame => frame.function === 'fixtureVite');
@@ -358,8 +370,20 @@ try {
   const uncaught = events().find(item => item.event.exception?.values?.[0]?.value?.startsWith('Fixture uncaught'));
   const uncaughtValue = uncaught?.event.exception?.values?.[0];
   check('actual onRequestError preserves response, error type and frames', [uncaughtResponse.status, await uncaughtResponse.text(), uncaughtUnchanged, uncaughtValue?.type, (uncaughtValue?.stacktrace?.frames?.length ?? 0) > 0, uncaughtValue?.mechanism?.handled], [500, 'Unexpected server error.', true, 'TypeError', true, false]);
-  check('actual onRequestError scrubs the requested sensitive message fields', uncaughtValue?.value, 'Fixture uncaught [email] [card] /play?[query]');
-  check('uncaught request headers and PII reach no SDK envelope field', ['buyer@example.com', '4242-4242-4242-4242', 'fixture-uncaught-query', 'fixture-uncaught-authorization', 'fixture-uncaught-cookie'].some(value => uncaught?.raw.includes(value)), false);
+  check('actual onRequestError scrubs the requested sensitive message fields', uncaughtValue?.value, 'Fixture uncaught [email] [card] /play?[query] card_[card] [email]');
+  check('uncaught request headers and PII reach no SDK envelope field', ['buyer@example.com', '4242-4242-4242-4242', 'fixture-uncaught-query', 'fixture-uncaught-authorization', 'fixture-uncaught-cookie', '4111111111111111', 'buyer%40example.com'].some(value => uncaught?.raw.includes(value)), false);
+  sdk.captureEvent({ message: 'Fixture encoded request', request: { method: 'GET', url: 'http://localhost/api/x/buyer%40example.com' } });
+  await sdk.flush(5000);
+  check('actual SDK request paths scrub encoded contacts', events().find(item => item.event.message === 'Fixture encoded request')?.event.request?.url, '[email]');
+  for (const breadcrumb of [{ category: 'fetch', data: null }, { category: 'fixture-malformed', message: 17, data: { diagnostic: 'keep-invalid-message' } }]) {
+    let threw = false;
+    try { sdk.addBreadcrumb(breadcrumb); } catch { threw = true; }
+    check('malformed ' + breadcrumb.category + ' breadcrumb cannot break reporting', threw, false);
+  }
+  sdk.captureEvent({ message: 'Fixture malformed breadcrumbs' });
+  await sdk.flush(5000);
+  const malformed = events().find(item => item.event.message === 'Fixture malformed breadcrumbs')?.event.breadcrumbs?.find(item => item.category === 'fixture-malformed');
+  check('invalid breadcrumb messages are removed without dropping diagnostic data', [malformed?.message ?? null, malformed?.data], [null, { diagnostic: 'keep-invalid-message' }]);
   await sdk.close(5000);
   const { register } = await import('../instrumentation.js');
   for (const invalid of ['', 'false', 'off', `"${dsn}"`, dsn.replace('http:', 'ftp:'), dsn.replace('fixturekey', 'invalid-key'), dsn.replace('/42', '/no-project'), `${dsn}?token=fixture-config`, `${dsn}#fixture-config`]) {
