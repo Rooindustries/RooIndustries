@@ -22,6 +22,15 @@ const sink = http.createServer((_request, response) => {
   response.end("sink");
 });
 const redirect = http.createServer();
+const standIn = http.createServer((_request, response) => { response.writeHead(404); response.end(); });
+let standInBytes = 0;
+const standInUpgrades = [];
+standIn.on("connection", socket => socket.on("data", chunk => { standInBytes += chunk.length; }));
+standIn.on("upgrade", (request, socket) => {
+  standInUpgrades.push({ method: request.method, url: request.url, upgrade: request.headers.upgrade, connection: request.headers.connection });
+  socket.on("error", () => {});
+  socket.end("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
+});
 let fixtureRequests = 0;
 let fixtureUpgrades = 0;
 let sinkRequests = 0;
@@ -50,7 +59,7 @@ const close = server => new Promise((resolve, reject) => {
 });
 
 before(async () => {
-  await Promise.all([listen(fixture), listen(sink), listen(redirect)]);
+  await Promise.all([listen(fixture), listen(sink), listen(redirect), listen(standIn)]);
   fixtureOrigin = `http://127.0.0.1:${fixture.address().port}`;
   if (process.env.PW_TEST_CONNECT_WS_ENDPOINT) endpoint = process.env.PW_TEST_CONNECT_WS_ENDPOINT;
   else {
@@ -64,7 +73,7 @@ before(async () => {
 
 after(async () => {
   await browserServer?.close();
-  await Promise.all([close(fixture), close(sink), close(redirect)]);
+  await Promise.all([close(fixture), close(sink), close(redirect), close(standIn)]);
 });
 
 const runChild = (code, endpointEnv) => new Promise((resolve, reject) => {
@@ -122,6 +131,68 @@ const requestHelpers = `
     if (!get) req.end();
   });
 `;
+const tunnelHelpers = () => `
+  ${requestHelpers}
+  const defaultHeaders = { Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==" };
+  const tunnelOptions = (headers = defaultHeaders) => ({
+    host: "127.0.0.1", port: ${JSON.stringify(String(standIn.address().port))}, path: "/stand-in-path", method: "GET",
+    createConnection: net.createConnection, agent: new (class extends http.Agent {})(), headers,
+  });
+  const tunnelAttempt = (headers, mutate = () => {}, finish = req => req.end()) => attempt(() => new Promise((resolve, reject) => {
+    const req = http.request(tunnelOptions(headers), response => { response.resume(); resolve(response.statusCode); });
+    req.on("error", reject);
+    req.on("upgrade", (_response, socket) => { socket.destroy(); resolve("upgraded"); });
+    req.setTimeout(5000, () => req.destroy(new Error("request timed out")));
+    mutate(req);
+    finish(req);
+  }));
+`;
+
+test("stand-in: an altered tunnel request sends no bytes", { timeout: 65_000 }, async t => {
+  standInBytes = 0;
+  standInUpgrades.length = 0;
+  const value = result(await runChild(`
+    ${tunnelHelpers()}
+    const cases = [
+      ["path", undefined, req => { req.path = "/other"; }],
+      ["method", undefined, req => { req.method = "POST"; }],
+      ["remove-upgrade", undefined, req => req.removeHeader("upgrade")],
+      ["replace-upgrade", undefined, req => req.setHeader("Upgrade", "h2c")],
+      ["remove-connection", undefined, req => req.removeHeader("connection")],
+      ["replace-connection", undefined, req => req.setHeader("Connection", "keep-alive")],
+      ["flush-headers", undefined, req => { req.path = "/other"; }, req => req.flushHeaders()],
+      ["write", undefined, req => { req.path = "/other"; }, req => req.write("x")],
+      ["body-smuggling", undefined, undefined, req => req.end("GET /other HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\n\\r\\n")],
+      ["prototype-end", undefined, undefined, req => http.ClientRequest.prototype.end.call(req, "x")],
+      ["duplicate-upgrade", { Connection: "Upgrade", Upgrade: "websocket", upgrade: "h2c" }],
+      ["missing-connection", { Upgrade: "websocket" }],
+      ["expect", { ...defaultHeaders, Expect: "100-continue" }],
+      ["raw-array", ["Connection", "Upgrade", "Upgrade", "websocket"]],
+    ];
+    const values = [];
+    for (const [name, headers, mutate, finish] of cases) values.push({ name, ...await tunnelAttempt(headers, mutate, finish) });
+    console.log(JSON.stringify(values));
+  `, `ws://127.0.0.1:${standIn.address().port}/stand-in-path`));
+  await new Promise(resolve => setTimeout(resolve, 300));
+  t.diagnostic(JSON.stringify({ cases: value, bytes: standInBytes, upgrades: standInUpgrades }));
+  for (const response of value) {
+    assert.match(response.error, /Remote browser requests must stay a websocket upgrade|Custom network transports are refused/, response.name);
+  }
+  assert.equal(standInBytes, 0);
+  assert.equal(standInUpgrades.length, 0);
+});
+
+test("stand-in: the legitimate handshake reaches the endpoint exactly once", { timeout: 65_000 }, async () => {
+  const beforeBytes = standInBytes;
+  const beforeUpgrades = standInUpgrades.length;
+  const value = result(await runChild(`
+    ${tunnelHelpers()}
+    console.log(JSON.stringify(await tunnelAttempt()));
+  `, `ws://127.0.0.1:${standIn.address().port}/stand-in-path`));
+  assert.equal(value.value, "upgraded");
+  assert.deepEqual(standInUpgrades.slice(beforeUpgrades), [{ method: "GET", url: "/stand-in-path", upgrade: "websocket", connection: "Upgrade" }]);
+  assert.ok(standInBytes > beforeBytes);
+});
 
 test("connects through the guard while fixture and outside fetch rules remain enforced", { timeout: 65_000 }, async () => {
   const beforeRequests = fixtureRequests;
@@ -160,7 +231,7 @@ test("refuses upgrade requests on another port and through the localhost alias",
     ${requestHelpers}
     const headers = { Connection: "Upgrade", Upgrade: "websocket" };
     const other = await attempt(() => request(http, {
-      host: "127.0.0.1", port: ${fixture.address().port}, path: "/", method: "GET",
+      host: "127.0.0.1", port: ${fixture.address().port}, path: ${JSON.stringify(url.pathname)}, method: "GET",
       createConnection: net.createConnection, headers,
     }));
     const alias = await attempt(() => request(http, {

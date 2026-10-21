@@ -30,6 +30,15 @@ const remoteBrowserEndpoint = () => {
   }
   return url;
 };
+const upgradeHeaders = (upgrade, connection) => upgrade.length === 1 && connection.length === 1 &&
+  typeof upgrade[0] === "string" && upgrade[0].trim().toLowerCase() === "websocket" &&
+  typeof connection[0] === "string" && connection[0].split(",").some(token => token.trim().toLowerCase() === "upgrade");
+const tunnelHeader = (header, pathname) => {
+  if (typeof header !== "string" || !header.endsWith("\r\n\r\n")) return false;
+  const [first, ...lines] = header.slice(0, -4).split("\r\n");
+  const values = name => lines.filter(line => line.slice(0, line.indexOf(":")).trim().toLowerCase() === name).map(line => line.slice(line.indexOf(":") + 1));
+  return first === `GET ${pathname} HTTP/1.1` && upgradeHeaders(values("upgrade"), values("connection"));
+};
 if (process.env.ROO_TEST_HOST && !isPrivateTestHost(process.env.ROO_TEST_HOST)) fail("ROO_TEST_HOST must be a private IP literal.");
 const childGuardImports = new Set([import.meta.url]);
 const childGuardOrigins = [];
@@ -187,11 +196,13 @@ export function installNetworkGuard(origins) {
     originals.push(() => { module.request = request; module.get = get; });
     module.request = function(input, options, callback) {
       const settings = typeof input === "object" && !(input instanceof URL) ? input : (typeof options === "object" ? options : {});
-      const tunnel = module === http && remoteBrowser && settings === input && !settings.socketPath && !settings.auth &&
+      const headers = settings.headers && typeof settings.headers === "object" && !Array.isArray(settings.headers) ? Object.entries(settings.headers) : null;
+      const headerValues = name => headers.filter(([key]) => key.toLowerCase() === name).map(([, value]) => value);
+      const tunnel = module === http && remoteBrowser && settings === input && headers && !settings.socketPath && !settings.auth &&
         (settings.protocol || "http:") === "http:" && (settings.hostname || settings.host) === "127.0.0.1" &&
         String(settings.port) === remoteBrowser.port && settings.path === remoteBrowser.pathname &&
         String(settings.method || "GET").toUpperCase() === "GET" &&
-        Object.entries(settings.headers || {}).some(([key, value]) => key.toLowerCase() === "upgrade" && String(value).toLowerCase() === "websocket");
+        headerValues("expect").length === 0 && upgradeHeaders(headerValues("upgrade"), headerValues("connection"));
       if (tunnel) input = { ...input, agent: module.globalAgent, createConnection: undefined };
       else {
         if (settings.socketPath || settings.createConnection ||
@@ -210,6 +221,18 @@ export function installNetworkGuard(origins) {
         }
       }
       const req = request.call(this, input, options, callback);
+      if (tunnel) {
+        const send = req._send;
+        const refuse = () => {
+          req.destroy(new Error("[test-target] Remote browser requests must stay a websocket upgrade."));
+          return false;
+        };
+        Object.defineProperty(req, "_send", { configurable: false, writable: false, value(data, ...rest) {
+          if (this.destroyed || (data != null && data.length !== 0) || !tunnelHeader(this._header, remoteBrowser.pathname)) return refuse();
+          return send.call(this, data, ...rest);
+        } });
+        if (req._header !== null) refuse();
+      }
       const emit = req.emit;
       req.emit = function(event, ...values) {
         if (event === "response" && values[0].statusCode >= 300 && values[0].statusCode < 400) {
