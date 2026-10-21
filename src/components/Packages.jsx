@@ -2,7 +2,6 @@ import React, { useState, useEffect, lazy, Suspense, startTransition } from "rea
 import { Link, useLocation } from "react-router-dom";
 import { getWarrantyCallout } from "../lib/packageWarranty";
 import PriceDisplay from "./PriceDisplay";
-import PaymentMethods from "./PaymentMethods";
 import {
   fetchHomeSectionData,
   HOME_SECTION_DATA_KEYS,
@@ -396,8 +395,6 @@ export default function Packages({
               );
             })}
           </div>
-
-          <PaymentMethods className="mt-8" />
 
           {dividerText && (
             <div className="ri-packages-divider-wrap mt-8 flex w-full flex-col items-stretch text-center text-ink-secondary gap-[0.5em]">

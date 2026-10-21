@@ -13,12 +13,13 @@ test.beforeEach(async ({ context, baseURL }) => {
 const methodList = scope => scope.getByRole("list", { name: "Payment methods", exact: true });
 const loaded = list => list.getByRole("img").evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0));
 const pageBox = locator => locator.evaluate(element => {
-  const { top, bottom, width, height } = element.getBoundingClientRect();
-  return { top: top + window.scrollY, bottom: bottom + window.scrollY, width, height };
+  const { left, top, width, height } = element.getBoundingClientRect();
+  return { x: left + window.scrollX, y: top + window.scrollY, width, height };
 });
 
-const expectMethods = async scope => {
+const expectMethods = async (scope, width) => {
   const list = methodList(scope);
+  await expect(list).toBeVisible();
   await list.scrollIntoViewIfNeeded();
   expect(await list.getByRole("img").evaluateAll(images => images.map(image => image.alt))).toEqual(METHODS);
   await expect.poll(() => loaded(list)).toBe(true);
@@ -32,27 +33,26 @@ const expectMethods = async scope => {
     return { ...count, [top]: (count[top] || 0) + 1 };
   }, {})));
   expect(Math.min(...rows)).toBeGreaterThan(1);
-  for (const note of NOTES) await expect(scope.getByText(note, { exact: true })).toBeVisible();
+  if (width === 1440) expect(rows).toHaveLength(1);
+  else expect(rows.length).toBeGreaterThan(1);
   return list;
 };
 
-for (const [width, height] of [[1440, 900], [390, 844], [360, 740]]) {
-  test(`payment methods show under the packages and in the footer at ${width}px`, async ({ page }) => {
+for (const [route, width, height] of [["/packages", 1440, 900], ["/packages", 390, 844], ["/packages", 360, 740], ["/", 390, 844]]) {
+  test(`payment logos appear only in the footer on ${route} at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height });
-    await page.goto("/packages");
-    const packages = page.locator("section.ri-packages-section");
-    const list = await expectMethods(packages);
-    const book = await pageBox(packages.locator(".ri-package-book-button").last());
-    const row = await pageBox(list);
-    expect(row.top).toBeGreaterThan(book.bottom);
-    expect(row.top - book.bottom).toBeLessThan(120);
-    await packages.locator("div").filter({ has: list }).last().screenshot({ path: `test-results/payment-methods-packages-${width}.png` });
-
+    await page.goto(route);
     const footer = page.locator("footer").last();
-    await expectMethods(footer);
-    await footer.screenshot({ path: `test-results/payment-methods-footer-${width}.png` });
-
+    await expectMethods(footer, width);
+    await expect(methodList(page)).toHaveCount(1);
+    for (const note of NOTES) await expect(page.getByText(note, { exact: true })).toHaveCount(0);
+    const packages = page.locator("section.ri-packages-section");
+    await expect(methodList(packages)).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+    await page.screenshot({ path: testInfo.outputPath(`footer-${width}.png`), fullPage: true, clip: await pageBox(footer), animations: "disabled" });
+    if (route === "/packages") {
+      await page.screenshot({ path: testInfo.outputPath(`packages-${width}.png`), fullPage: true, clip: await pageBox(packages), animations: "disabled" });
+    }
   });
 }
 
