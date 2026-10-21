@@ -17,6 +17,7 @@ const test = bookingTest.extend({
   }, { auto: true }],
 });
 
+test.use({ video: "off" });
 test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", viewport: { width: 390, height: 844 } });
 
 const storedReferral = page => page.evaluate(() => sessionStorage.getItem("referral_session"));
@@ -2804,4 +2805,697 @@ test.describe("referral restoration from the browser cache", () => {
     expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
     expect(flow.state.holds.size).toBe(1);
   });
+
+  const withPendingOldCleanup = async (page, flow, evidence, testInfo, assertions) => {
+    let releaseGate;
+    let finishHandler;
+    let entered = false;
+    let released;
+    let handler;
+    const gate = new Promise(resolve => { releaseGate = resolve; });
+    const finished = new Promise(resolve => { finishHandler = resolve; });
+    evidence.cleanup = { timeline: [], setupComplete: false };
+    const audit = evidence.cleanup;
+    page.on("request", request => {
+      const path = new URL(request.url()).pathname;
+      if (["/api/holdSlot", "/api/releaseHold"].includes(path)) {
+        audit.timeline.push({ kind: "request", path, body: request.postDataJSON(), at: Date.now() });
+      }
+    });
+    page.on("response", response => {
+      const path = new URL(response.url()).pathname;
+      if (["/api/holdSlot", "/api/releaseHold"].includes(path)) {
+        audit.timeline.push({ kind: "response", path, body: response.request().postDataJSON(), status: response.status(), at: Date.now() });
+      }
+    });
+    try {
+      await flow.reserve();
+      await flow.details();
+      audit.before = await slotSwapSnapshot(page);
+      const oldHold = audit.before.hold;
+      const isOld = request => {
+        const body = request.postDataJSON();
+        return new URL(request.url()).pathname === "/api/releaseHold" &&
+          body.holdId === oldHold.holdId && body.holdToken === oldHold.holdToken;
+      };
+      handler = async route => {
+        if (!isOld(route.request())) return route.fallback();
+        entered = true;
+        audit.oldRequest = route.request().postDataJSON();
+        audit.timeline.push({ kind: "old-cleanup-gated", at: Date.now() });
+        try {
+          await gate;
+          audit.timeline.push({ kind: "old-cleanup-fallback", at: Date.now() });
+          await route.fallback();
+        } finally {
+          finishHandler();
+        }
+      };
+      await page.route("**/api/releaseHold", handler);
+      await page.getByRole("button", { name: "Back", exact: true }).click();
+      await page.getByRole("button", { name: "11:00 AM", exact: true }).click();
+      await page.getByRole("button", { name: "Next", exact: true }).last().click();
+      await expect.poll(() => entered).toBe(true);
+      await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
+      await expect.poll(async () => (await slotSwapSnapshot(page)).hold?.holdId).not.toBe(oldHold.holdId);
+      audit.accepted = await slotSwapSnapshot(page);
+      const newHold = audit.accepted.hold;
+      expect(newHold).toBeTruthy();
+      expect(newHold.startTimeUTC).not.toBe(oldHold.startTimeUTC);
+      expect(newHold.holdId).not.toBe(oldHold.holdId);
+      expect(newHold.holdToken).not.toBe(oldHold.holdToken);
+      expect(flow.state.holds.size).toBe(1);
+      expect(flow.state.holds.get(newHold.startTimeUTC)).toMatchObject({ holdId: newHold.holdId, holdToken: newHold.holdToken });
+      expect(flow.state.holds.has(oldHold.startTimeUTC)).toBe(false);
+      const holds = flow.state.calls.filter(call => call.path === "/api/holdSlot");
+      expect(holds).toHaveLength(2);
+      expect(holds[1].body).toMatchObject({ startTimeUTC: newHold.startTimeUTC,
+        previousHoldId: oldHold.holdId, previousHoldToken: oldHold.holdToken });
+      expect(audit.timeline.filter(event => event.kind === "response" && event.path === "/api/holdSlot").at(-1).status).toBe(200);
+      expect(audit.oldRequest).toEqual({ holdId: oldHold.holdId, holdToken: oldHold.holdToken });
+      expect(flow.state.calls.filter(call => call.path === "/api/releaseHold")).toEqual([]);
+      expect(audit.accepted.fields).toEqual(audit.before.fields);
+      expect(audit.accepted.draft.packages[newHold.packageTitle].form).toEqual(audit.before.draft.packages[oldHold.packageTitle].form);
+      await expect(page.getByRole("button", { name: "Release Slot", exact: true })).toBeEnabled();
+      expect(evidence.pageErrors).toEqual([]);
+      expect(flow.state.calls.filter(call => call.path.startsWith("/api/payment/"))).toEqual([]);
+      audit.setupComplete = true;
+      await attachJson(testInfo, "old-cleanup-valid-new-hold-before-product-assertions", {
+        ...audit, calls: flow.state.calls, activeHolds: [...flow.state.holds.entries()],
+      });
+      const releaseOld = () => {
+        if (!released) {
+          released = (async () => {
+            const response = page.waitForResponse(response => isOld(response.request()));
+            releaseGate();
+            const result = await response;
+            audit.oldResponse = { status: result.status(), body: await result.json(), at: Date.now() };
+            await finished;
+            await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+          })();
+        }
+        return released;
+      };
+      try {
+        await assertions({ audit, oldHold, newHold, releaseOld });
+      } finally {
+        if (entered) await releaseOld();
+      }
+    } finally {
+      releaseGate();
+      if (entered) await finished;
+      if (handler) await page.unroute("**/api/releaseHold", handler);
+      audit.final = await slotSwapSnapshot(page);
+      audit.calls = flow.state.calls;
+      audit.activeHolds = [...flow.state.holds.entries()];
+      await attachJson(testInfo, "old-cleanup-complete-diagnosis", audit);
+    }
+  };
+
+  cachedTest("lifecycle diagnosis: old cleanup cannot block releasing the accepted new hold", async ({ page, flow, bfcache }, testInfo) => {
+    await withPendingOldCleanup(page, flow, bfcache, testInfo, async ({ audit, newHold, releaseOld }) => {
+      audit.releaseClick = { at: Date.now(), hold: newHold };
+      await page.getByRole("button", { name: "Release Slot", exact: true }).click();
+      const newReleases = () => flow.state.calls.filter(call => call.path === "/api/releaseHold" &&
+        call.body.holdId === newHold.holdId && call.body.holdToken === newHold.holdToken);
+      await expect.configure({ soft: true }).poll(() => newReleases().length, { timeout: 2000 }).toBe(1);
+      if (newReleases().length) {
+        await expect.poll(async () => (await slotSwapSnapshot(page)).hold, { timeout: 3000 }).toBeNull();
+      }
+      audit.afterClick = await slotSwapSnapshot(page);
+      audit.newReleaseRequests = newReleases();
+      audit.activeWhileOldPending = [...flow.state.holds.entries()];
+      await attachJson(testInfo, "new-hold-release-while-old-cleanup-pending", audit);
+      expect.soft(audit.afterClick.hold).toBeNull();
+      expect.soft(flow.state.holds.size).toBe(0);
+      await releaseOld();
+      audit.afterOldCleanup = await slotSwapSnapshot(page);
+      expect.soft(audit.afterOldCleanup.hold).toBeNull();
+      expect.soft(flow.state.holds.size).toBe(0);
+      expect.soft(newReleases()).toHaveLength(1);
+    });
+  });
+
+  cachedTest("lifecycle diagnosis: old cleanup cannot erase new-form validation", async ({ page, flow, bfcache }, testInfo) => {
+    await withPendingOldCleanup(page, flow, bfcache, testInfo, async ({ audit, newHold, releaseOld }) => {
+      const alert = page.getByRole("alert").filter({ hasText: "Please enter a valid email address." });
+      await page.getByRole("textbox", { name: "Booking email", exact: true }).fill("not-an-email");
+      await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+      await expect(alert).toHaveText("Please enter a valid email address.");
+      audit.beforeOldResponse = await slotSwapSnapshot(page);
+      audit.validationAlert = await alert.innerText();
+      await releaseOld();
+      audit.afterOldResponse = await slotSwapSnapshot(page);
+      audit.afterAlerts = await page.getByRole("alert").allTextContents();
+      await attachJson(testInfo, "new-form-validation-around-obsolete-cleanup-response", audit);
+      expect(audit.afterOldResponse.hold).toEqual(newHold);
+      expect(audit.afterOldResponse.fields.email).toBe("not-an-email");
+      expect(audit.afterOldResponse.draft.packages[newHold.packageTitle].form.email).toBe("not-an-email");
+      expect(flow.state.holds.size).toBe(1);
+      await expect(alert).toHaveText("Please enter a valid email address.", { timeout: 3000 });
+    });
+  });
+
+  cachedTest("lifecycle diagnosis: cached unready Y retains its own manual referral and coupon", async ({ page, flow, bfcache }, testInfo) => {
+    await bookScopePackage(page, "Y", "/?ref=friend");
+    await reserveScopeSlot(page, "10:00 AM");
+    await fillScopeForm(page, "y");
+    await reviewScope(page);
+    await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+    await flow.codeInput("friend");
+    await expectScopeControls(page);
+    await flow.codeInput("save20");
+    await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Remove coupon code save20", exact: true })).toBeVisible();
+    await expectScopeControls(page);
+    bfcache.priorY = await snapshot(page);
+    const priorCodes = bfcache.priorY.retained.draft.packages[scopePackages.Y].checkoutCodes;
+    expect(priorCodes.referral.code).toBe("friend");
+    expect(priorCodes.coupon.code).toBe("save20");
+    expect((await envelope(page)).choices[checkoutScope(scopePackages.Y)]).toBe("friend");
+    await bookScopePackage(page, "X");
+    await reserveScopeSlot(page, "11:00 AM");
+    await fillScopeForm(page, "x");
+    await reviewScope(page);
+    bfcache.priorX = await snapshot(page);
+    expect(bfcache.priorX.retained.draft.packages[scopePackages.X].form).toMatchObject(scopeForm("x"));
+    expect(bfcache.priorX.retained.draft.packages[scopePackages.Y].form).toEqual(bfcache.priorY.retained.draft.packages[scopePackages.Y].form);
+    expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(2);
+    await bookScopePackage(page, "Y", "/packages");
+    await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+    bfcache.before = await snapshot(page);
+    expect(bfcache.before.retained.hold).toEqual(bfcache.priorX.retained.hold);
+    expect(bfcache.before.retained.draft.packages[scopePackages.Y].checkoutCodes).toEqual(priorCodes);
+    expect(bfcache.before.retained.draft.packages[scopePackages.Y].form).toEqual(bfcache.priorY.retained.draft.packages[scopePackages.Y].form);
+    await page.goto("/about?ref=unknowncreator");
+    await expect.poll(() => storedReferral(page)).toBe("unknowncreator");
+    bfcache.otherDocument = await snapshot(page);
+    expect(bfcache.before.retained.intent.passive).toBe("friend");
+    expect(bfcache.otherDocument.retained.intent.passive).toBe("unknowncreator");
+    await observeBack(page, flow, bfcache, testInfo);
+    flow.state.failures["/api/releaseHold"] = 503;
+    bfcache.reserveBoundary = flow.state.calls.length;
+    await reserveScopeSlot(page, "10:00 AM");
+    await expectScopeSwap(page, flow, bfcache);
+    bfcache.reviewBoundary = flow.state.calls.length;
+    await reviewScope(page);
+    await expectScopeControls(page);
+    bfcache.settled = await snapshot(page);
+    bfcache.newValidations = flow.state.calls.slice(bfcache.reserveBoundary).filter(call => call.path.startsWith("/api/ref/validate"));
+    bfcache.setupComplete = true;
+    await attachJson(testInfo, "cached-unready-own-candidates-before-product-assertions", bfcache);
+    expect.soft(bfcache.settled.retained.draft.packages[scopePackages.Y].checkoutCodes).toEqual(priorCodes);
+    await expect.soft(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible({ timeout: 3000 });
+    await expect.soft(page.getByRole("button", { name: "Remove coupon code save20", exact: true })).toBeVisible({ timeout: 3000 });
+    await expect(page.getByRole("button", { name: "Remove referral code unknowncreator", exact: true })).toHaveCount(0);
+    expect(quoteCalls(flow, 0)).toEqual([]);
+  });
+
+  cachedTest("lifecycle diagnosis: a later passive capture cannot acknowledge a failed scope reset", async ({ page, flow, bfcache }, testInfo) => {
+    flow.state.collision = true;
+    await startFriendPayment(page, flow);
+    const replacement = flow.state.calls.length;
+    await submitPaymentCode(page, "save20");
+    await waitQuote(flow, "save20", replacement);
+    await page.getByRole("dialog").getByRole("button", { name: "Release", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.goto("/reviews?ref=friend");
+    await expect.poll(() => storedReferral(page)).toBe("friend");
+    bfcache.oldIntent = await referralIntent(page);
+    expect((await envelope(page)).choices[checkoutScope()]).toBe("save20");
+    await denyScopeDeletion(page, checkoutScope());
+    const since = flow.state.calls.length;
+    await page.goto("/booking");
+    await reserveAndReview(page, flow);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    await expectScopeControls(page);
+    bfcache.before = await snapshot(page);
+    bfcache.resetFailures = await page.evaluate(() => window.referralResetFailures);
+    expect(bfcache.before.retained.intent).toEqual(bfcache.oldIntent);
+    expect(bfcache.resetFailures.length).toBeGreaterThan(0);
+    const beforePayment = flow.state.calls.length;
+    await flow.payment();
+    await expect(paymentCode(page)).toBeEnabled();
+    await waitQuote(flow, "", beforePayment);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    expect(referralLookups(flow, since, "friend")).toEqual([]);
+    expect(referralLookups(flow, since, "save20")).toEqual([]);
+    bfcache.initialPayment = await snapshot(page);
+    bfcache.initialBlankQuotes = quoteCalls(flow, beforePayment);
+    expect(bfcache.initialPayment.retained.intent).toEqual(bfcache.oldIntent);
+    bfcache.passiveBoundary = flow.state.calls.length;
+    await page.goto("/about?ref=friend");
+    await expect.poll(() => storedReferral(page)).toBe("friend");
+    bfcache.otherDocument = await snapshot(page);
+    bfcache.otherDocumentResetFailures = await page.evaluate(() => window.referralResetFailures);
+    expect(bfcache.otherDocument.observation.nonce).not.toBe(bfcache.initialPayment.observation.nonce);
+    expect((await envelope(page)).choices[checkoutScope()]).toBe("save20");
+    bfcache.newPaymentBoundary = flow.state.calls.length;
+    await page.goto("/payment");
+    await expect(paymentCode(page)).toBeEnabled();
+    await expect.poll(() => quoteCalls(flow, bfcache.newPaymentBoundary).length).toBeGreaterThan(0);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    bfcache.afterPassivePayment = await snapshot(page);
+    bfcache.laterQuotes = quoteCalls(flow, bfcache.newPaymentBoundary);
+    bfcache.laterResetFailures = await page.evaluate(() => window.referralResetFailures);
+    bfcache.newLookups = flow.state.calls.slice(bfcache.passiveBoundary).filter(call => call.path.startsWith("/api/ref/validate"));
+    bfcache.setupComplete = true;
+    await attachJson(testInfo, "passive-capture-after-failed-reset-before-product-assertions", bfcache);
+    expectFormAndHold(bfcache.afterPassivePayment.retained, bfcache.initialPayment.retained);
+    expect.soft(bfcache.laterQuotes.every(call => call.body.referralCode === "")).toBe(true);
+    expect.soft(referralLookups(flow, bfcache.passiveBoundary, "save20")).toEqual([]);
+    await expect.soft(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible({ timeout: 3000 });
+    if (testInfo.errors.length) return;
+    await page.evaluate(() => window.restoreReferralSetter());
+    const recovery = flow.state.calls.length;
+    await submitPaymentCode(page, "friend");
+    await waitQuote(flow, "friend", recovery);
+    expect(await page.evaluate(() => sessionStorage.getItem("referral_capture"))).toBe("ready");
+    const reloadBoundary = flow.state.calls.length;
+    await page.reload();
+    await expect(paymentCode(page)).toHaveValue("friend");
+    await waitQuote(flow, "friend", reloadBoundary);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toHaveCount(0);
+    bfcache.recoveryBoundary = recovery;
+    bfcache.reloadBoundary = reloadBoundary;
+  });
+  const prepareFailedResetPayment = async (page, flow, evidence) => {
+    flow.state.collision = true;
+    await startFriendPayment(page, flow);
+    const replacement = flow.state.calls.length;
+    await submitPaymentCode(page, "save20");
+    await waitQuote(flow, "save20", replacement);
+    await page.getByRole("dialog").getByRole("button", { name: "Release", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.goto("/reviews?ref=friend");
+    await expect.poll(() => storedReferral(page)).toBe("friend");
+    evidence.oldIntent = await referralIntent(page);
+    expect((await envelope(page)).choices[checkoutScope()]).toBe("save20");
+    await denyScopeDeletion(page, checkoutScope());
+    const since = flow.state.calls.length;
+    await page.goto("/booking");
+    await reserveAndReview(page, flow);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    await expectScopeControls(page);
+    evidence.before = await snapshot(page);
+    evidence.resetFailures = await page.evaluate(() => window.referralResetFailures);
+    expect(evidence.before.retained.intent).toEqual(evidence.oldIntent);
+    expect(evidence.resetFailures.length).toBeGreaterThan(0);
+    evidence.beforePayment = flow.state.calls.length;
+    await flow.payment();
+    await expect(paymentCode(page)).toBeEnabled();
+    await waitQuote(flow, "", evidence.beforePayment);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    expect(referralLookups(flow, since, "friend")).toEqual([]);
+    expect(referralLookups(flow, since, "save20")).toEqual([]);
+    evidence.initialPayment = await snapshot(page);
+    evidence.initialBlankQuotes = quoteCalls(flow, evidence.beforePayment);
+    expect(evidence.initialPayment.retained.intent).toEqual(evidence.oldIntent);
+  };
+
+  for (const [fault, title] of [
+    ["lost marker", "a lost failure marker still refuses a passive acknowledgement"],
+    ["corrupt marker", "a corrupt failure marker still refuses a passive acknowledgement"],
+    ["manual retry", "failed deletions stay blocked through manual retry"],
+  ]) {
+    cachedTest(`reset guard recovery: ${title}`, async ({ page, flow, bfcache }, testInfo) => {
+      await prepareFailedResetPayment(page, flow, bfcache);
+      bfcache.fault = fault;
+      bfcache.initialGuard = JSON.parse(bfcache.initialPayment.retained.guard);
+      if (fault !== "manual retry") {
+        const corrupt = JSON.stringify({ code: "friend", resetScopes: ["not-a-canonical-scope"] });
+        bfcache.markerFault = await page.evaluate(({ fault, corrupt }) => {
+          const before = sessionStorage.getItem("referral_capture");
+          if (fault === "lost marker") sessionStorage.removeItem("referral_capture");
+          else sessionStorage.setItem("referral_capture", corrupt);
+          return { fault, before, after: sessionStorage.getItem("referral_capture"), at: Date.now() };
+        }, { fault, corrupt });
+      }
+      bfcache.passiveBoundary = flow.state.calls.length;
+      await page.goto("/about?ref=friend");
+      await expect.poll(() => storedReferral(page)).toBe("friend");
+      bfcache.otherDocument = await snapshot(page);
+      expect(bfcache.otherDocument.observation.nonce).not.toBe(bfcache.initialPayment.observation.nonce);
+      expect((await envelope(page)).choices[checkoutScope()]).toBe("save20");
+      bfcache.newPaymentBoundary = flow.state.calls.length;
+      await page.goto("/payment");
+      await expect(paymentCode(page)).toBeEnabled();
+      await expect.poll(() => quoteCalls(flow, bfcache.newPaymentBoundary).length).toBeGreaterThan(0);
+      bfcache.afterPassivePayment = await snapshot(page);
+      bfcache.laterQuotes = quoteCalls(flow, bfcache.newPaymentBoundary);
+      bfcache.laterResetFailures = await page.evaluate(() => window.referralResetFailures);
+      bfcache.newLookups = flow.state.calls.slice(bfcache.passiveBoundary).filter(call => call.path.startsWith("/api/ref/validate"));
+      bfcache.setupComplete = true;
+      await attachJson(testInfo, "reset-guard-before-product-assertions", bfcache);
+      expectFormAndHold(bfcache.afterPassivePayment.retained, bfcache.initialPayment.retained);
+      expect.soft(bfcache.laterQuotes.every(call => call.body.referralCode === "")).toBe(true);
+      expect.soft(referralLookups(flow, bfcache.passiveBoundary, "save20")).toEqual([]);
+      await expect.soft(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible({ timeout: 3000 });
+      expect.soft(bfcache.initialGuard).toEqual({ code: "", resetScopes: [checkoutScope()] });
+      if (testInfo.errors.length) return;
+      expect(bfcache.afterPassivePayment.retained.guard).not.toBe("ready");
+      expect(bfcache.afterPassivePayment.retained.intent).toEqual(bfcache.oldIntent);
+      if (fault === "manual retry") {
+        await page.evaluate(scope => {
+          const inherited = Storage.prototype.setItem;
+          window.referralManualWriteFailures = [];
+          window.restoreReferralOverwriteSetter = () => { Storage.prototype.setItem = inherited; };
+          Storage.prototype.setItem = function(key, value) {
+            if (key === "referral_dismissed") {
+              const previous = this.getItem(key);
+              if (JSON.parse(previous || "{}").choices?.[scope] === "save20" && JSON.parse(value).choices?.[scope] === "friend") {
+                window.referralManualWriteFailures.push({ key, value, previous, scope, at: Date.now(), name: "QuotaExceededError" });
+                throw new DOMException("Current manual journal overwrite denied", "QuotaExceededError");
+              }
+            }
+            return inherited.call(this, key, value);
+          };
+        }, checkoutScope());
+        bfcache.manualFailureBoundary = flow.state.calls.length;
+        await submitPaymentCode(page, "friend");
+        await expect(paymentCode(page)).toBeEnabled();
+        await expect.poll(() => page.evaluate(() => window.referralManualWriteFailures.length)).toBe(1);
+        bfcache.manualWriteFailures = await page.evaluate(() => window.referralManualWriteFailures);
+        bfcache.afterFailedManual = await snapshot(page);
+        bfcache.failedManualQuotes = quoteCalls(flow, bfcache.manualFailureBoundary);
+        await attachJson(testInfo, "reset-guard-real-manual-write-refusal", bfcache);
+        expect(referralLookups(flow, bfcache.manualFailureBoundary, "friend").length).toBeGreaterThan(0);
+        expect(bfcache.manualWriteFailures[0].name).toBe("QuotaExceededError");
+        expect(JSON.parse(bfcache.manualWriteFailures[0].value).choices[checkoutScope()]).toBe("friend");
+        expect(bfcache.afterFailedManual.retained.intent).toEqual(bfcache.oldIntent);
+        expect(bfcache.afterFailedManual.retained.guard).toBe(bfcache.afterPassivePayment.retained.guard);
+        expect(bfcache.afterFailedManual.retained.guard).not.toBe("ready");
+        expect(lastQuote(flow).body.referralCode).toBe("");
+        expect(bfcache.failedManualQuotes.every(call => call.body.referralCode === "")).toBe(true);
+        await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+        expectFormAndHold(bfcache.afterFailedManual.retained, bfcache.initialPayment.retained);
+        await page.evaluate(() => window.restoreReferralOverwriteSetter());
+      }
+      await page.evaluate(() => window.restoreReferralSetter());
+      bfcache.recoveryBoundary = flow.state.calls.length;
+      await submitPaymentCode(page, "friend");
+      await waitQuote(flow, "friend", bfcache.recoveryBoundary);
+      expect(await page.evaluate(() => sessionStorage.getItem("referral_capture"))).toBe("ready");
+      expect((await envelope(page)).choices[checkoutScope()]).toBe("friend");
+      bfcache.afterRecovery = await snapshot(page);
+      expectFormAndHold(bfcache.afterRecovery.retained, bfcache.initialPayment.retained);
+      bfcache.reloadBoundary = flow.state.calls.length;
+      await page.reload();
+      await expect(paymentCode(page)).toHaveValue("friend");
+      await waitQuote(flow, "friend", bfcache.reloadBoundary);
+      await expect(page.getByRole("alert").filter({ hasText: storageError })).toHaveCount(0);
+      expect((await envelope(page)).choices[checkoutScope()]).toBe("friend");
+      bfcache.afterReload = await snapshot(page);
+      expectFormAndHold(bfcache.afterReload.retained, bfcache.initialPayment.retained);
+      await attachJson(testInfo, "reset-guard-manual-recovery-and-reload", bfcache);
+      if (fault === "manual retry") {
+        const panel = page.locator(".booking-payment");
+        const readPanel = () => panel.evaluate(element => ({
+          at: Date.now(),
+          opacity: getComputedStyle(element).opacity,
+          children: [...element.children].map(child => ({
+            tag: child.tagName,
+            opacity: getComputedStyle(child).opacity,
+          })),
+        }));
+        const before = await readPanel();
+        await attachJson(testInfo, "payment-render-before-settle", before);
+        await expect(panel).toHaveCSS("opacity", "1", { timeout: 5000 });
+        for (const child of await panel.locator(":scope > div").all()) {
+          await expect(child).toHaveCSS("opacity", "1", { timeout: 5000 });
+        }
+        const heading = page.getByRole("heading", { name: "Booking Summary", exact: true });
+        await heading.scrollIntoViewIfNeeded();
+        await expect(heading).toBeInViewport();
+        await attachJson(testInfo, "payment-render-after-settle", { before, after: await readPanel() });
+        await testInfo.attach("payment-render-settled-summary", {
+          body: await page.screenshot(), contentType: "image/png",
+        });
+        await paymentCode(page).scrollIntoViewIfNeeded();
+        await expect(paymentCode(page)).toBeInViewport();
+        await testInfo.attach("payment-render-settled-code", {
+          body: await page.screenshot(), contentType: "image/png",
+        });
+      }
+    });
+  }
+
 });
+
+const slotSwapSnapshot = page => page.evaluate(() => {
+  const keys = ["my_slot_hold", "booking_draft", "booking_modal_state", "referral_intent",
+    "referral_dismissed", "referral_session", "referral_capture"];
+  const raw = Object.fromEntries(keys.map(key => [key, sessionStorage.getItem(key)]));
+  return {
+    at: Date.now(),
+    url: location.href,
+    raw,
+    hold: JSON.parse(raw.my_slot_hold),
+    draft: JSON.parse(raw.booking_draft),
+    modal: JSON.parse(raw.booking_modal_state),
+    referralIntent: { journal: raw.referral_dismissed, passive: raw.referral_session, guard: raw.referral_capture },
+    fields: Object.fromEntries(["discord", "email", "specs", "mainGame"].map(key => [
+      key, document.querySelector(`[name="${key}"]`)?.value ?? null,
+    ])),
+    dialog: document.querySelector('[role="dialog"]')?.innerText || "",
+  };
+});
+
+for (const [title, coupon, replacement] of [
+  ["successful replacement preserves typed details", false, true],
+  ["successful replacement preserves an applied coupon", true, true],
+  ["same-slot refresh keeps details and coupon", true, false],
+]) {
+  test(`slot-swap retention: ${title}`, async ({ page, flow }, testInfo) => {
+    const evidence = { title, coupon, replacement, timeline: [], pageErrors: [] };
+    page.on("pageerror", error => evidence.pageErrors.push({ name: error.name, message: error.message }));
+    let releaseGate;
+    let finishHandler;
+    let routeHandler;
+    let cleanupResponse;
+    let handlerEntered = false;
+    const gate = new Promise(resolve => { releaseGate = resolve; });
+    const handlerFinished = new Promise(resolve => { finishHandler = resolve; });
+    try {
+      if (coupon) {
+        await flow.review();
+        await flow.codeInput("save20");
+        await expect(page.getByRole("button", { name: "Remove coupon code save20", exact: true })).toBeVisible();
+        evidence.review = await slotSwapSnapshot(page);
+        const reviewDraft = evidence.review.draft.packages[evidence.review.draft.lastTitle];
+        expect(reviewDraft.checkoutCodes.coupon.code).toBe("save20");
+        expect(reviewDraft.checkoutCodes.referral).toBeNull();
+        await page.getByRole("button", { name: "Back", exact: true }).click();
+        await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toHaveCount(0);
+        await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
+      } else {
+        await flow.reserve();
+        await flow.details();
+      }
+      evidence.before = await slotSwapSnapshot(page);
+      const original = evidence.before;
+      const packageTitle = original.hold.packageTitle;
+      const originalDraft = original.draft.packages[packageTitle];
+      expect(original.fields).toEqual({
+        discord: "fixture_visitor", email: "visitor@example.invalid",
+        specs: "Ryzen 7700 / RTX 4070", mainGame: "CS2",
+      });
+      expect(originalDraft.form).toMatchObject(original.fields);
+      if (coupon) expect(originalDraft.checkoutCodes).toEqual(evidence.review.draft.packages[packageTitle].checkoutCodes);
+      expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
+      expect(flow.state.calls.filter(call => call.path === "/api/releaseHold")).toEqual([]);
+      expect(flow.state.holds.size).toBe(1);
+      if (replacement) {
+        page.on("request", request => {
+          if (new URL(request.url()).pathname === "/api/releaseHold") {
+            evidence.timeline.push({ kind: "cleanup-request", body: request.postDataJSON(), at: Date.now() });
+          }
+        });
+        page.on("response", response => {
+          if (new URL(response.url()).pathname === "/api/holdSlot") {
+            evidence.timeline.push({ kind: "replacement-response", status: response.status(), at: Date.now() });
+          }
+        });
+        cleanupResponse = page.waitForResponse(response => new URL(response.url()).pathname === "/api/releaseHold");
+        let enterHandler;
+        const entered = new Promise(resolve => { enterHandler = resolve; });
+        routeHandler = async route => {
+          handlerEntered = true;
+          evidence.gatedRequest = route.request().postDataJSON();
+          evidence.timeline.push({ kind: "replacement-request-entered", at: Date.now() });
+          enterHandler();
+          try {
+            await gate;
+            evidence.timeline.push({ kind: "replacement-request-fallback", at: Date.now() });
+            await route.fallback();
+          } finally {
+            finishHandler();
+          }
+        };
+        await page.route("**/api/holdSlot", routeHandler);
+        await page.getByRole("button", { name: "Back", exact: true }).click();
+        await page.getByRole("button", { name: "11:00 AM", exact: true }).click();
+        await page.getByRole("button", { name: "Next", exact: true }).last().click();
+        await entered;
+        await expect(page.getByRole("button", { name: "Reserving...", exact: true })).toBeVisible();
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        evidence.inflight = await slotSwapSnapshot(page);
+        evidence.inflightCalls = [...flow.state.calls];
+        evidence.inflightHolds = [...flow.state.holds.entries()];
+        evidence.timeline.push({ kind: "gate-released", at: Date.now() });
+        releaseGate();
+      } else {
+        await page.getByRole("button", { name: "Back", exact: true }).click();
+        await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+        await page.getByRole("button", { name: "Next", exact: true }).last().click();
+      }
+      if (replacement) {
+        await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold"))?.startTimeUTC)).toBe(`${flow.state.slots[0].date}T05:30:00.000Z`);
+        const response = await cleanupResponse;
+        evidence.cleanupResponse = { status: response.status(), body: await response.json() };
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      } else {
+        await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold"))?.holdToken)).not.toBe(original.hold.holdToken);
+      }
+      await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
+      evidence.after = await slotSwapSnapshot(page);
+      evidence.calls = [...flow.state.calls];
+      evidence.activeHolds = [...flow.state.holds.entries()];
+      evidence.holdCalls = flow.state.calls.filter(call => call.path === "/api/holdSlot");
+      evidence.releaseCalls = flow.state.calls.filter(call => call.path === "/api/releaseHold");
+      await attachJson(testInfo, "slot-swap-before-retention-assertions", evidence);
+      expect(evidence.holdCalls).toHaveLength(2);
+      expect(evidence.holdCalls[1].body).toMatchObject({
+        previousHoldId: original.hold.holdId, previousHoldToken: original.hold.holdToken, packageTitle,
+        startTimeUTC: evidence.after.hold.startTimeUTC,
+      });
+      expect(evidence.after.hold.packageTitle).toBe(packageTitle);
+      expect(flow.state.holds.size).toBe(1);
+      expect(evidence.activeHolds[0][0]).toBe(evidence.after.hold.startTimeUTC);
+      expect(evidence.activeHolds[0][1].holdId).toBe(evidence.after.hold.holdId);
+      if (replacement) {
+        expect(evidence.after.hold.holdId).not.toBe(original.hold.holdId);
+        expect(evidence.after.hold.startTimeUTC).not.toBe(original.hold.startTimeUTC);
+        expect(flow.state.holds.has(original.hold.startTimeUTC)).toBe(false);
+        expect(evidence.releaseCalls).toHaveLength(1);
+        expect(evidence.releaseCalls[0].body).toEqual({ holdId: original.hold.holdId, holdToken: original.hold.holdToken });
+        expect(evidence.gatedRequest).toEqual(evidence.holdCalls[1].body);
+      } else {
+        expect(evidence.after.hold.holdId).toBe(original.hold.holdId);
+        expect(evidence.after.hold.startTimeUTC).toBe(original.hold.startTimeUTC);
+        expect(evidence.releaseCalls).toEqual([]);
+      }
+      evidence.setupControlsPassed = true;
+      await attachJson(testInfo, "slot-swap-setup-controls-passed", evidence);
+      if (replacement) {
+        expect.soft(evidence.inflight.hold, "replacement keeps the original hold until acceptance").toEqual(original.hold);
+        expect.soft(evidence.inflightHolds).toHaveLength(1);
+        expect.soft(evidence.inflightHolds[0]?.[0]).toBe(original.hold.startTimeUTC);
+        expect.soft(evidence.inflightCalls.filter(call => call.path === "/api/releaseHold")).toEqual([]);
+        expect.soft(evidence.inflight.draft.packages[packageTitle].form).toEqual(originalDraft.form);
+        if (coupon) expect.soft(evidence.inflight.draft.packages[packageTitle].checkoutCodes).toEqual(originalDraft.checkoutCodes);
+        const responseIndex = evidence.timeline.findIndex(event => event.kind === "replacement-response" && event.status === 200);
+        expect.soft(responseIndex).toBeGreaterThan(-1);
+        expect.soft(evidence.timeline.findIndex(event => event.kind === "cleanup-request")).toBeGreaterThan(responseIndex);
+      }
+      for (const key of ["discord", "email", "specs", "mainGame"]) {
+        expect.soft(evidence.after.fields[key], `${key} survives the slot swap`).toBe(original.fields[key]);
+      }
+      const afterDraft = evidence.after.draft?.packages?.[packageTitle];
+      expect.soft(afterDraft?.form, "stored form survives the slot swap").toEqual(originalDraft.form);
+      if (coupon) {
+        expect.soft(afterDraft?.checkoutCodes, "validated coupon survives the slot swap").toEqual(originalDraft.checkoutCodes);
+      }
+    } finally {
+      releaseGate();
+      if (handlerEntered) await handlerFinished;
+      if (routeHandler) await page.unroute("**/api/holdSlot", routeHandler);
+      evidence.final = await slotSwapSnapshot(page);
+      evidence.calls = flow.state.calls;
+      evidence.activeHolds = [...flow.state.holds.entries()];
+      await attachJson(testInfo, "slot-swap-diagnostic", evidence);
+      await testInfo.attach("slot-swap-final-page", { body: await page.screenshot(), contentType: "image/png" });
+      expect(evidence.pageErrors).toEqual([]);
+      expect(flow.state.calls.filter(call => call.path.startsWith("/api/payment/"))).toEqual([]);
+    }
+  });
+}
+
+for (const status of [503, 409]) {
+  test(`slot-swap failure: ${status} preserves the prior reservation and draft for reload`, async ({ page, flow }, testInfo) => {
+    const evidence = { status, pageErrors: [] };
+    page.on("pageerror", error => evidence.pageErrors.push({ name: error.name, message: error.message }));
+    try {
+      await flow.review();
+      await flow.codeInput("save20");
+      await expect(page.getByRole("button", { name: "Remove coupon code save20", exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Back", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
+      evidence.before = await slotSwapSnapshot(page);
+      const original = evidence.before;
+      const packageTitle = original.hold.packageTitle;
+      const draft = original.draft.packages[packageTitle];
+      expect(original.fields).toEqual({ discord: "fixture_visitor", email: "visitor@example.invalid", specs: "Ryzen 7700 / RTX 4070", mainGame: "CS2" });
+      expect(draft.form).toMatchObject(original.fields);
+      expect(draft.checkoutCodes.coupon.code).toBe("save20");
+      expect(flow.state.holds.get(original.hold.startTimeUTC).holdId).toBe(original.hold.holdId);
+      flow.state.failures["/api/holdSlot"] = status;
+      await page.getByRole("button", { name: "Back", exact: true }).click();
+      await page.getByRole("button", { name: "11:00 AM", exact: true }).click();
+      const failedResponse = page.waitForResponse(response => new URL(response.url()).pathname === "/api/holdSlot" && response.request().method() === "POST");
+      await page.getByRole("button", { name: "Next", exact: true }).last().click();
+      const response = await failedResponse;
+      evidence.response = { status: response.status(), body: await response.json() };
+      await expect(page.getByRole("alert").filter({ hasText: status === 409 ? /slot was just taken/i : /could not reserve/i })).toBeVisible();
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      evidence.afterFailure = await slotSwapSnapshot(page);
+      evidence.failedCalls = [...flow.state.calls];
+      evidence.failedHolds = [...flow.state.holds.entries()];
+      await attachJson(testInfo, "slot-swap-failure-before-product-assertions", evidence);
+      expect(evidence.response.status).toBe(status);
+      expect(evidence.response.body.ok).toBe(false);
+      const holds = flow.state.calls.filter(call => call.path === "/api/holdSlot");
+      expect(holds).toHaveLength(2);
+      expect(holds[1].body).toEqual({ packageTitle,
+        startTimeUTC: `${flow.state.slots[0].date}T05:30:00.000Z`,
+        previousHoldId: original.hold.holdId, previousHoldToken: original.hold.holdToken });
+      expect(flow.state.calls.filter(call => call.path.startsWith("/api/payment/"))).toEqual([]);
+      evidence.setupControlsPassed = true;
+      await attachJson(testInfo, "slot-swap-failure-setup-controls-passed", evidence);
+      expect.soft(evidence.afterFailure.hold, "unaccepted replacement retains the prior hold").toEqual(original.hold);
+      expect.soft(evidence.afterFailure.draft?.packages?.[packageTitle]?.form, "failed replacement retains the form").toEqual(draft.form);
+      expect.soft(evidence.afterFailure.draft?.packages?.[packageTitle]?.checkoutCodes, "failed replacement retains the coupon").toEqual(draft.checkoutCodes);
+      expect.soft(flow.state.holds.size, "old fixture reservation remains active").toBe(1);
+      expect.soft(flow.state.holds.has(original.hold.startTimeUTC)).toBe(true);
+      expect.soft(flow.state.calls.filter(call => call.path === "/api/releaseHold"), "unaccepted replacement sends no release").toEqual([]);
+      if (testInfo.errors.length) return;
+      delete flow.state.failures["/api/holdSlot"];
+      await page.reload();
+      await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold")))) .toEqual(original.hold);
+      await expect.poll(async () => await page.getByRole("textbox", { name: "Booking email", exact: true }).isVisible() ||
+        await page.getByRole("button", { name: "10:00 AM", exact: true }).isVisible()).toBe(true);
+      if (!await page.getByRole("textbox", { name: "Booking email", exact: true }).isVisible()) {
+        await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+        await page.getByRole("button", { name: "Next", exact: true }).last().click();
+      }
+      await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
+      evidence.afterReload = await slotSwapSnapshot(page);
+      expect(evidence.afterReload.fields).toEqual(original.fields);
+      expect(evidence.afterReload.draft.packages[packageTitle].form).toEqual(draft.form);
+      expect(evidence.afterReload.draft.packages[packageTitle].checkoutCodes).toEqual(draft.checkoutCodes);
+      await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Remove coupon code save20", exact: true })).toBeVisible();
+      evidence.reviewAfterReload = await slotSwapSnapshot(page);
+      expect(evidence.reviewAfterReload.draft.packages[packageTitle].checkoutCodes).toEqual(draft.checkoutCodes);
+    } finally {
+      evidence.final = await slotSwapSnapshot(page);
+      evidence.calls = flow.state.calls;
+      evidence.activeHolds = [...flow.state.holds.entries()];
+      await attachJson(testInfo, "slot-swap-failure", evidence);
+      await testInfo.attach("slot-swap-failure-final-page", { body: await page.screenshot(), contentType: "image/png" });
+      expect(evidence.pageErrors).toEqual([]);
+      expect(flow.state.calls.filter(call => call.path.startsWith("/api/payment/"))).toEqual([]);
+    }
+  });
+}

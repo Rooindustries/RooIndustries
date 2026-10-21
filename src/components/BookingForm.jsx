@@ -607,7 +607,7 @@ export default function BookingForm() {
   const referralReadyScopeRef = useRef("");
   const currentHoldRef = useRef(myHold);
   currentHoldRef.current = myHold;
-  const releaseInFlightRef = useRef(false);
+  const releaseInFlightRef = useRef(new Set());
   const isPaymentPendingHold =
     String(myHold?.phase || "").trim().toLowerCase() === "payment_pending";
   const checkoutBooking = readStoredCheckoutBooking();
@@ -1811,10 +1811,7 @@ export default function BookingForm() {
     if (isPaymentPendingHold) return;
     manualCodeAttemptRef.current += 1;
     setValidatingCode(false);
-    if (referralReadyScopeRef.current !== scope) {
-      setRestoredCodeCandidates(null);
-      return;
-    }
+    if (referralReadyScopeRef.current !== scope) return;
     autoReferralAttemptRef.current = "";
     setAppliedReferral(null);
     setCodeError("");
@@ -2166,15 +2163,16 @@ export default function BookingForm() {
 
     const holdIdToDelete = myHold.holdId;
     const holdTokenToDelete = myHold.holdToken;
+    const releaseKey = JSON.stringify([holdIdToDelete, holdTokenToDelete]);
     const hasExpired = () => new Date(myHold.expiresAt).getTime() <= Date.now();
     const isCurrentHold = () =>
       currentHoldRef.current?.holdId === holdIdToDelete &&
       currentHoldRef.current?.holdToken === holdTokenToDelete;
-    if (classifyHoldResponse({ endpoint: "release", expired: hasExpired() }) === "clear") {
+    if (classifyHoldResponse({ endpoint: "release", expired: hasExpired() }) === "clear" && isCurrentHold()) {
       clearHoldState(resetStep);
     }
-    if (releaseInFlightRef.current) return hasExpired();
-    releaseInFlightRef.current = true;
+    if (releaseInFlightRef.current.has(releaseKey)) return hasExpired();
+    releaseInFlightRef.current.add(releaseKey);
 
     let outcome;
     let serverMessage = "";
@@ -2201,12 +2199,14 @@ export default function BookingForm() {
       console.error("Failed to release hold on server");
       outcome = classifyHoldResponse({ endpoint: "release", networkError: true, expired: hasExpired() });
     } finally {
-      releaseInFlightRef.current = false;
+      releaseInFlightRef.current.delete(releaseKey);
     }
     if (outcome !== "keep") {
-      if (isCurrentHold()) clearHoldState(resetStep);
-      setErrorStep1("");
-      setErrorStep2("");
+      if (isCurrentHold()) {
+        clearHoldState(resetStep);
+        setErrorStep1("");
+        setErrorStep2("");
+      }
       return true;
     }
     if (isCurrentHold() && !suppressError) {
@@ -2321,10 +2321,6 @@ export default function BookingForm() {
     const previousHoldId = myHold?.holdId || null;
     const previousHoldToken = myHold?.holdToken || null;
 
-    if (myHold && !isSameAsExisting) {
-      await releaseHold(false, { suppressError: true });
-    }
-
     try {
       const body = {
         startTimeUTC: selectedSlotId,
@@ -2405,6 +2401,7 @@ export default function BookingForm() {
           setCodeError(REFERRAL_STORAGE_ERROR);
         }
       }
+      currentHoldRef.current = newHold;
       setMyHold(newHold);
       writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(newHold));
       broadcastHold(newHold);
@@ -2423,6 +2420,9 @@ export default function BookingForm() {
         ),
       });
       setStep(2);
+      if (previousHoldId && !isSameAsExisting) {
+        await releaseHold(false, { suppressError: true });
+      }
     } finally {
       setLockingSlot(false);
     }

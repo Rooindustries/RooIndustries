@@ -49,6 +49,15 @@ test.skip(!nativeBinaries.every(file => file && fs.existsSync(file)), "Needs PG_
 const readHold = page => page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold")));
 const specifications = "Ryzen 7700 / RTX 4070 · 東京 🦊";
 
+const nativeSwapSnapshot = page => page.evaluate(() => ({
+  at: Date.now(),
+  hold: JSON.parse(sessionStorage.getItem("my_slot_hold")),
+  draft: JSON.parse(sessionStorage.getItem("booking_draft")),
+  fields: Object.fromEntries(["discord", "email", "specs", "mainGame"].map(key => [
+    key, document.querySelector(`[name="${key}"]`)?.value ?? null,
+  ])),
+}));
+
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test.describe(`${viewport.width}px`, () => {
     test.use({ viewport });
@@ -139,5 +148,123 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await other.close();
       });
     }
+
+    test("native slot-swap retention: replacement preserves details and retires only the old hold", async ({ page, context, flow, native }, testInfo) => {
+      const evidence = { viewport, timeline: [], pageErrors: [], apiCalls: [] };
+      page.on("pageerror", error => evidence.pageErrors.push({ name: error.name, message: error.message }));
+      page.on("request", request => {
+        const url = new URL(request.url());
+        if (url.pathname.startsWith("/api/")) evidence.apiCalls.push({ path: url.pathname, body: request.postDataJSON() });
+      });
+      const priorEvidence = await native.evidence();
+      const providerBoundary = priorEvidence.providerRequests.length;
+      const httpBoundary = priorEvidence.http.length;
+      flow.state.slots = [{ date: await native.nextSlotDate(), times: ["10:00", "11:00"] }];
+      const adapterRoute = /\/api\/(holdSlot|releaseHold)(?:\?|$)/;
+      const adapter = async route => {
+        const request = route.request();
+        const path = new URL(request.url()).pathname;
+        const body = request.postDataJSON();
+        evidence.timeline.push({ kind: "native-request", path, body, at: Date.now() });
+        if (path === "/api/releaseHold") evidence.cleanupEntry = await nativeSwapSnapshot(page);
+        const response = await native.post(path, body, request.headers().authorization);
+        evidence.timeline.push({ kind: "native-response", path, body, response, at: Date.now() });
+        await route.fulfill({ status: response.status, contentType: "application/json", body: JSON.stringify(response.body) });
+      };
+      await context.route(adapterRoute, adapter);
+      let releaseGate;
+      let finishHandler;
+      let handlerEntered = false;
+      const gate = new Promise(resolve => { releaseGate = resolve; });
+      const handlerFinished = new Promise(resolve => { finishHandler = resolve; });
+      let enterHandler;
+      const entered = new Promise(resolve => { enterHandler = resolve; });
+      const replacementGate = async route => {
+        handlerEntered = true;
+        evidence.gatedRequest = route.request().postDataJSON();
+        evidence.timeline.push({ kind: "replacement-gated", at: Date.now() });
+        enterHandler();
+        try { await gate; await route.fallback(); }
+        finally { finishHandler(); }
+      };
+      let gateInstalled = false;
+      try {
+        await flow.reserve();
+        await flow.details();
+        await page.getByRole("textbox", { name: "PC specifications", exact: true }).fill(specifications);
+        evidence.before = await nativeSwapSnapshot(page);
+        const original = evidence.before;
+        evidence.originalRow = await native.getHold(original.hold.holdId);
+        expect(evidence.originalRow.phase).toBe("active");
+        expect(await native.verifyHold({ token: original.hold.holdToken, holdId: original.hold.holdId })).toBe(true);
+        expect(original.fields).toEqual({ discord: "fixture_visitor", email: "visitor@example.invalid", specs: specifications, mainGame: "CS2" });
+        await page.route("**/api/holdSlot", replacementGate);
+        gateInstalled = true;
+        await page.getByRole("button", { name: "Back", exact: true }).last().click();
+        await page.getByRole("button", { name: "11:00 AM", exact: true }).click();
+        await page.getByRole("button", { name: "Next", exact: true }).last().click();
+        await entered;
+        await expect(page.getByRole("button", { name: "Reserving...", exact: true })).toBeVisible();
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        evidence.inflight = await nativeSwapSnapshot(page);
+        evidence.inflightRow = await native.getHold(original.hold.holdId);
+        evidence.inflightTimeline = [...evidence.timeline];
+        releaseGate();
+        await expect.poll(async () => (await readHold(page))?.startTimeUTC).toBe(`${flow.state.slots[0].date}T05:30:00.000Z`);
+        await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
+        evidence.after = await nativeSwapSnapshot(page);
+        evidence.newRow = await native.getHold(evidence.after.hold.holdId);
+        await expect.poll(async () => (await native.getHold(original.hold.holdId))?.phase).toBe("released");
+        await expect.poll(() => evidence.timeline.filter(event => event.kind === "native-response" && event.path === "/api/releaseHold").length).toBe(1);
+        await expect(page.getByRole("button", { name: "Reserving...", exact: true })).toHaveCount(0);
+        evidence.afterCleanup = await nativeSwapSnapshot(page);
+        evidence.oldRowAfter = await native.getHold(original.hold.holdId);
+        evidence.newRowAfter = await native.getHold(evidence.after.hold.holdId);
+        evidence.newTokenValid = await native.verifyHold({ token: evidence.after.hold.holdToken, holdId: evidence.after.hold.holdId });
+        await testInfo.attach("native-slot-swap-before-product-assertions", { body: JSON.stringify(evidence, null, 2), contentType: "application/json" });
+        const holdRequests = evidence.timeline.filter(event => event.kind === "native-request" && event.path === "/api/holdSlot");
+        const holdResponses = evidence.timeline.filter(event => event.kind === "native-response" && event.path === "/api/holdSlot");
+        expect(holdRequests).toHaveLength(2);
+        expect(holdResponses.map(event => event.response.status)).toEqual([200, 200]);
+        expect(holdRequests[1].body).toEqual(evidence.gatedRequest);
+        expect(holdRequests[1].body).toMatchObject({ previousHoldId: original.hold.holdId, previousHoldToken: original.hold.holdToken,
+          packageTitle: original.hold.packageTitle, startTimeUTC: evidence.after.hold.startTimeUTC });
+        expect(evidence.after.hold.holdId).not.toBe(original.hold.holdId);
+        expect(evidence.newRow._id).toBe(evidence.after.hold.holdId);
+        expect(evidence.newRow.phase).toBe("active");
+        expect(evidence.newRow.startTimeUTC).toBe(evidence.after.hold.startTimeUTC);
+        expect(evidence.newRowAfter.phase).toBe("active");
+        expect(evidence.oldRowAfter.phase).toBe("released");
+        expect(evidence.newTokenValid).toBe(true);
+        evidence.setupControlsPassed = true;
+        await testInfo.attach("native-slot-swap-setup-controls-passed", { body: JSON.stringify(evidence, null, 2), contentType: "application/json" });
+        expect.soft(evidence.inflightRow.phase, "old native reservation stays active until replacement succeeds").toBe("active");
+        expect.soft(evidence.inflight.hold).toEqual(original.hold);
+        expect.soft(evidence.inflight.draft.packages[original.hold.packageTitle].form).toEqual(original.draft.packages[original.hold.packageTitle].form);
+        expect.soft(evidence.afterCleanup.fields).toEqual(original.fields);
+        expect.soft(evidence.afterCleanup.draft.packages[original.hold.packageTitle].form).toEqual(original.draft.packages[original.hold.packageTitle].form);
+        const newResponseIndex = evidence.timeline.indexOf(holdResponses[1]);
+        const releaseIndex = evidence.timeline.findIndex(event => event.kind === "native-request" && event.path === "/api/releaseHold");
+        expect.soft(releaseIndex, "client cleanup follows accepted replacement response").toBeGreaterThan(newResponseIndex);
+        expect.soft(evidence.inflightTimeline.filter(event => event.path === "/api/releaseHold")).toEqual([]);
+        expect.soft(evidence.cleanupEntry.hold).toEqual(evidence.after.hold);
+        expect.soft(evidence.afterCleanup.hold).toEqual(evidence.after.hold);
+      } finally {
+        releaseGate();
+        if (handlerEntered) await handlerFinished;
+        if (gateInstalled) await page.unroute("**/api/holdSlot", replacementGate);
+        await context.unroute(adapterRoute, adapter);
+        const nativeEvidence = await native.evidence();
+        evidence.native = { database: nativeEvidence.database, http: nativeEvidence.http.slice(httpBoundary),
+          providerRequests: nativeEvidence.providerRequests.slice(providerBoundary), blocked: nativeEvidence.blocked };
+        evidence.final = await nativeSwapSnapshot(page);
+        await testInfo.attach("native-slot-swap", { body: JSON.stringify(evidence, null, 2), contentType: "application/json" });
+        await testInfo.attach("native-slot-swap-final-page", { body: await page.screenshot(), contentType: "image/png" });
+        expect(evidence.pageErrors).toEqual([]);
+        expect(evidence.apiCalls.filter(call => call.path.startsWith("/api/payment/"))).toEqual([]);
+        expect(evidence.native.providerRequests).toEqual([]);
+        expect(evidence.native.blocked).toEqual([]);
+      }
+    });
   });
 }

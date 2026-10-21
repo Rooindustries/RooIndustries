@@ -167,16 +167,33 @@ const restoreReferralCaptureFailure = () => {
     }
     let pending;
     try { pending = JSON.parse(raw); } catch { return { code: "", address: "" }; }
-    return isRecord(pending) && Object.keys(pending).length === 1 &&
-      typeof pending.code === "string" && pending.code === normalizeReferralCode(pending.code)
-      ? { code: pending.code, address: "" } : { code: "", address: "" };
+    if (!isRecord(pending) || !Object.hasOwn(pending, "code") ||
+      typeof pending.code !== "string" || pending.code !== normalizeReferralCode(pending.code)) {
+      return { code: "", address: "" };
+    }
+    if (Object.keys(pending).length === 1) return { code: pending.code, address: "" };
+    if (Object.keys(pending).length !== 2 || !Object.hasOwn(pending, "resetScopes") ||
+      !Array.isArray(pending.resetScopes) || !pending.resetScopes.length ||
+      new Set(pending.resetScopes).size !== pending.resetScopes.length ||
+      pending.resetScopes.some(scope => {
+        if (typeof scope !== "string") return true;
+        let parts;
+        try { parts = JSON.parse(scope); } catch { return true; }
+        return !Array.isArray(parts) || parts.length !== 2 ||
+          parts.some(part => typeof part !== "string" || part !== part.trim()) ||
+          !parts[0] || scope !== referralScope(...parts);
+      })) {
+      return { code: "", address: "" };
+    }
+    return { code: pending.code, address: "", resetScopes: pending.resetScopes };
   } catch { return { code: "", address: "" }; }
 };
 
-const beginReferralCapture = (code, address) => {
-  captureFailure = { code, address };
+const beginReferralCapture = (code, address, resetScopes = []) => {
+  const pending = resetScopes.length ? { code, resetScopes } : { code };
+  captureFailure = { ...pending, address };
   try {
-    window.sessionStorage.setItem(REFERRAL_CAPTURE_STORAGE_KEY, JSON.stringify({ code }));
+    window.sessionStorage.setItem(REFERRAL_CAPTURE_STORAGE_KEY, JSON.stringify(pending));
     return true;
   } catch {
     try { window.sessionStorage.setItem(REFERRAL_CAPTURE_STORAGE_KEY, ""); }
@@ -306,6 +323,7 @@ export const captureReferralAddress = (pathname, search) => {
   if (!restored) restoredAddress = null;
   const params = new URLSearchParams(search || "");
   const code = normalizeReferralCode(params.get("ref"));
+  if (captureFailure && (!captureFailure.code || captureFailure.resetScopes?.length)) return false;
   if (CHECKOUT_PATHS.includes(pathname)) {
     if (pathname !== "/booking" || restored) return !captureFailure;
     if (!code && params.has("ref")) {
@@ -357,11 +375,14 @@ export const clearReferralDismissal = (code, scope) => {
   if (!normalized || !scope) return false;
   try {
     const intent = readReferralIntent();
+    const choices = { ...intent.choices };
+    for (const pendingScope of captureFailure?.resetScopes || []) delete choices[pendingScope];
+    choices[scope] = normalized;
     writeReferralIntent({
       ...intent,
       passiveCode: normalized,
       codes: { ...intent.codes, [normalized]: "applied" },
-      choices: { ...intent.choices, [scope]: normalized },
+      choices,
     });
     acknowledgeReferralCapture();
     return true;
@@ -434,9 +455,8 @@ export const resetReferralChoice = (scope) => {
     writeReferralIntent({ ...intent, choices });
     return true;
   } catch {
-    if (!captureFailure) {
-      beginReferralCapture("", referralAddress(window.location.pathname, window.location.search));
-    }
+    const resetScopes = [...new Set([...(captureFailure?.resetScopes || []), scope])];
+    beginReferralCapture(captureFailure?.code || "", referralAddress(window.location.pathname, window.location.search), resetScopes);
     return false;
   }
 };

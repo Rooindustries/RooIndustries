@@ -57,7 +57,7 @@ Any PR that touches a money path, including a helper outside this list:
    - `npm run test:booking-flow`: the browser flow from the packages to the payment handoff. Fixtures answer the hold, quote and start, and it ends at a synthetic checkout handoff, so it never confirms a paid booking or a credit. (`tests/fixtures/booking-flow.cjs:71-89,131-141`)
    - `node scripts/test-payment-persistence-sweep.mjs --full-chain`, with Postgres 17 set up as in the native CI job: the payment flow functions against a real database on the full migration chain. It calls them through its own fixture router, not the Next webhook route (`scripts/test-payment-persistence-sweep.mjs:203`). Additional start, completion and referral scenario groups require `--a1` or `--a2` (`:19,40-48`).
    - the referral suites, when credit changes.
-   - **NOT ENFORCED (ROO-507):** no test runs the whole chain: booking, Dodo checkout, a signed webhook through `app/api/payment/webhook/dodo/route.js`, the confirmed booking and the creator's credit. Until one does, a money-path PR names the links its tests leave out.
+   - `npm run test:referral-payment`: browser booking, synthetic Dodo checkout, a signed webhook through the running Next `app/api/payment/webhook/dodo/route.js`, the confirmed booking and the creator's credit, with native Postgres. Both event orders and duplicate delivery must credit once. Provider responses are synthetic, and browser financial calls use a separate Next listener; this does not test live Dodo or hosted RLS. (`tests/referral-payment.spec.js:80-196`, `tests/fixtures/referral-payment.mjs`)
 7. Gets a Sol review briefed with the diff, these invariants and the entry points, and asks it to break each one (up to 5 rounds).
 8. Gets a read-only production smoke after deploy.
 9. Gives every bug found a one-line root cause and a new invariant line or regression E2E.
@@ -79,7 +79,7 @@ Any PR that touches a money path, including a helper outside this list:
   - It resolves the code itself: lowercased slug, creators whose `registrationStatus` isn't `pending_email`.
   - It takes discount and commission from that creator's current percentages. (`src/server/api/ref/pricing.js:227-228,443-463,610-616`)
 - **NOT ENFORCED (unknown or unverified code):** when no creator matches, `effectiveReferralCode` keeps the raw code at 0% commission (`src/server/api/ref/pricing.js:456-457`). Earnings match bookings by referral id or by lowercased code (`src/server/api/ref/payoutUtils.js:87-102`).
-  - The normal checkout validates codes first and drops unknown ones (`src/server/api/ref/validateReferral.js:93-107`, `src/components/Payment.jsx:719-726`). A raw API request can still store one.
+  - The normal checkout validates codes first and drops unknown ones (`src/server/api/ref/validateReferral.js:93-107`, `src/components/Payment.jsx:742-751`). A raw API request can still store one.
   - A creator who books before verifying their email gets no credit on those bookings (ROO-512).
 - **NOT ENFORCED (self-referral):** nothing compares the buyer with the creator, so a creator can book with their own code and earn commission. Policy call pending (ROO-511).
 - Commission is frozen on the booking when it's created. (`src/server/api/ref/createBooking.js:1293-1320,1615-1621`)
