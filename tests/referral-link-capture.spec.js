@@ -4005,3 +4005,542 @@ test("booking history authority: fresh same-view capture keeps an existing scope
     await attachBookingHistory(page, flow, evidence, testInfo);
   }
 });
+
+const lockedPriceTest = test.extend({
+  launchOptions: async ({ launchOptions }, use) => {
+    await use({ ...launchOptions, ignoreDefaultArgs: ["--disable-back-forward-cache"] });
+  },
+});
+
+lockedPriceTest("a locked checkout keeps its displayed price after a newer creator link and cached Back", async ({ page, browser, flow, baseURL }, testInfo) => {
+  const evidence = { setupComplete: false, pageErrors: [], overrides: [], requests: [], responses: [] };
+  const providers = {
+    dodo: { enabled: true, mode: "test" },
+    razorpay: { enabled: false, mode: "disabled" },
+    paypal: { enabled: false, mode: "disabled" },
+  };
+  const blankQuote = { grossAmount: 54.95, netAmount: 54.95, isFree: false };
+  const starts = () => evidence.overrides.filter(call => call.path === "/api/payment/start");
+  const quotes = () => evidence.overrides.filter(call => call.path === "/api/payment/quote");
+  const snapshot = async () => ({
+    ...await bookingHistorySnapshot(page),
+    ...await page.evaluate(() => {
+      const sessionRaw = sessionStorage.getItem("payment_session_state");
+      const session = sessionRaw ? JSON.parse(sessionRaw) : null;
+      const panel = document.querySelector(".booking-payment");
+      const heading = [...document.querySelectorAll("h3")].find(element => element.textContent === "Booking Summary");
+      const summary = heading?.parentElement;
+      const input = document.querySelector("#payment-referral-code");
+      return {
+        at: Date.now(), sessionRaw, session,
+        fingerprint: session?.fingerprint ? JSON.parse(session.fingerprint) : null,
+        ui: {
+          panelOpacity: panel ? getComputedStyle(panel).opacity : null,
+          children: panel ? [...panel.children].map(child => ({ tag: child.tagName, opacity: getComputedStyle(child).opacity })) : [],
+          summary: summary?.innerText || "",
+          totals: summary ? [...summary.querySelectorAll("span")].map(element => element.textContent.trim()).filter(text => /^\$[\d.]+ USD$/.test(text)) : [],
+          referralInput: input?.value ?? null, referralDisabled: input?.disabled ?? null,
+          lockedBanner: [...document.querySelectorAll("p")].map(element => element.textContent).find(text => text.includes("Pricing and provider selection are locked for this session.")) || "",
+          resume: [...document.querySelectorAll("button")].filter(button => button.textContent.trim() === "Resume checkout").map(button => ({ disabled: button.disabled })),
+          body: document.body.innerText,
+        },
+      };
+    }),
+  });
+  page.on("pageerror", error => evidence.pageErrors.push({ name: error.name, message: error.message }));
+  page.on("request", request => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/")) evidence.requests.push({ at: Date.now(), url: request.url(), path: url.pathname, method: request.method(), body: request.postDataJSON() });
+  });
+  page.on("response", response => {
+    const url = new URL(response.url());
+    if (url.pathname.startsWith("/api/")) evidence.responses.push({ at: Date.now(), url: response.url(), path: url.pathname, status: response.status() });
+  });
+  for (const path of ["/api/payment/providers", "/api/payment/quote", "/api/payment/start"]) {
+    await page.route(`**${path}`, async route => {
+      const request = route.request();
+      const body = request.postDataJSON();
+      const call = { at: Date.now(), path, method: request.method(), body };
+      evidence.overrides.push(call);
+      expect(new URL(request.url()).origin).toBe(baseURL);
+      let response;
+      if (path === "/api/payment/providers") {
+        response = { ok: true, providers };
+      } else if (path === "/api/payment/quote") {
+        expect(request.method()).toBe("POST");
+        expect(["", "friend"]).toContain(body.referralCode);
+        response = {
+          ok: true, providers, quoteFingerprint: `locked-fixture-${body.referralCode || "none"}`,
+          quote: { grossAmount: 54.95, netAmount: body.referralCode === "friend" ? 49.45 : 54.95, isFree: false },
+        };
+      } else {
+        expect(request.method()).toBe("POST");
+        const hold = flow.state.holds.get(body.bookingPayload.startTimeUTC);
+        expect(hold).toBeTruthy();
+        response = {
+          ok: true, paymentAccessToken: "fixture-payment", status: "started", quote: blankQuote,
+          quoteFingerprint: "locked-fixture-none", providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff` },
+          sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
+          refreshedHold: { slotHoldId: hold.holdId, slotHoldToken: hold.holdToken, slotHoldExpiresAt: hold.expiresAt, phase: "payment_pending" },
+        };
+        call.actualFixtureHold = { ...hold };
+      }
+      call.response = response;
+      call.status = 200;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(response) });
+      call.fulfilledAt = Date.now();
+    });
+  }
+  await observeBookingHistory(page);
+  try {
+    const session = await browser.newBrowserCDPSession();
+    evidence.engine = await session.send("Browser.getVersion");
+    evidence.commandLine = await session.send("Browser.getBrowserCommandLine");
+    await session.detach();
+    expect(evidence.commandLine.arguments).not.toContain("--disable-back-forward-cache");
+    expect(evidence.commandLine.arguments).toContain("--ozone-platform=x11");
+    expect(evidence.commandLine.arguments).toContain(`--unsafely-treat-insecure-origin-as-secure=${baseURL}`);
+    await flow.review();
+    await flow.payment();
+    const panel = page.locator(".booking-payment");
+    const heading = page.getByRole("heading", { name: "Booking Summary", exact: true });
+    const summary = heading.locator("..");
+    await expect.poll(() => quotes().some(call => call.body.referralCode === "" && call.status === 200)).toBe(true);
+    await expect(summary.getByText("$54.95 USD", { exact: true })).toBeVisible();
+    await expect(paymentCode(page)).toHaveValue("");
+    evidence.original = await snapshot();
+    expect(evidence.original.journal?.choices || {}).toEqual({});
+    expect(evidence.original.badges).toEqual([]);
+    expect(evidence.original.draft.packages[evidence.original.draft.lastTitle].checkoutCodes?.referral?.code || "").toBe("");
+    expect(evidence.original.draft.packages[evidence.original.draft.lastTitle].checkoutCodes?.coupon?.code || "").toBe("");
+    expect(flow.state.holds.size).toBe(1);
+    expect(evidence.original.hold.holdId).toBe([...flow.state.holds.values()][0].holdId);
+    await attachJson(testInfo, "locked-price-original", evidence.original);
+
+    await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Checkout handoff", exact: true })).toBeVisible();
+    evidence.handoff = await snapshot();
+    expect(starts()).toHaveLength(1);
+    expect(starts()[0].body.provider).toBe("dodo");
+    expect(starts()[0].body.bookingPayload.referralCode).toBe("");
+    expect(starts()[0].body.quoteFingerprint).toBe("locked-fixture-none");
+    expect(starts()[0].body.bookingPayload.slotHoldId).toBe(evidence.original.hold.holdId);
+    expect(starts()[0].body.bookingPayload.slotHoldToken).toBe(evidence.original.hold.holdToken);
+    expect(evidence.handoff.session.paymentAccessToken).toBe("fixture-payment");
+    expect(evidence.handoff.session.provider).toBe("dodo");
+    expect(evidence.handoff.fingerprint.referralCode).toBe("");
+    expect(evidence.handoff.session.result.quote.netAmount).toBe(54.95);
+    expect(evidence.handoff.journal?.choices || {}).toEqual({});
+    await attachJson(testInfo, "locked-price-handoff", evidence.handoff);
+
+    await page.goBack({ waitUntil: "commit" });
+    await expect(page).toHaveURL(/\/payment$/);
+    await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Resume checkout", exact: true })).toBeEnabled();
+    await expect(page.getByText(/Pricing and provider selection are locked for this session\./)).toBeVisible();
+    await expect(summary.getByText("$54.95 USD", { exact: true })).toBeVisible();
+    await expect(paymentCode(page)).toBeDisabled();
+    await expect(paymentCode(page)).toHaveValue("");
+    await expect(panel).toHaveCSS("opacity", "1", { timeout: 5000 });
+    await heading.scrollIntoViewIfNeeded();
+    await expect(heading).toBeInViewport();
+    evidence.beforeB = await snapshot();
+    expect(evidence.beforeB.sessionRaw).toBe(evidence.handoff.sessionRaw);
+    expect(evidence.beforeB.journal?.choices || {}).toEqual({});
+    expect(evidence.beforeB.hold.phase).toBe("payment_pending");
+    expect(evidence.beforeB.hold.holdId).toBe(evidence.original.hold.holdId);
+    expect(evidence.beforeB.hold.holdToken).toBe(evidence.original.hold.holdToken);
+    expect(evidence.beforeB.hold.startTimeUTC).toBe(evidence.original.hold.startTimeUTC);
+    expect(evidence.beforeB.draft.packages[evidence.beforeB.draft.lastTitle].form)
+      .toEqual(evidence.original.draft.packages[evidence.original.draft.lastTitle].form);
+    await attachJson(testInfo, "locked-price-before-new-link", evidence.beforeB);
+    await testInfo.attach("locked-price-before-new-link-viewport", { body: await page.screenshot(), contentType: "image/png" });
+
+    await page.goto("/about?ref=friend");
+    await expect.poll(() => storedReferral(page)).toBe("friend");
+    await expect.poll(() => page.evaluate(() => sessionStorage.getItem("referral_capture"))).toBe("ready");
+    evidence.otherDocument = await snapshot();
+    expect(evidence.otherDocument.observation.nonce).not.toBe(evidence.beforeB.observation.nonce);
+    expect(evidence.otherDocument.sessionRaw).toBe(evidence.beforeB.sessionRaw);
+    evidence.backBoundary = { at: Date.now(), overrideIndex: evidence.overrides.length, flowIndex: flow.state.calls.length, requestIndex: evidence.requests.length };
+    const newerQuote = page.waitForResponse(r => new URL(r.url()).pathname === "/api/payment/quote" && r.request().postDataJSON()?.referralCode === "friend", { timeout: 3000 })
+      .then(async r => { await r.finished(); return { status: r.status(), body: await r.json() }; })
+      .catch(e => ({ notObservedWithinMs: 3000, name: e.name }));
+    await page.goBack({ waitUntil: "commit" });
+    await expect(page).toHaveURL(/\/payment$/);
+    await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Resume checkout", exact: true })).toBeEnabled();
+    await expect(page.getByText(/Pricing and provider selection are locked for this session\./)).toBeVisible();
+    await expect.poll(async () => {
+      const state = await bookingHistorySnapshot(page);
+      return { nonce: state.observation.nonce, persisted: state.observation.pageshows
+        .slice(evidence.beforeB.observation.pageshows.length)
+        .some(event => event.persisted && new URL(event.url).pathname === "/payment") };
+    }).toEqual({ nonce: evidence.beforeB.observation.nonce, persisted: true });
+    evidence.afterBack = await snapshot();
+    expect(evidence.afterBack.observation.nonce).toBe(evidence.beforeB.observation.nonce);
+    const restoredEvents = evidence.afterBack.observation.pageshows.slice(evidence.beforeB.observation.pageshows.length);
+    expect(restoredEvents.some(event => event.persisted && new URL(event.url).pathname === "/payment")).toBe(true);
+    evidence.newerQuote = await newerQuote;
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect(panel).toHaveCSS("opacity", "1", { timeout: 5000 });
+    for (const child of await panel.locator(":scope > div").all()) {
+      await expect(child).toHaveCSS("opacity", "1", { timeout: 5000 });
+    }
+    await heading.scrollIntoViewIfNeeded();
+    await expect(heading).toBeInViewport();
+    evidence.settled = await snapshot();
+    expect(evidence.settled.hold.holdId).toBe(evidence.beforeB.hold.holdId);
+    expect(evidence.settled.hold.holdToken).toBe(evidence.beforeB.hold.holdToken);
+    expect(evidence.settled.hold.startTimeUTC).toBe(evidence.beforeB.hold.startTimeUTC);
+    expect(evidence.settled.session.paymentAccessToken).toBe(evidence.beforeB.session.paymentAccessToken);
+    expect(evidence.settled.session.provider).toBe("dodo");
+    expect(evidence.settled.draft.packages[evidence.settled.draft.lastTitle].form)
+      .toEqual(evidence.beforeB.draft.packages[evidence.beforeB.draft.lastTitle].form);
+    expect(flow.state.holds.size).toBe(1);
+    evidence.setupComplete = true;
+    await attachJson(testInfo, "locked-price-before-product-assertions", evidence);
+
+    const soft = expect.configure({ soft: true });
+    await soft(summary.getByText("$54.95 USD", { exact: true })).toBeVisible();
+    await soft(summary.getByText(/friend\s*·/)).not.toBeVisible();
+    await soft(paymentCode(page)).toBeDisabled();
+    await soft(paymentCode(page)).toHaveValue("");
+    soft(evidence.settled.sessionRaw).toBe(evidence.beforeB.sessionRaw);
+    soft(evidence.settled.session.paymentAccessToken).toBe(evidence.beforeB.session.paymentAccessToken);
+    soft(evidence.settled.session.fingerprint).toBe(evidence.beforeB.session.fingerprint);
+    soft(evidence.settled.session.result.quote).toEqual(evidence.beforeB.session.result.quote);
+    soft(evidence.settled.hold).toEqual(evidence.beforeB.hold);
+    soft(evidence.settled.draft).toEqual(evidence.beforeB.draft);
+    soft(starts()).toHaveLength(1);
+    soft(evidence.requests.filter(call => /\/api\/payment\/(cancel|finalize|capture|confirm)(\/|$)/.test(call.path))).toEqual([]);
+    soft(evidence.requests.filter(call => call.path === "/api/releaseHold")).toEqual([]);
+    soft(evidence.requests.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
+  } finally {
+    evidence.final = await snapshot();
+    evidence.flowCalls = flow.state.calls;
+    evidence.holds = [...flow.state.holds.entries()];
+    evidence.aborted = flow.state.aborted;
+    evidence.productErrors = testInfo.errors.map(error => ({ message: error.message, stack: error.stack }));
+    await attachJson(testInfo, "locked-price-diagnosis", evidence);
+    await testInfo.attach("locked-price-final-viewport", { body: await page.screenshot(), contentType: "image/png" });
+    await testInfo.attach("locked-price-final-fullpage", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
+    if (await paymentCode(page).count()) {
+      await paymentCode(page).scrollIntoViewIfNeeded();
+      await testInfo.attach("locked-price-final-code", { body: await page.screenshot(), contentType: "image/png" });
+    }
+    expect(evidence.pageErrors).toEqual([]);
+    expect(flow.state.aborted).toEqual([]);
+  }
+});
+
+const lockedSnapshotTest = lockedPriceTest.extend({
+  locked: async ({ page, browser, flow, baseURL }, use, testInfo) => {
+    const evidence = { setupComplete: false, snapshots: {}, calls: [], requests: [], responses: [], pageErrors: [], assetReadiness: [] };
+    const config = { stacked: false, changed: false, failedCancels: 0 };
+    const pendingAssets = new Set();
+    const providers = { dodo: { enabled: true, mode: "test" }, razorpay: { enabled: false, mode: "disabled" }, paypal: { enabled: false, mode: "disabled" } };
+    const quoteFor = body => {
+      const stacked = body.referralCode === "friend" && body.couponCode === "save20" && !config.changed;
+      const referred = body.referralCode === "friend";
+      return {
+        grossAmount: 54.95, netAmount: stacked ? 39.56 : referred ? (config.changed ? 52.20 : 49.45) : 54.95,
+        isFree: false, referralDiscountPercent: referred ? (config.changed ? 5 : 10) : 0,
+        referralDiscountAmount: stacked ? 4.4 : referred ? (config.changed ? 2.75 : 5.5) : 0,
+        couponDiscountPercent: stacked ? 20 : 0, couponDiscountAmount: stacked ? 10.99 : 0,
+        couponDiscountType: stacked ? "percent" : "", couponDiscountValue: stacked ? 20 : 0,
+        canCombineWithReferral: true,
+      };
+    };
+    const snapshot = async () => ({
+      ...await bookingHistorySnapshot(page),
+      ...await page.evaluate(() => {
+        const sessionRaw = sessionStorage.getItem("payment_session_state");
+        const session = sessionRaw ? JSON.parse(sessionRaw) : null;
+        const panel = document.querySelector(".booking-payment");
+        const summary = [...document.querySelectorAll("h3")].find(element => element.textContent === "Booking Summary")?.parentElement;
+        const input = id => {
+          const element = document.getElementById(id);
+          return { value: element?.value ?? null, disabled: element?.disabled ?? null, invalid: element?.getAttribute("aria-invalid"), describedBy: element?.getAttribute("aria-describedby") };
+        };
+        return { at: Date.now(), sessionRaw, session, fingerprint: session?.fingerprint ? JSON.parse(session.fingerprint) : null,
+          ui: { summary: summary?.innerText || "", body: document.body.innerText, opacity: panel ? getComputedStyle(panel).opacity : null,
+            children: panel ? [...panel.children].map(child => getComputedStyle(child).opacity) : [],
+            referral: input("payment-referral-code"), coupon: input("payment-coupon-code"),
+            alerts: [...document.querySelectorAll('[role="alert"]')].map(element => element.textContent) } };
+      }),
+    });
+    const capture = async label => {
+      const state = await snapshot();
+      evidence.snapshots[label] = state;
+      await attachJson(testInfo, `locked-price-${label}`, state);
+      return state;
+    };
+    page.on("pageerror", error => evidence.pageErrors.push({ name: error.name, message: error.message }));
+    page.on("request", request => {
+      const url = new URL(request.url());
+      if (url.origin === baseURL && ["script", "stylesheet", "image", "font"].includes(request.resourceType())) pendingAssets.add(request);
+      if (url.pathname.startsWith("/api/")) evidence.requests.push({ at: Date.now(), path: url.pathname, method: request.method(), body: request.postDataJSON() });
+    });
+    page.on("requestfinished", request => pendingAssets.delete(request));
+    page.on("requestfailed", request => pendingAssets.delete(request));
+    page.on("response", response => {
+      const url = new URL(response.url());
+      if (url.pathname.startsWith("/api/")) evidence.responses.push({ at: Date.now(), path: url.pathname, status: response.status() });
+    });
+    for (const path of ["/api/payment/providers", "/api/payment/quote", "/api/payment/start", "/api/payment/cancel", "/api/ref/validateReferral", "/api/ref/validateCoupon"]) {
+      await page.route(`**${path}*`, async route => {
+        const request = route.request();
+        const url = new URL(request.url());
+        if (url.pathname !== path || url.origin !== baseURL) return route.fallback();
+        if (path.startsWith("/api/ref/") && !config.changed) return route.fallback();
+        const call = { at: Date.now(), path, query: url.search, method: request.method(), body: request.postDataJSON(), authorization: request.headers().authorization || "" };
+        evidence.calls.push(call);
+        let status = 200;
+        let response;
+        if (path === "/api/payment/providers") response = { ok: true, providers };
+        if (path === "/api/payment/quote") response = { ok: true, providers, quoteFingerprint: `saved-price-${call.body.referralCode || "none"}-${call.body.couponCode || "none"}-${config.changed ? "changed" : "initial"}`, quote: quoteFor(call.body) };
+        if (path === "/api/payment/start") {
+          const hold = flow.state.holds.get(call.body.bookingPayload.startTimeUTC);
+          expect(hold).toBeTruthy();
+          const quoted = evidence.calls.filter(entry => entry.path === "/api/payment/quote" && entry.response).at(-1);
+          expect(call.body.quoteFingerprint).toBe(quoted.response.quoteFingerprint);
+          expect(call.body.bookingPayload.referralCode).toBe(config.stacked ? "friend" : "");
+          expect(call.body.bookingPayload.couponCode).toBe(config.stacked ? "save20" : "");
+          response = { ok: true, paymentAccessToken: "fixture-payment", status: "started", quote: quoted.response.quote,
+            quoteFingerprint: quoted.response.quoteFingerprint, providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff` },
+            sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
+            refreshedHold: { slotHoldId: hold.holdId, slotHoldToken: hold.holdToken, slotHoldExpiresAt: hold.expiresAt, phase: "payment_pending" } };
+        }
+        if (path === "/api/payment/cancel") {
+          const hold = [...flow.state.holds.values()][0];
+          expect(hold).toBeTruthy();
+          const index = evidence.calls.filter(entry => entry.path === path).length;
+          if (index <= config.failedCancels) { status = 409; response = { ok: false, error: "Fixture cancellation refused." }; }
+          else response = { ok: true, cancelled: true, refreshedHold: { slotHoldId: hold.holdId, slotHoldToken: hold.holdToken, slotHoldExpiresAt: hold.expiresAt, phase: "holding" } };
+        }
+        if (path === "/api/ref/validateReferral") response = { ok: true, active: true, eligible: true, referral: { code: "friend", currentDiscountPercent: 5 } };
+        if (path === "/api/ref/validateCoupon") { status = 400; response = { ok: false, error: "This coupon has expired.", reason: "expired" }; }
+        call.inflight = await snapshot();
+        call.response = response;
+        call.status = status;
+        await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(response) });
+        call.fulfilledAt = Date.now();
+      });
+    }
+    const heading = page.getByRole("heading", { name: "Booking Summary", exact: true });
+    const summary = heading.locator("..");
+    const waitForAssets = async () => {
+      const checkpoint = { at: Date.now(), url: page.url(), pending: [...pendingAssets].map(request => ({ url: request.url(), type: request.resourceType() })) };
+      evidence.assetReadiness.push(checkpoint);
+      await expect.poll(() => pendingAssets.size, { timeout: 10000 }).toBe(0);
+      checkpoint.readyAt = Date.now();
+      checkpoint.pendingAtReady = [...pendingAssets].map(request => ({ url: request.url(), type: request.resourceType() }));
+    };
+    const paint = async () => {
+      const panel = page.locator(".booking-payment");
+      await expect(panel).toHaveCSS("opacity", "1", { timeout: 5000 });
+      for (const child of await panel.locator(":scope > div").all()) await expect(child).toHaveCSS("opacity", "1", { timeout: 5000 });
+      await heading.scrollIntoViewIfNeeded();
+      await expect(heading).toBeInViewport();
+    };
+    const open = async stacked => {
+      config.stacked = Boolean(stacked);
+      await flow.review();
+      if (stacked) {
+        await flow.codeInput("friend");
+        await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+        await flow.codeInput("save20");
+        await expect(page.getByRole("button", { name: "Remove coupon code save20", exact: true })).toBeVisible();
+      }
+      await flow.payment();
+      await expect(summary.getByText(stacked ? "$39.56 USD" : "$54.95 USD", { exact: true })).toBeVisible();
+      await capture("original");
+      await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Checkout handoff", exact: true })).toBeVisible();
+      const handoff = await capture("handoff");
+      expect(evidence.calls.filter(call => call.path === "/api/payment/start")).toHaveLength(1);
+      expect(handoff.session.provider).toBe("dodo");
+      expect(handoff.session.result.quote.netAmount).toBe(stacked ? 39.56 : 54.95);
+      await page.goBack({ waitUntil: "commit" });
+      await expect(page.getByRole("button", { name: "Resume checkout", exact: true })).toBeEnabled();
+      await expect(page.getByText(/Pricing and provider selection are locked for this session\./)).toBeVisible();
+      await paint();
+      const baseline = await capture("baseline");
+      expect(baseline.sessionRaw).toBe(handoff.sessionRaw);
+      expect(baseline.hold.holdId).toBe(handoff.hold.holdId);
+      expect(baseline.fingerprint.referralCode).toBe(stacked ? "friend" : "");
+      expect(baseline.fingerprint.couponCode).toBe(stacked ? "save20" : "");
+      return baseline;
+    };
+    const unchanged = (actual, baseline) => {
+      const soft = expect.configure({ soft: true });
+      soft(actual.sessionRaw).toBe(baseline.sessionRaw);
+      soft(actual.hold).toEqual(baseline.hold);
+      soft(actual.draft).toEqual(baseline.draft);
+    };
+    await observeBookingHistory(page);
+    const browserSession = await browser.newBrowserCDPSession();
+    evidence.engine = await browserSession.send("Browser.getVersion");
+    evidence.commandLine = await browserSession.send("Browser.getBrowserCommandLine");
+    await browserSession.detach();
+    await attachJson(testInfo, "saved-price-engine", evidence.engine);
+    await attachJson(testInfo, "saved-price-launch-options", evidence.commandLine);
+    try {
+      await use({ evidence, config, snapshot, capture, open, paint, summary, unchanged, waitForAssets });
+    } finally {
+      try {
+        evidence.final = await snapshot();
+      } catch (error) {
+        evidence.final = { unavailable: true, url: page.url(), name: error.name, message: error.message };
+      }
+      evidence.flowCalls = flow.state.calls;
+      evidence.aborted = flow.state.aborted;
+      evidence.holds = [...flow.state.holds.entries()];
+      evidence.errors = testInfo.errors.map(error => ({ message: error.message, stack: error.stack }));
+      await attachJson(testInfo, "saved-price-evidence", evidence);
+      await testInfo.attach("saved-price-summary", { body: await page.screenshot(), contentType: "image/png" });
+      await testInfo.attach("saved-price-fullpage", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
+      if (await paymentCode(page).count()) {
+        await paymentCode(page).scrollIntoViewIfNeeded();
+        await expect(paymentCode(page)).toBeInViewport();
+        await testInfo.attach("saved-price-code", { body: await page.screenshot(), contentType: "image/png" });
+      }
+      expect(evidence.pageErrors).toEqual([]);
+      expect(evidence.aborted).toEqual([]);
+      expect(evidence.requests.filter(call => /\/api\/payment\/(capture|confirm|finalize)(\/|$)/.test(call.path))).toEqual([]);
+      expect(evidence.requests.filter(call => call.path === "/api/releaseHold")).toEqual([]);
+      expect(evidence.requests.filter(call => call.path === "/api/payment/start")).toHaveLength(1);
+      expect(evidence.requests.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
+    }
+  },
+});
+
+lockedSnapshotTest("a locked checkout keeps its price on reload and unlocks only after cancellation succeeds", async ({ page, flow, locked }, testInfo) => {
+  const baseline = await locked.open(false);
+  expect(baseline.journal?.choices || {}).toEqual({});
+  await locked.waitForAssets();
+  await page.goto("/about?ref=friend");
+  await expect.poll(() => storedReferral(page)).toBe("friend");
+  await locked.capture("public-link");
+  await locked.waitForAssets();
+  await page.goto("/payment");
+  await expect(page.getByRole("button", { name: "Resume checkout", exact: true })).toBeEnabled();
+  await locked.paint();
+  await locked.waitForAssets();
+  const quoteBoundary = locked.evidence.calls.length;
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Resume checkout", exact: true })).toBeEnabled();
+  await expect.poll(() => locked.evidence.calls.slice(quoteBoundary).some(call => call.path === "/api/payment/quote" && call.response?.quote.netAmount === 49.45)).toBe(true);
+  await locked.paint();
+  const restored = await locked.capture("reload");
+  expect(restored.navigation[0].type).toBe("reload");
+  expect(restored.session.paymentAccessToken).toBe(baseline.session.paymentAccessToken);
+  expect(restored.hold.holdId).toBe(baseline.hold.holdId);
+  locked.evidence.setupComplete = true;
+  await attachJson(testInfo, "saved-price-setup-controls", locked.evidence);
+  const soft = expect.configure({ soft: true });
+  await soft(locked.summary.getByText("$54.95 USD", { exact: true })).toBeVisible();
+  await soft(locked.summary.getByText(/friend\s*·/)).not.toBeVisible();
+  await soft(paymentCode(page)).toHaveValue("");
+  await soft(paymentCode(page)).toBeDisabled();
+  locked.unchanged(restored, baseline);
+
+  locked.config.failedCancels = 1;
+  await locked.capture("before-failed-cancel");
+  await page.getByRole("button", { name: "Change payment method", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "Fixture cancellation refused." })).toBeVisible();
+  const refused = await locked.capture("failed-cancel");
+  locked.unchanged(refused, baseline);
+  await soft(locked.summary.getByText("$54.95 USD", { exact: true })).toBeVisible();
+  await soft(paymentCode(page)).toBeDisabled();
+  expect(locked.evidence.calls.filter(call => call.path === "/api/payment/start")).toHaveLength(1);
+
+  const beforeSuccess = locked.evidence.calls.length;
+  await page.getByRole("button", { name: "Change payment method", exact: true }).click();
+  await expect(paymentCode(page)).toBeEnabled();
+  await expect.poll(() => locked.evidence.calls.slice(beforeSuccess).some(call => call.path === "/api/payment/quote" && call.response?.quote.netAmount === 49.45)).toBe(true);
+  await expect(locked.summary.getByText("$49.45 USD", { exact: true })).toBeVisible();
+  await locked.paint();
+  const released = await locked.capture("successful-cancel");
+  expect(released.session).toBeNull();
+  expect(released.hold.holdId).toBe(baseline.hold.holdId);
+  expect(released.hold.holdToken).toBe(baseline.hold.holdToken);
+  expect(released.hold.phase).toBe("holding");
+  expect(released.draft.packages[released.draft.lastTitle].form).toEqual(baseline.draft.packages[baseline.draft.lastTitle].form);
+  const cancels = locked.evidence.calls.filter(call => call.path === "/api/payment/cancel");
+  expect(cancels).toHaveLength(2);
+  expect(cancels.map(call => call.authorization)).toEqual(["Bearer fixture-payment", "Bearer fixture-payment"]);
+  expect(cancels.map(call => call.status)).toEqual([409, 200]);
+  expect(flow.state.holds.size).toBe(1);
+});
+
+lockedSnapshotTest("a locked checkout retains its saved referral and coupon amounts when their current quotes change", async ({ page, locked }, testInfo) => {
+  const baseline = await locked.open(true);
+  expect(baseline.session.result.quote).toMatchObject({ grossAmount: 54.95, netAmount: 39.56, referralDiscountPercent: 10, referralDiscountAmount: 4.4, couponDiscountPercent: 20, couponDiscountAmount: 10.99 });
+  locked.config.changed = true;
+  const boundary = locked.evidence.calls.length;
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Resume checkout", exact: true })).toBeEnabled();
+  await expect.poll(() => locked.evidence.calls.slice(boundary).some(call => call.path === "/api/payment/quote" && call.response?.quote.netAmount === 52.20)).toBe(true);
+  await locked.paint();
+  const restored = await locked.capture("changed-current-quotes");
+  expect(restored.session.paymentAccessToken).toBe(baseline.session.paymentAccessToken);
+  expect(restored.hold.holdId).toBe(baseline.hold.holdId);
+  locked.evidence.setupComplete = true;
+  await attachJson(testInfo, "saved-price-setup-controls", locked.evidence);
+  const soft = expect.configure({ soft: true });
+  await soft(locked.summary.getByText("$39.56 USD", { exact: true })).toBeVisible();
+  await soft(locked.summary.getByText("friend · −$4.40", { exact: true })).toBeVisible();
+  await soft(locked.summary.getByText("save20 · −$10.99", { exact: true })).toBeVisible();
+  await soft(paymentCode(page)).toHaveValue("friend");
+  await soft(paymentCode(page)).toBeDisabled();
+  await soft(page.locator("#payment-coupon-code")).toHaveValue("save20");
+  await soft(page.locator("#payment-coupon-code")).toBeDisabled();
+  await soft(page.getByRole("alert").filter({ hasText: "This coupon has expired." })).not.toBeVisible();
+  await soft(page.locator("#payment-coupon-code")).toHaveAttribute("aria-invalid", "false");
+  await soft(page.locator("#payment-coupon-code")).not.toHaveAttribute("aria-describedby");
+  await soft(page.getByRole("button", { name: "Remove coupon", exact: true })).toBeDisabled();
+  locked.unchanged(restored, baseline);
+});
+
+lockedSnapshotTest("a locked checkout with no saved quote keeps recovery without inventing a total", async ({ page, locked }, testInfo) => {
+  const baseline = await locked.open(false);
+  const legacyRaw = await page.evaluate(() => {
+    const session = JSON.parse(sessionStorage.getItem("payment_session_state"));
+    delete session.result.quote;
+    const raw = JSON.stringify(session);
+    sessionStorage.setItem("payment_session_state", raw);
+    return raw;
+  });
+  const constructed = { ...baseline, sessionRaw: legacyRaw, session: JSON.parse(legacyRaw) };
+  const expected = JSON.parse(baseline.sessionRaw);
+  delete expected.result.quote;
+  expect(constructed.session).toEqual(expected);
+  locked.evidence.constructedLegacy = constructed;
+  await locked.capture("constructed-no-saved-quote");
+  await page.goto("/about?ref=friend");
+  await expect.poll(() => storedReferral(page)).toBe("friend");
+  const boundary = locked.evidence.calls.length;
+  await page.goto("/payment");
+  await expect(page.getByRole("button", { name: "Resume checkout", exact: true })).toBeEnabled();
+  await expect.poll(() => locked.evidence.calls.slice(boundary).some(call => call.path === "/api/payment/quote" && call.response?.quote.netAmount === 49.45)).toBe(true);
+  await locked.paint();
+  const restored = await locked.capture("legacy-price-unavailable");
+  expect(restored.session.paymentAccessToken).toBe(baseline.session.paymentAccessToken);
+  expect(restored.hold.holdId).toBe(baseline.hold.holdId);
+  locked.evidence.setupComplete = true;
+  await attachJson(testInfo, "saved-price-setup-controls", locked.evidence);
+  const soft = expect.configure({ soft: true });
+  await soft(locked.summary.getByText("Unavailable", { exact: true })).toBeVisible();
+  await soft(locked.summary.getByText("Session price unavailable. Check payment status or change payment method.", { exact: true })).toBeVisible();
+  await soft(locked.summary.getByText(/\$(54\.95|49\.45)(?: USD)?/)).toHaveCount(0);
+  await soft(locked.summary.getByText(/friend\s*·/)).not.toBeVisible();
+  await soft(page.getByRole("button", { name: "Confirm Free Booking", exact: true })).not.toBeVisible();
+  await soft(page.getByRole("button", { name: "Check payment status", exact: true })).toBeEnabled();
+  await soft(page.getByRole("button", { name: "Change payment method", exact: true })).toBeEnabled();
+  await soft(page.getByText(/Pricing and provider selection are locked for this session\./)).toBeVisible();
+  await soft(paymentCode(page)).toHaveValue("");
+  await soft(paymentCode(page)).toBeDisabled();
+  locked.unchanged(restored, constructed);
+});

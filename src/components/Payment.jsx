@@ -470,17 +470,7 @@ export default function Payment({ hideFooter = false }) {
     return () => clearTimeout(timeoutId);
   }, [holdExpiresAt, processingDodoReturn, creatingFree, navigate, navState, location]);
 
-  const {
-    referralPercent,
-    couponDiscountAmount,
-    canStackCouponWithReferral,
-    referralDiscountAmount,
-    isFree,
-    preventedFreeReduction,
-    finalAmount,
-    effectiveDiscountAmount,
-    discountPercentCombined,
-  } = calculateCheckoutDiscounts({
+  const liveDiscounts = calculateCheckoutDiscounts({
     baseAmount,
     referral,
     coupon,
@@ -512,6 +502,41 @@ export default function Payment({ hideFooter = false }) {
   const otherCheckoutStarting = (provider) =>
     pendingStartsRef.current.some((start) => start.provider !== provider);
   const lockedProvider = String(paymentSession?.provider || "").trim();
+  const lockedQuote = paymentSession?.result?.quote;
+  const lockedPriceAvailable = Number.isFinite(lockedQuote?.grossAmount) &&
+    Number.isFinite(lockedQuote?.netAmount) && lockedQuote.netAmount > 0 &&
+    lockedQuote.grossAmount >= lockedQuote.netAmount && lockedQuote.isFree !== true;
+  const lockedCodes = parseCheckoutFingerprint(paymentSession?.fingerprint);
+  const summaryReferralCode = lockedProvider
+    ? (typeof lockedCodes?.referralCode === "string" ? lockedCodes.referralCode : "")
+    : referral?.code || "";
+  const summaryCouponCode = lockedProvider
+    ? (typeof lockedCodes?.couponCode === "string" ? lockedCodes.couponCode : "")
+    : coupon?.code || "";
+  const summaryBaseAmount = lockedProvider && lockedPriceAvailable ? lockedQuote.grossAmount : baseAmount;
+  const finalAmount = lockedProvider
+    ? (lockedPriceAvailable ? lockedQuote.netAmount : null)
+    : liveDiscounts.finalAmount;
+  const isFree = !lockedProvider && liveDiscounts.isFree;
+  const preventedFreeReduction = !lockedProvider && liveDiscounts.preventedFreeReduction;
+  const referralPercent = lockedProvider
+    ? (lockedPriceAvailable && summaryReferralCode && Number.isFinite(lockedQuote.referralDiscountPercent) &&
+       lockedQuote.referralDiscountPercent > 0 && lockedQuote.referralDiscountPercent <= 100
+      ? lockedQuote.referralDiscountPercent : 0)
+    : liveDiscounts.referralPercent;
+  const referralDiscountAmount = lockedProvider
+    ? (lockedPriceAvailable && summaryReferralCode && Number.isFinite(lockedQuote.referralDiscountAmount) &&
+       lockedQuote.referralDiscountAmount >= 0 && lockedQuote.referralDiscountAmount <= lockedQuote.grossAmount
+      ? lockedQuote.referralDiscountAmount : 0)
+    : liveDiscounts.referralDiscountAmount;
+  const couponDiscountAmount = lockedProvider
+    ? (lockedPriceAvailable && summaryCouponCode && Number.isFinite(lockedQuote.couponDiscountAmount) &&
+       lockedQuote.couponDiscountAmount >= 0 && lockedQuote.couponDiscountAmount <= lockedQuote.grossAmount
+      ? lockedQuote.couponDiscountAmount : 0)
+    : liveDiscounts.couponDiscountAmount;
+  const summaryDiscounted = lockedProvider
+    ? lockedPriceAvailable && lockedQuote.grossAmount > lockedQuote.netAmount
+    : referralPercent > 0 || couponDiscountAmount > 0;
   const dodoTaxExclusive = lockedProvider === "dodo"
     ? paymentSession?.providerPayload?.taxInclusive === false
     : !lockedProvider && providerConfig.dodo?.enabled;
@@ -1983,42 +2008,46 @@ export default function Payment({ hideFooter = false }) {
                   ) : null}
                 </dd>
               </div>
-              {referralPercent > 0 && (
+              {referralPercent > 0 && (!lockedProvider || referralDiscountAmount > 0) && (
                 <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
                   <dt className="text-ink-muted">Referral</dt>
                   <dd className="font-semibold text-ink sm:text-right">
-                    {referral?.code} · −${referralDiscountAmount.toFixed(2)}
+                    {summaryReferralCode} · −${referralDiscountAmount.toFixed(2)}
                   </dd>
                 </div>
               )}
-              {couponDiscountAmount > 0 && coupon && (
+              {couponDiscountAmount > 0 && summaryCouponCode && (
                 <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
                   <dt className="text-ink-muted">Coupon</dt>
                   <dd className="font-semibold text-ink sm:text-right">
-                    {coupon.code} · −${couponDiscountAmount.toFixed(2)}
+                    {summaryCouponCode} · −${couponDiscountAmount.toFixed(2)}
                   </dd>
                 </div>
               )}
               <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr] sm:items-baseline">
                 <dt className="font-semibold text-ink">{dodoTaxExclusive ? "Subtotal" : "Total"}</dt>
                 <dd className="sm:text-right">
-                  {(referralPercent > 0 || couponDiscountAmount > 0) && (
+                  {summaryDiscounted && (
                     <span className="mr-2 text-sm text-ink-secondary line-through">
-                      ${baseAmount.toFixed(2)}
+                      ${summaryBaseAmount.toFixed(2)}
                     </span>
                   )}
                   <span className="text-2xl font-extrabold text-accent">
-                    ${finalAmount.toFixed(2)} USD
+                    {finalAmount === null ? "Unavailable" : `$${finalAmount.toFixed(2)} USD`}
                   </span>
                 </dd>
               </div>
             </dl>
             <p className="mt-1 text-xs text-ink-muted sm:text-right">
-              {quoteLoading
-                ? "Confirming the current price..."
-                : quoteFingerprint
+              {lockedProvider
+                ? lockedPriceAvailable
                   ? "Price confirmed for this session."
-                  : "Price confirmation is unavailable. Payment is disabled."}
+                  : "Session price unavailable. Check payment status or change payment method."
+                : quoteLoading
+                  ? "Confirming the current price..."
+                  : quoteFingerprint
+                    ? "Price confirmed for this session."
+                    : "Price confirmation is unavailable. Payment is disabled."}
             </p>
             <div className="space-y-1">
               {isFree && (
@@ -2061,9 +2090,9 @@ export default function Payment({ hideFooter = false }) {
                     if (referralError) setReferralError("");
                   }}
                   disabled={creatingFree || preApplyingCodes || checkingCode || !!lockedProvider}
-                  aria-invalid={referralError ? "true" : "false"}
+                  aria-invalid={!lockedProvider && referralError ? "true" : "false"}
                   aria-describedby={
-                    referralError ? "payment-referral-code-error" : undefined
+                    !lockedProvider && referralError ? "payment-referral-code-error" : undefined
                   }
                   placeholder="e.g. vouch"
                   className="w-60 bg-surface-input border border-line-input rounded-md px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-border focus-visible:ring-offset-2 focus-visible:ring-offset-surface-card disabled:opacity-60"
@@ -2081,7 +2110,7 @@ export default function Payment({ hideFooter = false }) {
                   <span className="glow-line glow-line-left" />
                 </button>
               </div>
-              {referralError && !validating && (
+              {!lockedProvider && referralError && !validating && (
                 <p
                   id="payment-referral-code-error"
                   role="alert"
@@ -2109,9 +2138,9 @@ export default function Payment({ hideFooter = false }) {
                     if (couponError) setCouponError("");
                   }}
                   disabled={creatingFree || preApplyingCodes || checkingCode || !!lockedProvider}
-                  aria-invalid={couponError ? "true" : "false"}
+                  aria-invalid={!lockedProvider && couponError ? "true" : "false"}
                   aria-describedby={
-                    couponError ? "payment-coupon-code-error" : undefined
+                    !lockedProvider && couponError ? "payment-coupon-code-error" : undefined
                   }
                   placeholder="e.g. BF10"
                   className="w-60 bg-surface-input border border-line-input rounded-md px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-border focus-visible:ring-offset-2 focus-visible:ring-offset-surface-card disabled:opacity-60"
@@ -2131,7 +2160,7 @@ export default function Payment({ hideFooter = false }) {
                   <span className="glow-line glow-line-left" />
                 </button>
 
-                {coupon && (
+                {summaryCouponCode && (
                   <button
                     onClick={() => {
                       if (creatingFree || validating || validatingCoupon) return;
@@ -2146,7 +2175,7 @@ export default function Payment({ hideFooter = false }) {
                   </button>
                 )}
               </div>
-              {couponError && !validatingCoupon && (
+              {!lockedProvider && couponError && !validatingCoupon && (
                 <p
                   id="payment-coupon-code-error"
                   role="alert"
@@ -2155,7 +2184,7 @@ export default function Payment({ hideFooter = false }) {
                   {couponError}
                 </p>
               )}
-              {coupon &&
+              {!lockedProvider && coupon &&
                 coupon.canCombineWithReferral === false &&
                 referral && (
                   <p className="text-xs text-warning-text mt-1">
