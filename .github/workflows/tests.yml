@@ -15,7 +15,7 @@ concurrency:
 jobs:
   jest:
     name: Jest
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +37,7 @@ jobs:
 
   playwright:
     name: Playwright ${{ matrix.suite.name }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -108,7 +108,7 @@ jobs:
 
   routes:
     name: Playwright creator portal and API routes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       ROO_TEST_HOST: 127.0.0.1
@@ -144,7 +144,7 @@ jobs:
 
   native:
     name: Native PostgreSQL 17 suites
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       ROO_TEST_HOST: 127.0.0.1
@@ -234,7 +234,7 @@ jobs:
 
   revalidation:
     name: Playwright revalidation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       ROO_TEST_HOST: 127.0.0.1
