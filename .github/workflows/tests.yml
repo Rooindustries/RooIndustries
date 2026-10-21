@@ -32,6 +32,7 @@ jobs:
           TOOLING_NETWORK_GUARD: "1"
           NODE_OPTIONS: --import=${{ github.workspace }}/scripts/lib/test-target-safety.mjs
       - run: npm run test:tooling:dependencies
+      - run: npm run test:reconcile-payments
       - run: npm run check:seo
       - run: npm run check:supabase:migrations
 

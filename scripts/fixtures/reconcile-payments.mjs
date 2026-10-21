@@ -1,0 +1,710 @@
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const host = process.env.ROO_TEST_HOST || '127.0.0.1';
+assert.match(host, /^(127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d+\.\d+)$/);
+const artifactDir = path.resolve(process.env.ROO_RECONCILE_TEST_ARTIFACT || 'test-results/roo-498/daily-bridge');
+fs.mkdirSync(artifactDir, { recursive: true });
+const scratch = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'roo-reconcile-e2e-'));
+fs.chmodSync(scratch, 0o700);
+const actualCurl = execFileSync('which', ['curl'], { encoding: 'utf8' }).trim();
+const baseline = process.env.ROO_RECONCILE_BASELINE_SCRIPT;
+const selected = process.argv.find((arg) => arg.startsWith('--case='))?.slice(7).split(',');
+const scope = {
+  parentId: 'd5c5564e-7966-4c7a-b360-d193ee81296c',
+  projectId: 'edd95e95-8bc5-473c-a116-dc5646d79a87',
+  teamId: '9c69fa12-a33b-4072-99e8-a53f6f378104',
+};
+const today = new Date().toISOString().slice(0, 10);
+const tomorrow = new Date(Date.parse(today) + 86400000).toISOString().slice(0, 10);
+const token = crypto.randomBytes(24).toString('hex');
+const sourceHashes = Object.fromEntries([
+  'scripts/reconcile-payments.sh', 'scripts/lib/reconcile-linear.jq',
+  'scripts/test-reconcile-payments.sh', 'scripts/fixtures/reconcile-payments.mjs',
+  'docs/payment-reconciliation.md', 'package.json', '.github/workflows/tests.yml',
+].filter((name) => fs.existsSync(path.join(root, name))).map((name) => [
+  name, crypto.createHash('sha256').update(fs.readFileSync(path.join(root, name))).digest('hex'),
+]));
+const results = [];
+const children = new Set();
+let origin, current;
+const iso = () => new Date().toISOString();
+const envelope = (body) => ({ ok: true, data: { content: [{ type: 'text', text: JSON.stringify(body) }] } });
+const item = (key, reason = 'payment_without_booking', ref = 'record.fixture') => ({
+  key, id: key.slice(key.indexOf(':') + 1), ref, amount: '9.99', currency: 'USD', reason,
+});
+const windowReport = (items = [], complete = {}) => {
+  const at = Date.now();
+  return {
+    ok: true, at: new Date(at).toISOString(),
+    from: new Date(at - 72 * 3600000).toISOString(), to: new Date(at - 1800000).toISOString(),
+    mode: 'window', checks: [],
+    complete: { payments: true, bookings: true, records: true, items: items.length <= 50, ...complete },
+    count: items.length, items: items.slice(0, 50),
+  };
+};
+const check = (key, state = 'unknown', observations = [], aliases = [key]) => ({
+  key, state, keys: [...new Set([key, ...aliases])], items: observations,
+});
+const recovered = (key, id = 'fixture') => check(key, 'recovered', [], [
+  'payment:' + id, 'record:record.' + id, 'booking:booking.' + id,
+]);
+const freshState = () => ({
+  issues: [], comments: [], updates: [], calls: [], requests: [], runs: [], checks: {},
+  window: windowReport(), pageSize: 100, failures: [], date: today,
+  reportedCount: null, scopeFault: null, duplicateCursor: false, gate: null,
+});
+const managedDescription = (key) =>
+  '**Goal**: Resolve this payment, booking or referral-credit mismatch.\n\n' +
+  '**Done when**: The read-only payment audit confirms this entity is consistent.\n\n' +
+  '**Evidence**:\nReconciliation key: ' + key + '\n\n' +
+  '**Constraints**: Keep payment and booking data unchanged.\n\nSession: RooIndustries payment reconciliation';
+const seedIssue = (key, extra = {}, metaExtra = {}) => {
+  const uuid = crypto.randomUUID();
+  const number = current.issues.length + 9001;
+  const createdAt = '2026-01-01T00:00:00.000Z';
+  const issue = {
+    id: 'ROO-' + number, uuid, ...scope, description: managedDescription(key),
+    status: 'Backlog', statusType: 'backlog', archivedAt: null, createdAt, updatedAt: createdAt,
+    url: 'https://linear.app/rooindustries/issue/ROO-' + number, ...extra,
+  };
+  current.issues.push(issue);
+  const metadata = {
+    version: 1, issueId: uuid, primary: key, keys: [key], firstSeen: createdAt, lastSeen: createdAt,
+    lastCheckedAt: createdAt, state: 'unresolved', run: today, observations: [], ...metaExtra,
+  };
+  current.comments.push({
+    id: crypto.randomUUID(), issueId: uuid,
+    body: 'Payment reconciliation status\nReconciliation: ' + JSON.stringify(metadata),
+    createdAt, updatedAt: createdAt, author: { name: 'Fixture operator' }, attachments: [],
+    onBehalfOf: null, parentId: null, quotedText: null, resolvedAt: null,
+  });
+  return issue;
+};
+const page = (rows, args, field) => {
+  const start = args.cursor ? rows.findIndex((row) => (row.uuid || row.id) === args.cursor) + 1 : 0;
+  const entries = rows.slice(start, start + Math.min(args.limit, current.pageSize));
+  const hasNextPage = start + entries.length < rows.length;
+  return {
+    [field]: entries, hasNextPage,
+    ...(hasNextPage ? { cursor: current.duplicateCursor && args.cursor ? args.cursor : entries.at(-1).uuid || entries.at(-1).id } : {}),
+  };
+};
+const failureFor = (method, args) => current.failures.find((failure) =>
+  !failure.used && failure.method === method && (!failure.when || failure.when(args)));
+const linear = async (method, args) => {
+  current.calls.push({ method, args: structuredClone(args) });
+  if (method === 'get_issue' && args.id === 'ROO-498' && current.gate) {
+    const gate = current.gate;
+    current.gate = null;
+    gate.enter();
+    await gate.release;
+  }
+  const failure = failureFor(method, args);
+  if (failure && !failure.commit) {
+    failure.used = true;
+    return { status: failure.status || 503, body: failure.body || { ok: false } };
+  }
+  let result;
+  if (method === 'get_issue') {
+    result = args.id === 'ROO-498'
+      ? { id: 'ROO-498', uuid: scope.parentId, projectId: scope.projectId, teamId: scope.teamId }
+      : current.issues.find((issue) => issue.uuid === args.id || issue.id === args.id);
+    if (current.scopeFault === 'parent' && args.id === 'ROO-498') result = { ...result, uuid: crypto.randomUUID() };
+    if (current.scopeFault === 'root-team' && args.id === 'ROO-498') result = { ...result, teamId: crypto.randomUUID() };
+  } else if (method === 'list_issues') {
+    assert.equal(args.parentId, scope.parentId);
+    assert.equal(args.project, scope.projectId);
+    assert.equal(args.team, scope.teamId);
+    assert.equal(args.includeArchived, true);
+    assert.equal(args.limit, 100);
+    assert.deepEqual(args.fields, ['id', 'uuid', 'description', 'projectId', 'teamId', 'parentId', 'status', 'statusType', 'archivedAt', 'createdAt', 'updatedAt', 'url']);
+    result = page(current.issues, args, 'issues');
+    if (current.scopeFault && current.issues.length) {
+      const field = { project: 'projectId', team: 'teamId', child: 'parentId' }[current.scopeFault];
+      if (field) result.issues = result.issues.map((issue) => ({ ...issue, [field]: crypto.randomUUID() }));
+    }
+  } else if (method === 'list_comments') {
+    assert.ok(current.issues.some((issue) => issue.uuid === args.issueId));
+    assert.equal(args.limit, 100);
+    assert.equal(args.orderBy, 'updatedAt');
+    result = page(current.comments.filter((comment) => comment.issueId === args.issueId), args, 'comments');
+  } else if (method === 'get_status_updates') {
+    assert.equal(args.type, 'project');
+    assert.equal(args.project, scope.projectId);
+    assert.equal(args.orderBy, 'createdAt');
+    assert.equal(args.createdAt, current.date + 'T00:00:00Z');
+    result = page(current.updates.filter((update) => update.createdAt.slice(0, 10) >= current.date), args, 'statusUpdates');
+  } else if (method === 'save_issue') {
+    assert.equal(Object.hasOwn(args, 'labels'), false);
+    if (args.id) {
+      assert.deepEqual(Object.keys(args).sort(), ['id', 'state']);
+      result = current.issues.find((issue) => issue.uuid === args.id);
+      assert.ok(result);
+      result.status = args.state;
+      result.statusType = args.state === 'Done' ? 'completed' : 'backlog';
+      result.updatedAt = iso();
+    } else {
+      assert.equal(args.project, scope.projectId);
+      assert.equal(args.team, scope.teamId);
+      assert.equal(args.parentId, scope.parentId);
+      assert.equal(args.state, 'Backlog');
+      assert.equal(args.assignee, 'me');
+      assert.equal(args.priority, 1);
+      assert.ok(args.description.includes('Reconciliation key: '));
+      result = {
+        id: 'ROO-' + (9001 + current.issues.length), uuid: crypto.randomUUID(), ...scope,
+        description: args.description, status: 'Backlog', statusType: 'backlog',
+        archivedAt: null, createdAt: iso(), updatedAt: iso(),
+      };
+      result.url = 'https://linear.app/rooindustries/issue/' + result.id;
+      current.issues.push(result);
+    }
+  } else if (method === 'save_comment') {
+    if (args.id) {
+      assert.deepEqual(Object.keys(args).sort(), ['body', 'id']);
+      result = current.comments.find((comment) => comment.id === args.id);
+      assert.ok(result);
+      assert.ok(result.body.startsWith('Payment reconciliation status\n'));
+      result.body = args.body;
+      result.updatedAt = iso();
+    } else {
+      assert.deepEqual(Object.keys(args).sort(), ['body', 'issueId']);
+      assert.ok(current.issues.some((issue) => issue.uuid === args.issueId));
+      result = {
+        id: crypto.randomUUID(), issueId: args.issueId, body: args.body,
+        createdAt: iso(), updatedAt: iso(), author: { name: 'Fixture operator' },
+        attachments: [], quotedText: null, parentId: null, onBehalfOf: null, resolvedAt: null,
+      };
+      current.comments.push(result);
+    }
+  } else if (method === 'save_status_update') {
+    assert.equal(Object.hasOwn(args, 'health'), false);
+    if (args.id) {
+      assert.deepEqual(Object.keys(args).sort(), ['body', 'id']);
+      result = current.updates.find((update) => update.id === args.id);
+      assert.ok(result);
+      result.body = args.body;
+      result.updatedAt = iso();
+    } else {
+      assert.deepEqual(Object.keys(args).sort(), ['body', 'project', 'type']);
+      assert.equal(args.type, 'project');
+      assert.equal(args.project, scope.projectId);
+      result = {
+        id: crypto.randomUUID(), type: 'project', project: { id: scope.projectId },
+        body: args.body, createdAt: current.date + 'T12:00:00.000Z', updatedAt: iso(),
+      };
+      result.url = 'https://linear.app/rooindustries/project/roo-website/activity#project-update-' + result.id;
+      current.updates.push(result);
+    }
+  } else throw new Error('Unsupported fixture method');
+  if (failure) {
+    failure.used = true;
+    return { status: failure.status || 503, body: failure.body || { ok: false } };
+  }
+  return { status: 200, body: envelope(result || {}) };
+};
+const server = http.createServer(async (req, res) => {
+  try {
+    const url = new URL(req.url, origin);
+    if (url.pathname === '/api/payment/report') {
+      assert.equal(req.method, 'GET');
+      assert.equal(req.headers.authorization, 'Bearer ' + token);
+      const keys = url.searchParams.has('check') ? JSON.parse(url.searchParams.get('check')) : null;
+      current.requests.push({ method: req.method, path: url.pathname, checks: keys });
+      if (keys) {
+        const outcomes = keys.map((key) => current.checks[key] || check(key));
+        const items = [...new Map(outcomes.flatMap((outcome) => outcome.items).map((entry) => [JSON.stringify(entry), entry])).values()];
+        const body = {
+          ...windowReport(), mode: 'checks', checks: outcomes,
+          complete: { payments: false, bookings: false, records: false, items: items.length <= 50 },
+          count: items.length, items: items.slice(0, 50),
+        };
+        const failure = failureFor('checks', { keys });
+        if (failure) {
+          failure.used = true;
+          res.writeHead(failure.status || 503, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(failure.body || {}));
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(body));
+      } else {
+        const body = typeof current.window === 'function' ? current.window() : current.window;
+        if (current.reportedCount !== null) body.count = current.reportedCount;
+        res.writeHead(current.sourceStatus || 200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(body));
+      }
+      return;
+    }
+    assert.ok(url.pathname.startsWith('/linear/'));
+    assert.equal(req.method, 'POST');
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const args = JSON.parse(Buffer.concat(chunks).toString());
+    const response = await linear(url.pathname.slice(8), args);
+    res.writeHead(response.status, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(response.body));
+  } catch {
+    res.writeHead(500, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, fixtureError: 'fixture_contract_invalid' }));
+  }
+});
+await new Promise((resolve) => server.listen(0, host, resolve));
+origin = 'http://' + host + ':' + server.address().port;
+const bin = path.join(scratch, 'bin');
+fs.mkdirSync(bin, { mode: 0o700 });
+fs.writeFileSync(path.join(bin, 'curl'), [
+  '#!/usr/bin/env bash', 'set -euo pipefail', 'found=0', 'config_next=0', 'config_stdin=0',
+  'for arg in "$@"; do',
+  '  if [[ "$config_next" == 1 ]]; then [[ "$arg" == - ]] || exit 97; config_stdin=1; config_next=0; continue; fi',
+  '  case "$arg" in',
+  '    --config) config_next=1 ;;',
+  '    -K*|--config=*) printf "%s\\n" blocked >> "$ROO_RECONCILE_GUARD_BLOCKED"; exit 97 ;;',
+  '    --url=*) [[ "${arg#--url=}" == "$ROO_RECONCILE_FIXTURE_ORIGIN/"* ]] || { printf "%s\\n" blocked >> "$ROO_RECONCILE_GUARD_BLOCKED"; exit 97; }; found=1 ;;',
+  '    -L|--location|--location-trusted) printf "%s\\n" blocked >> "$ROO_RECONCILE_GUARD_BLOCKED"; exit 97 ;;',
+  '    http://*|https://*)',
+  '      [[ "$arg" == "$ROO_RECONCILE_FIXTURE_ORIGIN/"* ]] || { printf "%s\\n" blocked >> "$ROO_RECONCILE_GUARD_BLOCKED"; exit 97; }',
+  '      found=1 ;;',
+  '  esac',
+  'done',
+  '[[ "$found" == 1 ]] || exit 97',
+  'if [[ "$config_stdin" == 1 ]]; then',
+  '  config=$(cat)',
+  '  expected=$(printf \'header = "Authorization: Bearer %s"\' "$(cat "$HOME/.config/roo/reconcile-token")")',
+  '  [[ "$config" == "$expected" ]] || { printf "%s\\n" blocked >> "$ROO_RECONCILE_GUARD_BLOCKED"; exit 97; }',
+  '  printf "%s\\n" "$config" | "$ROO_RECONCILE_REAL_CURL" "$@"',
+  '  exit "$?"',
+  'fi',
+  'exec "$ROO_RECONCILE_REAL_CURL" "$@"', '',
+].join('\n'), { mode: 0o700 });
+fs.writeFileSync(path.join(bin, 'executor'), [
+  '#!/usr/bin/env bash', 'set -euo pipefail',
+  'if [[ "${1:-}" == "--reconcile-test-handshake" ]]; then',
+  '  [[ "${2:-}" == "$ROO_RECONCILE_FIXTURE_ORIGIN" ]] || exit 96',
+  '  jq -nc --arg origin "$ROO_RECONCILE_FIXTURE_ORIGIN" \'{rooReconcileFixture:1,origin:$origin}\'',
+  '  exit 0', 'fi',
+  '[[ "$#" == 7 && "$1" == call && "$2" == tools && "$3" == linear && "$4" == org && "$5" == linear ]] || exit 96',
+  'case "$6" in get_issue|list_issues|list_comments|get_status_updates|save_issue|save_comment|save_status_update) ;; *) exit 96 ;; esac',
+  'printf "%s" "$7" | curl --silent --show-error --fail-with-body --max-time 20 --header "Content-Type: application/json" --data-binary @- "$ROO_RECONCILE_FIXTURE_ORIGIN/linear/$6"', '',
+].join('\n'), { mode: 0o700 });
+const homeFor = (name) => {
+  const home = path.join(scratch, name);
+  fs.mkdirSync(path.join(home, '.config/roo'), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(home, '.config/roo/reconcile-token'), token + '\n', { mode: 0o600 });
+  return home;
+};
+const invoke = (home, options = {}) => {
+  const executable = baseline || path.join(root, 'scripts/reconcile-payments.sh');
+  const env = {
+    PATH: bin + ':/usr/bin:/bin', HOME: home, TMPDIR: scratch, LC_ALL: 'C',
+    ROO_RECONCILE_TEST_MODE: '1', ROO_RECONCILE_DATE: current.date,
+    ROO_RECONCILE_URL: origin + '/api/payment/report',
+    ROO_RECONCILE_EXECUTOR_BIN: path.join(bin, 'executor'),
+    ROO_RECONCILE_REAL_CURL: actualCurl, ROO_RECONCILE_FIXTURE_ORIGIN: origin,
+    ROO_RECONCILE_GUARD_BLOCKED: path.join(home, 'blocked'),
+    ...options.env,
+  };
+  return new Promise((resolve, reject) => {
+    const child = spawn('/bin/bash', [executable], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    children.add(child);
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    const timer = setTimeout(() => child.kill('SIGTERM'), 180000);
+    child.once('error', reject);
+    child.once('exit', (code, signal) => {
+      clearTimeout(timer);
+      children.delete(child);
+      assert.equal((stdout + stderr).includes(token), false, 'Fixture bearer leaked');
+      const result = { code, signal, stdout, stderr };
+      current.runs.push(result);
+      resolve(result);
+    });
+  });
+};
+const metadata = (issue) => {
+  const comments = current.comments.filter((comment) => comment.issueId === issue.uuid && comment.body.startsWith('Payment reconciliation status\n'));
+  assert.equal(comments.length, 1);
+  return JSON.parse(comments[0].body.split('\n')[1].slice('Reconciliation: '.length));
+};
+const writes = () => current.calls.filter((call) => call.method.startsWith('save_'));
+const fault = () => item('payment:fixture');
+const run = async (name, fn) => {
+  if (selected && !selected.includes(name)) return;
+  current = freshState();
+  const home = homeFor(name);
+  let passed = false, error;
+  try { await fn(home); passed = true; }
+  catch (cause) { error = cause.message; }
+  const blocked = fs.existsSync(path.join(home, 'blocked')) ? fs.readFileSync(path.join(home, 'blocked'), 'utf8').trim().split('\n').length : 0;
+  results.push({ name, passed, error, blockedRequests: blocked, expectedBlockedRequests: current.expectedBlocked || 0, calls: current.calls, sourceRequests: current.requests,
+    issues: current.issues, comments: current.comments, updates: current.updates, runs: current.runs });
+};
+try {
+  if (baseline) {
+    await run('legacy-daily-record', async (home) => {
+      current.window = windowReport([fault()]);
+      const result = await invoke(home);
+      assert.equal(result.code, 0);
+      assert.equal(fs.existsSync(path.join(home, '.local/share/mission-control/alerts/site-reconcile.json')), true);
+      assert.equal(current.requests.length, 1);
+      assert.equal(current.updates.length, 1, 'Daily project record missing despite successful local alert');
+      assert.equal(current.issues.length, 1);
+    });
+  } else {
+    await run('clean-record', async (home) => {
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(current.updates.length, 1);
+      assert.equal(current.issues.length, 0);
+      assert.match(current.updates[0].body, /clear/);
+      assert.equal(JSON.parse(current.runs[0].stdout).complete, true);
+    });
+    await run('original-reasons-and-owner-review', async (home) => {
+      const reasons = [
+        'payment_without_booking', 'booking_without_payment', 'amount_mismatch', 'dodo_currency_mismatch',
+        'refund_not_applied', 'commission_mismatch', 'payment_without_record', 'owner_review_dodo_currency_mismatch',
+        'owner_review_provider_order_not_found_after_late_capture_wat',
+        'owner_review_provider_partial_refund_details_missing_owner_r',
+        'owner_review_unknown',
+      ];
+      current.window = windowReport(reasons.map((reason, index) => item('payment:case-' + index, reason)));
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(current.issues.length, reasons.length);
+      for (const issue of current.issues) assert.equal(metadata(issue).state, 'unresolved');
+    });
+    await run('same-day-retry-and-next-day', async (home) => {
+      current.window = windowReport([fault()]);
+      assert.equal((await invoke(home)).code, 0);
+      current.checks['payment:fixture'] = check('payment:fixture', 'unresolved', [fault()]);
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(current.updates.length, 1);
+      assert.equal(current.issues.length, 1);
+      assert.equal(current.comments.length, 1);
+      current.date = tomorrow;
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(current.updates.length, 2);
+      assert.equal(current.issues.length, 1);
+    });
+    await run('reason-ref-shift-and-manual-text', async (home) => {
+      const issue = seedIssue('payment:fixture', { status: 'In Progress', statusType: 'started' });
+      issue.description += '\nHuman investigation notes stay here.';
+      const description = issue.description;
+      const human = { id: crypto.randomUUID(), issueId: issue.uuid, body: 'Human note; do not edit.', createdAt: iso(), updatedAt: iso(), attachments: [] };
+      current.comments.push(human);
+      const humanCopy = structuredClone(human);
+      current.window = windowReport([item('payment:fixture', 'refund_not_applied', 'booking.changed')]);
+      current.checks['payment:fixture'] = check('payment:fixture', 'unresolved', current.window.items);
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(current.issues.length, 1);
+      assert.equal(issue.description, description);
+      assert.deepEqual(human, humanCopy);
+      assert.equal(issue.status, 'In Progress');
+      assert.equal(metadata(issue).observations[0].reason, 'refund_not_applied');
+    });
+    await run('aged-out-unknown-and-exact-recovery', async (home) => {
+      const first = seedIssue('payment:fixture');
+      const second = seedIssue('booking:missing');
+      const firstSeen = metadata(second).firstSeen;
+      const lastSeen = metadata(second).lastSeen;
+      current.checks['payment:fixture'] = recovered('payment:fixture');
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(first.status, 'Done');
+      assert.equal(second.status, 'Backlog');
+      assert.equal(metadata(second).state, 'unknown');
+      assert.equal(metadata(second).firstSeen, firstSeen);
+      assert.equal(metadata(second).lastSeen, lastSeen);
+      assert.match(current.updates[0].body, /incomplete/);
+    });
+    await run('canonical-extra-deleted', async (home) => {
+      const canonical = seedIssue('payment:fixture');
+      const extra = seedIssue('booking:extra');
+      current.checks['payment:fixture'] = recovered('payment:fixture');
+      current.checks['booking:extra'] = check('booking:extra', 'unresolved', [item('booking:extra', 'payment_record_mismatch')]);
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(canonical.status, 'Done');
+      assert.equal(extra.status, 'Backlog');
+      current.checks['booking:extra'] = check('booking:extra');
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(extra.status, 'Backlog');
+      assert.equal(metadata(extra).state, 'unknown');
+    });
+    await run('closed-recurrence-reopen', async (home) => {
+      const issue = seedIssue('payment:fixture', { status: 'Done', statusType: 'completed' });
+      current.window = windowReport([fault()]);
+      current.checks['payment:fixture'] = check('payment:fixture', 'unresolved', [fault()]);
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(current.issues.length, 1);
+      assert.equal(issue.status, 'Backlog');
+    });
+    await run('closed-alias-needs-fresh-proof', async (home) => {
+      const issue = seedIssue('record:record.fixture', { status: 'Done', statusType: 'completed' }, { keys: ['record:record.fixture', 'payment:fixture'] });
+      current.window = windowReport([fault()]);
+      current.checks['record:record.fixture'] = check('record:record.fixture', 'unresolved', [fault()], ['record:record.fixture', 'payment:fixture']);
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(current.issues.length, 1);
+      assert.equal(issue.status, 'Backlog');
+    });
+    await run('caps-scans-and-held-identity', async (home) => {
+      const identity = seedIssue('scan:identity-invalid');
+      const items = Array.from({ length: 51 }, (_, index) => item('payment:cap-' + index));
+      current.window = windowReport(items, { payments: false, bookings: false, records: false });
+      assert.equal((await invoke(home)).code, 0);
+      for (const key of ['scan:items', 'scan:dodo-payments', 'scan:dodo-bookings', 'scan:dodo-records']) {
+        assert.ok(current.issues.some((issue) => metadata(issue).primary === key));
+      }
+      assert.equal(JSON.parse(current.runs[0].stdout).reportedCount, 51);
+      current.window = windowReport();
+      for (let index = 0; index < 50; index += 1) current.checks['payment:cap-' + index] = recovered('payment:cap-' + index, 'cap-' + index);
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(identity.status, 'Backlog');
+      for (const issue of current.issues.filter((entry) => ['scan:items', 'scan:dodo-payments', 'scan:dodo-bookings', 'scan:dodo-records'].includes(metadata(entry).primary))) assert.equal(issue.status, 'Done');
+    });
+    await run('target-rotation', async (home) => {
+      for (let index = 0; index < 201; index += 1) seedIssue('booking:rotation-' + String(index).padStart(3, '0'), {}, {
+        lastCheckedAt: new Date(Date.parse('2026-01-01') + index * 1000).toISOString(),
+      });
+      assert.equal((await invoke(home)).code, 0);
+      const first = current.requests.filter((request) => request.checks).flatMap((request) => request.checks);
+      assert.equal(first.length, 200);
+      assert.equal(first.includes('booking:rotation-200'), false);
+      assert.ok(current.issues.some((issue) => metadata(issue).primary === 'scan:targets'));
+      const count = current.requests.length;
+      assert.equal((await invoke(home)).code, 0);
+      const second = current.requests.slice(count).filter((request) => request.checks).flatMap((request) => request.checks);
+      assert.equal(second[0], 'booking:rotation-200');
+      assert.equal(second.length, 200);
+    });
+    await run('scan-flags-independent', async (home) => {
+      const fields = ['payments', 'bookings', 'records'];
+      const issues = fields.map((field) => seedIssue('scan:dodo-' + field));
+      const complete = { payments: false, bookings: false, records: false };
+      for (let index = 0; index < fields.length; index += 1) {
+        complete[fields[index]] = true;
+        current.window = windowReport([], complete);
+        assert.equal((await invoke(home)).code, 0);
+        for (let other = 0; other < issues.length; other += 1) assert.equal(issues[other].status, other <= index ? 'Done' : 'Backlog');
+      }
+    });
+    await run('unverified-closed-alias-held', async (home) => {
+      const issue = seedIssue('record:record.fixture', { status: 'Done', statusType: 'completed' }, { keys: ['record:record.fixture', 'payment:fixture'] });
+      current.window = windowReport([fault()]);
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(issue.status, 'Done');
+      assert.equal(current.issues.filter((entry) => entry.description.includes('Reconciliation key: payment:fixture')).length, 0);
+      assert.match(current.updates[0].body, /incomplete/);
+    });
+    for (const method of ['save_issue', 'save_status_update', 'save_comment']) {
+      await run('committed-' + method + '-retry', async (home) => {
+        current.window = windowReport([fault()]);
+        current.failures.push({ method, commit: true, status: 504 });
+        assert.notEqual((await invoke(home)).code, 0);
+        current.checks['payment:fixture'] = check('payment:fixture', 'unresolved', [fault()]);
+        assert.equal((await invoke(home)).code, 0);
+        assert.equal(current.issues.length, 1);
+        assert.equal(current.updates.length, 1);
+        assert.equal(current.comments.length, 1);
+      });
+    }
+    await run('comment-failure-before-close', async (home) => {
+      const issue = seedIssue('payment:fixture');
+      current.checks['payment:fixture'] = recovered('payment:fixture');
+      current.failures.push({ method: 'save_comment' });
+      assert.notEqual((await invoke(home)).code, 0);
+      assert.equal(issue.status, 'Backlog');
+    });
+    await run('state-failure-retains-retry', async (home) => {
+      const issue = seedIssue('payment:fixture');
+      current.checks['payment:fixture'] = recovered('payment:fixture');
+      current.failures.push({ method: 'save_issue', when: (args) => args.state === 'Done' });
+      assert.notEqual((await invoke(home)).code, 0);
+      assert.equal(issue.status, 'Backlog');
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(issue.status, 'Done');
+      assert.equal(current.updates.length, 1);
+    });
+    await run('readback-mismatch', async (home) => {
+      const issue = seedIssue('payment:fixture');
+      current.checks['payment:fixture'] = recovered('payment:fixture');
+      current.failures.push({ method: 'list_comments', when: () => current.calls.some((call) => call.method === 'save_comment'), status: 200,
+        body: envelope({ comments: [], hasNextPage: false }) });
+      assert.notEqual((await invoke(home)).code, 0);
+      assert.equal(issue.status, 'Backlog');
+    });
+    await run('state-readback-mismatch', async (home) => {
+      const issue = seedIssue('payment:fixture');
+      current.checks['payment:fixture'] = recovered('payment:fixture');
+      current.failures.push({ method: 'get_issue', when: () => current.calls.some((call) => call.method === 'save_issue' && call.args.state === 'Done'), status: 200,
+        body: envelope({ ...issue, status: 'Backlog', statusType: 'backlog' }) });
+      assert.notEqual((await invoke(home)).code, 0);
+      assert.equal(JSON.parse(current.runs[0].stdout).complete, false);
+    });
+    await run('update-readback-mismatch', async (home) => {
+      current.failures.push({ method: 'get_status_updates', when: () => current.calls.some((call) => call.method === 'save_status_update'), status: 200,
+        body: envelope({ statusUpdates: [], hasNextPage: false }) });
+      assert.notEqual((await invoke(home)).code, 0);
+      assert.equal(current.updates.length, 1);
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(current.updates.length, 1);
+    });
+    await run('partial-cli-payload', async (home) => {
+      current.failures.push({ method: 'get_issue', status: 200,
+        body: envelope({ id: 'ROO-498', uuid: scope.parentId, projectId: scope.projectId, teamId: scope.teamId, errors: [{ message: 'fixture_partial_failure' }] }) });
+      assert.notEqual((await invoke(home)).code, 0);
+      assert.equal(writes().length, 0);
+    });
+    await run('duplicate-owned-comment', async (home) => {
+      const issue = seedIssue('payment:fixture');
+      current.comments.push({ ...structuredClone(current.comments[0]), id: crypto.randomUUID() });
+      const original = structuredClone(current.comments);
+      current.checks['payment:fixture'] = recovered('payment:fixture');
+      assert.notEqual((await invoke(home)).code, 0);
+      assert.equal(issue.status, 'Backlog');
+      assert.deepEqual(current.comments.filter((comment) => comment.issueId === issue.uuid), original);
+    });
+    for (const kind of ['project', 'team', 'child', 'parent', 'root-team']) {
+      await run('scope-' + kind, async (home) => {
+        seedIssue('payment:fixture');
+        current.scopeFault = kind;
+        assert.notEqual((await invoke(home)).code, 0);
+        assert.equal(writes().length, 0);
+      });
+    }
+    for (const kind of ['extra-field', 'pii', 'stale', 'reason', 'status', 'count']) {
+      await run('invalid-source-' + kind, async (home) => {
+        const issue = seedIssue('payment:fixture');
+        current.checks['payment:fixture'] = recovered('payment:fixture');
+        current.window = windowReport([fault()]);
+        if (kind === 'extra-field') current.window.customer = 'unexpected';
+        if (kind === 'pii') current.window.items[0].ref = 'customer@example.invalid';
+        if (kind === 'reason') current.window.items[0].reason = 'untrusted_reason';
+        if (kind === 'stale') current.window.at = '2020-01-01T00:00:00.000Z';
+        if (kind === 'status') current.sourceStatus = 503;
+        if (kind === 'count') current.reportedCount = 17;
+        assert.notEqual((await invoke(home)).code, 0);
+        assert.equal(issue.status, 'Backlog');
+        assert.ok(!writes().some((call) => JSON.stringify(call.args).includes('customer@example.invalid')));
+      });
+    }
+    await run('late-batch-failure-no-close', async (home) => {
+      const issues = Array.from({ length: 21 }, (_, index) => seedIssue('payment:late-' + index));
+      for (let index = 0; index < 21; index += 1) current.checks['payment:late-' + index] = recovered('payment:late-' + index, 'late-' + index);
+      let batch = 0;
+      current.failures.push({ method: 'checks', when: () => ++batch === 2 });
+      assert.notEqual((await invoke(home)).code, 0);
+      assert.ok(issues.every((issue) => issue.status === 'Backlog'));
+    });
+    await run('invalid-canonical-proof-no-close', async (home) => {
+      const issue = seedIssue('payment:fixture');
+      current.checks['payment:fixture'] = check('payment:fixture', 'recovered', [], ['payment:fixture']);
+      assert.notEqual((await invoke(home)).code, 0);
+      assert.equal(issue.status, 'Backlog');
+    });
+    await run('pagination', async (home) => {
+      current.pageSize = 2;
+      for (let index = 0; index < 5; index += 1) seedIssue('booking:page-' + index);
+      assert.equal((await invoke(home)).code, 0);
+      assert.ok(current.calls.filter((call) => call.method === 'list_issues').length >= 3);
+    });
+    await run('bad-pagination-cursor', async (home) => {
+      current.pageSize = 1;
+      current.duplicateCursor = true;
+      for (let index = 0; index < 3; index += 1) seedIssue('booking:page-' + index);
+      assert.notEqual((await invoke(home)).code, 0);
+      assert.equal(writes().length, 0);
+    });
+    await run('ambiguous-aliases', async (home) => {
+      const first = seedIssue('record:record.one', {}, { keys: ['record:record.one', 'payment:fixture'] });
+      const second = seedIssue('record:record.two', {}, { keys: ['record:record.two', 'payment:fixture'] });
+      current.window = windowReport([fault()]);
+      current.checks['record:record.one'] = check('record:record.one', 'unresolved', [fault()], ['record:record.one', 'payment:fixture']);
+      current.checks['record:record.two'] = check('record:record.two', 'unresolved', [fault()], ['record:record.two', 'payment:fixture']);
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(first.status, 'Backlog');
+      assert.equal(second.status, 'Backlog');
+      assert.equal(current.issues.filter((issue) => metadata(issue).primary === 'payment:fixture').length, 0);
+      assert.ok(current.issues.some((issue) => metadata(issue).primary === 'scan:linear-identity'));
+    });
+    await run('archived-recurrence', async (home) => {
+      const issue = seedIssue('payment:fixture', { archivedAt: iso(), status: 'Done', statusType: 'completed' });
+      current.window = windowReport([fault()]);
+      current.checks['payment:fixture'] = check('payment:fixture', 'unresolved', [fault()]);
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(issue.status, 'Done');
+      assert.equal(current.issues.filter((entry) => entry.description.includes('Reconciliation key: payment:fixture')).length, 1);
+      assert.match(current.updates[0].body, /incomplete/);
+    });
+    await run('canceled-recurrence-held', async (home) => {
+      const issue = seedIssue('payment:fixture', { status: 'Canceled', statusType: 'canceled' });
+      current.window = windowReport([fault()]);
+      current.checks['payment:fixture'] = check('payment:fixture', 'unresolved', [fault()]);
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(issue.status, 'Canceled');
+      assert.equal(current.issues.filter((entry) => entry.description.includes('Reconciliation key: payment:fixture')).length, 1);
+      assert.match(current.updates[0].body, /incomplete/);
+    });
+    await run('fake-connection-required', async (home) => {
+      assert.notEqual((await invoke(home, { env: { ROO_RECONCILE_EXECUTOR_BIN: '/usr/bin/true' } })).code, 0);
+      assert.equal(current.calls.length, 0);
+      assert.equal(current.requests.length, 0);
+    });
+    await run('missing-token-records-failure', async (home) => {
+      fs.unlinkSync(path.join(home, '.config/roo/reconcile-token'));
+      assert.notEqual((await invoke(home)).code, 0);
+      assert.equal(current.requests.length, 0);
+      assert.equal(current.updates.length, 1);
+      assert.match(current.updates[0].body, /unavailable/);
+    });
+    await run('test-mode-production-origin-refused', async (home) => {
+      assert.notEqual((await invoke(home, { env: { ROO_RECONCILE_URL: 'https://www.rooindustries.com/api/payment/report' } })).code, 0);
+      assert.equal(current.calls.length, 0);
+      assert.equal(current.requests.length, 0);
+    });
+    await run('curl-origin-guard', async (home) => {
+      current.expectedBlocked = 1;
+      const result = spawnSync(path.join(bin, 'curl'), ['--url=https://www.rooindustries.com/api/payment/report'], {
+        env: { PATH: '/usr/bin:/bin', HOME: home, ROO_RECONCILE_FIXTURE_ORIGIN: origin,
+          ROO_RECONCILE_REAL_CURL: actualCurl, ROO_RECONCILE_GUARD_BLOCKED: path.join(home, 'blocked') },
+      });
+      assert.equal(result.status, 97);
+      assert.equal(current.requests.length, 0);
+      assert.equal(current.calls.length, 0);
+    });
+    await run('concurrent-job', async (home) => {
+      let enter, release;
+      const entered = new Promise((resolve) => { enter = resolve; });
+      const released = new Promise((resolve) => { release = resolve; });
+      current.gate = { enter, release: released };
+      const first = invoke(home);
+      try {
+        await Promise.race([entered, new Promise((_, reject) => setTimeout(() => reject(new Error('First job never reached fixture')), 10000))]);
+        assert.equal((await invoke(home)).code, 75);
+      } finally { release(); }
+      assert.equal((await first).code, 0);
+      assert.equal(current.updates.length, 1);
+    });
+  }
+} finally {
+  for (const child of children) child.kill('SIGTERM');
+  server.closeAllConnections();
+  await new Promise((resolve) => server.close(resolve));
+  const evidence = {
+    ok: results.length > 0 && results.every((result) => result.passed && result.blockedRequests === result.expectedBlockedRequests), scope,
+    baselineSha256: baseline ? crypto.createHash('sha256').update(fs.readFileSync(baseline)).digest('hex') : null,
+    externalRequests: 0, servicesStopped: true, sourceHashes, results,
+  };
+  fs.writeFileSync(path.join(artifactDir, 'results.json'), JSON.stringify(evidence, null, 2) + '\n');
+  fs.rmSync(scratch, { recursive: true, force: true });
+  process.stdout.write(JSON.stringify({
+    ok: evidence.ok, cases: results.map(({ name, passed, error }) => ({ name, passed, error })),
+    artifact: path.join(artifactDir, 'results.json'), servicesStopped: true,
+  }) + '\n');
+  if (!evidence.ok) process.exitCode = 1;
+}

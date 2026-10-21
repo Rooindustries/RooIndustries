@@ -71,6 +71,8 @@
     "test:perf:cls": "node scripts/test-content-layout-shift.mjs",
     "test:perf:cls:states": "node scripts/test-content-layout-shift.mjs --states",
     "check:payment:runtime": "node scripts/diagnose-payment-runtime.js",
+    "reconcile:payments": "bash scripts/reconcile-payments.sh",
+    "test:reconcile-payments": "bash scripts/test-reconcile-payments.sh",
     "check:payment:webhooks": "node scripts/check-payment-webhooks.js",
     "check:payment:stack": "node scripts/check-payment-stack.mjs",
     "check:payment:integrity": "node scripts/check-payment-booking-integrity.mjs",
