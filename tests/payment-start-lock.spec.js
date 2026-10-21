@@ -835,3 +835,352 @@ resumeQuoteTest("a reserved checkout keeps manual review guidance without a futu
   const status = resume.evidence.calls.filter(call => call.path === "/api/payment/status");
   expect(status).toHaveLength(1); expect(status[0].authorization).toBe(`Bearer ${baseline.session.paymentAccessToken}`); expect(status[0].body).toEqual({});
 });
+
+const claimedStartTest = test.extend({
+  claimed: async ({ page, browser, flow, baseURL }, use, testInfo) => {
+    const evidence = { synthetic: true, setupComplete: false, phase: "setup", calls: [], requests: [],
+      snapshots: {}, pageErrors: [], aborted: [], handoffs: [], boundaries: {}, validationResponses: [] };
+    const enabled = { ...providers, paypal: { enabled: true, mode: "sandbox", clientId: "fixture-client" } };
+    const config = { provider: "dodo", upgrade: false, emptyPayload: false, fault: "" };
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const attach = (name, value) => testInfo.attach(`claimed-${name}`, {
+      body: JSON.stringify(value, null, 2), contentType: "application/json",
+    });
+    await page.addInitScript(() => {
+      window.__claimedSdk = [];
+      window.__claimedStorageFailures = [];
+    });
+    page.on("pageerror", error => evidence.pageErrors.push({ name: error.name, message: error.message }));
+    page.on("requestfailed", request => evidence.aborted.push({ url: request.url(), failure: request.failure() }));
+    page.on("response", async response => {
+      const url = new URL(response.url());
+      if (/^\/api\/ref\/validate(Referral|Coupon)$/.test(url.pathname)) {
+        evidence.validationResponses.push({ at: Date.now(), url: url.href, status: response.status(), data: await response.json() });
+      }
+    });
+    page.on("request", request => {
+      const url = new URL(request.url());
+      if (url.pathname.startsWith("/api/")) evidence.requests.push({ at: Date.now(), path: url.pathname,
+        query: url.search, body: request.postDataJSON(), authorization: request.headers().authorization || "" });
+      if (url.pathname === "/__test/checkout-handoff") evidence.handoffs.push({ at: Date.now(), url: url.href });
+    });
+    await page.route("https://checkout.razorpay.com/v1/checkout.js", route => route.fulfill({
+      contentType: "application/javascript", body: `window.Razorpay = function(options) {
+        this.open = () => window.__claimedSdk.push({ kind: "razorpay-open", orderId: options.order_id });
+        this.on = () => {};
+      };`,
+    }));
+    await page.route(/https:\/\/www\.(sandbox\.)?paypal\.com\/sdk\/js/, route => route.fulfill({
+      contentType: "application/javascript", body: `window.paypal = { version: "5.0.0", Buttons(options) {
+        let button;
+        return { isEligible: () => true, updateProps: () => Promise.resolve(), close: async () => button?.remove(),
+          async render(container) {
+            button = document.createElement("button"); button.type = "button";
+            button.textContent = "Claimed fixture PayPal"; button.disabled = true; container.appendChild(button);
+            options.onInit({}, { enable: async () => { button.disabled = false; }, disable: async () => { button.disabled = true; } });
+            button.addEventListener("click", async () => {
+              try {
+                const result = await options.onClick({}, { resolve: () => "resolved", reject: () => "rejected" });
+                window.__claimedSdk.push({ kind: "paypal-click", result });
+                if (result === "resolved") window.__claimedSdk.push({ kind: "paypal-order", orderId: await options.createOrder({}, {}) });
+              } catch (error) { window.__claimedSdk.push({ kind: "paypal-error", message: error.message }); options.onError?.(error); }
+            });
+          },
+        };
+      } };`,
+    }));
+    for (const path of ["providers", "quote", "start", "status", "cancel"]) {
+      await page.route(`**/api/payment/${path}`, async route => {
+        const request = route.request();
+        const call = { at: Date.now(), path: `/api/payment/${path}`, body: request.postDataJSON(),
+          authorization: request.headers().authorization || "" };
+        evidence.calls.push(call);
+        let data;
+        if (path === "providers") data = { ok: true, providers: enabled };
+        if (path === "quote") {
+          const gross = call.body.originalOrderId ? 45 : 54.95;
+          const net = call.body.couponCode === "save20" ? (call.body.originalOrderId ? 36 : 43.96) : gross;
+          data = { ok: true, providers: enabled, quoteFingerprint: `claimed-${call.body.originalOrderId ? "upgrade" : "hold"}-${call.body.couponCode || "none"}`,
+            quote: { grossAmount: gross, netAmount: net, isFree: false } };
+        }
+        if (path === "start") {
+          const payload = call.body.bookingPayload;
+          const provider = call.body.provider;
+          const hold = [...flow.state.holds.values()][0];
+          data = { ok: true, provider, status: "started", paymentAccessToken: `claimed-${provider}-token`,
+            quote: { grossAmount: config.upgrade ? 45 : 54.95, netAmount: config.upgrade ? 45 : 54.95, isFree: false },
+            quoteFingerprint: call.body.quoteFingerprint, sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
+            providerPayload: config.emptyPayload ? {} : provider === "dodo" ? { checkoutUrl: `${baseURL}/__test/checkout-handoff` }
+              : provider === "razorpay" ? { orderId: "claimed-razorpay-order", key: "fixture-key", amount: 5495, currency: "USD" }
+                : { orderId: "claimed-paypal-order" },
+            ...(!config.upgrade ? { refreshedHold: { slotHoldId: hold?.holdId, slotHoldToken: hold?.holdToken,
+              slotHoldExpiresAt: hold?.expiresAt, phase: "payment_pending" } } : {}),
+          };
+          expect(payload.couponCode).toBe("");
+          call.data = data;
+          evidence.first = call;
+          call.claimedAt = Date.now();
+          await gate;
+          if (config.fault === "provider") data.provider = "razorpay";
+          if (config.fault === "quote") data.quoteFingerprint = "different-quote";
+          if (config.fault === "returned-hold") data.refreshedHold.slotHoldId = "different-hold";
+          call.releasedAt = Date.now();
+        }
+        if (path === "status") data = { ok: true, status: "started" };
+        if (path === "cancel") {
+          const hold = [...flow.state.holds.values()][0];
+          data = { ok: true, cancelled: true, ...(!config.upgrade ? { refreshedHold: {
+            slotHoldId: hold.holdId, slotHoldToken: `${hold.holdToken}-rotated`, slotHoldExpiresAt: hold.expiresAt, phase: "holding",
+          } } : {}) };
+        }
+        call.data = data; call.status = 200;
+        await route.fulfill({ json: data });
+        call.fulfilledAt = Date.now();
+      });
+    }
+    const snapshot = () => page.evaluate(() => {
+      const raw = Object.fromEntries(Object.keys(sessionStorage).sort().map(key => [key, sessionStorage.getItem(key)]));
+      const draft = JSON.parse(raw.booking_draft || "null");
+      const summary = [...document.querySelectorAll("h3")].find(element => /^(Booking|Upgrade) Summary$/.test(element.textContent))?.parentElement;
+      return { at: Date.now(), url: location.href, raw, session: JSON.parse(raw.payment_session_state || "null"),
+        hold: JSON.parse(raw.my_slot_hold || "null"), checkout: JSON.parse(raw.checkout_booking_state || "null"), draft,
+        form: draft?.packages?.[draft.lastTitle]?.form, sdk: window.__claimedSdk,
+        storageFailures: window.__claimedStorageFailures, summary: summary?.innerText || "",
+        couponInput: document.querySelector("#payment-coupon-code")?.value ?? null,
+        body: document.body.innerText };
+    });
+    const paint = async () => {
+      const panel = page.locator(".booking-payment");
+      if (!await panel.count()) return;
+      await expect(panel).toHaveCSS("opacity", "1");
+      for (const child of await panel.locator(":scope > div").all()) await expect(child).toHaveCSS("opacity", "1");
+      await page.getByRole("heading", { name: config.upgrade ? "Upgrade Summary" : "Booking Summary", exact: true }).scrollIntoViewIfNeeded();
+    };
+    const capture = async name => {
+      await paint();
+      const value = await snapshot(); evidence.snapshots[name] = value;
+      await attach(name, value);
+      await testInfo.attach(`claimed-${name}-paint`, { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
+      const input = page.locator("#payment-coupon-code");
+      if (await input.count()) {
+        await input.scrollIntoViewIfNeeded();
+        await expect(input).toBeVisible();
+        await testInfo.attach(`claimed-${name}-input-paint`, { body: await page.screenshot(), contentType: "image/png" });
+      }
+      return value;
+    };
+    const button = () => page.getByRole("button", { name: config.provider === "dodo" ? "Pay your way"
+      : config.provider === "razorpay" ? "Pay with Razorpay" : "Claimed fixture PayPal", exact: true });
+    const setup = async options => {
+      Object.assign(config, options);
+      if (config.upgrade) {
+        await flow.upgrade();
+        await page.getByRole("button", { name: "Check eligibility", exact: true }).click();
+        await page.getByRole("button", { name: "Proceed to Payment", exact: true }).click();
+        await expect(page.getByRole("heading", { name: "Complete Upgrade Payment", exact: true })).toBeVisible();
+      } else { await flow.review(); await flow.payment(); }
+      await page.goto("/payment?internalPayments=1");
+      await expect(button()).toBeEnabled();
+      await expect.poll(() => evidence.calls.some(call => call.path === "/api/payment/quote" && call.fulfilledAt && call.body.couponCode === "")).toBe(true);
+      evidence.initial = await capture("initial");
+      expect(evidence.initial.session).toBeNull();
+      if (config.upgrade) {
+        expect(evidence.initial.checkout).toMatchObject({ originalOrderId: "fixture-order", upgradeIntentToken: "fixture-intent",
+          email: "visitor@example.invalid", discord: "visitor", specs: "RTX 4070", mainGame: "CS2" });
+        expect(flow.state.holdCount).toBe(0);
+      } else {
+        expect(evidence.initial.hold.holdId).toBeTruthy();
+        expect(evidence.initial.form).toMatchObject({ email: "visitor@example.invalid", discord: "fixture_visitor",
+          specs: "Ryzen 7700 / RTX 4070", mainGame: "CS2" });
+        expect(flow.state.holdCount).toBe(1);
+      }
+      await button().click();
+      await expect.poll(() => !!evidence.first?.claimedAt).toBe(true);
+      expect(evidence.first.body.bookingPayload).toMatchObject(config.upgrade
+        ? { originalOrderId: "fixture-order", upgradeIntentToken: "fixture-intent" }
+        : { slotHoldId: evidence.initial.hold.holdId, slotHoldToken: evidence.initial.hold.holdToken });
+      const boundary = evidence.requests.length;
+      evidence.boundaries.apply = { at: Date.now(), requestIndex: boundary };
+      const input = page.locator("#payment-coupon-code");
+      await input.fill("save20");
+      await input.locator("..").getByRole("button", { name: "Apply", exact: true }).click();
+      await expect.poll(() => flow.state.calls.some(call => call.path === "/api/ref/validateCoupon" && call.query.includes("save20"))).toBe(true);
+      await expect.poll(() => evidence.calls.some(call => call.path === "/api/payment/quote" && call.fulfilledAt && call.body.couponCode === "save20")).toBe(true);
+      await expect(page.getByRole("heading", { name: config.upgrade ? "Upgrade Summary" : "Booking Summary", exact: true }).locator("..").getByText(config.upgrade ? "$36.00 USD" : "$43.96 USD", { exact: true })).toBeVisible();
+      evidence.before = await capture("before-response");
+      expect(evidence.before.session).toBeNull();
+      expect(evidence.before.couponInput).toBe("save20");
+      expect(evidence.requests.slice(boundary).some(call => call.path === "/api/ref/validateCoupon" && call.query.includes("save20"))).toBe(true);
+      evidence.setupComplete = true; evidence.phase = "product";
+      await attach("setup", evidence);
+    };
+    const deliver = async () => {
+      evidence.beforeDelivery = await capture("immediately-before-response");
+      evidence.boundaries.delivery = { at: Date.now(), requestIndex: evidence.requests.length };
+      const response = page.waitForResponse(value => new URL(value.url()).pathname === "/api/payment/start");
+      release(); await (await response).finished();
+      await expect.poll(() => !!evidence.first.fulfilledAt).toBe(true);
+      await page.waitForTimeout(250);
+      const q1 = evidence.calls.find(call => call.path === "/api/payment/quote" && call.body.couponCode === "save20" && call.fulfilledAt);
+      evidence.chronologyValid = evidence.first.claimedAt <= evidence.boundaries.apply.at &&
+        q1.fulfilledAt <= evidence.boundaries.delivery.at && evidence.boundaries.delivery.at <= evidence.first.releasedAt;
+      expect(evidence.chronologyValid).toBe(true);
+    };
+    const recover = async ({ reload = false, quota = false } = {}) => {
+      const soft = expect.configure({ soft: true, timeout: 2000 });
+      await deliver();
+      const change = page.getByRole("button", { name: "Change payment method", exact: true });
+      await soft(change).toBeVisible();
+      let saved = await capture("adopted");
+      if (quota) {
+        soft(saved.session).toBeNull();
+        soft(saved.storageFailures.some(call => call.name === "QuotaExceededError" && JSON.parse(call.value).paymentAccessToken === evidence.first.data.paymentAccessToken)).toBe(true);
+        await soft(page.getByText("Your browser could not save this payment session. Keep this page open and change payment method before trying again.", { exact: true })).toBeVisible();
+        await page.waitForTimeout(2200);
+        await soft(page.getByText("Your browser could not save this payment session. Keep this page open and change payment method before trying again.", { exact: true })).toBeVisible();
+      } else {
+        soft(saved.session?.paymentAccessToken).toBe(evidence.first.data.paymentAccessToken);
+        soft(saved.session?.recoveryFingerprint && JSON.parse(saved.session.recoveryFingerprint).couponCode).toBe("save20");
+        soft(saved.session?.fingerprint && JSON.parse(saved.session.fingerprint).couponCode).toBe("");
+        if (reload && saved.session) {
+          const raw = saved.raw.payment_session_state;
+          await page.reload();
+          await soft(change).toBeVisible(); saved = await capture("reloaded");
+          soft(saved.raw.payment_session_state).toBe(raw);
+        }
+      }
+      soft(saved.summary).toContain(config.upgrade ? "$45.00 USD" : "$54.95 USD");
+      soft(saved.couponInput).toBe("save20");
+      if (config.upgrade) { soft(saved.hold).toBeNull(); soft(saved.checkout.originalOrderId).toBe("fixture-order"); }
+      else { soft(saved.hold.holdId).toBe(evidence.initial.hold.holdId); soft(saved.hold.holdToken).toBe(evidence.initial.hold.holdToken); soft(saved.form).toEqual(evidence.initial.form); }
+      soft(saved.sdk.filter(call => ["razorpay-open", "paypal-order"].includes(call.kind))).toEqual([]);
+      soft(evidence.handoffs).toEqual([]);
+      if (!await change.isVisible()) { evidence.recoveryNotReached = true; return; }
+      evidence.boundaries.cancel = { at: Date.now(), requestIndex: evidence.requests.length, flowIndex: flow.state.calls.length };
+      await change.click();
+      await soft.poll(() => evidence.calls.filter(call => call.path === "/api/payment/cancel" && call.fulfilledAt).length).toBe(1);
+      const cancel = evidence.calls.find(call => call.path === "/api/payment/cancel");
+      soft(cancel).toMatchObject({ authorization: `Bearer ${evidence.first.data.paymentAccessToken}`, body: {}, status: 200, data: { ok: true, cancelled: true } });
+      await soft.poll(() => evidence.requests.slice(evidence.boundaries.cancel.requestIndex).some(call => call.path === "/api/ref/validateCoupon" && call.query.includes("save20"))).toBe(true);
+      await soft.poll(() => evidence.calls.some(call => call.path === "/api/payment/quote" && call.at >= evidence.boundaries.cancel.at && call.body.couponCode === "save20" && call.fulfilledAt)).toBe(true);
+      const cancelled = await capture("cancelled");
+      soft(cancelled.session).toBeNull(); soft(cancelled.couponInput).toBe("save20");
+      soft(cancelled.summary).toContain(config.upgrade ? "$36.00 USD" : "$43.96 USD");
+      if (config.upgrade) {
+        soft(cancelled.hold).toBeNull();
+        soft(cancelled.checkout).toMatchObject({ originalOrderId: "fixture-order", upgradeIntentToken: "fixture-intent",
+          email: "visitor@example.invalid", discord: "visitor", specs: "RTX 4070", mainGame: "CS2", couponCode: "save20" });
+      } else {
+        soft(cancelled.hold.holdId).toBe(evidence.initial.hold.holdId);
+        soft(cancelled.hold.holdToken).toBe(`${evidence.initial.hold.holdToken}-rotated`);
+        soft(cancelled.form).toEqual(evidence.initial.form);
+        soft(cancelled.checkout).toMatchObject({ ...evidence.first.body.bookingPayload, couponCode: "save20",
+          slotHoldToken: `${evidence.initial.hold.holdToken}-rotated`, slotHoldExpiresAt: evidence.initial.hold.expiresAt });
+      }
+      for (const key of ["booking_draft", "referral_dismissed", "referral_capture", "referral_session", "referral_choices"]) soft(cancelled.raw[key]).toBe(evidence.initial.raw[key]);
+    };
+    const cdp = await browser.newBrowserCDPSession(); evidence.engine = await cdp.send("Browser.getVersion"); await cdp.detach();
+    try { await use({ evidence, config, setup, deliver, recover, capture, snapshot }); }
+    finally {
+      release();
+      if (!page.isClosed()) {
+        try {
+          await page.evaluate(() => { if (window.__claimedNativeSetter) Storage.prototype.setItem = window.__claimedNativeSetter; });
+          evidence.final = await capture("final");
+        } catch (error) { evidence.finalCaptureError = error.message; }
+      }
+      evidence.flowCalls = flow.state.calls;
+      evidence.flowAborted = flow.state.aborted;
+      evidence.errors = testInfo.errors.map(error => error.message);
+      evidence.classification = evidence.setupComplete ? (evidence.errors.length ? "product failure" : "passed") : "setup failure";
+      await attach("evidence", evidence);
+      expect(evidence.pageErrors).toEqual([]); expect(evidence.aborted).toEqual([]);
+      expect(evidence.handoffs).toEqual([]);
+      expect(evidence.requests.filter(call => /\/api\/payment\/(capture|confirm|finalize)(\/|$)/.test(call.path) || call.path === "/api/releaseHold")).toEqual([]);
+      expect(evidence.requests.filter(call => call.path === "/api/holdSlot")).toHaveLength(config.upgrade ? 0 : 1);
+      expect(evidence.requests.filter(call => call.path === "/api/payment/start")).toHaveLength(1);
+      expect(evidence.final?.sdk?.filter(call => ["razorpay-open", "paypal-order"].includes(call.kind)) || []).toEqual([]);
+    }
+  },
+});
+
+claimedStartTest.use({ viewport: { width: 390, height: 844 }, reducedMotion: "reduce", actionTimeout: 10000, navigationTimeout: 20000, video: "off" });
+
+for (const [provider, title] of [["razorpay", "Razorpay"], ["paypal", "PayPal"]]) {
+  claimedStartTest(`a delayed claimed ${title} start keeps recovery without opening the old order`, async ({ claimed }) => {
+    await claimed.setup({ provider }); await claimed.recover();
+  });
+}
+
+claimedStartTest("a delayed claimed Dodo start survives reload with its original price and updated coupon", async ({ claimed }) => {
+  await claimed.setup({ provider: "dodo" }); await claimed.recover({ reload: true });
+});
+
+claimedStartTest("a delayed claimed Dodo start keeps in-memory cancellation when session storage is full", async ({ page, claimed }) => {
+  await claimed.setup({ provider: "dodo" });
+  await page.evaluate(() => {
+    window.__claimedNativeSetter = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key, value) {
+      if (this === sessionStorage && key === "payment_session_state") {
+        const error = new DOMException("Fixture session storage full", "QuotaExceededError");
+        window.__claimedStorageFailures.push({ at: Date.now(), key, value, name: error.name }); throw error;
+      }
+      return window.__claimedNativeSetter.call(this, key, value);
+    };
+  });
+  try { await claimed.recover({ quota: true }); }
+  finally { await page.evaluate(() => { Storage.prototype.setItem = window.__claimedNativeSetter; }); }
+});
+
+claimedStartTest("a delayed claimed Dodo start retains empty provider details for authentic cancellation", async ({ claimed }) => {
+  await claimed.setup({ provider: "dodo", emptyPayload: true }); await claimed.recover();
+});
+
+claimedStartTest("a delayed claimed Dodo upgrade keeps its exact intent through cancellation and coupon validation", async ({ claimed }) => {
+  await claimed.setup({ provider: "dodo", upgrade: true }); await claimed.recover();
+});
+
+for (const [fault, title] of [
+  ["stored-hold", "refuses a replaced stored hold ID"],
+  ["stored-token", "refuses a new stored hold token generation"],
+  ["replacement", "preserves a replacement payment session"],
+  ["close", "does not write after the actual Payment Close"],
+  ["provider", "refuses a different returned provider"],
+  ["quote", "refuses a different returned quote fingerprint"],
+  ["returned-hold", "refuses a different returned hold ID"],
+  ["email", "preserves a new stored checkout email"],
+  ["intent", "preserves a new stored upgrade intent"],
+]) {
+  claimedStartTest(`a delayed claimed Dodo start ${title}`, async ({ page, claimed }) => {
+    await claimed.setup({ provider: "dodo", upgrade: fault === "intent", fault });
+    claimed.evidence.setupComplete = false; claimed.evidence.phase = "refusal setup";
+    if (["stored-hold", "stored-token", "replacement", "email", "intent"].includes(fault)) {
+      claimed.evidence.constructedMutation = await page.evaluate(({ fault, first }) => {
+        const key = fault.startsWith("stored-") ? "my_slot_hold" : fault === "replacement" ? "payment_session_state" : "checkout_booking_state";
+        const data = JSON.parse(sessionStorage.getItem(key) || "null");
+        let value = data;
+        if (fault === "stored-hold") value.holdId = "new-owner-hold";
+        if (fault === "stored-token") value.holdToken = "new-generation-token";
+        if (fault === "email") value.email = "replacement@example.invalid";
+        if (fault === "intent") value.upgradeIntentToken = "replacement-intent";
+        if (fault === "replacement") value = { provider: "dodo", fingerprint: JSON.stringify({ ...first.body.bookingPayload }),
+          paymentAccessToken: "replacement-payment-token", providerPayload: { checkoutUrl: `${location.origin}/__test/checkout-handoff` },
+          result: { quote: first.data.quote }, sessionExpiresAt: first.data.sessionExpiresAt };
+        const raw = JSON.stringify(value); sessionStorage.setItem(key, raw); return { at: Date.now(), key, before: data, raw };
+      }, { fault, first: claimed.evidence.first });
+    }
+    if (fault === "close") {
+      await page.locator("#booking-modal-close").click();
+      await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toHaveCount(0);
+    }
+    claimed.evidence.setupComplete = true; claimed.evidence.phase = "product";
+    await claimed.deliver();
+    const after = await claimed.capture("refused");
+    expect(after.raw).toEqual(claimed.evidence.beforeDelivery.raw);
+    expect(after.url).toBe(claimed.evidence.beforeDelivery.url);
+    expect(after.sdk.filter(call => ["razorpay-open", "paypal-order"].includes(call.kind))).toEqual([]);
+    expect(claimed.evidence.calls.filter(call => call.path === "/api/payment/cancel")).toEqual([]);
+    await expect(page.getByRole("button", { name: "Change payment method", exact: true })).toHaveCount(0);
+  });
+}

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import http from "node:http";
 import { once } from "node:events";
 import { registerHooks } from "node:module";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash, createHmac } from "node:crypto";
 import { installNetworkGuard, refuseEnvFiles, validateDistDir } from "../../scripts/lib/test-target-safety.mjs";
 
@@ -54,7 +54,10 @@ export async function createReferralPaymentFixture() {
   const evidence = { dodoEnvironment: process.env.DODO_PAYMENTS_ENVIRONMENT,
     next: { baseURL, dist, routeSource, sourceSha256: createHash("sha256").update(fs.readFileSync(routeSource)).digest("hex") },
     http: [], providerRequests: [], blocked: [], stopped: false };
-  const artifact = new URL("../../test-results/referral-payment/native.json", import.meta.url);
+  const artifact = process.env.ROO_REFERRAL_PAYMENT_ARTIFACT
+    ? new URL(process.env.ROO_REFERRAL_PAYMENT_ARTIFACT, pathToFileURL(`${process.cwd()}/`))
+    : new URL("../../test-results/referral-payment/native.json", import.meta.url);
+  assert.equal(artifact.protocol, "file:", "Referral fixture artifact must be a local file");
   const save = () => {
     fs.mkdirSync(new URL(".", artifact), { recursive: true });
     fs.writeFileSync(artifact, JSON.stringify(evidence, null, 2));
@@ -131,6 +134,12 @@ export async function createReferralPaymentFixture() {
     await content.create({ _id: "package.fixture.vertex", _type: "package", title: PACKAGE.title, price: `$${PACKAGE.price}` });
     await content.create({ _id: "6d8a3646-0ed2-44b5-ad45-c5c9d578126a", _type: "bookingSettings",
       dateSlots: dates.map(date => ({ date, times: ["10:00", "11:00"] })), ownerEmail: "owner@example.invalid" });
+    for (const [code, percent] of [["delay20", 20], ["delayfree", 100]]) {
+      await commerce.create({ _id: `coupon.fixture.${code}`, _type: "coupon", code,
+        isActive: true, discountType: "percent", discountPercent: percent,
+        canCombineWithReferral: true, timesUsed: 0, activeReservations: 0, maxUses: 0,
+        backendOwner: "supabase", cutoverGeneration: 0 });
+    }
     const referral = { _id: REFERRAL.id, _type: "referral", email: "creator@example.invalid", name: "Fixture Creator",
       slug: { _type: "slug", current: REFERRAL.code }, registrationStatus: "active", verified: true,
       currentCommissionPercent: REFERRAL.commissionPercent, currentDiscountPercent: REFERRAL.discountPercent,

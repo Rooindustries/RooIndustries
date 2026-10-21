@@ -85,6 +85,11 @@ const paymentSessionMatchesCheckout = (storedFingerprint, currentFingerprint) =>
   );
 };
 
+const paymentStartIdentity = (payload) => JSON.stringify(
+  ["packageTitle", "originalOrderId", "startTimeUTC", "email", "slotHoldId", "slotHoldToken", "upgradeIntentToken"]
+    .map(key => String(payload?.[key] || ""))
+);
+
 function PayPalCheckout({ children }) {
   const [{ isResolved, isRejected, options }, dispatch] = usePayPalScriptReducer();
 
@@ -612,6 +617,12 @@ export default function Payment({ hideFooter = false }) {
   }
   const paymentView = paymentViewRef.current;
   paymentView.session = paymentSession;
+  paymentView.startIdentity = paymentStartIdentity({
+    ...bookingData,
+    packageTitle,
+    slotHoldId: sessionHold?.slotHoldId || bookingData.slotHoldId || "",
+    slotHoldToken: sessionHold?.slotHoldToken || bookingData.slotHoldToken || "",
+  });
   useEffect(() => {
     paymentMountedRef.current = true;
     return () => { paymentMountedRef.current = false; };
@@ -976,12 +987,15 @@ export default function Payment({ hideFooter = false }) {
 
   useEffect(() => {
     if (!hydrated || !packageTitle) return;
-    const stored = readStoredPaymentSession();
+    const stored = readStoredPaymentSession() || paymentView.session;
     if (
       stored?.fingerprint &&
       paymentSessionMatchesCheckout(stored.fingerprint, checkoutFingerprint)
     ) {
-      const storedFingerprint = parseCheckoutFingerprint(stored.fingerprint);
+      const storedFingerprint = parseCheckoutFingerprint(
+        stored.recoveryFingerprint && paymentSessionMatchesCheckout(stored.recoveryFingerprint, stored.fingerprint)
+          ? stored.recoveryFingerprint : stored.fingerprint
+      );
       const storedReferralCode = String(
         storedFingerprint?.referralCode || ""
       ).trim();
@@ -1116,16 +1130,25 @@ export default function Payment({ hideFooter = false }) {
         throw new Error(data?.error || "The payment method could not be changed.");
       }
 
+      const recoveryCodes = activeSession.recoveryFingerprint &&
+        paymentSessionMatchesCheckout(activeSession.recoveryFingerprint, activeSession.fingerprint) &&
+        paymentSessionMatchesCheckout(activeSession.fingerprint, checkoutFingerprint)
+        ? parseCheckoutFingerprint(activeSession.recoveryFingerprint) : null;
+      const nextCheckout = {
+        ...bookingData,
+        ...(recoveryCodes ? {
+          referralCode: typeof recoveryCodes.referralCode === "string" ? recoveryCodes.referralCode : "",
+          couponCode: typeof recoveryCodes.couponCode === "string" ? recoveryCodes.couponCode : "",
+        } : {}),
+      };
       const refreshedHold = data.refreshedHold || null;
       if (refreshedHold?.slotHoldId && refreshedHold?.slotHoldToken) {
         setSessionHold(refreshedHold);
-        const nextCheckout = {
-          ...bookingData,
+        Object.assign(nextCheckout, {
           slotHoldId: refreshedHold.slotHoldId,
           slotHoldToken: refreshedHold.slotHoldToken,
           slotHoldExpiresAt: refreshedHold.slotHoldExpiresAt,
-        };
-        writeStoredCheckout(nextCheckout);
+        });
         const holdState = {
           holdId: refreshedHold.slotHoldId,
           holdToken: refreshedHold.slotHoldToken,
@@ -1138,15 +1161,18 @@ export default function Payment({ hideFooter = false }) {
         writeBrowserStorage("sessionStorage", "my_slot_hold", JSON.stringify(holdState));
         window.dispatchEvent(new CustomEvent("hold-state", { detail: holdState }));
       }
+      if ((refreshedHold?.slotHoldId && refreshedHold?.slotHoldToken) || recoveryCodes) {
+        writeStoredCheckout(nextCheckout);
+      }
       clearPaymentSession("", operation.token);
       operation.token = "";
-      if (activeSession.provider === "dodo") {
+      if (activeSession.provider === "dodo" || recoveryCodes) {
         dodoReturnHandled.current = "";
         const query = new URLSearchParams(location.search);
         query.delete("dodo_return");
         query.delete("dodo_cancel");
         navigate({ pathname: location.pathname, search: query.toString(), hash: location.hash }, {
-          replace: true, state: location.state,
+          replace: true, state: recoveryCodes ? { ...navState, bookingData: nextCheckout } : location.state,
         });
       }
       showBanner("success", "Payment method released. Choose a payment method below.");
@@ -1334,17 +1360,45 @@ export default function Payment({ hideFooter = false }) {
         throw new Error("Checkout price is still being confirmed. Please try again.");
       }
 
+      const startPayload = buildCheckoutPayload();
       const { response, data } = await fetchJson("/api/payment/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider,
           quoteFingerprint,
-          bookingPayload: buildCheckoutPayload(),
+          bookingPayload: startPayload,
         }),
       });
 
-      if (!operation.current()) return { terminal: true, stale: true };
+      const recoveringStart = !operation.current();
+      if (recoveringStart) {
+        const view = paymentViewRef.current;
+        let sameStoredCheckout = false;
+        try {
+          const storedHold = JSON.parse(sessionStorage.getItem("my_slot_hold") || "null");
+          const storedCheckout = JSON.parse(sessionStorage.getItem(CHECKOUT_BOOKING_STORAGE_KEY) || "null");
+          sameStoredCheckout = sessionStorage.getItem(PAYMENT_SESSION_STORAGE_KEY) === null &&
+            (!storedCheckout || paymentStartIdentity(storedCheckout) === paymentStartIdentity(startPayload)) &&
+            (startPayload.originalOrderId
+              ? !!startPayload.upgradeIntentToken
+              : !!startPayload.slotHoldId && !!startPayload.slotHoldToken &&
+                (!storedHold || (storedHold.holdId === startPayload.slotHoldId && storedHold.holdToken === startPayload.slotHoldToken)));
+        } catch {}
+        const returnedHold = data?.refreshedHold || data?.hold;
+        if (!paymentMountedRef.current || !view || view.key !== paymentView.key ||
+            view.startIdentity !== paymentStartIdentity(startPayload) ||
+            !paymentSessionMatchesCheckout(checkoutFingerprint, view.fingerprint) ||
+            view.session?.paymentAccessToken || !sameStoredCheckout ||
+            provider === "free" || !response.ok || data?.ok !== true || data.provider !== provider ||
+            !["started", "booked", "email_partial", "refunded"].includes(String(data.status || "").trim().toLowerCase()) ||
+            typeof data.paymentAccessToken !== "string" || !data.paymentAccessToken.trim() ||
+            String(data.quoteFingerprint || data.fingerprint || "").trim() !== quoteFingerprint ||
+            (!startPayload.originalOrderId && (returnedHold?.slotHoldId !== startPayload.slotHoldId ||
+              typeof returnedHold.slotHoldToken !== "string" || !returnedHold.slotHoldToken))) {
+          return { terminal: true, stale: true };
+        }
+      }
 
       if (!response.ok || !data?.ok) {
         if (data?.quote) setServerQuote(data.quote);
@@ -1402,6 +1456,7 @@ export default function Payment({ hideFooter = false }) {
       const nextSession = {
         provider,
         fingerprint: checkoutFingerprint,
+        ...(recoveringStart ? { recoveryFingerprint: paymentViewRef.current.fingerprint } : {}),
         paymentAccessToken: String(data.paymentAccessToken || "").trim(),
         providerPayload: data.providerPayload || {},
         sessionExpiresAt: String(data.sessionExpiresAt || "").trim(),
@@ -1409,11 +1464,21 @@ export default function Payment({ hideFooter = false }) {
       };
       const returnedStatus = String(data.status || "").trim().toLowerCase();
       if (
-        provider !== "free" &&
+        !recoveringStart && provider !== "free" &&
         (returnedStatus === "booked" || returnedStatus === "email_partial")
       ) {
         await navigateToConfirmation("paid", data, operation);
         return { ...nextSession, terminal: true };
+      }
+      if (recoveringStart) {
+        paymentViewRef.current.session = nextSession;
+        setPaymentSession(nextSession);
+        const saved = writeStoredPaymentSession(nextSession);
+        showBanner("info", saved
+          ? "Your earlier checkout is still reserved. Change payment method to use the updated codes."
+          : "Your browser could not save this payment session. Keep this page open and change payment method before trying again.",
+        { persistent: true });
+        return { ...nextSession, terminal: true, stale: true };
       }
       if (provider !== "free") {
         operation.token = nextSession.paymentAccessToken;
