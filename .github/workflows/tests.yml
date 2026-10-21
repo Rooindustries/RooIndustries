@@ -207,6 +207,20 @@ jobs:
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);
           NODE
+      - name: Run the native referral payment E2E
+        env:
+          NEXT_DIST_DIR: .next-e2e-native-booking
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-referral-payment.json
+        run: |
+          xvfb-run -a npm run test:referral-payment -- --output=test-results/referral-payment-e2e --reporter=line,json
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const { stats } = require('./test-results/native-referral-payment.json');
+          assert.equal(stats.expected, 2, 'The native referral payment E2E must pass');
+          assert.equal(stats.skipped, 0, 'The native referral payment E2E must not skip');
+          assert.equal(stats.unexpected, 0);
+          assert.equal(stats.flaky, 0);
+          NODE
       - name: Run booking-contact PostgreSQL 17 suite
         run: npm run test:booking-contact
       - name: Run booking hold API suite

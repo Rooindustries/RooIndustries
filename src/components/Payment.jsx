@@ -603,10 +603,12 @@ export default function Payment({ hideFooter = false }) {
     const operation = {
       token: String(expectedToken ?? activeSession?.paymentAccessToken ?? "").trim(),
       current: () => {
-        if (!paymentMountedRef.current || paymentViewRef.current !== paymentView) return false;
-        const session = readStoredPaymentSession() || paymentView.session;
+        const view = paymentViewRef.current;
+        if (!paymentMountedRef.current || !view) return false;
+        if (view !== paymentView && !(operation.token && view.key === paymentView.key)) return false;
+        const session = readStoredPaymentSession() || view.session;
         return String(session?.paymentAccessToken || "").trim() === operation.token &&
-          (!operation.token || paymentSessionMatchesCheckout(session?.fingerprint, paymentView.fingerprint));
+          (!operation.token || paymentSessionMatchesCheckout(session?.fingerprint, view.fingerprint));
       },
     };
     return operation;
