@@ -1,6 +1,5 @@
-const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/g;
 const CARD = /\b\d(?:[ -]?\d){12,18}\b/g;
-const QUERY = /((?:https?:\/\/|\/)[^\s?#"'<>]*)\?[^\s#"'<>]+/g;
+const QUERY = /\?[^\s#"'<>]+/g;
 const SENSITIVE_KEY =
   /pass|token|secret|cookie|session|auth|signature|email|phone|address|card|cvv|cvc|iban|upi|vpa|billing|payment_?method|customer/i;
 const NAME_KEY = /^(?:full|first|last|display|customer|user)_?name$|^handle$|discord/i;
@@ -19,36 +18,30 @@ export const NO_DATA_COLLECTION = {
   frameContextLines: 0,
 };
 
-function passesLuhn(digits) {
-  let sum = 0;
-  for (let i = 0; i < digits.length; i += 1) {
-    let digit = Number(digits[digits.length - 1 - i]);
-    if (i % 2 === 1) {
-      digit *= 2;
-      if (digit > 9) digit -= 9;
-    }
-    sum += digit;
-  }
-  return sum % 10 === 0;
-}
-
 export function scrubText(text) {
   return text
-    .replace(QUERY, "$1?[query]")
-    .replace(EMAIL, "[email]")
-    .replace(CARD, (match) => (passesLuhn(match.replace(/[ -]/g, "")) ? "[card]" : match));
+    .replace(QUERY, "?[query]")
+    .replace(/\S+/g, (token) => {
+      const at = token.indexOf("@");
+      const dot = at > 0 ? token.indexOf(".", at + 2) : -1;
+      return dot !== -1 && dot < token.length - 1 ? "[email]" : token;
+    })
+    .replace(CARD, "[card]");
 }
 
-function scrubValue(value, depth = 0) {
+function scrubValue(value, depth = 0, path = []) {
   if (typeof value === "string") return scrubText(value);
   if (value === null || typeof value !== "object") return value;
   if (depth > 6) return "[Filtered]";
-  if (Array.isArray(value)) return value.map((item) => scrubValue(item, depth + 1));
-  const copy = {};
-  for (const [key, item] of Object.entries(value)) {
-    copy[key] = SENSITIVE_KEY.test(key) || NAME_KEY.test(key) ? "[Filtered]" : scrubValue(item, depth + 1);
-  }
-  return copy;
+  if (Array.isArray(value)) return value.map((item, index) => scrubValue(item, depth + 1, [...path, index]));
+  const trace = path.length === 2 && (path[0] === "contexts" && path[1] === "trace" || path[0] === "spans" && typeof path[1] === "number");
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => {
+    const identifier = trace && typeof item === "string" && (
+      (key === "span_id" || key === "parent_span_id") && /^[0-9a-f]{16}$/i.test(item) ||
+      key === "trace_id" && /^[0-9a-f]{32}$/i.test(item)
+    );
+    return [scrubText(key), identifier ? item : SENSITIVE_KEY.test(key) || NAME_KEY.test(key) ? "[Filtered]" : scrubValue(item, depth + 1, [...path, key])];
+  }));
 }
 
 function withoutQuery(url) {
@@ -80,21 +73,15 @@ export function scrubEvent(event) {
       ...(agent ? { headers: { "User-Agent": agent } } : {}),
     };
   }
-  if (event.message) event.message = scrubText(event.message);
-  if (event.logentry) event.logentry = scrubValue(event.logentry);
   for (const value of event.exception?.values ?? []) {
     for (const frame of value.stacktrace?.frames ?? []) {
       if (frame.filename) frame.filename = withoutQuery(frame.filename);
       if (frame.abs_path) frame.abs_path = withoutQuery(frame.abs_path);
       if (frame.module) frame.module = withoutQuery(frame.module);
     }
-    if (value.value) value.value = scrubText(value.value);
   }
   if (event.breadcrumbs) event.breadcrumbs = event.breadcrumbs.map(scrubBreadcrumb).filter(Boolean);
-  if (event.extra) event.extra = scrubValue(event.extra);
-  if (event.contexts) event.contexts = scrubValue(event.contexts);
-  if (event.tags) event.tags = scrubValue(event.tags);
-  return event;
+  return scrubValue(event);
 }
 
 export function monitoringEnvironment() {
