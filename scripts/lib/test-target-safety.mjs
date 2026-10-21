@@ -1,4 +1,4 @@
-import { isIP } from "node:net";
+import net, { isIP } from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
@@ -8,6 +8,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { promisify } from "node:util";
 import { getGlobalDispatcher, setGlobalDispatcher } from "undici";
 
+const connect = net.createConnection;
 const isPrivateTestHost = value => {
   if (typeof value !== "string" || value !== value.trim()) return false;
   if (value === "::1") return true;
@@ -33,11 +34,33 @@ const remoteBrowserEndpoint = () => {
 const upgradeHeaders = (upgrade, connection) => upgrade.length === 1 && connection.length === 1 &&
   typeof upgrade[0] === "string" && upgrade[0].trim().toLowerCase() === "websocket" &&
   typeof connection[0] === "string" && connection[0].split(",").some(token => token.trim().toLowerCase() === "upgrade");
+const framingHeaders = ["content-length", "transfer-encoding", "expect", "trailer"];
+const tunnelRefusal = "[test-target] Remote browser requests must stay a websocket upgrade.";
 const tunnelHeader = (header, pathname) => {
   if (typeof header !== "string" || !header.endsWith("\r\n\r\n")) return false;
   const [first, ...lines] = header.slice(0, -4).split("\r\n");
-  const values = name => lines.filter(line => line.slice(0, line.indexOf(":")).trim().toLowerCase() === name).map(line => line.slice(line.indexOf(":") + 1));
-  return first === `GET ${pathname} HTTP/1.1` && upgradeHeaders(values("upgrade"), values("connection"));
+  const names = lines.map(line => /[\r\n]/.test(line) ? null : /^[!#$%&'*+.^_`|~0-9A-Za-z-]+(?=:)/.exec(line)?.[0].toLowerCase() ?? null);
+  const values = name => lines.filter((_, index) => names[index] === name).map(line => line.slice(line.indexOf(":") + 1));
+  return first === `GET ${pathname} HTTP/1.1` && !names.includes(null) && !names.some(name => framingHeaders.includes(name)) &&
+    upgradeHeaders(values("upgrade"), values("connection"));
+};
+const guardTunnelSocket = (socket, pathname) => {
+  let phase = "handshake";
+  const write = socket._write, writev = socket._writev;
+  const allowed = chunks => {
+    if (phase === "open") return true;
+    const data = Buffer.concat(chunks.map(({ chunk, encoding }) => typeof chunk === "string" ? Buffer.from(chunk, encoding) : chunk));
+    if (data.length === 0) return true;
+    if (phase !== "handshake" || !tunnelHeader(data.toString("latin1"), pathname)) return false;
+    phase = "sent";
+    return true;
+  };
+  const refuse = callback => { const error = new Error(tunnelRefusal); socket.destroy(error); callback(error); };
+  Object.defineProperties(socket, {
+    _write: { value(chunk, encoding, callback) { return allowed([{ chunk, encoding }]) ? write.call(this, chunk, encoding, callback) : refuse(callback); } },
+    _writev: { value(chunks, callback) { return allowed(chunks) ? writev.call(this, chunks, callback) : refuse(callback); } },
+  });
+  return { socket, open: () => { if (phase === "sent") phase = "open"; } };
 };
 if (process.env.ROO_TEST_HOST && !isPrivateTestHost(process.env.ROO_TEST_HOST)) fail("ROO_TEST_HOST must be a private IP literal.");
 const childGuardImports = new Set([import.meta.url]);
@@ -195,6 +218,12 @@ export function installNetworkGuard(origins) {
     const request = module.request, get = module.get;
     originals.push(() => { module.request = request; module.get = get; });
     module.request = function(input, options, callback) {
+      let tunnelSocket = null;
+      const createConnection = () => {
+        if (tunnelSocket) throw new Error(tunnelRefusal);
+        tunnelSocket = guardTunnelSocket(connect({ host: "127.0.0.1", port: Number(remoteBrowser.port) }), remoteBrowser.pathname);
+        return tunnelSocket.socket;
+      };
       const settings = typeof input === "object" && !(input instanceof URL) ? input : (typeof options === "object" ? options : {});
       const headers = settings.headers && typeof settings.headers === "object" && !Array.isArray(settings.headers) ? Object.entries(settings.headers) : null;
       const headerValues = name => headers.filter(([key]) => key.toLowerCase() === name).map(([, value]) => value);
@@ -202,8 +231,8 @@ export function installNetworkGuard(origins) {
         (settings.protocol || "http:") === "http:" && (settings.hostname || settings.host) === "127.0.0.1" &&
         String(settings.port) === remoteBrowser.port && settings.path === remoteBrowser.pathname &&
         String(settings.method || "GET").toUpperCase() === "GET" &&
-        headerValues("expect").length === 0 && upgradeHeaders(headerValues("upgrade"), headerValues("connection"));
-      if (tunnel) input = { ...input, agent: module.globalAgent, createConnection: undefined };
+        framingHeaders.every(name => headerValues(name).length === 0) && upgradeHeaders(headerValues("upgrade"), headerValues("connection"));
+      if (tunnel) input = { ...input, agent: undefined, createConnection };
       else {
         if (settings.socketPath || settings.createConnection ||
             (settings.agent && settings.agent !== module.globalAgent && settings.agent.constructor !== module.Agent)) fail("Custom network transports are refused.");
@@ -224,7 +253,7 @@ export function installNetworkGuard(origins) {
       if (tunnel) {
         const send = req._send;
         const refuse = () => {
-          req.destroy(new Error("[test-target] Remote browser requests must stay a websocket upgrade."));
+          req.destroy(new Error(tunnelRefusal));
           return false;
         };
         Object.defineProperty(req, "_send", { configurable: false, writable: false, value(data, ...rest) {
@@ -235,6 +264,7 @@ export function installNetworkGuard(origins) {
       }
       const emit = req.emit;
       req.emit = function(event, ...values) {
+        if (tunnel && event === "upgrade" && values[0]?.statusCode === 101 && values[1] === tunnelSocket?.socket) tunnelSocket.open();
         if (event === "response" && values[0].statusCode >= 300 && values[0].statusCode < 400) {
           this.destroy(new Error("[test-target] HTTP redirects are refused."));
           values[0].destroy();
