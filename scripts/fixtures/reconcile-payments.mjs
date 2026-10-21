@@ -187,16 +187,18 @@ const linear = async (method, args) => {
       current.comments.push(result);
     }
   } else if (method === 'save_status_update') {
+    assert.equal(args.type, 'project');
+    assert.ok(Object.keys(args).every((key) =>
+      ['body', 'health', 'id', 'initiative', 'isDiffHidden', 'project', 'type'].includes(key)));
     assert.equal(Object.hasOwn(args, 'health'), false);
     if (args.id) {
-      assert.deepEqual(Object.keys(args).sort(), ['body', 'id']);
+      assert.deepEqual(Object.keys(args).sort(), ['body', 'id', 'type']);
       result = current.updates.find((update) => update.id === args.id);
       assert.ok(result);
       result.body = args.body;
       result.updatedAt = iso();
     } else {
       assert.deepEqual(Object.keys(args).sort(), ['body', 'project', 'type']);
-      assert.equal(args.type, 'project');
       assert.equal(args.project, scope.projectId);
       result = {
         id: crypto.randomUUID(), type: 'project', project: { id: scope.projectId },
@@ -593,11 +595,23 @@ try {
       });
     }
     await run('clean-record', async (home) => {
-      assert.equal((await invoke(home)).code, 0);
+      const result = await invoke(home);
+      assert.equal(result.code, 0);
       assert.equal(current.updates.length, 1);
       assert.equal(current.issues.length, 0);
       assert.match(current.updates[0].body, /clear/);
-      assert.equal(JSON.parse(current.runs[0].stdout).complete, true);
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.complete, true);
+      assert.equal(output.result, 'clear');
+      const update = current.updates[0];
+      const saved = current.calls.filter((call) => call.method === 'save_status_update');
+      assert.equal(saved.length, 2);
+      assert.equal(saved[0].args.type, 'project');
+      assert.equal(saved[0].args.project, scope.projectId);
+      assert.deepEqual(saved[1].args, { type: 'project', id: update.id, body: update.body });
+      assert.equal(update.project.id, scope.projectId);
+      assert.equal(output.updateURL, update.url);
+      assert.match(update.body, /Payment audit: clear[.] Reported: 0; listed: 0; open: 0; unknown: 0; recovered: 0[.] Incomplete: false[.]/);
     });
     await run('original-reasons-and-owner-review', async (home) => {
       const reasons = [
@@ -614,16 +628,40 @@ try {
     });
     await run('same-day-retry-and-next-day', async (home) => {
       current.window = windowReport([fault()]);
-      assert.equal((await invoke(home)).code, 0);
+      const first = await invoke(home);
+      assert.equal(first.code, 0);
+      const firstId = current.updates[0].id;
       current.checks['payment:fixture'] = check('payment:fixture', 'unresolved', [fault()]);
-      assert.equal((await invoke(home)).code, 0);
+      const retry = await invoke(home);
+      assert.equal(retry.code, 0);
       assert.equal(current.updates.length, 1);
+      assert.equal(current.updates[0].id, firstId);
       assert.equal(current.issues.length, 1);
       assert.equal(current.comments.length, 1);
       current.date = tomorrow;
-      assert.equal((await invoke(home)).code, 0);
+      const next = await invoke(home);
+      assert.equal(next.code, 0);
       assert.equal(current.updates.length, 2);
       assert.equal(current.issues.length, 1);
+      const nextId = current.updates[1].id;
+      assert.notEqual(nextId, firstId);
+      const saved = current.calls.filter((call) => call.method === 'save_status_update');
+      assert.equal(saved.length, 6);
+      assert.ok(saved.every((call) => call.args.type === 'project'));
+      assert.deepEqual(saved.filter((call) => call.args.id).map((call) => call.args.id),
+        [firstId, firstId, firstId, nextId]);
+      assert.equal(saved.filter((call) => !call.args.id).length, 2);
+      assert.ok(saved.filter((call) => !call.args.id).every((call) => call.args.project === scope.projectId));
+      for (const update of current.updates) {
+        assert.equal(update.project.id, scope.projectId);
+        assert.match(update.body, /Payment audit: mismatch[.] Reported: 1; listed: 1; open: 1; unknown: 0; recovered: 0[.] Incomplete: false[.]/);
+        assert.equal(saved.filter((call) => call.args.id === update.id).at(-1).args.body, update.body);
+      }
+      const outputs = [first, retry, next].map((result) => JSON.parse(result.stdout));
+      assert.ok(outputs.every((output) => output.result === 'mismatch' && output.complete === true));
+      assert.equal(outputs[0].updateURL, outputs[1].updateURL);
+      assert.equal(outputs[0].updateURL, current.updates[0].url);
+      assert.equal(outputs[2].updateURL, current.updates[1].url);
     });
     await run('reason-ref-shift-and-manual-text', async (home) => {
       const issue = seedIssue('payment:fixture', { status: 'In Progress', statusType: 'started' });

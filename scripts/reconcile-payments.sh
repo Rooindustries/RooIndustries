@@ -191,7 +191,7 @@ update_id=$(jq -r '.[0].id // ""' "$work/today.json")
 save_update() {
   local body="$1" args response
   if [[ -n "$update_id" ]]; then
-    args=$(jq -nc --arg id "$update_id" --arg body "$body" '{id:$id,body:$body}')
+    args=$(jq -nc --arg id "$update_id" --arg body "$body" '{type:"project",id:$id,body:$body}')
   else
     args=$(jq_module -nc --arg body "$body" 'include "reconcile-linear"; {type:"project",project:scope.projectId,body:$body}')
   fi
