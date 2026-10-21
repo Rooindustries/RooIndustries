@@ -1301,3 +1301,108 @@ test("native same-path history distinguishes an absent referral from explicit bl
     await attachJson(testInfo, "native-ref-presence-identity", { beforeAddress, blankAddress, beforeIntent, afterAddress: await address(), afterIntent: await referralIntent(page), nativeHistory, timing: await navigationTiming(page), calls: flow.state.calls.slice(since) });
   }
 });
+
+for (const variant of ["accepts a freshly followed passive referral", "recovers from an unavailable passive referral", "restores without a creator follow"]) {
+  test(`coupon-only retained draft ${variant}`, async ({ page, flow }, testInfo) => {
+    const followsCreator = variant !== "restores without a creator follow";
+    const unavailable = variant === "recovers from an unavailable passive referral";
+    const responses = [];
+    page.on("response", async response => {
+      const url = new URL(response.url());
+      if (!url.pathname.startsWith("/api/ref/validate")) return;
+      responses.push({ path: url.pathname, query: url.search, status: response.status(), data: await response.json() });
+    });
+    const snapshot = () => page.evaluate(() => ({
+      url: location.href,
+      passive: sessionStorage.getItem("referral_session"),
+      journal: sessionStorage.getItem("referral_dismissed"),
+      draft: JSON.parse(sessionStorage.getItem("booking_draft")),
+      hold: JSON.parse(sessionStorage.getItem("my_slot_hold")),
+      disabledButtons: [...document.querySelectorAll("button:disabled")].map(button => button.textContent),
+      text: document.body.innerText,
+    }));
+    let before;
+    let afterFollow;
+    let afterRestore;
+    let beforeTransition;
+    let beforeRetry;
+    let beforePayment;
+    let automaticLookupCount;
+    try {
+      await page.goto("/tourney");
+      await flow.review();
+      await flow.codeInput("save20");
+      await expect(page.getByRole("button", { name: "Remove coupon code save20", exact: true })).toBeVisible();
+      await expect.poll(async () => (await snapshot()).draft?.packages["Performance Vertex Overhaul"]?.checkoutCodes?.coupon?.code).toBe("save20");
+      before = await snapshot();
+      const original = before.draft.packages[before.draft.lastTitle];
+      expect(before.passive).toBeNull();
+      expect(before.journal).toBeNull();
+      expect(original.checkoutCodes.referral).toBeNull();
+      expect(original.form).toEqual({ discord: "fixture_visitor", email: "visitor@example.invalid", specs: "Ryzen 7700 / RTX 4070", mainGame: "CS2", notes: "" });
+      expect(before.hold.phase).toBe("active");
+      expect(Date.parse(before.hold.expiresAt)).toBeGreaterThan(Date.now());
+      expect(quoteCalls(flow, 0)).toHaveLength(0);
+      beforeTransition = flow.state.calls.length;
+      if (unavailable) {
+        await page.route("**/api/ref/validateReferral?code=friend", async route => {
+          flow.state.calls.push({ path: "/api/ref/validateReferral", query: "?code=friend", body: null });
+          await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ ok: false, reason: "unavailable" }) });
+        });
+      }
+      if (followsCreator) {
+        await page.goto("/reviews?ref=friend");
+        await expect.poll(() => storedReferral(page)).toBe("friend");
+        afterFollow = await snapshot();
+        expect(JSON.parse(afterFollow.journal)).toEqual({ passiveCode: "friend", codes: { friend: "available" }, choices: {} });
+      }
+      await page.goto("/booking");
+      await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+      if (followsCreator) await expect.poll(() => referralLookups(flow, beforeTransition, "friend").length).toBeGreaterThan(0);
+      await expect(page.getByRole("button", { name: "Checking code...", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Continue to payment", exact: true })).toBeEnabled();
+      await expect(page.getByRole("button", { name: "Remove coupon code save20", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toHaveCount(followsCreator && !unavailable ? 1 : 0);
+      for (const value of Object.values(original.form).filter(Boolean)) await expect(page.getByRole("dialog").getByText(value, { exact: true })).toBeVisible();
+      afterRestore = await snapshot();
+      expect(afterRestore.hold).toEqual(before.hold);
+      expect(afterRestore.draft.packages[before.draft.lastTitle].form).toEqual(original.form);
+      expect(flow.state.calls.slice(beforeTransition).filter(call => call.path === "/api/holdSlot")).toHaveLength(0);
+      await expect.poll(() => responses.filter(response => new URLSearchParams(response.query).get("code") === "save20").length).toBe(4);
+      expect(responses.filter(response => new URLSearchParams(response.query).get("code") === "save20").every(response => response.status === 200)).toBe(true);
+      if (unavailable) {
+        await expect(page.getByText("Code validation is temporarily unavailable. Try again or continue without this code.", { exact: true })).toBeVisible();
+        await expect(page.getByRole("textbox", { name: "Referral or coupon code", exact: true })).toBeEnabled();
+        await expect(page.getByRole("button", { name: "Apply", exact: true })).toBeEnabled();
+        automaticLookupCount = referralLookups(flow, beforeTransition, "friend").length;
+        expect(automaticLookupCount).toBe(1);
+        await page.waitForTimeout(700);
+        expect(referralLookups(flow, beforeTransition, "friend")).toHaveLength(automaticLookupCount);
+        expect(responses.filter(response => new URLSearchParams(response.query).get("code") === "friend").map(response => [response.path, response.status]).sort()).toEqual([["/api/ref/validateCoupon", 200], ["/api/ref/validateReferral", 503]]);
+        await page.unroute("**/api/ref/validateReferral?code=friend");
+        beforeRetry = flow.state.calls.length;
+        await flow.codeInput("friend");
+        await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+        await expect(page.getByRole("button", { name: "Remove coupon code save20", exact: true })).toBeVisible();
+        expect(referralLookups(flow, beforeRetry, "friend")).toHaveLength(1);
+      } else if (followsCreator) {
+        await expect.poll(() => responses.filter(response => new URLSearchParams(response.query).get("code") === "friend").length).toBe(2);
+        expect(responses.filter(response => new URLSearchParams(response.query).get("code") === "friend").every(response => response.status === 200)).toBe(true);
+      } else {
+        expect(await storedReferral(page)).toBeNull();
+        expect(referralLookups(flow, beforeTransition, "friend")).toHaveLength(0);
+      }
+      beforePayment = flow.state.calls.length;
+      expect(quoteCalls(flow, 0)).toHaveLength(0);
+      await flow.payment();
+      await expect.poll(() => quoteCalls(flow, beforePayment).at(-1)?.body).toMatchObject({ referralCode: followsCreator ? "friend" : "", couponCode: "save20" });
+    } finally {
+      await attachJson(testInfo, "coupon-only-retained-draft", {
+        variant, before, afterFollow, afterRestore, final: await snapshot(),
+        beforeTransition, beforeRetry, beforePayment, automaticLookupCount,
+        newQuotes: beforePayment === undefined ? [] : quoteCalls(flow, beforePayment),
+        responses, calls: flow.state.calls,
+      });
+    }
+  });
+}

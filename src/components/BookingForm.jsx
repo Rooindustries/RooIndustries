@@ -1827,13 +1827,15 @@ export default function BookingForm() {
       let invalidCodeFound = false;
       let unavailableCode = "";
       let storageFailed = false;
-      const candidates = [restoredCodeCandidates.referralCode, restoredCodeCandidates.couponCode];
-      const stillSelected = (input, canonical = "") => {
-        const current = selectStoredReferral(scope, candidates, nextDismissedCode);
+      const candidates = [restoredCodeCandidates.referralCode];
+      let referralOrigin = "";
+      let referralCandidates = candidates;
+      const stillSelected = (input, canonical = "", origins = candidates) => {
+        const current = selectStoredReferral(scope, origins, nextDismissedCode);
         return current === input.toLowerCase() || (canonical && current === canonical.toLowerCase());
       };
 
-      const applyResult = (result, sourceType, sourceCode) => {
+      const applyResult = (result, sourceType, sourceCode, origins = candidates) => {
         if (!result?.ok) {
           if (result?.unavailable) {
             unavailableCode = sourceCode;
@@ -1856,13 +1858,15 @@ export default function BookingForm() {
             invalidCodeFound = true;
             return;
           }
-          if (!stillSelected(sourceCode, safeReferral.code) ||
+          if (!stillSelected(sourceCode, safeReferral.code, origins) ||
             isReferralDismissed(safeReferral.code, nextDismissedCode)) return;
           if (!recordAutomaticReferral(safeReferral.code, scope)) {
             storageFailed = true;
             return;
           }
           nextReferral = safeReferral;
+          referralOrigin = sourceCode;
+          referralCandidates = origins;
           nextDismissedCode = "";
           if (nextCoupon?.canCombineWithReferral === false) {
             nextCoupon = null;
@@ -1881,7 +1885,7 @@ export default function BookingForm() {
         nextCoupon = safeCoupon;
       };
 
-      const referralCode = selectStoredReferral(scope, [restoredCodeCandidates.referralCode], nextDismissedCode);
+      const referralCode = selectStoredReferral(scope, candidates, nextDismissedCode);
       if (referralCode) {
         const result = await resolveCheckoutCode(
           referralCode,
@@ -1889,23 +1893,22 @@ export default function BookingForm() {
         );
         if (!active || !hasActiveHoldRef.current) return;
         const canonical = result?.ok && result.type === "referral" ? result.value?.code || "" : "";
-        if (!stillSelected(referralCode, canonical)) return;
-        applyResult(result, "referral", referralCode);
+        if (stillSelected(referralCode, canonical)) applyResult(result, "referral", referralCode);
       }
 
-      const couponCode = restoredCodeCandidates.couponCode;
+      const couponCode = String(restoredCodeCandidates.couponCode || "").trim();
       if (couponCode && couponCode.toLowerCase() !== referralCode.toLowerCase()) {
         const result = await resolveCheckoutCode(
           couponCode,
           selectedPackage.title
         );
         if (!active || !hasActiveHoldRef.current) return;
-        applyResult(result, "coupon", couponCode);
+        applyResult(result, "coupon", couponCode, [...candidates, couponCode]);
       }
 
       if (!active || !hasActiveHoldRef.current) return;
-      if (nextReferral && (!stillSelected(nextReferral.code) ||
-        isReferralDismissed(nextReferral.code, nextDismissedCode))) return;
+      if (nextReferral && (!stillSelected(referralOrigin, nextReferral.code, referralCandidates) ||
+        isReferralDismissed(nextReferral.code, nextDismissedCode))) nextReferral = null;
       setAppliedReferral(nextReferral);
       setAppliedCoupon(nextCoupon);
       setDismissedReferralCode(nextDismissedCode);
@@ -1916,8 +1919,6 @@ export default function BookingForm() {
           dismissedCode: nextDismissedCode,
         });
       }
-      setRestoredCodeCandidates(null);
-
       if (storageFailed || unavailableCode || invalidCodeFound) {
         setCodeEntryOpen(true);
         if (unavailableCode) setCodeInput(unavailableCode);
@@ -1925,9 +1926,18 @@ export default function BookingForm() {
       }
     };
 
-    restoreValidatedCodes().finally(() => {
+    restoreValidatedCodes().catch(() => {
+      if (!active || !hasActiveHoldRef.current) return;
+      setCodeEntryOpen(true);
+      setCodeError(CODE_VALIDATION_UNAVAILABLE_MESSAGE);
+    }).finally(() => {
       settled = true;
-      if (active) setValidatingCode(false);
+      if (active) {
+        if (hasActiveHoldRef.current) {
+          setRestoredCodeCandidates(current => current === restoredCodeCandidates ? null : current);
+        }
+        setValidatingCode(false);
+      }
     });
 
     return () => {
