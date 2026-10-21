@@ -65,7 +65,8 @@ const freshState = () => ({
   issues: [], comments: [], updates: [], calls: [], requests: [], runs: [], checks: {},
   window: windowReport(), pageSize: 100, failures: [], date: today,
   reportedCount: null, scopeFault: null, duplicateCursor: false, gate: null,
-  issueResponses: [], minimalCreateResponse: false, omitDefaultChildParent: false, canonicalChildFault: null, workflowRaces: [],
+  issueResponses: [], updateResponses: [], identityBefore: null,
+  minimalCreateResponse: false, omitDefaultChildParent: false, canonicalChildFault: null, workflowRaces: [],
 });
 const managedDescription = (key) =>
   '**Goal**: Resolve this payment, booking or referral-credit mismatch.\n\n' +
@@ -109,7 +110,7 @@ const failureFor = (method, args) => current.failures.find((failure) =>
 const issueResponse = (issue, method, args) => {
   let dto = { ...structuredClone(issue), description: responseDescription(issue.description) };
   if (method === 'list_issues') {
-    if (dto.description.length > 500) dto.description = dto.description.slice(0, 449) + truncationMarker;
+    if (typeof dto.description === 'string' && dto.description.length > 500) dto.description = dto.description.slice(0, 449) + truncationMarker;
     const field = { project: 'projectId', team: 'teamId', child: 'parentId' }[current.scopeFault];
     if (field) dto[field] = '00000000-0000-4000-8000-000000000000';
   } else if (method === 'get_issue') {
@@ -124,6 +125,14 @@ const issueResponse = (issue, method, args) => {
   } else if (!args.id && current.minimalCreateResponse) dto = { uuid: issue.uuid };
   current.issueResponses.push({
     method, args: structuredClone(args), uuid: issue.uuid, authoredDescription: issue.description,
+    dto: structuredClone(dto), callIndex: current.calls.length - 1, reportRequests: current.requests.length,
+  });
+  return dto;
+};
+const updateResponse = (update, method, args) => {
+  const dto = { ...structuredClone(update), body: responseDescription(update.body) };
+  current.updateResponses.push({
+    method, args: structuredClone(args), id: update.id, authoredBody: update.body,
     dto: structuredClone(dto), callIndex: current.calls.length - 1, reportRequests: current.requests.length,
   });
   return dto;
@@ -177,6 +186,7 @@ const linear = async (method, args) => {
     assert.equal(args.orderBy, 'createdAt');
     assert.equal(args.createdAt, current.date + 'T00:00:00Z');
     result = page(current.updates.filter((update) => update.createdAt.slice(0, 10) >= current.date), args, 'statusUpdates');
+    result.statusUpdates = result.statusUpdates.map((update) => updateResponse(update, method, args));
   } else if (method === 'save_issue') {
     assert.equal(Object.hasOwn(args, 'labels'), false);
     if (args.id) {
@@ -242,6 +252,7 @@ const linear = async (method, args) => {
       result.url = 'https://linear.app/rooindustries/project/roo-website/activity#project-update-' + result.id;
       current.updates.push(result);
     }
+    result = updateResponse(result, method, args);
   } else throw new Error('Unsupported fixture method');
   if (failure) {
     failure.used = true;
@@ -366,7 +377,9 @@ const invoke = (home, options = {}) => {
       children.delete(child);
       assert.equal((stdout + stderr).includes(token), false, 'Fixture bearer leaked');
       const alertFile = path.join(home, '.local/share/mission-control/alerts/site-reconcile.json');
+      const stateFile = path.join(home, '.local/state/roo-reconcile/run-' + current.date + '.json');
       const result = { code, signal, stdout, stderr,
+        state: fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')) : null,
         alert: fs.existsSync(alertFile) ? JSON.parse(fs.readFileSync(alertFile, 'utf8')) : null };
       current.runs.push(result);
       resolve(result);
@@ -404,6 +417,16 @@ const seedHeldIssue = (archived = false) => {
   });
   return issue;
 };
+const seedHumanIssue = (description) => {
+  const issue = seedIssue('payment:fixture', { title: 'Human investigation', description });
+  current.comments = current.comments.filter((comment) => comment.issueId !== issue.uuid);
+  current.comments.push({
+    id: crypto.randomUUID(), issueId: issue.uuid, body: 'Human investigation notes remain unchanged.',
+    createdAt: iso(), updatedAt: iso(), author: { name: 'Fixture operator' }, attachments: [],
+    onBehalfOf: null, parentId: null, quotedText: null, resolvedAt: null,
+  });
+  return issue;
+};
 const fault = () => item('payment:fixture');
 const run = async (name, fn) => {
   if (selected && !selected.includes(name)) return;
@@ -415,7 +438,8 @@ const run = async (name, fn) => {
   const blocked = fs.existsSync(path.join(home, 'blocked')) ? fs.readFileSync(path.join(home, 'blocked'), 'utf8').trim().split('\n').length : 0;
   results.push({ name, passed, error, blockedRequests: blocked, expectedBlockedRequests: current.expectedBlocked || 0, calls: current.calls, sourceRequests: current.requests,
     handshakes: fs.existsSync(path.join(home, 'handshakes')) ? fs.readFileSync(path.join(home, 'handshakes'), 'utf8').trim().split('\n') : [],
-    issueResponses: current.issueResponses, workflowRaces: current.workflowRaces,
+    issueResponses: current.issueResponses, updateResponses: current.updateResponses,
+    identityBefore: current.identityBefore, workflowRaces: current.workflowRaces,
     issues: current.issues, comments: current.comments, updates: current.updates, runs: current.runs });
 };
 try {
@@ -430,6 +454,122 @@ try {
       assert.equal(current.issues.length, 1);
     });
   } else {
+    await run('status-update-normalized-bodies', async (home) => {
+      current.window = windowReport([fault()]);
+      const mismatch = await invoke(home);
+      assert.equal(mismatch.code, 0);
+      assert.equal(JSON.parse(mismatch.stdout).result, 'mismatch');
+      assert.equal(mismatch.alert.severity, 'red');
+      assert.equal(current.issues.length, 1);
+      assert.equal(current.comments.length, 1);
+      assert.equal(current.updates.length, 1);
+      const issue = current.issues[0];
+      const issueUUID = issue.uuid;
+      const updateID = current.updates[0].id;
+      const issueURL = 'https://linear.app/rooindustries/issue/' + issue.id;
+      assert.deepEqual(JSON.parse(mismatch.stdout).ownedissueURLs, [issueURL]);
+      assert.deepEqual(mismatch.state.ownedissueURLs, [issueURL]);
+      current.window = windowReport();
+      current.checks['payment:fixture'] = recovered('payment:fixture');
+      const recovery = await invoke(home);
+      assert.equal(recovery.code, 0);
+      assert.equal(JSON.parse(recovery.stdout).result, 'clear');
+      assert.equal(JSON.parse(recovery.stdout).complete, true);
+      assert.equal(recovery.alert.severity, 'green');
+      assert.equal(current.issues.length, 1);
+      assert.equal(current.issues[0].uuid, issueUUID);
+      assert.equal(issue.status, 'Done');
+      assert.equal(current.comments.length, 1);
+      assert.equal(current.updates.length, 1);
+      assert.equal(current.updates[0].id, updateID);
+      assert.deepEqual(JSON.parse(recovery.stdout).ownedissueURLs, [issueURL]);
+      assert.deepEqual(recovery.state.ownedissueURLs, [issueURL]);
+      const bodies = [
+        'Reconciliation run: ' + today + '\nPayment audit: mismatch. Reported: 1; listed: 1; open: 1; unknown: 0; recovered: 0. Incomplete: false.\n' + issue.id,
+        'Reconciliation run: ' + today + '\nPayment audit: clear. Reported: 0; listed: 0; open: 0; unknown: 0; recovered: 1. Incomplete: false.\n' + issue.id,
+      ];
+      const saved = current.updateResponses.filter((response) => response.method === 'save_status_update' && !response.authoredBody.endsWith('Payment audit: pending.'));
+      assert.deepEqual(saved.map((response) => response.authoredBody), bodies);
+      assert.deepEqual(saved.map((response) => response.dto.body), bodies);
+      assert.equal(current.updates[0].body, bodies[1]);
+      for (const body of bodies) assert.doesNotMatch(body, /https?:\/\//);
+      for (const body of bodies) assert.ok(current.updateResponses.some((response) => response.method === 'get_status_updates' && response.dto.body === body));
+      assert.equal(writes().some((call) => call.method === 'save_issue' && Object.hasOwn(call.args, 'description') && call.args.id), false);
+      assertProjectedChildReads();
+    });
+    for (const [name, description] of [['nullable-unowned-child', null], ['empty-unowned-child', '']]) {
+      await run(name, async (home) => {
+        const issue = seedHumanIssue(description);
+        current.identityBefore = structuredClone({ issues: current.issues, comments: current.comments });
+        const result = await invoke(home);
+        assert.equal(result.code, 0);
+        assert.equal(JSON.parse(result.stdout).result, 'clear');
+        assert.equal(JSON.parse(result.stdout).complete, true);
+        assert.deepEqual(JSON.parse(result.stdout).ownedissueURLs, []);
+        assert.equal(result.alert.severity, 'green');
+        assert.equal(current.updates.length, 1);
+        assert.deepEqual({ issues: current.issues, comments: current.comments }, current.identityBefore);
+        assert.equal(writes().filter((call) => call.method !== 'save_status_update').length, 0);
+        assert.deepEqual(current.requests.map((request) => request.checks), [null]);
+        assert.ok(current.calls.some((call) => call.method === 'list_comments' && call.args.issueId === issue.uuid && call.args.limit === 100 && call.args.orderBy === 'updatedAt'));
+        assertProjectedChildReads();
+        assert.ok(current.issueResponses.some((response) => response.method === 'get_issue' && response.dto.description === description));
+      });
+    }
+    for (const [name, description] of [
+      ['lost-owned-description-null', null], ['lost-owned-description-empty', ''],
+      ['lost-owned-description-replaced', 'Human investigation is continuing.'],
+    ]) {
+      await run(name, async (home) => {
+        const issue = seedIssue('payment:fixture', { description });
+        current.identityBefore = structuredClone({ issues: current.issues, comments: current.comments });
+        const result = await invoke(home);
+        assert.notEqual(result.code, 0);
+        assert.equal(JSON.parse(result.stdout).result, 'unavailable');
+        assert.equal(JSON.parse(result.stdout).complete, false);
+        assert.equal(result.alert.severity, 'amber');
+        assert.equal(writes().length, 0);
+        assert.equal(current.requests.length, 0);
+        assert.deepEqual({ issues: current.issues, comments: current.comments }, current.identityBefore);
+        assertProjectedChildReads();
+        assert.ok(current.calls.some((call) => call.method === 'list_comments' && call.args.issueId === issue.uuid));
+        assert.equal(result.alert.items[0].reason, 'linear_identity_invalid');
+      });
+    }
+    for (const [name, description] of [
+      ['malformed-description-false', false], ['malformed-description-object', { human: 'Malformed description' }],
+    ]) {
+      await run(name, async (home) => {
+        seedHumanIssue(description);
+        current.identityBefore = structuredClone({ issues: current.issues, comments: current.comments });
+        const result = await invoke(home);
+        assert.notEqual(result.code, 0);
+        assert.equal(JSON.parse(result.stdout).result, 'unavailable');
+        assert.equal(JSON.parse(result.stdout).complete, false);
+        assert.equal(result.alert.severity, 'amber');
+        assert.equal(result.alert.items[0].reason, 'linear_scope_invalid');
+        assert.equal(writes().length, 0);
+        assert.equal(current.requests.length, 0);
+        assert.deepEqual({ issues: current.issues, comments: current.comments }, current.identityBefore);
+        assert.deepEqual(current.issueResponses.find((response) => response.method === 'list_issues').dto.description, description);
+      });
+    }
+    await run('unowned-comment-read-fails', async (home) => {
+      const issue = seedHumanIssue('');
+      current.identityBefore = structuredClone({ issues: current.issues, comments: current.comments });
+      const failure = { method: 'list_comments', when: (args) => args.issueId === issue.uuid };
+      current.failures.push(failure);
+      const result = await invoke(home);
+      assert.notEqual(result.code, 0);
+      assert.equal(failure.used, true);
+      assert.equal(JSON.parse(result.stdout).result, 'unavailable');
+      assert.equal(JSON.parse(result.stdout).complete, false);
+      assert.equal(result.alert.severity, 'amber');
+      assert.equal(writes().length, 0);
+      assert.equal(current.requests.length, 0);
+      assert.deepEqual({ issues: current.issues, comments: current.comments }, current.identityBefore);
+      assertProjectedChildReads();
+    });
     await run('linear-description-roundtrip', async (home) => {
       current.window = windowReport([fault()]);
       const result = await invoke(home);
@@ -936,6 +1076,8 @@ try {
       const second = current.requests.slice(count).filter((request) => request.checks).flatMap((request) => request.checks);
       assert.equal(second[0], 'booking:rotation-200');
       assert.equal(second.length, 200);
+      assert.ok(current.updates[0].body.endsWith('\nFull issue list: ROO-498'));
+      assert.doesNotMatch(current.updates[0].body, /https?:\/\//);
     });
     await run('scan-flags-independent', async (home) => {
       const fields = ['payments', 'bookings', 'records'];

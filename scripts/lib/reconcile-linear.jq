@@ -94,7 +94,7 @@ def root_scope:
 def issue_scope:
   (.uuid|uuid) and (.id|type == "string" and test("^ROO-[0-9]+\\z"))
   and .parentId == scope.parentId and .projectId == scope.projectId and .teamId == scope.teamId
-  and (.description|type == "string") and (.status|type == "string")
+  and (.description == null or (.description|type == "string")) and (.status|type == "string")
   and (.statusType|IN("triage","backlog","unstarted","started","completed","canceled"))
   and (.createdAt|timestamp) and (.updatedAt|timestamp)
   and (.archivedAt == null or (.archivedAt|timestamp));
@@ -116,7 +116,7 @@ def metadata_valid($issue):
   and (.observations|type == "array" and all(.[];safe_item(true)));
 def owned_issue:
   . as $issue |
-  [.description|split("\n")[]|select(startswith("Reconciliation key: "))] as $markers |
+  [(.description // "")|split("\n")[]|select(startswith("Reconciliation key: "))] as $markers |
   if ($markers|length)==0 then empty
   elif ($markers|length)!=1 then error("linear_identity_invalid")
   else ($markers[0]|ltrimstr("Reconciliation key: ")) as $primary |

@@ -176,6 +176,11 @@ while IFS= read -r issue_id; do
   mv "$work/next.json" "$work/issues.json"
 done < <(jq -r '.[].uuid' "$work/listed-issues.json")
 jq_module -c 'include "reconcile-linear"; [.[]|owned_issue]' "$work/issues.json" > "$work/owned.json" || fail linear_identity_invalid
+while IFS= read -r issue_id; do
+  comment_args=$(jq -nc --arg issueId "$issue_id" '{issueId:$issueId,limit:100,orderBy:"updatedAt"}')
+  all_pages list_comments "$comment_args" comments > "$work/unowned-comments.json" || fail linear_pagination_invalid
+  jq_module -e 'all(.[]; (.body|type)=="string" and (.body|startswith("Payment reconciliation status\n")|not))' "$work/unowned-comments.json" >/dev/null || fail linear_identity_invalid
+done < <(jq_module -r 'include "reconcile-linear"; .[]|select(([owned_issue]|length)==0)|.uuid' "$work/issues.json")
 jq -c 'map(.url)|unique' "$work/owned.json" > "$work/urls.json"
 jq '[.[]|{uuid,statusType,archivedAt}]' "$work/owned.json" > "$work/verified.json"
 printf '[]\n' > "$work/managed.json"
@@ -325,8 +330,8 @@ complete=$(jq .complete "$work/plan.json")
 open_count=$(known_open)
 result=$(jq -r .result "$work/plan.json")
 body="$marker"$'\n'"Payment audit: $result. Reported: $reported_count; listed: $listed_count; open: $open_count; unknown: $unknown_count; recovered: $recovered_count. Incomplete: $([[ "$complete" == true ]] && printf false || printf true)."
-while IFS= read -r issue_url; do body+=$'\n'"$issue_url"; done < <(jq -r '.[:20][]' "$work/urls.json")
-if [[ "$(jq length "$work/urls.json")" -gt 20 ]]; then body+=$'\n''Full issue list: https://linear.app/rooindustries/issue/ROO-498'; fi
+while IFS= read -r issue_id; do body+=$'\n'"$issue_id"; done < <(jq -r '.[:20][]|ltrimstr("https://linear.app/rooindustries/issue/")' "$work/urls.json")
+if [[ "$(jq length "$work/urls.json")" -gt 20 ]]; then body+=$'\n''Full issue list: ROO-498'; fi
 save_update "$body" || fail linear_update_unverified
 if [[ "$source_ok" != true || "$targets_ok" != true || "$(jq .metadataInvalid "$work/plan.json")" == true ]]; then exit 1; fi
 error_code=""
