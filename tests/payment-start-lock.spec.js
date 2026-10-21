@@ -322,7 +322,7 @@ test("a free booking can't be confirmed while a paid checkout is starting", asyn
 
 const resumeQuoteTest = test.extend({
   launchOptions: async ({ launchOptions }, use) => {
-    await use({ ...launchOptions, ignoreDefaultArgs: ["--disable-back-forward-cache"] });
+    await use({ ...launchOptions, channel: "chromium", ignoreDefaultArgs: ["--disable-back-forward-cache"] });
   },
   resume: async ({ page, browser, flow, baseURL }, use, testInfo) => {
     const evidence = { setupComplete: false, calls: [], requests: [], snapshots: {}, pageErrors: [], readiness: [] };
@@ -334,7 +334,8 @@ const resumeQuoteTest = test.extend({
     const enabledProviders = { dodo: { enabled: true, mode: "test" }, razorpay: { enabled: true, mode: "test" }, paypal: { enabled: true, mode: "sandbox", clientId: "fixture-client" } };
     const attach = async (name, value) => testInfo.attach(name, { body: JSON.stringify(value, null, 2), contentType: "application/json" });
     await page.addInitScript(() => {
-      window.__resumeObservation = { nonce: crypto.randomUUID(), pageshows: [] };
+      const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, "0")).join("");
+      window.__resumeObservation = { nonce, pageshows: [] };
       window.__resumeSdk = [];
       addEventListener("pageshow", event => window.__resumeObservation.pageshows.push({ persisted: event.persisted, url: location.href, at: performance.now() }));
     });

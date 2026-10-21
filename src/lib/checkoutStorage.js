@@ -161,9 +161,14 @@ const restoreReferralCaptureFailure = () => {
     const raw = window.sessionStorage.getItem(REFERRAL_CAPTURE_STORAGE_KEY);
     if (raw === "ready") return null;
     if (raw === null) {
-      return window.sessionStorage.getItem(REFERRAL_DISMISSED_STORAGE_KEY) === null &&
-        window.sessionStorage.getItem(REFERRAL_SESSION_STORAGE_KEY) === null
-        ? null : { code: "", address: "" };
+      if (window.sessionStorage.getItem(REFERRAL_DISMISSED_STORAGE_KEY) !== null) {
+        return { code: "", address: "" };
+      }
+      const legacyCode = normalizeReferralCode(window.sessionStorage.getItem(REFERRAL_SESSION_STORAGE_KEY));
+      if (!legacyCode) return null;
+      writeReferralIntent({ passiveCode: legacyCode, codes: {}, choices: {} });
+      acknowledgeReferralCapture();
+      return null;
     }
     let pending;
     try { pending = JSON.parse(raw); } catch { return { code: "", address: "" }; }

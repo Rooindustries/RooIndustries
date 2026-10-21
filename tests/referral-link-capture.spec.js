@@ -4544,3 +4544,396 @@ lockedSnapshotTest("a locked checkout with no saved quote keeps recovery without
   await soft(paymentCode(page)).toBeDisabled();
   locked.unchanged(restored, constructed);
 });
+
+test.describe("legacy creator tabs after upgrade", () => {
+  const legacyTabForm = {
+    discord: "fixture_visitor", email: "visitor@example.invalid",
+    specs: "Ryzen 7700 / RTX 4070", mainGame: "CS2", notes: "",
+  };
+  const legacyTabSnapshot = async page => {
+    const retained = await retainedCheckout(page);
+    return {
+      ...retained,
+      rawMirror: retained.intent.passive,
+      rawJournal: retained.intent.journal,
+      rawGuard: retained.guard,
+      journal: JSON.parse(retained.intent.journal),
+      ...await page.evaluate(() => ({
+        entries: Object.fromEntries(Object.entries(sessionStorage)),
+        fields: Object.fromEntries(["discord", "email", "specs", "mainGame"].map(key => [
+          key, document.querySelector(`[name="${key}"]`)?.value ?? null,
+        ])),
+        paint: [...document.querySelectorAll(".booking-payment, .booking-step-panel")].map(element => ({
+          at: Date.now(), className: element.className, opacity: getComputedStyle(element).opacity,
+          children: [...element.children].map(child => ({ tag: child.tagName, opacity: getComputedStyle(child).opacity })),
+        })),
+        operations: window.legacyMigrationOperations || [],
+        installerSkipped: window.legacyMigrationInstallerSkipped ?? null,
+      })),
+    };
+  };
+  const legacyTabSeed = async (page, flow, baseURL, { dismissed = false, failure = null } = {}) => {
+    const fixtureOrigin = new URL(baseURL).origin;
+    await page.route("**/api/payment/quote", async route => {
+      const request = route.request();
+      const url = new URL(request.url());
+      if (url.origin !== fixtureOrigin) return route.fallback();
+      const body = request.postDataJSON();
+      const call = { at: Date.now(), path: url.pathname, query: url.search, method: request.method(), body };
+      flow.state.calls.push(call);
+      expect(request.method()).toBe("POST");
+      expect(["", "friend", "save20"]).toContain(body.referralCode || "");
+      expect(body.couponCode || "").toBe("");
+      const code = body.referralCode || "";
+      const response = {
+        ok: true,
+        quoteFingerprint: `legacy-migration-${code || "none"}`,
+        providers: {
+          dodo: { enabled: true, mode: "test" },
+          razorpay: { enabled: false, mode: "disabled" },
+          paypal: { enabled: false, mode: "disabled" },
+        },
+        quote: { grossAmount: 54.95, netAmount: code ? 49.45 : 54.95, isFree: false },
+      };
+      call.response = response;
+      call.status = 200;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(response) });
+      call.fulfilledAt = Date.now();
+    });
+    await page.waitForLoadState("networkidle", { timeout: 10000 });
+    await page.goto("/__test/checkout-handoff");
+    expect(await page.evaluate(() => Object.entries(sessionStorage))).toEqual([]);
+    let beforeUpgrade;
+    if (dismissed) {
+      await page.waitForLoadState("networkidle", { timeout: 10000 });
+      await flow.review();
+      beforeUpgrade = await legacyTabSnapshot(page);
+      expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
+      expect(flow.state.holds.size).toBe(1);
+      const hold = [...flow.state.holds.values()][0];
+      expect(beforeUpgrade.hold).toMatchObject({ holdId: hold.holdId, holdToken: hold.holdToken });
+      expect(beforeUpgrade.draft.lastTitle).toBe("Performance Vertex Overhaul");
+      expect(beforeUpgrade.draft.packages[beforeUpgrade.draft.lastTitle].form).toEqual(legacyTabForm);
+      expect(beforeUpgrade.draft.packages[beforeUpgrade.draft.lastTitle].checkoutCodes?.referral || null).toBeNull();
+      expect(beforeUpgrade.draft.packages[beforeUpgrade.draft.lastTitle].checkoutCodes?.coupon || null).toBeNull();
+      await expect(page.getByRole("button", { name: /^Remove (referral|coupon) code / })).toHaveCount(0);
+      expect(beforeUpgrade.rawMirror).toBeNull();
+      expect(beforeUpgrade.rawJournal).toBeNull();
+      expect(beforeUpgrade.rawGuard).toBeNull();
+      expect(JSON.parse(beforeUpgrade.entries.booking_modal_state)).toMatchObject({
+        packageTitle: "Performance Vertex Overhaul", step: 3,
+      });
+    }
+    await page.evaluate(({ raw, dismissed }) => {
+      sessionStorage.setItem("referral_session", raw);
+      if (dismissed) {
+        const draft = JSON.parse(sessionStorage.getItem("booking_draft"));
+        draft.packages[draft.lastTitle].checkoutCodes = {
+          referral: null, coupon: null, dismissedReferralCode: "friend",
+        };
+        sessionStorage.setItem("booking_draft", JSON.stringify(draft));
+      }
+    }, { raw: "FrIeNd", dismissed });
+    const seed = await legacyTabSnapshot(page);
+    const entries = { referral_session: "FrIeNd" };
+    if (dismissed) {
+      const draft = JSON.parse(beforeUpgrade.entries.booking_draft);
+      draft.packages[draft.lastTitle].checkoutCodes = {
+        referral: null, coupon: null, dismissedReferralCode: "friend",
+      };
+      Object.assign(entries, beforeUpgrade.entries, { referral_session: "FrIeNd", booking_draft: JSON.stringify(draft) });
+    }
+    expect(seed.entries).toEqual(entries);
+    expect(seed.rawJournal).toBeNull();
+    expect(seed.rawGuard).toBeNull();
+    if (dismissed) {
+      expect(seed.hold).toEqual(beforeUpgrade.hold);
+      expect(JSON.stringify(seed.draft.packages[seed.draft.lastTitle].form))
+        .toBe(JSON.stringify(beforeUpgrade.draft.packages[beforeUpgrade.draft.lastTitle].form));
+      await page.waitForLoadState("networkidle", { timeout: 10000 });
+      await page.reload();
+      return { ...seed, beforeUpgrade };
+    }
+    expect(seed.hold).toBeNull();
+    if (failure) await page.addInitScript(failure => {
+      window.legacyMigrationOperations = [];
+      window.legacyMigrationInstallerSkipped = sessionStorage.getItem("referral_capture") === "ready";
+      if (window.legacyMigrationInstallerSkipped) return;
+      const original = Storage.prototype.setItem;
+      window.restoreLegacyMigrationStorage = () => { Storage.prototype.setItem = original; };
+      Storage.prototype.setItem = function(key, value) {
+        if (this === window.sessionStorage &&
+            ((failure === "journal" && key === "referral_dismissed") ||
+             (failure === "acknowledgement" && key === "referral_capture" && value === "ready"))) {
+          window.legacyMigrationOperations.push({ operation: "set", key, value, error: "QuotaExceededError" });
+          throw new DOMException("Fixture legacy migration write denied", "QuotaExceededError");
+        }
+        return original.call(this, key, value);
+      };
+    }, failure);
+    return seed;
+  };
+  const legacyTabEvidence = page => {
+    const evidence = {
+      setupComplete: false, pageErrors: [],
+      setup: "Constructed pre-deploy mirror-only state from the verified legacy writer; not old-build UI proof.",
+    };
+    page.on("pageerror", error => evidence.pageErrors.push({ name: error.name, message: error.message, stack: error.stack }));
+    return evidence;
+  };
+  const legacyTabReview = async (page, flow, evidence, testInfo, { restored = false } = {}) => {
+    evidence.reviewBoundary = flow.state.calls.length;
+    if (restored) await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+    else {
+      await page.waitForLoadState("networkidle", { timeout: 10000 });
+      await flow.review();
+    }
+    evidence.review = await legacyTabSnapshot(page);
+    expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
+    expect(flow.state.holds.size).toBe(1);
+    const hold = [...flow.state.holds.values()][0];
+    expect(evidence.review.hold).toMatchObject({ holdId: hold.holdId, holdToken: hold.holdToken });
+    expect(flow.state.calls.find(call => call.path === "/api/holdSlot").body.startTimeUTC).toBe(hold.startTimeUTC);
+    expect(evidence.review.draft.lastTitle).toBe("Performance Vertex Overhaul");
+    expect(evidence.review.draft.packages[evidence.review.draft.lastTitle].form).toEqual(legacyTabForm);
+    for (const value of Object.values(legacyTabForm).filter(Boolean)) {
+      await expect(page.getByRole("dialog").getByText(value, { exact: true })).toBeVisible();
+    }
+    evidence.setupComplete = true;
+    await attachJson(testInfo, "legacy-tab-setup-controls", evidence);
+  };
+  const legacyTabPaint = async page => {
+    const panel = page.locator(".booking-payment");
+    await expect(panel).toHaveCSS("opacity", "1", { timeout: 5000 });
+    for (const child of await panel.locator(":scope > div").all()) {
+      await expect(child).toHaveCSS("opacity", "1", { timeout: 5000 });
+    }
+  };
+  const legacyTabPrice = async (page, flow, code, since, testInfo, assertions = expect) => {
+    await expect.poll(() => quoteCalls(flow, since).length).toBeGreaterThan(0);
+    await expect.poll(() => quoteCalls(flow, since).at(-1)?.fulfilledAt || 0).toBeGreaterThan(0);
+    await assertions.poll(() => quoteCalls(flow, since).at(-1)?.body.referralCode, { timeout: 3000 }).toBe(code);
+    assertions(quoteCalls(flow, since).at(-1)).toMatchObject({
+      method: "POST", status: 200, fulfilledAt: expect.any(Number),
+      body: { referralCode: code, couponCode: "" },
+      response: {
+        ok: true, quoteFingerprint: `legacy-migration-${code || "none"}`,
+        quote: { grossAmount: 54.95, netAmount: code ? 49.45 : 54.95, isFree: false },
+      },
+    });
+    await legacyTabPaint(page);
+    const heading = page.getByRole("heading", { name: "Booking Summary", exact: true });
+    await heading.scrollIntoViewIfNeeded();
+    await expect(heading).toBeInViewport();
+    await assertions(heading.locator("..").getByText(code ? "$49.45 USD" : "$54.95 USD", { exact: true }))
+      .toBeVisible({ timeout: 3000 });
+    await attachJson(testInfo, `legacy-tab-quote-${since}`, { since, quotes: quoteCalls(flow, since), state: await legacyTabSnapshot(page) });
+    await testInfo.attach(`legacy-tab-painted-price-${since}`, { body: await page.screenshot(), contentType: "image/png" });
+  };
+  const legacyTabRetainsFormAndHold = (after, before) => {
+    expect(after.hold).toEqual(before.hold);
+    expect(after.draft.packages[before.draft.lastTitle].form).toEqual(before.draft.packages[before.draft.lastTitle].form);
+  };
+  const legacyTabFinish = async (page, flow, evidence, testInfo) => {
+    evidence.final = await legacyTabSnapshot(page);
+    await attachJson(testInfo, "legacy-tab-before-final-paint", { ...evidence, calls: flow.state.calls, aborted: flow.state.aborted });
+    try {
+      if (await page.locator(".booking-payment").count()) await legacyTabPaint(page);
+      await testInfo.attach("legacy-tab-final-page", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
+    } finally {
+      evidence.afterPaint = await legacyTabSnapshot(page);
+      evidence.calls = flow.state.calls;
+      evidence.newQuotes = flow.state.calls.filter(call => call.path === "/api/payment/quote");
+      evidence.holds = [...flow.state.holds.values()];
+      evidence.aborted = flow.state.aborted;
+      await attachJson(testInfo, "legacy-tab-complete-evidence", evidence);
+      const soft = expect.configure({ soft: true });
+      soft(evidence.pageErrors).toEqual([]);
+      soft(evidence.aborted).toEqual([]);
+      soft(flow.state.calls.filter(call => /\/api\/.*(?:start|capture|confirm|finalize|cancel)/i.test(call.path) || call.path === "/api/releaseHold")).toEqual([]);
+      soft(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
+      soft(flow.state.holds.size).toBe(1);
+    }
+  };
+
+  test("a pre-journal creator code survives booking and payment after upgrade", async ({ page, flow, baseURL }, testInfo) => {
+    const evidence = legacyTabEvidence(page);
+    const soft = expect.configure({ soft: true });
+    flow.state.collision = true;
+    try {
+      evidence.seed = await legacyTabSeed(page, flow, baseURL);
+      await legacyTabReview(page, flow, evidence, testInfo);
+      await soft(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible({ timeout: 3000 });
+      await soft(page.getByRole("alert").filter({ hasText: storageError })).toHaveCount(0, { timeout: 3000 });
+      evidence.paymentBoundary = flow.state.calls.length;
+      await flow.payment();
+      await legacyTabPrice(page, flow, "friend", evidence.paymentBoundary, testInfo, soft);
+      await soft(paymentCode(page)).toHaveValue("friend", { timeout: 3000 });
+      await soft(page.getByRole("alert").filter({ hasText: storageError })).toHaveCount(0, { timeout: 3000 });
+      evidence.payment = await legacyTabSnapshot(page);
+      soft(evidence.payment.rawGuard).toBe("ready");
+      soft(evidence.payment.rawMirror).toBe("friend");
+      soft(evidence.payment.journal?.passiveCode).toBe("friend");
+      soft(["available", "applied"]).toContain(evidence.payment.journal?.codes?.friend);
+      soft(evidence.payment.journal?.choices?.[checkoutScope()]).toBe("friend");
+      soft(evidence.payment.draft.packages[evidence.payment.draft.lastTitle].checkoutCodes?.referral?.code).toBe("friend");
+      legacyTabRetainsFormAndHold(evidence.payment, evidence.review);
+      await page.waitForLoadState("networkidle", { timeout: 10000 });
+      await page.goto("/?ref=save20");
+      await soft.poll(() => storedReferral(page), { timeout: 3000 }).toBe("save20");
+      evidence.afterFreshLink = await legacyTabSnapshot(page);
+      soft(evidence.afterFreshLink.rawGuard).toBe("ready");
+      soft(evidence.afterFreshLink.journal?.passiveCode).toBe("save20");
+      soft(evidence.afterFreshLink.journal?.codes?.save20).toBe("available");
+      soft(evidence.afterFreshLink.journal?.choices?.[checkoutScope()]).toBe("friend");
+      expect(evidence.afterFreshLink.hold).toEqual(evidence.payment.hold);
+      expect(evidence.afterFreshLink.draft).toEqual(evidence.payment.draft);
+      expect(evidence.afterFreshLink.entries.checkout_booking_state).toBe(evidence.payment.entries.checkout_booking_state);
+    } finally {
+      await legacyTabFinish(page, flow, evidence, testInfo);
+    }
+  });
+
+  test("a pre-journal tab accepts a fresh creator link before booking", async ({ page, flow, baseURL }, testInfo) => {
+    const evidence = legacyTabEvidence(page);
+    const soft = expect.configure({ soft: true });
+    flow.state.collision = true;
+    try {
+      evidence.seed = await legacyTabSeed(page, flow, baseURL);
+      await page.waitForLoadState("networkidle", { timeout: 10000 });
+      await page.goto("/?ref=save20");
+      await soft.poll(() => storedReferral(page), { timeout: 3000 }).toBe("save20");
+      evidence.beforeBooking = await legacyTabSnapshot(page);
+      expect(evidence.beforeBooking.hold).toBeNull();
+      expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toEqual([]);
+      soft(evidence.beforeBooking.rawGuard).toBe("ready");
+      soft(evidence.beforeBooking.journal?.passiveCode).toBe("save20");
+      soft(evidence.beforeBooking.journal?.codes?.save20).toBe("available");
+      soft(evidence.beforeBooking.journal?.choices).toEqual({});
+      await legacyTabReview(page, flow, evidence, testInfo);
+      await soft(page.getByRole("button", { name: "Remove referral code save20", exact: true })).toBeVisible({ timeout: 3000 });
+      evidence.paymentBoundary = flow.state.calls.length;
+      await flow.payment();
+      await legacyTabPrice(page, flow, "save20", evidence.paymentBoundary, testInfo, soft);
+      await soft(paymentCode(page)).toHaveValue("save20", { timeout: 3000 });
+      await soft(page.getByRole("alert").filter({ hasText: storageError })).toHaveCount(0, { timeout: 3000 });
+      evidence.payment = await legacyTabSnapshot(page);
+      soft(evidence.payment.rawGuard).toBe("ready");
+      soft(evidence.payment.journal?.choices?.[checkoutScope()]).toBe("save20");
+      soft(evidence.payment.draft.packages[evidence.payment.draft.lastTitle].checkoutCodes?.referral?.code).toBe("save20");
+      soft(referralLookups(flow, 0, "friend")).toEqual([]);
+      legacyTabRetainsFormAndHold(evidence.payment, evidence.review);
+    } finally {
+      await legacyTabFinish(page, flow, evidence, testInfo);
+    }
+  });
+
+  test("migration preserves a legacy booking dismissal", async ({ page, flow, baseURL }, testInfo) => {
+    const evidence = legacyTabEvidence(page);
+    const soft = expect.configure({ soft: true });
+    try {
+      evidence.seed = await legacyTabSeed(page, flow, baseURL, { dismissed: true });
+      await legacyTabReview(page, flow, evidence, testInfo, { restored: true });
+      await soft(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toHaveCount(0);
+      evidence.paymentBoundary = flow.state.calls.length;
+      await flow.payment();
+      await legacyTabPrice(page, flow, "", evidence.paymentBoundary, testInfo, soft);
+      await soft(paymentCode(page)).toHaveValue("", { timeout: 3000 });
+      await soft(page.getByRole("alert").filter({ hasText: storageError })).toHaveCount(0, { timeout: 3000 });
+      evidence.payment = await legacyTabSnapshot(page);
+      soft(evidence.payment.rawGuard).toBe("ready");
+      soft(evidence.payment.journal?.codes?.friend, "migration retains the legacy removal tombstone").toBe("removed");
+      soft(evidence.payment.journal?.passiveCode).toBe("");
+      soft(Object.values(evidence.payment.journal?.choices || {})).not.toContain("friend");
+      soft(evidence.payment.rawMirror).toBeNull();
+      soft(evidence.payment.draft.packages[evidence.payment.draft.lastTitle].checkoutCodes?.dismissedReferralCode).toBe("friend");
+      soft(evidence.payment.draft.packages[evidence.payment.draft.lastTitle].checkoutCodes?.referral).toBeNull();
+      soft(referralLookups(flow, 0, "friend")).toEqual([]);
+      soft(quoteCalls(flow, evidence.paymentBoundary).every(call => call.body.referralCode === "")).toBe(true);
+      legacyTabRetainsFormAndHold(evidence.payment, evidence.review);
+    } finally {
+      await legacyTabFinish(page, flow, evidence, testInfo);
+    }
+  });
+
+  for (const [failure, label] of [["journal", "journal migration"], ["acknowledgement", "guard acknowledgement"]]) {
+    test(`a failed legacy ${label} keeps data until manual recovery`, async ({ page, flow, baseURL }, testInfo) => {
+      const evidence = legacyTabEvidence(page);
+      evidence.failure = failure;
+      evidence.executionBoundary = "GREEN-only control: requires the real migration write attempt.";
+      try {
+        evidence.seed = await legacyTabSeed(page, flow, baseURL, { failure });
+        await legacyTabReview(page, flow, evidence, testInfo);
+        evidence.firstDocumentFaults = evidence.review.operations;
+        expect(evidence.firstDocumentFaults.length).toBeGreaterThan(0);
+        expect(evidence.firstDocumentFaults.every(operation => operation.error === "QuotaExceededError")).toBe(true);
+        expect(evidence.firstDocumentFaults).toContainEqual({
+          operation: "set", key: failure === "journal" ? "referral_dismissed" : "referral_capture",
+          value: failure === "journal" ? expect.any(String) : "ready", error: "QuotaExceededError",
+        });
+        await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+        evidence.paymentBoundary = flow.state.calls.length;
+        await flow.payment();
+        await waitQuote(flow, "", evidence.paymentBoundary);
+        await legacyTabPrice(page, flow, "", evidence.paymentBoundary, testInfo);
+        await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+        evidence.blocked = await legacyTabSnapshot(page);
+        evidence.beforeReloadFaults = evidence.blocked.operations;
+        expect(evidence.blocked.rawGuard).not.toBe("ready");
+        expect(evidence.blocked.rawMirror?.trim().toLowerCase()).toBe("friend");
+        if (failure === "journal") {
+          expect(evidence.blocked.rawJournal).toBeNull();
+          expect(evidence.blocked.rawMirror).toBe(evidence.seed.rawMirror);
+        } else expect(evidence.blocked.journal?.passiveCode).toBe("friend");
+        expect(referralLookups(flow, 0, "friend")).toEqual([]);
+        expect(quoteCalls(flow, evidence.paymentBoundary).every(call => call.body.referralCode === "")).toBe(true);
+        legacyTabRetainsFormAndHold(evidence.blocked, evidence.review);
+        evidence.failedReloadBoundary = flow.state.calls.length;
+        await page.waitForLoadState("networkidle", { timeout: 10000 });
+        await page.reload();
+        await expect(paymentCode(page)).toBeEnabled();
+        await waitQuote(flow, "", evidence.failedReloadBoundary);
+        await legacyTabPrice(page, flow, "", evidence.failedReloadBoundary, testInfo);
+        await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+        evidence.afterFailedReload = await legacyTabSnapshot(page);
+        expect(evidence.afterFailedReload.installerSkipped).toBe(false);
+        expect(evidence.afterFailedReload.rawGuard).not.toBe("ready");
+        expect(evidence.afterFailedReload.rawMirror).toBe(evidence.blocked.rawMirror);
+        expect(evidence.afterFailedReload.rawJournal).toBe(evidence.blocked.rawJournal);
+        expect(referralLookups(flow, 0, "friend")).toEqual([]);
+        expect(quoteCalls(flow, evidence.failedReloadBoundary).every(call => call.body.referralCode === "")).toBe(true);
+        legacyTabRetainsFormAndHold(evidence.afterFailedReload, evidence.blocked);
+        await page.evaluate(() => window.restoreLegacyMigrationStorage());
+        evidence.recoveryBoundary = flow.state.calls.length;
+        await submitPaymentCode(page, "friend");
+        await waitQuote(flow, "friend", evidence.recoveryBoundary);
+        await legacyTabPrice(page, flow, "friend", evidence.recoveryBoundary, testInfo);
+        await expect(paymentCode(page)).toHaveValue("friend");
+        await expect(page.getByRole("alert").filter({ hasText: storageError })).toHaveCount(0);
+        evidence.afterManual = await legacyTabSnapshot(page);
+        expect(evidence.afterManual.rawGuard).toBe("ready");
+        expect(evidence.afterManual.rawMirror).toBe("friend");
+        expect(evidence.afterManual.journal?.choices?.[checkoutScope()]).toBe("friend");
+        expect(evidence.afterManual.journal?.codes?.friend).toBe("applied");
+        expect(referralLookups(flow, evidence.recoveryBoundary, "friend")).toHaveLength(1);
+        legacyTabRetainsFormAndHold(evidence.afterManual, evidence.blocked);
+        evidence.readyReloadBoundary = flow.state.calls.length;
+        await page.waitForLoadState("networkidle", { timeout: 10000 });
+        await page.reload();
+        await expect(paymentCode(page)).toHaveValue("friend");
+        await waitQuote(flow, "friend", evidence.readyReloadBoundary);
+        await legacyTabPrice(page, flow, "friend", evidence.readyReloadBoundary, testInfo);
+        await expect(page.getByRole("alert").filter({ hasText: storageError })).toHaveCount(0);
+        evidence.afterReadyReload = await legacyTabSnapshot(page);
+        expect(evidence.afterReadyReload.installerSkipped).toBe(true);
+        expect(evidence.afterReadyReload.operations).toEqual([]);
+        expect(evidence.afterReadyReload.rawGuard).toBe("ready");
+        expect(evidence.afterReadyReload.rawMirror).toBe("friend");
+        expect(evidence.afterReadyReload.journal?.choices?.[checkoutScope()]).toBe("friend");
+        legacyTabRetainsFormAndHold(evidence.afterReadyReload, evidence.afterManual);
+      } finally {
+        await legacyTabFinish(page, flow, evidence, testInfo);
+      }
+    });
+  }
+});
