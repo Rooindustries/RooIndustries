@@ -1808,7 +1808,7 @@ export default function BookingForm() {
   };
 
   useEffect(() => subscribeReferralRestore(() => {
-    if (isPaymentPendingHold) return;
+    if (isPaymentPendingHold || referralReadyScopeRef.current !== scope) return;
     manualCodeAttemptRef.current += 1;
     autoReferralAttemptRef.current = "";
     setValidatingCode(false);
@@ -1819,7 +1819,7 @@ export default function BookingForm() {
       couponCode: appliedCoupon?.code || "",
       dismissedCode: dismissedReferralCode,
     });
-  }), [appliedReferral, appliedCoupon, dismissedReferralCode, referralQuery.code, isPaymentPendingHold]);
+  }), [appliedReferral, appliedCoupon, dismissedReferralCode, referralQuery.code, isPaymentPendingHold, scope]);
 
   useEffect(() => {
     if (

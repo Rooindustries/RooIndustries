@@ -395,6 +395,7 @@ export default function Payment({ hideFooter = false }) {
   const [referral, setReferral] = useState(null);
   const [validating, setValidating] = useState(false);
   const manualValidationAttemptRef = useRef(0);
+  const pendingAutomaticReferralRef = useRef(null);
   const [referralError, setReferralError] = useState("");
 
   const [couponInput, setCouponInput] = useState("");
@@ -620,6 +621,7 @@ export default function Payment({ hideFooter = false }) {
   useEffect(() => subscribeReferralRestore(() => {
     if (!codeApplicationAllowedRef.current) return;
     manualValidationAttemptRef.current += 1;
+    pendingAutomaticReferralRef.current = null;
     setValidating(false);
     setValidatingCoupon(false);
     setPreApplyingCodes(true);
@@ -720,6 +722,7 @@ export default function Payment({ hideFooter = false }) {
     const candidates = [params.get("ref"), bookingData.referralCode];
     const referralCode = selectStoredReferral(scope, candidates);
     const captureFailure = getReferralCaptureFailure();
+    pendingAutomaticReferralRef.current = null;
     const couponCode = String(bookingData.couponCode || "").trim();
     let active = true;
     setPreApplyingCodes(true);
@@ -821,6 +824,7 @@ export default function Payment({ hideFooter = false }) {
           referralMessage = REFERRAL_STORAGE_ERROR;
         }
       }
+      pendingAutomaticReferralRef.current = referralUnavailable && referralCode ? { scope, code: referralCode } : null;
       setReferral(nextReferral);
       setCoupon(nextCoupon);
       setReferralInput(nextReferralInput);
@@ -1532,10 +1536,12 @@ export default function Payment({ hideFooter = false }) {
     if (creatingFree || validating || validatingCoupon) return;
     const normalizedCode = String(code || "").trim();
     if (!normalizedCode) {
-      if (referral?.code && !dismissReferralCode(referral.code)) {
+      const removedCode = referral?.code || (pendingAutomaticReferralRef.current?.scope === scope ? pendingAutomaticReferralRef.current.code : "");
+      if (removedCode && !dismissReferralCode(removedCode)) {
         setReferralError(REFERRAL_STORAGE_ERROR);
         return;
       }
+      pendingAutomaticReferralRef.current = null;
       setReferral(null);
       setReferralError("");
       return;
@@ -1544,7 +1550,8 @@ export default function Payment({ hideFooter = false }) {
     const validationView = paymentView;
     const attempt = ++manualValidationAttemptRef.current;
     const isCurrent = () => operation.current() &&
-      paymentViewRef.current === validationView && codeApplicationAllowedRef.current;
+      paymentViewRef.current === validationView && codeApplicationAllowedRef.current &&
+      manualValidationAttemptRef.current === attempt;
     try {
       setValidating(true);
       setReferralError("");
@@ -1592,6 +1599,7 @@ export default function Payment({ hideFooter = false }) {
         setReferralError(REFERRAL_STORAGE_ERROR);
         return;
       }
+      pendingAutomaticReferralRef.current = null;
       setReferral(safeReferral);
       setReferralInput(safeReferral.code);
       if (coupon?.canCombineWithReferral === false) {
@@ -1625,7 +1633,8 @@ export default function Payment({ hideFooter = false }) {
     const validationView = paymentView;
     const attempt = ++manualValidationAttemptRef.current;
     const isCurrent = () => operation.current() &&
-      paymentViewRef.current === validationView && codeApplicationAllowedRef.current;
+      paymentViewRef.current === validationView && codeApplicationAllowedRef.current &&
+      manualValidationAttemptRef.current === attempt;
     try {
       setValidatingCoupon(true);
       setCouponError("");
@@ -1648,6 +1657,7 @@ export default function Payment({ hideFooter = false }) {
           setCouponError(REFERRAL_STORAGE_ERROR);
           return;
         }
+        pendingAutomaticReferralRef.current = null;
         setReferral(safeReferral);
         setReferralInput(safeReferral.code);
         setCoupon(null);
