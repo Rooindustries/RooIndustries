@@ -79,7 +79,7 @@ Any PR that touches a money path, including a helper outside this list:
 - An invalid code is dropped and remembered as dismissed. A code that can't be checked right now (validation unavailable) is kept so the visitor can retry. (`src/components/BookingForm.jsx:1952-1964`)
 - The draft remembers one removed code at a time, and the auto-apply skips it.
   - Applying another code clears that memory (`src/components/BookingForm.jsx:1709-1713`), and removing a code replaces it (`:1775-1785`).
-  - So: remove A, apply B, remove B, then follow A's link, and A applies again. (`:1936-1940`)
+  - Remove A, apply B, remove B, then open `/booking?ref=A`, and A applies again. Creator links use `/?ref=A` (`src/components/RefDashboard.jsx:349`); following that link and reopening `/booking` without `?ref` clears A while B is remembered, as in the ROO-475 gap above. (`:649-663,1936-1940`)
 - **NOT ENFORCED (second creator link after a code is applied):** a booking draft restores its applied referral (`src/components/BookingForm.jsx:1229-1272`), and auto-apply skips when one is applied (`:1928`).
   - So creator A's code applied at review, then creator B's link in the same tab, still credits A, even on `/booking?ref=B`.
   - The restore also falls back to the last-used package's draft (`:1245-1247`).
@@ -199,7 +199,7 @@ Webhook delivery:
   - restores the consumed coupon use;
   - decrements the creator's `successfulReferrals`.
   - (`src/server/api/ref/bookingRefunds.js:228-314`)
-- Commission counts only `captured` and `completed` bookings, so a fully refunded booking earns none. (`src/server/api/ref/payoutUtils.js:87-93`, `supabase/migrations/20260712092342_close_supabase_port_and_unified_auth.sql:1467`)
+- Commission counts only `captured` and `completed` bookings, so a fully refunded booking earns none. (`src/server/api/ref/payoutUtils.js:87-93`, `supabase/migrations/20260712092342_close_supabase_port_and_unified_auth.sql:1513`)
 - Refund accounting applies once:
   - full refunds through `refundAccountingAppliedAt`;
   - non-Dodo partial refunds through `processedRefundIds`;
