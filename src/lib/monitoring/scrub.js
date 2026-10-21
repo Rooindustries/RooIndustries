@@ -58,8 +58,34 @@ function withoutQuery(url) {
   return scrubText(end === -1 ? url : url.slice(0, end));
 }
 
+function networkData(data = {}, description) {
+  const target = data["url.full"] ?? data["http.url"] ?? data.url ?? (typeof description === "string" ? description.replace(/^[A-Z]+ /, "") : undefined);
+  let url;
+  if (typeof target === "string") {
+    try {
+      const parsed = new URL(target);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") url = scrubText(parsed.origin);
+    } catch {}
+  }
+  const candidate = data["http.request.method"] ?? data["http.method"] ?? data.method ?? (typeof description === "string" ? description.split(" ", 1)[0] : undefined);
+  const method = typeof candidate === "string" && /^(CONNECT|DELETE|GET|HEAD|OPTIONS|PATCH|POST|PUT|TRACE)$/.test(candidate.toUpperCase()) ? candidate.toUpperCase() : undefined;
+  const status = data["http.response.status_code"] ?? data["http.status_code"] ?? data.status_code;
+  const status_code = typeof status === "number" && Number.isInteger(status) && status >= 0 && status <= 599 ? status : undefined;
+  return { url, method, status_code };
+}
+
+function scrubNetworkSpan(span) {
+  span.data = networkData(span.data, span.description);
+  span.description = [span.data.method, span.data.url].filter(Boolean).join(" ") || "HTTP request";
+}
+
 export function scrubBreadcrumb(breadcrumb) {
   if (breadcrumb.category === "console") return null;
+  if (["http", "fetch", "xhr"].includes(breadcrumb.category)) {
+    delete breadcrumb.message;
+    breadcrumb.data = networkData(breadcrumb.data);
+    return breadcrumb;
+  }
   if (breadcrumb.message) breadcrumb.message = scrubText(breadcrumb.message);
   if (breadcrumb.data) {
     const data = scrubValue(breadcrumb.data);
@@ -87,6 +113,15 @@ export function scrubEvent(event) {
     }
   }
   if (event.breadcrumbs) event.breadcrumbs = event.breadcrumbs.map(scrubBreadcrumb).filter(Boolean);
+  for (const span of event.spans ?? []) if (span.op === "http.client") scrubNetworkSpan(span);
+  const trace = event.contexts?.trace;
+  if (trace?.op === "http.client") {
+    const span = { data: trace.data, description: event.transaction };
+    scrubNetworkSpan(span);
+    trace.data = span.data;
+    event.transaction = span.description;
+    if (event.request) event.request.url = networkData({ url: event.request.url }).url;
+  }
   return scrubValue(event);
 }
 

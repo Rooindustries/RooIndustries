@@ -26,6 +26,8 @@ const artifact = join(root, 'test-results', 'monitoring-e2e', new Date().toISOSt
 const checks = [];
 const timing = [];
 const received = [];
+const providerCalls = [];
+let outgoingSpansObserved = 0;
 let sdk;
 let reportError;
 let relay;
@@ -47,17 +49,22 @@ const check = (name, actual, expected) => {
   checks.push({ name, ok, actual, expected });
   console.log(`${ok ? 'ok' : 'FAIL'} ${name}${ok ? '' : `: ${JSON.stringify(actual)}`}`);
 };
-const events = () => received.flatMap(({ body }) => {
+const events = (type = 'event') => received.flatMap(({ body }) => {
   const lines = body.split('\n').filter(Boolean);
   const result = [];
   for (let index = 1; index + 1 < lines.length; index += 2) {
-    if (JSON.parse(lines[index]).type === 'event') result.push({ raw: body, event: JSON.parse(lines[index + 1]) });
+    if (JSON.parse(lines[index]).type === type) result.push({ raw: body, event: JSON.parse(lines[index + 1]) });
   }
   return result;
 });
 
 let streamingResponseClosed = false;
 const ingest = http.createServer((request, response) => {
+  if (request.url.startsWith('/v1/payments/')) {
+    providerCalls.push(request.url);
+    response.end('invalid-provider-json');
+    return;
+  }
   const chunks = [];
   request.on('data', chunk => chunks.push(chunk));
   request.on('end', () => {
@@ -80,6 +87,26 @@ const ingest = http.createServer((request, response) => {
 });
 const api = http.createServer(async (request, response) => {
   try {
+    if (request.url === '/network') {
+      const random = Math.random;
+      Math.random = () => 0;
+      try {
+        await sdk.startSpan({ name: 'Fixture network root', op: 'fixture', forceTransaction: true }, async () => {
+          try { await (await fetch(`${ingestOrigin}/v1/payments/pay_PROBEPAYMENTID42/refunds?count=100&skip=0`)).json(); }
+          catch (error) { reportError('Razorpay payment verification failed', error); }
+          await new Promise((resolve, reject) => http.get(`${ingestOrigin}/v1/payments/pay_HTTPPAYMENTID42`, result => { result.resume(); result.on('end', resolve); }).on('error', reject));
+          sdk.withScope(scope => {
+            for (const category of ['fetch', 'xhr']) scope.addBreadcrumb({ category, message: 'pay_BROWSERPAYMENTID42', data: { url: `${ingestOrigin}/v1/payments/pay_BROWSERPAYMENTID42`, method: 'GET', status_code: 200 } });
+            scope.addBreadcrumb({ category: 'fetch', message: 'pay_RELATIVEPAYMENTID42', data: { url: '/v1/payments/pay_RELATIVEPAYMENTID42', method: 'POST', status_code: 201 } });
+            scope.addBreadcrumb({ category: 'xhr', message: 'pay_FTPPAYMENTID42', data: { url: 'ftp://files.invalid/pay_FTPPAYMENTID42', method: 'POST', status_code: 202 } });
+            sdk.captureException(new Error('Fixture network categories'));
+          });
+        });
+      } finally { Math.random = random; }
+      response.writeHead(500);
+      response.end('Unexpected server error.');
+      return;
+    }
     if (request.url === '/caught' || request.url.startsWith('/caught?')) {
       const fixture = caughtCases.find(item => item.name === new URL(request.url, origin).searchParams.get('case'));
       const error = fixture ? fixture.build() : new Error('hidden buyer@example.com 4242424242424242');
@@ -148,6 +175,10 @@ try {
   const { startServerMonitoring } = await import('../src/lib/monitoring/server.js');
   ({ logSafeError: reportError } = await import('../src/server/safeErrorLog.js'));
   startServerMonitoring(dsn);
+  sdk.addEventProcessor(event => {
+    if (event.type === 'transaction' && event.transaction === 'Fixture network root') outgoingSpansObserved += (event.spans ?? []).filter(span => span.op === 'http.client').length;
+    return event;
+  });
   check('adverse environment is replaced before SDK initialization', sdk.getClient().getOptions().environment, 'unknown');
   const { monitoringDsn } = await import('../src/lib/monitoring/scrub.js');
   check('external HTTP is refused while external HTTPS and loopback HTTP remain valid', [monitoringDsn('http://fixturekey@public.invalid/42') ?? null, monitoringDsn('https://fixturekey@public.invalid/42'), monitoringDsn(dsn)], [null, 'https://fixturekey@public.invalid/42', dsn]);
@@ -218,6 +249,19 @@ try {
       check(`${fixture.name} has no private message or payment identifier in the envelope`, /fixture-private-|FIXTUREORDER123|FIXTUREPAY123/.test(item.raw), false);
     }
   }
+  const networkResponse = await fetch(`${origin}/network`);
+  sdk.captureEvent({ type: 'transaction', transaction: `GET ${ingestOrigin}/v1/payments/pay_ROOTPAYMENTID42`, start_timestamp: Date.now() / 1000, timestamp: Date.now() / 1000, contexts: { trace: { trace_id: '34567890123456789012345678901234', span_id: '3456789012345678', op: 'http.client', data: { 'http.request.method': 'GET', 'http.url': `${ingestOrigin}/v1/payments/pay_ROOTPAYMENTID42`, 'http.target': '/v1/payments/pay_METAPAYMENTID42', private_network_detail: 'pay_METAPAYMENTID42' } } }, spans: [] });
+  await sdk.flush(5000);
+  check('provider-path failures keep the generic application response', [networkResponse.status, await networkResponse.text()], [500, 'Unexpected server error.']);
+  check('the real SDK observes both fetch and native HTTP child spans', [providerCalls.length, outgoingSpansObserved >= 2], [2, true]);
+  const networkError = events().find(item => item.event.exception?.values?.[0]?.value === 'Razorpay payment verification failed');
+  check('payment lookup errors retain their safe label and real stack', Boolean(networkError?.event.exception?.values?.[0]?.stacktrace?.frames?.length), true);
+  const networkItems = received.filter(item => item.body.includes('Fixture network root') || item.body.includes('Fixture network categories') || item.body.includes('Razorpay payment verification failed') || item.body.includes('34567890123456789012345678901234'));
+  check('payment path identifiers appear nowhere in error or transaction envelopes', networkItems.some(item => /pay_(?:PROBE|HTTP|BROWSER|RELATIVE|FTP|ROOT|META)PAYMENTID42/.test(item.body)), false);
+  const networkCrumbs = events().find(item => item.event.exception?.values?.[0]?.value === 'Fixture network categories')?.event.breadcrumbs?.filter(crumb => ['fetch', 'xhr'].includes(crumb.category) || crumb.data?.url?.startsWith(ingestOrigin)) ?? [];
+  check('network breadcrumb diagnostics retain only the provider origin', [networkCrumbs.length >= 3, networkCrumbs.filter(crumb => crumb.data?.status_code === 200).every(crumb => crumb.data?.url === ingestOrigin && !crumb.message)], [true, true]);
+  check('relative and non-HTTP network targets are omitted without losing status', networkCrumbs.filter(crumb => [201, 202].includes(crumb.data?.status_code)).map(crumb => crumb.data), [{ method: 'POST', status_code: 201 }, { method: 'POST', status_code: 202 }]);
+  check('root HTTP transaction metadata keeps only safe network fields', events('transaction').find(item => item.event.contexts?.trace?.trace_id === '34567890123456789012345678901234')?.event.transaction, `GET ${ingestOrigin}`);
   const cpuBefore = process.cpuUsage();
   await fetch(`${origin}/sdk`);
   sdk.captureEvent({ message: 'Fixture private release', release: 'buyer@example.com' });
@@ -278,7 +322,7 @@ try {
   await Promise.all([new Promise(resolve => api.close(resolve)), new Promise(resolve => ingest.close(resolve))]);
   restoreGuard();
   await mkdir(dirname(artifact), { recursive: true });
-  await writeFile(artifact, JSON.stringify({ ok: checks.length > 0 && checks.every(item => item.ok), checks, events: events().map(item => item.event), timing, sdkEntry }, null, 2));
+  await writeFile(artifact, JSON.stringify({ ok: checks.length > 0 && checks.every(item => item.ok), checks, events: events().map(item => item.event), transactions: events('transaction').map(item => item.event), timing, sdkEntry }, null, 2));
   console.log(`report: ${artifact}`);
   process.exitCode = checks.length > 0 && checks.every(item => item.ok) ? 0 : 1;
 }
