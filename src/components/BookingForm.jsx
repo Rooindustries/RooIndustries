@@ -24,14 +24,17 @@ import {
   BOOKING_DRAFT_STORAGE_KEY,
   CHECKOUT_BOOKING_STORAGE_KEY,
   REFERRAL_STORAGE_ERROR,
+  captureReferralAddress,
   clearReferralDismissal,
   clearStoredReferral,
   dismissReferralCode,
+  getReferralCaptureFailure,
   isReferralDismissed,
   recordAutomaticReferral,
   referralScope,
   resetReferralChoice,
   selectStoredReferral,
+  subscribeReferralRestore,
   persistBookingPackageSelection,
   readStoredCheckoutBooking,
   updateStoredCheckoutHold,
@@ -1804,6 +1807,20 @@ export default function BookingForm() {
     });
   };
 
+  useEffect(() => subscribeReferralRestore(() => {
+    if (isPaymentPendingHold) return;
+    manualCodeAttemptRef.current += 1;
+    autoReferralAttemptRef.current = "";
+    setValidatingCode(false);
+    setAppliedReferral(null);
+    setCodeError("");
+    setRestoredCodeCandidates({
+      referralCode: appliedReferral?.code || referralQuery.code,
+      couponCode: appliedCoupon?.code || "",
+      dismissedCode: dismissedReferralCode,
+    });
+  }), [appliedReferral, appliedCoupon, dismissedReferralCode, referralQuery.code, isPaymentPendingHold]);
+
   useEffect(() => {
     if (
       draftLoading || holdLoading || referralReadyScope !== scope ||
@@ -1886,6 +1903,8 @@ export default function BookingForm() {
       };
 
       const referralCode = selectStoredReferral(scope, candidates, nextDismissedCode);
+      const captureFailure = getReferralCaptureFailure();
+      if (captureFailure) storageFailed = true;
       if (referralCode) {
         const result = await resolveCheckoutCode(
           referralCode,
@@ -1912,7 +1931,7 @@ export default function BookingForm() {
       setAppliedReferral(nextReferral);
       setAppliedCoupon(nextCoupon);
       setDismissedReferralCode(nextDismissedCode);
-      if (!unavailableCode) {
+      if (!unavailableCode && !storageFailed) {
         persistCheckoutCodes({
           referral: nextReferral,
           coupon: nextCoupon,
@@ -1921,7 +1940,8 @@ export default function BookingForm() {
       }
       if (storageFailed || unavailableCode || invalidCodeFound) {
         setCodeEntryOpen(true);
-        if (unavailableCode) setCodeInput(unavailableCode);
+        if (captureFailure) setCodeInput(captureFailure.code);
+        else if (unavailableCode) setCodeInput(unavailableCode);
         setCodeError(storageFailed ? REFERRAL_STORAGE_ERROR : unavailableCode ? CODE_VALIDATION_UNAVAILABLE_MESSAGE : INVALID_CHECKOUT_CODE_MESSAGE);
       }
     };
@@ -1971,6 +1991,13 @@ export default function BookingForm() {
 
     const candidates = [referralQuery.code];
     const autoCode = selectStoredReferral(scope, candidates, dismissedReferralCode);
+    const captureFailure = getReferralCaptureFailure();
+    if (captureFailure) {
+      setCodeEntryOpen(true);
+      setCodeInput(captureFailure.code);
+      setCodeError(REFERRAL_STORAGE_ERROR);
+      return;
+    }
     if (!autoCode) {
       return;
     }
@@ -2431,7 +2458,9 @@ export default function BookingForm() {
       getSlotLocalLabel(selectedSlot.utcStart, localSlotMap, localSlotFormatters) ||
       selectedSlot.localLabel;
 
-    const finalReferralCode = String(appliedReferral?.code || "").trim();
+    captureReferralAddress(window.location.pathname, window.location.search);
+    const captureFailed = Boolean(getReferralCaptureFailure());
+    const finalReferralCode = captureFailed ? "" : String(appliedReferral?.code || "").trim();
     const finalCouponCode = String(appliedCoupon?.code || "").trim();
 
     const payload = {
@@ -2467,11 +2496,11 @@ export default function BookingForm() {
       persistDraft({
         form: { ...form },
         selectedPackage: { ...selectedPackage },
-        checkoutCodes: {
+        ...(!captureFailed ? { checkoutCodes: {
           referral: sanitizeReferralForCheckout(appliedReferral),
           coupon: sanitizeCouponForCheckout(appliedCoupon),
           dismissedReferralCode,
-        },
+        } } : {}),
       });
     } catch {
       console.error("Failed to persist booking draft");
@@ -2514,6 +2543,7 @@ export default function BookingForm() {
   };
 
   const handlePay = () => {
+    captureReferralAddress(window.location.pathname, window.location.search);
     if (loading || validatingCode || restoredCodeCandidates) return;
     setLoading(true);
     handleSubmit();

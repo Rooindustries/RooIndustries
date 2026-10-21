@@ -15,10 +15,12 @@ import {
   clearReferralDismissal,
   clearStoredReferral,
   dismissReferralCode,
+  getReferralCaptureFailure,
   isReferralDismissed,
   recordAutomaticReferral,
   referralScope,
   selectStoredReferral,
+  subscribeReferralRestore,
   REFERRAL_STORAGE_ERROR,
 } from "../lib/checkoutStorage";
 import {
@@ -401,6 +403,7 @@ export default function Payment({ hideFooter = false }) {
   const checkingCode = validating || validatingCoupon;
   const [couponError, setCouponError] = useState("");
   const [preApplyingCodes, setPreApplyingCodes] = useState(true);
+  const [referralRestoreCount, setReferralRestoreCount] = useState(0);
 
   const [banner, setBanner] = useState(null);
   const bannerRef = useRef(null);
@@ -614,6 +617,18 @@ export default function Payment({ hideFooter = false }) {
     return operation;
   };
 
+  useEffect(() => subscribeReferralRestore(() => {
+    if (!codeApplicationAllowedRef.current) return;
+    manualValidationAttemptRef.current += 1;
+    setValidating(false);
+    setValidatingCoupon(false);
+    setPreApplyingCodes(true);
+    setReferral(null);
+    setServerQuote(null);
+    setQuoteFingerprint("");
+    setReferralRestoreCount(current => current + 1);
+  }), []);
+
   useEffect(() => {
     if (!packageTitle || preApplyingCodes) {
       setServerQuote(null);
@@ -704,6 +719,7 @@ export default function Payment({ hideFooter = false }) {
     const params = new URLSearchParams(location.search);
     const candidates = [params.get("ref"), bookingData.referralCode];
     const referralCode = selectStoredReferral(scope, candidates);
+    const captureFailure = getReferralCaptureFailure();
     const couponCode = String(bookingData.couponCode || "").trim();
     let active = true;
     setPreApplyingCodes(true);
@@ -714,10 +730,10 @@ export default function Payment({ hideFooter = false }) {
     const preApplyCodes = async () => {
       let nextReferral = null;
       let nextCoupon = null;
-      let nextReferralInput = "";
+      let nextReferralInput = captureFailure?.code || "";
       let nextCouponInput = couponCode;
       let referralUnavailable = false;
-      let referralMessage = "";
+      let referralMessage = captureFailure ? REFERRAL_STORAGE_ERROR : "";
       let couponMessage = "";
       let infoMessage = "";
       let referralOrigin = referralCode;
@@ -733,7 +749,7 @@ export default function Payment({ hideFooter = false }) {
             if (result?.unavailable) {
               referralUnavailable = true;
               nextReferral = referral;
-              nextReferralInput = referral?.code || "";
+              nextReferralInput = referral?.code || input;
               referralMessage = result.error;
             } else {
               clearStoredReferral(input);
@@ -827,6 +843,7 @@ export default function Payment({ hideFooter = false }) {
     location.key,
     location.search,
     packageTitle,
+    referralRestoreCount,
     scope,
   ]);
 
@@ -1534,6 +1551,14 @@ export default function Payment({ hideFooter = false }) {
       const result = await resolveCheckoutCode(normalizedCode, packageTitle);
       if (!isCurrent()) return;
       if (!result.ok) {
+        if (!result.unavailable) {
+          const currentMatches = String(referral?.code || "").toLowerCase() === normalizedCode.toLowerCase();
+          if (currentMatches) setReferral(null);
+          if (!clearStoredReferral(normalizedCode)) {
+            setReferralError(REFERRAL_STORAGE_ERROR);
+            return;
+          }
+        }
         setReferralError(result.unavailable ? result.error : "Invalid or inactive referral code.");
         return;
       }

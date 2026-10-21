@@ -124,12 +124,73 @@ export const migrateCheckoutStorageToSession = () => {
 
 const REFERRAL_SESSION_STORAGE_KEY = "referral_session";
 const REFERRAL_DISMISSED_STORAGE_KEY = "referral_dismissed";
+const REFERRAL_CAPTURE_STORAGE_KEY = "referral_capture";
+const CHECKOUT_PATHS = ["/booking", "/payment", "/payment-success", "/thank-you"];
+let capturedAddress = null;
+let lastPublicAddress = null;
+let restoredAddress = null;
+let captureFailure = null;
+let referralRestoreSnapshot = null;
+const referralRestoreListeners = new Set();
+
+export const subscribeReferralRestore = (listener) => {
+  referralRestoreListeners.add(listener);
+  return () => referralRestoreListeners.delete(listener);
+};
+
+const readReferralRestoreSnapshot = () => {
+  try {
+    return JSON.stringify([
+      window.sessionStorage.getItem(REFERRAL_CAPTURE_STORAGE_KEY),
+      window.sessionStorage.getItem(REFERRAL_DISMISSED_STORAGE_KEY),
+      window.sessionStorage.getItem(REFERRAL_SESSION_STORAGE_KEY),
+    ]);
+  } catch {
+    return null;
+  }
+};
 
 export const REFERRAL_STORAGE_ERROR =
   "Couldn't save this code change. Please try again.";
 
 const normalizeReferralCode = (code) => String(code || "").trim().toLowerCase();
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+const restoreReferralCaptureFailure = () => {
+  try {
+    const raw = window.sessionStorage.getItem(REFERRAL_CAPTURE_STORAGE_KEY);
+    if (raw === "ready") return null;
+    if (raw === null) {
+      return window.sessionStorage.getItem(REFERRAL_DISMISSED_STORAGE_KEY) === null &&
+        window.sessionStorage.getItem(REFERRAL_SESSION_STORAGE_KEY) === null
+        ? null : { code: "", address: "" };
+    }
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return { code: "", address: "" }; }
+    return isRecord(pending) && Object.keys(pending).length === 1 &&
+      typeof pending.code === "string" && pending.code === normalizeReferralCode(pending.code)
+      ? { code: pending.code, address: "" } : { code: "", address: "" };
+  } catch { return { code: "", address: "" }; }
+};
+
+const beginReferralCapture = (code, address) => {
+  captureFailure = { code, address };
+  try {
+    window.sessionStorage.setItem(REFERRAL_CAPTURE_STORAGE_KEY, JSON.stringify({ code }));
+    return true;
+  } catch {
+    try { window.sessionStorage.setItem(REFERRAL_CAPTURE_STORAGE_KEY, ""); }
+    catch { try { window.sessionStorage.removeItem(REFERRAL_CAPTURE_STORAGE_KEY); } catch {} }
+    return false;
+  }
+};
+
+const acknowledgeReferralCapture = () => {
+  if (window.sessionStorage.getItem(REFERRAL_CAPTURE_STORAGE_KEY) !== "ready") {
+    window.sessionStorage.setItem(REFERRAL_CAPTURE_STORAGE_KEY, "ready");
+  }
+  captureFailure = null;
+};
 
 export const referralScope = (packageTitle, originalOrderId = "") =>
   JSON.stringify([String(packageTitle || "").trim(), String(originalOrderId || "").trim()]);
@@ -205,20 +266,73 @@ export const isReferralDismissed = (code, legacyDismissedCode = "") => {
 };
 
 export const rememberReferralFromSearch = (search) => {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") return false;
   const code = normalizeReferralCode(new URLSearchParams(search || "").get("ref"));
-  if (!code) return;
+  if (!code) return false;
   try {
     const intent = readReferralIntent();
     const status = Object.hasOwn(intent.codes, code) ? intent.codes[code] : undefined;
-    if (status === "removed") return;
+    if (status === "removed") return true;
     writeReferralIntent({
       ...intent,
       passiveCode: code,
       codes: { ...intent.codes, [code]: status || "available" },
     });
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 };
+
+const referralAddress = (pathname, search) => {
+  const params = new URLSearchParams(search || "");
+  return JSON.stringify([pathname, params.has("ref"), params.get("ref") || ""]);
+};
+
+export const captureReferralAddress = (pathname, search) => {
+  if (typeof window === "undefined") return false;
+  const address = referralAddress(pathname, search);
+  if (address !== referralAddress(window.location.pathname, window.location.search)) return false;
+  if (address === capturedAddress) return !captureFailure;
+  const firstCapture = capturedAddress === null;
+  capturedAddress = address;
+  let initialType = "";
+  if (firstCapture) {
+    try {
+      initialType = window.performance.getEntriesByType("navigation")[0]?.type || "";
+    } catch {}
+  }
+  const restored = address === restoredAddress || (firstCapture && initialType !== "navigate");
+  if (!restored) restoredAddress = null;
+  const params = new URLSearchParams(search || "");
+  const code = normalizeReferralCode(params.get("ref"));
+  if (CHECKOUT_PATHS.includes(pathname)) {
+    if (pathname !== "/booking" || restored) return !captureFailure;
+    if (!code && params.has("ref")) {
+      if (!beginReferralCapture(code, address)) return false;
+      try {
+        const intent = readReferralIntent();
+        if (intent.passiveCode) writeReferralIntent({ ...intent, passiveCode: "" });
+        acknowledgeReferralCapture();
+      } catch {
+        captureFailure = { code, address };
+      }
+      return !captureFailure;
+    }
+    if (!code) return !captureFailure;
+  } else {
+    const seen = address === lastPublicAddress;
+    lastPublicAddress = address;
+    if (!code || seen || restored) return !captureFailure;
+  }
+  if (!beginReferralCapture(code, address)) return false;
+  try {
+    if (rememberReferralFromSearch(search)) acknowledgeReferralCapture();
+  } catch {}
+  return !captureFailure;
+};
+
+export const getReferralCaptureFailure = () => captureFailure;
 
 export const dismissReferralCode = (code) => {
   if (typeof window === "undefined") return false;
@@ -249,9 +363,12 @@ export const clearReferralDismissal = (code, scope) => {
       codes: { ...intent.codes, [normalized]: "applied" },
       choices: { ...intent.choices, [scope]: normalized },
     });
+    acknowledgeReferralCapture();
     return true;
   } catch (error) {
-    return error?.name === "SecurityError";
+    if (error?.name !== "SecurityError") return false;
+    captureFailure = null;
+    return true;
   }
 };
 
@@ -277,6 +394,8 @@ export const recordAutomaticReferral = (code, scope) => {
 
 export const selectStoredReferral = (scope, candidates = [], legacyDismissedCode = "") => {
   if (typeof window === "undefined") return "";
+  captureReferralAddress(window.location.pathname, window.location.search);
+  if (captureFailure) return "";
   try {
     const intent = readReferralIntent();
     const allowed = code => code && !isReferralDismissed(code, legacyDismissedCode);
@@ -318,3 +437,26 @@ export const resetReferralChoice = (scope) => {
     return false;
   }
 };
+
+if (typeof window !== "undefined") {
+  captureFailure = restoreReferralCaptureFailure();
+  window.addEventListener("pagehide", (event) => {
+    if (event.persisted) referralRestoreSnapshot = readReferralRestoreSnapshot();
+  });
+  window.addEventListener("pageshow", (event) => {
+    if (!event.persisted) return;
+    restoredAddress = referralAddress(window.location.pathname, window.location.search);
+    const snapshot = readReferralRestoreSnapshot();
+    if (referralRestoreSnapshot !== null && referralRestoreSnapshot === snapshot) return;
+    captureFailure = restoreReferralCaptureFailure();
+    capturedAddress = restoredAddress;
+    referralRestoreListeners.forEach(listener => listener());
+  });
+  window.addEventListener("popstate", () => {
+    restoredAddress = referralAddress(window.location.pathname, window.location.search);
+  }, true);
+  window.addEventListener("click", () => {
+    captureReferralAddress(window.location.pathname, window.location.search);
+  }, true);
+  captureReferralAddress(window.location.pathname, window.location.search);
+}

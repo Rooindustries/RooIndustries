@@ -1,18 +1,13 @@
 "use client";
 
-import { Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { isProductionBrowser } from "../lib/productionBrowser";
 import { Analytics } from "@vercel/analytics/react";
 import { sanitizeAnalyticsEvent } from "../lib/salesAttribution";
 import { initializePerformanceProfile } from "../lib/performanceProfile";
-import {
-  clearStoredReferral,
-  readStoredReferral,
-  rememberReferralFromSearch,
-} from "../lib/checkoutStorage";
+import { captureReferralAddress } from "../lib/checkoutStorage";
 
-const CHECKOUT_PATHS = ["/booking", "/payment", "/payment-success", "/thank-you"];
 const SEORCE_PROJECT_ID = "6a2e76bf3f9dac8c30e27b89";
 const SEORCE_SCRIPT_ID = "seorce-runtime-script";
 // Seorce retries its tracking-config fetch every 90 seconds and logs failures.
@@ -74,60 +69,20 @@ export const loadSeorceScript = ({
   return true;
 };
 
-const referralAddress = (pathname, search) => {
-  const params = new URLSearchParams(search || "");
-  return JSON.stringify([pathname, params.has("ref"), params.get("ref") || ""]);
-};
-
-function ReferralCapture({ restoredAddress }) {
+function ReferralCapture() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const lastAddress = useRef(null);
-  const lastPublicAddress = useRef(null);
 
   useLayoutEffect(() => {
     if (!pathname) return;
-    const search = searchParams?.toString() || "";
-    const address = referralAddress(pathname, search);
-    if (address !== referralAddress(window.location.pathname, window.location.search)) return;
-    const previous = lastAddress.current;
-    lastAddress.current = address;
-    let initialType = "";
-    if (previous === null) {
-      try {
-        initialType = window.performance.getEntriesByType("navigation")[0]?.type || "";
-      } catch {}
-    }
-    const restored = address === restoredAddress.current ||
-      (previous === null && initialType !== "navigate");
-    if (!restored) restoredAddress.current = null;
-    const params = new URLSearchParams(search);
-    const referral = String(params.get("ref") || "").trim();
-    if (CHECKOUT_PATHS.includes(pathname)) {
-      if (pathname !== "/booking" || previous === address || restored) return;
-      if (referral) rememberReferralFromSearch(search);
-      else if (params.has("ref")) clearStoredReferral(readStoredReferral());
-      return;
-    }
-    const seen = address === lastPublicAddress.current;
-    lastPublicAddress.current = address;
-    if (referral && !seen && !restored) rememberReferralFromSearch(search);
-  }, [pathname, searchParams, restoredAddress]);
+    captureReferralAddress(pathname, searchParams?.toString() || "");
+  }, [pathname, searchParams]);
 
   return null;
 }
 
 export default function AppClientRuntime() {
   const [analyticsEnabled, setAnalyticsEnabled] = useState(false);
-  const restoredAddress = useRef(null);
-
-  useLayoutEffect(() => {
-    const rememberRestoredAddress = () => {
-      restoredAddress.current = referralAddress(window.location.pathname, window.location.search);
-    };
-    window.addEventListener("popstate", rememberRestoredAddress, true);
-    return () => window.removeEventListener("popstate", rememberRestoredAddress, true);
-  }, []);
 
   useEffect(() => {
     setAnalyticsEnabled(isProductionBrowser());
@@ -152,7 +107,7 @@ export default function AppClientRuntime() {
   return (
     <>
       <Suspense fallback={null}>
-        <ReferralCapture restoredAddress={restoredAddress} />
+        <ReferralCapture />
       </Suspense>
       {analyticsEnabled ? <Analytics beforeSend={sanitizeAnalyticsEvent} /> : null}
     </>

@@ -1,4 +1,21 @@
-const { test, expect } = require("./fixtures/booking-flow.cjs");
+const { test: bookingTest, expect } = require("./fixtures/booking-flow.cjs");
+
+const test = bookingTest.extend({
+  referralCpu: [async ({ page }, use, testInfo) => {
+    if (testInfo.title !== "a fresh direct booking query captures a different creator after removal" &&
+      testInfo.title !== "quick Continue on a fresh direct creator link never quotes the prior creator") return use();
+    const session = await page.context().newCDPSession(page);
+    await session.send("Emulation.setCPUThrottlingRate", { rate: 6 });
+    await testInfo.attach("referral-cpu-throttling", {
+      body: JSON.stringify({ rate: 6, browserName: "chromium" }), contentType: "application/json",
+    });
+    try {
+      await use();
+    } finally {
+      await session.detach();
+    }
+  }, { auto: true }],
+});
 
 test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", viewport: { width: 390, height: 844 } });
 
@@ -1406,3 +1423,731 @@ for (const variant of ["accepts a freshly followed passive referral", "recovers 
     }
   });
 }
+
+const retainedCheckout = page => page.evaluate(() => ({
+  intent: {
+    passive: sessionStorage.getItem("referral_session"),
+    journal: sessionStorage.getItem("referral_dismissed"),
+  },
+  draft: JSON.parse(sessionStorage.getItem("booking_draft")),
+  hold: JSON.parse(sessionStorage.getItem("my_slot_hold")),
+  captureFailures: window.referralCaptureFailures || [],
+  guard: sessionStorage.getItem("referral_capture"),
+  url: location.href,
+}));
+
+for (const entry of ["direct booking", "public Book click"]) {
+  test(`a failed fresh creator capture on ${entry} continues without attribution and recovers manually`, async ({ page, flow }, testInfo) => {
+    flow.state.collision = true;
+    await startFriendPayment(page, flow);
+    const before = await retainedCheckout(page);
+    expect(JSON.parse(before.intent.journal).codes.friend).toBe("available");
+    expect(JSON.parse(before.intent.journal).choices[checkoutScope()]).toBe("friend");
+    await page.addInitScript(() => {
+      const original = Storage.prototype.setItem;
+      window.referralCaptureFailures = [];
+      window.restoreReferralSetter = () => { Storage.prototype.setItem = original; };
+      Storage.prototype.setItem = function(key, value) {
+        if (key === "referral_dismissed" && JSON.parse(value).passiveCode === "save20" &&
+          JSON.parse(value).codes.save20 === "available") {
+          window.referralCaptureFailures.push({ key, value, previous: this.getItem(key), name: "QuotaExceededError" });
+          throw new DOMException("Fresh creator journal denied", "QuotaExceededError");
+        }
+        return original.call(this, key, value);
+      };
+    });
+    const since = flow.state.calls.length;
+    let afterFailure;
+    let paymentEmpty;
+    let beforePayment;
+    let beforeRecovery;
+    try {
+      if (entry === "direct booking") await page.goto("/booking?ref=save20");
+      else {
+        await page.goto("/?ref=save20");
+        await expect.poll(() => page.evaluate(() => window.referralCaptureFailures.length)).toBeGreaterThan(0);
+        await page.locator(".ri-package-book-button").first().click();
+      }
+      await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+      await expect.poll(() => page.evaluate(() => window.referralCaptureFailures.length)).toBe(1);
+      await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+      await expect(page.getByRole("textbox", { name: "Referral or coupon code", exact: true })).toHaveValue("save20");
+      await expect(page.getByRole("button", { name: /^Remove referral code / })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Checking code...", exact: true })).toHaveCount(0);
+      afterFailure = await retainedCheckout(page);
+      expect(afterFailure.intent).toEqual(before.intent);
+      expect(afterFailure.hold).toEqual(before.hold);
+      expect(afterFailure.draft.packages[before.draft.lastTitle].form).toEqual(before.draft.packages[before.draft.lastTitle].form);
+      expect(afterFailure.draft.packages[before.draft.lastTitle].checkoutCodes).toEqual(before.draft.packages[before.draft.lastTitle].checkoutCodes);
+      expect(afterFailure.draft.packages[before.draft.lastTitle].selectedPackage.title).toBe(before.draft.packages[before.draft.lastTitle].selectedPackage.title);
+      for (const value of Object.values(before.draft.packages[before.draft.lastTitle].form).filter(Boolean)) {
+        await expect(page.getByRole("dialog").getByText(value, { exact: true })).toBeVisible();
+      }
+      expect(referralLookups(flow, since, "friend")).toEqual([]);
+      expect(referralLookups(flow, since, "save20")).toEqual([]);
+      expect(quoteCalls(flow, since)).toEqual([]);
+      beforePayment = flow.state.calls.length;
+      await flow.payment();
+      await expect(paymentCode(page)).toBeEnabled();
+      await expect(paymentCode(page)).toHaveValue("save20");
+      await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+      await waitQuote(flow, "", beforePayment);
+      paymentEmpty = await retainedCheckout(page);
+      expect(paymentEmpty.intent).toEqual(before.intent);
+      expect(paymentEmpty.hold).toEqual(before.hold);
+      expect(paymentEmpty.draft.packages[before.draft.lastTitle].form).toEqual(before.draft.packages[before.draft.lastTitle].form);
+      expect(paymentEmpty.draft.packages[before.draft.lastTitle].checkoutCodes).toEqual(before.draft.packages[before.draft.lastTitle].checkoutCodes);
+      expect(paymentEmpty.draft.packages[before.draft.lastTitle].selectedPackage.title).toBe(before.draft.packages[before.draft.lastTitle].selectedPackage.title);
+      expect(quoteCalls(flow, since).every(call => call.body.referralCode === "")).toBe(true);
+      expect(referralLookups(flow, since, "friend")).toEqual([]);
+      expect(referralLookups(flow, since, "save20")).toEqual([]);
+      const beforeReload = flow.state.calls.length;
+      await page.reload();
+      await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+      await expect(paymentCode(page)).toBeEnabled();
+      const afterReload = await retainedCheckout(page);
+      const reloadCalls = flow.state.calls.slice(beforeReload);
+      await attachJson(testInfo, "failed-capture-payment-reload", {
+        beforeReload, beforeReloadState: paymentEmpty, afterReload, reloadCalls,
+        timing: await navigationTiming(page), referralInput: await paymentCode(page).inputValue(),
+        storageErrorVisible: await page.getByRole("alert").filter({ hasText: storageError }).isVisible(),
+      });
+      await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+      await expect(paymentCode(page)).toHaveValue("save20");
+      await waitQuote(flow, "", beforeReload);
+      expect(referralLookups(flow, beforeReload, "friend")).toEqual([]);
+      expect(afterReload.intent).toEqual(before.intent);
+      await page.evaluate(() => window.restoreReferralSetter());
+      beforeRecovery = flow.state.calls.length;
+      await submitPaymentCode(page, "save20");
+      await waitQuote(flow, "save20", beforeRecovery);
+      expect(referralLookups(flow, beforeRecovery, "save20")).toHaveLength(1);
+      expect((await envelope(page)).choices[checkoutScope()]).toBe("save20");
+      expect((await envelope(page)).codes.save20).toBe("applied");
+      expect(await storedReferral(page)).toBe("save20");
+      expect(quoteCalls(flow, beforeRecovery).every(call => call.body.referralCode === "save20")).toBe(true);
+      expect(quoteCalls(flow, since).every(call => ["", "save20"].includes(call.body.referralCode))).toBe(true);
+      expect(referralLookups(flow, since, "friend")).toEqual([]);
+      expect(await page.evaluate(() => sessionStorage.getItem("referral_capture"))).toBe("ready");
+      const beforeAcknowledgedReload = flow.state.calls.length;
+      await page.reload();
+      await expect(paymentCode(page)).toBeEnabled();
+      await expect(paymentCode(page)).toHaveValue("save20");
+      await expect(page.getByRole("alert").filter({ hasText: storageError })).toHaveCount(0);
+      await waitQuote(flow, "save20", beforeAcknowledgedReload);
+      expect(referralLookups(flow, beforeAcknowledgedReload, "friend")).toEqual([]);
+      await attachJson(testInfo, "acknowledged-capture-reload", {
+        beforeAcknowledgedReload, after: await retainedCheckout(page), calls: flow.state.calls.slice(beforeAcknowledgedReload),
+      });
+    } finally {
+      await attachJson(testInfo, "failed-fresh-capture-recovery", {
+        entry, before, afterFailure, paymentEmpty, final: await retainedCheckout(page), beforePayment, beforeRecovery,
+        calls: flow.state.calls.slice(since), newQuotes: beforePayment === undefined ? [] : quoteCalls(flow, beforePayment),
+        recoveredQuotes: beforeRecovery === undefined ? [] : quoteCalls(flow, beforeRecovery),
+      });
+    }
+  });
+}
+
+const friendValidationPhases = async (page, flow, phase) => {
+  for (const type of ["Referral", "Coupon"]) {
+    await page.route(`**/api/ref/validate${type}?*`, async route => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("code") !== "friend" || phase.current === "valid") return route.fallback();
+      flow.state.calls.push({ path: url.pathname, query: url.search, body: null, phase: phase.current });
+      await route.fulfill({
+        status: type === "Referral" && phase.current === "unavailable" ? 503 : 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: false, reason: type === "Referral" && phase.current === "unavailable" ? "unavailable" : "not_found" }),
+      });
+    });
+  }
+};
+
+const unavailableMessage = "Code validation is temporarily unavailable. Try again or continue without this code.";
+const invalidReferralMessage = "Invalid or inactive referral code.";
+
+test("an unavailable Payment arrival keeps the referral input retryable and an invalid retry clears its passive code", async ({ page, flow }, testInfo) => {
+  await startFriendPayment(page, flow);
+  const phase = { current: "unavailable" };
+  await friendValidationPhases(page, flow, phase);
+  const since = flow.state.calls.length;
+  let unavailable;
+  let retry;
+  try {
+    await page.reload();
+    await expect(paymentCode(page)).toBeEnabled();
+    await expect(page.getByRole("alert").filter({ hasText: unavailableMessage })).toBeVisible();
+    await expect(paymentCode(page)).toHaveValue("friend");
+    await waitQuote(flow, "", since);
+    expect(await storedReferral(page)).toBe("friend");
+    await expect(page.locator("dt").filter({ hasText: /^Referral$/ })).toHaveCount(0);
+    unavailable = { intent: await referralIntent(page), quotes: quoteCalls(flow, since) };
+    phase.current = "invalid";
+    retry = flow.state.calls.length;
+    await submitPaymentCode(page, "friend");
+    await expect(page.getByRole("alert").filter({ hasText: invalidReferralMessage })).toBeVisible();
+    expect(await storedReferral(page)).toBeNull();
+    expect((await envelope(page)).codes.friend).toBe("available");
+    expect(quoteCalls(flow, retry)).toEqual([]);
+  } finally {
+    await attachJson(testInfo, "payment-arrival-unavailable-retry", {
+      unavailable, retry, after: await referralIntent(page), calls: flow.state.calls.slice(since),
+    });
+  }
+});
+
+for (const blockedClear of [false, true]) {
+  test(`a same-code invalid Payment retry removes its applied discount${blockedClear ? " despite a failed journal clear" : " and passive attribution"}`, async ({ page, flow }, testInfo) => {
+    await startFriendPayment(page, flow);
+    const before = await referralIntent(page);
+    const phase = { current: "unavailable" };
+    await friendValidationPhases(page, flow, phase);
+    const since = flow.state.calls.length;
+    let unavailable;
+    let retry;
+    try {
+      await submitPaymentCode(page, "friend");
+      await expect(paymentCode(page)).toBeEnabled();
+      await expect(page.getByRole("alert").filter({ hasText: unavailableMessage })).toBeVisible();
+      await expect(paymentCode(page)).toHaveValue("friend");
+      await expect(page.locator("dt").filter({ hasText: /^Referral$/ })).toHaveCount(1);
+      expect(await referralIntent(page)).toEqual(before);
+      expect(quoteCalls(flow, since)).toEqual([]);
+      expect(lastQuote(flow).body.referralCode).toBe("friend");
+      unavailable = { intent: await referralIntent(page), quotes: quoteCalls(flow, since) };
+      if (blockedClear) {
+        await page.evaluate(() => {
+          const original = Storage.prototype.setItem;
+          window.referralClearFailures = [];
+          Storage.prototype.setItem = function(key, value) {
+            if (key === "referral_dismissed" && JSON.parse(value).passiveCode === "") {
+              window.referralClearFailures.push({ key, value, previous: this.getItem(key), name: "QuotaExceededError" });
+              throw new DOMException("Invalid referral clear denied", "QuotaExceededError");
+            }
+            return original.call(this, key, value);
+          };
+        });
+      }
+      phase.current = "invalid";
+      retry = flow.state.calls.length;
+      await submitPaymentCode(page, "friend");
+      await expect(page.getByRole("alert").filter({ hasText: blockedClear ? storageError : invalidReferralMessage })).toBeVisible();
+      await waitQuote(flow, "", retry);
+      await expect(page.locator("dt").filter({ hasText: /^Referral$/ })).toHaveCount(0);
+      if (blockedClear) {
+        expect(await referralIntent(page)).toEqual(before);
+        expect(await page.evaluate(() => window.referralClearFailures.length)).toBe(1);
+      } else {
+        expect(await storedReferral(page)).toBeNull();
+        expect((await envelope(page)).codes.friend).toBe("available");
+      }
+    } finally {
+      await attachJson(testInfo, "payment-same-code-invalid-retry", {
+        blockedClear, before, unavailable, retry, after: await referralIntent(page),
+        clearFailures: await page.evaluate(() => window.referralClearFailures || []),
+        calls: flow.state.calls.slice(since), newQuotes: retry === undefined ? [] : quoteCalls(flow, retry),
+      });
+    }
+  });
+}
+
+test("quick Continue on a fresh direct creator link never quotes the prior creator", async ({ page, flow }, testInfo) => {
+  flow.state.collision = true;
+  await startFriendPayment(page, flow);
+  let since = flow.state.calls.length;
+  await submitPaymentCode(page, "");
+  await waitQuote(flow, "", since);
+  const before = await retainedCheckout(page);
+  since = flow.state.calls.length;
+  try {
+    await page.goto("/booking?ref=save20");
+    await page.getByRole("button", { name: "Continue to payment", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+    await expect(paymentCode(page)).toBeEnabled();
+    await waitQuote(flow, "save20", since);
+    expect(quoteCalls(flow, since).every(call => call.body.referralCode === "save20")).toBe(true);
+    expect(referralLookups(flow, since, "friend")).toEqual([]);
+    expect((await envelope(page)).choices[checkoutScope()]).toBe("save20");
+  } finally {
+    await attachJson(testInfo, "quick-continue-fresh-creator", {
+      before, after: await retainedCheckout(page), calls: flow.state.calls.slice(since), newQuotes: quoteCalls(flow, since),
+    });
+  }
+});
+
+const expectRetainedCaptureData = (after, before) => {
+  expect(after.intent).toEqual(before.intent);
+  expect(after.hold).toEqual(before.hold);
+  expect(after.draft.packages[before.draft.lastTitle].form).toEqual(before.draft.packages[before.draft.lastTitle].form);
+  expect(after.draft.packages[before.draft.lastTitle].checkoutCodes).toEqual(before.draft.packages[before.draft.lastTitle].checkoutCodes);
+};
+
+const recoverDurableReferral = async (page, flow, code) => {
+  const beforeManual = flow.state.calls.length;
+  await submitPaymentCode(page, code);
+  await waitQuote(flow, code, beforeManual);
+  expect(referralLookups(flow, beforeManual, code)).toHaveLength(1);
+  expect(await page.evaluate(() => sessionStorage.getItem("referral_capture"))).toBe("ready");
+  const afterManual = await retainedCheckout(page);
+  const beforeReload = flow.state.calls.length;
+  await page.reload();
+  await expect(paymentCode(page)).toBeEnabled();
+  await expect(paymentCode(page)).toHaveValue(code);
+  await expect(page.getByRole("alert").filter({ hasText: storageError })).toHaveCount(0);
+  await waitQuote(flow, code, beforeReload);
+  return { beforeManual, afterManual, beforeReload, afterReload: await retainedCheckout(page), calls: flow.state.calls.slice(beforeManual) };
+};
+
+test("durable capture treats a missing legacy guard as unconfirmed until explicit reapplication", async ({ page, flow }, testInfo) => {
+  await startFriendPayment(page, flow);
+  const before = await retainedCheckout(page);
+  await page.evaluate(() => sessionStorage.removeItem("referral_capture"));
+  const since = flow.state.calls.length;
+  let unconfirmed;
+  let recovery;
+  try {
+    await page.reload();
+    await expect(paymentCode(page)).toBeEnabled();
+    unconfirmed = await retainedCheckout(page);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    await waitQuote(flow, "", since);
+    expect(referralLookups(flow, since, "friend")).toEqual([]);
+    expectRetainedCaptureData(unconfirmed, before);
+    recovery = await recoverDurableReferral(page, flow, "friend");
+  } finally {
+    await attachJson(testInfo, "legacy-unconfirmed-capture", {
+      before, unconfirmed, recovery, final: await retainedCheckout(page), since, calls: flow.state.calls.slice(since),
+    });
+  }
+});
+
+for (const failure of ["guard allocation", "native full store"]) {
+  test(`durable capture refuses a fresh creator after ${failure} across Payment reload`, async ({ page, flow }, testInfo) => {
+    flow.state.collision = true;
+    await startFriendPayment(page, flow);
+    const before = await retainedCheckout(page);
+    const quota = failure === "native full store" ? await fillSessionQuota(page) : null;
+    if (quota) {
+      expect(quota.exception).toBe("QuotaExceededError");
+      expect(quota.extraCharacterError).toBe("QuotaExceededError");
+    }
+    await page.addInitScript(blockGuard => {
+      const setter = Storage.prototype.setItem;
+      const remover = Storage.prototype.removeItem;
+      window.captureStorageOperations = [];
+      window.restoreCaptureStorage = () => {
+        Storage.prototype.setItem = setter;
+        Storage.prototype.removeItem = remover;
+      };
+      Storage.prototype.setItem = function(key, value) {
+        const observed = ["referral_capture", "referral_dismissed", "referral_session"].includes(key);
+        try {
+          if (blockGuard && key === "referral_capture") throw new DOMException("Capture guard denied", "QuotaExceededError");
+          const result = setter.call(this, key, value);
+          if (observed) window.captureStorageOperations.push({ operation: "set", key, value, result: "success" });
+          return result;
+        } catch (error) {
+          if (observed) window.captureStorageOperations.push({ operation: "set", key, value, error: error.name });
+          throw error;
+        }
+      };
+      Storage.prototype.removeItem = function(key) {
+        const result = remover.call(this, key);
+        if (key === "referral_capture") window.captureStorageOperations.push({ operation: "remove", key, result: "success" });
+        return result;
+      };
+    }, failure === "guard allocation");
+    const since = flow.state.calls.length;
+    let afterCapture;
+    let captureOperations;
+    let beforePayment;
+    let beforeReload;
+    let afterReload;
+    let recovery;
+    try {
+      await page.goto("/booking?ref=save20");
+      await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+      await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+      afterCapture = await retainedCheckout(page);
+      captureOperations = await page.evaluate(() => window.captureStorageOperations);
+      expectRetainedCaptureData(afterCapture, before);
+      expect(captureOperations.some(operation => operation.error === "QuotaExceededError")).toBe(true);
+      expect(captureOperations.filter(operation => operation.key === "referral_dismissed")).toEqual([]);
+      if (failure === "guard allocation") {
+        expect(afterCapture.guard).toBeNull();
+        expect(captureOperations.some(operation => operation.operation === "remove" && operation.key === "referral_capture")).toBe(true);
+      } else expect(["", null]).toContain(afterCapture.guard);
+      beforePayment = flow.state.calls.length;
+      await flow.payment();
+      await expect(paymentCode(page)).toBeEnabled();
+      await waitQuote(flow, "", beforePayment);
+      beforeReload = flow.state.calls.length;
+      await page.reload();
+      await expect(paymentCode(page)).toBeEnabled();
+      afterReload = await retainedCheckout(page);
+      await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+      await waitQuote(flow, "", beforeReload);
+      expect(referralLookups(flow, since, "friend")).toEqual([]);
+      expect(quoteCalls(flow, since).every(call => call.body.referralCode === "")).toBe(true);
+      expectRetainedCaptureData(afterReload, before);
+      await page.evaluate(() => {
+        window.restoreCaptureStorage();
+        sessionStorage.removeItem("roo-referral-quota");
+      });
+      recovery = await recoverDurableReferral(page, flow, "save20");
+    } finally {
+      await attachJson(testInfo, "failed-capture-guard-allocation", {
+        failure, before, quota, afterCapture, captureOperations, beforePayment, beforeReload, afterReload, recovery,
+        final: await retainedCheckout(page), finalOperations: await page.evaluate(() => window.captureStorageOperations || []),
+        since, calls: flow.state.calls.slice(since),
+      });
+    }
+  });
+}
+
+test("durable capture refusal survives a real opener session clone without changing the original", async ({ page, flow }, testInfo) => {
+  flow.state.collision = true;
+  await startFriendPayment(page, flow);
+  const before = await retainedCheckout(page);
+  await page.addInitScript(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key, value) {
+      if (key === "referral_dismissed" && JSON.parse(value).passiveCode === "save20") {
+        throw new DOMException("Fresh creator journal denied", "QuotaExceededError");
+      }
+      return original.call(this, key, value);
+    };
+  });
+  const since = flow.state.calls.length;
+  let original;
+  let clone;
+  let popup;
+  let beforePopup;
+  let hasOpener;
+  try {
+    await page.goto("/booking?ref=save20");
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    const beforePayment = flow.state.calls.length;
+    await flow.payment();
+    await expect(paymentCode(page)).toBeEnabled();
+    await waitQuote(flow, "", beforePayment);
+    original = await retainedCheckout(page);
+    beforePopup = flow.state.calls.length;
+    [popup] = await Promise.all([
+      page.waitForEvent("popup"),
+      page.evaluate(() => { window.open("/payment", "_blank"); }),
+    ]);
+    await expect(popup.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+    await expect(paymentCode(popup)).toBeEnabled();
+    hasOpener = await popup.evaluate(() => window.opener !== null);
+    clone = await retainedCheckout(popup);
+    expect(hasOpener).toBe(true);
+    await expect(popup.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    await expect(paymentCode(popup)).toHaveValue("save20");
+    await waitQuote(flow, "", beforePopup);
+    expect(referralLookups(flow, beforePopup, "friend")).toEqual([]);
+    expect(JSON.parse(clone.guard)).toEqual({ code: "save20" });
+    expect(clone.guard).toBe(original.guard);
+    expectRetainedCaptureData(clone, before);
+    expect(await retainedCheckout(page)).toEqual(original);
+  } finally {
+    await attachJson(testInfo, "cloned-capture-refusal", {
+      before, original, clone, hasOpener, beforePopup, since, calls: flow.state.calls.slice(since),
+      finalOriginal: await retainedCheckout(page),
+    });
+    if (popup) await popup.close();
+  }
+});
+
+test.describe("referral restoration from the browser cache", () => {
+  const cachedTest = test.extend({
+    launchOptions: async ({ launchOptions }, use) => {
+      await use({ ...launchOptions, ignoreDefaultArgs: ["--disable-back-forward-cache"] });
+    },
+    bfcache: [async ({ page, browser, flow }, use, testInfo) => {
+      const evidence = { timeline: [], notRestored: [], pageErrors: [], documents: [] };
+      page.on("console", message => {
+        if (message.text().startsWith("roo475-bfcache:")) {
+          evidence.timeline.push({ observedAt: new Date().toISOString(), ...JSON.parse(message.text().slice(15)) });
+        }
+      });
+      page.on("pageerror", error => evidence.pageErrors.push({ name: error.name, message: error.message }));
+      page.on("response", async response => {
+        if (response.request().isNavigationRequest() && response.frame() === page.mainFrame()) {
+          evidence.documents.push({ url: response.url(), status: response.status(), headers: await response.allHeaders() });
+        }
+      });
+      const session = await page.context().newCDPSession(page);
+      await session.send("Page.enable");
+      session.on("Page.backForwardCacheNotUsed", event => evidence.notRestored.push(event));
+      const browserSession = await browser.newBrowserCDPSession();
+      evidence.engine = await browserSession.send("Browser.getVersion");
+      evidence.commandLine = await browserSession.send("Browser.getBrowserCommandLine");
+      await browserSession.detach();
+      expect(evidence.commandLine.arguments).not.toContain("--disable-back-forward-cache");
+      await page.addInitScript(() => {
+        const nonce = crypto.randomUUID();
+        const observation = window.referralBfcache = { nonce, pageshows: [], pagehides: [] };
+        const record = (kind, event) => {
+          const entry = { persisted: event.persisted, url: location.href, time: performance.now() };
+          observation[kind].push(entry);
+          console.debug("roo475-bfcache:" + JSON.stringify({ kind, nonce, ...entry }));
+        };
+        window.addEventListener("pageshow", event => record("pageshows", event));
+        window.addEventListener("pagehide", event => record("pagehides", event));
+      });
+      try {
+        await use(evidence);
+      } finally {
+        evidence.final = await snapshot(page);
+        evidence.calls = flow.state.calls;
+        evidence.newQuotes = quoteCalls(flow, evidence.backBoundary ?? 0);
+        await attachJson(testInfo, "cached-referral-runtime", evidence);
+        await session.detach();
+        expect(evidence.pageErrors).toEqual([]);
+        expect(flow.state.calls.filter(call => /\/api\/payment\/(start|capture|confirm|finalize)(\/|$)/.test(call.path))).toEqual([]);
+      }
+    }, { auto: true }],
+  });
+
+  const snapshot = async page => ({
+    retained: await page.evaluate(() => {
+      const read = key => (window.referralOriginalGetter || Storage.prototype.getItem).call(sessionStorage, key);
+      return {
+        intent: { passive: read("referral_session"), journal: read("referral_dismissed") },
+        guard: read("referral_capture"),
+        draft: JSON.parse(read("booking_draft")),
+        hold: JSON.parse(read("my_slot_hold")),
+        captureFailures: window.referralCaptureFailures || [],
+        url: location.href,
+      };
+    }),
+    observation: await page.evaluate(() => ({
+      ...window.referralBfcache,
+      query: location.search,
+      navigation: performance.getEntriesByType("navigation").map(entry => ({
+        type: entry.type,
+        notRestoredReasons: entry.notRestoredReasons?.toJSON?.() ?? entry.notRestoredReasons ?? null,
+      })),
+    })),
+    paymentInput: await paymentCode(page).count() ? await paymentCode(page).inputValue() : null,
+    bookingInput: await page.getByRole("textbox", { name: "Referral or coupon code", exact: true }).count()
+      ? await page.getByRole("textbox", { name: "Referral or coupon code", exact: true }).inputValue() : null,
+    storageErrorVisible: await page.getByRole("alert").filter({ hasText: storageError }).isVisible(),
+    referralGrants: await page.locator("dt").filter({ hasText: /^Referral$/ }).allTextContents(),
+    referralBadges: await page.getByRole("button", { name: /^Remove referral code / }).allTextContents(),
+    alerts: await page.getByRole("alert").allTextContents(),
+    body: await page.locator("body").innerText(),
+  });
+
+  const denyFreshBJournal = page => page.addInitScript(() => {
+    const original = Storage.prototype.setItem;
+    window.referralCaptureFailures = [];
+    window.restoreReferralSetter = () => { Storage.prototype.setItem = original; };
+    Storage.prototype.setItem = function(key, value) {
+      if (key === "referral_dismissed" && JSON.parse(value).passiveCode === "save20" &&
+        JSON.parse(value).codes.save20 === "available") {
+        window.referralCaptureFailures.push({ key, value, previous: this.getItem(key), name: "QuotaExceededError" });
+        throw new DOMException("Fresh creator journal denied", "QuotaExceededError");
+      }
+      return original.call(this, key, value);
+    };
+  });
+
+  const observeBack = async (page, flow, evidence, testInfo) => {
+    evidence.backBoundary = flow.state.calls.length;
+    evidence.backAt = new Date().toISOString();
+    await page.goBack({ waitUntil: "commit" });
+    await expect.poll(() => page.evaluate(() => window.referralBfcache?.pageshows.some(event => event.persisted))).toBe(true);
+    evidence.afterBack = await snapshot(page);
+    await attachJson(testInfo, "cached-referral-before-product-assertions", {
+      before: evidence.before, otherDocument: evidence.otherDocument, afterBack: evidence.afterBack,
+      calls: flow.state.calls, backBoundary: evidence.backBoundary, notRestored: evidence.notRestored,
+    });
+    expect(evidence.afterBack.observation.pageshows.some(event => event.persisted === true)).toBe(true);
+    expect(evidence.afterBack.observation.nonce).toBe(evidence.before.observation.nonce);
+    expect(evidence.otherDocument.observation.nonce).not.toBe(evidence.before.observation.nonce);
+  };
+
+  const expectFormAndHold = (after, before) => {
+    expect(after.hold).toEqual(before.hold);
+    expect(after.draft.packages[before.draft.lastTitle].form).toEqual(before.draft.packages[before.draft.lastTitle].form);
+    expect(after.draft.packages[before.draft.lastTitle].selectedPackage).toEqual(before.draft.packages[before.draft.lastTitle].selectedPackage);
+  };
+
+  const acknowledgeBInBooking = async (page, flow, evidence) => {
+    await page.goto("/booking");
+    await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+    await page.evaluate(() => window.restoreReferralSetter());
+    const since = flow.state.calls.length;
+    await flow.codeInput("save20");
+    await expect(page.getByRole("button", { name: "Remove referral code save20", exact: true })).toBeVisible();
+    expect(referralLookups(flow, since, "save20")).toHaveLength(1);
+    const journal = await envelope(page);
+    expect(journal.codes.save20).toBe("applied");
+    expect(journal.choices[checkoutScope()]).toBe("save20");
+    expect(await storedReferral(page)).toBe("save20");
+    expect(await page.evaluate(() => sessionStorage.getItem("referral_capture"))).toBe("ready");
+    evidence.otherDocument = await snapshot(page);
+    expectFormAndHold(evidence.otherDocument.retained, evidence.before.retained);
+    expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
+  };
+
+  cachedTest("cached referral Payment rejects a newly pending capture", async ({ page, flow, bfcache }, testInfo) => {
+    flow.state.collision = true;
+    await startFriendPayment(page, flow);
+    await expect(paymentCode(page)).toBeEnabled();
+    bfcache.before = await snapshot(page);
+    bfcache.oldQuotes = quoteCalls(flow, 0);
+    await denyFreshBJournal(page);
+    const since = flow.state.calls.length;
+    await page.goto("/reviews?ref=save20");
+    await expect.poll(() => page.evaluate(() => sessionStorage.getItem("referral_capture"))).toBe(JSON.stringify({ code: "save20" }));
+    bfcache.otherDocument = await snapshot(page);
+    expect(bfcache.otherDocument.retained.intent).toEqual(bfcache.before.retained.intent);
+    expect(bfcache.otherDocument.retained.captureFailures).toHaveLength(1);
+    expect(quoteCalls(flow, since)).toEqual([]);
+    await observeBack(page, flow, bfcache, testInfo);
+    await expect(page.locator("dt").filter({ hasText: /^Referral$/ })).toHaveCount(0);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    await expect(paymentCode(page)).toHaveValue("save20");
+    await waitQuote(flow, "", bfcache.backBoundary);
+    expect(quoteCalls(flow, bfcache.backBoundary).every(call => call.body.referralCode === "")).toBe(true);
+    expect(referralLookups(flow, bfcache.backBoundary, "friend")).toEqual([]);
+    expectRetainedCaptureData(await retainedCheckout(page), bfcache.before.retained);
+    expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
+  });
+
+  cachedTest("cached referral Payment observes later manual acknowledgement", async ({ page, flow, bfcache }, testInfo) => {
+    flow.state.collision = true;
+    await startFriendPayment(page, flow);
+    const acknowledgedA = await retainedCheckout(page);
+    await denyFreshBJournal(page);
+    await page.goto("/booking?ref=save20");
+    await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    const beforePayment = flow.state.calls.length;
+    await flow.payment();
+    await expect(paymentCode(page)).toHaveValue("save20");
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    await waitQuote(flow, "", beforePayment);
+    bfcache.before = await snapshot(page);
+    expectRetainedCaptureData(bfcache.before.retained, acknowledgedA);
+    await acknowledgeBInBooking(page, flow, bfcache);
+    await observeBack(page, flow, bfcache, testInfo);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toHaveCount(0);
+    await expect(paymentCode(page)).toHaveValue("save20");
+    await expect(page.locator("dt").filter({ hasText: /^Referral$/ })).toHaveCount(1);
+    await waitQuote(flow, "save20", bfcache.backBoundary);
+    expect(quoteCalls(flow, bfcache.backBoundary).every(call => call.body.referralCode === "save20")).toBe(true);
+    expect(referralLookups(flow, bfcache.backBoundary, "friend")).toEqual([]);
+    expectFormAndHold(await retainedCheckout(page), bfcache.before.retained);
+    expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
+  });
+
+  cachedTest("cached referral Payment preserves unchanged acknowledged intent", async ({ page, flow, bfcache }, testInfo) => {
+    await startFriendPayment(page, flow);
+    await expect(paymentCode(page)).toBeEnabled();
+    bfcache.before = await snapshot(page);
+    bfcache.oldQuotes = quoteCalls(flow, 0);
+    await page.goto("/about");
+    bfcache.otherDocument = await snapshot(page);
+    expect(bfcache.otherDocument.retained.intent).toEqual(bfcache.before.retained.intent);
+    await observeBack(page, flow, bfcache, testInfo);
+    await expect(paymentCode(page)).toHaveValue("friend");
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toHaveCount(0);
+    await expect(page.locator("dt").filter({ hasText: /^Referral$/ })).toHaveCount(1);
+    expectRetainedCaptureData(await retainedCheckout(page), bfcache.before.retained);
+    expect(quoteCalls(flow, bfcache.backBoundary)).toEqual([]);
+  });
+
+  cachedTest("cached referral Booking rejects a newly pending capture", async ({ page, flow, bfcache }, testInfo) => {
+    flow.state.collision = true;
+    await page.goto("/booking?ref=friend");
+    await reserveAndReview(page, flow);
+    await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+    bfcache.before = await snapshot(page);
+    await denyFreshBJournal(page);
+    const since = flow.state.calls.length;
+    await page.goto("/reviews?ref=save20");
+    await expect.poll(() => page.evaluate(() => sessionStorage.getItem("referral_capture"))).toBe(JSON.stringify({ code: "save20" }));
+    bfcache.otherDocument = await snapshot(page);
+    expect(bfcache.otherDocument.retained.intent).toEqual(bfcache.before.retained.intent);
+    expect(bfcache.otherDocument.retained.captureFailures).toHaveLength(1);
+    expect(quoteCalls(flow, since)).toEqual([]);
+    await observeBack(page, flow, bfcache, testInfo);
+    await expect(page.getByRole("button", { name: /^Remove referral code / })).toHaveCount(0);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Referral or coupon code", exact: true })).toHaveValue("save20");
+    expectRetainedCaptureData(await retainedCheckout(page), bfcache.before.retained);
+    expectFormAndHold(await retainedCheckout(page), bfcache.before.retained);
+    await flow.payment();
+    await waitQuote(flow, "", bfcache.backBoundary);
+    expect(quoteCalls(flow, bfcache.backBoundary).every(call => call.body.referralCode === "")).toBe(true);
+    expect(referralLookups(flow, bfcache.backBoundary, "friend")).toEqual([]);
+    expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
+  });
+
+  cachedTest("cached referral Booking observes later manual acknowledgement", async ({ page, flow, bfcache }, testInfo) => {
+    flow.state.collision = true;
+    await startFriendPayment(page, flow);
+    await denyFreshBJournal(page);
+    await page.goto("/booking?ref=save20");
+    await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Referral or coupon code", exact: true })).toHaveValue("save20");
+    bfcache.before = await snapshot(page);
+    await acknowledgeBInBooking(page, flow, bfcache);
+    await observeBack(page, flow, bfcache, testInfo);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Remove referral code save20", exact: true })).toBeVisible();
+    expectFormAndHold(await retainedCheckout(page), bfcache.before.retained);
+    await flow.payment();
+    await waitQuote(flow, "save20", bfcache.backBoundary);
+    expect(quoteCalls(flow, bfcache.backBoundary).every(call => call.body.referralCode === "save20")).toBe(true);
+    expect(referralLookups(flow, bfcache.backBoundary, "friend")).toEqual([]);
+    expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
+  });
+
+  cachedTest("cached referral Payment refuses unreadable restored storage", async ({ page, flow, bfcache }, testInfo) => {
+    await startFriendPayment(page, flow);
+    await expect(paymentCode(page)).toBeEnabled();
+    bfcache.before = await snapshot(page);
+    await page.evaluate(() => {
+      const original = Storage.prototype.getItem;
+      window.referralOriginalGetter = original;
+      window.restoreReferralGetter = () => { Storage.prototype.getItem = original; };
+      Storage.prototype.getItem = function(key) {
+        if (["referral_capture", "referral_dismissed", "referral_session"].includes(key)) {
+          throw new DOMException("Referral storage read denied", "SecurityError");
+        }
+        return original.call(this, key);
+      };
+    });
+    await page.goto("/about");
+    bfcache.otherDocument = await snapshot(page);
+    await observeBack(page, flow, bfcache, testInfo);
+    expect(await page.evaluate(() => {
+      try { sessionStorage.getItem("referral_capture"); return null; }
+      catch (error) { return error.name; }
+    })).toBe("SecurityError");
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    await expect(paymentCode(page)).toHaveValue("");
+    await expect(page.locator("dt").filter({ hasText: /^Referral$/ })).toHaveCount(0);
+    await waitQuote(flow, "", bfcache.backBoundary);
+    expect(referralLookups(flow, bfcache.backBoundary, "friend")).toEqual([]);
+    bfcache.afterRefusal = await snapshot(page);
+    expectRetainedCaptureData(bfcache.afterRefusal.retained, bfcache.before.retained);
+    expect(bfcache.afterRefusal.retained.guard).toBe(bfcache.before.retained.guard);
+    await page.evaluate(() => window.restoreReferralGetter());
+    bfcache.manualBoundary = flow.state.calls.length;
+    await submitPaymentCode(page, "friend");
+    await waitQuote(flow, "friend", bfcache.manualBoundary);
+    expect(referralLookups(flow, bfcache.manualBoundary, "friend")).toHaveLength(1);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toHaveCount(0);
+    await expect(page.locator("dt").filter({ hasText: /^Referral$/ })).toHaveCount(1);
+    expect(await page.evaluate(() => sessionStorage.getItem("referral_capture"))).toBe("ready");
+    expectFormAndHold(await retainedCheckout(page), bfcache.before.retained);
+  });
+});
