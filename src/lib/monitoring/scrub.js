@@ -21,8 +21,6 @@ export const NO_DATA_COLLECTION = {
 
 export function scrubText(text) {
   return text
-    .replace(QUERY, "?[query]")
-    .replace(/\/\/[^\s/?#"'<>]*@/g, "//")
     .replace(/\S+/g, (token) => {
       let dot = token.length;
       let separator = token.length;
@@ -33,6 +31,8 @@ export function scrubText(text) {
       }
       return token;
     })
+    .replace(QUERY, "?[query]")
+    .replace(/\/\/[^\s/?#"'<>]*@/g, "//")
     .replace(CARD, "[card]");
 }
 
