@@ -7,7 +7,7 @@ import { gunzipSync } from 'node:zlib';
 import { isDeepStrictEqual } from 'node:util';
 import { installNetworkGuard, refuseEnvFiles } from './lib/test-target-safety.mjs';
 import { checkBrowserBootstrap } from './monitoring-bootstrap-e2e.mjs';
-import { normalizedCards, normalizedEmails, separatorRuns, releaseSha, samplingId } from './monitoring-recognizer-cases.mjs';
+import { normalizedCards, normalizedEmails, separatorRuns, releaseSha, samplingId, surfaceCases, plusRun, diagnosticControls, querySegments } from './monitoring-recognizer-cases.mjs';
 
 refuseEnvFiles();
 const require = createRequire(import.meta.url);
@@ -326,6 +326,14 @@ try {
   check('root HTTP transaction metadata keeps only safe network fields', events('transaction').find(item => item.event.contexts?.trace?.trace_id === '34567890123456789012345678901234')?.event.transaction, `GET ${ingestOrigin}`);
   const cpuBefore = process.cpuUsage();
   await fetch(`${origin}/sdk`);
+  for (const [index, [value]] of surfaceCases.entries()) sdk.captureEvent({
+    message: `Fixture surface ${index}: ${value}`, tags: { fixture_case: `surface-${index}` },
+    exception: { values: [{ type: 'Error', value: `Fixture surface ${index}: ${value}`, stacktrace: { frames: [{ filename: `http://localhost/api/x/${value}`, function: 'fixtureSurface' }] } }] },
+    extra: { reference: value, keys: { [value]: 'keep' } },
+    request: { method: 'GET', url: `http://localhost/api/x/${value}` },
+    breadcrumbs: [{ category: 'navigation', data: { label: `surface-${index}`, from: value, to: `http://localhost/api/x/${value}` } }],
+  });
+  sdk.captureEvent({ message: 'Fixture recognizer controls', release: 'rooindustries@0.2.0', extra: { diagnostic_values: diagnosticControls, separator_run: plusRun, query_examples: querySegments } });
   sdk.captureEvent({ message: 'Fixture private release', release: 'buyer@example.com' });
   sdk.captureEvent({ message: 'Fixture card release', release: 'rooindustries@4242.4242.4242-4242' });
   for (const [name, value] of [['contact', 'a%40b%2F.c'], ['PAN', normalizedCards[1]]]) sdk.captureEvent({ message: `Fixture normalized request ${name}`, request: { method: 'GET', url: `http://localhost/api/x/${value}` } });
@@ -337,6 +345,18 @@ try {
   timing.push({ name: 'SDK event with eight 16KiB tokens', length: 16000, count: 8, cpuMs: sdkCpuMs });
   const caught = events().find(item => item.event.exception?.values?.[0]?.value === 'Fixture caught failure');
   check('caught errors reach the real Next SDK', Boolean(caught), true);
+  for (const [index, [, text, path, keyValue]] of surfaceCases.entries()) {
+    const item = events().find(item => item.event.tags?.fixture_case === `surface-${index}`)?.event;
+    check(`encoded query and plus-card surface ${index}`, [
+      item?.message, item?.exception?.values?.[0]?.value, item?.extra?.reference, item?.extra?.keys,
+      item?.request?.url, item?.exception?.values?.[0]?.stacktrace?.frames?.[0]?.filename,
+      item?.breadcrumbs?.find(crumb => crumb.data?.label === `surface-${index}`)?.data,
+    ], [`Fixture surface ${index}: ${text}`, `Fixture surface ${index}: ${text}`, text, { [text]: keyValue }, path, path, { label: `surface-${index}`, from: text, to: path }]);
+  }
+  const controls = events().find(item => item.event.message === 'Fixture recognizer controls')?.event;
+  check('raw queries stay precise while semver, offsets and ordinary plus signs survive', [controls?.release, controls?.extra?.diagnostic_values], ['rooindustries@0.2.0', ['https://example.test/cb?[query]', ...diagnosticControls.slice(1)]]);
+  check('16KiB plus-separated digits are scrubbed', controls?.extra?.separator_run, '[card]');
+  check('encoded queries outside the first raw query are scrubbed', controls?.extra?.query_examples, ['[query]', '[query]']);
   check('caught reports contain no original error message', /hidden|buyer@example.com|4242424242424242/.test(caught?.raw || ''), false);
   const reported = events().find(item => item.event.exception?.values?.[0]?.value?.startsWith('Fixture SDK'));
   check('SDK error text and relative queries are scrubbed', reported?.event.exception?.values?.[0]?.value, 'Fixture SDK [email] [card] play?[query] ?[query]');
