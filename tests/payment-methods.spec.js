@@ -45,6 +45,7 @@ for (const [route, width, height] of [["/packages", 1440, 900], ["/packages", 39
     const footer = page.locator("footer").last();
     await expectMethods(footer, width);
     await expect(methodList(page)).toHaveCount(1);
+    await expect(page.locator('img[src^="/payment-methods/"]')).toHaveCount(await footer.locator('img[src^="/payment-methods/"]').count());
     for (const note of NOTES) await expect(page.getByText(note, { exact: true })).toHaveCount(0);
     const packages = page.locator("section.ri-packages-section");
     await expect(methodList(packages)).toHaveCount(0);

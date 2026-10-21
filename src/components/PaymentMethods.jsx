@@ -16,7 +16,7 @@ const METHODS = [
 
 export default function PaymentMethods({ className = "" }) {
   return (
-    <ul aria-label="Payment methods" className={`flex max-w-[22rem] flex-wrap justify-center gap-1 sm:max-w-none sm:gap-2 ${className}`}>
+    <ul role="list" aria-label="Payment methods" className={`flex max-w-[22rem] flex-wrap justify-center gap-1 sm:max-w-none sm:gap-2 ${className}`}>
       {METHODS.map(([id, name]) => (
         <li key={id}>
           <img
