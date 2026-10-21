@@ -323,7 +323,14 @@ export const captureReferralAddress = (pathname, search) => {
   if (!restored) restoredAddress = null;
   const params = new URLSearchParams(search || "");
   const code = normalizeReferralCode(params.get("ref"));
-  if (captureFailure && (!captureFailure.code || captureFailure.resetScopes?.length)) return false;
+  if (captureFailure) {
+    if (!captureFailure.code || captureFailure.resetScopes?.length) return false;
+    try {
+      if (readReferralIntent().codes[code] === "removed") return false;
+    } catch {
+      return false;
+    }
+  }
   if (CHECKOUT_PATHS.includes(pathname)) {
     if (pathname !== "/booking" || restored) return !captureFailure;
     if (!code && params.has("ref")) {
@@ -375,6 +382,8 @@ export const clearReferralDismissal = (code, scope) => {
   if (!normalized || !scope) return false;
   try {
     const intent = readReferralIntent();
+    if (captureFailure && !captureFailure.code && !captureFailure.resetScopes?.length &&
+      Object.keys(intent.choices).some(key => key !== scope)) return false;
     const choices = { ...intent.choices };
     for (const pendingScope of captureFailure?.resetScopes || []) delete choices[pendingScope];
     choices[scope] = normalized;
