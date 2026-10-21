@@ -91,6 +91,23 @@ remember_issue() {
   jq -c --slurpfile issue "$work/verified-issue.json" 'map(select(.uuid!=$issue[0].uuid))+$issue' "$work/verified.json" > "$work/verified-next.json"
   mv "$work/verified-next.json" "$work/verified.json"
 }
+persist_registry() {
+  jq_module -e 'include "reconcile-linear"; registry_valid' "$work/identity-next.json" >/dev/null || fail linear_identity_invalid
+  mv -fT -- "$work/identity-next.json" "$state_dir/identities.json" || fail linear_identity_unavailable
+  cp -- "$state_dir/identities.json" "$work/identity-current.json" || fail linear_identity_unavailable
+}
+if [[ -e "$state_dir/identities.json" || -L "$state_dir/identities.json" ]]; then
+  [[ -f "$state_dir/identities.json" && ! -L "$state_dir/identities.json" && -r "$state_dir/identities.json" &&
+    "$(stat -c %u "$state_dir/identities.json")" == "$(id -u)" ]] || fail linear_identity_unavailable
+  (( (8#$(stat -c %a "$state_dir/identities.json") & 077) == 0 )) || fail linear_identity_unavailable
+  jq_module -cse 'include "reconcile-linear";
+    if length==1 and (.[0]|registry_valid) then .[0] else error("linear_identity_invalid") end' \
+    "$state_dir/identities.json" > "$work/identity-current.json" || fail linear_identity_invalid
+else
+  if compgen -G "$state_dir/run-*.json" >/dev/null; then fail linear_identity_unavailable; fi
+  jq_module -nc 'include "reconcile-linear"; {version:1,scope:scope,issues:[]}' > "$work/identity-next.json"
+  persist_registry
+fi
 if [[ -z "$executor" ]]; then executor=$(command -v executor) || fail executor_unavailable; fi
 executor=$(realpath -e -- "$executor" 2>/dev/null) || fail executor_unavailable
 valid_path "$executor" && [[ -f "$executor" && -x "$executor" ]] || fail executor_unavailable
@@ -145,6 +162,15 @@ all_pages() {
   printf '[]\n' > "$all_file"
   while (( pages < 50 )); do
     page=$(linear_call "$method" "$args") || return 1
+    if [[ "$method" == list_issues ]]; then
+      printf '%s' "$page" | jq -c '
+        if (.issues|type)=="array" then [.issues[]|objects|(.uuid // .id)] else [] end' > "$work/observed-issue-ids.json" || return 1
+      jq -c --slurpfile observed "$work/observed-issue-ids.json" '
+        .issues|=map(. as $entry |
+          if ($observed[0]|index($entry.uuid))!=null then .released=false else . end)' \
+        "$work/identity-current.json" > "$work/identity-next.json" || return 1
+      persist_registry
+    fi
     printf '%s' "$page" | jq_module -e --arg field "$field" 'include "reconcile-linear"; page_valid($field)' >/dev/null 2>&1 || return 1
     printf '%s' "$page" | jq -c --arg field "$field" '.[$field]' > "$rows_file"
     jq_module -e 'include "reconcile-linear"; map(.uuid // .id) | all(.[];uuid) and distinct' "$rows_file" >/dev/null || return 1
@@ -176,6 +202,16 @@ while IFS= read -r issue_id; do
   mv "$work/next.json" "$work/issues.json"
 done < <(jq -r '.[].uuid' "$work/listed-issues.json")
 jq_module -c 'include "reconcile-linear"; [.[]|owned_issue]' "$work/issues.json" > "$work/owned.json" || fail linear_identity_invalid
+jq_module -e --slurpfile owned "$work/owned.json" 'include "reconcile-linear";
+  all(.issues[]; . as $entry |
+    [$owned[0][]|select(.uuid==$entry.uuid and .primary==$entry.primary)] as $matches |
+    if ($matches|length)==1 then true
+    else $entry.released and all($owned[0][];.uuid!=$entry.uuid) end)' "$work/identity-current.json" >/dev/null || fail linear_identity_invalid
+jq -c --slurpfile owned "$work/owned.json" '
+  reduce $owned[0][] as $issue (.;
+    .issues=([.issues[]|select(.uuid!=$issue.uuid)]+[
+      {uuid:$issue.uuid,primary:$issue.primary,released:false}]))' "$work/identity-current.json" > "$work/identity-next.json"
+persist_registry
 while IFS= read -r issue_id; do
   comment_args=$(jq -nc --arg issueId "$issue_id" '{issueId:$issueId,limit:100,orderBy:"updatedAt"}')
   all_pages list_comments "$comment_args" comments > "$work/unowned-comments.json" || fail linear_pagination_invalid
@@ -277,6 +313,12 @@ while IFS= read -r action; do
     created=$(linear_call save_issue "$args") || fail linear_issue_unverified
     printf '%s' "$created" | jq_module -e 'include "reconcile-linear"; .uuid|uuid' >/dev/null || fail linear_issue_unverified
     issue_id=$(printf '%s' "$created" | jq -r .uuid)
+    jq -e --arg id "$issue_id" --arg key "$primary" 'all(.issues[];.uuid!=$id or .primary==$key)' \
+      "$work/identity-current.json" >/dev/null || fail linear_identity_invalid
+    jq -c --arg id "$issue_id" --arg key "$primary" '
+      .issues=([.issues[]|select(.uuid!=$id)]+[{uuid:$id,primary:$key,released:false}])' \
+      "$work/identity-current.json" > "$work/identity-next.json"
+    persist_registry
     get_args=$(issue_args "$issue_id")
     issue=$(linear_call get_issue "$get_args") || fail linear_issue_unverified
     printf '%s' "$issue" | jq_module -e --arg id "$issue_id" --arg key "$primary" 'include "reconcile-linear"; issue_scope and .uuid==$id and .status=="Backlog" and ([(owned_issue|.primary)]==[$key])' >/dev/null || fail linear_issue_unverified
@@ -334,4 +376,18 @@ while IFS= read -r issue_id; do body+=$'\n'"$issue_id"; done < <(jq -r '.[:20][]
 if [[ "$(jq length "$work/urls.json")" -gt 20 ]]; then body+=$'\n''Full issue list: ROO-498'; fi
 save_update "$body" || fail linear_update_unverified
 if [[ "$source_ok" != true || "$targets_ok" != true || "$(jq .metadataInvalid "$work/plan.json")" == true ]]; then exit 1; fi
+jq_module -c --slurpfile verified "$work/verified.json" --slurpfile managed "$work/managed.json" --slurpfile plan "$work/plan.json" '
+  include "reconcile-linear";
+  .issues|=map(. as $entry |
+    [$verified[0][]|select(.uuid==$entry.uuid)] as $current |
+    if ($current|length)==0 then .
+    else [$plan[0].actions[]|select(.primary==$entry.primary)] as $actions |
+      [$managed[0][]|select(.uuid==$entry.uuid and .primary==$entry.primary and .invalidMetadata==false)] as $metadata |
+      (if ($actions|length)==1 and ($actions[0].issue==null or $actions[0].issue.uuid==$entry.uuid) then $actions[0].state
+       elif ($actions|length)==0 and ($metadata|length)==1 then $metadata[0].meta.state
+       else "incomplete" end) as $state |
+      .released=($plan[0].complete and ($current|length)==1 and
+        ($current[0].statusType|IN("completed","canceled")) and $state=="recovered")
+    end)' "$work/identity-current.json" > "$work/identity-next.json"
+persist_registry
 error_code=""

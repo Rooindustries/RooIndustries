@@ -98,6 +98,12 @@ def issue_scope:
   and (.statusType|IN("triage","backlog","unstarted","started","completed","canceled"))
   and (.createdAt|timestamp) and (.updatedAt|timestamp)
   and (.archivedAt == null or (.archivedAt|timestamp));
+def registry_valid:
+  exact(["version","scope","issues"]) and .version==1 and .scope==scope
+  and (.issues|type=="array")
+  and all(.issues[];exact(["uuid","primary","released"]) and (.uuid|uuid)
+    and (.primary|managed_key) and (.released|type=="boolean"))
+  and ([.issues[].uuid]|distinct);
 def update_scope:
   (.id|uuid) and .type == "project" and .project.id == scope.projectId
   and (.body|type == "string") and (.createdAt|timestamp)

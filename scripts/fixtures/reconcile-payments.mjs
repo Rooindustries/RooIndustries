@@ -67,6 +67,7 @@ const freshState = () => ({
   reportedCount: null, scopeFault: null, duplicateCursor: false, gate: null,
   issueResponses: [], updateResponses: [], identityBefore: null,
   minimalCreateResponse: false, omitDefaultChildParent: false, canonicalChildFault: null, workflowRaces: [],
+  captureIdentity: false, registryFault: null, listPages: [],
 });
 const managedDescription = (key) =>
   '**Goal**: Resolve this payment, booking or referral-credit mismatch.\n\n' +
@@ -173,7 +174,8 @@ const linear = async (method, args) => {
     assert.equal(args.includeArchived, true);
     assert.equal(args.limit, 100);
     assert.deepEqual(args.fields, issueFields);
-    result = page(current.issues, args, 'issues');
+    result = page(current.issues.filter((issue) =>
+      issue.parentId === args.parentId && issue.projectId === args.project && issue.teamId === args.team), args, 'issues');
     result.issues = result.issues.map((issue) => issueResponse(issue, method, args));
   } else if (method === 'list_comments') {
     assert.ok(current.issues.some((issue) => issue.uuid === args.issueId));
@@ -299,6 +301,9 @@ const server = http.createServer(async (req, res) => {
     for await (const chunk of req) chunks.push(chunk);
     const args = JSON.parse(Buffer.concat(chunks).toString());
     const response = await linear(url.pathname.slice(8), args);
+    if (url.pathname === '/linear/list_issues') current.listPages.push({
+      args: structuredClone(args), response: structuredClone(response), callIndex: current.calls.length - 1,
+    });
     res.writeHead(response.status, { 'content-type': 'application/json' });
     res.end(JSON.stringify(response.body));
   } catch {
@@ -351,7 +356,23 @@ const homeFor = (name) => {
   fs.writeFileSync(path.join(home, '.config/roo/reconcile-token'), token + '\n', { mode: 0o600 });
   return home;
 };
+const registryFile = (home) => path.join(home, '.local/state/roo-reconcile/identities.json');
+const registrySnapshot = (home) => {
+  const file = registryFile(home);
+  let stat;
+  try { stat = fs.lstatSync(file); }
+  catch (error) { if (error.code === 'ENOENT') return { kind: 'missing' }; throw error; }
+  const details = { mode: stat.mode & 0o777, uid: stat.uid };
+  if (stat.isSymbolicLink()) return { ...details, kind: 'symlink', target: fs.readlinkSync(file) };
+  if (stat.isDirectory()) return { ...details, kind: 'directory', entries: fs.readdirSync(file) };
+  if (stat.isFile()) return { ...details, kind: 'file', text: fs.readFileSync(file, 'utf8') };
+  return { ...details, kind: 'other' };
+};
 const invoke = (home, options = {}) => {
+  const boundary = {
+    callStart: current.calls.length, sourceStart: current.requests.length, registryBefore: registrySnapshot(home),
+    ...(current.captureIdentity ? { remoteBefore: structuredClone({ issues: current.issues, comments: current.comments }) } : {}),
+  };
   const executable = baseline || path.join(root, 'scripts/reconcile-payments.sh');
   const env = {
     PATH: bin + ':/usr/bin:/bin', HOME: home, TMPDIR: scratch, LC_ALL: 'C',
@@ -380,7 +401,11 @@ const invoke = (home, options = {}) => {
       const stateFile = path.join(home, '.local/state/roo-reconcile/run-' + current.date + '.json');
       const result = { code, signal, stdout, stderr,
         state: fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')) : null,
-        alert: fs.existsSync(alertFile) ? JSON.parse(fs.readFileSync(alertFile, 'utf8')) : null };
+        alert: fs.existsSync(alertFile) ? JSON.parse(fs.readFileSync(alertFile, 'utf8')) : null,
+        boundary: { ...boundary, calls: structuredClone(current.calls.slice(boundary.callStart)),
+          sourceRequests: structuredClone(current.requests.slice(boundary.sourceStart)), registryAfter: registrySnapshot(home),
+          ...(current.captureIdentity ? { remoteAfter: structuredClone({ issues: current.issues, comments: current.comments }) } : {}) },
+      };
       current.runs.push(result);
       resolve(result);
     });
@@ -428,9 +453,70 @@ const seedHumanIssue = (description) => {
   return issue;
 };
 const fault = () => item('payment:fixture');
+const assertRetainedIdentity = (result, issue, released, primary = 'payment:fixture') => {
+  const snapshot = result.boundary.registryAfter;
+  assert.equal(snapshot.kind, 'file');
+  assert.equal(snapshot.uid, process.getuid());
+  assert.equal(snapshot.mode & 0o077, 0);
+  const registry = JSON.parse(snapshot.text);
+  assert.deepEqual(Object.keys(registry).sort(), ['issues', 'scope', 'version']);
+  assert.equal(registry.version, 1);
+  assert.deepEqual(registry.scope, scope);
+  assert.deepEqual(registry.issues.filter((entry) => entry.uuid === issue.uuid), [{ uuid: issue.uuid, primary, released }]);
+};
+const assertIdentityRefusal = (result) => {
+  assert.notEqual(result.code, 0);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.result, 'unavailable');
+  assert.equal(output.complete, false);
+  assert.equal(result.alert.severity, 'amber');
+  assert.equal(result.boundary.calls.filter((call) => call.method.startsWith('save_')).length, 0);
+  assert.deepEqual(result.boundary.sourceRequests, []);
+  assert.deepEqual(result.boundary.remoteAfter, result.boundary.remoteBefore);
+  const inScope = result.boundary.remoteBefore.issues.filter((issue) =>
+    issue.parentId === scope.parentId && issue.projectId === scope.projectId && issue.teamId === scope.teamId);
+  for (const call of result.boundary.calls.filter((entry) => entry.method === 'get_issue' && entry.args.id !== 'ROO-498')) {
+    assert.ok(inScope.some((issue) => issue.uuid === call.args.id));
+  }
+};
+const ageWindow = () => {
+  current.window = windowReport();
+  current.date = new Date(Date.parse(current.date) + 4 * 86400000).toISOString().slice(0, 10);
+};
+const loseIssue = (issue, kind) => {
+  if (kind === 'project-move') issue.projectId = crypto.randomUUID();
+  else if (kind === 'team-move') issue.teamId = crypto.randomUUID();
+  else if (kind === 'parent-null') issue.parentId = null;
+  else if (kind === 'parent-other') issue.parentId = crypto.randomUUID();
+  else if (kind === 'nested-reparent') issue.parentId = seedHumanIssue(null).uuid;
+  else if (kind === 'delete') current.issues = current.issues.filter((entry) => entry.uuid !== issue.uuid);
+  else assert.fail('Unknown identity loss fixture');
+};
+const firstMismatch = async (home, extra = {}) => {
+  const issue = seedIssue('payment:fixture', extra);
+  issue.description += '\nHuman investigation remains unchanged.';
+  current.comments.push({ id: crypto.randomUUID(), issueId: issue.uuid, body: 'Human follow-up remains unchanged.',
+    createdAt: iso(), updatedAt: iso(), attachments: [] });
+  current.window = windowReport([fault()]);
+  current.checks['payment:fixture'] = check('payment:fixture', 'unresolved', [fault()]);
+  const result = await invoke(home);
+  assert.equal(result.code, 0);
+  assert.equal(JSON.parse(result.stdout).result, 'mismatch');
+  return issue;
+};
+const recoverIdentity = async (home, issue) => {
+  current.window = windowReport();
+  current.checks['payment:fixture'] = recovered('payment:fixture');
+  const result = await invoke(home);
+  assert.equal(result.code, 0);
+  assert.equal(JSON.parse(result.stdout).result, 'clear');
+  assert.equal(issue.status, 'Done');
+  return result;
+};
 const run = async (name, fn) => {
   if (selected && !selected.includes(name)) return;
   current = freshState();
+  current.captureIdentity = name.startsWith('retained-registry-');
   const home = homeFor(name);
   let passed = false, error;
   try { await fn(home); passed = true; }
@@ -439,7 +525,7 @@ const run = async (name, fn) => {
   results.push({ name, passed, error, blockedRequests: blocked, expectedBlockedRequests: current.expectedBlocked || 0, calls: current.calls, sourceRequests: current.requests,
     handshakes: fs.existsSync(path.join(home, 'handshakes')) ? fs.readFileSync(path.join(home, 'handshakes'), 'utf8').trim().split('\n') : [],
     issueResponses: current.issueResponses, updateResponses: current.updateResponses,
-    identityBefore: current.identityBefore, workflowRaces: current.workflowRaces,
+    identityBefore: current.identityBefore, workflowRaces: current.workflowRaces, registryFault: current.registryFault, listPages: current.listPages,
     issues: current.issues, comments: current.comments, updates: current.updates, runs: current.runs });
 };
 try {
@@ -454,6 +540,232 @@ try {
       assert.equal(current.issues.length, 1);
     });
   } else {
+    for (const kind of ['project-move', 'team-move', 'parent-null', 'parent-other', 'nested-reparent', 'delete']) {
+      await run('retained-registry-' + kind, async (home) => {
+        const issue = await firstMismatch(home);
+        ageWindow();
+        loseIssue(issue, kind);
+        const result = await invoke(home);
+        assertIdentityRefusal(result);
+        assert.equal(result.alert.items[0].reason, 'linear_identity_invalid');
+        assertRetainedIdentity(result, issue, false);
+        if (kind === 'project-move') {
+          Object.assign(issue, scope);
+          const recovery = await recoverIdentity(home, issue);
+          assert.equal(current.issues.filter((entry) => entry.uuid === issue.uuid).length, 1);
+          assert.ok(recovery.boundary.sourceRequests.some((request) => request.checks?.includes('payment:fixture')));
+          assertRetainedIdentity(recovery, issue, true);
+        }
+      });
+    }
+    for (const kind of ['unknown', 'completed-unresolved', 'canceled-unresolved', 'archived-unresolved']) {
+      await run('retained-registry-' + kind, async (home) => {
+        const issue = seedIssue('payment:fixture', kind === 'canceled-unresolved'
+          ? { status: 'Canceled', statusType: 'canceled' }
+          : kind === 'archived-unresolved' ? { status: 'Done', statusType: 'completed', archivedAt: '2026-01-02T00:00:00.000Z' } : {});
+        current.checks['payment:fixture'] = kind === 'unknown' ? check('payment:fixture')
+          : check('payment:fixture', 'unresolved', [fault()]);
+        assert.equal((await invoke(home)).code, 0);
+        if (kind === 'completed-unresolved') Object.assign(issue, { status: 'Done', statusType: 'completed' });
+        ageWindow();
+        loseIssue(issue, 'parent-null');
+        const result = await invoke(home);
+        assertIdentityRefusal(result);
+        assertRetainedIdentity(result, issue, false);
+      });
+    }
+    for (const kind of ['project-move', 'parent-null', 'delete']) {
+      await run('retained-registry-released-' + kind, async (home) => {
+        const issue = await firstMismatch(home);
+        const recovery = await recoverIdentity(home, issue);
+        ageWindow();
+        loseIssue(issue, kind);
+        const result = await invoke(home);
+        assert.equal(result.code, 0);
+        assert.equal(JSON.parse(result.stdout).result, 'clear');
+        assert.equal(JSON.parse(result.stdout).complete, true);
+        assert.equal(result.alert.severity, 'green');
+        assert.equal(result.boundary.calls.filter((call) => call.method === 'save_issue' || call.method === 'save_comment').length, 0);
+        assert.deepEqual(result.boundary.sourceRequests.map((request) => request.checks), [null]);
+        assert.deepEqual(result.boundary.remoteAfter, result.boundary.remoteBefore);
+        assert.equal(result.boundary.calls.some((call) => call.method === 'get_issue' && call.args.id === issue.uuid), false);
+        assertRetainedIdentity(recovery, issue, true);
+        assertRetainedIdentity(result, issue, true);
+      });
+    }
+    await run('retained-registry-open-recovered-comment', async (home) => {
+      const issue = await firstMismatch(home);
+      current.window = windowReport();
+      current.checks['payment:fixture'] = recovered('payment:fixture');
+      current.failures.push({ method: 'save_issue', when: (args) => args.state === 'Done' });
+      assert.notEqual((await invoke(home)).code, 0);
+      assert.equal(issue.status, 'Backlog');
+      assert.equal(metadata(issue).state, 'recovered');
+      ageWindow();
+      loseIssue(issue, 'project-move');
+      const result = await invoke(home);
+      assertIdentityRefusal(result);
+      assertRetainedIdentity(result, issue, false);
+    });
+    await run('retained-registry-replacement-uuid', async (home) => {
+      const issue = await firstMismatch(home);
+      ageWindow();
+      loseIssue(issue, 'project-move');
+      const replacement = seedIssue('payment:fixture');
+      const result = await invoke(home);
+      assertIdentityRefusal(result);
+      assertRetainedIdentity(result, issue, false);
+      assert.equal(JSON.parse(result.boundary.registryAfter.text).issues.some((entry) => entry.uuid === replacement.uuid), false);
+    });
+    await run('retained-registry-changed-primary', async (home) => {
+      const issue = await firstMismatch(home);
+      ageWindow();
+      issue.description = managedDescription('record:record.fixture');
+      const meta = metadata(issue);
+      Object.assign(meta, { primary: 'record:record.fixture', keys: ['record:record.fixture'], observations: [] });
+      current.comments.find((comment) => comment.issueId === issue.uuid && comment.body.startsWith('Payment reconciliation status\n')).body =
+        'Payment reconciliation status\nReconciliation: ' + JSON.stringify(meta);
+      const result = await invoke(home);
+      assertIdentityRefusal(result);
+      assertRetainedIdentity(result, issue, false);
+    });
+    await run('retained-registry-unrelated-children', async (home) => {
+      seedHumanIssue(null);
+      const unrelated = seedIssue('payment:elsewhere', { projectId: crypto.randomUUID() });
+      const result = await invoke(home);
+      assert.equal(result.code, 0);
+      assert.equal(JSON.parse(result.stdout).result, 'clear');
+      assert.equal(result.alert.severity, 'green');
+      assert.equal(result.boundary.calls.some((call) => call.method === 'get_issue' && call.args.id === unrelated.uuid), false);
+      assert.equal(result.boundary.calls.filter((call) => call.method === 'save_issue' || call.method === 'save_comment').length, 0);
+      assert.deepEqual(result.boundary.remoteAfter, result.boundary.remoteBefore);
+      assert.equal(result.boundary.registryAfter.kind, 'file');
+      assert.deepEqual(JSON.parse(result.boundary.registryAfter.text).issues, []);
+    });
+    await run('retained-registry-provisional-create', async (home) => {
+      current.window = windowReport([fault()]);
+      current.failures.push({ method: 'get_issue', when: (args) => args.id !== 'ROO-498' && current.calls.some((call) => call.method === 'save_issue' && !call.args.id) });
+      const first = await invoke(home);
+      assert.notEqual(first.code, 0);
+      assert.equal(current.issues.length, 1);
+      const issue = current.issues[0];
+      assert.ok(current.issueResponses.some((response) => response.method === 'save_issue' && response.dto.uuid === issue.uuid));
+      ageWindow();
+      loseIssue(issue, 'project-move');
+      const result = await invoke(home);
+      assertIdentityRefusal(result);
+      assertRetainedIdentity(first, issue, false);
+      assertRetainedIdentity(result, issue, false);
+    });
+    for (const kind of ['missing', 'malformed-json', 'wrong-scope', 'invalid-boolean', 'invalid-entry', 'invalid-uuid', 'symlink', 'directory']) {
+      await run('retained-registry-unsafe-' + kind, async (home) => {
+        const issue = await firstMismatch(home);
+        ageWindow();
+        loseIssue(issue, 'parent-null');
+        const file = registryFile(home);
+        const valid = { version: 1, scope, issues: [{ uuid: issue.uuid, primary: 'payment:fixture', released: false }] };
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+        let target;
+        if (kind === 'missing') {}
+        else if (kind === 'symlink') {
+          target = path.join(home, 'retained-registry-target.json');
+          fs.writeFileSync(target, JSON.stringify(valid), { mode: 0o600 });
+          fs.symlinkSync(target, file);
+        } else if (kind === 'directory') fs.mkdirSync(file, { mode: 0o700 });
+        else {
+          if (kind === 'wrong-scope') valid.scope = { ...scope, projectId: crypto.randomUUID() };
+          if (kind === 'invalid-boolean') valid.issues[0].released = 'false';
+          if (kind === 'invalid-entry') valid.issues[0].human = 'Unexpected field';
+          if (kind === 'invalid-uuid') valid.issues[0].uuid = 'not-a-uuid';
+          fs.writeFileSync(file, kind === 'malformed-json' ? '{invalid json' : JSON.stringify(valid), { mode: 0o600 });
+        }
+        const before = registrySnapshot(home);
+        const targetBefore = target ? fs.readFileSync(target, 'utf8') : null;
+        const result = await invoke(home);
+        assertIdentityRefusal(result);
+        assert.deepEqual(registrySnapshot(home), before);
+        if (target) assert.equal(fs.readFileSync(target, 'utf8'), targetBefore);
+      });
+    }
+    await run('retained-registry-write-failure', async (home) => {
+      const issue = await firstMismatch(home);
+      const file = registryFile(home);
+      if (!fs.existsSync(file)) fs.writeFileSync(file,
+        JSON.stringify({ version: 1, scope, issues: [{ uuid: issue.uuid, primary: 'payment:fixture', released: false }] }), { mode: 0o600 });
+      const before = fs.readFileSync(file, 'utf8');
+      const retained = path.join(home, 'retained-registry-last-good.json');
+      let changed = false;
+      current.beforeIssueRead = (args) => {
+        if (args.id !== issue.uuid || changed) return;
+        changed = true;
+        fs.renameSync(file, retained);
+        fs.mkdirSync(file, { mode: 0o700 });
+      };
+      const result = await invoke(home);
+      assertIdentityRefusal(result);
+      assert.equal(changed, true);
+      assert.equal(result.alert.items[0].reason, 'linear_identity_unavailable');
+      assert.equal(registrySnapshot(home).kind, 'directory');
+      assert.deepEqual(fs.readdirSync(file), []);
+      assert.equal(fs.readFileSync(retained, 'utf8'), before);
+      current.registryFault = { kind: 'destination-directory', before, retained: fs.readFileSync(retained, 'utf8') };
+    });
+    await run('retained-registry-invalidate-before-comments', async (home) => {
+      const issue = await firstMismatch(home);
+      await recoverIdentity(home, issue);
+      current.failures.push({ method: 'list_comments', when: (args) => args.issueId === issue.uuid });
+      assert.notEqual((await invoke(home)).code, 0);
+      ageWindow();
+      loseIssue(issue, 'parent-null');
+      const result = await invoke(home);
+      assertIdentityRefusal(result);
+      assertRetainedIdentity(result, issue, false);
+    });
+    for (const kind of ['marker-loss', 'invalid-marker', 'failed-canonical-read', 'partial-pagination']) {
+      await run('retained-registry-observed-' + kind, async (home) => {
+        const issue = await firstMismatch(home);
+        const recovery = await recoverIdentity(home, issue);
+        assertRetainedIdentity(recovery, issue, true);
+        Object.assign(issue, { status: 'Backlog', statusType: 'backlog' });
+        let failure, unrelated;
+        if (kind === 'marker-loss') issue.description = 'Human investigation continues without a managed key.';
+        if (kind === 'invalid-marker') issue.description += '\nReconciliation key: payment:fixture';
+        if (kind === 'failed-canonical-read') {
+          failure = { method: 'get_issue', when: (args) => args.id === issue.uuid, status: 503 };
+        }
+        if (kind === 'partial-pagination') {
+          unrelated = seedHumanIssue(null);
+          current.pageSize = 1;
+          failure = { method: 'list_issues', when: (args) => Boolean(args.cursor), status: 503 };
+        }
+        if (failure) current.failures.push(failure);
+        const pageStart = current.listPages.length;
+        const intermediate = await invoke(home);
+        assertIdentityRefusal(intermediate);
+        if (failure) assert.equal(failure.used, true);
+        if (kind === 'partial-pagination') {
+          const pages = current.listPages.slice(pageStart);
+          assert.equal(pages.length, 2);
+          assert.equal(pages[0].response.status, 200);
+          const firstPage = JSON.parse(pages[0].response.body.data.content[0].text);
+          assert.deepEqual(firstPage.issues.map((entry) => entry.uuid), [issue.uuid]);
+          assert.equal(firstPage.hasNextPage, true);
+          assert.equal(firstPage.cursor, issue.uuid);
+          assert.equal(pages[1].args.cursor, firstPage.cursor);
+          assert.equal(pages[1].response.status, 503);
+        }
+        ageWindow();
+        loseIssue(issue, 'parent-null');
+        if (unrelated) loseIssue(unrelated, 'parent-null');
+        current.failures = current.failures.filter((entry) => entry !== failure);
+        const result = await invoke(home);
+        assertIdentityRefusal(result);
+        assert.equal(result.alert.items[0].reason, 'linear_identity_invalid');
+        assertRetainedIdentity(intermediate, issue, false);
+        assertRetainedIdentity(result, issue, false);
+        assert.equal(current.issues.filter((entry) => entry.uuid === issue.uuid).length, 1);
+      });
+    }
     await run('status-update-normalized-bodies', async (home) => {
       current.window = windowReport([fault()]);
       const mismatch = await invoke(home);
@@ -1292,8 +1604,10 @@ try {
   for (const child of children) child.kill('SIGTERM');
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
+  const unexecutedCases = (selected || []).filter((name) => !results.some((result) => result.name === name));
   const evidence = {
-    ok: results.length > 0 && results.every((result) => result.passed && result.blockedRequests === result.expectedBlockedRequests), scope,
+    ok: results.length > 0 && unexecutedCases.length === 0 && results.every((result) => result.passed && result.blockedRequests === result.expectedBlockedRequests), scope,
+    selectedCases: selected || null, unexecutedCases,
     baselineSha256: baseline ? crypto.createHash('sha256').update(fs.readFileSync(baseline)).digest('hex') : null,
     externalRequests: 0, servicesStopped: true, sourceHashes, results,
   };

@@ -21,6 +21,13 @@ states stay unchanged; clearing uncertainty requires fresh positive evidence.
 
 State lives in `~/.local/state/roo-reconcile`. The existing mission-control
 alert is `~/.local/share/mission-control/alerts/site-reconcile.json`.
+The private `identities.json` retains observed issue UUIDs and their
+reconciliation keys. If an unresolved identity leaves the scoped Linear list,
+the job refuses before reporting or source requests; it never writes outside
+the configured scope. Only an identity last verified recovered and closed can
+leave without blocking. Missing or damaged identity state beside prior run
+records also refuses. Restore and verify that state before retrying; deleting
+it is not a reset.
 `ROO_RECONCILE_TOKEN_FILE`, `ROO_RECONCILE_STATE_DIR`,
 `ROO_RECONCILE_ALERT_FILE` and `ROO_RECONCILE_EXECUTOR_BIN` override those
 locations and the CLI executable. The live report URL is fixed.
