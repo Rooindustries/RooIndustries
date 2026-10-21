@@ -37,6 +37,8 @@ standIn.on("connection", socket => {
 standIn.on("upgrade", (request, socket) => {
   socket.on("error", () => {});
   if (request.headers["x-stand-in-reply"] === "200") return socket.resume().write("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok");
+  if (request.headers["x-stand-in-reply"] === "keep-alive") return socket.resume().write("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok");
+  if (request.headers["x-stand-in-reply"] === "stall") return socket.resume();
   standInUpgrades.push({ method: request.method, url: request.url, upgrade: request.headers.upgrade, connection: request.headers.connection });
   const accept = createHash("sha1").update(`${request.headers["sec-websocket-key"]}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
   socket.on("data", chunk => { standInFrames += chunk.length; socket.end(); });
@@ -46,6 +48,8 @@ standIn.on("upgrade", (request, socket) => {
 let fixtureRequests = 0;
 let fixtureUpgrades = 0;
 let sinkRequests = 0;
+let sinkBytes = 0;
+let sinkConnections = 0;
 let fixtureOrigin;
 let endpoint;
 let redirectEndpoint;
@@ -54,6 +58,10 @@ let browserServer;
 fixture.on("upgrade", (_request, socket) => {
   fixtureUpgrades++;
   socket.destroy();
+});
+sink.on("connection", socket => {
+  sinkConnections++;
+  socket.on("data", chunk => { sinkBytes += chunk.length; });
 });
 redirect.on("upgrade", (_request, socket) => {
   socket.on("error", () => {});
@@ -147,6 +155,7 @@ const requestHelpers = `
 const tunnelHelpers = () => `
   ${requestHelpers}
   const defaultHeaders = { Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==" };
+  const header = "GET /stand-in-path HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: Upgrade\\r\\nUpgrade: websocket\\r\\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\\r\\n\\r\\n";
   const tunnelOptions = (headers = defaultHeaders) => ({
     host: "127.0.0.1", port: ${JSON.stringify(String(standIn.address().port))}, path: "/stand-in-path", method: "GET",
     createConnection: net.createConnection, agent: new (class extends http.Agent {})(), headers,
@@ -224,10 +233,8 @@ test("stand-in: the socket carries nothing after a non-101 answer", { timeout: 6
       req.socket.write("GET /other-response HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n", error => { seen.writeError = error?.message ?? null; });
     });
     req.on("error", error => { seen.requestError = error.message; });
+    process.once("beforeExit", () => console.log(JSON.stringify(seen)));
     req.end();
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    req.destroy();
-    console.log(JSON.stringify(seen));
   `, `ws://127.0.0.1:${standIn.address().port}/stand-in-path`));
   await new Promise(resolve => setTimeout(resolve, 300));
   t.diagnostic(JSON.stringify({ ...value, wire: standInWire.slice(start) }));
@@ -255,6 +262,167 @@ test("stand-in: Playwright's real client passes the guard and sends frames after
   assert.equal(upgrades[0].method, "GET");
   assert.ok(standInFrames > beforeFrames);
   assert.doesNotMatch(value.error ?? "", /\[test-target\]/);
+});
+
+test("stand-in: a non-101 keep-alive answer releases the socket", { timeout: 65_000 }, async () => {
+  const child = await runChild(`
+    ${tunnelHelpers()}
+    const seen = {};
+    const req = http.request(tunnelOptions({ ...defaultHeaders, "X-Stand-In-Reply": "keep-alive" }), response => {
+      seen.status = response.statusCode;
+      response.setEncoding("latin1");
+      response.on("data", chunk => { seen.body = (seen.body ?? "") + chunk; });
+    });
+    req.on("error", error => { seen.error = error.message; });
+    req.on("close", () => { seen.closed = true; });
+    process.once("beforeExit", () => console.log(JSON.stringify(seen)));
+    req.end();
+  `, `ws://127.0.0.1:${standIn.address().port}/stand-in-path`);
+  assert.deepEqual(result(child), { status: 200, body: "ok", closed: true });
+});
+
+test("stand-in: request timeouts and abort signals still reach the tunnel", { timeout: 65_000 }, async () => {
+  const child = await runChild(`
+    ${tunnelHelpers()}
+    const stalled = ({ options = () => {}, request = () => {} } = {}) => new Promise(resolve => {
+      const settings = tunnelOptions({ ...defaultHeaders, "X-Stand-In-Reply": "stall" });
+      options(settings);
+      const req = http.request(settings);
+      const watchdog = setTimeout(() => req.destroy(new Error("watchdog")), 3000);
+      const finish = value => { clearTimeout(watchdog); resolve(value); };
+      req.on("timeout", () => req.destroy(new Error("own-timeout")));
+      req.on("error", error => finish(error.code === "ABORT_ERR" ? "ABORT_ERR" : error.message));
+      req.on("upgrade", (_response, socket) => { socket.destroy(); finish("upgraded"); });
+      request(req);
+      req.end();
+    });
+    const controller = new AbortController();
+    const values = {
+      "timeout-option": await stalled({ options: settings => { settings.timeout = 40; } }),
+      "set-timeout": await stalled({ request: req => req.setTimeout(40) }),
+      "abort-before": await stalled({ options: settings => { settings.signal = AbortSignal.abort(); } }),
+      "abort-during": await stalled({ options: settings => { settings.signal = controller.signal; }, request: () => setTimeout(() => controller.abort(), 40) }),
+    };
+    console.log(JSON.stringify(values));
+  `, `ws://127.0.0.1:${standIn.address().port}/stand-in-path`);
+  assert.deepEqual(result(child), { "timeout-option": "own-timeout", "set-timeout": "own-timeout", "abort-before": "ABORT_ERR", "abort-during": "ABORT_ERR" });
+});
+
+test("stand-in: bytes changed after a write never reach the endpoint", { timeout: 65_000 }, async t => {
+  const start = standInWire.length;
+  const beforeUpgrades = standInUpgrades.length;
+  const value = result(await runChild(`
+    ${tunnelHelpers()}
+    const modes = {
+      "unaltered": (socket, bytes, done) => socket.write(bytes, done),
+      "write-mutate": (socket, bytes, done) => { socket.write(bytes, done); bytes.write("/other", 4, "latin1"); },
+      "end-mutate": (socket, bytes, done) => { socket.end(bytes, done); bytes.write("/other", 4, "latin1"); },
+      "writev-mutate": (socket, bytes, done) => { socket.cork(); socket.write(bytes.subarray(0, 12), done); socket.write(bytes.subarray(12), done); socket.uncork(); bytes.write("/other", 4, "latin1"); },
+    };
+    const values = [];
+    for (const [name, mode] of Object.entries(modes)) values.push(await new Promise(resolve => {
+      const seen = { name, writeError: null };
+      const req = http.request(tunnelOptions());
+      const timer = setTimeout(() => req.destroy(), 1000);
+      req.on("error", error => { seen.error = error.message; });
+      req.on("upgrade", (_response, socket) => { seen.upgraded = true; socket.destroy(); });
+      req.on("close", () => { clearTimeout(timer); resolve(seen); });
+      req.on("socket", socket => mode(socket, Buffer.from(header, "latin1"), error => { seen.writeError ??= error?.message ?? null; }));
+    }));
+    console.log(JSON.stringify(values));
+  `, `ws://127.0.0.1:${standIn.address().port}/stand-in-path`));
+  await new Promise(resolve => setTimeout(resolve, 300));
+  t.diagnostic(JSON.stringify({ values: value, upgrades: standInUpgrades.slice(beforeUpgrades), wire: standInWire.slice(start) }));
+  for (const row of value) {
+    assert.equal(row.upgraded, true, row.name);
+    assert.equal(row.writeError, null, row.name);
+  }
+  assert.deepEqual(standInUpgrades.slice(beforeUpgrades).map(upgrade => upgrade.url), ["/stand-in-path", "/stand-in-path", "/stand-in-path", "/stand-in-path"]);
+  assert.ok(!standInWire.slice(start).includes("/other"), standInWire.slice(start));
+});
+
+test("stand-in: the tunnel socket can't reconnect elsewhere before or after 101", { timeout: 65_000 }, async t => {
+  const beforeSinkBytes = sinkBytes;
+  const beforeSinkConnections = sinkConnections;
+  const beforeUpgrades = standInUpgrades.length;
+  const seen = result(await runChild(`
+    ${tunnelHelpers()}
+    const seen = { before: {}, after: {} };
+    const reconnect = (socket, record, send) => {
+      try { socket.connect({ host: "127.0.0.1", port: ${sink.address().port} }, send); }
+      catch (error) { record.connectError = error.message; }
+    };
+    await new Promise(resolve => {
+      const req = http.request(tunnelOptions());
+      req.on("error", error => { seen.before.error = error.message; });
+      req.on("socket", socket => {
+        socket.once("close", () => { reconnect(socket, seen.before, () => socket.write(header)); resolve(); });
+        socket.destroy();
+      });
+      req.end();
+    });
+    await new Promise(resolve => {
+      const req = http.request(tunnelOptions());
+      req.on("error", error => { seen.after.error = error.message; });
+      req.on("upgrade", (_response, socket) => {
+        seen.after.upgraded = true;
+        socket.once("close", () => { reconnect(socket, seen.after, () => socket.end("GET /other-reconnect HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n")); resolve(); });
+        socket.destroy();
+      });
+      req.end();
+    });
+    process.once("beforeExit", () => console.log(JSON.stringify(seen)));
+  `, `ws://127.0.0.1:${standIn.address().port}/stand-in-path`));
+  await new Promise(resolve => setTimeout(resolve, 300));
+  t.diagnostic(JSON.stringify({ ...seen, upgrades: standInUpgrades.slice(beforeUpgrades), sinkBytes: sinkBytes - beforeSinkBytes, sinkConnections: sinkConnections - beforeSinkConnections }));
+  assert.match(seen.before.connectError, /Remote browser requests must stay a websocket upgrade/);
+  assert.match(seen.after.connectError, /Remote browser requests must stay a websocket upgrade/);
+  assert.equal(seen.after.upgraded, true);
+  assert.equal(standInUpgrades.length - beforeUpgrades, 1);
+  assert.equal(sinkBytes, beforeSinkBytes);
+  assert.equal(sinkConnections, beforeSinkConnections);
+});
+
+test("stand-in: a second guard install still lets Playwright's client through", { timeout: 65_000 }, async t => {
+  const beforeUpgrades = standInUpgrades.length;
+  const beforeFrames = standInFrames;
+  const url = `ws://127.0.0.1:${standIn.address().port}/stand-in-path`;
+  const value = result(await runChild(`
+    import { chromium } from "@playwright/test";
+    const { installNetworkGuard } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+    installNetworkGuard([${JSON.stringify(fixtureOrigin)}]);
+    let error = null;
+    try { await (await chromium.connect(${JSON.stringify(url)}, { timeout: 5000 })).close(); }
+    catch (failure) { error = failure.message; }
+    console.log(JSON.stringify({ error }));
+  `, url));
+  const upgrades = standInUpgrades.slice(beforeUpgrades);
+  t.diagnostic(JSON.stringify({ ...value, upgrades, frames: standInFrames - beforeFrames }));
+  assert.equal(upgrades.length, 1);
+  assert.equal(upgrades[0].url, "/stand-in-path");
+  assert.equal(upgrades[0].method, "GET");
+  assert.ok(standInFrames > beforeFrames);
+  assert.doesNotMatch(value.error ?? "", /\[test-target\]|Cannot redefine/);
+});
+
+test("stand-in: a second guard install fails cleanly when the endpoint is down", { timeout: 65_000 }, async () => {
+  const spare = http.createServer();
+  await listen(spare);
+  const closedPort = spare.address().port;
+  await close(spare);
+  const url = `ws://127.0.0.1:${closedPort}/closed-path`;
+  const child = await runChild(`
+    import { chromium } from "@playwright/test";
+    const { installNetworkGuard } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+    installNetworkGuard([${JSON.stringify(fixtureOrigin)}]);
+    let error = null;
+    try { await (await chromium.connect(${JSON.stringify(url)}, { timeout: 5000 })).close(); }
+    catch (failure) { error = failure.message; }
+    console.log(JSON.stringify({ error }));
+  `, url);
+  const value = result(child);
+  assert.match(value.error, /ECONNREFUSED/);
+  assert.doesNotMatch(value.error, /\[test-target\]|Cannot redefine/);
 });
 
 test("connects through the guard while fixture and outside fetch rules remain enforced", { timeout: 65_000 }, async () => {

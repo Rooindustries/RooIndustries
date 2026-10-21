@@ -46,19 +46,24 @@ const tunnelHeader = (header, pathname) => {
 };
 const guardTunnelSocket = (socket, pathname) => {
   let phase = "handshake";
-  const write = socket._write, writev = socket._writev;
-  const allowed = chunks => {
-    if (phase === "open") return true;
+  const { _write: write, _writev: writev, _destroy: destroy } = socket;
+  const send = (self, chunks, callback) => {
     const data = Buffer.concat(chunks.map(({ chunk, encoding }) => typeof chunk === "string" ? Buffer.from(chunk, encoding) : chunk));
-    if (data.length === 0) return true;
-    if (phase !== "handshake" || !tunnelHeader(data.toString("latin1"), pathname)) return false;
-    phase = "sent";
-    return true;
+    if (data.length !== 0) {
+      if (phase !== "handshake" || !tunnelHeader(data.toString("latin1"), pathname)) {
+        const error = new Error(tunnelRefusal);
+        self.destroy(error);
+        return callback(error);
+      }
+      phase = "sent";
+    }
+    return write.call(self, data, "buffer", callback);
   };
-  const refuse = callback => { const error = new Error(tunnelRefusal); socket.destroy(error); callback(error); };
   Object.defineProperties(socket, {
-    _write: { value(chunk, encoding, callback) { return allowed([{ chunk, encoding }]) ? write.call(this, chunk, encoding, callback) : refuse(callback); } },
-    _writev: { value(chunks, callback) { return allowed(chunks) ? writev.call(this, chunks, callback) : refuse(callback); } },
+    connect: { value() { throw new Error(tunnelRefusal); } },
+    _destroy: { value(error, callback) { phase = "closed"; return destroy.call(this, error, callback); } },
+    _write: { value(chunk, encoding, callback) { return phase === "open" ? write.call(this, chunk, encoding, callback) : send(this, [{ chunk, encoding }], callback); } },
+    _writev: { value(chunks, callback) { return phase === "open" ? writev.call(this, chunks, callback) : send(this, chunks, callback); } },
   });
   return { socket, open: () => { if (phase === "sent") phase = "open"; } };
 };
@@ -219,9 +224,9 @@ export function installNetworkGuard(origins) {
     originals.push(() => { module.request = request; module.get = get; });
     module.request = function(input, options, callback) {
       let tunnelSocket = null;
-      const createConnection = () => {
+      const createConnection = ({ timeout } = {}) => {
         if (tunnelSocket) throw new Error(tunnelRefusal);
-        tunnelSocket = guardTunnelSocket(connect({ host: "127.0.0.1", port: Number(remoteBrowser.port) }), remoteBrowser.pathname);
+        tunnelSocket = guardTunnelSocket(connect({ host: "127.0.0.1", port: Number(remoteBrowser.port), timeout }), remoteBrowser.pathname);
         return tunnelSocket.socket;
       };
       const settings = typeof input === "object" && !(input instanceof URL) ? input : (typeof options === "object" ? options : {});
@@ -250,7 +255,8 @@ export function installNetworkGuard(origins) {
         }
       }
       const req = request.call(this, input, options, callback);
-      if (tunnel) {
+      if (tunnel && Object.getOwnPropertyDescriptor(req, "_send")?.configurable !== false) {
+        Object.defineProperty(req, "shouldKeepAlive", { configurable: false, get: () => false, set() {} });
         const send = req._send;
         const refuse = () => {
           req.destroy(new Error(tunnelRefusal));
