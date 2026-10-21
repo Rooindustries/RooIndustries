@@ -842,7 +842,8 @@ const claimedStartTest = test.extend({
       snapshots: {}, pageErrors: [], aborted: [], handoffs: [], boundaries: {}, validationResponses: [] };
     const enabled = { ...providers, paypal: { enabled: true, mode: "sandbox", clientId: "fixture-client" } };
     const config = { provider: "dodo", upgrade: false, emptyPayload: false, fault: "",
-      status: { httpStatus: 200, body: { ok: true, status: "started" } }, holdStatus: false };
+      status: { httpStatus: 200, body: { ok: true, status: "started" } }, holdStatus: false,
+      expectedStarts: 1, refuseReplacementStart: false };
     let release, releaseStatus;
     const gate = new Promise(resolve => { release = resolve; });
     const statusGate = new Promise(resolve => { releaseStatus = resolve; });
@@ -903,6 +904,13 @@ const claimedStartTest = test.extend({
         const call = { at: Date.now(), path: `/api/payment/${path}`, body: request.postDataJSON(),
           authorization: request.headers().authorization || "" };
         evidence.calls.push(call);
+        if (path === "start" && config.refuseReplacementStart && evidence.calls.filter(call => call.path === "/api/payment/start").length > 1) {
+          call.status = 503; call.data = { ok: false, error: "Fixture replacement start unavailable." };
+          call.releasedAt = Date.now();
+          await route.fulfill({ status: call.status, json: call.data });
+          call.fulfilledAt = Date.now();
+          return;
+        }
         let data, status = 200;
         if (path === "providers") data = { ok: true, providers: enabled };
         if (path === "quote") {
@@ -1141,7 +1149,7 @@ const claimedStartTest = test.extend({
       expect(evidence.handoffs).toEqual([]);
       expect(evidence.requests.filter(call => /\/api\/payment\/(capture|confirm|finalize)(\/|$)/.test(call.path) || call.path === "/api/releaseHold")).toEqual([]);
       expect(evidence.requests.filter(call => call.path === "/api/holdSlot")).toHaveLength(config.upgrade ? 0 : 1);
-      expect(evidence.requests.filter(call => call.path === "/api/payment/start")).toHaveLength(1);
+      expect(evidence.requests.filter(call => call.path === "/api/payment/start")).toHaveLength(config.expectedStarts);
       expect(evidence.final?.sdk?.filter(call => ["razorpay-open", "paypal-order"].includes(call.kind)) || []).toEqual([]);
     }
   },
@@ -1218,6 +1226,158 @@ claimedStartTest("a delayed claimed PayPal start shows a current error after a n
   expect(status).toMatchObject({ status: 503, data: claimed.config.status.body, fulfilledAt: expect.any(Number) });
   expect(claimed.evidence.calls.filter(call => call.path === "/api/payment/cancel")).toEqual([]);
 });
+
+for (const [title, upgrade, status, recoveryReason] of [
+  ["a reserved PayPal upgrade keeps its manual-review guidance after the SDK rejects checkout", true, "needs_recovery", "Your payment was received. Roo Industries will contact you about your upgrade."],
+  ["a reserved PayPal checkout keeps its refunded status guidance after the SDK rejects checkout", false, "refunded", "This payment has been refunded."],
+  ["a reserved PayPal checkout keeps its failed status guidance after the SDK rejects checkout", false, "failed", "Payment could not be completed."],
+  ["a reserved PayPal checkout keeps its abandoned status guidance after the SDK rejects checkout", false, "abandoned", "This payment session was released and is no longer payable."],
+]) {
+  claimedStartTest(title, async ({ page, claimed }) => {
+    const soft = expect.configure({ soft: true, timeout: 2000 });
+    await claimed.setup({ provider: "paypal", ...(upgrade ? { upgrade: true } : {}) });
+    await claimed.deliver();
+    await expect.poll(() => page.evaluate(() => window.__claimedSdk.some(call => call.kind === "paypal-error-handled"))).toBe(true);
+    const adopted = await claimed.capture("terminal-adopted");
+    expect(adopted.session).toMatchObject({ provider: "paypal", paymentAccessToken: "claimed-paypal-token",
+      providerPayload: { orderId: "claimed-paypal-order" } });
+    expect(adopted.session.paymentAccessToken).toBe(claimed.evidence.first.data.paymentAccessToken);
+    expect(adopted.session.providerPayload).toEqual(claimed.evidence.first.data.providerPayload);
+    expect(adopted.session.result).toEqual(claimed.evidence.first.data);
+    expect(adopted.session.result.quote).toEqual({ grossAmount: upgrade ? 45 : 54.95, netAmount: upgrade ? 45 : 54.95, isFree: false });
+    expect(JSON.parse(adopted.session.fingerprint)).toMatchObject({ couponCode: "", originalOrderId: upgrade ? "fixture-order" : "" });
+    expect(JSON.parse(adopted.session.recoveryFingerprint)).toEqual({ ...JSON.parse(adopted.session.fingerprint), couponCode: "save20" });
+    expect(adopted.checkout).toEqual(claimed.evidence.beforeDelivery.checkout);
+    expect(adopted.draft).toEqual(claimed.evidence.beforeDelivery.draft);
+    expect(adopted.form).toEqual(claimed.evidence.initial.form);
+    expect(adopted.summary).toContain(upgrade ? "$45.00 USD" : "$54.95 USD");
+    expect(adopted.couponInput).toBe("save20");
+    if (upgrade) {
+      expect(adopted.hold).toBeNull();
+      expect(adopted.checkout).toMatchObject({ originalOrderId: "fixture-order", upgradeIntentToken: "fixture-intent",
+        email: "visitor@example.invalid", discord: "visitor", specs: "RTX 4070", mainGame: "CS2" });
+    } else {
+      expect(adopted.hold).toEqual({ holdId: claimed.evidence.initial.hold.holdId,
+        holdToken: claimed.evidence.initial.hold.holdToken, expiresAt: claimed.evidence.initial.hold.expiresAt,
+        startTimeUTC: claimed.evidence.initial.hold.startTimeUTC, packageTitle: claimed.evidence.initial.hold.packageTitle,
+        phase: "payment_pending" });
+    }
+    expect(claimed.evidence.requests.filter(call => call.path === "/api/holdSlot")).toHaveLength(upgrade ? 0 : 1);
+    expect(adopted.sdk.filter(call => ["paypal-order", "razorpay-open"].includes(call.kind))).toEqual([]);
+    await page.locator(".booking-payment").getByRole("button", { name: "Close", exact: true }).click();
+    claimed.config.status = { httpStatus: 200, body: { ok: true, provider: "paypal", status, recoveryReason,
+      ...(upgrade ? { manualReviewRequired: true } : {}) } };
+    claimed.config.holdStatus = true;
+    const boundary = { at: Date.now(), sdkIndex: adopted.sdk.length, requestIndex: claimed.evidence.requests.length };
+    claimed.evidence.boundaries.terminal = boundary;
+    await page.getByRole("button", { name: "Claimed fixture PayPal", exact: true }).click();
+    await expect.poll(() => claimed.evidence.calls.filter(call => call.path === "/api/payment/status").length).toBe(1);
+    const statusCall = claimed.evidence.calls.find(call => call.path === "/api/payment/status");
+    expect(statusCall).toMatchObject({ authorization: `Bearer ${adopted.session.paymentAccessToken}`, body: {} });
+    const pending = await claimed.capture("terminal-status-pending");
+    expect(pending.sdk.slice(boundary.sdkIndex).filter(call => call.kind === "paypal-error")).toEqual([]);
+    const response = page.waitForResponse(value => new URL(value.url()).pathname === "/api/payment/status");
+    claimed.releaseStatus();
+    const terminal = await response;
+    await terminal.finished();
+    expect(terminal.status()).toBe(200);
+    expect(await terminal.json()).toEqual(claimed.config.status.body);
+    claimed.evidence.boundaries.statusFinished = { at: Date.now(), status: terminal.status(), body: await terminal.json() };
+    await expect.poll(() => page.evaluate(index => window.__claimedSdk.slice(index).some(call => call.kind === "paypal-error-handled"), boundary.sdkIndex)).toBe(true);
+    const after = await claimed.capture("terminal-error-handled");
+    const sdk = after.sdk.slice(boundary.sdkIndex);
+    expect(sdk.filter(call => call.kind === "paypal-click")).toEqual([{ at: expect.any(Number), kind: "paypal-click", result: "resolved" }]);
+    const errors = sdk.filter(call => call.kind === "paypal-error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].at).toBeGreaterThanOrEqual(statusCall.releasedAt);
+    expect(sdk.filter(call => call.kind === "paypal-error-handled")).toEqual([{ at: expect.any(Number), kind: "paypal-error-handled" }]);
+    expect(sdk.find(call => call.kind === "paypal-error-handled").at).toBeGreaterThanOrEqual(errors[0].at);
+    await soft(page.getByText(recoveryReason, { exact: true })).toBeVisible();
+    await soft(page.getByText("This payment method could not process your payment. Please try again.", { exact: true })).toHaveCount(0);
+    if (upgrade) {
+      expect(after.raw).toEqual(adopted.raw);
+      expect(after.session).toEqual(adopted.session);
+      expect(after.summary).toContain("$45.00 USD");
+      await expect(page.getByRole("button", { name: "Change payment method", exact: true })).toBeVisible();
+    } else {
+      expect(after.session).toBeNull();
+      const { payment_session_state, ...otherRaw } = adopted.raw;
+      expect(after.raw).toEqual(otherRaw);
+      await expect(page.getByRole("button", { name: "Change payment method", exact: true })).toHaveCount(0);
+      expect(after.summary).not.toContain("This checkout is reserved with PayPal.");
+      const summary = page.getByRole("heading", { name: "Booking Summary", exact: true }).locator("..");
+      await soft(summary.getByText("$43.96 USD", { exact: true })).toBeVisible();
+      await soft(summary.getByText("save20 · −$10.99", { exact: true })).toBeVisible();
+    }
+    expect(after.hold).toEqual(adopted.hold);
+    expect(after.checkout).toEqual(adopted.checkout);
+    expect(after.draft).toEqual(adopted.draft);
+    expect(after.form).toEqual(adopted.form);
+    expect(after.couponInput).toBe("save20");
+    expect(after.sdk.filter(call => ["paypal-order", "razorpay-open"].includes(call.kind))).toEqual([]);
+    expect(statusCall).toMatchObject({ status: 200, data: claimed.config.status.body, fulfilledAt: expect.any(Number) });
+    expect(claimed.evidence.requests.slice(boundary.requestIndex).filter(call => call.path === "/api/payment/status")).toEqual([
+      { at: expect.any(Number), path: "/api/payment/status", query: "", body: {}, authorization: `Bearer ${adopted.session.paymentAccessToken}` },
+    ]);
+    expect(claimed.evidence.calls.filter(call => call.path === "/api/payment/start")).toHaveLength(1);
+    expect(claimed.evidence.calls.filter(call => call.path === "/api/payment/status")).toHaveLength(1);
+    expect(claimed.evidence.calls.filter(call => call.path === "/api/payment/cancel")).toEqual([]);
+    expect(claimed.evidence.requests.filter(call => /\/api\/payment\/(cancel|capture|confirm|finalize)(\/|$)/.test(call.path) || call.path === "/api/releaseHold")).toEqual([]);
+    expect(claimed.evidence.pageErrors).toEqual([]);
+    expect(claimed.evidence.aborted).toEqual([]);
+    expect(claimed.evidence.handoffs).toEqual([]);
+    if (!upgrade && status === "failed") {
+      const first = JSON.stringify(claimed.evidence.first);
+      claimed.config.expectedStarts = 2;
+      claimed.config.refuseReplacementStart = true;
+      const replacementBoundary = { at: Date.now(), sdkIndex: after.sdk.length, requestIndex: claimed.evidence.requests.length };
+      claimed.evidence.boundaries.replacement = replacementBoundary;
+      const response = page.waitForResponse(value => new URL(value.url()).pathname === "/api/payment/start");
+      await page.getByRole("button", { name: "Claimed fixture PayPal", exact: true }).click();
+      const refused = await response;
+      await refused.finished();
+      expect(refused.status()).toBe(503);
+      expect(await refused.json()).toEqual({ ok: false, error: "Fixture replacement start unavailable." });
+      claimed.evidence.boundaries.replacementFinished = { at: Date.now(), status: refused.status(), body: await refused.json() };
+      await expect.poll(() => page.evaluate(index => window.__claimedSdk.slice(index).some(call => call.kind === "paypal-error-handled"), replacementBoundary.sdkIndex)).toBe(true);
+      const replacement = await claimed.capture("replacement-error-handled");
+      const start = claimed.evidence.calls.filter(call => call.path === "/api/payment/start")[1];
+      expect(claimed.evidence.calls.filter(call => call.path === "/api/payment/start")).toHaveLength(2);
+      expect(start).toMatchObject({ status: 503, data: { ok: false, error: "Fixture replacement start unavailable." },
+        releasedAt: expect.any(Number), fulfilledAt: expect.any(Number), authorization: "" });
+      soft(start.body).toEqual({ provider: "paypal", quoteFingerprint: "claimed-hold-save20",
+        bookingPayload: { ...claimed.evidence.first.body.bookingPayload, couponCode: "save20" } });
+      expect(JSON.stringify(start.body)).not.toContain(adopted.session.paymentAccessToken);
+      expect(claimed.evidence.requests.slice(replacementBoundary.requestIndex).filter(call => call.path === "/api/payment/start")).toEqual([
+        { at: expect.any(Number), path: "/api/payment/start", query: "", body: start.body, authorization: "" },
+      ]);
+      expect(JSON.stringify(claimed.evidence.first)).toBe(first);
+      expect(replacement.raw).toEqual(after.raw);
+      expect(replacement.session).toBeNull();
+      expect(replacement.hold).toEqual(after.hold);
+      expect(replacement.checkout).toEqual(after.checkout);
+      expect(replacement.draft).toEqual(after.draft);
+      expect(replacement.form).toEqual(after.form);
+      expect(replacement.couponInput).toBe("save20");
+      const sdk = replacement.sdk.slice(replacementBoundary.sdkIndex);
+      expect(sdk.filter(call => call.kind === "paypal-click")).toEqual([{ at: expect.any(Number), kind: "paypal-click", result: "resolved" }]);
+      expect(sdk.filter(call => call.kind === "paypal-error")).toEqual([
+        { at: expect.any(Number), kind: "paypal-error", message: "Fixture replacement start unavailable." },
+      ]);
+      expect(sdk.filter(call => call.kind === "paypal-error-handled")).toEqual([{ at: expect.any(Number), kind: "paypal-error-handled" }]);
+      expect(sdk.find(call => call.kind === "paypal-error").at).toBeGreaterThanOrEqual(start.releasedAt);
+      expect(sdk.find(call => call.kind === "paypal-error-handled").at).toBeGreaterThanOrEqual(sdk.find(call => call.kind === "paypal-error").at);
+      await expect(page.getByText("This payment method could not process your payment. Please try again.", { exact: true })).toBeVisible();
+      expect(replacement.sdk.filter(call => ["paypal-order", "razorpay-open"].includes(call.kind))).toEqual([]);
+      expect(claimed.evidence.calls.filter(call => call.path === "/api/payment/status")).toHaveLength(1);
+      expect(claimed.evidence.calls.filter(call => call.path === "/api/payment/cancel")).toEqual([]);
+      expect(claimed.evidence.requests.filter(call => /\/api\/payment\/(cancel|capture|confirm|finalize)(\/|$)/.test(call.path) || call.path === "/api/releaseHold")).toEqual([]);
+      expect(claimed.evidence.pageErrors).toEqual([]);
+      expect(claimed.evidence.aborted).toEqual([]);
+      expect(claimed.evidence.handoffs).toEqual([]);
+    }
+  });
+}
 
 claimedStartTest("a delayed claimed Dodo start retains empty provider details for authentic cancellation", async ({ claimed }) => {
   await claimed.setup({ provider: "dodo", emptyPayload: true }); await claimed.recover();

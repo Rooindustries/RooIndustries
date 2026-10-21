@@ -1341,9 +1341,10 @@ export default function Payment({ hideFooter = false }) {
         if (handled) {
           return { ...paymentSession, result: data, terminal: true };
         }
-        throw new Error(
-          data?.recoveryReason || "This payment session is no longer payable."
-        );
+        showBanner("error", data?.recoveryReason || "This payment session is no longer payable.", {
+          persistent: true,
+        });
+        return { ...paymentSession, result: data, terminal: true };
       }
       clearPaymentSession("", paymentSession.paymentAccessToken);
       operation.token = "";
@@ -1421,11 +1422,13 @@ export default function Payment({ hideFooter = false }) {
         throw new Error(data?.error || "Unable to start payment.");
       }
 
-      if (data.quote) setServerQuote(data.quote);
-      if (data.quoteFingerprint || data.fingerprint) {
-        setQuoteFingerprint(
-          String(data.quoteFingerprint || data.fingerprint || "").trim()
-        );
+      if (!recoveringStart) {
+        if (data.quote) setServerQuote(data.quote);
+        if (data.quoteFingerprint || data.fingerprint) {
+          setQuoteFingerprint(
+            String(data.quoteFingerprint || data.fingerprint || "").trim()
+          );
+        }
       }
 
       const refreshedHold = data.refreshedHold || data.hold || null;
@@ -2501,6 +2504,7 @@ export default function Payment({ hideFooter = false }) {
                               throw new Error("Checkout changed before this payment could open.");
                             }
                             if (session?.terminal) {
+                              paypalStaleOrderRef.current = true;
                               throw new Error("This payment is already complete.");
                             }
                             return session?.providerPayload?.orderId || "";
