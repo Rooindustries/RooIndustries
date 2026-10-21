@@ -2391,4 +2391,417 @@ test.describe("referral restoration from the browser cache", () => {
       expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
     });
   }
+
+  const scopePackages = { X: "Performance Vertex Overhaul", Y: "Performance Vertex Max" };
+  const scopeForm = label => ({
+    discord: `${label}_scope_visitor`, email: `${label}-visitor@example.invalid`,
+    specs: `${label.toUpperCase()} Ryzen 9800X3D / RTX 5080`, mainGame: label === "y" ? "Valorant" : "CS2",
+  });
+  const fillScopeForm = async (page, label) => {
+    const form = scopeForm(label);
+    for (const [name, value] of [["Discord username", form.discord], ["Booking email", form.email],
+      ["PC specifications", form.specs], ["Main game or application", form.mainGame]]) {
+      await page.getByRole("textbox", { name, exact: true }).fill(value);
+    }
+  };
+  const expectScopeForm = async (page, label) => {
+    const form = scopeForm(label);
+    for (const [name, value] of [["Discord username", form.discord], ["Booking email", form.email],
+      ["PC specifications", form.specs], ["Main game or application", form.mainGame]]) {
+      await expect(page.getByRole("textbox", { name, exact: true })).toHaveValue(value);
+    }
+  };
+  const bookScopePackage = async (page, label, route = "/") => {
+    await page.goto(route);
+    await page.locator(".ri-package-book-button").nth(label === "X" ? 0 : 1).click();
+    await expect(page).toHaveURL(/\/booking$/);
+  };
+  const reserveScopeSlot = async (page, label) => {
+    await page.getByRole("button", { name: /^Earliest available:/ }).click();
+    await page.getByRole("button", { name: label, exact: true }).click();
+    await page.getByRole("button", { name: "Next", exact: true }).last().click();
+    await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
+  };
+  const reviewScope = async page => {
+    await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+  };
+  const scopeInput = page => page.getByRole("textbox", { name: "Referral or coupon code", exact: true });
+  const expectScopeControls = async page => {
+    await expect(page.getByRole("button", { name: "Continue to payment", exact: true })).toBeEnabled();
+    await expect(page.getByText("Checking code...", { exact: true })).toHaveCount(0);
+    if (!await scopeInput(page).isVisible()) {
+      await page.getByRole("button", { name: "Have a referral or coupon code?", exact: true }).click();
+    }
+    await expect(scopeInput(page)).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Apply", exact: true })).toBeEnabled();
+  };
+  const preparePriorYScope = async (page, flow, evidence) => {
+    await bookScopePackage(page, "Y", "/?ref=friend");
+    await reserveScopeSlot(page, "10:00 AM");
+    await fillScopeForm(page, "y");
+    await reviewScope(page);
+    await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+    await flow.codeInput("friend");
+    await expectScopeControls(page);
+    evidence.priorY = await snapshot(page);
+    expect(evidence.priorY.retained.draft.packages[scopePackages.Y].form).toMatchObject(scopeForm("y"));
+    expect(evidence.priorY.retained.draft.packages[scopePackages.Y].checkoutCodes.referral.code).toBe("friend");
+    expect((await envelope(page)).choices[checkoutScope(scopePackages.Y)]).toBe("friend");
+    await bookScopePackage(page, "X");
+    await reserveScopeSlot(page, "11:00 AM");
+    expect(flow.state.holds.has(evidence.priorY.retained.hold.startTimeUTC)).toBe(false);
+    await fillScopeForm(page, "x");
+    await reviewScope(page);
+    await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+    evidence.priorX = await snapshot(page);
+    expect(evidence.priorX.retained.draft.packages[scopePackages.X].form).toMatchObject(scopeForm("x"));
+    expect(evidence.priorX.retained.draft.packages[scopePackages.Y].form).toEqual(evidence.priorY.retained.draft.packages[scopePackages.Y].form);
+    expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(2);
+    expect(flow.state.holds.size).toBe(1);
+  };
+  const expectScopeSwap = async (page, flow, evidence) => {
+    const current = await snapshot(page);
+    const holds = flow.state.calls.filter(call => call.path === "/api/holdSlot");
+    evidence.holdRequests = holds;
+    evidence.activeHolds = [...flow.state.holds.entries()];
+    evidence.afterSwap = current;
+    expect(holds).toHaveLength(3);
+    expect(holds[1].body).toMatchObject({ packageTitle: scopePackages.X,
+      previousHoldId: evidence.priorY.retained.hold.holdId, previousHoldToken: evidence.priorY.retained.hold.holdToken });
+    expect(holds[2].body).toMatchObject({ packageTitle: scopePackages.Y,
+      previousHoldId: evidence.priorX.retained.hold.holdId, previousHoldToken: evidence.priorX.retained.hold.holdToken });
+    expect(flow.state.holds.size).toBe(1);
+    expect(flow.state.holds.has(evidence.priorX.retained.hold.startTimeUTC)).toBe(false);
+    expect([...flow.state.holds.values()][0].holdId).toBe(current.retained.hold.holdId);
+    expect(current.retained.hold.packageTitle).toBe(scopePackages.Y);
+    expect(current.retained.hold.startTimeUTC).toBe(evidence.priorY.retained.hold.startTimeUTC);
+    expect(current.retained.draft.packages[scopePackages.Y].form).toEqual(evidence.priorY.retained.draft.packages[scopePackages.Y].form);
+    await expectScopeForm(page, "y");
+  };
+  const denyScopeDeletion = (page, scope) => page.addInitScript(scope => {
+    const original = Storage.prototype.setItem;
+    window.referralResetFailures = [];
+    window.restoreReferralSetter = () => { Storage.prototype.setItem = original; };
+    Storage.prototype.setItem = function(key, value) {
+      if (key === "referral_dismissed") {
+        const previous = this.getItem(key);
+        if (Object.hasOwn(JSON.parse(previous || "{}").choices || {}, scope) && !Object.hasOwn(JSON.parse(value).choices, scope)) {
+          window.referralResetFailures.push({ key, value, previous, name: "QuotaExceededError", at: Date.now() });
+          throw new DOMException("Scoped choice deletion denied", "QuotaExceededError");
+        }
+      }
+      return original.call(this, key, value);
+    };
+  }, scope);
+
+  for (const [failure, route, desktop] of [["network", "/", true], [503, "/packages", false], [429, "/", false]]) {
+    cachedTest(`hold-scope recovery: prior Y candidates settle after ${failure} release on ${route}`, async ({ page, flow, bfcache }, testInfo) => {
+      if (desktop) await page.setViewportSize({ width: 1280, height: 900 });
+      await preparePriorYScope(page, flow, bfcache);
+      flow.state.failures["/api/releaseHold"] = failure;
+      bfcache.failure = failure;
+      await bookScopePackage(page, "Y", route);
+      await reserveScopeSlot(page, "10:00 AM");
+      await expectScopeSwap(page, flow, bfcache);
+      await reviewScope(page);
+      bfcache.review = await snapshot(page);
+      await attachJson(testInfo, "scope-swap-before-product-assertions", bfcache);
+      await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+      await expectScopeControls(page);
+      const beforePayment = flow.state.calls.length;
+      await flow.payment();
+      await waitQuote(flow, "friend", beforePayment);
+      expect(quoteCalls(flow, beforePayment).every(call => call.body.packageTitle === scopePackages.Y && call.body.referralCode === "friend")).toBe(true);
+      expect((await snapshot(page)).retained.draft.packages[scopePackages.Y].form).toEqual(bfcache.priorY.retained.draft.packages[scopePackages.Y].form);
+      expect((await envelope(page)).choices[checkoutScope(scopePackages.Y)]).toBe("friend");
+      expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(3);
+      bfcache.beforePayment = beforePayment;
+      bfcache.newPaymentQuotes = quoteCalls(flow, beforePayment);
+    });
+  }
+
+  cachedTest("hold-scope recovery: first-time Y applies passive referral without draft candidates", async ({ page, flow, bfcache }, testInfo) => {
+    await bookScopePackage(page, "X", "/?ref=friend");
+    await reserveScopeSlot(page, "10:00 AM");
+    await fillScopeForm(page, "x");
+    bfcache.priorX = await snapshot(page);
+    expect(bfcache.priorX.retained.draft.packages[scopePackages.X].checkoutCodes).toBeUndefined();
+    flow.state.failures["/api/releaseHold"] = "network";
+    await bookScopePackage(page, "Y");
+    await reserveScopeSlot(page, "11:00 AM");
+    await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveValue("");
+    await expect(page.getByRole("textbox", { name: "Discord username", exact: true })).toHaveValue("");
+    await fillScopeForm(page, "y");
+    bfcache.freshY = await snapshot(page);
+    await reviewScope(page);
+    bfcache.review = await snapshot(page);
+    await attachJson(testInfo, "fresh-scope-before-product-assertions", bfcache);
+    await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+    await expectScopeControls(page);
+    expect(quoteCalls(flow, 0)).toEqual([]);
+    const beforePayment = flow.state.calls.length;
+    await flow.payment();
+    await waitQuote(flow, "friend", beforePayment);
+    expect(quoteCalls(flow, beforePayment).every(call => call.body.packageTitle === scopePackages.Y && call.body.referralCode === "friend")).toBe(true);
+    expect((await envelope(page)).choices[checkoutScope(scopePackages.Y)]).toBe("friend");
+    const after = await snapshot(page);
+    expect(after.retained.draft.packages[scopePackages.Y].form).toEqual(bfcache.freshY.retained.draft.packages[scopePackages.Y].form);
+    expect(after.retained.hold).toEqual(bfcache.freshY.retained.hold);
+    expect(flow.state.holds.size).toBe(1);
+    expect(flow.state.holds.has(bfcache.priorX.retained.hold.startTimeUTC)).toBe(false);
+    expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(2);
+    expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")[1].body).toMatchObject({
+      previousHoldId: bfcache.priorX.retained.hold.holdId, previousHoldToken: bfcache.priorX.retained.hold.holdToken });
+    bfcache.beforePayment = beforePayment;
+    bfcache.newPaymentQuotes = quoteCalls(flow, beforePayment);
+  });
+
+  cachedTest("hold-scope recovery: a same-scope restored hold retains its manual choice and removal", async ({ page, flow, bfcache }) => {
+    flow.state.collision = true;
+    await bookScopePackage(page, "X", "/?ref=friend");
+    await reserveAndReview(page, flow);
+    await page.getByRole("button", { name: "Remove referral code friend", exact: true }).click();
+    await flow.codeInput("save20");
+    await expect(page.getByRole("button", { name: "Remove referral code save20", exact: true })).toBeVisible();
+    bfcache.before = await snapshot(page);
+    await bookScopePackage(page, "X");
+    await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Remove referral code save20", exact: true })).toBeVisible();
+    await expectScopeControls(page);
+    const restored = await snapshot(page);
+    expectFormAndHold(restored.retained, bfcache.before.retained);
+    expect(restored.retained.intent).toEqual(bfcache.before.retained.intent);
+    expect((await envelope(page)).codes.friend).toBe("removed");
+    expect((await envelope(page)).choices[checkoutScope()]).toBe("save20");
+    const beforePayment = flow.state.calls.length;
+    await flow.payment();
+    await waitQuote(flow, "save20", beforePayment);
+    expect(referralLookups(flow, beforePayment, "friend")).toEqual([]);
+    expect(flow.state.holds.size).toBe(1);
+    expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
+    bfcache.beforePayment = beforePayment;
+    bfcache.newPaymentQuotes = quoteCalls(flow, beforePayment);
+  });
+
+  cachedTest("hold-scope recovery: denied Y reset preserves prior draft and refuses Payment until manual recovery", async ({ page, flow, bfcache }, testInfo) => {
+    await preparePriorYScope(page, flow, bfcache);
+    await denyScopeDeletion(page, checkoutScope(scopePackages.Y));
+    flow.state.failures["/api/releaseHold"] = 503;
+    const since = flow.state.calls.length;
+    await bookScopePackage(page, "Y");
+    await reserveScopeSlot(page, "10:00 AM");
+    await expectScopeSwap(page, flow, bfcache);
+    await reviewScope(page);
+    bfcache.review = await snapshot(page);
+    bfcache.resetFailures = await page.evaluate(() => window.referralResetFailures);
+    await attachJson(testInfo, "denied-scope-reset-before-product-assertions", bfcache);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    await expectScopeControls(page);
+    expect(bfcache.resetFailures.length).toBeGreaterThan(0);
+    expect((await envelope(page)).choices[checkoutScope(scopePackages.Y)]).toBe("friend");
+    expect(bfcache.review.retained.guard).not.toBe("ready");
+    expect(bfcache.review.retained.draft.packages[scopePackages.Y].checkoutCodes).toEqual(bfcache.priorY.retained.draft.packages[scopePackages.Y].checkoutCodes);
+    const beforePayment = flow.state.calls.length;
+    await flow.payment();
+    await waitQuote(flow, "", beforePayment);
+    expect(referralLookups(flow, since, "friend")).toEqual([]);
+    expect(quoteCalls(flow, beforePayment).every(call => call.body.referralCode === "" && call.body.packageTitle === scopePackages.Y)).toBe(true);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    const paymentState = (await snapshot(page)).retained;
+    const priorDraft = bfcache.afterSwap.retained.draft.packages[scopePackages.Y];
+    const paymentDraft = paymentState.draft.packages[scopePackages.Y];
+    expect(paymentState.hold).toEqual(bfcache.afterSwap.retained.hold);
+    expect(paymentState.intent).toEqual(bfcache.review.retained.intent);
+    expect(paymentDraft.form).toEqual(priorDraft.form);
+    expect(paymentDraft.checkoutCodes).toEqual(priorDraft.checkoutCodes);
+    expect(paymentDraft.selectedPackage).toMatchObject(priorDraft.selectedPackage);
+    await page.evaluate(() => window.restoreReferralSetter());
+    const recovery = flow.state.calls.length;
+    await submitPaymentCode(page, "friend");
+    await waitQuote(flow, "friend", recovery);
+    expect(await page.evaluate(() => sessionStorage.getItem("referral_capture"))).toBe("ready");
+    const reloadBoundary = flow.state.calls.length;
+    await page.reload();
+    await expect(paymentCode(page)).toHaveValue("friend");
+    await waitQuote(flow, "friend", reloadBoundary);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toHaveCount(0);
+    expect(flow.state.holds.size).toBe(1);
+    expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(3);
+    bfcache.beforePayment = beforePayment;
+    bfcache.recoveryBoundary = recovery;
+    bfcache.reloadBoundary = reloadBoundary;
+    bfcache.newPaymentQuotes = quoteCalls(flow, beforePayment);
+  });
+
+  cachedTest("hold-scope recovery: failed fresh reset refuses retained choice through Payment reload before recovery", async ({ page, flow, bfcache }, testInfo) => {
+    flow.state.collision = true;
+    await startFriendPayment(page, flow);
+    const replacement = flow.state.calls.length;
+    await submitPaymentCode(page, "save20");
+    await waitQuote(flow, "save20", replacement);
+    await page.getByRole("dialog").getByRole("button", { name: "Release", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.goto("/reviews?ref=friend");
+    await expect.poll(() => storedReferral(page)).toBe("friend");
+    bfcache.oldIntent = await referralIntent(page);
+    await denyScopeDeletion(page, checkoutScope());
+    const since = flow.state.calls.length;
+    await page.goto("/booking");
+    await reserveAndReview(page, flow);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    await expectScopeControls(page);
+    bfcache.before = await snapshot(page);
+    bfcache.resetFailures = await page.evaluate(() => window.referralResetFailures);
+    expect(bfcache.before.retained.intent).toEqual(bfcache.oldIntent);
+    expect(bfcache.resetFailures.length).toBeGreaterThan(0);
+    const beforePayment = flow.state.calls.length;
+    await flow.payment();
+    await expect(paymentCode(page)).toBeEnabled();
+    bfcache.afterPayment = await snapshot(page);
+    await attachJson(testInfo, "failed-reset-payment-before-product-assertions", bfcache);
+    await waitQuote(flow, "", beforePayment);
+    expect(referralLookups(flow, since, "friend")).toEqual([]);
+    expect(referralLookups(flow, since, "save20")).toEqual([]);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    expect(bfcache.afterPayment.retained.intent).toEqual(bfcache.oldIntent);
+    const reloadBoundary = flow.state.calls.length;
+    await page.reload();
+    await expect(paymentCode(page)).toBeEnabled();
+    await waitQuote(flow, "", reloadBoundary);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    expect(referralLookups(flow, since, "friend")).toEqual([]);
+    expect(referralLookups(flow, since, "save20")).toEqual([]);
+    expectFormAndHold((await snapshot(page)).retained, bfcache.before.retained);
+    expect((await snapshot(page)).retained.intent).toEqual(bfcache.oldIntent);
+    await page.evaluate(() => window.restoreReferralSetter());
+    const recovery = flow.state.calls.length;
+    await submitPaymentCode(page, "friend");
+    await waitQuote(flow, "friend", recovery);
+    expect(await page.evaluate(() => sessionStorage.getItem("referral_capture"))).toBe("ready");
+    const acknowledgedReload = flow.state.calls.length;
+    await page.reload();
+    await expect(paymentCode(page)).toHaveValue("friend");
+    await waitQuote(flow, "friend", acknowledgedReload);
+    expect((await envelope(page)).choices[checkoutScope()]).toBe("friend");
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toHaveCount(0);
+    bfcache.beforePayment = beforePayment;
+    bfcache.reloadBoundary = reloadBoundary;
+    bfcache.recoveryBoundary = recovery;
+    bfcache.acknowledgedReload = acknowledgedReload;
+    bfcache.newPaymentQuotes = quoteCalls(flow, beforePayment);
+  });
+
+  cachedTest("hold-scope recovery: unready cached Booking invalidates its completed obsolete manual continuation", async ({ page, flow, bfcache }, testInfo) => {
+    flow.state.collision = true;
+    await page.addInitScript(() => {
+      if (location.hash !== "#referral-storage-denied") return;
+      const getter = Storage.prototype.getItem;
+      const setter = Storage.prototype.setItem;
+      const remover = Storage.prototype.removeItem;
+      const keys = ["referral_capture", "referral_dismissed", "referral_session"];
+      window.referralOriginalGetter = getter;
+      window.referralBlockedOperations = [];
+      Storage.prototype.getItem = function(key) {
+        if (keys.includes(key)) throw new DOMException("First document referral read denied", "SecurityError");
+        return getter.call(this, key);
+      };
+      Storage.prototype.setItem = function(key, value) {
+        if (keys.includes(key)) {
+          window.referralBlockedOperations.push({ key, value, at: Date.now() });
+          throw new DOMException("First document referral write denied", "SecurityError");
+        }
+        return setter.call(this, key, value);
+      };
+      Storage.prototype.removeItem = function(key) {
+        if (keys.includes(key)) throw new DOMException("First document referral removal denied", "SecurityError");
+        return remover.call(this, key);
+      };
+    });
+    await page.goto("/booking#referral-storage-denied");
+    await reserveAndReview(page, flow);
+    await expect(page.getByRole("alert").filter({ hasText: storageError })).toBeVisible();
+    await expectScopeControls(page);
+    bfcache.beforeManual = await snapshot(page);
+    bfcache.manualNetwork = [];
+    page.on("requestfinished", request => {
+      const url = new URL(request.url());
+      if (url.pathname.startsWith("/api/ref/validate")) bfcache.manualNetwork.push({ url: request.url(), at: Date.now() });
+    });
+    await page.evaluate(() => {
+      const originalFetch = window.fetch;
+      const originalSet = Storage.prototype.setItem;
+      let release;
+      let selected = false;
+      const gate = new Promise(resolve => { release = resolve; });
+      const audit = window.referralManualContinuation = { events: [], released: false, resumed: false };
+      const record = (kind, details = {}) => audit.events.push({ kind, at: Date.now(), time: performance.now(), ...details });
+      window.fetch = async function(input, options) {
+        const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+        const hold = !selected && url.pathname === "/api/ref/validateReferral" && url.searchParams.get("code") === "friend";
+        if (hold) selected = true;
+        const response = await originalFetch.call(this, input, options);
+        if (hold) {
+          const originalJson = response.json.bind(response);
+          response.json = async () => {
+            const data = await originalJson();
+            record("network-json-complete", { url: url.href, ok: response.ok });
+            await gate;
+            audit.resumed = true;
+            record("json-continuation-resumed");
+            return data;
+          };
+        }
+        return response;
+      };
+      Storage.prototype.setItem = function(key, value) {
+        if (key === "booking_draft") {
+          const draft = JSON.parse(value);
+          record("draft-write", { code: draft.packages[draft.lastTitle]?.checkoutCodes?.referral?.code || "", value });
+        }
+        return originalSet.call(this, key, value);
+      };
+      window.addEventListener("pageshow", event => {
+        if (!event.persisted) return;
+        record("pageshow-release", { persisted: event.persisted, nonce: window.referralBfcache.nonce });
+        audit.released = true;
+        release();
+      });
+    });
+    const finished = page.waitForEvent("requestfinished", request => {
+      const url = new URL(request.url());
+      return url.pathname === "/api/ref/validateReferral" && url.searchParams.get("code") === "friend";
+    });
+    await flow.codeInput("friend");
+    await finished;
+    await expect.poll(() => page.evaluate(() => window.referralManualContinuation.events.some(event => event.kind === "network-json-complete"))).toBe(true);
+    expect(await page.evaluate(() => window.referralManualContinuation.resumed)).toBe(false);
+    bfcache.before = await snapshot(page);
+    bfcache.beforeContinuation = await page.evaluate(() => window.referralManualContinuation);
+    await page.goto("/booking?scope_recovery=acknowledge");
+    await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+    await flow.codeInput("save20");
+    await expect(page.getByRole("button", { name: "Remove referral code save20", exact: true })).toBeVisible();
+    expect((await envelope(page)).choices[checkoutScope()]).toBe("save20");
+    expect(await page.evaluate(() => sessionStorage.getItem("referral_capture"))).toBe("ready");
+    bfcache.otherDocument = await snapshot(page);
+    expect(bfcache.otherDocument.observation.nonce).not.toBe(bfcache.before.observation.nonce);
+    await observeBack(page, flow, bfcache, testInfo);
+    await expect.poll(() => page.evaluate(() => window.referralManualContinuation.resumed)).toBe(true);
+    await expectScopeControls(page);
+    bfcache.afterContinuation = await page.evaluate(() => window.referralManualContinuation);
+    bfcache.afterRestore = await snapshot(page);
+    await attachJson(testInfo, "unready-booking-obsolete-manual-ordering", bfcache);
+    const events = bfcache.afterContinuation.events;
+    expect(events.findIndex(event => event.kind === "network-json-complete")).toBeLessThan(events.findIndex(event => event.kind === "pageshow-release"));
+    expect(events.findIndex(event => event.kind === "pageshow-release")).toBeLessThan(events.findIndex(event => event.kind === "json-continuation-resumed"));
+    expect(events.filter(event => event.kind === "draft-write" && event.code === "friend")).toEqual([]);
+    expect(bfcache.afterRestore.retained.intent).toEqual(bfcache.otherDocument.retained.intent);
+    expectFormAndHold(bfcache.afterRestore.retained, bfcache.beforeManual.retained);
+    await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toHaveCount(0);
+    expect(quoteCalls(flow, 0)).toEqual([]);
+    expect(referralLookups(flow, bfcache.backBoundary, "friend")).toEqual([]);
+    expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
+    expect(flow.state.holds.size).toBe(1);
+  });
 });

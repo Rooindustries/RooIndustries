@@ -434,6 +434,9 @@ export const resetReferralChoice = (scope) => {
     writeReferralIntent({ ...intent, choices });
     return true;
   } catch {
+    if (!captureFailure) {
+      beginReferralCapture("", referralAddress(window.location.pathname, window.location.search));
+    }
     return false;
   }
 };

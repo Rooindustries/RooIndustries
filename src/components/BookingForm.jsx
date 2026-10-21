@@ -1808,10 +1808,14 @@ export default function BookingForm() {
   };
 
   useEffect(() => subscribeReferralRestore(() => {
-    if (isPaymentPendingHold || referralReadyScopeRef.current !== scope) return;
+    if (isPaymentPendingHold) return;
     manualCodeAttemptRef.current += 1;
-    autoReferralAttemptRef.current = "";
     setValidatingCode(false);
+    if (referralReadyScopeRef.current !== scope) {
+      setRestoredCodeCandidates(null);
+      return;
+    }
+    autoReferralAttemptRef.current = "";
     setAppliedReferral(null);
     setCodeError("");
     setRestoredCodeCandidates({
@@ -2391,11 +2395,12 @@ export default function BookingForm() {
         phase: "active",
       };
 
-      if (!previousHoldId && referralReadyScopeRef.current !== scope) {
+      if (referralReadyScopeRef.current !== scope) {
         const ready = resetReferralChoice(scope);
         referralReadyScopeRef.current = ready ? scope : "";
         setReferralReadyScope(ready ? scope : "");
         if (!ready) {
+          setRestoredCodeCandidates(null);
           setCodeEntryOpen(true);
           setCodeError(REFERRAL_STORAGE_ERROR);
         }
