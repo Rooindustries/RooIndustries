@@ -4333,6 +4333,13 @@ const lockedSnapshotTest = lockedPriceTest.extend({
     const waitForAssets = async () => {
       const checkpoint = { at: Date.now(), url: page.url(), pending: [...pendingAssets].map(request => ({ url: request.url(), type: request.resourceType() })) };
       evidence.assetReadiness.push(checkpoint);
+      if (await page.evaluate(() => !matchMedia("(prefers-reduced-motion: reduce)").matches && !navigator.connection?.saveData)) {
+        const logo = page.locator('header img[src="/logo-animated-small.webp"]:visible');
+        await expect(logo).toHaveCount(1);
+        await expect.poll(() => logo.evaluate(image => image.complete && image.naturalWidth > 0), { timeout: 10000 }).toBe(true);
+        checkpoint.logoReadyAt = Date.now();
+        checkpoint.logo = await logo.evaluate(image => ({ src: image.currentSrc, complete: image.complete, naturalWidth: image.naturalWidth }));
+      }
       await expect.poll(() => pendingAssets.size, { timeout: 10000 }).toBe(0);
       checkpoint.readyAt = Date.now();
       checkpoint.pendingAtReady = [...pendingAssets].map(request => ({ url: request.url(), type: request.resourceType() }));
