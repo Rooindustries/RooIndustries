@@ -327,7 +327,10 @@ const resumeQuoteTest = test.extend({
   resume: async ({ page, browser, flow, baseURL }, use, testInfo) => {
     const evidence = { setupComplete: false, calls: [], requests: [], snapshots: {}, pageErrors: [], readiness: [] };
     const pendingAssets = new Set();
-    const config = { failure: false, gate: null };
+    const config = { failure: false, gate: null,
+      status: { httpStatus: 200, body: { ok: true, status: "started" } },
+      cancel: { httpStatus: 409, body: { ok: false, error: "Fixture cancellation refused." } },
+    };
     const enabledProviders = { dodo: { enabled: true, mode: "test" }, razorpay: { enabled: true, mode: "test" }, paypal: { enabled: true, mode: "sandbox", clientId: "fixture-client" } };
     const attach = async (name, value) => testInfo.attach(name, { body: JSON.stringify(value, null, 2), contentType: "application/json" });
     await page.addInitScript(() => {
@@ -380,13 +383,13 @@ const resumeQuoteTest = test.extend({
                 const result = await options.onClick({}, { resolve: () => "resolved", reject: () => "rejected" });
                 window.__resumeSdk.push({ kind: "paypal-click", result });
                 if (result === "resolved") window.__resumeSdk.push({ kind: "paypal-order", orderId: await options.createOrder({}, {}) });
-              } catch (error) { window.__resumeSdk.push({ kind: "paypal-error", message: error.message }); }
+              } catch (error) { window.__resumeSdk.push({ kind: "paypal-error", message: error.message }); options.onError?.(error); }
             });
           },
         };
       } };
     ` }));
-    for (const path of ["/api/payment/providers", "/api/payment/quote", "/api/payment/start", "/api/payment/status"]) {
+    for (const path of ["/api/payment/providers", "/api/payment/quote", "/api/payment/start", "/api/payment/status", "/api/payment/cancel"]) {
       await page.route(`**${path}`, async route => {
         const request = route.request();
         const call = { at: Date.now(), path, body: request.postDataJSON(), authorization: request.headers().authorization || "" };
@@ -413,7 +416,15 @@ const resumeQuoteTest = test.extend({
             sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
             refreshedHold: { slotHoldId: hold.holdId, slotHoldToken: hold.holdToken, slotHoldExpiresAt: hold.expiresAt, phase: "payment_pending" } };
         }
-        if (path === "/api/payment/status") response = { ok: true, status: "started" };
+        if (path === "/api/payment/status") { status = config.status.httpStatus; response = config.status.body; }
+        if (path === "/api/payment/cancel") {
+          status = config.cancel.httpStatus; response = { ...config.cancel.body };
+          if (response.ok && response.cancelled) {
+            const hold = [...flow.state.holds.values()][0];
+            expect(hold).toBeTruthy();
+            response.refreshedHold = { slotHoldId: hold.holdId, slotHoldToken: hold.holdToken, slotHoldExpiresAt: hold.expiresAt, phase: "holding" };
+          }
+        }
         call.response = response; call.status = status;
         await route.fulfill({ status, json: response });
         call.fulfilledAt = Date.now();
@@ -521,7 +532,9 @@ const resumeQuoteTest = test.extend({
       await attach("resume-evidence", evidence);
       await testInfo.attach("resume-final-page", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
       expect(evidence.pageErrors).toEqual([]); expect(evidence.aborted).toEqual([]);
-      expect(evidence.requests.filter(call => /\/api\/payment\/(cancel|capture|confirm|finalize)(\/|$)/.test(call.path) || call.path === "/api/releaseHold")).toEqual([]);
+      expect(evidence.requests.filter(call => /\/api\/payment\/(capture|confirm|finalize)(\/|$)/.test(call.path) || call.path === "/api/releaseHold")).toEqual([]);
+      expect(evidence.requests.filter(call => call.path === "/api/payment/cancel")).toHaveLength(evidence.expectedCancels || 0);
+      if (evidence.expectedSessionRemoved) expect(evidence.final.session).toBeNull();
       expect(evidence.requests.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
       expect(evidence.requests.filter(call => call.path === "/api/payment/start")).toHaveLength(evidence.noStart ? 0 : 1);
     }
@@ -583,3 +596,155 @@ resumeQuoteTest("a new checkout still waits for its confirmed price", async ({ p
   for (const provider of ["dodo", "razorpay", "paypal"]) await expect(resume.button(provider)).toBeEnabled();
   await resume.paint(); const recovered = await resume.capture("fresh-price-recovered"); resume.unchanged(recovered, baseline);
 });
+
+const sameRecoveryReservation = (actual, baseline) => {
+  for (const key of ["holdId", "holdToken", "expiresAt", "startTimeUTC", "packageTitle"]) expect(actual.hold[key]).toBe(baseline.hold[key]);
+  expect(actual.draft).toEqual(baseline.draft);
+};
+
+const providerOpenCount = (snapshot, provider) => snapshot.sdk.filter(call => call.kind === (provider === "razorpay" ? "razorpay-open" : "paypal-order")).length;
+
+const clickReservedStatus = async (page, resume, provider, { captureBody = true } = {}) => {
+  const observed = page.waitForResponse(response => new URL(response.url()).pathname === "/api/payment/status");
+  await expect(resume.button(provider)).toBeEnabled();
+  await resume.button(provider).click();
+  const response = await observed; await response.finished();
+  resume.evidence.observedStatuses ||= [];
+  const statusEvidence = { at: Date.now(), status: response.status(), bodyCaptured: captureBody };
+  if (captureBody) statusEvidence.body = await response.json();
+  resume.evidence.observedStatuses.push(statusEvidence);
+};
+
+const recoverPriceAfterClose = async (page, resume, baseline) => {
+  const soft = expect.configure({ soft: true });
+  await resume.paint();
+  await expect.poll(() => resume.evidence.calls.filter(call => call.path === "/api/payment/quote").every(call => call.fulfilledAt)).toBe(true);
+  const retry = page.getByRole("button", { name: "Retry price check", exact: true });
+  const before = await resume.capture("retry-before-close");
+  expect(before.session).toBeNull(); sameRecoveryReservation(before, baseline);
+  for (const provider of ["dodo", "razorpay", "paypal"]) await expect(resume.button(provider)).toBeDisabled();
+  resume.evidence.retryBeforeClose = { at: Date.now(), count: await retry.count() };
+  await soft(retry).toHaveCount(1, { timeout: 2000 });
+  await soft(retry).toBeVisible({ timeout: 2000 });
+  const close = page.locator(".booking-payment").getByRole("button", { name: "Close", exact: true });
+  resume.evidence.bannerBeforeClose = await close.locator("..").innerText();
+  await close.click();
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const after = await resume.capture("retry-after-close");
+  expect(after.session).toBeNull(); sameRecoveryReservation(after, baseline);
+  resume.evidence.retryAfterClose = { at: Date.now(), count: await retry.count() };
+  await soft(retry).toHaveCount(1, { timeout: 2000 });
+  await soft(retry).toBeVisible({ timeout: 2000 });
+  if (await retry.count() === 1) {
+    resume.config.gate = null; resume.config.failure = false;
+    const boundary = resume.evidence.calls.length;
+    await retry.click();
+    await expect.poll(() => resume.evidence.calls.slice(boundary).some(call => call.path === "/api/payment/quote" && call.status === 200 && call.fulfilledAt && call.body.referralCode === "friend")).toBe(true);
+    for (const provider of ["dodo", "razorpay", "paypal"]) await expect(resume.button(provider)).toBeEnabled();
+    await resume.paint();
+    await expect(page.getByRole("heading", { name: "Booking Summary", exact: true }).locator("..").getByText("$49.45 USD", { exact: true })).toBeVisible();
+    const recovered = await resume.capture("price-recovered");
+    expect(recovered.session).toBeNull(); sameRecoveryReservation(recovered, baseline);
+  } else resume.evidence.manualPriceRecoveryBlocked = true;
+};
+
+for (const [provider, title] of [["razorpay", "Razorpay"], ["paypal", "PayPal"]]) {
+  resumeQuoteTest(`price retry survives a terminal ${title} resume after a failed fresh quote`, async ({ page, resume }) => {
+    const baseline = await resume.open(provider);
+    await resume.newerLink(baseline); await resume.failQuote();
+    const before = await resume.capture("before-terminal-status");
+    resume.config.status = { httpStatus: 200, body: { ok: true, status: "failed", recoveryReason: "Fixture checkout is no longer payable." } };
+    await clickReservedStatus(page, resume, provider);
+    await expect.poll(() => page.evaluate(() => sessionStorage.getItem("payment_session_state"))).toBeNull();
+    resume.evidence.expectedSessionRemoved = true;
+    const cleared = await resume.capture("terminal-cleared");
+    expect(providerOpenCount(cleared, provider)).toBe(providerOpenCount(before, provider));
+    sameRecoveryReservation(cleared, baseline);
+    const status = resume.evidence.calls.filter(call => call.path === "/api/payment/status");
+    expect(status).toHaveLength(1); expect(status[0].authorization).toBe(`Bearer ${baseline.session.paymentAccessToken}`); expect(status[0].body).toEqual({});
+    await recoverPriceAfterClose(page, resume, baseline);
+  });
+}
+
+for (const [provider, title] of [["dodo", "Dodo"], ["razorpay", "Razorpay"], ["paypal", "PayPal"]]) {
+  resumeQuoteTest(`price retry survives releasing ${title} after a failed fresh quote`, async ({ page, resume }) => {
+    const baseline = await resume.open(provider);
+    await resume.newerLink(baseline); await resume.failQuote();
+    resume.config.cancel = { httpStatus: 200, body: { ok: true, cancelled: true } };
+    resume.evidence.expectedCancels = 1;
+    const observed = page.waitForResponse(response => new URL(response.url()).pathname === "/api/payment/cancel");
+    await page.getByRole("button", { name: "Change payment method", exact: true }).click();
+    const response = await observed; await response.finished(); expect(response.status()).toBe(200);
+    await expect.poll(() => page.evaluate(() => sessionStorage.getItem("payment_session_state"))).toBeNull();
+    resume.evidence.expectedSessionRemoved = true;
+    const released = await resume.capture("method-released");
+    expect(released.hold.phase).toBe("holding"); sameRecoveryReservation(released, baseline);
+    const cancel = resume.evidence.calls.filter(call => call.path === "/api/payment/cancel");
+    expect(cancel).toHaveLength(1); expect(cancel[0].authorization).toBe(`Bearer ${baseline.session.paymentAccessToken}`); expect(cancel[0].body).toEqual({});
+    await recoverPriceAfterClose(page, resume, baseline);
+  });
+}
+
+const statusRefusals = [
+  { provider: "dodo", title: "a Dodo resume preserves its session when status reports an expired token", httpStatus: 401, body: { ok: false, code: "payment_access_token_expired", error: "Payment session expired." } },
+  { provider: "razorpay", title: "a Razorpay resume preserves its session when status rejects its identity", httpStatus: 403, body: { ok: false, code: "payment_access_token_mismatch", error: "Payment session does not match the current record." } },
+  { provider: "paypal", title: "a PayPal resume preserves its session when status cannot find its record", httpStatus: 404, body: { ok: false, code: "payment_record_not_found", error: "Payment session not found." } },
+  { provider: "razorpay", title: "a Razorpay resume preserves its session when status is unavailable", httpStatus: 503, body: { ok: false, error: "Payment status is temporarily unavailable." } },
+  { provider: "razorpay", title: "a Razorpay resume refuses a contradictory successful status response", httpStatus: 200, body: { ok: false, status: "started", error: "Fixture contradictory status response." } },
+];
+
+for (const fault of statusRefusals) {
+  resumeQuoteTest(fault.title, async ({ page, resume }) => {
+    const baseline = await resume.open(fault.provider);
+    resume.config.status = { httpStatus: fault.httpStatus, body: fault.body };
+    await clickReservedStatus(page, resume, fault.provider);
+    expect(resume.evidence.observedStatuses[0]).toMatchObject({ status: fault.httpStatus, body: fault.body });
+    resume.evidence.setupComplete = true;
+    const soft = expect.configure({ soft: true });
+    const message = fault.provider === "paypal" ? "This payment method could not process your payment. Please try again." : fault.body.error;
+    await soft(page.getByRole("alert").filter({ hasText: message })).toBeVisible({ timeout: 2000 });
+    await soft(page).toHaveURL(/\/payment(?:\?|$)/, { timeout: 2000 });
+    const refused = await resume.capture("status-refused"); resume.unchanged(refused, baseline);
+    if (fault.provider !== "dodo") soft(providerOpenCount(refused, fault.provider)).toBe(providerOpenCount(baseline, fault.provider));
+    if (fault.provider === "paypal") soft(refused.sdk.filter(call => call.kind === "paypal-error")).toHaveLength(1);
+    if (new URL(page.url()).pathname === "/payment") {
+      resume.config.status = { httpStatus: 200, body: { ok: true, status: "started" } };
+      await clickReservedStatus(page, resume, fault.provider, { captureBody: fault.provider !== "dodo" });
+      expect(resume.evidence.observedStatuses.at(-1).status).toBe(200);
+      if (fault.provider === "dodo") await expect(page.getByRole("heading", { name: "Checkout handoff", exact: true })).toBeVisible();
+      else await expect.poll(() => page.evaluate(provider => window.__resumeSdk.filter(call => call.kind === (provider === "razorpay" ? "razorpay-open" : "paypal-order")).length, fault.provider)).toBe(providerOpenCount(refused, fault.provider) + 1);
+      const recovered = await resume.capture("verified-status-recovered"); resume.unchanged(recovered, baseline);
+      if (fault.provider !== "dodo") expect(recovered.sdk.filter(call => call.kind === (fault.provider === "razorpay" ? "razorpay-open" : "paypal-order")).at(-1).orderId).toBe(baseline.session.providerPayload.orderId);
+      const statuses = resume.evidence.calls.filter(call => call.path === "/api/payment/status");
+      expect(statuses).toHaveLength(2); expect(statuses.map(call => ({ authorization: call.authorization, body: call.body }))).toEqual([0, 1].map(() => ({ authorization: `Bearer ${baseline.session.paymentAccessToken}`, body: {} })));
+    } else resume.evidence.manualStatusRecoveryNotReached = true;
+  });
+}
+
+for (const [provider, title] of [["dodo", "Dodo"], ["razorpay", "Razorpay"], ["paypal", "PayPal"]]) {
+  resumeQuoteTest(`a reserved ${title} checkout retains malformed details without opening an empty order`, async ({ page, resume }) => {
+    const baseline = await resume.open(provider);
+    const malformedRaw = await page.evaluate(() => {
+      const value = JSON.parse(sessionStorage.getItem("payment_session_state")); value.providerPayload = {};
+      const raw = JSON.stringify(value); sessionStorage.setItem("payment_session_state", raw); return raw;
+    });
+    const expected = JSON.parse(baseline.raw.payment_session_state); expected.providerPayload = {};
+    expect(JSON.parse(malformedRaw)).toEqual(expected);
+    const malformed = { ...baseline, raw: { ...baseline.raw, payment_session_state: malformedRaw }, session: JSON.parse(malformedRaw) };
+    resume.evidence.constructedMalformed = malformed;
+    await resume.ready(); await page.reload();
+    await expect(resume.button(provider)).toBeEnabled(); await resume.paint(); await resume.ready();
+    const before = await resume.capture("malformed-reloaded"); resume.unchanged(before, malformed);
+    await clickReservedStatus(page, resume, provider);
+    expect(resume.evidence.observedStatuses[0]).toMatchObject({ status: 200, body: { ok: true, status: "started" } });
+    resume.evidence.setupComplete = true;
+    const soft = expect.configure({ soft: true });
+    await soft(page.locator(".booking-payment").getByRole("alert")).toBeVisible({ timeout: 2000 });
+    await soft(page).toHaveURL(/\/payment(?:\?|$)/, { timeout: 2000 });
+    const refused = await resume.capture("malformed-refused"); resume.unchanged(refused, malformed);
+    if (provider !== "dodo") soft(providerOpenCount(refused, provider)).toBe(providerOpenCount(before, provider));
+    if (provider === "paypal") soft(refused.sdk.filter(call => call.kind === "paypal-error")).toHaveLength(1);
+    const statuses = resume.evidence.calls.filter(call => call.path === "/api/payment/status");
+    expect(statuses).toHaveLength(1); expect(statuses[0].authorization).toBe(`Bearer ${baseline.session.paymentAccessToken}`); expect(statuses[0].body).toEqual({});
+  });
+}

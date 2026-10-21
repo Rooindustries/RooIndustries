@@ -1282,6 +1282,9 @@ export default function Payment({ hideFooter = false }) {
         body: "{}",
       });
       if (!operation.current()) return { terminal: true, stale: true };
+      if (!response.ok || data?.ok !== true) {
+        throw new Error(data?.error || "Unable to check this payment session. Please try again.");
+      }
       const resumedStatus = String(data?.status || "").trim().toLowerCase();
       if (response.ok && data?.manualReviewRequired === true) {
         showBanner("info", data.recoveryReason, { persistent: true });
@@ -1295,9 +1298,14 @@ export default function Payment({ hideFooter = false }) {
         return { ...paymentSession, result: data, terminal: true };
       }
       if (
-        !response.ok ||
         !["refunded", "failed", "abandoned"].includes(resumedStatus)
       ) {
+        const resumeTarget = provider === "dodo"
+          ? paymentSession.providerPayload.checkoutUrl
+          : paymentSession.providerPayload.orderId;
+        if (typeof resumeTarget !== "string" || !resumeTarget.trim()) {
+          throw new Error("Checkout details are unavailable. Check payment status or change payment method.");
+        }
         return paymentSession;
       }
       if (paymentSessionOwnsCurrentHold(paymentSession)) {
@@ -2050,6 +2058,20 @@ export default function Payment({ hideFooter = false }) {
                     ? "Price confirmed for this session."
                     : "Price confirmation is unavailable. Payment is disabled."}
             </p>
+            {quoteSettled && !preApplyingCodes && !quoteLoading && !quoteFingerprint && !(banner?.text && banner.retryQuote) && (
+              <div className="mt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBanner(null);
+                    setQuoteRetryCount((count) => count + 1);
+                  }}
+                  className="rounded-md border border-line-input px-3 py-2 text-xs font-semibold text-ink hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-border"
+                >
+                  Retry price check
+                </button>
+              </div>
+            )}
             <div className="space-y-1">
               {isFree && (
                 <p className="text-xs text-success-text mt-2">
