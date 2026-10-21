@@ -841,9 +841,11 @@ const claimedStartTest = test.extend({
     const evidence = { synthetic: true, setupComplete: false, phase: "setup", calls: [], requests: [],
       snapshots: {}, pageErrors: [], aborted: [], handoffs: [], boundaries: {}, validationResponses: [] };
     const enabled = { ...providers, paypal: { enabled: true, mode: "sandbox", clientId: "fixture-client" } };
-    const config = { provider: "dodo", upgrade: false, emptyPayload: false, fault: "" };
-    let release;
+    const config = { provider: "dodo", upgrade: false, emptyPayload: false, fault: "",
+      status: { httpStatus: 200, body: { ok: true, status: "started" } }, holdStatus: false };
+    let release, releaseStatus;
     const gate = new Promise(resolve => { release = resolve; });
+    const statusGate = new Promise(resolve => { releaseStatus = resolve; });
     const attach = (name, value) => testInfo.attach(`claimed-${name}`, {
       body: JSON.stringify(value, null, 2), contentType: "application/json",
     });
@@ -873,6 +875,7 @@ const claimedStartTest = test.extend({
     }));
     await page.route(/https:\/\/www\.(sandbox\.)?paypal\.com\/sdk\/js/, route => route.fulfill({
       contentType: "application/javascript", body: `window.paypal = { version: "5.0.0", Buttons(options) {
+        window.__claimedPayPalOptions = options;
         let button;
         return { isEligible: () => true, updateProps: () => Promise.resolve(), close: async () => button?.remove(),
           async render(container) {
@@ -882,9 +885,13 @@ const claimedStartTest = test.extend({
             button.addEventListener("click", async () => {
               try {
                 const result = await options.onClick({}, { resolve: () => "resolved", reject: () => "rejected" });
-                window.__claimedSdk.push({ kind: "paypal-click", result });
-                if (result === "resolved") window.__claimedSdk.push({ kind: "paypal-order", orderId: await options.createOrder({}, {}) });
-              } catch (error) { window.__claimedSdk.push({ kind: "paypal-error", message: error.message }); options.onError?.(error); }
+                window.__claimedSdk.push({ at: Date.now(), kind: "paypal-click", result });
+                if (result === "resolved") window.__claimedSdk.push({ at: Date.now(), kind: "paypal-order", orderId: await options.createOrder({}, {}) });
+              } catch (error) {
+                window.__claimedSdk.push({ at: Date.now(), kind: "paypal-error", message: error.message });
+                options.onError?.(error);
+                window.__claimedSdk.push({ at: Date.now(), kind: "paypal-error-handled" });
+              }
             });
           },
         };
@@ -896,7 +903,7 @@ const claimedStartTest = test.extend({
         const call = { at: Date.now(), path: `/api/payment/${path}`, body: request.postDataJSON(),
           authorization: request.headers().authorization || "" };
         evidence.calls.push(call);
-        let data;
+        let data, status = 200;
         if (path === "providers") data = { ok: true, providers: enabled };
         if (path === "quote") {
           const gross = call.body.originalOrderId ? 45 : 54.95;
@@ -927,15 +934,19 @@ const claimedStartTest = test.extend({
           if (config.fault === "returned-hold") data.refreshedHold.slotHoldId = "different-hold";
           call.releasedAt = Date.now();
         }
-        if (path === "status") data = { ok: true, status: "started" };
+        if (path === "status") {
+          data = config.status.body; status = config.status.httpStatus;
+          if (config.holdStatus) await statusGate;
+          call.releasedAt = Date.now();
+        }
         if (path === "cancel") {
           const hold = [...flow.state.holds.values()][0];
           data = { ok: true, cancelled: true, ...(!config.upgrade ? { refreshedHold: {
             slotHoldId: hold.holdId, slotHoldToken: `${hold.holdToken}-rotated`, slotHoldExpiresAt: hold.expiresAt, phase: "holding",
           } } : {}) };
         }
-        call.data = data; call.status = 200;
-        await route.fulfill({ json: data });
+        call.data = data; call.status = status;
+        await route.fulfill({ status, json: data });
         call.fulfilledAt = Date.now();
       });
     }
@@ -1030,6 +1041,9 @@ const claimedStartTest = test.extend({
     const recover = async ({ reload = false, quota = false } = {}) => {
       const soft = expect.configure({ soft: true, timeout: 2000 });
       await deliver();
+      if (config.provider === "paypal") {
+        await expect.poll(() => page.evaluate(() => window.__claimedSdk.some(call => call.kind === "paypal-error-handled"))).toBe(true);
+      }
       const change = page.getByRole("button", { name: "Change payment method", exact: true });
       await soft(change).toBeVisible();
       let saved = await capture("adopted");
@@ -1049,6 +1063,34 @@ const claimedStartTest = test.extend({
           await soft(change).toBeVisible(); saved = await capture("reloaded");
           soft(saved.raw.payment_session_state).toBe(raw);
         }
+      }
+      if (config.provider === "paypal") {
+        const guidance = quota
+          ? "Your browser could not save this payment session. Keep this page open and change payment method before trying again."
+          : "Your earlier checkout is still reserved. Change payment method to use the updated codes.";
+        const assertGuidance = async () => {
+          await soft(page.getByText(guidance, { exact: true })).toBeVisible();
+          await soft(page.getByText("This payment method could not process your payment. Please try again.", { exact: true })).toHaveCount(0);
+          await soft(change).toBeVisible();
+        };
+        await assertGuidance();
+        for (const callback of ["onCancel", "onError"]) {
+          evidence.boundaries[callback] = { at: Date.now(), requestIndex: evidence.requests.length };
+          await page.evaluate(callback => {
+            window.__claimedSdk.push({ at: Date.now(), kind: "constructed-callback", callback });
+            if (callback === "onError") window.__claimedPayPalOptions.onError(new Error("Repeated obsolete SDK error"));
+            else window.__claimedPayPalOptions.onCancel({});
+            window.__claimedSdk.push({ at: Date.now(), kind: "constructed-callback-handled", callback });
+          }, callback);
+          await assertGuidance();
+          const notified = await capture(`after-obsolete-${callback}`);
+          soft(notified.raw).toEqual(saved.raw);
+          soft(notified.sdk.filter(call => ["paypal-order", "razorpay-open"].includes(call.kind))).toEqual([]);
+          soft(evidence.calls.filter(call => /\/(status|cancel)$/.test(call.path))).toEqual([]);
+        }
+        await page.waitForTimeout(2200);
+        await assertGuidance();
+        await capture("obsolete-callback-guidance-persistent");
       }
       soft(saved.summary).toContain(config.upgrade ? "$45.00 USD" : "$54.95 USD");
       soft(saved.couponInput).toBe("save20");
@@ -1081,9 +1123,9 @@ const claimedStartTest = test.extend({
       for (const key of ["booking_draft", "referral_dismissed", "referral_capture", "referral_session", "referral_choices"]) soft(cancelled.raw[key]).toBe(evidence.initial.raw[key]);
     };
     const cdp = await browser.newBrowserCDPSession(); evidence.engine = await cdp.send("Browser.getVersion"); await cdp.detach();
-    try { await use({ evidence, config, setup, deliver, recover, capture, snapshot }); }
+    try { await use({ evidence, config, setup, deliver, recover, capture, snapshot, releaseStatus }); }
     finally {
-      release();
+      release(); releaseStatus();
       if (!page.isClosed()) {
         try {
           await page.evaluate(() => { if (window.__claimedNativeSetter) Storage.prototype.setItem = window.__claimedNativeSetter; });
@@ -1117,20 +1159,64 @@ claimedStartTest("a delayed claimed Dodo start survives reload with its original
   await claimed.setup({ provider: "dodo" }); await claimed.recover({ reload: true });
 });
 
-claimedStartTest("a delayed claimed Dodo start keeps in-memory cancellation when session storage is full", async ({ page, claimed }) => {
-  await claimed.setup({ provider: "dodo" });
-  await page.evaluate(() => {
-    window.__claimedNativeSetter = Storage.prototype.setItem;
-    Storage.prototype.setItem = function(key, value) {
-      if (this === sessionStorage && key === "payment_session_state") {
-        const error = new DOMException("Fixture session storage full", "QuotaExceededError");
-        window.__claimedStorageFailures.push({ at: Date.now(), key, value, name: error.name }); throw error;
-      }
-      return window.__claimedNativeSetter.call(this, key, value);
-    };
+for (const [provider, title] of [["dodo", "Dodo"], ["paypal", "PayPal"]]) {
+  claimedStartTest(`a delayed claimed ${title} start keeps in-memory cancellation when session storage is full`, async ({ page, claimed }) => {
+    await claimed.setup({ provider });
+    await page.evaluate(() => {
+      window.__claimedNativeSetter = Storage.prototype.setItem;
+      Storage.prototype.setItem = function(key, value) {
+        if (this === sessionStorage && key === "payment_session_state") {
+          const error = new DOMException("Fixture session storage full", "QuotaExceededError");
+          window.__claimedStorageFailures.push({ at: Date.now(), key, value, name: error.name }); throw error;
+        }
+        return window.__claimedNativeSetter.call(this, key, value);
+      };
+    });
+    try { await claimed.recover({ quota: true }); }
+    finally { await page.evaluate(() => { Storage.prototype.setItem = window.__claimedNativeSetter; }); }
   });
-  try { await claimed.recover({ quota: true }); }
-  finally { await page.evaluate(() => { Storage.prototype.setItem = window.__claimedNativeSetter; }); }
+}
+
+claimedStartTest("a delayed claimed PayPal start shows a current error after a new accepted attempt", async ({ page, claimed }) => {
+  await claimed.setup({ provider: "paypal" });
+  await claimed.deliver();
+  await expect.poll(() => page.evaluate(() => window.__claimedSdk.some(call => call.kind === "paypal-error-handled"))).toBe(true);
+  const adopted = await claimed.capture("retry-adopted");
+  expect(adopted.session.paymentAccessToken).toBe(claimed.evidence.first.data.paymentAccessToken);
+  expect(adopted.form).toEqual(claimed.evidence.initial.form);
+  expect(adopted.hold).toMatchObject({ holdId: claimed.evidence.initial.hold.holdId,
+    holdToken: claimed.evidence.initial.hold.holdToken, expiresAt: claimed.evidence.initial.hold.expiresAt, phase: "payment_pending" });
+  expect(adopted.summary).toContain("$54.95 USD");
+  expect(adopted.couponInput).toBe("save20");
+  await page.locator(".booking-payment").getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page.getByText("This payment method could not process your payment. Please try again.", { exact: true })).toHaveCount(0);
+  claimed.config.status = { httpStatus: 503, body: { ok: false, error: "Fixture current PayPal status unavailable." } };
+  claimed.config.holdStatus = true;
+  claimed.evidence.boundaries.currentError = { at: Date.now(), sdkIndex: adopted.sdk.length, requestIndex: claimed.evidence.requests.length };
+  await page.getByRole("button", { name: "Claimed fixture PayPal", exact: true }).click();
+  await expect.poll(() => claimed.evidence.calls.filter(call => call.path === "/api/payment/status").length).toBe(1);
+  const status = claimed.evidence.calls.find(call => call.path === "/api/payment/status");
+  expect(status).toMatchObject({ authorization: `Bearer ${adopted.session.paymentAccessToken}`, body: {} });
+  const pending = await claimed.capture("current-status-pending");
+  expect(pending.sdk.slice(claimed.evidence.boundaries.currentError.sdkIndex).filter(call => call.kind === "paypal-error")).toEqual([]);
+  const response = page.waitForResponse(value => new URL(value.url()).pathname === "/api/payment/status");
+  claimed.releaseStatus();
+  const refused = await response;
+  await refused.finished();
+  expect(refused.status()).toBe(503);
+  expect(await refused.json()).toEqual(claimed.config.status.body);
+  await expect.poll(() => page.evaluate(boundary => window.__claimedSdk.slice(boundary).some(call => call.kind === "paypal-error-handled"), claimed.evidence.boundaries.currentError.sdkIndex)).toBe(true);
+  await expect(page.getByText("This payment method could not process your payment. Please try again.", { exact: true })).toBeVisible();
+  const failed = await claimed.capture("current-error");
+  expect(failed.raw).toEqual(adopted.raw);
+  expect(failed.sdk.slice(claimed.evidence.boundaries.currentError.sdkIndex).filter(call => call.kind === "paypal-click")).toEqual([
+    { at: expect.any(Number), kind: "paypal-click", result: "resolved" },
+  ]);
+  const errors = failed.sdk.slice(claimed.evidence.boundaries.currentError.sdkIndex).filter(call => call.kind === "paypal-error");
+  expect(errors).toEqual([{ at: expect.any(Number), kind: "paypal-error", message: claimed.config.status.body.error }]);
+  expect(errors[0].at).toBeGreaterThanOrEqual(status.releasedAt);
+  expect(status).toMatchObject({ status: 503, data: claimed.config.status.body, fulfilledAt: expect.any(Number) });
+  expect(claimed.evidence.calls.filter(call => call.path === "/api/payment/cancel")).toEqual([]);
 });
 
 claimedStartTest("a delayed claimed Dodo start retains empty provider details for authentic cancellation", async ({ claimed }) => {

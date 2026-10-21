@@ -499,6 +499,7 @@ export default function Payment({ hideFooter = false }) {
   const [cancellingPayment, setCancellingPayment] = useState(false);
   const sessionStartRef = useRef(null);
   const pendingStartsRef = useRef([]);
+  const paypalStaleOrderRef = useRef(false);
   const [, setPendingStartCount] = useState(0);
   const setPendingStarts = (next) => {
     pendingStartsRef.current = next;
@@ -2489,10 +2490,16 @@ export default function Payment({ hideFooter = false }) {
                             if (!ensureSlotBeforeAction()) {
                               return actions?.reject ? actions.reject() : false;
                             }
+                            paypalStaleOrderRef.current = false;
                             return actions?.resolve ? actions.resolve() : true;
                           }}
                           createOrder={async () => {
+                            paypalStaleOrderRef.current = false;
                             const session = await startSessionCheckout("paypal");
+                            if (session?.stale) {
+                              paypalStaleOrderRef.current = true;
+                              throw new Error("Checkout changed before this payment could open.");
+                            }
                             if (session?.terminal) {
                               throw new Error("This payment is already complete.");
                             }
@@ -2528,6 +2535,7 @@ export default function Payment({ hideFooter = false }) {
                             }
                           }}
                           onError={() => {
+                            if (paypalStaleOrderRef.current) return;
                             if (!createPaymentOperation().current()) return;
                             console.error("PayPal checkout failed");
                             showBanner(
@@ -2536,6 +2544,7 @@ export default function Payment({ hideFooter = false }) {
                             );
                           }}
                           onCancel={() => {
+                            if (paypalStaleOrderRef.current) return;
                             if (!createPaymentOperation().current()) return;
                             showBanner(
                               "info",
