@@ -1,3 +1,5 @@
+import { monitoringDsn } from "../../../src/lib/monitoring/scrub";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -30,7 +32,7 @@ async function readEnvelope(request) {
 }
 
 export async function POST(request) {
-  const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
+  const dsn = monitoringDsn(process.env.NEXT_PUBLIC_SENTRY_DSN);
   if (!dsn) return empty(404);
   if (request.headers.get("origin") !== new URL(request.url).origin) return empty(403);
   if (Number(request.headers.get("content-length") || 0) > ENVELOPE_LIMIT) return empty(413);
@@ -59,6 +61,7 @@ export async function POST(request) {
       const value = response.headers.get(name);
       if (value !== null) headers.set(name, value);
     }
+    await response.body?.cancel().catch(() => {});
     return new Response(null, { status: response.status, headers });
   } catch {
     return empty(502);

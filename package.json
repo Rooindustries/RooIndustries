@@ -48,6 +48,7 @@
     "build": "next build",
     "test": "jest",
     "test:monitoring": "node scripts/monitoring-e2e.mjs",
+    "test:monitoring:startup": "node scripts/monitoring-next-startup-e2e.mjs",
     "test:contact:csp": "playwright test tests/contact-form-csp.spec.js --project=chromium",
     "test:booking-flow": "playwright test tests/booking-flow.spec.js --project=chromium",
     "test:booking-initial-slot": "playwright test tests/booking-initial-slot.spec.js --project=chromium",

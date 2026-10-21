@@ -1,4 +1,4 @@
-const CARD = /\b\d(?:[ -]?\d){12,18}\b/g;
+const CARD = /\b\d(?:[\s._-]?\d){12,18}\b/g;
 const QUERY = /\?[^\s#"'<>]+/g;
 const SENSITIVE_KEY =
   /pass|token|secret|cookie|session|auth|signature|email|phone|address|card|cvv|cvc|iban|upi|vpa|billing|payment|customer/i;
@@ -23,9 +23,14 @@ export function scrubText(text) {
     .replace(QUERY, "?[query]")
     .replace(/\/\/[^\s/?#"'<>]*@/g, "//")
     .replace(/\S+/g, (token) => {
-      const at = token.indexOf("@");
-      const dot = at > 0 ? token.indexOf(".", at + 2) : -1;
-      return dot !== -1 && dot < token.length - 1 ? "[email]" : token;
+      let dot = token.length;
+      let separator = token.length;
+      for (let i = token.length - 1; i > 0; i--) {
+        if (token[i] === "/" || token[i] === "\\") separator = i;
+        else if (token[i] === ".") dot = i;
+        else if (token[i] === "@" && dot > i + 1 && dot < separator && dot < token.length - 1) return "[email]";
+      }
+      return token;
     })
     .replace(CARD, "[card]");
 }
@@ -67,11 +72,9 @@ export function scrubBreadcrumb(breadcrumb) {
 export function scrubEvent(event) {
   delete event.user;
   if (event.request) {
-    const agent = event.request.headers?.["User-Agent"];
     event.request = {
       method: event.request.method,
       url: withoutQuery(event.request.url),
-      ...(agent ? { headers: { "User-Agent": agent } } : {}),
     };
   }
   for (const value of event.exception?.values ?? []) {
@@ -89,13 +92,23 @@ export function monitoringEnvironment() {
   return process.env.NEXT_PUBLIC_VERCEL_ENV || process.env.VERCEL_ENV || process.env.NODE_ENV;
 }
 
-export function envelopeHeaderScrubber(dsn, environment) {
-  const publicKey = new URL(dsn).username;
+export function monitoringDsn(value) {
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol) || !/^\w+$/.test(url.username) || !/\/\d+$/.test(url.pathname) || url.search || url.hash) return undefined;
+    url.password = "";
+    return url.href;
+  } catch {
+    return undefined;
+  }
+}
+
+export function envelopeHeaderScrubber(publicKey, environment) {
   return (envelope) => {
     const header = Array.isArray(envelope) ? envelope[0] : undefined;
     if (!header?.trace) return;
     const traceId = header.trace.trace_id;
-    if (typeof traceId === "string" && /^[0-9a-f]{32}$/.test(traceId)) {
+    if (publicKey && typeof traceId === "string" && /^[0-9a-f]{32}$/.test(traceId)) {
       header.trace = { trace_id: traceId, public_key: publicKey, ...(environment ? { environment } : {}) };
     } else {
       delete header.trace;

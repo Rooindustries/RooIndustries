@@ -44,6 +44,7 @@ const events = () => received.flatMap(({ body }) => {
   return result;
 });
 
+let streamingResponseClosed = false;
 const ingest = http.createServer((request, response) => {
   const chunks = [];
   request.on('data', chunk => chunks.push(chunk));
@@ -57,6 +58,11 @@ const ingest = http.createServer((request, response) => {
       ...(body.includes('fixture-quota-category') ? { 'X-Sentry-Rate-Limits': '60:error:organization' } : {}),
       ...(body.includes('fixture-quota-all') ? { 'Retry-After': '60' } : {}),
     });
+    if (body.includes('fixture-upstream-stream')) {
+      response.once('close', () => { streamingResponseClosed = true; });
+      response.write('provider-private-body');
+      return;
+    }
     response.end('{}');
   });
 });
@@ -82,10 +88,13 @@ const api = http.createServer(async (request, response) => {
         scope.setExtra('span_id', '4242424242424242');
         scope.setExtra('diagnostic_values', Array(8).fill('a'.repeat(16000)));
         scope.setExtra('diagnostic_urls', ['http://fixture-user:fixture-secret@localhost/path?token=fixture-url', '//fixture-user:fixture-secret@localhost/path?token=fixture-url', 'http://localhost/path']);
+        scope.setExtra('text_examples', ['@carol@example.com', '@team,john@example.com', 'δοκιμή@παράδειγμα.δοκιμή', 'foo/@bar.com', '4242\u00a04242\u00a04242\u00a04242', '4242\t4242\t4242\t4242', '4242.4242.4242.4242', '4242_4242_4242_4242']);
+        scope.setExtra('path_examples', ['file:///app/node_modules/@sentry/core/build/esm/index.js', '/@fs/source/app.js', '/@vite/client.js', `file:///app/${'@scope/'.repeat(1800)}index.js`]);
         scope.addEventProcessor(event => ({
           ...event,
+          request: { ...event.request, headers: { 'User-Agent': 'fixture-agent', 'user-agent': 'fixture-agent-lower', Authorization: 'fixture-authorization' } },
           contexts: { ...event.contexts, trace: { trace_id: '0123456789abcdef0123456789abcdef', span_id: '1234567890123456', parent_span_id: '2345678901234567' } },
-          exception: { ...event.exception, values: event.exception?.values?.map(value => ({ ...value, stacktrace: { ...value.stacktrace, frames: [...value.stacktrace?.frames ?? [], { function: 'fixtureCredentials', filename: 'http://fixture-user:fixture-secret@localhost/script.js?token=fixture-url' }] } })) },
+          exception: { ...event.exception, values: event.exception?.values?.map(value => ({ ...value, stacktrace: { ...value.stacktrace, frames: [...value.stacktrace?.frames ?? [], { function: 'fixtureCredentials', filename: 'http://fixture-user:fixture-secret@localhost/script.js?token=fixture-url' }, { function: 'fixtureScoped', filename: 'file:///app/node_modules/@sentry/core/build/esm/index.js', module: '@sentry/core' }, { function: 'fixtureVite', filename: '/@fs/source/app.js', abs_path: '/@vite/client.js' }] } })) },
         }));
         sdk.captureException(new Error('Fixture SDK buyer@example.com 4242424242424242 play?token=fixture-private-query ?token=fixture-query-only'));
       });
@@ -147,6 +156,9 @@ try {
   check('invalid envelope is refused', (await post('not json')).status, 400);
   check('upstream failure status is preserved', (await post(envelope(dsn, 'fixture-upstream-failure'))).status, 503);
   check('upstream connection failure returns 502', (await post(envelope(dsn, 'fixture-upstream-network-error'))).status, 502);
+  check('an unending provider body keeps its response status', (await post(envelope(dsn, 'fixture-upstream-stream'))).status, 200);
+  for (let i = 0; i < 20 && !streamingResponseClosed; i++) await new Promise(resolve => setTimeout(resolve, 50));
+  check('an unending provider body is canceled within one second', streamingResponseClosed, true);
   process.env.NEXT_PUBLIC_SENTRY_DSN = '';
   check('disabled reporting returns 404', (await post(envelope(dsn, 'fixture-disabled'))).status, 404);
   process.env.NEXT_PUBLIC_SENTRY_DSN = dsn;
@@ -190,6 +202,12 @@ try {
   check('dynamic email keys are scrubbed without losing diagnostics', reported?.event.extra?.['[email]'], 'useful diagnostic');
   check('absolute and scheme-relative diagnostic URLs lose userinfo', reported?.event.extra?.diagnostic_urls, ['http://localhost/path?[query]', '//localhost/path?[query]', 'http://localhost/path']);
   check('stack frame URLs lose userinfo and query', reported?.event.exception?.values?.[0]?.stacktrace?.frames?.find(frame => frame.function === 'fixtureCredentials')?.filename, 'http://localhost/script.js');
+  check('all email prefixes and formatted card values are scrubbed', reported?.event.extra?.text_examples, [...Array(4).fill('[email]'), ...Array(4).fill('[card]')]);
+  check('scoped and Vite paths survive including a long multi-at path', reported?.event.extra?.path_examples, ['file:///app/node_modules/@sentry/core/build/esm/index.js', '/@fs/source/app.js', '/@vite/client.js', `file:///app/${'@scope/'.repeat(1800)}index.js`]);
+  const scoped = reported?.event.exception?.values?.[0]?.stacktrace?.frames?.find(frame => frame.function === 'fixtureScoped');
+  const vite = reported?.event.exception?.values?.[0]?.stacktrace?.frames?.find(frame => frame.function === 'fixtureVite');
+  check('actual scoped and Vite frame locations survive', [scoped?.filename, scoped?.module, vite?.filename, vite?.abs_path], ['file:///app/node_modules/@sentry/core/build/esm/index.js', '@sentry/core', '/@fs/source/app.js', '/@vite/client.js']);
+  check('SDK request has no headers even when explicitly attached', reported?.event.request?.headers ?? null, null);
   check('invalid card-shaped values are scrubbed', reported?.event.extra?.reference, '[card]');
   check('card-shaped keys are scrubbed', reported?.event.extra?.['[card]'], 'card-shaped key');
   check('valid numeric trace identifiers retain their links', reported?.event.contexts?.trace, { trace_id: '0123456789abcdef0123456789abcdef', span_id: '1234567890123456', parent_span_id: '2345678901234567' });
@@ -197,7 +215,20 @@ try {
   check('16KiB tokens remain usable diagnostic data', reported?.event.extra?.diagnostic_values?.map?.(value => value.length), Array(8).fill(16000));
   check('16KiB tokens stay below 250ms of SDK CPU', sdkCpuMs < 250, true);
   check('stack frames remain available', Boolean(reported?.event.exception?.values?.[0]?.stacktrace?.frames?.length), true);
-  check('private values appear nowhere in SDK envelope', ['buyer@example.com', '4242424242424242', '4242 4242 4242 4243', '4242-4242-4242-4243', 'fixture-private-cvv', 'fixture-private-payment-id', 'fixture-private-query', 'fixture-query-only'].filter(value => reported?.raw.includes(value)), []);
+  check('private values appear nowhere in SDK envelope', ['buyer@example.com', '4242424242424242', '4242 4242 4242 4243', '4242-4242-4242-4243', 'fixture-private-cvv', 'fixture-private-payment-id', 'fixture-private-query', 'fixture-query-only', 'fixture-user', 'fixture-secret', 'fixture-url', 'fixture-agent', 'fixture-authorization', 'carol@example.com', 'john@example.com', 'δοκιμή@παράδειγμα.δοκιμή'].filter(value => reported?.raw.includes(value)), []);
+  await sdk.close(5000);
+  const { register } = await import('../instrumentation.js');
+  for (const invalid of ['', 'false', 'off', `"${dsn}"`, dsn.replace('http:', 'ftp:'), dsn.replace('fixturekey', 'invalid-key'), dsn.replace('/42', '/no-project'), `${dsn}?token=fixture-config`, `${dsn}#fixture-config`]) {
+    process.env.NEXT_PUBLIC_SENTRY_DSN = invalid;
+    check(`optional monitoring startup resolves for ${invalid ? 'malformed' : 'missing'} config`, await register().then(() => true, () => false), true);
+    check('unavailable monitoring relay is off', (await post(envelope(invalid, 'fixture-disabled-config'))).status, 404);
+    const normal = await fetch(`${origin}/caught`);
+    check('normal caught response is unchanged with unavailable monitoring', [normal.status, await normal.text()], [500, 'Unexpected server error.']);
+  }
+  process.env.NEXT_PUBLIC_SENTRY_DSN = `  http://fixturekey:legacy-password@127.0.0.1:${ingest.address().port}/42 \n`;
+  check('canonical legacy DSN config starts safely', await register().then(() => true, () => false), true);
+  check('canonical public DSN matches the relay config', (await post(envelope(dsn, 'fixture-canonical'))).status, 200);
+  check('no legacy DSN password is forwarded', received.some(item => item.body.includes('legacy-password')), false);
 } catch (error) {
   check('monitoring E2E completes', error.message, null);
 } finally {

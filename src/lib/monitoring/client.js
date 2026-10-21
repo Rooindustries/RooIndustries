@@ -1,4 +1,6 @@
-const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
+import { monitoringDsn } from "./scrub";
+
+const dsn = monitoringDsn(process.env.NEXT_PUBLIC_SENTRY_DSN);
 const MAX_PENDING = 10;
 let pending = [];
 let sentry = null;

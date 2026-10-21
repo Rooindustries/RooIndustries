@@ -2,12 +2,15 @@ import { captureException, init } from "@sentry/nextjs";
 import {
   NO_DATA_COLLECTION,
   envelopeHeaderScrubber,
+  monitoringDsn,
   monitoringEnvironment,
   scrubBreadcrumb,
   scrubEvent,
 } from "./scrub";
 
-export function startBrowserMonitoring(dsn) {
+export function startBrowserMonitoring(value) {
+  const dsn = monitoringDsn(value);
+  if (!dsn) return null;
   const client = init({
     dsn,
     environment: monitoringEnvironment(),
@@ -17,6 +20,6 @@ export function startBrowserMonitoring(dsn) {
     beforeSend: scrubEvent,
     beforeBreadcrumb: scrubBreadcrumb,
   });
-  client?.on("beforeEnvelope", envelopeHeaderScrubber(dsn, monitoringEnvironment()));
+  client?.on("beforeEnvelope", envelopeHeaderScrubber(client.getDsn()?.publicKey, monitoringEnvironment()));
   return { captureException };
 }
