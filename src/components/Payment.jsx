@@ -1304,7 +1304,7 @@ export default function Payment({ hideFooter = false }) {
           ? paymentSession.providerPayload.checkoutUrl
           : paymentSession.providerPayload.orderId;
         if (typeof resumeTarget !== "string" || !resumeTarget.trim()) {
-          throw new Error("Checkout details are unavailable. Check payment status or change payment method.");
+          throw new Error("Checkout details are unavailable. Try again or change payment method.");
         }
         return paymentSession;
       }
@@ -2051,19 +2051,18 @@ export default function Payment({ hideFooter = false }) {
               {lockedProvider
                 ? lockedPriceAvailable
                   ? "Price confirmed for this session."
-                  : "Session price unavailable. Check payment status or change payment method."
+                  : "Session price unavailable. Try again or change payment method."
                 : quoteLoading
                   ? "Confirming the current price..."
                   : quoteFingerprint
                     ? "Price confirmed for this session."
                     : "Price confirmation is unavailable. Payment is disabled."}
             </p>
-            {quoteSettled && !preApplyingCodes && !quoteLoading && !quoteFingerprint && !(banner?.text && banner.retryQuote) && (
+            {!lockedProvider && quoteSettled && !preApplyingCodes && !quoteLoading && !quoteFingerprint && !(banner?.text && banner.retryQuote) && (
               <div className="mt-2 flex justify-end">
                 <button
                   type="button"
                   onClick={() => {
-                    setBanner(null);
                     setQuoteRetryCount((count) => count + 1);
                   }}
                   className="rounded-md border border-line-input px-3 py-2 text-xs font-semibold text-ink hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-border"

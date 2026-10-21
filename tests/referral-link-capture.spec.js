@@ -4533,7 +4533,7 @@ lockedSnapshotTest("a locked checkout with no saved quote keeps recovery without
   await attachJson(testInfo, "saved-price-setup-controls", locked.evidence);
   const soft = expect.configure({ soft: true });
   await soft(locked.summary.getByText("Unavailable", { exact: true })).toBeVisible();
-  await soft(locked.summary.getByText("Session price unavailable. Check payment status or change payment method.", { exact: true })).toBeVisible();
+  await soft(locked.summary.getByText("Session price unavailable. Try again or change payment method.", { exact: true })).toBeVisible();
   await soft(locked.summary.getByText(/\$(54\.95|49\.45)(?: USD)?/)).toHaveCount(0);
   await soft(locked.summary.getByText(/friend\s*·/)).not.toBeVisible();
   await soft(page.getByRole("button", { name: "Confirm Free Booking", exact: true })).not.toBeVisible();
