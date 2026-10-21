@@ -3446,6 +3446,39 @@ test.describe("referral restoration from the browser cache", () => {
     });
   }
 
+  cachedTest("booking history authority: cached Booking before a hold keeps the newer creator", async ({ page, flow, bfcache }, testInfo) => {
+    flow.state.collision = true;
+    const evidence = { setupComplete: false, pageErrors: [] };
+    page.on("pageerror", error => evidence.pageErrors.push({ name: error.name, message: error.message }));
+    try {
+      await page.goto("/booking?ref=friend");
+      await expect(page).toHaveURL(/\/booking\?ref=friend$/);
+      await page.waitForFunction(() => Boolean(window.next?.router));
+      await expect.poll(() => storedReferral(page)).toBe("friend");
+      evidence.original = await bookingHistorySnapshot(page);
+      expectBookingHistoryBeforeHold(evidence.original, flow, "friend");
+      bfcache.before = await snapshot(page);
+      await attachJson(testInfo, "booking-history-original", evidence.original);
+      await page.goto("/about?ref=save20");
+      await expect.poll(() => storedReferral(page)).toBe("save20");
+      bfcache.otherDocument = await snapshot(page);
+      evidence.otherDocument = await bookingHistorySnapshot(page);
+      expectBookingHistoryBeforeHold(evidence.otherDocument, flow, "save20");
+      await observeBack(page, flow, bfcache, testInfo);
+      await expect(page).toHaveURL(/\/booking\?ref=friend$/);
+      await page.waitForFunction(() => Boolean(window.next?.router));
+      evidence.afterBack = await bookingHistorySnapshot(page);
+      expectBookingHistoryBeforeHold(evidence.afterBack, flow, "save20");
+      evidence.setupComplete = true;
+      await attachJson(testInfo, "booking-history-before-product-assertions", evidence);
+      evidence.reserveBoundary = flow.state.calls.length;
+      await reserveAndReview(page, flow);
+      await verifyBookingHistoryReview(page, flow, evidence, testInfo, expect.configure({ soft: true }));
+    } finally {
+      await attachBookingHistory(page, flow, evidence, testInfo);
+    }
+  });
+
 });
 
 const slotSwapSnapshot = page => page.evaluate(() => {
@@ -3705,3 +3738,270 @@ for (const status of [503, 409]) {
     }
   });
 }
+
+const bookingHistorySnapshot = page => page.evaluate(() => {
+  const keys = ["referral_capture", "referral_dismissed", "referral_session", "booking_draft", "my_slot_hold"];
+  const raw = Object.fromEntries(keys.map(key => [key, sessionStorage.getItem(key)]));
+  return {
+    url: location.href,
+    raw,
+    journal: JSON.parse(raw.referral_dismissed),
+    draft: JSON.parse(raw.booking_draft),
+    hold: JSON.parse(raw.my_slot_hold),
+    observation: window.bookingHistoryObservation || window.referralBfcache,
+    navigation: performance.getEntriesByType("navigation").map(entry => ({ type: entry.type })),
+    fields: Object.fromEntries(["discord", "email", "specs", "mainGame"].map(key => [
+      key, document.querySelector(`[name="${key}"]`)?.value ?? null,
+    ])),
+    badges: [...document.querySelectorAll("button")].map(button => button.getAttribute("aria-label") || button.textContent)
+      .filter(text => text.startsWith("Remove referral code ")),
+  };
+});
+
+const observeBookingHistory = page => page.addInitScript(() => {
+  const observation = window.bookingHistoryObservation = { nonce: crypto.randomUUID(), pageshows: [] };
+  window.addEventListener("pageshow", event => observation.pageshows.push({
+    persisted: event.persisted, url: location.href, at: performance.now(),
+  }));
+});
+
+const expectBookingHistoryBeforeHold = (state, flow, passive) => {
+  expect(state.raw.referral_session).toBe(passive);
+  expect(state.journal?.choices || {}).toEqual({});
+  expect(state.hold).toBeNull();
+  expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toEqual([]);
+  expect(flow.state.holds.size).toBe(0);
+  expect(flow.state.calls.filter(call => call.path === "/api/payment/quote")).toEqual([]);
+  expect(state.badges).toEqual([]);
+  for (const draft of Object.values(state.draft?.packages || {})) {
+    expect(draft.checkoutCodes?.referral?.code || "").toBe("");
+    expect(draft.checkoutCodes?.coupon?.code || "").toBe("");
+  }
+  expect(Object.values(state.fields).every(value => value === null || value === "")).toBe(true);
+};
+
+const verifyBookingHistoryReview = async (page, flow, evidence, testInfo, assertions) => {
+  await assertions(page.getByRole("button", { name: "Remove referral code save20", exact: true }))
+    .toBeVisible({ timeout: 3000 });
+  evidence.review = await bookingHistorySnapshot(page);
+  expect(evidence.review.hold).toMatchObject({ holdId: "fixture-hold-1", holdToken: "fixture-token-1" });
+  expect(flow.state.holds.size).toBe(1);
+  expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
+  expect(evidence.review.draft.packages[evidence.review.draft.lastTitle].form).toMatchObject({
+    email: "visitor@example.invalid", discord: "fixture_visitor", specs: "Ryzen 7700 / RTX 4070", mainGame: "CS2",
+  });
+  await attachJson(testInfo, "booking-history-review", evidence.review);
+  assertions(evidence.review.journal?.choices?.[checkoutScope()]).toBe("save20");
+  assertions(referralLookups(flow, evidence.reserveBoundary, "friend")).toEqual([]);
+  evidence.quoteBoundary = flow.state.calls.length;
+  await flow.payment();
+  await expect.poll(() => quoteCalls(flow, evidence.quoteBoundary).length).toBeGreaterThan(0);
+  await assertions.poll(() => quoteCalls(flow, evidence.quoteBoundary).at(-1)?.body.referralCode).toBe("save20");
+  evidence.payment = await bookingHistorySnapshot(page);
+  evidence.newQuotes = quoteCalls(flow, evidence.quoteBoundary);
+  expect(evidence.payment.hold).toEqual(evidence.review.hold);
+  expect(evidence.payment.draft.packages[evidence.review.draft.lastTitle].form)
+    .toEqual(evidence.review.draft.packages[evidence.review.draft.lastTitle].form);
+  assertions(evidence.payment.journal?.choices?.[checkoutScope()]).toBe("save20");
+  assertions(referralLookups(flow, evidence.reserveBoundary, "friend")).toEqual([]);
+};
+
+const attachBookingHistory = async (page, flow, evidence, testInfo) => {
+  evidence.final = await bookingHistorySnapshot(page);
+  evidence.calls = flow.state.calls;
+  evidence.holds = [...flow.state.holds.values()];
+  evidence.newQuotes = evidence.quoteBoundary === undefined ? [] : quoteCalls(flow, evidence.quoteBoundary);
+  if (evidence.setupComplete && testInfo.errors.length === 0) {
+    const panel = page.locator(".booking-payment");
+    const readPanel = () => panel.evaluate(element => ({
+      at: Date.now(),
+      opacity: getComputedStyle(element).opacity,
+      children: [...element.children].map(child => ({
+        tag: child.tagName,
+        opacity: getComputedStyle(child).opacity,
+      })),
+    }));
+    const before = await readPanel();
+    await attachJson(testInfo, "booking-history-paint-before", before);
+    await expect(panel).toHaveCSS("opacity", "1", { timeout: 5000 });
+    for (const child of await panel.locator(":scope > div").all()) {
+      await expect(child).toHaveCSS("opacity", "1", { timeout: 5000 });
+    }
+    const heading = page.getByRole("heading", { name: "Booking Summary", exact: true });
+    await heading.scrollIntoViewIfNeeded();
+    await expect(heading).toBeInViewport();
+    await testInfo.attach("booking-history-painted-summary", {
+      body: await page.screenshot(), contentType: "image/png",
+    });
+    await paymentCode(page).scrollIntoViewIfNeeded();
+    await expect(paymentCode(page)).toBeInViewport();
+    await expect(paymentCode(page)).toBeEnabled({ timeout: 5000 });
+    await expect(paymentCode(page)).toHaveValue(evidence.newQuotes.at(-1).body.referralCode);
+    const settled = await bookingHistorySnapshot(page);
+    expect(settled.hold).toEqual(evidence.final.hold);
+    expect(settled.draft).toEqual(evidence.final.draft);
+    await attachJson(testInfo, "booking-history-paint-after", { before, after: await readPanel(), settled });
+    await testInfo.attach("booking-history-painted-code", {
+      body: await page.screenshot(), contentType: "image/png",
+    });
+  }
+  await attachJson(testInfo, "booking-history-authority", evidence);
+  await testInfo.attach("booking-history-final-page", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
+  expect(evidence.pageErrors).toEqual([]);
+  expect(flow.state.calls.filter(call => /\/api\/payment\/(start|capture|confirm|finalize)(\/|$)/.test(call.path))).toEqual([]);
+};
+
+for (const [title, history] of [
+  ["cross-document Back before a hold keeps the newer creator", "document"],
+  ["reload after Back before a hold keeps the newer creator", "reload"],
+  ["in-site Back before a hold keeps the newer creator", "spa"],
+]) {
+  test(`booking history authority: ${title}`, async ({ page, flow }, testInfo) => {
+    flow.state.collision = true;
+    const evidence = { history, setupComplete: false, pageErrors: [] };
+    page.on("pageerror", error => evidence.pageErrors.push({ name: error.name, message: error.message }));
+    await observeBookingHistory(page);
+    try {
+      await page.goto("/booking?ref=friend");
+      await expect(page).toHaveURL(/\/booking\?ref=friend$/);
+      await page.waitForFunction(() => Boolean(window.next?.router));
+      await expect.poll(() => storedReferral(page)).toBe("friend");
+      evidence.original = await bookingHistorySnapshot(page);
+      expectBookingHistoryBeforeHold(evidence.original, flow, "friend");
+      await attachJson(testInfo, "booking-history-original", evidence.original);
+      if (history === "spa") await page.evaluate(() => window.next.router.push("/about?ref=save20"));
+      else await page.goto("/about?ref=save20");
+      await expect(page).toHaveURL(history === "spa" ? /\/about(?:\?|$)/ : /\/about\?ref=save20$/);
+      await expect.poll(() => storedReferral(page)).toBe("save20");
+      evidence.otherDocument = await bookingHistorySnapshot(page);
+      expectBookingHistoryBeforeHold(evidence.otherDocument, flow, "save20");
+      if (history === "spa") expect(evidence.otherDocument.raw.referral_capture).toBe("ready");
+      await page.goBack({ waitUntil: "commit" });
+      await expect(page).toHaveURL(/\/booking\?ref=friend$/);
+      await page.waitForFunction(() => Boolean(window.next?.router));
+      await expect.poll(() => storedReferral(page)).toBe("save20");
+      evidence.afterBack = await bookingHistorySnapshot(page);
+      expectBookingHistoryBeforeHold(evidence.afterBack, flow, "save20");
+      if (history === "spa") {
+        expect(evidence.otherDocument.observation.nonce).toBe(evidence.original.observation.nonce);
+        expect(evidence.afterBack.observation.nonce).toBe(evidence.original.observation.nonce);
+      } else {
+        expect(evidence.afterBack.navigation[0]?.type === "back_forward" ||
+          evidence.afterBack.observation.pageshows.some(event => event.persisted)).toBe(true);
+      }
+      if (history === "reload") {
+        await page.reload();
+        await expect(page).toHaveURL(/\/booking\?ref=friend$/);
+        await page.waitForFunction(() => Boolean(window.next?.router));
+        await expect.poll(() => storedReferral(page)).toBe("save20");
+        evidence.afterReload = await bookingHistorySnapshot(page);
+        expect(evidence.afterReload.navigation[0]?.type).toBe("reload");
+        expectBookingHistoryBeforeHold(evidence.afterReload, flow, "save20");
+      }
+      evidence.setupComplete = true;
+      await attachJson(testInfo, "booking-history-before-product-assertions", evidence);
+      evidence.reserveBoundary = flow.state.calls.length;
+      await reserveAndReview(page, flow);
+      await verifyBookingHistoryReview(page, flow, evidence, testInfo, expect.configure({ soft: true }));
+    } finally {
+      await attachBookingHistory(page, flow, evidence, testInfo);
+    }
+  });
+}
+
+test("booking history authority: a fresh same-view Booking query at Review still captures", async ({ page, flow }, testInfo) => {
+  flow.state.collision = true;
+  const evidence = { setupComplete: false, pageErrors: [], reserveBoundary: 0 };
+  page.on("pageerror", error => evidence.pageErrors.push({ name: error.name, message: error.message }));
+  await observeBookingHistory(page);
+  try {
+    await page.goto("/booking");
+    await page.waitForFunction(() => Boolean(window.next?.router));
+    evidence.original = await bookingHistorySnapshot(page);
+    expectBookingHistoryBeforeHold(evidence.original, flow, null);
+    await reserveAndReview(page, flow);
+    evidence.beforeFreshQuery = await bookingHistorySnapshot(page);
+    expect(evidence.beforeFreshQuery.journal?.choices || {}).toEqual({});
+    expect(evidence.beforeFreshQuery.badges).toEqual([]);
+    await page.evaluate(() => window.next.router.push("/booking?ref=save20"));
+    await expect(page).toHaveURL(/\/booking\?ref=save20$/);
+    await expect.poll(() => storedReferral(page)).toBe("save20");
+    evidence.afterFreshQuery = await bookingHistorySnapshot(page);
+    evidence.routerLocations = await page.evaluate(() => {
+      const heading = [...document.querySelectorAll("h1,h2,h3")]
+        .find(element => element.textContent === "Review your booking");
+      const key = heading && Object.keys(heading).find(name => name.startsWith("__reactFiber$"));
+      const locations = [];
+      for (let fiber = key ? heading[key] : null; fiber; fiber = fiber.return) {
+        const value = fiber.memoizedProps?.value;
+        if (value?.location && typeof value.navigationType === "string") {
+          locations.push({ pathname: value.location.pathname, search: value.location.search,
+            navigationType: value.navigationType });
+        }
+      }
+      return { browser: { pathname: location.pathname, search: location.search }, locations };
+    });
+    await attachJson(testInfo, "booking-history-router-observation", evidence.routerLocations);
+    expect(evidence.afterFreshQuery.observation.nonce).toBe(evidence.beforeFreshQuery.observation.nonce);
+    expect(evidence.afterFreshQuery.hold).toEqual(evidence.beforeFreshQuery.hold);
+    expect(evidence.afterFreshQuery.fields).toEqual(evidence.beforeFreshQuery.fields);
+    expect(evidence.afterFreshQuery.draft.packages[evidence.beforeFreshQuery.draft.lastTitle].form)
+      .toEqual(evidence.beforeFreshQuery.draft.packages[evidence.beforeFreshQuery.draft.lastTitle].form);
+    expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
+    evidence.setupComplete = true;
+    await attachJson(testInfo, "booking-history-before-product-assertions", evidence);
+    await verifyBookingHistoryReview(page, flow, evidence, testInfo, expect);
+  } finally {
+    await attachBookingHistory(page, flow, evidence, testInfo);
+  }
+});
+
+test("booking history authority: fresh same-view capture keeps an existing scoped choice", async ({ page, flow }, testInfo) => {
+  flow.state.collision = true;
+  const evidence = { setupComplete: false, pageErrors: [] };
+  page.on("pageerror", error => evidence.pageErrors.push({ name: error.name, message: error.message }));
+  await observeBookingHistory(page);
+  try {
+    await page.goto("/booking?ref=friend");
+    await page.waitForFunction(() => Boolean(window.next?.router));
+    await expect.poll(() => storedReferral(page)).toBe("friend");
+    await reserveAndReview(page, flow);
+    await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+    await expect.poll(async () => {
+      const state = await bookingHistorySnapshot(page);
+      return state.draft.packages[state.draft.lastTitle].checkoutCodes?.referral?.code;
+    }).toBe("friend");
+    evidence.beforeScopedQuery = await bookingHistorySnapshot(page);
+    expect(evidence.beforeScopedQuery.journal.choices[checkoutScope()]).toBe("friend");
+    evidence.captureBoundary = flow.state.calls.length;
+    await page.evaluate(() => window.next.router.push("/booking?ref=save20"));
+    await expect(page).toHaveURL(/\/booking\?ref=save20$/);
+    await expect.poll(() => storedReferral(page)).toBe("save20");
+    evidence.afterScopedQuery = await bookingHistorySnapshot(page);
+    expect(evidence.afterScopedQuery.observation.nonce).toBe(evidence.beforeScopedQuery.observation.nonce);
+    expect(evidence.afterScopedQuery.hold).toEqual(evidence.beforeScopedQuery.hold);
+    expect(evidence.afterScopedQuery.fields).toEqual(evidence.beforeScopedQuery.fields);
+    expect(evidence.afterScopedQuery.draft.packages[evidence.beforeScopedQuery.draft.lastTitle].form)
+      .toEqual(evidence.beforeScopedQuery.draft.packages[evidence.beforeScopedQuery.draft.lastTitle].form);
+    expect(evidence.afterScopedQuery.draft.packages[evidence.beforeScopedQuery.draft.lastTitle].checkoutCodes)
+      .toEqual(evidence.beforeScopedQuery.draft.packages[evidence.beforeScopedQuery.draft.lastTitle].checkoutCodes);
+    expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
+    evidence.setupComplete = true;
+    await attachJson(testInfo, "booking-history-before-product-assertions", evidence);
+    await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+    expect(evidence.afterScopedQuery.journal.choices[checkoutScope()]).toBe("friend");
+    expect(referralLookups(flow, evidence.captureBoundary, "save20")).toEqual([]);
+    evidence.quoteBoundary = flow.state.calls.length;
+    await flow.payment();
+    await waitQuote(flow, "friend", evidence.quoteBoundary);
+    evidence.payment = await bookingHistorySnapshot(page);
+    expect(evidence.payment.hold).toEqual(evidence.beforeScopedQuery.hold);
+    expect(evidence.payment.draft.packages[evidence.beforeScopedQuery.draft.lastTitle].form)
+      .toEqual(evidence.beforeScopedQuery.draft.packages[evidence.beforeScopedQuery.draft.lastTitle].form);
+    expect(evidence.payment.journal.choices[checkoutScope()]).toBe("friend");
+    expect(referralLookups(flow, evidence.captureBoundary, "save20")).toEqual([]);
+    expect(flow.state.calls.filter(call => call.path === "/api/holdSlot")).toHaveLength(1);
+  } finally {
+    await attachBookingHistory(page, flow, evidence, testInfo);
+  }
+});

@@ -490,13 +490,6 @@ export default function BookingForm() {
   const handleHomeSectionLink = useHomeSectionLinkHandler();
   const location = useLocation();
   const navigate = useNavigate();
-  const referralQuery = useMemo(() => {
-    const params = new URLSearchParams(location.search);
-    return {
-      code: String(params.get("ref") || "").trim(),
-      present: params.has("ref"),
-    };
-  }, [location.search]);
 
   const [step, setStep] = useState(1);
   useEffect(() => {
@@ -1816,11 +1809,11 @@ export default function BookingForm() {
     setAppliedReferral(null);
     setCodeError("");
     setRestoredCodeCandidates({
-      referralCode: appliedReferral?.code || referralQuery.code,
+      referralCode: appliedReferral?.code || "",
       couponCode: appliedCoupon?.code || "",
       dismissedCode: dismissedReferralCode,
     });
-  }), [appliedReferral, appliedCoupon, dismissedReferralCode, referralQuery.code, isPaymentPendingHold, scope]);
+  }), [appliedReferral, appliedCoupon, dismissedReferralCode, isPaymentPendingHold, scope]);
 
   useEffect(() => {
     if (
@@ -1990,7 +1983,7 @@ export default function BookingForm() {
       return;
     }
 
-    const candidates = [referralQuery.code];
+    const candidates = [];
     const autoCode = selectStoredReferral(scope, candidates, dismissedReferralCode);
     const captureFailure = getReferralCaptureFailure();
     if (captureFailure) {
@@ -2088,7 +2081,7 @@ export default function BookingForm() {
     draftLoading,
     hasActiveHold,
     isPaymentPendingHold,
-    referralQuery.code,
+    location.search,
     restoredCodeCandidates,
     selectedPackage.title,
     step,

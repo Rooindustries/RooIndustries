@@ -306,7 +306,7 @@ const referralAddress = (pathname, search) => {
   return JSON.stringify([pathname, params.has("ref"), params.get("ref") || ""]);
 };
 
-export const captureReferralAddress = (pathname, search) => {
+const captureCurrentReferralAddress = (pathname, search) => {
   if (typeof window === "undefined") return false;
   const address = referralAddress(pathname, search);
   if (address !== referralAddress(window.location.pathname, window.location.search)) return false;
@@ -355,6 +355,19 @@ export const captureReferralAddress = (pathname, search) => {
     if (rememberReferralFromSearch(search)) acknowledgeReferralCapture();
   } catch {}
   return !captureFailure;
+};
+
+export const captureReferralAddress = (pathname, search) => {
+  if (typeof window === "undefined") return false;
+  const snapshot = readReferralRestoreSnapshot();
+  const failure = captureFailure;
+  try {
+    return captureCurrentReferralAddress(pathname, search);
+  } finally {
+    if (snapshot !== readReferralRestoreSnapshot() || failure !== captureFailure) {
+      referralRestoreListeners.forEach(listener => listener());
+    }
+  }
 };
 
 export const getReferralCaptureFailure = () => captureFailure;
