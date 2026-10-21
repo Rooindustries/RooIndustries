@@ -202,3 +202,48 @@ test("/ and /packages list an offer for every card after CMS price edits without
     await testInfo.attach("offer-price-edit", { body: JSON.stringify(timeline, null, 2), contentType: "application/json" });
   }
 });
+
+test("/ rates the service only from CMS reviews with a whole 1-5 star rating after review edits", async ({ request, baseURL }, testInfo) => {
+  test.setTimeout(300000);
+  const control = contentControl(request, baseURL);
+  const timeline = [];
+  const read = pageReader(request, timeline);
+  const ratings = body => [...body.matchAll(/<script type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g)]
+    .map(match => JSON.parse(match[1]))
+    .flatMap(script => script["@graph"] || [script])
+    .filter(node => node["@type"] === "AggregateRating");
+  const review = (index, text, rating) => ({
+    _id: `rating-edit-${index}`,
+    name: `Rating Edit ${index}`,
+    text,
+    ...(rating === undefined ? {} : { rating }),
+  });
+  const publish = async (reviews, marker) => {
+    await control({ patch: { _id: "tooling-proReviewsCarousel", reviews } });
+    await wait(61000);
+    expect((await read("/", `first request after ${marker}`)).status).toBe(200);
+    await expect.poll(async () => {
+      const page = await read("/", `waiting for ${marker}`);
+      return page.cache === "HIT" && page.body.includes(marker);
+    }, { timeout: 20000 }).toBe(true);
+    return (await read("/", `after ${marker}`)).body;
+  };
+  try {
+    const mixed = await publish([
+      review(0, "Mixed ratings marker", 4),
+      review(1, "No rating set"),
+      review(2, "Half star rating", 2.5),
+      review(3, "Out of range rating", 7),
+      review(4, "Five star rating", 5),
+    ], "Mixed ratings marker");
+    expect(ratings(mixed)).toEqual([expect.objectContaining({ ratingValue: 4.5, ratingCount: 2, bestRating: 5, worstRating: 1 })]);
+    const unrated = await publish([
+      review(0, "Unrated marker"),
+      review(1, "Still no rating", null),
+    ], "Unrated marker");
+    expect(ratings(unrated)).toEqual([]);
+  } finally {
+    await control({ reset: true });
+    await testInfo.attach("review-rating-edit", { body: JSON.stringify(timeline, null, 2), contentType: "application/json" });
+  }
+});

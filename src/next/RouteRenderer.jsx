@@ -6,6 +6,7 @@ export default async function RouteRenderer({
   searchParams,
   initialHomeData = null,
   initialRouteData = null,
+  routeJsonLd = null,
   notFound = false,
   entry: Entry = LegacyRoutePage,
 }) {
@@ -19,6 +20,7 @@ export default async function RouteRenderer({
         searchParams={resolvedSearchParams}
         initialHomeData={initialHomeData}
         initialRouteData={initialRouteData}
+        routeJsonLd={routeJsonLd}
         notFound={notFound}
       />
     </>

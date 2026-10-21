@@ -331,8 +331,25 @@ const buildServiceNode = (catalog) => ({
   ...(catalog ? { hasOfferCatalog: { "@id": catalog["@id"] } } : {}),
 });
 
-const buildHomePageJsonLd = (hero = HOME_COPY.hero, packages = []) => {
+const buildReviewRating = (reviews = []) => {
+  const ratings = (Array.isArray(reviews) ? reviews : [])
+    .map((review) => review?.rating)
+    .filter((rating) => Number.isInteger(rating) && rating >= 1 && rating <= 5);
+  if (!ratings.length) return null;
+  const total = ratings.reduce((sum, rating) => sum + rating, 0);
+  return {
+    "@type": "AggregateRating",
+    itemReviewed: { "@id": `${siteUrl}/#pc-game-optimization-service` },
+    ratingValue: Math.round((total / ratings.length) * 100) / 100,
+    ratingCount: ratings.length,
+    bestRating: 5,
+    worstRating: 1,
+  };
+};
+
+const buildHomePageJsonLd = (hero = HOME_COPY.hero, packages = [], reviews = []) => {
   const catalog = buildOfferCatalog(packages);
+  const rating = buildReviewRating(reviews);
   return {
     "@context": "https://schema.org",
     "@graph": [
@@ -365,6 +382,7 @@ const buildHomePageJsonLd = (hero = HOME_COPY.hero, packages = []) => {
       },
       buildServiceNode(catalog),
       ...(catalog ? [catalog] : []),
+      ...(rating ? [rating] : []),
     ],
   };
 };
