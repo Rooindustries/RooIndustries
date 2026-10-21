@@ -39,6 +39,7 @@ A file is a money path when a payment, booking, hold, price, discount, referral 
 - `app/api/payment/`, `app/api/holdSlot/`, `app/api/releaseHold/`, `app/api/ref/`, `app/api/admin/referral-creators/`
 - `src/server/api/payment/`, `src/server/booking/`, `src/server/api/ref/`, `src/server/referrals/`
 - `src/server/commerce/`, `src/server/data/documentClient.js`, `src/server/supabase/` (the stores those decisions read and write)
+- `src/lib/cms/contentSchema.js`, `src/lib/cms/contentPreservation.js`, `src/server/cms/`, `app/api/admin/content/` (coupon validation and publishing can change checkout pricing and coupon capacity)
 - `src/lib/packagePricing.js`, `src/lib/checkoutStorage.js`, `src/lib/checkoutCodes.js`, `src/lib/salesAttribution.ts`, `src/lib/useUpgradeEligibility.js`
 - `src/components/BookingForm.jsx`, `BookingModal.jsx`, `Packages.jsx`, `Payment.jsx`, `PaymentSuccess.jsx`, `ReservationBanner.jsx`, `UpgradeLink.jsx`, `UpgradeXoc.jsx`, `RefDashboard.jsx`
 - `src/components/admin/ReferralCreatorEditor.jsx`, `src/components/admin/referralDraftStore.js`
