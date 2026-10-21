@@ -44,7 +44,7 @@ export function scrubText(text) {
     }
     if (decoded !== match[0]) {
       const rawQuery = match[0].matchAll(QUERY).next().value;
-      if (decoded.match(QUERY) && [...match[0].matchAll(/%3f/gi)].some(query => !rawQuery || query.index < rawQuery.index || query.index >= rawQuery.index + rawQuery[0].length)) ranges.push({ start: match.index, end: match.index + match[0].length, marker: '[query]', priority: 2 });
+      if ([...match[0].matchAll(/%3f/gi)].some(query => !rawQuery || query.index < rawQuery.index || query.index >= rawQuery.index + rawQuery[0].length)) ranges.push({ start: match.index, end: match.index + match[0].length, marker: '[query]', priority: 2 });
       if (decoded.match(CARD)) ranges.push({ start: match.index, end: match.index + match[0].length, marker: "[card]", priority: 3 });
       if (/\/\/[^\s/?#"<>]*@/.test(decoded)) ranges.push({ start: match.index, end: match.index + match[0].length, marker: "[Filtered]", priority: 4 });
     }

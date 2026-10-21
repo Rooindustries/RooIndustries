@@ -32,6 +32,7 @@ export const surfaceCases = [
   ['4111+1111+1111+1111', '[card]', 'http://localhost/api/x/[card]', 'keep'],
   ['4111%2B1111%2B1111%2B1111', '[card]', '[card]', 'keep'],
   [new URLSearchParams({ pan: '4111 1111 1111 1111' }).toString(), 'pan=[card]', 'http://localhost/api/x/pan=[card]', 'keep'],
+  ...['%27', '%22', '%23', '%20', '%3C', '%3E', '%09', '%0A'].map(stop => [`https://host/path%3F${stop}secret`, '[query]', '[query]', '[Filtered]']),
 ];
 export const plusRun = '1+'.repeat(8000) + '1';
 export const querySegments = ['https://example.test/cb?next=https%3A%2F%2Fx.test%2Fcb%3Ftoken%3Dinner"tail%3Ftoken%3Douter', 'lookup?x"callback%3Ftoken%3Douter'];
