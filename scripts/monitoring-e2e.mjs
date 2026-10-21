@@ -7,6 +7,7 @@ import { gunzipSync } from 'node:zlib';
 import { isDeepStrictEqual } from 'node:util';
 import { installNetworkGuard, refuseEnvFiles } from './lib/test-target-safety.mjs';
 import { checkBrowserBootstrap } from './monitoring-bootstrap-e2e.mjs';
+import { normalizedCards, normalizedEmails, separatorRuns, releaseSha, samplingId } from './monitoring-recognizer-cases.mjs';
 
 refuseEnvFiles();
 const require = createRequire(import.meta.url);
@@ -165,15 +166,18 @@ const api = http.createServer(async (request, response) => {
         scope.setExtra('ordering_examples', ['what?4111 1111 1111 1111', 'lookup?n=4242 4242 4242 4242', 'a@b.4111 1111 1111 1111']);
         scope.setExtra('identifier_examples', ['card_4111111111111111', 'x4111111111111111y', '4111111111111111_suffix', 'card_4111-1111-1111-1111', 'pan4111 1111 1111 1111end', '🔒x4111 1111 1111 1111y', '41111111111111111225', '４１１１１１１１１１１１１１１１', '٤١١١١١١١١١١١١١١١']);
         scope.setExtra('encoded_examples', ['buyer%40example.com', '/api/x/buyer%40example.com', 'buyer%40example%2Ecom']);
+        scope.setExtra('normalized_values', { forms: normalizedCards, texts: normalizedEmails, urls: ["http://u:it's@localhost/x", encodeURIComponent("http://u:it's@localhost/x")] });
+        scope.setExtra('normalized_keys', { [normalizedCards[0]]: 'digits', ['a@b%2F.c']: 'contact' });
         scope.setExtra('probe_x4111111111111111y', 'keep');
         scope.setExtra('event_id', 'a1234567890123' + 'b'.repeat(18));
         scope.addBreadcrumb({ category: 'navigation', data: { from: '/api/x/buyer%40example.com', to: '/api/x/buyer%40example%2Ecom' } });
+        scope.addBreadcrumb({ category: 'navigation', data: { label: 'normalized', from: '/api/x/a%40b%2F.c', to: `/api/x/${normalizedCards[1]}` } });
         scope.addEventProcessor(event => ({
           ...event,
           event_id: 'a1234567890123' + 'b'.repeat(18),
           request: { ...event.request, headers: { 'User-Agent': 'fixture-agent', 'user-agent': 'fixture-agent-lower', Authorization: 'fixture-authorization' } },
           contexts: { ...event.contexts, trace: { trace_id: '0123456789abcdef0123456789abcdef', span_id: '1234567890123456', parent_span_id: '2345678901234567' } },
-          exception: { ...event.exception, values: event.exception?.values?.map(value => ({ ...value, stacktrace: { ...value.stacktrace, frames: [...value.stacktrace?.frames ?? [], { function: 'fixtureCredentials', filename: 'http://fixture-user:fixture-secret@localhost/script.js?token=fixture-url' }, { function: 'fixtureScoped', filename: 'file:///app/node_modules/@sentry/core/build/esm/index.js', module: '@sentry/core' }, { function: 'fixtureVite', filename: '/@fs/source/app.js', abs_path: '/@vite/client.js' }] } })) },
+          exception: { ...event.exception, values: event.exception?.values?.map(value => ({ ...value, stacktrace: { ...value.stacktrace, frames: [...value.stacktrace?.frames ?? [], { function: 'fixtureCredentials', filename: 'http://fixture-user:fixture-secret@localhost/script.js?token=fixture-url' }, { function: 'fixtureScoped', filename: 'file:///app/node_modules/@sentry/core/build/esm/index.js', module: '@sentry/core' }, { function: 'fixtureVite', filename: '/@fs/source/app.js', abs_path: '/@vite/client.js' }, { function: 'fixtureNormalizedContact', filename: 'http://localhost/api/x/a%40b%2F.c' }, { function: 'fixtureNormalizedCard', filename: `http://localhost/api/x/${normalizedCards[1]}.js` }, { function: 'fixtureQuotedCredentials', filename: "http://u:it's@localhost/script.js" }] } })) },
         }));
         sdk.captureException(new Error('Fixture SDK buyer@example.com 4242424242424242 play?token=fixture-private-query ?token=fixture-query-only'));
       });
@@ -324,6 +328,9 @@ try {
   await fetch(`${origin}/sdk`);
   sdk.captureEvent({ message: 'Fixture private release', release: 'buyer@example.com' });
   sdk.captureEvent({ message: 'Fixture card release', release: 'rooindustries@4242.4242.4242-4242' });
+  for (const [name, value] of [['contact', 'a%40b%2F.c'], ['PAN', normalizedCards[1]]]) sdk.captureEvent({ message: `Fixture normalized request ${name}`, request: { method: 'GET', url: `http://localhost/api/x/${value}` } });
+  sdk.captureEvent({ message: `Fixture normalized text ${normalizedCards[0]} a@b%2F.c` });
+  sdk.captureEvent({ message: 'Fixture SHA release', release: releaseSha, sdkProcessingMetadata: { dynamicSamplingContext: { trace_id: samplingId, public_key: sdk.getClient().getDsn().publicKey } }, extra: { separator_runs: separatorRuns, generic_reference: releaseSha } });
   await sdk.flush(5000);
   const sdkCpu = process.cpuUsage(cpuBefore);
   const sdkCpuMs = (sdkCpu.user + sdkCpu.system) / 1000;
@@ -343,6 +350,20 @@ try {
   check('overlapping email, card and query ranges leave no fragments', reported?.event.extra?.ordering_examples, ['what?[query]', 'lookup?[query]', '[email]']);
   check('identifier-adjacent card values and decimal variants are scrubbed', reported?.event.extra?.identifier_examples, ['card_[card]', 'x[card]y', '[card]_suffix', 'card_[card]', 'pan[card]end', '🔒x[card]y', '[card]', '[card]', '[card]']);
   check('percent-encoded email tokens are scrubbed', reported?.event.extra?.encoded_examples, Array(3).fill('[email]'));
+  check('encoded, Unicode and multiple-separator cards are scrubbed', reported?.event.extra?.normalized_values?.forms, Array(normalizedCards.length).fill('[card]'));
+  check('accepted raw and encoded contact forms remain private', reported?.event.extra?.normalized_values?.texts, Array(normalizedEmails.length).fill('[email]'));
+  check('raw and encoded apostrophe credentials are scrubbed', reported?.event.extra?.normalized_values?.urls, ['http://localhost/x', '[Filtered]']);
+  check('normalized metadata keys retain only safe labels', reported?.event.extra?.normalized_keys, { '[card]': 'digits', '[email]': 'contact' });
+  check('normalized navigation values are scrubbed', reported?.event.breadcrumbs?.find(item => item.data?.label === 'normalized')?.data, { label: 'normalized', from: '[email]', to: '[card]' });
+  check('normalized contacts and cards leave no raw SDK envelope fragments', [...normalizedCards, ...normalizedEmails].some(value => reported.raw.includes(value)), false);
+  const normalizedFrames = reported?.event.exception?.values?.[0]?.stacktrace?.frames ?? [];
+  check('normalized frame paths are scrubbed without dropping credential-free callsites', ['fixtureNormalizedContact', 'fixtureNormalizedCard', 'fixtureQuotedCredentials'].map(name => normalizedFrames.find(frame => frame.function === name)?.filename), ['[email]', '[card]', 'http://localhost/script.js']);
+  check('actual SDK request paths scrub separator contacts and encoded cards', ['contact', 'PAN'].map(name => events().find(item => item.event.message === `Fixture normalized request ${name}`)?.event.request?.url), ['[email]', '[card]']);
+  check('actual SDK messages scrub normalized sensitive values', events().some(item => item.event.message === 'Fixture normalized text [card] [email]'), true);
+  const shaItem = events().find(item => item.event.message === 'Fixture SHA release');
+  check('root SHA release and semantic DSC identity survive', [shaItem?.event.release, JSON.parse(shaItem?.raw.split('\n')[0] ?? '{}').trace?.trace_id], [releaseSha, samplingId]);
+  check('generic SHA-looking customer metadata is not exempt', shaItem?.event.extra?.generic_reference, 'a[card]' + 'b'.repeat(26));
+  check('16KiB separator runs retain diagnostics', shaItem?.event.extra?.separator_runs, separatorRuns);
   check('encoded navigation paths lose contact data', reported?.event.breadcrumbs?.find(item => item.category === 'navigation')?.data, { from: '[email]', to: '[email]' });
   check('identifier-adjacent metadata keys are scrubbed', [reported?.event.extra?.['probe_x[card]y'], 'probe_x4111111111111111y' in (reported?.event.extra ?? {})], ['keep', false]);
   check('root event identifiers and envelope headers keep the same valid identity', [reported?.event.event_id, JSON.parse(reported.raw.split('\n')[0]).event_id], Array(2).fill('a1234567890123' + 'b'.repeat(18)));

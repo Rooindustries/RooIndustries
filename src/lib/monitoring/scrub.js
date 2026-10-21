@@ -1,4 +1,5 @@
-const CARD = /(^|[^\p{Nd}])(\p{Nd}(?:[\s._-]?\p{Nd}){12,})/gu;
+const CARD = /(^|[^\p{Nd}])(\p{Nd}(?:[\s\p{Pd}\u2212\u00B7\u30FB\uFF0E._]{0,3}\p{Nd}){12,})/gu;
+const UTF8 = new TextDecoder();
 const QUERY = /\?[^\s#"'<>]+/g;
 const SENSITIVE_KEY =
   /pass|token|secret|cookie|session|auth|signature|email|phone|address|card|cvv|cvc|iban|upi|vpa|billing|payment|customer/i;
@@ -22,21 +23,33 @@ export const NO_DATA_COLLECTION = {
 export function scrubText(text) {
   const ranges = [];
   for (const match of text.matchAll(/\S+/g)) {
-    const token = match[0].replace(/%[0-9a-f]{2}/gi, value => String.fromCharCode(Number.parseInt(value.slice(1), 16)));
-    let dot = token.length;
-    let separator = token.length;
-    for (let i = token.length - 1; i > 0; i--) {
-      if (token[i] === "/" || token[i] === "\\") separator = i;
-      else if (token[i] === ".") dot = i;
-      else if (token[i] === "@" && dot > i + 1 && dot < separator && dot < token.length - 1) {
-        ranges.push({ start: match.index, end: match.index + match[0].length, marker: "[email]", priority: 0 });
-        break;
+    const decoded = match[0].replace(/(?:%[0-9a-f]{2})+/gi, value => UTF8.decode(Uint8Array.from(value.match(/%../g), byte => Number.parseInt(byte.slice(1), 16))));
+    for (const token of decoded === match[0] ? [match[0]] : [match[0], decoded]) {
+      const authority = token.match(/^(?:[a-z][a-z0-9+.-]*:)?\/\/[^\s/?#"<>]*@/i);
+      const lastDot = token.lastIndexOf(".", token.length - 2);
+      let dot = token.length;
+      let separator = token.length;
+      for (let i = token.length - 1; i > 0; i--) {
+        if (token[i] === "/" || token[i] === "\\") separator = i;
+        else if (token[i] === ".") dot = i;
+        else if (token[i] === "@" && (!authority || i >= authority[0].length)) {
+          const local = token[i - 1] !== "/" && token[i - 1] !== "\\";
+          const domainDot = local ? lastDot : dot;
+          if (domainDot > i + 1 && domainDot < token.length - 1 && (local || dot < separator)) {
+            ranges.push({ start: match.index, end: match.index + match[0].length, marker: "[email]", priority: 0 });
+            break;
+          }
+        }
       }
+    }
+    if (decoded !== match[0]) {
+      if (decoded.match(CARD)) ranges.push({ start: match.index, end: match.index + match[0].length, marker: "[card]", priority: 3 });
+      if (/\/\/[^\s/?#"<>]*@/.test(decoded)) ranges.push({ start: match.index, end: match.index + match[0].length, marker: "[Filtered]", priority: 4 });
     }
   }
   for (const match of text.matchAll(CARD)) ranges.push({ start: match.index + match[1].length, end: match.index + match[0].length, marker: "[card]", priority: 3 });
   for (const match of text.matchAll(QUERY)) ranges.push({ start: match.index + 1, end: match.index + match[0].length, marker: "[query]", priority: 2 });
-  for (const match of text.matchAll(/\/\/[^\s/?#"'<>]*@/g)) ranges.push({ start: match.index + 2, end: match.index + match[0].length, marker: "", priority: 4 });
+  for (const match of text.matchAll(/\/\/[^\s/?#"<>]*@/g)) ranges.push({ start: match.index + 2, end: match.index + match[0].length, marker: "", priority: 4 });
   ranges.sort((a, b) => a.start - b.start || b.end - a.end);
   const merged = [];
   for (const range of ranges) {
@@ -65,13 +78,14 @@ function scrubValue(value, depth = 0, path = []) {
   if (depth > 6) return "[Filtered]";
   if (Array.isArray(value)) return value.map((item, index) => scrubValue(item, depth + 1, [...path, index]));
   const trace = path.length === 2 && (path[0] === "contexts" && path[1] === "trace" || path[0] === "spans" && typeof path[1] === "number");
+  const dynamicSampling = path.length === 2 && path[0] === "sdkProcessingMetadata" && path[1] === "dynamicSamplingContext";
   return Object.fromEntries(Object.entries(value).filter(([key]) => !["headers", "user_agent.original"].includes(key.toLowerCase())).map(([key, item]) => {
     const eventId = path.length === 0 && key === "event_id" && typeof item === "string" && /^[0-9a-f]{32}$/i.test(item);
     const identifier = trace && typeof item === "string" && (
       (key === "span_id" || key === "parent_span_id") && /^[0-9a-f]{16}$/i.test(item) ||
       key === "trace_id" && /^[0-9a-f]{32}$/i.test(item)
-    );
-    const release = path.length === 0 && key === "release" && typeof item === "string" && VERSIONED_RELEASE.test(item) && item.replace(CARD, "[card]") === item;
+    ) || dynamicSampling && key === "trace_id" && typeof item === "string" && /^[0-9a-f]{32}$/i.test(item);
+    const release = path.length === 0 && key === "release" && typeof item === "string" && (VERSIONED_RELEASE.test(item) && item.replace(CARD, "[card]") === item || /^(?=[0-9a-f]*[a-f])[0-9a-f]{40}$/i.test(item));
     return [scrubText(key), eventId || identifier || release ? item : SENSITIVE_KEY.test(key) || NAME_KEY.test(key) ? "[Filtered]" : scrubValue(item, depth + 1, [...path, key])];
   }));
 }
