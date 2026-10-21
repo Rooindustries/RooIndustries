@@ -160,11 +160,21 @@ all_pages() {
   done
   return 1
 }
+issue_args() {
+  jq -nc --arg id "$1" '{id:$id,fields:["id","uuid","description","projectId","teamId","parentId","status","statusType","archivedAt","createdAt","updatedAt","url"]}'
+}
 root_issue=$(linear_call get_issue '{"id":"ROO-498"}') || fail linear_unavailable
 printf '%s' "$root_issue" | jq_module -e 'include "reconcile-linear"; root_scope' >/dev/null || fail linear_scope_invalid
 issues_args=$(jq_module -nc 'include "reconcile-linear"; scope | {parentId,project:.projectId,team:.teamId,limit:100,includeArchived:true,fields:["id","uuid","description","projectId","teamId","parentId","status","statusType","archivedAt","createdAt","updatedAt","url"]}')
-all_pages list_issues "$issues_args" issues > "$work/issues.json" || fail linear_pagination_invalid
-jq_module -e 'include "reconcile-linear"; all(.[];issue_scope)' "$work/issues.json" >/dev/null || fail linear_scope_invalid
+all_pages list_issues "$issues_args" issues > "$work/listed-issues.json" || fail linear_pagination_invalid
+jq_module -e 'include "reconcile-linear"; all(.[];issue_scope)' "$work/listed-issues.json" >/dev/null || fail linear_scope_invalid
+printf '[]\n' > "$work/issues.json"
+while IFS= read -r issue_id; do
+  linear_call get_issue "$(issue_args "$issue_id")" > "$work/canonical-issue.json" || fail linear_scope_invalid
+  jq_module -e --arg id "$issue_id" 'include "reconcile-linear"; issue_scope and .uuid==$id' "$work/canonical-issue.json" >/dev/null || fail linear_scope_invalid
+  jq -c --slurpfile issue "$work/canonical-issue.json" '.+$issue' "$work/issues.json" > "$work/next.json"
+  mv "$work/next.json" "$work/issues.json"
+done < <(jq -r '.[].uuid' "$work/listed-issues.json")
 jq_module -c 'include "reconcile-linear"; [.[]|owned_issue]' "$work/issues.json" > "$work/owned.json" || fail linear_identity_invalid
 jq -c 'map(.url)|unique' "$work/owned.json" > "$work/urls.json"
 jq '[.[]|{uuid,statusType,archivedAt}]' "$work/owned.json" > "$work/verified.json"
@@ -255,20 +265,19 @@ while IFS= read -r action; do
   primary=$(printf '%s' "$action" | jq -r .primary)
   comment_id=$(printf '%s' "$issue" | jq -r '.commentId // ""')
   if [[ "$issue" == null ]]; then
-    args=$(jq_module -nc --arg key "$primary" --arg updateURL "$update_url" 'include "reconcile-linear"; {
+    args=$(jq_module -nc --arg key "$primary" 'include "reconcile-linear"; {
       title:("Resolve payment reconciliation: "+$key),team:scope.teamId,project:scope.projectId,parentId:scope.parentId,
       assignee:"me",priority:1,state:"Backlog",
-      description:("**Goal**: Resolve this payment, booking or referral-credit mismatch.\n\n**Done when**: The read-only payment audit confirms this entity is consistent.\n\n**Evidence**:\nReconciliation key: "+$key+"\nDaily report: "+$updateURL+"\n\n**Constraints**: Keep payment and booking data unchanged. Investigate in fixtures or test mode; do not issue refunds or alter customer prices.\n\nSession: RooIndustries payment reconciliation")}')
-    expected_description=$(printf '%s' "$args" | jq -r .description)
+      description:("**Goal**: Resolve this payment, booking or referral-credit mismatch.\n\n**Done when**: The read-only payment audit confirms this entity is consistent.\n\n**Evidence**: Current evidence lives in the reconciliation status comment.\n\nReconciliation key: "+$key+"\n\n**Constraints**: Keep payment and booking data unchanged. Investigate in fixtures or test mode; do not issue refunds or alter customer prices.\n\nSession: RooIndustries payment reconciliation")}')
     created=$(linear_call save_issue "$args") || fail linear_issue_unverified
-    printf '%s' "$created" | jq_module -e 'include "reconcile-linear"; issue_scope' >/dev/null || fail linear_issue_unverified
+    printf '%s' "$created" | jq_module -e 'include "reconcile-linear"; .uuid|uuid' >/dev/null || fail linear_issue_unverified
     issue_id=$(printf '%s' "$created" | jq -r .uuid)
-    get_args=$(jq -nc --arg id "$issue_id" '{id:$id}')
+    get_args=$(issue_args "$issue_id")
     issue=$(linear_call get_issue "$get_args") || fail linear_issue_unverified
-    printf '%s' "$issue" | jq_module -e --arg id "$issue_id" --arg key "$primary" --arg description "$expected_description" 'include "reconcile-linear"; issue_scope and .uuid==$id and .description==$description and .status=="Backlog" and ([(owned_issue|.primary)]==[$key])' >/dev/null || fail linear_issue_unverified
+    printf '%s' "$issue" | jq_module -e --arg id "$issue_id" --arg key "$primary" 'include "reconcile-linear"; issue_scope and .uuid==$id and .status=="Backlog" and ([(owned_issue|.primary)]==[$key])' >/dev/null || fail linear_issue_unverified
   fi
   issue_id=$(printf '%s' "$issue" | jq -r .uuid)
-  get_args=$(jq -nc --arg id "$issue_id" '{id:$id}')
+  get_args=$(issue_args "$issue_id")
   fresh=$(linear_call get_issue "$get_args") || fail linear_issue_unverified
   printf '%s' "$fresh" | jq_module -e --arg id "$issue_id" --arg key "$primary" \
     'include "reconcile-linear"; issue_scope and .uuid==$id and .archivedAt==null and ([(owned_issue|.primary)]==[$key])' >/dev/null || fail linear_issue_unverified
@@ -301,7 +310,7 @@ while IFS= read -r action; do
   if [[ -n "$change" ]]; then
     args=$(jq -nc --arg id "$issue_id" --arg state "$change" '{id:$id,state:$state}')
     linear_call save_issue "$args" >/dev/null || fail linear_issue_unverified
-    args=$(jq -nc --arg id "$issue_id" '{id:$id}')
+    args=$(issue_args "$issue_id")
     fresh=$(linear_call get_issue "$args") || fail linear_issue_unverified
     printf '%s' "$fresh" | jq_module -e --arg id "$issue_id" --arg state "$change" \
       'include "reconcile-linear"; issue_scope and .uuid==$id and .status==$state' >/dev/null || fail linear_issue_unverified
