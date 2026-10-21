@@ -1,4 +1,4 @@
-import { captureException, init } from "@sentry/nextjs";
+import { captureException, httpIntegration, init } from "@sentry/nextjs";
 import {
   NO_DATA_COLLECTION,
   envelopeHeaderScrubber,
@@ -18,16 +18,33 @@ export function startServerMonitoring(value) {
     traceLifecycle: "static",
     tracePropagationTargets: [],
     dataCollection: NO_DATA_COLLECTION,
+    integrations: (integrations) => [
+      ...integrations.filter((integration) => integration.name !== "ProcessSession"),
+      httpIntegration({ sessions: false, disableIncomingRequestSpans: true }),
+    ],
     beforeSend: scrubEvent,
     beforeSendTransaction: scrubEvent,
     beforeBreadcrumb: scrubBreadcrumb,
   });
   client?.on("beforeEnvelope", envelopeHeaderScrubber(client.getDsn()?.publicKey, monitoringEnvironment()));
   globalThis[Symbol.for("roo.reportServerError")] = (label, error, metadata) => {
-    const report = new Error(label);
-    report.name = metadata.name;
-    const frames = typeof error?.stack === "string" ? error.stack.split("\n").filter((line) => /^\s+at /.test(line)) : [];
-    report.stack = [`${report.name}: ${label}`, ...frames].join("\n");
-    captureException(report, { tags: { error_code: metadata.code, error_status: String(metadata.status) } });
+    try {
+      const message = label.split(": ", 1)[0];
+      const report = new Error(message);
+      report.name = metadata.name;
+      const frames = [];
+      try {
+        const stack = error?.stack;
+        const head = Error.prototype.toString.call(error);
+        if (typeof stack === "string" && stack.startsWith(`${head}\n`)) {
+          for (const line of stack.slice(head.length + 1).split("\n")) {
+            if (!/^\s+at /.test(line)) break;
+            frames.push(line);
+          }
+        }
+      } catch {}
+      report.stack = [`${report.name}: ${message}`, ...frames].join("\n");
+      captureException(report, { tags: { error_code: metadata.code, error_status: String(metadata.status) } });
+    } catch {}
   };
 }

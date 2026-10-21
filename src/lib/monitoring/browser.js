@@ -17,6 +17,7 @@ export function startBrowserMonitoring(value) {
     tunnel: "/api/client-report",
     tracePropagationTargets: [],
     dataCollection: NO_DATA_COLLECTION,
+    integrations: (integrations) => integrations.filter((integration) => integration.name !== "BrowserSession"),
     beforeSend: scrubEvent,
     beforeBreadcrumb: scrubBreadcrumb,
   });

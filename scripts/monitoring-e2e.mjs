@@ -30,6 +30,18 @@ let sdk;
 let reportError;
 let relay;
 let origin;
+const caughtCases = [
+  { name: 'bare', label: 'Fixture bare continuation', build: () => new Error('request failed\n    at fixture-private-bare') },
+  { name: 'frame', label: 'Fixture frame continuation', build: () => new Error('request failed\n    at fake (fixture-private-frame.invalid:42:7)') },
+  { name: 'subclass', label: 'Fixture named error', build: () => { const error = new Error('fixture-private-subclass'); error.name = 'FixtureError'; return error; } },
+  { name: 'changed', label: 'Fixture changed message', build: () => { const error = new Error('fixture-private-old-message'); void error.stack; error.message = 'fixture-private-new-message'; return error; }, emptyFrames: true },
+  { name: 'empty', label: 'Fixture empty message', build: () => new Error('') },
+  { name: 'cause', label: 'Fixture appended cause', build: () => { const error = new Error('fixture-private-cause-message'); error.stack += '\nCaused by: fixture-private-cause\n    at fake (fixture-private-cause.invalid:1:1)'; return error; } },
+  { name: 'paypal', label: 'Payment recovery requires owner review: paymentRecord.paypal.FIXTUREORDER123', prefix: 'Payment recovery requires owner review', build: () => new Error('fixture-private-paypal-message') },
+  { name: 'razorpay', label: 'Captured upgrade requires owner review: paymentRecord.razorpay.payment.FIXTUREPAY123', prefix: 'Captured upgrade requires owner review', build: () => new Error('fixture-private-razorpay-message') },
+  { name: 'getter', label: 'Fixture throwing stack', build: () => Object.defineProperty(new Error(), 'stack', { get() { throw new Error('fixture-private-getter'); } }), emptyFrames: true },
+  { name: 'string', label: 'Fixture thrown string', build: () => 'fixture-private-string', emptyFrames: true },
+];
 const check = (name, actual, expected) => {
   const ok = isDeepStrictEqual(actual, expected);
   checks.push({ name, ok, actual, expected });
@@ -68,10 +80,11 @@ const ingest = http.createServer((request, response) => {
 });
 const api = http.createServer(async (request, response) => {
   try {
-    if (request.url === '/caught') {
-      const error = new Error('hidden buyer@example.com 4242424242424242');
-      error.code = 'ECONNREFUSED';
-      reportError('Fixture caught failure', error);
+    if (request.url === '/caught' || request.url.startsWith('/caught?')) {
+      const fixture = caughtCases.find(item => item.name === new URL(request.url, origin).searchParams.get('case'));
+      const error = fixture ? fixture.build() : new Error('hidden buyer@example.com 4242424242424242');
+      if (error && typeof error === 'object') error.code = 'ECONNREFUSED';
+      reportError(fixture?.label || 'Fixture caught failure', error);
       response.writeHead(500);
       response.end('Unexpected server error.');
       return;
@@ -86,6 +99,10 @@ const api = http.createServer(async (request, response) => {
         scope.setExtra('reference', '4242 4242 4242 4243');
         scope.setExtra('4242-4242-4242-4243', 'card-shaped key');
         scope.setExtra('span_id', '4242424242424242');
+        scope.setExtra('release', 'buyer@example.com');
+        scope.setExtra('headers', { 'X-Fixture': 'fixture-extra-header' });
+        scope.setContext('fixture', { Headers: { 'X-Fixture': 'fixture-context-header' }, diagnostic: 'keep' });
+        scope.addBreadcrumb({ category: 'fixture', data: { HEADERS: { 'X-Fixture': 'fixture-breadcrumb-header' }, diagnostic: 'keep' } });
         scope.setExtra('diagnostic_values', Array(8).fill('a'.repeat(16000)));
         scope.setExtra('diagnostic_urls', ['http://fixture-user:fixture-secret@localhost/path?token=fixture-url', '//fixture-user:fixture-secret@localhost/path?token=fixture-url', 'http://localhost/path']);
         scope.setExtra('text_examples', ['@carol@example.com', '@team,john@example.com', 'δοκιμή@παράδειγμα.δοκιμή', 'foo/@bar.com', '4242\u00a04242\u00a04242\u00a04242', '4242\t4242\t4242\t4242', '4242.4242.4242.4242', '4242_4242_4242_4242']);
@@ -120,7 +137,8 @@ const dsn = `http://fixturekey@127.0.0.1:${ingest.address().port}/42`;
 const restoreGuard = installNetworkGuard([origin, ingestOrigin]);
 process.env.NEXT_PUBLIC_SENTRY_DSN = dsn;
 process.env.NEXT_RUNTIME = 'nodejs';
-process.env.SENTRY_RELEASE = 'monitoring-e2e';
+process.env.SENTRY_RELEASE = 'rooindustries@0.2.0';
+process.env.NEXT_PUBLIC_VERCEL_ENV = 'carol@example.invalid 4242-4242-4242-4242 ?token=fixture-env';
 
 try {
   sdk = await import('@sentry/nextjs');
@@ -130,6 +148,9 @@ try {
   const { startServerMonitoring } = await import('../src/lib/monitoring/server.js');
   ({ logSafeError: reportError } = await import('../src/server/safeErrorLog.js'));
   startServerMonitoring(dsn);
+  check('adverse environment is replaced before SDK initialization', sdk.getClient().getOptions().environment, 'unknown');
+  const { monitoringDsn } = await import('../src/lib/monitoring/scrub.js');
+  check('external HTTP is refused while external HTTPS and loopback HTTP remain valid', [monitoringDsn('http://fixturekey@public.invalid/42') ?? null, monitoringDsn('https://fixturekey@public.invalid/42'), monitoringDsn(dsn)], [null, 'https://fixturekey@public.invalid/42', dsn]);
   const envelope = (target, message) => `${JSON.stringify({ dsn: target })}\n{"type":"event"}\n${JSON.stringify({ message })}\n`;
   const post = (body, headers = {}) => fetch(`${origin}/api/client-report`, {
     method: 'POST',
@@ -185,8 +206,22 @@ try {
   const caughtResponse = await fetch(`${origin}/caught`);
   check('caught application failure keeps its status', caughtResponse.status, 500);
   check('caught application failure keeps its generic response', await caughtResponse.text(), 'Unexpected server error.');
+  for (const fixture of caughtCases) {
+    const response = await fetch(`${origin}/caught?case=${fixture.name}`);
+    check(`${fixture.name} keeps the generic caught response`, [response.status, await response.text()], [500, 'Unexpected server error.']);
+    await sdk.flush(5000);
+    const item = events().find(item => item.event.exception?.values?.[0]?.value === (fixture.prefix || fixture.label));
+    check(`${fixture.name} has the expected safe report`, Boolean(item), true);
+    if (item) {
+      const frames = item.event.exception?.values?.[0]?.stacktrace?.frames ?? [];
+      check(`${fixture.name} retains only unambiguous genuine frames`, fixture.emptyFrames ? frames.length : frames.some(frame => frame.filename?.includes('monitoring-e2e.mjs')), fixture.emptyFrames ? 0 : true);
+      check(`${fixture.name} has no private message or payment identifier in the envelope`, /fixture-private-|FIXTUREORDER123|FIXTUREPAY123/.test(item.raw), false);
+    }
+  }
   const cpuBefore = process.cpuUsage();
   await fetch(`${origin}/sdk`);
+  sdk.captureEvent({ message: 'Fixture private release', release: 'buyer@example.com' });
+  sdk.captureEvent({ message: 'Fixture card release', release: 'rooindustries@4242.4242.4242-4242' });
   await sdk.flush(5000);
   const sdkCpu = process.cpuUsage(cpuBefore);
   const sdkCpuMs = (sdkCpu.user + sdkCpu.system) / 1000;
@@ -215,6 +250,11 @@ try {
   check('16KiB tokens remain usable diagnostic data', reported?.event.extra?.diagnostic_values?.map?.(value => value.length), Array(8).fill(16000));
   check('16KiB tokens stay below 250ms of SDK CPU', sdkCpuMs < 250, true);
   check('stack frames remain available', Boolean(reported?.event.exception?.values?.[0]?.stacktrace?.frames?.length), true);
+  check('SDK release identity survives without exempting customer metadata', [reported?.event.release, reported?.event.extra?.release], ['rooindustries@0.2.0', '[email]']);
+  check('semantic release handling still scrubs private and card-shaped root values', events().filter(item => item.event.message === 'Fixture private release' || item.event.message === 'Fixture card release').map(item => item.event.release), ['[email]', '[email]']);
+  check('nested headers are excluded without losing adjacent diagnostics', [reported?.event.extra?.headers ?? null, reported?.event.contexts?.fixture, reported?.event.breadcrumbs?.find(crumb => crumb.category === 'fixture')?.data], [null, { diagnostic: 'keep' }, { diagnostic: 'keep' }]);
+  check('metadata and nested header sentinels appear nowhere in captured SDK envelopes', received.filter(item => /fixture-env|carol@example.invalid|fixture-extra-header|fixture-context-header|fixture-breadcrumb-header/.test(item.body)).length, 0);
+  check('errors and traces do not send automatic session aggregates', received.flatMap(item => item.body.split('\n').filter(Boolean).filter((line, index) => index % 2 === 1).map(line => JSON.parse(line).type)).filter(type => type === 'session' || type === 'sessions').length, 0);
   check('private values appear nowhere in SDK envelope', ['buyer@example.com', '4242424242424242', '4242 4242 4242 4243', '4242-4242-4242-4243', 'fixture-private-cvv', 'fixture-private-payment-id', 'fixture-private-query', 'fixture-query-only', 'fixture-user', 'fixture-secret', 'fixture-url', 'fixture-agent', 'fixture-authorization', 'carol@example.com', 'john@example.com', 'δοκιμή@παράδειγμα.δοκιμή'].filter(value => reported?.raw.includes(value)), []);
   await sdk.close(5000);
   const { register } = await import('../instrumentation.js');

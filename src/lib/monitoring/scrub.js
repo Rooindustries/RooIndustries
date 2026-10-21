@@ -3,6 +3,7 @@ const QUERY = /\?[^\s#"'<>]+/g;
 const SENSITIVE_KEY =
   /pass|token|secret|cookie|session|auth|signature|email|phone|address|card|cvv|cvc|iban|upi|vpa|billing|payment|customer/i;
 const NAME_KEY = /^(?:full|first|last|display|customer|user)_?name$|^handle$|discord/i;
+const VERSIONED_RELEASE = /^(?:@[\w.-]+\/)?[\w.-]+@v?\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/;
 
 export const NO_DATA_COLLECTION = {
   userInfo: false,
@@ -41,12 +42,13 @@ function scrubValue(value, depth = 0, path = []) {
   if (depth > 6) return "[Filtered]";
   if (Array.isArray(value)) return value.map((item, index) => scrubValue(item, depth + 1, [...path, index]));
   const trace = path.length === 2 && (path[0] === "contexts" && path[1] === "trace" || path[0] === "spans" && typeof path[1] === "number");
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => key.toLowerCase() !== "headers").map(([key, item]) => {
     const identifier = trace && typeof item === "string" && (
       (key === "span_id" || key === "parent_span_id") && /^[0-9a-f]{16}$/i.test(item) ||
       key === "trace_id" && /^[0-9a-f]{32}$/i.test(item)
     );
-    return [scrubText(key), identifier ? item : SENSITIVE_KEY.test(key) || NAME_KEY.test(key) ? "[Filtered]" : scrubValue(item, depth + 1, [...path, key])];
+    const release = path.length === 0 && key === "release" && typeof item === "string" && VERSIONED_RELEASE.test(item) && item.replace(CARD, "[card]") === item;
+    return [scrubText(key), identifier || release ? item : SENSITIVE_KEY.test(key) || NAME_KEY.test(key) ? "[Filtered]" : scrubValue(item, depth + 1, [...path, key])];
   }));
 }
 
@@ -88,14 +90,15 @@ export function scrubEvent(event) {
   return scrubValue(event);
 }
 
-export function monitoringEnvironment() {
-  return process.env.NEXT_PUBLIC_VERCEL_ENV || process.env.VERCEL_ENV || process.env.NODE_ENV;
+export function monitoringEnvironment(value = process.env.NEXT_PUBLIC_VERCEL_ENV || process.env.VERCEL_ENV || process.env.NODE_ENV || "production") {
+  return /^[A-Za-z0-9_.-]{1,64}$/.test(value) && value !== "None" && scrubText(value) === value ? value : "unknown";
 }
 
 export function monitoringDsn(value) {
   try {
     const url = new URL(value);
-    if (!["http:", "https:"].includes(url.protocol) || !/^\w+$/.test(url.username) || !/\/\d+$/.test(url.pathname) || url.search || url.hash) return undefined;
+    const loopbackHttp = url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    if ((url.protocol !== "https:" && !loopbackHttp) || !/^\w+$/.test(url.username) || !/\/\d+$/.test(url.pathname) || url.search || url.hash) return undefined;
     url.password = "";
     return url.href;
   } catch {
@@ -109,7 +112,7 @@ export function envelopeHeaderScrubber(publicKey, environment) {
     if (!header?.trace) return;
     const traceId = header.trace.trace_id;
     if (publicKey && typeof traceId === "string" && /^[0-9a-f]{32}$/.test(traceId)) {
-      header.trace = { trace_id: traceId, public_key: publicKey, ...(environment ? { environment } : {}) };
+      header.trace = { trace_id: traceId, public_key: publicKey, ...(environment ? { environment: monitoringEnvironment(environment) } : {}) };
     } else {
       delete header.trace;
     }
