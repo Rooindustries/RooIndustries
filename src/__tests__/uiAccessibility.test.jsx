@@ -136,7 +136,7 @@ describe("UI accessibility regressions", () => {
       },
     ]);
 
-    render(<Benchmarks />);
+    render(<MemoryRouter><Benchmarks /></MemoryRouter>);
     const openButton = await screen.findByRole("button", {
       name: "Open Example system benchmark before optimization",
     });
@@ -218,7 +218,7 @@ describe("UI accessibility regressions", () => {
       },
     ]);
 
-    render(<Tools />);
+    render(<MemoryRouter><Tools /></MemoryRouter>);
     const downloadButton = await screen.findByRole("button", {
       name: "Download",
     });
