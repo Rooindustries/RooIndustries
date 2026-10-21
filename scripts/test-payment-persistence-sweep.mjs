@@ -706,6 +706,187 @@ try{
     amount: '999',
     currency: 'USD',
   });
+  const zeroCommissionFixture = async (bookingChanges = {}, percent = 0.04) => {
+    const { resolveBookingPricing } = await import('../src/server/api/ref/pricing.js');
+    const quote = await resolveBookingPricing({
+      packageTitle: 'Vertex Essentials',
+      paymentProvider: 'dodo',
+      client: commerce,
+      pricingInputs: {
+        packageDoc: { _id: 'package.zero-commission', title: 'Vertex Essentials', price: '$9.99' },
+        referralDoc: {
+          _id: 'referral.correct',
+          slug: { current: 'creator-correct' },
+          currentCommissionPercent: percent,
+          currentDiscountPercent: 0,
+        },
+        couponDoc: null,
+      },
+    });
+    assert.equal(quote.effectiveGrossAmount, 9.99);
+    assert.equal(quote.effectiveNetAmount, 9.99);
+    assert.equal(quote.effectiveCommissionPercent, percent);
+    assert.equal(quote.commissionAmount, 0);
+    assert.equal(quote.effectiveReferralId, 'referral.correct');
+    assert.equal(quote.effectiveReferralCode, 'creator-correct');
+    await seed('dodo', bookingChanges.status === 'refunded' ? 'refunded' : 'booked', dodoBooking({
+      grossAmount: quote.effectiveGrossAmount,
+      netAmount: quote.effectiveNetAmount,
+      commissionAmount: quote.commissionAmount,
+      commissionPercent: quote.effectiveCommissionPercent,
+      referralCode: quote.effectiveReferralCode,
+      referral: { _type: 'reference', _ref: quote.effectiveReferralId },
+      ...bookingChanges,
+    }, { pricingSnapshot: {
+      grossAmount: quote.effectiveGrossAmount,
+      netAmount: quote.effectiveNetAmount,
+      commissionAmount: quote.commissionAmount,
+      commissionPercent: quote.effectiveCommissionPercent,
+      effectiveReferralCode: quote.effectiveReferralCode,
+      effectiveReferralId: quote.effectiveReferralId,
+    } }));
+    dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+    dodoList = [dodoSummary()];
+    return quote;
+  };
+  await run('reconcile-report-unrefunded-zero-commission-consumer', async () => {
+    const quote = await zeroCommissionFixture();
+    const secondRecordId = 'paymentRecord.zero-two';
+    const secondBookingId = 'booking.zero-two';
+    const secondPaymentId = 'payment-zero-two';
+    const secondOrderId = 'order-zero-two';
+    const { _id: firstBookingId, _rev: bookingRevision, ...bookingCopy } = (await row(bookingId)).payload;
+    await commerce.create({
+      ...bookingCopy,
+      _id: secondBookingId,
+      paymentRecordId: secondRecordId,
+      dodoPaymentId: secondPaymentId,
+      dodoCheckoutSessionId: secondOrderId,
+    });
+    const { _id: firstRecordId, _rev: recordRevision, ...recordCopy } = await record();
+    await commerce.create({
+      ...recordCopy,
+      _id: secondRecordId,
+      bookingId: secondBookingId,
+      providerPaymentId: secondPaymentId,
+      providerOrderId: secondOrderId,
+      providerIdempotencyKey: 'zero-two-key',
+      sessionScope: 'zero-two-session',
+    });
+    await commerce.patch(bookingId).set({ paymentRecordId: recordId }).commit();
+    await commerce.patch(secondBookingId).set({ paymentRecordId: secondRecordId }).commit();
+    const secondPayment = {
+      ...dodoPayment,
+      payment_id: secondPaymentId,
+      checkout_session_id: secondOrderId,
+      metadata: { paymentRecordId: secondRecordId },
+    };
+    providerHook = (request, req, res) => {
+      if (request.path !== `/payments/${secondPaymentId}`) return;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(secondPayment));
+      return true;
+    };
+    dodoList = [dodoSummary(), dodoSummary(secondPayment)];
+    const nativeBookings = await sql`select legacy_sanity_id,payment_record_id,booking_payload from commerce.bookings order by legacy_sanity_id`;
+    const nativeRecords = await sql`select id,legacy_sanity_id from commerce.payment_records order by legacy_sanity_id`;
+    const recordIdentities = new Map(nativeRecords.map((payment) => [payment.id, payment.legacy_sanity_id]));
+    assert.equal(nativeBookings.length, 2);
+    assert.equal(nativeRecords.length, 2);
+    assert.equal(new Set(nativeBookings.map((booking) => booking.payment_record_id)).size, 2);
+    for (const booking of nativeBookings) {
+      assert.ok(booking.payment_record_id);
+      assert.equal(recordIdentities.get(booking.payment_record_id), booking.booking_payload.paymentRecordId);
+      assert.equal(booking.booking_payload.commissionAmount, 0);
+      assert.equal(Object.hasOwn(booking.booking_payload, 'dodoOriginalCommissionAmount'), false);
+    }
+    const frozenRecords = [await record(), (await row(secondRecordId)).payload];
+    const frozenCommissionsSum = frozenRecords.reduce((sum, payment) => sum + payment.pricingSnapshot.commissionAmount, 0);
+    assert.equal(frozenCommissionsSum, 0);
+    const report = await authorizedReport('GET', true);
+    const earnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    assert.equal(report.status, 200, JSON.stringify(report.body));
+    assert.equal(earnings.total, 0.01, JSON.stringify(earnings));
+    for (const id of [bookingId, secondBookingId]) {
+      await commerce.patch(id).set({ dodoOriginalCommissionAmount: 0 }).commit();
+    }
+    const control = await authorizedReport('GET', true);
+    const controlEarnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    assert.equal(control.status, 200);
+    assert.equal(control.body.count, 0, JSON.stringify(control.body));
+    assert.deepEqual(control.body.items, []);
+    assert.equal(controlEarnings.total, 0, JSON.stringify(controlEarnings));
+    const proof = {
+      quote, frozenRecords, frozenCommissionsSum, nativeBookings, nativeRecords,
+      providerPayments: [dodoPayment, secondPayment], report, earnings, control, controlEarnings,
+      engine: JSON.parse(sourceText('node_modules/next/package.json')).version,
+      pricingSha256: crypto.createHash('sha256').update(sourceText('src/server/api/ref/pricing.js')).digest('hex'),
+    };
+    assert.deepEqual(report.body.items, [
+      { id: 'payment-fixture', ref: bookingId, amount: '9.99', currency: 'USD', reason: 'commission_mismatch' },
+      { id: secondPaymentId, ref: secondBookingId, amount: '9.99', currency: 'USD', reason: 'commission_mismatch' },
+    ], JSON.stringify(proof));
+    assert.equal(report.body.count, 2);
+    return proof;
+  });
+  for (const [name, status, dispute] of [
+    ['single', 'captured', null],
+    ['completed', 'completed', null],
+    ['resolved-dispute', 'captured', 'dispute_won'],
+  ]) {
+    await run(`reconcile-report-${name}-zero-commission-consumer`, async () => {
+      const quote = await zeroCommissionFixture({ status });
+      if (dispute) dodoPayment.disputes = [dodoDispute(dispute)];
+      const report = await expectReport(['commission_mismatch']);
+      const earnings = await commerce.referralEarnings({
+        referralId: 'referral.correct', referralCode: 'creator-correct',
+      });
+      assert.equal(earnings.total, 0, JSON.stringify(earnings));
+      await commerce.patch(bookingId).set({ dodoOriginalCommissionAmount: 0 }).commit();
+      const control = await expectReport([]);
+      const controlEarnings = await commerce.referralEarnings({
+        referralId: 'referral.correct', referralCode: 'creator-correct',
+      });
+      assert.equal(controlEarnings.total, 0, JSON.stringify(controlEarnings));
+      return {
+        quote, report, earnings, control, controlEarnings,
+        nativeRoundingLimit: 'A single positive unrounded fallback rounds to zero; multiple rows can accumulate.',
+      };
+    });
+  }
+  await run('reconcile-report-zero-rate-creator-consumer', async () => {
+    const quote = await zeroCommissionFixture({}, 0);
+    const report = await expectReport([]);
+    const earnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    assert.equal(earnings.total, 0, JSON.stringify(earnings));
+    return { quote, report, earnings };
+  });
+  for (const state of ['active-dispute', 'full-refund']) {
+    await run(`reconcile-report-${state}-zero-commission-consumer`, async () => {
+      const refunded = state === 'full-refund';
+      const quote = await zeroCommissionFixture(refunded ? {
+        status: 'refunded', refundedAmount: 9.99, refundStatus: 'full',
+      } : { status: 'pending', dodoDisputeActive: true });
+      if (refunded) {
+        dodoPayment.refund_status = 'full';
+        dodoPayment.refunds = [dodoRefund];
+      } else dodoPayment.disputes = [dodoDispute('dispute_opened')];
+      const booking = (await row(bookingId)).payload;
+      assert.equal(Object.hasOwn(booking, 'dodoOriginalCommissionAmount'), false);
+      const report = await expectReport([]);
+      const earnings = await commerce.referralEarnings({
+        referralId: 'referral.correct', referralCode: 'creator-correct',
+      });
+      assert.equal(earnings.total, 0, JSON.stringify(earnings));
+      return { quote, booking, report, earnings };
+    });
+  }
   await run('reconcile-report-partial-disputed-original-earnings', async () => {
     await seed('dodo', 'booked', dodoBooking({
       status: 'pending',

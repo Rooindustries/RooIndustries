@@ -339,6 +339,13 @@ const checkBooking = ({ payment, record, booking, refunded, pricing }) => {
   if (referralCode !== pricing.referralCode || referralId !== pricing.referralId)
     return "referral_binding_mismatch";
   const commission = moneyCents(booking.commissionAmount);
+  const hasOriginalCommission = Object.hasOwn(booking, "dodoOriginalCommissionAmount");
+  const usesEarningsFallback =
+    !hasOriginalCommission &&
+    KEPT_BOOKING_STATUSES.includes(booking.status) &&
+    commission === 0 &&
+    pricing.percent > 0 &&
+    (booking.netAmount || booking.grossAmount) > 0;
   const expected =
     disputed || fullRefund || !KEPT_BOOKING_STATUSES.includes(booking.status)
       ? 0
@@ -348,8 +355,9 @@ const checkBooking = ({ payment, record, booking, refunded, pricing }) => {
     commission === null ||
     commission !== expected ||
     booking.commissionPercent !== pricing.percent ||
-    (refunded > 0 && !fullRefund && !Object.hasOwn(booking, "dodoOriginalCommissionAmount")) ||
-    (Object.hasOwn(booking, "dodoOriginalCommissionAmount") &&
+    (refunded > 0 && !fullRefund && !hasOriginalCommission) ||
+    usesEarningsFallback ||
+    (hasOriginalCommission &&
       moneyCents(booking.dodoOriginalCommissionAmount) !== pricing.commission)
   )
     return "commission_mismatch";
