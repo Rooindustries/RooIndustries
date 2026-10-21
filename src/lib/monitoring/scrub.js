@@ -42,7 +42,7 @@ function scrubValue(value, depth = 0, path = []) {
   if (depth > 6) return "[Filtered]";
   if (Array.isArray(value)) return value.map((item, index) => scrubValue(item, depth + 1, [...path, index]));
   const trace = path.length === 2 && (path[0] === "contexts" && path[1] === "trace" || path[0] === "spans" && typeof path[1] === "number");
-  return Object.fromEntries(Object.entries(value).filter(([key]) => key.toLowerCase() !== "headers").map(([key, item]) => {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !["headers", "user_agent.original"].includes(key.toLowerCase())).map(([key, item]) => {
     const identifier = trace && typeof item === "string" && (
       (key === "span_id" || key === "parent_span_id") && /^[0-9a-f]{16}$/i.test(item) ||
       key === "trace_id" && /^[0-9a-f]{32}$/i.test(item)

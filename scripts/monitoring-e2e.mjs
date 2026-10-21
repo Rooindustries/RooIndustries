@@ -101,7 +101,7 @@ const api = http.createServer(async (request, response) => {
         scope.setExtra('span_id', '4242424242424242');
         scope.setExtra('release', 'buyer@example.com');
         scope.setExtra('headers', { 'X-Fixture': 'fixture-extra-header' });
-        scope.setContext('fixture', { Headers: { 'X-Fixture': 'fixture-context-header' }, diagnostic: 'keep' });
+        scope.setContext('fixture', { Headers: { 'X-Fixture': 'fixture-context-header' }, 'user_agent.original': 'fixture-span-agent', diagnostic: 'keep' });
         scope.addBreadcrumb({ category: 'fixture', data: { HEADERS: { 'X-Fixture': 'fixture-breadcrumb-header' }, diagnostic: 'keep' } });
         scope.setExtra('diagnostic_values', Array(8).fill('a'.repeat(16000)));
         scope.setExtra('diagnostic_urls', ['http://fixture-user:fixture-secret@localhost/path?token=fixture-url', '//fixture-user:fixture-secret@localhost/path?token=fixture-url', 'http://localhost/path']);
@@ -253,7 +253,7 @@ try {
   check('SDK release identity survives without exempting customer metadata', [reported?.event.release, reported?.event.extra?.release], ['rooindustries@0.2.0', '[email]']);
   check('semantic release handling still scrubs private and card-shaped root values', events().filter(item => item.event.message === 'Fixture private release' || item.event.message === 'Fixture card release').map(item => item.event.release), ['[email]', '[email]']);
   check('nested headers are excluded without losing adjacent diagnostics', [reported?.event.extra?.headers ?? null, reported?.event.contexts?.fixture, reported?.event.breadcrumbs?.find(crumb => crumb.category === 'fixture')?.data], [null, { diagnostic: 'keep' }, { diagnostic: 'keep' }]);
-  check('metadata and nested header sentinels appear nowhere in captured SDK envelopes', received.filter(item => /fixture-env|carol@example.invalid|fixture-extra-header|fixture-context-header|fixture-breadcrumb-header/.test(item.body)).length, 0);
+  check('metadata and nested header sentinels appear nowhere in captured SDK envelopes', received.filter(item => /fixture-env|carol@example.invalid|fixture-extra-header|fixture-context-header|fixture-breadcrumb-header|fixture-span-agent/.test(item.body)).length, 0);
   check('errors and traces do not send automatic session aggregates', received.flatMap(item => item.body.split('\n').filter(Boolean).filter((line, index) => index % 2 === 1).map(line => JSON.parse(line).type)).filter(type => type === 'session' || type === 'sessions').length, 0);
   check('private values appear nowhere in SDK envelope', ['buyer@example.com', '4242424242424242', '4242 4242 4242 4243', '4242-4242-4242-4243', 'fixture-private-cvv', 'fixture-private-payment-id', 'fixture-private-query', 'fixture-query-only', 'fixture-user', 'fixture-secret', 'fixture-url', 'fixture-agent', 'fixture-authorization', 'carol@example.com', 'john@example.com', 'δοκιμή@παράδειγμα.δοκιμή'].filter(value => reported?.raw.includes(value)), []);
   await sdk.close(5000);
