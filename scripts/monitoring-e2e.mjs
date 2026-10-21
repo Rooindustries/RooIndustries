@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { isDeepStrictEqual } from 'node:util';
 import { installNetworkGuard, refuseEnvFiles } from './lib/test-target-safety.mjs';
+import { checkBrowserBootstrap } from './monitoring-bootstrap-e2e.mjs';
 
 refuseEnvFiles();
 const require = createRequire(import.meta.url);
@@ -31,6 +32,8 @@ let outgoingSpansObserved = 0;
 let sdk;
 let reportError;
 let relay;
+let onRequestError;
+let uncaughtUnchanged = false;
 let origin;
 const caughtCases = [
   { name: 'bare', label: 'Fixture bare continuation', build: () => new Error('request failed\n    at fixture-private-bare') },
@@ -59,6 +62,16 @@ const events = (type = 'event') => received.flatMap(({ body }) => {
 });
 
 let streamingResponseClosed = false;
+const redirected = [];
+const redirectTarget = http.createServer((request, response) => {
+  const chunks = [];
+  request.on('data', chunk => chunks.push(chunk));
+  request.on('end', () => {
+    redirected.push({ method: request.method, body: Buffer.concat(chunks).toString() });
+    response.writeHead(200, { 'Retry-After': '7' });
+    response.end('{}');
+  });
+});
 const ingest = http.createServer((request, response) => {
   if (request.url.startsWith('/v1/payments/')) {
     providerCalls.push(request.url);
@@ -71,6 +84,12 @@ const ingest = http.createServer((request, response) => {
     const bytes = Buffer.concat(chunks);
     const body = (request.headers['content-encoding'] === 'gzip' ? gunzipSync(bytes) : bytes).toString();
     received.push({ body, headers: request.headers, path: request.url });
+    const redirect = body.match(/fixture-redirect-(301|302|303|307|308)/);
+    if (redirect) {
+      response.writeHead(Number(redirect[1]), { Location: `http://127.0.0.1:${redirectTarget.address().port}/elsewhere` });
+      response.end();
+      return;
+    }
     if (body.includes('fixture-upstream-network-error')) { request.socket.destroy(); return; }
     response.writeHead(body.includes('fixture-quota-all') ? 429 : body.includes('fixture-upstream-failure') ? 503 : 200, {
       'Set-Cookie': 'provider-only=fixture-private; Path=/',
@@ -87,6 +106,15 @@ const ingest = http.createServer((request, response) => {
 });
 const api = http.createServer(async (request, response) => {
   try {
+    if (request.url === '/uncaught') {
+      const error = new TypeError('Fixture uncaught buyer@example.com 4242-4242-4242-4242 /play?token=fixture-uncaught-query');
+      const message = error.message;
+      await onRequestError(error, { path: '/api/fixture', method: 'GET', headers: { authorization: 'fixture-uncaught-authorization', cookie: 'fixture-uncaught-cookie' } }, { routerKind: 'App Router', routePath: '/api/fixture', routeType: 'route' });
+      uncaughtUnchanged = error.message === message && error.name === 'TypeError';
+      response.writeHead(500);
+      response.end('Unexpected server error.');
+      return;
+    }
     if (request.url === '/network') {
       const random = Math.random;
       Math.random = () => 0;
@@ -134,6 +162,7 @@ const api = http.createServer(async (request, response) => {
         scope.setExtra('diagnostic_urls', ['http://fixture-user:fixture-secret@localhost/path?token=fixture-url', '//fixture-user:fixture-secret@localhost/path?token=fixture-url', 'http://localhost/path']);
         scope.setExtra('text_examples', ['@carol@example.com', '@team,john@example.com', 'δοκιμή@παράδειγμα.δοκιμή', 'foo/@bar.com', 'jane.doe//@example.com', 'jane//x@example.com', 'john@gmail?.com', 'jane.doe?@example.com', '4242\u00a04242\u00a04242\u00a04242', '4242\t4242\t4242\t4242', '4242.4242.4242.4242', '4242_4242_4242_4242']);
         scope.setExtra('path_examples', ['file:///app/node_modules/@sentry/core/build/esm/index.js', '/@fs/source/app.js', '/@vite/client.js', `file:///app/${'@scope/'.repeat(1800)}index.js`]);
+        scope.setExtra('ordering_examples', ['what?4111 1111 1111 1111', 'lookup?n=4242 4242 4242 4242']);
         scope.addEventProcessor(event => ({
           ...event,
           request: { ...event.request, headers: { 'User-Agent': 'fixture-agent', 'user-agent': 'fixture-agent-lower', Authorization: 'fixture-authorization' } },
@@ -157,21 +186,25 @@ const api = http.createServer(async (request, response) => {
   }
 });
 await new Promise(resolve => ingest.listen(0, '127.0.0.1', resolve));
+await new Promise(resolve => redirectTarget.listen(0, '127.0.0.1', resolve));
 await new Promise(resolve => api.listen(0, process.env.ROO_TEST_HOST || '127.0.0.1', resolve));
 const ingestOrigin = `http://127.0.0.1:${ingest.address().port}`;
 origin = `http://${process.env.ROO_TEST_HOST || '127.0.0.1'}:${api.address().port}`;
 const dsn = `http://fixturekey@127.0.0.1:${ingest.address().port}/42`;
-const restoreGuard = installNetworkGuard([origin, ingestOrigin]);
+const unmodifiedFetch = globalThis.fetch;
+const restoreGuard = installNetworkGuard([origin, ingestOrigin, `http://127.0.0.1:${redirectTarget.address().port}`]);
 process.env.NEXT_PUBLIC_SENTRY_DSN = dsn;
 process.env.NEXT_RUNTIME = 'nodejs';
 process.env.SENTRY_RELEASE = 'rooindustries@0.2.0';
 process.env.NEXT_PUBLIC_VERCEL_ENV = 'carol@example.invalid 4242-4242-4242-4242 ?token=fixture-env';
 
 try {
+  await checkBrowserBootstrap(check);
   sdk = await import('@sentry/nextjs');
   const browser = await import(pathToFileURL(browserEntry).href);
   const { makeFetchTransport } = browser.default ?? browser;
   ({ POST: relay } = await import('../app/api/client-report/route.js'));
+  ({ onRequestError } = await import('../instrumentation.js'));
   const { startServerMonitoring } = await import('../src/lib/monitoring/server.js');
   ({ logSafeError: reportError } = await import('../src/server/safeErrorLog.js'));
   startServerMonitoring(dsn);
@@ -208,6 +241,25 @@ try {
   check('invalid envelope is refused', (await post('not json')).status, 400);
   check('upstream failure status is preserved', (await post(envelope(dsn, 'fixture-upstream-failure'))).status, 503);
   check('upstream connection failure returns 502', (await post(envelope(dsn, 'fixture-upstream-network-error'))).status, 502);
+  const guardedFetch = globalThis.fetch;
+  let relayRawFetchCalls = 0;
+  globalThis.fetch = (input, options) => {
+    const url = new URL(typeof input === 'string' || input instanceof URL ? String(input) : input.url);
+    if (url.origin === ingestOrigin && url.pathname === '/api/42/envelope/' && options?.body instanceof Uint8Array && /fixture-redirect-(301|302|303|307|308)/.test(new TextDecoder().decode(options.body))) {
+      relayRawFetchCalls++;
+      return unmodifiedFetch(input, options);
+    }
+    return guardedFetch(input, options);
+  };
+  try {
+    for (const status of [301, 302, 303, 307, 308]) {
+      const reply = await post(envelope(dsn, `fixture-redirect-${status}`));
+      check(`${status} redirects cannot send an envelope to another origin`, [reply.status, redirected.length, reply.headers.get('retry-after')], [502, 0, null]);
+    }
+    check('every redirect case exercises the route fetch without guard rewriting', relayRawFetchCalls, 5);
+  } finally {
+    globalThis.fetch = guardedFetch;
+  }
   check('an unending provider body keeps its response status', (await post(envelope(dsn, 'fixture-upstream-stream'))).status, 200);
   for (let i = 0; i < 20 && !streamingResponseClosed; i++) await new Promise(resolve => setTimeout(resolve, 50));
   check('an unending provider body is canceled within one second', streamingResponseClosed, true);
@@ -282,6 +334,7 @@ try {
   check('absolute and scheme-relative diagnostic URLs lose userinfo', reported?.event.extra?.diagnostic_urls, ['http://localhost/path?[query]', '//localhost/path?[query]', 'http://localhost/path']);
   check('stack frame URLs lose userinfo and query', reported?.event.exception?.values?.[0]?.stacktrace?.frames?.find(frame => frame.function === 'fixtureCredentials')?.filename, 'http://localhost/script.js');
   check('all email prefixes and formatted card values are scrubbed', reported?.event.extra?.text_examples, [...Array(8).fill('[email]'), ...Array(4).fill('[card]')]);
+  check('card data is removed before query rewriting can leave fragments', reported?.event.extra?.ordering_examples, ['what?[query]', 'lookup?[query]']);
   check('scoped and Vite paths survive including a long multi-at path', reported?.event.extra?.path_examples, ['file:///app/node_modules/@sentry/core/build/esm/index.js', '/@fs/source/app.js', '/@vite/client.js', `file:///app/${'@scope/'.repeat(1800)}index.js`]);
   const scoped = reported?.event.exception?.values?.[0]?.stacktrace?.frames?.find(frame => frame.function === 'fixtureScoped');
   const vite = reported?.event.exception?.values?.[0]?.stacktrace?.frames?.find(frame => frame.function === 'fixtureVite');
@@ -300,6 +353,13 @@ try {
   check('metadata and nested header sentinels appear nowhere in captured SDK envelopes', received.filter(item => /fixture-env|carol@example.invalid|fixture-extra-header|fixture-context-header|fixture-breadcrumb-header|fixture-span-agent/.test(item.body)).length, 0);
   check('errors and traces do not send automatic session aggregates', received.flatMap(item => item.body.split('\n').filter(Boolean).filter((line, index) => index % 2 === 1).map(line => JSON.parse(line).type)).filter(type => type === 'session' || type === 'sessions').length, 0);
   check('private values appear nowhere in SDK envelope', ['buyer@example.com', '4242424242424242', '4242 4242 4242 4243', '4242-4242-4242-4243', 'fixture-private-cvv', 'fixture-private-payment-id', 'fixture-private-query', 'fixture-query-only', 'fixture-user', 'fixture-secret', 'fixture-url', 'fixture-agent', 'fixture-authorization', 'carol@example.com', 'john@example.com', 'δοκιμή@παράδειγμα.δοκιμή'].filter(value => reported?.raw.includes(value)), []);
+  const uncaughtResponse = await fetch(`${origin}/uncaught`);
+  await sdk.flush(5000);
+  const uncaught = events().find(item => item.event.exception?.values?.[0]?.value?.startsWith('Fixture uncaught'));
+  const uncaughtValue = uncaught?.event.exception?.values?.[0];
+  check('actual onRequestError preserves response, error type and frames', [uncaughtResponse.status, await uncaughtResponse.text(), uncaughtUnchanged, uncaughtValue?.type, (uncaughtValue?.stacktrace?.frames?.length ?? 0) > 0, uncaughtValue?.mechanism?.handled], [500, 'Unexpected server error.', true, 'TypeError', true, false]);
+  check('actual onRequestError scrubs the requested sensitive message fields', uncaughtValue?.value, 'Fixture uncaught [email] [card] /play?[query]');
+  check('uncaught request headers and PII reach no SDK envelope field', ['buyer@example.com', '4242-4242-4242-4242', 'fixture-uncaught-query', 'fixture-uncaught-authorization', 'fixture-uncaught-cookie'].some(value => uncaught?.raw.includes(value)), false);
   await sdk.close(5000);
   const { register } = await import('../instrumentation.js');
   for (const invalid of ['', 'false', 'off', `"${dsn}"`, dsn.replace('http:', 'ftp:'), dsn.replace('fixturekey', 'invalid-key'), dsn.replace('/42', '/no-project'), `${dsn}?token=fixture-config`, `${dsn}#fixture-config`]) {
@@ -319,7 +379,8 @@ try {
   await sdk?.close?.(5000);
   api.closeAllConnections();
   ingest.closeAllConnections();
-  await Promise.all([new Promise(resolve => api.close(resolve)), new Promise(resolve => ingest.close(resolve))]);
+  redirectTarget.closeAllConnections();
+  await Promise.all([new Promise(resolve => api.close(resolve)), new Promise(resolve => ingest.close(resolve)), new Promise(resolve => redirectTarget.close(resolve))]);
   restoreGuard();
   await mkdir(dirname(artifact), { recursive: true });
   await writeFile(artifact, JSON.stringify({ ok: checks.length > 0 && checks.every(item => item.ok), checks, events: events().map(item => item.event), transactions: events('transaction').map(item => item.event), timing, sdkEntry }, null, 2));

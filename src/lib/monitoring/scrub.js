@@ -31,9 +31,9 @@ export function scrubText(text) {
       }
       return token;
     })
+    .replace(CARD, "[card]")
     .replace(QUERY, "?[query]")
-    .replace(/\/\/[^\s/?#"'<>]*@/g, "//")
-    .replace(CARD, "[card]");
+    .replace(/\/\/[^\s/?#"'<>]*@/g, "//");
 }
 
 function scrubValue(value, depth = 0, path = []) {

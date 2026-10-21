@@ -54,6 +54,7 @@ export async function POST(request) {
       method: "POST",
       body,
       headers: { "Content-Type": "application/x-sentry-envelope" },
+      redirect: "error",
       signal: AbortSignal.timeout(10000),
     });
     const headers = new Headers();

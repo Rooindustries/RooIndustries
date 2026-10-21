@@ -5,6 +5,7 @@ const MAX_PENDING = 10;
 let pending = [];
 let sentry = null;
 let loading = false;
+let retries = 0;
 
 function load() {
   if (loading) return;
@@ -17,7 +18,15 @@ function load() {
       for (const error of queued) sentry.captureException(error);
     })
     .catch(() => {
-      loading = false;
+      if (pending.length && retries < 2) {
+        retries++;
+        setTimeout(() => {
+          loading = false;
+          load();
+        }, 500 * retries);
+      } else {
+        loading = false;
+      }
     });
 }
 
@@ -28,6 +37,7 @@ export function reportClientError(error) {
     return;
   }
   if (pending.length < MAX_PENDING) pending.push(error);
+  if (!loading) retries = 0;
   load();
 }
 
