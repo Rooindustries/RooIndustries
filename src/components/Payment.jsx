@@ -502,6 +502,7 @@ export default function Payment({ hideFooter = false }) {
   const otherCheckoutStarting = (provider) =>
     pendingStartsRef.current.some((start) => start.provider !== provider);
   const lockedProvider = String(paymentSession?.provider || "").trim();
+  const paymentQuotePending = !lockedProvider && (quoteLoading || !quoteFingerprint);
   const lockedQuote = paymentSession?.result?.quote;
   const lockedPriceAvailable = Number.isFinite(lockedQuote?.grossAmount) &&
     Number.isFinite(lockedQuote?.netAmount) && lockedQuote.netAmount > 0 &&
@@ -1791,7 +1792,7 @@ export default function Payment({ hideFooter = false }) {
     }
 
     try {
-      if (finalAmount <= 0) {
+      if (finalAmount !== null && finalAmount <= 0) {
         showBanner(
           "error",
           "Final amount is zero or negative. Please contact support."
@@ -2254,13 +2255,15 @@ export default function Payment({ hideFooter = false }) {
                     <div className="flex h-8 w-20 items-center justify-center text-ink" aria-hidden="true">
                       <WalletCards size={36} strokeWidth={1.5} />
                     </div>
-                    <p className="text-xs font-medium text-ink-secondary sm:text-sm">
-                      {finalAmount >= 50.01 ? "Cards, crypto & Klarna" : "Cards & crypto"}
-                    </p>
+                    {finalAmount !== null && (
+                      <p className="text-xs font-medium text-ink-secondary sm:text-sm">
+                        {finalAmount >= 50.01 ? "Cards, crypto & Klarna" : "Cards & crypto"}
+                      </p>
+                    )}
                   </div>
                   <div className="flex w-full shrink-0 flex-col gap-2 md:w-52">
                     <button type="button" onClick={handleDodoCheckout}
-                      disabled={!canSubmitBooking || payingDodo || paymentStatusBusy || cancellingPayment || quoteLoading || !quoteFingerprint || !providerIsAvailableForSession("dodo") || otherCheckoutStarting("dodo")}
+                      disabled={!canSubmitBooking || payingDodo || paymentStatusBusy || cancellingPayment || paymentQuotePending || !providerIsAvailableForSession("dodo") || otherCheckoutStarting("dodo")}
                       className="glow-button inline-flex h-11 w-full items-center justify-center whitespace-nowrap rounded-lg px-4 text-sm font-semibold disabled:opacity-60">
                       {payingDodo ? "Opening checkout..." : lockedProvider === "dodo" ? "Resume checkout" : "Pay your way"}
                     </button>
@@ -2307,8 +2310,7 @@ export default function Payment({ hideFooter = false }) {
                     !rzpReady ||
                     payingRzp ||
                     paymentStatusBusy ||
-                    quoteLoading ||
-                    !quoteFingerprint ||
+                    paymentQuotePending ||
                     !canUseRazorpay ||
                     !providerIsAvailableForSession("razorpay") ||
                     otherCheckoutStarting("razorpay")
@@ -2383,8 +2385,7 @@ export default function Payment({ hideFooter = false }) {
                           fundingSource="paypal"
                           disabled={
                             paymentStatusBusy ||
-                            quoteLoading ||
-                            !quoteFingerprint ||
+                            paymentQuotePending ||
                             !providerIsAvailableForSession("paypal") ||
                             otherCheckoutStarting("paypal")
                           }
