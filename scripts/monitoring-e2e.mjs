@@ -162,7 +162,7 @@ const api = http.createServer(async (request, response) => {
         scope.setExtra('diagnostic_urls', ['http://fixture-user:fixture-secret@localhost/path?token=fixture-url', '//fixture-user:fixture-secret@localhost/path?token=fixture-url', 'http://localhost/path']);
         scope.setExtra('text_examples', ['@carol@example.com', '@team,john@example.com', 'δοκιμή@παράδειγμα.δοκιμή', 'foo/@bar.com', 'jane.doe//@example.com', 'jane//x@example.com', 'john@gmail?.com', 'jane.doe?@example.com', '4242\u00a04242\u00a04242\u00a04242', '4242\t4242\t4242\t4242', '4242.4242.4242.4242', '4242_4242_4242_4242']);
         scope.setExtra('path_examples', ['file:///app/node_modules/@sentry/core/build/esm/index.js', '/@fs/source/app.js', '/@vite/client.js', `file:///app/${'@scope/'.repeat(1800)}index.js`]);
-        scope.setExtra('ordering_examples', ['what?4111 1111 1111 1111', 'lookup?n=4242 4242 4242 4242']);
+        scope.setExtra('ordering_examples', ['what?4111 1111 1111 1111', 'lookup?n=4242 4242 4242 4242', 'a@b.4111 1111 1111 1111']);
         scope.setExtra('identifier_examples', ['card_4111111111111111', 'x4111111111111111y', '4111111111111111_suffix', 'card_4111-1111-1111-1111', 'pan4111 1111 1111 1111end', '🔒x4111 1111 1111 1111y', '41111111111111111225', '４１１１１１１１１１１１１１１１', '٤١١١١١١١١١١١١١١١']);
         scope.setExtra('encoded_examples', ['buyer%40example.com', '/api/x/buyer%40example.com', 'buyer%40example%2Ecom']);
         scope.setExtra('probe_x4111111111111111y', 'keep');
@@ -340,7 +340,7 @@ try {
   check('absolute and scheme-relative diagnostic URLs lose userinfo', reported?.event.extra?.diagnostic_urls, ['http://localhost/path?[query]', '//localhost/path?[query]', 'http://localhost/path']);
   check('stack frame URLs lose userinfo and query', reported?.event.exception?.values?.[0]?.stacktrace?.frames?.find(frame => frame.function === 'fixtureCredentials')?.filename, 'http://localhost/script.js');
   check('all email prefixes and formatted card values are scrubbed', reported?.event.extra?.text_examples, [...Array(8).fill('[email]'), ...Array(4).fill('[card]')]);
-  check('card data is removed before query rewriting can leave fragments', reported?.event.extra?.ordering_examples, ['what?[query]', 'lookup?[query]']);
+  check('overlapping email, card and query ranges leave no fragments', reported?.event.extra?.ordering_examples, ['what?[query]', 'lookup?[query]', '[email]']);
   check('identifier-adjacent card values and decimal variants are scrubbed', reported?.event.extra?.identifier_examples, ['card_[card]', 'x[card]y', '[card]_suffix', 'card_[card]', 'pan[card]end', '🔒x[card]y', '[card]', '[card]', '[card]']);
   check('percent-encoded email tokens are scrubbed', reported?.event.extra?.encoded_examples, Array(3).fill('[email]'));
   check('encoded navigation paths lose contact data', reported?.event.breadcrumbs?.find(item => item.category === 'navigation')?.data, { from: '[email]', to: '[email]' });
