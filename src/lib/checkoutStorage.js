@@ -471,6 +471,10 @@ export const clearStoredReferral = (expectedCode) => {
   if (!normalized) return false;
   try {
     const intent = readReferralIntent();
+    const known = intent.passiveCode === normalized || Object.hasOwn(intent.codes, normalized) ||
+      Object.values(intent.choices).includes(normalized);
+    // A typed code the journal never held has nothing to clear; recording it would rewrite intent the visitor never had.
+    if (!known) return true;
     const choices = { ...intent.choices };
     for (const [scope, code] of Object.entries(choices)) {
       if (code === normalized) delete choices[scope];
