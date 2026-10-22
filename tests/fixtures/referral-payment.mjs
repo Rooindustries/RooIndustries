@@ -170,6 +170,39 @@ export async function createReferralPaymentFixture() {
     });
     server.listen(port, host);
     await once(server, "listening");
+    const warmRoute = async (path) => {
+      let lastError;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const response = await fetch(`${baseURL}${path}`, {
+            method: "GET",
+            headers: { origin: baseURL },
+            signal: AbortSignal.timeout(20000),
+          });
+          await response.arrayBuffer();
+          return;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw lastError;
+    };
+    for (const path of [
+      "/api/holdSlot",
+      "/api/releaseHold",
+      "/api/payment/providers",
+      "/api/payment/quote",
+      "/api/payment/start",
+      "/api/payment/status",
+      "/api/payment/finalize",
+      "/api/payment/cancel",
+      "/api/payment/webhook/dodo",
+      "/api/ref/validateReferral",
+      "/api/ref/validateCoupon",
+    ]) {
+      await warmRoute(path);
+    }
+    globalThis.__rooRateLimitBuckets?.clear();
     const request = async ({ method = "GET", path, body = "", headers = {} }) => {
       globalThis.__rooRateLimitBuckets?.clear();
       const response = await fetch(`${baseURL}${path}`, { method,
