@@ -280,8 +280,15 @@ export default function Payment({ hideFooter = false }) {
   }, [hydrated, location.search, navState.bookingData]);
 
   const dropCheckoutCoupon = () => {
-    const source = navState.bookingData || readStoredCheckout() || bookingData;
+    const stored = readStoredCheckout();
+    const source = navState.bookingData || stored || bookingData;
     const nextBooking = { ...source, couponCode: "" };
+    if (stored?.slotHoldId && stored?.slotHoldToken &&
+        (stored.slotHoldId !== source.slotHoldId || stored.slotHoldToken !== source.slotHoldToken)) {
+      nextBooking.slotHoldId = stored.slotHoldId;
+      nextBooking.slotHoldToken = stored.slotHoldToken;
+      nextBooking.slotHoldExpiresAt = stored.slotHoldExpiresAt || "";
+    }
     writeStoredCheckout(nextBooking);
     navigate(
       { pathname: location.pathname, search: location.search, hash: location.hash },
@@ -1175,18 +1182,17 @@ export default function Payment({ hideFooter = false }) {
         writeBrowserStorage("sessionStorage", "my_slot_hold", JSON.stringify(holdState));
         window.dispatchEvent(new CustomEvent("hold-state", { detail: holdState }));
       }
-      if ((refreshedHold?.slotHoldId && refreshedHold?.slotHoldToken) || recoveryCodes) {
-        writeStoredCheckout(nextCheckout);
-      }
+      const persistedCheckout = Boolean(refreshedHold?.slotHoldId && refreshedHold?.slotHoldToken) || Boolean(recoveryCodes);
+      if (persistedCheckout) writeStoredCheckout(nextCheckout);
       clearPaymentSession("", operation.token);
       operation.token = "";
-      if (activeSession.provider === "dodo" || recoveryCodes) {
+      if (activeSession.provider === "dodo" || recoveryCodes || persistedCheckout) {
         dodoReturnHandled.current = "";
         const query = new URLSearchParams(location.search);
         query.delete("dodo_return");
         query.delete("dodo_cancel");
         navigate({ pathname: location.pathname, search: query.toString(), hash: location.hash }, {
-          replace: true, state: recoveryCodes ? { ...navState, bookingData: nextCheckout } : location.state,
+          replace: true, state: persistedCheckout ? { ...navState, bookingData: nextCheckout } : location.state,
         });
       }
       showBanner("success", "Payment method released. Choose a payment method below.");

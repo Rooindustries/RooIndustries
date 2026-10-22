@@ -527,6 +527,51 @@ describe("payment client request and accessibility behavior", () => {
     expect(JSON.parse(sessionStorage.getItem("checkout_booking_state")).couponCode).toBe("");
   });
 
+  test("removing a coupon keeps a refreshed hold that is only in storage", async () => {
+    global.fetch = jest.fn(async (url) => {
+      const requestUrl = String(url);
+      if (requestUrl.startsWith("/api/ref/validateReferral")) {
+        return response({ ok: false, error: "Invalid or inactive referral code." });
+      }
+      if (requestUrl.startsWith("/api/ref/validateCoupon")) {
+        return response({
+          ok: true,
+          coupon: {
+            id: "coupon.save10",
+            code: "SAVE10",
+            discountType: "fixed",
+            discountAmount: 10,
+            canCombineWithReferral: true,
+          },
+        });
+      }
+      return standardFetch(url);
+    });
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/payment", state: { bookingData: { ...checkout, couponCode: "SAVE10" } } }]}>
+        <Payment hideFooter />
+      </MemoryRouter>
+    );
+    await screen.findByRole("button", { name: "Remove coupon" });
+    const refreshed = {
+      ...JSON.parse(sessionStorage.getItem("checkout_booking_state")),
+      slotHoldId: "slotHold.refreshed",
+      slotHoldToken: "refreshed-hold-token",
+      slotHoldExpiresAt: "2099-01-05T10:40:00.000Z",
+    };
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(refreshed));
+    fireEvent.click(screen.getByRole("button", { name: "Remove coupon" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Remove coupon" })).not.toBeInTheDocument();
+    });
+    expect(JSON.parse(sessionStorage.getItem("checkout_booking_state"))).toMatchObject({
+      couponCode: "",
+      slotHoldId: "slotHold.refreshed",
+      slotHoldToken: "refreshed-hold-token",
+      slotHoldExpiresAt: "2099-01-05T10:40:00.000Z",
+    });
+  });
+
   test("keeps a late payment start when checkout storage cannot be read", async () => {
     let finishStart;
     global.fetch = jest.fn(async (url) => {
