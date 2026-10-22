@@ -38,6 +38,7 @@ export const startVercel = ({
   dropMutationResponse = false,
   swapNewestOnDeploymentRead = 0,
   dropAcceptedRollback = false,
+  promoteAssignPolls = 0,
 } = {}) => {
   const state = structuredClone(fixture);
   tweak?.(state);
@@ -46,6 +47,8 @@ export const startVercel = ({
   let rollbackPosts = 0;
   let projectReadsAfterRollback = 0;
   let newestReads = 0;
+  let promotePosted = false;
+  let promoteReads = 0;
   const server = http.createServer((req, res) => {
     const chunks = [];
     req.on("data", chunk => chunks.push(chunk));
@@ -117,6 +120,10 @@ export const startVercel = ({
         projectReadsAfterRollback += 1;
         if (projectReadsAfterRollback >= aliasSettlePolls) state.project.lastAliasRequest.jobStatus = "succeeded";
       }
+      if (promotePosted && promoteAssignPolls > 0 && state.project.autoAssignCustomDomains === false) {
+        promoteReads += 1;
+        if (promoteReads >= promoteAssignPolls) state.project.autoAssignCustomDomains = true;
+      }
       return send(200, state.project);
     }
     if (req.method === "GET" && url.pathname === "/v7/deployments") {
@@ -185,7 +192,8 @@ export const startVercel = ({
     if (req.method === "POST" && (match = url.pathname.match(/^\/v10\/projects\/([^/]+)\/promote\/([^/]+)$/))) {
       const from = state.aliases[DOMAIN].deploymentId;
       moveAlias(match[2]);
-      state.project.autoAssignCustomDomains = true;
+      promotePosted = true;
+      state.project.autoAssignCustomDomains = promoteAssignPolls > 0 ? false : true;
       state.project.lastAliasRequest = { type: "promote", jobStatus: "succeeded", fromDeploymentId: from, toDeploymentId: match[2], requestedAt: Date.now() };
       return dropMutationResponse ? req.socket.destroy() : send(promoteStatus);
     }

@@ -49,14 +49,36 @@ test("rollback moves production to the previous ready production deployment and 
   const [post] = mutations(vercel.requests);
   assert.equal(post.path, "/v1/projects/prj_rooFixture/rollback/dpl_previous");
   assert.equal(post.body && typeof post.body, "object");
-  assert.deepEqual(post.body, {});
+  assert.deepEqual(post.body, { description: "smoke failed on /packages" });
   assert.equal(post.query.teamId, "team_rooFixture");
-  assert.equal(post.query.description, "smoke failed on /packages");
+  assert.equal(post.query.description, undefined);
   assert.equal(mutations(vercel.requests).length, 1);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
   assert.match(result.output, /now serves dpl_previous/);
   assert.match(result.output, /deploy:rollback -- --undo/);
   assert.doesNotMatch(result.output, new RegExp(TOKEN));
+}));
+
+test("undo waits to report success until automatic assignment is back on", () => withVercel({
+  promoteAssignPolls: 3,
+  tweak: state => {
+    state.project.autoAssignCustomDomains = false;
+    state.project.lastAliasRequest = {
+      type: "promote",
+      jobStatus: "succeeded",
+      fromDeploymentId: "dpl_previous",
+      toDeploymentId: "dpl_live",
+      requestedAt: Date.now(),
+    };
+  },
+}, async (vercel, exec) => {
+  const result = await exec(["--undo"]);
+  assert.equal(result.code, 0, result.output);
+  const postAt = vercel.requests.findIndex(request => request.method === "POST" && request.path.includes("/promote/"));
+  const projectReads = vercel.requests.slice(postAt + 1).filter(request => request.path.startsWith("/v9/projects/"));
+  assert.ok(projectReads.length >= 3, `${projectReads.length} project reads after promote\n${result.output}`);
+  assert.equal(vercel.state.project.autoAssignCustomDomains, true);
+  assert.match(result.output, /go live automatically/);
 }));
 
 test("undo after a rollback promotes the newest ready production deployment and turns auto-assignment back on", () => withVercel({}, async (vercel, exec) => {

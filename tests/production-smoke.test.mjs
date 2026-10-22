@@ -9,10 +9,10 @@ import { DOMAIN, TOKEN, startVercel } from "./fixtures/fake-vercel.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const script = path.join(root, "scripts/production-smoke.mjs");
 
-const run = (args, onSpawn) => new Promise(resolve => {
+const run = (args, onSpawn, env = {}) => new Promise(resolve => {
   const child = spawn(process.execPath, [script, ...args], {
     cwd: root,
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, SMOKE_RETRY_MS: "50", PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH },
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, SMOKE_RETRY_MS: "50", PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH, ...env },
   });
   onSpawn?.(child);
   let output = "";
@@ -37,6 +37,19 @@ test("a healthy site passes every money-path check with GET requests only", () =
   }
   assert.deepEqual(site.requests.filter(request => request.method !== "GET"), []);
 }));
+
+test("a hung money page fails inside the smoke deadline", async () => {
+  const site = await startSite({ hang: ["/"] });
+  try {
+    const started = Date.now();
+    const result = await run(["--base", site.base], null, { SMOKE_DEADLINE_MS: "500" });
+    assert.equal(result.code, 2, result.output);
+    assert.match(result.output, /smoke deadline/);
+    assert.ok(Date.now() - started < 15000, `took ${Date.now() - started}ms`);
+  } finally {
+    await site.close();
+  }
+});
 
 test("a money page that fails is a money-path failure", () => withSite({ status: { "/payment": 500 } }, (site, result) => {
   assert.equal(result.code, 2, result.output);
@@ -205,7 +218,7 @@ test("deploy gate: a money-path failure on the live deployment rolls production 
   const changes = vercelChanges(vercel);
   assert.equal(changes.length, 1);
   assert.equal(changes[0].path, "/v1/projects/prj_rooFixture/rollback/dpl_previous");
-  assert.match(changes[0].query.description, /Money-path smoke failed/);
+  assert.match(changes[0].body.description, /Money-path smoke failed/);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
   assert.match(result.output, /--undo/);
 }));

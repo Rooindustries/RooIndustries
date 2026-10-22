@@ -6,6 +6,7 @@ const MONEY_PAGES = ["/", "/packages", "/booking", "/payment"];
 const REFERRAL_CODE = "roo-smoke-check";
 const ATTEMPTS = 3;
 const RETRY_MS = Number(process.env.SMOKE_RETRY_MS || 10000);
+const SMOKE_DEADLINE_MS = Number(process.env.SMOKE_DEADLINE_MS || 180000);
 const PRICE_PATTERN = /^\$\d{1,3}(?:,\d{3})*(?:\.\d{2})?$/;
 
 class Refusal extends Error {}
@@ -161,6 +162,22 @@ const withBrowserRetries = async (browser, base, check) => {
 
 const main = async () => {
   const base = resolveBase(parseArgs(process.argv.slice(2)).base);
+  const deadline = Date.now() + SMOKE_DEADLINE_MS;
+  const withinDeadline = async (run) => {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error("the smoke deadline passed");
+    let timer;
+    try {
+      return await Promise.race([
+        run(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error("the smoke deadline passed")), remaining);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   const checks = [
     ...MONEY_PAGES.map((path) => [`page ${path}`, () => getWithRetries(`${base}${path}`, expectHtml)]),
     ["booking availability", () => getWithRetries(`${base}/api/bookingAvailability`, expectAvailability)],
@@ -182,16 +199,17 @@ const main = async () => {
     );
     for (const [name, run] of checks) {
       try {
-        const detail = await run();
+        const detail = await withinDeadline(run);
         results.push({ name, ok: true, detail: detail || "" });
         console.log(`ok    ${name}${detail ? ` (${detail})` : ""}`);
       } catch (error) {
-        if (!browser.isConnected()) {
+        if (!browser.isConnected() && !/smoke deadline/.test(error.message)) {
           if (results.some((result) => !result.ok)) break;
           throw error;
         }
         results.push({ name, ok: false, detail: error.message });
         console.log(`FAIL  ${name}: ${error.message}`);
+        if (Date.now() >= deadline) break;
       }
     }
   } finally {
@@ -203,7 +221,12 @@ const main = async () => {
     fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [`### Money-path smoke on ${base}`, "", "| Result | Check | Detail |", "| --- | --- | --- |", ...rows, ""].join("\n"));
   }
   console.log(failed.length ? `${failed.length} money-path check(s) failed on ${base}.` : `All money-path checks passed on ${base}.`);
-  process.exitCode = failed.length ? 2 : 0;
+  const code = failed.length ? 2 : 0;
+  if (Date.now() >= deadline) {
+    await browser.close().catch(() => {});
+    process.exit(code);
+  }
+  process.exitCode = code;
 };
 
 main().catch((error) => {

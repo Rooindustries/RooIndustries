@@ -215,7 +215,7 @@ const checkAutomaticRollback = async (api, state, ifLive) => {
   }
 };
 
-const waitForDomain = async (api, state, domain, targetId) => {
+const waitForDomain = async (api, state, domain, targetId, { autoAssign } = {}) => {
   const deadline = Date.now() + VERIFY_TIMEOUT_MS;
   let alias = null;
   let job = null;
@@ -225,7 +225,9 @@ const waitForDomain = async (api, state, domain, targetId) => {
     job = project?.lastAliasRequest || null;
     const domainMoved = alias?.deploymentId === targetId;
     const jobTargetsThis = job?.toDeploymentId === targetId;
-    if (domainMoved && job?.jobStatus === "succeeded" && jobTargetsThis) return;
+    const assignmentReady = autoAssign === undefined ||
+      (autoAssign ? project?.autoAssignCustomDomains !== false : project?.autoAssignCustomDomains === false);
+    if (domainMoved && job?.jobStatus === "succeeded" && jobTargetsThis && assignmentReady) return;
     if (job && FAILED_JOBS.has(job.jobStatus) && (jobTargetsThis || domainMoved)) {
       throw new Error(`Vercel accepted the request, but the ${job.type || "alias"} job ${job.jobStatus} for ${targetId}. ${domain} serves ${alias?.deploymentId}. Check the Vercel dashboard.`);
     }
@@ -251,10 +253,10 @@ const rememberAmbiguousMutation = async (api, domain, targetId) => {
   }
 };
 
-const postMutation = async (api, domain, targetId, pathname, query) => {
+const postMutation = async (api, domain, targetId, pathname, query, payload = {}) => {
   mutationAttempted = true;
   try {
-    await api("POST", pathname, query, {});
+    await api("POST", pathname, query, payload);
     mutationAccepted = true;
   } catch (error) {
     if (mutationAttempted && ambiguousDelivery(error)) await rememberAmbiguousMutation(api, domain, targetId);
@@ -322,7 +324,7 @@ const main = async () => {
     }
     if (deploymentId(freshTarget) !== deploymentId(fresh.live)) checkTarget(freshTarget, fresh, { rollback: false });
     await postMutation(api, options.domain, deploymentId(freshTarget), `/v10/projects/${encodeURIComponent(fresh.project.id)}/promote/${encodeURIComponent(deploymentId(freshTarget))}`, { teamId: fresh.teamId });
-    await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget));
+    await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget), { autoAssign: true });
     console.log(`${options.domain} now serves ${deploymentId(target)}, and new production deployments go live automatically again.`);
     return;
   }
@@ -349,6 +351,7 @@ const main = async () => {
   }
   await postMutation(api, options.domain, deploymentId(freshTarget), `/v1/projects/${encodeURIComponent(fresh.project.id)}/rollback/${encodeURIComponent(deploymentId(freshTarget))}`, {
     teamId: fresh.teamId,
+  }, {
     description: options.reason || "npm run deploy:rollback",
   });
   await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget));

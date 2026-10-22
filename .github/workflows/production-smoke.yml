@@ -15,7 +15,7 @@ jobs:
     name: Money-path smoke
     if: github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       DEPLOYMENT_URL: ${{ github.event.deployment_status.environment_url }}
     steps:

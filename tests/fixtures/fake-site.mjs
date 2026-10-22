@@ -35,6 +35,7 @@ export const startSite = (overrides = {}) => {
       res.writeHead(503);
       return res.end("busy");
     }
+    if (overrides.hang?.includes(url.pathname)) return;
     if (overrides.status?.[url.pathname]) {
       res.writeHead(overrides.status[url.pathname], { "content-type": "text/html" });
       return res.end(page("error"));
@@ -63,7 +64,10 @@ export const startSite = (overrides = {}) => {
     server.listen(0, "127.0.0.1", () => resolve({
       base: `http://127.0.0.1:${server.address().port}`,
       requests,
-      close: () => new Promise(done => server.close(done)),
+      close: () => new Promise(done => {
+        server.closeAllConnections();
+        server.close(done);
+      }),
     }));
   });
 };
