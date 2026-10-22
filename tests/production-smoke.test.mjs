@@ -32,7 +32,7 @@ const withSite = async (overrides, body) => {
 
 test("a healthy site passes every money-path check with GET requests only", () => withSite({ packages: { postOnLoad: true } }, (site, result) => {
   assert.equal(result.code, 0, result.output);
-  for (const name of ["page /", "page /packages", "page /booking", "page /payment", "booking availability", "package prices", "referral capture"]) {
+  for (const name of ["page /", "page /packages", "page /booking", "page /payment", "booking availability", "package prices", "referral capture", "booking page renders", "payment page renders"]) {
     assert.match(result.output, new RegExp(`ok\\s+${name.replace("/", "\\/")}`));
   }
   assert.deepEqual(site.requests.filter(request => request.method !== "GET"), []);
@@ -60,6 +60,20 @@ test("structured data prices that disagree with the cards are a money-path failu
 }, (site, result) => {
   assert.equal(result.code, 2, result.output);
   assert.match(result.output, /FAIL\s+package prices/);
+}));
+
+test("a booking page without the slot picker is a money-path failure", () => withSite({
+  bodies: { "/booking": "<p>Fixture page /booking with its usual content.</p>" },
+}, (site, result) => {
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /FAIL\s+booking page renders: \/booking is missing "Select a Date and Time for Your Session"/);
+}));
+
+test("a payment page without the booking summary is a money-path failure", () => withSite({
+  bodies: { "/payment": "<p>Fixture page /payment with its usual content.</p>" },
+}, (site, result) => {
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /FAIL\s+payment page renders: \/payment is missing "Booking Summary"/);
 }));
 
 test("a ?ref link that isn't remembered is a money-path failure", () => withSite({ packages: { storeReferral: false } }, (site, result) => {

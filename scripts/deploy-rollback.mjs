@@ -19,6 +19,7 @@ const FAILED_JOBS = new Set(["failed", "error", "canceled", "cancelled"]);
 const VERIFY_INTERVAL_MS = Number(process.env.ROLLBACK_VERIFY_INTERVAL_MS || 3000);
 const VERIFY_TIMEOUT_MS = Number(process.env.ROLLBACK_VERIFY_TIMEOUT_MS || 120000);
 let mutationAccepted = false;
+let mutationAttempted = false;
 
 class Refusal extends Error {}
 
@@ -90,17 +91,6 @@ const createClient = (token, base) => async (method, pathname, query = {}, paylo
     throw new ApiError(method, url.pathname, response.status, body?.error?.message || body?.error?.code || text.slice(0, 200));
   }
   return { status: response.status, body };
-};
-
-// A POST can reach Vercel and still lose its answer. Only an error status that Vercel itself sent below 500 proves the request was refused.
-const sendMutation = async (api, pathname, query, payload) => {
-  try {
-    return await api("POST", pathname, query, payload);
-  } catch (error) {
-    if (error instanceof ApiError && error.status < 500) throw error;
-    mutationAccepted = true;
-    throw new Error(`${error.message}. Vercel may have applied the request anyway, so production's state is unknown. Run \`npm run deploy:rollback -- --status\` and check the Vercel dashboard before trying again.`);
-  }
 };
 
 const createdAt = (deployment) => Number(deployment?.created ?? deployment?.createdAt ?? 0);
@@ -245,6 +235,36 @@ const waitForDomain = async (api, state, domain, targetId) => {
   throw new Error(`Vercel accepted the request, but ${domain} still serves ${alias?.deploymentId}; not confirmed (last ${job?.type || "alias"} job: ${job?.jobStatus || "unknown"}). Check the Vercel dashboard.`);
 };
 
+const ambiguousDelivery = (error) =>
+  !(error instanceof Refusal) && !(error instanceof ApiError && error.status < 500);
+
+const rememberAmbiguousMutation = async (api, domain, targetId) => {
+  try {
+    const fresh = await loadState(api, domain);
+    const job = fresh.project.lastAliasRequest;
+    const moved = deploymentId(fresh.live) === targetId;
+    const jobForTarget = job?.toDeploymentId === targetId &&
+      (PENDING_JOBS.has(job.jobStatus) || job.jobStatus === "succeeded");
+    if (moved || jobForTarget) mutationAccepted = true;
+  } catch {
+    mutationAccepted = true;
+  }
+};
+
+const postMutation = async (api, domain, targetId, pathname, query) => {
+  mutationAttempted = true;
+  try {
+    await api("POST", pathname, query, {});
+    mutationAccepted = true;
+  } catch (error) {
+    if (mutationAttempted && ambiguousDelivery(error)) await rememberAmbiguousMutation(api, domain, targetId);
+    if (mutationAccepted) {
+      throw new Error(`${error.message}. Vercel may have applied the request anyway, so production's state is unknown. Run \`npm run deploy:rollback -- --status\` and check the Vercel dashboard before trying again.`);
+    }
+    throw error;
+  }
+};
+
 const main = async () => {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
@@ -287,17 +307,22 @@ const main = async () => {
       return;
     }
     const fresh = await loadState(api, options.domain);
+    const freshTarget = fresh.newest;
+    if (!freshTarget) throw new Refusal("No ready production deployment to promote.");
     refuseBusyProject(fresh);
     if (deploymentId(fresh.live) !== deploymentId(state.live)) {
       throw new Refusal(`${deploymentId(state.live)} is no longer live (${deploymentId(fresh.live)} is); leaving production alone.`);
     }
-    if (!fresh.newest || deploymentId(fresh.newest) !== deploymentId(target)) {
-      throw new Refusal(`The undo target changed from ${deploymentId(target)} to ${deploymentId(fresh.newest)}; leaving production alone.`);
+    if (deploymentId(freshTarget) === deploymentId(fresh.live) && fresh.project.autoAssignCustomDomains !== false) {
+      console.log("Nothing to undo: the newest production deployment is live and new deployments go live automatically.");
+      return;
     }
-    if (deploymentId(fresh.newest) !== deploymentId(fresh.live)) checkTarget(fresh.newest, fresh, { rollback: false });
-    await sendMutation(api, `/v10/projects/${encodeURIComponent(state.project.id)}/promote/${encodeURIComponent(deploymentId(target))}`, { teamId: state.teamId }, {});
-    mutationAccepted = true;
-    await waitForDomain(api, state, options.domain, deploymentId(target));
+    if (deploymentId(freshTarget) !== deploymentId(target)) {
+      throw new Refusal(`The undo target changed from ${deploymentId(target)} to ${deploymentId(freshTarget)}; leaving production alone.`);
+    }
+    if (deploymentId(freshTarget) !== deploymentId(fresh.live)) checkTarget(freshTarget, fresh, { rollback: false });
+    await postMutation(api, options.domain, deploymentId(freshTarget), `/v10/projects/${encodeURIComponent(fresh.project.id)}/promote/${encodeURIComponent(deploymentId(freshTarget))}`, { teamId: fresh.teamId });
+    await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget));
     console.log(`${options.domain} now serves ${deploymentId(target)}, and new production deployments go live automatically again.`);
     return;
   }
@@ -322,12 +347,11 @@ const main = async () => {
   if (deploymentId(freshTarget) !== deploymentId(target)) {
     throw new Refusal(`The rollback target changed from ${deploymentId(target)} to ${deploymentId(freshTarget)}; leaving production alone.`);
   }
-  await sendMutation(api, `/v1/projects/${encodeURIComponent(state.project.id)}/rollback/${encodeURIComponent(deploymentId(target))}`, {
-    teamId: state.teamId,
+  await postMutation(api, options.domain, deploymentId(freshTarget), `/v1/projects/${encodeURIComponent(fresh.project.id)}/rollback/${encodeURIComponent(deploymentId(freshTarget))}`, {
+    teamId: fresh.teamId,
     description: options.reason || "npm run deploy:rollback",
-  }, {});
-  mutationAccepted = true;
-  await waitForDomain(api, state, options.domain, deploymentId(target));
+  });
+  await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget));
   console.log(`${options.domain} now serves ${deploymentId(target)}.`);
   console.log("New production deployments stay off the domain until you run `npm run deploy:rollback -- --undo`.");
 };

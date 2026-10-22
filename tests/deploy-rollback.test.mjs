@@ -90,6 +90,38 @@ test("undo with the newest deployment live and auto-assignment on changes nothin
   assert.deepEqual(mutations(vercel.requests), []);
 }));
 
+test("undo leaves production alone when a newer deployment becomes ready before the request", () => withVercel({
+  swapNewestOnDeploymentRead: 2,
+  tweak: state => {
+    state.aliases[DOMAIN].deploymentId = "dpl_previous";
+    state.project.autoAssignCustomDomains = false;
+  },
+}, async (vercel, exec) => {
+  const result = await exec(["--undo"]);
+  assert.notEqual(result.code, 0, result.output);
+  assert.match(result.output, /undo target changed from dpl_live to dpl_newer/);
+  assert.deepEqual(mutations(vercel.requests), []);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
+}));
+
+test("a dropped rollback response exits 2 when Vercel already accepted it", () => withVercel({
+  dropAcceptedRollback: true,
+}, async (vercel, exec) => {
+  const result = await exec([]);
+  assert.equal(result.code, 2, result.output);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
+  assert.equal(mutations(vercel.requests).length, 1);
+}));
+
+test("a rejected rollback exits 1 and leaves production alone", () => withVercel({
+  rollbackError: { status: 500, code: "internal_error", message: "temporarily unavailable" },
+}, async (vercel, exec) => {
+  const result = await exec([]);
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /500/);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
+}));
+
 test("dry run of undo shows the deployment it would promote and changes nothing", () => withVercel({
   tweak: state => {
     state.aliases[DOMAIN].deploymentId = "dpl_previous";

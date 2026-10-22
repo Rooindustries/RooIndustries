@@ -106,6 +106,10 @@ const checkPrices = async (browser, base) => {
 };
 
 const APP_ERROR_PATTERN = /application error|client-side exception|internal server error/i;
+const FLOW_MARKERS = {
+  "/booking": "Select a Date and Time for Your Session",
+  "/payment": "Booking Summary",
+};
 
 const checkPageRenders = async (browser, base, pathname) => {
   const context = await browser.newContext();
@@ -118,6 +122,8 @@ const checkPageRenders = async (browser, base, pathname) => {
       .catch(() => { throw new Error(`${pathname} rendered no visible content`); });
     const text = await page.evaluate(() => document.body.innerText);
     if (APP_ERROR_PATTERN.test(text)) throw new Error(`${pathname} shows an application error`);
+    const marker = FLOW_MARKERS[pathname];
+    if (marker && !text.includes(marker)) throw new Error(`${pathname} is missing "${marker}"`);
     return "renders";
   } finally {
     await context.close();

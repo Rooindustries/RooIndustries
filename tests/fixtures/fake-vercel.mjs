@@ -36,6 +36,8 @@ export const startVercel = ({
   swapLiveOnAliasRead = 0,
   swapLiveTo = null,
   dropMutationResponse = false,
+  swapNewestOnDeploymentRead = 0,
+  dropAcceptedRollback = false,
 } = {}) => {
   const state = structuredClone(fixture);
   tweak?.(state);
@@ -43,6 +45,7 @@ export const startVercel = ({
   let aliasReads = 0;
   let rollbackPosts = 0;
   let projectReadsAfterRollback = 0;
+  let newestReads = 0;
   const server = http.createServer((req, res) => {
     const chunks = [];
     req.on("data", chunk => chunks.push(chunk));
@@ -118,6 +121,28 @@ export const startVercel = ({
     }
     if (req.method === "GET" && url.pathname === "/v7/deployments") {
       const query = url.searchParams;
+      if (!query.get("rollbackCandidate")) {
+        newestReads += 1;
+        if (swapNewestOnDeploymentRead && newestReads === swapNewestOnDeploymentRead) {
+          const current = state.deployments.find(item => item.uid === state.aliases[DOMAIN].deploymentId) || state.deployments[0];
+          const newerId = "dpl_newer";
+          if (current && !state.deployments.some(item => item.uid === newerId)) {
+            const newestCreated = Math.max(...state.deployments.map(item => Number(item.created) || 0));
+            state.deployments.unshift({
+              ...structuredClone(current),
+              uid: newerId,
+              url: "rooindustries-newer-roo-industries.vercel.app",
+              created: newestCreated + 1000,
+              createdAt: newestCreated + 1000,
+              ready: newestCreated + 1000,
+              meta: {
+                githubCommitSha: "9999999999999999999999999999999999999999",
+                githubCommitMessage: "fix: a newer deploy became ready",
+              },
+            });
+          }
+        }
+      }
       let list = owned ? [...state.deployments].sort((a, b) => b.created - a.created) : [];
       if (!ignoreFilters) {
         if (query.get("projectId")) list = list.filter(item => item.projectId === query.get("projectId"));
@@ -133,6 +158,19 @@ export const startVercel = ({
       if (rollbackError) return send(rollbackError.status, { error: { code: rollbackError.code, message: rollbackError.message } });
       const from = state.aliases[DOMAIN].deploymentId;
       moveAlias(match[2]);
+      if (dropAcceptedRollback) {
+        state.project.autoAssignCustomDomains = false;
+        rollbackPosts += 1;
+        state.project.lastAliasRequest = {
+          type: "rollback",
+          jobStatus: "in-progress",
+          fromDeploymentId: from,
+          toDeploymentId: match[2],
+          requestedAt: Date.now(),
+        };
+        res.destroy();
+        return;
+      }
       state.project.autoAssignCustomDomains = false;
       rollbackPosts += 1;
       state.project.lastAliasRequest = {
