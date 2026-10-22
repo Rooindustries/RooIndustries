@@ -17,7 +17,9 @@ export const getSafeErrorCode = (error, fallback = "server_error") => {
 };
 
 export const logSafeError = (label, error) => {
-  console.error(String(label || "Server error"), getSafeErrorMetadata(error));
+  const metadata = getSafeErrorMetadata(error);
+  console.error(String(label || "Server error"), metadata);
+  globalThis[Symbol.for("roo.reportServerError")]?.(String(label || "Server error"), error, metadata);
 };
 
 export const logSafeWarn = (label, error) => {

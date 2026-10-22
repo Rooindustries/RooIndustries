@@ -1,6 +1,13 @@
 "use client";
 
-export default function ErrorPage() {
+import { useEffect } from "react";
+import { reportClientError } from "@/src/lib/monitoring/client";
+
+export default function ErrorPage({ error }) {
+  useEffect(() => {
+    reportClientError(error);
+  }, [error]);
+
   return (
     <main
       id="main-content"

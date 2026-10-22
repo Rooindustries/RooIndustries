@@ -12,7 +12,8 @@ export function middleware(req) {
 
   if (process.env.SALES_PREVIEW_READ_ONLY === "1" && process.env.VERCEL_ENV !== "production") {
     const readableApi = /^\/api\/content\/[a-z-]+$/.test(pathname) || pathname === "/api/bookingAvailability";
-    if (pathname.startsWith("/auth/") || !["GET", "HEAD"].includes(req.method) || (pathname.startsWith("/api/") && !readableApi)) {
+    const errorReport = pathname === "/api/client-report" && req.method === "POST";
+    if (!errorReport && (pathname.startsWith("/auth/") || !["GET", "HEAD"].includes(req.method) || (pathname.startsWith("/api/") && !readableApi))) {
       return NextResponse.json({ ok: false, error: "This preview does not create bookings or accept payments." }, { status: 503 });
     }
   }
