@@ -138,6 +138,8 @@ const test = base.extend({
           ok: true, paymentAccessToken: "fixture-payment", status: "started",
           providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff` },
           sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
+          quoteFingerprint: "fixture-quote",
+          quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
         });
       }
       return route.fallback();

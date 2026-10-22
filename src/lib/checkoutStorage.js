@@ -257,6 +257,7 @@ const writeReferralIntent = (intent) => {
     if (intent.passiveCode) window.sessionStorage.setItem(REFERRAL_SESSION_STORAGE_KEY, intent.passiveCode);
     else window.sessionStorage.removeItem(REFERRAL_SESSION_STORAGE_KEY);
   } catch {}
+  if (!captureFailure) acknowledgeReferralCapture();
 };
 
 export const readStoredReferral = () => {
@@ -464,8 +465,17 @@ export const clearStoredReferral = (expectedCode) => {
   if (!normalized) return false;
   try {
     const intent = readReferralIntent();
-    if (intent.passiveCode !== normalized) return true;
-    writeReferralIntent({ ...intent, passiveCode: "" });
+    const choices = { ...intent.choices };
+    for (const [scope, code] of Object.entries(choices)) {
+      if (code === normalized) delete choices[scope];
+    }
+    const passiveCode = intent.passiveCode === normalized ? "" : intent.passiveCode;
+    writeReferralIntent({
+      ...intent,
+      passiveCode,
+      codes: { ...intent.codes, [normalized]: "removed" },
+      choices,
+    });
     return true;
   } catch {
     return false;

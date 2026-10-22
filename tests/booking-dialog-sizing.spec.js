@@ -390,9 +390,11 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 
       await flow.reserve();
       const states = [];
       const captureLabels = async name => {
-        const labels = await page.locator(dialogSelector).first().evaluate((dialog, fields) => fields.map(([name, text]) => {
-          const input = dialog.querySelector(`[name="${name}"]`);
-          const label = input?.id ? [...dialog.querySelectorAll("label")].find(label => label.htmlFor === input.id) : null;
+        const dialog = page.locator(dialogSelector).filter({ has: page.locator('[name="email"]') });
+        await expect(dialog.locator('[name="email"]')).toBeVisible();
+        const labels = await dialog.evaluate((node, fields) => fields.map(([name, text]) => {
+          const input = node.querySelector(`[name="${name}"]`);
+          const label = input?.id ? [...node.querySelectorAll("label")].find(label => label.htmlFor === input.id) : null;
           return { name, expected: text, text: label?.textContent.trim() || "", visible: Boolean(label?.checkVisibility({ checkVisibilityCSS: true })), value: input?.value };
         }), fields);
         states.push({ name, labels });
@@ -431,7 +433,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 
       expect.soft(reopenSizes.at(-1).width - reopenSizes[0].width).toBe(48);
       expect.soft(reopenSizes.at(-1).height - reopenSizes[0].height).toBe(48);
       await page.reload();
-      await expect(email).toHaveValue("visitor@example.invalid");
+      await expect(page.locator(dialogSelector).locator('[name="email"]')).toHaveValue("visitor@example.invalid");
       await captureLabels("reloaded-labels");
       const close = page.getByRole("button", { name: "Close", exact: true });
       await close.focus();

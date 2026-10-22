@@ -3,6 +3,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import BookingForm from "../components/BookingForm";
 import { calculateCheckoutDiscounts } from "../lib/checkoutCodes";
+import { captureReferralAddress } from "../lib/checkoutStorage";
 
 let mockLocation = {
   pathname: "/booking",
@@ -123,9 +124,11 @@ const STACKING_COUPON = {
 };
 
 const setBookingLocation = (bookingPackage = OVERHAUL_PACKAGE, search = "") => {
+  const normalizedSearch = search ? (search.startsWith("?") ? search : `?${search}`) : "";
+  window.history.replaceState({ bookingPackage }, "", `/booking${normalizedSearch}`);
   __setMockLocation({
     pathname: "/booking",
-    search,
+    search: normalizedSearch,
     hash: "",
     state: { bookingPackage },
   });
@@ -269,6 +272,8 @@ describe("booking calendar UI", () => {
     mockNavigate.mockReset();
     window.sessionStorage.clear();
     window.localStorage.clear();
+    window.history.replaceState(null, "", "/booking");
+    captureReferralAddress("/booking", "");
     __setMockLocation({
       pathname: "/booking",
       search: "",
@@ -645,17 +650,18 @@ describe("booking calendar UI", () => {
         global.fetch.mock.calls.filter(([url]) => url === "/api/releaseHold")
       ).toHaveLength(1);
     });
-    expect(controllers).toHaveLength(1);
+    expect(
+      global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot")
+    ).toHaveLength(1);
+    expect(controllers).toHaveLength(2);
 
     await act(async () => {
-      controllers[0].abort();
+      controllers[1].abort();
       await Promise.resolve();
     });
 
     expect(await screen.findByLabelText("Discord username")).toBeInTheDocument();
-    expect(
-      global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot")
-    ).toHaveLength(1);
+    expect(JSON.parse(sessionStorage.getItem("my_slot_hold")).holdId).toBe("hold_replacement_1");
     expect(abortTimeoutSpy).toHaveBeenCalledTimes(2);
     expect(abortTimeoutSpy).toHaveBeenNthCalledWith(1, 8_000);
     expect(abortTimeoutSpy).toHaveBeenNthCalledWith(2, 8_000);
@@ -867,8 +873,8 @@ describe("booking calendar UI", () => {
     await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
 
     expect(await screen.findByText("The replacement slot is already held.")).toBeInTheDocument();
-    expect(storedAtReplacement).toBeNull();
-    expect(sessionStorage.getItem("my_slot_hold")).toBeNull();
+    expect(JSON.parse(storedAtReplacement)).toEqual(originalHold);
+    expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toEqual(originalHold);
     expect(screen.queryByLabelText("Booking email")).not.toBeInTheDocument();
     const holdCalls = global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot");
     expect(holdCalls).toHaveLength(1);
@@ -876,17 +882,13 @@ describe("booking calendar UI", () => {
       previousHoldId: originalHold.holdId,
       previousHoldToken: originalHold.holdToken,
     });
+    expect(global.fetch.mock.calls.filter(([url]) => url === "/api/releaseHold")).toHaveLength(0);
   });
 
-  test.each(["active", "released", "taken"])("revalidates the %s original slot after release times out and its replacement returns 409", async (originalState) => {
-    const controllers = [];
+  test.each(["active", "released", "taken"])("keeps the original hold when a replacement returns 409 and revalidates that %s slot", async (originalState) => {
     abortTimeoutSpy = jest
       .spyOn(AbortSignal, "timeout")
-      .mockImplementation(() => {
-        const controller = new AbortController();
-        controllers.push(controller);
-        return controller.signal;
-      });
+      .mockImplementation(() => new AbortController().signal);
     consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
     seedBookingSession({ step: 2 });
     const originalHold = JSON.parse(sessionStorage.getItem("my_slot_hold"));
@@ -926,11 +928,6 @@ describe("booking calendar UI", () => {
       name: formatLocalTime(getUtcFromHostLocal(2099, 0, 5, 11), "America/Los_Angeles"),
     }));
     await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
-    await waitFor(() => expect(controllers).toHaveLength(1));
-    await act(async () => {
-      controllers[0].abort();
-      await Promise.resolve();
-    });
 
     expect(await screen.findByText("The replacement slot is already held.")).toBeInTheDocument();
     expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toEqual(originalHold);
@@ -940,9 +937,9 @@ describe("booking calendar UI", () => {
       previousHoldId: originalHold.holdId,
       previousHoldToken: originalHold.holdToken,
     });
-    expect(abortTimeoutSpy).toHaveBeenCalledTimes(2);
+    expect(global.fetch.mock.calls.filter(([url]) => url === "/api/releaseHold")).toHaveLength(0);
+    expect(abortTimeoutSpy).toHaveBeenCalledTimes(1);
     expect(abortTimeoutSpy).toHaveBeenNthCalledWith(1, 8_000);
-    expect(abortTimeoutSpy).toHaveBeenNthCalledWith(2, 8_000);
 
     const originalSlot = screen.getByRole("button", {
       name: formatLocalTime(new Date(FUTURE_SLOT), "America/Los_Angeles"),
@@ -957,9 +954,9 @@ describe("booking calendar UI", () => {
       previousHoldId: originalHold.holdId,
       previousHoldToken: originalHold.holdToken,
     });
-    expect(global.fetch.mock.calls.filter(([url]) => url === "/api/releaseHold")).toHaveLength(1);
-    expect(abortTimeoutSpy).toHaveBeenCalledTimes(3);
-    expect(abortTimeoutSpy).toHaveBeenNthCalledWith(3, 8_000);
+    expect(global.fetch.mock.calls.filter(([url]) => url === "/api/releaseHold")).toHaveLength(0);
+    expect(abortTimeoutSpy).toHaveBeenCalledTimes(2);
+    expect(abortTimeoutSpy).toHaveBeenNthCalledWith(2, 8_000);
     if (originalState === "taken") {
       expect(await screen.findByText("This slot is currently reserved by someone else.")).toBeInTheDocument();
       expect(sessionStorage.getItem("my_slot_hold")).toBeNull();
