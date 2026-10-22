@@ -94,6 +94,25 @@ for (const base of ["https://example.com", "https://rooindustries.com.attacker.e
   });
 }
 
+test("a confirmed page failure still counts when the browser later disconnects", async () => {
+  let smokePid;
+  const site = await startSite({
+    status: { "/": 500 },
+    onRequest: (pathname) => {
+      if (pathname === "/packages" && smokePid) execFileSync("pkill", ["-KILL", "-P", String(smokePid)]);
+    },
+  });
+  try {
+    const result = await run(["--base", site.base], (child) => { smokePid = child.pid; });
+    assert.equal(result.code, 2, result.output);
+    assert.match(result.output, /FAIL\s+page \/.*500/);
+    assert.match(result.output, /money-path check\(s\) failed/);
+    assert.doesNotMatch(result.output, /Smoke could not run/);
+  } finally {
+    await site.close();
+  }
+});
+
 test("a browser that dies mid-run means the smoke could not run, not a money-path failure", async () => {
   let smokePid;
   const site = await startSite({

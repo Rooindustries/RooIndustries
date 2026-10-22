@@ -185,7 +185,10 @@ const main = async () => {
         results.push({ name, ok: true, detail: detail || "" });
         console.log(`ok    ${name}${detail ? ` (${detail})` : ""}`);
       } catch (error) {
-        if (!browser.isConnected()) throw error;
+        if (!browser.isConnected()) {
+          if (results.some((result) => !result.ok)) break;
+          throw error;
+        }
         results.push({ name, ok: false, detail: error.message });
         console.log(`FAIL  ${name}: ${error.message}`);
       }
