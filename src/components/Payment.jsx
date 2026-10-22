@@ -761,10 +761,10 @@ export default function Payment({ hideFooter = false }) {
     const referralCode = selectStoredReferral(scope, candidates);
     const captureFailure = getReferralCaptureFailure();
     pendingAutomaticReferralRef.current = null;
-    const couponCode = String(bookingData.couponCode || "").trim();
+    const couponCode = String(coupon?.code || bookingData.couponCode || "").trim();
     let active = true;
     setPreApplyingCodes(true);
-    setCoupon(null);
+    if (!coupon?.code) setCoupon(null);
     setReferralError("");
     setCouponError("");
 

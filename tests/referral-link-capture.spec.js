@@ -1589,7 +1589,7 @@ test("an unavailable Payment arrival keeps the referral input retryable and an i
     await submitPaymentCode(page, "friend");
     await expect(page.getByRole("alert").filter({ hasText: invalidReferralMessage })).toBeVisible();
     expect(await storedReferral(page)).toBeNull();
-    expect((await envelope(page)).codes.friend).toBe("available");
+    expect((await envelope(page)).codes.friend).toBe("removed");
     expect(quoteCalls(flow, retry)).toEqual([]);
   } finally {
     await attachJson(testInfo, "payment-arrival-unavailable-retry", {
@@ -1641,7 +1641,7 @@ for (const blockedClear of [false, true]) {
         expect(await page.evaluate(() => window.referralClearFailures.length)).toBe(1);
       } else {
         expect(await storedReferral(page)).toBeNull();
-        expect((await envelope(page)).codes.friend).toBe("available");
+        expect((await envelope(page)).codes.friend).toBe("removed");
       }
     } finally {
       await attachJson(testInfo, "payment-same-code-invalid-retry", {

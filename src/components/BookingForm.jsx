@@ -772,9 +772,10 @@ export default function BookingForm() {
     setDismissedReferralCode("");
     setAppliedReferral(null);
     setAppliedCoupon(null);
-    const key = getDraftKey(selectedPackage);
-    clearDraftForPackage(key);
-    setForm(createFreshForm());
+    if (ready) {
+      clearDraftForPackage(getDraftKey(selectedPackage));
+      setForm(createFreshForm());
+    }
     setSelectedSlot(null);
     setStep(1);
     clearedNoHoldRef.current = true;
@@ -1857,8 +1858,11 @@ export default function BookingForm() {
           }
           invalidCodeFound = true;
           if (sourceType === "referral") {
+            if (!clearStoredReferral(sourceCode)) {
+              storageFailed = true;
+              return;
+            }
             nextDismissedCode = sourceCode;
-            clearStoredReferral(sourceCode);
           }
           return;
         }

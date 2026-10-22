@@ -3,7 +3,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import BookingForm from "../components/BookingForm";
 import { calculateCheckoutDiscounts } from "../lib/checkoutCodes";
-import { captureReferralAddress } from "../lib/checkoutStorage";
+import { captureReferralAddress, clearReferralDismissal } from "../lib/checkoutStorage";
 
 let mockLocation = {
   pathname: "/booking",
@@ -297,6 +297,51 @@ describe("booking calendar UI", () => {
     }
     if (resolvedOptionsSpy) {
       resolvedOptionsSpy.mockRestore();
+    }
+  });
+
+  test("keeps typed details when the referral scope cannot be reset", async () => {
+    window.sessionStorage.setItem(
+      "booking_draft",
+      JSON.stringify({
+        lastTitle: OVERHAUL_PACKAGE.title,
+        packages: {
+          [OVERHAUL_PACKAGE.title]: {
+            selectedPackage: OVERHAUL_PACKAGE,
+            form: VALID_FORM,
+          },
+        },
+      })
+    );
+    const scope = JSON.stringify([OVERHAUL_PACKAGE.title, ""]);
+    window.sessionStorage.setItem("referral_capture", "ready");
+    window.sessionStorage.setItem(
+      "referral_dismissed",
+      JSON.stringify({
+        passiveCode: "",
+        codes: { friend: "applied" },
+        choices: { [scope]: "friend" },
+      })
+    );
+    const originalSetItem = Storage.prototype.setItem;
+    const setItemSpy = jest.spyOn(Storage.prototype, "setItem").mockImplementation(function setItem(key, value) {
+      if (key === "referral_dismissed") throw new DOMException("denied", "QuotaExceededError");
+      return originalSetItem.call(this, key, value);
+    });
+    installDefaultFetch();
+    setBookingLocation();
+    const view = render(<BookingForm />);
+    try {
+      await screen.findByText(/select a date and time/i);
+      expect(
+        JSON.parse(window.sessionStorage.getItem("booking_draft")).packages[
+          OVERHAUL_PACKAGE.title
+        ].form.email
+      ).toBe(CLIENT_EMAIL);
+    } finally {
+      view.unmount();
+      setItemSpy.mockRestore();
+      clearReferralDismissal("friend", scope);
     }
   });
 
