@@ -49,7 +49,7 @@ export const startSite = (overrides = {}) => {
     }
     if (["/", "/booking", "/payment"].includes(url.pathname)) {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      return res.end(page(`<h1>${url.pathname}</h1>`));
+      return res.end(page(overrides.bodies?.[url.pathname] ?? `<h1>${url.pathname}</h1><p>Fixture page ${url.pathname} with its usual content.</p>`));
     }
     res.writeHead(404);
     return res.end();

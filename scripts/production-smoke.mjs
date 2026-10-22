@@ -105,6 +105,25 @@ const checkPrices = async (browser, base) => {
   }
 };
 
+const APP_ERROR_PATTERN = /application error|client-side exception|internal server error/i;
+
+const checkPageRenders = async (browser, base, pathname) => {
+  const context = await browser.newContext();
+  try {
+    await allowOnlyGet(context);
+    const page = await context.newPage();
+    const response = await page.goto(`${base}${pathname}`, { waitUntil: "load", timeout: 30000 });
+    if (response?.status() !== 200) throw new Error(`${pathname} answered ${response?.status()}`);
+    await page.waitForFunction(() => document.body.innerText.trim().length >= 20, null, { timeout: 15000 })
+      .catch(() => { throw new Error(`${pathname} rendered no visible content`); });
+    const text = await page.evaluate(() => document.body.innerText);
+    if (APP_ERROR_PATTERN.test(text)) throw new Error(`${pathname} shows an application error`);
+    return "renders";
+  } finally {
+    await context.close();
+  }
+};
+
 const checkReferral = async (browser, base) => {
   const context = await browser.newContext();
   try {
@@ -151,6 +170,8 @@ const main = async () => {
     checks.push(
       ["package prices", () => withBrowserRetries(browser, base, checkPrices)],
       ["referral capture", () => withBrowserRetries(browser, base, checkReferral)],
+      ["booking page renders", () => withBrowserRetries(browser, base, (b, url) => checkPageRenders(b, url, "/booking"))],
+      ["payment page renders", () => withBrowserRetries(browser, base, (b, url) => checkPageRenders(b, url, "/payment"))],
     );
     for (const [name, run] of checks) {
       try {

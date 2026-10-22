@@ -69,7 +69,7 @@ test("a ?ref link that isn't remembered is a money-path failure", () => withSite
 
 test("a brief outage on one page is retried before it counts", () => withSite({ failFirst: { "/booking": 1 } }, (site, result) => {
   assert.equal(result.code, 0, result.output);
-  assert.equal(site.requests.filter(request => request.path === "/booking").length, 2);
+  assert.equal(site.requests.filter(request => request.path === "/booking").length, 3);
 }));
 
 for (const base of ["https://example.com", "https://rooindustries.com.attacker.example", "ftp://127.0.0.1"]) {
@@ -96,6 +96,18 @@ test("a browser that dies mid-run means the smoke could not run, not a money-pat
     await site.close();
   }
 });
+
+test("a booking page that renders nothing is a money-path failure even with a 200", () => withSite({ bodies: { "/booking": "" } }, (site, result) => {
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /FAIL  booking page renders: \/booking rendered no visible content/);
+}));
+
+test("a payment page that shows an application error is a money-path failure", () => withSite({
+  bodies: { "/payment": "<h1>Application error</h1><p>a client-side exception has occurred</p>" },
+}, (site, result) => {
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /FAIL  payment page renders: \/payment shows an application error/);
+}));
 
 test("refuses unknown options", async () => {
   const result = await run(["--bse", "https://www.rooindustries.com"]);

@@ -275,6 +275,20 @@ test("an undo request whose answer is lost reports production's state as unknown
   assert.match(result.output, /state is unknown/);
 }));
 
+test("undo leaves production alone when a newer deployment goes live before the promote request", () => withVercel({
+  swapLiveOnAliasRead: 2,
+  swapLiveTo: "dpl_newer",
+  tweak: state => {
+    state.aliases[DOMAIN].deploymentId = "dpl_previous";
+    state.project.autoAssignCustomDomains = false;
+  },
+}, async (vercel, exec) => {
+  const result = await exec(["--undo"]);
+  assert.notEqual(result.code, 0, result.output);
+  assert.match(result.output, /no longer live|target changed/);
+  assert.deepEqual(mutations(vercel.requests), []);
+}));
+
 test("fails loudly when the domain does not move to the target after the rollback call", () => withVercel({ freezeAlias: true }, async (vercel, exec) => {
   const result = await exec([]);
   assert.equal(result.code, 2);

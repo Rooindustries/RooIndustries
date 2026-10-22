@@ -286,6 +286,15 @@ const main = async () => {
       console.log("Dry run: nothing changed.");
       return;
     }
+    const fresh = await loadState(api, options.domain);
+    refuseBusyProject(fresh);
+    if (deploymentId(fresh.live) !== deploymentId(state.live)) {
+      throw new Refusal(`${deploymentId(state.live)} is no longer live (${deploymentId(fresh.live)} is); leaving production alone.`);
+    }
+    if (!fresh.newest || deploymentId(fresh.newest) !== deploymentId(target)) {
+      throw new Refusal(`The undo target changed from ${deploymentId(target)} to ${deploymentId(fresh.newest)}; leaving production alone.`);
+    }
+    if (deploymentId(fresh.newest) !== deploymentId(fresh.live)) checkTarget(fresh.newest, fresh, { rollback: false });
     await sendMutation(api, `/v10/projects/${encodeURIComponent(state.project.id)}/promote/${encodeURIComponent(deploymentId(target))}`, { teamId: state.teamId }, {});
     mutationAccepted = true;
     await waitForDomain(api, state, options.domain, deploymentId(target));
