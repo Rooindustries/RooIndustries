@@ -77,10 +77,22 @@ const login = (author) => String(author || "").replace(/\[bot\]$/, "");
 const shortSha = (sha) => String(sha || "").slice(0, 7);
 const unique = (values) => [...new Set(values)];
 
+// A shipped file whose path names a money concept is a money path even when no list names it yet.
+const MONEY_WORDS = new Set([
+  "booking", "checkout", "commission", "coupon", "discount", "dodo", "hold", "invoice", "order", "pay", "payment",
+  "payout", "price", "pricing", "quote", "razorpay", "referral", "refund", "reservation", "slot", "stripe", "upgrade",
+]);
+const pathWords = (filePath) => filePath
+  .split(/[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Za-z])(?=[0-9])/)
+  .map((word) => word.toLowerCase().replace(/s$/, ""))
+  .filter(Boolean);
+const isTestOrDoc = (filePath) => /\.(?:md|mdx|txt)$/i.test(filePath) || /(?:^|\/)(?:tests?|__tests__)\//.test(filePath) || /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(filePath);
+
 export const isMoneyPath = (filePath) => {
   if (MONEY_FILES.has(filePath) || MONEY_PREFIXES.some((prefix) => filePath.startsWith(prefix))) return true;
   const base = filePath.split("/").pop();
-  return filePath.startsWith("src/components/") && MONEY_COMPONENTS.has(base);
+  if (filePath.startsWith("src/components/") && MONEY_COMPONENTS.has(base)) return true;
+  return !isTestOrDoc(filePath) && pathWords(filePath).some((word) => MONEY_WORDS.has(word));
 };
 
 export const isSecretPath = (filePath) => {
@@ -95,7 +107,7 @@ export const isProductionMutator = (filePath) => /scripts\/.*(?:deploy|rollback|
 // DROP covers every object kind PostgreSQL can drop (and ALTER ... DROP COLUMN/CONSTRAINT).
 const DESTRUCTIVE_SQL = /\b(?:DROP\s+(?:ACCESS\s+METHOD|AGGREGATE|CAST|COLLATION|COLUMN|CONSTRAINT|CONVERSION|DATABASE|DOMAIN|EVENT\s+TRIGGER|EXTENSION|FOREIGN\s+(?:DATA\s+WRAPPER|TABLE)|FUNCTION|GROUP|INDEX|LANGUAGE|MATERIALIZED\s+VIEW|OPERATOR|OWNED|POLICY|PROCEDURE|PUBLICATION|ROLE|ROUTINE|RULE|SCHEMA|SEQUENCE|SERVER|STATISTICS|SUBSCRIPTION|TABLE|TABLESPACE|TEXT\s+SEARCH|TRANSFORM|TRIGGER|TYPE|USER|VIEW)\b|TRUNCATE\s+(?:TABLE\s+|ONLY\s+)?["\w.]+|DELETE\s+FROM\s+["\w.]+)/i;
 // Test suites only talk to local fixtures and docs never run, so their SQL does not hold a pull request.
-const runsSql = (filePath) => !/\.(?:md|mdx|txt)$/i.test(filePath) && !/(?:^|\/)(?:tests?|__tests__)\//.test(filePath) && !/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(filePath);
+const runsSql = (filePath) => !isTestOrDoc(filePath);
 
 // Added and unchanged context lines: an edit under an existing DELETE still shows the DELETE.
 const hunkText = (patch) => String(patch || "").split("\n").filter((line) => !/^(?:-|@@|\\)/.test(line)).join("\n");
@@ -197,7 +209,7 @@ const fileRisks = (files) => {
     // A rename carries its old path: moving a file out of a risky path must not hide it.
     const paths = [file.filename || file.path || "", file.previousFilename || ""].filter(Boolean);
     if (paths.some(isMoneyPath)) reasons.push("risky-money");
-    if (paths.some(isSecretPath) || /BEGIN (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY/.test(added)) reasons.push("risky-secret");
+    if (paths.some(isSecretPath) || /BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY/.test(added)) reasons.push("risky-secret");
     if (paths.some((filePath) => filePath.startsWith("supabase/migrations/"))) reasons.push("risky-migration");
     if (paths.some((filePath) => filePath.startsWith(".github/workflows/") || GATE_FILES.has(filePath))) reasons.push("risky-workflow");
     if (paths.some(runsSql) && DESTRUCTIVE_SQL.test(hunkText(file.patch))) reasons.push("risky-sql");

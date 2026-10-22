@@ -123,6 +123,7 @@ const collectSnapshot = async (number) => {
     title: pull.title,
     draft: pull.draft,
     baseRef: pull.base.ref,
+    baseSha: pull.base.sha,
     headSha: pull.head.sha,
     headRef: pull.head.ref,
     sameRepository: pull.head.repo?.full_name === pull.base.repo.full_name,
@@ -248,11 +249,16 @@ const applyOne = async (number) => {
     if (!counted) await recordReviewRound(snapshot);
   }
   if (decision.action === "merge") {
-    const { error: mergeError, headMoved } = await mergePullRequest(number, snapshot.headSha);
+    // The merge call can pin only the head, so re-read the base right before it and defer if main moved.
+    const { payload: latest } = await api(readToken, `repos/${repo}/pulls/${number}`);
+    const baseMoved = latest.base.sha !== snapshot.baseSha || latest.head.sha !== snapshot.headSha || latest.mergeable_state !== "clean";
+    const { error: mergeError, headMoved } = baseMoved
+      ? { error: "", headMoved: true }
+      : await mergePullRequest(number, snapshot.headSha);
     if (headMoved) {
       decision.action = "wait";
       decision.reasons = [...decision.reasons, "head-moved"];
-      decision.lines = [`The branch head moved while the merge was being sent, so nothing merged. The next run decides again on the new head.`];
+      decision.lines = [`The branch or main moved while the merge was being prepared, so nothing merged. The next run decides again.`];
     } else if (mergeError) {
       decision.action = "flag";
       decision.reasons = [...decision.reasons, "merge-rejected"];

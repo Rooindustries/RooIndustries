@@ -159,6 +159,14 @@ test("money, secret, migration, workflow, and production-rollback diffs are held
   assert.equal(held("src/components/Payment.jsx").wake, false);
   assert.equal(isMoneyPath("src/components/Payment.jsx"), true);
   assert.equal(isMoneyPath("src/components/Footer.jsx"), false);
+  for (const moneyFile of ["src/lib/holdResponse.js", "src/lib/bookingDialogHold.js", "src/components/PriceDisplay.jsx", "app/upgrade-xoc/page.jsx", "src/lib/pricing2.js"]) {
+    assert.equal(isMoneyPath(moneyFile), true, moneyFile);
+  }
+  for (const plainFile of ["src/components/BorderBox.jsx", "src/lib/placeholder.js", "src/lib/payload.js", "tests/booking-flow.spec.js", "src/__tests__/holdResponse.test.js"]) {
+    assert.equal(isMoneyPath(plainFile), false, plainFile);
+  }
+  assert.ok(held("src/config/runtime.json", "+-----BEGIN ENCRYPTED PRIVATE KEY-----\n").reasons.includes("risky-secret"));
+  assert.ok(held("src/config/runtime.json", "+-----BEGIN PGP PRIVATE KEY BLOCK-----\n").reasons.includes("risky-secret"));
   assert.equal(isSecretPath("src/lib/checkoutStorage.js"), false);
   assert.equal(isProductionMutator("scripts/deploy-rollback.mjs"), true);
 });
@@ -264,7 +272,7 @@ test("the gate comment names the owner only on a hold", () => {
 });
 
 test("a rename out of a money, secret, or migration path is held by its old path", () => {
-  const renamed = (previousFilename) => decide(safe({ files: [{ filename: "src/lib/pricing2.js", previousFilename, patch: "+export const price = 1;\n" }] }));
+  const renamed = (previousFilename) => decide(safe({ files: [{ filename: "src/lib/helpers2.js", previousFilename, patch: "+export const price = 1;\n" }] }));
   assert.ok(renamed("app/api/payment/route.js").reasons.includes("risky-money"));
   assert.ok(renamed(".env.production").reasons.includes("risky-secret"));
   assert.ok(renamed("supabase/migrations/20260101_x.sql").reasons.includes("risky-migration"));
@@ -291,6 +299,7 @@ test("the merge is bound to the head that was reviewed, and runs serialize", () 
   assert.match(apply, /botNamed\(comment\.user, "github-actions"\)/);
   assert.match(apply, /paginate\(`repos\/\$\{repo\}\/commits\/\$\{pull\.head\.sha\}\/statuses`\)/);
   assert.match(apply, /files\.length === pull\.changed_files/);
+  assert.match(apply, /latest\.base\.sha !== snapshot\.baseSha/);
   const workflow = readFileSync(new URL("../.github/workflows/auto-merge.yml", import.meta.url), "utf8");
   assert.match(workflow, /group: auto-merge\n/);
   assert.match(workflow, /cancel-in-progress: false/);
