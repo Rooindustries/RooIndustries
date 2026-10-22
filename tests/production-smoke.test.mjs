@@ -12,7 +12,7 @@ const script = path.join(root, "scripts/production-smoke.mjs");
 const run = (args, onSpawn, env = {}) => new Promise(resolve => {
   const child = spawn(process.execPath, [script, ...args], {
     cwd: root,
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, SMOKE_RETRY_MS: "50", PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH, ...env },
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, SMOKE_RETRY_MS: "50", SMOKE_MARKER_TIMEOUT_MS: "400", PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH, ...env },
   });
   onSpawn?.(child);
   let output = "";
@@ -80,6 +80,15 @@ test("structured data prices that disagree with the cards are a money-path failu
 }, (site, result) => {
   assert.equal(result.code, 2, result.output);
   assert.match(result.output, /FAIL\s+package prices/);
+}));
+
+test("a booking page that shows the slot picker after the calendar loads still passes", () => withSite({
+  bodies: {
+    "/booking": "<p>Fixture page loading the calendar for this session.</p><script>setTimeout(() => document.body.insertAdjacentHTML('beforeend', '<h3>Select a Date and Time for Your Session</h3>'), 150)</script>",
+  },
+}, (site, result) => {
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /ok\s+booking page renders/);
 }));
 
 test("a booking page without the slot picker is a money-path failure", () => withSite({
@@ -218,7 +227,7 @@ test("deploy gate: a money-path failure on the live deployment rolls production 
   const changes = vercelChanges(vercel);
   assert.equal(changes.length, 1);
   assert.equal(changes[0].path, "/v1/projects/prj_rooFixture/rollback/dpl_previous");
-  assert.match(changes[0].body.description, /Money-path smoke failed/);
+  assert.match(changes[0].query.description, /Money-path smoke failed/);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
   assert.match(result.output, /--undo/);
 }));

@@ -125,7 +125,11 @@ const checkPageRenders = async (browser, base, pathname) => {
     const text = await page.evaluate(() => document.body.innerText);
     if (APP_ERROR_PATTERN.test(text)) throw new Error(`${pathname} shows an application error`);
     const marker = FLOW_MARKERS[pathname];
-    if (marker && !text.includes(marker)) throw new Error(`${pathname} is missing "${marker}"`);
+    if (marker) {
+      await page.waitForFunction((expected) => document.body.innerText.includes(expected), marker, {
+        timeout: Number(process.env.SMOKE_MARKER_TIMEOUT_MS || 15000),
+      }).catch(() => { throw new Error(`${pathname} is missing "${marker}"`); });
+    }
     return "renders";
   } finally {
     await context.close();

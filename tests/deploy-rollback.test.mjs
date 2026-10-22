@@ -49,9 +49,9 @@ test("rollback moves production to the previous ready production deployment and 
   const [post] = mutations(vercel.requests);
   assert.equal(post.path, "/v1/projects/prj_rooFixture/rollback/dpl_previous");
   assert.equal(post.body && typeof post.body, "object");
-  assert.deepEqual(post.body, { description: "smoke failed on /packages" });
+  assert.deepEqual(post.body, {});
   assert.equal(post.query.teamId, "team_rooFixture");
-  assert.equal(post.query.description, undefined);
+  assert.equal(post.query.description, "smoke failed on /packages");
   assert.equal(mutations(vercel.requests).length, 1);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
   assert.match(result.output, /now serves dpl_previous/);

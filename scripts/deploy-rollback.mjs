@@ -351,7 +351,6 @@ const main = async () => {
   }
   await postMutation(api, options.domain, deploymentId(freshTarget), `/v1/projects/${encodeURIComponent(fresh.project.id)}/rollback/${encodeURIComponent(deploymentId(freshTarget))}`, {
     teamId: fresh.teamId,
-  }, {
     description: options.reason || "npm run deploy:rollback",
   });
   await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget));
