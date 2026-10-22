@@ -2012,8 +2012,13 @@ export default function BookingForm() {
         if (!result?.ok) {
           const nextCoupon = sanitizeCouponForCheckout(appliedCoupon);
           if (!result?.unavailable) {
+            if (!clearStoredReferral(autoCode)) {
+              setCodeEntryOpen(true);
+              setCodeInput(autoCode);
+              setCodeError(REFERRAL_STORAGE_ERROR);
+              return;
+            }
             setDismissedReferralCode(autoCode);
-            clearStoredReferral(autoCode);
             persistCheckoutCodes({
               referral: null,
               coupon: nextCoupon,

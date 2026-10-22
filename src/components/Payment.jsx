@@ -792,8 +792,10 @@ export default function Payment({ hideFooter = false }) {
               nextReferral = referral;
               nextReferralInput = referral?.code || input;
               referralMessage = result.error;
+            } else if (!clearStoredReferral(input)) {
+              referralMessage = REFERRAL_STORAGE_ERROR;
+              nextReferralInput = input;
             } else {
-              clearStoredReferral(input);
               referralMessage = "Invalid or inactive referral code.";
             }
           } else {
