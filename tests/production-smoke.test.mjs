@@ -48,6 +48,13 @@ test("booking availability that isn't ok is a money-path failure", () => withSit
   assert.match(result.output, /FAIL\s+booking availability/);
 }));
 
+test("booking availability without the occupied-slot list is a money-path failure", () => withSite({
+  availability: { ok: true, settings: { dateSlots: [{ date: "2026-11-01", times: ["2", "3"] }] } },
+}, (site, result) => {
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /FAIL\s+booking availability: has no bookedSlots list/);
+}));
+
 test("package cards without a price are a money-path failure", () => withSite({
   packages: { cards: [{ name: "Vertex Essentials", price: "" }, packages[1]] },
 }, (site, result) => {

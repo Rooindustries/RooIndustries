@@ -67,6 +67,7 @@ const expectAvailability = async (response) => {
   const body = await response.json();
   if (body?.ok !== true) throw new Error("answered ok: false");
   if (!Array.isArray(body?.settings?.dateSlots)) throw new Error("has no dateSlots list");
+  if (!Array.isArray(body?.bookedSlots)) throw new Error("has no bookedSlots list");
 };
 
 const allowOnlyGet = (context) => context.route("**/*", (route) =>
