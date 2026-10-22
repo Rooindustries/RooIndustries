@@ -776,6 +776,8 @@ export default function BookingForm() {
     if (!readBrowserStorage("sessionStorage", BOOKING_HOLD_EXPIRED_STORAGE_KEY)) {
       clearDraftForPackage(getDraftKey(selectedPackage));
       setForm(createFreshForm());
+    } else {
+      setErrorStep1(RESERVATION_EXPIRED_ERROR);
     }
     setSelectedSlot(null);
     setStep(1);
@@ -2103,6 +2105,8 @@ export default function BookingForm() {
     if (classifyHoldResponse({ endpoint: "release", expired: hasExpired() }) === "clear") {
       markHoldExpired();
       clearHoldState(resetStep);
+      setErrorStep1(RESERVATION_EXPIRED_ERROR);
+      setErrorStep2("");
     }
     if (releaseInFlightRef.current) return hasExpired();
     releaseInFlightRef.current = true;
@@ -2135,9 +2139,19 @@ export default function BookingForm() {
       releaseInFlightRef.current = false;
     }
     if (outcome !== "keep") {
+      const expired = hasExpired();
+      if (expired && isCurrentHold()) {
+        markHoldExpired();
+        clearHoldState(resetStep);
+        setErrorStep1(RESERVATION_EXPIRED_ERROR);
+        setErrorStep2("");
+        return true;
+      }
       if (isCurrentHold()) clearHoldState(resetStep);
-      setErrorStep1("");
-      setErrorStep2("");
+      if (!expired) {
+        setErrorStep1("");
+        setErrorStep2("");
+      }
       return true;
     }
     if (isCurrentHold() && !suppressError) {
