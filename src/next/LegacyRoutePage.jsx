@@ -11,6 +11,7 @@ export default function LegacyRoutePage({
   searchParams,
   initialHomeData = null,
   initialRouteData = null,
+  routeJsonLd = null,
   initialRouteComponent = null,
   initialHomeComponent = null,
   initialBookingModalComponent = null,
@@ -29,6 +30,7 @@ export default function LegacyRoutePage({
       <AppContent
         initialHomeData={initialHomeData}
         initialRouteData={initialRouteData}
+        routeJsonLd={routeJsonLd}
         initialRouteComponent={initialRouteComponent}
         initialHomeComponent={initialHomeComponent}
         initialBookingModalComponent={initialBookingModalComponent}

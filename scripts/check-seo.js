@@ -66,7 +66,6 @@ for (const route of strictRoutes) {
 const reviewsPath = path.join(process.cwd(), "src", "legacyPages", "Reviews.jsx");
 const seoConfigPath = path.join(process.cwd(), "src", "seoConfig.js");
 const seoLibPath = path.join(process.cwd(), "src", "lib", "seo.js");
-const indexHtmlPath = path.join(process.cwd(), "public", "index.html");
 const biosGuideHtmlPath = path.join(process.cwd(), "public", "BIOSGuide", "index.html");
 
 const reviewsContents = fs.readFileSync(reviewsPath, "utf8");
@@ -81,14 +80,6 @@ if (/buildAggregateRatingJsonLd/.test(seoConfigContents)) {
 const seoLibContents = fs.readFileSync(seoLibPath, "utf8");
 if (/"x-default"/.test(seoLibContents)) {
   errors.push("Invalid x-default meta usage is still present.");
-}
-
-const indexHtml = fs.readFileSync(indexHtmlPath, "utf8");
-if (!/og:image:width"\s+content="500"/.test(indexHtml)) {
-  errors.push("public/index.html og:image:width must be 500.");
-}
-if (!/og:image:height"\s+content="500"/.test(indexHtml)) {
-  errors.push("public/index.html og:image:height must be 500.");
 }
 
 const biosGuideHtml = fs.readFileSync(biosGuideHtmlPath, "utf8");

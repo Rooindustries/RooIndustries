@@ -1,4 +1,4 @@
-import { isIP } from "node:net";
+import net, { isIP } from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
@@ -8,6 +8,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { promisify } from "node:util";
 import { getGlobalDispatcher, setGlobalDispatcher } from "undici";
 
+const connect = net.createConnection;
 const isPrivateTestHost = value => {
   if (typeof value !== "string" || value !== value.trim()) return false;
   if (value === "::1") return true;
@@ -19,6 +20,52 @@ const isLocalHost = value => value === "localhost" || value === "[::1]" || isPri
 const fail = (message) => { throw new Error(`[test-target] ${message}`); };
 const refuseSanityHost = hostname => {
   if (/(^|\.)(sanity\.io|apicdn\.sanity\.io|sanity\.studio)$/i.test(hostname.replace(/\.$/, ''))) fail("Sanity hosts are refused.");
+};
+const remoteBrowserEndpoint = () => {
+  const value = process.env.PW_TEST_CONNECT_WS_ENDPOINT;
+  if (!value) return null;
+  let url;
+  try { url = new URL(value); } catch { fail("Remote browser endpoint must be a local tunnel."); }
+  if (url.protocol !== "ws:" || url.hostname !== "127.0.0.1" || !url.port || url.username || url.password || url.search || url.hash) {
+    fail("Remote browser endpoint must be a local tunnel.");
+  }
+  return url;
+};
+const upgradeHeaders = (upgrade, connection) => upgrade.length === 1 && connection.length === 1 &&
+  typeof upgrade[0] === "string" && upgrade[0].trim().toLowerCase() === "websocket" &&
+  typeof connection[0] === "string" && connection[0].split(",").some(token => token.trim().toLowerCase() === "upgrade");
+const framingHeaders = ["content-length", "transfer-encoding", "expect", "trailer"];
+const tunnelRefusal = "[test-target] Remote browser requests must stay a websocket upgrade.";
+const tunnelHeader = (header, pathname) => {
+  if (typeof header !== "string" || !header.endsWith("\r\n\r\n")) return false;
+  const [first, ...lines] = header.slice(0, -4).split("\r\n");
+  const names = lines.map(line => /[\r\n]/.test(line) ? null : /^[!#$%&'*+.^_`|~0-9A-Za-z-]+(?=:)/.exec(line)?.[0].toLowerCase() ?? null);
+  const values = name => lines.filter((_, index) => names[index] === name).map(line => line.slice(line.indexOf(":") + 1));
+  return first === `GET ${pathname} HTTP/1.1` && !names.includes(null) && !names.some(name => framingHeaders.includes(name)) &&
+    upgradeHeaders(values("upgrade"), values("connection"));
+};
+const guardTunnelSocket = (socket, pathname) => {
+  let phase = "handshake";
+  const { _write: write, _writev: writev, _destroy: destroy } = socket;
+  const send = (self, chunks, callback) => {
+    const data = Buffer.concat(chunks.map(({ chunk, encoding }) => typeof chunk === "string" ? Buffer.from(chunk, encoding) : chunk));
+    if (data.length !== 0) {
+      if (phase !== "handshake" || !tunnelHeader(data.toString("latin1"), pathname)) {
+        const error = new Error(tunnelRefusal);
+        self.destroy(error);
+        return callback(error);
+      }
+      phase = "sent";
+    }
+    return write.call(self, data, "buffer", callback);
+  };
+  Object.defineProperties(socket, {
+    connect: { value() { throw new Error(tunnelRefusal); } },
+    _destroy: { value(error, callback) { phase = "closed"; return destroy.call(this, error, callback); } },
+    _write: { value(chunk, encoding, callback) { return phase === "open" ? write.call(this, chunk, encoding, callback) : send(this, [{ chunk, encoding }], callback); } },
+    _writev: { value(chunks, callback) { return phase === "open" ? writev.call(this, chunks, callback) : send(this, chunks, callback); } },
+  });
+  return { socket, open: () => { if (phase === "sent") phase = "open"; } };
 };
 if (process.env.ROO_TEST_HOST && !isPrivateTestHost(process.env.ROO_TEST_HOST)) fail("ROO_TEST_HOST must be a private IP literal.");
 const childGuardImports = new Set([import.meta.url]);
@@ -143,6 +190,7 @@ export function installNetworkGuard(origins) {
   for (const name of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "NODE_USE_ENV_PROXY"]) {
     if (process.env[name] && process.env[name] !== "0") fail("Proxy transports are refused for local checks.");
   }
+  const remoteBrowser = remoteBrowserEndpoint();
   const loopbackHosts = ["127.0.0.1", "localhost", "[::1]"];
   const loopbackAliases = origin => {
     const url = new URL(origin);
@@ -175,24 +223,54 @@ export function installNetworkGuard(origins) {
     const request = module.request, get = module.get;
     originals.push(() => { module.request = request; module.get = get; });
     module.request = function(input, options, callback) {
+      let tunnelSocket = null;
+      const createConnection = ({ timeout } = {}) => {
+        if (tunnelSocket) throw new Error(tunnelRefusal);
+        tunnelSocket = guardTunnelSocket(connect({ host: "127.0.0.1", port: Number(remoteBrowser.port), timeout }), remoteBrowser.pathname);
+        return tunnelSocket.socket;
+      };
       const settings = typeof input === "object" && !(input instanceof URL) ? input : (typeof options === "object" ? options : {});
-      if (settings.socketPath || settings.createConnection ||
-          (settings.agent && settings.agent !== module.globalAgent && settings.agent.constructor !== module.Agent)) fail("Custom network transports are refused.");
-      const destination = typeof input === "string" || input instanceof URL
-        ? new URL(input) : new URL(`${settings.protocol || protocol}//${settings.hostname || settings.host || "localhost"}:${settings.port || (protocol === "http:" ? 80 : 443)}${settings.path || "/"}`);
-      if (typeof input === "string" || input instanceof URL) {
-        if (settings.hostname || settings.host) destination.hostname = settings.hostname || settings.host;
-        if (settings.port) destination.port = settings.port;
-        if (settings.protocol) destination.protocol = settings.protocol;
-      }
-      check(destination);
-      if (settings.agent && settings.agent !== module.globalAgent) {
-        if (typeof input === "object" && !(input instanceof URL)) input = { ...input, agent: module.globalAgent };
-        else options = { ...settings, agent: module.globalAgent };
+      const headers = settings.headers && typeof settings.headers === "object" && !Array.isArray(settings.headers) ? Object.entries(settings.headers) : null;
+      const headerValues = name => headers.filter(([key]) => key.toLowerCase() === name).map(([, value]) => value);
+      const tunnel = module === http && remoteBrowser && settings === input && headers && !settings.socketPath && !settings.auth &&
+        (settings.protocol || "http:") === "http:" && (settings.hostname || settings.host) === "127.0.0.1" &&
+        String(settings.port) === remoteBrowser.port && settings.path === remoteBrowser.pathname &&
+        String(settings.method || "GET").toUpperCase() === "GET" &&
+        framingHeaders.every(name => headerValues(name).length === 0) && upgradeHeaders(headerValues("upgrade"), headerValues("connection"));
+      if (tunnel) input = { ...input, agent: undefined, createConnection };
+      else {
+        if (settings.socketPath || settings.createConnection ||
+            (settings.agent && settings.agent !== module.globalAgent && settings.agent.constructor !== module.Agent)) fail("Custom network transports are refused.");
+        const destination = typeof input === "string" || input instanceof URL
+          ? new URL(input) : new URL(`${settings.protocol || protocol}//${settings.hostname || settings.host || "localhost"}:${settings.port || (protocol === "http:" ? 80 : 443)}${settings.path || "/"}`);
+        if (typeof input === "string" || input instanceof URL) {
+          if (settings.hostname || settings.host) destination.hostname = settings.hostname || settings.host;
+          if (settings.port) destination.port = settings.port;
+          if (settings.protocol) destination.protocol = settings.protocol;
+        }
+        check(destination);
+        if (settings.agent && settings.agent !== module.globalAgent) {
+          if (typeof input === "object" && !(input instanceof URL)) input = { ...input, agent: module.globalAgent };
+          else options = { ...settings, agent: module.globalAgent };
+        }
       }
       const req = request.call(this, input, options, callback);
+      if (tunnel && Object.getOwnPropertyDescriptor(req, "_send")?.configurable !== false) {
+        Object.defineProperty(req, "shouldKeepAlive", { configurable: false, get: () => false, set() {} });
+        const send = req._send;
+        const refuse = () => {
+          req.destroy(new Error(tunnelRefusal));
+          return false;
+        };
+        Object.defineProperty(req, "_send", { configurable: false, writable: false, value(data, ...rest) {
+          if (this.destroyed || (data != null && data.length !== 0) || !tunnelHeader(this._header, remoteBrowser.pathname)) return refuse();
+          return send.call(this, data, ...rest);
+        } });
+        if (req._header !== null) refuse();
+      }
       const emit = req.emit;
       req.emit = function(event, ...values) {
+        if (tunnel && event === "upgrade" && values[0]?.statusCode === 101 && values[1] === tunnelSocket?.socket) tunnelSocket.open();
         if (event === "response" && values[0].statusCode >= 300 && values[0].statusCode < 400) {
           this.destroy(new Error("[test-target] HTTP redirects are refused."));
           values[0].destroy();

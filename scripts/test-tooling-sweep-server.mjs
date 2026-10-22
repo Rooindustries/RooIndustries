@@ -48,6 +48,7 @@ const env = {
     NEXT_PUBLIC_BASE_URL: baseURL,
   } : {}),
   NEXT_TELEMETRY_DISABLED: "1",
+  NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN || "",
   BASE_URL: baseURL,
   ROO_TEST_HOST: testHost,
   NEXT_DIST_DIR: dist,
@@ -58,13 +59,14 @@ const next = path.resolve("node_modules/next/dist/bin/next");
 const development = process.env.TOOLING_DEV_SERVER === "1";
 const fingerprint = createHash("sha256");
 const tracked = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean);
-for (const file of tracked.filter(file => /^(?:src\/|app\/|scripts\/|tests\/fixtures\/|package(?:-lock)?\.json$|next\.config\.mjs$|(?:tailwind|postcss)\.config)/.test(file)).sort()) {
+for (const file of tracked.filter(file => /^(?:src\/|app\/|scripts\/|tests\/fixtures\/|package(?:-lock)?\.json$|next\.config\.mjs$|instrumentation(?:-client)?\.js$|middleware\.js$|jsconfig\.json$|(?:tailwind|postcss)\.config)/.test(file)).sort()) {
   if (!fs.existsSync(file)) continue;
   fingerprint.update(file);
   fingerprint.update(fs.readFileSync(file));
 }
 fingerprint.update(fs.readFileSync(fileURLToPath(import.meta.url)));
 fingerprint.update(fs.readFileSync(fileURLToPath(new URL("./lib/test-target-safety.mjs", import.meta.url))));
+fingerprint.update(env.NEXT_PUBLIC_SENTRY_DSN);
 const sourceHash = fingerprint.digest("hex");
 const manifestPath = path.join(dist, "tooling-build.json");
 let active;

@@ -1,3 +1,4 @@
+import { withSentryConfig } from "@sentry/nextjs/config";
 import { readdirSync, lstatSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 
@@ -127,6 +128,7 @@ const nextConfig = {
         destination: 'https://www.rooindustries.com/:path*',
         permanent: true,
       },
+      { source: '/index.html', destination: '/', permanent: true },
     ];
   },
   async rewrites() {
@@ -171,4 +173,13 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  org: "rooindustries",
+  project: "rooindustries-website",
+  silent: true,
+  telemetry: false,
+  sourcemaps: { disable: true },
+  release: { create: false },
+  bundleSizeOptimizations: { excludeDebugStatements: true },
+  webpack: { autoInstrumentMiddleware: false },
+});

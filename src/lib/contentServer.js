@@ -173,20 +173,20 @@ async function fetchStaticPageContent(resource, { requireContent = false } = {})
   }
 }
 
-async function fetchBenchmarks({ requireContent = false } = {}) {
+async function fetchContentList(resource, label, { requireContent = false } = {}) {
   try {
     const fetchContent = await createPublicContentFetcher({ fresh: true });
-    const rows = await fetchContent("benchmarks");
+    const rows = await fetchContent(resource);
     return Array.isArray(rows) ? rows : [];
   } catch (error) {
-    if (requireContent) {
-      const { logSafeError } = await import("../server/safeErrorLog.js");
-      logSafeError("Benchmarks content unavailable; keeping the previous page", error);
-      throw error;
-    }
+    if (requireContent) await refuseContentFallback(`${label} content unavailable; keeping the previous page`, error);
     return null;
   }
 }
+
+const fetchBenchmarks = (options) => fetchContentList("benchmarks", "Benchmarks", options);
+
+const fetchReviewsGallery = (options) => fetchContentList("reviews-gallery", "Reviews", options);
 
 async function fetchPackagesPageData({ requireContent = false } = {}) {
   const refuse = (error) =>
@@ -215,6 +215,7 @@ async function fetchPackagesPageData({ requireContent = false } = {}) {
 
 module.exports = {
   fetchBenchmarks,
+  fetchReviewsGallery,
   fetchStaticPageContent,
   fetchPrivacyPolicy,
   fetchFaqQuestions,

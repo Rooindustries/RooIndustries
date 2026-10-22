@@ -164,13 +164,6 @@ if (!requested || requested === 'routes') {
     assert(!doc.querySelector('link[rel="preconnect"][href*="supabase.co"]'), 'Production preconnect ignores fixture asset origin.');
     return { scripts: [...doc.scripts].map(value => value.src).filter(Boolean), remoteResources: frame.contentWindow.performance.getEntriesByType('resource').filter(value => !value.name.startsWith(location.origin)).map(value => value.name) };
   });
-  await run('static-entry-local-isolation', async () => {
-    await load('/index.html'); const doc = frame.contentDocument; await delay(300);
-    assert(!doc.querySelector('script[src*="googletagmanager"],link[rel="preconnect"][href*="sanity.io"]'), 'Static page initialized remote integrations.');
-    assert(!doc.documentElement.innerHTML.includes('%PUBLIC_URL%'), 'Literal CRA public asset placeholder remains.');
-    const icon = doc.querySelector('link[rel="icon"]'); assert((await fetch(icon.getAttribute('href'))).ok, 'Static entry icon not served.');
-    return { remoteIntegrations: false, icon: icon.getAttribute('href') };
-  });
   await run('tourney-mobile-layout', async () => {
     const evidence = [];
     for (const width of [320, 390]) {

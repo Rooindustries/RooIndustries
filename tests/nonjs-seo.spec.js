@@ -74,6 +74,111 @@ test.describe("Non-JS crawlability", () => {
     await expect(page.locator('section[aria-label="No-JS SEO fallback"]')).toHaveCount(0);
   });
 
+  for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 }]) {
+    test(`/ shows the proof card without JavaScript at ${viewport.width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize(viewport);
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+      const card = page.locator("main#main-content .ri-proof-card");
+      const opacity = () => card.evaluate(element => getComputedStyle(element).opacity);
+      await expect(card).toHaveCount(1);
+      await expect.poll(opacity, { timeout: 3000 }).toBe("1");
+      const animation = await card.evaluate(element => getComputedStyle(element).animationName);
+      await testInfo.attach("proof-card-nojs", {
+        body: JSON.stringify({ viewport, opacity: await opacity(), animation, text: await card.innerText() }, null, 2),
+        contentType: "application/json",
+      });
+      expect(animation).toBe("riReveal");
+      await expect(card.locator(".ri-proof-cta")).toBeVisible();
+    });
+  }
+
+  test("/ fades the proof card in when it scrolls into view once JavaScript loads", async ({ browser, baseURL }, testInfo) => {
+    const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+    for (const reducedMotion of ["no-preference", "reduce"]) {
+      const context = await browser.newContext({ baseURL, javaScriptEnabled: true, reducedMotion, viewport: { width: 390, height: 844 } });
+      try {
+        await guardBrowserContext(context, [baseURL]);
+        const page = await context.newPage();
+        await page.goto("/", { waitUntil: "load" });
+        await page.waitForFunction(() => document.documentElement.classList.contains("low-performance-mode"));
+        const card = page.locator("main#main-content .ri-proof-card");
+        await page.waitForTimeout(1000);
+        const fold = await card.evaluate(element => ({ top: element.getBoundingClientRect().top, innerHeight }));
+        expect(fold.top).toBeGreaterThan(fold.innerHeight);
+        const offscreen = await card.evaluate(element => getComputedStyle(element).opacity);
+        expect(offscreen).toBe(reducedMotion === "reduce" ? "1" : "0");
+        await expect(card).toHaveAttribute("data-reveal-wait", "");
+        await page.emulateMedia({ media: "print" });
+        const printed = await card.evaluate(element => getComputedStyle(element).opacity);
+        await page.emulateMedia({ media: "screen" });
+        expect(printed).toBe("1");
+        expect(await card.evaluate(element => getComputedStyle(element).opacity)).toBe(offscreen);
+        await expect(card).toHaveAttribute("data-reveal-wait", "");
+        const animations = await card.evaluate(element => new Promise(resolve => {
+          const observer = new MutationObserver(() => {
+            if (element.hasAttribute("data-reveal-wait")) return;
+            observer.disconnect();
+            resolve(element.getAnimations().map(animation => animation.animationName));
+          });
+          observer.observe(element, { attributes: true });
+          element.scrollIntoView({ block: "center" });
+        }));
+        await expect.poll(() => card.evaluate(element => getComputedStyle(element).opacity), { timeout: 3000 }).toBe("1");
+        await page.waitForTimeout(1000);
+        const settled = await card.evaluate(element => ({
+          opacity: getComputedStyle(element).opacity,
+          rootClasses: document.documentElement.className,
+        }));
+        await testInfo.attach(`proof-card-js-${reducedMotion}`, { body: JSON.stringify({ offscreen, animations, settled }, null, 2), contentType: "application/json" });
+        expect(animations).toEqual(reducedMotion === "reduce" ? [] : ["riReveal"]);
+        expect(settled.opacity).toBe("1");
+        expect(settled.rootClasses).toContain("low-performance-mode");
+      } finally {
+        await context.close();
+      }
+    }
+  });
+
+  test("/ fades the proof card in when a visitor scrolls past it before JavaScript loads", async ({ browser, baseURL }, testInfo) => {
+    const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+    const context = await browser.newContext({ baseURL, javaScriptEnabled: true, viewport: { width: 390, height: 844 } });
+    try {
+      await guardBrowserContext(context, [baseURL]);
+      const page = await context.newPage();
+      let releaseScripts;
+      const scriptsHeld = new Promise(resolve => { releaseScripts = resolve; });
+      await page.route(/\/_next\/static\/chunks\/.*\.js(\?.*)?$/, async route => {
+        await scriptsHeld;
+        await route.continue();
+      });
+      await page.goto("/", { waitUntil: "commit" });
+      await page.locator("main#main-content .ri-proof-card").waitFor({ state: "attached" });
+      await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }));
+      await expect.poll(() => page.evaluate(() => document.querySelector("main#main-content .ri-proof-card").getBoundingClientRect().bottom)).toBeLessThanOrEqual(0);
+      releaseScripts();
+      await page.waitForFunction(() => document.documentElement.classList.contains("low-performance-mode"));
+      const card = page.locator("main#main-content .ri-proof-card");
+      await page.waitForTimeout(1000);
+      const above = await card.evaluate(element => element.getBoundingClientRect().bottom);
+      expect(above).toBeLessThanOrEqual(0);
+      await expect(card).toHaveAttribute("data-reveal-wait", "");
+      const animations = await card.evaluate(element => new Promise(resolve => {
+        const observer = new MutationObserver(() => {
+          if (element.hasAttribute("data-reveal-wait")) return;
+          observer.disconnect();
+          resolve(element.getAnimations().map(animation => animation.animationName));
+        });
+        observer.observe(element, { attributes: true });
+        element.scrollIntoView({ block: "center" });
+      }));
+      await expect.poll(() => card.evaluate(element => getComputedStyle(element).opacity), { timeout: 3000 }).toBe("1");
+      await testInfo.attach("proof-card-js-from-below", { body: JSON.stringify({ above, animations }, null, 2), contentType: "application/json" });
+      expect(animations).toEqual(["riReveal"]);
+    } finally {
+      await context.close();
+    }
+  });
+
   for (const route of routes) {
     test(`renders meaningful HTML for ${route}`, async ({ page }) => {
       await page.goto(route, { waitUntil: "domcontentloaded" });

@@ -4,9 +4,10 @@ const path = require("node:path");
 const { createHash, randomUUID } = require("node:crypto");
 const { CONTENT_TYPES } = require("../src/lib/cms/contentSchema.js");
 const { PUBLIC_CONTENT_RESOURCES } = require("../src/lib/publicContentQueries.js");
-const { ALL_PUBLIC_ROUTES } = require("../src/lib/routes.js");
+const { ALL_PUBLIC_ROUTES, PREBUILT_ROUTES } = require("../src/lib/routes.js");
 const { MONEY_BACK_FAQ_QUESTION, MONEY_BACK_FAQ_ANSWER } = require("../src/lib/policyContent.js");
 const fieldContract = require("./fixtures/cms-field-contract.cjs");
+const { withoutCanonicalUrl } = require("../scripts/lib/rsc-canonical-url.cjs");
 
 const ADMIN_KEY = "synthetic-admin-key";
 const EMAIL = "content-admin@example.invalid";
@@ -154,6 +155,46 @@ test("ROO-66 public fixture HTML and API stay identical", async ({ page, request
   await page.goto("/admin/content");
   await evidence(page, testInfo, { publicHtmlSha256: Object.fromEntries(Object.entries(snapshot.pages).map(([pathname, value]) => [pathname, value.sha256])), apiResources: Object.keys(snapshot.api) });
 });
+
+for (const route of PREBUILT_ROUTES) {
+  test(`ROO-297 the first visit after a publish keeps its query string out of ${route}`, async ({ request }, testInfo) => {
+    test.skip(process.env.ROO_TEST_DEV === "1", "Prebuilt pages need a production build.");
+    const manifest = JSON.parse(await fs.readFile(path.join(testInfo.config.metadata.toolingDistDir, "prerender-manifest.json"), "utf8"));
+    const revalidateSeconds = manifest.routes[route].initialRevalidateSeconds === false ? 31536000 : manifest.routes[route].initialRevalidateSeconds;
+    const results = [];
+    for (const [visit, method, headers] of [
+      ["page", "GET", { accept: "text/html" }],
+      ["page with a next-action header", "GET", { accept: "text/html", "next-action": "x" }],
+      ["HEAD with a next-action header", "HEAD", { accept: "text/html", "next-action": "x" }],
+      ["RSC", "GET", { accept: "text/html", rsc: "1" }],
+    ]) {
+      const original = await cms(request, "/api/admin/content/documents/tooling-about");
+      await cms(request, "/api/admin/content/publish", { operation: "replace", type: "about", documentId: "tooling-about", expectedRevision: original.revision, document: original.document });
+      const probe = `leakprobe${randomUUID()}`;
+      const response = await request.fetch(`${route}?ref=${probe}&gclid=${probe}`, { method, headers, maxRedirects: 0 });
+      await response.body();
+      const deadline = Date.now() + 30000;
+      let page;
+      do {
+        if (page) await new Promise(resolve => setTimeout(resolve, 1000));
+        page = await request.get(route, { headers: { accept: "text/html" } });
+      } while (page.headers()["x-nextjs-cache"] !== "HIT" && Date.now() < deadline);
+      const html = await page.text();
+      const rsc = await (await request.get(route, { headers: { accept: "text/html", rsc: "1" } })).text();
+      const cacheControl = page.headers()["cache-control"] ?? null;
+      const rebuilt = page.headers()["x-nextjs-cache"] === "HIT" && new RegExp(`^s-maxage=${revalidateSeconds}(,|$)`).test(cacheControl ?? "");
+      results.push({ visit, status: response.status(), cache: response.headers()["x-nextjs-cache"] ?? null, rebuilt, cacheControl, htmlLeaked: withoutCanonicalUrl(html).includes("leakprobe"), rscLeaked: withoutCanonicalUrl(rsc).includes("leakprobe") });
+    }
+    await testInfo.attach("publish-query-leak", { body: JSON.stringify({ route, results }, null, 2), contentType: "application/json" });
+    for (const result of results) {
+      expect(result.status, result.visit).toBe(200);
+      expect(result.cache, result.visit).toMatch(/^(MISS|STALE)$/);
+      expect(result.rebuilt, result.visit).toBe(true);
+      expect(result.htmlLeaked, result.visit).toBe(false);
+      expect(result.rscLeaked, result.visit).toBe(false);
+    }
+  });
+}
 
 const prepareFieldFixture = async (request, baseURL, document) => {
   const response = await request.post(`http://127.0.0.1:${Number(new URL(baseURL).port) + 6}/cms-field-fixture`, { data: document });

@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import Negotiator from "negotiator";
 import markdownContent from "./src/lib/markdownContent";
+import routes from "./src/lib/routes";
 
 const { MARKDOWN_PATHS, MARKDOWN_VARY } = markdownContent;
+const { PREBUILT_ROUTES } = routes;
 const ASSET_EXTENSION = /\.(?:png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|webm|mp4|css|js|map|txt|xml|webmanifest)$/;
 
 export function middleware(req) {
@@ -10,7 +12,8 @@ export function middleware(req) {
 
   if (process.env.SALES_PREVIEW_READ_ONLY === "1" && process.env.VERCEL_ENV !== "production") {
     const readableApi = /^\/api\/content\/[a-z-]+$/.test(pathname) || pathname === "/api/bookingAvailability";
-    if (pathname.startsWith("/auth/") || !["GET", "HEAD"].includes(req.method) || (pathname.startsWith("/api/") && !readableApi)) {
+    const errorReport = pathname === "/api/client-report" && req.method === "POST";
+    if (!errorReport && (pathname.startsWith("/auth/") || !["GET", "HEAD"].includes(req.method) || (pathname.startsWith("/api/") && !readableApi))) {
       return NextResponse.json({ ok: false, error: "This preview does not create bookings or accept payments." }, { status: 503 });
     }
   }
@@ -65,22 +68,17 @@ export function middleware(req) {
     !req.headers.has("rsc") &&
     !req.headers.has("next-router-state-tree") &&
     !req.headers.has("next-action");
-  if (MARKDOWN_PATHS.includes(pathname) && ["GET", "HEAD"].includes(req.method) &&
-    [...req.nextUrl.searchParams.keys()].some((key) => key !== "_rsc")) {
-    const prefersHtml = !isDocument ||
-      new Negotiator({ headers: { accept: req.headers.get("accept") ?? undefined } })
-        .mediaType(["text/html; charset=utf-8", "text/markdown; charset=utf-8"]) === "text/html; charset=utf-8";
-    if (prefersHtml) {
-      const url = req.nextUrl.clone();
-      url.search = "";
-      for (const value of req.nextUrl.searchParams.getAll("_rsc")) url.searchParams.append("_rsc", value);
-      if (isDocument && !headers.get("user-agent")) headers.set("user-agent", "Mozilla/5.0");
-      const response = NextResponse.rewrite(url, { request: { headers } });
-      if (isDocument) response.headers.set("Vary", MARKDOWN_VARY);
-      return response;
+  const servePage = () => {
+    if (!PREBUILT_ROUTES.includes(pathname) || !["GET", "HEAD"].includes(req.method) ||
+      [...req.nextUrl.searchParams.keys()].every((key) => key === "_rsc")) {
+      return NextResponse.next({ request: { headers } });
     }
-  }
-  if (!isDocument) return NextResponse.next({ request: { headers } });
+    const url = req.nextUrl.clone();
+    url.search = "";
+    for (const value of req.nextUrl.searchParams.getAll("_rsc")) url.searchParams.append("_rsc", value);
+    return NextResponse.rewrite(url, { request: { headers } });
+  };
+  if (!isDocument) return servePage();
   if (!headers.get("user-agent")) headers.set("user-agent", "Mozilla/5.0");
 
   const negotiator = new Negotiator({ headers: { accept: req.headers.get("accept") ?? undefined } });
@@ -113,7 +111,7 @@ export function middleware(req) {
   if (negotiator.mediaType(["text/markdown; charset=utf-8", "text/html; charset=utf-8"]) === "text/markdown; charset=utf-8") {
     headers.set("x-roo-missing-format", "markdown");
   }
-  const response = NextResponse.next({ request: { headers } });
+  const response = servePage();
   if (!ASSET_EXTENSION.test(pathname)) {
     response.headers.set("Vary", MARKDOWN_VARY);
   }

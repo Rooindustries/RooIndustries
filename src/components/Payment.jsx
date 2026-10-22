@@ -506,6 +506,14 @@ export default function Payment({ hideFooter = false }) {
   const [paymentStatusBusy, setPaymentStatusBusy] = useState(false);
   const [cancellingPayment, setCancellingPayment] = useState(false);
   const sessionStartRef = useRef(null);
+  const pendingStartsRef = useRef([]);
+  const [, setPendingStartCount] = useState(0);
+  const setPendingStarts = (next) => {
+    pendingStartsRef.current = next;
+    setPendingStartCount(next.length);
+  };
+  const otherCheckoutStarting = (provider) =>
+    pendingStartsRef.current.some((start) => start.provider !== provider);
   const lockedProvider = String(paymentSession?.provider || "").trim();
   const dodoTaxExclusive = lockedProvider === "dodo"
     ? paymentSession?.providerPayload?.taxInclusive === false
@@ -964,6 +972,24 @@ export default function Payment({ hideFooter = false }) {
     return null;
   };
 
+  const paymentSessionOwnsCurrentHold = (session) => {
+    const sessionHoldToken = String(
+      session?.result?.refreshedHold?.slotHoldToken || session?.result?.hold?.slotHoldToken || ""
+    ).trim();
+    if (!sessionHoldToken) return true;
+    let storedHoldToken = "";
+    try {
+      storedHoldToken = JSON.parse(sessionStorage.getItem("my_slot_hold") || "null")?.holdToken;
+    } catch {}
+    const currentHoldTokens = [
+      sessionHold?.slotHoldToken,
+      storedHoldToken,
+      readStoredCheckout()?.slotHoldToken,
+      bookingData?.slotHoldToken,
+    ].map((token) => String(token || "").trim()).filter(Boolean);
+    return !currentHoldTokens.length || currentHoldTokens.includes(sessionHoldToken);
+  };
+
   const clearPaymentSession = (terminalStatus = "", expectedToken = "") => {
     const storedSession = readStoredPaymentSession();
     const activeSession = storedSession || paymentSession;
@@ -973,7 +999,8 @@ export default function Payment({ hideFooter = false }) {
     paymentView.session = null;
     clearStoredPaymentSession();
     if (activeSession?.provider !== "dodo" || isUpgrade ||
-        !["failed", "abandoned", "refunded"].includes(terminalStatus)) return false;
+        !["failed", "abandoned", "refunded"].includes(terminalStatus) ||
+        !paymentSessionOwnsCurrentHold(activeSession)) return false;
     const nextCheckout = {
       ...bookingData,
       slotHoldId: "",
@@ -1207,9 +1234,12 @@ export default function Payment({ hideFooter = false }) {
         return { ...paymentSession, result: data, terminal: true };
       }
       if (
-        response.ok &&
-        ["refunded", "failed", "abandoned"].includes(resumedStatus)
+        !response.ok ||
+        !["refunded", "failed", "abandoned"].includes(resumedStatus)
       ) {
+        return paymentSession;
+      }
+      if (paymentSessionOwnsCurrentHold(paymentSession)) {
         const handled = clearPaymentSession(resumedStatus, paymentSession.paymentAccessToken);
         operation.token = "";
         if (handled) {
@@ -1219,11 +1249,15 @@ export default function Payment({ hideFooter = false }) {
           data?.recoveryReason || "This payment session is no longer payable."
         );
       }
-      return paymentSession;
+      clearPaymentSession("", paymentSession.paymentAccessToken);
+      operation.token = "";
     }
 
     if (sessionStartRef.current?.provider === provider && sessionStartRef.current.operation.current()) {
       return sessionStartRef.current.promise;
+    }
+    if (otherCheckoutStarting(provider)) {
+      throw new Error("Another payment method is still starting. Please wait a moment and try again.");
     }
 
     const promise = (async () => {
@@ -1320,6 +1354,7 @@ export default function Payment({ hideFooter = false }) {
     })();
 
     sessionStartRef.current = { provider, promise, operation };
+    setPendingStarts([...pendingStartsRef.current, { provider, promise }]);
 
     try {
       return await promise;
@@ -1328,6 +1363,7 @@ export default function Payment({ hideFooter = false }) {
       throw error;
     } finally {
       if (sessionStartRef.current?.promise === promise) sessionStartRef.current = null;
+      setPendingStarts(pendingStartsRef.current.filter((start) => start.promise !== promise));
     }
   };
 
@@ -1413,7 +1449,7 @@ export default function Payment({ hideFooter = false }) {
   const handleDodoCheckout = async () => {
     const operation = createPaymentOperation();
     if (!operation.current()) return;
-    if (payingDodo || paymentStatusBusy) return;
+    if (payingDodo || paymentStatusBusy || otherCheckoutStarting("dodo")) return;
     if (!ensureSlotBeforeAction()) return;
     setPayingDodo(true);
     try {
@@ -1598,6 +1634,7 @@ export default function Payment({ hideFooter = false }) {
     if (!operation.current()) return;
     if (!isFree) return;
     if (validating || validatingCoupon) return;
+    if (otherCheckoutStarting("free")) return;
     if (!ensureSlotBeforeAction()) return;
 
     setCreatingFree(true);
@@ -1633,6 +1670,7 @@ export default function Payment({ hideFooter = false }) {
   async function handleRazorpayPay() {
     const operation = createPaymentOperation();
     if (!operation.current()) return;
+    if (otherCheckoutStarting("razorpay")) return;
     if (!canUseRazorpay) {
       showBanner(
         "error",
@@ -2100,7 +2138,7 @@ export default function Payment({ hideFooter = false }) {
               </p>
               <button
                 onClick={handleFreeBooking}
-                disabled={creatingFree || validating || validatingCoupon || quoteLoading || !quoteFingerprint}
+                disabled={creatingFree || validating || validatingCoupon || quoteLoading || !quoteFingerprint || otherCheckoutStarting("free")}
                 className="glow-button px-4 py-3 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
               >
                 {creatingFree ? "Confirming..." : "Confirm Free Booking"}
@@ -2125,7 +2163,7 @@ export default function Payment({ hideFooter = false }) {
                   </div>
                   <div className="flex w-full shrink-0 flex-col gap-2 md:w-52">
                     <button type="button" onClick={handleDodoCheckout}
-                      disabled={!canSubmitBooking || payingDodo || paymentStatusBusy || cancellingPayment || quoteLoading || !quoteFingerprint || !providerIsAvailableForSession("dodo")}
+                      disabled={!canSubmitBooking || payingDodo || paymentStatusBusy || cancellingPayment || quoteLoading || !quoteFingerprint || !providerIsAvailableForSession("dodo") || otherCheckoutStarting("dodo")}
                       className="glow-button inline-flex h-11 w-full items-center justify-center whitespace-nowrap rounded-lg px-4 text-sm font-semibold disabled:opacity-60">
                       {payingDodo ? "Opening checkout..." : lockedProvider === "dodo" ? "Resume checkout" : "Pay your way"}
                     </button>
@@ -2175,7 +2213,8 @@ export default function Payment({ hideFooter = false }) {
                     quoteLoading ||
                     !quoteFingerprint ||
                     !canUseRazorpay ||
-                    !providerIsAvailableForSession("razorpay")
+                    !providerIsAvailableForSession("razorpay") ||
+                    otherCheckoutStarting("razorpay")
                   }
                   className="glow-button h-11 w-full shrink-0 whitespace-nowrap rounded-lg px-4 text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 md:w-52"
                 >
@@ -2249,7 +2288,8 @@ export default function Payment({ hideFooter = false }) {
                             paymentStatusBusy ||
                             quoteLoading ||
                             !quoteFingerprint ||
-                            !providerIsAvailableForSession("paypal")
+                            !providerIsAvailableForSession("paypal") ||
+                            otherCheckoutStarting("paypal")
                           }
                           style={{
                             layout: "horizontal",
@@ -2261,6 +2301,7 @@ export default function Payment({ hideFooter = false }) {
                           }}
                           onClick={(data, actions) => {
                             if (!createPaymentOperation().current()) return actions?.reject ? actions.reject() : false;
+                            if (otherCheckoutStarting("paypal")) return actions?.reject ? actions.reject() : false;
                             if (!ensureSlotBeforeAction()) {
                               return actions?.reject ? actions.reject() : false;
                             }

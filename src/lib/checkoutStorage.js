@@ -122,3 +122,14 @@ export const migrateCheckoutStorageToSession = () => {
     } catch {}
   });
 };
+
+const REFERRAL_SESSION_STORAGE_KEY = "referral_session";
+
+export const rememberReferralFromSearch = (search) => {
+  if (typeof window === "undefined") return;
+  const code = String(new URLSearchParams(search || "").get("ref") || "").trim();
+  if (!code) return;
+  try {
+    window.sessionStorage.setItem(REFERRAL_SESSION_STORAGE_KEY, code);
+  } catch {}
+};

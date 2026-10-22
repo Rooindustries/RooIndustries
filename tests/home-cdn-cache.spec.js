@@ -1,6 +1,7 @@
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs/promises");
 const http = require("node:http");
+const { PREBUILT_ROUTES } = require("../src/lib/routes");
 
 const HOME_CACHE = /^s-maxage=60, stale-while-revalidate=\d+$/;
 const HTML = { accept: "text/html" };
@@ -49,15 +50,25 @@ test.describe("home page caching", () => {
     });
   }
 
-  test("a campaign query on / gets the same response headers as /", async ({ request }, testInfo) => {
-    const home = await served(request, testInfo, "home-plain", "/");
-    const campaign = await served(request, testInfo, "home-utm", "/?utm_source=newsletter");
-    expect(campaign.status).toBe(200);
-    expect(campaign.value("cache-control")).toMatch(HOME_CACHE);
-    for (const key of ["cache-control", "cdn-cache-control", "vercel-cdn-cache-control", "content-type", "vary", "x-nextjs-prerender", "set-cookie"]) {
-      expect(campaign.value(key), key).toBe(home.value(key));
-    }
-  });
+  for (const path of PREBUILT_ROUTES) {
+    const name = path === "/" ? "home" : path.slice(1);
+    test(`a campaign query on ${path} gets the same response headers as ${path}`, async ({ request }, testInfo) => {
+      const plain = await served(request, testInfo, `${name}-plain`, path);
+      const campaign = await served(request, testInfo, `${name}-utm`, `${path}?utm_source=newsletter&ref=friend`);
+      expect(campaign.status).toBe(200);
+      if (path === "/") expect(campaign.value("cache-control")).toMatch(HOME_CACHE);
+      for (const response of [plain, campaign]) expect(response.value("x-nextjs-prerender")).toMatch(/^1(, 1)*$/);
+      for (const key of ["cache-control", "cdn-cache-control", "vercel-cdn-cache-control", "content-type", "vary", "set-cookie"]) {
+        expect(campaign.value(key), key).toBe(plain.value(key));
+      }
+    });
+
+    test(`an RSC request with a query on ${path} still gets the RSC payload`, async ({ request }, testInfo) => {
+      const response = await served(request, testInfo, `${name}-rsc-query`, `${path}?ref=friend&_rsc=abc12`, { headers: { ...HTML, rsc: "1" } });
+      expect(response.status).toBe(200);
+      expect(response.value("content-type")).toContain("text/x-component");
+    });
+  }
 
   for (const [name, headers] of [
     ["rsc", { rsc: "1" }],
@@ -121,7 +132,7 @@ test.describe("home page caching", () => {
     expect(redirect.value("vercel-cdn-cache-control")).toBe("no-store");
   });
 
-  for (const path of ["/about", "/contact", "/privacy"]) {
+  for (const path of ["/about", "/contact", "/privacy", "/reviews"]) {
     for (const method of ["GET", "HEAD"]) {
       test(`${method} ${path} gets the same caching as /`, async ({ request }, testInfo) => {
         const name = `${path.slice(1)}-${method.toLowerCase()}`;
@@ -142,7 +153,7 @@ test.describe("home page caching", () => {
     }
   }
 
-  for (const path of ["/booking", "/payment", "/faq", "/reviews"]) {
+  for (const path of ["/booking", "/payment", "/faq"]) {
     test(`${path} is not cached at the CDN`, async ({ request }, testInfo) => {
       const page = await served(request, testInfo, `page${path.replace(/\//g, "-")}`, path);
       expect(page.value("vercel-cdn-cache-control") ?? "").not.toContain("s-maxage");
