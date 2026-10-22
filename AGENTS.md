@@ -58,7 +58,7 @@ When CodeRabbit and Codex do not both approve, or a review thread is still open,
 
 Stop and flag the owner instead of merging when any of these are true:
 
-- The change can lose data, or it touches a payment, checkout, booking, hold, price, discount, referral credit, refund, or payout. That is a money path, listed above, and `app/api/razorpay/` counts as one too.
+- The change can lose data, or it touches a payment, checkout, booking, hold, price, discount, referral credit, refund, or payout. That is a money path, listed above, and `app/api/razorpay/` counts as one too. So does any file a money-path file imports directly, and any shipped file whose name contains a money word such as hold, booking, price or referral.
 - The change touches a secret, or the diff contains a private key.
 - The change adds or edits `supabase/migrations/`, or other SQL that drops, truncates, or deletes data. SQL in test suites and docs does not count.
 - The change edits `.github/workflows/` or the merge gate (`scripts/pr-auto-merge-gate.mjs`, `scripts/pr-auto-merge-apply.mjs`). The gate must not be able to loosen itself and then merge.

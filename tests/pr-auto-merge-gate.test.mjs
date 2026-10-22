@@ -9,6 +9,7 @@ import {
   isProductionMutator,
   isSecretPath,
   latestChecks,
+  moneyDependencies,
   parseCodexState,
 } from "../scripts/pr-auto-merge-gate.mjs";
 
@@ -25,6 +26,7 @@ const safe = (overrides = {}) => ({
   checks: checks(),
   reviews: [approved("coderabbitai")],
   threads: [],
+  moneyDependencies: [],
   codex: { commitSha: head, status: "completed", hasUnresolvedFindings: false, hasAnyFindings: false },
   ...overrides,
 });
@@ -303,6 +305,33 @@ test("the merge is bound to the head that was reviewed, and runs serialize", () 
   const workflow = readFileSync(new URL("../.github/workflows/auto-merge.yml", import.meta.url), "utf8");
   assert.match(workflow, /group: auto-merge\n/);
   assert.match(workflow, /cancel-in-progress: false/);
+});
+
+test("a queued rerun keeps the check pending even after an earlier success", () => {
+  const rerun = [...checks(), { name: "Jest", status: "queued", conclusion: null, completedAt: "" }];
+  const decision = decide(safe({ checks: rerun }));
+  assert.equal(decision.action, "wait");
+  assert.ok(decision.reasons.includes("checks-pending"));
+  const reversed = decide(safe({ checks: [{ name: "Jest", status: "in_progress", conclusion: null, completedAt: "" }, ...checks()] }));
+  assert.ok(reversed.reasons.includes("checks-pending"));
+});
+
+test("files a money path imports are money paths too", () => {
+  const sources = new Map([
+    ["src/components/BookingForm.jsx", 'import { save } from "../lib/browserStorage";\nimport { motion } from "framer-motion";\nconst lazy = import("@/src/lib/lazyHelper");\n'],
+    ["src/components/Footer.jsx", 'import { year } from "../lib/dates";\n'],
+    ["src/lib/browserStorage.js", "export const save = () => {};\n"],
+    ["src/lib/lazyHelper/index.js", "export default 1;\n"],
+    ["src/lib/dates.js", "export const year = 2026;\n"],
+  ]);
+  assert.deepEqual(moneyDependencies(sources), ["src/lib/browserStorage.js", "src/lib/lazyHelper/index.js"]);
+  const decision = decide(safe({
+    files: [{ filename: "src/lib/browserStorage.js", patch: "+export const save = () => null;\n" }],
+    moneyDependencies: moneyDependencies(sources),
+  }));
+  assert.equal(decision.action, "flag");
+  assert.ok(decision.reasons.includes("risky-money"));
+  assert.equal(decide(safe({ moneyDependencies: undefined })).action, "wait");
 });
 
 test("the required check names are the jobs the Tests workflow runs", () => {

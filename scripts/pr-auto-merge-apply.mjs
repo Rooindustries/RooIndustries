@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   GATE_MARKER,
@@ -7,6 +8,7 @@ import {
   countReviewRounds,
   decide,
   gateComment,
+  moneyDependencies,
   parseCodexState,
 } from "./pr-auto-merge-gate.mjs";
 
@@ -150,6 +152,33 @@ const collectSnapshot = async (number) => {
   };
 };
 
+// The workflow checks out main, so this reads main's source to find what the money paths import.
+const readSources = async () => {
+  const sources = new Map();
+  for (const root of ["app", "src", "lib"]) {
+    let entries;
+    try {
+      entries = await fs.readdir(root, { recursive: true, withFileTypes: true });
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+      throw error;
+    }
+    for (const entry of entries) {
+      if (!entry.isFile() || !/\.[cm]?[jt]sx?$/.test(entry.name)) continue;
+      const filePath = path.relative(process.cwd(), path.join(entry.parentPath ?? entry.path, entry.name)).split(path.sep).join("/");
+      sources.set(filePath, await fs.readFile(filePath, "utf8"));
+    }
+  }
+  for (const filePath of ["middleware.js", "middleware.ts"]) {
+    try {
+      sources.set(filePath, await fs.readFile(filePath, "utf8"));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  return sources;
+};
+
 const ensureLabel = async () => {
   try {
     await api(readToken, `repos/${repo}/labels/needs-owner`);
@@ -232,8 +261,8 @@ const pullNumbers = async () => {
   return [];
 };
 
-const applyOne = async (number) => {
-  const snapshot = await collectSnapshot(number);
+const applyOne = async (number, dependencies) => {
+  const snapshot = { ...(await collectSnapshot(number)), moneyDependencies: dependencies };
   if (!snapshot.sameRepository) {
     console.log(`#${number} fork, skipped`);
     return;
@@ -282,10 +311,11 @@ const applyOne = async (number) => {
 const main = async () => {
   if (!repo || !readToken) throw new Error("REPO and GH_TOKEN are required");
   const numbers = await pullNumbers();
+  const dependencies = numbers.length ? moneyDependencies(await readSources()) : [];
   const failures = [];
   for (const number of numbers) {
     try {
-      await applyOne(number);
+      await applyOne(number, dependencies);
     } catch (error) {
       failures.push(`#${number}: ${error.message}`);
       console.error(`#${number} ${error.message}`);

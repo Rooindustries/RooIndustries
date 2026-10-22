@@ -153,7 +153,9 @@ export const latestChecks = (checks) => {
       completedAt: check.completedAt || check.startedAt || "",
     };
     const previous = byName.get(check.name);
-    if (!previous || current.completedAt > previous.completedAt) byName.set(check.name, current);
+    // A queued or running attempt has no finish time; it outranks any earlier finished attempt.
+    if (previous && previous.status !== "completed") continue;
+    if (!previous || current.status !== "completed" || current.completedAt > previous.completedAt) byName.set(check.name, current);
     else if (current.completedAt === previous.completedAt) byName.set(check.name, { ...worse(previous, current), completedAt: current.completedAt });
   }
   return [...byName.values()];
@@ -202,13 +204,47 @@ const codexVerdict = (codex, headSha) => {
 
 const openFindings = (threads) => (threads || []).filter((thread) => thread && thread.isResolved !== true);
 
-const fileRisks = (files) => {
+const CODE_EXTENSIONS = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"];
+const IMPORT_PATTERN = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s+)["']([^"']+)["']/gm;
+
+const resolveImport = (fromFile, specifier, known) => {
+  let base;
+  if (specifier.startsWith("@/")) base = specifier.slice(2);
+  else if (specifier.startsWith("./") || specifier.startsWith("../")) {
+    const parts = fromFile.split("/").slice(0, -1);
+    for (const part of specifier.split("/")) {
+      if (part === "..") parts.pop();
+      else if (part !== ".") parts.push(part);
+    }
+    base = parts.join("/");
+  } else {
+    return null;
+  }
+  const candidates = [base, ...CODE_EXTENSIONS.map((ext) => base + ext), ...CODE_EXTENSIONS.map((ext) => `${base}/index${ext}`)];
+  return candidates.find((candidate) => known.has(candidate)) || null;
+};
+
+// Files that a money-path file imports directly carry the same risk, e.g. a storage helper behind the booking form.
+export const moneyDependencies = (sources) => {
+  const known = new Set(sources.keys());
+  const found = new Set();
+  for (const [filePath, source] of sources) {
+    if (!isMoneyPath(filePath)) continue;
+    for (const match of String(source).matchAll(IMPORT_PATTERN)) {
+      const target = resolveImport(filePath, match[1], known);
+      if (target && !isMoneyPath(target)) found.add(target);
+    }
+  }
+  return [...found].sort();
+};
+
+const fileRisks = (files, dependencies = new Set()) => {
   const reasons = [];
   for (const file of files) {
     const added = addedLines(file.patch);
     // A rename carries its old path: moving a file out of a risky path must not hide it.
     const paths = [file.filename || file.path || "", file.previousFilename || ""].filter(Boolean);
-    if (paths.some(isMoneyPath)) reasons.push("risky-money");
+    if (paths.some((filePath) => isMoneyPath(filePath) || dependencies.has(filePath))) reasons.push("risky-money");
     if (paths.some(isSecretPath) || /BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY/.test(added)) reasons.push("risky-secret");
     if (paths.some((filePath) => filePath.startsWith("supabase/migrations/"))) reasons.push("risky-migration");
     if (paths.some((filePath) => filePath.startsWith(".github/workflows/") || GATE_FILES.has(filePath))) reasons.push("risky-workflow");
@@ -241,7 +277,8 @@ export const decide = (input) => {
   if (input.baseRef !== "main") return idle(["base"], [`The base branch is ${input.baseRef}. This workflow only merges into main.`]);
   if (!Array.isArray(input.files)) return idle(["files-unknown"], ["The changed-file list was unavailable, so this pull request was not merged."]);
 
-  const risks = fileRisks(input.files);
+  if (!Array.isArray(input.moneyDependencies)) return idle(["money-map-unknown"], ["The list of files the money paths import was unavailable, so this pull request was not merged."]);
+  const risks = fileRisks(input.files, new Set(input.moneyDependencies));
   const checks = assessChecks(input.checks);
   const rabbit = coderabbitVerdict(input.reviews, input.headSha);
   const codex = codexVerdict(input.codex, input.headSha);
