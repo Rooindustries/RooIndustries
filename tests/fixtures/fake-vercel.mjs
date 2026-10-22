@@ -25,10 +25,23 @@ const toSingleDeployment = (deployment, ownerId) => ({
   aliasError: null,
 });
 
-export const startVercel = ({ tweak, rollbackError, freezeAlias, ignoreFilters, promoteStatus = 201 } = {}) => {
+export const startVercel = ({
+  tweak,
+  rollbackError,
+  freezeAlias,
+  ignoreFilters,
+  promoteStatus = 201,
+  aliasSettlePolls = 0,
+  aliasJobStatus = null,
+  swapLiveOnAliasRead = 0,
+  swapLiveTo = null,
+} = {}) => {
   const state = structuredClone(fixture);
   tweak?.(state);
   const requests = [];
+  let aliasReads = 0;
+  let rollbackPosts = 0;
+  let projectReadsAfterRollback = 0;
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://fixture");
     requests.push({ method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), auth: req.headers.authorization });
@@ -48,6 +61,28 @@ export const startVercel = ({ tweak, rollbackError, freezeAlias, ignoreFilters, 
     }
     if (req.method === "GET" && (match = url.pathname.match(/^\/v4\/aliases\/([^/]+)$/))) {
       const alias = owned ? state.aliases[decodeURIComponent(match[1])] : null;
+      if (alias) {
+        aliasReads += 1;
+        if (swapLiveOnAliasRead && aliasReads === swapLiveOnAliasRead) {
+          const newerId = swapLiveTo || "dpl_newer";
+          const current = state.deployments.find(item => item.uid === alias.deploymentId);
+          if (current && !state.deployments.some(item => item.uid === newerId)) {
+            state.deployments.unshift({
+              ...structuredClone(current),
+              uid: newerId,
+              url: "rooindustries-newer-roo-industries.vercel.app",
+              created: current.created + 1000,
+              createdAt: current.createdAt + 1000,
+              ready: (current.ready || current.created) + 1000,
+              meta: {
+                githubCommitSha: "9999999999999999999999999999999999999999",
+                githubCommitMessage: "fix: a newer deploy went live",
+              },
+            });
+          }
+          alias.deploymentId = newerId;
+        }
+      }
       return alias ? send(200, alias) : notFound();
     }
     if (req.method === "GET" && (match = url.pathname.match(/^\/v13\/deployments\/([^/]+)$/))) {
@@ -56,7 +91,12 @@ export const startVercel = ({ tweak, rollbackError, freezeAlias, ignoreFilters, 
       return deployment ? send(200, toSingleDeployment(deployment, state.project.accountId)) : notFound();
     }
     if (req.method === "GET" && (match = url.pathname.match(/^\/v9\/projects\/([^/]+)$/))) {
-      return owned && decodeURIComponent(match[1]) === state.project.id ? send(200, state.project) : notFound();
+      if (!(owned && decodeURIComponent(match[1]) === state.project.id)) return notFound();
+      if (rollbackPosts && aliasSettlePolls && state.project.lastAliasRequest?.jobStatus === "in-progress") {
+        projectReadsAfterRollback += 1;
+        if (projectReadsAfterRollback >= aliasSettlePolls) state.project.lastAliasRequest.jobStatus = "succeeded";
+      }
+      return send(200, state.project);
     }
     if (req.method === "GET" && url.pathname === "/v7/deployments") {
       const query = url.searchParams;
@@ -76,7 +116,14 @@ export const startVercel = ({ tweak, rollbackError, freezeAlias, ignoreFilters, 
       const from = state.aliases[DOMAIN].deploymentId;
       moveAlias(match[2]);
       state.project.autoAssignCustomDomains = false;
-      state.project.lastAliasRequest = { type: "rollback", jobStatus: "succeeded", fromDeploymentId: from, toDeploymentId: match[2], requestedAt: Date.now() };
+      rollbackPosts += 1;
+      state.project.lastAliasRequest = {
+        type: "rollback",
+        jobStatus: aliasJobStatus || (aliasSettlePolls ? "in-progress" : "succeeded"),
+        fromDeploymentId: from,
+        toDeploymentId: match[2],
+        requestedAt: Date.now(),
+      };
       return send(201);
     }
     if (req.method === "POST" && (match = url.pathname.match(/^\/v10\/projects\/([^/]+)\/promote\/([^/]+)$/))) {

@@ -15,6 +15,7 @@ The Vercel token is read from VERCEL_TOKEN only.`;
 const VERCEL_API = "https://api.vercel.com";
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const PENDING_JOBS = new Set(["pending", "in-progress"]);
+const FAILED_JOBS = new Set(["failed", "error", "canceled", "cancelled"]);
 const VERIFY_INTERVAL_MS = Number(process.env.ROLLBACK_VERIFY_INTERVAL_MS || 3000);
 const VERIFY_TIMEOUT_MS = Number(process.env.ROLLBACK_VERIFY_TIMEOUT_MS || 120000);
 
@@ -210,16 +211,22 @@ const checkAutomaticRollback = async (api, state, ifLive) => {
 
 const waitForDomain = async (api, state, domain, targetId) => {
   const deadline = Date.now() + VERIFY_TIMEOUT_MS;
+  let alias = null;
+  let job = null;
   for (;;) {
-    const { body: alias } = await api("GET", `/v4/aliases/${encodeURIComponent(domain)}`, { teamId: state.teamId });
-    if (alias?.deploymentId === targetId) return;
-    if (Date.now() >= deadline) {
-      const { body: project } = await api("GET", `/v9/projects/${encodeURIComponent(state.project.id)}`, { teamId: state.teamId });
-      const job = project?.lastAliasRequest;
-      throw new Error(`Vercel accepted the request, but ${domain} still serves ${alias?.deploymentId}; not confirmed (last ${job?.type || "alias"} job: ${job?.jobStatus || "unknown"}). Check the Vercel dashboard.`);
+    ({ body: alias } = await api("GET", `/v4/aliases/${encodeURIComponent(domain)}`, { teamId: state.teamId }));
+    const { body: project } = await api("GET", `/v9/projects/${encodeURIComponent(state.project.id)}`, { teamId: state.teamId });
+    job = project?.lastAliasRequest || null;
+    const domainMoved = alias?.deploymentId === targetId;
+    const jobTargetsThis = job?.toDeploymentId === targetId;
+    if (domainMoved && job?.jobStatus === "succeeded" && jobTargetsThis) return;
+    if (job && FAILED_JOBS.has(job.jobStatus) && (jobTargetsThis || domainMoved)) {
+      throw new Error(`Vercel accepted the request, but the ${job.type || "alias"} job ${job.jobStatus} for ${targetId}. ${domain} serves ${alias?.deploymentId}. Check the Vercel dashboard.`);
     }
+    if (Date.now() >= deadline) break;
     await new Promise((resolve) => setTimeout(resolve, VERIFY_INTERVAL_MS));
   }
+  throw new Error(`Vercel accepted the request, but ${domain} still serves ${alias?.deploymentId}; not confirmed (last ${job?.type || "alias"} job: ${job?.jobStatus || "unknown"}). Check the Vercel dashboard.`);
 };
 
 const main = async () => {
@@ -277,6 +284,17 @@ const main = async () => {
   if (options.dryRun) {
     console.log("Dry run: nothing changed.");
     return;
+  }
+  const fresh = await loadState(api, options.domain);
+  refuseBusyProject(fresh);
+  if (deploymentId(fresh.live) !== deploymentId(state.live)) {
+    throw new Refusal(`${deploymentId(state.live)} is no longer live (${deploymentId(fresh.live)} is); leaving production alone.`);
+  }
+  if (options.ifLive) await checkAutomaticRollback(api, fresh, options.ifLive);
+  const freshTarget = await findRollbackTarget(api, fresh);
+  checkTarget(freshTarget, fresh, { rollback: true });
+  if (deploymentId(freshTarget) !== deploymentId(target)) {
+    throw new Refusal(`The rollback target changed from ${deploymentId(target)} to ${deploymentId(freshTarget)}; leaving production alone.`);
   }
   await api("POST", `/v1/projects/${encodeURIComponent(state.project.id)}/rollback/${encodeURIComponent(deploymentId(target))}`, {
     teamId: state.teamId,

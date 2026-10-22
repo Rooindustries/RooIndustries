@@ -186,6 +186,39 @@ test("refuses while a rolling release is moving traffic", () => withVercel({
   assert.deepEqual(mutations(vercel.requests), []);
 }));
 
+test("automatic rollback leaves production alone when a newer deployment goes live before the request", () => withVercel({
+  swapLiveOnAliasRead: 2,
+  swapLiveTo: "dpl_newer",
+}, async (vercel, exec) => {
+  const result = await exec(["--if-live", LIVE_URL]);
+  assert.notEqual(result.code, 0, result.output);
+  assert.match(result.output, /no longer live/);
+  assert.deepEqual(mutations(vercel.requests), []);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_newer");
+}));
+
+test("rollback waits until the alias job succeeds even after the domain already points at the target", () => withVercel({
+  aliasSettlePolls: 3,
+}, async (vercel, exec) => {
+  const result = await exec([]);
+  assert.equal(result.code, 0, result.output);
+  const postAt = vercel.requests.findIndex(request => request.method === "POST");
+  const projectReads = vercel.requests.slice(postAt + 1).filter(request => request.path.startsWith("/v9/projects/"));
+  assert.ok(projectReads.length >= 3, `${projectReads.length} project reads after rollback\n${result.output}`);
+  assert.equal(vercel.state.project.lastAliasRequest.jobStatus, "succeeded");
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
+}));
+
+test("rollback fails when the alias job fails even if the domain already moved", () => withVercel({
+  aliasJobStatus: "failed",
+}, async (vercel, exec) => {
+  const result = await exec([]);
+  assert.notEqual(result.code, 0);
+  assert.match(result.output, /failed/);
+  assert.equal(mutations(vercel.requests).length, 1);
+  assert.doesNotMatch(result.output, /now serves/);
+}));
+
 test("automatic rollback acts when the failing deployment is live and the newest", () => withVercel({}, async (vercel, exec) => {
   const result = await exec(["--if-live", LIVE_URL, "--reason", "money-path smoke failed"]);
   assert.equal(result.code, 0, result.output);
