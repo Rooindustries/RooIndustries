@@ -93,12 +93,12 @@ const collectThreads = async (number) => {
 
 const collectSnapshot = async (number) => {
   const { payload: pull } = await api(readToken, `repos/${repo}/pulls/${number}`);
-  const [reviews, files, checkRuns, commentPage, status] = await Promise.all([
+  const [reviews, files, checkRuns, commentPage, statuses] = await Promise.all([
     paginate(`repos/${repo}/pulls/${number}/reviews`),
     paginate(`repos/${repo}/pulls/${number}/files`),
     paginate(`repos/${repo}/commits/${pull.head.sha}/check-runs`),
     paginate(`repos/${repo}/issues/${number}/comments`),
-    api(readToken, `repos/${repo}/commits/${pull.head.sha}/status`).then((result) => result.payload),
+    paginate(`repos/${repo}/commits/${pull.head.sha}/statuses`),
   ]);
   const comments = Array.isArray(commentPage) ? commentPage : [];
   const codexComment = [...comments].reverse().find((comment) => botNamed(comment.user, "chatgpt-codex-connector") && comment.body?.includes("codex-review-state:v1"));
@@ -110,7 +110,7 @@ const collectSnapshot = async (number) => {
       conclusion: run.conclusion,
       completedAt: run.completed_at || run.started_at || "",
     })),
-    ...(status.statuses || []).map((entry) => ({
+    ...statuses.map((entry) => ({
       name: entry.context,
       status: entry.state === "pending" ? "pending" : "completed",
       conclusion: entry.state === "error" ? "failure" : entry.state,
@@ -127,7 +127,13 @@ const collectSnapshot = async (number) => {
     headRef: pull.head.ref,
     sameRepository: pull.head.repo?.full_name === pull.base.repo.full_name,
     mergeableState: pull.mergeable_state,
-    files: files.map((file) => ({ filename: file.filename, previousFilename: file.previous_filename || "", patch: file.patch || "" })),
+    // The files API stops at 3000 files; a shorter list than GitHub's count is treated as unknown.
+    files: files.length === pull.changed_files ? files.map((file) => ({
+      filename: file.filename,
+      previousFilename: file.previous_filename || "",
+      patch: file.patch || "",
+      patchMissing: file.patch === undefined && file.changes > 0,
+    })) : null,
     checks,
     reviews: reviews.map((review) => ({
       author: login(review.user),

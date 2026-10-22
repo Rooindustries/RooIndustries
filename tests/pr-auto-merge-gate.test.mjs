@@ -143,6 +143,12 @@ test("money, secret, migration, workflow, and production-rollback diffs are held
   assert.ok(held("src/server/cleanup.js", "+await sql`delete from commerce.bookings where true`;\n").reasons.includes("risky-sql"));
   assert.equal(held("tests/booking-emails.mjs", "+await sql`delete from commerce.bookings`;\n").reasons.includes("risky-sql"), false);
   assert.equal(held("src/lib/format.js", "+export const short = (text) => truncate(text, 20);\n").action, "merge");
+  assert.ok(held("scripts/archive-old-bookings.mjs", "@@ -10,3 +10,3 @@\n   await sql`\n     DELETE FROM commerce.bookings\n-    WHERE created_at < now() - interval '2 years'\n+    WHERE true\n   `;\n").reasons.includes("risky-sql"));
+  assert.equal(held("scripts/archive-old-bookings.mjs", "@@ -1,2 +1,2 @@\n-await sql`DELETE FROM commerce.bookings`;\n+console.log(\"kept\");\n").reasons.includes("risky-sql"), false);
+  const unreadable = decide(safe({ files: [{ filename: "src/lib/big.js", patch: "", patchMissing: true }] }));
+  assert.equal(unreadable.action, "flag");
+  assert.ok(unreadable.reasons.includes("risky-unreadable-diff"));
+  assert.equal(decide(safe({ files: null })).action, "wait");
   assert.ok(held(".github/workflows/tests.yml").reasons.includes("risky-workflow"));
   assert.ok(held("scripts/pr-auto-merge-gate.mjs").reasons.includes("risky-workflow"));
   assert.ok(held("scripts/deploy-rollback.mjs").reasons.includes("risky-production-script"));
@@ -279,6 +285,8 @@ test("the merge is bound to the head that was reviewed, and runs serialize", () 
   assert.match(apply, /merge_method: "squash", sha/);
   assert.match(apply, /mergePullRequest\(number, snapshot\.headSha\)/);
   assert.match(apply, /botNamed\(comment\.user, "github-actions"\)/);
+  assert.match(apply, /paginate\(`repos\/\$\{repo\}\/commits\/\$\{pull\.head\.sha\}\/statuses`\)/);
+  assert.match(apply, /files\.length === pull\.changed_files/);
   const workflow = readFileSync(new URL("../.github/workflows/auto-merge.yml", import.meta.url), "utf8");
   assert.match(workflow, /group: auto-merge\n/);
   assert.match(workflow, /cancel-in-progress: false/);

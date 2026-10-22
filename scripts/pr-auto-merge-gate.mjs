@@ -96,6 +96,8 @@ const DESTRUCTIVE_SQL = /\b(?:DROP\s+(?:TABLE|COLUMN|SCHEMA|INDEX|DATABASE|VIEW|
 // Test suites only talk to local fixtures and docs never run, so their SQL does not hold a pull request.
 const runsSql = (filePath) => !/\.(?:md|mdx|txt)$/i.test(filePath) && !/(?:^|\/)(?:tests?|__tests__)\//.test(filePath) && !/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(filePath);
 
+// Added and unchanged context lines: an edit under an existing DELETE still shows the DELETE.
+const hunkText = (patch) => String(patch || "").split("\n").filter((line) => !/^(?:-|@@|\\)/.test(line)).join("\n");
 const addedLines = (patch) => String(patch || "").split("\n").filter((line) => line.startsWith("+") && !line.startsWith("+++")).join("\n");
 
 export const parseCodexState = (body) => {
@@ -197,7 +199,8 @@ const fileRisks = (files) => {
     if (paths.some(isSecretPath) || /BEGIN (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY/.test(added)) reasons.push("risky-secret");
     if (paths.some((filePath) => filePath.startsWith("supabase/migrations/"))) reasons.push("risky-migration");
     if (paths.some((filePath) => filePath.startsWith(".github/workflows/") || GATE_FILES.has(filePath))) reasons.push("risky-workflow");
-    if (paths.some(runsSql) && DESTRUCTIVE_SQL.test(added)) reasons.push("risky-sql");
+    if (paths.some(runsSql) && DESTRUCTIVE_SQL.test(hunkText(file.patch))) reasons.push("risky-sql");
+    if (file.patchMissing) reasons.push("risky-unreadable-diff");
     if (paths.some(isProductionMutator)) reasons.push("risky-production-script");
   }
   return unique(reasons);
@@ -239,6 +242,7 @@ export const decide = (input) => {
   if (risks.includes("risky-migration")) add("risky-migration", "The diff edits a database migration. It stays with the owner.");
   if (risks.includes("risky-sql")) add("risky-sql", "The diff includes SQL that drops, truncates, or deletes data. It stays with the owner.");
   if (risks.includes("risky-workflow")) add("risky-workflow", "The diff edits the CI workflows or the merge gate. It stays with the owner.");
+  if (risks.includes("risky-unreadable-diff")) add("risky-unreadable-diff", "GitHub did not return the diff for at least one changed file, so the gate cannot check it. It stays with the owner.");
   if (risks.includes("risky-production-script")) add("risky-production-script", "The diff edits a script that deploys, rolls back, or deletes production data. It stays with the owner.");
 
   if (checks.missing.length) add("checks-missing", `Required checks have not reported on ${sha}: ${checks.missing.join(", ")}.`);

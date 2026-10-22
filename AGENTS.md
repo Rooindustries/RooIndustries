@@ -63,6 +63,7 @@ Stop and flag the owner instead of merging when any of these are true:
 - The change adds or edits `supabase/migrations/`, or other SQL that drops, truncates, or deletes data. SQL in test suites and docs does not count.
 - The change edits `.github/workflows/` or the merge gate (`scripts/pr-auto-merge-gate.mjs`, `scripts/pr-auto-merge-apply.mjs`). The gate must not be able to loosen itself and then merge.
 - The change adds or edits a script that deploys, rolls back, or deletes production data.
+- GitHub does not return the diff for a changed file, so the gate cannot read it.
 
 Flagging is a `needs-owner` label and one comment on the pull request, from the workflow. Leave the pull request open. Keep fixing ordinary test failures and review findings on a safe pull request until both models approve. On a risky pull request, keep the branch healthy, and leave the merge to the owner. Money-path pull requests stay on the rules in Money paths (one at a time, Sol review, the local suites). The workflow will not merge them.
 
