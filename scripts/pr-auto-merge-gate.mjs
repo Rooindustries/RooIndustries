@@ -12,8 +12,11 @@ export const REQUIRED_CHECKS = [
 ];
 
 export const MAX_REPAIR_WAKES = 8;
+export const MAX_REVIEW_ROUNDS = 8;
 export const GATE_MARKER = "<!-- pr-auto-merge-gate -->";
 export const WAKE_MARKER_PREFIX = "<!-- pr-repair-wake:";
+export const REVIEW_ROUND_PREFIX = "<!-- pr-review-round:";
+export const REVIEW_REQUEST_PREFIX = "<!-- pr-review-request:";
 
 const CODERABBIT = "coderabbitai";
 const CODEX = "chatgpt-codex-connector";
@@ -111,6 +114,7 @@ export const parseCodexState = (body) => {
 };
 
 export const countRepairWakes = (bodies) => bodies.filter((body) => String(body).includes(WAKE_MARKER_PREFIX)).length;
+export const countReviewRounds = (bodies) => bodies.filter((body) => String(body).includes(REVIEW_ROUND_PREFIX)).length;
 
 const worse = (left, right) => {
   const rank = (check) => {
@@ -215,10 +219,11 @@ export const decide = (input) => {
     if (line && !lines.includes(line)) lines.push(line);
   };
 
-  if (input.draft) return { action: "wait", wake: false, reasons: ["draft"], lines: ["This pull request is still a draft."] };
-  if (input.sameRepository === false) return { action: "wait", wake: false, reasons: ["fork"], lines: ["Fork pull requests are outside this workflow."] };
-  if (input.baseRef !== "main") return { action: "wait", wake: false, reasons: ["base"], lines: [`The base branch is ${input.baseRef}. This workflow only merges into main.`] };
-  if (!Array.isArray(input.files)) return { action: "wait", wake: false, reasons: ["files-unknown"], lines: ["The changed-file list was unavailable, so this pull request was not merged."] };
+  const idle = (reasons, lines) => ({ action: "wait", wake: false, requestReviews: false, reviewRound: false, reasons, lines });
+  if (input.draft) return idle(["draft"], ["This pull request is still a draft."]);
+  if (input.sameRepository === false) return idle(["fork"], ["Fork pull requests are outside this workflow."]);
+  if (input.baseRef !== "main") return idle(["base"], [`The base branch is ${input.baseRef}. This workflow only merges into main.`]);
+  if (!Array.isArray(input.files)) return idle(["files-unknown"], ["The changed-file list was unavailable, so this pull request was not merged."]);
 
   const risks = fileRisks(input.files);
   const checks = assessChecks(input.checks);
@@ -227,6 +232,7 @@ export const decide = (input) => {
   const findings = openFindings(input.threads);
   const git = input.mergeableState || "unknown";
   const wakes = Number(input.repairWakes) || 0;
+  const reviewRounds = Number(input.reviewRounds) || 0;
   const sha = shortSha(input.headSha);
 
   if (risks.includes("risky-money")) add("risky-money", "The diff touches payments, checkout, bookings, holds, pricing, referral credit, refunds, or payouts. It stays with the owner.");
@@ -256,9 +262,14 @@ export const decide = (input) => {
   const safe = risks.length === 0;
   const clean = git === "clean";
   const canMerge = checksGreen && clean && bothApprove && safe && findings.length === 0;
+  const reviewWork = disagree || findings.length > 0 || rabbit === "hold" || codex === "hold";
+  const reviewCapped = reviewWork && reviewRounds >= MAX_REVIEW_ROUNDS;
 
-  if (disagree && checksGreen && git !== "dirty" && git !== "behind") {
-    add("models-disagree", "CodeRabbit and Codex disagree on this head. It stays with the owner instead of merging.");
+  if (disagree && !reviewCapped) {
+    add("models-disagree", "CodeRabbit and Codex do not both approve this head. The owning agent addresses the disagreeing model's findings, pushes, and both reviews are requested again.");
+  }
+  if (reviewCapped) {
+    add("review-cap", `CodeRabbit and Codex have not both approved, with no open threads, after ${MAX_REVIEW_ROUNDS} review rounds. It stays with the owner.`);
   }
   if (git === "blocked" && checksGreen && bothApprove && safe && findings.length === 0) {
     add("github-blocked", "The pull request meets the repo bar, and GitHub is still blocking the merge. Branch protection or a ruleset is the likely hold. This workflow does not change those settings.");
@@ -267,22 +278,20 @@ export const decide = (input) => {
     add("merge-state-unstable", "GitHub still reports the merge state as unstable. The workflow will look again when that clears.");
   }
 
-  const needsAgent = checks.red.length > 0
-    || git === "behind"
-    || git === "dirty"
-    || findings.length > 0
-    || (checksGreen && (rabbit === "pending" || codex === "pending" || disagree));
-  if (needsAgent && wakes >= MAX_REPAIR_WAKES) {
+  const repairWork = checks.red.length > 0 || git === "behind" || git === "dirty";
+  const needsReviewAgent = reviewWork && !reviewCapped;
+  if (repairWork && wakes >= MAX_REPAIR_WAKES) {
     add("repair-cap", `The repair loop already continued this pull request ${MAX_REPAIR_WAKES} times. It stops here for the owner.`);
   }
 
-  const hold = reasons.some((reason) => reason.startsWith("risky-") || reason === "models-disagree" || reason === "github-blocked" || reason === "repair-cap");
+  const hold = reasons.some((reason) => reason.startsWith("risky-") || reason === "github-blocked" || reason === "repair-cap" || reason === "review-cap");
   let action = "wait";
   if (canMerge) action = "merge";
   else if (hold) action = "flag";
-  const wake = action !== "merge" && needsAgent && wakes < MAX_REPAIR_WAKES;
+  const wake = action !== "merge" && ((repairWork && wakes < MAX_REPAIR_WAKES) || needsReviewAgent);
+  const requestReviews = !reviewCapped && (rabbit === "pending" || codex === "pending");
   if (action === "merge") lines.unshift(`Every check on ${sha} is green, the branch is up to date, the diff is safe, and CodeRabbit and Codex both approve with no open findings.`);
-  return { action, wake, reasons, lines };
+  return { action, wake, requestReviews, reviewRound: needsReviewAgent && wake, reasons, lines };
 };
 
 export const gateComment = ({ decision, headSha, keyConfigured, wakeError }) => {

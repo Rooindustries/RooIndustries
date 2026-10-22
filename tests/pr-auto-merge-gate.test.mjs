@@ -76,7 +76,8 @@ test("CodeRabbit approval of an older commit does not approve the head", () => {
     reviews: [{ author: "coderabbitai[bot]", state: "APPROVED", commitSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", submittedAt: "2026-10-22T00:00:00Z" }],
   }));
   assert.equal(decision.action, "wait");
-  assert.equal(decision.wake, true);
+  assert.equal(decision.wake, false);
+  assert.equal(decision.requestReviews, true);
   assert.ok(decision.reasons.includes("coderabbit-pending"));
 });
 
@@ -87,9 +88,11 @@ test("a later CodeRabbit request for changes overrides an approval", () => {
       { author: "coderabbitai", state: "CHANGES_REQUESTED", commitSha: head, submittedAt: "2026-10-22T01:00:00Z" },
     ],
   }));
-  assert.notEqual(decision.action, "merge");
+  assert.equal(decision.action, "wait");
+  assert.equal(decision.wake, true);
+  assert.equal(decision.requestReviews, false);
+  assert.equal(decision.reviewRound, true);
   assert.ok(decision.reasons.includes("models-disagree"));
-  assert.equal(decision.action, "flag");
 });
 
 test("Codex approves from its review-state comment, and unresolved findings disagree", () => {
@@ -98,9 +101,10 @@ test("Codex approves from its review-state comment, and unresolved findings disa
   assert.equal(decide(safe({ codex: clean })).action, "merge");
   const open = { ...clean, hasUnresolvedFindings: true, hasAnyFindings: true };
   const decision = decide(safe({ codex: open }));
-  assert.equal(decision.action, "flag");
+  assert.equal(decision.action, "wait");
   assert.ok(decision.reasons.includes("models-disagree"));
   assert.equal(decision.wake, true);
+  assert.equal(decision.reviewRound, true);
 });
 
 test("an open Seer thread blocks a merge that both models approved", () => {
@@ -178,6 +182,42 @@ test("drafts, forks, and non-main bases never merge or wake", () => {
   }
 });
 
+test("disagreement keeps looping and flags the owner only after eight review rounds", () => {
+  const open = {
+    reviews: [
+      approved("coderabbitai"),
+      { author: "coderabbitai", state: "CHANGES_REQUESTED", commitSha: head, submittedAt: "2026-10-22T02:00:00Z" },
+    ],
+  };
+  const looping = decide(safe({ ...open, reviewRounds: 7 }));
+  assert.equal(looping.action, "wait");
+  assert.equal(looping.wake, true);
+  const capped = decide(safe({ ...open, reviewRounds: 8 }));
+  assert.equal(capped.action, "flag");
+  assert.equal(capped.wake, false);
+  assert.equal(capped.requestReviews, false);
+  assert.ok(capped.reasons.includes("review-cap"));
+  const agreed = decide(safe({ reviewRounds: 8 }));
+  assert.equal(agreed.action, "merge");
+  const pending = decide(safe({ reviews: [], codex: null, reviewRounds: 1 }));
+  assert.equal(pending.action, "wait");
+  assert.equal(pending.wake, false);
+  assert.equal(pending.requestReviews, true);
+});
+
+test("a money-path disagreement stays with the owner and still dispatches the agent", () => {
+  const decision = decide(safe({
+    files: [{ filename: "src/components/Payment.jsx", patch: "+export const price = 1;\n" }],
+    reviews: [
+      approved("coderabbitai"),
+      { author: "coderabbitai", state: "CHANGES_REQUESTED", commitSha: head, submittedAt: "2026-10-22T02:00:00Z" },
+    ],
+  }));
+  assert.equal(decision.action, "flag");
+  assert.equal(decision.wake, true);
+  assert.ok(decision.reasons.includes("risky-money"));
+});
+
 test("the repair loop stops with the owner after the wake cap", () => {
   const decision = decide(safe({
     checks: checks().map((check) => check.name === "Jest" ? { ...check, conclusion: "failure" } : check),
@@ -220,8 +260,12 @@ test("the required check names are the jobs the Tests workflow runs", () => {
   assert.doesNotMatch(apply, /child_process|execSync|execFile/);
   assert.match(apply, /workOnCurrentBranch: true/);
   assert.match(apply, /merge_method: "squash"/);
+  assert.match(apply, /@coderabbitai review/);
+  assert.match(apply, /@codex review/);
   const agents = readFileSync(new URL("../AGENTS.md", import.meta.url), "utf8");
   assert.match(agents, /Grok Bot assistant does not merge/);
   assert.match(agents, /CodeRabbit and Codex both approve/);
   assert.match(agents, /CURSOR_API_KEY/);
+  assert.match(agents, /After 8 review rounds/);
+  assert.doesNotMatch(agents, /disagree on the current head/);
 });

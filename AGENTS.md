@@ -54,9 +54,10 @@ CodeRabbit and Codex are the two review models. CodeRabbit approves by a GitHub 
 
 A squash-merge to `main` is the production deploy. The Vercel project ships `main`. The workflow does not deploy by any other path. The owner should not have to merge a pull request that has already met this bar.
 
+When CodeRabbit and Codex do not both approve, or a review thread is still open, the workflow keeps that same branch in a loop. It dispatches the owning agent to address the disagreeing model's findings. The agent pushes. The workflow then requests both reviews again, with `@coderabbitai review` and `@codex review`, on the new head. That repeats until both approve and no review thread is open. The gate above then merges and deploys. After 8 review rounds without that agreement, the workflow stops the loop and adds `needs-owner`.
+
 Stop and flag the owner instead of merging when any of these are true:
 
-- CodeRabbit and Codex disagree on the current head. One approves and the other does not.
 - The change can lose data, or it touches a payment, checkout, booking, hold, price, discount, referral credit, refund, or payout. That is a money path, listed above, and `app/api/razorpay/` counts as one too.
 - The change touches a secret, or the diff contains a private key.
 - The change adds or edits `supabase/migrations/`, or other SQL that drops or truncates.
@@ -65,7 +66,7 @@ Stop and flag the owner instead of merging when any of these are true:
 
 Flagging is a `needs-owner` label and one comment on the pull request, from the workflow. Leave the pull request open. Keep fixing ordinary test failures and review findings on a safe pull request until both models approve. On a risky pull request, keep the branch healthy, and leave the merge to the owner. Money-path pull requests stay on the rules in Money paths (one at a time, Sol review, the local suites). The workflow will not merge them.
 
-When checks are red, the branch needs a rebase or a conflict resolution, a review finding is still open, or a green head is still waiting on CodeRabbit or Codex, the workflow asks Cursor to continue an agent on that same pull request. The request is sent only when the `CURSOR_API_KEY` Actions secret is set. That key is created in the Cursor dashboard under API keys. Without the secret, the agent that opened the pull request is the last one to touch it, and a red check or a later review comment has nobody waiting to fix it. After eight of those continuations on one pull request, the workflow stops waking an agent and flags the owner.
+When checks are red, or the branch needs a rebase or a conflict resolution, the workflow asks Cursor to continue an agent on that same pull request. The request is sent only when the `CURSOR_API_KEY` Actions secret is set. That key is created in the Cursor dashboard under API keys. Without the secret, the agent that opened the pull request is the last one to touch it, and a red check has nobody waiting to fix it. After eight of those continuations on one pull request, the workflow stops waking an agent and flags the owner. The review loop above has its own cap of 8 review rounds.
 
 The workflow merges with the GitHub Actions token. That token can land the squash commit, and it does not start a new Actions run on the merge commit. Vercel still receives the push and deploys `main`. If GitHub rejects the merge because of branch protection, the pull request comment says so. A repository secret named `AUTO_MERGE_TOKEN`, holding a token that can write to this repository, merges as that user instead, which also lets the Tests workflow run on the merge commit. This repository does not change branch protection or rulesets from the workflow.
 
