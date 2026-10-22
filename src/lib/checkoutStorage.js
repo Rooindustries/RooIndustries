@@ -281,7 +281,13 @@ export const isReferralDismissed = (code, legacyDismissedCode = "") => {
       });
       return true;
     }
-    if (!status) writeReferralIntent({ ...intent, codes: { ...intent.codes, [normalized]: "available" } });
+    if (!status) {
+      try {
+        writeReferralIntent({ ...intent, codes: { ...intent.codes, [normalized]: "available" } });
+      } catch {
+        return false;
+      }
+    }
     return false;
   } catch {
     return true;

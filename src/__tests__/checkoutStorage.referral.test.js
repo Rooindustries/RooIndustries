@@ -38,6 +38,24 @@ test("clearing an invalid applied code keeps a newer passive code selectable", (
   expect(selectStoredReferral(scope)).toBe("creatorb");
 });
 
+test("a new payment candidate stays selectable when recording it fails", () => {
+  window.history.replaceState(null, "", "/payment?ref=friend");
+  window.sessionStorage.setItem("referral_capture", "ready");
+  const setItem = Storage.prototype.setItem;
+  jest.spyOn(Storage.prototype, "setItem").mockImplementation(function (key, value) {
+    if (key === "referral_dismissed") throw new DOMException("denied", "QuotaExceededError");
+    return setItem.call(this, key, value);
+  });
+  try {
+    expect(selectStoredReferral(scope, ["friend"])).toBe("friend");
+    expect(getReferralCaptureFailure()).toBeNull();
+    expect(window.sessionStorage.getItem("referral_dismissed")).toBeNull();
+    expect(recordAutomaticReferral("friend", scope)).toBe(false);
+  } finally {
+    jest.restoreAllMocks();
+  }
+});
+
 test("a referral journal write marks the capture ready when no capture is in progress", () => {
   expect(getReferralCaptureFailure()).toBeNull();
   expect(recordAutomaticReferral("creatorb", scope)).toBe(true);
