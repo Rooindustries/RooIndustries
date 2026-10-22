@@ -18,7 +18,7 @@ permissions:
   statuses: read
 
 concurrency:
-  group: auto-merge-${{ github.event.pull_request.number || github.event.workflow_run.id || github.event_name }}
+  group: auto-merge
   cancel-in-progress: false
 
 jobs:

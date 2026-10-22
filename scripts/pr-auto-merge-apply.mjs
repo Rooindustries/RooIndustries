@@ -60,6 +60,7 @@ const graphql = async (query, variables) => {
 };
 
 const login = (author) => author?.login || "";
+const botNamed = (author, name) => author?.type === "Bot" && String(author.login || "").replace(/\[bot\]$/, "") === name;
 
 const collectThreads = async (number) => {
   const [owner, name] = repo.split("/");
@@ -100,7 +101,8 @@ const collectSnapshot = async (number) => {
     api(readToken, `repos/${repo}/commits/${pull.head.sha}/status`).then((result) => result.payload),
   ]);
   const comments = Array.isArray(commentPage) ? commentPage : [];
-  const codexComment = [...comments].reverse().find((comment) => comment.user?.login?.startsWith("chatgpt-codex-connector") && comment.body?.includes("codex-review-state:v1"));
+  const codexComment = [...comments].reverse().find((comment) => botNamed(comment.user, "chatgpt-codex-connector") && comment.body?.includes("codex-review-state:v1"));
+  const ownComments = comments.filter((comment) => botNamed(comment.user, "github-actions"));
   const checks = [
     ...checkRuns.map((run) => ({
       name: run.name,
@@ -125,18 +127,19 @@ const collectSnapshot = async (number) => {
     headRef: pull.head.ref,
     sameRepository: pull.head.repo?.full_name === pull.base.repo.full_name,
     mergeableState: pull.mergeable_state,
-    files: files.map((file) => ({ filename: file.filename, patch: file.patch || "" })),
+    files: files.map((file) => ({ filename: file.filename, previousFilename: file.previous_filename || "", patch: file.patch || "" })),
     checks,
     reviews: reviews.map((review) => ({
       author: login(review.user),
+      bot: review.user?.type === "Bot",
       state: review.state,
       commitSha: review.commit_id,
       submittedAt: review.submitted_at,
     })),
     threads: await collectThreads(number),
     codex: parseCodexState(codexComment?.body || ""),
-    reviewRounds: countReviewRounds(comments.map((comment) => comment.body || "")),
-    comments,
+    reviewRounds: countReviewRounds(ownComments.map((comment) => comment.body || "")),
+    comments: ownComments,
   };
 };
 
@@ -193,12 +196,12 @@ const requestReviews = async (snapshot) => {
   });
 };
 
-const mergePullRequest = async (number) => {
+const mergePullRequest = async (number, sha) => {
   try {
-    await api(mergeToken, `repos/${repo}/pulls/${number}/merge`, { method: "PUT", body: { merge_method: "squash" } });
-    return "";
+    await api(mergeToken, `repos/${repo}/pulls/${number}/merge`, { method: "PUT", body: { merge_method: "squash", sha } });
+    return { error: "", headMoved: false };
   } catch (error) {
-    return error.message;
+    return { error: error.message, headMoved: error.status === 409 };
   }
 };
 
@@ -239,8 +242,12 @@ const applyOne = async (number) => {
     if (!counted) await recordReviewRound(snapshot);
   }
   if (decision.action === "merge") {
-    const mergeError = await mergePullRequest(number);
-    if (mergeError) {
+    const { error: mergeError, headMoved } = await mergePullRequest(number, snapshot.headSha);
+    if (headMoved) {
+      decision.action = "wait";
+      decision.reasons = [...decision.reasons, "head-moved"];
+      decision.lines = [`The branch head moved while the merge was being sent, so nothing merged. The next run decides again on the new head.`];
+    } else if (mergeError) {
       decision.action = "flag";
       decision.reasons = [...decision.reasons, "merge-rejected"];
       decision.lines = [

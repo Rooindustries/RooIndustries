@@ -14,7 +14,7 @@ import {
 
 const head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const checks = () => REQUIRED_CHECKS.map((name) => ({ name, status: "completed", conclusion: "success", completedAt: "2026-10-22T00:00:00Z" }));
-const approved = (author) => ({ author, state: "APPROVED", commitSha: head, submittedAt: "2026-10-22T00:00:00Z" });
+const approved = (author) => ({ author, bot: true, state: "APPROVED", commitSha: head, submittedAt: "2026-10-22T00:00:00Z" });
 const safe = (overrides = {}) => ({
   draft: false,
   sameRepository: true,
@@ -84,7 +84,7 @@ test("a later CodeRabbit request for changes overrides an approval", () => {
   const decision = decide(safe({
     reviews: [
       approved("coderabbitai"),
-      { author: "coderabbitai", state: "CHANGES_REQUESTED", commitSha: head, submittedAt: "2026-10-22T01:00:00Z" },
+      { author: "coderabbitai", bot: true, state: "CHANGES_REQUESTED", commitSha: head, submittedAt: "2026-10-22T01:00:00Z" },
     ],
   }));
   assert.equal(decision.action, "wait");
@@ -185,7 +185,7 @@ test("disagreement keeps looping and flags the owner only after eight review rou
   const open = {
     reviews: [
       approved("coderabbitai"),
-      { author: "coderabbitai", state: "CHANGES_REQUESTED", commitSha: head, submittedAt: "2026-10-22T02:00:00Z" },
+      { author: "coderabbitai", bot: true, state: "CHANGES_REQUESTED", commitSha: head, submittedAt: "2026-10-22T02:00:00Z" },
     ],
   };
   const looping = decide(safe({ ...open, reviewRounds: 7 }));
@@ -209,7 +209,7 @@ test("a money-path disagreement stays with the owner and still dispatches the ag
     files: [{ filename: "src/components/Payment.jsx", patch: "+export const price = 1;\n" }],
     reviews: [
       approved("coderabbitai"),
-      { author: "coderabbitai", state: "CHANGES_REQUESTED", commitSha: head, submittedAt: "2026-10-22T02:00:00Z" },
+      { author: "coderabbitai", bot: true, state: "CHANGES_REQUESTED", commitSha: head, submittedAt: "2026-10-22T02:00:00Z" },
     ],
   }));
   assert.equal(decision.action, "flag");
@@ -240,6 +240,37 @@ test("the gate comment names the owner only on a hold", () => {
   });
   assert.match(held, /@serviroo/);
   assert.match(held, /needs you/);
+});
+
+test("a rename out of a money, secret, or migration path is held by its old path", () => {
+  const renamed = (previousFilename) => decide(safe({ files: [{ filename: "src/lib/pricing2.js", previousFilename, patch: "+export const price = 1;\n" }] }));
+  assert.ok(renamed("app/api/payment/route.js").reasons.includes("risky-money"));
+  assert.ok(renamed(".env.production").reasons.includes("risky-secret"));
+  assert.ok(renamed("supabase/migrations/20260101_x.sql").reasons.includes("risky-migration"));
+  assert.equal(renamed("src/lib/other.js").action, "merge");
+});
+
+test("scripts that delete or drop production data are held", () => {
+  for (const filename of ["scripts/delete-production-data.mjs", "scripts/purge-bookings.mjs", "scripts/repair-supabase-commerce-integrity.mjs"]) {
+    const decision = decide(safe({ files: [{ filename, patch: "+console.log(1);\n" }] }));
+    assert.equal(decision.action, "flag", filename);
+    assert.ok(decision.reasons.includes("risky-production-script"), filename);
+  }
+});
+
+test("only the real review bots count: a human named like one approves nothing", () => {
+  const human = { ...approved("coderabbitai"), bot: false };
+  assert.equal(decide(safe({ reviews: [human] })).action, "wait");
+});
+
+test("the merge is bound to the head that was reviewed, and runs serialize", () => {
+  const apply = readFileSync(new URL("../scripts/pr-auto-merge-apply.mjs", import.meta.url), "utf8");
+  assert.match(apply, /merge_method: "squash", sha/);
+  assert.match(apply, /mergePullRequest\(number, snapshot\.headSha\)/);
+  assert.match(apply, /botNamed\(comment\.user, "github-actions"\)/);
+  const workflow = readFileSync(new URL("../.github/workflows/auto-merge.yml", import.meta.url), "utf8");
+  assert.match(workflow, /group: auto-merge\n/);
+  assert.match(workflow, /cancel-in-progress: false/);
 });
 
 test("the required check names are the jobs the Tests workflow runs", () => {

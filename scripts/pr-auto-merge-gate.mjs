@@ -90,7 +90,7 @@ export const isSecretPath = (filePath) => {
   return /(^|[._/-])(secrets?|credentials|service-account)([._/-]|$)/i.test(filePath);
 };
 
-export const isProductionMutator = (filePath) => /scripts\/.*(?:deploy|rollback)/i.test(filePath);
+export const isProductionMutator = (filePath) => /scripts\/.*(?:deploy|rollback|delete|drop|purge|wipe|truncate|destroy|repair|migrate)/i.test(filePath);
 
 const addedLines = (patch) => String(patch || "").split("\n").filter((line) => line.startsWith("+") && !line.startsWith("+++")).join("\n");
 
@@ -154,7 +154,7 @@ const assessChecks = (checks) => {
 };
 
 const reviewOnHead = (reviews, author, headSha) => (reviews || [])
-  .filter((review) => login(review.author) === author && review.commitSha === headSha)
+  .filter((review) => review.bot === true && login(review.author) === author && review.commitSha === headSha)
   .sort((left, right) => String(left.submittedAt).localeCompare(String(right.submittedAt)));
 
 const coderabbitVerdict = (reviews, headSha) => {
@@ -186,16 +186,15 @@ const openFindings = (threads) => (threads || []).filter((thread) => thread && t
 const fileRisks = (files) => {
   const reasons = [];
   for (const file of files) {
-    const filePath = file.filename || file.path || "";
     const added = addedLines(file.patch);
-    if (isMoneyPath(filePath)) reasons.push("risky-money");
-    if (isSecretPath(filePath) || /BEGIN (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY/.test(added)) reasons.push("risky-secret");
-    if (filePath.startsWith("supabase/migrations/") || filePath.startsWith(".github/workflows/") || GATE_FILES.has(filePath)) {
-      if (filePath.startsWith("supabase/migrations/")) reasons.push("risky-migration");
-      else reasons.push("risky-workflow");
-    }
-    if (filePath.endsWith(".sql") && /\b(DROP\s+(TABLE|COLUMN|SCHEMA|INDEX|DATABASE)|TRUNCATE\s+TABLE)\b/i.test(added)) reasons.push("risky-sql");
-    if (isProductionMutator(filePath)) reasons.push("risky-production-script");
+    // A rename carries its old path: moving a file out of a risky path must not hide it.
+    const paths = [file.filename || file.path || "", file.previousFilename || ""].filter(Boolean);
+    if (paths.some(isMoneyPath)) reasons.push("risky-money");
+    if (paths.some(isSecretPath) || /BEGIN (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY/.test(added)) reasons.push("risky-secret");
+    if (paths.some((filePath) => filePath.startsWith("supabase/migrations/"))) reasons.push("risky-migration");
+    if (paths.some((filePath) => filePath.startsWith(".github/workflows/") || GATE_FILES.has(filePath))) reasons.push("risky-workflow");
+    if (paths.some((filePath) => filePath.endsWith(".sql")) && /\b(DROP\s+(TABLE|COLUMN|SCHEMA|INDEX|DATABASE)|TRUNCATE\s+TABLE)\b/i.test(added)) reasons.push("risky-sql");
+    if (paths.some(isProductionMutator)) reasons.push("risky-production-script");
   }
   return unique(reasons);
 };
