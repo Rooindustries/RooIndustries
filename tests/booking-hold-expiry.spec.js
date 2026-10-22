@@ -36,6 +36,7 @@ test("expiry on the details step keeps the booking open with the typed details",
   expect(await draftEmail(page)).toBe("visitor@example.invalid");
   await page.reload();
   await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: expiredMessage })).toBeVisible();
   expect(await draftEmail(page)).toBe("visitor@example.invalid");
   await reserveAgainKeepsDetails(page, flow);
 });
@@ -128,8 +129,37 @@ test("releasing the slot right after it expired keeps the typed details", async 
   await page.clock.setSystemTime(Date.parse(expiresAt) + 100);
   await page.getByRole("button", { name: "Release Slot", exact: true }).click();
   await expect.poll(() => storedHold(page)).toBeNull();
+  await expect(page.getByRole("alert").filter({ hasText: expiredMessage })).toBeVisible();
   expect(await draftEmail(page)).toBe("visitor@example.invalid");
   await reserveAgainKeepsDetails(page, flow, 60 * 60 * 1000);
+});
+
+test("a release that finishes after the deadline keeps the typed details and the reason", async ({ page, flow }) => {
+  await page.clock.install();
+  await flow.reserve();
+  await flow.details();
+  const { expiresAt } = await storedHold(page);
+  let finishRelease;
+  const releaseFinished = new Promise((resolve) => {
+    finishRelease = resolve;
+  });
+  await page.route("**/api/releaseHold", async (route) => {
+    await releaseFinished;
+    await route.fulfill({ json: { ok: true } });
+  });
+  const releaseStarted = page.waitForRequest("**/api/releaseHold");
+  const releaseClick = page.getByRole("button", { name: "Release Slot", exact: true }).click();
+  await releaseStarted;
+  await page.clock.setSystemTime(Date.parse(expiresAt) + 1000);
+  finishRelease();
+  await releaseClick;
+  await expect(page.getByRole("alert").filter({ hasText: expiredMessage })).toBeVisible();
+  expect(await storedHold(page)).toBeNull();
+  expect(await draftEmail(page)).toBe("visitor@example.invalid");
+  expect(await page.evaluate(() => sessionStorage.getItem("booking_hold_expired"))).toBe("1");
+  await page.reload();
+  await expect(page.getByRole("alert").filter({ hasText: expiredMessage })).toBeVisible();
+  expect(await draftEmail(page)).toBe("visitor@example.invalid");
 });
 
 test("expiry away from the booking flow clears the reservation without moving the visitor and keeps the details", async ({ page, flow }) => {
