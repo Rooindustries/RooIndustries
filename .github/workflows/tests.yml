@@ -15,7 +15,7 @@ concurrency:
 jobs:
   jest:
     name: Jest
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -38,7 +38,7 @@ jobs:
 
   playwright:
     name: Playwright ${{ matrix.suite.name }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -97,6 +97,7 @@ jobs:
             TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:agent-readiness
             TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:traffic-recovery
             TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:tourney-retirement:phases
+            npm run test:remote-browser-guard
             npm run test:smoke:production
           fi
           xvfb-run -a npx playwright test --pass-with-no-tests ${PW_SHARD:+--shard="$PW_SHARD"} "$PW_FILES"
@@ -110,7 +111,7 @@ jobs:
 
   routes:
     name: Playwright creator portal and API routes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       ROO_TEST_HOST: 127.0.0.1
@@ -146,7 +147,7 @@ jobs:
 
   native:
     name: Native PostgreSQL 17 suites
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       ROO_TEST_HOST: 127.0.0.1
@@ -236,7 +237,7 @@ jobs:
 
   revalidation:
     name: Playwright revalidation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       ROO_TEST_HOST: 127.0.0.1

@@ -391,6 +391,9 @@ export default function Packages({
                       <span className="glow-line glow-line-left" />
                     </Link>
                   </div>
+                  <p className="ri-package-guarantee mt-3 text-center text-sm text-ink-secondary">
+                    No gains? 3-day money-back guarantee.
+                  </p>
                 </div>
               );
             })}

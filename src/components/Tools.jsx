@@ -210,6 +210,10 @@ export default function Tools({ initialData = null }) {
           testing, overclocking and troubleshooting. Downloads are either direct
           from the official developer or securely hosted by Roo Industries.
         </p>
+        <p className="mt-2 text-sm sm:text-base text-ink-secondary">
+          Don&apos;t want to do it yourself? I&apos;ll tune your PC for you.{" "}
+          <Link to="/packages" className="inline-flex min-h-11 items-center text-accent underline underline-offset-4">See the packages</Link>
+        </p>
       </header>
 
       {!loading && loadError ? (

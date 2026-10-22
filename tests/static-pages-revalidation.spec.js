@@ -170,3 +170,80 @@ test("/faq publishes its own changes while unrelated home content is unavailable
     await testInfo.attach("faq-unrelated-outage", { body: JSON.stringify(timeline, null, 2), contentType: "application/json" });
   }
 });
+
+test("/ and /packages list an offer for every card after CMS price edits without a dollar sign or with a space", async ({ request, baseURL }, testInfo) => {
+  test.setTimeout(180000);
+  const control = contentControl(request, baseURL);
+  const timeline = [];
+  const read = pageReader(request, timeline);
+  const offers = body => [...body.matchAll(/<script type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g)]
+    .map(match => JSON.parse(match[1]))
+    .flatMap(script => script["@graph"] || [script])
+    .filter(node => node["@type"] === "OfferCatalog")
+    .flatMap(node => node.itemListElement.map(offer => offer.price));
+  try {
+    await control({ patch: { _id: "tooling-package-0", price: "84.99" } });
+    await control({ patch: { _id: "tooling-package-1", price: "$ 139.95" } });
+    await wait(61000);
+    for (const route of ["/", "/packages"]) {
+      expect((await read(route, "first request after the price edit")).status).toBe(200);
+      await expect.poll(async () => {
+        const page = await read(route, "waiting for the edited price");
+        return page.cache === "HIT" && page.body.includes("$ 139.95") && page.body.includes(">84.99<");
+      }, { timeout: 20000 }).toBe(true);
+      const { body } = await read(route, "after the price edit");
+      const cards = body.match(/class="ri-package-card /g) || [];
+      expect(cards.length).toBeGreaterThan(1);
+      expect(offers(body)).toHaveLength(cards.length);
+      expect(offers(body)).toEqual(expect.arrayContaining(["84.99", "139.95"]));
+    }
+  } finally {
+    await control({ reset: true });
+    await testInfo.attach("offer-price-edit", { body: JSON.stringify(timeline, null, 2), contentType: "application/json" });
+  }
+});
+
+test("/ rates the service only from CMS reviews with a whole 1-5 star rating after review edits", async ({ request, baseURL }, testInfo) => {
+  test.setTimeout(300000);
+  const control = contentControl(request, baseURL);
+  const timeline = [];
+  const read = pageReader(request, timeline);
+  const ratings = body => [...body.matchAll(/<script type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g)]
+    .map(match => JSON.parse(match[1]))
+    .flatMap(script => script["@graph"] || [script])
+    .filter(node => node["@type"] === "AggregateRating");
+  const review = (index, text, rating) => ({
+    _id: `rating-edit-${index}`,
+    name: `Rating Edit ${index}`,
+    text,
+    ...(rating === undefined ? {} : { rating }),
+  });
+  const publish = async (reviews, marker) => {
+    await control({ patch: { _id: "tooling-proReviewsCarousel", reviews } });
+    await wait(61000);
+    expect((await read("/", `first request after ${marker}`)).status).toBe(200);
+    await expect.poll(async () => {
+      const page = await read("/", `waiting for ${marker}`);
+      return page.cache === "HIT" && page.body.includes(marker);
+    }, { timeout: 20000 }).toBe(true);
+    return (await read("/", `after ${marker}`)).body;
+  };
+  try {
+    const mixed = await publish([
+      review(0, "Mixed ratings marker", 4),
+      review(1, "No rating set"),
+      review(2, "Half star rating", 2.5),
+      review(3, "Out of range rating", 7),
+      review(4, "Five star rating", 5),
+    ], "Mixed ratings marker");
+    expect(ratings(mixed)).toEqual([expect.objectContaining({ ratingValue: 4.5, ratingCount: 2, bestRating: 5, worstRating: 1 })]);
+    const unrated = await publish([
+      review(0, "Unrated marker"),
+      review(1, "Still no rating", null),
+    ], "Unrated marker");
+    expect(ratings(unrated)).toEqual([]);
+  } finally {
+    await control({ reset: true });
+    await testInfo.attach("review-rating-edit", { body: JSON.stringify(timeline, null, 2), contentType: "application/json" });
+  }
+});

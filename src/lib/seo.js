@@ -1,7 +1,7 @@
 const { NOINDEX_ROUTES } = require("./routes");
 const { HOME_COPY } = require("./homeCopy");
 const { buildPackageOffers } = require("./packageContent");
-const { getPackagePricePresentation } = require("./packagePricing");
+const { getPackagePricePresentation, toMoney } = require("./packagePricing");
 
 const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || "https://www.rooindustries.com").replace(/\/$/, "");
 
@@ -14,25 +14,27 @@ const DEFAULT_DESCRIPTION =
 
 const routeMeta = {
   "/": {
-    title: "Roo Industries | PC Game Optimization",
-    description: DEFAULT_DESCRIPTION,
+    title: "Remote PC Optimization Service for Gamers | Roo Industries",
+    description:
+      "We tune your BIOS, Windows, RAM and game settings remotely so the games you actually play get more FPS and less input lag. Same-day sessions available.",
     noindex: false,
   },
   "/benchmarks": {
-    title: "Benchmark Results | Roo Industries",
-    description: "See before and after FPS numbers from real Roo Industries game tuning sessions.",
+    title: "Before & After PC Optimization Benchmarks | Roo Industries",
+    description:
+      "Before and after benchmark screenshots from real Roo Industries tuning sessions, run on the clients' own PCs. No lab rigs, just the numbers they got.",
     noindex: false,
   },
   "/reviews": {
-    title: "Client Reviews & Results | Roo Industries Performance Tuning",
+    title: "PC Optimization Reviews & Results | Roo Industries",
     description:
-      "Read how players describe the FPS gains, lower input lag, smoother mouse feel, and cleaner frametimes after real Roo Industries game tuning sessions online.",
+      "Screenshots of what real clients said after their tuning sessions: more FPS, less input lag, a smoother mouse feel. Read them yourself before you book.",
     noindex: false,
   },
   "/faq": {
-    title: "PC Game Optimization FAQ | Roo Industries",
+    title: "FAQ: Remote PC Optimization Sessions | Roo Industries",
     description:
-      "Read the first questions players ask about FPS, input lag, booking, remote access, warranty, and what happens during the session.",
+      "Is it safe for your PC, what results to expect, how long a session takes, which games and hardware it works on, and how the money-back guarantee works.",
     noindex: false,
   },
   "/contact": {
@@ -68,9 +70,9 @@ const routeMeta = {
     noindex: false,
   },
   "/packages": {
-    title: "PC Game Optimization Packages | Roo Industries",
+    title: "PC Optimization Packages & Pricing | Roo Industries",
     description:
-      "Compare packages for game settings, FPS tuning, Windows and BIOS work, input lag, and full PC performance tuning.",
+      "Every package covers Windows, BIOS and game tuning. Overhaul and Max add RAM, CPU and GPU overclocking. You get a 90-day warranty, or lifetime on Max.",
     noindex: false,
   },
   "/tourney": {
@@ -220,7 +222,7 @@ function buildMetadata({
       ],
     },
     twitter: {
-      card: "summary_large_image",
+      card: "summary",
       title,
       description,
       images: [imageUrl],
@@ -280,77 +282,116 @@ const buildOrganizationJsonLd = () => ({
   },
 });
 
-const buildHomePageJsonLd = (hero = HOME_COPY.hero) => ({
-  "@context": "https://schema.org",
-  "@graph": [
-    {
-      "@type": "WebSite",
-      "@id": `${siteUrl}/#website`,
-      name: SITE_NAME,
-      url: siteUrl,
-      publisher: {
-        "@id": `${siteUrl}/#organization`,
-      },
-    },
-    {
-      "@type": "WebPage",
-      "@id": `${siteUrl}/#webpage`,
-      url: siteUrl,
-      name: "Roo Industries | PC Game Optimization",
-      headline: `${hero.headingLine1} ${hero.headingLine2}`,
-      description:
-        "Roo Industries tunes BIOS, Windows, memory, GPU, and game settings around the games players actually play for smoother ranked games, higher FPS, lower input lag, and cleaner frametimes.",
-      isPartOf: {
-        "@id": `${siteUrl}/#website`,
-      },
-      publisher: {
-        "@id": `${siteUrl}/#organization`,
-      },
-      mainEntity: {
-        "@id": `${siteUrl}/#pc-game-optimization-service`,
-      },
-    },
-    {
-      "@type": "Service",
-      "@id": `${siteUrl}/#pc-game-optimization-service`,
-      name: "Remote PC Game Optimization",
-      serviceType: "PC game optimization",
-      url: siteUrl,
-      provider: {
-        "@id": `${siteUrl}/#organization`,
-      },
-      areaServed: "Worldwide",
-      description:
-        "Remote optimization for BIOS, Windows, memory, GPU, RAM, and in-game settings focused on FPS, input lag, frametime stability, and ranked-game performance.",
-    },
-  ],
-});
+const parseUsdAmount = (value) => {
+  if (/[€£₹]/.test(String(value || ""))) return null;
+  const amount = toMoney(value);
+  const shown = Number(String(value || "").replace(/[\s,$]/g, ""));
+  return amount > 0 && shown === amount ? String(amount) : null;
+};
 
-const buildOfferCatalogJsonLd = (packages = []) => {
-  const itemListElement = buildPackageOffers(packages).flatMap((pkg) => {
+const buildOfferCatalog = (packages = []) => {
+  const itemListElement = buildPackageOffers(packages).map((pkg) => {
     const { price } = getPackagePricePresentation(
       pkg.title,
       pkg.price || pkg.compareAtPrice || pkg.originalPrice
     );
-    const amount = String(price).trim().match(/^\$(\d+(?:,\d{3})*(?:\.\d{1,2})?)$/);
-    if (!pkg.title || !amount) return [];
-    return [{
+    const amount = parseUsdAmount(price);
+    if (!pkg.title || !amount) return null;
+    return {
       "@type": "Offer",
       url: `${siteUrl}/packages`,
-      price: amount[1].replace(/,/g, ""),
+      price: amount,
       priceCurrency: "USD",
       seller: { "@id": `${siteUrl}/#organization` },
       itemOffered: { "@type": "Service", name: pkg.title },
-    }];
+    };
   });
-  if (!itemListElement.length) return null;
+  if (!itemListElement.length || itemListElement.includes(null)) return null;
   return {
-    "@context": "https://schema.org",
     "@type": "OfferCatalog",
     "@id": `${siteUrl}/packages#offer-catalog`,
     name: "PC Game Optimization Packages",
     url: `${siteUrl}/packages`,
     itemListElement,
+  };
+};
+
+const buildServiceNode = (catalog) => ({
+  "@type": "Service",
+  "@id": `${siteUrl}/#pc-game-optimization-service`,
+  name: "Remote PC Game Optimization",
+  serviceType: "PC game optimization",
+  url: siteUrl,
+  provider: {
+    "@id": `${siteUrl}/#organization`,
+  },
+  areaServed: "Worldwide",
+  description:
+    "Remote optimization for BIOS, Windows, memory, GPU, RAM, and in-game settings focused on FPS, input lag, frametime stability, and ranked-game performance.",
+  ...(catalog ? { hasOfferCatalog: { "@id": catalog["@id"] } } : {}),
+});
+
+const buildReviewRating = (reviews = []) => {
+  const ratings = (Array.isArray(reviews) ? reviews : [])
+    .map((review) => review?.rating)
+    .filter((rating) => Number.isInteger(rating) && rating >= 1 && rating <= 5);
+  if (!ratings.length) return null;
+  const total = ratings.reduce((sum, rating) => sum + rating, 0);
+  return {
+    "@type": "AggregateRating",
+    itemReviewed: { "@id": `${siteUrl}/#pc-game-optimization-service` },
+    ratingValue: Math.round((total / ratings.length) * 100) / 100,
+    ratingCount: ratings.length,
+    bestRating: 5,
+    worstRating: 1,
+  };
+};
+
+const buildHomePageJsonLd = (hero = HOME_COPY.hero, packages = [], reviews = []) => {
+  const catalog = buildOfferCatalog(packages);
+  const rating = buildReviewRating(reviews);
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": `${siteUrl}/#website`,
+        name: SITE_NAME,
+        url: siteUrl,
+        publisher: {
+          "@id": `${siteUrl}/#organization`,
+        },
+      },
+      {
+        "@type": "WebPage",
+        "@id": `${siteUrl}/#webpage`,
+        url: siteUrl,
+        name: "Roo Industries | PC Game Optimization",
+        headline: `${hero.headingLine1} ${hero.headingLine2}`,
+        description:
+          "Roo Industries tunes BIOS, Windows, memory, GPU, and game settings around the games players actually play for smoother ranked games, higher FPS, lower input lag, and cleaner frametimes.",
+        isPartOf: {
+          "@id": `${siteUrl}/#website`,
+        },
+        publisher: {
+          "@id": `${siteUrl}/#organization`,
+        },
+        mainEntity: {
+          "@id": `${siteUrl}/#pc-game-optimization-service`,
+        },
+      },
+      buildServiceNode(catalog),
+      ...(catalog ? [catalog] : []),
+      ...(rating ? [rating] : []),
+    ],
+  };
+};
+
+const buildOfferCatalogJsonLd = (packages = []) => {
+  const catalog = buildOfferCatalog(packages);
+  return {
+    "@context": "https://schema.org",
+    "@graph": [buildServiceNode(catalog), ...(catalog ? [catalog] : [])],
   };
 };
 

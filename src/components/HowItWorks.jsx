@@ -12,6 +12,92 @@ import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 const { HOME_COPY } = homeCopy;
 const fallbackData = HOME_COPY.howItWorks;
 
+function VideoBadge({ name, pauseVideos }) {
+  const cardRef = useRef(null);
+  const videoRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+
+  useEffect(() => {
+    const node = videoRef.current;
+    if (!node) return;
+
+    if (pauseVideos) {
+      node.pause();
+      return;
+    }
+
+    if (typeof IntersectionObserver === "undefined" || !cardRef.current) {
+      node.play().catch(() => {});
+      return;
+    }
+
+    let visible = false;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        visible = Boolean(entries[0]?.isIntersecting);
+        if (visible && !document.hidden) {
+          node.play().catch(() => {});
+        } else {
+          node.pause();
+        }
+      },
+      { rootMargin: "200px 0px" }
+    );
+
+    const onVisibility = () => {
+      if (document.hidden) { node.pause(); }
+      else if (visible) { node.play().catch(() => {}); }
+    };
+
+    observer.observe(cardRef.current);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [pauseVideos]);
+
+  if (!name) return null;
+
+  const webm = `/videos/${name}.webm`;
+  const mp4 = `/videos/${name}.mp4`;
+  const poster = `/posters/${name}.jpg`;
+
+  return (
+    <div
+      ref={cardRef}
+      className="ri-hiw-video relative overflow-hidden rounded-2xl border border-line-input bg-surface-card
+                 shadow-[var(--shadow-card-glow-info)]
+                 w-[calc(100%+0.75rem)] sm:w-[calc(100%+1rem)] -mx-1.5 sm:-mx-2 aspect-video sm:aspect-[16/10]"
+    >
+      <img
+        src={poster}
+        alt=""
+        aria-hidden="true"
+        loading="lazy"
+        decoding="async"
+        className="absolute inset-0 w-full h-full object-cover"
+      />
+      <video
+        ref={videoRef}
+        className={`absolute inset-0 w-full h-full object-cover${playing ? "" : " opacity-0"}`}
+        loop
+        muted
+        playsInline
+        preload="none"
+        fetchPriority="low"
+        onPlaying={() => setPlaying(true)}
+      >
+        <source src={webm} type="video/webm" />
+        <source src={mp4} type="video/mp4" />
+      </video>
+
+      <div className="absolute inset-0 bg-gradient-to-br from-sky-500/12 via-transparent to-cyan-500/12" />
+      <div className="absolute inset-0 ring-1 ring-inset ring-white/10" />
+    </div>
+  );
+}
+
 export default function HowItWorks({ initialData = null }) {
   const [data, setData] = useState(
     () => initialData ?? fallbackData
@@ -58,91 +144,6 @@ export default function HowItWorks({ initialData = null }) {
     1: "instructions",
     2: "bios",
     3: "tuning",
-  };
-  const VideoBadge = ({ name, pauseVideos }) => {
-    const cardRef = useRef(null);
-    const videoRef = useRef(null);
-    const [playing, setPlaying] = useState(false);
-
-    useEffect(() => {
-      const node = videoRef.current;
-      if (!node) return;
-
-      if (pauseVideos) {
-        node.pause();
-        return;
-      }
-
-      if (typeof IntersectionObserver === "undefined" || !cardRef.current) {
-        node.play().catch(() => {});
-        return;
-      }
-
-      let visible = false;
-      const observer = new IntersectionObserver(
-        (entries) => {
-          visible = Boolean(entries[0]?.isIntersecting);
-          if (visible && !document.hidden) {
-            node.play().catch(() => {});
-          } else {
-            node.pause();
-          }
-        },
-        { rootMargin: "200px 0px" }
-      );
-
-      const onVisibility = () => {
-        if (document.hidden) { node.pause(); }
-        else if (visible) { node.play().catch(() => {}); }
-      };
-
-      observer.observe(cardRef.current);
-      document.addEventListener("visibilitychange", onVisibility);
-      return () => {
-        observer.disconnect();
-        document.removeEventListener("visibilitychange", onVisibility);
-      };
-    }, [pauseVideos]);
-
-    if (!name) return null;
-
-    const webm = `/videos/${name}.webm`;
-    const mp4 = `/videos/${name}.mp4`;
-    const poster = `/posters/${name}.jpg`;
-
-    return (
-      <div
-        ref={cardRef}
-        className="ri-hiw-video relative overflow-hidden rounded-2xl border border-line-input bg-surface-card
-                   shadow-[var(--shadow-card-glow-info)]
-                   w-[calc(100%+0.75rem)] sm:w-[calc(100%+1rem)] -mx-1.5 sm:-mx-2 aspect-video sm:aspect-[16/10]"
-      >
-        <img
-          src={poster}
-          alt=""
-          aria-hidden="true"
-          loading="lazy"
-          decoding="async"
-          className="absolute inset-0 w-full h-full object-cover"
-        />
-        <video
-          ref={videoRef}
-          className={`absolute inset-0 w-full h-full object-cover${playing ? "" : " opacity-0"}`}
-          loop
-          muted
-          playsInline
-          preload="none"
-          fetchPriority="low"
-          onPlaying={() => setPlaying(true)}
-        >
-          <source src={webm} type="video/webm" />
-          <source src={mp4} type="video/mp4" />
-        </video>
-
-        <div className="absolute inset-0 bg-gradient-to-br from-sky-500/12 via-transparent to-cyan-500/12" />
-        <div className="absolute inset-0 ring-1 ring-inset ring-white/10" />
-      </div>
-    );
   };
 
   return (

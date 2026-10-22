@@ -53,9 +53,28 @@ test.describe("How It Works videos", () => {
 
   test("a video shows once it plays", async ({ page }) => {
     await page.goto("/");
-    const card = page.locator(".ri-hiw-video").first();
+    const cards = page.locator(".ri-hiw-video");
+    await expect(cards).toHaveCount(4);
+    const card = cards.first();
     await card.locator("img").scrollIntoViewIfNeeded();
     await expect.poll(() => card.locator("video").evaluate(video => !video.paused && video.readyState >= 3), { timeout: 15000 }).toBe(true);
     await expect(card.locator("video")).toHaveCSS("opacity", "1");
+  });
+
+  test("a re-render keeps the cards' posters and videos in place", async ({ page }) => {
+    await page.goto("/");
+    const cards = page.locator(".ri-hiw-video");
+    await expect(cards).toHaveCount(4);
+    const video = cards.first().locator("video");
+    await cards.first().locator("img").scrollIntoViewIfNeeded();
+    await expect.poll(() => video.evaluate(node => !node.paused && node.readyState >= 3), { timeout: 15000 }).toBe(true);
+    await page.evaluate(() => document.querySelectorAll(".ri-hiw-video img, .ri-hiw-video video").forEach(node => { node.dataset.firstMount = "1"; }));
+    await page.evaluate(() => {
+      localStorage.setItem("roo_perf_debug_toggles", JSON.stringify({ pauseHowItWorksVideos: true }));
+      window.dispatchEvent(new CustomEvent("roo-perf-debug-change"));
+    });
+    await expect.poll(() => video.evaluate(node => node.paused)).toBe(true);
+    await expect(page.locator(".ri-hiw-video [data-first-mount]")).toHaveCount(8);
+    await expect(video).toHaveCSS("opacity", "1");
   });
 });

@@ -9,6 +9,7 @@ import {
   Navigate,
 } from "react-router-dom";
 import Navbar from "./components/Navbar";
+import JsonLd from "./next/JsonLd";
 import { isProductionBrowser } from "./lib/productionBrowser";
 import SalesTelemetry from "./components/SalesTelemetry";
 import { SpeedInsights } from "@vercel/speed-insights/react";
@@ -315,6 +316,7 @@ function AnimatedRoutes({
 export function AppContent({
   initialHomeData = null,
   initialRouteData = null,
+  routeJsonLd = null,
   initialRouteComponent = null,
   initialRoutePath = null,
   initialHomeComponent = null,
@@ -678,6 +680,7 @@ export function AppContent({
 
   return (
     <>
+      {routeJsonLd && location.pathname === initialRoutePath ? <JsonLd data={routeJsonLd} /> : null}
       <DeferredTelemetry />
       <SalesTelemetry />
       <IntercomRuntime

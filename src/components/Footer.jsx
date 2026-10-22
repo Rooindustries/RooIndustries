@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { FaDiscord } from "react-icons/fa";
 import packagePricing from "../lib/packagePricing";
 import { readBookingPackageSelection } from "../lib/checkoutStorage";
+import PaymentMethods from "./PaymentMethods";
 
 const { isTopPackageTitle } = packagePricing;
 
@@ -87,52 +88,7 @@ export default function Footer() {
         </div>
 
         <div className="py-2 flex justify-center md:justify-end">
-          <div className="inline-flex items-center gap-3 px-4 py-2 rounded-2xl border border-line-soft bg-surface-veil backdrop-blur-md">
-            <span className="grid place-items-center h-10 w-14 rounded-xl border border-line-soft bg-surface-input">
-              <img
-                src="/newVisa.png"
-                alt="Visa"
-                className="h-7 w-auto object-contain"
-                loading="lazy"
-                decoding="async"
-                width={240}
-                height={152}
-              />
-            </span>
-            <span className="grid place-items-center h-10 w-14 rounded-xl border border-line-soft bg-surface-input">
-              <img
-                src="/mastercard.jpg"
-                alt="Mastercard"
-                className="h-7 w-auto object-contain"
-                loading="lazy"
-                decoding="async"
-                width={220}
-                height={128}
-              />
-            </span>
-            <span className="grid place-items-center h-10 w-14 rounded-xl border border-line-soft bg-surface-input">
-              <img
-                src="/newAmex.png"
-                alt="American Express"
-                className="h-7 w-auto object-contain"
-                loading="lazy"
-                decoding="async"
-                width={50}
-                height={30}
-              />
-            </span>
-            <span className="grid place-items-center h-10 w-14 rounded-xl border border-line-soft bg-surface-input">
-              <img
-                src="/newPaypal.png"
-                alt="PayPal"
-                className="h-7 w-auto object-contain"
-                loading="lazy"
-                decoding="async"
-                width={50}
-                height={30}
-              />
-            </span>
-          </div>
+          <PaymentMethods className="px-2 py-2 sm:px-4 rounded-2xl border border-line-soft bg-surface-veil backdrop-blur-md" />
         </div>
 
         <div className="flex flex-col md:flex-row items-center justify-between gap-3 pt-1">
