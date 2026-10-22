@@ -179,6 +179,17 @@ test("deploy gate: an already rolled-back production is never rolled back furthe
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
 }));
 
+test("deploy gate: an accepted rollback that is not confirmed says the request was sent", () => withGate({
+  site: { status: { "/payment": 500 } },
+  vercel: { freezeAlias: true },
+}, async ({ vercel, exec }) => {
+  const result = await exec();
+  assert.equal(result.code, 1, result.output);
+  assert.equal(vercelChanges(vercel).length, 1);
+  assert.match(result.output, /rollback was sent, but production was not confirmed/);
+  assert.doesNotMatch(result.output, /did not run/);
+}));
+
 test("deploy gate: refuses to run without the deployment URL", () => withGate({}, async ({ site, vercel, exec }) => {
   const result = await exec({ DEPLOYMENT_URL: undefined });
   assert.equal(result.code, 1, result.output);

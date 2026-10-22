@@ -43,14 +43,31 @@ export const startVercel = ({
   let rollbackPosts = 0;
   let projectReadsAfterRollback = 0;
   const server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on("data", chunk => chunks.push(chunk));
+    req.on("end", () => {
+    const rawBody = Buffer.concat(chunks).toString("utf8");
+    let parsedBody = null;
+    if (rawBody) {
+      try { parsedBody = JSON.parse(rawBody); } catch { parsedBody = rawBody; }
+    }
     const url = new URL(req.url, "http://fixture");
-    requests.push({ method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), auth: req.headers.authorization });
+    requests.push({
+      method: req.method,
+      path: url.pathname,
+      query: Object.fromEntries(url.searchParams),
+      auth: req.headers.authorization,
+      body: parsedBody,
+    });
     const send = (status, body) => {
       res.writeHead(status, { "content-type": "application/json" });
       res.end(body === undefined ? "" : JSON.stringify(body));
     };
     const notFound = () => send(404, { error: { code: "not_found", message: "The resource was not found" } });
     if (req.headers.authorization !== `Bearer ${TOKEN}`) return send(403, { error: { code: "forbidden", message: "Not authorized" } });
+    if (req.method === "POST" && (req.headers["content-type"] !== "application/json" || parsedBody === null || typeof parsedBody !== "object" || Array.isArray(parsedBody))) {
+      return send(400, { error: { code: "bad_request", message: "Expected a JSON object body" } });
+    }
     const owned = url.searchParams.get("teamId") === state.project.accountId;
     const moveAlias = deploymentId => {
       if (!freezeAlias) state.aliases[DOMAIN].deploymentId = deploymentId;
@@ -134,6 +151,7 @@ export const startVercel = ({
       return send(promoteStatus);
     }
     return notFound();
+    });
   });
   return new Promise(resolve => {
     server.listen(0, "127.0.0.1", () => resolve({

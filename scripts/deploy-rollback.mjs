@@ -18,6 +18,7 @@ const PENDING_JOBS = new Set(["pending", "in-progress"]);
 const FAILED_JOBS = new Set(["failed", "error", "canceled", "cancelled"]);
 const VERIFY_INTERVAL_MS = Number(process.env.ROLLBACK_VERIFY_INTERVAL_MS || 3000);
 const VERIFY_TIMEOUT_MS = Number(process.env.ROLLBACK_VERIFY_TIMEOUT_MS || 120000);
+let mutationAccepted = false;
 
 class Refusal extends Error {}
 
@@ -64,14 +65,18 @@ const resolveApiBase = () => {
   throw new Refusal("VERCEL_API_URL must be https://api.vercel.com (or a loopback address in tests).");
 };
 
-const createClient = (token, base) => async (method, pathname, query = {}) => {
+const createClient = (token, base) => async (method, pathname, query = {}, payload) => {
   const url = new URL(pathname, base);
   for (const [key, value] of Object.entries(query)) {
     if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
   }
   const response = await fetch(url, {
     method,
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(payload === undefined ? {} : { "Content-Type": "application/json" }),
+    },
+    body: payload === undefined ? undefined : JSON.stringify(payload),
     signal: AbortSignal.timeout(20000),
   });
   const text = await response.text();
@@ -270,7 +275,8 @@ const main = async () => {
       console.log("Dry run: nothing changed.");
       return;
     }
-    await api("POST", `/v10/projects/${encodeURIComponent(state.project.id)}/promote/${encodeURIComponent(deploymentId(target))}`, { teamId: state.teamId });
+    await api("POST", `/v10/projects/${encodeURIComponent(state.project.id)}/promote/${encodeURIComponent(deploymentId(target))}`, { teamId: state.teamId }, {});
+    mutationAccepted = true;
     await waitForDomain(api, state, options.domain, deploymentId(target));
     console.log(`${options.domain} now serves ${deploymentId(target)}, and new production deployments go live automatically again.`);
     return;
@@ -299,7 +305,8 @@ const main = async () => {
   await api("POST", `/v1/projects/${encodeURIComponent(state.project.id)}/rollback/${encodeURIComponent(deploymentId(target))}`, {
     teamId: state.teamId,
     description: options.reason || "npm run deploy:rollback",
-  });
+  }, {});
+  mutationAccepted = true;
   await waitForDomain(api, state, options.domain, deploymentId(target));
   console.log(`${options.domain} now serves ${deploymentId(target)}.`);
   console.log("New production deployments stay off the domain until you run `npm run deploy:rollback -- --undo`.");
@@ -307,5 +314,5 @@ const main = async () => {
 
 main().catch((error) => {
   console.error(error instanceof Refusal ? `Refusing: ${error.message.replace(/^Refusing /, "")}` : error.message);
-  process.exitCode = 1;
+  process.exitCode = mutationAccepted ? 2 : 1;
 });

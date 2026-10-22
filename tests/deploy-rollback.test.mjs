@@ -48,6 +48,8 @@ test("rollback moves production to the previous ready production deployment and 
   assert.equal(result.code, 0, result.output);
   const [post] = mutations(vercel.requests);
   assert.equal(post.path, "/v1/projects/prj_rooFixture/rollback/dpl_previous");
+  assert.equal(post.body && typeof post.body, "object");
+  assert.deepEqual(post.body, {});
   assert.equal(post.query.teamId, "team_rooFixture");
   assert.equal(post.query.description, "smoke failed on /packages");
   assert.equal(mutations(vercel.requests).length, 1);
@@ -213,7 +215,7 @@ test("rollback fails when the alias job fails even if the domain already moved",
   aliasJobStatus: "failed",
 }, async (vercel, exec) => {
   const result = await exec([]);
-  assert.notEqual(result.code, 0);
+  assert.equal(result.code, 2);
   assert.match(result.output, /failed/);
   assert.equal(mutations(vercel.requests).length, 1);
   assert.doesNotMatch(result.output, /now serves/);
@@ -255,7 +257,7 @@ test("reports Vercel's refusal of the rollback and exits non-zero", () => withVe
 
 test("fails loudly when the domain does not move to the target after the rollback call", () => withVercel({ freezeAlias: true }, async (vercel, exec) => {
   const result = await exec([]);
-  assert.notEqual(result.code, 0);
+  assert.equal(result.code, 2);
   assert.match(result.output, /not confirmed/);
   assert.equal(mutations(vercel.requests).length, 1);
 }));

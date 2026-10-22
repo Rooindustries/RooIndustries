@@ -67,6 +67,10 @@ const main = async () => {
     return 1;
   }
   const rollback = await runNode("deploy-rollback.mjs", ["--if-live", deploymentUrl, "--reason", `Money-path smoke failed on ${deploymentUrl}`]);
+  if (rollback.code === 2) {
+    annotate("error", `The money-path smoke failed on ${deploymentUrl}. The rollback was sent, but production was not confirmed on the previous deployment (see above).`);
+    return 1;
+  }
   if (rollback.code !== 0) {
     annotate("error", `The money-path smoke failed on ${deploymentUrl} and the automatic rollback did not run (see above).`);
     return 1;
