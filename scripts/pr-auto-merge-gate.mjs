@@ -92,7 +92,8 @@ export const isSecretPath = (filePath) => {
 
 export const isProductionMutator = (filePath) => /scripts\/.*(?:deploy|rollback|delete|drop|purge|wipe|truncate|destroy|repair|migrate)/i.test(filePath);
 
-const DESTRUCTIVE_SQL = /\b(?:DROP\s+(?:TABLE|COLUMN|SCHEMA|INDEX|DATABASE|VIEW|MATERIALIZED\s+VIEW|FUNCTION|TYPE|TRIGGER|POLICY)\b|TRUNCATE\s+(?:TABLE\s+|ONLY\s+)?["\w.]+|DELETE\s+FROM\s+["\w.]+)/i;
+// DROP covers every object kind PostgreSQL can drop (and ALTER ... DROP COLUMN/CONSTRAINT).
+const DESTRUCTIVE_SQL = /\b(?:DROP\s+(?:ACCESS\s+METHOD|AGGREGATE|CAST|COLLATION|COLUMN|CONSTRAINT|CONVERSION|DATABASE|DOMAIN|EVENT\s+TRIGGER|EXTENSION|FOREIGN\s+(?:DATA\s+WRAPPER|TABLE)|FUNCTION|GROUP|INDEX|LANGUAGE|MATERIALIZED\s+VIEW|OPERATOR|OWNED|POLICY|PROCEDURE|PUBLICATION|ROLE|ROUTINE|RULE|SCHEMA|SEQUENCE|SERVER|STATISTICS|SUBSCRIPTION|TABLE|TABLESPACE|TEXT\s+SEARCH|TRANSFORM|TRIGGER|TYPE|USER|VIEW)\b|TRUNCATE\s+(?:TABLE\s+|ONLY\s+)?["\w.]+|DELETE\s+FROM\s+["\w.]+)/i;
 // Test suites only talk to local fixtures and docs never run, so their SQL does not hold a pull request.
 const runsSql = (filePath) => !/\.(?:md|mdx|txt)$/i.test(filePath) && !/(?:^|\/)(?:tests?|__tests__)\//.test(filePath) && !/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(filePath);
 

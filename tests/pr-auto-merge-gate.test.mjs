@@ -139,6 +139,10 @@ test("money, secret, migration, workflow, and production-rollback diffs are held
   assert.ok(held("scripts/cleanup.sql", "+TRUNCATE TABLE bookings;\n").reasons.includes("risky-sql"));
   assert.ok(held("scripts/cleanup.sql", "+TRUNCATE bookings;\n").reasons.includes("risky-sql"));
   assert.ok(held("scripts/cleanup.sql", "+DELETE FROM bookings;\n").reasons.includes("risky-sql"));
+  for (const statement of ["DROP SEQUENCE commerce.booking_ids;", "drop extension pgcrypto;", "DROP MATERIALIZED VIEW stats;", "alter table bookings drop constraint bookings_pkey;", "DROP OWNED BY app_user;"]) {
+    assert.ok(held("scripts/cleanup.sql", `+${statement}\n`).reasons.includes("risky-sql"), statement);
+  }
+  assert.equal(held("src/components/Menu.jsx", "+// drop down the menu when the user clicks\n").reasons.includes("risky-sql"), false);
   assert.ok(held("scripts/archive-old-bookings.mjs", "+await sql`drop table commerce.bookings`;\n").reasons.includes("risky-sql"));
   assert.ok(held("src/server/cleanup.js", "+await sql`delete from commerce.bookings where true`;\n").reasons.includes("risky-sql"));
   assert.equal(held("tests/booking-emails.mjs", "+await sql`delete from commerce.bookings`;\n").reasons.includes("risky-sql"), false);
