@@ -33,10 +33,41 @@ Check monitoring with `npm run test:monitoring`. `npm run test:monitoring:startu
 ## How we ship
 
 - Small PRs, one fix each. Two fixes are two PRs.
-- Run the affected suites locally, then push once per round. Every push restarts CI.
+- Run the affected suites locally, then push once per round. Every push restarts CI. A round is the push after you have read the latest checks and reviews. Wait for those results before the next push.
 - Tests talk only to local fixtures: `scripts/test-tooling-sweep-server.mjs` refuses env files and outbound requests outside its allowed local fixture origins. Never point a test or script at production. The one exception is `npm run smoke:production`, which sends read-only GET requests to www.rooindustries.com.
 - After every production deploy, `.github/workflows/production-smoke.yml` runs `npm run deploy:gate`: it smokes the money path (the money pages, booking availability, package prices, `?ref` capture) and, if that fails while the new deployment is live, rolls production back one step.
 - Undo a bad deploy by hand with `VERCEL_TOKEN=… npm run deploy:rollback` (`-- --dry-run` to preview). A rollback pins production to the older deployment, so new deploys stay off the domain until `npm run deploy:rollback -- --undo` promotes the newest one.
+
+### Own the pull request until it ships
+
+The agent that opens a pull request keeps working that same branch until the pull request ships, or until it has to stop for the owner. Opening the pull request is the start of that loop.
+
+Each round, read the checks on the current head and every open review finding. The checks include the jobs in `.github/workflows/tests.yml` and the other checks on the pull request (Vercel, GitGuardian, CodeRabbit, Seer, and anything else that reported). The findings include every unresolved thread from CodeRabbit, Seer/Sentry, Codex, and any other reviewer. Fix the failures and the findings, push to the same branch, and repeat. When the branch is behind `main` or GitHub reports conflicts, rebase onto `main` and resolve the conflicts. A cancelled check is not green. Put the suites back on the head.
+
+No coding agent merges a pull request. The Grok Bot assistant does not merge one either. Merging is the job of `.github/workflows/auto-merge.yml`. It squash-merges into `main` only when all of the following are true:
+
+- Every check on the head is green. Success, skipped, and neutral count as green. Pending, failed, and cancelled do not. The branch is up to date with `main` (`mergeable_state` is `clean`).
+- The change is safe to merge, as defined below.
+- CodeRabbit and Codex both approve that head, and no review thread is still open.
+
+CodeRabbit and Codex are the two review models. CodeRabbit approves by a GitHub approval on that head with no later request for changes. Codex does not use GitHub's Approve button. Codex approves when its review-state comment records a completed review of that head with no unresolved findings. Seer and the other bots do not stand in for either approval. An open finding from any of them still blocks the merge, and the owning agent clears it.
+
+A squash-merge to `main` is the production deploy. The Vercel project ships `main`. The workflow does not deploy by any other path. The owner should not have to merge a pull request that has already met this bar.
+
+Stop and flag the owner instead of merging when any of these are true:
+
+- CodeRabbit and Codex disagree on the current head. One approves and the other does not.
+- The change can lose data, or it touches a payment, checkout, booking, hold, price, discount, referral credit, refund, or payout. That is a money path, listed above, and `app/api/razorpay/` counts as one too.
+- The change touches a secret, or the diff contains a private key.
+- The change adds or edits `supabase/migrations/`, or other SQL that drops or truncates.
+- The change edits `.github/workflows/` or the merge gate (`scripts/pr-auto-merge-gate.mjs`, `scripts/pr-auto-merge-apply.mjs`). The gate must not be able to loosen itself and then merge.
+- The change adds or edits a script that deploys, rolls back, or deletes production data.
+
+Flagging is a `needs-owner` label and one comment on the pull request, from the workflow. Leave the pull request open. Keep fixing ordinary test failures and review findings on a safe pull request until both models approve. On a risky pull request, keep the branch healthy, and leave the merge to the owner. Money-path pull requests stay on the rules in Money paths (one at a time, Sol review, the local suites). The workflow will not merge them.
+
+When checks are red, the branch needs a rebase or a conflict resolution, a review finding is still open, or a green head is still waiting on CodeRabbit or Codex, the workflow asks Cursor to continue an agent on that same pull request. The request is sent only when the `CURSOR_API_KEY` Actions secret is set. That key is created in the Cursor dashboard under API keys. Without the secret, the agent that opened the pull request is the last one to touch it, and a red check or a later review comment has nobody waiting to fix it. After eight of those continuations on one pull request, the workflow stops waking an agent and flags the owner.
+
+The workflow merges with the GitHub Actions token. That token can land the squash commit, and it does not start a new Actions run on the merge commit. Vercel still receives the push and deploys `main`. If GitHub rejects the merge because of branch protection, the pull request comment says so. A repository secret named `AUTO_MERGE_TOKEN`, holding a token that can write to this repository, merges as that user instead, which also lets the Tests workflow run on the merge commit. This repository does not change branch protection or rulesets from the workflow.
 
 ## Invariants
 
@@ -258,6 +289,7 @@ Only files a maintainer can run or read on purpose belong in the repository. Nev
 
 ## Before opening a pull request
 
+- After the pull request is open, follow "Own the pull request until it ships". The open pull request is not the end of the task.
 - `git status` shows only the files the change needs. Delete scratch files instead of renaming or parking them.
 - Every new script runs from a clean checkout without machine-specific paths; fixture locations come from environment variables with documented defaults.
 - Branch names use the `servi/` prefix with a short description, for example `servi/review-carousel-loop`.
