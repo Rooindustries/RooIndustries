@@ -92,6 +92,17 @@ const createClient = (token, base) => async (method, pathname, query = {}, paylo
   return { status: response.status, body };
 };
 
+// A POST can reach Vercel and still lose its answer. Only an error status that Vercel itself sent below 500 proves the request was refused.
+const sendMutation = async (api, pathname, query, payload) => {
+  try {
+    return await api("POST", pathname, query, payload);
+  } catch (error) {
+    if (error instanceof ApiError && error.status < 500) throw error;
+    mutationAccepted = true;
+    throw new Error(`${error.message}. Vercel may have applied the request anyway, so production's state is unknown. Run \`npm run deploy:rollback -- --status\` and check the Vercel dashboard before trying again.`);
+  }
+};
+
 const createdAt = (deployment) => Number(deployment?.created ?? deployment?.createdAt ?? 0);
 const deploymentId = (deployment) => deployment?.uid || deployment?.id;
 const readyState = (deployment) => deployment?.readyState || deployment?.state;
@@ -275,7 +286,7 @@ const main = async () => {
       console.log("Dry run: nothing changed.");
       return;
     }
-    await api("POST", `/v10/projects/${encodeURIComponent(state.project.id)}/promote/${encodeURIComponent(deploymentId(target))}`, { teamId: state.teamId }, {});
+    await sendMutation(api, `/v10/projects/${encodeURIComponent(state.project.id)}/promote/${encodeURIComponent(deploymentId(target))}`, { teamId: state.teamId }, {});
     mutationAccepted = true;
     await waitForDomain(api, state, options.domain, deploymentId(target));
     console.log(`${options.domain} now serves ${deploymentId(target)}, and new production deployments go live automatically again.`);
@@ -302,7 +313,7 @@ const main = async () => {
   if (deploymentId(freshTarget) !== deploymentId(target)) {
     throw new Refusal(`The rollback target changed from ${deploymentId(target)} to ${deploymentId(freshTarget)}; leaving production alone.`);
   }
-  await api("POST", `/v1/projects/${encodeURIComponent(state.project.id)}/rollback/${encodeURIComponent(deploymentId(target))}`, {
+  await sendMutation(api, `/v1/projects/${encodeURIComponent(state.project.id)}/rollback/${encodeURIComponent(deploymentId(target))}`, {
     teamId: state.teamId,
     description: options.reason || "npm run deploy:rollback",
   }, {});

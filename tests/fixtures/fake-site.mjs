@@ -28,6 +28,7 @@ export const startSite = (overrides = {}) => {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://site");
     requests.push({ method: req.method, path: url.pathname });
+    overrides.onRequest?.(url.pathname);
     const pending = failures.get(url.pathname);
     if (pending > 0) {
       failures.set(url.pathname, pending - 1);

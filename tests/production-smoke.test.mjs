@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -9,11 +9,12 @@ import { DOMAIN, TOKEN, startVercel } from "./fixtures/fake-vercel.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const script = path.join(root, "scripts/production-smoke.mjs");
 
-const run = (args) => new Promise(resolve => {
+const run = (args, onSpawn) => new Promise(resolve => {
   const child = spawn(process.execPath, [script, ...args], {
     cwd: root,
     env: { PATH: process.env.PATH, HOME: process.env.HOME, SMOKE_RETRY_MS: "50", PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH },
   });
+  onSpawn?.(child);
   let output = "";
   child.stdout.on("data", chunk => { output += chunk; });
   child.stderr.on("data", chunk => { output += chunk; });
@@ -78,6 +79,23 @@ for (const base of ["https://example.com", "https://rooindustries.com.attacker.e
     assert.match(result.output, /Refusing/);
   });
 }
+
+test("a browser that dies mid-run means the smoke could not run, not a money-path failure", async () => {
+  let smokePid;
+  const site = await startSite({
+    onRequest: (pathname) => {
+      if (pathname === "/packages" && smokePid) execFileSync("pkill", ["-KILL", "-P", String(smokePid)]);
+    },
+  });
+  try {
+    const result = await run(["--base", site.base], (child) => { smokePid = child.pid; });
+    assert.equal(result.code, 1, result.output);
+    assert.match(result.output, /Smoke could not run/);
+    assert.doesNotMatch(result.output, /money-path check\(s\) failed/);
+  } finally {
+    await site.close();
+  }
+});
 
 test("refuses unknown options", async () => {
   const result = await run(["--bse", "https://www.rooindustries.com"]);

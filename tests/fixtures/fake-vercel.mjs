@@ -35,6 +35,7 @@ export const startVercel = ({
   aliasJobStatus = null,
   swapLiveOnAliasRead = 0,
   swapLiveTo = null,
+  dropMutationResponse = false,
 } = {}) => {
   const state = structuredClone(fixture);
   tweak?.(state);
@@ -141,14 +142,14 @@ export const startVercel = ({
         toDeploymentId: match[2],
         requestedAt: Date.now(),
       };
-      return send(201);
+      return dropMutationResponse ? req.socket.destroy() : send(201);
     }
     if (req.method === "POST" && (match = url.pathname.match(/^\/v10\/projects\/([^/]+)\/promote\/([^/]+)$/))) {
       const from = state.aliases[DOMAIN].deploymentId;
       moveAlias(match[2]);
       state.project.autoAssignCustomDomains = true;
       state.project.lastAliasRequest = { type: "promote", jobStatus: "succeeded", fromDeploymentId: from, toDeploymentId: match[2], requestedAt: Date.now() };
-      return send(promoteStatus);
+      return dropMutationResponse ? req.socket.destroy() : send(promoteStatus);
     }
     return notFound();
     });

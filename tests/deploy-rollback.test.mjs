@@ -255,6 +255,26 @@ test("reports Vercel's refusal of the rollback and exits non-zero", () => withVe
   assert.doesNotMatch(result.output, new RegExp(TOKEN));
 }));
 
+test("a rollback request whose answer is lost reports production's state as unknown and exits 2", () => withVercel({ dropMutationResponse: true }, async (vercel, exec) => {
+  const result = await exec([]);
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /state is unknown/);
+  assert.match(result.output, /--status/);
+  assert.equal(mutations(vercel.requests).length, 1);
+}));
+
+test("an undo request whose answer is lost reports production's state as unknown and exits 2", () => withVercel({
+  dropMutationResponse: true,
+  tweak: state => {
+    state.aliases[DOMAIN].deploymentId = "dpl_previous";
+    state.project.autoAssignCustomDomains = false;
+  },
+}, async (vercel, exec) => {
+  const result = await exec(["--undo"]);
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /state is unknown/);
+}));
+
 test("fails loudly when the domain does not move to the target after the rollback call", () => withVercel({ freezeAlias: true }, async (vercel, exec) => {
   const result = await exec([]);
   assert.equal(result.code, 2);
