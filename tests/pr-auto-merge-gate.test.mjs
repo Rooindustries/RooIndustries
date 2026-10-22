@@ -26,7 +26,6 @@ const safe = (overrides = {}) => ({
   reviews: [approved("coderabbitai")],
   threads: [],
   codex: { commitSha: head, status: "completed", hasUnresolvedFindings: false, hasAnyFindings: false },
-  repairWakes: 0,
   ...overrides,
 });
 
@@ -218,29 +217,26 @@ test("a money-path disagreement stays with the owner and still dispatches the ag
   assert.ok(decision.reasons.includes("risky-money"));
 });
 
-test("the repair loop stops with the owner after the wake cap", () => {
-  const decision = decide(safe({
-    checks: checks().map((check) => check.name === "Jest" ? { ...check, conclusion: "failure" } : check),
-    repairWakes: 8,
-  }));
-  assert.equal(decision.action, "flag");
-  assert.equal(decision.wake, false);
-  assert.ok(decision.reasons.includes("repair-cap"));
+test("the workflow calls no agent API and the owning agent's watch does the waking", () => {
+  const apply = readFileSync(new URL("../scripts/pr-auto-merge-apply.mjs", import.meta.url), "utf8");
+  const workflow = readFileSync(new URL("../.github/workflows/auto-merge.yml", import.meta.url), "utf8");
+  assert.doesNotMatch(apply, /api\.cursor\.com|CURSOR_API_KEY/);
+  assert.doesNotMatch(workflow, /CURSOR_API_KEY/);
+  const agents = readFileSync(new URL("../AGENTS.md", import.meta.url), "utf8");
+  assert.match(agents, /pull request watch/);
+  assert.doesNotMatch(agents, /CURSOR_API_KEY/);
 });
 
-test("the gate comment names the owner once and tells them when the repair secret is missing", () => {
+test("the gate comment names the owner only on a hold", () => {
   const decision = decide(safe({
     checks: checks().map((check) => check.name === "Jest" ? { ...check, conclusion: "failure" } : check),
   }));
-  const body = gateComment({ decision, headSha: head, keyConfigured: false, wakeError: "" });
+  const body = gateComment({ decision, headSha: head });
   assert.match(body, /<!-- pr-auto-merge-gate -->/);
-  assert.match(body, /CURSOR_API_KEY/);
   assert.doesNotMatch(body, /@serviroo/);
   const held = gateComment({
     decision: decide(safe({ files: [{ filename: "vercel.json", patch: "+{}\n" }] })),
     headSha: head,
-    keyConfigured: true,
-    wakeError: "",
   });
   assert.match(held, /@serviroo/);
   assert.match(held, /needs you/);
@@ -258,14 +254,12 @@ test("the required check names are the jobs the Tests workflow runs", () => {
   assert.doesNotMatch(workflow, /pull_request:\s*$/m);
   const apply = readFileSync(new URL("../scripts/pr-auto-merge-apply.mjs", import.meta.url), "utf8");
   assert.doesNotMatch(apply, /child_process|execSync|execFile/);
-  assert.match(apply, /workOnCurrentBranch: true/);
   assert.match(apply, /merge_method: "squash"/);
   assert.match(apply, /@coderabbitai review/);
   assert.match(apply, /@codex review/);
   const agents = readFileSync(new URL("../AGENTS.md", import.meta.url), "utf8");
   assert.match(agents, /Grok Bot assistant does not merge/);
   assert.match(agents, /CodeRabbit and Codex both approve/);
-  assert.match(agents, /CURSOR_API_KEY/);
   assert.match(agents, /After 8 review rounds/);
   assert.doesNotMatch(agents, /disagree on the current head/);
 });

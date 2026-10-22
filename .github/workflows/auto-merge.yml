@@ -38,6 +38,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
           AUTO_MERGE_TOKEN: ${{ secrets.AUTO_MERGE_TOKEN }}
         run: node scripts/pr-auto-merge-apply.mjs

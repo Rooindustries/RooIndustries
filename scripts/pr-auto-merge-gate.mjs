@@ -11,10 +11,8 @@ export const REQUIRED_CHECKS = [
   "Playwright revalidation",
 ];
 
-export const MAX_REPAIR_WAKES = 8;
 export const MAX_REVIEW_ROUNDS = 8;
 export const GATE_MARKER = "<!-- pr-auto-merge-gate -->";
-export const WAKE_MARKER_PREFIX = "<!-- pr-repair-wake:";
 export const REVIEW_ROUND_PREFIX = "<!-- pr-review-round:";
 export const REVIEW_REQUEST_PREFIX = "<!-- pr-review-request:";
 
@@ -113,7 +111,6 @@ export const parseCodexState = (body) => {
   }
 };
 
-export const countRepairWakes = (bodies) => bodies.filter((body) => String(body).includes(WAKE_MARKER_PREFIX)).length;
 export const countReviewRounds = (bodies) => bodies.filter((body) => String(body).includes(REVIEW_ROUND_PREFIX)).length;
 
 const worse = (left, right) => {
@@ -231,7 +228,6 @@ export const decide = (input) => {
   const codex = codexVerdict(input.codex, input.headSha);
   const findings = openFindings(input.threads);
   const git = input.mergeableState || "unknown";
-  const wakes = Number(input.repairWakes) || 0;
   const reviewRounds = Number(input.reviewRounds) || 0;
   const sha = shortSha(input.headSha);
 
@@ -280,21 +276,19 @@ export const decide = (input) => {
 
   const repairWork = checks.red.length > 0 || git === "behind" || git === "dirty";
   const needsReviewAgent = reviewWork && !reviewCapped;
-  if (repairWork && wakes >= MAX_REPAIR_WAKES) {
-    add("repair-cap", `The repair loop already continued this pull request ${MAX_REPAIR_WAKES} times. It stops here for the owner.`);
-  }
 
-  const hold = reasons.some((reason) => reason.startsWith("risky-") || reason === "github-blocked" || reason === "repair-cap" || reason === "review-cap");
+  const hold = reasons.some((reason) => reason.startsWith("risky-") || reason === "github-blocked" || reason === "review-cap");
   let action = "wait";
   if (canMerge) action = "merge";
   else if (hold) action = "flag";
-  const wake = action !== "merge" && ((repairWork && wakes < MAX_REPAIR_WAKES) || needsReviewAgent);
+  // `wake` means the owning agent has work. The owning T3 thread's pull request watch delivers it; the workflow calls no agent.
+  const wake = action !== "merge" && (repairWork || needsReviewAgent);
   const requestReviews = !reviewCapped && (rabbit === "pending" || codex === "pending");
   if (action === "merge") lines.unshift(`Every check on ${sha} is green, the branch is up to date, the diff is safe, and CodeRabbit and Codex both approve with no open findings.`);
   return { action, wake, requestReviews, reviewRound: needsReviewAgent && wake, reasons, lines };
 };
 
-export const gateComment = ({ decision, headSha, keyConfigured, wakeError }) => {
+export const gateComment = ({ decision, headSha }) => {
   const head = [
     GATE_MARKER,
     `<!-- pr-auto-merge-head:${headSha} -->`,
@@ -313,9 +307,5 @@ export const gateComment = ({ decision, headSha, keyConfigured, wakeError }) => 
   } else {
     prose.push("Not merged. The owning agent keeps this branch until every check is green, the branch is up to date, the diff is safe, and both models approve with no open findings.");
   }
-  if (decision.wake && !keyConfigured) {
-    prose.push("No repair agent was started. Add the CURSOR_API_KEY Actions secret (Cursor dashboard, API keys) so a red check, a conflict, or an open review can wake an agent on this branch.");
-  }
-  if (wakeError) prose.push(wakeError);
   return `${head.join("\n")}\n\n${prose.join("\n\n")}\n`;
 };
