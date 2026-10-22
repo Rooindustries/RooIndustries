@@ -278,6 +278,17 @@ export default function Payment({ hideFooter = false }) {
     // sessionStorage is intentionally a reload fallback, not a reactive source.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, location.search, navState.bookingData]);
+
+  const dropCheckoutCoupon = () => {
+    const source = navState.bookingData || readStoredCheckout() || bookingData;
+    const nextBooking = { ...source, couponCode: "" };
+    writeStoredCheckout(nextBooking);
+    navigate(
+      { pathname: location.pathname, search: location.search, hash: location.hash },
+      { replace: true, state: { ...navState, bookingData: nextBooking } }
+    );
+  };
+
   useEffect(() => {
     if (navState.bookingData) {
       writeStoredCheckout(navState.bookingData);
@@ -1388,7 +1399,9 @@ export default function Payment({ hideFooter = false }) {
               ? !!startPayload.upgradeIntentToken
               : !!startPayload.slotHoldId && !!startPayload.slotHoldToken &&
                 (!storedHold || (storedHold.holdId === startPayload.slotHoldId && storedHold.holdToken === startPayload.slotHoldToken)));
-        } catch {}
+        } catch {
+          sameStoredCheckout = true;
+        }
         const returnedHold = data?.refreshedHold || data?.hold;
         if (!paymentMountedRef.current || !view || view.key !== paymentView.key ||
             view.startIdentity !== paymentStartIdentity(startPayload) ||
@@ -2260,6 +2273,7 @@ export default function Payment({ hideFooter = false }) {
                       setCoupon(null);
                       setCouponInput("");
                       setCouponError("");
+                      dropCheckoutCoupon();
                     }}
                     disabled={creatingFree || checkingCode || !!lockedProvider}
                     className="text-xs text-ink-secondary underline underline-offset-2"

@@ -809,9 +809,13 @@ export default function BookingForm() {
             return;
           }
           normalizedHold.startTimeUTC = utcDate.toISOString();
-          sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
           restoredHoldIdRef.current = normalizedHold.holdId;
           setMyHold(normalizedHold);
+          try {
+            sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
+          } catch {
+            console.error("Failed to persist restored slot reservation");
+          }
           broadcastHold(normalizedHold);
         } else {
           sessionStorage.removeItem(HOLD_STORAGE_KEY);

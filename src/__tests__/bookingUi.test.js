@@ -345,6 +345,29 @@ describe("booking calendar UI", () => {
     }
   });
 
+  test("restores a valid hold when its normalized rewrite cannot be stored", async () => {
+    seedBookingSession();
+    const originalSetItem = Storage.prototype.setItem;
+    const setItemSpy = jest.spyOn(Storage.prototype, "setItem").mockImplementation(function setItem(key, value) {
+      if (key === "my_slot_hold") throw new DOMException("denied", "QuotaExceededError");
+      return originalSetItem.call(this, key, value);
+    });
+    installDefaultFetch();
+    setBookingLocation();
+    try {
+      render(<BookingForm />);
+      expect(await screen.findByDisplayValue(CLIENT_EMAIL)).toBeInTheDocument();
+      expect(
+        JSON.parse(window.sessionStorage.getItem("booking_draft")).packages[
+          OVERHAUL_PACKAGE.title
+        ].form.email
+      ).toBe(CLIENT_EMAIL);
+      expect(JSON.parse(window.sessionStorage.getItem("my_slot_hold")).holdId).toBe("hold_seeded_1");
+    } finally {
+      setItemSpy.mockRestore();
+    }
+  });
+
   test.each([
     ["America/Los_Angeles", "2099-01-05", "2099-01-05T05:00:00.000Z"],
     ["America/Los_Angeles", "2099-07-05", "2099-07-05T05:00:00.000Z"],
