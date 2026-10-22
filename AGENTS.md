@@ -60,7 +60,7 @@ Stop and flag the owner instead of merging when any of these are true:
 
 - The change can lose data, or it touches a payment, checkout, booking, hold, price, discount, referral credit, refund, or payout. That is a money path, listed above, and `app/api/razorpay/` counts as one too.
 - The change touches a secret, or the diff contains a private key.
-- The change adds or edits `supabase/migrations/`, or other SQL that drops or truncates.
+- The change adds or edits `supabase/migrations/`, or other SQL that drops, truncates, or deletes data. SQL in test suites and docs does not count.
 - The change edits `.github/workflows/` or the merge gate (`scripts/pr-auto-merge-gate.mjs`, `scripts/pr-auto-merge-apply.mjs`). The gate must not be able to loosen itself and then merge.
 - The change adds or edits a script that deploys, rolls back, or deletes production data.
 

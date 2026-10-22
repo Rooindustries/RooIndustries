@@ -92,6 +92,10 @@ export const isSecretPath = (filePath) => {
 
 export const isProductionMutator = (filePath) => /scripts\/.*(?:deploy|rollback|delete|drop|purge|wipe|truncate|destroy|repair|migrate)/i.test(filePath);
 
+const DESTRUCTIVE_SQL = /\b(?:DROP\s+(?:TABLE|COLUMN|SCHEMA|INDEX|DATABASE|VIEW|MATERIALIZED\s+VIEW|FUNCTION|TYPE|TRIGGER|POLICY)\b|TRUNCATE\s+(?:TABLE\s+|ONLY\s+)?["\w.]+|DELETE\s+FROM\s+["\w.]+)/i;
+// Test suites only talk to local fixtures and docs never run, so their SQL does not hold a pull request.
+const runsSql = (filePath) => !/\.(?:md|mdx|txt)$/i.test(filePath) && !/(?:^|\/)(?:tests?|__tests__)\//.test(filePath) && !/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(filePath);
+
 const addedLines = (patch) => String(patch || "").split("\n").filter((line) => line.startsWith("+") && !line.startsWith("+++")).join("\n");
 
 export const parseCodexState = (body) => {
@@ -181,7 +185,7 @@ const codexVerdict = (codex, headSha) => {
   return codex.hasUnresolvedFindings ? "hold" : "approve";
 };
 
-const openFindings = (threads) => (threads || []).filter((thread) => thread && thread.isResolved !== true && thread.isOutdated !== true);
+const openFindings = (threads) => (threads || []).filter((thread) => thread && thread.isResolved !== true);
 
 const fileRisks = (files) => {
   const reasons = [];
@@ -193,7 +197,7 @@ const fileRisks = (files) => {
     if (paths.some(isSecretPath) || /BEGIN (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY/.test(added)) reasons.push("risky-secret");
     if (paths.some((filePath) => filePath.startsWith("supabase/migrations/"))) reasons.push("risky-migration");
     if (paths.some((filePath) => filePath.startsWith(".github/workflows/") || GATE_FILES.has(filePath))) reasons.push("risky-workflow");
-    if (paths.some((filePath) => filePath.endsWith(".sql")) && /\b(DROP\s+(TABLE|COLUMN|SCHEMA|INDEX|DATABASE)|TRUNCATE\s+TABLE)\b/i.test(added)) reasons.push("risky-sql");
+    if (paths.some(runsSql) && DESTRUCTIVE_SQL.test(added)) reasons.push("risky-sql");
     if (paths.some(isProductionMutator)) reasons.push("risky-production-script");
   }
   return unique(reasons);
@@ -233,7 +237,7 @@ export const decide = (input) => {
   if (risks.includes("risky-money")) add("risky-money", "The diff touches payments, checkout, bookings, holds, pricing, referral credit, refunds, or payouts. It stays with the owner.");
   if (risks.includes("risky-secret")) add("risky-secret", "The diff touches a secret or a private key. It stays with the owner.");
   if (risks.includes("risky-migration")) add("risky-migration", "The diff edits a database migration. It stays with the owner.");
-  if (risks.includes("risky-sql")) add("risky-sql", "The diff includes SQL that drops or truncates data. It stays with the owner.");
+  if (risks.includes("risky-sql")) add("risky-sql", "The diff includes SQL that drops, truncates, or deletes data. It stays with the owner.");
   if (risks.includes("risky-workflow")) add("risky-workflow", "The diff edits the CI workflows or the merge gate. It stays with the owner.");
   if (risks.includes("risky-production-script")) add("risky-production-script", "The diff edits a script that deploys, rolls back, or deletes production data. It stays with the owner.");
 

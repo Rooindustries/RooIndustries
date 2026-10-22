@@ -116,11 +116,16 @@ test("an open Seer thread blocks a merge that both models approved", () => {
   assert.equal(decision.reasons.includes("risky-money"), false);
 });
 
-test("an outdated thread does not block", () => {
+test("an outdated thread still blocks until someone resolves it", () => {
   const decision = decide(safe({
     threads: [{ author: "chatgpt-codex-connector", path: "README.md", isResolved: false, isOutdated: true }],
   }));
-  assert.equal(decision.action, "merge");
+  assert.equal(decision.action, "wait");
+  assert.ok(decision.reasons.includes("open-findings"));
+  const resolved = decide(safe({
+    threads: [{ author: "chatgpt-codex-connector", path: "README.md", isResolved: true, isOutdated: true }],
+  }));
+  assert.equal(resolved.action, "merge");
 });
 
 test("money, secret, migration, workflow, and production-rollback diffs are held", () => {
@@ -132,6 +137,12 @@ test("money, secret, migration, workflow, and production-rollback diffs are held
   assert.ok(held("src/lib/notes.js", "+-----BEGIN OPENSSH PRIVATE KEY-----\n").reasons.includes("risky-secret"));
   assert.ok(held("supabase/migrations/20261022000000_drop_bookings.sql", "+DROP TABLE bookings;\n").reasons.includes("risky-migration"));
   assert.ok(held("scripts/cleanup.sql", "+TRUNCATE TABLE bookings;\n").reasons.includes("risky-sql"));
+  assert.ok(held("scripts/cleanup.sql", "+TRUNCATE bookings;\n").reasons.includes("risky-sql"));
+  assert.ok(held("scripts/cleanup.sql", "+DELETE FROM bookings;\n").reasons.includes("risky-sql"));
+  assert.ok(held("scripts/archive-old-bookings.mjs", "+await sql`drop table commerce.bookings`;\n").reasons.includes("risky-sql"));
+  assert.ok(held("src/server/cleanup.js", "+await sql`delete from commerce.bookings where true`;\n").reasons.includes("risky-sql"));
+  assert.equal(held("tests/booking-emails.mjs", "+await sql`delete from commerce.bookings`;\n").reasons.includes("risky-sql"), false);
+  assert.equal(held("src/lib/format.js", "+export const short = (text) => truncate(text, 20);\n").action, "merge");
   assert.ok(held(".github/workflows/tests.yml").reasons.includes("risky-workflow"));
   assert.ok(held("scripts/pr-auto-merge-gate.mjs").reasons.includes("risky-workflow"));
   assert.ok(held("scripts/deploy-rollback.mjs").reasons.includes("risky-production-script"));
