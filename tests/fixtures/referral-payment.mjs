@@ -180,6 +180,9 @@ export async function createReferralPaymentFixture() {
             signal: AbortSignal.timeout(20000),
           });
           await response.arrayBuffer();
+          if (response.status >= 500) {
+            throw new Error(`Route warm-up failed: ${path} returned ${response.status}`);
+          }
           return;
         } catch (error) {
           lastError = error;
