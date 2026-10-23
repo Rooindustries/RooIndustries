@@ -1,59 +1,5 @@
 begin;
 
-do $$
-declare
-  v_booking migration.source_documents%rowtype;
-  v_generation integer;
-begin
-  perform 1 from migration.source_documents
-  where document_type in ('booking', 'referral', 'creatorPayout') and not tombstoned
-  order by legacy_sanity_id for update;
-  select generation into v_generation from migration.commerce_control where singleton;
-  for v_booking in
-    select booking.* from migration.source_documents booking
-    where booking.document_type = 'booking' and not booking.tombstoned
-      and coalesce(booking.payload->>'commissionCalculationVersion', '') <> '2'
-      and exists (
-        select 1 from migration.source_documents creator
-        where creator.document_type = 'referral' and not creator.tombstoned
-          and (creator.legacy_sanity_id = booking.payload#>>'{referral,_ref}'
-            or (nullif(booking.payload->>'referralCode', '') is not null
-              and lower(creator.payload#>>'{slug,current}') = lower(booking.payload->>'referralCode')))
-      )
-      and not exists (
-        select 1 from migration.source_documents creator
-        where creator.document_type = 'referral' and not creator.tombstoned
-          and (creator.legacy_sanity_id = booking.payload#>>'{referral,_ref}'
-            or (nullif(booking.payload->>'referralCode', '') is not null
-              and lower(creator.payload#>>'{slug,current}') = lower(booking.payload->>'referralCode')))
-          and (
-            coalesce(creator.payload->'xocPayments', '[]'::jsonb) not in ('[]'::jsonb, 'null'::jsonb)
-            or coalesce(creator.payload->'vertexPayments', '[]'::jsonb) not in ('[]'::jsonb, 'null'::jsonb)
-            or coalesce(migration.try_numeric(creator.payload->>'paidTotal'), 0) <> 0
-            or coalesce(migration.try_numeric(creator.payload->>'paidXoc'), 0) <> 0
-            or coalesce(migration.try_numeric(creator.payload->>'paidVertex'), 0) <> 0
-            or exists (
-              select 1 from migration.source_documents payout
-              where payout.document_type = 'creatorPayout' and not payout.tombstoned
-                and (payout.payload->>'referralId' = creator.legacy_sanity_id
-                  or payout.payload#>>'{creator,_ref}' = creator.legacy_sanity_id)
-            )
-          )
-      )
-    order by booking.legacy_sanity_id
-  loop
-    perform public.roo_apply_commerce_document_mutations(
-      'commission-v2:' || md5(v_booking.legacy_sanity_id || ':' || v_booking.source_revision),
-      jsonb_build_array(jsonb_build_object(
-        'operation', 'replace',
-        'document', v_booking.payload || jsonb_build_object('commissionCalculationVersion', 2),
-        'expected_revision', v_booking.source_revision
-      )), v_generation
-    );
-  end loop;
-end;
-$$;
-
 create or replace function public.roo_referral_earnings_summary(
   p_referral_legacy_id text,
   p_referral_code text

@@ -1,17 +1,21 @@
 const mockReadFetch = jest.fn();
 const mockWriteFetch = jest.fn();
 const mockPatch = jest.fn();
+const mockGetDocument = jest.fn();
+const mockTransaction = jest.fn();
 const mockRequireAdminKey = jest.fn();
 const mockFetchReferralEarnings = jest.fn();
 
 jest.mock("../server/data/documentClient.js", () => ({
-  createDataClient: (config) =>
-    config.perspective
-      ? { fetch: (...args) => mockReadFetch(...args) }
-      : {
-          fetch: (...args) => mockWriteFetch(...args),
-          patch: (...args) => mockPatch(...args),
-        },
+  createDataClient: () => ({
+    fetch: (...args) =>
+      String(args[0]).includes('"package"')
+        ? mockReadFetch(...args)
+        : mockWriteFetch(...args),
+    patch: (...args) => mockPatch(...args),
+    getDocument: (...args) => mockGetDocument(...args),
+    transaction: (...args) => mockTransaction(...args),
+  }),
 }));
 
 jest.mock("../server/api/ref/auth.js", () => ({
@@ -59,10 +63,14 @@ const referral = ({ xocPayments = [], vertexPayments = [] } = {}) => ({
 
 describe("admin referral payment updates", () => {
   let committedValues;
+  let committedReceipt;
 
   beforeEach(() => {
     jest.clearAllMocks();
     committedValues = null;
+    committedReceipt = null;
+    const receipts = new Map();
+    mockGetDocument.mockImplementation(async (id) => receipts.get(id) || null);
     mockRequireAdminKey.mockReturnValue(true);
     mockReadFetch.mockResolvedValue([]);
     mockFetchReferralEarnings.mockResolvedValue({
@@ -72,19 +80,42 @@ describe("admin referral payment updates", () => {
       byPackage: {},
     });
     mockPatch.mockImplementation(() => {
-      const values = {};
       const patch = {
+        values: {},
         ifRevisionId: () => patch,
         set(nextValues) {
-          Object.assign(values, nextValues);
+          Object.assign(patch.values, nextValues);
           return patch;
-        },
-        async commit() {
-          committedValues = values;
-          return { _rev: "revision-two" };
         },
       };
       return patch;
+    });
+    mockTransaction.mockImplementation(() => {
+      let receipt;
+      let referralPatch;
+      const transaction = {
+        create(document) {
+          receipt = document;
+          return transaction;
+        },
+        patch(id, buildPatch) {
+          expect(id).toBe(receipt.referralId);
+          referralPatch = buildPatch();
+          return transaction;
+        },
+        async commit() {
+          if (receipts.has(receipt._id)) {
+            throw Object.assign(new Error("Receipt already exists"), {
+              statusCode: 409,
+            });
+          }
+          committedValues = referralPatch.values;
+          committedReceipt = receipt;
+          receipts.set(receipt._id, receipt);
+          return { _rev: "revision-two" };
+        },
+      };
+      return transaction;
     });
   });
 
@@ -95,33 +126,33 @@ describe("admin referral payment updates", () => {
       5,
       "paymentLogVertex"
     );
-    mockWriteFetch.mockResolvedValue(
-      referral({
-        xocPayments: [existingXoc],
-        vertexPayments: [existingVertex],
-      })
-    );
+    const initialReferral = referral({
+      xocPayments: [existingXoc],
+      vertexPayments: [existingVertex],
+    });
+    mockWriteFetch.mockImplementation(async () => ({
+      ...initialReferral,
+      ...committedValues,
+    }));
     const res = createResponse();
-
-    await handler(
-      {
-        method: "POST",
-        body: {
-          referralId: "referral.account",
-          packageType: "xoc",
-          amount: 20,
-          paidOn: "2026-07-18T01:00:00.000Z",
-          note: "Monthly payout",
-        },
+    const request = {
+      method: "POST",
+      body: {
+        referralId: "referral.account",
+        packageType: "xoc",
+        amount: 20,
+        payoutId: "monthly-payout",
+        paidOn: "2026-07-18T01:00:00.000Z",
+        note: "Monthly payout",
       },
-      res
-    );
+    };
+    await handler(request, res);
 
     expect(res.statusCode).toBe(200);
     expect(committedValues.xocPayments).toEqual([
       existingXoc,
       expect.objectContaining({
-        _key: expect.any(String),
+        _key: "monthly-payout",
         _type: "paymentLogXoc",
         amount: 20,
         note: "Monthly payout",
@@ -140,18 +171,30 @@ describe("admin referral payment updates", () => {
       payments: { xoc: 30, vertex: 5, total: 35 },
       owed: { xoc: 70, vertex: 45, total: 115 },
     });
+    expect(committedReceipt).toMatchObject({
+      _type: "creatorPayout",
+      referralId: "referral.account",
+      packageType: "xoc",
+      amount: 20,
+      paymentEntry: committedValues.xocPayments[1],
+    });
+    const replay = createResponse();
+    await handler(request, replay);
+    expect(replay.statusCode).toBe(200);
+    expect(replay.body.logs).toEqual(res.body.logs);
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
+    expect(mockGetDocument).toHaveBeenCalledWith(committedReceipt._id);
   });
 
-  test("upserts only the matching package array when keys overlap", async () => {
+  test("rejects an existing payment key without changing either package array", async () => {
     const xocEntry = paymentEntry("shared-key", 12, "paymentLogXoc");
     const vertexEntry = paymentEntry("shared-key", 8, "paymentLogVertex");
     const otherVertex = paymentEntry("vertex-other", 4, "paymentLogVertex");
-    mockWriteFetch.mockResolvedValue(
-      referral({
-        xocPayments: [xocEntry],
-        vertexPayments: [vertexEntry, otherVertex],
-      })
-    );
+    const initialReferral = referral({
+      xocPayments: [xocEntry],
+      vertexPayments: [vertexEntry, otherVertex],
+    });
+    mockWriteFetch.mockResolvedValue(initialReferral);
     mockFetchReferralEarnings.mockResolvedValue({
       xoc: 40,
       vertex: 60,
@@ -175,25 +218,18 @@ describe("admin referral payment updates", () => {
       res
     );
 
-    expect(res.statusCode).toBe(200);
-    expect(committedValues.xocPayments).toEqual([xocEntry]);
-    expect(committedValues.vertexPayments).toEqual([
-      expect.objectContaining({
-        _key: "shared-key",
-        _type: "paymentLogVertex",
-        amount: 20,
-        note: "Corrected payout",
-      }),
-      otherVertex,
-    ]);
-    expect(committedValues).toMatchObject({
-      paidXoc: 12,
-      paidVertex: 24,
-      paidTotal: 36,
-      owedXoc: 28,
-      owedVertex: 36,
-      owedTotal: 64,
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({
+      ok: false,
+      error:
+        "This key belongs to an existing payment log. Use a new payoutId for a new transfer.",
     });
+    expect(initialReferral.xocPayments).toEqual([xocEntry]);
+    expect(initialReferral.vertexPayments).toEqual([vertexEntry, otherVertex]);
+    expect(committedValues).toBeNull();
+    expect(committedReceipt).toBeNull();
+    expect(mockPatch).not.toHaveBeenCalled();
+    expect(mockTransaction).not.toHaveBeenCalled();
   });
 
   test.each([

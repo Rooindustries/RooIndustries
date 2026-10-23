@@ -2734,40 +2734,22 @@ try {
     };
     await cron();
     const settled = cohorts[0];
+    const historicalIds = cohorts.flatMap(({first, ids}) => [
+      first.creator._id,
+      ...ids,
+    ]);
     const before =
-      await sql`select legacy_sanity_id, source_revision, source_hash, payload from migration.source_documents where legacy_sanity_id=any(${[settled.first.creator._id, ...settled.ids]}) order by legacy_sanity_id`;
+      await sql`select legacy_sanity_id, source_revision, source_hash, payload from migration.source_documents where legacy_sanity_id=any(${historicalIds}) order by legacy_sanity_id`;
     const versionsBefore =
       await sql`select legacy_sanity_id, payload->>'commissionCalculationVersion' as version from migration.source_documents where document_type='booking' and not tombstoned order by legacy_sanity_id`;
     const projection = await applyCommissionMigration({traceProjections: true});
     const versionsAfter =
       await sql`select legacy_sanity_id, payload->>'commissionCalculationVersion' as version from migration.source_documents where document_type='booking' and not tombstoned order by legacy_sanity_id`;
-    const previousVersions = new Map(
-      versionsBefore.map((row) => [row.legacy_sanity_id, row.version])
-    );
-    const migratedIds = versionsAfter
-      .filter(
-        (row) =>
-          row.version === '2' &&
-          previousVersions.get(row.legacy_sanity_id) !== '2'
-      )
-      .map((row) => row.legacy_sanity_id);
-    assert.ok(migratedIds.length > 0);
-    assert.deepEqual(
-      projection.calls.filter((call) => call.kind !== 'targeted'),
-      []
-    );
-    assert.ok(
-      projection.calls.every(
-        (call) => call.ids?.length > 0 && call.ids.length <= 100
-      )
-    );
-    const projectedIds = projection.calls.flatMap((call) => call.ids).sort();
-    assert.deepEqual(projectedIds, migratedIds.sort());
-    assert.ok(settled.ids.every((id) => !projectedIds.includes(id)));
-    projection.migratedIds = migratedIds;
+    assert.deepEqual(versionsAfter, versionsBefore);
+    assert.deepEqual(projection.calls, []);
     await cron();
     const after =
-      await sql`select legacy_sanity_id, source_revision, source_hash, payload from migration.source_documents where legacy_sanity_id=any(${[settled.first.creator._id, ...settled.ids]}) order by legacy_sanity_id`;
+      await sql`select legacy_sanity_id, source_revision, source_hash, payload from migration.source_documents where legacy_sanity_id=any(${historicalIds}) order by legacy_sanity_id`;
     assert.deepEqual(after, before);
     const paidCreator = await documents.getDocument(settled.first.creator._id);
     assert.equal(paidCreator.earnedTotal, 0.01);
@@ -2776,9 +2758,10 @@ try {
     const unpaidCreator = await documents.getDocument(
       cohorts[1].first.creator._id
     );
-    assert.equal(unpaidCreator.earnedTotal, 0.02);
-    assert.equal(unpaidCreator.owedTotal, 0.02);
-    await summary(cohorts[1].first.creator, 0.02);
+    assert.equal(unpaidCreator.earnedTotal, 0.01);
+    assert.equal(unpaidCreator.paidTotal, 0);
+    assert.equal(unpaidCreator.owedTotal, 0.01);
+    await summary(cohorts[1].first.creator, 0.01);
     const newBookings = [];
     for (let index = 0; index < 2; index++) {
       const next = await seed('dodo', {amount: 9.99, rate: 0.04});
@@ -2795,6 +2778,84 @@ try {
     await summary(settled.first.creator, 0.01);
     current = cohorts[1].first;
     return {before, after, paidCreator, unpaidCreator, newBookings, projection};
+  });
+
+  await run('review-r2-unpaid-historical-balance', async () => {
+    const first = await seed('dodo', {amount: 12.51, rate: 0.04});
+    const second = await seed('dodo', {amount: 12.51, rate: 0.04});
+    await commerce
+      .patch(first.record.bookingId)
+      .unset(['commissionAmount', 'commissionCalculationVersion'])
+      .commit();
+    await commerce
+      .patch(second.record.bookingId)
+      .unset(['commissionAmount', 'commissionCalculationVersion'])
+      .set({
+        referral: {_type: 'reference', _ref: first.creator._id},
+        referralCode: first.key,
+      })
+      .commit();
+    const {functionDefinition} = await import(
+      './lib/sweep-postgres-fixture.mjs'
+    );
+    await sql.unsafe(
+      functionDefinition(
+        '20260712092342_close_supabase_port_and_unified_auth.sql',
+        'public.roo_referral_earnings_summary'
+      ).replace(
+        "and (booking.booking_payload->>'commissionAmount')::numeric <> 0",
+        "and ((booking.booking_payload->>'commissionAmount')::numeric <> 0 or booking.booking_payload ? 'dodoOriginalCommissionAmount')"
+      )
+    );
+    const cron = async () => {
+      const response = await fetch(`${origin}/api/ref/cronSyncAll`, {
+        headers: {authorization: 'Bearer fixture'},
+      });
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    const ids = [first.record.bookingId, second.record.bookingId];
+    const bookings = () =>
+      sql`select legacy_sanity_id, source_revision, source_hash, payload from migration.source_documents where legacy_sanity_id=any(${ids}) order by legacy_sanity_id`;
+    const preSync = await cron();
+    const before = await documents.getDocument(first.creator._id);
+    assert.equal(before.earnedTotal, 0.01);
+    assert.equal(before.paidTotal, 0);
+    assert.equal(before.owedTotal, 0.01);
+    const beforeEarnings = await summary(first.creator, 0.01);
+    const beforeBookings = await bookings();
+    await applyCommissionMigration();
+    const postSync = await cron();
+    const after = await documents.getDocument(first.creator._id);
+    const afterBookings = await bookings();
+    const exactCents = {
+      beforeEarned: Math.round(before.earnedTotal * 100),
+      beforePaid: Math.round(before.paidTotal * 100),
+      beforeOwed: Math.round(before.owedTotal * 100),
+      afterEarned: Math.round(after.earnedTotal * 100),
+      afterPaid: Math.round(after.paidTotal * 100),
+      afterOwed: Math.round(after.owedTotal * 100),
+    };
+    evidence.unpaidHistoricalBalance = {
+      preSync,
+      postSync,
+      before,
+      after,
+      beforeEarnings,
+      beforeBookings,
+      afterBookings,
+      exactCents,
+    };
+    assert.equal(exactCents.afterEarned, exactCents.beforeEarned);
+    assert.equal(exactCents.afterPaid, exactCents.beforePaid);
+    assert.equal(exactCents.afterOwed, exactCents.beforeOwed);
+    assert.deepEqual(afterBookings, beforeBookings);
+    assert.deepEqual(after, before);
+    evidence.unpaidHistoricalBalance.afterEarnings = await summary(
+      first.creator,
+      0.01
+    );
+    return evidence.unpaidHistoricalBalance;
   });
 
   await run('R1-paid-legacy-zero-preserves-marker-presence', async () => {
