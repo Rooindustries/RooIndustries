@@ -72,10 +72,9 @@ const REASSURANCE_COPY =
   "You won't be charged until you confirm on the payment page.";
 const PAYMENT_PENDING_EXPIRY_ERROR =
   "This reservation expired while payment is still pending. Return to payment to check its status or release payment to try again.";
+const RESERVATION_EXPIRED_ERROR = "The reservation expired. Please choose a slot again.";
 const REQUIRED_DETAIL_FIELDS = ["discord", "email", "specs", "mainGame"];
 const REQUIRED_DETAILS_ERROR = "Please fill out all required fields.";
-const RESERVATION_EXPIRED_ERROR = "The reservation expired. Please choose a slot again.";
-const markHoldExpired = () => writeBrowserStorage("sessionStorage", BOOKING_HOLD_EXPIRED_STORAGE_KEY, "1");
 const CALENDAR_AVAILABILITY_LABELS = Object.freeze({
   green: "fully available",
   yellow: "limited slots",
@@ -789,10 +788,10 @@ export default function BookingForm() {
     }
     if (clearedNoHoldRef.current) return;
 
-    if (!bookingHoldExpired()) {
+    if (!bookingHoldExpired() && isDraftEmpty(form)) {
       clearDraftForPackage(getDraftKey(selectedPackage));
       setForm(createFreshForm());
-    } else {
+    } else if (bookingHoldExpired()) {
       setErrorStep1(RESERVATION_EXPIRED_ERROR);
     }
     setSelectedSlot(null);
