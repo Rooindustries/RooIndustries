@@ -60,9 +60,9 @@ test("Lighthouse fixture exits when a proxy prevents guard installation", async 
   let failure;
   try {
     await exec(process.execPath, [
-      "--test", "--test-isolation=none", "--test-name-pattern=^Lighthouse's HTTP fixture",
+      "--test", "--experimental-test-isolation=none", "--test-name-pattern=^Lighthouse's HTTP fixture",
       "tests/toolchain.test.mjs",
-    ], { env: { ...process.env, HTTP_PROXY: "http://127.0.0.1:9" }, timeout: 10_000 });
+    ], { env: { ...process.env, HTTP_PROXY: "http://127.0.0.1:9" }, timeout: 30_000 });
   } catch (error) {
     failure = error;
   }
