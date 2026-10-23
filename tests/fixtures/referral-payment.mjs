@@ -67,7 +67,11 @@ export async function createReferralPaymentFixture() {
   let database, server, app;
   const stop = async () => {
     if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); server = null; }
-    if (app) { await app.close(); app = null; }
+    if (app) {
+      let timeout;
+      try { await Promise.race([app.close(), new Promise(resolve => { timeout = setTimeout(resolve, 5000); })]); }
+      finally { clearTimeout(timeout); app = null; }
+    }
     if (database) { await database.stop(); database = null; }
     globalThis.fetch = originalFetch;
     restoreGuard();
@@ -261,7 +265,21 @@ export async function createReferralPaymentFixture() {
       };
     };
     const nextSlotDate = (() => { let next = 0; return () => dates[next++]; })();
-    return { baseURL, request, pay, webhook, state, snapshot, nextSlotDate, evidence, readEvidence, save, stop };
+    const expireHold = async id => {
+      await database.sql.begin(async sql => {
+        await sql`update migration.source_documents set
+          payload=jsonb_set(payload,'{expiresAt}',to_jsonb((now()-interval '1 second')::text)),
+          source_hash=encode(extensions.digest(jsonb_set(payload,'{expiresAt}',to_jsonb((now()-interval '1 second')::text))::text,'sha256'),'hex')
+          where legacy_sanity_id=${id}`;
+        const [hold] = await sql`update commerce.slot_holds set expires_at=now()-interval '1 second'
+          where legacy_sanity_id=${id} returning id`;
+        assert.ok(hold, "Hold to expire must exist");
+        await sql`delete from commerce.slot_claims where hold_id=${hold.id}`;
+      });
+      assert.ok(Date.parse((await commerce.fetch(`*[_type == "slotHold" && _id == $id][0]`, { id })).expiresAt) < Date.now());
+      return true;
+    };
+    return { baseURL, request, pay, webhook, state, snapshot, nextSlotDate, expireHold, evidence, readEvidence, save, stop };
   } catch (error) { await stop(); throw error; }
 }
 
@@ -281,12 +299,12 @@ if (process.argv.includes("--worker")) {
         });
         return;
       }
-      if (!["request", "pay", "webhook", "state", "snapshot", "nextSlotDate"].includes(method) && method !== "evidence") {
+      if (!["request", "pay", "webhook", "state", "snapshot", "nextSlotDate", "expireHold"].includes(method) && method !== "evidence") {
         throw new Error(`Unknown referral payment fixture operation: ${method}`);
       }
       const value = method === "evidence" ? fixture.readEvidence() : await fixture[method](...args);
       process.send({ id, value: JSON.parse(JSON.stringify(value)) });
     } catch (error) { process.send({ id, error: error.stack || error.message }); }
   });
-  process.send({ ready: true });
+  process.send({ ready: true, baseURL: fixture.baseURL });
 }

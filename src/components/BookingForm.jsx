@@ -19,6 +19,7 @@ import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
 import PriceDisplay from "./PriceDisplay";
+import PackageSupportWarning from "./PackageSupportWarning";
 import { getWarrantyCallout } from "../lib/packageWarranty";
 import {
   BOOKING_DRAFT_STORAGE_KEY,
@@ -2272,6 +2273,18 @@ export default function BookingForm() {
 
   const releasePaymentSession = async () => {
     if (!isPaymentPendingHold || releasingPayment) return;
+    const releasingHold = myHold;
+    let paymentAccessToken = "";
+    const isCurrent = () => {
+      if (currentHoldRef.current?.holdId !== releasingHold.holdId ||
+          currentHoldRef.current?.holdToken !== releasingHold.holdToken) return false;
+      try {
+        const hold = JSON.parse(sessionStorage.getItem(HOLD_STORAGE_KEY) || "null");
+        const session = JSON.parse(sessionStorage.getItem(PAYMENT_SESSION_STORAGE_KEY) || "null");
+        return hold?.holdId === releasingHold.holdId && hold?.holdToken === releasingHold.holdToken &&
+          String(session?.paymentAccessToken || "").trim() === paymentAccessToken;
+      } catch { return false; }
+    };
     setReleasingPayment(true);
     setErrorStep2("");
     setPaymentReleaseStatus("");
@@ -2279,7 +2292,7 @@ export default function BookingForm() {
       const stored = JSON.parse(
         sessionStorage.getItem(PAYMENT_SESSION_STORAGE_KEY) || "null"
       );
-      const paymentAccessToken = String(stored?.paymentAccessToken || "").trim();
+      paymentAccessToken = String(stored?.paymentAccessToken || "").trim();
       if (!paymentAccessToken) {
         throw new Error("Return to payment once so the active session can be checked.");
       }
@@ -2293,6 +2306,7 @@ export default function BookingForm() {
         signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
       });
       const data = await response.json().catch(() => ({}));
+      if (!isCurrent()) return;
       if (data?.captured) {
         showCapturedPaymentResult(data);
         return;
@@ -2309,12 +2323,13 @@ export default function BookingForm() {
         return;
       }
       const nextHold = {
-        ...myHold,
+        ...releasingHold,
         holdId: refreshed.slotHoldId,
         holdToken: refreshed.slotHoldToken,
         expiresAt: refreshed.slotHoldExpiresAt,
         phase: "holding",
       };
+      currentHoldRef.current = nextHold;
       setMyHold(nextHold);
       writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(nextHold));
       const checkoutUpdated = updateStoredCheckoutHold(refreshed);
@@ -2326,6 +2341,7 @@ export default function BookingForm() {
           : "Payment method released. Review your booking details and submit again."
       );
     } catch (error) {
+      if (!isCurrent()) return;
       setPaymentReleaseStatus("");
       const timedOut =
         error?.name === "AbortError" || error?.name === "TimeoutError";
@@ -2701,6 +2717,9 @@ export default function BookingForm() {
               </div>
             )}
 
+            {isXoc && (
+              <PackageSupportWarning className="mx-auto mb-5 max-w-3xl text-sm leading-relaxed text-warning-text" />
+            )}
             <AnimatePresence mode="wait">
               {step === 1 && (
                 <motion.div

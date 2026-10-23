@@ -6,6 +6,7 @@ import reconcile from "../../../../src/server/api/payment/reconcile.js";
 import start from "../../../../src/server/api/payment/start.js";
 import status from "../../../../src/server/api/payment/status.js";
 import cancel from "../../../../src/server/api/payment/cancel.js";
+import recover from "../../../../src/server/api/payment/recover.js";
 import { after } from "next/server";
 import { recordCommerceResponseMetric } from "../../../../src/server/supabase/commerceMetrics";
 
@@ -19,6 +20,7 @@ const ACTION_HANDLERS = {
   providers,
   quote,
   reconcile,
+  recover,
   start,
   status,
 };
@@ -60,7 +62,7 @@ async function handle(request, context, methodOverride) {
     } catch {}
 
   }
-  if (action === "cancel" || action === "finalize" || action === "status") {
+  if (action === "cancel" || action === "finalize" || action === "status" || action === "recover") {
     response.headers.set("cache-control", "private, no-store");
     response.headers.set("pragma", "no-cache");
   }
