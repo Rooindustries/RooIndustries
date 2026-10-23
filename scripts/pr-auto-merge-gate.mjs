@@ -174,6 +174,7 @@ export const decide = (input) => {
   const changesRequestedBy = peopleRequestingChanges(input.reviews);
   const git = input.mergeableState || "unknown";
   const reviewRounds = Number(input.reviewRounds) || 0;
+  const reviewTimedOut = input.reviewWaitExpired === true && (rabbit === "pending" || codex === "pending");
   const sha = shortSha(input.headSha);
 
   if (checks.missing.length) add("checks-missing", `Required checks have not reported on ${sha}: ${checks.missing.join(", ")}.`);
@@ -191,6 +192,7 @@ export const decide = (input) => {
   if (codexEdited) add("codex-edited", `Codex's review comment was last edited by ${input.codexEditor}, so it doesn't count as Codex's review.`);
   if (codex === "pending") add("codex-pending", `Codex has not completed a review of ${sha} with no unresolved findings.`);
   if (codex === "hold") add("codex-hold", `Codex still has unresolved findings on ${sha}.`);
+  if (reviewTimedOut) add("review-timeout", "A requested review has not completed after 24 hours. Check the review integration before continuing.");
 
   const checksGreen = checks.red.length === 0 && checks.pending.length === 0 && checks.missing.length === 0;
   const disagree = rabbit !== "pending" && codex !== "pending" && rabbit !== codex;
@@ -206,7 +208,7 @@ export const decide = (input) => {
   if (reviewCapped) {
     add("review-cap", `CodeRabbit and Codex have not both approved, with no open threads, after ${MAX_REVIEW_ROUNDS} review rounds. It stays with the owner.`);
   }
-  if (git === "blocked" && checksGreen && bothApprove && findings.length === 0) {
+  if (git === "blocked" && checksGreen && bothApprove && findings.length === 0 && changesRequestedBy.length === 0) {
     add("github-blocked", "The pull request meets the repo bar, and GitHub is still blocking the merge. Branch protection or a ruleset is the likely hold. This workflow does not change those settings.");
   }
   if (git === "unstable" && checksGreen && bothApprove && findings.length === 0) {
@@ -216,13 +218,13 @@ export const decide = (input) => {
   const repairWork = checks.red.length > 0 || git === "behind" || git === "dirty";
   const needsReviewAgent = reviewWork && !reviewCapped;
 
-  const hold = reasons.some((reason) => reason === "github-blocked" || reason === "review-cap");
+  const hold = reasons.some((reason) => reason === "github-blocked" || reason === "review-cap" || reason === "review-timeout");
   let action = "wait";
   if (canMerge) action = "merge";
   else if (hold) action = "flag";
   // `wake` means the owning agent has work. The owning T3 thread's pull request watch delivers it; the workflow calls no agent.
   const wake = action !== "merge" && (repairWork || needsReviewAgent);
-  const requestReviews = !reviewCapped && (rabbit === "pending" || codex === "pending");
+  const requestReviews = !reviewCapped && !reviewTimedOut && (rabbit === "pending" || codex === "pending");
   if (action === "merge") lines.unshift(`Every check on ${sha} is green, the branch is up to date, and CodeRabbit and Codex both approve with no open findings.`);
   return { action, wake, requestReviews, reviewRound: needsReviewAgent && wake, reasons, lines };
 };

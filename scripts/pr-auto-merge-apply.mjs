@@ -93,18 +93,23 @@ const collectThreads = async (number) => {
 
 const collectSnapshot = async (number) => {
   const { payload: pull } = await api(readToken, `repos/${repo}/pulls/${number}`);
-  const [reviews, checkRuns, commentPage, statuses] = await Promise.all([
+  const [reviews, checkRuns, commentPage, statuses, base] = await Promise.all([
     paginate(`repos/${repo}/pulls/${number}/reviews`),
     paginate(`repos/${repo}/commits/${pull.head.sha}/check-runs`),
     paginate(`repos/${repo}/issues/${number}/comments`),
     paginate(`repos/${repo}/commits/${pull.head.sha}/statuses`),
+    api(readToken, `repos/${repo}/git/ref/heads/main`),
   ]);
+  const baseSha = base.payload?.object?.sha;
+  if (!baseSha) throw new Error("GitHub did not return the main branch tip.");
   const comments = Array.isArray(commentPage) ? commentPage : [];
   const codexComment = [...comments].reverse().find((comment) => botNamed(comment.user, "chatgpt-codex-connector") && comment.body?.includes("codex-review-state:v1"));
   const editor = codexComment ? (await graphql(`query($id: ID!) {
     node(id: $id) { ... on IssueComment { editor { login } } }
   }`, { id: codexComment.node_id })).node?.editor : null;
   const ownComments = comments.filter((comment) => botNamed(comment.user, "github-actions"));
+  const requested = ownComments.find((comment) => String(comment.body).includes(`${REVIEW_REQUEST_PREFIX}${pull.head.sha}`));
+  const requestedAt = Date.parse(requested?.created_at);
   const checks = [
     ...checkRuns.map((run) => ({
       source: "check-run",
@@ -131,7 +136,7 @@ const collectSnapshot = async (number) => {
     state: pull.state,
     draft: pull.draft,
     baseRef: pull.base.ref,
-    baseSha: pull.base.sha,
+    baseSha,
     headSha: pull.head.sha,
     headRef: pull.head.ref,
     sameRepository: pull.head.repo?.full_name === pull.base.repo.full_name,
@@ -148,6 +153,7 @@ const collectSnapshot = async (number) => {
     codex: parseCodexState(codexComment?.body || ""),
     codexEditor: editor?.login || "",
     reviewRounds: countReviewRounds(ownComments.map((comment) => comment.body || "")),
+    reviewWaitExpired: Boolean(requested) && (!Number.isFinite(requestedAt) || Date.now() - requestedAt >= 24 * 3600000),
     comments: ownComments,
   };
 };
@@ -197,10 +203,17 @@ const recordReviewRound = async (snapshot) => {
 };
 
 const requestReviews = async (snapshot) => {
+  const mentions = "@coderabbitai review\n@codex review";
+  if (process.env.AUTO_MERGE_TOKEN) {
+    await api(mergeToken, `repos/${repo}/issues/${snapshot.number}/comments`, {
+      method: "POST",
+      body: { body: mentions },
+    });
+  }
   await api(readToken, `repos/${repo}/issues/${snapshot.number}/comments`, {
     method: "POST",
     body: {
-      body: `@coderabbitai review\n@codex review\n${REVIEW_REQUEST_PREFIX}${snapshot.headSha} -->\n`,
+      body: `${process.env.AUTO_MERGE_TOKEN ? "Requested both reviews with the user credential." : mentions}\n${REVIEW_REQUEST_PREFIX}${snapshot.headSha} -->\n`,
     },
   });
 };

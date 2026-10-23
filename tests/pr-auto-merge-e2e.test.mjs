@@ -15,11 +15,13 @@ const repo = "fixture/website";
 const prefix = `/repos/${repo}`;
 const bot = login => ({ login: `${login}[bot]`, type: "Bot" });
 const token = "fixture-github-token";
+const userToken = "fixture-user-token";
 
 const baseline = () => ({
   pull: { number: 1, html_url: "https://github.com/fixture/website/pull/1", title: "Fixture PR", state: "open", draft: false,
     base: { ref: "main", sha: "b".repeat(40), repo: { full_name: repo } },
     head: { ref: "fixture-change", sha: head, repo: { full_name: repo } }, mergeable_state: "clean" },
+  baseTip: "b".repeat(40),
   reviews: [{ user: bot("coderabbitai"), state: "APPROVED", commit_id: head, submitted_at: "2026-10-23T00:00:00Z" }],
   checks: REQUIRED_CHECKS.map((name, index) => ({ id: index + 1, name, app: { slug: "github-actions" },
     status: "completed", conclusion: "success", completed_at: "2026-10-23T00:00:00Z" })),
@@ -30,7 +32,7 @@ const baseline = () => ({
   editor: null,
 });
 
-const runScenario = async (name, { setup, changeSecond, mergeStatus = 200, event = "pull_request_target", eventBody } = {}) => {
+const runScenario = async (name, { setup, changeSecond, mergeStatus = 200, event = "pull_request_target", eventBody, useUserToken = false } = {}) => {
   const state = baseline();
   setup?.(state);
   const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "pr-gate-e2e-"));
@@ -43,9 +45,11 @@ const runScenario = async (name, { setup, changeSecond, mergeStatus = 200, event
       const raw = Buffer.concat(chunks).toString("utf8");
       const body = raw ? JSON.parse(raw) : null;
       const url = new URL(req.url, "http://fixture");
-      requests.push({ method: req.method, path: url.pathname, query: url.search, body });
+      const credential = req.headers.authorization === `Bearer ${userToken}` ? "user" : "workflow";
+      requests.push({ method: req.method, path: url.pathname, query: url.search, body, credential });
       const send = (code, payload) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(payload)); };
-      if (req.headers.authorization !== `Bearer ${token}`) return send(401, { message: "Unexpected fixture credential" });
+      if (![token, userToken].some(value => req.headers.authorization === `Bearer ${value}`)) return send(401, { message: "Unexpected fixture credential" });
+      if (req.method === "GET" && url.pathname === `${prefix}/git/ref/heads/main`) return send(200, { object: { sha: state.baseTip } });
       if (url.pathname === "/graphql") {
         if (body.query.includes("IssueComment")) return send(200, { data: { node: { editor: state.editor } } });
         return send(200, { data: { repository: { pullRequest: { reviewThreads: {
@@ -85,6 +89,7 @@ const runScenario = async (name, { setup, changeSecond, mergeStatus = 200, event
     child = spawn(process.execPath, ["--import", "./tests/fixtures/github-api-transport.mjs", "scripts/pr-auto-merge-apply.mjs"], {
       cwd: root,
       env: { PATH: process.env.PATH, HOME: process.env.HOME, REPO: repo, GH_TOKEN: token,
+        ...(useUserToken ? { AUTO_MERGE_TOKEN: userToken } : {}),
         ROO_GITHUB_FIXTURE_ORIGIN: `http://${address.address}:${address.port}`,
         GITHUB_EVENT_NAME: event, GITHUB_EVENT_PATH: eventPath },
       timeout: 30000,
@@ -139,7 +144,7 @@ for (const [name, setup] of Object.entries(refusals)) {
 
 for (const [name, changeSecond] of Object.entries({
   "moved-head": state => { state.pull.head.sha = "d".repeat(40); },
-  "moved-main": state => { state.pull.base.sha = "d".repeat(40); },
+  "moved-main": state => { state.pull.base.sha = "d".repeat(40); state.baseTip = state.pull.base.sha; },
   "new-review": state => { state.reviews[0].state = "CHANGES_REQUESTED"; },
   "new-failure": state => { state.checks[0].conclusion = "failure"; },
   "newly-closed": state => { state.pull.state = "closed"; },
@@ -192,3 +197,39 @@ test("CLI ignores human gate markers and still requests missing reviews", async 
   assert.ok(result.comments.some(body => body.includes("@coderabbitai review")));
   assert.ok(result.requests.every(request => request.method !== "PATCH"));
 });
+
+test("CLI keeps a human change request with the agent when GitHub reports blocked", async () => {
+  const result = await runScenario("blocked-human-review", { setup: state => {
+    state.pull.mergeable_state = "blocked";
+    state.reviews.push({ user: { login: "fixture-person", type: "User" }, state: "CHANGES_REQUESTED", commit_id: head, submitted_at: "2026-10-23T01:00:00Z" });
+  } });
+  assert.deepEqual(result.merges, []);
+  assert.ok(result.comments.some(body => body.includes("pr-auto-merge-action:wait")));
+  assert.ok(result.requests.every(request => !request.body?.labels?.includes("needs-owner")));
+});
+
+test("CLI refuses an independently moved main ref when the PR base payload stays unchanged", async () => {
+  const result = await runScenario("independent-main-move", { changeSecond: state => { state.baseTip = "c".repeat(40); } });
+  assert.equal(result.snapshots, 2);
+  assert.deepEqual(result.merges, []);
+});
+
+test("CLI requests reviews through the available user credential and records a workflow receipt", async () => {
+  const result = await runScenario("user-review-request", { useUserToken: true, setup: state => { state.comments = []; state.reviews = []; } });
+  const request = result.requests.find(request => request.body?.body?.includes("@codex review"));
+  assert.equal(request?.credential, "user");
+  assert.ok(result.requests.some(request => request.credential === "workflow" && request.body?.body?.includes(`<!-- pr-review-request:${head}`)));
+});
+
+for (const expired of [false, true]) {
+  test(`CLI ${expired ? "flags an expired" : "waits for a recent"} unanswered review request without repeating it`, async () => {
+    const result = await runScenario(`pending-request-${expired}`, { setup: state => {
+      state.comments = [{ id: 11, user: bot("github-actions"), created_at: new Date(Date.now() - (expired ? 25 : 1) * 3600000).toISOString(),
+        body: `<!-- pr-review-request:${head} -->` }];
+      state.reviews = [];
+    } });
+    assert.deepEqual(result.merges, []);
+    assert.ok(result.comments.every(body => !body.includes("@codex review")));
+    assert.equal(result.requests.some(request => request.body?.labels?.includes("needs-owner")), expired);
+  });
+}
