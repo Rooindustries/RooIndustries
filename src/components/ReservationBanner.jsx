@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
+  holdAwaitsPayment,
+  markBookingHoldExpired,
   persistBookingPackageSelection,
   readStoredCheckoutBooking,
 } from "../lib/checkoutStorage";
@@ -16,6 +18,7 @@ const { getPublicPackageTitle } = packagePricing;
 const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = "booking_draft";
 const MOBILE_MAX_WIDTH = 780;
+const flowOwnsHoldExpiry = (pathname) => pathname === "/booking" || pathname === "/payment";
 
 const useIsMobileWidth = (maxWidth = MOBILE_MAX_WIDTH) => {
   const [isMobileWidth, setIsMobileWidth] = useState(false);
@@ -101,7 +104,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
       const stored = sessionStorage.getItem(HOLD_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (new Date(parsed.expiresAt) > new Date()) {
+        if (new Date(parsed.expiresAt) > new Date() || holdAwaitsPayment(parsed)) {
           const normalizedHold = {
             holdId: parsed.holdId,
             holdToken: parsed.holdToken,
@@ -123,8 +126,9 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
           currentHoldRef.current = normalizedHold;
           setHold(normalizedHold);
           broadcastHold(normalizedHold);
-        } else {
+        } else if (!flowOwnsHoldExpiry(pathRef.current)) {
           sessionStorage.removeItem(HOLD_STORAGE_KEY);
+          markBookingHoldExpired();
         }
       }
     } catch {
@@ -192,13 +196,11 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
           setCountdown(0);
           return false;
         }
-        if (hold.phase === "payment_pending" && paymentInOtherTab) {
+        if (holdAwaitsPayment(hold) || flowOwnsHoldExpiry(path)) {
           setCountdown(0);
           return false;
         }
-        const shouldRedirectHome =
-          path === "/payment" || path === "/payment-success" || path === "/booking";
-        releaseHold(true, shouldRedirectHome);
+        releaseHold(true);
         return false;
       }
       setCountdown(diff);
@@ -241,7 +243,8 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
   const releaseHold = async (clearOnly = false, redirect = false) => {
     if (!hold) return;
     if (clearOnly) {
-      clearReservation(redirect);
+      clearReservation(redirect, { keepDraft: true });
+      markBookingHoldExpired();
       return;
     }
     if (releasing) return;
@@ -286,7 +289,10 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
       currentHoldRef.current?.holdToken !== target.holdToken
     ) return;
     if (outcome === "clear") {
-      clearReservation(redirect && pathRef.current === startPath, { keepDraft: readDraft() !== startDraft });
+      // A release that lands after the deadline is an expiry: the visitor keeps what they typed.
+      const expired = hasExpired();
+      clearReservation(redirect && pathRef.current === startPath, { keepDraft: expired || readDraft() !== startDraft });
+      if (expired) markBookingHoldExpired();
     } else {
       setReleaseError(serverMessage || "We couldn't release this slot. Your reservation and details are still saved. Please try again.");
     }

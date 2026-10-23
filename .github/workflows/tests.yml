@@ -193,7 +193,7 @@ jobs:
           npx --yes npm@11.12.1 run build --prefix "$STORAGE_SOURCE"
       - name: Run native admin CMS suite
         run: xvfb-run -a npx playwright test -c playwright.admin.config.js
-      - name: Run all four native booking-hold browser cases
+      - name: Run all six native booking-hold browser cases
         env:
           NEXT_DIST_DIR: .next-e2e-native-booking
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-booking-hold.json
@@ -202,8 +202,22 @@ jobs:
           node - <<'NODE'
           const assert = require('node:assert/strict');
           const { stats } = require('./test-results/native-booking-hold.json');
-          assert.equal(stats.expected, 4, 'All four native booking-hold cases must pass');
+          assert.equal(stats.expected, 6, 'All six native booking-hold cases must pass');
           assert.equal(stats.skipped, 0, 'Native booking-hold cases must not skip');
+          assert.equal(stats.unexpected, 0);
+          assert.equal(stats.flaky, 0);
+          NODE
+      - name: Run the native referral payment and claimed-start recovery E2Es
+        env:
+          NEXT_DIST_DIR: .next-e2e-native-booking
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-referral-payment.json
+        run: |
+          xvfb-run -a npm run test:referral-payment -- --output=test-results/referral-payment-e2e --reporter=line,json
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const { stats } = require('./test-results/native-referral-payment.json');
+          assert.equal(stats.expected, 4, 'The native referral payment E2E must pass');
+          assert.equal(stats.skipped, 0, 'The native referral payment E2E must not skip');
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);
           NODE

@@ -3,6 +3,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import BookingForm from "../components/BookingForm";
 import { calculateCheckoutDiscounts } from "../lib/checkoutCodes";
+import { captureReferralAddress, clearReferralDismissal } from "../lib/checkoutStorage";
 
 let mockLocation = {
   pathname: "/booking",
@@ -123,9 +124,11 @@ const STACKING_COUPON = {
 };
 
 const setBookingLocation = (bookingPackage = OVERHAUL_PACKAGE, search = "") => {
+  const normalizedSearch = search ? (search.startsWith("?") ? search : `?${search}`) : "";
+  window.history.replaceState({ bookingPackage }, "", `/booking${normalizedSearch}`);
   __setMockLocation({
     pathname: "/booking",
-    search,
+    search: normalizedSearch,
     hash: "",
     state: { bookingPackage },
   });
@@ -269,6 +272,8 @@ describe("booking calendar UI", () => {
     mockNavigate.mockReset();
     window.sessionStorage.clear();
     window.localStorage.clear();
+    window.history.replaceState(null, "", "/booking");
+    captureReferralAddress("/booking", "");
     __setMockLocation({
       pathname: "/booking",
       search: "",
@@ -292,6 +297,74 @@ describe("booking calendar UI", () => {
     }
     if (resolvedOptionsSpy) {
       resolvedOptionsSpy.mockRestore();
+    }
+  });
+
+  test("keeps typed details when the referral scope cannot be reset", async () => {
+    window.sessionStorage.setItem(
+      "booking_draft",
+      JSON.stringify({
+        lastTitle: OVERHAUL_PACKAGE.title,
+        packages: {
+          [OVERHAUL_PACKAGE.title]: {
+            selectedPackage: OVERHAUL_PACKAGE,
+            form: VALID_FORM,
+          },
+        },
+      })
+    );
+    const scope = JSON.stringify([OVERHAUL_PACKAGE.title, ""]);
+    window.sessionStorage.setItem("referral_capture", "ready");
+    window.sessionStorage.setItem(
+      "referral_dismissed",
+      JSON.stringify({
+        passiveCode: "",
+        codes: { friend: "applied" },
+        choices: { [scope]: "friend" },
+      })
+    );
+    const originalSetItem = Storage.prototype.setItem;
+    const setItemSpy = jest.spyOn(Storage.prototype, "setItem").mockImplementation(function setItem(key, value) {
+      if (key === "referral_dismissed") throw new DOMException("denied", "QuotaExceededError");
+      return originalSetItem.call(this, key, value);
+    });
+    installDefaultFetch();
+    setBookingLocation();
+    const view = render(<BookingForm />);
+    try {
+      await screen.findByText(/select a date and time/i);
+      expect(
+        JSON.parse(window.sessionStorage.getItem("booking_draft")).packages[
+          OVERHAUL_PACKAGE.title
+        ].form.email
+      ).toBe(CLIENT_EMAIL);
+    } finally {
+      view.unmount();
+      setItemSpy.mockRestore();
+      clearReferralDismissal("friend", scope);
+    }
+  });
+
+  test("restores a valid hold when its normalized rewrite cannot be stored", async () => {
+    seedBookingSession();
+    const originalSetItem = Storage.prototype.setItem;
+    const setItemSpy = jest.spyOn(Storage.prototype, "setItem").mockImplementation(function setItem(key, value) {
+      if (key === "my_slot_hold") throw new DOMException("denied", "QuotaExceededError");
+      return originalSetItem.call(this, key, value);
+    });
+    installDefaultFetch();
+    setBookingLocation();
+    try {
+      render(<BookingForm />);
+      expect(await screen.findByDisplayValue(CLIENT_EMAIL)).toBeInTheDocument();
+      expect(
+        JSON.parse(window.sessionStorage.getItem("booking_draft")).packages[
+          OVERHAUL_PACKAGE.title
+        ].form.email
+      ).toBe(CLIENT_EMAIL);
+      expect(JSON.parse(window.sessionStorage.getItem("my_slot_hold")).holdId).toBe("hold_seeded_1");
+    } finally {
+      setItemSpy.mockRestore();
     }
   });
 
@@ -645,17 +718,18 @@ describe("booking calendar UI", () => {
         global.fetch.mock.calls.filter(([url]) => url === "/api/releaseHold")
       ).toHaveLength(1);
     });
-    expect(controllers).toHaveLength(1);
+    expect(
+      global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot")
+    ).toHaveLength(1);
+    expect(controllers).toHaveLength(2);
 
     await act(async () => {
-      controllers[0].abort();
+      controllers[1].abort();
       await Promise.resolve();
     });
 
     expect(await screen.findByLabelText("Discord username")).toBeInTheDocument();
-    expect(
-      global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot")
-    ).toHaveLength(1);
+    expect(JSON.parse(sessionStorage.getItem("my_slot_hold")).holdId).toBe("hold_replacement_1");
     expect(abortTimeoutSpy).toHaveBeenCalledTimes(2);
     expect(abortTimeoutSpy).toHaveBeenNthCalledWith(1, 8_000);
     expect(abortTimeoutSpy).toHaveBeenNthCalledWith(2, 8_000);
@@ -867,8 +941,8 @@ describe("booking calendar UI", () => {
     await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
 
     expect(await screen.findByText("The replacement slot is already held.")).toBeInTheDocument();
-    expect(storedAtReplacement).toBeNull();
-    expect(sessionStorage.getItem("my_slot_hold")).toBeNull();
+    expect(JSON.parse(storedAtReplacement)).toEqual(originalHold);
+    expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toEqual(originalHold);
     expect(screen.queryByLabelText("Booking email")).not.toBeInTheDocument();
     const holdCalls = global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot");
     expect(holdCalls).toHaveLength(1);
@@ -876,17 +950,13 @@ describe("booking calendar UI", () => {
       previousHoldId: originalHold.holdId,
       previousHoldToken: originalHold.holdToken,
     });
+    expect(global.fetch.mock.calls.filter(([url]) => url === "/api/releaseHold")).toHaveLength(0);
   });
 
-  test.each(["active", "released", "taken"])("revalidates the %s original slot after release times out and its replacement returns 409", async (originalState) => {
-    const controllers = [];
+  test.each(["active", "released", "taken"])("keeps the original hold when a replacement returns 409 and revalidates that %s slot", async (originalState) => {
     abortTimeoutSpy = jest
       .spyOn(AbortSignal, "timeout")
-      .mockImplementation(() => {
-        const controller = new AbortController();
-        controllers.push(controller);
-        return controller.signal;
-      });
+      .mockImplementation(() => new AbortController().signal);
     consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
     seedBookingSession({ step: 2 });
     const originalHold = JSON.parse(sessionStorage.getItem("my_slot_hold"));
@@ -926,11 +996,6 @@ describe("booking calendar UI", () => {
       name: formatLocalTime(getUtcFromHostLocal(2099, 0, 5, 11), "America/Los_Angeles"),
     }));
     await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
-    await waitFor(() => expect(controllers).toHaveLength(1));
-    await act(async () => {
-      controllers[0].abort();
-      await Promise.resolve();
-    });
 
     expect(await screen.findByText("The replacement slot is already held.")).toBeInTheDocument();
     expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toEqual(originalHold);
@@ -940,9 +1005,9 @@ describe("booking calendar UI", () => {
       previousHoldId: originalHold.holdId,
       previousHoldToken: originalHold.holdToken,
     });
-    expect(abortTimeoutSpy).toHaveBeenCalledTimes(2);
+    expect(global.fetch.mock.calls.filter(([url]) => url === "/api/releaseHold")).toHaveLength(0);
+    expect(abortTimeoutSpy).toHaveBeenCalledTimes(1);
     expect(abortTimeoutSpy).toHaveBeenNthCalledWith(1, 8_000);
-    expect(abortTimeoutSpy).toHaveBeenNthCalledWith(2, 8_000);
 
     const originalSlot = screen.getByRole("button", {
       name: formatLocalTime(new Date(FUTURE_SLOT), "America/Los_Angeles"),
@@ -957,9 +1022,9 @@ describe("booking calendar UI", () => {
       previousHoldId: originalHold.holdId,
       previousHoldToken: originalHold.holdToken,
     });
-    expect(global.fetch.mock.calls.filter(([url]) => url === "/api/releaseHold")).toHaveLength(1);
-    expect(abortTimeoutSpy).toHaveBeenCalledTimes(3);
-    expect(abortTimeoutSpy).toHaveBeenNthCalledWith(3, 8_000);
+    expect(global.fetch.mock.calls.filter(([url]) => url === "/api/releaseHold")).toHaveLength(0);
+    expect(abortTimeoutSpy).toHaveBeenCalledTimes(2);
+    expect(abortTimeoutSpy).toHaveBeenNthCalledWith(2, 8_000);
     if (originalState === "taken") {
       expect(await screen.findByText("This slot is currently reserved by someone else.")).toBeInTheDocument();
       expect(sessionStorage.getItem("my_slot_hold")).toBeNull();
@@ -1236,6 +1301,113 @@ describe("booking calendar UI", () => {
     );
     expect(error).toHaveClass("text-danger-text");
     expectActiveStep("Review & pay", "Step 3 of 3");
+  });
+
+  test("shows the expiry reason after reload when only the expired marker remains", async () => {
+    window.sessionStorage.setItem(
+      "booking_draft",
+      JSON.stringify({
+        lastTitle: OVERHAUL_PACKAGE.title,
+        packages: {
+          [OVERHAUL_PACKAGE.title]: {
+            selectedPackage: OVERHAUL_PACKAGE,
+            form: VALID_FORM,
+          },
+        },
+      })
+    );
+    window.sessionStorage.setItem("booking_hold_expired", "1");
+    installDefaultFetch();
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    expect(
+      await screen.findByText("The reservation expired. Please choose a slot again.")
+    ).toBeInTheDocument();
+    expect(
+      JSON.parse(window.sessionStorage.getItem("booking_draft")).packages[
+        OVERHAUL_PACKAGE.title
+      ].form.email
+    ).toBe(CLIENT_EMAIL);
+  });
+
+  test("keeps the expiry reason when a release finishes after the deadline", async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2099-01-05T05:59:55.000Z"));
+    seedBookingSession({
+      expiresAt: "2099-01-05T06:00:00.000Z",
+      step: 2,
+    });
+    installDefaultFetch();
+    const defaultFetch = global.fetch.getMockImplementation();
+    let finishRelease;
+    global.fetch.mockImplementation((url, options) => {
+      if (url === "/api/releaseHold") {
+        return new Promise((resolve) => {
+          finishRelease = () =>
+            resolve({ ok: true, status: 200, json: async () => ({ ok: true }) });
+        });
+      }
+      return defaultFetch(url, options);
+    });
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    const release = await screen.findByRole("button", { name: "Release Slot" });
+    await act(async () => {
+      release.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      jest.setSystemTime(new Date("2099-01-05T06:00:01.000Z"));
+      finishRelease();
+      for (let tick = 0; tick < 8; tick += 1) await Promise.resolve();
+    });
+    jest.useRealTimers();
+
+    expect(window.sessionStorage.getItem("booking_hold_expired")).toBe("1");
+    expect(window.sessionStorage.getItem("my_slot_hold")).toBeNull();
+    expect(
+      await screen.findByText("The reservation expired. Please choose a slot again.")
+    ).toBeInTheDocument();
+    expect(
+      JSON.parse(window.sessionStorage.getItem("booking_draft")).packages[
+        OVERHAUL_PACKAGE.title
+      ].form.email
+    ).toBe(CLIENT_EMAIL);
+  });
+
+  test("a release that finishes before the deadline does not record an expiry", async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2099-01-05T05:59:55.000Z"));
+    seedBookingSession({
+      expiresAt: "2099-01-05T06:00:00.000Z",
+      step: 2,
+    });
+    installDefaultFetch();
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    const release = await screen.findByRole("button", { name: "Release Slot" });
+    await act(async () => {
+      release.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(window.sessionStorage.getItem("booking_hold_expired")).toBeNull();
+    expect(window.sessionStorage.getItem("my_slot_hold")).toBeNull();
+    expect(
+      screen.queryByText("The reservation expired. Please choose a slot again.")
+    ).not.toBeInTheDocument();
+    expect(
+      JSON.parse(window.sessionStorage.getItem("booking_draft")).packages[
+        OVERHAUL_PACKAGE.title
+      ].form
+    ).toBeUndefined();
   });
 
   test("releases an ordinary step-3 hold when its countdown expires", async () => {

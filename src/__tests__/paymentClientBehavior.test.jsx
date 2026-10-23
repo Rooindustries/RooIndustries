@@ -489,4 +489,161 @@ describe("payment client request and accessibility behavior", () => {
       "Payment succeeded but something went wrong saving your booking. Please contact support."
     );
   });
+
+  test("a removed coupon stays off the checkout when pre-apply runs again", async () => {
+    let couponValidations = 0;
+    global.fetch = jest.fn(async (url) => {
+      const requestUrl = String(url);
+      if (requestUrl.startsWith("/api/ref/validateReferral")) {
+        return response({ ok: false, error: "Invalid or inactive referral code." });
+      }
+      if (requestUrl.startsWith("/api/ref/validateCoupon")) {
+        couponValidations += 1;
+        return response({
+          ok: true,
+          coupon: {
+            id: "coupon.save10",
+            code: "SAVE10",
+            discountType: "fixed",
+            discountAmount: 10,
+            canCombineWithReferral: true,
+          },
+        });
+      }
+      return standardFetch(url);
+    });
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/payment", state: { bookingData: { ...checkout, couponCode: "SAVE10" } } }]}>
+        <Payment hideFooter />
+      </MemoryRouter>
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Remove coupon" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Remove coupon" })).not.toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: "Apply" }).every((button) => !button.disabled)).toBe(true);
+    });
+    expect(couponValidations).toBe(1);
+    expect(screen.getByLabelText("Coupon Code (optional)")).toHaveValue("");
+    expect(JSON.parse(sessionStorage.getItem("checkout_booking_state")).couponCode).toBe("");
+  });
+
+  test("removing a coupon keeps a refreshed hold that is only in storage", async () => {
+    global.fetch = jest.fn(async (url) => {
+      const requestUrl = String(url);
+      if (requestUrl.startsWith("/api/ref/validateReferral")) {
+        return response({ ok: false, error: "Invalid or inactive referral code." });
+      }
+      if (requestUrl.startsWith("/api/ref/validateCoupon")) {
+        return response({
+          ok: true,
+          coupon: {
+            id: "coupon.save10",
+            code: "SAVE10",
+            discountType: "fixed",
+            discountAmount: 10,
+            canCombineWithReferral: true,
+          },
+        });
+      }
+      return standardFetch(url);
+    });
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/payment", state: { bookingData: { ...checkout, couponCode: "SAVE10" } } }]}>
+        <Payment hideFooter />
+      </MemoryRouter>
+    );
+    await screen.findByRole("button", { name: "Remove coupon" });
+    const refreshed = {
+      ...JSON.parse(sessionStorage.getItem("checkout_booking_state")),
+      slotHoldId: "slotHold.refreshed",
+      slotHoldToken: "refreshed-hold-token",
+      slotHoldExpiresAt: "2099-01-05T10:40:00.000Z",
+    };
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(refreshed));
+    fireEvent.click(screen.getByRole("button", { name: "Remove coupon" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Remove coupon" })).not.toBeInTheDocument();
+    });
+    expect(JSON.parse(sessionStorage.getItem("checkout_booking_state"))).toMatchObject({
+      couponCode: "",
+      slotHoldId: "slotHold.refreshed",
+      slotHoldToken: "refreshed-hold-token",
+      slotHoldExpiresAt: "2099-01-05T10:40:00.000Z",
+    });
+  });
+
+  test("keeps a late payment start when checkout storage cannot be read", async () => {
+    let finishStart;
+    global.fetch = jest.fn(async (url) => {
+      const requestUrl = String(url);
+      if (requestUrl.startsWith("/api/ref/validateReferral")) {
+        return response({ ok: false, error: "Invalid or inactive referral code." });
+      }
+      if (requestUrl.startsWith("/api/ref/validateCoupon")) {
+        return response({
+          ok: true,
+          coupon: {
+            id: "coupon.save10",
+            code: "SAVE10",
+            discountType: "fixed",
+            discountAmount: 10,
+            canCombineWithReferral: true,
+          },
+        });
+      }
+      if (requestUrl === "/api/payment/start") {
+        return new Promise((resolve) => {
+          finishStart = () => resolve(response({
+            ok: true,
+            provider: "paypal",
+            status: "started",
+            paymentAccessToken: "late-payment-token",
+            quoteFingerprint: quotePayload.quoteFingerprint,
+            providerPayload: { orderId: "paypal_late_order" },
+            refreshedHold: {
+              slotHoldId: checkout.slotHoldId,
+              slotHoldToken: checkout.slotHoldToken,
+              slotHoldExpiresAt: checkout.slotHoldExpiresAt,
+            },
+          }));
+        });
+      }
+      return standardFetch(url);
+    });
+    renderPayment();
+    await screen.findByText("Price confirmed for this session.");
+    await waitFor(() => expect(mockPayPalButtonProps).toBeTruthy());
+    let orderAttempt;
+    await act(async () => {
+      orderAttempt = mockPayPalButtonProps.createOrder();
+      await flushMicrotasks();
+    });
+    await waitFor(() => expect(finishStart).toEqual(expect.any(Function)));
+
+    const couponInput = screen.getByLabelText("Coupon Code (optional)");
+    fireEvent.change(couponInput, { target: { value: "SAVE10" } });
+    fireEvent.click(couponInput.parentElement.querySelector("button"));
+    await screen.findByRole("button", { name: "Remove coupon" });
+
+    const originalGetItem = Storage.prototype.getItem;
+    const getItemSpy = jest.spyOn(Storage.prototype, "getItem").mockImplementation(function getItem(key) {
+      if (key === "my_slot_hold") {
+        throw new DOMException("denied", "SecurityError");
+      }
+      return originalGetItem.call(this, key);
+    });
+    try {
+      await act(async () => {
+        finishStart();
+        await flushMicrotasks();
+      });
+      await expect(orderAttempt).rejects.toThrow("Checkout changed before this payment could open.");
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        "Your earlier checkout is still reserved. Change payment method to use the updated codes."
+      );
+    } finally {
+      getItemSpy.mockRestore();
+    }
+    expect(JSON.parse(sessionStorage.getItem("payment_session_state")).paymentAccessToken).toBe("late-payment-token");
+  });
 });

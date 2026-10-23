@@ -584,15 +584,20 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         const delayedChunk = new Promise(resolve => { releaseChunk = resolve; });
         const interceptChunk = async route => {
           expect(new URL(route.request().url()).origin).toBe(new URL(baseURL).origin);
-          const response = await route.fetch({ maxRetries: 2 });
+          expect(route.request().method()).toBe("GET");
+          const response = await fetch(route.request().url(), { redirect: "error", signal: AbortSignal.timeout(10000) });
+          expect(response.status).toBe(200);
+          const contentType = response.headers.get("content-type");
+          expect(contentType).toMatch(/javascript|ecmascript/);
           const body = await response.text();
-          if (!body.includes(neutralHeading) || !body.includes("Payment Successful")) return route.fulfill({ response, body });
+          const chunkResponse = { status: response.status, contentType, body };
+          if (!body.includes(neutralHeading) || !body.includes("Payment Successful")) return route.fulfill(chunkResponse);
           const chunk = { url: route.request().url(), requestedAt: Date.now(), fulfilledAt: null };
           chunks.push(chunk);
           if (chunkState === "failed") return route.abort("failed");
           delayTimer = setTimeout(releaseChunk, 10_000);
           await delayedChunk;
-          await route.fulfill({ response, body });
+          await route.fulfill(chunkResponse);
           chunk.fulfilledAt = Date.now();
         };
         await page.route("**/_next/static/chunks/**", interceptChunk);

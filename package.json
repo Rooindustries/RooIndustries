@@ -54,6 +54,8 @@
     "test:booking-initial-slot": "playwright test tests/booking-initial-slot.spec.js --project=chromium",
     "test:booking-hold": "node --test tests/booking-hold.test.mjs",
     "test:booking-hold:e2e": "playwright test tests/booking-hold.spec.js --project=chromium",
+    "test:referral-payment": "playwright test tests/referral-payment.spec.js --project=chromium",
+    "test:payment-operation-guard": "playwright test tests/payment-operation-guard.spec.js --project=chromium",
     "test:booking-contact": "node scripts/test-booking-contact.mjs",
     "test:upgrade-credit": "node scripts/test-booking-contact.mjs --upgrade-credit",
     "test:emails": "playwright test tests/transactional-emails.spec.js --project=chromium",

@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import { isProductionBrowser } from "../lib/productionBrowser";
 import { Analytics } from "@vercel/analytics/react";
 import { sanitizeAnalyticsEvent } from "../lib/salesAttribution";
 import { initializePerformanceProfile } from "../lib/performanceProfile";
-import { rememberReferralFromSearch } from "../lib/checkoutStorage";
+import { captureReferralAddress } from "../lib/checkoutStorage";
 
-const CHECKOUT_PATHS = ["/booking", "/payment", "/payment-success", "/thank-you"];
 const SEORCE_PROJECT_ID = "6a2e76bf3f9dac8c30e27b89";
 const SEORCE_SCRIPT_ID = "seorce-runtime-script";
 // Seorce retries its tracking-config fetch every 90 seconds and logs failures.
@@ -69,6 +69,18 @@ export const loadSeorceScript = ({
   return true;
 };
 
+function ReferralCapture() {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  useLayoutEffect(() => {
+    if (!pathname) return;
+    captureReferralAddress(pathname, searchParams?.toString() || "");
+  }, [pathname, searchParams]);
+
+  return null;
+}
+
 export default function AppClientRuntime() {
   const [analyticsEnabled, setAnalyticsEnabled] = useState(false);
 
@@ -78,10 +90,6 @@ export default function AppClientRuntime() {
   useEffect(() => {
     initializePerformanceProfile();
   }, []);
-  useEffect(() => {
-    if (!CHECKOUT_PATHS.includes(window.location.pathname)) rememberReferralFromSearch(window.location.search);
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
     const cleanup = runWhenIdle(() => {
@@ -96,5 +104,12 @@ export default function AppClientRuntime() {
     };
   }, []);
 
-  return analyticsEnabled ? <Analytics beforeSend={sanitizeAnalyticsEvent} /> : null;
+  return (
+    <>
+      <Suspense fallback={null}>
+        <ReferralCapture />
+      </Suspense>
+      {analyticsEnabled ? <Analytics beforeSend={sanitizeAnalyticsEvent} /> : null}
+    </>
+  );
 }

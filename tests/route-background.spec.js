@@ -112,7 +112,16 @@ for (const origin of ["/packages", "/reviews"]) {
 test.describe("payment step", () => {
   test.use({ timezoneId: "Asia/Kolkata" });
 
-  test("an expired slot after reloading the payment step does not trap the customer in the booking dialog", async ({ page, flow }) => {
+  const expiredMessage = "The reservation expired. Please choose a slot again.";
+
+  const expectSlotStepAfterExpiry = async (page) => {
+    await expect(page.getByRole("dialog").getByRole("alert").filter({ hasText: expiredMessage })).toBeVisible({ timeout: 25000 });
+    await expect(page).toHaveURL(url => url.pathname === "/booking");
+    await expect(page.getByRole("dialog").getByRole("heading", { name: "Schedule Your Session", exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog").getByRole("button", { name: "10:00 AM", exact: true })).toBeVisible();
+  };
+
+  test("an expired slot after reloading the payment step returns to slot selection and closes to the background page", async ({ page, flow }) => {
     flow.state.holdMs = 15000;
     await flow.review();
     await flow.payment();
@@ -120,12 +129,15 @@ test.describe("payment step", () => {
     await page.reload();
     await expect(page.locator("#main-content").getByRole("heading", { name: "Community Reviews", exact: true })).toBeVisible();
     await expect(page.getByRole("dialog").getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
-    await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 25000 });
-    await expect(page).toHaveURL(url => url.pathname === "/");
-    await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("flow_background_location")).pathname)).toBe("/");
+    await expectSlotStepAfterExpiry(page);
+    await expect(page.locator("#main-content").getByRole("heading", { name: "Community Reviews", exact: true })).toBeVisible();
+    await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page).toHaveURL(url => url.pathname === "/reviews");
+    await expect(page.locator("#main-content").getByRole("heading", { name: "Community Reviews", exact: true })).toBeVisible();
   });
 
-  test("a payment step opened in a second tab does not trap the customer when its slot expires", async ({ page, context, flow }) => {
+  test("a payment step opened in a second tab returns to slot selection when its slot expires and closes to the background page", async ({ page, context, flow }) => {
     flow.state.holdMs = 15000;
     await flow.review();
     await flow.payment();
@@ -135,8 +147,9 @@ test.describe("payment step", () => {
     await other.evaluate(entries => entries.forEach(([key, value]) => sessionStorage.setItem(key, value)), checkout);
     await other.goto("/payment");
     await expect(other.getByRole("dialog").getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
-    await expect(other.getByRole("dialog")).toHaveCount(0, { timeout: 25000 });
+    await expectSlotStepAfterExpiry(other);
+    await other.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+    await expect(other.getByRole("dialog")).toHaveCount(0);
     await expect(other).toHaveURL(url => url.pathname === "/");
-    await expect.poll(() => other.evaluate(() => JSON.parse(sessionStorage.getItem("flow_background_location")).pathname)).toBe("/");
   });
 });
