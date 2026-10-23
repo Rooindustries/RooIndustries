@@ -69,6 +69,11 @@ test("a money page that fails is a money-path failure", () => withSite({ status:
   assert.match(result.output, /FAIL\s+page \/payment.*500/);
 }));
 
+test("a payment redirect loop is a money-path failure", () => withSite({ redirectLoop: ["/payment"] }, (site, result) => {
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /FAIL\s+payment page renders/);
+}));
+
 test("booking availability that isn't ok is a money-path failure", () => withSite({ availability: { ok: false, error: "unavailable" } }, (site, result) => {
   assert.equal(result.code, 2, result.output);
   assert.match(result.output, /FAIL\s+booking availability/);
@@ -237,6 +242,20 @@ test("deploy gate: a healthy live deployment passes and nothing is rolled back",
 test("deploy gate: a money-path failure on the live deployment rolls production back once", () => withGate({ site: { status: { "/payment": 500 } } }, async ({ vercel, exec }) => {
   const result = await exec();
   assert.equal(result.code, 1, result.output);
+  const changes = vercelChanges(vercel);
+  assert.equal(changes.length, 1);
+  assert.equal(changes[0].path, "/v1/projects/prj_rooFixture/rollback/dpl_previous");
+  assert.match(changes[0].query.description, /Money-path smoke failed/);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
+  assert.match(result.output, /--undo/);
+}));
+
+test("deploy gate: a CSP-blocked referral script rolls production back once", () => withGate({
+  site: { packages: { externalReferral: true }, cspScriptBlock: true },
+}, async ({ vercel, exec }) => {
+  const result = await exec();
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /FAIL  referral capture/);
   const changes = vercelChanges(vercel);
   assert.equal(changes.length, 1);
   assert.equal(changes[0].path, "/v1/projects/prj_rooFixture/rollback/dpl_previous");

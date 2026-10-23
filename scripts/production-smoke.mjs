@@ -15,6 +15,20 @@ class Refusal extends Error {}
 // The runner could not reach the site at all (DNS, TLS, refused or reset connections, a dead browser).
 // A deployment can't cause these, so they mean "the smoke could not run", never a money-path failure.
 class CouldNotRun extends Error {}
+// Only failures of the connection itself are the runner's: a deploy can't cause them. Anything the browser
+// refused on the site's say-so (CSP, CORS, redirects, bad responses) is the site's failure.
+const RUNNER_NET_ERRORS = new Set([
+  "net::ERR_CONNECTION_RESET", "net::ERR_CONNECTION_REFUSED", "net::ERR_CONNECTION_CLOSED",
+  "net::ERR_CONNECTION_ABORTED", "net::ERR_CONNECTION_FAILED", "net::ERR_CONNECTION_TIMED_OUT",
+  "net::ERR_TIMED_OUT", "net::ERR_EMPTY_RESPONSE", "net::ERR_NAME_NOT_RESOLVED",
+  "net::ERR_NAME_RESOLUTION_FAILED", "net::ERR_ADDRESS_UNREACHABLE", "net::ERR_INTERNET_DISCONNECTED",
+  "net::ERR_NETWORK_CHANGED", "net::ERR_NETWORK_IO_SUSPENDED", "net::ERR_SOCKET_NOT_CONNECTED",
+  "net::ERR_INCOMPLETE_CHUNKED_ENCODING", "net::ERR_CONTENT_LENGTH_MISMATCH", "net::ERR_SSL_PROTOCOL_ERROR",
+]);
+const runnerNetError = (text) => {
+  const code = String(text || "").match(/net::ERR_[A-Z0-9_]+/)?.[0] || "";
+  return RUNNER_NET_ERRORS.has(code) || code.startsWith("net::ERR_CERT_");
+};
 // Node's fetch reports every network-level failure as a TypeError: "fetch failed" before a response arrives,
 // "terminated" when the connection drops mid-body. Only its own header and body timeouts mean the site was slow.
 const SITE_TIMEOUTS = new Set(["UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"]);
@@ -22,7 +36,7 @@ const asRunnerFault = (error, what) => {
   if (error instanceof CouldNotRun) return error;
   const fetchTransport = error?.name === "TypeError" && /^(?:fetch failed|terminated)$/.test(error.message) &&
     !SITE_TIMEOUTS.has(error.cause?.code);
-  const transport = fetchTransport || /net::ERR_/.test(String(error?.message));
+  const transport = fetchTransport || runnerNetError(error?.message);
   return transport ? new CouldNotRun(`couldn't reach ${what}: ${error.cause?.code || error.cause?.message || error.message}`) : error;
 };
 
@@ -89,9 +103,8 @@ const expectAvailability = async (response) => {
 const allowOnlyGet = (context) => context.route("**/*", (route) =>
   route.request().method() === "GET" ? route.continue() : route.abort());
 
-// Each browser check gets its own GET-only page. If a check fails after one of the site's own GET requests never
-// arrived (a script or page lost to a reset, refused or timed-out connection), the runner couldn't load the page,
-// so the failure says nothing about the deploy. Navigation-cancelled requests (net::ERR_ABORTED) don't count.
+// Each browser check gets its own GET-only page. Only connection failures on the site's own GET requests count
+// as requests the runner couldn't load; resources the site blocks or refuses remain site failures.
 const withSmokePage = async (browser, base, contextOptions, check) => {
   const context = await browser.newContext(contextOptions);
   const lost = [];
@@ -101,7 +114,7 @@ const withSmokePage = async (browser, base, contextOptions, check) => {
     const origin = new URL(base).origin;
     page.on("requestfailed", (request) => {
       const reason = request.failure()?.errorText || "";
-      if (request.method() === "GET" && new URL(request.url()).origin === origin && reason !== "net::ERR_ABORTED") {
+      if (request.method() === "GET" && new URL(request.url()).origin === origin && runnerNetError(reason)) {
         lost.push(`${new URL(request.url()).pathname} (${reason || "failed"})`);
       }
     });

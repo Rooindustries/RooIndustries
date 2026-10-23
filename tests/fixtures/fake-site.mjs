@@ -39,6 +39,10 @@ export const startSite = (overrides = {}) => {
       return res.end("busy");
     }
     if (overrides.hang?.includes(url.pathname)) return;
+    if (overrides.redirectLoop?.includes(url.pathname)) {
+      res.writeHead(302, { Location: url.pathname });
+      return res.end();
+    }
     if (overrides.resetFetchMidBody?.includes(url.pathname) && !/Mozilla/.test(req.headers["user-agent"] || "")) {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.write("<!doctype html><html><body><h1>partial");
@@ -58,6 +62,7 @@ export const startSite = (overrides = {}) => {
       return res.end(REFERRAL_SCRIPT);
     }
     if (url.pathname === "/packages") {
+      if (overrides.cspScriptBlock) res.setHeader("Content-Security-Policy", "script-src 'none'");
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       return res.end(packagesPage(overrides.packages));
     }
