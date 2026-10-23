@@ -175,6 +175,31 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       });
     });
 
+    test("expired other-tab reservation: Check again that finds the slot gone keeps the typed details", async ({ page, flow }) => {
+      await page.clock.install();
+      await flow.reserve();
+      await flow.details();
+      const original = { ...await hold(page), phase: "payment_pending", paymentStartedElsewhere: true };
+      await page.evaluate(value => sessionStorage.setItem("my_slot_hold", JSON.stringify(value)), original);
+      await page.reload();
+      await page.clock.fastForward(21 * 60 * 1000);
+      await expect(page.getByRole("alert").filter({ hasText: "This reservation expired. Use Check again to choose a slot again." })).toBeVisible();
+      await page.route("**/api/holdSlot", route => route.fulfill({
+        status: 409, contentType: "application/json",
+        body: JSON.stringify({ ok: false, message: "This slot is currently reserved by someone else." }),
+      }));
+      await page.getByRole("button", { name: "Check again", exact: true }).click();
+      await expect.poll(() => hold(page)).toBeNull();
+      await expect(page.getByRole("alert").filter({ hasText: "The reservation expired. Please choose a slot again." })).toBeVisible();
+      const draft = await page.evaluate(() => JSON.parse(sessionStorage.getItem("booking_draft") || "null"));
+      expect(Object.values(draft?.packages || {}).map(entry => entry?.form?.email)).toContain("visitor@example.invalid");
+      await page.unroute("**/api/holdSlot");
+      flow.state.holds.clear();
+      await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+      await page.getByRole("button", { name: "Next", exact: true }).last().click();
+      await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveValue("visitor@example.invalid");
+    });
+
     test("same-slot payment pending keeps credentials and returns to details", async ({ page, flow }) => {
       await flow.reserve();
       await flow.details();

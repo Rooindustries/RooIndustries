@@ -344,7 +344,7 @@ export default async function handler(req, res) {
     const expiresAt = new Date(now + HOLD_DURATION_MS).toISOString();
 
     if (isHoldActive(existingHold, now)) {
-      const mayRefresh =
+      const verifyOwner = (ignoreExpiry) =>
         previousHoldId === holdId &&
         verifyHoldToken({
           token: previousHoldToken,
@@ -354,15 +354,18 @@ export default async function handler(req, res) {
           backend:
             existingHold.backendOwner,
           cutoverGeneration: Number(existingHold.cutoverGeneration || 0),
+          ignoreExpiry,
         });
+      const mayRefresh = verifyOwner(false);
       if (
         String(existingHold.phase || "").trim().toLowerCase() ===
         "payment_pending"
       ) {
+        // Starting payment extends the hold but not the copy another tab kept, so that copy only has to match.
         return res.status(409).json({
           ok: false,
           message: "This slot already has a payment session in progress.",
-          ...(mayRefresh ? { code: "hold_payment_in_progress" } : {}),
+          ...(verifyOwner(true) ? { code: "hold_payment_in_progress" } : {}),
         });
       }
       if (!mayRefresh) {
