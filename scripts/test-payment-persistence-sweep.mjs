@@ -715,11 +715,14 @@ try{
       assert.ok(beforeRefundLedger.every(dispatch=>dispatch.revision_matches&&dispatch.hash_matches));
       const emailRequests=providerRequests.filter(request=>request.path==='/emails').length;
       assert.equal(emailRequests,2);
+      const beforeRefundPayment=(await row(saved._id)).payload;
+      assert.equal(beforeRefundPayment.emailDispatch.allSent,true);
       const refunded=provider==='paypal'
         ?await requestFlow('paypal',{req:paypalReq('PAYMENT.CAPTURE.REFUNDED',{id:'refund-final',status:'COMPLETED',supplementary_data:{related_ids:{order_id:'order-fixture',capture_id:'capture-fixture'}},amount:{value:'5.00',currency_code:'USD'}})})
         :await requestFlow('razorpay',{req:razorReq('refund.processed',{refund:{entity:{id:'refund-final',payment_id:'payment-fixture',status:'processed',amount:500,currency:'USD'}}})});
       assert.equal(refunded.status,200,JSON.stringify(refunded));
       const terminalPayment=(await row(saved._id)).payload,terminalBooking=(await row(booking._id)).payload;
+      assert.deepEqual(terminalPayment.emailDispatch,beforeRefundPayment.emailDispatch);
       assert.equal(terminalPayment.refundState,'full');
       assert.equal(terminalPayment.refundProcessedAmountInSubunits,999);
       assert.equal(terminalBooking.status,'refunded');
@@ -766,7 +769,7 @@ try{
       const rebuilds=await a1RebuildProof(`fix-c-legacy-${provider}-later-full`);
       assert.deepEqual(await emailLedger(),terminalLedger);
       assert.deepEqual(await refundLedger(),terminalRefunds);
-      fullProof={refunded,beforeRefundLedger,terminalPayment,terminalBooking,refreshedBooking,terminalLedger,terminalRefunds,replays,rebuilds,rowMetadata,emailRequests,
+      fullProof={refunded,beforeRefundPayment,beforeRefundLedger,terminalPayment,terminalBooking,refreshedBooking,terminalLedger,terminalRefunds,replays,rebuilds,rowMetadata,emailRequests,
         staleLegacyPartialSnapshotCannotDowngradeFull:true,noReplayEmailAttempt:true};
     }
     return{fullProof,result,recovered,committedBeforeRecovery,booking,saved,ledger,replay,partialGrantAndCommissionPolicyPreserved:true,duplicateRefundAccountingUnchanged:true,standIn:'Imported active sanity-owned hold in native store; no live legacy incidence or Sanity engine claimed'};
