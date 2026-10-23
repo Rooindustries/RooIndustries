@@ -3575,6 +3575,19 @@ export const cancelPaymentSession = async ({
   let record = resolved.record;
   const status = String(record.status || "").trim().toLowerCase();
   if (status === PAYMENT_STATUS_ABANDONED) {
+    if (record.resourceReleasePending === true) {
+      const message = "Your payment is still being released. Please try again.";
+      return {
+        httpStatus: 202,
+        body: {
+          ...await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record) }),
+          ok: false,
+          cancelled: false,
+          recoveryReason: message,
+          error: message,
+        },
+      };
+    }
     return {
       httpStatus: 200,
       body: {

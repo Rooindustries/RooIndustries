@@ -1781,6 +1781,33 @@ try{
     return { responses, unchanged };
   });
 
+  for (const pending of [true, false]) await run(`confirmation-cancel-release-${pending ? 'pending' : 'complete'}`, async () => {
+    const holdId = 'slotHold.pending-cancel';
+    const expiresAt = pending ? '2099-01-01T10:00:00.000Z' : '2020-01-01T10:00:00.000Z';
+    const payment = await seed('paypal', 'abandoned', { record: {
+      bookingId: '',
+      resourceReleasePending: pending,
+      holdSnapshot: { slotHoldId: holdId, slotHoldToken: 'fixture-hold-token', slotHoldExpiresAt: expiresAt },
+    } });
+    await commerce.create({
+      _id: holdId, _type: 'slotHold', startTimeUTC: '2099-01-01T10:00:00.000Z',
+      packageTitle: 'Vertex Essentials', holdNonce: 'fixture-hold-owner', paymentProvider: 'paypal',
+      expiresAt, phase: pending ? 'holding' : 'released',
+      paymentRecordId: pending ? payment._id : '', backendOwner: 'supabase', cutoverGeneration: 0,
+    });
+    if (pending) await commerce.patch(holdId).set({ phase: 'payment_pending' }).commit();
+    const before = await snapshot();
+    const response = await requestFlow('cancel', { paymentAccessToken: tokenFor(payment) });
+    const after = await snapshot();
+    const proof = { pending, response, before, after };
+    fs.writeFileSync(`${artifact}.cancel-release-${pending ? 'pending' : 'complete'}.json`, JSON.stringify(proof, null, 2));
+    assert.equal(response.status, pending ? 202 : 200, JSON.stringify(response));
+    assert.equal(response.body.cancelled, !pending);
+    assert.equal(response.body.ok, !pending);
+    assert.deepEqual(after, before);
+    return proof;
+  });
+
   await run('confirmation-summary-captured-cancel', async () => {
     const checkout = await a1Start('paypal');
     const initial = (await row(checkout.id)).payload;

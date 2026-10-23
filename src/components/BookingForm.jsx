@@ -2264,9 +2264,9 @@ export default function BookingForm() {
     }
   };
 
-  const handleLockAndGoNext = async (recheckOtherTab = false) => {
-    // Check again always asks the server, even past the deadline: the other tab's payment may still be running.
-    const recheckingPayment = recheckOtherTab === true && paymentInOtherTab;
+  const handleLockAndGoNext = async (recheckPayment = false) => {
+    // Check again always asks the server, even past the deadline: payment may still be running.
+    const recheckingPayment = recheckPayment === true && isPaymentPendingHold;
     if (isPaymentPendingHold && !recheckingPayment) {
       const message = "Your payment session is already in progress. Return to payment to finish it.";
       if (myHold.startTimeUTC === selectedSlot?.utcStart?.toISOString()) {
@@ -3344,7 +3344,7 @@ export default function BookingForm() {
                           <button
                             type="button"
                             onClick={releasePaymentSession}
-                            disabled={releasingPayment}
+                            disabled={releasingPayment || lockingSlot}
                             className="w-full min-w-0 rounded-lg border border-danger-border bg-danger-soft py-3 font-semibold text-danger-text transition hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60"
                           >
                             {releasingPayment
@@ -3354,6 +3354,7 @@ export default function BookingForm() {
                           <button
                             type="button"
                             onClick={returnToPayment}
+                            disabled={releasingPayment || lockingSlot}
                             className="ri-booking-primary glow-button inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg py-3 font-semibold transition"
                           >
                             Return to payment
@@ -3361,6 +3362,14 @@ export default function BookingForm() {
                             <span className="glow-line glow-line-right" />
                             <span className="glow-line glow-line-bottom" />
                             <span className="glow-line glow-line-left" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleLockAndGoNext(true)}
+                            disabled={lockingSlot || releasingPayment}
+                            className="w-full min-w-0 rounded-lg bg-surface-input py-3 font-semibold transition hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60 booking-actions-wide"
+                          >
+                            {lockingSlot ? "Checking reservation..." : "Check again"}
                           </button>
                         </>
                         )
