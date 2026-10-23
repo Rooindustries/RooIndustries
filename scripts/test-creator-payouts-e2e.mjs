@@ -557,6 +557,7 @@ try {
     return { conflict, booking, earnings: await summary(state.creator, ['full-refund', 'admin-cancel'].includes(outcome) ? 0 : 5.5) };
   });
 
+  const zeroCounterStart = states.length;
   for (const lost of ['dispute_lost', 'dispute_accepted', 'dispute_expired']) for (const counter of ['zero', 'missing']) for (const outcome of ['won-cycle', 'cancelled-cycle', 'full-refund', 'legacy-snapshot', 'legacy-full-refund']) await run(`ROO-509-zero-counter-${lost}-${counter}-${outcome}`, async () => {
     const state = await seed('dodo', { count: 0 });
     if (counter === 'missing') await documents.patch(state.creator._id).unset(['successfulReferrals']).commit();
@@ -610,6 +611,25 @@ try {
     assert.equal(booking.dodoReferralReversedAfterDispute, false);
     return { first, paidBooking, booking, creator: await documents.getDocument(state.creator._id), earnings: await summary(state.creator, 5.5) };
   });
+  if (states.length > zeroCounterStart) {
+    await run('ROO-509-zero-counter-projections', async () => {
+      const snapshot = async () => ({
+        bookings: await sql`select legacy_sanity_id, booking_payload, status from commerce.bookings order by legacy_sanity_id`,
+        creators: await sql`select legacy_sanity_id, payload from migration.source_documents where document_type='referral' and tombstoned=false order by legacy_sanity_id`,
+      });
+      const before = await snapshot();
+      const after = {};
+      for (const rpc of ['roo_project_operational_shadow', 'roo_refresh_operational_shadow']) {
+        assert.equal((await fixture.client.rpc(rpc)).error, null);
+        after[rpc] = await snapshot(); assert.deepEqual(after[rpc], before);
+      }
+      return { before, after };
+    });
+    for (const state of states.slice(zeroCounterStart)) {
+      const record = await read(state.record._id);
+      if (record?.bookingId) await commerce.delete(record.bookingId);
+    }
+  }
 
   await run('ROO-509-open-partial-refund-then-won', async () => {
     const state = await seed('dodo');
