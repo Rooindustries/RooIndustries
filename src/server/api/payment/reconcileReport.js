@@ -343,23 +343,14 @@ const checkBooking = ({ payment, record, booking, refunded, pricing }) => {
     (refunded > 0 && booking.refundCurrency != null && booking.refundCurrency !== payment.currency)
   )
     return "refund_not_applied";
-  for (const dispute of payment.disputes) {
-    if (
-      !dispute?.dispute_id ||
-      dispute.payment_id !== payment.payment_id ||
-      dispute.currency !== payment.currency ||
-      !DISPUTE_STATUSES.includes(dispute.dispute_status) ||
-      !["pre_dispute", "dispute", "pre_arbitration"].includes(dispute.dispute_stage)
-    )
-      throw unavailable();
-  }
   const disputed = openDispute(payment);
+  const cancelledDuringDispute = booking.status === "cancelled" && payment.disputes.length > 0;
   if (disputed && booking.status !== "refunded" && booking.dodoDisputeActive !== true)
     return "dispute_not_applied";
   if (!disputed && booking.dodoDisputeActive === true) return "dispute_not_applied";
-  if (!fullRefund && !disputed && !KEPT_BOOKING_STATUSES.includes(booking.status))
+  if (!fullRefund && !disputed && !cancelledDuringDispute && !KEPT_BOOKING_STATUSES.includes(booking.status))
     return "payment_record_mismatch";
-  if (disputed && !["pending", "refunded"].includes(booking.status)) return "dispute_not_applied";
+  if (disputed && !cancelledDuringDispute && !["pending", "refunded"].includes(booking.status)) return "dispute_not_applied";
   const referralCode =
     booking.referralCode == null
       ? ""
@@ -386,10 +377,11 @@ const checkBooking = ({ payment, record, booking, refunded, pricing }) => {
     disputed || fullRefund || !KEPT_BOOKING_STATUSES.includes(booking.status)
       ? 0
       : Math.round(pricing.commission * (1 - refunded / payment.total_amount));
-  if (commission !== null && commission > expected) return "commission_exceeds_kept_share";
+  const payableCommission = fullRefund || (cancelledDuringDispute && !disputed) ? 0 : commission;
+  if (payableCommission !== null && payableCommission > expected) return "commission_exceeds_kept_share";
   if (
     commission === null ||
-    commission !== expected ||
+    payableCommission !== expected ||
     booking.commissionPercent !== pricing.percent ||
     (refunded > 0 && !fullRefund && !hasOriginalCommission) ||
     usesEarningsFallback ||
@@ -500,17 +492,43 @@ export const buildReconcileReport = async ({
     const booking =
       suppliedBooking ||
       (await getDocument("booking", bookingId, bookings));
-    if (!booking) {
-      return mismatch(record._id, "payment_without_booking");
-    }
     const refunded = await refundedCents(dodo, payment);
-    const reason = checkBooking({ payment, record, booking, refunded, pricing });
-    checkedBookingIds.add(booking._id);
-    if (reason) return mismatch(booking._id, reason);
+    for (const dispute of payment.disputes) {
+      if (
+        !dispute?.dispute_id ||
+        dispute.payment_id !== payment.payment_id ||
+        dispute.currency !== payment.currency ||
+        !DISPUTE_STATUSES.includes(dispute.dispute_status) ||
+        !["pre_dispute", "dispute", "pre_arbitration"].includes(dispute.dispute_stage)
+      )
+        throw unavailable();
+    }
+    if (!booking) {
+      if (
+        bookingId ||
+        refunded !== payment.total_amount ||
+        record.status !== "refunded" ||
+        record.refundState !== "full" ||
+        record.refundProcessedAmountInSubunits !== refunded ||
+        record.refundCurrency !== payment.currency ||
+        record.refundRequiresBookingSync !== false ||
+        record.resourceReleasePending === true ||
+        record.providerRecoveryTerminal === true ||
+        record.reconciliationRecoveryTerminal === true ||
+        record.recoveryReason ||
+        record.refundBookingSync?.bookingId !== "" ||
+        record.refundBookingSync?.releasedUnbookedPaymentResources !== true
+      )
+        return mismatch(record._id, "payment_without_booking");
+    } else {
+      const reason = checkBooking({ payment, record, booking, refunded, pricing });
+      checkedBookingIds.add(booking._id);
+      if (reason) return mismatch(booking._id, reason);
+    }
     const keys = [
       entityKey("payment", payment.payment_id),
       entityKey("record", record._id),
-      entityKey("booking", booking._id),
+      ...(booking ? [entityKey("booking", booking._id)] : []),
     ];
     if (keys.includes("scan:identity-invalid"))
       return finish(unresolved({

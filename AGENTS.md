@@ -28,6 +28,8 @@ Sentry (project `rooindustries-website`) gets Node server and browser errors whe
 
 External DSNs require HTTPS; HTTP is allowed only for loopback fixtures. Invalid environment labels become `unknown` before SDK initialization. Automatic release-health sessions are disabled. Network breadcrumbs and HTTP client spans keep only the method, status and origin, so payment IDs in URL paths stay private. Caught-error reports keep the static label before any `: ` suffix and only unambiguous stack frames; local console logs keep the full label.
 
+On monitored commerce routes, a failed response coalesces internal error logs and automatic request-error capture into one event with a fixed route message and sanitized stack. Other logged errors and separate metric-store failures retain their existing reporting. Request contexts stay separate, and an error marker applies only to its reported route (`src/lib/monitoring/commerce.js`, `src/lib/monitoring/server.js`, `instrumentation.js`).
+
 Check monitoring with `npm run test:monitoring`. `npm run test:monitoring:startup` builds and starts an isolated production fixture with a malformed DSN; the homepage must stay available and the reporting endpoint must stay off. Both use local fixtures with production traffic blocked.
 
 ## How we ship
@@ -213,6 +215,8 @@ Webhook delivery:
   - decrements the creator's `successfulReferrals`.
   - (`src/server/api/ref/bookingRefunds.js:228-314`)
 - Commission counts only `captured` and `completed` bookings, so a fully refunded booking earns none. (`src/server/api/ref/payoutUtils.js:87-93`, `supabase/migrations/20260712092342_close_supabase_port_and_unified_auth.sql:1513`)
+- The daily audit accepts historical commission on fully refunded bookings as zero earnings. A full refund before booking is clean only with a validated full provider refund and a local refunded record whose refund sync and resource release completed; a missing linked booking or unfinished refund stays unresolved. (`src/server/api/payment/reconcileReport.js:379-388,494-530`, regression cases `reconcile-report-processed-full-refund-*` and `reconcile-report-unbooked-refund-*` in `scripts/test-payment-persistence-sweep.mjs`)
+- An admin cancellation preserved during a provider dispute stays cancelled after it closes and earns nothing, even if historical commission returns. The audit requires the provider dispute and local active flag to agree and retains binding, pricing and owner-review checks. (`src/server/api/payment/reconcileReport.js`, regression cases `reconcile-report-admin-cancel-*` in `scripts/test-payment-persistence-sweep.mjs`)
 - Refund accounting applies once:
   - full refunds through `refundAccountingAppliedAt`;
   - non-Dodo partial refunds through `processedRefundIds`;

@@ -9,6 +9,7 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { installNetworkGuard, refuseEnvFiles } from './lib/test-target-safety.mjs';
+import { logSafeError } from '../src/server/safeErrorLog.js';
 
 refuseEnvFiles();
 const require = createRequire(import.meta.url);
@@ -37,8 +38,10 @@ let reportPaymentMismatches;
 let sdk;
 let restoreGuard;
 let error;
+let onRequestError;
 let origin;
 let nativeReport;
+const reusedError = new Error('Reusable fixture error');
 const check = (name, fn) => {
   try { fn(); checks.push({ name, passed: true }); }
   catch (cause) { checks.push({ name, passed: false, error: cause.message }); throw cause; }
@@ -82,14 +85,29 @@ const server = http.createServer(async (request, response) => {
       request: new Request(requestUrl, { method: 'POST', body: raw, headers: {
         'content-type': 'application/json', authorization: 'Bearer fixture-private-token',
       } }),
-      handler: (_req, res) => {
-        if (request.headers['x-fixture-throw']) throw new Error('buyer@example.invalid fixture-private-token');
+      handler: async (_req, res) => {
+        const error = request.headers['x-fixture-reuse']
+          ? requestUrl.pathname === '/api/unmonitored' ? new Error('Reusable fixture error', { cause: reusedError }) : reusedError
+          : new Error('buyer@example.invalid fixture-private-token');
+        error.code = 'fixture_safe';
+        for (let index = 0; index < Number(request.headers['x-fixture-log'] || 0); index++) logSafeError('Fixture checkout failure', error);
+        if (request.headers['x-fixture-background']) setTimeout(() => logSafeError('Fixture background failure', error), 50);
+        if (request.headers['x-fixture-delay']) await new Promise(resolve => setTimeout(resolve, 50));
+        if (request.headers['x-fixture-throw']) throw error;
         return res.status(status).json({ ok: status < 400, private: privateValues });
       },
     });
     response.writeHead(result.status);
     response.end(await result.text());
-  } catch {
+  } catch (error) {
+    if (request.headers['x-fixture-instrument']) {
+      sdk.withScope(scope => {
+        scope.addEventProcessor(event => ({ ...event, request: { url: String(requestUrl) } }));
+        sdk.captureException(error, { mechanism: { type: 'auto.function.nextjs.route_handler', handled: false } });
+      });
+      await onRequestError(error, { path: requestUrl.pathname, method: 'POST', headers: {} }, { routerKind: 'App Router', routePath: requestUrl.pathname, routeType: 'route' });
+      await sdk.flush(2000);
+    }
     response.writeHead(500);
     response.end('{}');
   }
@@ -130,10 +148,12 @@ try {
   const { startServerMonitoring } = await import('../src/lib/monitoring/server.js');
   ({ runLegacyApiHandler } = await import('../src/lib/nextApiAdapter.js'));
   ({ reportPaymentMismatches } = await import('../src/lib/monitoring/commerce.js'));
-  startServerMonitoring(`http://fixture@127.0.0.1:${server.address().port}/1`);
-  const send = (route, status, throws = false) => fetch(`${origin}${route}?token=fixture-private-token`, {
+  process.env.NEXT_PUBLIC_SENTRY_DSN = `http://fixture@127.0.0.1:${server.address().port}/1`;
+  startServerMonitoring(process.env.NEXT_PUBLIC_SENTRY_DSN);
+  ({ onRequestError } = await import('../instrumentation.js'));
+  const send = (route, status, throws = false, headers = {}) => fetch(`${origin}${route}?token=fixture-private-token`, {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-fixture-status': String(status),
-      ...(throws ? { 'x-fixture-throw': '1' } : {}) }, body: JSON.stringify({ email: privateValues[0] }),
+      ...(throws ? { 'x-fixture-throw': '1' } : {}), ...headers }, body: JSON.stringify({ email: privateValues[0] }),
   });
   for (const [route, surface] of [
     ['/api/payment/quote', 'checkout'], ['/api/payment/start', 'checkout'],
@@ -164,6 +184,56 @@ try {
     await (await send('/api/payment/start', status)).body.cancel();
     check(`expected HTTP ${status} does not alert`, () => assert.equal(events.length, before));
   }
+  const beforeLogged = events.length;
+  await send('/api/payment/quote', 503, false, { 'x-fixture-log': '2' });
+  check('handled failures coalesce internal error logs into one commerce event', () => {
+    assert.equal(events.length, beforeLogged + 1);
+    assert.equal(events.at(-1).tags.commerce_route, '/api/payment/quote');
+    assert.equal(events.at(-1).exception.values[0].value, 'Commerce route failed');
+    assert.ok(events.at(-1).exception.values[0].stacktrace.frames.length > 0);
+  });
+  const beforeParallel = events.length;
+  await Promise.all([
+    send('/api/payment/quote', 503, false, { 'x-fixture-log': '1', 'x-fixture-delay': '1' }),
+    send('/api/payment/start', 503, false, { 'x-fixture-log': '1' }),
+  ]);
+  check('parallel request errors retain one separate event for each route', () => {
+    assert.equal(events.length, beforeParallel + 2);
+    assert.deepEqual(events.slice(beforeParallel).map(event => event.tags.commerce_route).sort(), ['/api/payment/quote', '/api/payment/start']);
+  });
+  const beforeSuccessfulLog = events.length;
+  await send('/api/payment/quote', 200, false, { 'x-fixture-log': '1' });
+  await sdk.flush(2000);
+  check('an internal logged error on a successful response retains existing reporting', () => {
+    assert.equal(events.length, beforeSuccessfulLog + 1);
+    assert.equal(events.at(-1).tags.error_code, 'fixture_safe');
+    assert.equal(events.at(-1).tags.commerce_route, undefined);
+  });
+  for (const status of [200, 503]) {
+    const beforeBackground = events.length;
+    await send('/api/payment/quote', status, false, { 'x-fixture-background': '1' });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await sdk.flush(2000);
+    check(`a background log after HTTP ${status} follows the completed request outcome`, () => {
+      assert.equal(events.length, beforeBackground + 1);
+      assert.equal(events.at(-1).tags.commerce_route, status === 503 ? '/api/payment/quote' : undefined);
+    });
+  }
+  const beforeInstrumented = events.length;
+  const instrumented = await send('/api/payment/quote', 500, true, { 'x-fixture-log': '1', 'x-fixture-instrument': '1' });
+  check('a logged thrown error is not captured again by Next instrumentation', () => {
+    assert.equal(instrumented.status, 500);
+    assert.equal(events.length, beforeInstrumented + 1);
+    assert.equal(events.at(-1).tags.commerce_route, '/api/payment/quote');
+  });
+  const beforeReuse = events.length;
+  await send('/api/payment/quote', 500, true, { 'x-fixture-reuse': '1', 'x-fixture-instrument': '1' });
+  await send('/api/unmonitored', 500, true, { 'x-fixture-reuse': '1', 'x-fixture-instrument': '1' });
+  check('a new error wrapping an earlier commerce failure retains ordinary reporting on another route', () => {
+    assert.equal(events.length, beforeReuse + 2);
+    assert.equal(events.at(-1).exception.values[0].value, 'Reusable fixture error');
+    assert.equal(events.at(-1).tags?.commerce_route, undefined);
+  });
   await send('/api/payment/quote', 500, true);
   check('a thrown route failure alerts and preserves HTTP 500', () => {
     assert.equal(events.at(-1).tags.error_status, '500');

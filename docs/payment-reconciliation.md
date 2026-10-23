@@ -61,6 +61,22 @@ That ceiling is a hard lifetime limit for a complete scan, even if every
 listed payment is healthy. Detail reads run in groups of eight, retain list
 order and share in-flight reads for repeated identities.
 
+Fully refunded bookings earn no referral commission, even when they keep a
+historical commission amount. A full refund before booking is clean only when
+the provider's validated refund total matches the payment and the local record
+confirms completed refund synchronization and released resources. A payment
+without a booking still needs investigation if its refund is partial or
+unfinished, or its record points to a missing booking.
+An admin cancellation preserved during a dispute stays cancelled after the
+dispute closes and earns no referral commission. The audit accepts that state
+only after the provider dispute and local booking flags agree.
+
+The provider must return readable, valid details before the audit can establish
+ownership and completeness. An unreadable or malformed account payment makes
+the report unavailable, even if another payment is known to need attention.
+The daily job records that failure and keeps existing issues open; it never
+treats the unreadable payment as unrelated or reports a clean scan.
+
 Run `npm run test:reconcile-payments` for repeatable local HTTP and CLI
 fixtures. Test mode requires a private HTTP origin and an explicit fake-CLI
 handshake. It refuses the production URL and does not use real Linear.
@@ -74,6 +90,9 @@ Checkout, webhook and booking routes report handled server errors as well as
 thrown errors. Expected client errors, such as a slot conflict or an invalid
 signature, do not send a route alert. Sentry delivery has a two-second limit
 and cannot change the route's result.
+Internal logs and automatic exception capture for the same failed route share
+one route event, retaining a sanitized stack. Successful responses and separate
+metric-store errors keep their existing error reporting.
 
 Local test and preview servers must unset Sentry DSNs, including server and
 public/client aliases, or use a loopback collector. The maintained local

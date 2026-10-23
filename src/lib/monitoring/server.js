@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { captureEvent, captureException, flush, httpIntegration, init } from "@sentry/nextjs";
+import { deferCommerceError, isReportedCommerceError } from "./commerce.js";
 import {
   NO_DATA_COLLECTION,
   envelopeHeaderScrubber,
@@ -8,6 +9,24 @@ import {
   scrubBreadcrumb,
   scrubEvent,
 } from "./scrub";
+
+const safeException = (message, error, name = "Error") => {
+  const report = new Error(message);
+  report.name = name;
+  const frames = [];
+  try {
+    const stack = error?.stack;
+    const head = Error.prototype.toString.call(error);
+    if (typeof stack === "string" && stack.startsWith(`${head}\n`)) {
+      for (const line of stack.slice(head.length + 1).split("\n")) {
+        if (!/^\s+at /.test(line)) break;
+        frames.push(line);
+      }
+    }
+  } catch {}
+  report.stack = [`${report.name}: ${message}`, ...frames].join("\n");
+  return report;
+};
 
 export function startServerMonitoring(value) {
   const dsn = monitoringDsn(value);
@@ -23,7 +42,7 @@ export function startServerMonitoring(value) {
       ...integrations.filter((integration) => integration.name !== "ProcessSession"),
       httpIntegration({ sessions: false, disableIncomingRequestSpans: true }),
     ],
-    beforeSend: scrubEvent,
+    beforeSend: (event, hint) => isReportedCommerceError(hint?.originalException, event.request?.url) ? null : scrubEvent(event),
     beforeSendTransaction: scrubEvent,
     beforeBreadcrumb: scrubBreadcrumb,
   });
@@ -31,7 +50,9 @@ export function startServerMonitoring(value) {
   globalThis[Symbol.for("roo.reportCommerceAlert")] = async (alert) => {
     try {
       if (alert.kind === "route") {
+        const exception = alert.error ? await client.eventFromException(safeException("Commerce route failed", alert.error), {}) : {};
         captureEvent({
+          ...exception,
           level: "error",
           message: "Commerce route failed",
           fingerprint: ["commerce-route", alert.route, String(alert.status)],
@@ -56,23 +77,12 @@ export function startServerMonitoring(value) {
     } catch {}
   };
   globalThis[Symbol.for("roo.reportServerError")] = (label, error, metadata) => {
-    try {
-      const message = label.split(": ", 1)[0];
-      const report = new Error(message);
-      report.name = metadata.name;
-      const frames = [];
+    const send = () => {
       try {
-        const stack = error?.stack;
-        const head = Error.prototype.toString.call(error);
-        if (typeof stack === "string" && stack.startsWith(`${head}\n`)) {
-          for (const line of stack.slice(head.length + 1).split("\n")) {
-            if (!/^\s+at /.test(line)) break;
-            frames.push(line);
-          }
-        }
+        const report = safeException(label.split(": ", 1)[0], error, metadata.name);
+        captureException(report, { tags: { error_code: metadata.code, error_status: String(metadata.status) } });
       } catch {}
-      report.stack = [`${report.name}: ${message}`, ...frames].join("\n");
-      captureException(report, { tags: { error_code: metadata.code, error_status: String(metadata.status) } });
-    } catch {}
+    };
+    if (!deferCommerceError(send, error)) send();
   };
 }

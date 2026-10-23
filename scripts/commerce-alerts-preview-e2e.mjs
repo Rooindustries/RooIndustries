@@ -14,7 +14,7 @@ import { localMonitoringEnv } from './lib/local-monitoring-env.mjs';
 refuseEnvFiles();
 const artifact = resolve(process.env.ROO_COMMERCE_PREVIEW_ARTIFACT || 'test-results/commerce-alerts-preview');
 await mkdir(artifact, { recursive: true });
-const host = process.env.ROO_TEST_HOST || '127.0.0.1';
+const host = 'localhost';
 const events = [];
 const checks = [];
 const processes = [];
@@ -165,6 +165,12 @@ try {
     });
     await relay.body?.cancel();
     await stop(entry);
+    if (mode === 'local') check('each actual commerce route failure sends one event alongside separate metric-store errors', () => {
+      const routeEvents = events.slice(before).filter(event => event.message !== 'Local browser relay fixture' &&
+        event.exception?.values?.[0]?.value !== 'Commerce metric recording failed');
+      assert.equal(routeEvents.length, 3);
+      assert.ok(routeEvents.every(event => event.tags?.commerce_route));
+    });
     restoreGuard();
     restoreGuard = undefined;
   }

@@ -1552,7 +1552,13 @@ try {
         if (kind === 'stale') current.window.at = '2020-01-01T00:00:00.000Z';
         if (kind === 'status') current.sourceStatus = 503;
         if (kind === 'count') current.reportedCount = 17;
-        assert.notEqual((await invoke(home)).code, 0);
+        const result = await invoke(home);
+        assert.notEqual(result.code, 0);
+        if (kind === 'status') {
+          assert.equal(JSON.parse(result.stdout).result, 'unavailable');
+          assert.equal(result.alert.severity, 'amber');
+          assert.match(current.updates[0].body, /unavailable/i);
+        }
         assert.equal(issue.status, 'Backlog');
         assert.ok(!writes().some((call) => JSON.stringify(call.args).includes('customer@example.invalid')));
       });
