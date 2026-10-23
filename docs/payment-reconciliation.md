@@ -63,15 +63,24 @@ A just-settled old checkout therefore waits for its webhook or reconciliation
 to finish. During that grace period, daily findings omit it and targeted checks
 return unknown, keeping existing issues open. Explicit terminal owner-review
 records still alert immediately because their automatic processing has stopped.
-If the optional update timestamp is absent or null, the audit uses creation
-and available child timestamps; it cannot infer an unreported transition time.
+If the optional update timestamp is absent or null, a matching server-confirmed
+local capture can supply its last update time. A pending start or finalization
+lease is not capture proof. Without reliable transition evidence, targeted
+checks remain unknown and the window reports incomplete coverage; creation
+time alone cannot establish settlement age. The endpoint writes no observation
+record. Such a payment stays deferred until trustworthy timing becomes available.
 Malformed or materially future timestamps make the report unavailable.
-The 72-hour `from` value applies to the reverse
-booking scan and recently changed owner-review records, including exhausted
-booking recovery. Either terminal flag keeps a record awaiting recovery unresolved
+The 72-hour `from` value applies to the reverse booking scan.
+Stopped owner-review records, including exhausted booking recovery, are
+discovered regardless of update age. Either terminal flag keeps a record unresolved
 in daily and targeted checks. The two flag scans share a deduplicated limit of
 200 records and report incomplete coverage when that limit is exceeded. Each
-payment is read again before comparison. The scan stops after 2,000 listed payments and reports
+positive database filter also requires its field to exist before the limit is
+applied. Ordinary records without recovery flags cannot crowd out terminal
+records; the same presence rule applies to booking scan fields.
+Age affects response priority only: recent booking findings stay ahead of old
+terminal findings, which remain visible up to the response limit.
+Each payment is read again before comparison. The scan stops after 2,000 listed payments and reports
 incomplete coverage if that limit is reached; it cannot report clean then.
 That ceiling is a hard lifetime limit for a complete scan, even if every
 listed payment is healthy. Detail reads run in groups of eight, retain list
@@ -116,11 +125,20 @@ Booked refunds remain unresolved until the payment record agrees with the
 provider's cumulative refund total, currency and full or partial state, and
 confirms completed booking synchronization. Updating the booking alone cannot
 close its issue while that record still has pending or inconsistent refund work.
+After a completed full refund before booking, positive targeted proof contains
+the payment and record identities with `recovery: unbooked_full_refund`. The
+daily job accepts that pair only for this explicit recovery type and only when
+the issue has no known booking identity. Booked payments use `recovery: booking`
+and require all three identity types. Missing types, duplicates, incomplete or
+conflicting identity sets cannot close issues.
 Pending, failed and review refunds with no succeeded amount do not change earnings.
 The audit follows the existing writers' exact cent rounding. Creation with a
 partial refund and later refund or dispute updates use their existing operation
 order; no one-cent tolerance is applied. Invalid writer markers cannot prove
 recovery, and a cent above or below the matching writer result still alerts.
+Stored financial proof must also be an exact cent amount. Extra precision in
+pricing, commission, supplied totals or refunds stays unresolved instead of
+being rounded into a match. Ordinary cent values such as 0.29 remain valid.
 Historical reschedule recovery can intentionally omit a referral reference to
 preserve earlier accounting. The audit accepts only that documented shape:
 preserved accounting, no pending reconstruction, a reschedule booking and no
@@ -157,9 +175,11 @@ metric-store errors keep their existing error reporting.
 Local test and preview servers must unset Sentry DSNs, including server and
 public/client aliases, or use a loopback collector. The maintained local
 launcher removes inherited aliases and hosting markers and accepts only a
-loopback DSN. Monitoring accepts external HTTPS DSNs in Production and hosted
-Vercel Preview builds. A public build marker comes from Vercel's hosting flag
-and a production build; local Preview keeps external reporting off. Keep builds
+loopback DSN. External server reporting requires `NODE_ENV=production`,
+`VERCEL=1` and `VERCEL_ENV=production` together. Hosted Preview, CI and a local
+production build do not qualify. Initialization, automatic request capture and
+commerce alerts share this gate; explicit loopback collectors remain available.
+Browser build and relay deployment gating belongs to ROO-719. Keep builds
 isolated so a previous build cannot retain a public DSN. Never use real Sentry
 issues or notifications as local test fixtures. Production notification
 activation stays with release.
@@ -178,6 +198,11 @@ reads it through the payment report route, runs the daily check twice and
 checks the Sentry transport. Results go to `test-results/commerce-alerts/`.
 The owner issue and daily update are reused on the second attempt. The check
 also confirms the audit left payment and booking records unchanged.
+The same command runs the deployment gate E2E with a fictional `.invalid` DSN
+under transport and DNS guards, then three production-labelled route events
+against a loopback collector. Its native reports also reach the daily command
+after a signed pre-booking refund, on initial discovery of old terminal records,
+after a four-day gap, and across local-capture grace without provider timestamps.
 `npm run test:commerce-alerts:routes` runs the route and transport checks
 without Postgres. Both commands use local services and fake reporting accounts.
 The daily bridge accepts up to 60 seconds of server clock lead; reports older

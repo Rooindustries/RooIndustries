@@ -4,7 +4,7 @@ import { deferCommerceError, isReportedCommerceError } from "./commerce.js";
 import {
   NO_DATA_COLLECTION,
   envelopeHeaderScrubber,
-  monitoringDsn,
+  serverMonitoringDsn,
   monitoringEnvironment,
   scrubBreadcrumb,
   scrubEvent,
@@ -29,7 +29,7 @@ const safeException = (message, error, name = "Error") => {
 };
 
 export function startServerMonitoring(value) {
-  const dsn = monitoringDsn(value);
+  const dsn = serverMonitoringDsn(value);
   if (!dsn) return;
   const client = init({
     dsn,
@@ -49,6 +49,7 @@ export function startServerMonitoring(value) {
   client?.on("beforeEnvelope", envelopeHeaderScrubber(client.getDsn()?.publicKey, monitoringEnvironment()));
   globalThis[Symbol.for("roo.reportCommerceAlert")] = async (alert) => {
     try {
+      if (!serverMonitoringDsn(dsn)) return;
       if (alert.kind === "route") {
         const exception = alert.error ? await client.eventFromException(safeException("Commerce route failed", alert.error), {}) : {};
         captureEvent({
@@ -79,6 +80,7 @@ export function startServerMonitoring(value) {
   globalThis[Symbol.for("roo.reportServerError")] = (label, error, metadata) => {
     const send = () => {
       try {
+        if (!serverMonitoringDsn(dsn)) return;
         const report = safeException(label.split(": ", 1)[0], error, metadata.name);
         captureException(report, { tags: { error_code: metadata.code, error_status: String(metadata.status) } });
       } catch {}

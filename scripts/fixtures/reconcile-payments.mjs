@@ -57,6 +57,7 @@ const windowReport = (items = [], complete = {}) => {
 };
 const check = (key, state = 'unknown', observations = [], aliases = [key]) => ({
   key, state, keys: [...new Set([key, ...aliases])], items: observations,
+  ...(state === 'recovered' ? { recovery: 'booking' } : {}),
 });
 const recovered = (key, id = 'fixture') => check(key, 'recovered', [], [
   'payment:' + id, 'record:record.' + id, 'booking:booking.' + id,
@@ -723,6 +724,69 @@ try {
         assert.equal(metadata(current.issues[0]).observations[0].reason, entry.reason);
         if (identity) assert.equal(current.issues[0].uuid, identity);
         identity = current.issues[0].uuid;
+      }
+    });
+  }
+  if (process.env.ROO_RECONCILE_UNBOOKED_REFUND_REPORT) {
+    const proof = JSON.parse(fs.readFileSync(process.env.ROO_RECONCILE_UNBOOKED_REFUND_REPORT, 'utf8'));
+    for (const primary of proof.targeted.body.checks.map(entry => entry.key)) await run('actual-unbooked-refund-' + primary.split(':')[0], async (home) => {
+      const issue = seedIssue(primary);
+      current.window = proof.before.window.body;
+      for (const entry of proof.before.targeted.body.checks) current.checks[entry.key] = entry;
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(issue.status, 'Backlog');
+      assert.equal(metadata(issue).observations[0].reason, 'payment_without_booking');
+      current.window = proof.window.body;
+      for (const entry of proof.targeted.body.checks) current.checks[entry.key] = entry;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const result = await invoke(home);
+        assert.equal(result.code, 0, result.stdout);
+        assert.equal(JSON.parse(result.stdout).result, 'clear');
+        assert.equal(issue.status, 'Done');
+        assert.equal(metadata(issue).state, 'recovered');
+        assert.deepEqual(new Set(metadata(issue).keys), new Set(proof.targeted.body.checks[0].keys));
+        assert.equal(current.issues.length, 1);
+        assert.equal(current.updates.length, 1);
+      }
+    });
+  }
+  if (process.env.ROO_RECONCILE_REVIEW_REPORT) {
+    const proof = JSON.parse(fs.readFileSync(process.env.ROO_RECONCILE_REVIEW_REPORT, 'utf8'));
+    const receipt = report => {
+      const { at, from, to } = windowReport();
+      return { ...report, at, from, to };
+    };
+    for (const terminal of proof.terminals) for (const gap of [false, true]) await run(`old-terminal-${terminal.flag}-${gap ? 'outage' : 'install'}`, async (home) => {
+      if (gap) {
+        assert.equal((await invoke(home)).code, 0);
+        assert.equal(current.issues.length, 0);
+        current.date = new Date(Date.parse(today) + 4 * 86400000).toISOString().slice(0, 10);
+      }
+      current.window = receipt(terminal.window.body);
+      for (const entry of terminal.targeted.body.checks) current.checks[entry.key] = entry;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const result = await invoke(home);
+        assert.equal(result.code, 0);
+        assert.equal(JSON.parse(result.stdout).result, 'mismatch');
+        assert.equal(current.issues.length, 1);
+        assert.equal(metadata(current.issues[0]).primary, terminal.targeted.body.checks[0].key);
+        assert.equal(metadata(current.issues[0]).observations[0].reason, 'owner_review_unknown');
+        assert.equal(current.issues[0].status, 'Backlog');
+      }
+    });
+    for (const settlement of proof.settlements) await run('recent-success-' + settlement.update, async (home) => {
+      current.window = receipt(settlement.window.body);
+      for (const entry of settlement.targeted.body.checks) current.checks[entry.key] = entry;
+      assert.equal((await invoke(home)).code, 0);
+      assert.equal(current.issues.length, 0);
+      current.window = receipt(settlement.mature.body);
+      for (const entry of settlement.matureTargets.body.checks) current.checks[entry.key] = entry;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const result = await invoke(home);
+        assert.equal(result.code, 0);
+        assert.equal(JSON.parse(result.stdout).result, 'mismatch');
+        assert.equal(current.issues.length, 1);
+        assert.equal(metadata(current.issues[0]).observations[0].reason, 'payment_without_booking');
       }
     });
   }
@@ -1723,6 +1787,62 @@ try {
       current.checks['payment:fixture'] = check('payment:fixture', 'recovered', [], ['payment:fixture']);
       assert.notEqual((await invoke(home)).code, 0);
       assert.equal(issue.status, 'Backlog');
+    });
+    for (const primary of ['payment:fixture', 'record:record.fixture']) await run('recovered-unbooked-' + primary.split(':')[0], async (home) => {
+      const issue = seedIssue(primary);
+      current.checks[primary] = check(primary, 'recovered', [], ['payment:fixture', 'record:record.fixture']);
+      current.checks[primary].recovery = 'unbooked_full_refund';
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const result = await invoke(home);
+        assert.equal(result.code, 0, result.stdout);
+        assert.equal(JSON.parse(result.stdout).result, 'clear');
+        assert.equal(issue.status, 'Done');
+        assert.equal(metadata(issue).state, 'recovered');
+        assert.deepEqual(new Set(metadata(issue).keys), new Set(['payment:fixture', 'record:record.fixture']));
+        assert.equal(current.issues.length, 1);
+        assert.equal(current.updates.length, 1);
+      }
+    });
+    for (const state of ['open', 'completed', 'archived']) await run('unbooked-refund-known-booking-' + state, async (home) => {
+      const primary = 'payment:fixture';
+      const issue = seedIssue(primary, state === 'open' ? {} : { status: 'Done', statusType: 'completed', archivedAt: state === 'archived' ? iso() : null },
+        { keys: [primary, 'record:record.fixture', 'booking:known-booking'] });
+      const originalStatus = issue.status;
+      current.checks[primary] = { ...check(primary, 'recovered', [], [primary, 'record:record.fixture']), recovery: 'unbooked_full_refund' };
+      const result = await invoke(home);
+      assert.equal(result.code, 0);
+      assert.equal(JSON.parse(result.stdout).result, 'incomplete');
+      assert.equal(issue.status, originalStatus);
+      assert.notEqual(metadata(issue).state, 'recovered');
+      assert.ok(metadata(issue).keys.includes('booking:known-booking'));
+    });
+    for (const [name, primary, keys] of [
+      ['missing-record', 'payment:fixture', ['payment:fixture', 'booking:booking.fixture']],
+      ['missing-payment', 'record:record.fixture', ['record:record.fixture', 'booking:booking.fixture']],
+      ['same-type', 'payment:fixture', ['payment:fixture', 'payment:other']],
+      ['duplicate', 'payment:fixture', ['payment:fixture', 'record:record.fixture', 'record:record.fixture']],
+      ['extra', 'payment:fixture', ['payment:fixture', 'record:record.fixture', 'booking:booking.fixture', 'record:other']],
+      ['missing-requested', 'payment:fixture', ['payment:other', 'record:record.other']],
+      ['unsafe', 'payment:fixture', ['payment:fixture', 'record:bad alias']],
+    ]) await run('invalid-recovery-aliases-' + name, async (home) => {
+      const issue = seedIssue(primary);
+      current.checks[primary] = { key: primary, state: 'recovered', recovery: 'unbooked_full_refund', keys, items: [] };
+      assert.notEqual((await invoke(home)).code, 0);
+      assert.equal(issue.status, 'Backlog');
+      assert.notEqual(metadata(issue).state, 'recovered');
+    });
+    for (const kind of ['absent', 'unknown', 'booking', 'unbooked-with-booking', 'unknown-state']) await run('invalid-recovery-kind-' + kind, async (home) => {
+      const primary = 'payment:fixture';
+      const issue = seedIssue(primary);
+      const proof = check(primary, 'recovered', [], ['payment:fixture', 'record:record.fixture']);
+      if (kind === 'absent') delete proof.recovery;
+      if (kind === 'unknown') proof.recovery = 'unknown';
+      if (kind === 'unbooked-with-booking') { proof.recovery = 'unbooked_full_refund'; proof.keys.push('booking:booking.fixture'); }
+      if (kind === 'unknown-state') { proof.state = 'unknown'; proof.keys = [primary]; }
+      current.checks[primary] = proof;
+      assert.notEqual((await invoke(home)).code, 0);
+      assert.equal(issue.status, 'Backlog');
+      assert.notEqual(metadata(issue).state, 'recovered');
     });
     await run('pagination', async (home) => {
       current.pageSize = 2;

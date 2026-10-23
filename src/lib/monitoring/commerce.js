@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { serverMonitoringDsn } from "./scrub.js";
 
 const stateKey = Symbol.for("roo.commerceRequestState");
 const state = globalThis[stateKey] ||= { requests: new AsyncLocalStorage(), errors: new WeakMap() };
@@ -62,6 +63,7 @@ export function isReportedCommerceError(error, url) {
 
 export async function reportCommerceFailure(url, status, error) {
   try {
+    if (!serverMonitoringDsn(process.env.NEXT_PUBLIC_SENTRY_DSN)) return;
     const route = new URL(url).pathname;
     const surface = routes.get(route);
     if (!surface || status < 500 || status > 599) return;
@@ -85,6 +87,7 @@ export async function reportCommerceFailure(url, status, error) {
 
 export async function reportPaymentMismatches(report) {
   try {
+    if (!serverMonitoringDsn(process.env.NEXT_PUBLIC_SENTRY_DSN)) return;
     const items = report.items.map(({ key, reason }) => ({ key, reason }));
     if (items.length) {
       await globalThis[Symbol.for("roo.reportCommerceAlert")]?.({ kind: "reconciliation", items });

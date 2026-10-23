@@ -55,17 +55,19 @@ def report_base:
   and .complete.items == (.count <= 50);
 def valid_window:
   report_base and .mode == "window" and .checks == [];
-def canonical_aliases:
-  type == "array" and length == 3 and distinct
+def canonical_aliases($recovery):
+  type == "array" and distinct
   and all(.[];target_key)
-  and ([.[]|split(":")[0]]|sort) == ["booking","payment","record"];
+  and ([.[]|split(":")[0]]|sort) ==
+    (if $recovery == "unbooked_full_refund" then ["payment","record"]
+     elif $recovery == "booking" then ["booking","payment","record"] else [] end);
 def valid_check:
-  exact(["key","state","keys","items"]) and (.key | target_key)
+  exact(["key","state","keys","items"] + (if .state == "recovered" then ["recovery"] else [] end)) and (.key | target_key)
   and (.keys | type == "array" and distinct and all(.[];source_key))
   and (. as $c | .keys | index($c.key) != null)
   and (.items | type == "array" and all(.[];safe_item(false)) and distinct)
   and (
-    if .state == "recovered" then .items == [] and (.keys | canonical_aliases)
+    if .state == "recovered" then .items == [] and (. as $c | .keys | canonical_aliases($c.recovery))
     elif .state == "unknown" then .items == [] and .keys == [.key]
     elif .state == "unresolved" then (.items | length) > 0
       and (. as $c | all(.items[]; .key as $key | $c.keys | index($key) != null))
@@ -148,10 +150,13 @@ def with_comment($issue;$run):
   end;
 def closed: .statusType == "completed" or .statusType == "canceled";
 def outcome($checks;$issue): first($checks[]|select(.key==$issue.primary)) // null;
+def recovered_for($issue):
+  . != null and .state == "recovered" and
+  (.recovery != "unbooked_full_refund" or all(($issue.meta.keys // [])[]; startswith("booking:")|not));
 def candidates($issues;$checks;$key):
   [$issues[] as $issue | outcome($checks;$issue) as $proof |
     select($issue.primary==$key or ($proof!=null and $proof.state!="unknown" and ($proof.keys|index($key)!=null))
-      or (($issue.meta.keys // [] | index($key)!=null) and ($proof==null or $proof.state!="recovered"))) |
+      or (($issue.meta.keys // [] | index($key)!=null) and (($proof|recovered_for($issue))|not))) |
     {issue:$issue,verified:($issue.primary==$key or ($proof!=null and $proof.state!="unknown" and ($proof.keys|index($key)!=null)))}];
 def select_targets($window):
   [.[]|select(.primary|target_key)|select(.invalidMetadata|not)] |
@@ -194,7 +199,7 @@ def plan($window;$issues;$checks;$sourceOK;$targetsOK;$coverage;$run;$at):
       ([$source[]|.key as $key|select($key==$issue.primary or ($proof!=null and ($proof.keys|index($key)!=null)))]|length)==0 and
       (if $issue.primary|startswith("scan:") then
         scan_recovered($issue.primary;$window;$sourceOK;$targetsOK;$coverage;$ambiguous)
-       else $proof!=null and $proof.state=="recovered" end))|not) |
+       else $proof|recovered_for($issue) end))|not) |
     $issue] as $held |
   ($coverage and ($held|length)==0) as $effectiveCoverage |
   operation_faults($window;$sourceOK;$targetsOK;$effectiveCoverage;$ambiguous) as $ops |
@@ -209,7 +214,7 @@ def plan($window;$issues;$checks;$sourceOK;$targetsOK;$coverage;$run;$at):
     ($sourceOK and $targetsOK and ($negative|length)==0 and ($related|length)==0 and ($blocked|not) and
       (if $issue.primary|startswith("scan:") then
         scan_recovered($issue.primary;$window;$sourceOK;$targetsOK;$effectiveCoverage;$ambiguous)
-       else $proof!=null and $proof.state=="recovered" end)) as $recovered |
+       else $proof|recovered_for($issue) end)) as $recovered |
     (if ($negative|length)>0 then "unresolved"
      elif $recovered then "recovered"
      elif $proof!=null and $proof.state=="unknown" then "unknown"

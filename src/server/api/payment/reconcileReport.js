@@ -176,11 +176,15 @@ const listDodoPayments = async ({ dodo, to, deadline }) => {
 const readDocuments = async (client, type, options, deadline) => {
   checkBudget(deadline);
   if (!client.shadowClient) throw unavailable();
+  const filters = options.filters || [];
   const documents = await fetchShadowDocuments({
     client: client.shadowClient,
     documentTypes: [type],
     allowLegacyFallback: false,
     ...options,
+    filters: [...new Set(filters.map((filter) => filter.path))]
+      .map((path) => ({ path, op: "defined" }))
+      .concat(filters.filter((filter) => filter.op !== "defined")),
   });
   checkBudget(deadline);
   return documents;
@@ -207,7 +211,8 @@ const moneyCents = (value) =>
   typeof value === "number" &&
   Number.isFinite(value) &&
   value >= 0 &&
-  Number.isSafeInteger(Math.round(value * 100))
+  Number.isSafeInteger(Math.round(value * 100)) &&
+  value === Math.round(value * 100) / 100
     ? Math.round(value * 100)
     : null;
 
@@ -295,13 +300,19 @@ const retrievePayment = async (dodo, paymentId, allowMissing, deadline) => {
   return payment;
 };
 
-const paymentReadyForAudit = (payment, now) => {
+const paymentReadyForAudit = (payment, now, record) => {
   const observedAt = Math.max(now, Date.now());
   const updates = [
     payment.updated_at,
     ...payment.refunds.map((refund) => refund?.created_at),
     ...payment.disputes.map((dispute) => dispute?.created_at),
   ].filter((value) => value != null);
+  const localCapture = record?.provider === "dodo" &&
+    record.providerPaymentId === payment.payment_id &&
+    record.providerOrderId === payment.checkout_session_id &&
+    (record.verificationState === "server_verified" ||
+      ["captured_client", "captured_webhook", "booked", "email_partial", "refunded"].includes(record.status));
+  if (payment.updated_at == null && localCapture && record.updatedAt != null) updates.push(record.updatedAt);
   const timestamps = [payment.created_at, ...updates].map((value) => {
     if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(value))
       throw unavailable();
@@ -309,6 +320,7 @@ const paymentReadyForAudit = (payment, now) => {
     if (!Number.isFinite(timestamp) || timestamp > observedAt + 60000) throw unavailable();
     return timestamp;
   });
+  if (payment.updated_at == null && (!localCapture || record.updatedAt == null)) return null;
   return Math.max(...timestamps) <= now - SETTLE_MINUTES * 60 * 1000;
 };
 
@@ -366,13 +378,13 @@ const checkBooking = ({ payment, record, booking, refunded, pricing }) => {
   if (
     moneyCents(booking.grossAmount) !== pricing.gross ||
     moneyCents(booking.netAmount) !== pricing.net ||
-    (booking.dodoTotalAmount != null && cents(booking.dodoTotalAmount) !== payment.total_amount) ||
+    (booking.dodoTotalAmount != null && moneyCents(booking.dodoTotalAmount) !== payment.total_amount) ||
     (booking.currency != null && booking.currency !== payment.currency)
   )
     return "amount_mismatch";
   const fullRefund = refunded === payment.total_amount;
   if (
-    cents(booking.refundedAmount) !== refunded ||
+    (booking.refundedAmount == null ? 0 : moneyCents(booking.refundedAmount)) !== refunded ||
     (fullRefund && booking.status !== "refunded") ||
     (refunded > 0 && booking.refundStatus !== (fullRefund ? "full" : "partial")) ||
     (refunded === 0 && ["full", "partial"].includes(booking.refundStatus)) ||
@@ -513,6 +525,7 @@ export const buildReconcileReport = async ({
   const records = new Map();
   const bookings = new Map();
   const checkedBookingIds = new Set();
+  let transitionUnknown = false;
   const getDocument = async (type, id, cache) => {
     if (!id) return null;
     if (!cache.has(id)) {
@@ -546,8 +559,13 @@ export const buildReconcileReport = async ({
     };
     const mismatch = (ref, reason) => finish(unresolved({ ...base, ref, reason }));
     const terminal = record && isTerminalRecovery(record);
-    if (!terminal && !paymentReadyForAudit(payment, now))
-      return finish(unknown());
+    if (!terminal) {
+      const ready = paymentReadyForAudit(payment, now, record);
+      if (!ready) {
+        if (ready === null) transitionUnknown = true;
+        return finish(unknown());
+      }
+    }
     if (!record || record.provider !== "dodo") {
       return mismatch(suppliedBooking?._id || record?._id || "", "payment_without_record");
     }
@@ -619,6 +637,7 @@ export const buildReconcileReport = async ({
       }));
     return finish({
       state: "recovered",
+      recovery: booking ? "booking" : "unbooked_full_refund",
       keys: [...new Set(keys)],
       items: [],
     });
@@ -705,8 +724,6 @@ export const buildReconcileReport = async ({
             { path: "provider", op: "eq", value: "dodo" },
             { path: flag, op: "eq", value: true },
             { path: "status", op: "ieq", value: "needs_recovery" },
-            { path: "updatedAt", op: "gte", value: from },
-            { path: "updatedAt", op: "lte", value: new Date(now).toISOString() },
           ],
           limit: MAX_BOOKING_LOOKUPS + 1,
         }, deadline),
@@ -720,11 +737,10 @@ export const buildReconcileReport = async ({
     for (const record of terminalRecords.slice(0, MAX_BOOKING_LOOKUPS)) {
       if (
         record.provider !== "dodo" ||
-        !isTerminalRecovery(record) ||
-        !inWindow(record.updatedAt, from, new Date(now).toISOString())
+        !isTerminalRecovery(record)
       )
         continue;
-      recentRefs.add(record._id);
+      if (inWindow(record.updatedAt, from, new Date(now).toISOString())) recentRefs.add(record._id);
       terminalReview(record);
     }
 
@@ -771,7 +787,6 @@ export const buildReconcileReport = async ({
         { path: "paymentProvider", op: "eq", value: "dodo" },
         { path: "status", op: "in", value: window.statuses },
         ...(window.refund ? [{ path: "refundStatus", op: "in", value: ["full", "partial"] }] : []),
-        { path: window.path, op: "defined" },
         { path: window.path, op: "gte", value: from },
         { path: window.path, op: "lte", value: window.to },
       ],
@@ -800,7 +815,7 @@ export const buildReconcileReport = async ({
       } else await auditPayment(payment, booking);
     }
 
-    return finishWindow({ payments: !truncated, bookings: !bookingCap, records: !recordCap });
+    return finishWindow({ payments: !truncated && !transitionUnknown, bookings: !bookingCap, records: !recordCap });
   } catch (error) {
     if (error?.code !== "reconcile_report_budget_exceeded") throw error;
     if (checks.length) {

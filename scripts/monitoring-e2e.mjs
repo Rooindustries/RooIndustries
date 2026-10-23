@@ -241,8 +241,8 @@ try {
   delete process.env.NEXT_PUBLIC_SENTRY_HOSTED;
   check('local preview refuses an inherited external DSN at the HTTP relay', (await post(envelope(dsn, 'fixture-local-external'))).status, 404);
   process.env.NEXT_PUBLIC_SENTRY_HOSTED = '1';
-  check('hosted preview retains HTTPS configuration without external delivery', monitoringDsn(process.env.NEXT_PUBLIC_SENTRY_DSN), 'https://fixturekey@public.invalid/42');
-  check('hosted preview relay validates the configured DSN instead of disabling reporting', (await post(envelope(dsn, 'fixture-hosted-wrong-project'))).status, 400);
+  check('hosted preview refuses external reporting configuration', monitoringDsn(process.env.NEXT_PUBLIC_SENTRY_DSN) ?? null, null);
+  check('hosted preview relay stays disabled for external reporting', (await post(envelope(dsn, 'fixture-hosted-wrong-project'))).status, 404);
   process.env.NEXT_PUBLIC_SENTRY_DSN = dsn;
   process.env.NEXT_PUBLIC_VERCEL_ENV = previousEnvironment;
   if (previousHosted === undefined) delete process.env.NEXT_PUBLIC_SENTRY_HOSTED;

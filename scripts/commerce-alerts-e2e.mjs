@@ -49,6 +49,8 @@ let graceReport;
 let priorityReport;
 let terminalProof;
 let transitionReport;
+let unbookedRefundProof;
+let reviewProof;
 const reusedError = new Error('Reusable fixture error');
 const check = (name, fn) => {
   try { fn(); checks.push({ name, passed: true }); }
@@ -123,14 +125,31 @@ const server = http.createServer(async (request, response) => {
 
 try {
   if (!process.argv.includes('--routes')) {
+    const gateArtifact = join(artifact, 'deployment-gate');
+    await child('scripts/commerce-monitoring-gate-e2e.mjs', [], { ROO_COMMERCE_GATE_ARTIFACT: gateArtifact }, 'deployment-gate.log');
+    const gate = JSON.parse(await readFile(join(gateArtifact, 'report.json'), 'utf8'));
+    check('hosted preview, CI and local start make no external monitoring attempt; production flags preserve three local route events', () => {
+      assert.equal(gate.ok, true);
+      assert.equal(gate.results.length, 4);
+      assert.ok(gate.results.every(result => result.attempts.length === 0 && result.servicesStopped));
+      assert.equal(gate.results.find(result => result.mode === 'production').events.length, 3);
+    });
     const nativeArtifact = join(artifact, 'payment-persistence.json');
+    const nativeScenarios = [
+      'reconcile-report-payment-without-booking', 'reconcile-report-late-capture-without-booking',
+      'reconcile-report-late-capture-without-record', 'reconcile-report-transition-grace-settlement',
+      'reconcile-report-recent-priority-50-reverse', 'reconcile-report-terminal-identity-providerRecoveryTerminal',
+      'reconcile-report-old-refund-transition-full', 'reconcile-report-processed-full-refund-unbooked',
+      'reconcile-report-review-old-terminal-providerRecoveryTerminal', 'reconcile-report-review-old-terminal-reconciliationRecoveryTerminal',
+      'reconcile-report-review-recent-success-omitted', 'reconcile-report-review-recent-success-null',
+    ];
     await child('scripts/test-payment-persistence-sweep.mjs', [
-      '--full-chain', '--scenario=reconcile-report-payment-without-booking,reconcile-report-late-capture-without-booking,reconcile-report-late-capture-without-record,reconcile-report-transition-grace-settlement,reconcile-report-recent-priority-50-reverse,reconcile-report-terminal-identity-providerRecoveryTerminal,reconcile-report-old-refund-transition-full',
+      '--full-chain', '--scenario=' + nativeScenarios.join(','),
     ], { ROO_PAYMENT_PERSISTENCE_ARTIFACT: nativeArtifact }, 'payment-persistence.log');
     const result = JSON.parse(await readFile(nativeArtifact, 'utf8'));
     assert.equal(result.ok, true);
     check('late captures without a booking or a payment record remain visible', () => {
-      assert.equal(result.scenarios.length, 7);
+      assert.equal(result.scenarios.length, 12);
       assert.ok(result.scenarios.every(scenario => scenario.passed));
     });
     nativeReport = result.scenarios.find(scenario => scenario.name === 'reconcile-report-payment-without-booking').proof.report;
@@ -138,17 +157,33 @@ try {
     priorityReport = result.scenarios.find(scenario => scenario.name === 'reconcile-report-recent-priority-50-reverse').proof.report;
     terminalProof = result.scenarios.find(scenario => scenario.name === 'reconcile-report-terminal-identity-providerRecoveryTerminal').proof;
     transitionReport = result.scenarios.find(scenario => scenario.name === 'reconcile-report-old-refund-transition-full').proof.report.body;
+    unbookedRefundProof = result.scenarios.find(scenario => scenario.name === 'reconcile-report-processed-full-refund-unbooked').proof;
+    reviewProof = {
+      terminals: result.scenarios.filter(scenario => scenario.name.startsWith('reconcile-report-review-old-terminal-')).map(scenario => scenario.proof),
+      settlements: result.scenarios.filter(scenario => scenario.name.startsWith('reconcile-report-review-recent-success-')).map(scenario => scenario.proof),
+    };
     await writeFile(join(artifact, 'seeded-report.json'), JSON.stringify(nativeReport, null, 2));
     await writeFile(join(artifact, 'grace-report.json'), JSON.stringify(graceReport, null, 2));
     await writeFile(join(artifact, 'priority-report.json'), JSON.stringify(priorityReport, null, 2));
     await writeFile(join(artifact, 'terminal-report.json'), JSON.stringify(terminalProof, null, 2));
     await writeFile(join(artifact, 'transition-report.json'), JSON.stringify(transitionReport, null, 2));
-    await child('scripts/fixtures/reconcile-payments.mjs', ['--case=seeded-payment-alert,recent-findings-survive-history,terminal-identity-reuse,terminal-identity-reuse-legacy,recent-refund-alert'], {
+    await writeFile(join(artifact, 'unbooked-refund-report.json'), JSON.stringify(unbookedRefundProof, null, 2));
+    await writeFile(join(artifact, 'review-report.json'), JSON.stringify(reviewProof, null, 2));
+    const dailyCases = [
+      'seeded-payment-alert', 'recent-findings-survive-history', 'terminal-identity-reuse', 'terminal-identity-reuse-legacy',
+      'recent-refund-alert', 'actual-unbooked-refund-payment', 'actual-unbooked-refund-record',
+      'old-terminal-providerRecoveryTerminal-install', 'old-terminal-providerRecoveryTerminal-outage',
+      'old-terminal-reconciliationRecoveryTerminal-install', 'old-terminal-reconciliationRecoveryTerminal-outage',
+      'recent-success-omitted', 'recent-success-null',
+    ];
+    await child('scripts/fixtures/reconcile-payments.mjs', ['--case=' + dailyCases.join(',')], {
       ROO_RECONCILE_SEED_REPORT: join(artifact, 'seeded-report.json'),
       ROO_RECONCILE_GRACE_REPORT: join(artifact, 'grace-report.json'),
       ROO_RECONCILE_PRIORITY_REPORT: join(artifact, 'priority-report.json'),
       ROO_RECONCILE_TERMINAL_REPORT: join(artifact, 'terminal-report.json'),
       ROO_RECONCILE_TRANSITION_REPORT: join(artifact, 'transition-report.json'),
+      ROO_RECONCILE_UNBOOKED_REFUND_REPORT: join(artifact, 'unbooked-refund-report.json'),
+      ROO_RECONCILE_REVIEW_REPORT: join(artifact, 'review-report.json'),
       ROO_RECONCILE_TEST_ARTIFACT: join(artifact, 'daily-check'),
     }, 'daily-check.log');
     const daily = JSON.parse(await readFile(join(artifact, 'daily-check/results.json'), 'utf8'));
@@ -158,6 +193,21 @@ try {
       assert.equal(result.issues.length, 1);
       assert.equal(result.runs.length, 3);
       assert.equal(daily.externalRequests, 0);
+    });
+    check('a signed full refund without a booking closes either retained owner identity and stays closed on retry', () => {
+      const results = daily.results.filter(result => result.name.startsWith('actual-unbooked-refund-'));
+      assert.equal(results.length, 2);
+      assert.ok(results.every(result => result.passed && result.issues.length === 1 && result.issues[0].status === 'Done' && result.runs.length === 3));
+    });
+    check('both old terminal flags create one owner issue on installation or after a four-day gap', () => {
+      const results = daily.results.filter(result => result.name.startsWith('old-terminal-'));
+      assert.equal(results.length, 4);
+      assert.ok(results.every(result => result.passed && result.issues.length === 1));
+    });
+    check('omitted and null provider update times wait for actual local capture grace before the daily owner alert', () => {
+      const results = daily.results.filter(result => result.name.startsWith('recent-success-'));
+      assert.equal(results.length, 2);
+      assert.ok(results.every(result => result.passed && result.issues.length === 1 && result.runs.length === 3));
     });
     check('recent booking and terminal alerts survive historical overflow and reuse owner issues', () => {
       const result = daily.results.find(result => result.name === 'recent-findings-survive-history');
@@ -334,6 +384,17 @@ try {
   const count = events.length;
   await fetch(`${origin}/reconciliation`, { method: 'POST', body: JSON.stringify({ items: [] }) });
   check('clean reports produce no mismatch alert', () => assert.equal(events.length, count));
+  if (reviewProof) {
+    const beforeGrace = events.length;
+    for (const settlement of reviewProof.settlements) await fetch(`${origin}/reconciliation`, { method: 'POST', body: JSON.stringify(settlement.window.body) });
+    check('recent captures without provider update timestamps send no mismatch during local capture grace', () => assert.equal(events.length, beforeGrace));
+    const beforeOld = events.length;
+    for (const terminal of reviewProof.terminals) await fetch(`${origin}/reconciliation`, { method: 'POST', body: JSON.stringify(terminal.window.body) });
+    check('old terminal recovery remains visible to the local Sentry collector', () => {
+      assert.ok(events.length > beforeOld);
+      assert.ok(events.slice(beforeOld).every(event => event.tags.reconciliation_reason === 'owner_review_unknown'));
+    });
+  }
   for (const reason of [
     'payment_without_record', 'payment_record_mismatch',
     'owner_review_dodo_currency_mismatch', 'owner_review_dodo_amount_mismatch',
@@ -367,6 +428,7 @@ try {
   const sourceHashes = Object.fromEntries(await Promise.all([
     'src/lib/monitoring/server.js', 'src/lib/monitoring/commerce.js', 'src/lib/nextApiAdapter.js',
     'src/server/api/payment/reconcileReport.js', 'scripts/commerce-alerts-e2e.mjs',
+    'src/lib/monitoring/deployment.mjs', 'src/lib/monitoring/scrub.js', 'instrumentation.js', 'scripts/commerce-monitoring-gate-e2e.mjs',
   ].map(async file => [file, createHash('sha256').update(await readFile(file)).digest('hex')])));
   const ok = !error && checks.length > 0 && checks.every(check => check.passed);
   await writeFile(join(artifact, 'report.json'), JSON.stringify({ ok, error, checks, events, sourceHashes,
