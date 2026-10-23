@@ -10,7 +10,7 @@ import {
 } from "../scripts/pr-auto-merge-gate.mjs";
 
 const head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const checks = () => REQUIRED_CHECKS.map((name) => ({ name, status: "completed", conclusion: "success", completedAt: "2026-10-22T00:00:00Z" }));
+const checks = () => REQUIRED_CHECKS.map((name) => ({ name, source: "check-run", app: "github-actions", status: "completed", conclusion: "success", completedAt: "2026-10-22T00:00:00Z" }));
 const approved = (author) => ({ author, bot: true, state: "APPROVED", commitSha: head, submittedAt: "2026-10-22T00:00:00Z" });
 const safe = (overrides = {}) => ({
   draft: false,
@@ -50,11 +50,50 @@ test("missing checks wait without waking before CI has reported", () => {
   assert.ok(decision.reasons.includes("checks-missing"));
 });
 
+test("required Tests jobs: green commit statuses cannot replace GitHub Actions check runs", () => {
+  const decision = decide(safe({
+    checks: REQUIRED_CHECKS.map((name) => ({ name, source: "status", status: "completed", conclusion: "success" })),
+  }));
+  assert.equal(decision.action, "wait");
+  assert.deepEqual(decision.reasons, ["checks-missing"]);
+  assert.deepEqual(decision.lines, [`Required checks have not reported on ${head.slice(0, 7)}: ${REQUIRED_CHECKS.join(", ")}.`]);
+});
+
+test("required Tests jobs: another app's green check runs cannot replace GitHub Actions check runs", () => {
+  const decision = decide(safe({
+    checks: checks().map((check) => ({ ...check, app: "some-other-app" })),
+  }));
+  assert.equal(decision.action, "wait");
+  assert.deepEqual(decision.reasons, ["checks-missing"]);
+  assert.deepEqual(decision.lines, [`Required checks have not reported on ${head.slice(0, 7)}: ${REQUIRED_CHECKS.join(", ")}.`]);
+});
+
+test("required Tests jobs: a failing status still blocks a GitHub Actions check run with the same name", () => {
+  const decision = decide(safe({
+    checks: [...checks(), { name: "Jest", source: "status", status: "completed", conclusion: "failure" }],
+  }));
+  assert.equal(decision.action, "wait");
+  assert.equal(decision.wake, true);
+  assert.deepEqual(decision.reasons, ["checks-red"]);
+  assert.deepEqual(decision.lines, [`Checks failed or were cancelled on ${head.slice(0, 7)}: Jest.`]);
+});
+
+test("required Tests jobs: another app's newer green check run cannot hide a failed GitHub Actions run", () => {
+  const decision = decide(safe({
+    checks: [
+      ...checks().map((check, index) => ({ ...check, order: 100 + index, conclusion: check.name === "Jest" ? "failure" : "success" })),
+      { name: "Jest", source: "check-run", app: "some-other-app", order: 900, status: "completed", conclusion: "success", completedAt: "2026-10-22T01:00:00Z" },
+    ],
+  }));
+  assert.equal(decision.action, "wait");
+  assert.deepEqual(decision.reasons, ["checks-red"]);
+});
+
 test("a skipped extra check stays green and a later success replaces an older failure", () => {
   const decision = decide(safe({
     checks: [
       ...checks(),
-      { name: "Jest", status: "completed", conclusion: "failure", completedAt: "2026-10-21T00:00:00Z" },
+      { name: "Jest", source: "check-run", app: "github-actions", status: "completed", conclusion: "failure", completedAt: "2026-10-21T00:00:00Z" },
       { name: "Seer Code Review", status: "completed", conclusion: "skipped", completedAt: "2026-10-22T00:00:00Z" },
     ],
   }));
@@ -255,7 +294,7 @@ test("the merge is bound to the head that was reviewed, and runs serialize", () 
 test("the newest record per check decides: a queued rerun is pending, a newer success clears an older pending status", () => {
   const rerun = [
     ...checks().map((check, index) => ({ ...check, source: "check-run", order: 100 + index })),
-    { name: "Jest", source: "check-run", order: 500, status: "queued", conclusion: null, completedAt: "" },
+    { name: "Jest", source: "check-run", app: "github-actions", order: 500, status: "queued", conclusion: null, completedAt: "" },
   ];
   assert.ok(decide(safe({ checks: rerun })).reasons.includes("checks-pending"));
   const statusHistory = [

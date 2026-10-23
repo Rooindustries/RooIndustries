@@ -68,12 +68,13 @@ export const latestChecks = (checks) => {
     const current = {
       name: check.name,
       source: check.source || "",
+      app: check.app || "",
       order: Number(check.order),
       status: check.status || "completed",
       conclusion: check.conclusion || "",
       completedAt: check.completedAt || check.startedAt || "",
     };
-    const key = JSON.stringify([current.source, current.name]);
+    const key = JSON.stringify([current.source, current.app, current.name]);
     const previous = bySource.get(key);
     if (!previous) bySource.set(key, current);
     else if (current.completedAt === previous.completedAt && !Number.isFinite(current.order)) bySource.set(key, worse(previous, current));
@@ -89,14 +90,16 @@ export const latestChecks = (checks) => {
 
 const assessChecks = (checks) => {
   const latest = latestChecks(checks);
-  const byName = new Map(latest.map((check) => [check.name, check]));
+  const actionsChecks = new Set((checks || [])
+    .filter((check) => check?.source === "check-run" && check.app === "github-actions")
+    .map((check) => check.name));
   const red = [];
   const pending = [];
   for (const check of latest) {
     if (check.status !== "completed" || (!GREEN.has(check.conclusion) && !RED.has(check.conclusion))) pending.push(check.name);
     else if (RED.has(check.conclusion)) red.push(check.name);
   }
-  const missing = REQUIRED_CHECKS.filter((name) => !byName.has(name));
+  const missing = REQUIRED_CHECKS.filter((name) => !actionsChecks.has(name));
   return { red, pending, missing };
 };
 

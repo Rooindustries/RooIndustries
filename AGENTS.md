@@ -50,6 +50,8 @@ No coding agent merges a pull request. The Grok Bot assistant does not merge one
 - CodeRabbit and Codex both approve that head, and no review thread is still open.
 - No person has an open request for changes. It stands, on any commit, until that person approves or the review is dismissed.
 
+The required Tests jobs count only as GitHub Actions check runs; a commit status or another app's check with the same name never stands in for one.
+
 Green means merge. No kind of change waits for the owner once it meets this bar: money paths, workflows, the merge gate, deploy and rollback scripts and migrations merge the same way.
 
 CodeRabbit and Codex are the two review models. CodeRabbit approves by a GitHub approval on that head with no later request for changes. Codex does not use GitHub's Approve button. Codex approves when its review-state comment records a completed review of that head with no unresolved findings. A Codex review-state comment last edited by anyone other than Codex doesn't count. Seer and the other bots do not stand in for either approval. An open finding from any of them still blocks the merge, and the owning agent clears it.

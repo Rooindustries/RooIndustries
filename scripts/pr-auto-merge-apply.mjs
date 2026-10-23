@@ -108,6 +108,7 @@ const collectSnapshot = async (number) => {
   const checks = [
     ...checkRuns.map((run) => ({
       source: "check-run",
+      app: run.app?.slug || "",
       order: run.id,
       name: run.name,
       status: run.status,
