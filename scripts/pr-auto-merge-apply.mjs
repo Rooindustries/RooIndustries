@@ -45,7 +45,7 @@ const paginate = async (path) => {
   let next = `https://api.github.com/${path}${path.includes("?") ? "&" : "?"}per_page=100`;
   while (next) {
     const { payload, headers } = await api(readToken, next);
-    items.push(...(Array.isArray(payload) ? payload : payload.check_runs || payload.statuses || []));
+    items.push(...(Array.isArray(payload) ? payload : payload.check_runs || payload.statuses || payload.workflow_runs || []));
     const link = headers.get("link") || "";
     const match = link.match(/<([^>]+)>; rel="next"/);
     next = match ? match[1] : "";
@@ -93,15 +93,29 @@ const collectThreads = async (number) => {
 
 const collectSnapshot = async (number) => {
   const { payload: pull } = await api(readToken, `repos/${repo}/pulls/${number}`);
-  const [reviews, checkRuns, commentPage, statuses, base] = await Promise.all([
+  const [reviews, checkRuns, commentPage, statuses, base, testsWorkflow, workflowRuns] = await Promise.all([
     paginate(`repos/${repo}/pulls/${number}/reviews`),
     paginate(`repos/${repo}/commits/${pull.head.sha}/check-runs`),
     paginate(`repos/${repo}/issues/${number}/comments`),
     paginate(`repos/${repo}/commits/${pull.head.sha}/statuses`),
     api(readToken, `repos/${repo}/git/ref/heads/main`),
+    api(readToken, `repos/${repo}/actions/workflows/tests.yml`),
+    paginate(`repos/${repo}/actions/runs?head_sha=${pull.head.sha}`),
   ]);
   const baseSha = base.payload?.object?.sha;
   if (!baseSha) throw new Error("GitHub did not return the main branch tip.");
+  const testsWorkflowId = testsWorkflow.payload?.id;
+  if (!Number.isSafeInteger(testsWorkflowId) || testsWorkflowId <= 0 || testsWorkflow.payload.path !== ".github/workflows/tests.yml") {
+    throw new Error("GitHub did not identify the Tests workflow.");
+  }
+  const runsBySuite = new Map(workflowRuns
+    .filter((run) => run.head_sha === pull.head.sha && Number.isSafeInteger(run.id) && run.id > 0 &&
+      Number.isSafeInteger(run.check_suite_id) && run.check_suite_id > 0 &&
+      Number.isSafeInteger(run.workflow_id) && run.workflow_id > 0)
+    .map((run) => [run.check_suite_id, run]));
+  const { payload: comparison } = await api(readToken, `repos/${repo}/compare/${baseSha}...${pull.head.sha}?per_page=1`);
+  const baseIsAncestor = comparison?.base_commit?.sha === baseSha && comparison?.merge_base_commit?.sha === baseSha &&
+    comparison?.behind_by === 0 && ["ahead", "identical"].includes(comparison?.status);
   const comments = Array.isArray(commentPage) ? commentPage : [];
   const codexComment = [...comments].reverse().find((comment) => botNamed(comment.user, "chatgpt-codex-connector") && comment.body?.includes("codex-review-state:v1"));
   const editor = codexComment ? (await graphql(`query($id: ID!) {
@@ -111,9 +125,15 @@ const collectSnapshot = async (number) => {
   const requested = ownComments.find((comment) => String(comment.body).includes(`${REVIEW_REQUEST_PREFIX}${pull.head.sha}`));
   const requestedAt = Date.parse(requested?.created_at);
   const checks = [
-    ...checkRuns.filter((run) => !(run.app?.slug === "github-actions" && run.name === "auto-merge-gate")).map((run) => ({
+    ...checkRuns.filter((run) => {
+      const workflow = runsBySuite.get(run.check_suite?.id);
+      return !(run.app?.slug === "github-actions" && run.name === "auto-merge-gate" &&
+        String(workflow?.id) === process.env.GITHUB_RUN_ID && workflow?.path === ".github/workflows/auto-merge.yml");
+    }).map((run) => ({
       source: "check-run",
       app: run.app?.slug || "",
+      workflowId: runsBySuite.get(run.check_suite?.id)?.workflow_id || null,
+      checkSuiteId: run.check_suite?.id || null,
       order: run.id,
       name: run.name,
       status: run.status,
@@ -137,6 +157,8 @@ const collectSnapshot = async (number) => {
     draft: pull.draft,
     baseRef: pull.base.ref,
     baseSha,
+    baseIsAncestor,
+    testsWorkflowId,
     headSha: pull.head.sha,
     headRef: pull.head.ref,
     sameRepository: pull.head.repo?.full_name === pull.base.repo.full_name,
@@ -202,8 +224,8 @@ const recordReviewRound = async (snapshot) => {
   });
 };
 
-const requestReviews = async (snapshot) => {
-  const mentions = "@coderabbitai review\n@codex review";
+const requestReviews = async (snapshot, reviewers) => {
+  const mentions = reviewers.map((reviewer) => reviewer === "coderabbit" ? "@coderabbitai review" : "@codex review").join("\n");
   if (process.env.AUTO_MERGE_TOKEN) {
     await api(mergeToken, `repos/${repo}/issues/${snapshot.number}/comments`, {
       method: "POST",
@@ -213,7 +235,7 @@ const requestReviews = async (snapshot) => {
   await api(readToken, `repos/${repo}/issues/${snapshot.number}/comments`, {
     method: "POST",
     body: {
-      body: `${process.env.AUTO_MERGE_TOKEN ? "Requested both reviews with the user credential." : mentions}\n${REVIEW_REQUEST_PREFIX}${snapshot.headSha} -->\n`,
+      body: `${process.env.AUTO_MERGE_TOKEN ? "Requested reviews with the user credential." : mentions}\n${REVIEW_REQUEST_PREFIX}${snapshot.headSha} -->\n`,
     },
   });
 };
@@ -261,7 +283,7 @@ const applyOne = async (number) => {
   console.log(`#${number} ${decision.action} wake=${decision.wake} ${decision.reasons.join(",")}`);
   if (decision.requestReviews) {
     const requested = snapshot.comments.some((comment) => String(comment.body).includes(`${REVIEW_REQUEST_PREFIX}${snapshot.headSha}`));
-    if (!requested) await requestReviews(snapshot);
+    if (!requested) await requestReviews(snapshot, decision.reviewers);
   }
   if (decision.reviewRound) {
     const counted = snapshot.comments.some((comment) => String(comment.body).includes(`${REVIEW_ROUND_PREFIX}${snapshot.headSha}`));

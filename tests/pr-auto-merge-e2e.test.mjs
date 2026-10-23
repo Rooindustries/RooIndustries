@@ -30,7 +30,12 @@ const baseline = () => ({
     head: { ref: "fixture-change", sha: head, repo: { full_name: repo } }, mergeable_state: "clean" },
   baseTip: "b".repeat(40),
   reviews: [{ user: bot("coderabbitai"), state: "APPROVED", commit_id: head, submitted_at: "2026-10-23T00:00:00Z" }],
-  checks: checkNames.map((name, index) => ({ id: index + 1, name, app: { slug: "github-actions" },
+  workflow: { id: 1, path: ".github/workflows/tests.yml" },
+  workflowRuns: [
+    { id: 600, workflow_id: 1, check_suite_id: 10, head_sha: head, path: ".github/workflows/tests.yml" },
+    { id: 700, workflow_id: 2, check_suite_id: 20, head_sha: head, path: ".github/workflows/auto-merge.yml" },
+  ],
+  checks: checkNames.map((name, index) => ({ id: index + 1, name, app: { slug: "github-actions" }, check_suite: { id: 10 },
     status: "completed", conclusion: "success", completed_at: "2026-10-23T00:00:00Z" })),
   statuses: [],
   comments: [{ id: 10, node_id: "codex-review", user: bot("chatgpt-codex-connector"),
@@ -39,7 +44,7 @@ const baseline = () => ({
   editor: null,
 });
 
-const runScenario = async (name, { setup, changeSecond, mergeStatus = 200, event = "pull_request_target", eventBody, useUserToken = false } = {}) => {
+const runScenario = async (name, { setup, changeSecond, mergeStatus = 200, event = "pull_request_target", eventBody, useUserToken = false, expectedCode = 0 } = {}) => {
   const state = baseline();
   setup?.(state);
   const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "pr-gate-e2e-"));
@@ -57,6 +62,20 @@ const runScenario = async (name, { setup, changeSecond, mergeStatus = 200, event
       const send = (code, payload) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(payload)); };
       if (![token, userToken].some(value => req.headers.authorization === `Bearer ${value}`)) return send(401, { message: "Unexpected fixture credential" });
       if (req.method === "GET" && url.pathname === `${prefix}/git/ref/heads/main`) return send(200, { object: { sha: state.baseTip } });
+      if (req.method === "GET" && url.pathname === `${prefix}/actions/workflows/tests.yml`) return send(200, state.workflow);
+      if (req.method === "GET" && url.pathname === `${prefix}/actions/runs`) {
+        assert.equal(url.searchParams.get("head_sha"), state.pull.head.sha);
+        if (state.workflowPageTwo && !url.searchParams.has("page")) {
+          res.setHeader("link", `<https://api.github.com${url.pathname}?head_sha=${state.pull.head.sha}&page=2>; rel="next"`);
+        }
+        return send(200, { workflow_runs: url.searchParams.has("page") ? state.workflowPageTwo : state.workflowRuns });
+      }
+      if (req.method === "GET" && url.pathname.startsWith(`${prefix}/compare/`)) {
+        assert.equal(url.pathname, `${prefix}/compare/${state.baseTip}...${state.pull.head.sha}`);
+        return send(200, state.comparison || {
+          status: "ahead", behind_by: 0, base_commit: { sha: state.baseTip }, merge_base_commit: { sha: state.baseTip },
+        });
+      }
       if (url.pathname === "/graphql") {
         if (body.query.includes("IssueComment")) return send(200, { data: { node: { editor: state.editor } } });
         return send(200, { data: { repository: { pullRequest: { reviewThreads: {
@@ -98,7 +117,7 @@ const runScenario = async (name, { setup, changeSecond, mergeStatus = 200, event
       env: { PATH: process.env.PATH, HOME: process.env.HOME, REPO: repo, GH_TOKEN: token,
         ...(useUserToken ? { AUTO_MERGE_TOKEN: userToken } : {}),
         ROO_GITHUB_FIXTURE_ORIGIN: `http://${address.address}:${address.port}`,
-        GITHUB_EVENT_NAME: event, GITHUB_EVENT_PATH: eventPath },
+        GITHUB_EVENT_NAME: event, GITHUB_EVENT_PATH: eventPath, GITHUB_RUN_ID: "700" },
       timeout: 30000,
     });
     let output = "";
@@ -108,7 +127,7 @@ const runScenario = async (name, { setup, changeSecond, mergeStatus = 200, event
     const artifact = path.join(root, "test-results/pr-auto-merge", `${name}.json`);
     await fs.mkdir(path.dirname(artifact), { recursive: true });
     await fs.writeFile(artifact, JSON.stringify({ code, output, requests }, null, 2));
-    assert.equal(code, 0, output);
+    assert.equal(code, expectedCode, output);
     const merges = requests.filter(request => request.method === "PUT");
     const comments = requests.filter(request => request.body?.body).map(request => request.body.body);
     return { merges, comments, requests, snapshots };
@@ -155,7 +174,7 @@ for (const [status, conclusion] of [["queued", null], ["in_progress", null], ["c
   test(`CLI ignores its own ${status} ${conclusion || ""} gate check on a manual dispatch`, async () => {
     const result = await runScenario(`self-check-${status}-${conclusion}`, {
       event: "workflow_dispatch", eventBody: {},
-      setup: state => state.checks.push({ id: 1000, name: "auto-merge-gate", app: { slug: "github-actions" }, status, conclusion }),
+      setup: state => state.checks.push({ id: 1000, name: "auto-merge-gate", app: { slug: "github-actions" }, check_suite: { id: 20 }, status, conclusion }),
     });
     assert.deepEqual(result.merges.map(request => request.body), [{ merge_method: "squash", sha: head }]);
   });
@@ -263,6 +282,125 @@ test("CLI requests reviews through the available user credential and records a w
   const request = result.requests.find(request => request.body?.body?.includes("@codex review"));
   assert.equal(request?.credential, "user");
   assert.ok(result.requests.some(request => request.credential === "workflow" && request.body?.body?.includes(`<!-- pr-review-request:${head}`)));
+});
+
+for (const [name, setup] of Object.entries({
+  "different-workflow-required-jobs": state => { state.workflowRuns[0].workflow_id = 3; },
+  "missing-workflow-provenance": state => { state.workflowRuns = []; },
+  "different-head-workflow": state => { state.workflowRuns[0].head_sha = "d".repeat(40); },
+  "missing-workflow-run-id": state => { delete state.workflowRuns[0].id; },
+  "missing-check-suite": state => { state.checks.forEach(check => { delete check.check_suite; }); },
+  "same-name-success-after-tests-failure": state => {
+    state.checks[0].conclusion = "failure";
+    state.workflowRuns.push({ id: 800, workflow_id: 3, check_suite_id: 30, head_sha: head });
+    state.checks.push({ ...state.checks[0], id: 1000, check_suite: { id: 30 }, conclusion: "success" });
+  },
+  "same-name-failure-after-tests-success": state => {
+    state.workflowRuns.push({ id: 800, workflow_id: 3, check_suite_id: 30, head_sha: head });
+    state.checks.unshift({ ...state.checks[0], id: 0, check_suite: { id: 30 }, conclusion: "failure" });
+  },
+  "clean-but-stale-main": state => {
+    state.comparison = { status: "diverged", behind_by: 1, base_commit: { sha: state.baseTip }, merge_base_commit: { sha: "c".repeat(40) } };
+  },
+  "missing-ancestry": state => { state.comparison = {}; },
+  "contradicting-ancestry": state => {
+    state.comparison = { status: "ahead", behind_by: 1, base_commit: { sha: state.baseTip }, merge_base_commit: { sha: state.baseTip } };
+  },
+  "wrong-comparison-base": state => {
+    state.comparison = { status: "ahead", behind_by: 0, base_commit: { sha: "c".repeat(40) }, merge_base_commit: { sha: state.baseTip } };
+  },
+})) {
+  test(`CLI refuses ${name}`, async () => {
+    const result = await runScenario(name, { setup });
+    assert.deepEqual(result.merges, []);
+  });
+}
+
+for (const [status, conclusion] of [["queued", null], ["in_progress", null], ["completed", "failure"], ["completed", "cancelled"]]) {
+  test(`CLI preserves a foreign Actions gate check that is ${status} ${conclusion || ""}`, async () => {
+    const result = await runScenario(`foreign-actions-gate-${status}-${conclusion}`, { setup: state => {
+      state.workflowRuns.push({ id: 800, workflow_id: 3, check_suite_id: 30, head_sha: head });
+      state.checks.push({ id: 1000, name: "auto-merge-gate", app: { slug: "github-actions" }, check_suite: { id: 30 }, status, conclusion });
+    } });
+    assert.deepEqual(result.merges, []);
+  });
+}
+
+test("CLI preserves a gate check from an earlier run of its own workflow", async () => {
+  const result = await runScenario("earlier-gate-run", { setup: state => {
+    state.workflowRuns.push({ ...state.workflowRuns[1], id: 699, check_suite_id: 19 });
+    state.checks.push({ id: 1000, name: "auto-merge-gate", app: { slug: "github-actions" }, check_suite: { id: 19 }, status: "completed", conclusion: "failure" });
+  } });
+  assert.deepEqual(result.merges, []);
+});
+
+test("CLI follows workflow-run pagination to establish Tests provenance", async () => {
+  const result = await runScenario("workflow-pagination", { setup: state => {
+    state.workflowPageTwo = state.workflowRuns;
+    state.workflowRuns = [];
+  } });
+  assert.equal(result.merges.length, 1);
+  assert.ok(result.requests.some(request => request.path.endsWith("/actions/runs") && request.query.includes("page=2")));
+});
+
+test("CLI rejects incomplete workflow metadata", async () => {
+  const result = await runScenario("missing-workflow-id", { expectedCode: 1, setup: state => { delete state.workflow.id; } });
+  assert.deepEqual(result.merges, []);
+});
+
+test("CLI rechecks ancestry on the final snapshot", async () => {
+  const result = await runScenario("ancestry-changed", { changeSecond: state => {
+    state.comparison = { status: "diverged", behind_by: 1, base_commit: { sha: state.baseTip }, merge_base_commit: { sha: "c".repeat(40) } };
+  } });
+  assert.equal(result.snapshots, 2);
+  assert.deepEqual(result.merges, []);
+});
+
+test("CLI rechecks Tests provenance on the final snapshot", async () => {
+  const result = await runScenario("workflow-provenance-changed", { changeSecond: state => { state.workflowRuns[0].workflow_id = 3; } });
+  assert.equal(result.snapshots, 2);
+  assert.deepEqual(result.merges, []);
+});
+
+test("CLI leaves a stale blocked branch with the owning agent", async () => {
+  const result = await runScenario("blocked-stale-branch", { setup: state => {
+    state.pull.mergeable_state = "blocked";
+    state.comparison = { status: "diverged", behind_by: 1, base_commit: { sha: state.baseTip }, merge_base_commit: { sha: "c".repeat(40) } };
+  } });
+  assert.deepEqual(result.merges, []);
+  assert.ok(result.requests.every(request => !request.body?.labels?.includes("needs-owner")));
+});
+
+test("CLI accepts an identical main and head", async () => {
+  const result = await runScenario("identical-main", { setup: state => {
+    state.baseTip = head;
+    state.comparison = { status: "identical", behind_by: 0, base_commit: { sha: head }, merge_base_commit: { sha: head } };
+  } });
+  assert.equal(result.merges.length, 1);
+});
+
+for (const useUserToken of [false, true]) {
+  for (const reviewer of ["coderabbit", "codex"]) {
+    test(`CLI requests only ${reviewer} with the ${useUserToken ? "user" : "workflow"} credential`, async () => {
+      const result = await runScenario(`request-only-${reviewer}-${useUserToken}`, { useUserToken, setup: state => {
+        if (reviewer === "coderabbit") state.reviews = [];
+        else state.comments = [];
+      } });
+      const wanted = reviewer === "coderabbit" ? "@coderabbitai review" : "@codex review";
+      const approved = reviewer === "coderabbit" ? "@codex review" : "@coderabbitai review";
+      assert.ok(result.comments.some(body => body.includes(wanted)));
+      assert.ok(result.comments.every(body => !body.includes(approved)));
+      assert.ok(result.comments.every(body => !body.includes("Requested both reviews")));
+    });
+  }
+}
+
+test("CLI includes a holding reviewer alongside a pending reviewer", async () => {
+  const result = await runScenario("request-held-and-pending", { setup: state => {
+    state.reviews[0].state = "CHANGES_REQUESTED";
+    state.comments = [];
+  } });
+  assert.ok(result.comments.some(body => body.includes("@coderabbitai review") && body.includes("@codex review")));
 });
 
 for (const expired of [false, true]) {

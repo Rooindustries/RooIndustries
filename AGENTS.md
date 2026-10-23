@@ -50,7 +50,7 @@ No coding agent merges a pull request. The Grok Bot assistant does not merge one
 - CodeRabbit and Codex both approve that head, and no review thread is still open.
 - No person has an open request for changes. It stands, on any commit, until that person approves or the review is dismissed.
 
-The required Tests jobs count only as GitHub Actions check runs; a commit status or another app's check with the same name never stands in for one.
+The required Tests jobs count only as GitHub Actions check runs from this repository's `.github/workflows/tests.yml`, matched through their workflow and check-suite identities. A commit status, another app's check or another workflow's job with the same name never stands in for one. Current `main` must be an ancestor of the PR head, as proven by the commit comparison API; `mergeable_state: clean` alone is not enough.
 
 Green means merge. No kind of change waits for the owner once it meets this bar: money paths, workflows, the merge gate, deploy and rollback scripts and migrations merge the same way.
 
@@ -62,9 +62,9 @@ When CodeRabbit and Codex do not both approve, or a review thread is still open,
 
 The workflow flags the owner only when the loop cannot finish on its own: after 8 review rounds without agreement, a requested review remains pending for 24 hours, or GitHub blocks or rejects a merge that meets the bar. Human change requests stay with the owning agent until the review cap. Flagging is a `needs-owner` label and one comment on the pull request, from the workflow. Leave the pull request open. Money-path pull requests also follow the rules in Money paths (one at a time, Sol review, the local suites) before their final push.
 
-Review mentions use `AUTO_MERGE_TOKEN` when available so integrations can receive a user-authored request. The workflow records its own receipt for that head; human-authored markers do not suppress requests. The merge snapshots read the current `main` ref directly because the PR payload's base SHA can remain older.
+Review mentions use `AUTO_MERGE_TOKEN` when available so integrations can receive a user-authored request. Only reviewers without approval on the current head are requested. The workflow records its own receipt for that head; human-authored markers do not suppress requests. The merge snapshots read the current `main` ref directly because the PR payload's base SHA can remain older.
 
-The workflow's own GitHub Actions check is named `auto-merge-gate` and is excluded from merge snapshots, including manual dispatches on a pull request branch. Every other check still counts.
+The workflow's own GitHub Actions check is named `auto-merge-gate` and is excluded from merge snapshots only when its check-suite identity belongs to the current Auto-merge workflow run, including manual dispatches on a pull request branch. Every other check still counts, including another workflow's job with that name and earlier Auto-merge runs.
 
 The workflow does not call any agent API. The owning agent finds out about a red check, a conflict, a new review or a new comment through its own pull request watch (in T3, `watch_pull_request` on that thread wakes it), fixes the branch and pushes. Keep that watch on until the pull request merges, closes, or is flagged `needs-owner`. If the watch ends or the thread is gone, the pull request has nobody waiting on it: whoever picks it up next reopens the loop with a fresh watch. The workflow only counts review rounds (a marker comment per head that still had open review work); after 8 of them it adds `needs-owner`.
 

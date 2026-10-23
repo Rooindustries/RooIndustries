@@ -10,12 +10,14 @@ import {
 } from "../scripts/pr-auto-merge-gate.mjs";
 
 const head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const checks = () => REQUIRED_CHECKS.map((name) => ({ name, source: "check-run", app: "github-actions", status: "completed", conclusion: "success", completedAt: "2026-10-22T00:00:00Z" }));
+const checks = () => REQUIRED_CHECKS.map((name) => ({ name, source: "check-run", app: "github-actions", workflowId: 1, status: "completed", conclusion: "success", completedAt: "2026-10-22T00:00:00Z" }));
 const approved = (author) => ({ author, bot: true, state: "APPROVED", commitSha: head, submittedAt: "2026-10-22T00:00:00Z" });
 const safe = (overrides = {}) => ({
   draft: false,
   sameRepository: true,
   baseRef: "main",
+  baseIsAncestor: true,
+  testsWorkflowId: 1,
   headSha: head,
   mergeableState: "clean",
   checks: checks(),
@@ -93,7 +95,7 @@ test("a skipped extra check stays green and a later success replaces an older fa
   const decision = decide(safe({
     checks: [
       ...checks(),
-      { name: "Jest", source: "check-run", app: "github-actions", status: "completed", conclusion: "failure", completedAt: "2026-10-21T00:00:00Z" },
+      { name: "Jest", source: "check-run", app: "github-actions", workflowId: 1, status: "completed", conclusion: "failure", completedAt: "2026-10-21T00:00:00Z" },
       { name: "Seer Code Review", status: "completed", conclusion: "skipped", completedAt: "2026-10-22T00:00:00Z" },
     ],
   }));
@@ -294,7 +296,7 @@ test("the merge is bound to the head that was reviewed, and runs serialize", () 
 test("the newest record per check decides: a queued rerun is pending, a newer success clears an older pending status", () => {
   const rerun = [
     ...checks().map((check, index) => ({ ...check, source: "check-run", order: 100 + index })),
-    { name: "Jest", source: "check-run", app: "github-actions", order: 500, status: "queued", conclusion: null, completedAt: "" },
+    { name: "Jest", source: "check-run", app: "github-actions", workflowId: 1, order: 500, status: "queued", conclusion: null, completedAt: "" },
   ];
   assert.ok(decide(safe({ checks: rerun })).reasons.includes("checks-pending"));
   const statusHistory = [

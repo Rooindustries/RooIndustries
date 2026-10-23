@@ -69,12 +69,14 @@ export const latestChecks = (checks) => {
       name: check.name,
       source: check.source || "",
       app: check.app || "",
+      workflowId: check.workflowId || "",
+      checkSuiteId: check.checkSuiteId || "",
       order: Number(check.order),
       status: check.status || "completed",
       conclusion: check.conclusion || "",
       completedAt: check.completedAt || check.startedAt || "",
     };
-    const key = JSON.stringify([current.source, current.app, current.name]);
+    const key = JSON.stringify([current.source, current.app, current.workflowId, current.workflowId ? "" : current.checkSuiteId, current.name]);
     const previous = bySource.get(key);
     if (!previous) bySource.set(key, current);
     else if (current.completedAt === previous.completedAt && !Number.isFinite(current.order)) bySource.set(key, worse(previous, current));
@@ -88,10 +90,11 @@ export const latestChecks = (checks) => {
   return [...byName.values()];
 };
 
-const assessChecks = (checks) => {
+const assessChecks = (checks, testsWorkflowId) => {
   const latest = latestChecks(checks);
   const actionsChecks = new Set((checks || [])
-    .filter((check) => check?.source === "check-run" && check.app === "github-actions")
+    .filter((check) => check?.source === "check-run" && check.app === "github-actions" &&
+      Number.isSafeInteger(testsWorkflowId) && testsWorkflowId > 0 && check.workflowId === testsWorkflowId)
     .map((check) => check.name));
   const red = [];
   const pending = [];
@@ -161,12 +164,12 @@ export const decide = (input) => {
     if (line && !lines.includes(line)) lines.push(line);
   };
 
-  const idle = (reasons, lines) => ({ action: "wait", wake: false, requestReviews: false, reviewRound: false, reasons, lines });
+  const idle = (reasons, lines) => ({ action: "wait", wake: false, requestReviews: false, reviewers: [], reviewRound: false, reasons, lines });
   if (input.draft) return idle(["draft"], ["This pull request is still a draft."]);
   if (input.sameRepository === false) return idle(["fork"], ["Fork pull requests are outside this workflow."]);
   if (input.baseRef !== "main") return idle(["base"], [`The base branch is ${input.baseRef}. This workflow only merges into main.`]);
 
-  const checks = assessChecks(input.checks);
+  const checks = assessChecks(input.checks, input.testsWorkflowId);
   const rabbit = coderabbitVerdict(input.reviews, input.headSha);
   const codexEdited = Boolean(input.codexEditor) && login(input.codexEditor) !== CODEX;
   const codex = codexEdited ? "pending" : codexVerdict(input.codex, input.headSha);
@@ -180,7 +183,7 @@ export const decide = (input) => {
   if (checks.missing.length) add("checks-missing", `Required checks have not reported on ${sha}: ${checks.missing.join(", ")}.`);
   if (checks.pending.length) add("checks-pending", `Checks are still running on ${sha}: ${checks.pending.join(", ")}.`);
   if (checks.red.length) add("checks-red", `Checks failed or were cancelled on ${sha}: ${checks.red.join(", ")}.`);
-  if (git === "behind") add("behind", "The branch is behind main. Rebase it and resolve the result.");
+  if (git === "behind" || input.baseIsAncestor !== true) add("behind", "The branch has not been proven to contain current main. Rebase it and resolve the result.");
   if (git === "dirty") add("conflicts", "The branch conflicts with main. Resolve the conflicts.");
   if (git === "unknown" || git === "draft" || !["clean", "behind", "dirty", "blocked", "unstable"].includes(git)) {
     add("merge-state-unknown", "GitHub has not finished computing whether the branch merges.");
@@ -197,7 +200,7 @@ export const decide = (input) => {
   const checksGreen = checks.red.length === 0 && checks.pending.length === 0 && checks.missing.length === 0;
   const disagree = rabbit !== "pending" && codex !== "pending" && rabbit !== codex;
   const bothApprove = rabbit === "approve" && codex === "approve";
-  const clean = git === "clean";
+  const clean = git === "clean" && input.baseIsAncestor === true;
   const canMerge = checksGreen && clean && bothApprove && findings.length === 0 && changesRequestedBy.length === 0;
   const reviewWork = disagree || findings.length > 0 || changesRequestedBy.length > 0 || rabbit === "hold" || codex === "hold";
   const reviewCapped = reviewWork && reviewRounds >= MAX_REVIEW_ROUNDS;
@@ -208,14 +211,14 @@ export const decide = (input) => {
   if (reviewCapped) {
     add("review-cap", `CodeRabbit and Codex have not both approved, with no open threads, after ${MAX_REVIEW_ROUNDS} review rounds. It stays with the owner.`);
   }
-  if (git === "blocked" && checksGreen && bothApprove && findings.length === 0 && changesRequestedBy.length === 0) {
+  if (git === "blocked" && input.baseIsAncestor === true && checksGreen && bothApprove && findings.length === 0 && changesRequestedBy.length === 0) {
     add("github-blocked", "The pull request meets the repo bar, and GitHub is still blocking the merge. Branch protection or a ruleset is the likely hold. This workflow does not change those settings.");
   }
   if (git === "unstable" && checksGreen && bothApprove && findings.length === 0) {
     add("merge-state-unstable", "GitHub still reports the merge state as unstable. The workflow will look again when that clears.");
   }
 
-  const repairWork = checks.red.length > 0 || git === "behind" || git === "dirty";
+  const repairWork = checks.red.length > 0 || git === "behind" || git === "dirty" || input.baseIsAncestor !== true;
   const needsReviewAgent = reviewWork && !reviewCapped;
 
   const hold = reasons.some((reason) => reason === "github-blocked" || reason === "review-cap" || reason === "review-timeout");
@@ -225,8 +228,9 @@ export const decide = (input) => {
   // `wake` means the owning agent has work. The owning T3 thread's pull request watch delivers it; the workflow calls no agent.
   const wake = action !== "merge" && (repairWork || needsReviewAgent);
   const requestReviews = !reviewCapped && !reviewTimedOut && (rabbit === "pending" || codex === "pending");
+  const reviewers = requestReviews ? [rabbit !== "approve" && "coderabbit", codex !== "approve" && "codex"].filter(Boolean) : [];
   if (action === "merge") lines.unshift(`Every check on ${sha} is green, the branch is up to date, and CodeRabbit and Codex both approve with no open findings.`);
-  return { action, wake, requestReviews, reviewRound: needsReviewAgent && wake, reasons, lines };
+  return { action, wake, requestReviews, reviewers, reviewRound: needsReviewAgent && wake, reasons, lines };
 };
 
 export const gateComment = ({ decision, headSha }) => {
