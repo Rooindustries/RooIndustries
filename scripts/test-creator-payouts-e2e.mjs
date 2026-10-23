@@ -26,6 +26,9 @@ const sources = [
   'src/server/api/ref/syncPayouts.js',
   'src/server/api/ref/payouts.js',
   'src/server/api/ref/couponReservations.js',
+  'src/server/supabase/documentClient.js',
+  'src/server/supabase/shadowStore.js',
+  'src/server/commerce/store.js',
 ];
 for (const source of [
   'src/server/referrals/commissionMoney.js',
@@ -66,6 +69,14 @@ if (baseline) {
   } catch (error) {
     if (!/does not exist|exists on disk, but not in/.test(String(error.stderr)))
       throw error;
+  }
+}
+let baselineRulesMigration;
+if (baseline) {
+  try {
+    baselineRulesMigration = execFileSync('git', ['show', baseline + ':supabase/migrations/20261024000000_creator_money_rules.sql'], {encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']});
+  } catch (error) {
+    if (!/does not exist|exists on disk, but not in/.test(String(error.stderr))) throw error;
   }
 }
 for (const key of Object.keys(process.env)) {
@@ -183,6 +194,7 @@ let current,
 const responses = [];
 const emailRequests = [];
 let failCouponAlert = false;
+let failCouponAlertKey = '';
 const states = [];
 const refundsById = new Map();
 const inFlight = new Set();
@@ -626,6 +638,18 @@ try {
     }
   };
   if (baselineMigration) await applyCommissionMigration();
+  if (baselineRulesMigration) {
+    const connection = await sql.reserve();
+    try {
+      await connection.unsafe(baselineRulesMigration);
+      await connection.unsafe("notify pgrst, 'reload schema'");
+    } finally { connection.release(); }
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const probe = await fixture.client.rpc('roo_pending_coupon_alerts', {p_limit: 1});
+      if (!probe.error || probe.error.code !== 'PGRST202') break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  }
   Object.assign(process.env, {
     SUPABASE_URL: fixture.origin,
     SUPABASE_SERVICE_ROLE_KEY: fixture.token,
@@ -691,7 +715,12 @@ try {
         if (req.url === '/emails') {
           const requestBody = JSON.parse(body);
           emailRequests.push({body: requestBody, headers: req.headers});
-          if (failCouponAlert && requestBody.subject === 'Paid checkout exceeded a coupon limit') {
+          if (requestBody.subject === 'Paid checkout exceeded a coupon limit' && requestBody.from === 'unverified@example.invalid') {
+            res.writeHead(403, {'content-type': 'application/json'});
+            res.end(JSON.stringify({name: 'validation_error', statusCode: 403, message: 'Synthetic unverified sending domain'}));
+            return;
+          }
+          if ((failCouponAlert || (failCouponAlertKey && req.headers['idempotency-key'] === failCouponAlertKey)) && requestBody.subject === 'Paid checkout exceeded a coupon limit') {
             res.writeHead(503, {'content-type': 'application/json'});
             res.end(JSON.stringify({name: 'application_error', message: 'Synthetic alert outage'}));
             return;
@@ -3263,17 +3292,27 @@ try {
       const {dispatchCouponAlerts} = await import('../src/server/api/ref/couponAlerts.js');
       if (!baseline) {
         const [permissions] = await sql`select
-          has_function_privilege('anon', 'public.roo_pending_coupon_alerts(text,integer)', 'execute') as anon,
-          has_function_privilege('authenticated', 'public.roo_pending_coupon_alerts(text,integer)', 'execute') as authenticated,
-          has_function_privilege('service_role', 'public.roo_pending_coupon_alerts(text,integer)', 'execute') as service`;
+          has_function_privilege('anon', 'public.roo_pending_coupon_alerts(integer)', 'execute') as anon,
+          has_function_privilege('authenticated', 'public.roo_pending_coupon_alerts(integer)', 'execute') as authenticated,
+          has_function_privilege('service_role', 'public.roo_pending_coupon_alerts(integer)', 'execute') as service`;
         assert.deepEqual(permissions, {anon: false, authenticated: false, service: true});
       }
       failCouponAlert = true;
       await dispatchCouponAlerts({client: commerce, redemptionId: pending.at(-1)._id});
       assert.equal((await read(pending.at(-1)._id)).ownerAlertSentAt, undefined);
       failCouponAlert = false;
-      const retry = await post('/api/payment/reconcile', {}, {authorization: 'Bearer fixture'});
-      assert.equal(retry.status, 200, JSON.stringify(retry));
+      failCouponAlertKey = 'coupon-capacity/' + crypto.createHash('sha256').update(pending[0]._id).digest('hex');
+      for (let batch = 0; batch < Math.ceil(pending.length / 25); batch++) {
+        const beforeBatch = emailRequests.length;
+        const retry = await post('/api/payment/reconcile', {}, {authorization: 'Bearer fixture'});
+        assert.equal(retry.status, 200, JSON.stringify(retry));
+        const count = emailRequests.slice(beforeBatch).filter(row => row.body.subject === 'Paid checkout exceeded a coupon limit').length;
+        assert.ok(count <= 25, 'Reconciliation attempted ' + count + ' alerts in one invocation');
+      }
+      assert.equal((await read(pending[0]._id)).ownerAlertSentAt, undefined);
+      assert.ok((await read(pending.at(-1)._id)).ownerAlertSentAt);
+      failCouponAlertKey = '';
+      assert.equal((await post('/api/payment/reconcile', {}, {authorization: 'Bearer fixture'})).status, 200);
       const sent = [];
       for (const document of pending) {
         const row = await read(document._id);
@@ -3285,8 +3324,53 @@ try {
         first: sent[0], last: sent.at(-1), firstAttemptFailed: true};
     } finally {
       failCouponAlert = false;
+      failCouponAlertKey = '';
       for (const document of pending) await commerce.delete(document._id);
       await sql`delete from migration.source_documents where legacy_sanity_id=any(${history.map(row => row._id)})`;
+    }
+  });
+
+  await run('money-rules-543-rejected-sender-recovery', async () => {
+    const state = await seed('dodo', {coupon: 20});
+    const {dispatchCouponAlerts} = await import('../src/server/api/ref/couponAlerts.js');
+    const id = 'couponRedemption.sender-' + state.key;
+    await commerce.create({_id: id, _type: 'couponRedemption', status: 'consumed',
+      coupon: {_ref: 'coupon.' + state.key}, ownerId: id,
+      bookingId: state.record.bookingId, ownerAlertRequired: true});
+    const originalFrom = process.env.FROM_EMAIL;
+    const before = emailRequests.length;
+    try {
+      process.env.FROM_EMAIL = 'unverified@example.invalid';
+      await dispatchCouponAlerts({client: commerce, redemptionId: id});
+      const rejected = await read(id);
+      assert.equal(rejected.ownerAlertRequired, true);
+      assert.equal(rejected.ownerAlertFrom, undefined);
+      assert.equal(rejected.ownerAlertGeneration, 1);
+      process.env.FROM_EMAIL = originalFrom;
+      await dispatchCouponAlerts({client: commerce, redemptionId: id});
+      const delivered = await read(id);
+      assert.ok(delivered.ownerAlertSentAt);
+      const attempts = emailRequests.slice(before);
+      assert.equal(attempts.length, 2);
+      assert.notEqual(attempts[0].headers['idempotency-key'], attempts[1].headers['idempotency-key']);
+      const uncertainId = id + '-uncertain';
+      await commerce.create({_id: uncertainId, _type: 'couponRedemption', status: 'consumed',
+        coupon: {_ref: 'coupon.' + state.key}, ownerId: uncertainId,
+        bookingId: state.record.bookingId, ownerAlertRequired: true});
+      failCouponAlert = true;
+      await dispatchCouponAlerts({client: commerce, redemptionId: uncertainId});
+      const uncertain = await read(uncertainId);
+      assert.equal(uncertain.ownerAlertFrom, originalFrom);
+      process.env.FROM_EMAIL = 'changed@example.invalid';
+      failCouponAlert = false;
+      await dispatchCouponAlerts({client: commerce, redemptionId: uncertainId});
+      const retried = emailRequests.slice(before + 2);
+      assert.equal(retried[0].headers['idempotency-key'], retried[1].headers['idempotency-key']);
+      assert.equal(retried[0].body.from, retried[1].body.from);
+      return {rejected, delivered, uncertain, attempts, uncertainRetry: retried};
+    } finally {
+      process.env.FROM_EMAIL = originalFrom;
+      failCouponAlert = false;
     }
   });
 

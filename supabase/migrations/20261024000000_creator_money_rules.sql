@@ -163,32 +163,29 @@ begin
 end;
 $$;
 
-create or replace function public.roo_pending_coupon_alerts(
-  p_after_id text default '',
-  p_limit integer default 100
-)
+create or replace function public.roo_pending_coupon_alerts(p_limit integer default 25)
 returns jsonb
 language sql
 stable
 security definer
 set search_path = ''
 as $$
-  select coalesce(jsonb_agg(selected.payload order by selected.legacy_sanity_id), '[]'::jsonb)
+  select coalesce(jsonb_agg(selected.payload order by selected.last_attempt nulls first, selected.legacy_sanity_id), '[]'::jsonb)
   from (
-    select source.legacy_sanity_id, source.payload
+    select source.legacy_sanity_id, source.payload,
+      migration.try_timestamptz(source.payload->>'ownerAlertLastAttemptAt') as last_attempt
     from migration.source_documents source
     where source.document_type = 'couponRedemption'
       and not source.tombstoned
       and source.payload->'ownerAlertRequired' = 'true'::jsonb
       and nullif(source.payload->>'ownerAlertSentAt', '') is null
-      and source.legacy_sanity_id > coalesce(p_after_id, '')
-    order by source.legacy_sanity_id
-    limit greatest(1, least(coalesce(p_limit, 100), 100))
+    order by last_attempt nulls first, source.legacy_sanity_id
+    limit greatest(1, least(coalesce(p_limit, 25), 25))
   ) selected;
 $$;
 
-revoke all on function public.roo_pending_coupon_alerts(text, integer) from public, anon, authenticated;
-grant execute on function public.roo_pending_coupon_alerts(text, integer) to service_role;
+revoke all on function public.roo_pending_coupon_alerts(integer) from public, anon, authenticated;
+grant execute on function public.roo_pending_coupon_alerts(integer) to service_role;
 
 drop function pg_temp.creator_empty_code_previous(text, text);
 commit;
