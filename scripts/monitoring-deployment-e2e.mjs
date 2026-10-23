@@ -247,6 +247,7 @@ export function GET() { throw new Error('Fixture edge error'); }
           if (mode.enabled) {
             for (let i = 0; i < 40 && !hasError(received.slice(from), 'Fixture browser boundary'); i++) await delay(250);
           } else await delay(2000);
+          if (!mode.enabled && !mode.reuse) check(`${mode.name}: all browser actions send no relay requests`, relayRequests.length, 0);
         } finally {
           await context.tracing.stop({ path: join(artifact, `${mode.name}-trace.zip`) });
           await context.close();
