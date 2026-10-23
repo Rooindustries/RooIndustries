@@ -92,8 +92,11 @@ const runScenario = async (name, { setup, changeSecond, mergeStatus = 200, event
       }
       if (req.method === "GET" && url.pathname === `${prefix}/pulls/1/reviews`) return send(200, state.reviews);
       if (url.pathname.endsWith("/check-runs")) {
+        if (state.latestChecks && url.searchParams.get("filter") !== "all") return send(200, { check_runs: state.latestChecks });
         if (state.checkPageTwo && !url.searchParams.has("page")) {
-          res.setHeader("link", `<https://api.github.com${url.pathname}?page=2>; rel="next"`);
+          const nextPage = new URL(url);
+          nextPage.searchParams.set("page", "2");
+          res.setHeader("link", `<https://api.github.com${nextPage.pathname}${nextPage.search}>; rel="next"`);
         }
         return send(200, { check_runs: url.searchParams.has("page") ? state.checkPageTwo : state.checks });
       }
@@ -794,4 +797,30 @@ for (const reviewer of ["codex", "seer"]) {
     assert.ok(result.comments.some(body => body.includes(mention)));
     assert.ok(result.requests.every(request => !request.body?.labels?.includes("needs-owner")));
   });
+}
+
+for (const expired of [false, true]) {
+  for (const paged of [false, true]) {
+    test(`CLI retains the ${expired ? "expired" : "recent"} Seer request during a rerun with completed history on ${paged ? "page two" : "page one"}`, async () => {
+      const first = await runScenario(`seer-rerun-receipt-${expired}-${paged}`, { setup: state => {
+        state.checks.find(check => check.name === "Seer Code Review").conclusion = "neutral";
+      } });
+      const receipts = controllerReceipts(first).map(comment => ({ ...comment,
+        created_at: new Date(Date.now() - (expired ? 25 : 1) * 3600000).toISOString() }));
+      const result = await runScenario(`seer-rerun-history-${expired}-${paged}`, { setup: state => {
+        const completed = state.checks.find(check => check.name === "Seer Code Review");
+        completed.conclusion = "neutral";
+        state.checks.push(seerCheck({ id: 101, status: "in_progress", conclusion: null }));
+        state.latestChecks = state.checks.filter(check => check !== completed);
+        if (paged) {
+          state.checks = state.latestChecks;
+          state.checkPageTwo = [completed];
+        }
+        state.comments.push(...receipts);
+      } });
+      assert.deepEqual(result.merges, []);
+      assert.ok(result.comments.every(body => !body.includes("@sentry review")));
+      assert.equal(result.requests.some(request => request.body?.labels?.includes("needs-owner")), expired);
+    });
+  }
 }

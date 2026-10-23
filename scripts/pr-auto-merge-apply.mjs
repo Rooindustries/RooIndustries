@@ -135,7 +135,7 @@ const collectSnapshot = async (number) => {
   const { payload: pull } = await api(readToken, `repos/${repo}/pulls/${number}`);
   const [reviews, checkRuns, commentPage, statuses, base, testsWorkflow, workflowRuns] = await Promise.all([
     paginate(`repos/${repo}/pulls/${number}/reviews`),
-    paginate(`repos/${repo}/commits/${pull.head.sha}/check-runs`),
+    paginate(`repos/${repo}/commits/${pull.head.sha}/check-runs?filter=all`),
     paginate(`repos/${repo}/issues/${number}/comments`),
     paginate(`repos/${repo}/commits/${pull.head.sha}/statuses`),
     api(readToken, `repos/${repo}/git/ref/heads/main`),
