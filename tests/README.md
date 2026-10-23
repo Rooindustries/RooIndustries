@@ -22,6 +22,9 @@ test:nav:sections:repeat` runs the complete section-navigation suite five times
 with one worker and no retries. Commit changes first: the command records the
 commit and preserves each run's report, timings and console logs separately
 under `test-results/section-nav-consecutive/`. It stops at the first failure.
+Each round must produce all three fresh audit files, even when the browser
+command exits successfully. `npm run test:tooling:dependencies` also exercises
+interrupted, missing-evidence and complete rounds through isolated CLI fixtures.
 Keep real Sentry DSNs unset in both the fixture server and browser process.
 
 `npm run test:booking:holds` starts the real hold handler and request adapter over

@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
@@ -73,3 +74,57 @@ test("Lighthouse fixture exits when a proxy prevents guard installation", async 
     exitCode: failure.code, killed: failure.killed, signal: failure.signal,
   }, null, 2));
 });
+
+for (const [scenario, title] of [
+  ["interrupted", "rejects stale evidence after child interruption"],
+  ["missing", "rejects success without audit evidence"],
+  ["complete", "preserves five sets of fresh evidence"],
+]) {
+  test("navigation proof runner " + title, async () => {
+    const fixture = await fs.mkdtemp(path.join(tmpdir(), "roo-nav-runner-"));
+    const artifacts = ["phase1-nav-reliability", "phase1-client-crash-log", "phase1-hydration-log"];
+    const env = { ...process.env, BASE_URL: "http://127.0.0.1:41791", NAV_RUNNER_FIXTURE: scenario };
+    for (const key of Object.keys(env)) if (/^GIT_|sentry.*dsn/i.test(key)) delete env[key];
+    try {
+      await fs.mkdir(path.join(fixture, "node_modules/@playwright/test"), { recursive: true });
+      await fs.copyFile("tests/fixtures/section-nav-runner-cli.cjs", path.join(fixture, "node_modules/@playwright/test/cli.js"));
+      await fs.writeFile(path.join(fixture, ".gitignore"), "node_modules/\naudit/\ntest-results/\nrun-count\n");
+      await exec("git", ["init", "--quiet", "--initial-branch=servi/roo-637-fixture"], { cwd: fixture, env });
+      await exec("git", ["add", ".gitignore"], { cwd: fixture, env });
+      await exec("git", ["-c", "user.name=serviroo", "-c", "user.email=serviroo@rooindustries.com", "commit", "--quiet", "-m", "test: record navigation proof fixture"], { cwd: fixture, env });
+      await fs.mkdir(path.join(fixture, "audit"));
+      for (const artifact of artifacts) await fs.writeFile(path.join(fixture, "audit", artifact + ".json"), JSON.stringify({ previous: true }));
+      let exitCode = 0, stdout = "", stderr = "", killed = false;
+      try {
+        ({ stdout, stderr } = await exec(process.execPath, [path.resolve("scripts/test-section-nav-repeated.mjs")], { cwd: fixture, env, timeout: 120_000 }));
+      } catch (error) {
+        ({ code: exitCode, stdout, stderr, killed } = error);
+      }
+      const parent = path.join(fixture, "test-results/section-nav-consecutive");
+      const directories = await fs.readdir(parent);
+      assert.equal(directories.length, 1);
+      const directory = path.join(parent, directories[0]);
+      const proof = JSON.parse(await fs.readFile(path.join(directory, "summary.json"), "utf8"));
+      const copied = (await fs.readdir(directory)).filter(name => name.includes("-phase1-"));
+      const evidence = {};
+      for (const name of copied) evidence[name] = JSON.parse(await fs.readFile(path.join(directory, name), "utf8"));
+      await fs.mkdir(artifactDir, { recursive: true });
+      await fs.writeFile(path.join(artifactDir, "navigation-runner-" + scenario + ".json"), JSON.stringify({ scenario, exitCode, killed, stdout, stderr, proof, evidence }, null, 2));
+      assert.equal(killed, false);
+      if (scenario === "complete") {
+        assert.equal(exitCode, 0);
+        assert.equal(proof.runs.length, 5);
+        assert.equal(copied.length, 15);
+        for (let run = 1; run <= 5; run++) {
+          for (const artifact of artifacts) assert.deepEqual(evidence["run-" + run + "-" + artifact + ".json"], { run });
+        }
+      } else {
+        assert.equal(exitCode, 1);
+        assert.equal(proof.runs.length, 1);
+        assert.equal(copied.length, 0);
+      }
+    } finally {
+      await fs.rm(fixture, { recursive: true, force: true });
+    }
+  });
+}
