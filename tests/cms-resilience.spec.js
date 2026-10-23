@@ -460,3 +460,49 @@ test("HEAD and GET action headers cannot seed cached query strings", async ({ re
   }
   await fs.writeFile(testInfo.outputPath("head-and-action-queries.json"), JSON.stringify(results, null, 2));
 });
+
+for (const mode of ["5xx", "timeout", "malformed"]) {
+  test(`a committed receipt keeps cached pages while the saved document read has ${mode}`, async ({ request, browser, baseURL }, testInfo) => {
+    const timeline = [];
+    let status;
+    try {
+      await control(request, baseURL, { reset: true });
+      await renew(request);
+      await warm(request, timeline);
+      const state = await (await request.get(controlUrl(baseURL))).json();
+      const offset = state.requests.length;
+      const loaded = await request.get("/api/admin/content/documents/tooling-contact", { headers: adminHeaders });
+      const { data } = await loaded.json();
+      const marker = `Recovered contact after ${mode} document read`;
+      const command = { operation: "replace", type: "contact", documentId: data.document._id, expectedRevision: data.revision, document: { ...data.document, subtitle: marker } };
+      await control(request, baseURL, { publishResponseFailure: "5xx" });
+      expect((await publish(request, command)).status()).toBe(503);
+      await control(request, baseURL, mode === "5xx" ? { outage: state.documentTypes } : { failure: mode });
+      const response = await request.post("/api/admin/content/publish/status", { headers: adminHeaders, data: command });
+      status = { code: response.status(), body: await response.json() };
+      expect.soft(status.code, "A receipt alone cannot confirm unreadable content").toBe(503);
+      for (const route of PREBUILT_ROUTES) {
+        const html = await read(request, route, timeline, "saved read unavailable");
+        await fs.writeFile(testInfo.outputPath(`${route.replaceAll("/", "") || "home"}.html`), html);
+        expect.soft(timeline.at(-1).cache, `${route} is not invalidated`).toBe("HIT");
+      }
+      if (status.code === 503 && timeline.slice(-PREBUILT_ROUTES.length).every(row => row.status === 200 && row.cache === "HIT")) {
+        await screenshots(browser, baseURL, testInfo, `saved-read-${mode}`);
+      }
+      await control(request, baseURL, { outage: false, failure: "", publishResponseFailure: "" });
+      const recovered = await request.post("/api/admin/content/publish/status", { headers: adminHeaders, data: command });
+      expect(recovered.ok(), await recovered.text()).toBe(true);
+      const current = await request.get("/contact");
+      expect(current.status()).toBe(200);
+      expect(await current.text()).toContain(marker);
+      const after = await (await request.get(controlUrl(baseURL))).json();
+      const applied = after.requests.slice(offset).filter(call => call.path.endsWith("/roo_apply_cms_publish_command"));
+      expect(applied).toHaveLength(1);
+      expect(applied[0].committed).toBe(true);
+      await fs.writeFile(testInfo.outputPath("committed-requests.json"), JSON.stringify(applied, null, 2));
+    } finally {
+      await control(request, baseURL, { reset: true });
+      await fs.writeFile(testInfo.outputPath("saved-read.json"), JSON.stringify({ mode, status, timeline }, null, 2));
+    }
+  });
+}
