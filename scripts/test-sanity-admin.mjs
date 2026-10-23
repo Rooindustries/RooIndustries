@@ -66,7 +66,7 @@ try {
   const publish = async body => {
     const revalidated = [];
     const result = await globalThis.rooRevalidations.run(revalidated, () => call('publish', body));
-    assert.deepEqual(revalidated, [['/', 'layout']], 'Every publish revalidates the root layout');
+    assert.deepEqual(revalidated, result.ok ? [['/', 'layout']] : [], 'Only successful publishes revalidate the root layout');
     return result;
   };
   const create = (type, document, createIntentId = crypto.randomUUID()) => publish({ operation: 'create', type, document, createIntentId });
