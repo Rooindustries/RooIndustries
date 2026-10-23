@@ -89,17 +89,38 @@ const expectAvailability = async (response) => {
 const allowOnlyGet = (context) => context.route("**/*", (route) =>
   route.request().method() === "GET" ? route.continue() : route.abort());
 
+// Each browser check gets its own GET-only page. If a check fails after one of the site's own GET requests never
+// arrived (a script or page lost to a reset, refused or timed-out connection), the runner couldn't load the page,
+// so the failure says nothing about the deploy. Navigation-cancelled requests (net::ERR_ABORTED) don't count.
+const withSmokePage = async (browser, base, contextOptions, check) => {
+  const context = await browser.newContext(contextOptions);
+  const lost = [];
+  try {
+    await allowOnlyGet(context);
+    const page = await context.newPage();
+    const origin = new URL(base).origin;
+    page.on("requestfailed", (request) => {
+      const reason = request.failure()?.errorText || "";
+      if (request.method() === "GET" && new URL(request.url()).origin === origin && reason !== "net::ERR_ABORTED") {
+        lost.push(`${new URL(request.url()).pathname} (${reason || "failed"})`);
+      }
+    });
+    return await check(page);
+  } catch (error) {
+    if (lost.length && !(error instanceof CouldNotRun)) throw new CouldNotRun(`couldn't load ${lost[0]}: ${error.message}`);
+    throw error;
+  } finally {
+    await context.close();
+  }
+};
+
 const nodes = (value) => {
   if (Array.isArray(value)) return value.flatMap(nodes);
   if (!value || typeof value !== "object") return [];
   return [value, ...Object.values(value).flatMap(nodes)];
 };
 
-const checkPrices = async (browser, base) => {
-  const context = await browser.newContext({ javaScriptEnabled: false });
-  try {
-    await allowOnlyGet(context);
-    const page = await context.newPage();
+const checkPrices = (browser, base) => withSmokePage(browser, base, { javaScriptEnabled: false }, async (page) => {
     const response = await page.goto(`${base}/packages`, { waitUntil: "domcontentloaded", timeout: 30000 });
     if (response?.status() !== 200) throw new Error(`/packages answered ${response?.status()}`);
     const cards = await page.locator(".ri-package-card").evaluateAll((elements) => elements.map((card) => ({
@@ -117,10 +138,7 @@ const checkPrices = async (browser, base) => {
       throw new Error(`structured data offers ${JSON.stringify(published)} don't match the cards ${JSON.stringify(shown)}`);
     }
     return `${cards.length} packages priced`;
-  } finally {
-    await context.close();
-  }
-};
+});
 
 const APP_ERROR_PATTERN = /application error|client-side exception|internal server error/i;
 const FLOW_MARKERS = {
@@ -128,11 +146,7 @@ const FLOW_MARKERS = {
   "/payment": "Booking Summary",
 };
 
-const checkPageRenders = async (browser, base, pathname) => {
-  const context = await browser.newContext();
-  try {
-    await allowOnlyGet(context);
-    const page = await context.newPage();
+const checkPageRenders = (browser, base, pathname) => withSmokePage(browser, base, {}, async (page) => {
     const response = await page.goto(`${base}${pathname}`, { waitUntil: "load", timeout: 30000 });
     if (response?.status() !== 200) throw new Error(`${pathname} answered ${response?.status()}`);
     await page.waitForFunction(() => document.body.innerText.trim().length >= 20, null, { timeout: 15000 })
@@ -146,25 +160,15 @@ const checkPageRenders = async (browser, base, pathname) => {
       }).catch(() => { throw new Error(`${pathname} is missing "${marker}"`); });
     }
     return "renders";
-  } finally {
-    await context.close();
-  }
-};
+});
 
-const checkReferral = async (browser, base) => {
-  const context = await browser.newContext();
-  try {
-    await allowOnlyGet(context);
-    const page = await context.newPage();
+const checkReferral = (browser, base) => withSmokePage(browser, base, {}, async (page) => {
     const response = await page.goto(`${base}/packages?ref=${REFERRAL_CODE}`, { waitUntil: "load", timeout: 30000 });
     if (response?.status() !== 200) throw new Error(`/packages?ref answered ${response?.status()}`);
     await page.waitForFunction((code) => window.sessionStorage.getItem("referral_session") === code, REFERRAL_CODE, { timeout: 15000 })
       .catch(() => { throw new Error("the ?ref code was not remembered for checkout"); });
     return "code remembered";
-  } finally {
-    await context.close();
-  }
-};
+});
 
 const withBrowserRetries = async (browser, base, check) => {
   let lastError;

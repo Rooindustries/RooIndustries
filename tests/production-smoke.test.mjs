@@ -286,6 +286,22 @@ test("deploy gate: a connection that drops mid-page rolls nothing back", () => w
   assert.deepEqual(vercelChanges(vercel), []);
 }));
 
+test("a page script the runner couldn't download is a smoke that could not run, and the gate rolls nothing back", async () => {
+  const healthy = await startSite({ packages: { externalReferral: true } });
+  try {
+    const result = await run(["--base", healthy.base]);
+    assert.equal(result.code, 0, result.output);
+  } finally {
+    await healthy.close();
+  }
+  await withGate({ site: { packages: { externalReferral: true }, resetReferralScript: true } }, async ({ vercel, exec }) => {
+    const result = await exec();
+    assert.equal(result.code, 1, result.output);
+    assert.match(result.output, /couldn't load \/referral\.js/);
+    assert.deepEqual(vercelChanges(vercel), []);
+  });
+});
+
 test("deploy gate: a runner that can't reach production rolls nothing back", () => withGate({ site: { dropNonBrowser: true } }, async ({ vercel, exec }) => {
   const result = await exec();
   assert.equal(result.code, 1, result.output);
