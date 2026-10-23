@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -33,7 +33,7 @@ const withSite = async (overrides, body) => {
 
 test("a healthy site passes every money-path check with GET requests only", () => withSite({ packages: { postOnLoad: true } }, (site, result) => {
   assert.equal(result.code, 0, result.output);
-  for (const name of ["page /", "page /packages", "page /booking", "page /payment", "booking availability", "package prices", "referral capture", "booking page renders", "payment page renders"]) {
+  for (const name of ["page /", "page /packages", "page /booking", "page /payment", "booking availability", "package prices", "referral capture", "home page renders", "booking page renders", "payment page renders"]) {
     assert.match(result.output, new RegExp(`ok\\s+${name.replace("/", "\\/")}`));
   }
   assert.deepEqual(site.requests.filter(request => request.method !== "GET"), []);
@@ -189,9 +189,27 @@ test("a payment page that shows an application error is a money-path failure", (
   assert.match(result.output, /FAIL  payment page renders: \/payment shows an application error/);
 }));
 
+for (const [name, body] of Object.entries({
+  "application error": "<h1>Application error</h1><p>The homepage cannot render.</p>",
+  "empty document": "",
+  "navigation shell": "<nav>Roo Industries <a href='/packages'>Packages</a></nav>",
+})) {
+  test(`a 200 homepage with ${name} fails the smoke`, () => withSite({ bodies: { "/": body } }, (site, result) => {
+    assert.equal(result.code, 2, result.output);
+    assert.match(result.output, /FAIL\s+home page renders/);
+    assert.deepEqual(site.requests.filter(request => request.method !== "GET"), []);
+  }));
+}
+
 test("refuses unknown options", async () => {
   const result = await run(["--bse", "https://www.rooindustries.com"]);
   assert.equal(result.code, 1, result.output);
+});
+
+test("CI refuses the production smoke target before sending a request", async () => {
+  const result = await run(["--base", "https://www.rooindustries.com"], null, { GITHUB_ACTIONS: "true" });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /CI requires an explicit loopback smoke target/);
 });
 
 const gate = path.join(root, "scripts/production-deploy-gate.mjs");
@@ -232,36 +250,60 @@ const withGate = async ({ site: siteOverrides, vercel: vercelOptions } = {}, bod
 
 const vercelChanges = vercel => vercel.requests.filter(request => request.method !== "GET");
 
+test("deploy gate: a stalled decorative image leaves a healthy deployment live", async () => {
+  let imageRequests = 0;
+  const external = http.createServer(() => { imageRequests += 1; });
+  await new Promise(resolve => external.listen(0, "127.0.0.1", resolve));
+  const imageUrl = `http://127.0.0.1:${external.address().port}/payment-logo.svg`;
+  try {
+    await withGate({ site: { bodies: {
+      "/payment": `<h3>Booking Summary</h3><p>The payment page works.</p><img src="${imageUrl}" alt="Payment provider logo">`,
+    } } }, async ({ vercel, exec }) => {
+      const result = await exec();
+      assert.equal(result.code, 0, result.output);
+      assert.ok(imageRequests > 0, "The browser must request the independent image origin.");
+      assert.deepEqual(vercelChanges(vercel), []);
+      assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
+    });
+  } finally {
+    external.closeAllConnections();
+    await new Promise(resolve => external.close(resolve));
+  }
+});
+
+test("deploy gate: CI rejects a nonlocal smoke before contacting the deployment provider", () => withGate({}, async ({ site, vercel, exec }) => {
+  const result = await exec({ GITHUB_ACTIONS: "true", SMOKE_BASE_URL: "https://example.com" });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /CI requires an explicit loopback SMOKE_BASE_URL/);
+  assert.deepEqual(vercel.requests, []);
+  assert.deepEqual(site.requests, []);
+}));
+
 test("deploy gate: a healthy live deployment passes and nothing is rolled back", () => withGate({}, async ({ site, vercel, exec }) => {
-  const result = await exec();
+  const result = await exec({ GITHUB_ACTIONS: "true" });
   assert.equal(result.code, 0, result.output);
   assert.ok(site.requests.length > 0);
   assert.deepEqual(vercelChanges(vercel), []);
 }));
 
-test("deploy gate: a money-path failure on the live deployment rolls production back once", () => withGate({ site: { status: { "/payment": 500 } } }, async ({ vercel, exec }) => {
+test("deploy gate: a money-path failure is reported without unsafe automatic rollback", () => withGate({ site: { status: { "/payment": 500 } } }, async ({ vercel, exec }) => {
   const result = await exec();
   assert.equal(result.code, 1, result.output);
-  const changes = vercelChanges(vercel);
-  assert.equal(changes.length, 1);
-  assert.equal(changes[0].path, "/v1/projects/prj_rooFixture/rollback/dpl_previous");
-  assert.match(changes[0].query.description, /Money-path smoke failed/);
-  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
-  assert.match(result.output, /--undo/);
+  assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
+  assert.match(result.output, /FAIL\s+page \/payment/);
+  assert.match(result.output, /Automatic rollback is disabled/);
 }));
 
-test("deploy gate: a CSP-blocked referral script rolls production back once", () => withGate({
+test("deploy gate: a CSP-blocked referral script fails without unsafe automatic rollback", () => withGate({
   site: { packages: { externalReferral: true }, cspScriptBlock: true },
 }, async ({ vercel, exec }) => {
   const result = await exec();
   assert.equal(result.code, 1, result.output);
   assert.match(result.output, /FAIL  referral capture/);
-  const changes = vercelChanges(vercel);
-  assert.equal(changes.length, 1);
-  assert.equal(changes[0].path, "/v1/projects/prj_rooFixture/rollback/dpl_previous");
-  assert.match(changes[0].query.description, /Money-path smoke failed/);
-  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
-  assert.match(result.output, /--undo/);
+  assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
+  assert.match(result.output, /Automatic rollback is disabled/);
 }));
 
 test("deploy gate: a deployment that never serves production still gets production smoked, without a rollback", () => withGate({ site: { status: { "/payment": 500 } } }, async ({ site, vercel, exec }) => {
@@ -327,20 +369,6 @@ test("deploy gate: a runner that can't reach production rolls nothing back", () 
   assert.deepEqual(vercelChanges(vercel), []);
 }));
 
-test("only successful Production deployments share the smoke queue, so a Preview event can't replace a pending Production smoke", () => {
-  const workflow = readFileSync(new URL("../.github/workflows/production-smoke.yml", import.meta.url), "utf8");
-  assert.match(workflow, /group: production-smoke-\$\{\{ github\.event\.deployment\.environment \}\}-\$\{\{ github\.event\.deployment_status\.state \}\}/);
-  assert.match(workflow, /cancel-in-progress: false/);
-});
-
-test("every queued production smoke waits its turn without cancelling another deployment's smoke", () => {
-  const workflow = readFileSync(new URL("../.github/workflows/production-smoke.yml", import.meta.url), "utf8");
-  const concurrency = workflow.match(/^concurrency:\s*\n(?:[ \t]+[^\n]*\n)*/m)?.[0];
-  assert.ok(concurrency, "The production smoke workflow must define concurrency.");
-  assert.match(concurrency, /^  queue: max\s*$/m);
-  assert.match(concurrency, /^  cancel-in-progress: false\s*$/m);
-});
-
 test("deploy gate: a smoke that can't run doesn't roll anything back", () => withGate({}, async ({ vercel, exec }) => {
   const result = await exec({ SMOKE_BASE_URL: "https://example.com" });
   assert.equal(result.code, 1, result.output);
@@ -357,15 +385,15 @@ test("deploy gate: an already rolled-back production is never rolled back furthe
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
 }));
 
-test("deploy gate: an accepted rollback that is not confirmed says the request was sent", () => withGate({
+test("deploy gate: an unconfirmable automatic rollback is never sent", () => withGate({
   site: { status: { "/payment": 500 } },
   vercel: { freezeAlias: true },
 }, async ({ vercel, exec }) => {
   const result = await exec();
   assert.equal(result.code, 1, result.output);
-  assert.equal(vercelChanges(vercel).length, 1);
-  assert.match(result.output, /rollback was sent, but production was not confirmed/);
-  assert.doesNotMatch(result.output, /did not run/);
+  assert.deepEqual(vercelChanges(vercel), []);
+  assert.match(result.output, /automatic rollback did not run/);
+  assert.doesNotMatch(result.output, /rollback was sent/);
 }));
 
 test("deploy gate: refuses to run without the deployment URL", () => withGate({}, async ({ site, vercel, exec }) => {

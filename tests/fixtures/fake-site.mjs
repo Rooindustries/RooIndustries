@@ -69,6 +69,7 @@ export const startSite = (overrides = {}) => {
     if (["/", "/booking", "/payment"].includes(url.pathname)) {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       const markers = {
+        "/": '<header id="top"><h1>PC game performance optimization</h1><a href="/#packages">Book an optimization</a></header>',
         "/booking": "<h1>Select a Date and Time for Your Session</h1>",
         "/payment": "<h3>Booking Summary</h3>",
       };

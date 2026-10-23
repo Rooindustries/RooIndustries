@@ -67,6 +67,10 @@ const resolveBase = (value) => {
   } catch {
     throw new Refusal(`"${value}" is not a URL.`);
   }
+  if (process.env.GITHUB_ACTIONS === "true" &&
+      (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname))) {
+    throw new Refusal("CI requires an explicit loopback smoke target; live monitoring is disabled.");
+  }
   if (url.origin === PRODUCTION) return url.origin;
   if (url.protocol === "http:" && isPrivateHost(url.hostname)) return url.origin;
   throw new Refusal(`the smoke only runs against ${PRODUCTION} or a local test server, not ${url.origin}.`);
@@ -160,23 +164,39 @@ const FLOW_MARKERS = {
 };
 
 const checkPageRenders = (browser, base, pathname) => withSmokePage(browser, base, {}, async (page) => {
-    const response = await page.goto(`${base}${pathname}`, { waitUntil: "load", timeout: 30000 });
+    const errors = [];
+    page.on("pageerror", (error) => { errors.push(error.message); });
+    const response = await page.goto(`${base}${pathname}`, { waitUntil: "domcontentloaded", timeout: 30000 });
     if (response?.status() !== 200) throw new Error(`${pathname} answered ${response?.status()}`);
-    await page.waitForFunction(() => document.body.innerText.trim().length >= 20, null, { timeout: 15000 })
+    const markerTimeout = Number(process.env.SMOKE_MARKER_TIMEOUT_MS || 15000);
+    await page.waitForFunction(() => document.body.innerText.trim().length >= 20, null, { timeout: markerTimeout })
       .catch(() => { throw new Error(`${pathname} rendered no visible content`); });
     const text = await page.evaluate(() => document.body.innerText);
     if (APP_ERROR_PATTERN.test(text)) throw new Error(`${pathname} shows an application error`);
+    if (pathname === "/") {
+      await page.waitForFunction(() => {
+        const heading = document.querySelector("#top h1");
+        const bookingLink = document.querySelector('#top a[href="/#packages"]');
+        return heading?.innerText.trim() && heading.getBoundingClientRect().height > 0 &&
+          bookingLink?.innerText.trim() && bookingLink.getBoundingClientRect().height > 0;
+      }, null, { timeout: markerTimeout })
+        .catch(() => { throw new Error("/ is missing its homepage heading or booking link"); });
+    }
     const marker = FLOW_MARKERS[pathname];
     if (marker) {
       await page.waitForFunction((expected) => document.body.innerText.includes(expected), marker, {
-        timeout: Number(process.env.SMOKE_MARKER_TIMEOUT_MS || 15000),
+        timeout: markerTimeout,
       }).catch(() => { throw new Error(`${pathname} is missing "${marker}"`); });
+    }
+    if (errors.length) throw new Error(`${pathname} has a rendering error: ${errors[0]}`);
+    if (APP_ERROR_PATTERN.test(await page.evaluate(() => document.body.innerText))) {
+      throw new Error(`${pathname} shows an application error`);
     }
     return "renders";
 });
 
 const checkReferral = (browser, base) => withSmokePage(browser, base, {}, async (page) => {
-    const response = await page.goto(`${base}/packages?ref=${REFERRAL_CODE}`, { waitUntil: "load", timeout: 30000 });
+    const response = await page.goto(`${base}/packages?ref=${REFERRAL_CODE}`, { waitUntil: "domcontentloaded", timeout: 30000 });
     if (response?.status() !== 200) throw new Error(`/packages?ref answered ${response?.status()}`);
     await page.waitForFunction((code) => window.sessionStorage.getItem("referral_session") === code, REFERRAL_CODE, { timeout: 15000 })
       .catch(() => { throw new Error("the ?ref code was not remembered for checkout"); });
@@ -230,6 +250,7 @@ const main = async () => {
     checks.push(
       ["package prices", () => withBrowserRetries(browser, base, checkPrices)],
       ["referral capture", () => withBrowserRetries(browser, base, checkReferral)],
+      ["home page renders", () => withBrowserRetries(browser, base, (b, url) => checkPageRenders(b, url, "/"))],
       ["booking page renders", () => withBrowserRetries(browser, base, (b, url) => checkPageRenders(b, url, "/booking"))],
       ["payment page renders", () => withBrowserRetries(browser, base, (b, url) => checkPageRenders(b, url, "/payment"))],
     );

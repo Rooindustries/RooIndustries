@@ -34,6 +34,7 @@ export const startVercel = ({
   aliasSettlePolls = 0,
   aliasJobStatus = null,
   swapLiveOnAliasRead = 0,
+  swapLiveAfterAliasRead = 0,
   swapLiveTo = null,
   dropMutationResponse = false,
   swapLiveBeforeMutation = false,
@@ -110,7 +111,10 @@ export const startVercel = ({
         aliasReads += 1;
         if (swapLiveOnAliasRead && aliasReads === swapLiveOnAliasRead) goLiveNewer(alias);
       }
-      return alias ? send(200, alias) : notFound();
+      if (!alias) return notFound();
+      send(200, alias);
+      if (swapLiveAfterAliasRead && aliasReads === swapLiveAfterAliasRead) goLiveNewer(alias);
+      return;
     }
     if (req.method === "GET" && (match = url.pathname.match(/^\/v13\/deployments\/([^/]+)$/))) {
       const key = decodeURIComponent(match[1]);

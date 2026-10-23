@@ -145,22 +145,24 @@ test("a 5xx answer to the rollback leaves production's state unknown even when n
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
 }));
 
-test("a newer deployment that goes live right before the rollback is reported, not silently replaced", () => withVercel({
-  swapLiveBeforeMutation: true,
+test("automatic rollback preserves a newer deployment promoted after the last alias response", () => withVercel({
+  swapLiveAfterAliasRead: 3,
 }, async (vercel, exec) => {
   const result = await exec(["--if-live", LIVE_URL]);
-  assert.equal(result.code, 2, result.output);
-  assert.match(result.output, /moved it away from dpl_newer, not dpl_live/);
-  assert.match(result.output, /--undo/);
+  assert.equal(result.code, 1, result.output);
+  assert.deepEqual(mutations(vercel.requests), []);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_newer");
+  assert.equal(vercel.state.project.autoAssignCustomDomains, true);
 }));
 
-test("a rollback Vercel records without its source deployment is unconfirmed, even when a newer deploy slipped in", () => withVercel({
-  swapLiveBeforeMutation: true,
+test("automatic rollback refuses even when the provider would omit the replaced deployment", () => withVercel({
+  swapLiveAfterAliasRead: 3,
   omitFromDeployment: true,
 }, async (vercel, exec) => {
   const result = await exec(["--if-live", LIVE_URL]);
-  assert.equal(result.code, 2, result.output);
-  assert.match(result.output, /didn't record which deployment it replaced/);
+  assert.equal(result.code, 1, result.output);
+  assert.deepEqual(mutations(vercel.requests), []);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_newer");
 }));
 
 test("rollback returns to the deployment that served production before the live one, not to a newer bad one", () => withVercel({
@@ -328,11 +330,12 @@ test("rollback fails when the alias job fails even if the domain already moved",
   assert.doesNotMatch(result.output, /now serves/);
 }));
 
-test("automatic rollback acts when the failing deployment is live and the newest", () => withVercel({}, async (vercel, exec) => {
+test("automatic rollback refuses without an enforceable expected-source condition", () => withVercel({}, async (vercel, exec) => {
   const result = await exec(["--if-live", LIVE_URL, "--reason", "money-path smoke failed"]);
-  assert.equal(result.code, 0, result.output);
-  assert.equal(mutations(vercel.requests).length, 1);
-  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /Automatic rollback is disabled/);
+  assert.deepEqual(mutations(vercel.requests), []);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
 }));
 
 const autoRefusals = {
