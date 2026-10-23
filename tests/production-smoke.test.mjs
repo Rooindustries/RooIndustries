@@ -7,7 +7,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { packages, startSite } from "./fixtures/fake-site.mjs";
-import { DOMAIN, TOKEN, startVercel } from "./fixtures/fake-vercel.mjs";
+import { DOMAIN } from "./fixtures/fake-vercel.mjs";
+import { withRecovery } from "./fixtures/production-recovery.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const script = path.join(root, "scripts/production-smoke.mjs");
@@ -368,43 +369,16 @@ test("CI keeps a reset required script classified as a runner connection failure
   }
 });
 
-const gate = path.join(root, "scripts/production-deploy-gate.mjs");
 const LIVE_URL = "https://rooindustries-live-roo-industries.vercel.app";
 const PREVIOUS_URL = "https://rooindustries-previous-roo-industries.vercel.app";
 
-const runGate = (env) => new Promise(resolve => {
-  const childEnv = {
-    PATH: process.env.PATH,
-    HOME: process.env.HOME,
-    PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
-    SMOKE_RETRY_MS: "50",
-    GATE_LIVE_ATTEMPTS: "2",
-    GATE_LIVE_WAIT_MS: "20",
-    ROLLBACK_VERIFY_INTERVAL_MS: "20",
-    ROLLBACK_VERIFY_TIMEOUT_MS: "400",
-    ...env,
-  };
-  for (const key of Object.keys(childEnv)) if (childEnv[key] === undefined) delete childEnv[key];
-  const child = spawn(process.execPath, [gate], { cwd: root, env: childEnv });
-  let output = "";
-  child.stdout.on("data", chunk => { output += chunk; });
-  child.stderr.on("data", chunk => { output += chunk; });
-  child.on("close", code => resolve({ code, output }));
-});
-
 const withGate = async ({ site: siteOverrides, vercel: vercelOptions } = {}, body) => {
-  const site = await startSite(siteOverrides);
-  const vercel = await startVercel(vercelOptions);
-  try {
-    const exec = (env = {}) => runGate({ VERCEL_TOKEN: TOKEN, VERCEL_API_URL: vercel.origin, SMOKE_BASE_URL: site.base, DEPLOYMENT_URL: LIVE_URL, ...env });
-    await body({ site, vercel, exec });
-  } finally {
-    await site.close();
-    await vercel.close();
-  }
+  await withRecovery({ site: siteOverrides, vercel: vercelOptions }, async context => {
+    await body({ ...context, exec: env => context.exec({ SMOKE_MARKER_TIMEOUT_MS: "2000", ...env }) });
+  });
 };
 
-const vercelChanges = vercel => vercel.requests.filter(request => request.method !== "GET");
+const vercelChanges = vercel => vercel.requests.filter(request => request.method !== "GET" && !request.path.startsWith("/repos/"));
 
 test("review regression: concurrent gates recover a broken deployment exactly once", () => withGate({
   site: { status: { "/payment": 500 } },
@@ -412,7 +386,7 @@ test("review regression: concurrent gates recover a broken deployment exactly on
   const results = await Promise.all([exec(), exec({ VERCEL_API_URL: `${vercel.origin}/`, TMPDIR: os.homedir() })]);
   assert.equal(vercelChanges(vercel).length, 1, results.map(result => result.output).join("\n"));
   const mutation = vercel.requests.findIndex(request => request.method === "POST");
-  assert.equal(vercel.requests.slice(0, mutation).filter(request => request.path === "/v2/teams").length, 4,
+  assert.equal(vercel.requests.slice(0, mutation).filter(request => request.path === "/v2/teams").length, 5,
     "The waiting gate must not read production before the first recovery completes.");
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
   assert.ok(results.some(result => /production was rolled back/.test(result.output)));
@@ -420,7 +394,7 @@ test("review regression: concurrent gates recover a broken deployment exactly on
 
 test("the production deployment event invokes recovery using only fake services", () => withGate({
   site: { status: { "/payment": 500 } },
-}, async ({ site, vercel, exec }) => {
+}, async ({ site, previous, vercel, exec }) => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "roo702-event-"));
   const eventPath = path.join(scratch, "event.json");
   fs.writeFileSync(eventPath, JSON.stringify({ repository: { full_name: "Rooindustries/RooIndustries" },
@@ -428,7 +402,7 @@ test("the production deployment event invokes recovery using only fake services"
   try {
     const env = { GITHUB_ACTIONS: "true", GITHUB_EVENT_NAME: "deployment_status", GITHUB_EVENT_PATH: eventPath,
       GITHUB_WORKFLOW_REF: "Rooindustries/RooIndustries/.github/workflows/production-smoke.yml@refs/heads/main",
-      ROO_TEST_MONITOR_ORIGIN: site.base, SMOKE_BASE_URL: undefined,
+      ROO_TEST_MONITOR_ORIGIN: site.base, ROO_TEST_PREVIOUS_ORIGIN: previous.base, SMOKE_BASE_URL: undefined,
       NODE_OPTIONS: `--import=${path.join(root, "tests/fixtures/production-monitor-loader.mjs")}` };
     const refused = await exec({ ...env, GITHUB_WORKFLOW_REF: "Rooindustries/RooIndustries/.github/workflows/tests.yml@refs/heads/main" });
     assert.equal(refused.code, 1, refused.output);

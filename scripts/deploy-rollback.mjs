@@ -1,4 +1,8 @@
 import { withRecoveryLock } from "./lib/production-recovery-lock.mjs";
+import fs from "node:fs";
+import { log, logError, logJson, deploymentOrigin } from "./lib/production-diagnostics.mjs";
+import { latestPassedGate, verifyHistoryTarget } from "./lib/production-recovery-history.mjs";
+import { verifyEvidence } from "./lib/production-smoke-report.mjs";
 
 const USAGE = `Usage: npm run deploy:rollback -- [options]
 
@@ -7,7 +11,9 @@ const USAGE = `Usage: npm run deploy:rollback -- [options]
   --undo                  Promote the newest ready production deployment and turn
                           automatic production domains back on.
   --status                Print the live deployment and rollback state as JSON.
-  --if-live <url-or-id>   Roll back only while this newest deployment is still live.
+  --if-live <url-or-id>   Roll back only while this deployment is still live.
+  --plan                  Print the verified automatic recovery target as JSON.
+  --evidence <file>        Repeated differential-smoke evidence for automatic recovery.
   --reason <text>         Reason recorded with the rollback in Vercel.
   --domain <host>         Production domain to check (default www.rooindustries.com).
 
@@ -33,12 +39,13 @@ class ApiError extends Error {
 
 const parseArgs = (argv) => {
   const options = { dryRun: false, undo: false, status: false, ifLive: null, reason: null, domain: "www.rooindustries.com" };
-  const valueFlags = { "--if-live": "ifLive", "--reason": "reason", "--domain": "domain" };
+  const valueFlags = { "--if-live": "ifLive", "--reason": "reason", "--domain": "domain", "--evidence": "evidence" };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--dry-run") options.dryRun = true;
     else if (arg === "--undo") options.undo = true;
     else if (arg === "--status") options.status = true;
+    else if (arg === "--plan") options.plan = true;
     else if (arg === "--help" || arg === "-h") options.help = true;
     else if (valueFlags[arg]) {
       const value = argv[index + 1];
@@ -51,6 +58,14 @@ const parseArgs = (argv) => {
   }
   if (options.status && (options.undo || options.ifLive || options.dryRun)) throw new Refusal("--status can't be combined with other actions.");
   if (options.undo && options.ifLive) throw new Refusal("--if-live only applies to a rollback, not to --undo.");
+  if ((options.plan || options.evidence) && (!options.ifLive || options.status || options.undo)) throw new Refusal("--plan and --evidence require --if-live.");
+  if (options.ifLive) {
+    if (options.ifLive.startsWith("dpl_")) {
+      if (!/^dpl_[a-z\d_-]+$/i.test(options.ifLive)) throw new Refusal("Invalid deployment identifier.");
+    } else deploymentOrigin(options.ifLive);
+  }
+  if (!/^[a-z\d]+(?:[a-z\d.-]*[a-z\d])?\.?$/i.test(options.domain)) throw new Refusal("--domain must be a hostname without credentials or a URL.");
+  options.domain = options.domain.toLowerCase().replace(/\.$/, "");
   return options;
 };
 
@@ -62,6 +77,7 @@ const resolveApiBase = () => {
   } catch {
     throw new Refusal("VERCEL_API_URL is not a valid URL.");
   }
+  if (url.username || url.password) throw new Refusal("VERCEL_API_URL must not contain credentials.");
   if (url.origin === VERCEL_API) return VERCEL_API;
   if (url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname)) return url.origin;
   throw new Refusal("VERCEL_API_URL must be https://api.vercel.com (or a loopback address in tests).");
@@ -74,6 +90,7 @@ const createClient = (token, base) => async (method, pathname, query = {}, paylo
   }
   const response = await fetch(url, {
     method,
+    redirect: "error",
     headers: {
       Authorization: `Bearer ${token}`,
       ...(payload === undefined ? {} : { "Content-Type": "application/json" }),
@@ -102,7 +119,8 @@ const summarize = (deployment) => {
   const sha = String(deployment?.meta?.githubCommitSha || "").slice(0, 8) || "no-sha";
   const message = String(deployment?.meta?.githubCommitMessage || "").split("\n")[0];
   const when = createdAt(deployment) ? new Date(createdAt(deployment)).toISOString() : "unknown time";
-  return `${deploymentId(deployment)} ${deployment?.url || ""} ${when} ${sha}${message ? ` "${message}"` : ""}`;
+  const host = new URL(deploymentOrigin(`https://${deployment.url}`)).hostname;
+  return `${deploymentId(deployment)} ${host} ${when} ${sha}${message ? ` "${message}"` : ""}`;
 };
 
 const findScope = async (api, domain) => {
@@ -124,6 +142,7 @@ const loadState = async (api, domain) => {
   const { teamId, alias } = await findScope(api, domain);
   if (!alias?.deploymentId || alias.redirect) throw new Refusal(`${domain} is not pointed at a deployment.`);
   const { body: live } = await api("GET", `/v13/deployments/${encodeURIComponent(alias.deploymentId)}`, { teamId });
+  deploymentOrigin(`https://${live?.url}`);
   if (deploymentId(live) !== alias.deploymentId) throw new Refusal(`Vercel returned ${deploymentId(live)} for ${alias.deploymentId}.`);
   if (alias.projectId && live.projectId !== alias.projectId) throw new Refusal(`${domain} belongs to ${alias.projectId}, but its deployment belongs to ${live.projectId}.`);
   if (readyState(live) !== "READY" || live.target !== "production") {
@@ -141,6 +160,7 @@ const loadState = async (api, domain) => {
   const production = (Array.isArray(listing?.deployments) ? listing.deployments : [])
     .filter((deployment) => isLiveable(deployment, project.id))
     .sort((a, b) => createdAt(b) - createdAt(a));
+  if (production[0]) deploymentOrigin(`https://${production[0].url}`);
   return { teamId, live, project, newest: production[0] || null };
 };
 
@@ -177,10 +197,10 @@ const refuseBusyProject = (state) => {
 
 // Vercel's last promote or rollback says which deployment served production before the live one,
 // and which one a rollback already moved away from. Creation order alone can pick a known-bad deployment.
-const findRollbackTarget = async (api, state) => {
+const findRollbackTarget = async (api, state, recordedTarget = null) => {
   const job = state.project.lastAliasRequest;
   const settled = job?.jobStatus === "succeeded" && job?.fromDeploymentId;
-  const previous = settled && job.type !== "rollback" && job.toDeploymentId === deploymentId(state.live) ? job.fromDeploymentId : null;
+  const previous = recordedTarget || (settled && job.type !== "rollback" && job.toDeploymentId === deploymentId(state.live) ? job.fromDeploymentId : null);
   const rolledAwayFrom = settled && job.type === "rollback" ? job.fromDeploymentId : null;
   const wanted = (deployment) => previous
     ? deploymentId(deployment) === previous
@@ -223,15 +243,48 @@ const checkAutomaticRollback = async (api, state, ifLive) => {
   if (deploymentId(failing) !== deploymentId(state.live)) {
     throw new Refusal(`${deploymentId(failing)} is not live (${deploymentId(state.live)} is); leaving production alone.`);
   }
-  if (deploymentId(state.newest) !== deploymentId(state.live)) {
-    throw new Refusal(`${deploymentId(state.live)} is not the newest production deployment (${deploymentId(state.newest)} is); leaving production alone.`);
-  }
-  if (state.project.autoAssignCustomDomains === false) {
-    throw new Refusal("Production is already rolled back; an automatic rollback never goes further back.");
+  if (state.project.autoAssignCustomDomains !== true) {
+    throw new Refusal("Production is already rolled back or its automatic assignment is unknown; an automatic rollback never goes further back.");
   }
 };
 
-const waitForDomain = async (api, state, domain, targetId, { autoAssign, expectedFrom } = {}) => {
+const automaticPlan = async (api, state, options) => {
+  await checkAutomaticRollback(api, state, options.ifLive);
+  const history = await latestPassedGate();
+  const target = await findRollbackTarget(api, state, history.deploymentId);
+  checkTarget(target, state, { rollback: true });
+  verifyHistoryTarget(history, state, target, options.domain);
+  if (!options.plan && !options.dryRun) {
+    if (!options.evidence) throw new Refusal("Automatic recovery requires repeated differential-smoke evidence.");
+    const evidence = JSON.parse(fs.readFileSync(options.evidence, "utf8"));
+    verifyEvidence(evidence, { sourceId: deploymentId(state.live), targetId: deploymentId(target), historyId: history.id,
+      epoch: history.epoch, sourceBase: process.env.SMOKE_BASE_URL || deploymentOrigin(`https://${state.live.url}`),
+      targetBase: process.env.SMOKE_PREVIOUS_BASE_URL || deploymentOrigin(`https://${target.url}`) });
+  }
+  return { target, history };
+};
+
+const restoreDisplacedDeployment = async (api, state, domain, targetId, displacedId, restorations) => {
+  if (restorations >= 3) throw new Error("Production kept changing during race restoration. Stop competing alias writers and check production immediately.");
+  const displaced = await resolveDeployment(api, state, displacedId);
+  if (deploymentId(displaced) !== displacedId || !isLiveable(displaced, state.project.id) || createdAt(displaced) <= createdAt(state.live)) {
+    throw new Error("The rollback replaced an unexpected deployment whose safe restoration cannot be established. Check production immediately.");
+  }
+  const current = await loadState(api, domain);
+  if (deploymentId(current.live) !== targetId || current.project.id !== state.project.id || current.teamId !== state.teamId) {
+    throw new Error("Production changed again before race restoration; no further switch was sent. Check production immediately.");
+  }
+  refuseBusyProject(current);
+  try {
+    await postMutation(api, current, domain, `/v10/projects/${encodeURIComponent(state.project.id)}/promote/${encodeURIComponent(displacedId)}`, { teamId: state.teamId });
+  } catch (error) {
+    if (!error.uncertainDelivery) throw error;
+  }
+  await waitForDomain(api, current, domain, displacedId, { autoAssign: true, expectedFrom: targetId, automatic: true, restorations: restorations + 1 });
+  throw new Error(`Recovery raced with a newer deployment; restored ${displacedId} immediately and verified automatic domain assignment. The failing deployment was not recovered.`);
+};
+
+const waitForDomain = async (api, state, domain, targetId, { autoAssign, expectedFrom, automatic = false, restorations = 0 } = {}) => {
   const deadline = Date.now() + VERIFY_TIMEOUT_MS;
   let alias = null;
   let job = null;
@@ -242,7 +295,11 @@ const waitForDomain = async (api, state, domain, targetId, { autoAssign, expecte
     const domainMoved = alias?.deploymentId === targetId;
     const jobTargetsThis = job?.toDeploymentId === targetId;
     const assignmentReady = autoAssign === undefined ||
-      (autoAssign ? project?.autoAssignCustomDomains !== false : project?.autoAssignCustomDomains === false);
+      (autoAssign ? project?.autoAssignCustomDomains === true : project?.autoAssignCustomDomains === false);
+    if (automatic && domainMoved && jobTargetsThis && job.fromDeploymentId && job.fromDeploymentId !== expectedFrom &&
+        (job.jobStatus === "succeeded" || FAILED_JOBS.has(job.jobStatus))) {
+      await restoreDisplacedDeployment(api, state, domain, targetId, job.fromDeploymentId, restorations);
+    }
     if (domainMoved && job?.jobStatus === "succeeded" && jobTargetsThis && assignmentReady) {
       if (expectedFrom && !job.fromDeploymentId) {
         throw new Error(`${domain} now serves ${targetId}, but Vercel didn't record which deployment it replaced, so it isn't confirmed that ${expectedFrom} was the one. Check that no newer deployment went live just before the request, and run \`npm run deploy:rollback -- --undo\` if one did.`);
@@ -264,11 +321,12 @@ const waitForDomain = async (api, state, domain, targetId, { autoAssign, expecte
 const ambiguousDelivery = (error) =>
   !(error instanceof Refusal) && !(error instanceof ApiError && error.status < 500);
 
-const postMutation = async (api, state, domain, pathname, query, { automatic = false } = {}) => {
+const postMutation = async (api, state, domain, pathname, query, { automatic = null } = {}) => {
   if (automatic) {
     const current = await loadState(api, domain);
     refuseBusyProject(current);
-    await checkAutomaticRollback(api, current, deploymentId(state.live));
+    const plan = await automaticPlan(api, current, automatic);
+    if (deploymentId(plan.target) !== automatic.targetId) throw new Refusal("The recorded automatic recovery target changed before mutation.");
   }
   const { body: alias } = await api("GET", `/v4/aliases/${encodeURIComponent(domain)}`, { teamId: state.teamId });
   if (alias?.deploymentId !== deploymentId(state.live)) {
@@ -278,9 +336,13 @@ const postMutation = async (api, state, domain, pathname, query, { automatic = f
     await api("POST", pathname, query, {});
     mutationAccepted = true;
   } catch (error) {
-    if (ambiguousDelivery(error)) mutationAccepted = true;
-    if (mutationAccepted) {
-      throw new Error(`${error.message}. Vercel may have applied the request anyway, so production's state is unknown. Run \`npm run deploy:rollback -- --status\` and check the Vercel dashboard before trying again.`);
+    const unknownDelivery = ambiguousDelivery(error);
+    if (unknownDelivery) mutationAccepted = true;
+    if (unknownDelivery) {
+      if (automatic) await waitForDomain(api, state, domain, automatic.targetId, { autoAssign: false, expectedFrom: deploymentId(state.live), automatic: true });
+      const uncertain = new Error(`${error.message}. Vercel may have applied the request anyway, so production's state is unknown. Run \`npm run deploy:rollback -- --status\` and check the Vercel dashboard before trying again.`);
+      uncertain.uncertainDelivery = true;
+      throw uncertain;
     }
     throw error;
   }
@@ -288,7 +350,7 @@ const postMutation = async (api, state, domain, pathname, query, { automatic = f
 
 const main = async (options) => {
   if (options.help) {
-    console.log(USAGE);
+    log(USAGE);
     return;
   }
   const token = String(process.env.VERCEL_TOKEN || "").trim();
@@ -297,33 +359,43 @@ const main = async (options) => {
   const state = await loadState(api, options.domain);
 
   if (options.status) {
-    console.log(JSON.stringify({
+    logJson({
       domain: options.domain,
+      projectId: state.project.id,
       live: { id: deploymentId(state.live), url: state.live.url, createdAt: createdAt(state.live), sha: state.live.meta?.githubCommitSha || null },
       newest: state.newest ? { id: deploymentId(state.newest), url: state.newest.url, createdAt: createdAt(state.newest) } : null,
       autoAssignCustomDomains: state.project.autoAssignCustomDomains ?? null,
       lastAliasRequest: state.project.lastAliasRequest ?? null,
-    }, null, 2));
+    });
     return;
   }
 
-  console.log(`Live:   ${summarize(state.live)}`);
+  if (options.plan) {
+    refuseBusyProject(state);
+    const plan = await automaticPlan(api, state, options);
+    logJson({ sourceId: deploymentId(state.live), targetId: deploymentId(plan.target),
+      sourceUrl: deploymentOrigin(`https://${state.live.url}`), targetUrl: deploymentOrigin(`https://${plan.target.url}`),
+      historyId: plan.history.id, epoch: plan.history.epoch });
+    return;
+  }
+
+  log(`Live:   ${summarize(state.live)}`);
   if (state.project.autoAssignCustomDomains === false) {
-    console.log("Production is rolled back: new deployments don't go live until `npm run deploy:rollback -- --undo`.");
+    log("Production is rolled back: new deployments don't go live until `npm run deploy:rollback -- --undo`.");
   }
 
   if (options.undo) {
     const target = state.newest;
     if (!target) throw new Refusal("No ready production deployment to promote.");
     if (deploymentId(target) === deploymentId(state.live) && state.project.autoAssignCustomDomains !== false) {
-      console.log("Nothing to undo: the newest production deployment is live and new deployments go live automatically.");
+      log("Nothing to undo: the newest production deployment is live and new deployments go live automatically.");
       return;
     }
     refuseBusyProject(state);
     if (deploymentId(target) !== deploymentId(state.live)) checkTarget(target, state, { rollback: false });
-    console.log(`Target: ${summarize(target)}`);
+    log(`Target: ${summarize(target)}`);
     if (options.dryRun) {
-      console.log("Dry run: nothing changed.");
+      log("Dry run: nothing changed.");
       return;
     }
     const fresh = await loadState(api, options.domain);
@@ -334,7 +406,7 @@ const main = async (options) => {
       throw new Refusal(`${deploymentId(state.live)} is no longer live (${deploymentId(fresh.live)} is); leaving production alone.`);
     }
     if (deploymentId(freshTarget) === deploymentId(fresh.live) && fresh.project.autoAssignCustomDomains !== false) {
-      console.log("Nothing to undo: the newest production deployment is live and new deployments go live automatically.");
+      log("Nothing to undo: the newest production deployment is live and new deployments go live automatically.");
       return;
     }
     if (deploymentId(freshTarget) !== deploymentId(target)) {
@@ -343,17 +415,17 @@ const main = async (options) => {
     if (deploymentId(freshTarget) !== deploymentId(fresh.live)) checkTarget(freshTarget, fresh, { rollback: false });
     await postMutation(api, fresh, options.domain, `/v10/projects/${encodeURIComponent(fresh.project.id)}/promote/${encodeURIComponent(deploymentId(freshTarget))}`, { teamId: fresh.teamId });
     await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget), { autoAssign: true, expectedFrom: deploymentId(fresh.live) });
-    console.log(`${options.domain} now serves ${deploymentId(target)}, and new production deployments go live automatically again.`);
+    log(`${options.domain} now serves ${deploymentId(target)}, and new production deployments go live automatically again.`);
     return;
   }
 
   refuseBusyProject(state);
-  if (options.ifLive) await checkAutomaticRollback(api, state, options.ifLive);
-  const target = await findRollbackTarget(api, state);
+  const plan = options.ifLive ? await automaticPlan(api, state, options) : null;
+  const target = plan?.target || await findRollbackTarget(api, state);
   checkTarget(target, state, { rollback: true });
-  console.log(`Target: ${summarize(target)}`);
+  log(`Target: ${summarize(target)}`);
   if (options.dryRun) {
-    console.log("Dry run: nothing changed.");
+    log("Dry run: nothing changed.");
     return;
   }
   const fresh = await loadState(api, options.domain);
@@ -361,8 +433,8 @@ const main = async (options) => {
   if (deploymentId(fresh.live) !== deploymentId(state.live)) {
     throw new Refusal(`${deploymentId(state.live)} is no longer live (${deploymentId(fresh.live)} is); leaving production alone.`);
   }
-  if (options.ifLive) await checkAutomaticRollback(api, fresh, options.ifLive);
-  const freshTarget = await findRollbackTarget(api, fresh);
+  const freshPlan = options.ifLive ? await automaticPlan(api, fresh, options) : null;
+  const freshTarget = freshPlan?.target || await findRollbackTarget(api, fresh);
   checkTarget(freshTarget, fresh, { rollback: true });
   if (deploymentId(freshTarget) !== deploymentId(target)) {
     throw new Refusal(`The rollback target changed from ${deploymentId(target)} to ${deploymentId(freshTarget)}; leaving production alone.`);
@@ -370,19 +442,19 @@ const main = async (options) => {
   await postMutation(api, fresh, options.domain, `/v1/projects/${encodeURIComponent(fresh.project.id)}/rollback/${encodeURIComponent(deploymentId(freshTarget))}`, {
     teamId: fresh.teamId,
     description: options.reason || "npm run deploy:rollback",
-  }, { automatic: Boolean(options.ifLive) });
-  await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget), { autoAssign: false, expectedFrom: deploymentId(fresh.live) });
-  console.log(`${options.domain} now serves ${deploymentId(target)}.`);
-  console.log("New production deployments stay off the domain until you run `npm run deploy:rollback -- --undo`.");
+  }, { automatic: options.ifLive ? { ...options, targetId: deploymentId(freshTarget) } : null });
+  await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget), { autoAssign: false, expectedFrom: deploymentId(fresh.live), automatic: Boolean(options.ifLive) });
+  log(`${options.domain} now serves ${deploymentId(target)}.`);
+  log("New production deployments stay off the domain until you run `npm run deploy:rollback -- --undo`.");
 };
 
 const run = async () => {
   const options = parseArgs(process.argv.slice(2));
-  if (options.status || options.dryRun || options.help) return main(options);
+  if (options.status || options.plan || options.dryRun || options.help) return main(options);
   return withRecoveryLock(options.domain, () => main(options));
 };
 
 run().catch((error) => {
-  console.error(error instanceof Refusal ? `Refusing: ${error.message.replace(/^Refusing /, "")}` : error.message);
+  logError(error instanceof Refusal ? `Refusing: ${error.message.replace(/^Refusing /, "")}` : error.message);
   process.exitCode = mutationAccepted ? 2 : 1;
 });

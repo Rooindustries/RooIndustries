@@ -29,7 +29,7 @@ export const startSite = (overrides = {}) => {
   const failures = new Map(Object.entries(overrides.failFirst || {}));
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://site");
-    const entry = { method: req.method, path: url.pathname };
+    const entry = { method: req.method, path: url.pathname, at: Date.now() };
     requests.push(entry);
     if (overrides.dropNonBrowser && !/Mozilla/.test(req.headers["user-agent"] || "")) return req.socket.destroy();
     overrides.onRequest?.(url.pathname);
@@ -108,7 +108,7 @@ export const startSite = (overrides = {}) => {
             ? `const booking = JSON.parse(sessionStorage.getItem("checkout_booking_state") || "null"); if (!booking) return; fetch('/api/payment/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageTitle: booking.packageTitle }) }).then(response => response.json()).then(body => { if (body.ok && body.quoteFingerprint) document.body.dataset.rooFlowReady = 'payment'; });`
           : `document.body.dataset.rooFlowReady = ${JSON.stringify(flow)}`;
         const readyCheck = startup.requiresExternalReady ? "if (!window.fixtureExternalReady) return;" : "";
-        res.end(`const initialize = () => { ${readyCheck} ${action}; }; if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize, { once: true }); else initialize();`);
+        res.end(`const initialize = () => { ${readyCheck} ${action}; }; const start = () => setTimeout(initialize, ${Number(startup.initializeDelay || 0)}); if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true }); else start();`);
       }, startup.delay || 0);
     }
     if (url.pathname === "/packages") {

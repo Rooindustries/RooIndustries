@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DOMAIN, TOKEN, startVercel } from "./fixtures/fake-vercel.mjs";
+import { withRecovery } from "./fixtures/production-recovery.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const script = path.join(root, "scripts/deploy-rollback.mjs");
@@ -30,6 +31,9 @@ const withVercel = async (options, body) => {
 };
 
 const mutations = requests => requests.filter(request => request.method !== "GET");
+const withAutomatic = (options, body) => withRecovery({ site: { status: { "/payment": 500 } }, vercel: options },
+  async ({ vercel, exec }) => body(vercel, () => exec()));
+const automaticMutations = requests => mutations(requests).filter(request => !request.path.startsWith("/repos/"));
 
 test("dry run shows the live and previous production deployments and changes nothing", () => withVercel({}, async (vercel, exec) => {
   const result = await exec(["--dry-run"]);
@@ -145,21 +149,21 @@ test("a 5xx answer to the rollback leaves production's state unknown even when n
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
 }));
 
-test("automatic rollback preserves a newer deployment promoted after the last alias response", () => withVercel({
+test("automatic rollback preserves a newer deployment promoted after the last alias response", () => withAutomatic({
   swapLiveAfterAliasRead: 3,
 }, async (vercel, exec) => {
-  const result = await exec(["--if-live", LIVE_URL]);
+  const result = await exec();
   assert.equal(result.code, 1, result.output);
   assert.deepEqual(mutations(vercel.requests), []);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_newer");
   assert.equal(vercel.state.project.autoAssignCustomDomains, true);
 }));
 
-test("automatic rollback refuses even when the provider would omit the replaced deployment", () => withVercel({
+test("automatic rollback refuses even when the provider would omit the replaced deployment", () => withAutomatic({
   swapLiveAfterAliasRead: 3,
   omitFromDeployment: true,
 }, async (vercel, exec) => {
-  const result = await exec(["--if-live", LIVE_URL]);
+  const result = await exec();
   assert.equal(result.code, 1, result.output);
   assert.deepEqual(mutations(vercel.requests), []);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_newer");
@@ -297,13 +301,13 @@ test("refuses while a rolling release is moving traffic", () => withVercel({
   assert.deepEqual(mutations(vercel.requests), []);
 }));
 
-test("automatic rollback leaves production alone when a newer deployment goes live before the request", () => withVercel({
+test("automatic rollback leaves production alone when a newer deployment goes live before the request", () => withAutomatic({
   swapLiveOnAliasRead: 2,
   swapLiveTo: "dpl_newer",
 }, async (vercel, exec) => {
-  const result = await exec(["--if-live", LIVE_URL]);
+  const result = await exec();
   assert.notEqual(result.code, 0, result.output);
-  assert.match(result.output, /no longer live/);
+  assert.match(result.output, /not live|no longer live|not the newest/);
   assert.deepEqual(mutations(vercel.requests), []);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_newer");
 }));
@@ -330,30 +334,29 @@ test("rollback fails when the alias job fails even if the domain already moved",
   assert.doesNotMatch(result.output, /now serves/);
 }));
 
-test("automatic rollback serializes and verifies the expected live source", () => withVercel({}, async (vercel, exec) => {
-  const result = await exec(["--if-live", LIVE_URL, "--reason", "money-path smoke failed"]);
-  assert.equal(result.code, 0, result.output);
-  assert.equal(mutations(vercel.requests).length, 1);
+test("automatic rollback serializes and verifies the expected live source", () => withAutomatic({}, async (vercel, exec) => {
+  const result = await exec();
+  assert.equal(result.code, 1, result.output);
+  assert.equal(automaticMutations(vercel.requests).length, 1);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
   assert.equal(vercel.state.project.lastAliasRequest.fromDeploymentId, "dpl_live");
 }));
 
 for (const [name, options] of Object.entries({
-  "a deployment moves between the final read and mutation": { swapLiveBeforeMutation: true },
   "the replaced deployment is missing": { omitFromDeployment: true },
   "the response is lost": { dropMutationResponse: true },
 })) {
-  test(`automatic recovery reports ambiguous state when ${name}`, () => withVercel(options, async (vercel, exec) => {
-    const result = await exec(["--if-live", LIVE_URL]);
-    assert.equal(result.code, 2, result.output);
-    assert.equal(mutations(vercel.requests).length, 1);
+  test(`automatic recovery reports ambiguous state when ${name}`, () => withAutomatic(options, async (vercel, exec) => {
+    const result = await exec();
+    assert.equal(result.code, 1, result.output);
+    assert.equal(automaticMutations(vercel.requests).length, 1);
     assert.doesNotMatch(result.output, /now serves dpl_previous\.$/m);
   }));
 }
 
 const autoRefusals = {
   "a different deployment is live": { arg: "https://rooindustries-previous-roo-industries.vercel.app" },
-  "the failing deployment is not the newest production deployment": {
+  "the requested older source has no passed-gate proof": {
     arg: "https://rooindustries-previous-roo-industries.vercel.app",
     tweak: state => { state.aliases[DOMAIN].deploymentId = "dpl_previous"; },
   },

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { isIP } from "node:net";
 import { isProductionMonitor } from "./lib/production-monitor.mjs";
+import { log, logError, redact, redactObject, deploymentOrigin } from "./lib/production-diagnostics.mjs";
 
 const PRODUCTION = "https://www.rooindustries.com";
 const MONEY_PAGES = ["/", "/packages", "/booking", "/payment"];
@@ -18,6 +19,8 @@ class Refusal extends Error {}
 // The runner could not reach the site at all (DNS, TLS, refused or reset connections, a dead browser).
 // A deployment can't cause these, so they mean "the smoke could not run", never a money-path failure.
 class CouldNotRun extends Error {}
+class ApplicationFailure extends Error {}
+class InitializationIncomplete extends Error {}
 // Only failures of the connection itself are the runner's: a deploy can't cause them. Anything the browser
 // refused on the site's say-so (CSP, CORS, redirects, bad responses) is the site's failure.
 const RUNNER_NET_ERRORS = new Set([
@@ -46,8 +49,8 @@ const asRunnerFault = (error, what) => {
 const parseArgs = (argv) => {
   const options = { base: PRODUCTION };
   for (let index = 0; index < argv.length; index += 1) {
-    if (argv[index] === "--base" && argv[index + 1]) {
-      options.base = argv[index + 1];
+    if (["--base", "--report"].includes(argv[index]) && argv[index + 1]) {
+      options[argv[index] === "--base" ? "base" : "report"] = argv[index + 1];
       index += 1;
     } else {
       throw new Refusal(`unknown option "${argv[index]}". Usage: npm run smoke:production [-- --base <url>]`);
@@ -68,12 +71,16 @@ const resolveBase = (value) => {
   try {
     url = new URL(value);
   } catch {
-    throw new Refusal(`"${value}" is not a URL.`);
+    throw new Refusal("The smoke target is not a valid URL.");
   }
-  if (process.env.GITHUB_ACTIONS === "true" && !(isCiTarget(url) || (isProductionMonitor() && url.origin === PRODUCTION && !url.username && !url.password))) {
+  if (url.username || url.password) throw new Refusal("The smoke target must not contain credentials.");
+  const recoveryOrigin = process.env.SMOKE_DEPLOYMENT_URL && deploymentOrigin(process.env.SMOKE_DEPLOYMENT_URL);
+  const recoveryTarget = url.origin === recoveryOrigin && url.hostname.endsWith(".vercel.app");
+  if (process.env.GITHUB_ACTIONS === "true" && !(isCiTarget(url) || (isProductionMonitor() && (url.origin === PRODUCTION || recoveryTarget)))) {
     throw new Refusal("CI requires an explicit loopback smoke target; live monitoring is disabled.");
   }
   if (url.origin === PRODUCTION) return url.origin;
+  if (recoveryTarget) return url.origin;
   if (url.protocol === "http:" && isPrivateHost(url.hostname)) return url.origin;
   throw new Refusal(`the smoke only runs against ${PRODUCTION} or a local test server, not ${url.origin}.`);
 };
@@ -123,7 +130,7 @@ const allowSmokeRequests = async (context, base, checkout) => {
       } catch {}
     }
     const allowed = (request.method() === "GET" || quote) &&
-      (process.env.GITHUB_ACTIONS !== "true" || isCiTarget(url) || (isProductionMonitor() && url.origin === PRODUCTION));
+      (process.env.GITHUB_ACTIONS !== "true" || isCiTarget(url) || (isProductionMonitor() && url.origin === base));
     if (!allowed) {
       if (request.resourceType() === "script" && url.origin !== base) blockedScripts.push(url.origin);
       return route.abort("blockedbyclient");
@@ -176,6 +183,24 @@ const withSmokePage = async (browser, base, contextOptions, check) => {
     }, checkout);
     const page = await context.newPage();
     const origin = new URL(base).origin;
+    const applicationError = new Promise((_, reject) => {
+      page.on("response", response => {
+        if (checkout && response.url() === `${base}/api/payment/quote` && response.request().method() === "POST" && response.status() !== 200) {
+          reject(new ApplicationFailure(`/payment quote answered ${response.status()}`));
+        }
+      });
+      page.on("pageerror", error => {
+        const sources = (error.stack || "").split("\n").filter(frame => /^\s+at /.test(frame))
+          .flatMap(frame => frame.match(/https?:\/\/[^\s)]+/g) || []);
+        const origins = sources.map(source => { try { return new URL(source).origin; } catch { return null; } });
+        if (origins.length && origins.every(source => source && source !== origin)) return;
+        if (lost.length && (runnerNetError(error.message) || /^(Failed to fetch|Load failed|NetworkError)/i.test(error.message))) {
+          reject(new CouldNotRun(`couldn't load ${lost[0]}: ${error.message}`));
+          return;
+        }
+        reject(new ApplicationFailure(`${new URL(page.url()).pathname} has a rendering error: ${error.message}`));
+      });
+    });
     page.on("request", request => {
       if (new URL(request.url()).origin === origin && ["document", "script", "stylesheet", "xhr", "fetch"].includes(request.resourceType())) pending.add(request);
     });
@@ -187,8 +212,9 @@ const withSmokePage = async (browser, base, contextOptions, check) => {
         lost.push(`${new URL(request.url()).pathname} (${reason || "failed"})`);
       }
     });
-    return await check(page);
+    return await Promise.race([check(page), applicationError]);
   } catch (error) {
+    if (error instanceof ApplicationFailure) throw error;
     if (lost.length && !(error instanceof CouldNotRun)) throw new CouldNotRun(`couldn't load ${lost[0]}: ${error.message}`);
     if (pending.size && !(error instanceof CouldNotRun)) throw new CouldNotRun(`client resources are still loading: ${error.message}`);
     if (blockedScripts.length && !(error instanceof CouldNotRun)) throw new CouldNotRun(`the smoke blocked external scripts from ${blockedScripts[0]}: ${error.message}`);
@@ -232,29 +258,17 @@ const FLOW_MARKERS = {
 };
 
 const checkPageRenders = (browser, base, pathname, checkout) => withSmokePage(browser, base, { checkout }, async (page) => {
-    const errors = [];
     let quoted = false;
     if (pathname === "/payment") page.on("response", (response) => {
       if (response.url() === `${base}/api/payment/quote` && response.request().method() === "POST" && response.status() === 200) quoted = true;
     });
-    const origin = new URL(base).origin;
-    page.on("pageerror", (error) => {
-      const sources = (error.stack || "").split("\n")
-        .filter((frame) => /^\s+at /.test(frame))
-        .flatMap((frame) => frame.match(/https?:\/\/[^\s)]+/g) || []);
-      const origins = sources.map((source) => {
-        try { return new URL(source).origin; } catch { return null; }
-      });
-      if (origins.length && origins.every((source) => source && source !== origin)) return;
-      errors.push(error.message);
-    });
     const response = await page.goto(`${base}${pathname}`, { waitUntil: "domcontentloaded", timeout: 30000 });
-    if (response?.status() !== 200) throw new Error(`${pathname} answered ${response?.status()}`);
+    if (response?.status() !== 200) throw new ApplicationFailure(`${pathname} answered ${response?.status()}`);
     const markerTimeout = Number(process.env.SMOKE_MARKER_TIMEOUT_MS || 15000);
     await page.waitForFunction(() => document.body.innerText.trim().length >= 20, null, { timeout: markerTimeout })
       .catch(() => { throw new Error(`${pathname} rendered no visible content`); });
     const text = await page.evaluate(() => document.body.innerText);
-    if (APP_ERROR_PATTERN.test(text)) throw new Error(`${pathname} shows an application error`);
+    if (APP_ERROR_PATTERN.test(text)) throw new ApplicationFailure(`${pathname} shows an application error`);
     if (pathname === "/") {
       await page.waitForFunction(() => {
         const visible = (element) => {
@@ -277,14 +291,17 @@ const checkPageRenders = (browser, base, pathname, checkout) => withSmokePage(br
     if (marker) {
       await page.waitForFunction((expected) => document.body.innerText.includes(expected), marker, {
         timeout: markerTimeout,
-      }).catch(() => { throw new Error(`${pathname} is missing "${marker}"`); });
+      }).catch(async () => {
+        const initialized = await page.locator(`[data-roo-flow-ready="${pathname.slice(1)}"]`).count();
+        const Failure = initialized ? ApplicationFailure : InitializationIncomplete;
+        throw new Failure(`${pathname} is missing "${marker}"`);
+      });
     }
     const flow = pathname === "/" ? "home" : pathname.slice(1);
     await page.waitForFunction((expected) => document.querySelector(`[data-roo-flow-ready="${expected}"]`), flow, {
       timeout: markerTimeout,
     }).catch(() => {
-      if (errors.length) throw new Error(`${pathname} has a rendering error: ${errors[0]}`);
-      throw new Error(`${pathname} did not finish client initialization`);
+      throw new InitializationIncomplete(`${pathname} did not finish client initialization`);
     });
     if (marker) {
       const control = pathname === "/booking" ? '[data-roo-flow-ready="booking"] button:not(:disabled)' : '#payment-coupon-code';
@@ -315,9 +332,8 @@ const checkPageRenders = (browser, base, pathname, checkout) => withSmokePage(br
       }
     }
     if (pathname === "/payment" && !quoted) throw new Error("/payment did not confirm a real checkout quote");
-    if (errors.length) throw new Error(`${pathname} has a rendering error: ${errors[0]}`);
     if (APP_ERROR_PATTERN.test(await page.evaluate(() => document.body.innerText))) {
-      throw new Error(`${pathname} shows an application error`);
+      throw new ApplicationFailure(`${pathname} shows an application error`);
     }
     return "renders";
 });
@@ -332,19 +348,23 @@ const checkReferral = (browser, base) => withSmokePage(browser, base, {}, async 
 
 const withBrowserRetries = async (browser, base, check) => {
   let lastError;
+  let applicationFailure;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
     try {
       return await check(browser, base);
     } catch (error) {
+      if (error instanceof ApplicationFailure) applicationFailure = error;
       lastError = browser.isConnected() ? asRunnerFault(error, base) : new CouldNotRun(`the browser closed: ${error.message}`);
       if (attempt < ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
     }
   }
-  throw lastError;
+  throw applicationFailure || lastError;
 };
 
 const main = async () => {
-  const base = resolveBase(parseArgs(process.argv.slice(2)).base);
+  const options = parseArgs(process.argv.slice(2));
+  const base = resolveBase(options.base);
+  const startedAt = Date.now();
   const deadline = Date.now() + SMOKE_DEADLINE_MS;
   const withinDeadline = async (run) => {
     const remaining = deadline - Date.now();
@@ -386,18 +406,18 @@ const main = async () => {
       try {
         const detail = await withinDeadline(run);
         results.push({ name, ok: true, detail: detail || "" });
-        console.log(`ok    ${name}${detail ? ` (${detail})` : ""}`);
+        log(`ok    ${name}${detail ? ` (${detail})` : ""}`);
       } catch (error) {
         // Running out of the smoke's own time budget is the runner's problem; only evidence from the site counts against a deploy.
-        const fault = browser.isConnected() || error instanceof CouldNotRun ? error : new CouldNotRun(`the browser closed: ${error.message}`);
+        const fault = browser.isConnected() || error instanceof CouldNotRun || error instanceof ApplicationFailure ? error : new CouldNotRun(`the browser closed: ${error.message}`);
         if (fault instanceof CouldNotRun) {
           results.push({ name, ok: false, couldNotRun: true, detail: fault.message });
-          console.log(`SKIP  ${name}: ${fault.message}`);
+          log(`SKIP  ${name}: ${fault.message}`);
           if (!browser.isConnected() || Date.now() >= deadline) break;
           continue;
         }
-        results.push({ name, ok: false, detail: error.message });
-        console.log(`FAIL  ${name}: ${error.message}`);
+        results.push({ name, ok: false, ...(error instanceof InitializationIncomplete ? { initializationIncomplete: true } : {}), detail: error.message });
+        log(`FAIL  ${name}: ${error.message}`);
         if (Date.now() >= deadline) break;
       }
     }
@@ -408,12 +428,13 @@ const main = async () => {
   const unreachable = results.filter((result) => result.couldNotRun);
   if (process.env.GITHUB_STEP_SUMMARY) {
     const rows = results.map((result) => `| ${result.ok ? "ok" : result.couldNotRun ? "SKIP" : "FAIL"} | ${result.name} | ${result.detail.replace(/\|/g, "\\|")} |`);
-    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [`### Money-path smoke on ${base}`, "", "| Result | Check | Detail |", "| --- | --- | --- |", ...rows, ""].join("\n"));
+    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, redact([`### Money-path smoke on ${base}`, "", "| Result | Check | Detail |", "| --- | --- | --- |", ...rows, ""].join("\n")));
   }
-  if (failed.length) console.log(`${failed.length} money-path check(s) failed on ${base}.`);
-  else if (unreachable.length) console.log(`Smoke could not run: ${unreachable.length} check(s) couldn't reach ${base} from this runner.`);
-  else console.log(`All money-path checks passed on ${base}.`);
+  if (failed.length) log(`${failed.length} money-path check(s) failed on ${base}.`);
+  else if (unreachable.length) log(`Smoke could not run: ${unreachable.length} check(s) couldn't reach ${base} from this runner.`);
+  else log(`All money-path checks passed on ${base}.`);
   const code = failed.length ? 2 : unreachable.length ? 1 : 0;
+  if (options.report) fs.writeFileSync(options.report, JSON.stringify(redactObject({ version: 1, base, startedAt, completedAt: Date.now(), results })), { mode: 0o600 });
   if (Date.now() >= deadline) {
     await browser.close().catch(() => {});
     process.exit(code);
@@ -422,6 +443,6 @@ const main = async () => {
 };
 
 main().catch((error) => {
-  console.error(error instanceof Refusal ? `Refusing: ${error.message}` : `Smoke could not run: ${error.message}`);
+  logError(error instanceof Refusal ? `Refusing: ${error.message}` : `Smoke could not run: ${error.message}`);
   process.exitCode = 1;
 });
