@@ -30,6 +30,7 @@ const sources = [
 for (const source of [
   'src/server/referrals/commissionMoney.js',
   'src/server/referrals/disputeAccounting.js',
+  'src/server/api/ref/couponAlerts.js',
 ]) {
   try {
     if (baseline) {
@@ -3232,6 +3233,61 @@ try {
     assert.equal((await webhook()).status, 200);
     assert.equal(emailRequests.filter(row => row.body?.subject === 'Paid checkout exceeded a coupon limit').length, 2);
     return {booking, redemption, alerts};
+  });
+
+  await run('money-rules-543-alert-backlog', async () => {
+    const state = await seed('dodo', {coupon: 20});
+    const couponId = 'coupon.' + state.key;
+    const history = Array.from({length: 1001}, (_, index) => ({
+      _id: 'couponRedemption.000' + String(index).padStart(4, '0'),
+      _rev: 'seed', _type: 'couponRedemption', status: 'consumed',
+      coupon: {_ref: couponId}, ownerId: 'old-' + index,
+      ownerAlertRequired: false,
+    }));
+    const pending = Array.from({length: 201}, (_, index) => ({
+      _id: 'couponRedemption.zzz' + String(index).padStart(4, '0'),
+      _type: 'couponRedemption', status: 'consumed',
+      coupon: {_ref: couponId}, ownerId: 'pending-' + index,
+      bookingId: state.record.bookingId, ownerAlertRequired: true,
+      capacityExceededAtRecovery: true,
+    }));
+    for (const document of history) await sql`
+      insert into migration.source_documents(legacy_sanity_id, document_type, source_revision, source_hash, payload)
+      values(${document._id}, 'couponRedemption', 'seed', ${'0'.repeat(64)}, ${sql.json(document)})`;
+    for (let index = 0; index < pending.length; index += 50) {
+      const transaction = commerce.transaction();
+      for (const document of pending.slice(index, index + 50)) transaction.create(document);
+      await transaction.commit();
+    }
+    try {
+      const {dispatchCouponAlerts} = await import('../src/server/api/ref/couponAlerts.js');
+      if (!baseline) {
+        const [permissions] = await sql`select
+          has_function_privilege('anon', 'public.roo_pending_coupon_alerts(text,integer)', 'execute') as anon,
+          has_function_privilege('authenticated', 'public.roo_pending_coupon_alerts(text,integer)', 'execute') as authenticated,
+          has_function_privilege('service_role', 'public.roo_pending_coupon_alerts(text,integer)', 'execute') as service`;
+        assert.deepEqual(permissions, {anon: false, authenticated: false, service: true});
+      }
+      failCouponAlert = true;
+      await dispatchCouponAlerts({client: commerce, redemptionId: pending.at(-1)._id});
+      assert.equal((await read(pending.at(-1)._id)).ownerAlertSentAt, undefined);
+      failCouponAlert = false;
+      const retry = await post('/api/payment/reconcile', {}, {authorization: 'Bearer fixture'});
+      assert.equal(retry.status, 200, JSON.stringify(retry));
+      const sent = [];
+      for (const document of pending) {
+        const row = await read(document._id);
+        assert.ok(row.ownerAlertSentAt, document._id + ' was not delivered');
+        assert.equal(row.ownerAlertRequired, false);
+        sent.push(row._id);
+      }
+      return {historicalRows: history.length, deliveredPendingRows: sent.length,
+        first: sent[0], last: sent.at(-1), firstAttemptFailed: true};
+    } finally {
+      failCouponAlert = false;
+      for (const document of pending) await commerce.delete(document._id);
+      await sql`delete from migration.source_documents where legacy_sanity_id=any(${history.map(row => row._id)})`;
+    }
   });
 
   await run('money-rules-729-seeded-balance-report', async () => {
