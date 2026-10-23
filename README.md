@@ -6,7 +6,7 @@ Set `SENTRY_AUTH_TOKEN` in the private Vercel build environment to upload source
 
 If an upload fails, the build warns and continues so a Sentry outage cannot block deployment. Check that warning before relying on source maps for the new build.
 
-`npm run test:sourcemaps` checks the real build configuration against a local upload fixture. It covers the main browser file, private map cleanup and refused uploads, without real credentials. Reports are saved under `test-results/sourcemaps-e2e/`.
+`npm run test:sourcemaps` requires `unzip` and checks the real build configuration against a local upload fixture. It inspects uploaded maps for the main and shared browser files, their matching debug IDs and original source, along with private map cleanup and refused uploads. It uses no real credentials. Reports and uploaded archives are saved under `test-results/sourcemaps-e2e/`.
 
 ## Code of Conduct
 
