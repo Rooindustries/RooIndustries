@@ -1838,6 +1838,51 @@ try{
     return proof;
   });
 
+  await run('recovery-cancel-completed-staging-conflict', async () => {
+    const { checkout, payment, holdId } = await prepareExpiredCancellation();
+    const bothStaged = deferred();
+    const finishWinner = deferred();
+    let stages = 0;
+    fixture.setRequestHook(async (phase, request) => {
+      if (phase !== 'before' || !request.body?.p_mutations?.some(item =>
+        item.document?._id === checkout.id && item.document.status === 'abandoned' &&
+        item.document.resourceReleasePending === true)) return;
+      if (++stages === 1) await bothStaged.promise;
+      else {
+        bothStaged.resolve();
+        await finishWinner.promise;
+      }
+    });
+    const attempts = [requestFlow('cancel', { paymentAccessToken: tokenFor(payment) }),
+      requestFlow('cancel', { paymentAccessToken: tokenFor(payment) })];
+    try {
+      const first = await Promise.race(attempts);
+      const completed = (await row(checkout.id)).payload;
+      const hold = (await row(holdId)).payload;
+      const beforeLoser = await snapshot();
+      finishWinner.resolve();
+      const responses = await Promise.all(attempts);
+      const afterLoser = await snapshot();
+      const proof = { stages, first, completed, hold, responses, beforeLoser, afterLoser };
+      fs.writeFileSync(`${artifact}.cancel-completed-staging-conflict.json`, JSON.stringify(proof, null, 2));
+      assert.equal(stages, 2);
+      assert.equal(completed.resourceReleasePending, false);
+      assert.equal(hold.phase, 'released');
+      for (const response of responses) {
+        assert.equal(response.status, 200, JSON.stringify(response));
+        assert.equal(response.body.ok, true);
+        assert.equal(response.body.cancelled, true);
+      }
+      assert.deepEqual(afterLoser, beforeLoser);
+      return proof;
+    } finally {
+      bothStaged.resolve();
+      finishWinner.resolve();
+      await Promise.allSettled(attempts);
+      fixture.setRequestHook(null);
+    }
+  });
+
   await run('recovery-cancel-final-write-conflict', async () => {
     const { checkout, payment, holdId } = await prepareExpiredCancellation();
     let conflicted = false;

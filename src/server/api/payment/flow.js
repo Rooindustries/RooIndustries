@@ -2698,9 +2698,10 @@ const abandonStartedPaymentRecord = async ({
     } catch (error) {
       if (!isConflictError(error)) throw error;
       const fresh = (await getPaymentRecordById(client, current._id)) || current;
+      const complete = paymentAbandonmentComplete(fresh);
       return {
-        ok: paymentAbandonmentComplete(fresh),
-        httpStatus: 202,
+        ok: complete,
+        httpStatus: complete ? 200 : 202,
         paymentRecord: fresh,
         response: buildPublicStatusBody(fresh),
       };
