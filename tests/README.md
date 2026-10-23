@@ -30,8 +30,11 @@ GET page redirects are checked and started as fresh guarded navigations, with
 at most 20 hops. Fetches, image requests and POST forms refuse redirects
 instead of replaying requests. Forbidden targets, credentials, malformed
 locations and redirect loops are recorded before refusal. Allowed navigation
-chains retain their final URL, response, load wait and Back/Forward history;
-the browser E2Es also check ordinary POST bodies, server failures and images.
+chains retain their final URL, response, load wait and Back/Forward history.
+Every hop and final load wait share the original navigation deadline, including
+page/context defaults. Explicit zero and inherited unlimited timeouts remain
+unlimited. Real timeout and cancellation failures still reject the navigation.
+The browser E2Es also check ordinary POST bodies, server failures and images.
 An initial popup request can arrive before its frame exists. Its ordinary
 response stays guarded; a redirect without a frame is recorded and refused.
 

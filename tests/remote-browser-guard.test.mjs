@@ -10,7 +10,15 @@ import { chromium } from "@playwright/test";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const fixture = http.createServer((request, response) => {
   fixtureRequests++;
-  if (request.method === "GET" && ["/", "/landing"].includes(request.url)) {
+  if (["/redirect-budget", "/budget-landing", "/redirect-unending"].includes(request.url)) {
+    setTimeout(() => {
+      if (request.url === "/budget-landing") { response.writeHead(200, { "Content-Type": "text/html" }); response.end("<p>fixture-ok</p>"); }
+      else { response.writeHead(302, { Location: request.url === "/redirect-unending" ? "/unending" : "/budget-landing" }); response.end(); }
+    }, 650).unref();
+  } else if (request.url === "/unending") {
+    response.writeHead(200, { "Content-Type": "text/html" });
+    response.write("<p>Waiting");
+  } else if (request.method === "GET" && ["/", "/landing"].includes(request.url)) {
     response.writeHead(200, { "Content-Type": "text/html" });
     response.end('<p>fixture-ok</p>' + (request.url === "/landing" ? '<img src="/delayed.svg" alt="Delayed fixture">' : ""));
   } else if (request.url.startsWith("/redirect")) {
@@ -613,6 +621,127 @@ test("browser navigation keeps its timeout after an allowed redirect", { timeout
   assert.equal(value.failure?.name, "TimeoutError");
   assert.ok(value.requests.includes(fixtureOrigin + "/slow"));
   assert.ok(value.elapsed < 2000);
+});
+
+test("browser redirects preserve inherited navigation deadlines", { timeout: 65_000 }, async t => {
+  const child = await runChild(`
+    import { chromium } from "@playwright/test";
+    const { guardBrowserContext } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+    const browser = await chromium.connect(${JSON.stringify(endpoint)}, { exposeNetwork: "<loopback>" });
+    const cases = [
+      { name: "page navigation", pageNavigation: 1000 },
+      { name: "context navigation", contextNavigation: 1000 },
+      { name: "page general", pageGeneral: 1000 },
+      { name: "context general", contextGeneral: 1000 },
+      { name: "page priority", contextNavigation: 5000, pageGeneral: 1000 },
+      { name: "existing page", pageNavigation: 1000, existingPage: true },
+      { name: "explicit control", pageNavigation: 5000, options: { timeout: 1000 } },
+      { name: "navigation waiter", pageNavigation: 1000, method: "waitForNavigation" },
+      { name: "URL waiter", pageNavigation: 1000, method: "waitForURL" },
+      { name: "unfinished body", pageNavigation: 1000, target: "/redirect-unending" },
+    ];
+    const outcomes = [];
+    try {
+      for (const item of cases) {
+        const context = await browser.newContext({ baseURL: ${JSON.stringify(fixtureOrigin)} });
+        if (item.contextNavigation !== undefined) context.setDefaultNavigationTimeout(item.contextNavigation);
+        if (item.contextGeneral !== undefined) context.setDefaultTimeout(item.contextGeneral);
+        let page = item.existingPage ? await context.newPage() : null;
+        if (page) page.setDefaultNavigationTimeout(item.pageNavigation);
+        const guard = await guardBrowserContext(context, [${JSON.stringify(fixtureOrigin)}]);
+        page ||= await context.newPage();
+        if (item.pageNavigation !== undefined && !item.existingPage) page.setDefaultNavigationTimeout(item.pageNavigation);
+        if (item.pageGeneral !== undefined) page.setDefaultTimeout(item.pageGeneral);
+        await page.goto(${JSON.stringify(fixtureOrigin)});
+        const requests = [];
+        page.on("request", request => requests.push(new URL(request.url()).pathname));
+        const started = Date.now();
+        let error, status;
+        try {
+          if (item.method) {
+            const navigation = item.method === "waitForNavigation" ? page.waitForNavigation() : page.waitForURL(${JSON.stringify(fixtureOrigin + "/budget-landing")});
+            await page.evaluate(() => { location.href = "/redirect-budget"; });
+            await navigation;
+          } else status = (await page.goto(${JSON.stringify(fixtureOrigin)} + (item.target || "/redirect-budget"), item.options)).status();
+        } catch (failure) { error = { name: failure.name, message: failure.message }; }
+        outcomes.push({ name: item.name, error, status, elapsed: Date.now() - started, requests, guard });
+        await context.close();
+      }
+      console.log(JSON.stringify({ outcomes }));
+    } finally { await browser.close(); }
+  `, endpoint);
+  t.diagnostic(JSON.stringify({ child }));
+  const value = result(child);
+  assert.equal(value.outcomes.length, 10);
+  for (const outcome of value.outcomes) {
+    assert.equal(outcome.error?.name, "TimeoutError", outcome.name);
+    assert.equal(outcome.status, undefined, outcome.name);
+    assert.ok(outcome.elapsed >= 900 && outcome.elapsed < 1800, JSON.stringify(outcome));
+    assert.ok(outcome.requests.includes(outcome.name === "unfinished body" ? "/unending" : "/budget-landing"), outcome.name);
+    assert.deepEqual(outcome.guard.unexpectedRequests, []);
+  }
+});
+
+test("browser redirects retain explicit and inherited unlimited navigation", { timeout: 65_000 }, async t => {
+  const child = await runChild(`
+    import { chromium } from "@playwright/test";
+    const { guardBrowserContext } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+    const browser = await chromium.connect(${JSON.stringify(endpoint)}, { exposeNetwork: "<loopback>" });
+    const outcomes = [];
+    try {
+      for (const mode of ["explicit zero", "page zero", "explicit longer"]) {
+        const context = await browser.newContext({ baseURL: ${JSON.stringify(fixtureOrigin)} });
+        context.setDefaultNavigationTimeout(1000);
+        const guard = await guardBrowserContext(context, [${JSON.stringify(fixtureOrigin)}]);
+        const page = await context.newPage();
+        if (mode === "page zero") page.setDefaultNavigationTimeout(0);
+        else page.setDefaultNavigationTimeout(1000);
+        const response = await page.goto(${JSON.stringify(fixtureOrigin + "/redirect-budget")}, mode === "page zero" ? {} : { timeout: mode === "explicit zero" ? 0 : 5000 });
+        outcomes.push({ mode, status: response.status(), url: page.url(), guard });
+        await context.close();
+      }
+      console.log(JSON.stringify({ outcomes }));
+    } finally { await browser.close(); }
+  `, endpoint);
+  t.diagnostic(JSON.stringify({ child }));
+  const value = result(child);
+  assert.equal(value.outcomes.length, 3);
+  for (const outcome of value.outcomes) {
+    assert.equal(outcome.status, 200);
+    assert.equal(outcome.url, fixtureOrigin + "/budget-landing");
+    assert.deepEqual(outcome.guard.unexpectedRequests, []);
+  }
+});
+
+test("browser redirect recovery propagates navigation cancellation", { timeout: 65_000 }, async t => {
+  const child = await runChild(`
+    import { chromium } from "@playwright/test";
+    const { guardBrowserContext } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+    const browser = await chromium.connect(${JSON.stringify(endpoint)}, { exposeNetwork: "<loopback>" });
+    const outcomes = [];
+    try {
+      for (const mode of ["closed page", "superseded navigation"]) {
+        const context = await browser.newContext({ baseURL: ${JSON.stringify(fixtureOrigin)} });
+        await guardBrowserContext(context, [${JSON.stringify(fixtureOrigin)}]);
+        const page = await context.newPage();
+        const landing = page.waitForRequest(${JSON.stringify(fixtureOrigin + "/budget-landing")});
+        const navigation = page.goto(${JSON.stringify(fixtureOrigin + "/redirect-budget")}).then(response => ({ status: response.status() }), error => ({ error: String(error) }));
+        await landing;
+        if (mode === "closed page") await page.close();
+        else await page.goto(${JSON.stringify(fixtureOrigin)});
+        outcomes.push({ mode, ...await navigation });
+        await context.close();
+      }
+      console.log(JSON.stringify({ outcomes }));
+    } finally { await browser.close(); }
+  `, endpoint);
+  t.diagnostic(JSON.stringify({ child }));
+  const value = result(child);
+  assert.equal(value.outcomes.length, 2);
+  for (const outcome of value.outcomes) {
+    assert.ok(outcome.error, outcome.mode);
+    assert.equal(outcome.status, undefined, outcome.mode);
+  }
 });
 
 for (const mode of ["window.open", "target=_blank"]) for (const redirect of [false, true]) {

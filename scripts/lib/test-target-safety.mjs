@@ -382,22 +382,23 @@ export async function guardBrowserContext(context, origins) {
   const navigationRedirects = new WeakMap();
   const navigationOperations = new WeakMap();
   const protectedFrames = new WeakSet();
+  const remainingTimeout = operation => operation?.deadline === undefined ? operation?.timeout : Math.max(1, operation.deadline - performance.now());
   const wrapNavigation = (owner, method, frame) => {
     const original = owner[method];
     owner[method] = async function(...args) {
       const options = (method === "goto" ? args[1] : args[0]) || {};
-      const operation = { options, redirect: null, started: Date.now() };
+      const timeout = frame.page()._timeoutSettings.navigationTimeout(options);
+      const operation = { options, redirect: null, timeout, deadline: timeout > 0 ? performance.now() + timeout : undefined };
       if (!navigationOperations.has(frame)) navigationOperations.set(frame, new Set());
       const operations = navigationOperations.get(frame);
       operations.add(operation);
       try { return await original.apply(this, args); }
       catch (error) {
-        if (!operation.redirect) throw error;
+        if (!operation.redirect || error.name === "TimeoutError") throw error;
         const result = await operation.redirect;
         if (result.error) throw result.error;
-        const timeout = options.timeout > 0 ? Math.max(1, options.timeout - (Date.now() - operation.started)) : options.timeout;
-        if (options.url) await frame.waitForURL(options.url, { ...options, timeout });
-        if (options.waitUntil !== "commit") await frame.waitForLoadState(options.waitUntil || "load", { timeout });
+        if (options.url) await frame.waitForURL(options.url, { ...options, timeout: remainingTimeout(operation) });
+        if (options.waitUntil !== "commit") await frame.waitForLoadState(options.waitUntil || "load", { timeout: remainingTimeout(operation) });
         return result.response;
       } finally { operations.delete(operation); }
     };
@@ -461,10 +462,9 @@ export async function guardBrowserContext(context, origins) {
         for (const operation of operations || []) if (!operation.redirect) operation.redirect = redirect;
         const operation = operations?.values().next().value;
         const options = operation?.options || {};
-        const timeout = options.timeout > 0 ? Math.max(1, options.timeout - (Date.now() - operation.started)) : options.timeout;
         try {
           await route.abort("aborted");
-          resolve({ response: await frame.goto(target.href, { waitUntil: "commit", timeout, referer: options.referer }) });
+          resolve({ response: await frame.goto(target.href, { waitUntil: "commit", timeout: remainingTimeout(operation), referer: options.referer }) });
         }
         catch (error) { resolve({ error }); }
         return;
