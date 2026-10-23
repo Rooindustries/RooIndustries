@@ -61,6 +61,13 @@ const graphql = async (query, variables) => {
 
 const login = (author) => author?.login || "";
 const botNamed = (author, name) => author?.type === "Bot" && String(author.login || "").replace(/\[bot\]$/, "") === name;
+const REVIEW_MENTIONS = { coderabbit: "@coderabbitai review", codex: "@codex review" };
+const reviewRequest = (comments, headSha, reviewer) => comments.find((comment) => {
+  const body = String(comment.body || "");
+  return body.includes(`${REVIEW_REQUEST_PREFIX}${headSha}:${reviewer} -->`) ||
+    (body.includes(`${REVIEW_REQUEST_PREFIX}${headSha} -->`) &&
+      (body.includes(REVIEW_MENTIONS[reviewer]) || body.includes("Requested both reviews with the user credential.")));
+});
 
 const collectThreads = async (number) => {
   const [owner, name] = repo.split("/");
@@ -122,13 +129,17 @@ const collectSnapshot = async (number) => {
     node(id: $id) { ... on IssueComment { editor { login } } }
   }`, { id: codexComment.node_id })).node?.editor : null;
   const ownComments = comments.filter((comment) => botNamed(comment.user, "github-actions"));
-  const requested = ownComments.find((comment) => String(comment.body).includes(`${REVIEW_REQUEST_PREFIX}${pull.head.sha}`));
-  const requestedAt = Date.parse(requested?.created_at);
+  const reviewWaitExpired = Object.fromEntries(Object.keys(REVIEW_MENTIONS).map((reviewer) => {
+    const requested = reviewRequest(ownComments, pull.head.sha, reviewer);
+    const requestedAt = Date.parse(requested?.created_at);
+    return [reviewer, Boolean(requested) && (!Number.isFinite(requestedAt) || Date.now() - requestedAt >= 24 * 3600000)];
+  }));
   const checks = [
     ...checkRuns.filter((run) => {
       const workflow = runsBySuite.get(run.check_suite?.id);
+      const workflowPath = typeof workflow?.path === "string" ? workflow.path.split("@", 1)[0] : "";
       return !(run.app?.slug === "github-actions" && run.name === "auto-merge-gate" &&
-        String(workflow?.id) === process.env.GITHUB_RUN_ID && workflow?.path === ".github/workflows/auto-merge.yml");
+        String(workflow?.id) === process.env.GITHUB_RUN_ID && workflowPath === ".github/workflows/auto-merge.yml");
     }).map((run) => ({
       source: "check-run",
       app: run.app?.slug || "",
@@ -175,7 +186,7 @@ const collectSnapshot = async (number) => {
     codex: parseCodexState(codexComment?.body || ""),
     codexEditor: editor?.login || "",
     reviewRounds: countReviewRounds(ownComments.map((comment) => comment.body || "")),
-    reviewWaitExpired: Boolean(requested) && (!Number.isFinite(requestedAt) || Date.now() - requestedAt >= 24 * 3600000),
+    reviewWaitExpired,
     comments: ownComments,
   };
 };
@@ -225,7 +236,8 @@ const recordReviewRound = async (snapshot) => {
 };
 
 const requestReviews = async (snapshot, reviewers) => {
-  const mentions = reviewers.map((reviewer) => reviewer === "coderabbit" ? "@coderabbitai review" : "@codex review").join("\n");
+  const mentions = reviewers.map((reviewer) => REVIEW_MENTIONS[reviewer]).join("\n");
+  const receipts = reviewers.map((reviewer) => `${REVIEW_REQUEST_PREFIX}${snapshot.headSha}:${reviewer} -->`).join("\n");
   if (process.env.AUTO_MERGE_TOKEN) {
     await api(mergeToken, `repos/${repo}/issues/${snapshot.number}/comments`, {
       method: "POST",
@@ -235,7 +247,7 @@ const requestReviews = async (snapshot, reviewers) => {
   await api(readToken, `repos/${repo}/issues/${snapshot.number}/comments`, {
     method: "POST",
     body: {
-      body: `${process.env.AUTO_MERGE_TOKEN ? "Requested reviews with the user credential." : mentions}\n${REVIEW_REQUEST_PREFIX}${snapshot.headSha} -->\n`,
+      body: `${process.env.AUTO_MERGE_TOKEN ? "Requested reviews with the user credential." : mentions}\n${receipts}\n`,
     },
   });
 };
@@ -282,8 +294,8 @@ const applyOne = async (number) => {
   const decision = decide(snapshot);
   console.log(`#${number} ${decision.action} wake=${decision.wake} ${decision.reasons.join(",")}`);
   if (decision.requestReviews) {
-    const requested = snapshot.comments.some((comment) => String(comment.body).includes(`${REVIEW_REQUEST_PREFIX}${snapshot.headSha}`));
-    if (!requested) await requestReviews(snapshot, decision.reviewers);
+    const reviewers = decision.reviewers.filter((reviewer) => !reviewRequest(snapshot.comments, snapshot.headSha, reviewer));
+    if (reviewers.length) await requestReviews(snapshot, reviewers);
   }
   if (decision.reviewRound) {
     const counted = snapshot.comments.some((comment) => String(comment.body).includes(`${REVIEW_ROUND_PREFIX}${snapshot.headSha}`));

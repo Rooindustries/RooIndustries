@@ -171,12 +171,27 @@ test("CLI rejects a malformed verdict that arrives at the final snapshot", async
 });
 
 for (const [status, conclusion] of [["queued", null], ["in_progress", null], ["completed", "failure"], ["completed", "success"]]) {
-  test(`CLI ignores its own ${status} ${conclusion || ""} gate check on a manual dispatch`, async () => {
-    const result = await runScenario(`self-check-${status}-${conclusion}`, {
-      event: "workflow_dispatch", eventBody: {},
-      setup: state => state.checks.push({ id: 1000, name: "auto-merge-gate", app: { slug: "github-actions" }, check_suite: { id: 20 }, status, conclusion }),
+  for (const [kind, suffix] of [["plain", ""], ["branch", "@main"], ["full-ref", "@refs/heads/fixture-change"]]) {
+    test(`CLI ignores its own ${status} ${conclusion || ""} gate check with a ${kind} path on a manual dispatch`, async () => {
+      const result = await runScenario(`self-check-${status}-${conclusion}-${kind}`, {
+        event: "workflow_dispatch", eventBody: {},
+        setup: state => {
+          state.workflowRuns[1].path += suffix;
+          state.checks.push({ id: 1000, name: "auto-merge-gate", app: { slug: "github-actions" }, check_suite: { id: 20 }, status, conclusion });
+        },
+      });
+      assert.deepEqual(result.merges.map(request => request.body), [{ merge_method: "squash", sha: head }]);
     });
-    assert.deepEqual(result.merges.map(request => request.body), [{ merge_method: "squash", sha: head }]);
+  }
+}
+
+for (const workflowPath of [undefined, ".github/workflows/auto-merge.yml-other@main"]) {
+  test(`CLI keeps a current-run gate check with a ${workflowPath ? "different" : "missing"} workflow path`, async () => {
+    const result = await runScenario(`unrecognized-gate-path-${Boolean(workflowPath)}`, { setup: state => {
+      state.workflowRuns[1].path = workflowPath;
+      state.checks.push({ id: 1000, name: "auto-merge-gate", app: { slug: "github-actions" }, check_suite: { id: 20 }, status: "in_progress", conclusion: null });
+    } });
+    assert.deepEqual(result.merges, []);
   });
 }
 
@@ -403,11 +418,60 @@ test("CLI includes a holding reviewer alongside a pending reviewer", async () =>
   assert.ok(result.comments.some(body => body.includes("@coderabbitai review") && body.includes("@codex review")));
 });
 
+for (const useUserToken of [false, true]) {
+  test(`CLI requests a dismissed reviewer after a different review was requested with ${useUserToken ? "user" : "workflow"} credentials`, async () => {
+    const first = await runScenario(`first-codex-request-${useUserToken}`, { useUserToken, setup: state => { state.comments = []; } });
+    const receipt = first.comments.find(body => body.includes(`<!-- pr-review-request:${head}`));
+    assert.ok(receipt);
+    const second = await runScenario(`dismissed-reviewer-${useUserToken}`, { useUserToken, setup: state => {
+      state.reviews[0].state = "DISMISSED";
+      state.comments = [{ id: 11, user: bot("github-actions"), body: receipt, created_at: new Date().toISOString() }];
+    } });
+    assert.ok(second.comments.some(body => body.includes("@coderabbitai review")));
+    assert.ok(second.comments.every(body => !body.includes("@codex review")));
+    assert.ok(second.comments.some(body => body.includes(`<!-- pr-review-request:${head}:coderabbit -->`)));
+  });
+}
+
+test("CLI does not use an approved reviewer's old receipt to expire an unrequested reviewer", async () => {
+  const result = await runScenario("independent-review-deadlines", { setup: state => {
+    state.reviews[0].state = "DISMISSED";
+    state.comments.push({ id: 11, user: bot("github-actions"), created_at: new Date(Date.now() - 25 * 3600000).toISOString(),
+      body: `<!-- pr-review-request:${head}:codex -->` });
+  } });
+  assert.ok(result.comments.some(body => body.includes("@coderabbitai review")));
+  assert.ok(result.comments.every(body => !body.includes("@codex review")));
+  assert.ok(result.requests.every(request => !request.body?.labels?.includes("needs-owner")));
+});
+
+test("CLI requests a newly pending reviewer even when another pending request timed out", async () => {
+  const result = await runScenario("expired-and-new-review", { setup: state => {
+    state.reviews = [];
+    state.comments = [{ id: 11, user: bot("github-actions"), created_at: new Date(Date.now() - 25 * 3600000).toISOString(),
+      body: `<!-- pr-review-request:${head}:codex -->` }];
+  } });
+  assert.ok(result.comments.some(body => body.includes("@coderabbitai review")));
+  assert.ok(result.comments.every(body => !body.includes("@codex review")));
+  assert.ok(result.requests.some(request => request.body?.labels?.includes("needs-owner")));
+});
+
+for (const explicit of [false, true]) {
+  test(`CLI ${explicit ? "honors an explicit" : "replaces an ambiguous"} legacy request receipt`, async () => {
+    const result = await runScenario(`legacy-review-receipt-${explicit}`, { setup: state => {
+      state.reviews = [];
+      state.comments = [{ id: 11, user: bot("github-actions"), created_at: new Date().toISOString(),
+        body: `${explicit ? "@codex review" : "Requested reviews with the user credential."}\n<!-- pr-review-request:${head} -->` }];
+    } });
+    assert.ok(result.comments.some(body => body.includes("@coderabbitai review")));
+    assert.equal(result.comments.some(body => body.includes("@codex review")), !explicit);
+  });
+}
+
 for (const expired of [false, true]) {
   test(`CLI ${expired ? "flags an expired" : "waits for a recent"} unanswered review request without repeating it`, async () => {
     const result = await runScenario(`pending-request-${expired}`, { setup: state => {
       state.comments = [{ id: 11, user: bot("github-actions"), created_at: new Date(Date.now() - (expired ? 25 : 1) * 3600000).toISOString(),
-        body: `<!-- pr-review-request:${head} -->` }];
+        body: `<!-- pr-review-request:${head}:coderabbit -->\n<!-- pr-review-request:${head}:codex -->` }];
       state.reviews = [];
     } });
     assert.deepEqual(result.merges, []);

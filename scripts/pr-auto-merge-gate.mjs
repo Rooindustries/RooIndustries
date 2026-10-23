@@ -177,7 +177,8 @@ export const decide = (input) => {
   const changesRequestedBy = peopleRequestingChanges(input.reviews);
   const git = input.mergeableState || "unknown";
   const reviewRounds = Number(input.reviewRounds) || 0;
-  const reviewTimedOut = input.reviewWaitExpired === true && (rabbit === "pending" || codex === "pending");
+  const reviewTimedOut = (rabbit === "pending" && input.reviewWaitExpired?.coderabbit === true) ||
+    (codex === "pending" && input.reviewWaitExpired?.codex === true);
   const sha = shortSha(input.headSha);
 
   if (checks.missing.length) add("checks-missing", `Required checks have not reported on ${sha}: ${checks.missing.join(", ")}.`);
@@ -227,8 +228,10 @@ export const decide = (input) => {
   else if (hold) action = "flag";
   // `wake` means the owning agent has work. The owning T3 thread's pull request watch delivers it; the workflow calls no agent.
   const wake = action !== "merge" && (repairWork || needsReviewAgent);
-  const requestReviews = !reviewCapped && !reviewTimedOut && (rabbit === "pending" || codex === "pending");
-  const reviewers = requestReviews ? [rabbit !== "approve" && "coderabbit", codex !== "approve" && "codex"].filter(Boolean) : [];
+  const reviewers = !reviewCapped && (rabbit === "pending" || codex === "pending")
+    ? [rabbit !== "approve" && "coderabbit", codex !== "approve" && "codex"].filter((reviewer) => reviewer && input.reviewWaitExpired?.[reviewer] !== true)
+    : [];
+  const requestReviews = reviewers.length > 0;
   if (action === "merge") lines.unshift(`Every check on ${sha} is green, the branch is up to date, and CodeRabbit and Codex both approve with no open findings.`);
   return { action, wake, requestReviews, reviewers, reviewRound: needsReviewAgent && wake, reasons, lines };
 };
