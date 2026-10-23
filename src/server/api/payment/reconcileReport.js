@@ -3,6 +3,7 @@ import { createCommerceReadClient } from "../ref/documentStore.js";
 import { createDodoClient, validateDodoPayment } from "./dodoProvider.js";
 import { fetchShadowDocuments } from "../../supabase/shadowStore.js";
 import { reportPaymentMismatches } from "../../../lib/monitoring/commerce.js";
+import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
 
 const WINDOW_HOURS = 72;
 const SETTLE_MINUTES = 30;
@@ -57,6 +58,7 @@ const OWNER_REVIEW_CODES = new Set([
   "provider_partial_refund_details_missing_owner_review",
   "provider_order_not_found_after_late_capture_watch",
   "upgrade_credit_changed_after_quote",
+  "dodo_settlement_time_unknown",
 ]);
 
 const unavailable = () => new Error("reconcile_report_unavailable");
@@ -439,11 +441,9 @@ const checkBooking = ({ payment, record, booking, refunded, pricing }) => {
   const commission = moneyCents(booking.commissionAmount);
   const hasOriginalCommission = Object.hasOwn(booking, "dodoOriginalCommissionAmount");
   const usesEarningsFallback =
-    !hasOriginalCommission &&
     KEPT_BOOKING_STATUSES.includes(booking.status) &&
     commission === 0 &&
-    pricing.percent > 0 &&
-    (booking.netAmount || booking.grossAmount) > 0;
+    originalBookingCommission(booking) !== 0;
   if (refunded > 0 && !fullRefund && (
     (booking.lastRefundAt != null && booking.lastRefundAt !== "" &&
       (typeof booking.lastRefundAt !== "string" || !Number.isFinite(Date.parse(booking.lastRefundAt)))) ||
@@ -452,8 +452,15 @@ const checkBooking = ({ payment, record, booking, refunded, pricing }) => {
   const retainedFraction = refunded > 0 && !booking.lastRefundAt && !Object.hasOwn(booking, "dodoDisputeActive")
     ? Math.max(0, 1 - refunded / ((payment.total_amount / 100) * 100))
     : Math.max(0, 1 - (refunded / 100) / (payment.total_amount / 100));
-  const expected =
-    disputed || fullRefund || !KEPT_BOOKING_STATUSES.includes(booking.status)
+  const blocked = disputed || fullRefund || !KEPT_BOOKING_STATUSES.includes(booking.status);
+  const expected = String(booking.commissionCalculationVersion) === "2"
+    ? moneyCents(calculateCreatorCommission({}, {
+      originalAmount: pricing.commission / 100,
+      paidAmount: payment.total_amount / 100,
+      refundedAmount: refunded / 100,
+      blocked,
+    }).amount)
+    : blocked
       ? 0
       : Math.round((pricing.commission / 100) * retainedFraction * 100);
   const payableCommission = fullRefund || (cancelledDuringDispute && !disputed) ? 0 : commission;
@@ -468,6 +475,16 @@ const checkBooking = ({ payment, record, booking, refunded, pricing }) => {
       moneyCents(booking.dodoOriginalCommissionAmount) !== pricing.commission)
   )
     return "commission_mismatch";
+  if (pricing.referralId && !historicalReferral) {
+    const completedRefund = fullRefund &&
+      typeof booking.refundAccountingAppliedAt === "string" &&
+      Number.isFinite(Date.parse(booking.refundAccountingAppliedAt)) &&
+      typeof booking.referralReversedAfterRefund === "boolean";
+    const applicationMissing = booking.referralAccountingApplied !== true ||
+      (!disputed && KEPT_BOOKING_STATUSES.includes(booking.status) && booking.dodoReferralReversedAfterDispute === true);
+    if (fullRefund ? !completedRefund : applicationMissing)
+      return "referral_accounting_not_applied";
+  }
   return "";
 };
 
@@ -567,7 +584,10 @@ export const buildReconcileReport = async ({
     if (!terminal) {
       const ready = paymentReadyForAudit(payment, now, record);
       if (!ready) {
-        if (ready === null) transitionUnknown = true;
+        if (ready === null) {
+          transitionUnknown = true;
+          return mismatch(record?._id || "", "owner_review_dodo_settlement_time_unknown");
+        }
         return finish(unknown());
       }
     }
@@ -591,7 +611,7 @@ export const buildReconcileReport = async ({
     if (!validation.ok) {
       return mismatch(record._id, validation.reason);
     }
-    const booking =
+    let booking =
       suppliedBooking ||
       (await getDocument("booking", bookingId, bookings));
     const refunded = await refundedCents(dodo, payment, deadline);
@@ -635,9 +655,29 @@ export const buildReconcileReport = async ({
       )
         return mismatch(record._id, "payment_without_booking");
     } else {
-      const reason = checkBooking({ payment, record, booking, refunded, pricing });
       checkedBookingIds.add(booking._id);
-      if (reason) return mismatch(booking._id, reason);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const reason = checkBooking({ payment, record, booking, refunded, pricing });
+        if (reason) return mismatch(booking._id, reason);
+        if (!pricing.referralId) break;
+        checkBudget(deadline);
+        const { data, error } = await client.shadowClient
+          .rpc("roo_booking_referral_audit", { p_booking_id: booking._id })
+          .abortSignal(AbortSignal.timeout(8000));
+        checkBudget(deadline);
+        if (error || !data || data.bookingId !== booking._id ||
+          typeof data.revision !== "string" || typeof data.projected !== "boolean") throw unavailable();
+        if (!data.projected)
+          return mismatch(booking._id, "referral_projection_mismatch");
+        if (data.revision === booking._rev) break;
+        if (attempt === 1) {
+          transitionUnknown = true;
+          return finish(unknown());
+        }
+        bookings.delete(bookingId);
+        booking = await getDocument("booking", bookingId, bookings);
+        if (!booking) return mismatch(record._id, "payment_without_booking");
+      }
     }
     const keys = [
       entityKey("payment", payment.payment_id),

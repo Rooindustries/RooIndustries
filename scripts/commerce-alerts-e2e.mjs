@@ -144,6 +144,18 @@ try {
       'reconcile-report-review-recent-success-omitted', 'reconcile-report-review-recent-success-null',
       ...['dispute_won', 'dispute_cancelled'].flatMap(status => ['listed', 'reverse'].map(discovery =>
         `reconcile-report-refund-during-dispute-full-${status}-${discovery}`)),
+      ...[false, null, 'missing'].map(marker => 'reconcile-report-review-group-referral-application-' + marker),
+      ...['missing', 'payload', 'revision'].map(state => 'reconcile-report-review-group-referral-projection-' + state),
+      'reconcile-report-review-group-referral-writer',
+      'reconcile-report-review-group-referral-proof-unavailable',
+      'reconcile-report-review-group-referral-revision-transition',
+      'reconcile-report-review-group-referral-full-refund-true', 'reconcile-report-review-group-referral-full-refund-false',
+      ...['null', 'omitted'].flatMap(timestamp => ['product', 'record'].map(binding =>
+        `reconcile-report-review-group-unobserved-${timestamp}-${binding}`)),
+      'reconcile-report-review-group-unobserved-bounded',
+      'reconcile-report-review-group-versioned-zero', 'reconcile-report-review-group-signed-half-refund',
+      'reconcile-report-review-group-legacy-half-refund-0.29', 'reconcile-report-review-group-legacy-half-refund-0.57',
+      'reconcile-report-refund-half-cent-0.29', 'reconcile-report-refund-half-cent-0.57', 'reconcile-report-created-refund-rounding',
     ];
     await child('scripts/test-payment-persistence-sweep.mjs', [
       '--full-chain', '--scenario=' + nativeScenarios.join(','),
@@ -151,7 +163,7 @@ try {
     const result = JSON.parse(await readFile(nativeArtifact, 'utf8'));
     assert.equal(result.ok, true);
     check('late captures without a booking or a payment record remain visible', () => {
-      assert.equal(result.scenarios.length, 16);
+      assert.equal(result.scenarios.length, nativeScenarios.length);
       assert.ok(result.scenarios.every(scenario => scenario.passed));
     });
     nativeReport = result.scenarios.find(scenario => scenario.name === 'reconcile-report-payment-without-booking').proof.report;
@@ -181,6 +193,9 @@ try {
       'recent-success-omitted', 'recent-success-null',
       ...['dispute_won', 'dispute_cancelled'].flatMap(status => ['listed', 'reverse'].map(discovery =>
         `actual-refunded-dispute-${status}-${discovery}`)),
+      ...[false, null, 'missing'].flatMap(marker => ['existing', 'window'].map(mode => `actual-referral-application-${marker}-${mode}`)),
+      ...['missing', 'payload', 'revision'].flatMap(state => ['existing', 'window'].map(mode => `actual-referral-projection-${state}-${mode}`)),
+      ...['null', 'omitted'].flatMap(timestamp => ['product', 'record'].map(binding => `actual-unobserved-${timestamp}-${binding}`)),
     ];
     await child('scripts/fixtures/reconcile-payments.mjs', ['--case=' + dailyCases.join(',')], {
       ROO_RECONCILE_SEED_REPORT: join(artifact, 'seeded-report.json'),
@@ -191,9 +206,20 @@ try {
       ROO_RECONCILE_UNBOOKED_REFUND_REPORT: join(artifact, 'unbooked-refund-report.json'),
       ROO_RECONCILE_REVIEW_REPORT: join(artifact, 'review-report.json'),
       ROO_RECONCILE_REFUNDED_DISPUTES_REPORT: join(artifact, 'refunded-disputes.json'),
+      ROO_RECONCILE_ACCOUNTING_REPORT: nativeArtifact,
       ROO_RECONCILE_TEST_ARTIFACT: join(artifact, 'daily-check'),
     }, 'daily-check.log');
     const daily = JSON.parse(await readFile(join(artifact, 'daily-check/results.json'), 'utf8'));
+    check('missing application and native credit projection keep window and retained owner issues open until positive proof', () => {
+      const results = daily.results.filter(result => result.name.startsWith('actual-referral-'));
+      assert.equal(results.length, 12);
+      assert.ok(results.every(result => result.passed && result.runs.length === 3 && result.issues.length === 1 && result.issues[0].status === 'Done'));
+    });
+    check('undated succeeded payments create one actionable owner issue on first observation and after four days', () => {
+      const results = daily.results.filter(result => result.name.startsWith('actual-unobserved-'));
+      assert.equal(results.length, 4);
+      assert.ok(results.every(result => result.passed && result.runs.length === 3 && result.issues.length === 2));
+    });
     check('seeded test-mode payment reaches the daily check and one owner issue on both attempts', () => {
       assert.equal(daily.ok, true);
       const result = daily.results.find(result => result.name === 'seeded-payment-alert');
@@ -250,6 +276,15 @@ try {
   ({ reportPaymentMismatches } = await import('../src/lib/monitoring/commerce.js'));
   process.env.NEXT_PUBLIC_SENTRY_DSN = `http://fixture@127.0.0.1:${server.address().port}/1`;
   startServerMonitoring(process.env.NEXT_PUBLIC_SENTRY_DSN);
+  globalThis[Symbol.for('roo.reportServerError')]('Fixture expected warning', new Error('buyer@example.invalid'), {
+    name: 'Error', code: 'fixture_warning', status: 0, level: 'warning',
+  });
+  await sdk.flush(2000);
+  check('independent server warnings retain their severity after commerce coalescing', () => {
+    assert.equal(events.at(-1).level, 'warning');
+    assert.equal(events.at(-1).tags.error_code, 'fixture_warning');
+    assert.equal(events.at(-1).exception.values[0].value, 'Fixture expected warning');
+  });
   ({ onRequestError } = await import('../instrumentation.js'));
   const send = (route, status, throws = false, headers = {}) => fetch(`${origin}${route}?token=fixture-private-token`, {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-fixture-status': String(status),

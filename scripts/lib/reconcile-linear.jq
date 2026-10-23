@@ -22,12 +22,14 @@ def owner_codes:
    "dodo_dispute_lost_owner_review","dodo_dispute_accepted_owner_review",
    "dodo_dispute_expired_owner_review","dodo_payment_failed","dodo_payment_cancelled",
    "provider_partial_refund_details_missing_owner_review",
-   "provider_order_not_found_after_late_capture_watch","upgrade_credit_changed_after_quote","unknown"];
+   "provider_order_not_found_after_late_capture_watch","upgrade_credit_changed_after_quote",
+   "dodo_settlement_time_unknown","unknown"];
 def source_reason:
   . as $reason |
   (["payment_without_record","payment_record_mismatch","payment_without_booking",
     "frozen_pricing_unavailable","amount_mismatch","refund_not_applied","dispute_not_applied",
-    "referral_binding_mismatch","commission_exceeds_kept_share","commission_mismatch",
+    "referral_binding_mismatch","referral_accounting_not_applied","referral_projection_mismatch",
+    "commission_exceeds_kept_share","commission_mismatch",
     "booking_without_payment","report_truncated","report_identity_invalid",
     "payment_not_found","payment_not_succeeded","dodo_payment_binding_mismatch",
     "dodo_environment_mismatch","dodo_currency_mismatch","dodo_amount_mismatch",

@@ -780,6 +780,62 @@ try {
       }
     });
   }
+  if (process.env.ROO_RECONCILE_ACCOUNTING_REPORT) {
+    const native = JSON.parse(fs.readFileSync(process.env.ROO_RECONCILE_ACCOUNTING_REPORT, 'utf8'));
+    assert.equal(native.ok, true);
+    const receipt = report => {
+      const { at, from, to } = windowReport();
+      return { ...report, at, from, to };
+    };
+    const writer = native.scenarios.find(({ name }) => name === 'reconcile-report-review-group-referral-writer').proof;
+    const accounting = native.scenarios.filter(({ name }) => /^reconcile-report-review-group-referral-(application|projection)-/.test(name));
+    for (const { name, proof } of accounting) for (const existing of [false, true]) {
+      await run(name.replace('reconcile-report-review-group-', 'actual-') + (existing ? '-existing' : '-window'), async (home) => {
+        const primary = proof.targeted.body.checks[0].key;
+        let issue = existing ? seedIssue(primary) : null;
+        current.window = receipt(existing ? writer.window.body : proof.window.body);
+        for (const entry of proof.targeted.body.checks) current.checks[entry.key] = entry;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const result = await invoke(home);
+          assert.equal(result.code, 0, result.stdout);
+          assert.equal(JSON.parse(result.stdout).result, 'mismatch');
+          assert.equal(result.alert.severity, 'red');
+          assert.equal(current.issues.length, 1);
+          issue ||= current.issues[0];
+          assert.notEqual(issue.status, 'Done');
+          assert.equal(metadata(issue).observations[0].reason, proof.window.body.items[0].reason);
+        }
+        current.window = receipt(writer.window.body);
+        for (const entry of (proof.repaired || writer.targeted).body.checks) current.checks[entry.key] = entry;
+        const recovered = await invoke(home);
+        assert.equal(recovered.code, 0, recovered.stdout);
+        assert.equal(JSON.parse(recovered.stdout).result, 'clear');
+        assert.equal(issue.status, 'Done');
+        assert.equal(current.issues.length, 1);
+      });
+    }
+    for (const { name, proof } of native.scenarios.filter(({ name }) => /^reconcile-report-review-group-unobserved-(null|omitted)-/.test(name))) {
+      await run(name.replace('reconcile-report-review-group-', 'actual-'), async (home) => {
+        for (const entry of proof.targeted.body.checks) current.checks[entry.key] = entry;
+        let identity;
+        for (const report of [proof.initial.body, proof.afterFourDays.body, proof.afterFourDays.body]) {
+          current.window = receipt(report);
+          const result = await invoke(home);
+          assert.equal(result.code, 0, result.stdout);
+          assert.equal(JSON.parse(result.stdout).result, 'incomplete');
+          assert.equal(result.alert.severity, 'amber');
+          const issues = current.issues.filter(issue => metadata(issue).primary === 'payment:payment-fixture');
+          assert.equal(issues.length, 1);
+          assert.notEqual(issues[0].status, 'Done');
+          assert.equal(metadata(issues[0]).observations[0].reason, 'owner_review_dodo_settlement_time_unknown');
+          if (identity) assert.equal(issues[0].uuid, identity);
+          identity = issues[0].uuid;
+          assert.equal(current.issues.filter(issue => metadata(issue).primary === 'scan:dodo-payments').length, 1);
+          assert.equal(current.issues.some(issue => metadata(issue).primary === 'scan:targets'), false);
+        }
+      });
+    }
+  }
   if (process.env.ROO_RECONCILE_REVIEW_REPORT) {
     const proof = JSON.parse(fs.readFileSync(process.env.ROO_RECONCILE_REVIEW_REPORT, 'utf8'));
     const receipt = report => {

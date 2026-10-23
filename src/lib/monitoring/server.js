@@ -82,7 +82,10 @@ export function startServerMonitoring(value) {
       try {
         if (!serverMonitoringDsn(dsn)) return;
         const report = safeException(label.split(": ", 1)[0], error, metadata.name);
-        captureException(report, { tags: { error_code: metadata.code, error_status: String(metadata.status) } });
+        captureException(report, {
+          ...(metadata.level === "warning" ? { level: "warning" } : {}),
+          tags: { error_code: metadata.code, error_status: String(metadata.status) },
+        });
       } catch {}
     };
     if (!deferCommerceError(send, error)) send();

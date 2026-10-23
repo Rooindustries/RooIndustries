@@ -69,10 +69,11 @@ return unknown, keeping existing issues open. Explicit terminal owner-review
 records still alert immediately because their automatic processing has stopped.
 If the optional update timestamp is absent or null, a matching server-confirmed
 local capture or validated active dispute can supply its last update time.
-A pending start or finalization lease is not capture proof. Without reliable transition evidence, targeted
-checks remain unknown and the window reports incomplete coverage; creation
-time alone cannot establish settlement age. The endpoint writes no observation
-record. Such a payment stays deferred until trustworthy timing becomes available.
+A pending start or finalization lease is not capture proof. Without reliable transition evidence,
+the window and targeted checks report `owner_review_dodo_settlement_time_unknown`
+against that payment's identity. The daily command creates or reuses its owner issue,
+and coverage remains incomplete. Creation time alone cannot establish settlement age;
+the read-only endpoint invents no transition time or observation record.
 Malformed or materially future timestamps make the report unavailable.
 The 72-hour `from` value divides those payment ranges and bounds reverse booking transitions.
 Stopped owner-review records, including exhausted booking recovery, are
@@ -153,13 +154,22 @@ the issue has no known booking identity. Booked payments use `recovery: booking`
 and require all three identity types. Missing types, duplicates, incomplete or
 conflicting identity sets cannot close issues.
 Pending, failed and review refunds with no succeeded amount do not change earnings.
-The audit follows the existing writers' exact cent rounding. Creation with a
-partial refund and later refund or dispute updates use their existing operation
-order; no one-cent tolerance is applied. Invalid writer markers cannot prove
+The audit uses the writers' shared exact rational calculator for version-2 commissions,
+including half-cent refund ties and authoritative frozen zeroes. Unversioned bookings
+retain their historical operation order and earnings rules. No cent tolerance is applied.
+Invalid writer markers cannot prove
 recovery, and a cent above or below the matching writer result still alerts.
 Stored financial proof must also be an exact cent amount. Extra precision in
 pricing, commission, supplied totals or refunds stays unresolved instead of
 being rounded into a match. Ordinary cent values such as 0.29 remain valid.
+Frozen referral fields alone cannot prove credit. An ordinary booking must carry the
+writer's `referralAccountingApplied: true`; completed refunds need their atomic refund
+accounting checkpoint. The service-role-only `roo_booking_referral_audit` RPC checks that
+the native earnings booking has the same source revision, hash, payload, status and ownership.
+Missing or stale native credit stays unresolved in both scans and targeted checks. An
+unavailable proof makes the report unavailable. Apply
+`20261024010000_read_booking_referral_audit.sql` before enabling the updated report;
+the function performs indexed reads only, returns no customer details and makes no repairs.
 Historical reschedule recovery can intentionally omit a referral reference to
 preserve earlier accounting. The audit accepts only that documented shape:
 preserved accounting, no pending reconstruction, a reschedule booking and no
@@ -201,7 +211,7 @@ loopback DSN. Server reporting requires `NODE_ENV=production`,
 production build do not qualify. Initialization, automatic request capture and
 commerce alerts share this gate, including loopback delivery. Positive local
 E2Es set those markers explicitly and send only to their loopback collector.
-Browser build and relay deployment gating belongs to ROO-719. Keep builds
+Browser builds and the relay share ROO-719's private production gate. Keep builds
 isolated so a previous build cannot retain a public DSN. Never use real Sentry
 issues or notifications as local test fixtures. Production notification
 activation stays with release.
@@ -225,13 +235,23 @@ checkout start failure, signed test-mode Dodo webhook and booking failure.
 Only Production sends one sanitized route event per category. The matrix
 checks shutdown for late events and retains process markers, source hashes,
 build logs and envelopes. Set `ROO_COMMERCE_PREVIEW_ARTIFACT` to choose its
-artifact directory. Browser-build and relay gating remain owned by ROO-719.
+artifact directory. This runtime matrix complements the fresh-build browser proof below.
 The production fixture copies the site into its own temporary directory and
 replaces only that copy's provider runtime-policy predicate with a test-only
 predicate. Production hosting markers otherwise forbid Dodo test mode before
 signature verification. The original production payment policy is unchanged;
 actual route handling, signature verification and monitoring run, with local
 database faults. This check asserts alert delivery, not a financial outcome.
+
+Run `ROO_MONITORING_CASE=local,ci,preview,production npm run test:monitoring:deployments`
+for the composed deployment proof. Each mode gets a fresh build with the same loopback
+DSN and an opposing public enable override. Production sends browser, server, edge,
+checkout, signed-webhook and booking events; the other modes send none. Each commerce
+failure sends exactly one sanitized route event. One headless browser is reused, with
+one Next server at a time. Build/server logs, browser traces, source hashes and stopped
+processes are retained under `test-results/monitoring-deployments/`; set
+`ROO_MONITORING_ARTIFACT` to choose the directory. The full command also covers development
+and reusing a production artifact locally. All provider and database failures remain synthetic.
 
 Run `npm run test:commerce-alerts` with the same Postgres 17 and PostgREST
 setup as native CI. It seeds a succeeded test-mode payment without a booking,
@@ -244,6 +264,9 @@ under transport and DNS guards, then three production-labelled route events
 against a loopback collector. Its native reports also reach the daily command
 after a signed pre-booking refund, on initial discovery of old terminal records,
 after a four-day gap, and across local-capture grace without provider timestamps.
+Missing referral application and stale native earnings projections keep both newly
+discovered and retained issues open. An undated payment gets its own owner issue on
+the first scan and after a four-day gap, with one identity reused across retries.
 `npm run test:commerce-alerts:routes` runs the route and transport checks
 without Postgres. Both commands use local services and fake reporting accounts.
 The daily bridge accepts up to 60 seconds of server clock lead; reports older
