@@ -56,6 +56,7 @@
     "test:smoke:production": "node --test tests/production-smoke.test.mjs",
     "test:contact:csp": "playwright test tests/contact-form-csp.spec.js --project=chromium",
     "test:booking-flow": "playwright test tests/booking-flow.spec.js --project=chromium",
+    "test:claims": "playwright test tests/backed-claims.spec.js --project=chromium",
     "test:booking-initial-slot": "playwright test tests/booking-initial-slot.spec.js --project=chromium",
     "test:booking-hold": "node --test tests/booking-hold.test.mjs",
     "test:booking-hold:e2e": "playwright test tests/booking-hold.spec.js --project=chromium",
