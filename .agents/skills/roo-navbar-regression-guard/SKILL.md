@@ -23,11 +23,16 @@ Run the existing fixture-backed suites from the repository root:
 
 ```bash
 (
+  set -e
   while IFS= read -r key; do
     case "$key" in SENTRY_DSN|*_SENTRY_DSN) unset "$key" ;; esac
   done < <(compgen -e)
+  browser_prefix=()
+  if [[ $(uname -s) == Linux && -z ${DISPLAY:-} ]]; then
+    browser_prefix=(xvfb-run -a)
+  fi
   env -u BASE_URL -u NEXT_DIST_DIR -u PW_SERVER_ID \
-    ./node_modules/.bin/playwright test \
+    "${browser_prefix[@]}" ./node_modules/.bin/playwright test \
     tests/section-nav.spec.js tests/nav-chaos.spec.js --project=chromium --reporter=line
 )
 ```
@@ -36,6 +41,8 @@ This clears inherited Sentry DSNs and fixture IDs, then invokes Playwright
 directly so `playwright.config.js` starts a separate local fixture for each
 process. The `npm run test:nav:*` wrappers synthesize `BASE_URL` and assume
 an already running server; use the direct command for this check.
+Linux sessions without `DISPLAY` use `xvfb-run`, matching CI; install the same
+browser/display prerequisites.
 Use a free `PW_PORT` and `ROO_TEST_HOST` for this checkout when other tests run.
 The suites cover navigation and desktop layout; they do not prove logo pixel
 transparency. Check rendered logos, computed wrapper styles and asset alpha at

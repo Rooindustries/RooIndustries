@@ -15,16 +15,23 @@ IDs and Sentry DSNs so each Playwright process gets its own local fixture.
 
 ```bash
 (
+  set -e
   while IFS= read -r key; do
     case "$key" in SENTRY_DSN|*_SENTRY_DSN) unset "$key" ;; esac
   done < <(compgen -e)
   unset BASE_URL NEXT_DIST_DIR PW_SERVER_ID
+  browser_prefix=()
+  if [[ $(uname -s) == Linux && -z ${DISPLAY:-} ]]; then
+    browser_prefix=(xvfb-run -a)
+  fi
   npm run check:seo
-  npm run test:seo:nonjs -- --project=chromium --reporter=line
-  npm run test:seo:structured-data -- --project=chromium --reporter=line
+  "${browser_prefix[@]}" npm run test:seo:nonjs -- --project=chromium --reporter=line
+  "${browser_prefix[@]}" npm run test:seo:structured-data -- --project=chromium --reporter=line
 )
 ```
 
+The block stops at the first failed check. Linux sessions without `DISPLAY`
+use `xvfb-run`, matching CI; install the same browser/display prerequisites.
 Use `ROO_TEST_HOST` and `PW_PORT` to select this checkout's local test endpoint.
 Save command results and Playwright artifacts under the task's artifact path.
 The fixture suite builds its own test server; do not point it at production.

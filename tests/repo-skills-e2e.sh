@@ -6,6 +6,7 @@ repo=$(git rev-parse --show-toplevel)
 artifacts=${ROO_SKILLS_ARTIFACTS:-$repo/test-results/repo-skills}
 mkdir -p "$artifacts" "${TMPDIR:-$HOME/.cache/agent-tmp}"
 artifacts=$(cd "$artifacts" && pwd)
+rm -f -- "$artifacts/result.json"
 scratch=$(mktemp -d "${TMPDIR:-$HOME/.cache/agent-tmp}/roo-skills-e2e.XXXXXX")
 cleanup() {
   local status=$?
