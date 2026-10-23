@@ -217,7 +217,7 @@ export function GET() { throw new Error('Fixture edge error'); }
         check(`${mode.name}: actual booking failure response`, [booking.status, (await booking.json()).message],
           [500, 'Failed to reserve this slot. Please try again.']);
         await fetch(`${content}/__fixture`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ failure: '' }) });
-        check(`${mode.name}: edge error remains outside reporting`, (await fetch(`${site}/api/monitoring-edge`)).status, 500);
+        check(`${mode.name}: edge route still fails`, (await fetch(`${site}/api/monitoring-edge`)).status, 500);
         const context = await browser.newContext({ serviceWorkers: 'block' });
         const relayRequests = [];
         await context.route('**/*', async route => {
@@ -258,7 +258,7 @@ export function GET() { throw new Error('Fixture edge error'); }
         if (!mode.enabled) await delay(2000);
         const rows = received.slice(from);
         if (mode.enabled) {
-          for (const message of ['Fixture server uncaught', 'Fixture server direct', 'Slot hold failed',
+          for (const message of ['Fixture server uncaught', 'Fixture server direct', 'Slot hold failed', 'Fixture edge error',
             'Fixture browser uncaught', 'Fixture browser rejection', 'Fixture browser reported', 'Fixture browser direct', 'Fixture browser boundary']) {
             check(`production: ${message} reaches the sink`, hasError(rows, message), true);
           }
