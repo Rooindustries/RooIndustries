@@ -455,9 +455,22 @@ export default function ContentAdmin() {
     if (isCurrentSelection(publishedGeneration)) setNotice(PUBLISH_NOTICE);
   };
 
-  const notPublished = () => {
+  const finishDeletion = async (pending) => {
+    if (!isCurrentSelection(pending.generation)) return;
+    clearDraft(draftKey(pending.session));
     setPendingPublication(null);
-    setBanner({ tone: "error", text: "Not published. Retry when you are ready; your changes are kept as a local draft.", retry: { kind: "publish" } });
+    referenceCache.current.delete(pending.session.type);
+    setSession(null);
+    setWorking(null);
+    setNotice("Deleted. The live site picks this up within a few minutes.");
+    setPane("documents");
+    await loadList(pending.session.type);
+  };
+
+  const notCommitted = (pending) => {
+    const deleting = pending.command.operation === "delete";
+    setPendingPublication(null);
+    setBanner({ tone: "error", text: `${deleting ? "Not deleted" : "Not published"}. Retry when you are ready; your changes are kept as a local draft.`, retry: { kind: deleting ? "delete" : "publish" } });
   };
 
   const reconcilePublication = async (pending) => {
@@ -468,7 +481,12 @@ export default function ContentAdmin() {
       const receipt = await api.getPublishStatus(pending.command);
       if (!isCurrentSelection(pending.generation)) return;
       if (receipt?.committed !== true || receipt.type !== pending.session.type || typeof receipt.revision !== "string" || !receipt.revision.trim() ||
-          (pending.session.documentId ? receipt.documentId !== pending.session.documentId : !hasCommittedCreateReceipt(receipt, pending.session))) { notPublished(); return; }
+          (pending.session.documentId ? receipt.documentId !== pending.session.documentId : !hasCommittedCreateReceipt(receipt, pending.session))) { notCommitted(pending); return; }
+      if (pending.command.operation === "delete") {
+        if (receipt.deleted !== true || receipt.revision !== pending.command.expectedRevision) throw new AdminApiError("The deletion receipt could not be confirmed.", { code: "CMS_RECEIPT_INVALID" });
+        await finishDeletion(pending);
+        return;
+      }
       const data = { ...(await api.getDocument(receipt.documentId)), documentId: receipt.documentId, receipt };
       if (!isCurrentSelection(pending.generation)) return;
       const documentId = pending.session.documentId || data?.documentId;
@@ -477,13 +495,15 @@ export default function ContentAdmin() {
       }
       if (receipt.revision === data.revision && publishedContentMatches(data, pending.session, pending.document, TYPES_BY_NAME.get(pending.session.type), pending.removedPaths)) {
         await finishPublication(pending, documentId);
-      } else notPublished();
+      } else notCommitted(pending);
     } catch (error) {
       if (!isCurrentSelection(pending.generation) || handleAuthFailure(error)) return;
-      if (error.status === 404) notPublished();
+      if (error.status === 404) notCommitted(pending);
       else {
         setPendingPublication(pending);
-        setBanner({ tone: "error", text: "Could not confirm publication. Your changes are kept as a local draft. Retry to check the saved version before publishing again.", retry: { kind: "publish-status" } });
+        setBanner({ tone: "error", text: pending.command.operation === "delete"
+          ? "Could not confirm deletion. Your changes are kept as a local draft. Retry to check whether it was deleted before trying again."
+          : "Could not confirm publication. Your changes are kept as a local draft. Retry to check the saved version before publishing again.", retry: { kind: "publish-status" } });
       }
     } finally {
       if (isCurrentSelection(pending.generation)) setSaving(false);
@@ -557,23 +577,20 @@ export default function ContentAdmin() {
     const selectedGeneration = selection.current;
     const title = documentTitle(type, session.baseline);
     if (!window.confirm(`Delete “${title}” from the live site? It disappears from this list. A copy is kept in the database for recovery, but restoring it needs a developer.`)) return;
+    setNotice("");
     setSaving(true);
     setBanner(null);
+    flushDraft({ force: true });
+    const command = { operation: "delete", type: session.type, documentId: session.documentId, expectedRevision: session.revision };
+    const pending = { generation: selectedGeneration, session, command };
     try {
-      await api.publish({
-        operation: "delete",
-        type: session.type,
-        documentId: session.documentId,
-        expectedRevision: session.revision,
-      });
+      const result = await api.publish(command);
       if (!isCurrentSelection(selectedGeneration)) return;
-      clearDraft(draftKey(session));
-      referenceCache.current.delete(session.type);
-      setSession(null);
-      setWorking(null);
-      setNotice("Deleted. The live site picks this up within a few minutes.");
-      setPane("documents");
-      loadList(session.type);
+      if (result?.committed !== true || result.deleted !== true || result.documentId !== session.documentId || result.revision !== session.revision) {
+        throw new AdminApiError("The deletion receipt could not be confirmed.", { code: "CMS_RECEIPT_INVALID" });
+      }
+      if (result.replayed === true) await reconcilePublication(pending);
+      else await finishDeletion(pending);
     } catch (error) {
       if (!isCurrentSelection(selectedGeneration) || handleAuthFailure(error)) return;
       if (error.code === "CMS_REFERENCED") {
@@ -586,6 +603,8 @@ export default function ContentAdmin() {
         });
       } else if (["CMS_REVISION_CONFLICT", "CMS_CREATE_INTENT_CONFLICT"].includes(error.code)) {
         setConflict({ currentRevision: error.details?.currentRevision || null, documentId: error.details?.documentId || session.documentId });
+      } else if (["ADMIN_REQUEST_TIMEOUT", "NETWORK_ERROR", "CMS_RECEIPT_INVALID"].includes(error.code) || error.status >= 500) {
+        await reconcilePublication(pending);
       } else {
         setBanner({ tone: "error", text: error.message });
       }
@@ -656,6 +675,7 @@ export default function ContentAdmin() {
     else if (retry?.kind === "document") openDocument(retry.documentId);
     else if (retry?.kind === "signout") lock();
     else if (retry?.kind === "publish") publish();
+    else if (retry?.kind === "delete") deleteDocument();
     else if (retry?.kind === "publish-status") reconcilePublication(pendingPublication);
   };
 
