@@ -234,3 +234,21 @@ test("expiry away from the booking flow clears the reservation without moving th
   await expect(page.getByRole("dialog")).toBeVisible();
   await reserveAgainKeepsDetails(page, flow);
 });
+
+test("an applied coupon survives an expiry and reaches the next payment quote", async ({ page, flow }) => {
+  flow.state.holdMs = 60000;
+  await page.clock.install();
+  await flow.review();
+  await flow.codeInput("save20");
+  await expect(page.getByRole("button", { name: "Remove coupon code save20", exact: true })).toBeVisible();
+  const { expiresAt } = await storedHold(page);
+  await page.clock.setSystemTime(Date.parse(expiresAt) + 1000);
+  await page.clock.runFor(2100);
+  await expect(page.getByRole("alert").filter({ hasText: expiredMessage })).toBeVisible();
+  await reserveAgainKeepsDetails(page, flow, 30 * 60 * 1000);
+  await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+  await flow.payment();
+  await expect.poll(() => flow.state.calls.filter(call => call.path === "/api/payment/quote").length).toBeGreaterThan(0);
+  expect(flow.state.calls.filter(call => call.path === "/api/payment/quote").at(-1).body.couponCode).toBe("save20");
+});

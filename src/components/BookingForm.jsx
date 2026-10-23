@@ -765,23 +765,28 @@ export default function BookingForm() {
     if (clearedNoHoldRef.current) return;
 
     restoredHoldIdRef.current = null;
-    const ready = resetReferralChoice(scope);
-    referralReadyScopeRef.current = ready ? scope : "";
-    setReferralReadyScope(ready ? scope : "");
-    if (!ready) {
-      setCodeEntryOpen(true);
-      setCodeError(REFERRAL_STORAGE_ERROR);
-    }
-    setRestoredCodeCandidates(null);
-    autoReferralAttemptRef.current = "";
-    setDismissedReferralCode("");
-    setAppliedReferral(null);
-    setAppliedCoupon(null);
     if (readBrowserStorage("sessionStorage", BOOKING_HOLD_EXPIRED_STORAGE_KEY)) {
+      // An expiry keeps the checkout as the visitor left it: typed details, applied codes and this scope's choice.
+      referralReadyScopeRef.current = scope;
+      setReferralReadyScope(scope);
       setErrorStep1(RESERVATION_EXPIRED_ERROR);
-    } else if (ready) {
-      clearDraftForPackage(getDraftKey(selectedPackage));
-      setForm(createFreshForm());
+    } else {
+      const ready = resetReferralChoice(scope);
+      referralReadyScopeRef.current = ready ? scope : "";
+      setReferralReadyScope(ready ? scope : "");
+      if (!ready) {
+        setCodeEntryOpen(true);
+        setCodeError(REFERRAL_STORAGE_ERROR);
+      }
+      setRestoredCodeCandidates(null);
+      autoReferralAttemptRef.current = "";
+      setDismissedReferralCode("");
+      setAppliedReferral(null);
+      setAppliedCoupon(null);
+      if (ready) {
+        clearDraftForPackage(getDraftKey(selectedPackage));
+        setForm(createFreshForm());
+      }
     }
     setSelectedSlot(null);
     setStep(1);

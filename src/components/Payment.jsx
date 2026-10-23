@@ -292,7 +292,7 @@ export default function Payment({ hideFooter = false }) {
     writeStoredCheckout(nextBooking);
     navigate(
       { pathname: location.pathname, search: location.search, hash: location.hash },
-      { replace: true, state: { ...navState, bookingData: nextBooking } }
+      { replace: true, state: { ...navState, bookingData: nextBooking, paymentViewKey: paymentViewRef.current?.key || location.key } }
     );
   };
 
@@ -630,9 +630,12 @@ export default function Payment({ hideFooter = false }) {
 
   const paymentMountedRef = useRef(true);
   const paymentViewRef = useRef(null);
-  if (paymentViewRef.current?.key !== location.key ||
+  // Removing a coupon rewrites this history entry in place; it carries the view's key so a payment start
+  // that finishes afterwards is still recognized as this checkout and its session is kept.
+  const paymentViewKey = location.state?.paymentViewKey || location.key;
+  if (paymentViewRef.current?.key !== paymentViewKey ||
       paymentViewRef.current?.fingerprint !== checkoutFingerprint) {
-    paymentViewRef.current = { key: location.key, fingerprint: checkoutFingerprint, session: paymentSession };
+    paymentViewRef.current = { key: paymentViewKey, fingerprint: checkoutFingerprint, session: paymentSession };
   }
   const paymentView = paymentViewRef.current;
   paymentView.session = paymentSession;

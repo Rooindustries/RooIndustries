@@ -1430,3 +1430,33 @@ for (const [fault, title] of [
     await expect(page.getByRole("button", { name: "Change payment method", exact: true })).toHaveCount(0);
   });
 }
+
+test("removing a coupon while a payment start is in flight keeps the started payment recoverable", async ({ page, flow }) => {
+  let pending;
+  let body;
+  await page.route("**/api/payment/start", route => { pending = route; body = route.request().postDataJSON(); });
+  await flow.review();
+  await flow.codeInput("save20");
+  await expect(page.getByRole("button", { name: "Remove coupon code save20", exact: true })).toBeVisible();
+  await flow.payment();
+  await expect(page.getByRole("button", { name: "Pay your way", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect.poll(() => Boolean(pending)).toBe(true);
+  await page.getByRole("button", { name: "Remove coupon", exact: true }).click();
+  await expect(page.locator("#payment-coupon-code")).toHaveValue("");
+  const expires = new Date(Date.now() + 20 * 60000).toISOString();
+  const response = page.waitForResponse("**/api/payment/start");
+  await pending.fulfill({ json: {
+    ok: true, provider: "dodo", status: "started", paymentAccessToken: "fixture-started-payment",
+    quoteFingerprint: body.quoteFingerprint,
+    providerPayload: { checkoutUrl: new URL("/__test/checkout-handoff", page.url()).href },
+    sessionExpiresAt: expires,
+    quote: { grossAmount: 54.95, netAmount: 43.96, isFree: false, couponDiscountAmount: 10.99 },
+    refreshedHold: { slotHoldId: body.bookingPayload.slotHoldId, slotHoldToken: body.bookingPayload.slotHoldToken, slotHoldExpiresAt: expires, phase: "payment_pending" },
+  } });
+  await response;
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("payment_session_state"))).not.toBeNull();
+  expect(JSON.parse(await page.evaluate(() => sessionStorage.getItem("payment_session_state"))).paymentAccessToken).toBe("fixture-started-payment");
+  await expect(page.getByText("Your earlier checkout is still reserved. Change payment method to use the updated codes.")).toBeVisible();
+  expect(body.bookingPayload.couponCode).toBe("save20");
+});
