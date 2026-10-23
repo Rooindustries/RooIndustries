@@ -1,5 +1,6 @@
 export const BOOKING_DRAFT_STORAGE_KEY = "booking_draft";
 export const CHECKOUT_BOOKING_STORAGE_KEY = "checkout_booking_state";
+export const BOOKING_HOLD_EXPIRED_STORAGE_KEY = "booking_hold_expired";
 
 const LEGACY_CHECKOUT_KEYS = [
   "my_slot_hold",

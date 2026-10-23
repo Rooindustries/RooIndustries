@@ -1852,7 +1852,7 @@ export default function Payment({ hideFooter = false }) {
       );
       if (holdExpiresAt && new Date(holdExpiresAt).getTime() <= Date.now()) {
         holdExpiryHandledRef.current = true;
-        navigate("/", { replace: true });
+        navigate("/booking", { state: backToBookingState, replace: true });
       }
     } finally {
       endConfirmation();

@@ -120,8 +120,10 @@ Any PR that touches a money path, including a helper outside this list:
   - exhausted retries: 12 failed finalizes set `reconciliationRecoveryTerminal` (`:105-117,1870-1911`), and reconcile then skips the record (`:4347`).
 - A definitive unpaid abandonment tries to release the hold and the coupon reservation. If the release fails it keeps `resourceReleasePending` and retries. (`src/server/api/payment/flow.js:1687,1746-1752,1781,2634,2696-2732`)
   - A payment still pending after its hold expires releases only the hold; its coupon reservation stays. (`src/server/api/payment/flow.js:3828-3840,4848-4854`)
-- **NOT ENFORCED (ROO-225, PR #227 parked):** when the hold expires in the booking dialog or on `/payment`, the visitor should stay in the flow with a reason and keep what they typed.
-  - Today `src/components/ReservationBanner.jsx:199-201,241-245` clears only the browser's copy of the hold, with no release call. It deletes `booking_draft` (`:234`) and sends them to `/` (`:237`) with no message.
+- When a hold expires in the booking dialog or on `/payment`, the visitor stays in the flow, keeps what they typed, and sees "The reservation expired. Please choose a slot again."
+  - On `/booking` and `/payment` the banner does not release or redirect (`src/components/ReservationBanner.jsx:20,198-201`). Away from those pages it records the expiry and keeps the draft (`:128-131,242-247`).
+  - A reload that only has `booking_hold_expired` keeps the draft and shows the reason (`src/components/BookingForm.jsx:776-780`). An expired stored hold does the same (`:817-821`). A release that is already past the deadline, or that finishes after it, records the expiry before the hold is cleared (`:2105-2109,2141-2148`). A release that finishes while the hold is still active does not record an expiry.
+  - An expired payment hold returns to `/booking` (`src/components/Payment.jsx:368-377,440-456,1661-1663`).
 
 ### Dodo payments and webhooks
 

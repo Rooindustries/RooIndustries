@@ -10,7 +10,7 @@ import React, {
 import { createPortal } from "react-dom";
 import { useDialogFocus } from "../lib/useDialogFocus";
 import { BookingDialogActionsContext, useBookingDialogPending } from "../lib/bookingDialogHold";
-import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
+import { readBrowserStorage, removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { getPublicContent } from "../lib/publicContentClient";
 import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
 import { useLocation, useNavigate, Link } from "react-router-dom";
@@ -22,6 +22,7 @@ import PriceDisplay from "./PriceDisplay";
 import { getWarrantyCallout } from "../lib/packageWarranty";
 import {
   BOOKING_DRAFT_STORAGE_KEY,
+  BOOKING_HOLD_EXPIRED_STORAGE_KEY,
   CHECKOUT_BOOKING_STORAGE_KEY,
   REFERRAL_STORAGE_ERROR,
   captureReferralAddress,
@@ -79,6 +80,8 @@ const REASSURANCE_COPY =
   "You won't be charged until you confirm on the payment page.";
 const PAYMENT_PENDING_EXPIRY_ERROR =
   "This reservation expired while payment is still pending. Return to payment to check its status or release payment to try again.";
+const RESERVATION_EXPIRED_ERROR = "The reservation expired. Please choose a slot again.";
+const markHoldExpired = () => writeBrowserStorage("sessionStorage", BOOKING_HOLD_EXPIRED_STORAGE_KEY, "1");
 const REQUIRED_DETAIL_FIELDS = ["discord", "email", "specs", "mainGame"];
 const REQUIRED_DETAILS_ERROR = "Please fill out all required fields.";
 const CALENDAR_AVAILABILITY_LABELS = Object.freeze({
@@ -755,6 +758,7 @@ export default function BookingForm() {
         setReferralReadyScope(scope);
       }
       clearedNoHoldRef.current = false;
+      removeBrowserStorage("sessionStorage", BOOKING_HOLD_EXPIRED_STORAGE_KEY);
       return;
     }
     if (clearedNoHoldRef.current) return;
@@ -772,7 +776,9 @@ export default function BookingForm() {
     setDismissedReferralCode("");
     setAppliedReferral(null);
     setAppliedCoupon(null);
-    if (ready) {
+    if (readBrowserStorage("sessionStorage", BOOKING_HOLD_EXPIRED_STORAGE_KEY)) {
+      setErrorStep1(RESERVATION_EXPIRED_ERROR);
+    } else if (ready) {
       clearDraftForPackage(getDraftKey(selectedPackage));
       setForm(createFreshForm());
     }
@@ -819,6 +825,8 @@ export default function BookingForm() {
           broadcastHold(normalizedHold);
         } else {
           sessionStorage.removeItem(HOLD_STORAGE_KEY);
+          markHoldExpired();
+          setErrorStep1(RESERVATION_EXPIRED_ERROR);
         }
       }
     } catch {
@@ -904,7 +912,9 @@ export default function BookingForm() {
             ? "This reservation expired. Use Check again to choose a slot again."
             : PAYMENT_PENDING_EXPIRY_ERROR);
         } else {
-          releaseHold();
+          releaseHold().then((released) => {
+            if (released && !currentHoldRef.current) setErrorStep1(RESERVATION_EXPIRED_ERROR);
+          });
         }
         return false;
       }
@@ -2175,7 +2185,10 @@ export default function BookingForm() {
       currentHoldRef.current?.holdId === holdIdToDelete &&
       currentHoldRef.current?.holdToken === holdTokenToDelete;
     if (classifyHoldResponse({ endpoint: "release", expired: hasExpired() }) === "clear" && isCurrentHold()) {
+      markHoldExpired();
       clearHoldState(resetStep);
+      setErrorStep1(RESERVATION_EXPIRED_ERROR);
+      setErrorStep2("");
     }
     if (releaseInFlightRef.current.has(releaseKey)) return hasExpired();
     releaseInFlightRef.current.add(releaseKey);
@@ -2208,6 +2221,13 @@ export default function BookingForm() {
       releaseInFlightRef.current.delete(releaseKey);
     }
     if (outcome !== "keep") {
+      if (isCurrentHold() && hasExpired()) {
+        markHoldExpired();
+        clearHoldState(resetStep);
+        setErrorStep1(RESERVATION_EXPIRED_ERROR);
+        setErrorStep2("");
+        return true;
+      }
       if (isCurrentHold()) {
         clearHoldState(resetStep);
         setErrorStep1("");
@@ -2255,8 +2275,10 @@ export default function BookingForm() {
       }
       const refreshed = data.refreshedHold;
       if (!refreshed?.slotHoldId || !refreshed?.slotHoldToken) {
+        removeBrowserStorage("sessionStorage", PAYMENT_SESSION_STORAGE_KEY);
+        markHoldExpired();
         clearHoldState(true);
-        setErrorStep1("The reservation expired. Please choose the slot again.");
+        setErrorStep1(RESERVATION_EXPIRED_ERROR);
         return;
       }
       const nextHold = {
@@ -2293,9 +2315,10 @@ export default function BookingForm() {
   const handleLockAndGoNext = async (recheckOtherTab = false) => {
     const recheckingPayment = recheckOtherTab === true && paymentInOtherTab;
     if (recheckingPayment && new Date(myHold.expiresAt).getTime() <= Date.now()) {
+      markHoldExpired();
       clearHoldState(true);
       setErrorStep2("");
-      setErrorStep1("The reservation expired. Please choose a slot again.");
+      setErrorStep1(RESERVATION_EXPIRED_ERROR);
       return;
     }
     if (isPaymentPendingHold && !recheckingPayment) {
