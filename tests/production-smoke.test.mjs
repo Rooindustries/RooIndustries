@@ -333,6 +333,14 @@ test("only successful Production deployments share the smoke queue, so a Preview
   assert.match(workflow, /cancel-in-progress: false/);
 });
 
+test("every queued production smoke waits its turn without cancelling another deployment's smoke", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/production-smoke.yml", import.meta.url), "utf8");
+  const concurrency = workflow.match(/^concurrency:\s*\n(?:[ \t]+[^\n]*\n)*/m)?.[0];
+  assert.ok(concurrency, "The production smoke workflow must define concurrency.");
+  assert.match(concurrency, /^  queue: max\s*$/m);
+  assert.match(concurrency, /^  cancel-in-progress: false\s*$/m);
+});
+
 test("deploy gate: a smoke that can't run doesn't roll anything back", () => withGate({}, async ({ vercel, exec }) => {
   const result = await exec({ SMOKE_BASE_URL: "https://example.com" });
   assert.equal(result.code, 1, result.output);
