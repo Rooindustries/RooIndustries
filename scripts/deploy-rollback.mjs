@@ -1,3 +1,5 @@
+import { withRecoveryLock } from "./lib/production-recovery-lock.mjs";
+
 const USAGE = `Usage: npm run deploy:rollback -- [options]
 
   (no options)            Roll production back to the previous ready production deployment.
@@ -5,8 +7,7 @@ const USAGE = `Usage: npm run deploy:rollback -- [options]
   --undo                  Promote the newest ready production deployment and turn
                           automatic production domains back on.
   --status                Print the live deployment and rollback state as JSON.
-  --if-live <url-or-id>   Inspect an automatic rollback. Mutations are disabled until
-                          the provider can enforce the expected live deployment.
+  --if-live <url-or-id>   Roll back only while this newest deployment is still live.
   --reason <text>         Reason recorded with the rollback in Vercel.
   --domain <host>         Production domain to check (default www.rooindustries.com).
 
@@ -264,12 +265,14 @@ const ambiguousDelivery = (error) =>
   !(error instanceof Refusal) && !(error instanceof ApiError && error.status < 500);
 
 const postMutation = async (api, state, domain, pathname, query, { automatic = false } = {}) => {
+  if (automatic) {
+    const current = await loadState(api, domain);
+    refuseBusyProject(current);
+    await checkAutomaticRollback(api, current, deploymentId(state.live));
+  }
   const { body: alias } = await api("GET", `/v4/aliases/${encodeURIComponent(domain)}`, { teamId: state.teamId });
   if (alias?.deploymentId !== deploymentId(state.live)) {
     throw new Refusal(`${deploymentId(state.live)} is no longer live (${alias?.deploymentId} is); leaving production alone.`);
-  }
-  if (automatic) {
-    throw new Refusal("Automatic rollback is disabled: Vercel cannot enforce the expected live deployment. Production was not changed; inspect it before a manual rollback.");
   }
   try {
     await api("POST", pathname, query, {});
@@ -283,8 +286,7 @@ const postMutation = async (api, state, domain, pathname, query, { automatic = f
   }
 };
 
-const main = async () => {
-  const options = parseArgs(process.argv.slice(2));
+const main = async (options) => {
   if (options.help) {
     console.log(USAGE);
     return;
@@ -369,12 +371,18 @@ const main = async () => {
     teamId: fresh.teamId,
     description: options.reason || "npm run deploy:rollback",
   }, { automatic: Boolean(options.ifLive) });
-  await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget), { expectedFrom: deploymentId(fresh.live) });
+  await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget), { autoAssign: false, expectedFrom: deploymentId(fresh.live) });
   console.log(`${options.domain} now serves ${deploymentId(target)}.`);
   console.log("New production deployments stay off the domain until you run `npm run deploy:rollback -- --undo`.");
 };
 
-main().catch((error) => {
+const run = async () => {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.status || options.dryRun || options.help) return main(options);
+  return withRecoveryLock(options.domain, () => main(options));
+};
+
+run().catch((error) => {
   console.error(error instanceof Refusal ? `Refusing: ${error.message.replace(/^Refusing /, "")}` : error.message);
   process.exitCode = mutationAccepted ? 2 : 1;
 });

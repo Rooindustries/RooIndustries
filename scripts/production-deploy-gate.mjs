@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { recoveryLock, withRecoveryLock } from "./lib/production-recovery-lock.mjs";
+import { isProductionMonitor } from "./lib/production-monitor.mjs";
 
 const scripts = path.dirname(fileURLToPath(import.meta.url));
 const LIVE_ATTEMPTS = Number(process.env.GATE_LIVE_ATTEMPTS || 30);
@@ -8,7 +10,7 @@ const LIVE_WAIT_MS = Number(process.env.GATE_LIVE_WAIT_MS || 10000);
 const annotate = (level, message) => console.log(process.env.GITHUB_ACTIONS === "true" ? `::${level}::${message}` : `${level}: ${message}`);
 
 const runNode = (script, args, { env = process.env, capture = false } = {}) => new Promise((resolve) => {
-  const child = spawn(process.execPath, [path.join(scripts, script), ...args], { env, stdio: ["ignore", capture ? "pipe" : "inherit", "inherit"] });
+  const child = spawn(process.execPath, [path.join(scripts, script), ...args], { env, stdio: ["ignore", capture ? "pipe" : "inherit", "inherit", ...(recoveryLock === undefined || script !== "deploy-rollback.mjs" ? [] : [recoveryLock])] });
   let stdout = "";
   child.stdout?.on("data", (chunk) => { stdout += chunk; });
   child.on("close", (code) => resolve({ code, stdout }));
@@ -28,9 +30,10 @@ const liveDeploymentUrl = async () => {
 const main = async () => {
   if (process.env.GITHUB_ACTIONS === "true") {
     let base;
-    try { base = new URL(process.env.SMOKE_BASE_URL); } catch { base = null; }
-    if (base?.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(base?.hostname) ||
-        base?.username || base?.password) {
+    const monitoring = isProductionMonitor();
+    try { base = new URL(process.env.SMOKE_BASE_URL || (monitoring ? "https://www.rooindustries.com" : "")); } catch { base = null; }
+    const fixture = base?.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(base?.hostname);
+    if ((!fixture && !(monitoring && base?.origin === "https://www.rooindustries.com")) || base?.username || base?.password) {
       annotate("error", "CI requires an explicit loopback SMOKE_BASE_URL; live monitoring is disabled.");
       return 1;
     }
@@ -60,6 +63,7 @@ const main = async () => {
 
   const smokeEnv = { ...process.env };
   delete smokeEnv.VERCEL_TOKEN;
+  delete smokeEnv.ROO_RECOVERY_LOCK;
   const smokeArgs = process.env.SMOKE_BASE_URL ? ["--base", process.env.SMOKE_BASE_URL] : [];
   const smoke = await runNode("production-smoke.mjs", smokeArgs, { env: smokeEnv });
   if (smoke.code === 0) return 0;
@@ -88,7 +92,7 @@ const main = async () => {
   return 1;
 };
 
-main().then((code) => { process.exitCode = code; }, (error) => {
+withRecoveryLock("www.rooindustries.com", main).then((code) => { process.exitCode = code; }, (error) => {
   annotate("error", `Deploy gate failed: ${error.message}`);
   process.exitCode = 1;
 });

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import http from "node:http";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -9,6 +11,11 @@ import { DOMAIN, TOKEN, startVercel } from "./fixtures/fake-vercel.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const script = path.join(root, "scripts/production-smoke.mjs");
+
+const closeOwnedBrowser = smokePid => {
+  const children = execFileSync("ps", ["-o", "pid=", "--ppid", String(smokePid)], { encoding: "utf8" }).trim();
+  for (const pid of children.split(/\s+/).filter(Boolean)) process.kill(Number(pid), "SIGKILL");
+};
 
 const run = (args, onSpawn, env = {}) => new Promise(resolve => {
   const child = spawn(process.execPath, [script, ...args], {
@@ -49,12 +56,14 @@ const withExternalScript = async (script, body) => {
   }
 };
 
-test("a healthy site passes every money-path check with GET requests only", () => withSite({ packages: { postOnLoad: true } }, (site, result) => {
+const unsafeRequests = site => site.requests.filter(request => request.method !== "GET" && !(request.method === "POST" && request.path === "/api/payment/quote"));
+
+test("a healthy site passes every money-path check with only GET and anonymous quote requests", () => withSite({ packages: { postOnLoad: true } }, (site, result) => {
   assert.equal(result.code, 0, result.output);
   for (const name of ["page /", "page /packages", "page /booking", "page /payment", "booking availability", "package prices", "referral capture", "home page renders", "booking page renders", "payment page renders"]) {
     assert.match(result.output, new RegExp(`ok\\s+${name.replace("/", "\\/")}`));
   }
-  assert.deepEqual(site.requests.filter(request => request.method !== "GET"), []);
+  assert.deepEqual(unsafeRequests(site), []);
 }));
 
 test("a hung money page that times out is a money-path failure inside the smoke deadline", async () => {
@@ -164,7 +173,7 @@ test("a confirmed page failure still counts when the browser later disconnects",
   const site = await startSite({
     status: { "/": 500 },
     onRequest: (pathname) => {
-      if (pathname === "/packages" && smokePid) execFileSync("pkill", ["-KILL", "-P", String(smokePid)]);
+      if (pathname === "/packages" && smokePid) closeOwnedBrowser(smokePid);
     },
   });
   try {
@@ -182,7 +191,7 @@ test("a browser that dies mid-run means the smoke could not run, not a money-pat
   let smokePid;
   const site = await startSite({
     onRequest: (pathname) => {
-      if (pathname === "/packages" && smokePid) execFileSync("pkill", ["-KILL", "-P", String(smokePid)]);
+      if (pathname === "/packages" && smokePid) closeOwnedBrowser(smokePid);
     },
   });
   try {
@@ -215,7 +224,7 @@ for (const [name, body] of Object.entries({
   test(`a 200 homepage with ${name} fails the smoke`, () => withSite({ bodies: { "/": body } }, (site, result) => {
     assert.equal(result.code, 2, result.output);
     assert.match(result.output, /FAIL\s+home page renders/);
-    assert.deepEqual(site.requests.filter(request => request.method !== "GET"), []);
+    assert.deepEqual(unsafeRequests(site), []);
   }));
 }
 
@@ -243,7 +252,7 @@ test("client readiness accepts a healthy delayed startup", () => withSite({
   startup: { "/booking": { delay: 500 } },
 }, (site, result) => {
   assert.equal(result.code, 0, result.output);
-  assert.deepEqual(site.requests.filter(request => request.method !== "GET"), []);
+  assert.deepEqual(unsafeRequests(site), []);
 }));
 
 for (const pathname of ["/", "/booking", "/payment"]) {
@@ -251,7 +260,7 @@ for (const pathname of ["/", "/booking", "/payment"]) {
     'throw new Error("Optional external fixture failed");',
     source => withSite({ scriptSources: { [pathname]: source } }, (site, result) => {
       assert.equal(result.code, 0, result.output);
-      assert.deepEqual(site.requests.filter(request => request.method !== "GET"), []);
+      assert.deepEqual(unsafeRequests(site), []);
     }),
   ));
 
@@ -270,7 +279,7 @@ test("an optional external script error stays harmless in a CI fixture", () => w
   'throw new Error("Optional external fixture failed");',
   source => withSite({ scriptSources: { "/payment": source } }, (site, result) => {
     assert.equal(result.code, 0, result.output);
-    assert.deepEqual(site.requests.filter(request => request.method !== "GET"), []);
+    assert.deepEqual(unsafeRequests(site), []);
   }, { GITHUB_ACTIONS: "true" }),
 ));
 
@@ -397,6 +406,140 @@ const withGate = async ({ site: siteOverrides, vercel: vercelOptions } = {}, bod
 
 const vercelChanges = vercel => vercel.requests.filter(request => request.method !== "GET");
 
+test("review regression: concurrent gates recover a broken deployment exactly once", () => withGate({
+  site: { status: { "/payment": 500 } },
+}, async ({ vercel, exec }) => {
+  const results = await Promise.all([exec(), exec({ VERCEL_API_URL: `${vercel.origin}/`, TMPDIR: os.homedir() })]);
+  assert.equal(vercelChanges(vercel).length, 1, results.map(result => result.output).join("\n"));
+  const mutation = vercel.requests.findIndex(request => request.method === "POST");
+  assert.equal(vercel.requests.slice(0, mutation).filter(request => request.path === "/v2/teams").length, 4,
+    "The waiting gate must not read production before the first recovery completes.");
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
+  assert.ok(results.some(result => /production was rolled back/.test(result.output)));
+}));
+
+test("the production deployment event invokes recovery using only fake services", () => withGate({
+  site: { status: { "/payment": 500 } },
+}, async ({ site, vercel, exec }) => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "roo702-event-"));
+  const eventPath = path.join(scratch, "event.json");
+  fs.writeFileSync(eventPath, JSON.stringify({ repository: { full_name: "Rooindustries/RooIndustries" },
+    deployment: { environment: "Production" }, deployment_status: { state: "success", environment_url: LIVE_URL } }));
+  try {
+    const env = { GITHUB_ACTIONS: "true", GITHUB_EVENT_NAME: "deployment_status", GITHUB_EVENT_PATH: eventPath,
+      GITHUB_WORKFLOW_REF: "Rooindustries/RooIndustries/.github/workflows/production-smoke.yml@refs/heads/main",
+      ROO_TEST_MONITOR_ORIGIN: site.base, SMOKE_BASE_URL: undefined,
+      NODE_OPTIONS: `--import=${path.join(root, "tests/fixtures/production-monitor-loader.mjs")}` };
+    const refused = await exec({ ...env, GITHUB_WORKFLOW_REF: "Rooindustries/RooIndustries/.github/workflows/tests.yml@refs/heads/main" });
+    assert.equal(refused.code, 1, refused.output);
+    assert.equal(vercel.requests.length, 0);
+    assert.equal(site.requests.length, 0);
+    const result = await exec(env);
+    assert.equal(result.code, 1, result.output);
+    assert.match(result.output, /production was rolled back/);
+    assert.equal(vercelChanges(vercel).length, 1);
+    assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
+    assert.deepEqual(unsafeRequests(site), []);
+  } finally {
+    fs.unlinkSync(eventPath);
+    fs.rmdirSync(scratch);
+  }
+}));
+
+test("review regression: the executable smoke rejects failing real checkout quotes", () => withSite({
+  quote: { status: 503, body: { ok: false, error: "Fixture quote unavailable." } },
+}, (site, result) => {
+  assert.equal(result.code, 2, result.output);
+  assert.ok(site.requests.some(request => request.path === "/api/payment/quote"));
+  assert.match(result.output, /FAIL\s+payment page renders/);
+}));
+
+test("deploy gate: flaky requests and a slow cold start leave production live", () => withGate({
+  site: { failFirst: { "/booking": 1, "/api/payment/quote": 1 },
+    startup: { "/": { delay: 600 }, "/booking": { delay: 600 }, "/payment": { delay: 600 } } },
+}, async ({ site, vercel, exec }) => {
+  const result = await exec({ SMOKE_MARKER_TIMEOUT_MS: "3000" });
+  assert.equal(result.code, 0, result.output);
+  assert.equal(vercelChanges(vercel).length, 0);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
+  assert.ok(site.requests.filter(request => request.path === "/api/payment/quote").length >= 2);
+}));
+
+for (const pathname of ["/", "/booking", "/payment"]) {
+  test(`deploy gate: slow ${pathname} initialization beyond the check budget never rolls back`, () => withGate({
+    site: { startup: { [pathname]: { delay: 1500 } } },
+  }, async ({ vercel, exec }) => {
+    const result = await exec({ SMOKE_MARKER_TIMEOUT_MS: "200" });
+    assert.equal(result.code, 1, result.output);
+    assert.match(result.output, /client resources are still loading/);
+    assert.equal(vercelChanges(vercel).length, 0);
+    assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
+  }));
+}
+
+test("an anonymous quote redirect cannot send a POST to a payment or hold endpoint", () => withSite({
+  redirectLoop: ["/api/payment/quote"],
+}, (site, result) => {
+  assert.equal(result.code, 2, result.output);
+  assert.equal(site.requests.filter(request => request.path === "/api/payment/quote").length, 3);
+  assert.deepEqual(unsafeRequests(site), []);
+}));
+
+test("the quote exception refuses identities, codes and hold details", () => withSite({
+  bodies: { "/payment": `<h3>Booking Summary</h3><script>
+    for (const key of ['email', 'referralCode', 'originalOrderId', 'slotHoldToken']) {
+      fetch('/api/payment/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packageTitle: 'Vertex Essentials', [key]: 'not-allowed' }) }).catch(() => {});
+    }
+  </script>` },
+}, (site, result) => {
+  assert.equal(result.code, 0, result.output);
+  const quotes = site.requests.filter(request => request.path === "/api/payment/quote");
+  assert.equal(quotes.length, 1);
+  assert.deepEqual(quotes[0].body, { packageTitle: "Vertex Essentials" });
+  assert.deepEqual(unsafeRequests(site), []);
+}));
+
+test("deploy gate: its own external SDK restriction cannot trigger recovery", () => withGate({
+  site: { scriptSources: { "/payment": "http://127.0.0.2:9/provider.js" },
+    startup: { "/payment": { requiresExternalReady: true } } },
+}, async ({ vercel, exec }) => {
+  const result = await exec({ GITHUB_ACTIONS: "true", SMOKE_MARKER_TIMEOUT_MS: "300" });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /the smoke blocked external scripts/);
+  assert.equal(vercelChanges(vercel).length, 0);
+}));
+
+test("deploy gate: a reset quote connection cannot trigger recovery", () => withGate({
+  site: { resetQuote: true },
+}, async ({ vercel, exec }) => {
+  const result = await exec({ SMOKE_MARKER_TIMEOUT_MS: "500" });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /couldn't load \/api\/payment\/quote/);
+  assert.equal(vercelChanges(vercel).length, 0);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
+}));
+
+for (const [pathname, heading] of Object.entries({
+  "/booking": "Select a Date and Time for Your Session", "/payment": "Booking Summary",
+})) {
+  test(`review regression: transparent ${pathname} content fails the executable smoke`, () => withSite({
+    bodies: { [pathname]: `<nav>Visible navigation and site shell</nav><section style="opacity:0"><h3>${heading}</h3><button>Continue</button></section>` },
+  }, (site, result) => {
+    assert.equal(result.code, 2, result.output);
+    assert.ok(result.output.includes(`FAIL  ${pathname.slice(1)} page renders`), result.output);
+  }));
+}
+
+for (const pathname of ["/booking", "/payment"]) {
+  test(`the executable smoke rejects visible ${pathname} text with unusable controls`, () => withSite({
+    bodies: { [pathname]: `<style>button,input { pointer-events: none; }</style><h3>${pathname === "/booking" ? "Select a Date and Time for Your Session" : "Booking Summary"}</h3>` },
+  }, (site, result) => {
+    assert.equal(result.code, 2, result.output);
+    assert.match(result.output, /content or controls are not visible and usable/);
+  }));
+}
+
 for (const ci of [false, true]) {
   test(`deploy gate: a stalled decorative image leaves a healthy deployment live${ci ? " in a CI fixture" : ""}`, async () => {
     let imageRequests = 0;
@@ -452,24 +595,24 @@ test("deploy gate: a healthy live deployment passes and nothing is rolled back",
   assert.deepEqual(vercelChanges(vercel), []);
 }));
 
-test("deploy gate: a money-path failure is reported without unsafe automatic rollback", () => withGate({ site: { status: { "/payment": 500 } } }, async ({ vercel, exec }) => {
+test("deploy gate: a money-path failure recovers the previous deployment", () => withGate({ site: { status: { "/payment": 500 } } }, async ({ vercel, exec }) => {
   const result = await exec();
   assert.equal(result.code, 1, result.output);
-  assert.deepEqual(vercelChanges(vercel), []);
-  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
+  assert.equal(vercelChanges(vercel).length, 1);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
   assert.match(result.output, /FAIL\s+page \/payment/);
-  assert.match(result.output, /Automatic rollback is disabled/);
+  assert.match(result.output, /production was rolled back/);
 }));
 
-test("deploy gate: a CSP-blocked referral script fails without unsafe automatic rollback", () => withGate({
+test("deploy gate: a CSP-blocked referral script triggers recovery", () => withGate({
   site: { packages: { externalReferral: true }, cspScriptBlock: true },
 }, async ({ vercel, exec }) => {
   const result = await exec();
   assert.equal(result.code, 1, result.output);
   assert.match(result.output, /FAIL  referral capture/);
-  assert.deepEqual(vercelChanges(vercel), []);
-  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
-  assert.match(result.output, /Automatic rollback is disabled/);
+  assert.equal(vercelChanges(vercel).length, 1);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
+  assert.match(result.output, /production was rolled back/);
 }));
 
 test("deploy gate: a deployment that never serves production still gets production smoked, without a rollback", () => withGate({ site: { status: { "/payment": 500 } } }, async ({ site, vercel, exec }) => {
@@ -551,15 +694,15 @@ test("deploy gate: an already rolled-back production is never rolled back furthe
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
 }));
 
-test("deploy gate: an unconfirmable automatic rollback is never sent", () => withGate({
+test("deploy gate: an unconfirmable automatic rollback is reported as ambiguous", () => withGate({
   site: { status: { "/payment": 500 } },
   vercel: { freezeAlias: true },
 }, async ({ vercel, exec }) => {
   const result = await exec();
   assert.equal(result.code, 1, result.output);
-  assert.deepEqual(vercelChanges(vercel), []);
-  assert.match(result.output, /automatic rollback did not run/);
-  assert.doesNotMatch(result.output, /rollback was sent/);
+  assert.equal(vercelChanges(vercel).length, 1);
+  assert.match(result.output, /rollback was sent, but production was not confirmed/);
+  assert.doesNotMatch(result.output, /so production was rolled back/);
 }));
 
 test("deploy gate: refuses to run without the deployment URL", () => withGate({}, async ({ site, vercel, exec }) => {

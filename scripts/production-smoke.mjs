@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { isIP } from "node:net";
+import { isProductionMonitor } from "./lib/production-monitor.mjs";
 
 const PRODUCTION = "https://www.rooindustries.com";
 const MONEY_PAGES = ["/", "/packages", "/booking", "/payment"];
@@ -69,7 +70,7 @@ const resolveBase = (value) => {
   } catch {
     throw new Refusal(`"${value}" is not a URL.`);
   }
-  if (process.env.GITHUB_ACTIONS === "true" && !isCiTarget(url)) {
+  if (process.env.GITHUB_ACTIONS === "true" && !(isCiTarget(url) || (isProductionMonitor() && url.origin === PRODUCTION && !url.username && !url.password))) {
     throw new Refusal("CI requires an explicit loopback smoke target; live monitoring is disabled.");
   }
   if (url.origin === PRODUCTION) return url.origin;
@@ -105,18 +106,43 @@ const expectAvailability = async (response) => {
   if (!Array.isArray(body?.bookedSlots)) throw new Error("has no bookedSlots list");
 };
 
-const allowOnlyGet = async (context) => {
+const allowSmokeRequests = async (context, base, checkout) => {
+  const active = new Set();
+  const blockedScripts = [];
+  context.on("close", () => { for (const controller of active) controller.abort(); });
   await context.route("**/*", async (route) => {
     const request = route.request();
-    const allowed = request.method() === "GET" &&
-      (process.env.GITHUB_ACTIONS !== "true" || isCiTarget(new URL(request.url())));
-    if (!allowed) return route.abort("blockedbyclient");
-    if (process.env.GITHUB_ACTIONS !== "true") return route.continue();
+    const url = new URL(request.url());
+    let quote = false;
+    if (checkout && request.method() === "POST" && url.origin === base && url.pathname === "/api/payment/quote" && !url.search) {
+      try {
+        const body = request.postDataJSON();
+        const fields = ["packageTitle", "originalOrderId", "startTimeUTC", "email", "referralCode", "couponCode", "upgradeIntentToken"];
+        quote = body?.packageTitle === checkout.packageTitle && Object.entries(body).every(([key, value]) =>
+          fields.includes(key) && (key === "packageTitle" || value === ""));
+      } catch {}
+    }
+    const allowed = (request.method() === "GET" || quote) &&
+      (process.env.GITHUB_ACTIONS !== "true" || isCiTarget(url) || (isProductionMonitor() && url.origin === PRODUCTION));
+    if (!allowed) {
+      if (request.resourceType() === "script" && url.origin !== base) blockedScripts.push(url.origin);
+      return route.abort("blockedbyclient");
+    }
+    if (process.env.GITHUB_ACTIONS !== "true" && !quote) return route.continue();
+    const controller = new AbortController();
+    active.add(controller);
     try {
       // Playwright skips routing later redirects, so CI refuses them before delivery.
-      const response = await route.fetch({ maxRedirects: 0, timeout: REQUEST_TIMEOUT_MS });
-      if (response.status() >= 300 && response.status() < 400) return route.abort("blockedbyclient");
-      return await route.fulfill({ response });
+      const response = await fetch(request.url(), {
+        method: request.method(), headers: request.headers(), body: quote ? request.postData() : undefined,
+        redirect: "manual", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
+      });
+      if (response.status >= 300 && response.status < 400) return route.abort("blockedbyclient");
+      const body = Buffer.from(await response.arrayBuffer());
+      const headers = Object.fromEntries(response.headers);
+      delete headers["content-encoding"];
+      delete headers["content-length"];
+      return await route.fulfill({ status: response.status, headers, body });
     } catch (error) {
       const codes = [
         [/ECONNRESET|socket hang up/, "connectionreset"],
@@ -124,31 +150,48 @@ const allowOnlyGet = async (context) => {
         [/ENOTFOUND|EAI_AGAIN/, "namenotresolved"],
         [/EHOSTUNREACH|ENETUNREACH/, "addressunreachable"],
       ];
-      const reason = codes.find(([pattern]) => pattern.test(error.message))?.[1] || "failed";
+      const reason = asRunnerFault(error, request.url()) instanceof CouldNotRun ? "connectionfailed"
+        : codes.find(([pattern]) => pattern.test(error.message))?.[1] || "failed";
       await route.abort(reason).catch(() => {});
+    } finally {
+      active.delete(controller);
     }
   });
   await context.routeWebSocket(/.*/, (socket) => socket.close());
+  return blockedScripts;
 };
 
-// Each browser check gets its own GET-only page. Only connection failures on the site's own GET requests count
+// Each browser check gets its own page with only GETs and an anonymous quote. Only connection failures on the site's own requests count
 // as requests the runner couldn't load; resources the site blocks or refuses remain site failures.
 const withSmokePage = async (browser, base, contextOptions, check) => {
-  const context = await browser.newContext({ ...contextOptions, serviceWorkers: "block" });
+  const { checkout, ...browserOptions } = contextOptions;
+  const context = await browser.newContext({ ...browserOptions, serviceWorkers: "block" });
   const lost = [];
+  const pending = new Set();
+  let blockedScripts = [];
   try {
-    await allowOnlyGet(context);
+    blockedScripts = await allowSmokeRequests(context, base, checkout);
+    if (checkout) await context.addInitScript((booking) => {
+      sessionStorage.setItem("checkout_booking_state", JSON.stringify(booking));
+    }, checkout);
     const page = await context.newPage();
     const origin = new URL(base).origin;
+    page.on("request", request => {
+      if (new URL(request.url()).origin === origin && ["document", "script", "stylesheet", "xhr", "fetch"].includes(request.resourceType())) pending.add(request);
+    });
+    page.on("requestfinished", request => pending.delete(request));
     page.on("requestfailed", (request) => {
+      pending.delete(request);
       const reason = request.failure()?.errorText || "";
-      if (request.method() === "GET" && new URL(request.url()).origin === origin && runnerNetError(reason)) {
+      if (new URL(request.url()).origin === origin && runnerNetError(reason)) {
         lost.push(`${new URL(request.url()).pathname} (${reason || "failed"})`);
       }
     });
     return await check(page);
   } catch (error) {
     if (lost.length && !(error instanceof CouldNotRun)) throw new CouldNotRun(`couldn't load ${lost[0]}: ${error.message}`);
+    if (pending.size && !(error instanceof CouldNotRun)) throw new CouldNotRun(`client resources are still loading: ${error.message}`);
+    if (blockedScripts.length && !(error instanceof CouldNotRun)) throw new CouldNotRun(`the smoke blocked external scripts from ${blockedScripts[0]}: ${error.message}`);
     throw error;
   } finally {
     await context.close();
@@ -161,7 +204,7 @@ const nodes = (value) => {
   return [value, ...Object.values(value).flatMap(nodes)];
 };
 
-const checkPrices = (browser, base) => withSmokePage(browser, base, { javaScriptEnabled: false }, async (page) => {
+const checkPrices = (browser, base, selectCheckout) => withSmokePage(browser, base, { javaScriptEnabled: false }, async (page) => {
     const response = await page.goto(`${base}/packages`, { waitUntil: "domcontentloaded", timeout: 30000 });
     if (response?.status() !== 200) throw new Error(`/packages answered ${response?.status()}`);
     const cards = await page.locator(".ri-package-card").evaluateAll((elements) => elements.map((card) => ({
@@ -178,6 +221,7 @@ const checkPrices = (browser, base) => withSmokePage(browser, base, { javaScript
     if (JSON.stringify(published) !== JSON.stringify(shown)) {
       throw new Error(`structured data offers ${JSON.stringify(published)} don't match the cards ${JSON.stringify(shown)}`);
     }
+    selectCheckout({ packageTitle: cards[0].name, packagePrice: cards[0].price });
     return `${cards.length} packages priced`;
 });
 
@@ -187,8 +231,12 @@ const FLOW_MARKERS = {
   "/payment": "Booking Summary",
 };
 
-const checkPageRenders = (browser, base, pathname) => withSmokePage(browser, base, {}, async (page) => {
+const checkPageRenders = (browser, base, pathname, checkout) => withSmokePage(browser, base, { checkout }, async (page) => {
     const errors = [];
+    let quoted = false;
+    if (pathname === "/payment") page.on("response", (response) => {
+      if (response.url() === `${base}/api/payment/quote` && response.request().method() === "POST" && response.status() === 200) quoted = true;
+    });
     const origin = new URL(base).origin;
     page.on("pageerror", (error) => {
       const sources = (error.stack || "").split("\n")
@@ -238,6 +286,35 @@ const checkPageRenders = (browser, base, pathname) => withSmokePage(browser, bas
       if (errors.length) throw new Error(`${pathname} has a rendering error: ${errors[0]}`);
       throw new Error(`${pathname} did not finish client initialization`);
     });
+    if (marker) {
+      const control = pathname === "/booking" ? '[data-roo-flow-ready="booking"] button:not(:disabled)' : '#payment-coupon-code';
+      const heading = page.getByRole("heading", { name: marker, exact: true });
+      const input = page.locator(control).first();
+      const usable = async (locator) => {
+        await locator.scrollIntoViewIfNeeded({ timeout: markerTimeout });
+        await page.waitForFunction((element) => {
+          const bounds = element.getBoundingClientRect();
+          if (bounds.width <= 0 || bounds.height <= 0 || getComputedStyle(element).visibility !== "visible") return false;
+          let opacity = 1;
+          for (let node = element; node; node = node.parentElement) {
+            const style = getComputedStyle(node);
+            opacity *= Number(style.opacity);
+            if (style.pointerEvents === "none" || node.inert) return false;
+          }
+          if (opacity < 0.1) return false;
+          const top = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+          return element === top || element.contains(top);
+        }, await locator.elementHandle(), { timeout: markerTimeout });
+      };
+      try {
+        await usable(heading);
+        await usable(input);
+        await input.click({ trial: true, timeout: markerTimeout });
+      } catch {
+        throw new Error(`${pathname} content or controls are not visible and usable`);
+      }
+    }
+    if (pathname === "/payment" && !quoted) throw new Error("/payment did not confirm a real checkout quote");
     if (errors.length) throw new Error(`${pathname} has a rendering error: ${errors[0]}`);
     if (APP_ERROR_PATTERN.test(await page.evaluate(() => document.body.innerText))) {
       throw new Error(`${pathname} shows an application error`);
@@ -296,13 +373,14 @@ const main = async () => {
   }
   const browser = await chromium.launch();
   const results = [];
+  let checkout;
   try {
     checks.push(
-      ["package prices", () => withBrowserRetries(browser, base, checkPrices)],
+      ["package prices", () => withBrowserRetries(browser, base, (b, url) => checkPrices(b, url, value => { checkout = value; }))],
       ["referral capture", () => withBrowserRetries(browser, base, checkReferral)],
       ["home page renders", () => withBrowserRetries(browser, base, (b, url) => checkPageRenders(b, url, "/"))],
       ["booking page renders", () => withBrowserRetries(browser, base, (b, url) => checkPageRenders(b, url, "/booking"))],
-      ["payment page renders", () => withBrowserRetries(browser, base, (b, url) => checkPageRenders(b, url, "/payment"))],
+      ["payment page renders", () => withBrowserRetries(browser, base, (b, url) => checkPageRenders(b, url, "/payment", checkout))],
     );
     for (const [name, run] of checks) {
       try {

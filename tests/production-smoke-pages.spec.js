@@ -25,6 +25,21 @@ const paypalSdk = `window.paypal = {
 };`;
 
 for (const width of [1280, 360, 390]) {
+  test(`${width}px an empty payment page never signals a usable checkout`, async ({ page, flow }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await Promise.all([
+      page.waitForResponse("**/api/payment/providers").then(response => response.finished()),
+      page.goto("/payment"),
+    ]);
+    await expect(page.getByRole("heading", { name: "Booking Summary", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Pay your way", exact: true })).toBeDisabled();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect(page.locator('[data-roo-flow-ready="payment"]')).toHaveCount(0);
+    await testInfo.attach("empty-checkout", { body: JSON.stringify({ width, ready: false }), contentType: "application/json" });
+  });
+}
+
+for (const width of [1280, 360, 390]) {
   for (const quote of [
     { name: "HTTP failure", status: 503, body: JSON.stringify({ ok: false, error: "Fixture quote unavailable." }), error: "Fixture quote unavailable." },
     { name: "invalid JSON", status: 200, body: "{invalid", error: "Unable to confirm checkout price." },
@@ -98,8 +113,15 @@ for (const width of [1280, 360, 390]) {
       } }),
     }))),
   ]) {
-    test(`${width}px direct payment readiness follows ${discovery.name} provider discovery`, async ({ page, flow }, testInfo) => {
+    test(`${width}px quoted payment readiness follows ${discovery.name} provider discovery`, async ({ page, flow }, testInfo) => {
       await page.setViewportSize({ width, height: 900 });
+      await page.addInitScript(() => sessionStorage.setItem("checkout_booking_state", JSON.stringify({
+        packageTitle: "Performance Vertex Overhaul", packagePrice: "$84.99",
+      })));
+      await page.route("**/api/payment/quote", route => route.fulfill({ json: {
+        ok: true, quoteFingerprint: "fixture-paid-quote",
+        quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
+      } }));
       if (discovery.provider) {
         await page.route(discovery.provider === "paypal"
           ? /https:\/\/www\.(sandbox\.)?paypal\.com\/sdk\/js/

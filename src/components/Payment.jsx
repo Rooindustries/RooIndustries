@@ -544,7 +544,7 @@ export default function Payment({ hideFooter = false }) {
     String(providerConfig?.razorpay?.mode || "unknown") !== "unknown";
   const canUsePaypal = hasPaypalClientId && !!providerConfig?.paypal?.enabled;
   const onlinePaymentUnavailable = providerAvailabilityKnown && !providerConfig.dodo?.enabled && !canUseRazorpay && !canUsePaypal;
-  const paymentFlowReady = hydrated && !quoteLoading && (!packageTitle || !!quoteFingerprint) && (
+  const paymentFlowReady = hydrated && !!packageTitle && !quoteLoading && !!quoteFingerprint && (
     isFree
       ? serverQuote?.isFree === true
       : providersSettled && providerAvailabilityKnown && (
