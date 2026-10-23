@@ -154,6 +154,15 @@ test("a newer deployment that goes live right before the rollback is reported, n
   assert.match(result.output, /--undo/);
 }));
 
+test("a rollback Vercel records without its source deployment is unconfirmed, even when a newer deploy slipped in", () => withVercel({
+  swapLiveBeforeMutation: true,
+  omitFromDeployment: true,
+}, async (vercel, exec) => {
+  const result = await exec(["--if-live", LIVE_URL]);
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /didn't record which deployment it replaced/);
+}));
+
 test("rollback returns to the deployment that served production before the live one, not to a newer bad one", () => withVercel({
   tweak: state => {
     state.project.lastAliasRequest = { type: "promote", jobStatus: "succeeded", fromDeploymentId: "dpl_older", toDeploymentId: "dpl_live", requestedAt: 1760995000000 };

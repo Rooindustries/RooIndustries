@@ -243,7 +243,10 @@ const waitForDomain = async (api, state, domain, targetId, { autoAssign, expecte
     const assignmentReady = autoAssign === undefined ||
       (autoAssign ? project?.autoAssignCustomDomains !== false : project?.autoAssignCustomDomains === false);
     if (domainMoved && job?.jobStatus === "succeeded" && jobTargetsThis && assignmentReady) {
-      if (expectedFrom && job.fromDeploymentId && job.fromDeploymentId !== expectedFrom) {
+      if (expectedFrom && !job.fromDeploymentId) {
+        throw new Error(`${domain} now serves ${targetId}, but Vercel didn't record which deployment it replaced, so it isn't confirmed that ${expectedFrom} was the one. Check that no newer deployment went live just before the request, and run \`npm run deploy:rollback -- --undo\` if one did.`);
+      }
+      if (expectedFrom && job.fromDeploymentId !== expectedFrom) {
         throw new Error(`${domain} now serves ${targetId}, but Vercel moved it away from ${job.fromDeploymentId}, not ${expectedFrom}: a newer deployment went live just before the request. Check it, and run \`npm run deploy:rollback -- --undo\` if it was healthy.`);
       }
       return;

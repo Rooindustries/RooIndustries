@@ -274,6 +274,18 @@ test("a runner that can't reach the site is a smoke that could not run, not a mo
   assert.doesNotMatch(result.output, /money-path check\(s\) failed/);
 }));
 
+test("a connection that drops mid-page is a smoke that could not run, not a money-path failure", () => withSite({ resetFetchMidBody: ["/booking"] }, (site, result) => {
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /Smoke could not run/);
+  assert.doesNotMatch(result.output, /money-path check\(s\) failed/);
+}));
+
+test("deploy gate: a connection that drops mid-page rolls nothing back", () => withGate({ site: { resetFetchMidBody: ["/booking"] } }, async ({ vercel, exec }) => {
+  const result = await exec();
+  assert.equal(result.code, 1, result.output);
+  assert.deepEqual(vercelChanges(vercel), []);
+}));
+
 test("deploy gate: a runner that can't reach production rolls nothing back", () => withGate({ site: { dropNonBrowser: true } }, async ({ vercel, exec }) => {
   const result = await exec();
   assert.equal(result.code, 1, result.output);

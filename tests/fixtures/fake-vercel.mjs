@@ -37,6 +37,7 @@ export const startVercel = ({
   swapLiveTo = null,
   dropMutationResponse = false,
   swapLiveBeforeMutation = false,
+  omitFromDeployment = false,
   swapNewestOnDeploymentRead = 0,
   dropAcceptedRollback = false,
   promoteAssignPolls = 0,
@@ -187,7 +188,7 @@ export const startVercel = ({
       state.project.lastAliasRequest = {
         type: "rollback",
         jobStatus: aliasJobStatus || (aliasSettlePolls ? "in-progress" : "succeeded"),
-        fromDeploymentId: from,
+        fromDeploymentId: omitFromDeployment ? null : from,
         toDeploymentId: match[2],
         requestedAt: Date.now(),
       };

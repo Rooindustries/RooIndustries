@@ -15,9 +15,14 @@ class Refusal extends Error {}
 // The runner could not reach the site at all (DNS, TLS, refused or reset connections, a dead browser).
 // A deployment can't cause these, so they mean "the smoke could not run", never a money-path failure.
 class CouldNotRun extends Error {}
+// Node's fetch reports every network-level failure as a TypeError: "fetch failed" before a response arrives,
+// "terminated" when the connection drops mid-body. Only its own header and body timeouts mean the site was slow.
+const SITE_TIMEOUTS = new Set(["UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"]);
 const asRunnerFault = (error, what) => {
   if (error instanceof CouldNotRun) return error;
-  const transport = (error?.name === "TypeError" && /fetch failed/.test(error.message)) || /net::ERR_/.test(String(error?.message));
+  const fetchTransport = error?.name === "TypeError" && /^(?:fetch failed|terminated)$/.test(error.message) &&
+    !SITE_TIMEOUTS.has(error.cause?.code);
+  const transport = fetchTransport || /net::ERR_/.test(String(error?.message));
   return transport ? new CouldNotRun(`couldn't reach ${what}: ${error.cause?.code || error.cause?.message || error.message}`) : error;
 };
 

@@ -37,6 +37,11 @@ export const startSite = (overrides = {}) => {
       return res.end("busy");
     }
     if (overrides.hang?.includes(url.pathname)) return;
+    if (overrides.resetFetchMidBody?.includes(url.pathname) && !/Mozilla/.test(req.headers["user-agent"] || "")) {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.write("<!doctype html><html><body><h1>partial");
+      return setTimeout(() => res.socket.destroy(), 20);
+    }
     if (overrides.status?.[url.pathname]) {
       res.writeHead(overrides.status[url.pathname], { "content-type": "text/html" });
       return res.end(page("error"));
