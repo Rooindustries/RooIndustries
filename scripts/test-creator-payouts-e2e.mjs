@@ -557,6 +557,60 @@ try {
     return { conflict, booking, earnings: await summary(state.creator, ['full-refund', 'admin-cancel'].includes(outcome) ? 0 : 5.5) };
   });
 
+  for (const lost of ['dispute_lost', 'dispute_accepted', 'dispute_expired']) for (const counter of ['zero', 'missing']) for (const outcome of ['won-cycle', 'cancelled-cycle', 'full-refund', 'legacy-snapshot', 'legacy-full-refund']) await run(`ROO-509-zero-counter-${lost}-${counter}-${outcome}`, async () => {
+    const state = await seed('dodo', { count: 0 });
+    if (counter === 'missing') await documents.patch(state.creator._id).unset(['successfulReferrals']).commit();
+    current.payment.disputes = [dispute(lost)];
+    assert.equal((await webhook('dispute.lost')).status, 200);
+    const first = await read(state.record.bookingId);
+    assert.equal(Number((await documents.getDocument(state.creator._id)).successfulReferrals || 0), 0);
+    assert.equal(first.dodoReferralReversedAfterDispute, false);
+    if (outcome.startsWith('legacy-')) await commerce.patch(first._id).unset(['dodoReferralDisputeAccounted']).commit();
+
+    const next = await seed('dodo', { booking: false, count: 0 });
+    current.creator = state.creator;
+    current.record = await commerce.patch(next.record._id).set({
+      pricingSnapshot: { ...next.record.pricingSnapshot, effectiveReferralId: state.creator._id, effectiveReferralCode: state.creator.slug.current },
+      bookingPayload: { ...next.record.bookingPayload, referralCode: state.creator.slug.current },
+    }).commit();
+    assert.equal((await webhook()).status, 200);
+    const paidBooking = await read((await read(next.record._id)).bookingId);
+    assert.equal(paidBooking.referral._ref, state.creator._id);
+    assert.equal(paidBooking.referralAccountingApplied, true);
+    current = state;
+    await countIs(1);
+
+    if (!outcome.endsWith('full-refund')) {
+      current.payment.disputes[0].remarks = 'Updated evidence after another paid booking';
+      const eventId = `changed-dispute-${state.key}`;
+      assert.equal((await webhook('dispute.updated', eventId)).status, 200);
+      await countIs(1);
+      assert.equal((await webhook('dispute.updated', eventId)).status, 200);
+      await countIs(1);
+      const restored = outcome === 'cancelled-cycle' ? 'dispute_cancelled' : 'dispute_won';
+      current.payment.disputes[0].dispute_status = restored;
+      assert.equal((await webhook('dispute.resolved')).status, 200);
+      await countIs(1);
+      current.payment.disputes[0].dispute_status = lost;
+      assert.equal((await webhook('dispute.reopened')).status, 200);
+      await countIs(1);
+      current.payment.disputes[0].dispute_status = restored;
+      assert.equal((await webhook('dispute.resolved')).status, 200);
+      await countIs(1);
+    }
+    current.payment.refund_status = 'full';
+    current.payment.refunds = [{ refund_id: `refund-${state.key}`, payment_id: state.payment.payment_id, status: 'succeeded', currency: 'USD', amount: state.payment.total_amount }];
+    assert.equal((await webhook('refund.succeeded')).status, 200);
+    await countIs(1);
+    assert.equal((await webhook('refund.succeeded')).status, 200);
+    await countIs(1);
+    const booking = await read(state.record.bookingId);
+    assert.equal(booking.status, 'refunded');
+    assert.equal(booking.dodoReferralDisputeAccounted, true);
+    assert.equal(booking.dodoReferralReversedAfterDispute, false);
+    return { first, paidBooking, booking, creator: await documents.getDocument(state.creator._id), earnings: await summary(state.creator, 5.5) };
+  });
+
   await run('ROO-509-open-partial-refund-then-won', async () => {
     const state = await seed('dodo');
     for (const status of ['dispute_opened', 'dispute_challenged']) {

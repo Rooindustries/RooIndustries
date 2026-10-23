@@ -5931,13 +5931,15 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     amount: dispute.amount, currency: dispute.currency, businessId: dispute.business_id,
     createdAt: dispute.created_at, isResolvedByRdr: dispute.is_resolved_by_rdr ?? null, remarks: dispute.remarks ?? null,
   })) : record.dodoDisputes || [];
-  const terminalDispute = dodoDisputes.find(dispute => ["dispute_lost", "dispute_accepted", "dispute_expired"].includes(dispute.status));
+  const terminalDisputeStatuses = ["dispute_lost", "dispute_accepted", "dispute_expired"];
+  const terminalDispute = dodoDisputes.find(dispute => terminalDisputeStatuses.includes(dispute.status));
   const disputed = disputes.some((dispute) => !["dispute_won", "dispute_cancelled"].includes(dispute.dispute_status)) ||
     (record.dodoDisputeActive === true && disputes.length === 0);
+  let disputeBooking;
   if ((disputed || record.dodoDisputeActive === true) && record.bookingId) {
-    const booking = await client.fetch(`*[_type == "booking" && _id == $id][0]{...}`, { id: record.bookingId });
-    if (booking && booking.status !== "refunded" && !booking.refundAccountingAppliedAt) {
-      requirePaymentRevision(booking);
+    disputeBooking = await client.fetch(`*[_type == "booking" && _id == $id][0]{...}`, { id: record.bookingId });
+    if (disputeBooking && disputeBooking.status !== "refunded" && !disputeBooking.refundAccountingAppliedAt) {
+      requirePaymentRevision(disputeBooking);
     }
   }
   if (disputed || record.dodoDisputeActive === true || disputes.length) {
@@ -5947,12 +5949,15 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       const previous = retainedDisputes.find(entry => entry.disputeId === dispute.disputeId);
       return previous && Object.entries(dispute).every(([key, value]) => previous[key] === value);
     });
+    const missingReferralAccounting = !!terminalDispute && disputeBooking &&
+      disputeBooking.status !== "refunded" && !disputeBooking.refundAccountingAppliedAt &&
+      disputeBooking.dodoReferralDisputeAccounted !== true;
     const unchanged = record.dodoDisputeActive === disputed && sameDisputes &&
-      record.providerRecoveryTerminal === !!terminalDispute;
+      record.providerRecoveryTerminal === !!terminalDispute && !missingReferralAccounting;
     if (!unchanged) {
-      const booking = record.bookingId
+      const booking = disputeBooking || (record.bookingId
         ? await client.fetch(`*[_type == "booking" && _id == $id][0]{...}`, { id: record.bookingId })
-        : null;
+        : null);
       const transaction = client.transaction();
       if (booking && booking.status !== "refunded" && !booking.refundAccountingAppliedAt) {
         const originalStatus = booking.dodoDisputeActive
@@ -5967,14 +5972,16 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
           preserveOriginalPrecision: preserveLegacyCommission,
         });
         const referralId = booking.referral?._ref;
+        let referralReversed = booking.dodoReferralReversedAfterDispute === true;
+        let referralDisputeAccounted = booking.dodoReferralDisputeAccounted === true || referralReversed ||
+          (booking.dodoDisputeActive === true && retainedDisputes.some(dispute => terminalDisputeStatuses.includes(dispute.status)));
         const reverseReferral = !!terminalDispute && !!referralId &&
           booking.referralAccountingApplied !== false && booking.referralReversedAfterRefund !== true &&
-          booking.dodoReferralReversedAfterDispute !== true;
+          !referralDisputeAccounted;
         const restoreReferral = !disputed && !!referralId &&
           booking.dodoReferralReversedAfterDispute === true &&
           ["captured", "completed"].includes(originalStatus) &&
           (booking.status === "pending" || ["captured", "completed"].includes(booking.status));
-        let referralReversed = booking.dodoReferralReversedAfterDispute === true;
         if (reverseReferral || restoreReferral) {
           const referral = await client.fetch(`*[_type == "referral" && _id == $id][0]{_id,_rev,successfulReferrals}`, { id: referralId });
           if (!referral?._id) {
@@ -5991,6 +5998,8 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
             referralReversed = !restoreReferral;
           }
         }
+        if (terminalDispute) referralDisputeAccounted = true;
+        else if (restoreReferral) referralDisputeAccounted = false;
         transaction.patch(booking._id, (patch) => {
           const guarded = guardPaymentRevision(patch, booking);
           return guarded.set({
@@ -5999,6 +6008,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
               : !disputed && booking.dodoDisputeActive && booking.status === "pending"
                 ? originalStatus : booking.status,
             dodoDisputeActive: disputed,
+            dodoReferralDisputeAccounted: referralDisputeAccounted,
             dodoReferralReversedAfterDispute: referralReversed,
             dodoDisputeBookingStatus: originalStatus,
             dodoOriginalCommissionAmount: commission.originalAmount,

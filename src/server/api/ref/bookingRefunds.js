@@ -283,7 +283,7 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
   }
   const referralId = booking.referral?._ref || "";
   const canReverseReferral = !!referralId && booking.referralAccountingApplied !== false &&
-    booking.dodoReferralReversedAfterDispute !== true;
+    booking.dodoReferralReversedAfterDispute !== true && booking.dodoReferralDisputeAccounted !== true;
   const referral = canReverseReferral
     ? await client.fetch(
         `*[_type == "referral" && _id == $id][0]{_id,_rev,successfulReferrals}`,
