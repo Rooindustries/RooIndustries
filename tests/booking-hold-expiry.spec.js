@@ -92,6 +92,29 @@ test("same-tab payment expiry on the booking step stays in the booking flow", as
   expect(await storedHold(page)).toMatchObject({ holdId: original.holdId, phase: "payment_pending" });
 });
 
+test("releasing a payment after the reservation expired keeps the typed details", async ({ page, flow }) => {
+  flow.state.holdMs = shortHold;
+  await flow.reserve();
+  await flow.details();
+  const original = { ...await storedHold(page), phase: "payment_pending" };
+  await page.evaluate(value => {
+    sessionStorage.setItem("my_slot_hold", JSON.stringify(value));
+    sessionStorage.setItem("payment_session_state", JSON.stringify({ paymentAccessToken: "fixture-payment" }));
+  }, original);
+  await page.route("**/api/payment/cancel", route => route.fulfill({ json: { ok: true, cancelled: true, slotReleased: true } }));
+  await page.reload();
+  const releasePayment = page.getByRole("button", { name: "Release payment", exact: true });
+  await expect(releasePayment).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "This reservation expired while payment is still pending." })).toBeVisible({ timeout: 25000 });
+  await releasePayment.click();
+  await expect(page.getByRole("alert").filter({ hasText: expiredMessage })).toBeVisible();
+  expect(await storedHold(page)).toBeNull();
+  expect(await draftEmail(page)).toBe("visitor@example.invalid");
+  await page.reload();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await reserveAgainKeepsDetails(page, flow);
+});
+
 test("expiry away from the booking flow clears the reservation without moving the visitor and keeps the details", async ({ page, flow }) => {
   flow.state.holdMs = shortHold;
   await flow.reserve();
