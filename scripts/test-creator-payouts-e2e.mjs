@@ -18,6 +18,7 @@ const sources = [
   'src/server/api/ref/bookingRefunds.js',
   'src/server/api/ref/bookingCommit.js',
   'src/server/api/payment/flow.js',
+  'src/server/api/payment/reconcile.js',
   'src/server/api/ref/pricing.js',
   'src/server/api/ref/createBooking.js',
   'src/server/api/ref/updatePayments.js',
@@ -195,6 +196,9 @@ const responses = [];
 const emailRequests = [];
 let failCouponAlert = false;
 let failCouponAlertKey = '';
+let pauseCouponAlerts = false;
+let abortedCouponAlerts = 0;
+const pausedCouponAlerts = new Set();
 const states = [];
 const refundsById = new Map();
 const inFlight = new Set();
@@ -715,6 +719,14 @@ try {
         if (req.url === '/emails') {
           const requestBody = JSON.parse(body);
           emailRequests.push({body: requestBody, headers: req.headers});
+          if (pauseCouponAlerts && requestBody.subject === 'Paid checkout exceeded a coupon limit') {
+            await new Promise(resolve => {
+              const resume = () => { pausedCouponAlerts.delete(resume); resolve(); };
+              pausedCouponAlerts.add(resume);
+              res.once('close', () => { if (!res.writableEnded) abortedCouponAlerts++; resume(); });
+            });
+            if (res.destroyed) return;
+          }
           if (requestBody.subject === 'Paid checkout exceeded a coupon limit' && requestBody.from === 'unverified@example.invalid') {
             res.writeHead(403, {'content-type': 'application/json'});
             res.end(JSON.stringify({name: 'validation_error', statusCode: 403, message: 'Synthetic unverified sending domain'}));
@@ -771,8 +783,8 @@ try {
           result = refundsById.get(id);
         else if (req.url.startsWith('/checkouts/'))
           result = {
-            session_id: state?.record.providerOrderId,
-            payment_id: state?.record.providerPaymentId,
+            id: state?.record.providerOrderId,
+            payment_id: state?.payment.payment_id,
           };
         else if (req.url === '/products/pdt_fixture')
           result = {
@@ -3249,6 +3261,9 @@ try {
     const pendingAlert = await read(reserved.redemption._id);
     assert.equal(pendingAlert.ownerAlertRequired, true);
     assert.equal(pendingAlert.ownerAlertSentAt, undefined);
+    const failedRetry = await post('/api/payment/reconcile', {}, {authorization: 'Bearer fixture'});
+    assert.equal(failedRetry.status, 200, JSON.stringify(failedRetry));
+    assert.equal((await read(reserved.redemption._id)).ownerAlertSentAt, undefined);
     failCouponAlert = false;
     const retry = await post('/api/payment/reconcile', {}, {authorization: 'Bearer fixture'});
     assert.equal(retry.status, 200, JSON.stringify(retry));
@@ -3327,6 +3342,79 @@ try {
       failCouponAlertKey = '';
       for (const document of pending) await commerce.delete(document._id);
       await sql`delete from migration.source_documents where legacy_sanity_id=any(${history.map(row => row._id)})`;
+    }
+  });
+
+  await run('money-rules-543-slow-alert-payment-recovery', async () => {
+    const payments = [];
+    for (let index = 0; index < 3; index++) {
+      const payment = await seed('dodo', {booking: false, count: 0, coupon: 20});
+      await startCheckout(payment);
+      payment.record = await commerce.patch(payment.record._id).set({lastAttemptAt: new Date(Date.now() - 120000).toISOString()}).commit();
+      const {releaseCouponReservation} = await import('../src/server/api/ref/couponReservations.js');
+      await releaseCouponReservation({client: commerce, redemptionId: payment.record.couponReservationId});
+      await documents.patch(`coupon.${payment.key}`).set({maxUses: 1, timesUsed: 1, isActive: false}).commit();
+      payments.push(payment);
+    }
+    await documents.patch('6d8a3646-0ed2-44b5-ad45-c5c9d578126a').set({
+      dateSlots: payments.map(payment => ({date: payment.record.bookingPayload.startTimeUTC.slice(0, 10), times: ['15:30']})),
+    }).commit();
+    const pending = ['first', 'second'].map(label => ({
+      _id: `couponRedemption.slow-${current.key}-${label}`, _type: 'couponRedemption',
+      status: 'consumed', coupon: {_ref: 'coupon.slow-fixture'},
+      ownerId: label, bookingId: `booking.alert-${label}`, ownerAlertRequired: true,
+    }));
+    for (const row of pending) await commerce.create(row);
+    const before = emailRequests.length;
+    const abortedBefore = abortedCouponAlerts;
+    let reconciliation;
+    try {
+      pauseCouponAlerts = true;
+      const started = Date.now();
+      reconciliation = post('/api/payment/reconcile', {}, {authorization: 'Bearer fixture'});
+      const deadline = Date.now() + 15000;
+      while (!pausedCouponAlerts.size && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+      assert.equal(pausedCouponAlerts.size, 1, 'The local email provider must hold the alert response open.');
+      const recovered = [];
+      for (const payment of payments) {
+        const record = await read(payment.record._id);
+        assert.ok(record.bookingId, 'Every paid booking must be committed before the stalled alert response is released.');
+        const booking = await read(record.bookingId);
+        assert.equal(booking.status, 'captured');
+        assert.equal(booking.requiresReschedule, undefined);
+        assert.equal(booking.netAmount, payment.quote.effectiveNetAmount);
+        recovered.push({record, booking});
+      }
+      const paymentRecoveryObservedMs = Date.now() - started;
+      assert.ok(paymentRecoveryObservedMs < 20000);
+      const result = await reconciliation;
+      const elapsedMs = Date.now() - started;
+      assert.equal(result.status, 200, JSON.stringify(result));
+      assert.ok(elapsedMs < 20000, `Email delivery blocked reconciliation for ${elapsedMs}ms.`);
+      assert.equal(abortedCouponAlerts - abortedBefore, 1, 'The HTTP email attempt must be cancelled, not left running.');
+      const alertIds = [...pending.map(row => row._id), ...payments.map(payment => payment.record.couponReservationId)];
+      const held = await Promise.all(alertIds.map(read));
+      assert.ok(held.every(row => row.ownerAlertRequired && !row.ownerAlertSentAt));
+      assert.equal(emailRequests.slice(before).filter(row => row.body.subject === 'Paid checkout exceeded a coupon limit').length, 1,
+        'A timed-out batch must not start another send after its total budget is spent.');
+      const attempted = held.find(row => row.ownerAlertLastAttemptAt);
+      assert.ok(attempted?.ownerAlertFrom);
+      assert.equal(attempted.ownerAlertGeneration, undefined);
+      pauseCouponAlerts = false;
+      const retried = await post('/api/payment/reconcile', {}, {authorization: 'Bearer fixture'});
+      assert.equal(retried.status, 200, JSON.stringify(retried));
+      const delivered = await Promise.all(alertIds.map(read));
+      assert.ok(delivered.every(row => row.ownerAlertSentAt));
+      const attempts = emailRequests.slice(before).filter(row => row.body.subject === 'Paid checkout exceeded a coupon limit');
+      const duplicate = attempts.filter(row => row.headers['idempotency-key'] === attempts[0].headers['idempotency-key']);
+      assert.equal(duplicate.length, 2);
+      assert.deepEqual(duplicate[0].body, duplicate[1].body);
+      return {recovered, paymentRecoveryObservedMs, elapsedMs, held, delivered, attempts, cancelledRequests: abortedCouponAlerts - abortedBefore};
+    } finally {
+      pauseCouponAlerts = false;
+      for (const resume of [...pausedCouponAlerts]) resume();
+      if (reconciliation) await reconciliation;
+      for (const row of pending) await commerce.delete(row._id);
     }
   });
 

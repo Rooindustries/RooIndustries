@@ -12,7 +12,6 @@ import { dispatchRescheduleNotifications } from "./bookingEmails.js";
 import { getSafeErrorCode } from "../../safeErrorLog.js";
 import { calculateCreatorCommission } from "../../referrals/commissionMoney.js";
 import { freezeBookingCommission } from "../../referrals/bookingCommission.js";
-import { dispatchCouponAlerts } from "./couponAlerts.js";
 
 const normalize = (value) => String(value || "").trim();
 
@@ -289,7 +288,6 @@ export const commitBookingTransaction = async ({
     }
     throw error;
   }
-  if (couponReservation?.redemption?._id) await dispatchCouponAlerts({client, redemptionId: couponReservation.redemption._id});
   return { booking: bookingDocument, bookingId: doc._id, idempotent: false };
 };
 
@@ -519,7 +517,6 @@ export const createRequiresRescheduleBooking = async ({
     }
     idempotent = true;
   }
-  if (couponReservation?.redemption?._id) await dispatchCouponAlerts({client, redemptionId: couponReservation.redemption._id});
   const notification = notify
     ? await dispatchRescheduleNotifications({
         client,

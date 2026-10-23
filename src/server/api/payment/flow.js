@@ -1,4 +1,3 @@
-import { dispatchCouponAlerts } from '../ref/couponAlerts.js';
 import { buildBrowserCompletionBody } from "./bookingSummary.js";
 import envValue from "../../supabase/envValue.cjs";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
@@ -4388,7 +4387,6 @@ export const reconcilePaymentSessions = async ({
     });
   }
 
-  await dispatchCouponAlerts({client});
   const policy = resolveSupabaseRuntimePolicy();
   const currentGeneration = Math.max(
     0,
