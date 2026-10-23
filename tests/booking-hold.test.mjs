@@ -64,3 +64,18 @@ test("an ordinary foreign active hold keeps its existing 409 response", async ()
   assert.equal(response.status, 409);
   assert.deepEqual(response.body, { ok: false, message: "This slot is currently reserved by someone else." });
 });
+
+test("an owner whose copy of the token expired still recognizes their live payment hold", async () => {
+  const payload = await fixture.hold();
+  assert.equal((await fixture.start(payload)).status, 200);
+  const stored = await fixture.commerce.getDocument(payload.slotHoldId);
+  const { issueHoldToken } = await import("../src/server/booking/holdToken.js");
+  const expiredCopy = issueHoldToken({
+    holdId: stored._id, startTimeUTC: stored.startTimeUTC, expiresAt: new Date(Date.now() - 60000).toISOString(),
+    holdNonce: stored.holdNonce, backend: stored.backendOwner, cutoverGeneration: Number(stored.cutoverGeneration || 0),
+  });
+  const response = await refresh(payload, { previousHoldToken: expiredCopy });
+  assert.equal(response.status, 409);
+  assert.deepEqual(response.body, { ok: false, message: paymentMessage, code: "hold_payment_in_progress" });
+  assert.equal((await fixture.commerce.getDocument(payload.slotHoldId)).phase, "payment_pending");
+});
