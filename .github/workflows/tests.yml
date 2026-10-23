@@ -216,7 +216,7 @@ jobs:
           node - <<'NODE'
           const assert = require('node:assert/strict');
           const { stats } = require('./test-results/native-referral-payment.json');
-          assert.equal(stats.expected, 4, 'The native referral payment E2E must pass');
+          assert.equal(stats.expected, 10, 'The native referral and coupon payment E2Es must pass');
           assert.equal(stats.skipped, 0, 'The native referral payment E2E must not skip');
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);

@@ -64,7 +64,7 @@ const creditedOnce = before => ({
   successfulReferrals: before.successfulReferrals + 1,
 });
 
-const payWithDodo = async ({ page, context, flow, native }) => {
+const payWithDodo = async ({ page, context, flow, native, couponCode = "" }) => {
   const startRequests = [];
   flow.state.slots = [{ date: await native.nextSlotDate(), times: ["10:00", "11:00"] }];
   await context.route(/\/api\/(holdSlot|releaseHold|payment\/(providers|quote|start|status|finalize|cancel)|ref\/(validateReferral|validateCoupon))(?:\?|$)/, async route => {
@@ -74,7 +74,8 @@ const payWithDodo = async ({ page, context, flow, native }) => {
     const headers = Object.fromEntries(Object.entries(request.headers()).filter(([name]) => ["authorization", "content-type"].includes(name)));
     const response = await native.request({ method: request.method(), path: `${url.pathname}${url.search}`, body: request.postData() || "", headers });
     if (url.pathname === "/api/payment/finalize" && new URL(page.url()).searchParams.has("dodo_return")) {
-      await expect(page.getByText(`${REFERRAL_CODE} · −$2.75`, { exact: true })).toBeVisible();
+      const discount = couponCode ? `${couponCode} · −$10.99` : `${REFERRAL_CODE} · −$2.75`;
+      await expect(page.getByText(discount, { exact: true })).toBeVisible();
       expect(JSON.parse(response.body)).toMatchObject({ status: "booked", bookingId: expect.any(String) });
     }
     return route.fulfill({ status: response.status, contentType: response.headers["content-type"] || "application/json", body: response.body });
@@ -84,17 +85,31 @@ const payWithDodo = async ({ page, context, flow, native }) => {
   }));
 
   const before = credit(await native.state());
-  await page.goto(`/?ref=${REFERRAL_CODE}`);
-  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("referral_session"))).toBe(REFERRAL_CODE);
+  await page.goto(couponCode ? "/" : `/?ref=${REFERRAL_CODE}`);
+  if (!couponCode) {
+    await expect.poll(() => page.evaluate(() => sessionStorage.getItem("referral_session"))).toBe(REFERRAL_CODE);
+  }
   await flow.reserve();
   await flow.details();
   await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+  if (couponCode) {
+    await flow.codeInput(couponCode);
+    await expect(page.getByRole("button", { name: `Remove coupon code ${couponCode}`, exact: true })).toBeVisible();
+  }
   await flow.payment();
-  await expect(page.locator("#payment-referral-code")).toHaveValue(REFERRAL_CODE);
-  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page.locator(couponCode ? "#payment-coupon-code" : "#payment-referral-code"))
+    .toHaveValue(couponCode || REFERRAL_CODE);
+  const [startResponse] = await Promise.all([
+    page.waitForResponse("**/api/payment/start"),
+    page.getByRole("button", { name: "Pay your way", exact: true }).click(),
+  ]);
+  expect(startResponse.status()).toBe(200);
+  await page.waitForURL("https://test.checkout.dodopayments.com/session/**");
   await expect(page.getByRole("heading", { name: "Fixture Dodo test checkout", exact: true })).toBeVisible();
   expect(startRequests).toHaveLength(1);
-  expect(startRequests[0]).toMatchObject({ provider: "dodo", bookingPayload: { referralCode: REFERRAL_CODE } });
+  expect(startRequests[0]).toMatchObject({ provider: "dodo", bookingPayload: {
+    referralCode: couponCode ? "" : REFERRAL_CODE, couponCode,
+  } });
 
   const started = await native.state();
   expect(credit(started)).toEqual(before);
@@ -195,6 +210,63 @@ test("a ?ref visitor who returns before the webhook sees the booking, and the la
   await saveResult(testInfo, "return-first", { native, bookingId: booking._id, paymentRecordId: paymentRecord._id, paymentId,
     credit: { before, afterReturn: credit(returned), afterWebhooks: credit(final) },
     webhooks: { late, redelivered } });
+});
+
+const couponTest = test.extend({ headless: true, video: "on", navigationTimeout: 60000 });
+
+couponTest.describe("a paid coupon checkout returning from Dodo", () => {
+  for (const width of [1280, 360, 390]) {
+    for (const order of ["webhook-first", "return-first"]) {
+      couponTest(`${width}px ${order}: shows Payment Successful and the paid booking`, async ({ page, context, flow, native }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        const couponCode = "delay20";
+        const { before, paymentId } = await payWithDodo({ page, context, flow, native, couponCode });
+        const event = { paymentId, type: "payment.succeeded", eventId: `msg_${paymentId}` };
+        const expected = { ...before, bookings: before.bookings + 1 };
+        let delivered;
+        if (order === "webhook-first") {
+          delivered = await native.webhook(event);
+          expect(delivered.status).toBe(200);
+          expect(credit(await native.state())).toEqual(expected);
+        }
+
+        await page.goto("/payment?dodo_return=1");
+        await expect(page).toHaveURL(/\/payment-success$/);
+        const returned = await native.state();
+        const bookings = returned.bookings.filter(booking => booking.dodoPaymentId === paymentId);
+        expect(bookings).toHaveLength(1);
+        const [booking] = bookings;
+        const paymentRecord = returned.paymentRecords.find(record => record.providerPaymentId === paymentId);
+        expect(booking).toMatchObject({ status: "captured", paymentProvider: "dodo", couponCode,
+          netAmount: 43.96, commissionAmount: 0 });
+        expect(booking.referral?._ref).toBeFalsy();
+        expect(paymentRecord).toMatchObject({ bookingId: booking._id, verificationState: "server_verified" });
+        expect(credit(returned)).toEqual(expected);
+        await expect(page.getByRole("heading", { name: "Payment Successful", exact: true })).toBeVisible();
+        await expect(page.getByText(booking._id, { exact: true })).toBeVisible();
+        const settled = await native.snapshot();
+
+        if (order === "return-first") {
+          delivered = await native.webhook(event);
+          expect(delivered.status).toBe(200);
+          const afterLate = await native.state();
+          expect(credit(afterLate)).toEqual(expected);
+          expect(afterLate.bookings).toEqual(returned.bookings);
+          expect((await native.snapshot()).emails).toEqual(settled.emails);
+        }
+        const beforeReplay = await native.snapshot();
+        const redelivered = await native.webhook(event);
+        expect(redelivered).toMatchObject({ status: 200, body: { duplicate: true } });
+        expect(await native.snapshot()).toEqual(beforeReplay);
+
+        await saveResult(testInfo, `coupon-${width}-${order}`, { native, couponCode, width, order,
+          bookingId: booking._id, paymentRecordId: paymentRecord._id, paymentId,
+          booking: { status: booking.status, netAmount: booking.netAmount, commissionAmount: booking.commissionAmount },
+          credit: { before, afterReturn: credit(returned), afterWebhooks: credit(await native.state()) },
+          webhooks: { delivered, redelivered } });
+      });
+    }
+  }
 });
 
 test.describe("a changed quote after a claimed payment start", () => {
