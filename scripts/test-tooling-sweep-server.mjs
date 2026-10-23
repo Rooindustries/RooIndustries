@@ -32,6 +32,7 @@ const env = {
   PATH: process.env.PATH,
   HOME: process.env.HOME,
   CI: "true",
+  CIRCLE_NODE_TOTAL: "2",
   VERCEL_ENV: "preview",
   TZ: "UTC",
   TOURNEY_DATABASE_MODE: "memory",
@@ -46,6 +47,11 @@ const env = {
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "fixture-only-tooling-browser-publishable-key",
   ALLOW_LIVE_PAYMENTS: "0",
   SALES_PREVIEW_READ_ONLY: apiRoutes ? "0" : "1",
+  ...(process.env.TOOLING_CMS_RESILIENCE === "1" ? {
+    REF_ADMIN_KEY: "synthetic-cms-resilience-key",
+    CMS_WRITES_PAUSED: "0",
+    __NEXT_TEST_MODE: "cms-resilience",
+  } : {}),
   ...(apiRoutes ? {
     ...apiRouteSecrets,
     RESEND_API_KEY: "fixture-only-referral-email-key",
@@ -55,7 +61,7 @@ const env = {
   } : {}),
   NEXT_TELEMETRY_DISABLED: "1",
   SENTRY_CLI_NO_TELEMETRY: "1",
-  NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN || "",
+  NEXT_PUBLIC_SENTRY_DSN: process.env.TOOLING_CMS_RESILIENCE === "1" ? "" : process.env.NEXT_PUBLIC_SENTRY_DSN || "",
   BASE_URL: baseURL,
   ROO_TEST_HOST: testHost,
   NEXT_DIST_DIR: dist,
@@ -98,7 +104,7 @@ if (development) {
 } else {
   if (fs.existsSync(dist)) throw new Error("Incomplete isolated build exists; choose a fresh NEXT_DIST_DIR.");
 }
-const fixture = await createToolingContentFixture({ origin: contentURL, artifact: process.env.TOOLING_CONTENT_ARTIFACT, apiRoutes, clockFile });
+const fixture = await createToolingContentFixture({ origin: contentURL, artifact: process.env.TOOLING_CONTENT_ARTIFACT, apiRoutes, cms: process.env.TOOLING_CMS_RESILIENCE === "1", clockFile });
 try {
   await execute(["scripts/generate-sitemap.js"]);
   await execute(["scripts/generate-robots.js"], { ...env, VERCEL_ENV: "production" });

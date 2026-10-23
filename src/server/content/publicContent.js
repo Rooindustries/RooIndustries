@@ -4,6 +4,8 @@ import {
   PUBLIC_CONTENT_RESOURCES,
 } from "../../lib/publicContentQueries";
 import { createSupabaseDocumentClient } from "../supabase/documentClient.js";
+import { createSupabaseAdminClient } from "../supabase/adminClient.js";
+import { assertPublicContentShape } from "./publicContentShape.js";
 import { clearSupabaseAssetManifestCache, enrichSupabaseContentAssets } from "../supabase/assets.js";
 import policyContent from "../../lib/policyContent";
 import { UPGRADE_LINK_SLUG_PATTERN } from "../../lib/globalCmsContract.js";
@@ -40,11 +42,12 @@ const DOCUMENT_TYPES_BY_RESOURCE = Object.freeze({
 });
 const ASSET_DEREFERENCE_RESOURCES = new Set(["tools"]);
 
-const createPublicContentClient = ({ resource }) => {
+const createPublicContentClient = ({ resource, client }) => {
   const assetDocumentTypes = ASSET_DEREFERENCE_RESOURCES.has(resource)
     ? ["sanity.imageAsset", "sanity.fileAsset"]
     : [];
   return createSupabaseDocumentClient({
+    shadowClient: client,
     documentTypes: [
       ...(DOCUMENT_TYPES_BY_RESOURCE[resource] || []),
       ...assetDocumentTypes,
@@ -104,11 +107,17 @@ const validateAllowedParameters = (resource, searchParams) => {
 };
 
 const loadSupabasePublicContent = async ({ resource, query, params, fresh = false }) => {
+  const load = async () => {
+    const client = createSupabaseAdminClient({
+      signal: AbortSignal.timeout(5000),
+      fetchImpl: (input, init) => fetch(input, { ...init, cache: "no-store" }),
+    });
+    const data = await createPublicContentClient({ resource, client }).fetch(query, params);
+    assertPublicContentShape(resource, data, DOCUMENT_TYPES_BY_RESOURCE[resource][0]);
+    return enrichSupabaseContentAssets({ data, client });
+  };
   if (Object.keys(params).length > 0) {
-    const data = await createPublicContentClient({
-      resource,
-    }).fetch(query, params);
-    return enrichSupabaseContentAssets({ data });
+    return load();
   }
 
   const key = `${resource}:${JSON.stringify(params)}`;
@@ -117,9 +126,7 @@ const loadSupabasePublicContent = async ({ resource, query, params, fresh = fals
   if (!fresh && cached?.hasData && cached.expiresAt > now) return cached.data;
   if (!fresh && cached?.pending) return cached.pending;
 
-  const pending = createPublicContentClient({ resource })
-    .fetch(query, params)
-    .then((data) => enrichSupabaseContentAssets({ data }))
+  const pending = load()
     .then((data) => {
       if (supabaseContentCache.get(key)?.pending !== pending) return data;
       supabaseContentCache.set(key, {

@@ -6,7 +6,7 @@ import { uiRepairsFixture } from './ui-repairs-server.mjs';
 import { localOrigin } from '../../scripts/lib/test-target-safety.mjs';
 import { referralEmail } from './api-routes.mjs';
 
-export async function createToolingContentFixture({ origin, artifact, apiRoutes = false, clockFile }) {
+export async function createToolingContentFixture({ origin, artifact, apiRoutes = false, cms = false, clockFile }) {
   const target = new URL(localOrigin(origin));
   const reused = uiRepairsFixture({ base: origin });
   const content = resource => reused.content(resource, target);
@@ -141,7 +141,9 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
   let enqueueDelayMs = 0;
   let emailDelayMs = 0;
   let contentOutage = false;
-  let contentMissing = [];
+  let contentMissing = (process.env.TOOLING_CONTENT_MISSING || '').split(',').filter(Boolean);
+  let contentFailure = process.env.TOOLING_CONTENT_FAILURE || '';
+  const cmsReceipts = new Map();
   const changedContent = new Set();
   const emails = [];
   const mutate = mutations => {
@@ -184,6 +186,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           changedContent.clear();
           contentOutage = false;
           contentMissing = [];
+          contentFailure = '';
         }
         if (body.outage !== undefined) {
           const documentTypes = Array.isArray(body.outage) && body.outage.length > 0 && body.outage.every(type => typeof type === 'string' && type);
@@ -194,6 +197,10 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           if (!Array.isArray(body.missing) || !body.missing.every(type => typeof type === 'string' && type)) throw new Error('Invalid fixture missing content.');
           contentMissing = body.missing;
         }
+        if (body.failure !== undefined) {
+          if (!['', 'timeout', 'malformed', 'invalid-json'].includes(body.failure)) throw new Error('Invalid fixture content failure.');
+          contentFailure = body.failure;
+        }
         if (body.patch !== undefined) {
           const index = documents.findIndex(value => value._id === body.patch?._id);
           if (index < 0 || Object.keys(body.patch).some(key => key.startsWith('_') && key !== '_id')) throw new Error('Invalid fixture content patch.');
@@ -201,7 +208,21 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           changedContent.add(body.patch._id);
         }
         call.status = 200;
-        json(res, 200, { outage: contentOutage, missing: contentMissing, changed: [...changedContent] });
+        json(res, 200, { outage: contentOutage, missing: contentMissing, failure: contentFailure, changed: [...changedContent] });
+      } else if (url.pathname === '/__content' && req.method === 'GET') {
+        call.status = 200;
+        json(res, 200, evidence);
+      } else if (cms && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_cms_publish_command_result') {
+        if (contentOutage === true) throw Object.assign(new Error('Synthetic receipt outage.'), { status: 503 });
+        call.status = 200;
+        json(res, 200, cmsReceipts.get(body.p_command_id) || null);
+      } else if (cms && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_apply_cms_publish_command') {
+        const results = mutate(body.p_mutations);
+        const receipt = { replayed: true, results };
+        cmsReceipts.set(body.p_command_id, receipt);
+        for (const row of results) changedContent.add(row._id);
+        call.status = 200;
+        json(res, 200, { ...receipt, replayed: false });
       } else if (apiRoutes && url.pathname === '/__fixture' && ['GET', 'POST'].includes(req.method)) {
         if (req.method === 'POST') {
           if (body.reset === true) {
@@ -249,6 +270,20 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         json(res, 200, { delivery, session, documents, requests: evidence.requests, emails, clockNow });
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_fetch_shadow_documents_targeted') {
         if (contentOutage === true || (Array.isArray(contentOutage) && body.p_document_types?.some(type => contentOutage.includes(type)))) throw Object.assign(new Error('Synthetic content outage.'), { status: 503, code: 'FIXTURE_CONTENT_OUTAGE' });
+        if (contentFailure === 'timeout') {
+          call.delayMs = 35000;
+          await new Promise(resolve => {
+            const timer = setTimeout(resolve, call.delayMs);
+            res.once('close', () => { clearTimeout(timer); resolve(); });
+          });
+          if (res.destroyed) return;
+        }
+        if (contentFailure === 'invalid-json') {
+          call.status = 200;
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end('{broken');
+          return;
+        }
         const scopedIds = apiRoutes && body.p_document_types === null && Array.isArray(body.p_ids) && body.p_ids.length > 0;
         if ((!scopedIds && (!Array.isArray(body.p_document_types) || !body.p_document_types.length)) || !Array.isArray(body.p_filters) || !Number.isInteger(body.p_limit) || body.p_limit < 1 || body.p_limit > 1000 || body.p_ids !== null && !Array.isArray(body.p_ids)) throw new Error('Invalid fixture read scope.');
         if (apiRoutes && delivery === 'lookup_failed' && body.p_document_types?.includes('referral')) throw Object.assign(new Error('Synthetic referral lookup outage.'), { status: 503, code: 'FIXTURE_LOOKUP_UNAVAILABLE' });
@@ -270,6 +305,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           if (!['eq', 'ieq', 'in'].includes(filter.op) || typeof filter.path !== 'string') throw new Error('Unsupported fixture filter.');
           rows = rows.filter(row => { const value = filter.path.split('.').reduce((item, key) => item?.[key], row); return filter.op === 'in' ? Array.isArray(filter.value) && filter.value.includes(value) : filter.op === 'ieq' ? String(value).toLowerCase() === String(filter.value).toLowerCase() : value === filter.value; });
         }
+        if (contentFailure === 'malformed') rows = rows.map(row => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, key.startsWith('_') ? value : { broken: true }])));
         rows = rows.sort((a, b) => a._id < b._id ? -1 : a._id > b._id ? 1 : 0).slice(0, body.p_limit); call.status = 200; call.rows = rows.length; json(res, 200, rows);
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_asset_manifest_for_refs') {
         const assets = images.filter(image => body.p_asset_ids?.includes(image.id)).map(image => ({

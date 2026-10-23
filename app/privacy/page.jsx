@@ -9,7 +9,7 @@ export const revalidate = 60;
 
 export default async function Page() {
   const privacy = await contentServer.fetchStaticPageContent("privacy-policy", {
-    requireContent: process.env.NEXT_PHASE !== "phase-production-build",
+    requireContent: true,
   });
   return <RouteRenderer entry={Privacy} pathname="/privacy" searchParams={{}} initialRouteData={{ privacy }} />;
 }

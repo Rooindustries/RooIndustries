@@ -18,6 +18,10 @@ jest.mock("../server/supabase/documentClient", () => ({
     mockCreateSupabaseDocumentClient(...args),
 }));
 
+jest.mock("../server/supabase/adminClient", () => ({
+  createSupabaseAdminClient: jest.fn(() => ({})),
+}));
+
 jest.mock("../server/supabase/assets", () => ({
   clearSupabaseAssetManifestCache: jest.fn(),
   enrichSupabaseContentAssets: (...args) =>
@@ -156,9 +160,9 @@ describe("public content privacy boundary", () => {
     await expect(request()).resolves.toEqual([{ _id: "benchmark-one" }]);
     expect(mockSupabaseFetch).toHaveBeenCalledTimes(1);
     expect(mockEnrichSupabaseContentAssets).toHaveBeenCalledTimes(1);
-    expect(mockCreateSupabaseDocumentClient).toHaveBeenCalledWith({
+    expect(mockCreateSupabaseDocumentClient).toHaveBeenCalledWith(expect.objectContaining({
       documentTypes: ["benchmark"],
-    });
+    }));
   });
 
   test("serves recent content when a Supabase refresh fails", async () => {
