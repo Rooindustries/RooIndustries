@@ -66,22 +66,25 @@ const prepareCmsCommand = (body, actor) => {
   const lookup = { p_command_id: commandId, p_request_hash: requestHash, p_actor: actor };
   return { schema, creating, id, document, requestHash, lookup };
 };
-export const getCreateCommandStatus = async ({ body, supabaseClient, actor = "admin:key" } = {}) => {
+export const getCmsCommandStatus = async ({ body, supabaseClient, actor = "admin:key" } = {}) => {
   const { schema, creating, id, document, requestHash, lookup } = prepareCmsCommand(body, actor);
-  if (!creating) throw validationError("$.operation", "Only create commands have a creation status.");
-  const validation = validateContentDocument(body.type, preserveContentDocument(document, null, schema.fields, (path, item) => hash({ seed: requestHash, path, item }).slice(0, 20)));
-  if (!validation.ok) throw cmsError("Content validation failed.", 400, "CMS_VALIDATION_FAILED", validation.errors);
+  if (body.operation === "delete") throw validationError("$.operation", "Only create and replace commands have a publication status.");
+  if (creating) {
+    const validation = validateContentDocument(body.type, preserveContentDocument(document, null, schema.fields, (path, item) => hash({ seed: requestHash, path, item }).slice(0, 20)));
+    if (!validation.ok) throw cmsError("Content validation failed.", 400, "CMS_VALIDATION_FAILED", validation.errors);
+  }
   const receipt = rpcData(await supabaseClient.rpc("roo_cms_publish_command_result", lookup), "Receipt lookup");
-  if (!receipt || receipt.replayed !== true) throw cmsError("Create command was not published.", 404, "CMS_NOT_FOUND");
+  if (!receipt || receipt.replayed !== true) throw cmsError("Content command was not published.", 404, "CMS_NOT_FOUND");
   const resultId = receipt.document_ids?.[0];
   const record = receipt.results?.[0];
-  if (receipt.command_id !== lookup.p_command_id || receipt.operation !== "create" ||
+  if (receipt.command_id !== lookup.p_command_id || receipt.operation !== body.operation ||
       !Array.isArray(receipt.document_ids) || receipt.document_ids.length !== 1 || resultId !== id ||
       !Array.isArray(receipt.results) || receipt.results.length !== 1 || record?._id !== resultId || record?._type !== body.type ||
       typeof record?._rev !== "string" || !record._rev.trim()) {
-    throw cmsError("The committed create receipt could not be confirmed.", 503, "CMS_RECEIPT_INVALID");
+    throw cmsError("The committed content receipt could not be confirmed.", 503, "CMS_RECEIPT_INVALID");
   }
-  return { committed: true, createIntentId: body.createIntentId.toLowerCase(), type: body.type, documentId: resultId, revision: record._rev };
+  clearSupabasePublicContentCache();
+  return { committed: true, ...(creating ? { createIntentId: body.createIntentId.toLowerCase() } : {}), type: body.type, documentId: resultId, revision: record._rev };
 };
 export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = process.env, actor = "admin:key" } = {}) => {
   assertGlobalCmsWritesAllowed(env);

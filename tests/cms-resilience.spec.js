@@ -134,6 +134,182 @@ test("a successful publish and its replay refresh public content", async ({ requ
   } finally { await control(request, baseURL, { reset: true }); }
 });
 
+for (const failure of ["5xx", "timeout", "invalid-receipt"]) {
+  test(`confirmed publish recovery refreshes public pages after a ${failure} commit response`, async ({ request, page, baseURL }, testInfo) => {
+    const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+    await guardBrowserContext(page.context(), [baseURL, new URL(controlUrl(baseURL)).origin]);
+    await page.route("**/api/admin/content/**", route => route.continue({ headers: { ...route.request().headers(), ...adminHeaders } }));
+    const commands = [];
+    page.on("request", req => {
+      if (new URL(req.url()).pathname === "/api/admin/content/publish" && req.method() === "POST") commands.push(req.postDataJSON());
+    });
+    const results = [];
+    const errors = [];
+    page.on("pageerror", error => errors.push(error.message));
+    try {
+      await control(request, baseURL, { reset: true });
+      await renew(request);
+      const requestOffset = (await (await request.get(controlUrl(baseURL))).json()).requests.length;
+      for (const operation of ["replace", "create"]) {
+        const route = operation === "replace" ? "/" : "/benchmarks";
+        const marker = `Recovered ${operation} after ${failure.replaceAll("-", " ")}`;
+        await expect.poll(async () => (await request.get(route)).headers()["x-nextjs-cache"], { timeout: 30000 }).toBe("HIT");
+        const before = await request.get(route);
+        await fs.writeFile(testInfo.outputPath(`${operation}-before.html`), await before.text());
+        await control(request, baseURL, { publishResponseFailure: failure });
+        await page.goto("/admin/content");
+        const navigation = page.getByRole("navigation", { name: "Content types" });
+        await expect(navigation).toBeVisible();
+        await navigation.getByRole("button", { name: operation === "replace" ? "Hero Section" : "Benchmark", exact: true }).click();
+        if (operation === "replace") await page.getByLabel("Main Heading (Line 1)", { exact: true }).fill(marker);
+        else {
+          await page.getByRole("region", { name: "Benchmark list" }).getByRole("button", { name: "New", exact: true }).click();
+          await page.getByLabel("Benchmark Name", { exact: true }).fill(marker);
+        }
+        await page.getByRole("button", { name: "Publish", exact: true }).click();
+        await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible({ timeout: 35000 });
+        expect(commands).toHaveLength(operation === "replace" ? 1 : 2);
+        expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-content-draft:")))).toEqual([]);
+        await page.screenshot({ path: testInfo.outputPath(`${operation}-admin.png`), fullPage: true });
+        const response = await request.get(route);
+        const html = await response.text();
+        await fs.writeFile(testInfo.outputPath(`${operation}-after.html`), html);
+        results.push({ operation, route, marker, status: response.status(), cache: response.headers()["x-nextjs-cache"], updated: html.includes(marker) });
+        expect.soft(response.status()).toBe(200);
+        expect.soft(html, `${operation} is visible before the next ISR interval`).toContain(marker);
+        await page.goto(route);
+        await expect.soft(page.locator("body")).toContainText(marker);
+        await page.screenshot({ path: testInfo.outputPath(`${operation}-public.png`), fullPage: true });
+        expect.soft(errors.splice(0)).toEqual([]);
+      }
+      const state = await (await request.get(controlUrl(baseURL))).json();
+      const applied = state.requests.slice(requestOffset).filter(call => call.path.endsWith("/roo_apply_cms_publish_command"));
+      expect(applied).toHaveLength(2);
+      expect(applied.every(call => call.committed)).toBe(true);
+      await fs.writeFile(testInfo.outputPath("committed-requests.json"), JSON.stringify(applied, null, 2));
+    } finally {
+      await control(request, baseURL, { reset: true });
+      await fs.writeFile(testInfo.outputPath("recovery.json"), JSON.stringify({ failure, commands, results }, null, 2));
+    }
+  });
+}
+
+test("unconfirmed recovery keeps the draft and cached pages without another publish", async ({ request, page, baseURL }, testInfo) => {
+  const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+  await guardBrowserContext(page.context(), [baseURL, new URL(controlUrl(baseURL)).origin]);
+  let statusFailure = "outage";
+  await page.route("**/api/admin/content/**", async route => {
+    if (new URL(route.request().url()).pathname === "/api/admin/content/publish/status") await control(request, baseURL, { receiptFailure: statusFailure });
+    await route.continue({ headers: { ...route.request().headers(), ...adminHeaders } });
+  });
+  const commands = [];
+  page.on("request", req => {
+    if (new URL(req.url()).pathname === "/api/admin/content/publish" && req.method() === "POST") commands.push(req.postDataJSON());
+  });
+  const outcomes = [];
+  try {
+    await control(request, baseURL, { reset: true });
+    await renew(request);
+    await warm(request, []);
+    const offset = (await (await request.get(controlUrl(baseURL))).json()).requests.length;
+    await control(request, baseURL, { publishResponseFailure: "5xx" });
+    await page.goto("/admin/content");
+    await page.getByRole("navigation", { name: "Content types" }).getByRole("button", { name: "Hero Section", exact: true }).click();
+    const marker = "Confirmed only after the receipt returns";
+    await page.getByLabel("Main Heading (Line 1)", { exact: true }).fill(marker);
+    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "Could not confirm publication" })).toBeVisible();
+    expect(commands).toHaveLength(1);
+    expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-content-draft:")))).toHaveLength(1);
+    await page.screenshot({ path: testInfo.outputPath("unconfirmed-admin.png"), fullPage: true });
+    for (const failure of ["missing", "outage", "command", "operation", "document-id", "type", "revision", "replayed"]) {
+      await control(request, baseURL, { receiptFailure: failure });
+      const response = await request.post("/api/admin/content/publish/status", { headers: adminHeaders, data: commands[0] });
+      const payload = await response.json();
+      outcomes.push({ failure, status: response.status(), payload });
+      expect(response.status()).toBe(["missing", "replayed"].includes(failure) ? 404 : 503);
+      for (const route of PREBUILT_ROUTES) {
+        const cached = await request.get(route);
+        expect(cached.status()).toBe(200);
+        expect(cached.headers()["x-nextjs-cache"], `${failure} preserves ${route}`).toBe("HIT");
+      }
+    }
+    statusFailure = "";
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+    expect(commands).toHaveLength(1);
+    expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-content-draft:")))).toEqual([]);
+    const current = await request.get("/");
+    expect(current.status()).toBe(200);
+    expect(await current.text()).toContain(marker);
+    const state = await (await request.get(controlUrl(baseURL))).json();
+    expect(state.requests.slice(offset).filter(call => call.path.endsWith("/roo_apply_cms_publish_command"))).toHaveLength(1);
+    await page.goto("/");
+    await expect(page.locator("body")).toContainText(marker);
+    await page.screenshot({ path: testInfo.outputPath("confirmed-public.png"), fullPage: true });
+  } finally {
+    await control(request, baseURL, { reset: true });
+    await fs.writeFile(testInfo.outputPath("receipt-outcomes.json"), JSON.stringify({ commands, outcomes }, null, 2));
+  }
+});
+
+test("missing optional homepage singletons allow updates while actual read failures keep good content", async ({ request, page, baseURL }, testInfo) => {
+  const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+  await guardBrowserContext(page.context(), [baseURL, new URL(controlUrl(baseURL)).origin]);
+  const results = [];
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  try {
+    await control(request, baseURL, { reset: true });
+    for (const missing of [["faqSettings"], ["packagesSettings"], ["supportedGames"], ["proReviewsCarousel", "about", "services", "packagesSettings", "howItWorks", "supportedGames", "faqSettings"]]) {
+      const loaded = await request.get("/api/admin/content/documents/tooling-hero", { headers: adminHeaders });
+      const { data } = await loaded.json();
+      const marker = `Optional settings update ${results.length + 1}`;
+      await control(request, baseURL, { missing });
+      const response = await publish(request, { operation: "replace", type: "hero", documentId: data.document._id, expectedRevision: data.revision, document: { ...data.document, headingLine1: marker } });
+      expect(response.ok(), await response.text()).toBe(true);
+      const home = await request.get("/");
+      const html = await home.text();
+      await fs.writeFile(testInfo.outputPath(`optional-${results.length + 1}.html`), html);
+      results.push({ missing, marker, status: home.status(), updated: html.includes(marker) });
+      expect.soft(home.status()).toBe(200);
+      expect.soft(html).toContain(marker);
+      await page.goto("/");
+      await expect.soft(page.locator("body")).toContainText(marker);
+      await page.screenshot({ path: testInfo.outputPath(`optional-${results.length}.png`), fullPage: true });
+      expect.soft(errors.splice(0)).toEqual([]);
+    }
+    const lastGood = results.at(-1).marker;
+    await control(request, baseURL, { missing: [] });
+    await renew(request);
+    await expect.poll(async () => {
+      const response = await request.get("/");
+      return response.status() === 200 && response.headers()["x-nextjs-cache"] === "HIT" && (await response.text()).includes(lastGood);
+    }, { timeout: 30000 }).toBe(true);
+    const updated = "Valid update during an optional settings outage";
+    await control(request, baseURL, { outage: ["faqSettings", "faqSection"], patch: { _id: "tooling-hero", headingLine1: updated } });
+    await new Promise(resolve => setTimeout(resolve, 61000));
+    expect((await request.get("/")).headers()["x-nextjs-cache"]).toBe("STALE");
+    await page.waitForTimeout(2000);
+    const retained = await request.get("/");
+    const html = await retained.text();
+    await fs.writeFile(testInfo.outputPath("optional-read-failure.html"), html);
+    expect(retained.status()).toBe(200);
+    expect(html.includes(lastGood) || html.includes(updated)).toBe(true);
+    expect(html).toContain("Synthetic local question 1");
+    expect(html).not.toContain("Application error");
+    await page.goto("/");
+    await expect(page.locator("body")).toContainText(/Optional settings update 4|Valid update during an optional settings outage/);
+    await expect(page.locator("body")).toContainText("Synthetic local question 1");
+    await page.screenshot({ path: testInfo.outputPath("optional-read-failure.png"), fullPage: true });
+    expect(errors).toEqual([]);
+    await fs.writeFile(testInfo.outputPath("cms-requests.json"), JSON.stringify(await (await request.get(controlUrl(baseURL))).json(), null, 2));
+  } finally {
+    await control(request, baseURL, { reset: true });
+    await fs.writeFile(testInfo.outputPath("optional-results.json"), JSON.stringify(results, null, 2));
+  }
+});
+
 for (const mode of ["5xx", "timeout", "malformed", "malformed-icon", "invalid-json", "missing"]) {
   test(`public pages retain good content through ${mode} CMS revalidation and hydration`, async ({ request, browser, baseURL }, testInfo) => {
     const timeline = [];

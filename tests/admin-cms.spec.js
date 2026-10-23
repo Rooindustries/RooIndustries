@@ -1678,7 +1678,7 @@ test("create receipts bind a read-only lookup to the original validated request"
     expect(await response.json()).toMatchObject({ code: "CMS_VALIDATION_FAILED", details: [{ message: "JSON content exceeds 1 MiB." }] });
   }
   const replacement = await request.post(path, { headers: { "x-admin-key": ADMIN_KEY }, data: { operation: "replace", type: command.type, documentId: receipt.documentId, expectedRevision: receipt.revision, document: { title: "Must not write" } } });
-  expect(replacement.status()).toBe(400);
+  expect(replacement.status()).toBe(404);
   expect((await request.get(`/api/admin/content/publish?type=${command.type}&createIntentId=${command.createIntentId}`, { headers: { "x-admin-key": ADMIN_KEY } })).status()).toBe(405);
   expect((await request.post(path, { data: command })).status()).toBe(401);
   await login(page);
@@ -1691,6 +1691,38 @@ test("create receipts bind a read-only lookup to the original validated request"
   expect(afterLookup).toEqual(beforeLookup);
   expect((await cms(request, `/api/admin/content/documents/${receipt.documentId}`)).document.title).toBe(command.document.title);
   await evidence(page, testInfo, { status, missingRequests: missing.length, invalidRequests: invalid.length, otherActor, beforeLookup, afterLookup, legacyGetStatus: 405 });
+});
+
+test("replacement receipts confirm only the original command without writing again", async ({ page, request, baseURL }, testInfo) => {
+  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  const path = "/api/admin/content/publish/status";
+  const original = await cms(request, `/api/admin/content/documents/${HERO_ID}`);
+  const command = { operation: "replace", type: "hero", documentId: HERO_ID, expectedRevision: original.revision, document: { ...original.document, headingLine1: "Bound replacement receipt café 日本語" } };
+  const published = await cms(request, "/api/admin/content/publish", command);
+  const beforeLookup = await contentCounts(request, control);
+  const status = await cms(request, path, command);
+  expect(status).toEqual({ committed: true, type: command.type, documentId: HERO_ID, revision: published.revision });
+  expect(await cms(request, path, command)).toEqual(status);
+  for (const body of [
+    { ...command, expectedRevision: published.revision },
+    { ...command, document: { ...command.document, headingLine1: "Different command" } },
+  ]) {
+    const response = await request.post(path, { headers: { "x-admin-key": ADMIN_KEY }, data: body });
+    expect(response.status()).toBe(404);
+    expect(await response.json()).toMatchObject({ ok: false, code: "CMS_NOT_FOUND" });
+  }
+  const deletion = await request.post(path, { headers: { "x-admin-key": ADMIN_KEY }, data: { operation: "delete", type: "hero", documentId: HERO_ID, expectedRevision: published.revision } });
+  expect(deletion.status()).toBe(400);
+  await login(page); await hero(page);
+  const otherActor = await page.evaluate(async ({ path, command }) => {
+    const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(command) });
+    return { status: response.status, body: await response.json() };
+  }, { path, command });
+  expect(otherActor).toMatchObject({ status: 404, body: { ok: false, code: "CMS_NOT_FOUND" } });
+  const afterLookup = await contentCounts(request, control);
+  expect(afterLookup).toEqual(beforeLookup);
+  expect((await cms(request, `/api/admin/content/documents/${HERO_ID}`)).revision).toBe(published.revision);
+  await evidence(page, testInfo, { status, otherActor, beforeLookup, afterLookup });
 });
 
 test("#10 a concurrent subtitle prevents reconciling a missing deletion", async ({ page, request }, testInfo) => {
