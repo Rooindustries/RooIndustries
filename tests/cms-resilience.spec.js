@@ -89,6 +89,101 @@ const screenshots = async (browser, baseURL, testInfo, prefix, content = expecte
   }
 };
 
+test("confirmed publications and empty tool lists survive an eleven-minute CMS outage", async ({ request, browser, baseURL }, testInfo) => {
+  const fixtureUrl = new URL("/__fixture", controlUrl(baseURL)).href;
+  const marker = "Most recently confirmed headline through a prolonged outage";
+  const recoveredMarker = "Fresh source after the prolonged outage";
+  const timeline = [];
+  const deleted = [];
+  const setClock = async clockNow => {
+    const response = await request.post(fixtureUrl, { data: { clockNow } });
+    expect(response.status()).toBe(200);
+  };
+  const content = async (resource, stage) => {
+    const response = await request.get(`/api/content/${resource}`);
+    const body = await response.json();
+    timeline.push({ stage, resource, status: response.status(), body });
+    expect.soft(response.status(), `${stage}/${resource}`).toBe(200);
+    return body.data;
+  };
+  const pages = async stage => {
+    const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+    for (const width of [360, 390, 1440]) {
+      const context = await browser.newContext({ viewport: { width, height: 900 }, javaScriptEnabled: true, reducedMotion: "reduce" });
+      await guardBrowserContext(context, [baseURL, new URL(fixtureUrl).origin]);
+      const errors = [];
+      context.on("page", page => page.on("pageerror", error => errors.push(error.message)));
+      try {
+        const page = await context.newPage();
+        await page.goto("/");
+        await expect.soft(page.locator("main")).toContainText(stage === "recovered" ? recoveredMarker : marker);
+        await page.screenshot({ path: testInfo.outputPath(`${stage}-home-${width}.png`), fullPage: true });
+        await page.goto("/tools");
+        await expect.soft(page.getByRole("article")).toHaveCount(0);
+        await expect.soft(page.locator("body")).not.toContainText("Application error");
+        await page.screenshot({ path: testInfo.outputPath(`${stage}-tools-${width}.png`), fullPage: true });
+        expect.soft(errors, `${stage}/${width} hydration`).toEqual([]);
+      } finally { await context.close(); }
+    }
+  };
+  try {
+    await control(request, baseURL, { reset: true });
+    await renew(request);
+    const loaded = await request.get("/api/admin/content/documents/tooling-hero", { headers: adminHeaders });
+    const hero = (await loaded.json()).data;
+    expect(loaded.status()).toBe(200);
+    const command = { operation: "replace", type: "hero", documentId: "tooling-hero", expectedRevision: hero.revision, document: { ...hero.document, headingLine1: marker } };
+    expect((await publish(request, command)).status()).toBe(200);
+    expect((await content("hero", "confirmed publish")).headingLine1).toBe(marker);
+    const tools = await content("tools", "before deletion");
+    expect(tools).toHaveLength(4);
+    for (const tool of tools) {
+      const response = await request.get(`/api/admin/content/documents/${tool._id}`, { headers: adminHeaders });
+      const saved = (await response.json()).data;
+      expect(response.status()).toBe(200);
+      const deletion = { operation: "delete", type: "tool", documentId: tool._id, expectedRevision: saved.revision };
+      const committed = await publish(request, deletion);
+      expect(committed.status()).toBe(200);
+      const confirmed = await request.post("/api/admin/content/publish/status", { headers: adminHeaders, data: deletion });
+      expect(confirmed.status()).toBe(200);
+      expect((await confirmed.json()).data).toMatchObject({ committed: true, deleted: true, documentId: tool._id });
+      deleted.push(tool._id);
+    }
+    expect(await content("tools", "confirmed empty list")).toEqual([]);
+    expect((await content("hero", "latest confirmed state")).headingLine1).toBe(marker);
+    for (const route of ["/", "/tools"]) await expect.poll(async () => {
+      const response = await request.get(route);
+      return response.headers()["x-nextjs-cache"];
+    }, { timeout: 30000 }).toBe("HIT");
+    let clock = Date.now() + 11 * 60 * 1000;
+    await control(request, baseURL, { outage: true });
+    await setClock(clock);
+    expect.soft((await content("hero", "eleven-minute outage"))?.headingLine1).toBe(marker);
+    expect.soft(await content("tools", "eleven-minute outage")).toEqual([]);
+    await pages("outage");
+    await setClock(clock += 6000);
+    expect.soft((await content("hero", "continued outage retry"))?.headingLine1).toBe(marker);
+    expect.soft(await content("tools", "continued outage retry")).toEqual([]);
+    await control(request, baseURL, { outage: false, patch: { _id: "tooling-hero", headingLine1: recoveredMarker } });
+    await setClock(clock += 6000);
+    expect((await content("hero", "source recovered")).headingLine1).toBe(recoveredMarker);
+    expect(await content("tools", "source recovered")).toEqual([]);
+    await new Promise(resolve => setTimeout(resolve, 61000));
+    for (const route of ["/", "/tools"]) await expect.poll(async () => {
+      const response = await request.get(route);
+      const html = await response.text();
+      return response.headers()["x-nextjs-cache"] === "HIT" && (route !== "/" || html.includes(recoveredMarker));
+    }, { timeout: 30000 }).toBe(true);
+    await pages("recovered");
+  } finally {
+    await fs.writeFile(testInfo.outputPath("prolonged-outage.json"), JSON.stringify({ deleted, timeline }, null, 2));
+    await fs.writeFile(testInfo.outputPath("cms-requests.json"), JSON.stringify(await (await request.get(controlUrl(baseURL))).json(), null, 2));
+    await setClock(null);
+    await control(request, baseURL, { reset: true });
+    await renew(request);
+  }
+});
+
 test("an in-flight render keeps good content when a later publish invalidates its pending read", async ({ request, page, baseURL }, testInfo) => {
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
   await guardBrowserContext(page.context(), [baseURL, new URL(controlUrl(baseURL)).origin]);
@@ -502,6 +597,95 @@ test("missing optional homepage singletons allow updates while actual read failu
   }
 });
 
+test("malformed external tool links retain good navigation and recover to valid CMS updates", async ({ request, page, baseURL }, testInfo) => {
+  const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+  await guardBrowserContext(page.context(), [baseURL, new URL(controlUrl(baseURL)).origin]);
+  const downloadUrl = new URL("/favicon-96x96.png", baseURL).href;
+  const officialSite = new URL("/tools", baseURL).href;
+  const title = "Tool with validated external links";
+  const outcomes = [];
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const invalid = ["not a URL", "/relative-download", "//fixture.invalid/download", "javascript:alert('fixture')", "data:text/plain,fixture", "file:///fixture", "mailto:fixture@example.invalid", "https://fixture-user:fixture-password@example.invalid/download"];
+  try {
+    await control(request, baseURL, { reset: true, patch: { _id: "tooling-cls-tool-0", title, downloadUrl, officialSite } });
+    await renew(request);
+    const initial = await request.get("/api/content/tools");
+    expect(initial.status()).toBe(200);
+    const good = (await initial.json()).data.find(tool => tool._id === "tooling-cls-tool-0");
+    expect(good).toMatchObject({ title, downloadUrl, officialSite });
+    for (const field of ["downloadUrl", "officialSite"]) {
+      for (const value of invalid) {
+        const marker = `Malformed ${field} ${outcomes.length + 1}`;
+        await control(request, baseURL, { patch: { _id: good._id, title: marker, downloadUrl, officialSite, [field]: value } });
+        await renew(request);
+        const response = await request.get("/api/content/tools");
+        expect.soft(response.status()).toBe(200);
+        const row = (await response.json()).data?.find(tool => tool._id === good._id);
+        outcomes.push({ field, value, row, status: response.status() });
+        expect.soft(row, `${field} rejects ${value}`).toMatchObject({ title, downloadUrl, officialSite });
+        await page.goto("/tools");
+        await expect.soft(page.getByRole("article").filter({ hasText: title })).toBeVisible({ timeout: 1000 });
+        await expect.soft(page.getByRole("link", { name: "Official Site", exact: true }).first()).toHaveAttribute("href", officialSite, { timeout: 1000 });
+        if (outcomes.length === 1) {
+          const card = page.getByRole("article").filter({ hasText: title });
+          const siteOpened = page.waitForEvent("popup");
+          await card.getByRole("link", { name: "Official Site", exact: true }).click();
+          const site = await siteOpened;
+          await expect(site).toHaveURL(officialSite);
+          await expect(site.getByRole("article").filter({ hasText: title })).toBeVisible();
+          await site.close();
+          await card.getByRole("button", { name: "Download", exact: true }).click();
+          const downloadOpened = page.waitForEvent("popup");
+          await page.getByRole("dialog").getByRole("button", { name: "Download", exact: true }).click();
+          const download = await downloadOpened;
+          await expect(download).toHaveURL(downloadUrl);
+          await expect(download.locator("img")).toHaveAttribute("src", downloadUrl);
+          await download.screenshot({ path: testInfo.outputPath("working-download.png") });
+          await fs.writeFile(testInfo.outputPath("working-links.json"), JSON.stringify({ invalidDownloadUrl: value, officialSite: site.url(), downloadUrl: download.url(), opened: true }, null, 2));
+          await download.close();
+        }
+        await page.screenshot({ path: testInfo.outputPath(`invalid-${outcomes.length}.png`), fullPage: true });
+      }
+    }
+    const padded = { downloadUrl: `\t${downloadUrl} \n`, officialSite: ` ${officialSite} ` };
+    for (const values of [{ downloadUrl: null, officialSite: null }, { downloadUrl: "", officialSite: "" }, { downloadUrl, officialSite }, { downloadUrl: "https://example.invalid/download", officialSite: "https://example.invalid" }, padded]) {
+      const links = values === padded ? { downloadUrl, officialSite } : values;
+      const marker = `Valid tool links recovered ${outcomes.length + 1}`;
+      await control(request, baseURL, { patch: { _id: good._id, title: marker, ...values } });
+      await renew(request);
+      const response = await request.get("/api/content/tools");
+      expect(response.status()).toBe(200);
+      const row = (await response.json()).data.find(tool => tool._id === good._id);
+      expect(row).toMatchObject({ title: marker, ...links });
+      await page.goto("/tools");
+      const card = page.getByRole("article").filter({ hasText: marker });
+      await expect(card).toBeVisible();
+      if (links.officialSite) await expect(card.getByRole("link", { name: "Official Site", exact: true })).toHaveAttribute("href", links.officialSite);
+      else await expect(card.getByRole("link", { name: "Official Site", exact: true })).toHaveCount(0);
+      if (!links.downloadUrl) await expect(card.getByRole("button", { name: "No Download Configured", exact: true })).toBeDisabled();
+      if (values === padded) {
+        await card.getByRole("button", { name: "Download", exact: true }).click();
+        const opened = page.waitForEvent("popup");
+        await page.getByRole("dialog").getByRole("button", { name: "Download", exact: true }).click();
+        const download = await opened;
+        await expect(download).toHaveURL(downloadUrl);
+        await expect(download.locator("img")).toHaveAttribute("src", downloadUrl);
+        await download.screenshot({ path: testInfo.outputPath("legacy-padded-download.png") });
+        await fs.writeFile(testInfo.outputPath("legacy-padded-links.json"), JSON.stringify({ values, links: row, downloadUrl: download.url(), opened: true }, null, 2));
+        await download.close();
+      }
+      outcomes.push({ values, row, status: response.status() });
+      await page.screenshot({ path: testInfo.outputPath(`recovered-${outcomes.length}.png`), fullPage: true });
+    }
+    expect(errors).toEqual([]);
+  } finally {
+    await fs.writeFile(testInfo.outputPath("tool-links.json"), JSON.stringify({ outcomes, errors }, null, 2));
+    await fs.writeFile(testInfo.outputPath("cms-requests.json"), JSON.stringify(await (await request.get(controlUrl(baseURL))).json(), null, 2));
+    await control(request, baseURL, { reset: true });
+  }
+});
+
 for (const mode of ["5xx", "timeout", "malformed", "malformed-icon", "invalid-json", "missing"]) {
   test(`public pages retain good content through ${mode} CMS revalidation and hydration`, async ({ request, browser, baseURL }, testInfo) => {
     const timeline = [];
@@ -549,8 +733,26 @@ for (const mode of ["5xx", "timeout", "malformed", "malformed-icon", "invalid-js
         await fs.writeFile(testInfo.outputPath("projected-tools.json"), JSON.stringify(data, null, 2));
       }
       await screenshots(browser, baseURL, testInfo, mode);
+      const recoveredAt = Date.now();
+      const marker = `${expected["/contact"]} CMS recovered from ${mode}.`;
+      await control(request, baseURL, { reset: true, patch: { _id: "tooling-contact", subtitle: marker } });
+      await new Promise(resolve => setTimeout(resolve, 61000));
+      for (const route of PREBUILT_ROUTES) await read(request, route, timeline, "recovery trigger");
+      await warm(request, timeline);
+      const recovered = await request.get("/contact");
+      const html = await recovered.text();
+      expect(recovered.status()).toBe(200);
+      expect(recovered.headers()["x-nextjs-cache"]).toBe("HIT");
+      expect(html).toContain(marker);
+      await fs.writeFile(testInfo.outputPath("recovered-contact.html"), html);
+      await screenshots(browser, baseURL, testInfo, `${mode}-recovered`, { "/contact": marker });
       const evidence = await request.get(controlUrl(baseURL));
-      await fs.writeFile(testInfo.outputPath("cms-requests.json"), JSON.stringify(await evidence.json(), null, 2));
+      const source = await evidence.json();
+      const recoveredRead = source.requests.find(call => call.receivedAt >= recoveredAt && call.body?.p_ids === null && call.body?.p_document_types?.includes("contact") && call.status === 200 && call.rows > 0 && call.respondedAt);
+      expect(recoveredRead).toBeTruthy();
+      expect(source.requests.filter(call => call.receivedAt >= recoveredAt && call.path.endsWith("/roo_apply_cms_publish_command"))).toEqual([]);
+      await fs.writeFile(testInfo.outputPath("cms-requests.json"), JSON.stringify(source, null, 2));
+      await fs.writeFile(testInfo.outputPath("recovered-cache.json"), JSON.stringify({ mode, recoveredAt, marker, cache: recovered.headers()["x-nextjs-cache"], recoveredRead }, null, 2));
     } finally {
       await control(request, baseURL, { reset: true });
       await fs.writeFile(testInfo.outputPath("responses.json"), JSON.stringify(timeline, null, 2));

@@ -91,7 +91,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       shortDescription: 'Synthetic tool content for layout stability checks.',
       category: 'Benchmark',
       downloadMode: 'external',
-      downloadUrl: '/favicon-96x96.png',
+      downloadUrl: new URL('/favicon-96x96.png', process.env.BASE_URL || origin).href,
       sortOrder: index,
     }, `tooling-cls-tool-${index}`)),
   );

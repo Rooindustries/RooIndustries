@@ -14,7 +14,6 @@ import { logSafeError } from "../safeErrorLog.js";
 const { applyPublicPolicyOverrides } = policyContent;
 
 const SUPABASE_CONTENT_CACHE_TTL_MS = 60 * 1000;
-const SUPABASE_CONTENT_STALE_TTL_MS = 10 * 60 * 1000;
 const SUPABASE_CONTENT_RETRY_TTL_MS = 5 * 1000;
 const supabaseContentCache = new Map();
 
@@ -115,6 +114,11 @@ export const loadSupabasePublicContent = async ({ resource, query, params, fresh
       fetchImpl: (input, init) => fetch(input, { ...init, cache: "no-store" }),
     });
     const data = await createPublicContentClient({ resource, client }).fetch(query, params);
+    if (resource === "tools" && Array.isArray(data)) {
+      for (const tool of data) {
+        for (const field of ["downloadUrl", "officialSite"]) if (typeof tool?.[field] === "string") tool[field] = tool[field].trim();
+      }
+    }
     assertPublicContentShape(resource, data, DOCUMENT_TYPES_BY_RESOURCE[resource][0]);
     return enrichSupabaseContentAssets({ data, client });
   };
@@ -135,20 +139,21 @@ export const loadSupabasePublicContent = async ({ resource, query, params, fresh
         data,
         hasData: true,
         expiresAt: Date.now() + SUPABASE_CONTENT_CACHE_TTL_MS,
-        staleUntil: Date.now() + SUPABASE_CONTENT_STALE_TTL_MS,
       });
       return data;
     })
     .catch(async (error) => {
-      if (fallbackAllowed && cached?.hasData && cached.staleUntil > Date.now()) {
+      const current = supabaseContentCache.get(key);
+      const retained = current?.hasData ? current : cached;
+      if (fallbackAllowed && retained?.hasData) {
         if (supabaseContentCache.get(key)?.pending === pending) {
           supabaseContentCache.set(key, {
-            ...cached,
+            ...retained,
             expiresAt: Date.now() + SUPABASE_CONTENT_RETRY_TTL_MS,
             pending: null,
           });
         }
-        return cached.data;
+        return retained.data;
       }
       if (fallbackAllowed && process.env.NODE_ENV === "production") {
         try {
@@ -156,8 +161,10 @@ export const loadSupabasePublicContent = async ({ resource, query, params, fresh
           if (snapshot.version !== 1 || !snapshot.resources || !Object.hasOwn(snapshot.resources, resource)) throw new Error("The build content snapshot is invalid.");
           const data = snapshot.resources[resource];
           assertPublicContentShape(resource, data, DOCUMENT_TYPES_BY_RESOURCE[resource][0]);
+          const current = supabaseContentCache.get(key);
+          if (current?.hasData) return current.data;
           if (supabaseContentCache.get(key)?.pending === pending) {
-            supabaseContentCache.set(key, { data, hasData: true, expiresAt: Date.now() + SUPABASE_CONTENT_RETRY_TTL_MS, staleUntil: Date.now() + SUPABASE_CONTENT_STALE_TTL_MS });
+            supabaseContentCache.set(key, { data, hasData: true, expiresAt: Date.now() + SUPABASE_CONTENT_RETRY_TTL_MS });
           }
           logSafeError("Public content read failed; using build content", error);
           return data;

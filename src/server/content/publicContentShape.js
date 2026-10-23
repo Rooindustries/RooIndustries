@@ -20,6 +20,13 @@ const matchesField = (field, value) => {
   return object(value);
 };
 const matchesFields = (fields, value) => fields.every(field => matchesField(field, value[field.name]));
+const httpUrl = value => {
+  if (typeof value !== "string" || value.trim() !== value) return false;
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password;
+  } catch { return false; }
+};
 
 export const assertPublicContentShape = (resource, value, type) => {
   if (value == null && !requiredResources.has(resource)) return;
@@ -33,7 +40,8 @@ export const assertPublicContentShape = (resource, value, type) => {
     valid = object(value) && matchesFields(fields, value);
   }
   if (valid && resource === "tools") {
-    valid = value.every(tool => ["iconUrl", "fileUrl"].every(key => tool[key] == null || typeof tool[key] === "string"));
+    valid = value.every(tool => ["iconUrl", "fileUrl"].every(key => tool[key] == null || typeof tool[key] === "string") &&
+      ["downloadUrl", "officialSite"].every(key => tool[key] == null || tool[key] === "" || httpUrl(tool[key])));
   }
   if (valid && ["privacy-policy", "terms"].includes(resource)) {
     valid = typeof value.title === "string" && Boolean(value.title.trim()) && Array.isArray(value.sections) &&
