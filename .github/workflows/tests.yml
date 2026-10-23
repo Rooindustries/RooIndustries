@@ -123,14 +123,28 @@ jobs:
           retention-days: 7
 
   routes:
-    name: Playwright creator portal and API routes
+    name: Playwright ${{ matrix.suite.name }}
     runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/playwright:v1.58.2-noble
       options: --user 1001 --ipc=host
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - name: api-routes
+            script: test:api:routes
+            port: "3231"
+            server: routes-api
+          - name: creator-portal
+            script: test:creator:portal
+            port: "3241"
+            server: routes-portal
     env:
       ROO_TEST_HOST: 127.0.0.1
+      PW_PORT: ${{ matrix.suite.port }}
+      PW_SERVER_ID: ${{ matrix.suite.server }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -140,22 +154,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Run API route suite
-        id: api-routes
-        env:
-          PW_PORT: "3231"
-          PW_SERVER_ID: routes-api
-        run: xvfb-run -a npm run test:api:routes -- --output=test-results/api-routes
-      - name: Run creator portal suite
-        if: ${{ !cancelled() && (success() || steps.api-routes.outcome == 'failure') }}
-        env:
-          PW_PORT: "3241"
-          PW_SERVER_ID: routes-portal
-        run: xvfb-run -a npm run test:creator:portal -- --output=test-results/creator-portal
+      - name: Run ${{ matrix.suite.name }} suite
+        run: xvfb-run -a npm run ${{ matrix.suite.script }} -- --output=test-results/${{ matrix.suite.name }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-results-routes
+          name: test-results-routes-${{ matrix.suite.name }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
@@ -249,14 +253,28 @@ jobs:
           retention-days: 7
 
   revalidation:
-    name: Playwright revalidation
+    name: Playwright ${{ matrix.suite.name }}
     runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/playwright:v1.58.2-noble
       options: --user 1001 --ipc=host
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - name: benchmarks-revalidation
+            script: test:benchmarks:revalidation
+            port: "3251"
+            server: revalidation-benchmarks
+          - name: static-revalidation
+            script: test:static:revalidation
+            port: "3261"
+            server: revalidation-static
     env:
       ROO_TEST_HOST: 127.0.0.1
+      PW_PORT: ${{ matrix.suite.port }}
+      PW_SERVER_ID: ${{ matrix.suite.server }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -266,22 +284,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Run benchmarks revalidation suite
-        id: benchmarks-revalidation
-        env:
-          PW_PORT: "3251"
-          PW_SERVER_ID: revalidation-benchmarks
-        run: xvfb-run -a npm run test:benchmarks:revalidation -- --output=test-results/benchmarks-revalidation
-      - name: Run static pages revalidation suite
-        if: ${{ !cancelled() && (success() || steps.benchmarks-revalidation.outcome == 'failure') }}
-        env:
-          PW_PORT: "3261"
-          PW_SERVER_ID: revalidation-static
-        run: xvfb-run -a npm run test:static:revalidation -- --output=test-results/static-revalidation
+      - name: Run ${{ matrix.suite.name }} suite
+        run: xvfb-run -a npm run ${{ matrix.suite.script }} -- --output=test-results/${{ matrix.suite.name }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-results-revalidation
+          name: test-results-revalidation-${{ matrix.suite.name }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
