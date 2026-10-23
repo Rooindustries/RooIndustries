@@ -9,7 +9,7 @@ const schemas = new Map(CONTENT_TYPES.map(schema => [schema.name, schema]));
 const matchesField = (field, value) => {
   if (value == null) return true;
   if (textTypes.has(field.type)) return typeof value === "string" || field.name === "price" && typeof value === "number" && Number.isFinite(value);
-  if (field.type === "number") return typeof value === "number" && Number.isFinite(value);
+  if (field.type === "number") return field.name === "rating" || typeof value === "number" && Number.isFinite(value);
   if (field.type === "boolean") return typeof value === "boolean";
   if (field.type === "object") return object(value) && matchesFields(field.fields || [], value);
   if (field.type === "array") return Array.isArray(value) && value.every(item => item != null && (field.of || []).some(shape => matchesField(shape, item)));
