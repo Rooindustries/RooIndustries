@@ -50,7 +50,13 @@ const sink = http.createServer((_request, response) => {
 const redirect = http.createServer();
 let assetOutsideRequests = 0;
 const assets = http.createServer((request, response) => {
-  if (request.url === "/storage/v1/redirect") { response.writeHead(307, { Location: `http://127.0.0.1:${sink.address().port}/` }); response.end(); }
+  if (request.method === "POST" && request.url === "/stream") {
+    streamRequests++;
+    request.resume();
+    response.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": fixtureOrigin, "Access-Control-Allow-Credentials": "true" });
+    response.write('{"ok":');
+  }
+  else if (request.url === "/storage/v1/redirect") { response.writeHead(307, { Location: `http://127.0.0.1:${sink.address().port}/` }); response.end(); }
   else if (request.url === "/storage/v1/path-redirect") { response.writeHead(302, { Location: "/outside.svg" }); response.end(); }
   else { if (request.url === "/outside.svg") assetOutsideRequests++; response.setHeader("Content-Type", "image/svg+xml"); response.end('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'); }
 });
@@ -81,6 +87,7 @@ let fixtureUpgrades = 0;
 let sinkRequests = 0;
 let sinkBytes = 0;
 let sinkConnections = 0;
+let streamRequests = 0;
 let fixtureOrigin;
 let endpoint;
 let redirectEndpoint;
@@ -164,6 +171,207 @@ const attemptConnect = url => `
   finally { await browser?.close(); }
   console.log(JSON.stringify({ error }));
 `;
+
+test("native browser and API requests load the allowed fixture under the Node guard", { timeout: 65_000 }, async t => {
+  const child = await runChild(`
+    import { chromium } from "@playwright/test";
+    const { guardBrowserContext } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+    const browser = await chromium.launch();
+    try {
+      const context = await browser.newContext({ baseURL: ${JSON.stringify(fixtureOrigin)} });
+      const guard = await guardBrowserContext(context, [${JSON.stringify(fixtureOrigin)}]);
+      const page = await context.newPage();
+      const outcome = {};
+      try {
+        const response = await context.request.get("/");
+        outcome.api = { status: response.status(), body: await response.text(), error: null };
+        await response.dispose();
+      } catch (error) { outcome.api = { error: String(error) }; }
+      try {
+        const response = await page.goto("/");
+        outcome.navigation = { status: response.status(), body: await page.textContent("body"), error: null };
+        outcome.post = await page.evaluate(async () => {
+          const response = await fetch("/echo", { method: "POST", body: "native-fixture-body" });
+          return { status: response.status, body: await response.json() };
+        });
+        outcome.failure = await page.evaluate(async () => {
+          const response = await fetch("/failure");
+          return { status: response.status, body: await response.text() };
+        });
+      } catch (error) { outcome.navigation = { error: String(error) }; }
+      console.log(JSON.stringify({ outcome, guard }));
+      await context.close();
+    } finally { await browser.close(); }
+  `);
+  t.diagnostic(JSON.stringify({ child }));
+  const value = result(child);
+  assert.equal(value.outcome.api.error, null);
+  assert.equal(value.outcome.api.status, 200);
+  assert.match(value.outcome.api.body, /fixture-ok/);
+  assert.equal(value.outcome.navigation.error, null);
+  assert.equal(value.outcome.navigation.status, 200);
+  assert.match(value.outcome.navigation.body, /fixture-ok/);
+  assert.deepEqual(value.outcome.post, { status: 200, body: { method: "POST", body: "native-fixture-body" } });
+  assert.deepEqual(value.outcome.failure, { status: 503, body: "fixture-unavailable" });
+  assert.deepEqual(value.guard.unexpectedRequests, []);
+});
+
+test("guarded native pages receive allowed local streaming headers before the body completes", { timeout: 65_000 }, async t => {
+  const beforeRequests = streamRequests;
+  const child = await runChild(`
+    import { chromium } from "@playwright/test";
+    const { guardBrowserContext } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+    const browser = await chromium.launch();
+    try {
+      const context = await browser.newContext({ baseURL: ${JSON.stringify(fixtureOrigin)} });
+      const guard = await guardBrowserContext(context, ${JSON.stringify([fixtureOrigin, `http://127.0.0.1:${assets.address().port}`])});
+      const page = await context.newPage();
+      const errors = [];
+      page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
+      await page.route("**/echo", route => route.continue({ url: ${JSON.stringify(`http://127.0.0.1:${assets.address().port}/stream`)} }));
+      await page.goto("/");
+      await page.evaluate(() => {
+        window.streamController = new AbortController();
+        window.streamState = { status: null, bodyCompleted: false, error: null };
+        window.streamResult = fetch("/echo", { method: "POST", body: "fixture-body", signal: window.streamController.signal })
+          .then(async response => { window.streamState.status = response.status; await response.json(); window.streamState.bodyCompleted = true; })
+          .catch(error => { window.streamState.error = error.name; });
+      });
+      await page.waitForFunction(() => window.streamState.status !== null || window.streamState.error !== null, undefined, { timeout: 10000 });
+      const beforeAbort = await page.evaluate(() => window.streamState);
+      await page.evaluate(async () => { window.streamController.abort(); await window.streamResult; });
+      const afterAbort = await page.evaluate(() => window.streamState);
+      console.log(JSON.stringify({ beforeAbort, afterAbort, errors, guard }));
+      await context.close();
+    } finally { await browser.close(); }
+  `);
+  t.diagnostic(JSON.stringify({ child, streamRequests: streamRequests - beforeRequests }));
+  const value = result(child);
+  assert.deepEqual(value.beforeAbort, { status: 200, bodyCompleted: false, error: null });
+  assert.deepEqual(value.afterAbort, { status: 200, bodyCompleted: false, error: "AbortError" });
+  assert.equal(streamRequests - beforeRequests, 1);
+  assert.deepEqual(value.errors, []);
+  assert.deepEqual(value.guard.unexpectedRequests, []);
+});
+
+test("native browser redirects remain guarded with the Node guard active", { timeout: 65_000 }, async t => {
+  const beforeRequests = sinkRequests;
+  const child = await runChild(`
+    import { chromium } from "@playwright/test";
+    const { guardBrowserContext } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+    const refusals = [];
+    process.on("unhandledRejection", error => {
+      if (!String(error).includes("[test-target]")) throw error;
+      refusals.push(String(error));
+    });
+    const browser = await chromium.launch();
+    try {
+      const context = await browser.newContext({ baseURL: ${JSON.stringify(fixtureOrigin)} });
+      const guard = await guardBrowserContext(context, [${JSON.stringify(fixtureOrigin)}]);
+      const outcome = {};
+      try {
+        const response = await context.request.get("/redirect?status=307", { maxRedirects: 0 });
+        outcome.raw = { status: response.status(), location: response.headers().location, error: null };
+        await response.dispose();
+      } catch (error) { outcome.raw = { error: String(error) }; }
+      try { await context.request.get("/redirect"); outcome.apiRefusal = null; }
+      catch (error) { outcome.apiRefusal = String(error); }
+      const page = await context.newPage();
+      try {
+        await page.goto("/");
+        const response = await page.goto("/redirect-local-hop");
+        outcome.local = { status: response.status(), url: page.url(), body: await page.textContent("body"), error: null };
+        await page.goBack();
+        outcome.back = page.url();
+        await page.goForward();
+        outcome.forward = page.url();
+      } catch (error) { outcome.local = { error: String(error) }; }
+      outcome.forbidden = [];
+      for (const mode of ["fetch", "navigation"]) for (const status of [301, 302, 303, 307, 308]) {
+        const attemptPage = await context.newPage();
+        await attemptPage.goto("/");
+        const target = "/redirect?status=" + status;
+        let error = null;
+        if (mode === "fetch") error = await attemptPage.evaluate(async target => {
+          try { await fetch(target); return null; } catch (error) { return String(error); }
+        }, target);
+        else {
+          try { await attemptPage.goto(target); } catch (failure) { error = String(failure); }
+        }
+        outcome.forbidden.push({ mode, status, error });
+        await attemptPage.close();
+      }
+      await new Promise(resolve => setTimeout(resolve, 25));
+      console.log(JSON.stringify({ outcome, guard, refusals }));
+      await context.close();
+    } finally { await browser.close(); }
+  `);
+  t.diagnostic(JSON.stringify({ child, sinkRequests: sinkRequests - beforeRequests }));
+  const value = result(child);
+  assert.deepEqual(value.outcome.raw, { status: 307, location: `http://127.0.0.1:${sink.address().port}/`, error: null });
+  assert.match(value.outcome.apiRefusal, /HTTP redirects are refused/);
+  assert.equal(value.outcome.local.error, null);
+  assert.equal(value.outcome.local.status, 200);
+  assert.match(value.outcome.local.body, /fixture-ok/);
+  assert.equal(value.outcome.local.url, fixtureOrigin + "/landing#fixture");
+  assert.equal(value.outcome.back, fixtureOrigin + "/");
+  assert.equal(value.outcome.forward, fixtureOrigin + "/landing#fixture");
+  assert.equal(value.outcome.forbidden.length, 10);
+  for (const attempt of value.outcome.forbidden) assert.ok(attempt.error, `${attempt.mode} ${attempt.status}`);
+  assert.equal(value.guard.unexpectedRequests.length, 10);
+  for (const entry of value.guard.unexpectedRequests) {
+    assert.equal(entry.action, "unexpected-nonlocal-redirect");
+    assert.equal(entry.url, `http://127.0.0.1:${sink.address().port}/`);
+    assert.ok(entry.redirectedFrom.startsWith(fixtureOrigin + "/redirect?status="));
+  }
+  assert.equal(sinkRequests, beforeRequests);
+});
+
+test("caller HTTP Agents cannot redirect an allowed request to another origin", { timeout: 65_000 }, async t => {
+  const beforeRequests = sinkRequests;
+  const child = await runChild(`
+    import http from "node:http";
+    import net from "node:net";
+    let connections = 0;
+    const agent = new (class extends http.Agent {
+      createConnection(_options, callback) {
+        connections++;
+        return net.createConnection({ host: "127.0.0.1", port: ${sink.address().port} }, callback);
+      }
+    })();
+    const read = (...args) => new Promise((resolve, reject) => {
+      http.get(...args, response => {
+        let body = "";
+        response.on("data", chunk => { body += chunk; });
+        response.on("end", () => resolve({ status: response.statusCode, body }));
+      }).on("error", reject);
+    });
+    try {
+      const responses = [];
+      responses.push(await read(${JSON.stringify(fixtureOrigin)}, { agent }));
+      responses.push(await read(new URL(${JSON.stringify(fixtureOrigin)}), { agent }));
+      responses.push(await read({ hostname: "127.0.0.1", port: ${fixture.address().port}, path: "/", agent }));
+      const overrides = [];
+      for (const options of [{ createConnection: () => agent.createConnection() }, { socketPath: "/fixture-only-unused.sock" }]) {
+        try { await read(${JSON.stringify(fixtureOrigin)}, options); overrides.push(null); }
+        catch (error) { overrides.push(String(error)); }
+      }
+      let redirectError = null;
+      try { await read(${JSON.stringify(fixtureOrigin + "/redirect")}, { agent }); }
+      catch (error) { redirectError = String(error); }
+      console.log(JSON.stringify({ responses, connections, overrides, redirectError }));
+    } finally { agent.destroy(); }
+  `);
+  t.diagnostic(JSON.stringify({ child, sinkRequests: sinkRequests - beforeRequests }));
+  const value = result(child);
+  assert.equal(value.responses.length, 3);
+  for (const response of value.responses) { assert.equal(response.status, 200); assert.match(response.body, /fixture-ok/); }
+  assert.equal(value.connections, 0);
+  assert.equal(value.overrides.length, 2);
+  for (const error of value.overrides) assert.match(error, /Custom network transports are refused/);
+  assert.match(value.redirectError, /HTTP redirects are refused/);
+  assert.equal(sinkRequests, beforeRequests);
+});
 
 test("page and context API requests cannot escape the fixture on a connected browser", { timeout: 65_000 }, async t => {
   const beforeRequests = sinkRequests;
@@ -907,6 +1115,15 @@ test("refuses redirects from the remote browser endpoint", { timeout: 65_000 }, 
   const beforeSink = sinkRequests;
   const value = result(await runChild(attemptConnect(redirectEndpoint), redirectEndpoint));
   assert.match(value.error, /HTTP redirects are refused/);
+  const raw = result(await runChild(`
+    ${requestHelpers}
+    const response = await attempt(() => request(http, {
+      hostname: "127.0.0.1", port: ${redirect.address().port}, path: "/", maxRedirects: -1,
+      headers: { Connection: "Upgrade", Upgrade: "websocket" },
+    }));
+    console.log(JSON.stringify(response));
+  `, redirectEndpoint));
+  assert.match(raw.error, /HTTP redirects are refused/);
   assert.equal(sinkRequests, beforeSink);
 });
 

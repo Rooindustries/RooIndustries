@@ -18,8 +18,14 @@ directory when their source fingerprint changes. Generated HTTP attachments,
 screenshots, traces, and logs belong under `test-results/`.
 Keep real Sentry DSNs unset in the fixture server and browser process.
 
-`npm run test:remote-browser-guard` exercises the real browser connection and
-local HTTP fixtures. Browser requests are fetched with automatic redirects off.
+`npm run test:remote-browser-guard` exercises connected and native browsers with
+local HTTP fixtures. Native runs keep the Node and browser guards active together.
+Chromium receives local-network permission only for the allowed fixture origins,
+so direct streaming responses can expose their headers while their bodies stall.
+Caller HTTP agents are replaced with the default transport after the destination
+check. Zero-hop API responses remain available for redirect validation; ordinary
+HTTP redirects and browser endpoint redirects remain refused.
+Browser requests are fetched with automatic redirects off.
 GET page redirects are checked and started as fresh guarded navigations, with
 at most 20 hops. Fetches, image requests and POST forms refuse redirects
 instead of replaying requests. Forbidden targets, credentials, malformed

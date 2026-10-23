@@ -243,8 +243,7 @@ export function installNetworkGuard(origins) {
         framingHeaders.every(name => headerValues(name).length === 0) && upgradeHeaders(headerValues("upgrade"), headerValues("connection"));
       if (tunnel) input = { ...input, agent: undefined, createConnection };
       else {
-        if (settings.socketPath || settings.createConnection ||
-            (settings.agent && settings.agent !== module.globalAgent && settings.agent.constructor !== module.Agent)) fail("Custom network transports are refused.");
+        if (settings.socketPath || settings.createConnection) fail("Custom network transports are refused.");
         const destination = typeof input === "string" || input instanceof URL
           ? new URL(input) : new URL(`${settings.protocol || protocol}//${settings.hostname || settings.host || "localhost"}:${settings.port || (protocol === "http:" ? 80 : 443)}${settings.path || "/"}`);
         if (typeof input === "string" || input instanceof URL) {
@@ -275,7 +274,7 @@ export function installNetworkGuard(origins) {
       const emit = req.emit;
       req.emit = function(event, ...values) {
         if (tunnel && event === "upgrade" && values[0]?.statusCode === 101 && values[1] === tunnelSocket?.socket) tunnelSocket.open();
-        if (event === "response" && values[0].statusCode >= 300 && values[0].statusCode < 400) {
+        if (event === "response" && values[0].statusCode >= 300 && values[0].statusCode < 400 && (tunnel || settings.maxRedirects !== -1)) {
           this.destroy(new Error("[test-target] HTTP redirects are refused."));
           values[0].destroy();
           return false;
@@ -354,6 +353,9 @@ export function prepareTestTarget({ browser = false } = {}) {
 
 export async function guardBrowserContext(context, origins) {
   const allowed = new Set(origins.map(localOrigin));
+  if (context.browser()?.browserType().name() === "chromium") {
+    for (const origin of allowed) await context.grantPermissions(["local-network-access"], { origin });
+  }
   const api = context.request;
   const fetch = api.fetch;
   api.fetch = async function(input, options = {}) {
