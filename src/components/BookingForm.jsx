@@ -900,7 +900,6 @@ export default function BookingForm() {
             ? "This reservation expired. Use Check again to choose a slot again."
             : PAYMENT_PENDING_EXPIRY_ERROR);
         } else {
-          markHoldExpired();
           releaseHold().then((released) => {
             if (released && !currentHoldRef.current) setErrorStep1(RESERVATION_EXPIRED_ERROR);
           });
@@ -2102,6 +2101,7 @@ export default function BookingForm() {
       currentHoldRef.current?.holdId === holdIdToDelete &&
       currentHoldRef.current?.holdToken === holdTokenToDelete;
     if (classifyHoldResponse({ endpoint: "release", expired: hasExpired() }) === "clear") {
+      markHoldExpired();
       clearHoldState(resetStep);
     }
     if (releaseInFlightRef.current) return hasExpired();
@@ -2180,6 +2180,7 @@ export default function BookingForm() {
       }
       const refreshed = data.refreshedHold;
       if (!refreshed?.slotHoldId || !refreshed?.slotHoldToken) {
+        removeBrowserStorage("sessionStorage", PAYMENT_SESSION_STORAGE_KEY);
         markHoldExpired();
         clearHoldState(true);
         setErrorStep1(RESERVATION_EXPIRED_ERROR);

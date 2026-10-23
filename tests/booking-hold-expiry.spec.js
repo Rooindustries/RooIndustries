@@ -12,9 +12,9 @@ const draftEmail = page => page.evaluate(() => {
   return Object.values(draft?.packages || {}).map(entry => entry?.form?.email).find(Boolean) || null;
 });
 
-const reserveAgainKeepsDetails = async (page, flow) => {
+const reserveAgainKeepsDetails = async (page, flow, holdMs = 20 * 60 * 1000) => {
   flow.state.holds.clear();
-  flow.state.holdMs = 20 * 60 * 1000;
+  flow.state.holdMs = holdMs;
   const slot = page.getByRole("button", { name: "10:00 AM", exact: true });
   if (!await slot.isVisible()) await page.getByRole("button", { name: /^Earliest available:/ }).click();
   await slot.click();
@@ -109,10 +109,23 @@ test("releasing a payment after the reservation expired keeps the typed details"
   await releasePayment.click();
   await expect(page.getByRole("alert").filter({ hasText: expiredMessage })).toBeVisible();
   expect(await storedHold(page)).toBeNull();
+  expect(await page.evaluate(() => sessionStorage.getItem("payment_session_state"))).toBeNull();
   expect(await draftEmail(page)).toBe("visitor@example.invalid");
   await page.reload();
   await expect(page.getByRole("dialog")).toBeVisible();
   await reserveAgainKeepsDetails(page, flow);
+});
+
+test("releasing the slot right after it expired keeps the typed details", async ({ page, flow }) => {
+  await page.clock.install();
+  await flow.reserve();
+  await flow.details();
+  const { expiresAt } = await storedHold(page);
+  await page.clock.setSystemTime(Date.parse(expiresAt) + 100);
+  await page.getByRole("button", { name: "Release Slot", exact: true }).click();
+  await expect.poll(() => storedHold(page)).toBeNull();
+  expect(await draftEmail(page)).toBe("visitor@example.invalid");
+  await reserveAgainKeepsDetails(page, flow, 60 * 60 * 1000);
 });
 
 test("expiry away from the booking flow clears the reservation without moving the visitor and keeps the details", async ({ page, flow }) => {
