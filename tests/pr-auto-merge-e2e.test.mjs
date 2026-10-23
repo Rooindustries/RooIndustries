@@ -16,6 +16,8 @@ const prefix = `/repos/${repo}`;
 const bot = login => ({ login: `${login}[bot]`, type: "Bot" });
 const token = "fixture-github-token";
 const userToken = "fixture-user-token";
+const seerCheck = (overrides = {}) => ({ id: 100, name: "Seer Code Review", app: { id: 12637, slug: "sentry" },
+  head_sha: head, status: "completed", conclusion: "success", completed_at: "2026-10-23T00:00:00Z", ...overrides });
 const workflow = readFileSync(new URL("../.github/workflows/tests.yml", import.meta.url), "utf8");
 const matrixNames = [...workflow.matchAll(/^ {10}- name:\s*(\S+)\s*$/gm)].map(([, name]) => name);
 const checkNames = [...workflow.matchAll(/^ {4}name:\s*(.+?)\s*$/gm)].flatMap(([, name]) =>
@@ -29,16 +31,16 @@ const baseline = () => ({
     base: { ref: "main", sha: "b".repeat(40), repo: { full_name: repo } },
     head: { ref: "fixture-change", sha: head, repo: { full_name: repo } }, mergeable_state: "clean" },
   baseTip: "b".repeat(40),
-  reviews: [{ user: bot("coderabbitai"), state: "APPROVED", commit_id: head, submitted_at: "2026-10-23T00:00:00Z" }],
+  reviews: [{ id: 1, user: bot("coderabbitai"), state: "APPROVED", commit_id: head, submitted_at: "2026-10-23T00:00:00Z" }],
   workflow: { id: 1, path: ".github/workflows/tests.yml" },
   workflowRuns: [
     { id: 600, workflow_id: 1, check_suite_id: 10, head_sha: head, path: ".github/workflows/tests.yml" },
     { id: 700, workflow_id: 2, check_suite_id: 20, head_sha: head, path: ".github/workflows/auto-merge.yml" },
   ],
-  checks: checkNames.map((name, index) => ({ id: index + 1, name, app: { slug: "github-actions" }, check_suite: { id: 10 },
-    status: "completed", conclusion: "success", completed_at: "2026-10-23T00:00:00Z" })),
+  checks: [...checkNames.map((name, index) => ({ id: index + 1, name, app: { slug: "github-actions" }, check_suite: { id: 10 },
+    status: "completed", conclusion: "success", completed_at: "2026-10-23T00:00:00Z" })), seerCheck()],
   statuses: [],
-  comments: [{ id: 10, node_id: "codex-review", user: bot("chatgpt-codex-connector"),
+  comments: [{ id: 10, node_id: "codex-review", updated_at: "2026-10-23T00:00:00Z", user: bot("chatgpt-codex-connector"),
     body: `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: head, status: "completed", has_unresolved_findings: false } })} -->` }],
   threads: [],
   editor: null,
@@ -429,7 +431,7 @@ for (const useUserToken of [false, true]) {
     } });
     assert.ok(second.comments.some(body => body.includes("@coderabbitai review")));
     assert.ok(second.comments.every(body => !body.includes("@codex review")));
-    assert.ok(second.comments.some(body => body.includes(`<!-- pr-review-request:${head}:coderabbit -->`)));
+    assert.ok(second.comments.some(body => body.includes(`<!-- pr-review-request:${head}:coderabbit`)));
   });
 }
 
@@ -477,5 +479,319 @@ for (const expired of [false, true]) {
     assert.deepEqual(result.merges, []);
     assert.ok(result.comments.every(body => !body.includes("@codex review")));
     assert.equal(result.requests.some(request => request.body?.labels?.includes("needs-owner")), expired);
+  });
+}
+
+const controllerReceipts = result => result.comments
+  .filter(body => body.includes("<!-- pr-review-request:") || body.includes("<!-- pr-review-round:"))
+  .map((body, index) => ({ id: 1000 + index, user: bot("github-actions"), body, created_at: new Date().toISOString() }));
+
+for (const [name, check] of [
+  ["missing", null], ["pending", seerCheck({ status: "in_progress", conclusion: null })],
+  ["old-head", seerCheck({ head_sha: "c".repeat(40) })],
+  ["other-app", seerCheck({ app: { id: 999, slug: "other" } })],
+  ["wrong-app-id", seerCheck({ app: { id: 999, slug: "sentry" } })],
+  ["neutral", seerCheck({ conclusion: "neutral" })], ["skipped", seerCheck({ conclusion: "skipped" })],
+  ["unknown", seerCheck({ conclusion: null })],
+]) {
+  test(`CLI waits for a clean current Seer review when its result is ${name}`, async () => {
+    const result = await runScenario(`seer-${name}`, { setup: state => {
+      state.checks = state.checks.filter(item => item.name !== "Seer Code Review");
+      if (check) state.checks.push(check);
+    } });
+    assert.deepEqual(result.merges, []);
+    assert.ok(result.comments.some(body => body.includes("@sentry review")));
+  });
+}
+
+test("CLI rechecks Seer completion in its final snapshot", async () => {
+  const result = await runScenario("seer-final-snapshot", { changeSecond: state => {
+    state.checks = state.checks.filter(item => item.name !== "Seer Code Review");
+  } });
+  assert.equal(result.snapshots, 2);
+  assert.deepEqual(result.merges, []);
+});
+
+test("CLI waits for a requested Seer review without repeating it, then accepts its late result", async () => {
+  const first = await runScenario("seer-request", { setup: state => {
+    state.checks = state.checks.filter(item => item.name !== "Seer Code Review");
+  } });
+  const receipts = controllerReceipts(first);
+  assert.ok(first.comments.some(body => body.includes("@sentry review")));
+  const waiting = await runScenario("seer-waiting", { setup: state => {
+    state.checks = state.checks.filter(item => item.name !== "Seer Code Review");
+    state.comments.push(...receipts);
+  } });
+  assert.deepEqual(waiting.merges, []);
+  assert.ok(waiting.comments.every(body => !body.includes("@sentry review")));
+  const complete = await runScenario("seer-late-complete", { setup: state => { state.comments.push(...receipts); } });
+  assert.equal(complete.merges.length, 1);
+});
+
+test("CLI gives an unanswered Seer request the same 24-hour deadline", async () => {
+  const first = await runScenario("seer-before-timeout", { setup: state => {
+    state.checks = state.checks.filter(item => item.name !== "Seer Code Review");
+  } });
+  const result = await runScenario("seer-timeout", { setup: state => {
+    state.checks = state.checks.filter(item => item.name !== "Seer Code Review");
+    state.comments.push(...controllerReceipts(first).map(comment => ({ ...comment, created_at: new Date(Date.now() - 25 * 3600000).toISOString() })));
+  } });
+  assert.deepEqual(result.merges, []);
+  assert.ok(result.requests.some(request => request.body?.labels?.includes("needs-owner")));
+  assert.ok(result.comments.every(body => !body.includes("@sentry review")));
+});
+
+test("CLI retires the same reviewer's old receipt after dismissal without timing out its replacement", async () => {
+  const first = await runScenario("rabbit-initial-request", { setup: state => { state.reviews = []; } });
+  const old = controllerReceipts(first).map(comment => ({ ...comment, created_at: new Date(Date.now() - 25 * 3600000).toISOString() }));
+  const setup = state => {
+    state.reviews[0].state = "DISMISSED";
+    state.comments.push(...old);
+  };
+  const renewed = await runScenario("rabbit-dismissed-request", { setup });
+  assert.ok(renewed.comments.some(body => body.includes("@coderabbitai review")));
+  assert.ok(renewed.requests.every(request => !request.body?.labels?.includes("needs-owner")));
+  const waiting = await runScenario("rabbit-dismissed-wait", { setup: state => {
+    setup(state);
+    state.comments.push(...controllerReceipts(renewed));
+  } });
+  assert.ok(waiting.comments.every(body => !body.includes("@coderabbitai review")));
+  assert.ok(waiting.requests.every(request => !request.body?.labels?.includes("needs-owner")));
+});
+
+test("CLI re-requests a held review after its finding is resolved without a source commit", async () => {
+  const first = await runScenario("rabbit-held-open", { setup: state => {
+    state.reviews[0].state = "CHANGES_REQUESTED";
+    state.threads = [{ id: "finding", isResolved: false, path: "app/page.jsx", comments: { nodes: [{ author: { login: "coderabbitai" } }] } }];
+  } });
+  assert.ok(first.comments.every(body => !body.includes("@coderabbitai review")));
+  const renewed = await runScenario("rabbit-held-resolved", { setup: state => {
+    state.reviews[0].state = "CHANGES_REQUESTED";
+    state.threads = [{ id: "finding", isResolved: true, path: "app/page.jsx", comments: { nodes: [{ author: { login: "coderabbitai" } }] } }];
+    state.comments.push(...controllerReceipts(first));
+  } });
+  assert.ok(renewed.comments.some(body => body.includes("@coderabbitai review")));
+});
+
+test("CLI holds a stable completed review to one request generation and bounds repeated completed attempts", async () => {
+  let receipts = [];
+  for (let attempt = 0; attempt <= 8; attempt += 1) {
+    const result = await runScenario(`rabbit-attempt-${attempt}`, { setup: state => {
+      state.reviews[0] = { ...state.reviews[0], id: attempt + 1, state: "CHANGES_REQUESTED" };
+      state.comments.push(...receipts);
+    } });
+    assert.equal(result.comments.some(body => body.includes("@coderabbitai review")), attempt < 8);
+    assert.equal(result.requests.some(request => request.body?.labels?.includes("needs-owner")), attempt === 8);
+    if (attempt === 0) {
+      const unchanged = await runScenario("rabbit-unchanged-attempt", { setup: state => {
+        state.reviews[0].state = "CHANGES_REQUESTED";
+        state.comments.push(...controllerReceipts(result));
+      } });
+      assert.ok(unchanged.comments.every(body => !body.includes("@coderabbitai review")));
+    }
+    receipts.push(...controllerReceipts(result));
+  }
+});
+
+test("CLI keeps a Codex request generation while the response is in progress", async () => {
+  const first = await runScenario("codex-held-request", { setup: state => {
+    state.comments[0].body = `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: head, status: "completed", has_unresolved_findings: true } })} -->`;
+  } });
+  assert.ok(first.comments.some(body => body.includes("@codex review")));
+  const progress = await runScenario("codex-held-progress", { setup: state => {
+    state.comments[0].body = `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: head, status: "running", has_unresolved_findings: null } })} -->`;
+    state.comments.push(...controllerReceipts(first));
+  } });
+  assert.deepEqual(progress.merges, []);
+  assert.ok(progress.comments.every(body => !body.includes("@codex review")));
+});
+
+test("CLI accepts a clean Seer retry without retaining the failed check from its earlier suite", async () => {
+  const result = await runScenario("seer-recovered", { setup: state => {
+    state.checks.push(seerCheck({ id: 99, conclusion: "failure", check_suite: { id: 55 } }));
+    state.checks.find(check => check.id === 100).check_suite = { id: 56 };
+  } });
+  assert.equal(result.merges.length, 1);
+});
+
+test("CLI reports a completed merge as still awaiting production verification", async () => {
+  const result = await runScenario("merge-awaits-production");
+  assert.equal(result.merges.length, 1);
+  assert.ok(result.comments.some(body => body.includes("Production verification is still pending")));
+});
+
+for (const conclusion of ["failure", "cancelled"]) {
+  test(`CLI leaves a ${conclusion} check with the agent without flagging the owner`, async () => {
+    const result = await runScenario(`agent-repairs-${conclusion}`, { setup: state => { state.checks[0].conclusion = conclusion; } });
+    assert.deepEqual(result.merges, []);
+    assert.ok(result.comments.some(body => body.includes("checks-red") && body.includes("Jest")));
+    assert.ok(result.comments.every(body => !body.includes("@serviroo")));
+    assert.ok(result.requests.every(request => !request.body?.labels?.includes("needs-owner")));
+  });
+}
+
+test("CLI waits for required checks that have not reported", async () => {
+  const result = await runScenario("missing-tests", { setup: state => {
+    state.checks = state.checks.filter(check => check.name === "Seer Code Review");
+  } });
+  assert.deepEqual(result.merges, []);
+  assert.ok(result.comments.some(body => body.includes("checks-missing") && body.includes("Playwright booking")));
+  assert.ok(result.requests.every(request => !request.body?.labels?.includes("needs-owner")));
+});
+
+test("CLI retains a failing status even when a genuine Tests check has the same name", async () => {
+  const result = await runScenario("failing-status-same-name", { setup: state => {
+    state.statuses = [{ id: 900, context: "Jest", state: "failure" }];
+  } });
+  assert.deepEqual(result.merges, []);
+  assert.ok(result.comments.some(body => body.includes("checks-red")));
+});
+
+test("CLI retains a failed Tests check when another app posts a newer same-name success", async () => {
+  const result = await runScenario("other-app-cannot-clear-failure", { setup: state => {
+    state.checks[0].conclusion = "failure";
+    state.checks.push({ ...state.checks[0], id: 900, app: { slug: "other-app" }, conclusion: "success" });
+  } });
+  assert.deepEqual(result.merges, []);
+});
+
+test("CLI accepts a successful Tests rerun and green extra checks", async () => {
+  const result = await runScenario("successful-tests-rerun", { setup: state => {
+    state.checks.push({ ...state.checks[0], id: 900, conclusion: "success" });
+    state.checks[0].conclusion = "failure";
+    for (const [index, conclusion] of ["skipped", "neutral"].entries()) {
+      state.checks.push({ id: 901 + index, name: `extra-${conclusion}`, app: { slug: "other-app" }, status: "completed", conclusion });
+    }
+  } });
+  assert.equal(result.merges.length, 1);
+});
+
+test("CLI accepts the newer success in a commit-status history", async () => {
+  const result = await runScenario("newest-commit-status", { setup: state => {
+    state.statuses = [{ id: 900, context: "Vercel", state: "success" }, { id: 800, context: "Vercel", state: "pending" }];
+  } });
+  assert.equal(result.merges.length, 1);
+});
+
+test("CLI honors a later CodeRabbit request for changes after approval", async () => {
+  const result = await runScenario("rabbit-later-changes", { setup: state => {
+    state.reviews.push({ ...state.reviews[0], id: 2, state: "CHANGES_REQUESTED", submitted_at: "2026-10-23T01:00:00Z" });
+    state.threads = [{ isResolved: false, path: "scripts/example.mjs", comments: { nodes: [{ author: { login: "coderabbitai" } }] } }];
+  } });
+  assert.deepEqual(result.merges, []);
+  assert.ok(result.comments.some(body => body.includes("coderabbit-hold")));
+  assert.ok(result.comments.every(body => !body.includes("@coderabbitai review")));
+});
+
+for (const resolved of [false, true]) {
+  test(`CLI ${resolved ? "accepts" : "blocks on"} an outdated ${resolved ? "resolved" : "unresolved"} finding`, async () => {
+    const result = await runScenario(`outdated-finding-${resolved}`, { setup: state => {
+      state.threads = [{ isResolved: resolved, isOutdated: true, path: "README.md", comments: { nodes: [{ author: { login: "chatgpt-codex-connector" } }] } }];
+    } });
+    assert.equal(result.merges.length, resolved ? 1 : 0);
+  });
+}
+
+test("CLI keeps a failing money-path PR with its agent", async () => {
+  const result = await runScenario("agent-repairs-money-path", { setup: state => {
+    state.checks[0].conclusion = "failure";
+    state.threads = [{ isResolved: false, path: "src/lib/checkoutStorage.js", comments: { nodes: [{ author: { login: "sentry" } }] } }];
+  } });
+  assert.deepEqual(result.merges, []);
+  assert.ok(result.comments.some(body => body.includes("open-findings") && body.includes("checks-red")));
+  assert.ok(result.requests.every(request => !request.body?.labels?.includes("needs-owner")));
+});
+
+for (const [name, change] of [
+  ["conflicting", state => { state.pull.mergeable_state = "dirty"; }],
+  ["non-main-base", state => { state.pull.base.ref = "develop"; }],
+]) {
+  test(`CLI does not merge a ${name} branch`, async () => {
+    const result = await runScenario(name, { setup: change });
+    assert.deepEqual(result.merges, []);
+    assert.ok(result.requests.every(request => !request.body?.labels?.includes("needs-owner")));
+  });
+}
+
+test("CLI flags GitHub blocking an otherwise ready PR", async () => {
+  const result = await runScenario("github-blocked-ready", { setup: state => { state.pull.mergeable_state = "blocked"; } });
+  assert.deepEqual(result.merges, []);
+  assert.ok(result.comments.some(body => body.includes("github-blocked") && body.includes("@serviroo")));
+  assert.ok(result.requests.some(request => request.body?.labels?.includes("needs-owner")));
+});
+
+for (const nextState of ["COMMENTED", "APPROVED", "DISMISSED"]) {
+  test(`CLI ${nextState === "COMMENTED" ? "retains" : "clears"} an older human change request after ${nextState}`, async () => {
+    const result = await runScenario(`human-review-${nextState}`, { setup: state => {
+      const person = { user: { login: "fixture-person", type: "User" }, commit_id: "c".repeat(40) };
+      state.reviews.push({ ...person, id: 2, state: "CHANGES_REQUESTED", submitted_at: "2026-10-23T01:00:00Z" },
+        { ...person, id: 3, state: nextState, submitted_at: "2026-10-23T02:00:00Z" });
+    } });
+    assert.equal(result.merges.length, nextState === "COMMENTED" ? 0 : 1);
+  });
+}
+
+test("CLI merges after eight review rounds once all reviewers agree", async () => {
+  const result = await runScenario("agreed-after-cap", { setup: state => {
+    for (let round = 0; round < 8; round += 1) {
+      state.comments.push({ id: 100 + round, user: bot("github-actions"), body: `<!-- pr-review-round:previous-${round} -->` });
+    }
+  } });
+  assert.equal(result.merges.length, 1);
+});
+
+test("CLI preserves a pending Seer request across check-run progress updates", async () => {
+  const setup = state => {
+    state.checks.find(check => check.name === "Seer Code Review").status = "in_progress";
+    state.checks.find(check => check.name === "Seer Code Review").conclusion = null;
+  };
+  const first = await runScenario("seer-progress-request", { setup });
+  const waiting = await runScenario("seer-progress-wait", { setup: state => {
+    setup(state);
+    state.checks.find(check => check.name === "Seer Code Review").id += 1;
+    state.comments.push(...controllerReceipts(first));
+  } });
+  assert.deepEqual(waiting.merges, []);
+  assert.ok(waiting.comments.every(body => !body.includes("@sentry review")));
+});
+
+test("CLI ignores unrelated Codex security updates when identifying the completed code review", async () => {
+  const setup = state => {
+    state.comments[0].body = `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: head, status: "completed", has_unresolved_findings: true } })} -->\n` +
+      '| 📝 **Code Review** | ✅ **Completed** <relative-time datetime="2026-10-23T00:00:00Z">2026-10-23T00:00:00Z</relative-time> |';
+  };
+  const first = await runScenario("codex-before-security-update", { setup });
+  assert.ok(first.comments.some(body => body.includes("@codex review")));
+  const waiting = await runScenario("codex-security-update", { setup: state => {
+    setup(state);
+    state.comments[0].updated_at = "2026-10-23T01:00:00Z";
+    state.comments[0].body += '\n| **Security Review** | Running |';
+    state.comments.push(...controllerReceipts(first));
+  } });
+  assert.ok(waiting.comments.every(body => !body.includes("@codex review")));
+  assert.ok(waiting.comments.every(body => !body.includes("<!-- pr-review-round:")));
+});
+
+for (const reviewer of ["codex", "seer"]) {
+  test(`CLI retires an answered ${reviewer} request before timing its next completed attempt`, async () => {
+    const setup = (state, attempt) => {
+      if (reviewer === "codex") {
+        state.comments[0].updated_at = `2026-10-23T0${attempt}:00:00Z`;
+        state.comments[0].body = `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: head, status: "completed", has_unresolved_findings: true } })} -->`;
+      } else {
+        const check = state.checks.find(item => item.name === "Seer Code Review");
+        check.id += attempt;
+        check.conclusion = "neutral";
+      }
+    };
+    const first = await runScenario(`${reviewer}-old-held-request`, { setup: state => setup(state, 0) });
+    const result = await runScenario(`${reviewer}-new-held-request`, { setup: state => {
+      setup(state, 1);
+      state.comments.push(...controllerReceipts(first).map(comment => ({ ...comment,
+        created_at: new Date(Date.now() - 25 * 3600000).toISOString() })));
+    } });
+    const mention = reviewer === "codex" ? "@codex review" : "@sentry review";
+    assert.ok(result.comments.some(body => body.includes(mention)));
+    assert.ok(result.requests.every(request => !request.body?.labels?.includes("needs-owner")));
   });
 }

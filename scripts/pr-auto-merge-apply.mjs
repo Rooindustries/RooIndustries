@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import {
   GATE_MARKER,
@@ -61,13 +62,45 @@ const graphql = async (query, variables) => {
 
 const login = (author) => author?.login || "";
 const botNamed = (author, name) => author?.type === "Bot" && String(author.login || "").replace(/\[bot\]$/, "") === name;
-const REVIEW_MENTIONS = { coderabbit: "@coderabbitai review", codex: "@codex review" };
-const reviewRequest = (comments, headSha, reviewer) => comments.find((comment) => {
+const REVIEW_MENTIONS = { coderabbit: "@coderabbitai review", codex: "@codex review", seer: "@sentry review" };
+const fingerprint = (state) => createHash("sha256").update(JSON.stringify(state)).digest("hex");
+const reviewRequest = (comments, headSha, reviewer, generation) => [...comments].reverse().find((comment) => {
   const body = String(comment.body || "");
+  if (body.includes(`${REVIEW_REQUEST_PREFIX}${headSha}:${reviewer}:${generation} -->`)) return true;
+  if (generation !== "initial") return false;
   return body.includes(`${REVIEW_REQUEST_PREFIX}${headSha}:${reviewer} -->`) ||
     (body.includes(`${REVIEW_REQUEST_PREFIX}${headSha} -->`) &&
-      (body.includes(REVIEW_MENTIONS[reviewer]) || body.includes("Requested both reviews with the user credential.")));
+      (body.includes(REVIEW_MENTIONS[reviewer]) || (reviewer !== "seer" && body.includes("Requested both reviews with the user credential."))));
 });
+
+const lastRequestedGeneration = (comments, headSha, reviewer) => {
+  const marker = `${REVIEW_REQUEST_PREFIX}${headSha}:${reviewer}:`;
+  for (const comment of [...comments].reverse()) {
+    const suffix = String(comment.body || "").split(marker)[1];
+    const match = suffix?.match(/^(initial|[a-f0-9]{64}) -->/);
+    if (match) return match[1];
+  }
+  return "initial";
+};
+
+// A finished response retires the request that led to it. Pending updates to the same
+// response keep its generation, so scheduling another gate run does not request it again.
+const reviewGenerations = ({ reviews, codex, codexComment, seerChecks, comments, headSha }) => {
+  const rabbit = reviews.filter((review) => botNamed(review.user, "coderabbitai") && review.commit_id === headSha &&
+    ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(review.state))
+    .sort((left, right) => String(left.submitted_at).localeCompare(String(right.submitted_at)) || left.id - right.id).at(-1);
+  const seer = seerChecks.find((check) => check.status === "completed");
+  // Security reviews share this comment. Their updates do not finish another code review.
+  const codexRow = codexComment?.body?.split("\n").find((line) => line.includes("**Code Review**"));
+  const codexCompletedAt = codexRow?.match(/<relative-time datetime="([^"]+)">/)?.[1] || codexComment?.updated_at;
+  return {
+    coderabbit: rabbit ? fingerprint([rabbit.id, rabbit.state, rabbit.submitted_at]) : "initial",
+    codex: codex?.commitSha === headSha && codex.status === "completed"
+      ? fingerprint([codexComment.id, codexCompletedAt, codex])
+      : lastRequestedGeneration(comments, headSha, "codex"),
+    seer: seer ? fingerprint([seer.id, seer.conclusion, seer.completed_at]) : "initial",
+  };
+};
 
 const collectThreads = async (number) => {
   const [owner, name] = repo.split("/");
@@ -129,8 +162,14 @@ const collectSnapshot = async (number) => {
     node(id: $id) { ... on IssueComment { editor { login } } }
   }`, { id: codexComment.node_id })).node?.editor : null;
   const ownComments = comments.filter((comment) => botNamed(comment.user, "github-actions"));
+  const codex = parseCodexState(codexComment?.body || "");
+  // This repository's installed Sentry integration publishes this check. Other apps,
+  // old heads and skipped/neutral results cannot establish a clean Seer review.
+  const seerChecks = checkRuns.filter((run) => run.app?.id === 12637 && run.app?.slug === "sentry" &&
+    run.name === "Seer Code Review" && run.head_sha === pull.head.sha).sort((left, right) => right.id - left.id);
+  const generations = reviewGenerations({ reviews, codex, codexComment, seerChecks, comments: ownComments, headSha: pull.head.sha });
   const reviewWaitExpired = Object.fromEntries(Object.keys(REVIEW_MENTIONS).map((reviewer) => {
-    const requested = reviewRequest(ownComments, pull.head.sha, reviewer);
+    const requested = reviewRequest(ownComments, pull.head.sha, reviewer, generations[reviewer]);
     const requestedAt = Date.parse(requested?.created_at);
     return [reviewer, Boolean(requested) && (!Number.isFinite(requestedAt) || Date.now() - requestedAt >= 24 * 3600000)];
   }));
@@ -176,6 +215,7 @@ const collectSnapshot = async (number) => {
     mergeableState: pull.mergeable_state,
     checks,
     reviews: reviews.map((review) => ({
+      id: review.id,
       author: login(review.user),
       bot: review.user?.type === "Bot",
       state: review.state,
@@ -183,8 +223,11 @@ const collectSnapshot = async (number) => {
       submittedAt: review.submitted_at,
     })),
     threads: await collectThreads(number),
-    codex: parseCodexState(codexComment?.body || ""),
+    codex,
     codexEditor: editor?.login || "",
+    seer: seerChecks[0] || null,
+    reviewGenerations: generations,
+    reviewRoundId: fingerprint([pull.head.sha, generations]),
     reviewRounds: countReviewRounds(ownComments.map((comment) => comment.body || "")),
     reviewWaitExpired,
     comments: ownComments,
@@ -230,14 +273,14 @@ const recordReviewRound = async (snapshot) => {
   await api(readToken, `repos/${repo}/issues/${snapshot.number}/comments`, {
     method: "POST",
     body: {
-      body: `${REVIEW_ROUND_PREFIX}${snapshot.headSha} -->\nReview round on \`${snapshot.headRef}\`. The owning agent's pull request watch picks up the open findings, fixes them, and pushes. It does not merge.\n`,
+      body: `${REVIEW_ROUND_PREFIX}${snapshot.headSha}:${snapshot.reviewRoundId} -->\nReview round on \`${snapshot.headRef}\`. The owning agent's pull request watch picks up the open findings, fixes them, and requests another review. It does not merge.\n`,
     },
   });
 };
 
 const requestReviews = async (snapshot, reviewers) => {
   const mentions = reviewers.map((reviewer) => REVIEW_MENTIONS[reviewer]).join("\n");
-  const receipts = reviewers.map((reviewer) => `${REVIEW_REQUEST_PREFIX}${snapshot.headSha}:${reviewer} -->`).join("\n");
+  const receipts = reviewers.map((reviewer) => `${REVIEW_REQUEST_PREFIX}${snapshot.headSha}:${reviewer}:${snapshot.reviewGenerations[reviewer]} -->`).join("\n");
   if (process.env.AUTO_MERGE_TOKEN) {
     await api(mergeToken, `repos/${repo}/issues/${snapshot.number}/comments`, {
       method: "POST",
@@ -294,11 +337,11 @@ const applyOne = async (number) => {
   const decision = decide(snapshot);
   console.log(`#${number} ${decision.action} wake=${decision.wake} ${decision.reasons.join(",")}`);
   if (decision.requestReviews) {
-    const reviewers = decision.reviewers.filter((reviewer) => !reviewRequest(snapshot.comments, snapshot.headSha, reviewer));
+    const reviewers = decision.reviewers.filter((reviewer) => !reviewRequest(snapshot.comments, snapshot.headSha, reviewer, snapshot.reviewGenerations[reviewer]));
     if (reviewers.length) await requestReviews(snapshot, reviewers);
   }
   if (decision.reviewRound) {
-    const counted = snapshot.comments.some((comment) => String(comment.body).includes(`${REVIEW_ROUND_PREFIX}${snapshot.headSha}`));
+    const counted = snapshot.comments.some((comment) => String(comment.body).includes(`${REVIEW_ROUND_PREFIX}${snapshot.headSha}:${snapshot.reviewRoundId} -->`));
     if (!counted) await recordReviewRound(snapshot);
   }
   if (decision.action === "merge") {

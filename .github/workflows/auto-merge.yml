@@ -36,7 +36,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Merge when both reviews agree, or keep the review loop on this branch
+      - name: Merge when all three reviewers agree, or keep the review loop on this branch
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}

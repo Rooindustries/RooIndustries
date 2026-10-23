@@ -76,7 +76,8 @@ export const latestChecks = (checks) => {
       conclusion: check.conclusion || "",
       completedAt: check.completedAt || check.startedAt || "",
     };
-    const key = JSON.stringify([current.source, current.app, current.workflowId, current.workflowId ? "" : current.checkSuiteId, current.name]);
+    const unidentifiedActionsSuite = current.app === "github-actions" && !current.workflowId ? current.checkSuiteId : "";
+    const key = JSON.stringify([current.source, current.app, current.workflowId, unidentifiedActionsSuite, current.name]);
     const previous = bySource.get(key);
     if (!previous) bySource.set(key, current);
     else if (current.completedAt === previous.completedAt && !Number.isFinite(current.order)) bySource.set(key, worse(previous, current));
@@ -108,7 +109,7 @@ const assessChecks = (checks, testsWorkflowId) => {
 
 const reviewOnHead = (reviews, author, headSha) => (reviews || [])
   .filter((review) => review.bot === true && login(review.author) === author && review.commitSha === headSha)
-  .sort((left, right) => String(left.submittedAt).localeCompare(String(right.submittedAt)));
+  .sort((left, right) => String(left.submittedAt).localeCompare(String(right.submittedAt)) || left.id - right.id);
 
 // A person's request for changes stands, on any commit, until that person approves or the review is dismissed.
 const peopleRequestingChanges = (reviews) => {
@@ -123,27 +124,20 @@ const peopleRequestingChanges = (reviews) => {
 };
 
 const coderabbitVerdict = (reviews, headSha) => {
-  const mine = reviewOnHead(reviews, CODERABBIT, headSha);
-  let approved = false;
-  let reviewed = false;
-  for (const review of mine) {
-    if (review.state === "APPROVED") {
-      approved = true;
-      reviewed = true;
-    } else if (review.state === "CHANGES_REQUESTED") {
-      approved = false;
-      reviewed = true;
-    } else if (review.state === "DISMISSED") {
-      approved = false;
-    }
-  }
-  if (!reviewed) return "pending";
-  return approved ? "approve" : "hold";
+  const latest = reviewOnHead(reviews, CODERABBIT, headSha)
+    .filter((review) => ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(review.state)).at(-1);
+  if (!latest || latest.state === "DISMISSED") return "pending";
+  return latest.state === "APPROVED" ? "approve" : "hold";
 };
 
 const codexVerdict = (codex, headSha) => {
   if (!codex || codex.commitSha !== headSha || codex.status !== "completed") return "pending";
   return codex.hasUnresolvedFindings === false ? "approve" : "hold";
+};
+
+const seerVerdict = (seer) => {
+  if (!seer || seer.status !== "completed") return "pending";
+  return seer.conclusion === "success" ? "approve" : "hold";
 };
 
 const openFindings = (threads) => (threads || []).filter((thread) => thread && thread.isResolved !== true);
@@ -173,12 +167,14 @@ export const decide = (input) => {
   const rabbit = coderabbitVerdict(input.reviews, input.headSha);
   const codexEdited = Boolean(input.codexEditor) && login(input.codexEditor) !== CODEX;
   const codex = codexEdited ? "pending" : codexVerdict(input.codex, input.headSha);
+  const seer = seerVerdict(input.seer);
+  const verdicts = { coderabbit: rabbit, codex, seer };
   const findings = openFindings(input.threads);
   const changesRequestedBy = peopleRequestingChanges(input.reviews);
   const git = input.mergeableState || "unknown";
   const reviewRounds = Number(input.reviewRounds) || 0;
-  const reviewTimedOut = (rabbit === "pending" && input.reviewWaitExpired?.coderabbit === true) ||
-    (codex === "pending" && input.reviewWaitExpired?.codex === true);
+  const reviewTimedOut = Object.entries(verdicts).some(([reviewer, verdict]) =>
+    verdict !== "approve" && input.reviewWaitExpired?.[reviewer] === true);
   const sha = shortSha(input.headSha);
 
   if (checks.missing.length) add("checks-missing", `Required checks have not reported on ${sha}: ${checks.missing.join(", ")}.`);
@@ -196,26 +192,28 @@ export const decide = (input) => {
   if (codexEdited) add("codex-edited", `Codex's review comment was last edited by ${input.codexEditor}, so it doesn't count as Codex's review.`);
   if (codex === "pending") add("codex-pending", `Codex has not completed a review of ${sha} with no unresolved findings.`);
   if (codex === "hold") add("codex-hold", `Codex still has unresolved findings on ${sha}.`);
+  if (seer === "pending") add("seer-pending", `Sentry Seer has not completed a review of ${sha}.`);
+  if (seer === "hold") add("seer-hold", `Sentry Seer has not returned a clean review of ${sha}.`);
   if (reviewTimedOut) add("review-timeout", "A requested review has not completed after 24 hours. Check the review integration before continuing.");
 
   const checksGreen = checks.red.length === 0 && checks.pending.length === 0 && checks.missing.length === 0;
-  const disagree = rabbit !== "pending" && codex !== "pending" && rabbit !== codex;
-  const bothApprove = rabbit === "approve" && codex === "approve";
+  const disagree = new Set(Object.values(verdicts).filter((verdict) => verdict !== "pending")).size > 1;
+  const allApprove = Object.values(verdicts).every((verdict) => verdict === "approve");
   const clean = git === "clean" && input.baseIsAncestor === true;
-  const canMerge = checksGreen && clean && bothApprove && findings.length === 0 && changesRequestedBy.length === 0;
-  const reviewWork = disagree || findings.length > 0 || changesRequestedBy.length > 0 || rabbit === "hold" || codex === "hold";
+  const canMerge = checksGreen && clean && allApprove && findings.length === 0 && changesRequestedBy.length === 0;
+  const reviewWork = findings.length > 0 || changesRequestedBy.length > 0 || Object.values(verdicts).includes("hold");
   const reviewCapped = reviewWork && reviewRounds >= MAX_REVIEW_ROUNDS;
 
   if (disagree && !reviewCapped) {
-    add("models-disagree", "CodeRabbit and Codex do not both approve this head. The owning agent addresses the findings and pushes. Review requests go only to eligible reviewers without approval on that head.");
+    add("models-disagree", "CodeRabbit, Codex and Sentry Seer do not all approve this head. The owning agent addresses the findings and requests a fresh review from eligible reviewers without approval on that head.");
   }
   if (reviewCapped) {
     add("review-cap", `Review work remains after ${MAX_REVIEW_ROUNDS} review rounds. The pull request stays open for the owner.`);
   }
-  if (git === "blocked" && input.baseIsAncestor === true && checksGreen && bothApprove && findings.length === 0 && changesRequestedBy.length === 0) {
+  if (git === "blocked" && input.baseIsAncestor === true && checksGreen && allApprove && findings.length === 0 && changesRequestedBy.length === 0) {
     add("github-blocked", "The pull request meets the repo bar, and GitHub is still blocking the merge. Branch protection or a ruleset is the likely hold. This workflow does not change those settings.");
   }
-  if (git === "unstable" && checksGreen && bothApprove && findings.length === 0) {
+  if (git === "unstable" && checksGreen && allApprove && findings.length === 0) {
     add("merge-state-unstable", "GitHub still reports the merge state as unstable. The workflow will look again when that clears.");
   }
 
@@ -228,11 +226,12 @@ export const decide = (input) => {
   else if (hold) action = "flag";
   // `wake` means the owning agent has work. The owning T3 thread's pull request watch delivers it; the workflow calls no agent.
   const wake = action !== "merge" && (repairWork || needsReviewAgent);
-  const reviewers = !reviewCapped && (rabbit === "pending" || codex === "pending")
-    ? [rabbit !== "approve" && "coderabbit", codex !== "approve" && "codex"].filter((reviewer) => reviewer && input.reviewWaitExpired?.[reviewer] !== true)
-    : [];
+  const reviewers = reviewCapped ? [] : Object.entries(verdicts)
+    .filter(([reviewer, verdict]) => verdict !== "approve" && input.reviewWaitExpired?.[reviewer] !== true &&
+      (verdict === "pending" || (findings.length === 0 && changesRequestedBy.length === 0)))
+    .map(([reviewer]) => reviewer);
   const requestReviews = reviewers.length > 0;
-  if (action === "merge") lines.unshift(`Every check on ${sha} is green, the branch is up to date, and CodeRabbit and Codex both approve with no open findings.`);
+  if (action === "merge") lines.unshift(`Every check on ${sha} is green, the branch is up to date, and CodeRabbit, Codex and Sentry Seer all approve with no open findings.`);
   return { action, wake, requestReviews, reviewers, reviewRound: needsReviewAgent && wake, reasons, lines };
 };
 
@@ -246,14 +245,14 @@ export const gateComment = ({ decision, headSha }) => {
   const prose = [...decision.lines];
   if (decision.action === "merge") {
     prose.push(decision.merged
-      ? "Squash-merged into main. Vercel deploys production from main."
-      : "Squash-merging into main. Vercel deploys production from main.");
+      ? "Squash-merged into main. Production verification is still pending. The owning agent checks the Vercel deployment and production smoke result, and handles any failure or rollback before finishing."
+      : "Squash-merging into main. The owning agent then verifies the production deployment and smoke result before finishing.");
   } else if (decision.action === "flag") {
     prose.push(decision.wake
       ? "Not merged. @serviroo this one needs you. The owning agent still clears failing checks and open findings."
       : "Not merged. @serviroo this one needs you.");
   } else {
-    prose.push("Not merged. The owning agent keeps this branch until every check is green, the branch is up to date, and both models approve with no open findings.");
+    prose.push("Not merged. The owning agent keeps this branch until every check is green, the branch is up to date, and CodeRabbit, Codex and Sentry Seer all approve with no open findings. Ownership continues through production verification after merge.");
   }
   return `${head.join("\n")}\n\n${prose.join("\n\n")}\n`;
 };

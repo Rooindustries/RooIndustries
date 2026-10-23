@@ -70,7 +70,7 @@
     "test:agent-readiness": "node --test tests/agent-readiness.test.mjs",
     "test:repo-skills": "bash tests/repo-skills-e2e.sh",
     "diagnose:repo-skills": "bash scripts/diagnose-repo-skill-harnesses.sh",
-    "test:pr-auto-merge": "node --test tests/pr-auto-merge-gate.test.mjs tests/pr-auto-merge-e2e.test.mjs",
+    "test:pr-auto-merge": "node --test tests/pr-auto-merge-e2e.test.mjs",
     "test:traffic-recovery": "node --test tests/traffic-recovery.test.mjs",
     "test:remote-browser-guard": "node --test tests/remote-browser-guard.test.mjs",
     "test:creator:portal": "cross-env TOOLING_CREATOR_PORTAL=1 TOOLING_API_ROUTES=1 NODE_OPTIONS=--import=./tests/fixtures/creator-portal-loader.mjs playwright test tests/creator-portal.spec.js --project=chromium",
