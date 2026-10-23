@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import postgres from "postgres";
+import { postgresFixturePort } from "./lib/postgres-fixture-port.mjs";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 const pgBin = String(process.env.PG_BIN || "").trim() || spawnSync(
@@ -130,15 +130,9 @@ $$;
 let started = false;
 let sql = null;
 try {
-  const reservation = net.createServer();
-  await new Promise((resolve, reject) => {
-    reservation.once("error", reject);
-    reservation.listen(0, postgresHost, resolve);
-  });
-  port = reservation.address().port;
-  await new Promise((resolve, reject) => reservation.close(error => error ? reject(error) : resolve()));
   run(path.join(pgBin, "initdb"), ["-D", dataDir, "--auth=trust", "--no-locale"]);
   fs.appendFileSync(path.join(dataDir, "pg_hba.conf"), "\nhost all all samehost trust\n");
+  port = await postgresFixturePort(postgresHost);
   run(path.join(pgBin, "pg_ctl"), [
     "-D", dataDir,
     "-l", postgresLog,
