@@ -72,6 +72,19 @@ const runScenario = async (name, { setup, changeSecond, mergeStatus = 200, event
         }
         return send(200, { workflow_runs: url.searchParams.has("page") ? state.workflowPageTwo : state.workflowRuns });
       }
+      if (req.method === "GET" && /^\/repos\/fixture\/website\/actions\/runs\/\d+\/jobs$/.test(url.pathname)) {
+        const runId = Number(url.pathname.split("/").at(-2));
+        const jobs = state.jobs ?? state.checks.filter(check => check.app?.slug === "github-actions").map(check => ({
+          id: check.id, run_id: runId, head_sha: head, name: check.name, status: check.status, conclusion: check.conclusion,
+          runner_id: 1, steps: [{ status: "completed", started_at: "2026-10-23T00:00:00Z" }],
+        }));
+        if (state.jobPageTwo && !url.searchParams.has("page")) {
+          const nextPage = new URL(url);
+          nextPage.searchParams.set("page", "2");
+          res.setHeader("link", `<https://api.github.com${nextPage.pathname}${nextPage.search}>; rel="next"`);
+        }
+        return send(200, { jobs: url.searchParams.has("page") ? state.jobPageTwo : jobs });
+      }
       if (req.method === "GET" && url.pathname.startsWith(`${prefix}/compare/`)) {
         assert.equal(url.pathname, `${prefix}/compare/${state.baseTip}...${state.pull.head.sha}`);
         return send(200, state.comparison || {
@@ -100,7 +113,10 @@ const runScenario = async (name, { setup, changeSecond, mergeStatus = 200, event
         }
         return send(200, { check_runs: url.searchParams.has("page") ? state.checkPageTwo : state.checks });
       }
-      if (url.pathname.endsWith("/statuses")) return send(200, state.statuses);
+      if (url.pathname.endsWith("/statuses")) {
+        assert.equal(url.pathname, `${prefix}/commits/${state.pull.head.sha}/statuses`);
+        return send(200, state.statusesHead && state.statusesHead !== state.pull.head.sha ? [] : state.statuses);
+      }
       if (req.method === "GET" && url.pathname === `${prefix}/issues/1/comments`) return send(200, state.comments);
       if (req.method === "GET" && url.pathname === `${prefix}/labels/needs-owner`) return send(200, { name: "needs-owner" });
       if (req.method === "PUT" && url.pathname === `${prefix}/pulls/1/merge`) return send(mergeStatus, { merged: mergeStatus === 200, message: "Fixture merge result" });
@@ -155,24 +171,24 @@ for (const [name, value] of [
   ["missing", undefined], ["null", null], ["string-false", "false"], ["string-true", "true"],
   ["zero", 0], ["one", 1], ["array", []], ["object", {}], ["unresolved", true],
 ]) {
-  test(`CLI leaves a ${name} unresolved-findings flag unmerged`, async () => {
+  test(`CLI ignores an optional Codex ${name} unresolved-findings flag`, async () => {
     const result = await runScenario(`codex-flag-${name}`, { setup: state => {
       state.comments[0].body = `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: {
         commit_sha: head, status: "completed", has_unresolved_findings: value,
       } })} -->`;
     } });
-    assert.deepEqual(result.merges, []);
+    assert.equal(result.merges.length, 1);
   });
 }
 
-test("CLI rejects a malformed verdict that arrives at the final snapshot", async () => {
+test("CLI ignores an optional malformed Codex verdict at the final snapshot", async () => {
   const result = await runScenario("codex-flag-changed", { changeSecond: state => {
     state.comments[0].body = `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: {
       commit_sha: head, status: "completed", has_unresolved_findings: "false",
     } })} -->`;
   } });
   assert.equal(result.snapshots, 2);
-  assert.deepEqual(result.merges, []);
+  assert.equal(result.merges.length, 1);
 });
 
 for (const [status, conclusion] of [["queued", null], ["in_progress", null], ["completed", "failure"], ["completed", "success"]]) {
@@ -206,8 +222,6 @@ const refusals = {
   "queued-rerun": state => { state.checks.push({ ...state.checks[0], id: 1000, status: "queued", conclusion: null }); },
   "paged-failure": state => { state.checkPageTwo = [{ ...state.checks[0], id: 1000, conclusion: "failure" }]; },
   "human-review": state => { state.reviews[0].user = { login: "coderabbitai", type: "User" }; },
-  "forged-codex": state => { state.comments[0].user = { login: "chatgpt-codex-connector", type: "User" }; },
-  "edited-codex": state => { state.editor = { login: "fixture-person" }; },
   "old-approval": state => { state.reviews[0].commit_id = "c".repeat(40); },
   "open-thread": state => { state.threads.push({ isResolved: false, path: "src/app.js", comments: { nodes: [{ author: { login: "sentry" } }] } }); },
   "human-changes": state => { state.reviews.push({ user: { login: "fixture-person", type: "User" }, state: "CHANGES_REQUESTED", commit_id: head, submitted_at: "2026-10-23T01:00:00Z" }); },
@@ -299,7 +313,7 @@ test("CLI refuses an independently moved main ref when the PR base payload stays
 
 test("CLI requests reviews through the available user credential and records a workflow receipt", async () => {
   const result = await runScenario("user-review-request", { useUserToken: true, setup: state => { state.comments = []; state.reviews = []; } });
-  const request = result.requests.find(request => request.body?.body?.includes("@codex review"));
+  const request = result.requests.find(request => request.body?.body?.includes("@coderabbitai review"));
   assert.equal(request?.credential, "user");
   assert.ok(result.requests.some(request => request.credential === "workflow" && request.body?.body?.includes(`<!-- pr-review-request:${head}`)));
 });
@@ -400,14 +414,14 @@ test("CLI accepts an identical main and head", async () => {
 });
 
 for (const useUserToken of [false, true]) {
-  for (const reviewer of ["coderabbit", "codex"]) {
+  for (const reviewer of ["coderabbit", "seer"]) {
     test(`CLI requests only ${reviewer} with the ${useUserToken ? "user" : "workflow"} credential`, async () => {
       const result = await runScenario(`request-only-${reviewer}-${useUserToken}`, { useUserToken, setup: state => {
         if (reviewer === "coderabbit") state.reviews = [];
-        else state.comments = [];
+        else state.checks = state.checks.filter(check => check.name !== "Seer Code Review");
       } });
-      const wanted = reviewer === "coderabbit" ? "@coderabbitai review" : "@codex review";
-      const approved = reviewer === "coderabbit" ? "@codex review" : "@coderabbitai review";
+      const wanted = reviewer === "coderabbit" ? "@coderabbitai review" : "@sentry review";
+      const approved = reviewer === "coderabbit" ? "@sentry review" : "@coderabbitai review";
       assert.ok(result.comments.some(body => body.includes(wanted)));
       assert.ok(result.comments.every(body => !body.includes(approved)));
       assert.ok(result.comments.every(body => !body.includes("Requested both reviews")));
@@ -418,14 +432,16 @@ for (const useUserToken of [false, true]) {
 test("CLI includes a holding reviewer alongside a pending reviewer", async () => {
   const result = await runScenario("request-held-and-pending", { setup: state => {
     state.reviews[0].state = "CHANGES_REQUESTED";
-    state.comments = [];
+    state.checks = state.checks.filter(check => check.name !== "Seer Code Review");
   } });
-  assert.ok(result.comments.some(body => body.includes("@coderabbitai review") && body.includes("@codex review")));
+  assert.ok(result.comments.some(body => body.includes("@coderabbitai review") && body.includes("@sentry review")));
 });
 
 for (const useUserToken of [false, true]) {
   test(`CLI requests a dismissed reviewer after a different review was requested with ${useUserToken ? "user" : "workflow"} credentials`, async () => {
-    const first = await runScenario(`first-codex-request-${useUserToken}`, { useUserToken, setup: state => { state.comments = []; } });
+    const first = await runScenario(`first-seer-request-${useUserToken}`, { useUserToken, setup: state => {
+      state.checks = state.checks.filter(check => check.name !== "Seer Code Review");
+    } });
     const receipt = first.comments.find(body => body.includes(`<!-- pr-review-request:${head}`));
     assert.ok(receipt);
     const second = await runScenario(`dismissed-reviewer-${useUserToken}`, { useUserToken, setup: state => {
@@ -433,7 +449,7 @@ for (const useUserToken of [false, true]) {
       state.comments = [{ id: 11, user: bot("github-actions"), body: receipt, created_at: new Date().toISOString() }];
     } });
     assert.ok(second.comments.some(body => body.includes("@coderabbitai review")));
-    assert.ok(second.comments.every(body => !body.includes("@codex review")));
+    assert.ok(second.comments.every(body => !body.includes("@sentry review")));
     assert.ok(second.comments.some(body => body.includes(`<!-- pr-review-request:${head}:coderabbit`)));
   });
 }
@@ -442,21 +458,22 @@ test("CLI does not use an approved reviewer's old receipt to expire an unrequest
   const result = await runScenario("independent-review-deadlines", { setup: state => {
     state.reviews[0].state = "DISMISSED";
     state.comments.push({ id: 11, user: bot("github-actions"), created_at: new Date(Date.now() - 25 * 3600000).toISOString(),
-      body: `<!-- pr-review-request:${head}:codex -->` });
+      body: `<!-- pr-review-request:${head}:seer -->` });
   } });
   assert.ok(result.comments.some(body => body.includes("@coderabbitai review")));
-  assert.ok(result.comments.every(body => !body.includes("@codex review")));
+  assert.ok(result.comments.every(body => !body.includes("@sentry review")));
   assert.ok(result.requests.every(request => !request.body?.labels?.includes("needs-owner")));
 });
 
 test("CLI requests a newly pending reviewer even when another pending request timed out", async () => {
   const result = await runScenario("expired-and-new-review", { setup: state => {
     state.reviews = [];
+    state.checks = state.checks.filter(check => check.name !== "Seer Code Review");
     state.comments = [{ id: 11, user: bot("github-actions"), created_at: new Date(Date.now() - 25 * 3600000).toISOString(),
-      body: `<!-- pr-review-request:${head}:codex -->` }];
+      body: `<!-- pr-review-request:${head}:seer -->` }];
   } });
   assert.ok(result.comments.some(body => body.includes("@coderabbitai review")));
-  assert.ok(result.comments.every(body => !body.includes("@codex review")));
+  assert.ok(result.comments.every(body => !body.includes("@sentry review")));
   assert.ok(result.requests.some(request => request.body?.labels?.includes("needs-owner")));
 });
 
@@ -464,11 +481,12 @@ for (const explicit of [false, true]) {
   test(`CLI ${explicit ? "honors an explicit" : "replaces an ambiguous"} legacy request receipt`, async () => {
     const result = await runScenario(`legacy-review-receipt-${explicit}`, { setup: state => {
       state.reviews = [];
+      state.checks = state.checks.filter(check => check.name !== "Seer Code Review");
       state.comments = [{ id: 11, user: bot("github-actions"), created_at: new Date().toISOString(),
-        body: `${explicit ? "@codex review" : "Requested reviews with the user credential."}\n<!-- pr-review-request:${head} -->` }];
+        body: `${explicit ? "@sentry review" : "Requested reviews with the user credential."}\n<!-- pr-review-request:${head} -->` }];
     } });
     assert.ok(result.comments.some(body => body.includes("@coderabbitai review")));
-    assert.equal(result.comments.some(body => body.includes("@codex review")), !explicit);
+    assert.equal(result.comments.some(body => body.includes("@sentry review")), !explicit);
   });
 }
 
@@ -476,11 +494,12 @@ for (const expired of [false, true]) {
   test(`CLI ${expired ? "flags an expired" : "waits for a recent"} unanswered review request without repeating it`, async () => {
     const result = await runScenario(`pending-request-${expired}`, { setup: state => {
       state.comments = [{ id: 11, user: bot("github-actions"), created_at: new Date(Date.now() - (expired ? 25 : 1) * 3600000).toISOString(),
-        body: `<!-- pr-review-request:${head}:coderabbit -->\n<!-- pr-review-request:${head}:codex -->` }];
+        body: `<!-- pr-review-request:${head}:coderabbit -->\n<!-- pr-review-request:${head}:seer -->` }];
       state.reviews = [];
+      state.checks = state.checks.filter(check => check.name !== "Seer Code Review");
     } });
     assert.deepEqual(result.merges, []);
-    assert.ok(result.comments.every(body => !body.includes("@codex review")));
+    assert.ok(result.comments.every(body => !body.includes("@sentry review")));
     assert.equal(result.requests.some(request => request.body?.labels?.includes("needs-owner")), expired);
   });
 }
@@ -594,19 +613,6 @@ test("CLI holds a stable completed review to one request generation and bounds r
     }
     receipts.push(...controllerReceipts(result));
   }
-});
-
-test("CLI keeps a Codex request generation while the response is in progress", async () => {
-  const first = await runScenario("codex-held-request", { setup: state => {
-    state.comments[0].body = `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: head, status: "completed", has_unresolved_findings: true } })} -->`;
-  } });
-  assert.ok(first.comments.some(body => body.includes("@codex review")));
-  const progress = await runScenario("codex-held-progress", { setup: state => {
-    state.comments[0].body = `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: head, status: "running", has_unresolved_findings: null } })} -->`;
-    state.comments.push(...controllerReceipts(first));
-  } });
-  assert.deepEqual(progress.merges, []);
-  assert.ok(progress.comments.every(body => !body.includes("@codex review")));
 });
 
 test("CLI accepts a clean Seer retry without retaining the failed check from its earlier suite", async () => {
@@ -758,46 +764,21 @@ test("CLI preserves a pending Seer request across check-run progress updates", a
   assert.ok(waiting.comments.every(body => !body.includes("@sentry review")));
 });
 
-test("CLI ignores unrelated Codex security updates when identifying the completed code review", async () => {
-  const setup = state => {
-    state.comments[0].body = `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: head, status: "completed", has_unresolved_findings: true } })} -->\n` +
-      '| 📝 **Code Review** | ✅ **Completed** <relative-time datetime="2026-10-23T00:00:00Z">2026-10-23T00:00:00Z</relative-time> |';
+test("CLI retires an answered Seer request before timing its next completed attempt", async () => {
+  const setup = (state, attempt) => {
+    const check = state.checks.find(item => item.name === "Seer Code Review");
+    check.id += attempt;
+    check.conclusion = "neutral";
   };
-  const first = await runScenario("codex-before-security-update", { setup });
-  assert.ok(first.comments.some(body => body.includes("@codex review")));
-  const waiting = await runScenario("codex-security-update", { setup: state => {
-    setup(state);
-    state.comments[0].updated_at = "2026-10-23T01:00:00Z";
-    state.comments[0].body += '\n| **Security Review** | Running |';
-    state.comments.push(...controllerReceipts(first));
+  const first = await runScenario("seer-old-held-request", { setup: state => setup(state, 0) });
+  const result = await runScenario("seer-new-held-request", { setup: state => {
+    setup(state, 1);
+    state.comments.push(...controllerReceipts(first).map(comment => ({ ...comment,
+      created_at: new Date(Date.now() - 25 * 3600000).toISOString() })));
   } });
-  assert.ok(waiting.comments.every(body => !body.includes("@codex review")));
-  assert.ok(waiting.comments.every(body => !body.includes("<!-- pr-review-round:")));
+  assert.ok(result.comments.some(body => body.includes("@sentry review")));
+  assert.ok(result.requests.every(request => !request.body?.labels?.includes("needs-owner")));
 });
-
-for (const reviewer of ["codex", "seer"]) {
-  test(`CLI retires an answered ${reviewer} request before timing its next completed attempt`, async () => {
-    const setup = (state, attempt) => {
-      if (reviewer === "codex") {
-        state.comments[0].updated_at = `2026-10-23T0${attempt}:00:00Z`;
-        state.comments[0].body = `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: head, status: "completed", has_unresolved_findings: true } })} -->`;
-      } else {
-        const check = state.checks.find(item => item.name === "Seer Code Review");
-        check.id += attempt;
-        check.conclusion = "neutral";
-      }
-    };
-    const first = await runScenario(`${reviewer}-old-held-request`, { setup: state => setup(state, 0) });
-    const result = await runScenario(`${reviewer}-new-held-request`, { setup: state => {
-      setup(state, 1);
-      state.comments.push(...controllerReceipts(first).map(comment => ({ ...comment,
-        created_at: new Date(Date.now() - 25 * 3600000).toISOString() })));
-    } });
-    const mention = reviewer === "codex" ? "@codex review" : "@sentry review";
-    assert.ok(result.comments.some(body => body.includes(mention)));
-    assert.ok(result.requests.every(request => !request.body?.labels?.includes("needs-owner")));
-  });
-}
 
 for (const expired of [false, true]) {
   for (const paged of [false, true]) {
@@ -823,4 +804,117 @@ for (const expired of [false, true]) {
       assert.equal(result.requests.some(request => request.body?.labels?.includes("needs-owner")), expired);
     });
   }
+}
+
+const localCi = state => {
+  state.statuses = [{ id: 900, context: "local-ci", state: "success" }];
+  state.jobs = state.checks.filter(check => check.app?.slug === "github-actions").map(check => {
+    check.status = "queued";
+    check.conclusion = null;
+    check.started_at = "2026-10-23T00:00:00Z";
+    return { id: check.id, run_id: 600, head_sha: head, name: check.name, status: "queued", conclusion: null,
+      runner_id: 0, started_at: check.started_at, steps: [] };
+  });
+};
+
+for (const [name, setup] of Object.entries({
+  absent: state => { state.comments = []; },
+  running: state => { state.comments[0].body = `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: head, status: "running", has_unresolved_findings: null } })} -->`; },
+  held: state => { state.comments[0].body = `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: head, status: "completed", has_unresolved_findings: true } })} -->`; },
+  malformed: state => { state.comments[0].body = '<!-- codex-review-state:v1 not-json -->'; },
+  edited: state => { state.editor = { login: "fixture-person" }; },
+  expired: state => { state.comments = [{ id: 11, user: bot("github-actions"), created_at: new Date(Date.now() - 25 * 3600000).toISOString(), body: `<!-- pr-review-request:${head}:codex -->` }]; },
+})) {
+  test(`policy: optional Codex ${name} does not prevent a reviewed merge`, async () => {
+    const result = await runScenario(`optional-codex-${name}`, { setup });
+    assert.equal(result.merges.length, 1);
+    assert.ok(result.comments.every(body => !body.includes("@codex review")));
+    assert.ok(result.requests.every(request => !request.body?.labels?.includes("needs-owner")));
+  });
+}
+
+for (const stateName of ["clean", "unstable"]) {
+  test(`policy: local-ci replaces unstarted Actions jobs on a ${stateName} head`, async () => {
+    const result = await runScenario(`local-ci-${stateName}`, { setup: state => {
+      localCi(state);
+      state.pull.mergeable_state = stateName;
+      state.comments = [];
+    } });
+    assert.deepEqual(result.merges.map(request => request.body), [{ merge_method: "squash", sha: head }]);
+    assert.ok(result.comments.some(body => body.includes("local-ci")));
+  });
+}
+
+test("policy: local-ci permits a head with no Actions run or check yet", async () => {
+  const result = await runScenario("local-ci-no-actions", { setup: state => {
+    localCi(state);
+    state.checks = state.checks.filter(check => check.app?.slug !== "github-actions");
+    state.workflowRuns = [];
+    state.jobs = [];
+  } });
+  assert.equal(result.merges.length, 1);
+});
+
+test("policy: local-ci replaces jobs rejected before any runner or step started", async () => {
+  const result = await runScenario("local-ci-unstarted-failure", { setup: state => {
+    localCi(state);
+    for (const job of state.jobs) { job.status = "completed"; job.conclusion = "failure"; }
+    for (const check of state.checks.filter(check => check.app?.slug === "github-actions")) {
+      check.status = "completed"; check.conclusion = "failure";
+    }
+  } });
+  assert.equal(result.merges.length, 1);
+});
+
+for (const [name, mutate] of Object.entries({
+  missing: state => { state.statuses = []; },
+  pending: state => { state.statuses[0].state = "pending"; },
+  failed: state => { state.statuses[0].state = "failure"; },
+  error: state => { state.statuses[0].state = "error"; },
+  "old-head": state => { state.statusesHead = "c".repeat(40); },
+  "newer-failure": state => { state.statuses.push({ id: 901, context: "local-ci", state: "failure" }); },
+  "newer-pending": state => { state.statuses.push({ id: 901, context: "local-ci", state: "pending" }); },
+  "check-run-impostor": state => { state.statuses = []; state.checks.push({ id: 950, name: "local-ci", status: "completed", conclusion: "success", app: { slug: "other-app" } }); },
+  "running-job": state => { state.jobs[0].status = "in_progress"; },
+  "runner-assigned": state => { state.jobs[0].runner_id = 1; },
+  "started-step": state => { state.jobs[0].steps = [{ status: "completed", started_at: "2026-10-23T00:00:00Z" }]; },
+  "wrong-job-head": state => { state.jobs[0].head_sha = "c".repeat(40); },
+  "wrong-job-run": state => { state.jobs[0].run_id = 999; },
+  "missing-job": state => { state.jobs.shift(); },
+  "failed-started-job": state => {
+    state.jobs[0] = { ...state.jobs[0], status: "completed", conclusion: "failure", runner_id: 1 };
+    state.checks[0] = { ...state.checks[0], status: "completed", conclusion: "failure" };
+  },
+  "other-app-failure": state => { state.checks.push({ id: 950, name: "security", app: { slug: "other-app" }, status: "completed", conclusion: "failure" }); },
+  "same-name-status-failure": state => { state.statuses.push({ id: 950, context: "Jest", state: "failure" }); },
+  "other-workflow-pending": state => {
+    state.workflowRuns.push({ id: 800, workflow_id: 3, check_suite_id: 30, head_sha: head });
+    state.checks.push({ ...state.checks[0], id: 950, check_suite: { id: 30 } });
+  },
+})) {
+  test(`policy: local-ci does not hide ${name}`, async () => {
+    const result = await runScenario(`local-ci-refuses-${name}`, { setup: state => { localCi(state); mutate(state); } });
+    assert.deepEqual(result.merges, []);
+  });
+}
+
+test("policy: job history on a later page prevents hiding an executed failure", async () => {
+  const result = await runScenario("local-ci-job-pagination", { setup: state => {
+    localCi(state);
+    state.jobPageTwo = [{ ...state.jobs[0], id: 999, runner_id: 1, status: "completed", conclusion: "failure" }];
+  } });
+  assert.deepEqual(result.merges, []);
+  assert.ok(result.requests.some(request => request.path.endsWith("/jobs") && request.query.includes("page=2")));
+});
+
+for (const [name, changeSecond] of Object.entries({
+  "a-job-starts": state => { state.jobs[0].runner_id = 1; state.jobs[0].status = "in_progress"; },
+  "local-result-fails": state => { state.statuses[0].state = "failure"; },
+  "local-result-disappears": state => { state.statuses = []; },
+})) {
+  test(`policy: local-ci is rechecked before merge when ${name}`, async () => {
+    const result = await runScenario(`local-ci-race-${name}`, { setup: localCi, changeSecond });
+    assert.equal(result.snapshots, 2);
+    assert.deepEqual(result.merges, []);
+  });
 }

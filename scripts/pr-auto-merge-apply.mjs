@@ -3,12 +3,12 @@ import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import {
   GATE_MARKER,
+  REQUIRED_CHECKS,
   REVIEW_REQUEST_PREFIX,
   REVIEW_ROUND_PREFIX,
   countReviewRounds,
   decide,
   gateComment,
-  parseCodexState,
 } from "./pr-auto-merge-gate.mjs";
 
 const repo = process.env.REPO || process.env.GITHUB_REPOSITORY;
@@ -41,12 +41,13 @@ const api = async (token, path, { method = "GET", body } = {}) => {
   return { payload, headers: response.headers };
 };
 
-const paginate = async (path) => {
+const paginate = async (path, collection) => {
   const items = [];
   let next = `https://api.github.com/${path}${path.includes("?") ? "&" : "?"}per_page=100`;
   while (next) {
     const { payload, headers } = await api(readToken, next);
-    items.push(...(Array.isArray(payload) ? payload : payload.check_runs || payload.statuses || payload.workflow_runs || []));
+    if (collection && !Array.isArray(payload?.[collection])) throw new Error(`GitHub returned invalid ${collection} history.`);
+    items.push(...(collection ? payload[collection] : Array.isArray(payload) ? payload : payload.check_runs || payload.statuses || payload.workflow_runs || []));
     const link = headers.get("link") || "";
     const match = link.match(/<([^>]+)>; rel="next"/);
     next = match ? match[1] : "";
@@ -62,7 +63,7 @@ const graphql = async (query, variables) => {
 
 const login = (author) => author?.login || "";
 const botNamed = (author, name) => author?.type === "Bot" && String(author.login || "").replace(/\[bot\]$/, "") === name;
-const REVIEW_MENTIONS = { coderabbit: "@coderabbitai review", codex: "@codex review", seer: "@sentry review" };
+const REVIEW_MENTIONS = { coderabbit: "@coderabbitai review", seer: "@sentry review" };
 const fingerprint = (state) => createHash("sha256").update(JSON.stringify(state)).digest("hex");
 const reviewRequest = (comments, headSha, reviewer, generation) => [...comments].reverse().find((comment) => {
   const body = String(comment.body || "");
@@ -73,33 +74,36 @@ const reviewRequest = (comments, headSha, reviewer, generation) => [...comments]
       (body.includes(REVIEW_MENTIONS[reviewer]) || (reviewer !== "seer" && body.includes("Requested both reviews with the user credential."))));
 });
 
-const lastRequestedGeneration = (comments, headSha, reviewer) => {
-  const marker = `${REVIEW_REQUEST_PREFIX}${headSha}:${reviewer}:`;
-  for (const comment of [...comments].reverse()) {
-    const suffix = String(comment.body || "").split(marker)[1];
-    const match = suffix?.match(/^(initial|[a-f0-9]{64}) -->/);
-    if (match) return match[1];
-  }
-  return "initial";
-};
-
 // A finished response retires the request that led to it. Pending updates to the same
 // response keep its generation, so scheduling another gate run does not request it again.
-const reviewGenerations = ({ reviews, codex, codexComment, seerChecks, comments, headSha }) => {
+const reviewGenerations = ({ reviews, seerChecks, headSha }) => {
   const rabbit = reviews.filter((review) => botNamed(review.user, "coderabbitai") && review.commit_id === headSha &&
     ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(review.state))
     .sort((left, right) => String(left.submitted_at).localeCompare(String(right.submitted_at)) || left.id - right.id).at(-1);
   const seer = seerChecks.find((check) => check.status === "completed");
-  // Security reviews share this comment. Their updates do not finish another code review.
-  const codexRow = codexComment?.body?.split("\n").find((line) => line.includes("**Code Review**"));
-  const codexCompletedAt = codexRow?.match(/<relative-time datetime="([^"]+)">/)?.[1] || codexComment?.updated_at;
   return {
     coderabbit: rabbit ? fingerprint([rabbit.id, rabbit.state, rabbit.submitted_at]) : "initial",
-    codex: codex?.commitSha === headSha && codex.status === "completed"
-      ? fingerprint([codexComment.id, codexCompletedAt, codex])
-      : lastRequestedGeneration(comments, headSha, "codex"),
     seer: seer ? fingerprint([seer.id, seer.conclusion, seer.completed_at]) : "initial",
   };
+};
+
+const unstartedTests = async ({ runsBySuite, checkRuns, testsWorkflowId, headSha }) => {
+  const runs = [...runsBySuite.values()].filter(run => run.workflow_id === testsWorkflowId);
+  const histories = await Promise.all(runs.map(async run => ({
+    run, jobs: await paginate(`repos/${repo}/actions/runs/${run.id}/jobs?filter=all`, "jobs"),
+  })));
+  if (histories.some(({ run, jobs }) => jobs.some(job => !Number.isSafeInteger(job.id) || job.id <= 0 ||
+    typeof job.name !== "string" || !job.name || job.run_id !== run.id || job.head_sha !== headSha))) return [];
+  const jobs = histories.flatMap(history => history.jobs);
+  const neverStarted = job => job.runner_id === 0 && ["queued", "pending", "waiting", "requested", "completed"].includes(job.status) &&
+    Array.isArray(job.steps) && job.steps.every(step => !step.started_at && ["pending", "queued", "waiting", "skipped"].includes(step.status));
+  return REQUIRED_CHECKS.filter(name => {
+    const namedJobs = jobs.filter(job => job.name === name);
+    const namedChecks = checkRuns.filter(check => check.name === name && check.app?.slug === "github-actions" &&
+      runsBySuite.get(check.check_suite?.id)?.workflow_id === testsWorkflowId);
+    return namedJobs.every(neverStarted) && namedChecks.every(check => check.status !== "in_progress" &&
+      namedJobs.some(job => job.id === check.id));
+  });
 };
 
 const collectThreads = async (number) => {
@@ -157,17 +161,14 @@ const collectSnapshot = async (number) => {
   const baseIsAncestor = comparison?.base_commit?.sha === baseSha && comparison?.merge_base_commit?.sha === baseSha &&
     comparison?.behind_by === 0 && ["ahead", "identical"].includes(comparison?.status);
   const comments = Array.isArray(commentPage) ? commentPage : [];
-  const codexComment = [...comments].reverse().find((comment) => botNamed(comment.user, "chatgpt-codex-connector") && comment.body?.includes("codex-review-state:v1"));
-  const editor = codexComment ? (await graphql(`query($id: ID!) {
-    node(id: $id) { ... on IssueComment { editor { login } } }
-  }`, { id: codexComment.node_id })).node?.editor : null;
   const ownComments = comments.filter((comment) => botNamed(comment.user, "github-actions"));
-  const codex = parseCodexState(codexComment?.body || "");
   // This repository's installed Sentry integration publishes this check. Other apps,
   // old heads and skipped/neutral results cannot establish a clean Seer review.
   const seerChecks = checkRuns.filter((run) => run.app?.id === 12637 && run.app?.slug === "sentry" &&
     run.name === "Seer Code Review" && run.head_sha === pull.head.sha).sort((left, right) => right.id - left.id);
-  const generations = reviewGenerations({ reviews, codex, codexComment, seerChecks, comments: ownComments, headSha: pull.head.sha });
+  const generations = reviewGenerations({ reviews, seerChecks, headSha: pull.head.sha });
+  const unstartedChecks = statuses.some(status => status.context === "local-ci" && status.state === "success")
+    ? await unstartedTests({ runsBySuite, checkRuns, testsWorkflowId, headSha: pull.head.sha }) : [];
   const reviewWaitExpired = Object.fromEntries(Object.keys(REVIEW_MENTIONS).map((reviewer) => {
     const requested = reviewRequest(ownComments, pull.head.sha, reviewer, generations[reviewer]);
     const requestedAt = Date.parse(requested?.created_at);
@@ -214,6 +215,7 @@ const collectSnapshot = async (number) => {
     sameRepository: pull.head.repo?.full_name === pull.base.repo.full_name,
     mergeableState: pull.mergeable_state,
     checks,
+    unstartedChecks,
     reviews: reviews.map((review) => ({
       id: review.id,
       author: login(review.user),
@@ -223,8 +225,6 @@ const collectSnapshot = async (number) => {
       submittedAt: review.submitted_at,
     })),
     threads: await collectThreads(number),
-    codex,
-    codexEditor: editor?.login || "",
     seer: seerChecks[0] || null,
     reviewGenerations: generations,
     reviewRoundId: fingerprint([pull.head.sha, generations]),
@@ -361,7 +361,7 @@ const applyOne = async (number) => {
       decision.action = "flag";
       decision.reasons = [...decision.reasons, "merge-rejected"];
       decision.lines = [
-        ...decision.lines.filter((line) => !line.startsWith("Every check on")),
+        ...decision.lines.filter((line) => !line.startsWith("Required checks for")),
         `GitHub rejected the merge: ${mergeError}`,
         "Branch protection or a ruleset can block the GitHub Actions token. This workflow does not change those settings. A personal access token in the AUTO_MERGE_TOKEN secret merges as a user, which also lets the Tests workflow run on the merge commit.",
       ];
