@@ -1662,13 +1662,30 @@ try{
         assert.equal(webhook.status, 200, JSON.stringify(webhook));
         const duringGrace = await targetReport(keys);
         assertTarget(duringGrace, keys, keys.map(() => 'unknown'), []);
-        Date.now = () => changedAt + 1800000;
+        const recoveryTransitionAt = dodoPayment.updated_at == null ? Date.parse((await record()).updatedAt) : changedAt;
+        Date.now = () => recoveryTransitionAt + 1800000 - 1;
+        const repairBoundaryBefore = await targetReport(keys);
+        assertTarget(repairBoundaryBefore, keys, keys.map(() => 'unknown'), []);
+        Date.now = () => recoveryTransitionAt + 1800000;
         const after = await authorizedReport('GET', true);
         const targetedAfter = await targetReport(keys);
         assert.equal(after.body.count, 0, JSON.stringify(after.body));
         assertTarget(targetedAfter, keys, keys.map(() => 'recovered'), []);
+        const disputedTimingControls = [];
+        if (transition === 'dispute-open') {
+          assert.equal((await record()).verificationState, 'disputed');
+          for (const flag of [undefined, null, false, 'true']) {
+            const patch = commerce.patch(recordId);
+            await (flag === undefined ? patch.unset(['dodoDisputeActive']) : patch.set({ dodoDisputeActive: flag })).commit();
+            const targeted = await targetReport(keys);
+            assertTarget(targeted, keys, keys.map(() => 'unknown'), []);
+            disputedTimingControls.push({ flag: flag === undefined ? 'absent' : flag, targeted });
+          }
+          await commerce.patch(recordId).set({ dodoDisputeActive: true }).commit();
+          assertTarget(await targetReport(keys), keys, keys.map(() => 'recovered'), []);
+        }
         Date.now = originalNow;
-        repair = { webhook, duringGrace, after, targetedAfter };
+        repair = { webhook, duringGrace, recoveryTransitionAt, repairBoundaryBefore, after, targetedAfter, disputedTimingControls };
       }
       return { transition, provider: dodoPayment, before, targetedBefore, reverseBefore, boundaryBefore, mature, targetedMature, repair, createdDaysBeforeTransition: 10, graceMilliseconds: 1800000 };
     });
@@ -2654,7 +2671,7 @@ try{
     }));
     dodoPayment.created_at = old;
     const window = await authorizedReport('GET', true);
-    assert.equal(window.body.count, 0);
+    assert.deepEqual(reportReasons(window.body), ['owner_review_dodo_currency_mismatch']);
     const keys = ['record:' + recordId, 'payment:payment-fixture'];
     const owner = await targetReport(keys);
     assertTarget(owner, keys, ['unresolved', 'unresolved'], ['owner_review_dodo_currency_mismatch']);

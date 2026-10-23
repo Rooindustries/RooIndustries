@@ -311,6 +311,7 @@ const paymentReadyForAudit = (payment, now, record) => {
     record.providerPaymentId === payment.payment_id &&
     record.providerOrderId === payment.checkout_session_id &&
     (record.verificationState === "server_verified" ||
+      (record.verificationState === "disputed" && record.dodoDisputeActive === true) ||
       ["captured_client", "captured_webhook", "booked", "email_partial", "refunded"].includes(record.status));
   if (payment.updated_at == null && localCapture && record.updatedAt != null) updates.push(record.updatedAt);
   const timestamps = [payment.created_at, ...updates].map((value) => {

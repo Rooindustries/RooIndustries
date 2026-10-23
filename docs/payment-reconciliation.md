@@ -64,8 +64,8 @@ to finish. During that grace period, daily findings omit it and targeted checks
 return unknown, keeping existing issues open. Explicit terminal owner-review
 records still alert immediately because their automatic processing has stopped.
 If the optional update timestamp is absent or null, a matching server-confirmed
-local capture can supply its last update time. A pending start or finalization
-lease is not capture proof. Without reliable transition evidence, targeted
+local capture or validated active dispute can supply its last update time.
+A pending start or finalization lease is not capture proof. Without reliable transition evidence, targeted
 checks remain unknown and the window reports incomplete coverage; creation
 time alone cannot establish settlement age. The endpoint writes no observation
 record. Such a payment stays deferred until trustworthy timing becomes available.
