@@ -172,6 +172,48 @@ test("an unavailable coupon lookup preserves the applied coupon for retry", asyn
   await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
 });
 
+test("history restoration keeps the restored booking's codes during an outage", async ({ page, context, flow }, testInfo) => {
+  await page.goto("/?ref=friend");
+  await flow.review();
+  await flow.payment();
+  await page.locator("#payment-coupon-code").fill("save20");
+  await page.locator("#payment-coupon-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("checkout_booking_state"))?.couponCode)).toBe("save20");
+  await expect(page.locator("#payment-coupon-code")).toBeEnabled();
+  await context.route("**/api/ref/validateReferral?code=second", route => route.fulfill({ status: 503, json: { ok: false } }));
+  await context.route("**/api/ref/validateCoupon?code=save10*", route => route.fulfill({ status: 503, json: { ok: false } }));
+  const originalEmail = await page.evaluate(() => {
+    const booking = JSON.parse(sessionStorage.getItem("checkout_booking_state"));
+    const restored = {
+      ...booking,
+      email: "restored-visitor@example.invalid",
+      referralCode: "second",
+      couponCode: "save10",
+      checkoutCodes: {
+        referral: { code: "second", currentDiscountPercent: 5 },
+        coupon: { code: "save10", discountType: "percent", discountPercent: 10, canCombineWithReferral: true },
+        dismissedReferralCode: "",
+      },
+    };
+    history.replaceState({ ...history.state, usr: { ...history.state.usr, bookingData: booking } }, "", location.href);
+    history.pushState({ ...history.state, usr: { ...history.state.usr, bookingData: restored } }, "", location.href);
+    history.back();
+    return booking.email;
+  });
+  await expect.poll(() => page.evaluate(() => history.state?.usr?.bookingData?.email)).toBe(originalEmail);
+  const quoteCount = flow.state.calls.filter(call => call.path === "/api/payment/quote").length;
+  await page.goForward();
+  await expect(page.locator("#payment-referral-code")).toHaveValue("second");
+  await expect(page.locator("#payment-coupon-code")).toHaveValue("save10");
+  await expect(page.locator("#payment-coupon-code")).toBeEnabled();
+  await expect.poll(() => flow.state.calls.filter(call => call.path === "/api/payment/quote").length).toBeGreaterThan(quoteCount);
+  await expect.poll(() => flow.state.calls.filter(call => call.path === "/api/payment/quote").at(-1)?.body).toMatchObject({
+    referralCode: "second", couponCode: "save10",
+  });
+  const quote = flow.state.calls.filter(call => call.path === "/api/payment/quote").at(-1)?.body;
+  await testInfo.attach("restored-booking-quote", { body: JSON.stringify(quote), contentType: "application/json" });
+});
+
 test("a checkout whose session cannot be stored stays available for recovery", async ({ page, flow }) => {
   await page.goto("/?ref=friend");
   await flow.review();

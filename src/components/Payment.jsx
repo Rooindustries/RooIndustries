@@ -810,7 +810,7 @@ export default function Payment({ hideFooter = false }) {
           if (source === "referral") {
             if (result?.unavailable) {
               referralUnavailable = true;
-              nextReferral = referral || sanitizeReferralForCheckout({
+              nextReferral = sanitizeReferralForCheckout({
                 ...bookingData.checkoutCodes?.referral,
                 code: bookingData.referralCode,
               });
@@ -822,7 +822,7 @@ export default function Payment({ hideFooter = false }) {
           } else {
             if (result?.unavailable) {
               couponUnavailable = true;
-              nextCoupon = coupon || sanitizeCouponForCheckout({
+              nextCoupon = sanitizeCouponForCheckout({
                 ...bookingData.checkoutCodes?.coupon,
                 code: bookingData.couponCode,
               });
