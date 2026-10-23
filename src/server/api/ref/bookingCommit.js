@@ -306,6 +306,8 @@ export const createRequiresRescheduleBooking = async ({
   const booking = prepareDeterministicBooking({
     booking: {
       paymentRecordId: paymentRecord._id,
+      ...(payload.originalOrderId ? { originalOrderId: payload.originalOrderId } : {}),
+      cutoverGeneration: Math.max(0, Number(paymentRecord.cutoverGeneration) || 0),
       salesAttribution: sanitizeSalesAttribution(payload.salesAttribution),
       backendOwner:
         resolveStoreBackend(paymentRecord.backendOwner),

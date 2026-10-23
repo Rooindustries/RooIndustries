@@ -8,7 +8,9 @@ for (const key of [
   if (process.env[key] !== undefined) env[key] = process.env[key];
 }
 
-const testFile = process.argv.includes('--upgrade-credit')
+const testFile = process.argv.includes('--upgrade-credit-ownership')
+  ? 'tests/upgrade-credit-ownership.mjs'
+  : process.argv.includes('--upgrade-credit')
   ? 'tests/upgrade-credit.mjs'
   : 'tests/booking-contact.mjs';
 const result = spawnSync(process.execPath, ['--test', testFile], {

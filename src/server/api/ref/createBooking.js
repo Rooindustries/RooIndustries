@@ -310,6 +310,12 @@ export default async function handler(req, res) {
     const isInternalPaymentFinalization = !!req.internalContext && (
       !!paymentFinalizeSource || !!paymentProofClaimId || !!paymentFinalizationLeaseId
     );
+    if (isUpgrade && !isInternalPaymentFinalization) {
+      return res.status(410).json({
+        error: "Please restart the upgrade checkout.",
+        code: "upgrade_checkout_required",
+      });
+    }
     const preserveHistoricalAccounting =
       isInternalPaymentFinalization &&
       req.internalContext?.preserveHistoricalAccounting === true;
@@ -1639,7 +1645,7 @@ export default async function handler(req, res) {
               emailDispatchCompletedAt || new Date().toISOString(),
           }
         : {}),
-      ...(originalOrderId ? { originalOrderId } : {}),
+      ...(originalOrderId ? { originalOrderId: upgradeFunding?.rootOrderId || upgradeContext?.rootOrderId || originalOrderId } : {}),
       ...(couponCode
         ? {
             couponCode,

@@ -539,7 +539,25 @@ try {
     const duplicate=await create('upgradeLink',link('VALID-slug'));assertError(duplicate,400,'CMS_VALIDATION_FAILED');assert.ok(duplicate.details.some(row=>row.path==='$.slug'));
     const parallel=await Promise.all([create('upgradeLink',link('Concurrent-Slug')),create('upgradeLink',link('CONCURRENT-slug'))]);assert.equal(parallel.filter(row=>row.ok).length,1);assertError(parallel.find(row=>!row.ok),400,'CMS_VALIDATION_FAILED');
     const legacy=await create('upgradeLink',link('XOClawnmower'));assert.equal(legacy.ok,true);const current=await detail(legacy.data.documentId);const edited=await publish({operation:'replace',type:'upgradeLink',documentId:legacy.data.documentId,expectedRevision:current.data.revision,document:{...current.data.document,title:'Legacy mixed-case remains editable'}});assert.equal(edited.ok,true);assert.equal((await publicRead('xoclawnmower')).data.title,'Legacy mixed-case remains editable');
-    process.env.NODE_ENV='test';process.env.UPGRADE_INTENT_TOKEN_SECRET='synthetic-fixround-upgrade-secret';process.env.RATE_LIMIT_HASH_SECRET='synthetic-fixround-rate-secret';const bookingId=crypto.randomUUID();const saved=await fixture.client.rpc('roo_apply_document_mutations',{p_mutations:[{operation:'create',document:{_id:bookingId,_type:'booking',status:'captured',email:'slug@fixture.invalid',packageTitle:'Synthetic original package',packagePrice:'$1.00',grossAmount:1,netAmount:1}}]});assert.equal(saved.error,null);
+    process.env.NODE_ENV = 'test';
+    process.env.UPGRADE_INTENT_SECRET = 'synthetic-upgrade-secret';
+    process.env.RATE_LIMIT_HASH_SECRET = 'synthetic-rate-secret';
+    const bookingId = crypto.randomUUID();
+    const paymentRecordId = `paymentRecord.${bookingId}`;
+    const saved = await fixture.client.rpc('roo_apply_document_mutations', { p_mutations: [
+      { operation: 'create', document: { _id: bookingId, _type: 'booking', status: 'captured',
+        backendOwner: 'supabase', cutoverGeneration: 0, email: 'slug@fixture.invalid',
+        packageTitle: 'Synthetic original package', packagePrice: '$1.00', grossAmount: 1, netAmount: 1,
+        paymentRecordId, paymentProvider: 'paypal', paypalOrderId: `order_${bookingId}` } },
+      { operation: 'create', document: { _id: paymentRecordId, _type: 'paymentRecord',
+        backendOwner: 'supabase', cutoverGeneration: 0, status: 'booked', provider: 'paypal',
+        verificationState: 'server_verified', bookingId, providerOrderId: `order_${bookingId}`,
+        providerPaymentId: `capture_${bookingId}`, pricingSnapshot: { currency: 'USD', netAmount: 1 },
+        providerPublicData: { currency: 'USD', totalAmount: 100, taxAmount: 0, taxInclusive: false } } },
+    ] });
+    assert.equal(saved.error, null);
+    const projected = await fixture.client.rpc('roo_refresh_operational_shadow');
+    assert.equal(projected.error, null);
     const {default:getUpgradeInfo}=await import('../src/server/api/ref/getUpgradeInfo.js');const response={statusCode:200,headers:{},setHeader(key,value){this.headers[key]=value;},status(code){this.statusCode=code;return this;},json(value){this.body=value;return this;}};await getUpgradeInfo({method:'POST',headers:{'x-forwarded-for':'127.0.0.1'},body:{id:bookingId,email:'slug@fixture.invalid',slug:'XOClawnmower'}},response);assert.equal(response.statusCode,200,JSON.stringify(response.body));assert.equal(response.body.upgradeLink.title,'Legacy mixed-case remains editable');assert.equal(response.body.targetPackage.title,'Synthetic slug target');observed('BH3 exact public and upgrade-info roundtrip',{invalidField:invalid.details,duplicateField:duplicate.details,parallelSuccessCount:1,legacyStoredSlug:(await detail(legacy.data.documentId)).data.document.slug.current,upgradeInfo:response.body.upgradeLink});
   });
   await scenario('R10-admin-key-attempts-and-R12-region',async()=>{

@@ -1260,6 +1260,8 @@ const createStartClaimAndRecord = async ({
   holdPatch = {},
   couponReservationPlan = null,
   appendCouponReservation = null,
+  previousClaim = null,
+  creditSources = [],
 }) => {
   if (typeof client?.transaction !== "function") {
     const error = new Error("Atomic payment storage is unavailable.");
@@ -1270,7 +1272,15 @@ const createStartClaimAndRecord = async ({
   if (holdDoc?._id) requirePaymentRevision(holdDoc);
 
   try {
-    let transaction = client.transaction().create(claim).create(record);
+    let transaction = client.transaction().create(record);
+    if (previousClaim) {
+      transaction.patch(claim._id, patch => guardPaymentRevision(patch, previousClaim).set(claim));
+    } else {
+      transaction.create(claim);
+    }
+    for (const source of new Map(creditSources.map(source => [source._id, source])).values()) {
+      transaction.patch(source._id, patch => guardPaymentRevision(patch, source).set({}));
+    }
     if (couponReservationPlan && typeof appendCouponReservation === "function") {
       transaction = appendCouponReservation({
         transaction,
@@ -1283,7 +1293,7 @@ const createStartClaimAndRecord = async ({
       });
     }
     if (client?.backend === "supabase") {
-      await transaction.commit({ commandId: `payment-start:${claim._id}` });
+      await transaction.commit({ commandId: `payment-start:${claim._id}:${record._id}` });
     } else {
       await transaction.commit();
     }
@@ -2874,8 +2884,9 @@ const createOrReusePaymentRecordForStart = async ({
     : baseSessionScope;
   const paymentRecordId = buildPaymentSessionRecordId(sessionScope);
   const startClaimId = isUpgrade
-    ? buildPaymentUpgradeLockId(sessionScope)
+    ? buildPaymentUpgradeLockId(`upgrade:${quote.upgradeContext.rootOrderId}`)
     : buildPaymentStartClaimId(sessionScope);
+  let previousClaim = null;
   if (isUpgrade) {
     const claim = await getDocumentById({
       client,
@@ -2885,7 +2896,28 @@ const createOrReusePaymentRecordForStart = async ({
     const existing = claim?.paymentRecordId
       ? await getPaymentRecordById(client, claim.paymentRecordId)
       : null;
-    if (!existing?._id) {
+    if (!claim) {
+      const legacyPayments = await client.fetch(
+        `*[_type == "paymentRecord" && bookingPayload.originalOrderId in $ids && status in $statuses][0]{_id}`,
+        { ids: [quote.upgradeContext.rootOrderId, ...quote.upgradeContext.paidBookings.map(booking => booking._id)],
+          statuses: [PAYMENT_STATUS_STARTED, PAYMENT_STATUS_CAPTURED_CLIENT, PAYMENT_STATUS_CAPTURED_WEBHOOK,
+            PAYMENT_STATUS_FINALIZING, PAYMENT_STATUS_NEEDS_RECOVERY, "verified_server"] }
+      );
+      if (legacyPayments?._id) {
+        throw Object.assign(new Error("Another upgrade is already using this booking's credit."), {
+          status: 409, code: "upgrade_already_in_progress",
+        });
+      }
+    }
+    if (existing?.bookingId && [PAYMENT_STATUS_BOOKED, PAYMENT_STATUS_EMAIL_PARTIAL].includes(existing.status)) {
+      if (!quote.upgradeContext.paidBookings.some(booking => booking._id === existing.bookingId)) {
+        throw Object.assign(new Error("The original booking changed. Please review the upgrade again."), {
+          status: 409, code: "upgrade_credit_changed_after_quote",
+        });
+      }
+      previousClaim = claim;
+    }
+    if (!existing?._id || previousClaim) {
       const fields = ["discord", "specs", "mainGame", "message", "localTimeZone"].filter(
         field => Object.hasOwn(rawBookingPayload, field) &&
           (typeof rawBookingPayload[field] !== "string" || rawBookingPayload[field].trim())
@@ -3032,7 +3064,17 @@ const createOrReusePaymentRecordForStart = async ({
     holdPatch,
     couponReservationPlan,
     appendCouponReservation: appendReservation,
+    previousClaim,
+    creditSources: isUpgrade ? quote.upgradeContext.creditSources : [],
   });
+
+  if (isUpgrade && (record.bookingPayload.originalOrderId !== bookingPayload.originalOrderId ||
+      record.bookingPayload.email !== bookingPayload.email ||
+      record.bookingPayload.packageTitle !== bookingPayload.packageTitle)) {
+    throw Object.assign(new Error("Another upgrade is already using this booking's credit."), {
+      status: 409, code: "upgrade_already_in_progress",
+    });
+  }
 
   if (String(record.provider || "").trim().toLowerCase() !== provider) {
     const error = new Error("This reservation already has a payment provider selected.");
@@ -3961,6 +4003,7 @@ const recoverCapturedPaymentAsReschedule = async ({
   ).trim();
   const recoveryRecord = {
     ...record,
+    ...(upgradeFunding ? { bookingPayload: { ...record.bookingPayload, originalOrderId: upgradeFunding.rootOrderId } } : {}),
     providerOrderId: recoveredProviderOrderId,
     providerPaymentId: recoveredProviderPaymentId,
     payerEmail: String(

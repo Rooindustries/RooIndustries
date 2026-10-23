@@ -3,6 +3,7 @@ import packagePricing from "../../../lib/packagePricing.js";
 import { resolvePaymentCurrency } from "./bookingRefunds.js";
 import { parseMoneySubunits } from "../payment/providerClients.js";
 import { logSafeError } from "../../safeErrorLog.js";
+import { buildPaymentUpgradeLockId } from "../payment/paymentRecord.js";
 
 const {
   applyPackagePricing,
@@ -141,26 +142,25 @@ export const getRetainedUpgradeCredit = async ({ booking, client, creditSources 
   if (Array.isArray(creditSources) && Array.isArray(records)) {
     creditSources.push(...records.filter(record => record?._id));
   }
-  const hasSettledRefund =
-    (booking.refundedAmount != null && Number(booking.refundedAmount) !== 0) ||
-    ["partial", "full"].includes(booking.refundStatus) ||
-    (Array.isArray(records) && records.some(record =>
-      ["partial", "full"].includes(record?.refundState) || record?.status === "refunded" ||
-      Number(record?.refundProcessedAmountInSubunits) > 0 ||
-      (Array.isArray(record?.refunds) && record.refunds.some(refund => refund?.status === "processed"))));
-  if (!hasSettledRefund) return getPaidAmount(booking);
-  if (records && !Array.isArray(records)) throw creditError();
-  if (records?.length > 1 || (booking.paymentRecordId && !records?.[0]?._id)) throw creditError();
-  const record = records?.[0] || null;
-  const paid = record?.pricingSnapshot?.netAmount == null
-    ? creditSubunits(getPaidAmount(booking))
-    : creditSubunits(record.pricingSnapshot.netAmount);
-  if (record && (record._type !== "paymentRecord" || record.bookingId !== booking._id ||
-      (booking.paymentProvider && record.provider !== booking.paymentProvider))) throw creditError();
-  const provider = record?.provider || booking.paymentProvider;
+  if (!Array.isArray(records) || records.length !== 1 || !records[0]?._id) throw creditError();
+  const record = records[0];
+  if (record._type !== "paymentRecord" || record.bookingId !== booking._id ||
+      record.provider !== booking.paymentProvider || !record.backendOwner ||
+      record.backendOwner !== booking.backendOwner ||
+      Number(record.cutoverGeneration || 0) !== Number(booking.cutoverGeneration || 0)) throw creditError();
+  const provider = record.provider;
+  if (!["paypal", "razorpay", "dodo", "free"].includes(provider)) throw creditError();
+  if (record.dodoDisputeActive === true || booking.dodoDisputeActive === true ||
+      (record.dodoDisputes != null && (!Array.isArray(record.dodoDisputes) ||
+        record.dodoDisputes.some(dispute => !["dispute_won", "dispute_cancelled"].includes(dispute?.status))))) throw creditError();
+  if (record.pricingSnapshot?.netAmount == null ||
+      (provider !== "free" && record.verificationState !== "server_verified")) throw creditError();
+  if (!["booked", "email_partial", "refunded"].includes(record.status)) throw creditError();
+  const paid = creditSubunits(record.pricingSnapshot.netAmount);
   let currency;
   try {
-    currency = resolvePaymentCurrency(record || {}, { booking, fallback: "USD" });
+    currency = resolvePaymentCurrency(record, { fallback: "" });
+    resolvePaymentCurrency(record, { booking, fallback: "" });
   } catch {
     throw creditError();
   }
@@ -172,41 +172,39 @@ export const getRetainedUpgradeCredit = async ({ booking, client, creditSources 
     : provider === "paypal" ? booking.paypalOrderId : booking.razorpayOrderId;
   const providerPaymentId = provider === "dodo" ? booking.dodoPaymentId
     : provider === "razorpay" ? booking.razorpayPaymentId : "";
-  if (record && ((providerOrderId && record.providerOrderId !== providerOrderId) ||
-      (providerPaymentId && record.providerPaymentId !== providerPaymentId))) throw creditError();
-  if (booking.refundStatus === "full" || record?.refundState === "full" || record?.status === "refunded") return null;
+  if (provider !== "free" && (!providerOrderId || record.providerOrderId !== providerOrderId ||
+      !record.providerPaymentId || (["dodo", "razorpay"].includes(provider) &&
+        (!providerPaymentId || record.providerPaymentId !== providerPaymentId)))) throw creditError();
+  if (provider === "free" && paid !== 0) throw creditError();
+  if (["full", "reversal"].includes(booking.refundStatus) ||
+      ["full", "reversal"].includes(record.refundState) || record.status === "refunded") return null;
 
   const bookingRefunded = booking.refundedAmount == null ? 0 : creditSubunits(booking.refundedAmount);
   const settled = new Map();
-  let refunded = 0;
-  if (record) {
-    if (record.refunds != null && !Array.isArray(record.refunds)) throw creditError();
-    const identified = new Map();
-    for (const refund of record.refunds || []) {
-      if (!refund || typeof refund !== "object") throw creditError();
-      if (!["processed", "pending", "review", "failed"].includes(refund.status) ||
-          typeof refund.providerRefundId !== "string" || !refund.providerRefundId.trim()) throw creditError();
-      if (refund.providerPaymentId && refund.providerPaymentId !== record.providerPaymentId) throw creditError();
-      const amount = refund.amount == null && refund.amountInSubunits == null ? null : refundSubunits(refund);
-      const previous = identified.get(refund.providerRefundId);
-      if (previous != null && amount !== null && previous !== amount) throw creditError();
-      if (amount !== null) identified.set(refund.providerRefundId, amount);
-      if (refund.status !== "processed") continue;
-      if (!refund.currency || !refund.providerPaymentId || refund.reversed === true || amount === null) throw creditError();
-      settled.set(refund.providerRefundId, amount);
-    }
-    refunded = [...settled.values()].reduce((sum, amount) => sum + amount, 0);
-    if (!Number.isSafeInteger(refunded) || bookingRefunded > refunded) throw creditError();
-    if (record.refundProcessedAmountInSubunits != null &&
-        record.refundProcessedAmountInSubunits !== refunded) throw creditError();
-    if (record.providerRefundDetailsMissing === true) throw creditError();
+  if (record.refunds != null && !Array.isArray(record.refunds)) throw creditError();
+  const identified = new Map();
+  for (const refund of record.refunds || []) {
+    if (!refund || typeof refund !== "object") throw creditError();
+    if (!["processed", "pending", "review", "failed"].includes(refund.status) ||
+        typeof refund.providerRefundId !== "string" || !refund.providerRefundId.trim()) throw creditError();
+    if (refund.providerPaymentId && refund.providerPaymentId !== record.providerPaymentId) throw creditError();
+    const amount = refund.amount == null && refund.amountInSubunits == null ? null : refundSubunits(refund);
+    const previous = identified.get(refund.providerRefundId);
+    if (previous != null && amount !== null && previous !== amount) throw creditError();
+    if (amount !== null) identified.set(refund.providerRefundId, amount);
+    if (refund.status !== "processed") continue;
+    if (!refund.currency || !refund.providerPaymentId || refund.reversed === true || amount === null) throw creditError();
+    settled.set(refund.providerRefundId, amount);
   }
-  if ((booking.refundStatus === "partial" || record?.refundState === "partial") && refunded === 0) throw creditError();
-  if (!record && bookingRefunded > 0) throw creditError();
+  const refunded = [...settled.values()].reduce((sum, amount) => sum + amount, 0);
+  if (!Number.isSafeInteger(refunded) || bookingRefunded > refunded) throw creditError();
+  if (record.refundProcessedAmountInSubunits != null &&
+      record.refundProcessedAmountInSubunits !== refunded) throw creditError();
+  if (record.providerRefundDetailsMissing === true) throw creditError();
+  if ((booking.refundStatus === "partial" || record.refundState === "partial") && refunded === 0) throw creditError();
   if (refunded > 0 && !["paypal", "razorpay", "dodo"].includes(provider)) throw creditError();
-  if (record?.verificationState !== "server_verified" || record.pricingSnapshot?.netAmount == null) throw creditError();
 
-  const publicData = record?.providerPublicData || {};
+  const publicData = record.providerPublicData || {};
   const tax = publicData.taxAmount ?? (provider === "dodo" ? null : 0);
   const total = publicData.totalAmount ?? (provider === "dodo" || tax !== 0 ? null : paid);
   if (!Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(tax) || tax < 0 || tax > total) {
@@ -289,21 +287,18 @@ export async function resolveUpgradeContext({
   if (!Array.isArray(paidBookings) || !paidBookings.some(entry => entry?._id === booking._id)) throw creditError();
   let totalPaid = 0;
   const retainedBookings = [];
-  const creditSources = forFinalization ? [] : null;
+  const creditSources = [];
   for (const entry of paidBookings) {
-    const paidEntry = forFinalization
-      ? await client.fetch(`*[_type == "booking" && _id == $id][0]{...}`, { id: entry._id }) : entry;
-    if (forFinalization && !["captured", "completed"].includes(String(paidEntry?.status || "").toLowerCase())) {
+    const paidEntry = await client.fetch(`*[_type == "booking" && _id == $id][0]{...}`, { id: entry._id });
+    if (!["captured", "completed"].includes(String(paidEntry?.status || "").toLowerCase())) {
       if (entry._id === booking._id) {
         throw createApiError(400, "Only paid bookings can be upgraded.", "original_booking_unpaid");
       }
       continue;
     }
-    if (forFinalization && paidEntry._id !== rootOrderId && paidEntry.originalOrderId !== rootOrderId) throw creditError();
-    if (forFinalization) {
-      creditSources.push(paidEntry);
-      if (paidEntry._id === booking._id) booking = paidEntry;
-    }
+    if (paidEntry._id !== rootOrderId && paidEntry.originalOrderId !== rootOrderId) throw creditError();
+    creditSources.push(paidEntry);
+    if (paidEntry._id === booking._id) booking = paidEntry;
     const credit = await getRetainedUpgradeCredit({ booking: paidEntry, client, creditSources });
     if (credit === null) {
       if (entry._id === booking._id) {
@@ -339,7 +334,7 @@ export async function resolveUpgradeContext({
     targetPrice,
     totalPaid: toMoney(totalPaid),
     upgradePrice,
-    ...(forFinalization ? { creditSources } : {}),
+    creditSources,
   };
 }
 
@@ -357,6 +352,17 @@ export const resolveCapturedUpgradeFunding = async ({ record, client }) => {
       throw createApiError(409, "The original booking changed after checkout.", "upgrade_credit_changed_after_quote");
     }
     throw error;
+  }
+  const lock = await client.fetch(`*[_type == "paymentUpgradeLock" && _id == $id][0]{...}`, {
+    id: buildPaymentUpgradeLockId(`upgrade:${context.rootOrderId}`),
+  });
+  if (!lock?._rev || lock.paymentRecordId !== record._id) {
+    throw createApiError(409, "This upgrade no longer owns the original booking credit.", "upgrade_credit_changed_after_quote");
+  }
+  context.creditSources.push(lock);
+  if (context.paidBookings.some(booking => normalizePackageTitle(booking.packageTitle) ===
+      normalizePackageTitle(record.bookingPayload.packageTitle))) {
+    throw createApiError(409, "This booking already received the upgrade.", "upgrade_credit_changed_after_quote");
   }
   const captured = creditSubunits(record.pricingSnapshot.netAmount);
   const approvedDiscount = creditSubunits(record.pricingSnapshot.grossAmount) - captured;
@@ -383,6 +389,7 @@ export async function resolveBookingPricing({
   pricingInputs = null,
 }) {
   const isUpgrade = !!originalOrderId;
+  let resolvedUpgradeContext = null;
   const normalizedCouponCode = normalizeCouponCode(couponCode);
   const normalizedReferralCode = normalizeReferralCode(referralCode);
 
@@ -402,7 +409,7 @@ export async function resolveBookingPricing({
     effectivePackageId = packageDoc?._id || "";
     effectivePackageTitle = packageDoc?.title || effectivePackageTitle;
   } else {
-    const resolvedUpgradeContext =
+    resolvedUpgradeContext =
       upgradeContext ||
       (await resolveUpgradeContext({
         originalOrderId,
@@ -616,6 +623,7 @@ export async function resolveBookingPricing({
   );
 
   return {
+    ...(resolvedUpgradeContext ? { upgradeContext: resolvedUpgradeContext } : {}),
     canCombineWithReferral,
     couponDiscountAmount,
     couponDiscountPercent,

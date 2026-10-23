@@ -146,6 +146,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       '/api/payment/quote': '../../src/server/api/payment/quote.js',
       '/api/payment/finalize': '../../src/server/api/payment/finalize.js',
       '/api/payment/status': '../../src/server/api/payment/status.js',
+      '/api/payment/cancel': '../../src/server/api/payment/cancel.js',
       '/api/payment/reconcile': '../../src/server/api/payment/reconcile.js',
       '/api/payment/webhook/dodo': '../../src/server/api/payment/webhookDodo.js',
       '/api/ref/getUpgradeInfo': '../../src/server/api/ref/getUpgradeInfo.js',
@@ -239,7 +240,16 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
         paypalOrderId: `order_fixture_${nextDate}`, status: 'captured', ...details,
         startTimeUTC: `${dateSlots[nextDate - 1].date}T04:30:00.000Z`,
         displayDate: 'Legacy date', displayTime: '10:00 AM', ...changes };
+      const paymentRecordId = `paymentRecord.${original._id}`;
+      original.paymentRecordId = paymentRecordId;
       await commerce.create(original);
+      await commerce.create({ _id: paymentRecordId, _type: 'paymentRecord',
+        backendOwner: 'supabase', cutoverGeneration: 0, provider: 'paypal', status: 'booked',
+        verificationState: 'server_verified', bookingId: original._id,
+        providerOrderId: original.paypalOrderId, providerPaymentId: `capture_${original._id}`,
+        pricingSnapshot: { currency: 'USD', grossAmount: 54.95, netAmount: 54.95 },
+        providerPublicData: { currency: 'USD', totalAmount: 5495, taxAmount: 0, taxInclusive: false },
+      });
       const lookup = await post('/api/ref/getUpgradeInfo', { id: original._id, email: original.email });
       assert.equal(lookup.status, 200, JSON.stringify(lookup));
       return { original, payload: { originalOrderId: original._id, packageTitle: lookup.body.targetPackage.title,
@@ -255,7 +265,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       paymentTaxInclusive = value;
     };
     const setPaymentAmountOverrides = values => {
-      assert.ok(Object.keys(values).every(key => ['tax', 'total_amount'].includes(key)));
+      assert.ok(Object.keys(values).every(key => ['tax', 'total_amount', 'status', 'disputes'].includes(key)));
       paymentAmountOverrides = { ...values };
     };
     const dodoWebhook = async (paymentId, type, eventId) => {
