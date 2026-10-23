@@ -181,7 +181,7 @@ export default async function handler(req, res) {
     }
 
     let committedUpdate = null;
-    for (let attempt = 0; attempt < MAX_PAYMENT_UPDATE_ATTEMPTS; attempt += 1) {
+    for (let attempt = 0; attempt <= MAX_PAYMENT_UPDATE_ATTEMPTS; attempt += 1) {
       const receipt = await writeClient.getDocument(receiptId);
       if (receipt && receipt.requestHash !== requestHash) {
         return res.status(409).json({ok: false, error: 'This payoutId already records a different transfer.'});
@@ -191,6 +191,7 @@ export default async function handler(req, res) {
         committedUpdate = buildPaymentUpdate({referral, packageType, entry: receipt.paymentEntry, entryId: key, earnings});
         break;
       }
+      if (attempt === MAX_PAYMENT_UPDATE_ATTEMPTS) break;
       if ([...(referral.xocPayments || []), ...(referral.vertexPayments || [])].some(payment => payment?._key === key)) {
         return res.status(409).json({ok: false, error: 'This key belongs to an existing payment log. Use a new payoutId for a new transfer.'});
       }
@@ -233,7 +234,6 @@ export default async function handler(req, res) {
         break;
       } catch (error) {
         if (!isRevisionConflict(error)) throw error;
-        if (attempt === MAX_PAYMENT_UPDATE_ATTEMPTS - 1) break;
 
         referral = await fetchReferral(referralId);
         if (!referral) {
