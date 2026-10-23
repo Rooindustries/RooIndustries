@@ -62,7 +62,7 @@ async function fetchHomePageData({
   const safeFetch = async (resource, fallback) => {
     try {
       const data = await fetchContent(resource);
-      if (data == null) failed.add(resource);
+      if (data == null && (resource === "hero" || requiredResources.includes(resource))) failed.add(resource);
       return data ?? fallback;
     } catch {
       failed.add(resource);

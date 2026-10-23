@@ -465,20 +465,17 @@ export default function ContentAdmin() {
     setSaving(true);
     setBanner(null);
     try {
-      let data;
-      if (pending.session.documentId) data = await api.getDocument(pending.session.documentId);
-      else {
-        const receipt = await api.getCreateStatus(pending.session.type, pending.session.createIntentId, pending.document);
-        if (!isCurrentSelection(pending.generation)) return;
-        if (!hasCommittedCreateReceipt(receipt, pending.session)) { notPublished(); return; }
-        data = { ...(await api.getDocument(receipt.documentId)), documentId: receipt.documentId, receipt };
-      }
+      const receipt = await api.getPublishStatus(pending.command);
+      if (!isCurrentSelection(pending.generation)) return;
+      if (receipt?.committed !== true || receipt.type !== pending.session.type || typeof receipt.revision !== "string" || !receipt.revision.trim() ||
+          (pending.session.documentId ? receipt.documentId !== pending.session.documentId : !hasCommittedCreateReceipt(receipt, pending.session))) { notPublished(); return; }
+      const data = { ...(await api.getDocument(receipt.documentId)), documentId: receipt.documentId, receipt };
       if (!isCurrentSelection(pending.generation)) return;
       const documentId = pending.session.documentId || data?.documentId;
       if (!documentId || data?.document?._id !== documentId || data.document._type !== pending.session.type || typeof data.revision !== "string" || !data.revision || data.revision !== data.document._rev) {
         throw new Error("The publication status could not be read.");
       }
-      if (publishedContentMatches(data, pending.session, pending.document, TYPES_BY_NAME.get(pending.session.type), pending.removedPaths)) {
+      if (receipt.revision === data.revision && publishedContentMatches(data, pending.session, pending.document, TYPES_BY_NAME.get(pending.session.type), pending.removedPaths)) {
         await finishPublication(pending, documentId);
       } else notPublished();
     } catch (error) {
@@ -511,22 +508,22 @@ export default function ContentAdmin() {
     flushDraft({ force: true });
     setSaving(true);
     const submitted = working;
-    const pending = { generation: selectedGeneration, session, document: submitted, removedPaths: session.documentId ? removedContentPaths(session.baseline, submitted, type) : [] };
+    const body = session.documentId
+      ? {
+          operation: "replace",
+          type: session.type,
+          documentId: session.documentId,
+          document: submitted,
+          expectedRevision: session.revision,
+        }
+      : {
+          operation: "create",
+          type: session.type,
+          createIntentId: session.createIntentId,
+          document: submitted,
+        };
+    const pending = { generation: selectedGeneration, session, command: body, document: submitted, removedPaths: session.documentId ? removedContentPaths(session.baseline, submitted, type) : [] };
     try {
-      const body = session.documentId
-        ? {
-            operation: "replace",
-            type: session.type,
-            documentId: session.documentId,
-            document: submitted,
-            expectedRevision: session.revision,
-          }
-        : {
-            operation: "create",
-            type: session.type,
-            createIntentId: session.createIntentId,
-            document: submitted,
-          };
       const result = await api.publish(body);
       if (!isCurrentSelection(selectedGeneration)) return;
       if (result?.committed !== true || typeof result.revision !== "string" || !result.revision || typeof result.documentId !== "string" || !result.documentId || (session.documentId && result.documentId !== session.documentId)) {

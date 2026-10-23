@@ -136,6 +136,8 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
   let contentOutage = false;
   let contentMissing = (process.env.TOOLING_CONTENT_MISSING || '').split(',').filter(Boolean);
   let contentFailure = process.env.TOOLING_CONTENT_FAILURE || '';
+  let publishResponseFailure = '';
+  let receiptFailure = '';
   const cmsReceipts = new Map();
   const changedContent = new Set();
   const emails = [];
@@ -175,11 +177,23 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
             const index = documents.findIndex(value => value._id === id);
             const initial = initialDocuments.find(value => value._id === id);
             if (index >= 0 && initial) documents[index] = structuredClone(initial);
+            else if (index >= 0) documents.splice(index, 1);
           }
           changedContent.clear();
           contentOutage = false;
           contentMissing = [];
           contentFailure = '';
+          publishResponseFailure = '';
+          receiptFailure = '';
+          cmsReceipts.clear();
+        }
+        if (body.publishResponseFailure !== undefined) {
+          if (!['', '5xx', 'timeout', 'invalid-receipt'].includes(body.publishResponseFailure)) throw new Error('Invalid fixture publish response failure.');
+          publishResponseFailure = body.publishResponseFailure;
+        }
+        if (body.receiptFailure !== undefined) {
+          if (!['', 'missing', 'outage', 'command', 'operation', 'document-id', 'type', 'revision', 'replayed'].includes(body.receiptFailure)) throw new Error('Invalid fixture receipt failure.');
+          receiptFailure = body.receiptFailure;
         }
         if (body.outage !== undefined) {
           const documentTypes = Array.isArray(body.outage) && body.outage.length > 0 && body.outage.every(type => typeof type === 'string' && type);
@@ -206,16 +220,37 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         call.status = 200;
         json(res, 200, evidence);
       } else if (cms && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_cms_publish_command_result') {
-        if (contentOutage === true) throw Object.assign(new Error('Synthetic receipt outage.'), { status: 503 });
+        if (contentOutage === true || receiptFailure === 'outage') throw Object.assign(new Error('Synthetic receipt outage.'), { status: 503 });
+        const saved = cmsReceipts.get(body.p_command_id);
+        if (saved && (saved.requestHash !== body.p_request_hash || saved.actor !== body.p_actor)) throw Object.assign(new Error('Synthetic receipt identity conflict.'), { status: 409, code: '40001' });
+        const receipt = receiptFailure === 'missing' ? null : structuredClone(saved?.receipt || null);
+        if (receipt) {
+          if (receiptFailure === 'command') receipt.command_id = 'cms:' + '0'.repeat(64);
+          if (receiptFailure === 'operation') receipt.operation = 'delete';
+          if (receiptFailure === 'document-id') receipt.document_ids = ['unrelated-document'];
+          if (receiptFailure === 'type') receipt.results[0]._type = 'unrelated-type';
+          if (receiptFailure === 'revision') receipt.results[0]._rev = '';
+          if (receiptFailure === 'replayed') receipt.replayed = false;
+        }
         call.status = 200;
-        json(res, 200, cmsReceipts.get(body.p_command_id) || null);
+        json(res, 200, receipt);
       } else if (cms && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_apply_cms_publish_command') {
         const results = mutate(body.p_mutations);
-        const receipt = { replayed: true, results };
-        cmsReceipts.set(body.p_command_id, receipt);
+        const receipt = { command_id: body.p_command_id, operation: body.p_mutations[0].operation, document_ids: results.map(row => row._id), assets: 0, replayed: true, results };
+        cmsReceipts.set(body.p_command_id, { receipt, requestHash: body.p_request_hash, actor: body.p_actor });
         for (const row of results) changedContent.add(row._id);
+        call.committed = true;
+        if (publishResponseFailure === '5xx') throw Object.assign(new Error('Synthetic response lost after commit.'), { status: 503 });
+        if (publishResponseFailure === 'timeout') {
+          call.delayMs = 35000;
+          await new Promise(resolve => {
+            const timer = setTimeout(resolve, call.delayMs);
+            res.once('close', () => { clearTimeout(timer); resolve(); });
+          });
+          if (res.destroyed) return;
+        }
         call.status = 200;
-        json(res, 200, { ...receipt, replayed: false });
+        json(res, 200, { ...receipt, replayed: false, ...(publishResponseFailure === 'invalid-receipt' ? { results: [] } : {}) });
       } else if (apiRoutes && url.pathname === '/__fixture' && ['GET', 'POST'].includes(req.method)) {
         if (req.method === 'POST') {
           if (body.reset === true) {
