@@ -9,6 +9,7 @@ import { assertPublicContentShape } from "./publicContentShape.js";
 import { clearSupabaseAssetManifestCache, enrichSupabaseContentAssets } from "../supabase/assets.js";
 import policyContent from "../../lib/policyContent";
 import { UPGRADE_LINK_SLUG_PATTERN } from "../../lib/globalCmsContract.js";
+import { logSafeError } from "../safeErrorLog.js";
 
 const { applyPublicPolicyOverrides } = policyContent;
 
@@ -106,7 +107,8 @@ const validateAllowedParameters = (resource, searchParams) => {
   }
 };
 
-const loadSupabasePublicContent = async ({ resource, query, params, fresh = false }) => {
+export const loadSupabasePublicContent = async ({ resource, query, params, fresh = false, allowFallback = true }) => {
+  const fallbackAllowed = allowFallback && process.env.NEXT_PHASE !== "phase-production-build";
   const load = async () => {
     const client = createSupabaseAdminClient({
       signal: AbortSignal.timeout(5000),
@@ -137,17 +139,33 @@ const loadSupabasePublicContent = async ({ resource, query, params, fresh = fals
       });
       return data;
     })
-    .catch((error) => {
-      if (supabaseContentCache.get(key)?.pending !== pending) throw error;
-      if (cached?.hasData && cached.staleUntil > Date.now()) {
-        supabaseContentCache.set(key, {
-          ...cached,
-          expiresAt: Date.now() + SUPABASE_CONTENT_RETRY_TTL_MS,
-          pending: null,
-        });
+    .catch(async (error) => {
+      if (fallbackAllowed && cached?.hasData && cached.staleUntil > Date.now()) {
+        if (supabaseContentCache.get(key)?.pending === pending) {
+          supabaseContentCache.set(key, {
+            ...cached,
+            expiresAt: Date.now() + SUPABASE_CONTENT_RETRY_TTL_MS,
+            pending: null,
+          });
+        }
         return cached.data;
       }
-      supabaseContentCache.delete(key);
+      if (fallbackAllowed && process.env.NODE_ENV === "production") {
+        try {
+          const { default: snapshot } = await import("../../generated/public-content.json", { with: { type: "json" } });
+          if (snapshot.version !== 1 || !snapshot.resources || !Object.hasOwn(snapshot.resources, resource)) throw new Error("The build content snapshot is invalid.");
+          const data = snapshot.resources[resource];
+          assertPublicContentShape(resource, data, DOCUMENT_TYPES_BY_RESOURCE[resource][0]);
+          if (supabaseContentCache.get(key)?.pending === pending) {
+            supabaseContentCache.set(key, { data, hasData: true, expiresAt: Date.now() + SUPABASE_CONTENT_RETRY_TTL_MS, staleUntil: Date.now() + SUPABASE_CONTENT_STALE_TTL_MS });
+          }
+          logSafeError("Public content read failed; using build content", error);
+          return data;
+        } catch (snapshotError) {
+          logSafeError("Public content build fallback failed", snapshotError);
+        }
+      }
+      if (supabaseContentCache.get(key)?.pending === pending) supabaseContentCache.delete(key);
       throw error;
     });
 
@@ -155,8 +173,13 @@ const loadSupabasePublicContent = async ({ resource, query, params, fresh = fals
   return pending;
 };
 
-export const clearSupabasePublicContentCache = () => {
-  supabaseContentCache.clear();
+export const clearSupabasePublicContentCache = ({ preserveStale = false } = {}) => {
+  if (preserveStale) {
+    for (const [key, cached] of supabaseContentCache) {
+      if (cached.hasData) supabaseContentCache.set(key, { ...cached, expiresAt: 0, pending: null });
+      else supabaseContentCache.delete(key);
+    }
+  } else supabaseContentCache.clear();
   clearSupabaseAssetManifestCache();
 };
 

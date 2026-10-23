@@ -3,6 +3,7 @@ import { CONTENT_TYPES } from "../../lib/cms/contentSchema.js";
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const listResources = new Set(["packages-list", "tools", "benchmarks", "reviews-gallery"]);
 const textTypes = new Set(["string", "text", "url", "email", "date", "datetime"]);
+const requiredResources = new Set(["hero", "contact", "team", "privacy-policy", "terms"]);
 const schemas = new Map(CONTENT_TYPES.map(schema => [schema.name, schema]));
 
 const matchesField = (field, value) => {
@@ -21,7 +22,7 @@ const matchesField = (field, value) => {
 const matchesFields = (fields, value) => fields.every(field => matchesField(field, value[field.name]));
 
 export const assertPublicContentShape = (resource, value, type) => {
-  if (value == null) return;
+  if (value == null && !requiredResources.has(resource)) return;
   const fields = schemas.get(type)?.fields || [];
   let valid;
   if (resource === "faq-questions") {

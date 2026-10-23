@@ -52,3 +52,5 @@ __pycache__/
 
 # Local Supabase CLI state.
 /supabase/.temp/
+/src/generated/public-content.json
+/src/generated/public-content.json.*.tmp
