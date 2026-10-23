@@ -48,7 +48,7 @@ if (process.argv[2] === '--build') {
       url: `${origin}/chunks/`, chunkSize: 8388608, chunksPerRequest: 16, maxFileSize: 2147483648,
       maxRequestSize: 33554432, hashAlgorithm: 'sha1', concurrency: 1, compression: ['gzip'], accept: ['artifact_bundles'],
     }));
-    else if (request.url === '/chunks/') { chunkUploaded = true; response.end('[]'); }
+    else if (request.url === '/chunks/' && body.length > 0) { chunkUploaded = true; response.end('[]'); }
     else if (request.url.endsWith('/artifactbundle/assemble/')) response.end(JSON.stringify({
       state: chunkUploaded ? 'created' : 'not_found', missingChunks: chunkUploaded ? [] : JSON.parse(body).chunks, detail: null,
     }));
