@@ -17,7 +17,7 @@ const bot = login => ({ login: `${login}[bot]`, type: "Bot" });
 const token = "fixture-github-token";
 
 const baseline = () => ({
-  pull: { number: 1, html_url: "https://github.com/fixture/website/pull/1", title: "Fixture PR", draft: false,
+  pull: { number: 1, html_url: "https://github.com/fixture/website/pull/1", title: "Fixture PR", state: "open", draft: false,
     base: { ref: "main", sha: "b".repeat(40), repo: { full_name: repo } },
     head: { ref: "fixture-change", sha: head, repo: { full_name: repo } }, mergeable_state: "clean" },
   reviews: [{ user: bot("coderabbitai"), state: "APPROVED", commit_id: head, submitted_at: "2026-10-23T00:00:00Z" }],
@@ -142,6 +142,7 @@ for (const [name, changeSecond] of Object.entries({
   "moved-main": state => { state.pull.base.sha = "d".repeat(40); },
   "new-review": state => { state.reviews[0].state = "CHANGES_REQUESTED"; },
   "new-failure": state => { state.checks[0].conclusion = "failure"; },
+  "newly-closed": state => { state.pull.state = "closed"; },
 })) {
   test(`CLI rechecks ${name} before sending a merge`, async () => {
     const result = await runScenario(name, { changeSecond });
@@ -174,6 +175,11 @@ for (const [event, eventBody] of [
 test("CLI ignores Tests pushes to main", async () => {
   const result = await runScenario("main-push", { event: "workflow_run", eventBody: { workflow_run: { head_branch: "main", event: "push" } } });
   assert.deepEqual(result.requests, []);
+});
+
+test("CLI leaves an already closed PR untouched", async () => {
+  const result = await runScenario("already-closed", { setup: state => { state.pull.state = "closed"; } });
+  assert.ok(result.requests.every(request => request.method === "GET" || request.path === "/graphql"));
 });
 
 test("CLI ignores human gate markers and still requests missing reviews", async () => {

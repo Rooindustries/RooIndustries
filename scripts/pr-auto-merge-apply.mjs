@@ -128,6 +128,7 @@ const collectSnapshot = async (number) => {
     number,
     url: pull.html_url,
     title: pull.title,
+    state: pull.state,
     draft: pull.draft,
     baseRef: pull.base.ref,
     baseSha: pull.base.sha,
@@ -235,6 +236,10 @@ const pullNumbers = async () => {
 
 const applyOne = async (number) => {
   const snapshot = await collectSnapshot(number);
+  if (snapshot.state !== "open") {
+    console.log(`#${number} closed, skipped`);
+    return;
+  }
   if (!snapshot.sameRepository) {
     console.log(`#${number} fork, skipped`);
     return;
@@ -253,7 +258,7 @@ const applyOne = async (number) => {
     // The merge call can pin only the head, so run the whole gate again on fresh data right before it:
     // reviews, threads, checks, the base branch and both SHAs can all change while the first pass runs.
     const latest = await collectSnapshot(number);
-    const baseMoved = decide(latest).action !== "merge" || latest.headSha !== snapshot.headSha ||
+    const baseMoved = latest.state !== "open" || decide(latest).action !== "merge" || latest.headSha !== snapshot.headSha ||
       latest.baseSha !== snapshot.baseSha || latest.baseRef !== "main" || !latest.sameRepository;
     const { error: mergeError, headMoved } = baseMoved
       ? { error: "", headMoved: true }
