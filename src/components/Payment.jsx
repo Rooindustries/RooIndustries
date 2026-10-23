@@ -2158,7 +2158,7 @@ export default function Payment({ hideFooter = false }) {
                       <WalletCards size={36} strokeWidth={1.5} />
                     </div>
                     <p className="text-xs font-medium text-ink-secondary sm:text-sm">
-                      {finalAmount >= 50.01 ? "Cards, crypto & Klarna" : "Cards & crypto"}
+                      Payment options shown at checkout.
                     </p>
                   </div>
                   <div className="flex w-full shrink-0 flex-col gap-2 md:w-52">
