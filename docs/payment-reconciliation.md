@@ -153,6 +153,9 @@ daily job accepts that pair only for this explicit recovery type and only when
 the issue has no known booking identity. Booked payments use `recovery: booking`
 and require all three identity types. Missing types, duplicates, incomplete or
 conflicting identity sets cannot close issues.
+An overlong stored booking identity produces an unresolved identity finding before
+the bounded credit lookup. Valid identities, including the 80-character boundary,
+still require the native credit projection to match before recovery.
 Pending, failed and review refunds with no succeeded amount do not change earnings.
 The audit uses the writers' shared exact rational calculator for version-2 commissions,
 including half-cent refund ties and authoritative frozen zeroes. Unversioned bookings

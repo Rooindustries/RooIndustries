@@ -659,7 +659,7 @@ export const buildReconcileReport = async ({
       for (let attempt = 0; attempt < 2; attempt++) {
         const reason = checkBooking({ payment, record, booking, refunded, pricing });
         if (reason) return mismatch(booking._id, reason);
-        if (!pricing.referralId) break;
+        if (!pricing.referralId || !isIdentity(booking._id)) break;
         checkBudget(deadline);
         const { data, error } = await client.shadowClient
           .rpc("roo_booking_referral_audit", { p_booking_id: booking._id })
