@@ -153,6 +153,13 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
     const next = structuredClone(documents);
     const results = [];
     for (const mutation of mutations) {
+      if (mutation.operation === 'delete') {
+        const index = next.findIndex(row => row._id === mutation.id);
+        if (index < 0 || next[index]._rev !== mutation.expected_revision) throw Object.assign(new Error('Synthetic revision conflict.'), { status: 409, code: '40001' });
+        const [removed] = next.splice(index, 1);
+        results.push({ _id: removed._id, _rev: removed._rev, deleted: true });
+        continue;
+      }
       const value = mutation.document;
       if (!value?._id || !value?._type || !['create', 'replace'].includes(mutation.operation)) throw new Error('Unsupported fixture mutation.');
       const index = next.findIndex(row => row._id === value._id);
@@ -184,6 +191,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
             const index = documents.findIndex(value => value._id === id);
             const initial = initialDocuments.find(value => value._id === id);
             if (index >= 0 && initial) documents[index] = structuredClone(initial);
+            else if (index < 0 && initial) documents.push(structuredClone(initial));
             else if (index >= 0) documents.splice(index, 1);
           }
           changedContent.clear();
@@ -195,11 +203,11 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           cmsReceipts.clear();
         }
         if (body.publishResponseFailure !== undefined) {
-          if (!['', '5xx', 'timeout', 'invalid-receipt'].includes(body.publishResponseFailure)) throw new Error('Invalid fixture publish response failure.');
+          if (!['', '5xx', 'timeout', 'invalid-receipt', 'wrong-id'].includes(body.publishResponseFailure)) throw new Error('Invalid fixture publish response failure.');
           publishResponseFailure = body.publishResponseFailure;
         }
         if (body.receiptFailure !== undefined) {
-          if (!['', 'missing', 'outage', 'command', 'operation', 'document-id', 'type', 'revision', 'replayed'].includes(body.receiptFailure)) throw new Error('Invalid fixture receipt failure.');
+          if (!['', 'missing', 'outage', 'command', 'operation', 'document-id', 'type', 'revision', 'replayed', 'deleted', 'revision-mismatch'].includes(body.receiptFailure)) throw new Error('Invalid fixture receipt failure.');
           receiptFailure = body.receiptFailure;
         }
         if (body.outage !== undefined) {
@@ -233,11 +241,13 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         const receipt = receiptFailure === 'missing' ? null : structuredClone(saved?.receipt || null);
         if (receipt) {
           if (receiptFailure === 'command') receipt.command_id = 'cms:' + '0'.repeat(64);
-          if (receiptFailure === 'operation') receipt.operation = 'delete';
+          if (receiptFailure === 'operation') receipt.operation = receipt.operation === 'delete' ? 'replace' : 'delete';
           if (receiptFailure === 'document-id') receipt.document_ids = ['unrelated-document'];
           if (receiptFailure === 'type') receipt.results[0]._type = 'unrelated-type';
           if (receiptFailure === 'revision') receipt.results[0]._rev = '';
           if (receiptFailure === 'replayed') receipt.replayed = false;
+          if (receiptFailure === 'deleted') receipt.results[0].deleted = false;
+          if (receiptFailure === 'revision-mismatch') receipt.results[0]._rev = 'unrelated-revision';
         }
         call.status = 200;
         json(res, 200, receipt);
@@ -257,7 +267,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           if (res.destroyed) return;
         }
         call.status = 200;
-        json(res, 200, { ...receipt, replayed: false, ...(publishResponseFailure === 'invalid-receipt' ? { results: [] } : {}) });
+        json(res, 200, { ...receipt, replayed: false, ...(publishResponseFailure === 'invalid-receipt' ? { results: [] } : {}), ...(publishResponseFailure === 'wrong-id' ? { results: results.map(row => ({ ...row, _id: 'unrelated-document' })) } : {}) });
       } else if (apiRoutes && url.pathname === '/__fixture' && ['GET', 'POST'].includes(req.method)) {
         if (req.method === 'POST') {
           if (body.reset === true) {

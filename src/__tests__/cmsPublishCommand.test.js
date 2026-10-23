@@ -7,7 +7,10 @@ const createClient = ({ current = [], replayed = false } = {}) => ({
   rpc: jest.fn(async (name, args) => {
     if (name === "roo_cms_publish_command_result") return { data: null, error: null };
     if (name === "roo_fetch_shadow_documents_targeted") return { data: current, error: null };
-    if (name === "roo_apply_cms_publish_command") return { data: { replayed, results: [{ _id: args.p_mutations[0].id, _rev: "committed-revision" }] }, error: null };
+    if (name === "roo_apply_cms_publish_command") {
+      const mutation = args.p_mutations[0];
+      return { data: { command_id: args.p_command_id, operation: mutation.operation, document_ids: [mutation.id], replayed, results: [{ _id: mutation.id, ...(mutation.operation === "delete" ? { _rev: mutation.expected_revision, deleted: true } : { _type: mutation.document._type, _rev: "committed-revision" }) }] }, error: null };
+    }
     throw new Error(`Unexpected RPC: ${name}`);
   }),
 });
@@ -41,8 +44,8 @@ describe("D6/P4 native authoritative CMS command", () => {
   });
   test("replays a committed receipt without another document write", async () => {
     const client = createClient();
-    client.rpc.mockImplementation(async name => {
-      if (name === "roo_cms_publish_command_result") return { data: { replayed: true, results: [{ _id: id, _rev: "original-revision" }] }, error: null };
+    client.rpc.mockImplementation(async (name, args) => {
+      if (name === "roo_cms_publish_command_result") return { data: { command_id: args.p_command_id, operation: "create", document_ids: [id], replayed: true, results: [{ _id: id, _type: "benchmark", _rev: "original-revision" }] }, error: null };
       throw new Error(`Unexpected RPC: ${name}`);
     });
     await expect(execute({ client })).resolves.toMatchObject({ committed: true, replayed: true, revision: "original-revision" });

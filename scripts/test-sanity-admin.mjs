@@ -50,7 +50,7 @@ try {
   const authFixture = await seedContentAdmin(fixture);
   const sessionRoute = await import("../app/api/admin/content/session/route.js");
   const modules = {};
-  for (const name of ['documents','documents/[id]','documents/[id]/revisions','documents/[id]/revisions/[revisionId]','publish','assets/upload','assets/finalize']) modules[name] = await import(`../app/api/admin/content/${name}/route.js`);
+  for (const name of ['documents','documents/[id]','documents/[id]/revisions','documents/[id]/revisions/[revisionId]','publish','publish/status','assets/upload','assets/finalize']) modules[name] = await import(`../app/api/admin/content/${name}/route.js`);
   const tools = await import('../app/api/tools/[id]/download/route.js');
   const publicRoute = await import('../app/api/content/[resource]/route.js');
   const call = async (name, body, params = {}, key = 'synthetic-admin-key', address = '127.0.0.1') => {
@@ -63,10 +63,10 @@ try {
     observed(name, { status: response.status, result: sanitize(result) });
     return { status: response.status, ...result };
   };
-  const publish = async body => {
+  const publish = async (body, { revalidate = true } = {}) => {
     const revalidated = [];
     const result = await globalThis.rooRevalidations.run(revalidated, () => call('publish', body));
-    assert.deepEqual(revalidated, result.ok ? [['/', 'layout']] : [], 'Only successful publishes revalidate the root layout');
+    assert.deepEqual(revalidated, result.ok && revalidate ? [['/', 'layout']] : [], 'Only a confirmed current publish revalidates the root layout');
     return result;
   };
   const create = (type, document, createIntentId = crypto.randomUUID()) => publish({ operation: 'create', type, document, createIntentId });
@@ -255,8 +255,18 @@ try {
     const history = await call('documents/[id]/revisions', undefined, { id }); assert.equal(history.data.revisions.length, 1);
     const old = await call('documents/[id]/revisions/[revisionId]', undefined, { id, revisionId: history.data.revisions[0].revisionId }); assert.equal(old.data.document.title, 'Initial synthetic'); assert.deepEqual(old.data.assets, {});
     assertError(await call('documents/[id]/revisions/[revisionId]', undefined, { id: 'other', revisionId: history.data.revisions[0].revisionId }), 404, 'CMS_NOT_FOUND');
-    const deleted = await publish({ operation: 'delete', type: 'benchmark', documentId: id, expectedRevision: changed.data.revision }); assert.equal(deleted.ok, true);
-    assert.equal((await publish(body)).data.replayed, true, 'Lost original create response still replays after deletion');
+    const deleteCommand = { operation: 'delete', type: 'benchmark', documentId: id, expectedRevision: changed.data.revision };
+    const deleted = await publish(deleteCommand); assert.equal(deleted.ok, true); assert.equal(deleted.data.deleted, true);
+    const beforeStatus = (await fixture.sql`select count(*)::int n from migration.cms_publish_commands`)[0].n;
+    const statusInvalidations = [];
+    process.env.CMS_WRITES_PAUSED = '1';
+    try {
+      const status = await globalThis.rooRevalidations.run(statusInvalidations, () => call('publish/status', deleteCommand));
+      assert.deepEqual(status.data, { committed: true, deleted: true, type: 'benchmark', documentId: id, revision: changed.data.revision });
+      assert.deepEqual(statusInvalidations, [['/', 'layout']]);
+      assert.equal((await fixture.sql`select count(*)::int n from migration.cms_publish_commands`)[0].n, beforeStatus);
+    } finally { process.env.CMS_WRITES_PAUSED = '0'; }
+    assert.equal((await publish(body, { revalidate: false })).data.replayed, true, 'Lost original create response still replays after deletion without invalidating pages');
     assert.equal((await fixture.sql`select count(*)::int n from migration.cms_publish_commands where status='committed' and result->'document_ids' ? ${id}`)[0].n, 3);
   });
   await scenario('singletons-references-booking-identity', async () => {

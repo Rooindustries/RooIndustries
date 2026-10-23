@@ -1712,7 +1712,7 @@ test("replacement receipts confirm only the original command without writing aga
     expect(await response.json()).toMatchObject({ ok: false, code: "CMS_NOT_FOUND" });
   }
   const deletion = await request.post(path, { headers: { "x-admin-key": ADMIN_KEY }, data: { operation: "delete", type: "hero", documentId: HERO_ID, expectedRevision: published.revision } });
-  expect(deletion.status()).toBe(400);
+  expect(deletion.status()).toBe(404);
   await login(page); await hero(page);
   const otherActor = await page.evaluate(async ({ path, command }) => {
     const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(command) });
@@ -1723,6 +1723,47 @@ test("replacement receipts confirm only the original command without writing aga
   expect(afterLookup).toEqual(beforeLookup);
   expect((await cms(request, `/api/admin/content/documents/${HERO_ID}`)).revision).toBe(published.revision);
   await evidence(page, testInfo, { status, otherActor, beforeLookup, afterLookup });
+});
+
+test("deletion receipts recover a lost reply and bind read-only confirmation to the original actor and revision", async ({ page, request, baseURL }, testInfo) => {
+  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  const created = await cms(request, "/api/admin/content/publish", { operation: "create", type: "benchmark", createIntentId: randomUUID(), document: { title: "Native deletion recovery café 日本語" } });
+  await login(page); await choose(page, "Benchmark");
+  await page.getByRole("region", { name: "Benchmark list" }).getByRole("button").filter({ hasText: "Native deletion recovery café 日本語" }).click();
+  await page.getByLabel("Benchmark Name", { exact: true }).fill("Unpublished changes before native deletion");
+  await page.clock.install();
+  const pending = await hold(page, "**/api/admin/content/publish", { method: "POST" });
+  const commands = [];
+  page.on("request", request => { if (new URL(request.url()).pathname === "/api/admin/content/publish" && request.method() === "POST") commands.push(request.postDataJSON()); });
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  const response = await pending.arrived;
+  const receipt = (await response.json()).data;
+  const outcomes = [];
+  try {
+    await page.clock.fastForward(31000);
+    await expect.soft(page.getByRole("status").filter({ hasText: "Deleted. The live site" })).toBeVisible();
+    expect(commands).toHaveLength(1);
+    expect.soft(receipt).toMatchObject({ committed: true, deleted: true, documentId: created.documentId, revision: created.revision });
+    expect((await request.get(`/api/admin/content/documents/${created.documentId}`, { headers: { "x-admin-key": ADMIN_KEY } })).status()).toBe(404);
+    const beforeLookup = await contentCounts(request, control);
+    for (const command of [commands[0], { ...commands[0], expectedRevision: "another-revision" }, { ...commands[0], type: "tool" }]) {
+      const result = await page.evaluate(async command => {
+        const response = await fetch("/api/admin/content/publish/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(command) });
+        return { status: response.status, body: await response.json() };
+      }, command);
+      outcomes.push(result);
+    }
+    expect.soft(outcomes[0]).toEqual({ status: 200, body: { ok: true, data: { committed: true, deleted: true, type: "benchmark", documentId: created.documentId, revision: created.revision } } });
+    expect.soft(outcomes.slice(1).map(result => result.status)).toEqual([404, 404]);
+    const otherActor = await request.post("/api/admin/content/publish/status", { headers: { "x-admin-key": ADMIN_KEY }, data: commands[0] });
+    expect.soft(otherActor.status()).toBe(404);
+    const afterLookup = await contentCounts(request, control);
+    expect(afterLookup).toEqual(beforeLookup);
+    expect(commands).toHaveLength(1);
+    expect.soft(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-content-draft:")))).toEqual([]);
+    await evidence(page, testInfo, { commands, receipt, outcomes, otherActorStatus: otherActor.status(), beforeLookup, afterLookup });
+  } finally { await pending.release(); }
 });
 
 test("#10 a concurrent subtitle prevents reconciling a missing deletion", async ({ page, request }, testInfo) => {
