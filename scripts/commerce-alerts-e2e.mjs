@@ -9,8 +9,12 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { installNetworkGuard, refuseEnvFiles } from './lib/test-target-safety.mjs';
+import { localMonitoringEnv } from './lib/local-monitoring-env.mjs';
 import { logSafeError } from '../src/server/safeErrorLog.js';
 
+const monitoringEnv = localMonitoringEnv(process.env);
+for (const key of Object.keys(process.env)) if (!(key in monitoringEnv)) delete process.env[key];
+Object.assign(process.env, monitoringEnv);
 refuseEnvFiles();
 const require = createRequire(import.meta.url);
 const sdkEntry = pathToFileURL(join(dirname(require.resolve('@sentry/nextjs/package.json')), 'build/esm/index.server.js')).href;
@@ -41,6 +45,7 @@ let error;
 let onRequestError;
 let origin;
 let nativeReport;
+let graceReport;
 const reusedError = new Error('Reusable fixture error');
 const check = (name, fn) => {
   try { fn(); checks.push({ name, passed: true }); }
@@ -117,25 +122,28 @@ try {
   if (!process.argv.includes('--routes')) {
     const nativeArtifact = join(artifact, 'payment-persistence.json');
     await child('scripts/test-payment-persistence-sweep.mjs', [
-      '--full-chain', '--scenario=reconcile-report-payment-without-booking,reconcile-report-late-capture-without-booking,reconcile-report-late-capture-without-record',
+      '--full-chain', '--scenario=reconcile-report-payment-without-booking,reconcile-report-late-capture-without-booking,reconcile-report-late-capture-without-record,reconcile-report-transition-grace-settlement',
     ], { ROO_PAYMENT_PERSISTENCE_ARTIFACT: nativeArtifact }, 'payment-persistence.log');
     const result = JSON.parse(await readFile(nativeArtifact, 'utf8'));
     assert.equal(result.ok, true);
     check('late captures without a booking or a payment record remain visible', () => {
-      assert.equal(result.scenarios.length, 3);
+      assert.equal(result.scenarios.length, 4);
       assert.ok(result.scenarios.every(scenario => scenario.passed));
     });
     nativeReport = result.scenarios[0].proof.report;
+    graceReport = result.scenarios.find(scenario => scenario.name === 'reconcile-report-transition-grace-settlement').proof.before.body;
     await writeFile(join(artifact, 'seeded-report.json'), JSON.stringify(nativeReport, null, 2));
+    await writeFile(join(artifact, 'grace-report.json'), JSON.stringify(graceReport, null, 2));
     await child('scripts/fixtures/reconcile-payments.mjs', ['--case=seeded-payment-alert'], {
       ROO_RECONCILE_SEED_REPORT: join(artifact, 'seeded-report.json'),
+      ROO_RECONCILE_GRACE_REPORT: join(artifact, 'grace-report.json'),
       ROO_RECONCILE_TEST_ARTIFACT: join(artifact, 'daily-check'),
     }, 'daily-check.log');
     const daily = JSON.parse(await readFile(join(artifact, 'daily-check/results.json'), 'utf8'));
     check('seeded test-mode payment reaches the daily check and one owner issue on both attempts', () => {
       assert.equal(daily.ok, true);
       assert.equal(daily.results[0].issues.length, 1);
-      assert.equal(daily.results[0].runs.length, 2);
+      assert.equal(daily.results[0].runs.length, 3);
       assert.equal(daily.externalRequests, 0);
     });
   }
@@ -242,6 +250,11 @@ try {
   await send('/api/payment/customer@example.invalid', 503);
   check('unknown paths cannot become event tags', () => assert.equal(events.length, beforeUnknown));
   const report = nativeReport || { items: [{ key: 'payment:fixture', reason: 'payment_without_booking' }] };
+  if (graceReport) {
+    const beforeGrace = events.length;
+    await fetch(`${origin}/reconciliation`, { method: 'POST', body: JSON.stringify(graceReport) });
+    check('a just-settled old payment emits no mismatch event during its grace period', () => assert.equal(events.length, beforeGrace));
+  }
   for (let attempt = 0; attempt < 2; attempt++) {
     await fetch(`${origin}/reconciliation`, { method: 'POST', body: JSON.stringify(report) });
   }

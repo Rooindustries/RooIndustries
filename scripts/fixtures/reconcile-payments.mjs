@@ -392,7 +392,7 @@ const invoke = (home, options = {}) => {
     let stdout = '', stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
-    const timer = setTimeout(() => child.kill('SIGTERM'), 180000);
+    const timer = setTimeout(() => child.kill('SIGTERM'), options.timeoutMs ?? 180000);
     child.once('error', reject);
     child.once('exit', (code, signal) => {
       clearTimeout(timer);
@@ -565,6 +565,15 @@ try {
       assert.equal(report.ok, true);
       assert.equal(report.count, 1);
       assert.equal(report.items[0].reason, 'payment_without_booking');
+      if (process.env.ROO_RECONCILE_GRACE_REPORT) {
+        current.window = JSON.parse(fs.readFileSync(process.env.ROO_RECONCILE_GRACE_REPORT, 'utf8'));
+        assert.equal(current.window.count, 0);
+        const result = await invoke(home);
+        assert.equal(result.code, 0);
+        assert.equal(JSON.parse(result.stdout).result, 'clear');
+        assert.equal(result.alert.severity, 'green');
+        assert.equal(current.issues.length, 0);
+      }
       current.window = report;
       const entry = report.items[0];
       current.checks[entry.key] = check(entry.key, 'unresolved', [entry]);
@@ -1433,13 +1442,13 @@ try {
       for (let index = 0; index < 201; index += 1) seedIssue('booking:rotation-' + String(index).padStart(3, '0'), {}, {
         lastCheckedAt: new Date(Date.parse('2026-01-01') + index * 1000).toISOString(),
       });
-      assert.equal((await invoke(home)).code, 0);
+      assert.equal((await invoke(home, { timeoutMs: 600000 })).code, 0);
       const first = current.requests.filter((request) => request.checks).flatMap((request) => request.checks);
       assert.equal(first.length, 200);
       assert.equal(first.includes('booking:rotation-200'), false);
       assert.ok(current.issues.some((issue) => metadata(issue).primary === 'scan:targets'));
       const count = current.requests.length;
-      assert.equal((await invoke(home)).code, 0);
+      assert.equal((await invoke(home, { timeoutMs: 600000 })).code, 0);
       const second = current.requests.slice(count).filter((request) => request.checks).flatMap((request) => request.checks);
       assert.equal(second[0], 'booking:rotation-200');
       assert.equal(second.length, 200);

@@ -1284,6 +1284,140 @@ try{
       return { report: result.body, readOnly: true, createdDaysBeforeSettlement: 10 };
     });
   }
+  for (const transition of ['settlement', 'public-link', 'refund', 'dispute-open', 'dispute-closed']) {
+    await run(`reconcile-report-transition-grace-${transition}`, async () => {
+      const observedAt = originalNow();
+      const changedAt = observedAt - 60000;
+      const old = new Date(observedAt - 10 * 86400000).toISOString();
+      const recent = new Date(changedAt).toISOString();
+      await seed('dodo', 'booked', dodoBooking());
+      dodoPayment.created_at = old;
+      dodoPayment.updated_at = recent;
+      let reason, keys = canonicalKeys;
+      if (['settlement', 'public-link'].includes(transition)) {
+        await commerce.delete(bookingId);
+        keys = canonicalKeys.slice(0, 2);
+        if (transition === 'public-link') {
+          await commerce.delete(recordId);
+          dodoPayment.metadata = {};
+          keys = canonicalKeys.slice(0, 1);
+        }
+        reason = transition === 'public-link' ? 'payment_without_record' : 'payment_without_booking';
+      } else if (transition === 'refund') {
+        dodoPayment.updated_at = null;
+        dodoPayment.refund_status = 'partial';
+        dodoPayment.refunds = [{ ...dodoRefund, amount: 250, is_partial: true, created_at: recent }];
+        reason = 'refund_not_applied';
+      } else {
+        const closed = transition === 'dispute-closed';
+        dodoPayment.disputes = [{ ...dodoDispute(closed ? 'dispute_won' : 'dispute_opened'), created_at: closed ? old : recent }];
+        if (closed) await commerce.patch(bookingId).set({ status: 'pending', dodoDisputeActive: true, dodoDisputeBookingStatus: 'captured', dodoOriginalCommissionAmount: 1, commissionAmount: 0 }).commit();
+        else delete dodoPayment.updated_at;
+        reason = 'dispute_not_applied';
+      }
+      dodoList = [dodoSummary()];
+      Date.now = () => observedAt;
+      const before = await authorizedReport('GET', true);
+      const targetedBefore = await targetReport(keys);
+      assert.equal(before.status, 200, JSON.stringify(before.body));
+      assert.equal(before.body.count, 0, JSON.stringify(before.body));
+      assertTarget(targetedBefore, keys, keys.map(() => 'unknown'), []);
+      dodoList = [];
+      const reverseBefore = await authorizedReport('GET', true);
+      assert.equal(reverseBefore.body.count, 0, JSON.stringify(reverseBefore.body));
+      dodoList = [dodoSummary()];
+      Date.now = () => changedAt + 1800000 - 1;
+      const boundaryBefore = await targetReport(keys);
+      assertTarget(boundaryBefore, keys, keys.map(() => 'unknown'), []);
+      Date.now = () => changedAt + 1800000;
+      const mature = await authorizedReport('GET', true);
+      const targetedMature = await targetReport(keys);
+      assert.equal(mature.status, 200, JSON.stringify(mature.body));
+      assert.deepEqual(reportReasons(mature.body), [reason]);
+      assertTarget(targetedMature, keys, keys.map(() => 'unresolved'), [reason]);
+      Date.now = originalNow;
+      let repair;
+      if (['refund', 'dispute-open', 'dispute-closed'].includes(transition)) {
+        const type = transition === 'refund' ? 'refund.succeeded' : transition === 'dispute-open' ? 'dispute.opened' : 'dispute.won';
+        const webhook = await requestFlow('dodo', { req: dodoReq(transition === 'refund' ? dodoPayment.refunds[0] : dodoPayment.disputes[0], type) });
+        assert.equal(webhook.status, 200, JSON.stringify(webhook));
+        const duringGrace = await targetReport(keys);
+        assertTarget(duringGrace, keys, keys.map(() => 'unknown'), []);
+        Date.now = () => changedAt + 1800000;
+        const after = await authorizedReport('GET', true);
+        const targetedAfter = await targetReport(keys);
+        assert.equal(after.body.count, 0, JSON.stringify(after.body));
+        assertTarget(targetedAfter, keys, keys.map(() => 'recovered'), []);
+        Date.now = originalNow;
+        repair = { webhook, duringGrace, after, targetedAfter };
+      }
+      return { transition, provider: dodoPayment, before, targetedBefore, reverseBefore, boundaryBefore, mature, targetedMature, repair, createdDaysBeforeTransition: 10, graceMilliseconds: 1800000 };
+    });
+  }
+  for (const update of ['absent', null, 'old', 'invalid', 42, 'future']) {
+    await run(`reconcile-report-transition-timestamp-${String(update)}`, async () => {
+      await seed('dodo', 'booked', dodoBooking());
+      await commerce.delete(bookingId);
+      if (update !== 'absent') dodoPayment.updated_at = update === 'old' ? dodoPayment.created_at
+        : update === 'future' ? new Date(originalNow() + 86400000).toISOString() : update;
+      dodoList = [dodoSummary()];
+      const report = await authorizedReport('GET', true);
+      const targeted = await targetReport(canonicalKeys.slice(0, 2));
+      if (['invalid', 42, 'future'].includes(update)) {
+        assert.equal(report.status, 503, JSON.stringify(report.body));
+        assert.equal(targeted.status, 503, JSON.stringify(targeted.body));
+      } else {
+        assert.equal(report.status, 200, JSON.stringify(report.body));
+        assert.deepEqual(reportReasons(report.body), ['payment_without_booking']);
+        assertTarget(targeted, canonicalKeys.slice(0, 2), ['unresolved', 'unresolved'], ['payment_without_booking']);
+      }
+      return { update, report, targeted };
+    });
+  }
+  for (const field of ['created_at', 'refund', 'dispute']) {
+    await run(`reconcile-report-transition-malformed-${field}`, async () => {
+      await seed('dodo', 'booked', dodoBooking());
+      if (field === 'created_at') dodoPayment.created_at = 'invalid';
+      if (field === 'refund') dodoPayment.refunds = [{ ...dodoRefund, created_at: 'invalid' }];
+      if (field === 'dispute') dodoPayment.disputes = [{ ...dodoDispute('dispute_opened'), created_at: 42 }];
+      dodoList = [dodoSummary()];
+      const report = await authorizedReport('GET', true);
+      const targeted = await targetReport(canonicalKeys);
+      assert.equal(report.status, 503, JSON.stringify(report.body));
+      assert.equal(targeted.status, 503, JSON.stringify(targeted.body));
+      return { field, report, targeted };
+    });
+  }
+  await run('reconcile-report-transition-terminal-immediate', async () => {
+    await seed('dodo', 'needs_recovery', dodoBooking({}, {
+      reconciliationRecoveryTerminal: true, bookingId: '', updatedAt: new Date().toISOString(),
+    }));
+    await commerce.delete(bookingId);
+    dodoPayment.updated_at = new Date().toISOString();
+    dodoList = [dodoSummary()];
+    const report = await authorizedReport('GET', true);
+    const targeted = await targetReport(canonicalKeys.slice(0, 2));
+    assert.deepEqual(reportReasons(report.body), ['owner_review_unknown']);
+    assertTarget(targeted, canonicalKeys.slice(0, 2), ['unresolved', 'unresolved'], ['owner_review_unknown', 'owner_review_unknown']);
+    return { report, targeted };
+  });
+  await run('reconcile-report-transition-during-scan', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    await commerce.delete(bookingId);
+    const startedAt = originalNow();
+    Date.now = () => startedAt;
+    dodoList = [dodoSummary()];
+    providerHook = async (request) => {
+      if (request.path !== '/payments/payment-fixture') return;
+      dodoPayment.updated_at = new Date(startedAt + 90000).toISOString();
+      Date.now = () => startedAt + 120000;
+    };
+    const report = await authorizedReport('GET', true);
+    assert.equal(report.status, 200, JSON.stringify(report.body));
+    assert.equal(report.body.at, new Date(startedAt).toISOString());
+    assert.equal(report.body.count, 0);
+    return { report, startedAt, providerChangedAt: dodoPayment.updated_at, observedAt: Date.now() };
+  });
   await run('reconcile-report-booking-amount-mismatch', async () => {
     await seed('dodo', 'booked', dodoBooking({ netAmount: 19.99 }));
     dodoList = [dodoSummary()];

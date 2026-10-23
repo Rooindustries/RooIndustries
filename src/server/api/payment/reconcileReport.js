@@ -281,6 +281,23 @@ const retrievePayment = async (dodo, paymentId, allowMissing = false) => {
   return payment;
 };
 
+const paymentReadyForAudit = (payment, now) => {
+  const observedAt = Math.max(now, Date.now());
+  const updates = [
+    payment.updated_at,
+    ...payment.refunds.map((refund) => refund?.created_at),
+    ...payment.disputes.map((dispute) => dispute?.created_at),
+  ].filter((value) => value != null);
+  const timestamps = [payment.created_at, ...updates].map((value) => {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(value))
+      throw unavailable();
+    const timestamp = Date.parse(value);
+    if (!Number.isFinite(timestamp) || timestamp > observedAt + 60000) throw unavailable();
+    return timestamp;
+  });
+  return Math.max(...timestamps) <= now - SETTLE_MINUTES * 60 * 1000;
+};
+
 const refundedCents = async (dodo, payment) => {
   let amount = 0;
   const seen = new Set();
@@ -469,13 +486,16 @@ export const buildReconcileReport = async ({
       currency: payment.currency,
     };
     const mismatch = (ref, reason) => finish(unresolved({ ...base, ref, reason }));
+    const terminal = record && isTerminalRecovery(record);
+    if (!terminal && !paymentReadyForAudit(payment, now))
+      return finish(unknown());
     if (!record || record.provider !== "dodo") {
       return mismatch(suppliedBooking?._id || record?._id || "", "payment_without_record");
     }
     if (suppliedBooking && bookingId !== suppliedBooking._id) {
       return mismatch(suppliedBooking._id, "payment_record_mismatch");
     }
-    if (isTerminalRecovery(record)) {
+    if (terminal) {
       return mismatch(record._id, ownerReviewReason(record));
     }
     const pricing = frozenPricing(record);

@@ -51,9 +51,18 @@ The job changes only sanitized Linear reporting records and its local
 status files. It does not change bookings, referral credits, prices or
 refunds. Investigate money differences in fixtures or test mode.
 
-The Dodo scan reads succeeded payments across their history, ending 30 minutes
-before the check. It does not filter by the payment's creation date, because
-a payment can settle days later. The 72-hour `from` value applies to the reverse
+The Dodo scan requests succeeded payments created at least 30 minutes before
+the check, with no lower creation-date bound because a payment can settle days
+later. Before ordinary comparisons, details must also be at least 30 minutes
+past the latest supplied payment `updated_at` or refund/dispute `created_at`.
+A just-settled old checkout therefore waits for its webhook or reconciliation
+to finish. During that grace period, daily findings omit it and targeted checks
+return unknown, keeping existing issues open. Explicit terminal owner-review
+records still alert immediately because their automatic processing has stopped.
+If the optional update timestamp is absent or null, the audit uses creation
+and available child timestamps; it cannot infer an unreported transition time.
+Malformed or materially future timestamps make the report unavailable.
+The 72-hour `from` value applies to the reverse
 booking scan and recently changed owner-review records, including exhausted
 booking recovery. Either terminal flag keeps a record awaiting recovery unresolved
 in daily and targeted checks. The two flag scans share a deduplicated limit of
