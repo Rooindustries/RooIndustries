@@ -207,7 +207,7 @@ export const decide = (input) => {
   const reviewCapped = reviewWork && reviewRounds >= MAX_REVIEW_ROUNDS;
 
   if (disagree && !reviewCapped) {
-    add("models-disagree", "CodeRabbit and Codex do not both approve this head. The owning agent addresses the disagreeing model's findings, pushes, and both reviews are requested again.");
+    add("models-disagree", "CodeRabbit and Codex do not both approve this head. The owning agent addresses the findings and pushes. Review requests go only to eligible reviewers without approval on that head.");
   }
   if (reviewCapped) {
     add("review-cap", `CodeRabbit and Codex have not both approved, with no open threads, after ${MAX_REVIEW_ROUNDS} review rounds. It stays with the owner.`);
