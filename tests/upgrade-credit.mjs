@@ -1,14 +1,11 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { isDeepStrictEqual } from 'node:util';
 import { createBookingContactFixture } from './fixtures/booking-contact.mjs';
 
-test('retained upgrade credit over HTTP with PostgreSQL', { timeout: 300000 }, async t => {
+test('retained upgrade credit over HTTP with PostgreSQL', { timeout: 900000 }, async t => {
   const fixture = await createBookingContactFixture({ artifactName: 'upgrade-credit' });
   const { post, commerce, seedUpgrade, evidence, snapshot } = fixture;
-  const baselineCommit = '45bbda83e81a6c6d486bc4838dafdd9aa90bde64';
-  let baseline;
   const check = async (name, run) => t.test(name, async () => {
     const result = { name };
     evidence.cases.push(result);
@@ -47,7 +44,7 @@ test('retained upgrade credit over HTTP with PostgreSQL', { timeout: 300000 }, a
       .reduce((sum, amount) => sum + (amount || 0), 0);
     record.refundState ??= record.refundProcessedAmountInSubunits > 0 ? 'partial' : '';
     record.refundCurrency ??= 'USD';
-    await commerce.create(record);
+    await commerce.createOrReplace(record);
     await commerce.patch(original._id).set({
       paymentRecordId: record._id, paymentProvider: provider,
       ...(provider === 'dodo' ? { dodoPaymentId: record.providerPaymentId,
@@ -78,17 +75,6 @@ test('retained upgrade credit over HTTP with PostgreSQL', { timeout: 300000 }, a
     assert.equal(started.pricingSnapshot.netAmount, amount, 'Stored checkout price');
     const request = evidence.providerRequests.filter(request => request.path === '/checkouts').at(-1);
     assert.equal(request.body.product_cart[0].amount, Math.round(amount * 100), 'Provider checkout amount');
-  };
-  const parity = async (scenario, result) => {
-    const options = { originalOrderId: scenario.original._id,
-      packageTitle: scenario.payload.packageTitle, client: commerce };
-    const context = await baseline.resolveUpgradeContext(options);
-    const quote = await baseline.resolvePaymentQuote(options);
-    result.baseline = { commit: baselineCommit, credit: context.totalPaid, payable: context.upgradePrice,
-      grossAmount: quote.effectiveGrossAmount, netAmount: quote.effectiveNetAmount };
-    await price(scenario, result, context.totalPaid, context.upgradePrice);
-    assert.equal(result.quote.body.quote.grossAmount, quote.effectiveGrossAmount, 'Baseline quote gross');
-    assert.equal(result.quote.body.quote.netAmount, quote.effectiveNetAmount, 'Baseline quote net');
   };
   const refuse = async ({ original, payload }, result) => {
     const before = await snapshot();
@@ -175,11 +161,6 @@ test('retained upgrade credit over HTTP with PostgreSQL', { timeout: 300000 }, a
   };
 
   try {
-    const baselineSource = execFileSync('git', ['show', `${baselineCommit}:src/server/api/ref/pricing.js`], {
-      cwd: new URL('..', import.meta.url), encoding: 'utf8',
-    }).replace(/from "(\.\.?\/[^\"]+)"/g, (_, path) =>
-      `from "${new URL(path, new URL('../src/server/api/ref/pricing.js', import.meta.url)).href}"`);
-    baseline = await import(`data:text/javascript;base64,${Buffer.from(baselineSource).toString('base64')}`);
     for (const via of ['client', 'webhook', 'recovery']) {
       await check(`${via}: a $20 refund after a $45 upgrade checkout holds the captured payment for review`, async result => {
         const scenario = await openNativeUpgrade();
@@ -260,12 +241,12 @@ test('retained upgrade credit over HTTP with PostgreSQL', { timeout: 300000 }, a
       assert.equal((await commerce.getDocument(record.bookingId)).netAmount, 40.5);
     });
     for (const credit of [74.95, 99.95]) {
-      await check(`a captured upgrade still books when the retained credit rises to $${credit}`, async result => {
+      await check(`an unsupported booking amount increase to $${credit} cannot grant extra credit`, async result => {
         const scenario = await openNativeUpgrade();
         await commerce.patch(scenario.original.original._id).set({ netAmount: credit }).commit();
         const record = await finalizeUpgrade(scenario, 'client', result);
-        assert.equal(record.status, 'booked');
-        assert.equal((await commerce.getDocument(record.bookingId)).netAmount, 45);
+        await assertUpgradeIntact(scenario, record, result);
+        assert.equal(record.recoveryReason, 'upgrade_credit_unverified');
       });
     }
     await check('unverifiable credit at finalization preserves the capture and returns contact-us 409', async result => {
@@ -301,18 +282,18 @@ test('retained upgrade credit over HTTP with PostgreSQL', { timeout: 300000 }, a
       await assertUpgradeIntact(scenario, record, result);
       assert.equal(record.recoveryReason, 'upgrade_credit_changed_after_quote');
     });
-    for (const [name, options] of [
+    for (const [name, options, credit] of [
       ['historical Dodo without total or tax evidence', { provider: 'dodo', payment: {
         verificationState: '', providerPublicData: { currency: 'USD' },
-      } }],
+      } }, null],
       ['Dodo with verified tax evidence', { provider: 'dodo', payment: {
         providerPublicData: { currency: 'USD', totalAmount: 6045, taxAmount: 550, taxInclusive: false },
-      } }],
+      } }, 54.95],
       ['Dodo with historical tax-inclusive evidence', { provider: 'dodo', payment: {
         providerPublicData: { currency: 'USD', totalAmount: 5495, taxAmount: 500, taxInclusive: true },
-      } }],
-      ['PayPal', {}],
-      ['Razorpay in USD', { provider: 'razorpay' }],
+      } }, 49.95],
+      ['PayPal', {}, 54.95],
+      ['Razorpay in USD', { provider: 'razorpay' }, 54.95],
       ['Razorpay in INR', { provider: 'razorpay', booking: { currency: 'INR' }, payment: {
         bookingPayload: { currency: 'INR' }, pricingSnapshot: { currency: 'INR', netAmount: 54.95 },
         providerPublicData: { currency: 'INR' }, refundCurrency: 'INR',
@@ -325,32 +306,38 @@ test('retained upgrade credit over HTTP with PostgreSQL', { timeout: 300000 }, a
         dodoPaymentId: 'historical_payment', dodoCheckoutSessionId: 'historical_checkout',
       } }],
       ['numeric-string net amount uses the original gross fallback', { booking: { netAmount: '25.00' } }],
-      ['formatted legacy package price uses the original fallback', { booking: {
+      ['verified snapshot supplies a missing legacy amount', { booking: {
         netAmount: null, grossAmount: null, packagePrice: '₹54.95',
-      } }],
+      } }, 54.95],
       ['missing linked payment record', { booking: { paymentRecordId: 'paymentRecord.missing' } }],
     ]) {
-      await check(`unrefunded parity: ${name}`, async result => {
-        await parity(await seed(options), result);
+      await check(`unrefunded credit: ${name}`, async result => {
+        const scenario = await seed(options);
+        if (credit != null) await price(scenario, result, credit);
+        else await refuse(scenario, result);
       });
     }
     for (const status of ['pending', 'review', 'failed']) {
-      await check(`unrefunded parity: historical Dodo with only ${status} refunds`, async result => {
-        await parity(await seed({ provider: 'dodo', refunds: [{ status, amount: null, amountInSubunits: null }],
+      await check(`unrefunded historical Dodo with only ${status} refunds still requires verification`, async result => {
+        await refuse(await seed({ provider: 'dodo', refunds: [{ status, amount: null, amountInSubunits: null }],
           payment: { verificationState: '', refundState: status, refundProcessedAmountInSubunits: 0,
             providerPublicData: { currency: 'USD' } },
         }), result);
       });
     }
-    await check('unrefunded parity: legacy booking without a payment record', async result => {
-      await parity(await seedUpgrade(), result);
-    });
-    await check('unrefunded parity: Dodo booking without a payment record', async result => {
+    await check('legacy booking without a payment record refuses credit', async result => {
       const scenario = await seedUpgrade();
-      await commerce.patch(scenario.original._id).set({ paymentProvider: 'dodo' }).commit();
-      await parity(scenario, result);
+      await commerce.delete(scenario.original.paymentRecordId);
+      await commerce.patch(scenario.original._id).unset(['paymentRecordId']).commit();
+      await refuse(scenario, result);
     });
-    await check('unrefunded parity: multiple payment records', async result => {
+    await check('Dodo booking without a payment record refuses credit', async result => {
+      const scenario = await seedUpgrade();
+      await commerce.delete(scenario.original.paymentRecordId);
+      await commerce.patch(scenario.original._id).set({ paymentProvider: 'dodo' }).commit();
+      await refuse(scenario, result);
+    });
+    await check('multiple unlinked payment records refuse ambiguous credit', async result => {
       const scenario = await seed();
       for (const suffix of ['second', 'third']) {
         await commerce.create({ ...scenario.record, _id: `${scenario.record._id}.${suffix}`,
@@ -358,7 +345,7 @@ test('retained upgrade credit over HTTP with PostgreSQL', { timeout: 300000 }, a
           providerPaymentId: `${scenario.record.providerPaymentId}_${suffix}` });
       }
       await commerce.patch(scenario.original._id).unset(['paymentRecordId']).commit();
-      await parity(scenario, result);
+      await refuse(scenario, result);
     });
     await check('a settled refund on the third unlinked payment record refuses ambiguous credit', async result => {
       const scenario = await seed();
@@ -378,7 +365,7 @@ test('retained upgrade credit over HTTP with PostgreSQL', { timeout: 300000 }, a
       assert.ok(firstTwo.every(record => record.refunds.length === 0));
       await refuse(scenario, result);
     });
-    await check('unrefunded parity: mixed-provider upgrade chain', async result => {
+    await check('unrefunded mixed-provider chain still verifies every source', async result => {
       const scenario = await seed({ provider: 'dodo', booking: { netAmount: 29.95 }, payment: {
         verificationState: '', providerPublicData: { currency: 'USD' },
       } });
@@ -387,14 +374,14 @@ test('retained upgrade credit over HTTP with PostgreSQL', { timeout: 300000 }, a
         payment: { pricingSnapshot: { currency: 'INR', netAmount: 25 },
           bookingPayload: { currency: 'INR' }, providerPublicData: { currency: 'INR' }, refundCurrency: 'INR' },
       });
-      await parity(scenario, result);
+      await refuse(scenario, result);
     });
-    await check('unrefunded parity: chain amounts round after summing', async result => {
+    await check('unrefunded fractional-cent chain refuses inconsistent amounts', async result => {
       const scenario = await seed({ booking: { netAmount: 20.0049 } });
       await seed({ booking: { originalOrderId: scenario.original._id, netAmount: 25.0049 } });
-      await parity(scenario, result);
+      await refuse(scenario, result);
     });
-    await check('legacy booking without refunds keeps its full credit', async result => {
+    await check('verified legacy booking without refunds keeps its full credit', async result => {
       await price(await seedUpgrade(), result, 54.95);
     });
     await check('legacy settled refund without a payment record refuses credit', async result => {

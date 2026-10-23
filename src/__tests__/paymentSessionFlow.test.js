@@ -617,7 +617,9 @@ beforeEach(() => {
   process.env.PAYMENT_LEGACY_CHECKOUT_UNTIL = "2099-01-01T00:00:00.000Z";
 
   mockCreateRefWriteClient.mockReturnValue(mockClient);
-  mockResolvePaymentQuote.mockResolvedValue(baseQuote());
+  mockResolvePaymentQuote.mockImplementation(async ({ originalOrderId } = {}) => baseQuote(
+    originalOrderId ? { upgradeContext: { rootOrderId: originalOrderId, paidBookings: [], creditSources: [] } } : {}
+  ));
   mockGetBookingSettings.mockResolvedValue({});
   mockIsSlotAllowedForPackage.mockResolvedValue({
     allowed: true,
@@ -2998,7 +3000,7 @@ describe("payment session flow", () => {
     ).toBe(1);
   });
 
-  test("a completed upgrade replay returns the booking instead of the old order", async () => {
+  test("a completed upgrade cannot reuse a stale credit quote", async () => {
     const originalOrderId = "booking_upgrade_replay";
     const { issueUpgradeIntentToken } = require("../server/api/ref/upgradeIntentToken");
     const bookingPayload = baseBookingPayload({
@@ -3029,13 +3031,12 @@ describe("payment session flow", () => {
     });
 
     expect(replay).toMatchObject({
-      httpStatus: 200,
+      httpStatus: 409,
       body: {
-        status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
-        bookingId: "booking_upgrade_complete",
-        providerPayload: {},
+        code: "upgrade_credit_changed_after_quote",
       },
     });
+    expect(store.paymentRecords).toHaveLength(1);
     expect(mockCreatePayPalOrder).toHaveBeenCalledTimes(1);
   });
 

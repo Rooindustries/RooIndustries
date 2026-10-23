@@ -310,6 +310,12 @@ export default async function handler(req, res) {
     const isInternalPaymentFinalization = !!req.internalContext && (
       !!paymentFinalizeSource || !!paymentProofClaimId || !!paymentFinalizationLeaseId
     );
+    if (isUpgrade && !isInternalPaymentFinalization) {
+      return res.status(410).json({
+        error: "Please restart the upgrade checkout.",
+        code: "upgrade_checkout_required",
+      });
+    }
     const preserveHistoricalAccounting =
       isInternalPaymentFinalization &&
       req.internalContext?.preserveHistoricalAccounting === true;
@@ -930,7 +936,9 @@ export default async function handler(req, res) {
             email: resolvedEmail,
             packageTitle,
             startTimeUTC: resolvedStartTimeUTC,
-            originalOrderId,
+            originalOrderId: isInternalPaymentFinalization && originalBooking
+              ? originalBooking.originalOrderId || originalBooking._id
+              : originalOrderId,
             couponCode,
             paymentProvider,
             ...(isInternalPaymentFinalization ? {
@@ -1639,7 +1647,7 @@ export default async function handler(req, res) {
               emailDispatchCompletedAt || new Date().toISOString(),
           }
         : {}),
-      ...(originalOrderId ? { originalOrderId } : {}),
+      ...(originalOrderId ? { originalOrderId: upgradeFunding?.rootOrderId || upgradeContext?.rootOrderId || originalOrderId } : {}),
       ...(couponCode
         ? {
             couponCode,
@@ -1679,6 +1687,7 @@ export default async function handler(req, res) {
           }
         : null,
       creditSources: upgradeFunding?.creditSources || [],
+      upgradeLockToCreate: upgradeFunding?.upgradeLockToCreate,
       allowMissingHold:
         slotReservationState === "reconciled_after_expired_hold" ||
         slotReservationState === "reconciled_after_missing_hold",

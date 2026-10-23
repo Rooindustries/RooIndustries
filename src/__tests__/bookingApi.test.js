@@ -157,6 +157,46 @@ const createReq = (body = {}, method = "POST", headers = {}) => ({
   headers,
 });
 
+const createUpgradeFinalizationReq = (body) => {
+  const { buildPaymentUpgradeLockId } = require("../server/api/payment/paymentRecord");
+  const { issueUpgradeIntentToken, verifyUpgradeIntentToken, freezeUpgradeIntent } = require("../server/api/ref/upgradeIntentToken");
+  const original = store.bookings.find(booking => booking._id === body.originalOrderId);
+  for (const booking of store.bookings) {
+    Object.assign(booking, { _rev: `${booking._id}.rev`, backendOwner: "sanity", cutoverGeneration: 0,
+      currency: "USD", paymentProvider: "paypal", paypalOrderId: `${booking._id}.order`,
+      paymentRecordId: `${booking._id}.payment` });
+    store.paymentRecords.push({ _id: booking.paymentRecordId, _rev: `${booking.paymentRecordId}.rev`,
+      _type: "paymentRecord", provider: "paypal", providerOrderId: booking.paypalOrderId,
+      providerPaymentId: `${booking._id}.capture`, bookingId: booking._id, status: "booked",
+      verificationState: "server_verified", backendOwner: "sanity", cutoverGeneration: 0,
+      pricingSnapshot: { currency: "USD", netAmount: booking.netAmount },
+      providerPublicData: { currency: "USD", totalAmount: Math.round(booking.netAmount * 100) } });
+  }
+  const authorization = { bookingId: original._id, email: original.email,
+    targetPackageTitle: body.packageTitle, backend: "sanity", cutoverGeneration: 0 };
+  const paymentRecordId = "paymentRecord.upgrade.fixture";
+  const claimId = "paymentProofClaim.upgrade.fixture";
+  const leaseId = "lease_upgrade_fixture";
+  const providerOrderId = body.paypalOrderId || body.razorpayOrderId;
+  const amount = Number(body.packagePrice.replace("$", ""));
+  store.paymentRecords.push({ _id: paymentRecordId, _rev: "upgrade_payment_rev", _type: "paymentRecord",
+    provider: body.paymentProvider, providerOrderId, providerPaymentId: body.razorpayPaymentId || "upgrade_capture",
+    status: "finalizing", backendOwner: "sanity", cutoverGeneration: 0, verificationState: "server_verified",
+    bookingPayload: { ...body }, pricingSnapshot: { currency: "USD", grossAmount: amount, netAmount: amount },
+    upgradeIntentSnapshot: freezeUpgradeIntent({ payload: verifyUpgradeIntentToken({
+      ...authorization, token: issueUpgradeIntentToken(authorization) }) }),
+    paymentProofClaimId: claimId, finalizationLeaseId: leaseId,
+    finalizationLeaseExpiresAt: new Date(Date.now() + 300000).toISOString() });
+  store.paymentProofClaims.push({ _id: claimId, _rev: "upgrade_proof_rev", _type: "paymentProofClaim",
+    paymentRecordId, provider: body.paymentProvider, providerOrderId,
+    providerPaymentId: body.razorpayPaymentId || "upgrade_capture" });
+  store.paymentUpgradeLocks.push({ _id: buildPaymentUpgradeLockId(`upgrade:${original._id}`),
+    _rev: "upgrade_lock_rev", _type: "paymentUpgradeLock", paymentRecordId });
+  return { ...createReq({ ...body, paymentRecordId }), internalContext: {
+    paymentFinalizeSource: "reconcile", backendOwner: "sanity", cutoverGeneration: 0,
+    paymentProofClaimId: claimId, paymentFinalizationLeaseId: leaseId } };
+};
+
 const createRes = () => {
   const res = {
     statusCode: 200,
@@ -2465,7 +2505,7 @@ describe("booking reservation API", () => {
 
     const res = createRes();
     await createBooking(
-      createReq({
+      createUpgradeFinalizationReq({
         email: CLIENT_EMAIL,
         packageTitle: "Performance Vertex Max (Upgrade)",
         packagePrice: "$14.96",
@@ -2519,7 +2559,7 @@ describe("booking reservation API", () => {
 
     const res = createRes();
     await createBooking(
-      createReq({
+      createUpgradeFinalizationReq({
         packageTitle: "Performance Vertex Max",
         packagePrice: "$14.96",
         status: "captured",
@@ -2560,7 +2600,7 @@ describe("booking reservation API", () => {
 
     const res = createRes();
     await createBooking(
-      createReq({
+      createUpgradeFinalizationReq({
         email: "wrong@example.com",
         packageTitle: "Performance Vertex Max",
         packagePrice: "$14.96",
@@ -2574,7 +2614,7 @@ describe("booking reservation API", () => {
 
     expect(res.statusCode).toBe(403);
     expect(res.body).toEqual({
-      error: "Upgrade details do not match the original booking.",
+      error: "The frozen upgrade authorization no longer matches.",
     });
     expect(store.bookings).toHaveLength(1);
   });
@@ -2612,7 +2652,7 @@ describe("booking reservation API", () => {
 
     const res = createRes();
     await createBooking(
-      createReq({
+      createUpgradeFinalizationReq({
         email: CLIENT_EMAIL,
         packageTitle: "Performance Vertex Max",
         packagePrice: "$9.96",
@@ -2664,7 +2704,7 @@ describe("booking reservation API", () => {
 
     const res = createRes();
     await createBooking(
-      createReq({
+      createUpgradeFinalizationReq({
         email: CLIENT_EMAIL,
         packageTitle: "Performance Vertex Max",
         packagePrice: "$0.00",
@@ -2676,9 +2716,10 @@ describe("booking reservation API", () => {
       res
     );
 
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(409);
     expect(res.body).toEqual({
-      error: "This order already matches the target package.",
+      error: "This booking already received the upgrade.",
+      code: "upgrade_credit_changed_after_quote",
     });
   });
 
@@ -2722,7 +2763,7 @@ describe("booking reservation API", () => {
 
     const res = createRes();
     await createBooking(
-      createReq({
+      createUpgradeFinalizationReq({
         email: CLIENT_EMAIL,
         packageTitle: "Performance Vertex Max",
         packagePrice: "$14.96",
@@ -3211,7 +3252,7 @@ describe("booking reservation API", () => {
 
     const res = createRes();
     await createBooking(
-      createReq({
+      createUpgradeFinalizationReq({
         email: CLIENT_EMAIL,
         packageTitle: "Performance Vertex Max",
         packagePrice: "$14.96",

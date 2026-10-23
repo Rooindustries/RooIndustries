@@ -247,9 +247,7 @@ jobs:
       - name: Run the remaining PostgreSQL 17 suites
         run: |
           failed=()
-          baseline=$(sed -n "s/.*const baselineCommit = '\([0-9a-f]\{40\}\)'.*/\1/p" tests/upgrade-credit.mjs)
-          git fetch --no-tags --depth=1 origin "$baseline" || failed+=("upgrade-credit baseline fetch")
-          for suite in booking-hold upgrade-credit emails:postgres17 payment-recovery:postgres17 commerce-alerts referral:postgres17 referral-social:postgres17 backend-integrity:postgres17 referral-authority:postgres17 referral-email:postgres17 referral-integrity:postgres17 account-domain:postgres17 commerce-readiness:postgres17 referral-email:origins tooling:safety; do
+          for suite in booking-hold upgrade-credit upgrade-credit:ownership emails:postgres17 payment-recovery:postgres17 commerce-alerts referral:postgres17 referral-social:postgres17 backend-integrity:postgres17 referral-authority:postgres17 referral-email:postgres17 referral-integrity:postgres17 account-domain:postgres17 commerce-readiness:postgres17 referral-email:origins tooling:safety; do
             npm run "test:$suite" || failed+=("$suite")
           done
           if [ ${#failed[@]} -gt 0 ]; then

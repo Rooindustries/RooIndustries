@@ -2590,10 +2590,17 @@ try{
       const original = { ...input.bookingPayload, _id: 'booking.original', _type: 'booking',
         backendOwner: 'supabase', cutoverGeneration: 0, status: 'captured',
         packagePrice: '$9.99', grossAmount: 9.99, netAmount: 9.99, paymentProvider: 'paypal',
-        paypalOrderId: 'order-original', startTimeUTC: '2099-02-01T00:30:00.000Z', localTimeZone: 'Pacific/Honolulu' };
+        paypalOrderId: 'order-original', paymentRecordId: 'paymentRecord.original',
+        startTimeUTC: '2099-02-01T00:30:00.000Z', localTimeZone: 'Pacific/Honolulu' };
       delete original.slotHoldId;
       delete original.slotHoldToken;
       await commerce.create(original);
+      await commerce.create({ _id: original.paymentRecordId, _type: 'paymentRecord',
+        backendOwner: 'supabase', cutoverGeneration: 0, status: 'booked', provider: 'paypal',
+        verificationState: 'server_verified', bookingId: original._id,
+        providerOrderId: original.paypalOrderId, providerPaymentId: 'capture-original',
+        pricingSnapshot: { currency: 'USD', netAmount: 9.99 },
+        providerPublicData: { currency: 'USD', totalAmount: 999, taxAmount: 0, taxInclusive: false } });
       const target = { _id: 'package.fixture-upgrade', _type: 'package', title: 'Fixture Upgrade', price: '$19.98' };
       const existing = await documents.getDocument(target._id);
       if (existing) await documents.patch(target._id).set(target).commit();
@@ -2630,7 +2637,10 @@ try{
     const browserResponse = variant === 'browser' ? await fetch(`${origin}/start-route`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }) : null;
     const started = browserResponse ? { status: browserResponse.status, body: await browserResponse.json(), cacheControl: browserResponse.headers.get('cache-control') } : await requestFlow('start', { body: input });
     assert.equal(started.status,200,JSON.stringify(started));
-    const [payment]=await commerce.fetch('*[_type == "paymentRecord"]');assert.ok(payment?._id);
+    const payment = provider === 'free'
+      ? await commerce.fetch('*[_type == "paymentRecord" && bookingId == $id][0]', { id: started.body.bookingId })
+      : await commerce.fetch('*[_type == "paymentRecord" && providerOrderId == $id][0]', { id: started.body.providerPayload.orderId });
+    assert.ok(payment?._id);
     paypalOrder.status='COMPLETED';paypalOrder.purchase_units[0].payments={captures:[{id:'capture-fixture',status:'COMPLETED',amount:{value,currency_code:'USD'}}]};
     razorpayPayment.amount=amount;dodoPayment.metadata={paymentRecordId:payment._id};dodoPayment.total_amount=amount;
     const proof=provider==='paypal'?{paypalOrderId:'order-fixture',paypalPaymentId:'capture-fixture'}:provider==='razorpay'?{razorpayOrderId:'order-fixture',razorpayPaymentId:'payment-fixture',razorpaySignature:crypto.createHmac('sha256','fixture-secret').update('order-fixture|payment-fixture').digest('hex')}:{};
