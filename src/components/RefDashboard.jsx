@@ -626,6 +626,13 @@ export default function RefDashboard() {
                 value={owed.total}
                 accent={owed.total > 0 ? "text-warning-text" : "text-success-text"}
               />
+              {toMoneyNumber(payoutData.underReview?.total) > 0 && (
+                <StatCard
+                  label="Under review"
+                  value={payoutData.underReview.total}
+                  accent="text-warning-text"
+                />
+              )}
             </div>
 
             {overpaid.total > 0 && (

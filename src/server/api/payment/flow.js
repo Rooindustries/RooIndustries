@@ -1,3 +1,4 @@
+import { dispatchCouponAlerts } from '../ref/couponAlerts.js';
 import { buildBrowserCompletionBody } from "./bookingSummary.js";
 import envValue from "../../supabase/envValue.cjs";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
@@ -430,6 +431,7 @@ const buildPricingSnapshot = (quote = {}, currency = "USD") => ({
   canCombineWithReferral: quote.canCombineWithReferral === true,
   effectiveReferralCode: String(quote.effectiveReferralCode || "").trim(),
   effectiveReferralId: String(quote.effectiveReferralId || "").trim(),
+  referralCreatorEmail: String(quote.referralCreatorEmail || "").trim(),
 });
 
 const buildRecordPricingFingerprint = ({
@@ -4386,6 +4388,7 @@ export const reconcilePaymentSessions = async ({
     });
   }
 
+  await dispatchCouponAlerts({client});
   const policy = resolveSupabaseRuntimePolicy();
   const currentGeneration = Math.max(
     0,
