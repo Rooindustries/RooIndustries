@@ -121,6 +121,12 @@ const isDraftEmpty = (formObj) =>
   !String(formObj?.specs || "").trim() &&
   !String(formObj?.mainGame || "").trim() &&
   !String(formObj?.notes || "").trim();
+// Payment hands back what was submitted; it fills only fields a full store kept from being saved.
+const fillFromHandedBack = (form, bookingData, packageTitle) => {
+  if (!bookingData || bookingData.packageTitle !== packageTitle) return form;
+  const handedBack = normalizeForm({ ...bookingData, notes: bookingData.message });
+  return Object.fromEntries(Object.entries(form).map(([field, value]) => [field, String(value).trim() ? value : handedBack[field]]));
+};
 
 const isSameDay = (a, b) =>
   a.getFullYear() === b.getFullYear() &&
@@ -1254,6 +1260,7 @@ export default function BookingForm() {
 
   // Load persisted booking draft (keeps form + package when returning)
   useEffect(() => {
+    let storedForm = null;
     try {
       setAppliedReferral(null);
       setAppliedCoupon(null);
@@ -1272,7 +1279,7 @@ export default function BookingForm() {
           (parsed.lastTitle && parsed.packages && parsed.packages[parsed.lastTitle]) ||
           null;
         if (draftForPkg) {
-          if (draftForPkg.form) setForm(normalizeForm(draftForPkg.form));
+          if (draftForPkg.form) storedForm = normalizeForm(draftForPkg.form);
           if (draftForPkg.selectedPackage) {
             setPersistedPackage(draftForPkg.selectedPackage);
           }
@@ -1304,6 +1311,7 @@ export default function BookingForm() {
       console.error("Failed to load booking draft");
       setDraftLoading(false);
     }
+    setForm((prev) => fillFromHandedBack(storedForm || prev, location.state?.bookingData, selectedPackage.title));
   }, [selectedPackage.title]);
 
   const persistDraft = (payload) => {
@@ -2396,7 +2404,10 @@ export default function BookingForm() {
           return;
         }
         if (outcome === "clear") {
-          if (isSameAsExisting) clearHoldState(recheckingPayment);
+          if (isSameAsExisting) {
+            if (new Date(myHold.expiresAt).getTime() <= Date.now()) markBookingHoldExpired();
+            clearHoldState(recheckingPayment);
+          }
           setSelectedSlot(null);
         }
         const setHoldError = recheckingPayment && outcome !== "clear" ? setErrorStep2 : setErrorStep1;

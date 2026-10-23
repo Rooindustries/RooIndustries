@@ -87,6 +87,34 @@ test("expiry on the payment page returns to slot selection with the reason", asy
   await reserveAgainKeepsDetails(page, flow);
 });
 
+test("details typed after the browser store filled survive expiry on the payment page", async ({ page, flow }) => {
+  flow.state.holdMs = shortHold;
+  await flow.reserve();
+  await page.evaluate(() => {
+    const text = "x".repeat(8 * 1024 * 1024);
+    let low = 0;
+    let high = text.length;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      try {
+        sessionStorage.setItem("roo-hold-quota", text.slice(0, middle));
+        low = middle;
+      } catch {
+        high = middle - 1;
+      }
+    }
+  });
+  await flow.details();
+  expect(await draftEmail(page)).toBeNull();
+  await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+  await flow.payment();
+  await expect(page).toHaveURL(/\/booking$/, { timeout: 25000 });
+  await expect(page.getByRole("alert").filter({ hasText: expiredMessage })).toBeVisible();
+  await page.evaluate(() => sessionStorage.removeItem("roo-hold-quota"));
+  await reserveAgainKeepsDetails(page, flow);
+  await expect(page.getByRole("textbox", { name: "PC specifications", exact: true })).toHaveValue("Ryzen 7700 / RTX 4070");
+});
+
 for (const route of ["/booking", "/payment"]) {
   test(`reloading ${route} after the reservation expired keeps the typed details`, async ({ page, flow }) => {
     if (route === "/payment") {
