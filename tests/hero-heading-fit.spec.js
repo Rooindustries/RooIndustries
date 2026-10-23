@@ -8,7 +8,7 @@ const viewports = [
   { width: 1440, height: 900 },
 ];
 
-test.use({ javaScriptEnabled: true, trace: "off", video: "off", screenshot: "off" });
+test.use({ javaScriptEnabled: true, trace: process.env.CI ? "retain-on-failure" : "off", video: "off", screenshot: "off" });
 test.describe.configure({ retries: 0 });
 
 async function measureHeading(page) {

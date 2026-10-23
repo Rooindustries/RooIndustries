@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import yaml from "js-yaml";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const head = "a".repeat(40);
@@ -18,13 +19,12 @@ const token = "fixture-github-token";
 const userToken = "fixture-user-token";
 const seerCheck = (overrides = {}) => ({ id: 100, name: "Seer Code Review", app: { id: 12637, slug: "sentry" },
   head_sha: head, status: "completed", conclusion: "success", completed_at: "2026-10-23T00:00:00Z", ...overrides });
-const workflow = readFileSync(new URL("../.github/workflows/tests.yml", import.meta.url), "utf8");
-const matrixNames = [...workflow.matchAll(/^ {10}- name:\s*(\S+)\s*$/gm)].map(([, name]) => name);
-const checkNames = [...workflow.matchAll(/^ {4}name:\s*(.+?)\s*$/gm)].flatMap(([, name]) =>
-  name.includes("${{ matrix.suite.name }}")
-    ? matrixNames.map(suite => name.replace("${{ matrix.suite.name }}", suite))
-    : [name]
-);
+const workflow = yaml.safeLoad(readFileSync(new URL("../.github/workflows/tests.yml", import.meta.url), "utf8"));
+const jobNames = job => job.strategy?.matrix?.suite
+  ? job.strategy.matrix.suite.map(suite => job.name.replace("${{ matrix.suite.name }}", suite.name))
+  : [job.name];
+const checkNames = Object.values(workflow.jobs).flatMap(jobNames);
+const splitCheckNames = ["routes", "revalidation"].flatMap(id => jobNames(workflow.jobs[id]));
 
 const baseline = () => ({
   pull: { number: 1, html_url: "https://github.com/fixture/website/pull/1", title: "Fixture PR", state: "open", draft: false,
@@ -166,6 +166,42 @@ test("CLI merges only the evaluated head after two complete snapshots", async ()
   assert.deepEqual(result.merges.map(request => request.body), [{ merge_method: "squash", sha: head }]);
   assert.ok(result.comments.some(body => body.includes("Squash-merged into main")));
 });
+
+test("CLI accepts all actual workflow groups without removed check names", async () => {
+  assert.equal(new Set(checkNames).size, checkNames.length);
+  assert.equal(splitCheckNames.length, 4);
+  const result = await runScenario("workflow-groups-green", { setup: state => { state.comments = []; } });
+  assert.equal(result.snapshots, 2);
+  assert.deepEqual(result.merges.map(request => request.body), [{ merge_method: "squash", sha: head }]);
+});
+
+for (const name of splitCheckNames) {
+  for (const stage of ["initial", "final"]) {
+    for (const [condition, status, conclusion] of [
+      ["missing", null, null], ["queued", "queued", null],
+      ["running", "in_progress", null], ["failed", "completed", "failure"],
+    ]) {
+      test(`CLI blocks ${condition} split group ${name} at the ${stage} snapshot`, async () => {
+        const change = state => {
+          const check = state.checks.find(check => check.name === name);
+          assert.ok(check, `The real workflow must report ${name}.`);
+          if (condition === "missing") state.checks = state.checks.filter(item => item !== check);
+          else Object.assign(check, { status, conclusion });
+        };
+        const result = await runScenario(`split-${name.replaceAll(" ", "-")}-${condition}-${stage}`, {
+          [stage === "initial" ? "setup" : "changeSecond"]: change,
+        });
+        assert.deepEqual(result.merges, []);
+        if (stage === "initial") assert.ok(result.comments.some(body => body.includes(name)));
+        else {
+          assert.equal(result.snapshots, 2);
+          assert.equal(result.requests.filter(request => request.path.endsWith("/check-runs")).length, 2);
+          assert.ok(result.comments.some(body => body.includes("pr-auto-merge-action:wait")));
+        }
+      });
+    }
+  }
+}
 
 for (const [name, value] of [
   ["missing", undefined], ["null", null], ["string-false", "false"], ["string-true", "true"],
@@ -816,6 +852,17 @@ const localCi = state => {
       runner_id: 0, started_at: check.started_at, steps: [] };
   });
 };
+
+test("CLI accepts local-ci for the renamed groups before any Actions job starts", async () => {
+  const result = await runScenario("split-groups-local-ci", { setup: state => {
+    localCi(state);
+    state.comments = [];
+    assert.equal(state.jobs.filter(job => splitCheckNames.includes(job.name)).length, 4);
+  } });
+  assert.equal(result.snapshots, 2);
+  assert.deepEqual(result.merges.map(request => request.body), [{ merge_method: "squash", sha: head }]);
+  assert.ok(result.comments.some(body => body.includes("local-ci")));
+});
 
 for (const [name, setup] of Object.entries({
   absent: state => { state.comments = []; },

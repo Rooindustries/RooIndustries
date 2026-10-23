@@ -253,7 +253,7 @@ for (const viewportCfg of VIEWPORTS) {
   test(`section nav reliability matrix (${viewportCfg.name}, repeats=${viewportCfg.repeatCount})`, async ({
     page,
   }) => {
-    test.setTimeout(60 * 60 * 1000);
+    test.setTimeout(10 * 60 * 1000);
     await page.setViewportSize(viewportCfg.viewport);
 
     page.on("pageerror", (err) => {

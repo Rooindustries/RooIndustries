@@ -3,7 +3,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const cancelResponses = require("./fixtures/payment-cancel.json");
 
-test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", actionTimeout: 10000, reducedMotion: "reduce", trace: "off", video: "off" });
+test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", actionTimeout: 10000, reducedMotion: "reduce", trace: process.env.CI ? "retain-on-failure" : "off", video: "off" });
 const bookingId = "booking.summary-order";
 const summary = { bookingId, packageTitle: "Performance Vertex Overhaul", startTimeUTC: "2026-03-08T07:30:00.000Z", localTimeZone: "America/New_York" };
 const complete = (changes = {}) => ({ ok: true, status: "booked", bookingId, emailDispatchToken: "fixture-email-token", bookingSummary: summary, ...changes });

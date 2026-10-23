@@ -4,7 +4,7 @@ const path = require("node:path");
 
 const REFERRAL = "friend";
 
-test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", reducedMotion: "reduce", trace: "off", video: "off" });
+test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", reducedMotion: "reduce", trace: process.env.CI ? "retain-on-failure" : "off", video: "off" });
 
 const watchConsole = (page) => {
   const messages = [];

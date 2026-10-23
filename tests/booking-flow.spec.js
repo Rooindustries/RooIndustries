@@ -1,7 +1,7 @@
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
-test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", viewport: { width: 1440, height: 900 }, reducedMotion: "reduce", actionTimeout: 10000, navigationTimeout: 20000, trace: "off" });
+test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", viewport: { width: 1440, height: 900 }, reducedMotion: "reduce", actionTimeout: 10000, navigationTimeout: 20000, trace: process.env.CI ? "retain-on-failure" : "off" });
 
 test.afterEach(async ({ page, flow }, testInfo) => {
   const requests = testInfo.outputPath("requests.json");

@@ -6,7 +6,7 @@ const campaignPath = `${missingPath}?utm_source=x`;
 const hydrated = (page) => page.waitForFunction(() => window.history.state?.__rooLegacy === true);
 const address = (page) => page.evaluate(() => `${window.location.pathname}${window.location.search}${window.location.hash}`);
 
-test.use({ javaScriptEnabled: true, reducedMotion: "reduce", actionTimeout: 10000, navigationTimeout: 20000, trace: "off", video: "off" });
+test.use({ javaScriptEnabled: true, reducedMotion: "reduce", actionTimeout: 10000, navigationTimeout: 20000, trace: process.env.CI ? "retain-on-failure" : "off", video: "off" });
 
 test.beforeEach(async ({ page, flow }) => {
   void flow;

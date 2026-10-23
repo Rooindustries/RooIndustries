@@ -7,7 +7,7 @@ test.use({
   reducedMotion: "reduce",
   actionTimeout: 10000,
   navigationTimeout: 30000,
-  trace: "off",
+  trace: process.env.CI ? "retain-on-failure" : "off",
   video: "off",
 });
 

@@ -2,7 +2,7 @@ const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
-test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", reducedMotion: "reduce", actionTimeout: 10000, navigationTimeout: 30000, trace: "off", video: "off" });
+test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", reducedMotion: "reduce", actionTimeout: 10000, navigationTimeout: 30000, trace: process.env.CI ? "retain-on-failure" : "off", video: "off" });
 
 const dialogSelector = '[role="dialog"].ri-booking';
 const fields = [

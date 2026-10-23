@@ -2,7 +2,7 @@ const { test, expect } = require("@playwright/test");
 const fs = require("node:fs/promises");
 const { gzipSync } = require("node:zlib");
 
-test.use({ javaScriptEnabled: true, viewport: { width: 390, height: 844 }, serviceWorkers: "block", trace: "off", video: "off" });
+test.use({ javaScriptEnabled: true, viewport: { width: 390, height: 844 }, serviceWorkers: "block", trace: process.env.CI ? "retain-on-failure" : "off", video: "off" });
 
 const attach = async (testInfo, name, value) => {
   const file = testInfo.outputPath(`${name}.json`);
