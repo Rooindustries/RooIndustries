@@ -411,7 +411,13 @@ const checkBooking = ({ payment, record, booking, refunded, pricing }) => {
       : typeof booking.referral._ref === "string"
         ? booking.referral._ref
         : null;
-  if (referralCode !== pricing.referralCode || referralId !== pricing.referralId)
+  const historicalReferral =
+    booking.referral == null &&
+    booking.referralAccountingApplied === undefined &&
+    booking.requiresReschedule === true &&
+    record.historicalAccountingPreserved === true &&
+    (record.historicalBookingReconstruction === undefined || record.historicalBookingReconstruction === false);
+  if (referralCode !== pricing.referralCode || (referralId !== pricing.referralId && !historicalReferral))
     return "referral_binding_mismatch";
   const commission = moneyCents(booking.commissionAmount);
   const hasOriginalCommission = Object.hasOwn(booking, "dodoOriginalCommissionAmount");
@@ -421,10 +427,18 @@ const checkBooking = ({ payment, record, booking, refunded, pricing }) => {
     commission === 0 &&
     pricing.percent > 0 &&
     (booking.netAmount || booking.grossAmount) > 0;
+  if (refunded > 0 && !fullRefund && (
+    (booking.lastRefundAt != null && booking.lastRefundAt !== "" &&
+      (typeof booking.lastRefundAt !== "string" || !Number.isFinite(Date.parse(booking.lastRefundAt)))) ||
+    (Object.hasOwn(booking, "dodoDisputeActive") && typeof booking.dodoDisputeActive !== "boolean")
+  )) return "commission_mismatch";
+  const retainedFraction = refunded > 0 && !booking.lastRefundAt && !Object.hasOwn(booking, "dodoDisputeActive")
+    ? Math.max(0, 1 - refunded / ((payment.total_amount / 100) * 100))
+    : Math.max(0, 1 - (refunded / 100) / (payment.total_amount / 100));
   const expected =
     disputed || fullRefund || !KEPT_BOOKING_STATUSES.includes(booking.status)
       ? 0
-      : Math.round(pricing.commission * (1 - refunded / payment.total_amount));
+      : Math.round((pricing.commission / 100) * retainedFraction * 100);
   const payableCommission = fullRefund || (cancelledDuringDispute && !disputed) ? 0 : commission;
   if (payableCommission !== null && payableCommission > expected) return "commission_exceeds_kept_share";
   if (
@@ -746,16 +760,25 @@ export const buildReconcileReport = async ({
       bookings.set(id, booking);
     for (const payment of payments) await auditPayment(payment);
 
-    const dodoBookings = await readDocuments(client, "booking", {
+    const bookingWindows = [
+      { path: "_createdAt", to, statuses: AUDITED_BOOKING_STATUSES },
+      { path: "lastRefundAt", to: new Date(now).toISOString(), statuses: AUDITED_BOOKING_STATUSES },
+      { path: "updatedAt", to: new Date(now).toISOString(), statuses: ["refunded"] },
+      { path: "updatedAt", to: new Date(now).toISOString(), statuses: KEPT_BOOKING_STATUSES, refund: true },
+    ];
+    const bookingGroups = await Promise.all(bookingWindows.map((window) => readDocuments(client, "booking", {
       filters: [
         { path: "paymentProvider", op: "eq", value: "dodo" },
-        { path: "status", op: "in", value: AUDITED_BOOKING_STATUSES },
-        { path: "_createdAt", op: "gte", value: from },
-        { path: "_createdAt", op: "lte", value: to },
+        { path: "status", op: "in", value: window.statuses },
+        ...(window.refund ? [{ path: "refundStatus", op: "in", value: ["full", "partial"] }] : []),
+        { path: window.path, op: "defined" },
+        { path: window.path, op: "gte", value: from },
+        { path: window.path, op: "lte", value: window.to },
       ],
       limit: MAX_BOOKING_LOOKUPS + 1,
-    }, deadline);
-    if (!Array.isArray(dodoBookings)) throw unavailable();
+    }, deadline)));
+    if (bookingGroups.some((group) => !Array.isArray(group))) throw unavailable();
+    const dodoBookings = [...new Map(bookingGroups.flat().map((booking) => [booking._id, booking])).values()];
     const bookingCap = dodoBookings.length > MAX_BOOKING_LOOKUPS;
     if (bookingCap)
       report({ key: "scan:dodo-bookings", id: "dodo-bookings", reason: "report_truncated" });
@@ -763,7 +786,9 @@ export const buildReconcileReport = async ({
       if (
         booking.paymentProvider !== "dodo" ||
         !AUDITED_BOOKING_STATUSES.includes(booking.status) ||
-        !inWindow(booking._createdAt, from, to)
+        !bookingWindows.some((window) => window.statuses.includes(booking.status) &&
+          (!window.refund || ["full", "partial"].includes(booking.refundStatus)) &&
+          inWindow(booking[window.path], from, window.to))
       )
         continue;
       recentRefs.add(booking._id);

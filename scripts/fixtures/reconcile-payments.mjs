@@ -704,6 +704,28 @@ try {
       }
     });
   }
+  if (process.env.ROO_RECONCILE_TRANSITION_REPORT) {
+    await run('recent-refund-alert', async (home) => {
+      const report = JSON.parse(fs.readFileSync(process.env.ROO_RECONCILE_TRANSITION_REPORT, 'utf8'));
+      assert.equal(report.ok, true);
+      assert.equal(report.count, 1);
+      assert.equal(report.items[0].reason, 'refund_not_applied');
+      current.window = report;
+      const entry = report.items[0];
+      current.checks[entry.key] = check(entry.key, 'unresolved', [entry]);
+      let identity;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const result = await invoke(home);
+        assert.equal(result.code, 0);
+        assert.equal(JSON.parse(result.stdout).result, 'mismatch');
+        assert.equal(current.issues.length, 1);
+        assert.equal(current.updates.length, 1);
+        assert.equal(metadata(current.issues[0]).observations[0].reason, entry.reason);
+        if (identity) assert.equal(current.issues[0].uuid, identity);
+        identity = current.issues[0].uuid;
+      }
+    });
+  }
   if (baseline) {
     await run('legacy-daily-record', async (home) => {
       current.window = windowReport([fault()]);

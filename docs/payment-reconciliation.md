@@ -100,6 +100,12 @@ The reverse scan includes recent captured, completed and refunded Dodo bookings,
 so a refunded booking is still checked against provider details when its payment
 is absent from the succeeded-payment listing. The same booking limit applies
 across those statuses; an incomplete scan cannot report clean.
+It also includes older bookings with a refund in the last 72 hours. Booking
+creation, last refund time and refund-state updates form one deduplicated
+200-booking limit. Each date window requires that date to exist; unrelated
+updates to old captured bookings do not consume the refund window. Matching
+refunds still need provider validation, and recent provider changes retain
+their settlement grace period.
 Fully refunded bookings earn no referral commission, even when they keep a
 historical commission amount. A full refund before booking is clean only when
 the provider's validated refund total matches the payment and the local record
@@ -111,6 +117,16 @@ provider's cumulative refund total, currency and full or partial state, and
 confirms completed booking synchronization. Updating the booking alone cannot
 close its issue while that record still has pending or inconsistent refund work.
 Pending, failed and review refunds with no succeeded amount do not change earnings.
+The audit follows the existing writers' exact cent rounding. Creation with a
+partial refund and later refund or dispute updates use their existing operation
+order; no one-cent tolerance is applied. Invalid writer markers cannot prove
+recovery, and a cent above or below the matching writer result still alerts.
+Historical reschedule recovery can intentionally omit a referral reference to
+preserve earlier accounting. The audit accepts only that documented shape:
+preserved accounting, no pending reconstruction, a reschedule booking and no
+new referral-accounting flag. The referral code and frozen commission still
+must match. Ordinary missing references and conflicting references remain
+unresolved; the audit does not add a reference or change creator credit.
 An admin cancellation preserved during a dispute stays cancelled after the
 dispute closes and earns no referral commission. The audit accepts that state
 only after the provider dispute and local booking flags agree.
