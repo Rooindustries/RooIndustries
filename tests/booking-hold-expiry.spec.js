@@ -21,6 +21,7 @@ const reserveAgainKeepsDetails = async (page, flow, holdMs = 20 * 60 * 1000) => 
   await page.getByRole("button", { name: "Next", exact: true }).last().click();
   await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveValue("visitor@example.invalid");
   await expect(page.getByRole("textbox", { name: "Discord username", exact: true })).toHaveValue("fixture_visitor");
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("booking_hold_expired"))).toBeNull();
 };
 
 test("expiry on the details step keeps the booking open with the typed details", async ({ page, flow }) => {
@@ -239,6 +240,8 @@ const paymentSession = page => page.evaluate(() => sessionStorage.getItem("payme
 
 test("reloading after a payment-pending reservation expired keeps its payment controls", async ({ page, flow }) => {
   const hold = await startPayment(page, flow);
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Release payment", exact: true })).toBeVisible();
   await page.clock.setSystemTime(Date.parse(hold.expiresAt) + 1000);
   await page.reload();
   await expect(page.getByRole("alert").filter({ hasText: "This reservation expired while payment is still pending." })).toBeVisible();

@@ -1272,8 +1272,8 @@ export default function BookingForm() {
           (parsed.lastTitle && parsed.packages && parsed.packages[parsed.lastTitle]) ||
           null;
         if (draftForPkg) {
-          if (draftForPkg.form) storedForm = normalizeForm(draftForPkg.form);
           storedRevision = readFormRevision(draftForPkg.formRevision);
+          if (draftForPkg.form || storedRevision) storedForm = normalizeForm(draftForPkg.form);
           if (draftForPkg.selectedPackage) {
             setPersistedPackage(draftForPkg.selectedPackage);
           }
@@ -1348,22 +1348,23 @@ export default function BookingForm() {
   };
 
   const clearDraftForPackage = (pkgKey) => {
+    const formRevision = nextDraftRevision();
     try {
       const current = sessionStorage.getItem(BOOKING_DRAFT_KEY);
-      if (!current) return;
-      const parsed = { lastTitle: null, packages: {}, ...JSON.parse(current) };
-      if (parsed.packages && parsed.packages[pkgKey]) {
-        const selectedPackage = parsed.packages[pkgKey]?.selectedPackage;
-        if (selectedPackage?.title) {
-          parsed.packages[pkgKey] = { selectedPackage };
-          parsed.lastTitle = pkgKey;
-        } else {
-          delete parsed.packages[pkgKey];
-          if (parsed.lastTitle === pkgKey) parsed.lastTitle = null;
-        }
-        setDrafts(parsed.packages);
-        sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
-      }
+      const parsed = { lastTitle: null, packages: {}, ...(current ? JSON.parse(current) : {}) };
+      const storedPackage = parsed.packages?.[pkgKey]?.selectedPackage;
+      const draftPackage = storedPackage?.title ? storedPackage : selectedPackage;
+      if (!draftPackage?.title) return;
+      parsed.packages = {
+        ...(parsed.packages || {}),
+        [pkgKey]: {
+          selectedPackage: draftPackage,
+          formRevision,
+        },
+      };
+      parsed.lastTitle = pkgKey;
+      setDrafts(parsed.packages);
+      sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
     } catch {
       console.error("Failed to clear booking draft");
     }
@@ -2109,7 +2110,7 @@ export default function BookingForm() {
     });
   };
 
-  const releaseHold = async (resetStep = true, { suppressError = false } = {}) => {
+  const releaseHold = async (resetStep = true, { suppressError = false, clearDraft = false } = {}) => {
     if (!myHold) return true;
     if (isPaymentPendingHold) {
       setErrorStep2(
@@ -2120,6 +2121,7 @@ export default function BookingForm() {
 
     const holdIdToDelete = myHold.holdId;
     const holdTokenToDelete = myHold.holdToken;
+    const releaseDraftRevision = draftRevisionRef.current;
     const hasExpired = () => new Date(myHold.expiresAt).getTime() <= Date.now();
     const isCurrentHold = () =>
       currentHoldRef.current?.holdId === holdIdToDelete &&
@@ -2135,6 +2137,7 @@ export default function BookingForm() {
 
     let outcome;
     let serverMessage = "";
+    let releaseSucceeded = false;
     try {
       const response = await fetch("/api/releaseHold", {
         method: "POST",
@@ -2148,10 +2151,11 @@ export default function BookingForm() {
       const data = await response.json();
       const message = data?.message || data?.error;
       if (response.status === 409 && typeof message === "string") serverMessage = message;
+      releaseSucceeded = response.ok && data?.ok === true;
       outcome = classifyHoldResponse({
         endpoint: "release",
         status: response.status,
-        ok: response.ok && data?.ok === true,
+        ok: releaseSucceeded,
         expired: hasExpired(),
       });
     } catch {
@@ -2169,7 +2173,14 @@ export default function BookingForm() {
         setErrorStep2("");
         return true;
       }
-      if (isCurrentHold()) clearHoldState(resetStep);
+      if (isCurrentHold()) {
+        clearHoldState(resetStep);
+        if (!expired && clearDraft && releaseSucceeded && draftRevisionRef.current === releaseDraftRevision) {
+          clearDraftForPackage(getDraftKey(selectedPackage));
+          setForm(createFreshForm());
+          clearBookingHoldExpired();
+        }
+      }
       if (!expired) {
         setErrorStep1("");
         setErrorStep2("");
@@ -2626,7 +2637,7 @@ export default function BookingForm() {
                     countdownMs={holdCountdownMs}
                     isPaymentPending={isPaymentPendingHold}
                     localTimeLabel={holdLocalTimeLabel}
-                    onRelease={() => releaseHold(true)}
+                    onRelease={() => releaseHold(true, { clearDraft: true })}
                     className="mb-6 text-left"
                   />
                   {slotAvailabilityNotice && (
@@ -2960,7 +2971,7 @@ export default function BookingForm() {
                     countdownMs={holdCountdownMs}
                     isPaymentPending={isPaymentPendingHold}
                     localTimeLabel={holdLocalTimeLabel}
-                    onRelease={() => releaseHold(true)}
+                    onRelease={() => releaseHold(true, { clearDraft: true })}
                     className="mb-6"
                   />
 
@@ -3103,7 +3114,7 @@ export default function BookingForm() {
                     countdownMs={holdCountdownMs}
                     isPaymentPending={isPaymentPendingHold}
                     localTimeLabel={holdLocalTimeLabel}
-                    onRelease={() => releaseHold(true)}
+                    onRelease={() => releaseHold(true, { clearDraft: true })}
                     className="mb-6"
                   />
 
