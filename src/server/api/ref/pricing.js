@@ -353,9 +353,33 @@ export const resolveCapturedUpgradeFunding = async ({ record, client }) => {
     }
     throw error;
   }
-  const lock = await client.fetch(`*[_type == "paymentUpgradeLock" && _id == $id][0]{...}`, {
-    id: buildPaymentUpgradeLockId(`upgrade:${context.rootOrderId}`),
+  const rootScope = `upgrade:${context.rootOrderId}`;
+  const rootLockId = buildPaymentUpgradeLockId(rootScope);
+  let lock = await client.fetch(`*[_type == "paymentUpgradeLock" && _id == $id][0]{...}`, {
+    id: rootLockId,
   });
+  if (!lock && record.sessionScope && record.startClaimId === buildPaymentUpgradeLockId(record.sessionScope)) {
+    const legacy = await client.fetch(`*[_type == "paymentUpgradeLock" && _id == $id][0]{...}`, {
+      id: record.startClaimId,
+    });
+    if (legacy?._rev && record.quoteFingerprint && legacy.paymentRecordId === record._id && legacy.scope === record.sessionScope &&
+        legacy.backendOwner === record.backendOwner && legacy.provider === record.provider &&
+        legacy.quoteFingerprint === record.quoteFingerprint) {
+      lock = legacy;
+      const createdAt = new Date().toISOString();
+      context.upgradeLockToCreate = {
+        _id: rootLockId,
+        _type: "paymentUpgradeLock",
+        backendOwner: record.backendOwner,
+        scope: rootScope,
+        paymentRecordId: record._id,
+        provider: record.provider,
+        quoteFingerprint: record.quoteFingerprint,
+        createdAt,
+        updatedAt: createdAt,
+      };
+    }
+  }
   if (!lock?._rev || lock.paymentRecordId !== record._id) {
     throw createApiError(409, "This upgrade no longer owns the original booking credit.", "upgrade_credit_changed_after_quote");
   }

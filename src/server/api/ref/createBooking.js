@@ -1687,6 +1687,7 @@ export default async function handler(req, res) {
           }
         : null,
       creditSources: upgradeFunding?.creditSources || [],
+      upgradeLockToCreate: upgradeFunding?.upgradeLockToCreate,
       allowMissingHold:
         slotReservationState === "reconciled_after_expired_hold" ||
         slotReservationState === "reconciled_after_missing_hold",

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { isDeepStrictEqual } from 'node:util';
 import { createBookingContactFixture } from './fixtures/booking-contact.mjs';
+import { buildPaymentUpgradeLockId } from '../src/server/api/payment/paymentRecord.js';
 
 test('upgrade credit stays verified and belongs to one checkout', { timeout: 900000 }, async t => {
   const fixture = await createBookingContactFixture({ artifactName: 'upgrade-credit-ownership' });
@@ -57,7 +58,19 @@ test('upgrade credit stays verified and belongs to one checkout', { timeout: 900
     { id: started.body.providerPayload.orderId });
   const startsFor = scenario => commerce.fetch('*[_type == "paymentRecord" && bookingPayload.originalOrderId == $id]',
     { id: scenario.booking._id });
+  const useLegacyLock = async record => {
+    const lock = await commerce.getDocument(record.startClaimId);
+    const { _rev, ...values } = lock;
+    const legacyId = buildPaymentUpgradeLockId(record.sessionScope);
+    await commerce.delete(lock._id);
+    await fixture.database.sql`delete from commerce.payment_upgrade_locks where legacy_sanity_id = ${lock._id}`;
+    await commerce.create({ ...values, _id: legacyId });
+    await commerce.patch(record._id).set({ startClaimId: legacyId }).commit();
+    return { rootId: lock._id, legacyId };
+  };
   try {
+    await fixture.database.client.rpc('roo_apply_document_mutations', { p_mutations: [{ operation: 'create',
+      document: { _id: 'package.fixture.higher', _type: 'package', title: 'Fixture higher upgrade', price: '$149.95' } }] });
     for (const [name, booking, payment] of [
       ['non-USD original', { currency: 'EUR' }, {}],
       ['provider mismatch', { paymentProvider: 'paypal' }, {}],
@@ -125,8 +138,6 @@ test('upgrade credit stays verified and belongs to one checkout', { timeout: 900
     });
     await check('different target packages cannot open parallel credit checkouts', async result => {
       const scenario = await original();
-      await fixture.database.client.rpc('roo_apply_document_mutations', { p_mutations: [{ operation: 'create',
-        document: { _id: 'package.fixture.higher', _type: 'package', title: 'Fixture higher upgrade', price: '$149.95' } }] });
       const { issueUpgradeIntentToken } = await import('../src/server/api/ref/upgradeIntentToken.js');
       const higher = { ...scenario.payload, packageTitle: 'Fixture higher upgrade', upgradeIntentToken: issueUpgradeIntentToken({
         bookingId: scenario.booking._id, email: scenario.booking.email, targetPackageTitle: 'Fixture higher upgrade',
@@ -163,16 +174,12 @@ test('upgrade credit stays verified and belongs to one checkout', { timeout: 900
       assert.equal(result.next.status, 200, JSON.stringify(result.next));
       assert.equal((await paymentFor(result.next)).pricingSnapshot.netAmount, 95);
     });
-    await check('a checkout from the old per-intent lock scheme still blocks parallel credit', async result => {
+    await check('a pre-deploy checkout finalizes once and releases its adopted root lock on refund', async result => {
       const scenario = await original();
       const first = await fixture.start(scenario.payload);
       assert.equal(first.status, 200, JSON.stringify(first));
       const record = await paymentFor(first);
-      const lock = await commerce.getDocument(record.startClaimId);
-      const legacyId = `${lock._id}.legacy`;
-      await commerce.delete(lock._id);
-      await commerce.create({ ...lock, _id: legacyId, scope: `${lock.scope}:legacy` });
-      await commerce.patch(record._id).set({ startClaimId: legacyId }).commit();
+      const { rootId } = await useLegacyLock(record);
       const before = evidence.providerRequests.filter(request => request.path === '/checkouts').length;
       result.competing = await fixture.start(await freshIntent(scenario));
       assert.equal(result.competing.status, 409, JSON.stringify(result.competing));
@@ -180,10 +187,74 @@ test('upgrade credit stays verified and belongs to one checkout', { timeout: 900
       assert.equal(evidence.providerRequests.filter(request => request.path === '/checkouts').length, before);
       result.finalize = await post('/api/payment/finalize', {}, first.body.paymentAccessToken);
       result.record = await commerce.getDocument(record._id);
-      assert.equal(result.record.status, 'needs_recovery');
-      assert.equal(result.record.recoveryReason, 'upgrade_credit_changed_after_quote');
-      assert.equal(result.record.bookingId, '');
+      assert.equal(result.finalize.status, 200, JSON.stringify(result.finalize));
+      assert.equal(result.record.status, 'booked');
+      assert.equal(result.record.startClaimId, rootId);
+      result.booking = await commerce.getDocument(result.record.bookingId);
+      assert.equal(result.booking.originalOrderId, scenario.booking._id);
+      assert.equal(result.booking.netAmount, 45);
+      assert.equal((await commerce.getDocument(rootId)).paymentRecordId, record._id);
+      const paymentId = `payment_${record.providerOrderId}`;
+      result.replay = await fixture.dodoWebhook(paymentId, 'payment.succeeded', 'ownership_legacy_replay');
+      assert.equal(result.replay.status, 200, JSON.stringify(result.replay));
+      assert.equal((await commerce.fetch('*[_type == "booking" && paymentRecordId == $id]', { id: record._id })).length, 1);
+      result.refund = await fixture.refundPayment(paymentId, [{ refund_id: 'ownership_legacy_refund',
+        payment_id: paymentId, status: 'succeeded', amount: 4500, currency: 'USD', is_partial: false,
+      }], 'ownership_legacy_refund_event');
+      assert.equal(result.refund.status, 200, JSON.stringify(result.refund));
+      assert.ok(!await commerce.getDocument(rootId));
+      result.replacement = await fixture.start(await freshIntent(scenario));
+      assert.equal(result.replacement.status, 200, JSON.stringify(result.replacement));
     });
+    await check('two pre-deploy checkouts racing to finalize spend credit only once', async result => {
+      const scenario = await original();
+      const first = await fixture.start(scenario.payload);
+      assert.equal(first.status, 200, JSON.stringify(first));
+      const firstRecord = await paymentFor(first);
+      const { rootId } = await useLegacyLock(firstRecord);
+      await commerce.patch(firstRecord._id).set({ status: 'failed' }).commit();
+      const second = await fixture.start(await freshIntent(scenario));
+      assert.equal(second.status, 200, JSON.stringify(second));
+      const secondRecord = await paymentFor(second);
+      await useLegacyLock(secondRecord);
+      await commerce.patch(firstRecord._id).set({ status: 'started' }).commit();
+      result.setup = 'Two synthetic pending checkouts with genuine pre-deploy session lock keys.';
+      result.finalizes = await Promise.all([firstRecord, secondRecord].map((record, index) =>
+        fixture.dodoWebhook(`payment_${record.providerOrderId}`, 'payment.succeeded', `ownership_legacy_race_${index}`)));
+      result.records = await Promise.all([firstRecord, secondRecord].map(record => commerce.getDocument(record._id)));
+      const booked = result.records.filter(record => record.bookingId);
+      assert.equal(booked.length, 1, JSON.stringify(result.records.map(({ status, bookingId }) => ({ status, bookingId }))));
+      assert.equal(result.records.filter(record => record.status === 'needs_recovery').length, 1);
+      result.lock = await commerce.getDocument(rootId);
+      assert.equal(result.lock.paymentRecordId, booked[0]._id);
+      assert.equal(booked[0].startClaimId, rootId);
+      const bookings = await commerce.fetch('*[_type == "booking" && originalOrderId == $id]', { id: scenario.booking._id });
+      assert.equal(bookings.length, 1);
+      assert.equal(bookings[0].netAmount, 45);
+    });
+    for (const [name, changes] of [['missing', null], ['wrong owner', { paymentRecordId: 'paymentRecord.other' }],
+      ['wrong scope', { scope: 'upgrade:other' }], ['wrong provider', { provider: 'paypal' }],
+      ['wrong backend', { backendOwner: 'sanity' }], ['wrong quote', { quoteFingerprint: 'changed' }]]) {
+      await check(`a pre-deploy checkout with a ${name} lock cannot adopt credit`, async result => {
+        const scenario = await original();
+        const started = await fixture.start(scenario.payload);
+        assert.equal(started.status, 200, JSON.stringify(started));
+        const record = await paymentFor(started);
+        const { rootId, legacyId } = await useLegacyLock(record);
+        if (changes) {
+          await fixture.database.sql`update migration.source_documents set payload = payload || ${fixture.database.sql.json(changes)}
+            where legacy_sanity_id = ${legacyId}`;
+        } else {
+          await commerce.delete(legacyId);
+        }
+        result.finalize = await post('/api/payment/finalize', {}, started.body.paymentAccessToken);
+        result.record = await commerce.getDocument(record._id);
+        assert.equal(result.record.status, 'needs_recovery');
+        assert.equal(result.record.recoveryReason, 'upgrade_credit_changed_after_quote');
+        assert.equal(result.record.bookingId, '');
+        assert.ok(!await commerce.getDocument(rootId));
+      });
+    }
     await check('lost credit after checkout cannot produce a paid upgrade', async result => {
       const scenario = await original();
       const started = await fixture.start(scenario.payload);
@@ -249,16 +320,19 @@ test('upgrade credit stays verified and belongs to one checkout', { timeout: 900
       assert.equal(result.finalize.status, 200, JSON.stringify(result.finalize));
       assert.equal((await commerce.getDocument(current._id)).status, 'booked');
     });
-    await check('an abandoned checkout that still owns credit recovers into the same upgrade chain', async result => {
+    for (const legacy of [false, true]) await check(`an abandoned ${legacy ? 'pre-deploy ' : ''}checkout that still owns credit recovers into the same upgrade chain`, async result => {
       const scenario = await original();
       const started = await fixture.start(scenario.payload);
       assert.equal(started.status, 200, JSON.stringify(started));
       const record = await paymentFor(started);
+      if (legacy) await useLegacyLock(record);
       await commerce.patch(record._id).set({ status: 'abandoned',
         lateCaptureWatchUntil: new Date(Date.now() + 120000).toISOString() }).commit();
       result.finalize = await post('/api/payment/finalize', {}, started.body.paymentAccessToken);
       assert.equal(result.finalize.status, 200, JSON.stringify(result.finalize));
       result.record = await commerce.getDocument(record._id);
+      assert.equal(result.record.startClaimId, record.startClaimId);
+      assert.equal((await commerce.getDocument(record.startClaimId)).paymentRecordId, record._id);
       result.booking = await commerce.getDocument(result.record.bookingId);
       assert.equal(result.booking.originalOrderId, scenario.booking._id);
       assert.equal(result.booking.cutoverGeneration, record.cutoverGeneration);

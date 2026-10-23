@@ -132,6 +132,7 @@ export const commitBookingTransaction = async ({
   paymentProofClaim = null,
   paymentRecordMutation = null,
   creditSources = [],
+  upgradeLockToCreate = null,
   allowMissingHold = false,
 }) => {
   if (!client) throw new Error("Booking transaction requires a document client.");
@@ -185,6 +186,7 @@ export const commitBookingTransaction = async ({
   };
   const transaction = client.transaction().create(bookingDocument);
   appendCreditGuards(transaction, creditSources, paymentRecordMutation?.id);
+  if (upgradeLockToCreate) transaction.create(upgradeLockToCreate);
 
   if (slotLockId) {
     const lockValues = {
@@ -252,6 +254,7 @@ export const commitBookingTransaction = async ({
       { _id: paymentRecordMutation.id, _rev: paymentRecordMutation.revision },
       (patch) => patch.set({
         ...paymentRecordMutation.set,
+        ...(upgradeLockToCreate ? { startClaimId: upgradeLockToCreate._id } : {}),
         bookingId: doc._id,
         updatedAt: now,
       })
@@ -289,6 +292,7 @@ export const createRequiresRescheduleBooking = async ({
   paymentProofClaim = null,
   paymentRecordMutation = null,
   creditSources = [],
+  upgradeLockToCreate = null,
   couponReservation = null,
   referralId = "",
   paymentHold = null,
@@ -398,6 +402,7 @@ export const createRequiresRescheduleBooking = async ({
     const now = new Date().toISOString();
     const transaction = client.transaction().create(booking).create(recoveryCase);
     appendCreditGuards(transaction, creditSources, paymentRecordMutation?.id);
+    if (upgradeLockToCreate) transaction.create(upgradeLockToCreate);
 
     if (proofClaim?._id) {
       if (proofClaim._rev) {
@@ -452,6 +457,7 @@ export const createRequiresRescheduleBooking = async ({
         { _id: paymentRecordMutation.id, _rev: paymentRecordMutation.revision },
         (patch) => patch.set({
           ...paymentRecordMutation.set,
+          ...(upgradeLockToCreate ? { startClaimId: upgradeLockToCreate._id } : {}),
           bookingId: booking._id,
           updatedAt: now,
         })

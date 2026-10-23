@@ -4134,6 +4134,7 @@ const recoverCapturedPaymentAsReschedule = async ({
       client,
       paymentRecord: recoveryRecord,
       creditSources: upgradeFunding?.creditSources || [],
+      upgradeLockToCreate: upgradeFunding?.upgradeLockToCreate,
       reason: normalizedReason,
       notify: false,
       paymentProofClaim: proofClaim,
