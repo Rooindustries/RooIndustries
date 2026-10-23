@@ -22,6 +22,7 @@ expected='["roo-integrations-ops","roo-navbar-regression-guard","roo-parallel-wo
 mkdir -p "$scratch/checkout/nested" "$scratch/outside"
 git -C "$repo" archive "${ROO_SKILLS_TREEISH:-HEAD}" .agents/skills .claude/skills | tar -x -C "$scratch/checkout"
 git -C "$scratch/checkout" init -q
+git -C "$scratch/outside" init -q
 
 prompt='This is a read-only skill discovery check. Do not call tools, inspect files, or delegate. From the skills already offered in your current context, output only a JSON array of skill names beginning with roo-. Use [] if none are offered. Do not infer names from repository instructions.'
 server_keys=$(codex mcp list --json | jq -r '.[].name')

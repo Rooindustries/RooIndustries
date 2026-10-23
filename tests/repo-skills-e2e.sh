@@ -17,6 +17,7 @@ expected='["roo-integrations-ops","roo-navbar-regression-guard","roo-parallel-wo
 mkdir -p "$scratch/checkout/nested" "$scratch/outside"
 git -C "$repo" archive "${ROO_SKILLS_TREEISH:-HEAD}" .agents/skills .claude/skills | tar -x -C "$scratch/checkout"
 git -C "$scratch/checkout" init -q
+git -C "$scratch/outside" init -q
 
 git init --quiet --bare --initial-branch=main "$scratch/origin.git"
 git init --quiet --initial-branch=main "$scratch/source"
