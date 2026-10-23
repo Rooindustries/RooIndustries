@@ -5,7 +5,7 @@ test.use({
   javaScriptEnabled: true,
   viewport: { width: 1440, height: 900 },
   serviceWorkers: "block",
-  trace: "off",
+  trace: process.env.CI ? "retain-on-failure" : "off",
   video: "off",
 });
 

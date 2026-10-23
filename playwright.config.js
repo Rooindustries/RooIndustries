@@ -35,8 +35,16 @@ if (!shouldUseExternalServer && !internalDistDir.startsWith(".next-e2e-")) throw
 module.exports = defineConfig({
   testDir: "./tests",
   testMatch: "**/*.spec.js",
-  metadata: { toolingDistDir: internalDistDir, ownsToolingServer: !shouldUseExternalServer },
+  metadata: {
+    toolingDistDir: internalDistDir,
+    ownsToolingServer: !shouldUseExternalServer,
+    groupTimeoutMs: 20 * 60 * 1000,
+    groupStartedAt: performance.now(),
+  },
   timeout: 120000,
+  globalTimeout: 22 * 60 * 1000,
+  globalSetup: require.resolve("./scripts/playwright-group-deadline.cjs"),
+  reporter: [["line"], ["json", { outputFile: process.env.PLAYWRIGHT_JSON_OUTPUT_NAME || `test-results/${serverId}-results.json` }]],
   expect: {
     timeout: 10000,
   },

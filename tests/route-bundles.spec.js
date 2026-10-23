@@ -1,7 +1,7 @@
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs");
 
-test.use({ javaScriptEnabled: true, viewport: { width: 1440, height: 900 }, serviceWorkers: "block", trace: "off", video: "off" });
+test.use({ javaScriptEnabled: true, viewport: { width: 1440, height: 900 }, serviceWorkers: "block", trace: process.env.CI ? "retain-on-failure" : "off", video: "off" });
 
 const vendorMarkers = ["formspree.io", "Could not find Elements context", "[@portabletext/react]"];
 

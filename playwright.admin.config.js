@@ -16,7 +16,7 @@ module.exports = defineConfig({
       },
     },
   }],
-  use: { ...config.use, javaScriptEnabled: true, actionTimeout: 10000, navigationTimeout: 20000, video: "off", trace: "off" },
+  use: { ...config.use, javaScriptEnabled: true, actionTimeout: 10000, navigationTimeout: 20000, video: "off", trace: process.env.CI ? "retain-on-failure" : "off" },
   webServer: config.webServer ? {
     ...config.webServer,
     timeout: 240000,

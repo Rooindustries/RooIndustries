@@ -1,7 +1,7 @@
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs/promises");
 
-test.use({ javaScriptEnabled: true, serviceWorkers: "block", trace: "off", video: "off" });
+test.use({ javaScriptEnabled: true, serviceWorkers: "block", trace: process.env.CI ? "retain-on-failure" : "off", video: "off" });
 
 test.beforeEach(async ({ context, baseURL }) => {
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");

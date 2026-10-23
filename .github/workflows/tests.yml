@@ -1,6 +1,7 @@
 name: Tests
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [main]
@@ -8,8 +9,12 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
-  group: tests-${{ github.event.pull_request.number || github.ref }}
+  group: tests-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -40,6 +45,9 @@ jobs:
   playwright:
     name: Playwright ${{ matrix.suite.name }}
     runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.2-noble
+      options: --user 1001 --ipc=host
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -80,20 +88,21 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium webkit
+      - name: Check the preinstalled browser version
+        run: node -e 'require("node:assert/strict").equal(require("playwright/package.json").version, "1.58.2")'
       - name: Run browser and agent-readiness tests
         run: |
           node scripts/test-tooling-sweep-server.mjs &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" || true' EXIT
           for _ in {1..180}; do
-            if curl --fail --silent "$BASE_URL" > /dev/null; then
+            if curl --fail --silent --max-time 1 "$BASE_URL" > /dev/null; then
               break
             fi
             kill -0 "$server_pid"
             sleep 1
           done
-          curl --fail --silent "$BASE_URL" > /dev/null
+          curl --fail --silent --max-time 5 "$BASE_URL" > /dev/null
           if [ "$PW_SUITE" = "rest-1" ]; then
             TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:agent-readiness
             TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:traffic-recovery
@@ -102,8 +111,11 @@ jobs:
             npm run test:smoke:production
           fi
           xvfb-run -a npx playwright test --pass-with-no-tests ${PW_SHARD:+--shard="$PW_SHARD"} "$PW_FILES"
+          if [ "$PW_SUITE" = "rest-1" ]; then
+            npm run test:playwright:timeouts
+          fi
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: test-results-${{ matrix.suite.name }}
           path: test-results/
@@ -113,6 +125,9 @@ jobs:
   routes:
     name: Playwright creator portal and API routes
     runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.2-noble
+      options: --user 1001 --ipc=host
     timeout-minutes: 30
     env:
       ROO_TEST_HOST: 127.0.0.1
@@ -125,7 +140,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
       - name: Run API route suite
         id: api-routes
         env:
@@ -139,7 +153,7 @@ jobs:
           PW_SERVER_ID: routes-portal
         run: xvfb-run -a npm run test:creator:portal -- --output=test-results/creator-portal
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: test-results-routes
           path: test-results/
@@ -201,7 +215,7 @@ jobs:
           NEXT_DIST_DIR: .next-e2e-native-booking
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-booking-hold.json
         run: |
-          xvfb-run -a npx playwright test tests/booking-hold.spec.js --project=chromium --output=test-results/booking-hold-e2e --reporter=line,json
+          xvfb-run -a npx playwright test tests/booking-hold.spec.js --project=chromium --output=test-results/booking-hold-e2e
           node - <<'NODE'
           const assert = require('node:assert/strict');
           const { stats } = require('./test-results/native-booking-hold.json');
@@ -237,6 +251,9 @@ jobs:
   revalidation:
     name: Playwright revalidation
     runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.2-noble
+      options: --user 1001 --ipc=host
     timeout-minutes: 30
     env:
       ROO_TEST_HOST: 127.0.0.1
@@ -249,7 +266,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
       - name: Run benchmarks revalidation suite
         id: benchmarks-revalidation
         env:
@@ -263,7 +279,7 @@ jobs:
           PW_SERVER_ID: revalidation-static
         run: xvfb-run -a npm run test:static:revalidation -- --output=test-results/static-revalidation
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: test-results-revalidation
           path: test-results/

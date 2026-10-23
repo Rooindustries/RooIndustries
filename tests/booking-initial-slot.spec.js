@@ -1,6 +1,6 @@
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 
-test.use({ javaScriptEnabled: true, reducedMotion: "reduce", trace: "off" });
+test.use({ javaScriptEnabled: true, reducedMotion: "reduce", trace: process.env.CI ? "retain-on-failure" : "off" });
 test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(new Date("2026-10-11T12:00:00Z"));
 });

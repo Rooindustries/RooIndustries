@@ -8,6 +8,12 @@ If the production token is missing or an upload fails, the build warns and conti
 
 `npm run test:sourcemaps` runs on Linux with `unzip`, `cc` and `bwrap`. It checks the deployment gates, uploaded maps for the main and shared browser files, their matching debug IDs and original source, private map cleanup and refused uploads. It also starts a real production build without a token to check its warning, homepage and unavailable public maps. Env files are refused; the local-origin guard and an inherited native audit block outbound traffic and fail the check on any nonlocal attempt. It uses no real credentials. Reports, network audits and uploaded archives are saved under `test-results/sourcemaps-e2e/`.
 
+## Browser checks
+
+CI uses the official Playwright 1.58.2 Noble image for browser, API-route and revalidation jobs, matching `package-lock.json`. Browser system libraries and binaries are already installed; these jobs do not download Ubuntu packages. Update the image and its version check together when upgrading Playwright.
+
+Each Playwright invocation stops gracefully after 20 minutes, with a 22-minute emergency limit for shutdown. Ordinary tests have two minutes; existing slower cases keep their own finite limits, and each navigation matrix has ten minutes with its repeat counts unchanged. CI logs each test by name and keeps failed traces and JSON results in `test-results/`, uploaded even when a group fails. `npm run test:playwright:timeouts` checks per-test and group expiry against a deliberately hung local browser action, using shorter deadlines derived from the real config; its report is `test-results/playwright-timeouts.json`.
+
 ## Code of Conduct
 
 Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md) when participating in this project.

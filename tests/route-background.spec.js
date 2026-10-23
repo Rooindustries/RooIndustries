@@ -1,7 +1,7 @@
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
-test.use({ javaScriptEnabled: true, viewport: { width: 390, height: 844 }, serviceWorkers: "block", trace: "off", video: "off" });
+test.use({ javaScriptEnabled: true, viewport: { width: 390, height: 844 }, serviceWorkers: "block", trace: process.env.CI ? "retain-on-failure" : "off", video: "off" });
 test.setTimeout(45000);
 
 test.beforeEach(async ({ page, flow }) => {
