@@ -35,7 +35,7 @@ Check monitoring with `npm run test:monitoring`. `npm run test:monitoring:startu
 - Small PRs, one fix each. Two fixes are two PRs.
 - Run the affected suites locally, then push once per round. Every push restarts CI.
 - Tests talk only to local fixtures: `scripts/test-tooling-sweep-server.mjs` refuses env files and outbound requests outside its allowed local fixture origins. Never point a test or script at production. The one exception is `npm run smoke:production`, which sends read-only GET requests to www.rooindustries.com.
-- Local test and preview servers must unset every Sentry DSN, including public/client aliases, or use a loopback stand-in. Never use the real Sentry DSN or real issues for local checks.
+- Local test and preview servers must unset every Sentry DSN, including public/client aliases, or use a loopback stand-in. The blocked-ingest case in `scripts/commerce-alerts-preview-e2e.mjs` alone supplies a hard-coded fictional `.invalid` DSN to prove reporting stays disabled, with outbound requests restricted to local fixtures. Never use the real Sentry DSN or real issues for local checks.
 - After every production deploy, `.github/workflows/production-smoke.yml` runs `npm run deploy:gate`: it smokes the money path (the money pages, booking availability, package prices, `?ref` capture) and, if that fails while the new deployment is live, rolls production back one step.
 - Undo a bad deploy by hand with `VERCEL_TOKEN=… npm run deploy:rollback` (`-- --dry-run` to preview). A rollback pins production to the older deployment, so new deploys stay off the domain until `npm run deploy:rollback -- --undo` promotes the newest one.
 

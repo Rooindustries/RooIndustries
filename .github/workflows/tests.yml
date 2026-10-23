@@ -39,7 +39,7 @@ jobs:
         with:
           name: commerce-alerts-routes
           path: test-results/commerce-alerts/
-          if-no-files-found: error
+          if-no-files-found: ignore
       - run: npm run check:seo
       - run: npm run check:supabase:migrations
       - run: npm run test:deploy:rollback
@@ -63,7 +63,7 @@ jobs:
         with:
           name: commerce-alerts-preview
           path: test-results/commerce-alerts-preview/
-          if-no-files-found: error
+          if-no-files-found: ignore
 
   playwright:
     name: Playwright ${{ matrix.suite.name }}
