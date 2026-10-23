@@ -2424,6 +2424,8 @@ try{
       const current=await documents.getDocument(referral._id);if(current)await documents.patch(referral._id).ifRevisionId(current._rev).set(referral).commit();else await documents.create(referral);
       input.bookingPayload.referralCode='FIXTURE';
     }
+    if (variant === 'blank-referral') input.bookingPayload.referralCode = ' \t ';
+    if (variant === 'unknown-referral') input.bookingPayload.referralCode = ' NOT-A-CREATOR ';
     if(variant==='coupon'||provider==='free'){
       const code=`A1${scenarioNumber}`,percent=provider==='free'?100:10;
       await commerce.create({_id:`coupon.a1.${scenarioNumber}`,_type:'coupon',code,isActive:true,discountType:'percent',discountPercent:percent,canCombineWithReferral:true,timesUsed:0,activeReservations:0,maxUses:0,backendOwner:'supabase',cutoverGeneration:0});input.bookingPayload.couponCode=code;
@@ -2452,6 +2454,54 @@ try{
     return{input,quote,started,id:payment._id,proof};
   };
   const a1Hook=async provider=>requestFlow(provider,{req:provider==='paypal'?paypalReq('PAYMENT.CAPTURE.COMPLETED',{id:'capture-fixture',supplementary_data:{related_ids:{order_id:'order-fixture'}}}):provider==='razorpay'?razorReq('payment.captured',{payment:{entity:razorpayPayment}}):dodoReq()});
+  for (const variant of ['blank-referral', 'unknown-referral', 'referral']) for (const via of ['webhook', 'cron']) {
+    await run(`recovery-reschedule-${variant}-${via}`, async () => {
+      const checkout = await a1Start('dodo', variant);
+      const expectedCode = variant === 'blank-referral' ? '' : variant === 'referral' ? 'fixture' : 'not-a-creator';
+      const started = (await row(checkout.id)).payload;
+      assert.equal(started.bookingPayload.referralCode, String(checkout.input.bookingPayload.referralCode).trim());
+      assert.equal(started.pricingSnapshot.effectiveReferralCode, expectedCode);
+      assert.equal(started.pricingSnapshot.effectiveReferralId, variant === 'referral' ? 'referral.a1' : '');
+      await commerce.patch(checkout.id).ifRevisionId(started._rev).set({
+        status: 'abandoned', providerPaymentId: dodoPayment.payment_id,
+        lateCaptureWatchUntil: new Date(originalNow() + 3600000).toISOString(),
+        nextRecoveryAt: '',
+      }).commit();
+      const recovered = via === 'webhook' ? await a1Hook('dodo') : await requestFlow('reconcile');
+      assert.equal(recovered.status, 200, JSON.stringify(recovered));
+      const saved = (await row(checkout.id)).payload;
+      const booking = (await row(saved.bookingId)).payload;
+      assert.equal(saved.status, 'booked', JSON.stringify(saved));
+      assert.equal(booking.requiresReschedule, true);
+      assert.equal(booking.referralCode, expectedCode);
+      assert.equal(booking.referral?._ref || '', started.pricingSnapshot.effectiveReferralId);
+      assert.equal(booking.commissionAmount, started.pricingSnapshot.commissionAmount);
+      assert.equal(booking.commissionPercent, started.pricingSnapshot.commissionPercent);
+      assert.equal(saved.referralAccountingApplied, variant === 'referral');
+      dodoPayment.created_at = new Date(originalNow() - 3600000).toISOString();
+      dodoList = [dodoSummary()];
+      const window = await authorizedReport('GET', true);
+      const keys = ['payment:payment-fixture', `record:${saved._id}`, `booking:${booking._id}`];
+      const targeted = await targetReport(keys);
+      const reasons = variant === 'unknown-referral' ? ['frozen_pricing_unavailable'] : [];
+      assert.equal(window.status, 200, JSON.stringify(window.body));
+      assert.deepEqual(reportReasons(window.body), reasons, JSON.stringify(window.body));
+      assert.equal(targeted.status, 200, JSON.stringify(targeted.body));
+      assert.deepEqual(reportReasons(targeted.body), reasons);
+      assert.deepEqual(targeted.body.checks.map(check => check.state), keys.map(() => reasons.length ? 'unresolved' : 'recovered'));
+      const earnings = await commerce.referralEarnings({ referralId: 'referral.a1', referralCode: 'fixture' });
+      assert.equal(earnings.total, variant === 'referral' ? started.pricingSnapshot.commissionAmount : 0);
+      assert.equal((await a1Hook('dodo')).status, 200);
+      const afterHook = await snapshot({ receipts: true });
+      assert.equal((await requestFlow('reconcile')).status, 200);
+      assert.deepEqual(await snapshot({ receipts: true }), afterHook);
+      assert.deepEqual((await row(saved.bookingId)).payload, booking);
+      assert.equal((await sql`select count(*)::integer as count from commerce.bookings`)[0].count, 1);
+      assert.deepEqual(await commerce.referralEarnings({ referralId: 'referral.a1', referralCode: 'fixture' }), earnings);
+      return { variant, via, started, recovered, saved, booking, window, targeted, earnings,
+        afterHook, bookingAndCreditUnchangedOnRetry: true };
+    });
+  }
   for (const mode of ['complete', 'partial', 'missing-details']) await run(`recovery-reschedule-created-${mode}`, async () => {
     const checkout = await a1Start();
     const missing = mode === 'missing-details';
