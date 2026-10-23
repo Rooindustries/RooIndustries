@@ -462,8 +462,9 @@ export async function resolveBookingPricing({
   let referralDoc = hasReferralInput ? pricingInputs.referralDoc : null;
   if (!hasReferralInput && referralId) {
     referralDoc = await client.fetch(
-      `*[_type == "referral" && registrationStatus != "pending_email" && _id == $id][0]{
+      `*[_type == "referral" && _id == $id][0]{
         _id,
+        creatorEmail,
         slug,
         currentCommissionPercent,
         currentDiscountPercent
@@ -474,8 +475,9 @@ export async function resolveBookingPricing({
 
   if (!hasReferralInput && !referralDoc && normalizedReferralCode) {
     referralDoc = await client.fetch(
-      `*[_type == "referral" && registrationStatus != "pending_email" && slug.current == $code][0]{
+      `*[_type == "referral" && slug.current == $code][0]{
         _id,
+        creatorEmail,
         slug,
         currentCommissionPercent,
         currentDiscountPercent
@@ -660,6 +662,7 @@ export async function resolveBookingPricing({
     effectiveNetAmount,
     effectiveReferralCode,
     effectiveReferralId,
+    referralCreatorEmail: String(referralDoc?.creatorEmail || "").trim(),
     referralDiscountAmount,
     referralDiscountPercent,
     referralDoc,

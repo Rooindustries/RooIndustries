@@ -430,6 +430,7 @@ const buildPricingSnapshot = (quote = {}, currency = "USD") => ({
   canCombineWithReferral: quote.canCombineWithReferral === true,
   effectiveReferralCode: String(quote.effectiveReferralCode || "").trim(),
   effectiveReferralId: String(quote.effectiveReferralId || "").trim(),
+  referralCreatorEmail: String(quote.referralCreatorEmail || "").trim(),
 });
 
 const buildRecordPricingFingerprint = ({

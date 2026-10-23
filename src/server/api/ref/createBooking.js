@@ -19,6 +19,7 @@ import { normalizeBookingStatus } from "../../booking/bookingStatus.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { calculateCreatorCommission } from "../../referrals/commissionMoney.js";
+import { freezeBookingCommission } from "../../referrals/bookingCommission.js";
 import {
   buildDeferredEmailDispatch,
   getBookingForEmailDispatch,
@@ -1292,7 +1293,10 @@ export default async function handler(req, res) {
         error: "Frozen payment pricing is unavailable.",
       });
     }
-    const resolvedPricing = isInternalPaymentFinalization
+    const resolvedPricing = await freezeBookingCommission({
+      client: writeClient,
+      buyerEmail: resolvedEmail,
+      pricing: isInternalPaymentFinalization
       ? {
           couponDiscountAmount: Number(frozenPricing.couponDiscountAmount || 0),
           couponDiscountPercent: Number(frozenPricing.couponDiscountPercent || 0),
@@ -1310,9 +1314,12 @@ export default async function handler(req, res) {
           effectiveReferralId: String(
             frozenPricing.effectiveReferralId || ""
           ).trim(),
+          referralCreatorEmail: frozenPricing.referralCreatorEmail,
+          selfReferral: frozenPricing.selfReferral,
           commissionAmount: calculateCreatorCommission(frozenPricing).amount,
         }
-      : livePricing;
+      : livePricing,
+    });
     const {
       couponDiscountAmount,
       couponDiscountPercent,
@@ -1566,7 +1573,8 @@ export default async function handler(req, res) {
           `*[_type == "couponRedemption" && _id == $id][0]{...}`,
           { id: existingCouponReservationId }
         );
-        if (!redemption?._id || redemption.status !== "reserved") {
+        if (!redemption?._id || (redemption.status !== "reserved" &&
+            !(isInternalPaymentFinalization && redemption.status === "released"))) {
           return res.status(409).json({
             error: "Coupon reservation is no longer available.",
           });
@@ -1624,6 +1632,8 @@ export default async function handler(req, res) {
       commissionPercent: effectiveCommissionPercent,
       commissionBaseAmount: calculateCreatorCommission(resolvedPricing).baseAmount,
       commissionCalculationVersion: 2,
+      referralAttributionVersion: 2,
+      selfReferral: resolvedPricing.selfReferral === true,
       commissionAmount,
       ...(paymentProvider === "dodo" && internalPaymentRecord.refundState === "partial" ? {
         dodoOriginalCommissionAmount: commissionAmount,
@@ -1674,6 +1684,7 @@ export default async function handler(req, res) {
       slot: isUpgrade ? null : { startTimeUTC: normalizedStartTimeUTC },
       hold: holdDoc,
       couponReservation,
+      allowReleasedCouponRecovery: isInternalPaymentFinalization && normalizedStatus === "captured",
       referralId:
         normalizedStatus === "captured" && !preserveHistoricalAccounting
           ? effectiveReferralId || ""
@@ -1685,6 +1696,10 @@ export default async function handler(req, res) {
             revision: paymentRecordForLease._rev,
             set: {
               status: PAYMENT_STATUS_BOOKED,
+              ...(resolvedPricing.selfReferral ? {pricingSnapshot: {
+                ...internalPaymentRecord.pricingSnapshot,
+                commissionPercent: 0, commissionAmount: 0, selfReferral: true,
+              }} : {}),
               bookingId: bookingDocument._id,
               finalizationLeaseId: "",
               finalizationLeaseExpiresAt: "",

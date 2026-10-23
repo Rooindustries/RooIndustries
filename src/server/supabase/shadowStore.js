@@ -288,6 +288,16 @@ export const fetchReferralEarningsSummary = async ({
     "referral earnings summary"
   ) || { xoc: 0, vertex: 0, total: 0, byPackage: {} };
 
+export const fetchPendingCouponAlerts = async ({
+  limit = 25,
+  client = createSupabaseAdminClient(),
+} = {}) => requireShadowDocumentArray(requireRpcData(
+  await client.rpc("roo_pending_coupon_alerts", {
+    p_limit: Math.max(1, Math.min(25, Number(limit) || 25)),
+  }),
+  "pending coupon alerts"
+));
+
 export const fetchUpgradeBookingChain = async ({
   rootId,
   client = createSupabaseAdminClient(),
