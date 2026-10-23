@@ -1,11 +1,23 @@
-import { writeBrowserStorage } from "./browserStorage";
+import { readBrowserStorage, removeBrowserStorage, writeBrowserStorage } from "./browserStorage";
 
 export const BOOKING_DRAFT_STORAGE_KEY = "booking_draft";
 export const CHECKOUT_BOOKING_STORAGE_KEY = "checkout_booking_state";
 export const BOOKING_HOLD_EXPIRED_STORAGE_KEY = "booking_hold_expired";
 // A hold whose payment has started is never dropped by the browser after its deadline; payment status or a release settles it.
 export const holdAwaitsPayment = (hold) => String(hold?.phase || "").trim().toLowerCase() === "payment_pending";
-export const markBookingHoldExpired = () => writeBrowserStorage("sessionStorage", BOOKING_HOLD_EXPIRED_STORAGE_KEY, "1");
+// The stored marker carries an expiry across reloads; the in-memory flag still protects the draft on this page
+// when a full store refuses the marker. Write it after removing the hold so the freed space takes it.
+let bookingHoldExpiredHere = false;
+export const markBookingHoldExpired = () => {
+  bookingHoldExpiredHere = true;
+  return writeBrowserStorage("sessionStorage", BOOKING_HOLD_EXPIRED_STORAGE_KEY, "1");
+};
+export const clearBookingHoldExpired = () => {
+  bookingHoldExpiredHere = false;
+  return removeBrowserStorage("sessionStorage", BOOKING_HOLD_EXPIRED_STORAGE_KEY);
+};
+export const bookingHoldExpired = () =>
+  bookingHoldExpiredHere || Boolean(readBrowserStorage("sessionStorage", BOOKING_HOLD_EXPIRED_STORAGE_KEY));
 
 const LEGACY_CHECKOUT_KEYS = [
   "my_slot_hold",

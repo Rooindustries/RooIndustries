@@ -243,8 +243,8 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
   const releaseHold = async (clearOnly = false, redirect = false) => {
     if (!hold) return;
     if (clearOnly) {
-      markBookingHoldExpired();
       clearReservation(redirect, { keepDraft: true });
+      markBookingHoldExpired();
       return;
     }
     if (releasing) return;
@@ -291,8 +291,8 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
     if (outcome === "clear") {
       // A release that lands after the deadline is an expiry: the visitor keeps what they typed.
       const expired = hasExpired();
-      if (expired) markBookingHoldExpired();
       clearReservation(redirect && pathRef.current === startPath, { keepDraft: expired || readDraft() !== startDraft });
+      if (expired) markBookingHoldExpired();
     } else {
       setReleaseError(serverMessage || "We couldn't release this slot. Your reservation and details are still saved. Please try again.");
     }
