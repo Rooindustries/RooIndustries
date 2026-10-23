@@ -191,7 +191,9 @@ function parseFpsResult(value) {
 function ReviewCard({ review, groupIndex }) {
   const isCreator = Boolean(review.isVip);
   const result = parseFpsResult(review.optimizationResult);
-  const rating = Math.max(1, Math.min(5, Math.round(Number(review.rating) || 5)));
+  const rating = Number.isInteger(review.rating) && review.rating >= 1 && review.rating <= 5
+    ? review.rating
+    : null;
 
   return (
     <article
@@ -216,7 +218,7 @@ function ReviewCard({ review, groupIndex }) {
         <p className="text-white">{review.game || "PC performance"}</p>
       </div>
 
-      <div className={`mt-1 flex items-end gap-3 ${result ? "justify-between" : "justify-end"}`}>
+      <div className={`mt-1 flex min-h-4 items-end gap-3 ${result ? "justify-between" : "justify-end"}`}>
         {result && (
           <p className="font-black leading-none tracking-[-0.04em] tabular-nums whitespace-nowrap">
             <span className="mr-2 text-[10px] uppercase tracking-[0.12em] text-white">
@@ -240,13 +242,15 @@ function ReviewCard({ review, groupIndex }) {
             </span>
           </p>
         )}
-        <p
-          className="ri-review-champagne-text text-xs font-bold tracking-[0.08em] flex-shrink-0"
-          aria-label={`${rating} out of 5 stars`}
-        >
-          <span aria-hidden="true">{"★".repeat(rating)}{"☆".repeat(5 - rating)}</span>
-          <span className="sr-only">{rating} out of 5 stars</span>
-        </p>
+        {rating !== null && (
+          <p
+            className="ri-review-champagne-text text-xs font-bold tracking-[0.08em] flex-shrink-0"
+            aria-label={`${rating} out of 5 stars`}
+          >
+            <span aria-hidden="true">{"★".repeat(rating)}{"☆".repeat(5 - rating)}</span>
+            <span className="sr-only">{rating} out of 5 stars</span>
+          </p>
+        )}
       </div>
 
       <blockquote className="mt-2 flex-1">
