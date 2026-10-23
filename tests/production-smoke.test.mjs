@@ -392,15 +392,21 @@ test("review regression: concurrent gates recover a broken deployment exactly on
   assert.ok(results.some(result => /production was rolled back/.test(result.output)));
 }));
 
-test("the production deployment event invokes recovery using only fake services", () => withGate({
+test("the production deployment event invokes recovery on the free laptop runner using only fake services", () => withGate({
   site: { status: { "/payment": 500 } },
 }, async ({ site, previous, vercel, exec }) => {
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/production-smoke.yml"), "utf8");
+  const runner = workflow.match(/^    runs-on: \[([^\]]+)\]$/m)?.[1].split(/,\s*/);
+  assert.ok(["self-hosted", "Linux", "X64", "roo-production-smoke"].every(label => runner?.includes(label)),
+    "The production gate needs the dedicated free runner when hosted Actions minutes are unavailable.");
+  assert.doesNotMatch(workflow, /--with-deps/, "The dedicated runner uses preinstalled system libraries without root.");
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "roo702-event-"));
   const eventPath = path.join(scratch, "event.json");
   fs.writeFileSync(eventPath, JSON.stringify({ repository: { full_name: "Rooindustries/RooIndustries" },
     deployment: { environment: "Production" }, deployment_status: { state: "success", environment_url: LIVE_URL } }));
   try {
     const env = { GITHUB_ACTIONS: "true", GITHUB_EVENT_NAME: "deployment_status", GITHUB_EVENT_PATH: eventPath,
+      RUNNER_ENVIRONMENT: "self-hosted", RUNNER_OS: "Linux", RUNNER_ARCH: "X64",
       GITHUB_WORKFLOW_REF: "Rooindustries/RooIndustries/.github/workflows/production-smoke.yml@refs/heads/main",
       ROO_TEST_MONITOR_ORIGIN: site.base, ROO_TEST_PREVIOUS_ORIGIN: previous.base, SMOKE_BASE_URL: undefined,
       NODE_OPTIONS: `--import=${path.join(root, "tests/fixtures/production-monitor-loader.mjs")}` };

@@ -16,7 +16,7 @@ jobs:
   smoke:
     name: Money-path smoke
     if: github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, roo-production-smoke]
     timeout-minutes: 30
     env:
       DEPLOYMENT_URL: ${{ github.event.deployment_status.environment_url }}
@@ -31,7 +31,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install chromium
       - name: Smoke the money path and recover a failing deployment
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
