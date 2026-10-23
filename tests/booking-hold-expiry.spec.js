@@ -15,7 +15,9 @@ const draftEmail = page => page.evaluate(() => {
 const reserveAgainKeepsDetails = async (page, flow) => {
   flow.state.holds.clear();
   flow.state.holdMs = 20 * 60 * 1000;
-  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  const slot = page.getByRole("button", { name: "10:00 AM", exact: true });
+  if (!await slot.isVisible()) await page.getByRole("button", { name: /^Earliest available:/ }).click();
+  await slot.click();
   await page.getByRole("button", { name: "Next", exact: true }).last().click();
   await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveValue("visitor@example.invalid");
   await expect(page.getByRole("textbox", { name: "Discord username", exact: true })).toHaveValue("fixture_visitor");
@@ -31,6 +33,9 @@ test("expiry on the details step keeps the booking open with the typed details",
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toBeVisible();
   expect(await storedHold(page)).toBeNull();
+  expect(await draftEmail(page)).toBe("visitor@example.invalid");
+  await page.reload();
+  await expect(page.getByRole("dialog")).toBeVisible();
   expect(await draftEmail(page)).toBe("visitor@example.invalid");
   await reserveAgainKeepsDetails(page, flow);
 });
@@ -87,8 +92,8 @@ test("same-tab payment expiry on the booking step stays in the booking flow", as
   expect(await storedHold(page)).toMatchObject({ holdId: original.holdId, phase: "payment_pending" });
 });
 
-test("expiry away from the booking flow clears the reservation without moving the visitor", async ({ page, flow }) => {
-  await page.clock.install();
+test("expiry away from the booking flow clears the reservation without moving the visitor and keeps the details", async ({ page, flow }) => {
+  flow.state.holdMs = shortHold;
   await flow.reserve();
   await flow.details();
   await page.getByRole("button", { name: "Close", exact: true }).click();
@@ -96,9 +101,11 @@ test("expiry away from the booking flow clears the reservation without moving th
   const continueBooking = page.getByRole("button", { name: "Continue booking", exact: true });
   await expect(continueBooking).toBeVisible();
   const url = page.url();
-  await page.clock.fastForward(holdLifetime);
-  await expect(continueBooking).toHaveCount(0);
+  await expect(continueBooking).toHaveCount(0, { timeout: 25000 });
   expect(page.url()).toBe(url);
   expect(await storedHold(page)).toBeNull();
   expect(await draftEmail(page)).toBe("visitor@example.invalid");
+  await page.goto("/booking");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await reserveAgainKeepsDetails(page, flow);
 });
