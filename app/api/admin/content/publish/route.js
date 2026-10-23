@@ -6,10 +6,8 @@ export const runtime = "nodejs";
 export const preferredRegion = "dub1";
 export const dynamic = "force-dynamic";
 
-export const POST = (request, context) => handleCmsRequest(request, context, async ({ request, params, body, client, env, signal, actor }) => {
-  try {
-    return await executeGlobalCmsCommand({ body, supabaseClient: client, env, actor });
-  } finally {
-    revalidatePath("/", "layout");
-  }
+export const POST = (request, context) => handleCmsRequest(request, context, async ({ body, client, env, actor }) => {
+  const result = await executeGlobalCmsCommand({ body, supabaseClient: client, env, actor });
+  revalidatePath("/", "layout");
+  return result;
 }, { write: true });
