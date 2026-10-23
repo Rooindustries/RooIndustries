@@ -8,6 +8,7 @@ const WINDOW_HOURS = 72;
 const SETTLE_MINUTES = 30;
 const PAGE_SIZE = 100;
 const PAYMENT_LOOKUP_CONCURRENCY = 8;
+const REPORT_BUDGET_MS = 240000;
 const MAX_PAGES = 20;
 const MAX_ITEMS = 50;
 const MAX_BOOKING_LOOKUPS = 200;
@@ -58,6 +59,10 @@ const OWNER_REVIEW_CODES = new Set([
 ]);
 
 const unavailable = () => new Error("reconcile_report_unavailable");
+const checkBudget = (deadline) => {
+  if (Date.now() >= deadline)
+    throw Object.assign(unavailable(), { code: "reconcile_report_budget_exceeded" });
+};
 const checksInvalid = () => new Error("reconcile_report_checks_invalid");
 const isIdentity = (value) =>
   typeof value === "string" && value.match(/^[A-Za-z0-9_.:/-]{1,80}$/)?.[0] === value;
@@ -135,18 +140,20 @@ const toItem = ({ key, id, ref = "", cents = null, currency = "", reason }) => (
   ),
 });
 
-const listDodoPayments = async ({ dodo, to }) => {
+const listDodoPayments = async ({ dodo, to, deadline }) => {
   const payments = [];
   for (let page = 0; page < MAX_PAGES; page += 1) {
+    checkBudget(deadline);
     const response = await dodo.payments
       .list({
         status: "succeeded",
         created_at_lte: to,
         page_size: PAGE_SIZE,
         page_number: page,
-      })
+      }, { signal: AbortSignal.timeout(8000) })
       .asResponse();
     const result = await response.json();
+    checkBudget(deadline);
     const items = result?.items;
     if (
       !Array.isArray(items) ||
@@ -166,17 +173,20 @@ const listDodoPayments = async ({ dodo, to }) => {
   return { payments, truncated: true };
 };
 
-const readDocuments = async (client, type, options) => {
+const readDocuments = async (client, type, options, deadline) => {
+  checkBudget(deadline);
   if (!client.shadowClient) throw unavailable();
-  return fetchShadowDocuments({
+  const documents = await fetchShadowDocuments({
     client: client.shadowClient,
     documentTypes: [type],
     allowLegacyFallback: false,
     ...options,
   });
+  checkBudget(deadline);
+  return documents;
 };
 
-const fetchByIds = async (client, type, ids) => {
+const fetchByIds = async (client, type, ids, deadline) => {
   const unique = [...new Set(ids.filter(Boolean))];
   if (!unique.length) return new Map();
   const docs = [];
@@ -184,7 +194,7 @@ const fetchByIds = async (client, type, ids) => {
     const batch = await readDocuments(client, type, {
       ids: unique.slice(offset, offset + PAGE_SIZE),
       limit: PAGE_SIZE,
-    });
+    }, deadline);
     if (!Array.isArray(batch)) throw unavailable();
     docs.push(...batch);
   }
@@ -256,14 +266,17 @@ const openDispute = (payment) =>
     (dispute) => !SETTLED_DISPUTE_STATUSES.includes(dispute?.dispute_status),
   );
 
-const retrievePayment = async (dodo, paymentId, allowMissing = false) => {
+const retrievePayment = async (dodo, paymentId, allowMissing, deadline) => {
+  checkBudget(deadline);
   let payment;
   try {
-    payment = await dodo.payments.retrieve(paymentId);
+    payment = await dodo.payments.retrieve(paymentId, { signal: AbortSignal.timeout(8000) });
   } catch (error) {
+    checkBudget(deadline);
     if (allowMissing && error?.status === 404) return null;
     throw error;
   }
+  checkBudget(deadline);
   if (
     !payment ||
     payment.payment_id !== paymentId ||
@@ -299,10 +312,11 @@ const paymentReadyForAudit = (payment, now) => {
   return Math.max(...timestamps) <= now - SETTLE_MINUTES * 60 * 1000;
 };
 
-const refundedCents = async (dodo, payment) => {
+const refundedCents = async (dodo, payment, deadline) => {
   let amount = 0;
   const seen = new Set();
   for (const summary of payment.refunds) {
+    checkBudget(deadline);
     if (
       !summary?.refund_id ||
       seen.has(summary.refund_id) ||
@@ -315,8 +329,9 @@ const refundedCents = async (dodo, payment) => {
     if (summary.status !== "succeeded") continue;
     const refund =
       summary.amount == null || !summary.currency
-        ? await dodo.refunds.retrieve(summary.refund_id)
+        ? await dodo.refunds.retrieve(summary.refund_id, { signal: AbortSignal.timeout(8000) })
         : summary;
+    checkBudget(deadline);
     if (
       refund.refund_id !== summary.refund_id ||
       refund.payment_id !== payment.payment_id ||
@@ -432,6 +447,7 @@ export const buildReconcileReport = async ({
   checks = [],
 } = {}) => {
   if (!validChecks(checks)) throw checksInvalid();
+  const deadline = Date.now() + REPORT_BUDGET_MS;
   const from = new Date(now - WINDOW_HOURS * 3600 * 1000).toISOString();
   const to = new Date(now - SETTLE_MINUTES * 60 * 1000).toISOString();
   const items = [];
@@ -460,9 +476,24 @@ export const buildReconcileReport = async ({
     count: items.length,
     items: items.slice(0, MAX_ITEMS),
   });
+  const recentRefs = new Set();
+  const finishWindow = (complete) => {
+    const priority = (item) =>
+      item.key.startsWith("scan:") ? 0 : recentRefs.has(item.ref) ? 1 : 2;
+    items.sort((left, right) => priority(left) - priority(right));
+    return response([], complete);
+  };
+  const terminalReview = (record) => unresolved({
+    key: entityKey("record", record._id),
+    id: record.providerPaymentId || record._id,
+    ref: record._id,
+    cents: cents(record.pricingSnapshot?.netAmount),
+    currency: "USD",
+    reason: ownerReviewReason(record),
+  });
   const paymentCache = new Map();
   const getPayment = async (id, allowMissing = false) => {
-    if (!paymentCache.has(id)) paymentCache.set(id, retrievePayment(dodo, id, allowMissing));
+    if (!paymentCache.has(id)) paymentCache.set(id, retrievePayment(dodo, id, allowMissing, deadline));
     return paymentCache.get(id);
   };
   const records = new Map();
@@ -471,13 +502,14 @@ export const buildReconcileReport = async ({
   const getDocument = async (type, id, cache) => {
     if (!id) return null;
     if (!cache.has(id)) {
-      const found = await fetchByIds(client, type, [id]);
+      const found = await fetchByIds(client, type, [id], deadline);
       cache.set(id, found.get(id) || null);
     }
     return cache.get(id);
   };
   const audits = new Map();
   const auditPayment = async (payment, suppliedBooking = null) => {
+    checkBudget(deadline);
     const recordId = String(payment.metadata?.paymentRecordId || "").trim();
     const record = await getDocument("paymentRecord", recordId, records);
     const bookingId = String(record?.bookingId || "").trim();
@@ -509,7 +541,7 @@ export const buildReconcileReport = async ({
       return mismatch(suppliedBooking._id, "payment_record_mismatch");
     }
     if (terminal) {
-      return mismatch(record._id, ownerReviewReason(record));
+      return finish(terminalReview(record));
     }
     const pricing = frozenPricing(record);
     if (!pricing) {
@@ -525,7 +557,7 @@ export const buildReconcileReport = async ({
     const booking =
       suppliedBooking ||
       (await getDocument("booking", bookingId, bookings));
-    const refunded = await refundedCents(dodo, payment);
+    const refunded = await refundedCents(dodo, payment, deadline);
     for (const dispute of payment.disputes) {
       if (
         !dispute?.dispute_id ||
@@ -621,7 +653,7 @@ export const buildReconcileReport = async ({
       currency: "USD",
     };
     if (isTerminalRecovery(record))
-      return unresolved({ ...base, reason: ownerReviewReason(record) });
+      return terminalReview(record);
     let paymentId = record.providerPaymentId;
     if (paymentId != null && paymentId !== "" && !isIdentity(paymentId)) return unknown();
     if (!paymentId) {
@@ -642,112 +674,119 @@ export const buildReconcileReport = async ({
       return unresolved({ ...base, id: paymentId, reason: "payment_record_mismatch" });
     return auditPayment(payment);
   };
-  if (checks.length) {
-    const results = [];
-    for (const key of checks) {
-      const outcome = await auditCheck(key);
-      results.push({ key, ...outcome, keys: [...new Set([key, ...outcome.keys])] });
+  try {
+    if (checks.length) {
+      const results = [];
+      for (const key of checks) {
+        const outcome = await auditCheck(key);
+        results.push({ key, ...outcome, keys: [...new Set([key, ...outcome.keys])] });
+      }
+      return response(results, { payments: false, bookings: false, records: false });
     }
-    return response(results, { payments: false, bookings: false, records: false });
-  }
 
-  const { payments: listed, truncated } = await listDodoPayments({ dodo, to });
-  if (truncated)
+    const terminalGroups = await Promise.all(
+      ["providerRecoveryTerminal", "reconciliationRecoveryTerminal"].map((flag) =>
+        readDocuments(client, "paymentRecord", {
+          filters: [
+            { path: "provider", op: "eq", value: "dodo" },
+            { path: flag, op: "eq", value: true },
+            { path: "status", op: "ieq", value: "needs_recovery" },
+            { path: "updatedAt", op: "gte", value: from },
+            { path: "updatedAt", op: "lte", value: new Date(now).toISOString() },
+          ],
+          limit: MAX_BOOKING_LOOKUPS + 1,
+        }, deadline),
+      ),
+    );
+    if (terminalGroups.some((group) => !Array.isArray(group))) throw unavailable();
+    const terminalRecords = [...new Map(terminalGroups.flat().map((record) => [record._id, record])).values()];
+    const recordCap = terminalRecords.length > MAX_BOOKING_LOOKUPS;
+    if (recordCap)
+      report({ key: "scan:dodo-records", id: "dodo-records", reason: "report_truncated" });
+    for (const record of terminalRecords.slice(0, MAX_BOOKING_LOOKUPS)) {
+      if (
+        record.provider !== "dodo" ||
+        !isTerminalRecovery(record) ||
+        !inWindow(record.updatedAt, from, new Date(now).toISOString())
+      )
+        continue;
+      recentRefs.add(record._id);
+      terminalReview(record);
+    }
+
+    const { payments: listed, truncated } = await listDodoPayments({ dodo, to, deadline });
+    if (truncated)
+      report({ key: "scan:dodo-payments", id: "dodo-payments", reason: "report_truncated" });
+    const productIds = readSiteProductIds();
+    const payments = [];
+    for (let offset = 0; offset < listed.length; offset += PAYMENT_LOOKUP_CONCURRENCY) {
+      const batch = await Promise.all(listed.slice(offset, offset + PAYMENT_LOOKUP_CONCURRENCY).map(async (summary) => {
+        if (summary?.status && summary.status !== "succeeded") return null;
+        const payment = await getPayment(summary.payment_id);
+        if (summary.status === "succeeded" && payment.status !== "succeeded") throw unavailable();
+        if (!String(payment.metadata?.paymentRecordId || "").trim() && productIds.size === 0)
+          throw unavailable();
+        return payment?.status === "succeeded" && belongsToSite(payment, productIds) ? payment : null;
+      }));
+      payments.push(...batch.filter(Boolean));
+    }
+    for (const [id, record] of await fetchByIds(
+      client,
+      "paymentRecord",
+      payments.map((payment) => String(payment.metadata?.paymentRecordId || "").trim()),
+      deadline,
+    ))
+      records.set(id, record);
+    for (const [id, booking] of await fetchByIds(
+      client,
+      "booking",
+      [...records.values()].filter(Boolean).map((record) => String(record.bookingId || "").trim()),
+      deadline,
+    ))
+      bookings.set(id, booking);
+    for (const payment of payments) await auditPayment(payment);
+
+    const dodoBookings = await readDocuments(client, "booking", {
+      filters: [
+        { path: "paymentProvider", op: "eq", value: "dodo" },
+        { path: "status", op: "in", value: AUDITED_BOOKING_STATUSES },
+        { path: "_createdAt", op: "gte", value: from },
+        { path: "_createdAt", op: "lte", value: to },
+      ],
+      limit: MAX_BOOKING_LOOKUPS + 1,
+    }, deadline);
+    if (!Array.isArray(dodoBookings)) throw unavailable();
+    const bookingCap = dodoBookings.length > MAX_BOOKING_LOOKUPS;
+    if (bookingCap)
+      report({ key: "scan:dodo-bookings", id: "dodo-bookings", reason: "report_truncated" });
+    for (const booking of dodoBookings.slice(0, MAX_BOOKING_LOOKUPS)) {
+      if (
+        booking.paymentProvider !== "dodo" ||
+        !AUDITED_BOOKING_STATUSES.includes(booking.status) ||
+        !inWindow(booking._createdAt, from, to)
+      )
+        continue;
+      recentRefs.add(booking._id);
+      if (checkedBookingIds.has(booking._id)) continue;
+      const paymentId = String(booking.dodoPaymentId || "").trim();
+      const payment = paymentId ? await getPayment(paymentId, true) : null;
+      if (payment?.status !== "succeeded") {
+        bookingWithoutPayment(booking, paymentId);
+      } else await auditPayment(payment, booking);
+    }
+
+    return finishWindow({ payments: !truncated, bookings: !bookingCap, records: !recordCap });
+  } catch (error) {
+    if (error?.code !== "reconcile_report_budget_exceeded") throw error;
+    if (checks.length) {
+      items.length = 0;
+      return response(checks.map((key) => ({ key, ...unknown(), keys: [key] })), {
+        payments: false, bookings: false, records: false,
+      });
+    }
     report({ key: "scan:dodo-payments", id: "dodo-payments", reason: "report_truncated" });
-  const productIds = readSiteProductIds();
-  const payments = [];
-  for (let offset = 0; offset < listed.length; offset += PAYMENT_LOOKUP_CONCURRENCY) {
-    const batch = await Promise.all(listed.slice(offset, offset + PAYMENT_LOOKUP_CONCURRENCY).map(async (summary) => {
-      if (summary?.status && summary.status !== "succeeded") return null;
-      const payment = await getPayment(summary.payment_id);
-      if (summary.status === "succeeded" && payment.status !== "succeeded") throw unavailable();
-      if (!String(payment.metadata?.paymentRecordId || "").trim() && productIds.size === 0)
-        throw unavailable();
-      return payment?.status === "succeeded" && belongsToSite(payment, productIds) ? payment : null;
-    }));
-    payments.push(...batch.filter(Boolean));
+    return finishWindow({ payments: false, bookings: false, records: false });
   }
-  for (const [id, record] of await fetchByIds(
-    client,
-    "paymentRecord",
-    payments.map((payment) => String(payment.metadata?.paymentRecordId || "").trim()),
-  ))
-    records.set(id, record);
-  for (const [id, booking] of await fetchByIds(
-    client,
-    "booking",
-    [...records.values()].filter(Boolean).map((record) => String(record.bookingId || "").trim()),
-  ))
-    bookings.set(id, booking);
-  for (const payment of payments) await auditPayment(payment);
-
-  const dodoBookings = await readDocuments(client, "booking", {
-    filters: [
-      { path: "paymentProvider", op: "eq", value: "dodo" },
-      { path: "status", op: "in", value: AUDITED_BOOKING_STATUSES },
-      { path: "_createdAt", op: "gte", value: from },
-      { path: "_createdAt", op: "lte", value: to },
-    ],
-    limit: MAX_BOOKING_LOOKUPS + 1,
-  });
-  if (!Array.isArray(dodoBookings)) throw unavailable();
-  const bookingCap = dodoBookings.length > MAX_BOOKING_LOOKUPS;
-  if (bookingCap)
-    report({ key: "scan:dodo-bookings", id: "dodo-bookings", reason: "report_truncated" });
-  for (const booking of dodoBookings.slice(0, MAX_BOOKING_LOOKUPS)) {
-    if (
-      booking.paymentProvider !== "dodo" ||
-      !AUDITED_BOOKING_STATUSES.includes(booking.status) ||
-      !inWindow(booking._createdAt, from, to)
-    )
-      continue;
-    if (checkedBookingIds.has(booking._id)) continue;
-    const paymentId = String(booking.dodoPaymentId || "").trim();
-    const payment = paymentId ? await getPayment(paymentId, true) : null;
-    if (payment?.status !== "succeeded") {
-      bookingWithoutPayment(booking, paymentId);
-    } else await auditPayment(payment, booking);
-  }
-
-  const reportedRecords = new Set(items.map((item) => item.ref));
-  const terminalGroups = await Promise.all(
-    ["providerRecoveryTerminal", "reconciliationRecoveryTerminal"].map((flag) =>
-      readDocuments(client, "paymentRecord", {
-        filters: [
-          { path: "provider", op: "eq", value: "dodo" },
-          { path: flag, op: "eq", value: true },
-          { path: "status", op: "ieq", value: "needs_recovery" },
-          { path: "updatedAt", op: "gte", value: from },
-          { path: "updatedAt", op: "lte", value: new Date(now).toISOString() },
-        ],
-        limit: MAX_BOOKING_LOOKUPS + 1,
-      }),
-    ),
-  );
-  if (terminalGroups.some((group) => !Array.isArray(group))) throw unavailable();
-  const terminalRecords = [...new Map(terminalGroups.flat().map((record) => [record._id, record])).values()];
-  const recordCap = terminalRecords.length > MAX_BOOKING_LOOKUPS;
-  if (recordCap)
-    report({ key: "scan:dodo-records", id: "dodo-records", reason: "report_truncated" });
-  for (const record of terminalRecords.slice(0, MAX_BOOKING_LOOKUPS)) {
-    if (
-      record.provider !== "dodo" ||
-      !isTerminalRecovery(record) ||
-      !inWindow(record.updatedAt, from, new Date(now).toISOString())
-    )
-      continue;
-    if (reportedRecords.has(record._id)) continue;
-    report({
-      key: entityKey("record", record._id),
-      id: record.providerPaymentId || record._id,
-      ref: record._id,
-      cents: cents(record.pricingSnapshot?.netAmount),
-      currency: "USD",
-      reason: ownerReviewReason(record),
-    });
-  }
-
-  return response([], { payments: !truncated, bookings: !bookingCap, records: !recordCap });
 };
 
 export default async function handler(req, res) {

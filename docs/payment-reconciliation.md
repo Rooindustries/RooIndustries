@@ -76,6 +76,25 @@ incomplete coverage if that limit is reached; it cannot report clean then.
 That ceiling is a hard lifetime limit for a complete scan, even if every
 listed payment is healthy. Detail reads run in groups of eight, retain list
 order and share in-flight reads for repeated identities.
+Recent terminal records are checked before lifetime payments. Forward payment
+comparisons establish booking bindings before the reverse booking scan.
+The report stops starting work after four minutes and returns
+incomplete coverage with any findings already established. Each provider read
+is bounded through its response body; database reads keep their existing
+30-second limit, leaving time for the response and telemetry within the
+five-minute route limit. If targeted work runs out of time, all requested
+identities return unknown and none can close an issue.
+The response keeps at most 50 findings. Scan-limit warnings come first, then
+findings tied to recent reverse-scan bookings or terminal recovery records,
+then other lifetime payment findings. This keeps historical mismatches from
+crowding out recent booking and owner-review alerts. Ordering stays stable
+within each group, including entities already found by the forward scan.
+The count still includes every finding, and overflow remains incomplete.
+Retained historical issues remain eligible for targeted checks.
+Terminal recovery findings use their payment-record identity in every scan.
+A payment-key issue from an earlier report learns that record alias through
+its own targeted check, so a change in provider listing membership reuses the
+same owner issue and Sentry group.
 
 The reverse scan includes recent captured, completed and refunded Dodo bookings,
 so a refunded booking is still checked against provider details when its payment

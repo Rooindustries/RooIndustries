@@ -46,6 +46,8 @@ let onRequestError;
 let origin;
 let nativeReport;
 let graceReport;
+let priorityReport;
+let terminalProof;
 const reusedError = new Error('Reusable fixture error');
 const check = (name, fn) => {
   try { fn(); checks.push({ name, passed: true }); }
@@ -122,21 +124,27 @@ try {
   if (!process.argv.includes('--routes')) {
     const nativeArtifact = join(artifact, 'payment-persistence.json');
     await child('scripts/test-payment-persistence-sweep.mjs', [
-      '--full-chain', '--scenario=reconcile-report-payment-without-booking,reconcile-report-late-capture-without-booking,reconcile-report-late-capture-without-record,reconcile-report-transition-grace-settlement',
+      '--full-chain', '--scenario=reconcile-report-payment-without-booking,reconcile-report-late-capture-without-booking,reconcile-report-late-capture-without-record,reconcile-report-transition-grace-settlement,reconcile-report-recent-priority-50-reverse,reconcile-report-terminal-identity-providerRecoveryTerminal',
     ], { ROO_PAYMENT_PERSISTENCE_ARTIFACT: nativeArtifact }, 'payment-persistence.log');
     const result = JSON.parse(await readFile(nativeArtifact, 'utf8'));
     assert.equal(result.ok, true);
     check('late captures without a booking or a payment record remain visible', () => {
-      assert.equal(result.scenarios.length, 4);
+      assert.equal(result.scenarios.length, 6);
       assert.ok(result.scenarios.every(scenario => scenario.passed));
     });
     nativeReport = result.scenarios[0].proof.report;
     graceReport = result.scenarios.find(scenario => scenario.name === 'reconcile-report-transition-grace-settlement').proof.before.body;
+    priorityReport = result.scenarios.find(scenario => scenario.name === 'reconcile-report-recent-priority-50-reverse').proof.report;
+    terminalProof = result.scenarios.find(scenario => scenario.name === 'reconcile-report-terminal-identity-providerRecoveryTerminal').proof;
     await writeFile(join(artifact, 'seeded-report.json'), JSON.stringify(nativeReport, null, 2));
     await writeFile(join(artifact, 'grace-report.json'), JSON.stringify(graceReport, null, 2));
-    await child('scripts/fixtures/reconcile-payments.mjs', ['--case=seeded-payment-alert'], {
+    await writeFile(join(artifact, 'priority-report.json'), JSON.stringify(priorityReport, null, 2));
+    await writeFile(join(artifact, 'terminal-report.json'), JSON.stringify(terminalProof, null, 2));
+    await child('scripts/fixtures/reconcile-payments.mjs', ['--case=seeded-payment-alert,recent-findings-survive-history,terminal-identity-reuse,terminal-identity-reuse-legacy'], {
       ROO_RECONCILE_SEED_REPORT: join(artifact, 'seeded-report.json'),
       ROO_RECONCILE_GRACE_REPORT: join(artifact, 'grace-report.json'),
+      ROO_RECONCILE_PRIORITY_REPORT: join(artifact, 'priority-report.json'),
+      ROO_RECONCILE_TERMINAL_REPORT: join(artifact, 'terminal-report.json'),
       ROO_RECONCILE_TEST_ARTIFACT: join(artifact, 'daily-check'),
     }, 'daily-check.log');
     const daily = JSON.parse(await readFile(join(artifact, 'daily-check/results.json'), 'utf8'));
@@ -145,6 +153,17 @@ try {
       assert.equal(daily.results[0].issues.length, 1);
       assert.equal(daily.results[0].runs.length, 3);
       assert.equal(daily.externalRequests, 0);
+    });
+    check('recent booking and terminal alerts survive historical overflow and reuse owner issues', () => {
+      const result = daily.results.find(result => result.name === 'recent-findings-survive-history');
+      assert.equal(result.passed, true);
+      assert.equal(result.issues.length, 51);
+      assert.equal(result.runs.length, 2);
+    });
+    check('terminal discovery changes reuse the same owner issue, including a legacy payment identity', () => {
+      const results = daily.results.filter(result => result.name.startsWith('terminal-identity-reuse'));
+      assert.equal(results.length, 2);
+      assert.ok(results.every(result => result.passed && result.issues.length === 1 && result.runs.length === 3));
     });
   }
   server.listen(0, '127.0.0.1');
@@ -265,6 +284,30 @@ try {
     assert.equal(mismatchEvents[0].tags.reconciliation_reason, 'payment_without_booking');
     assert.equal(JSON.stringify(mismatchEvents).includes(report.items[0].key), false);
   });
+  if (priorityReport) {
+    const before = events.length;
+    await fetch(`${origin}/reconciliation`, { method: 'POST', body: JSON.stringify(priorityReport) });
+    check('recent reverse-booking and both terminal findings reach the local collector despite historical overflow', () => {
+      const delivered = events.slice(before);
+      assert.equal(delivered.length, 50);
+      for (const item of priorityReport.items.slice(0, 3)) {
+        const identity = createHash('sha256').update(item.key).digest('hex');
+        assert.ok(delivered.some(event => event.fingerprint.includes(identity) && event.tags.reconciliation_reason === item.reason));
+      }
+    });
+  }
+  if (terminalProof) {
+    const before = events.length;
+    for (const report of [terminalProof.before, terminalProof.listed, terminalProof.after]) {
+      await fetch(`${origin}/reconciliation`, { method: 'POST', body: JSON.stringify(report) });
+    }
+    check('terminal records keep one local Sentry group as provider listing membership changes', () => {
+      const delivered = events.slice(before);
+      assert.ok(delivered.length >= 1 && delivered.length <= 3);
+      assert.equal(new Set(delivered.map(event => JSON.stringify(event.fingerprint))).size, 1);
+      assert.equal(delivered[0].fingerprint[1], createHash('sha256').update('record:paymentRecord.fixture').digest('hex'));
+    });
+  }
   const count = events.length;
   await fetch(`${origin}/reconciliation`, { method: 'POST', body: JSON.stringify({ items: [] }) });
   check('clean reports produce no mismatch alert', () => assert.equal(events.length, count));

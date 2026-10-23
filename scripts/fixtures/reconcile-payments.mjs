@@ -646,6 +646,64 @@ try {
       }
     });
   }
+  if (process.env.ROO_RECONCILE_PRIORITY_REPORT) {
+    await run('recent-findings-survive-history', async (home) => {
+      const report = JSON.parse(fs.readFileSync(process.env.ROO_RECONCILE_PRIORITY_REPORT, 'utf8'));
+      assert.equal(report.ok, true);
+      assert.equal(report.count, 53);
+      assert.equal(report.items.length, 50);
+      assert.equal(report.complete.items, false);
+      current.window = report;
+      for (const entry of report.items) current.checks[entry.key] = check(entry.key, 'unresolved', [entry]);
+      const recent = report.items.slice(0, 3);
+      assert.deepEqual(recent.map((entry) => entry.ref).sort(), [
+        'booking.fixture', 'paymentRecord.recent-provider', 'paymentRecord.recent-reconciliation',
+      ].sort());
+      let identities;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const result = await invoke(home);
+        assert.equal(result.code, 0);
+        assert.equal(JSON.parse(result.stdout).result, 'incomplete');
+        assert.notEqual(result.alert.severity, 'green');
+        assert.equal(current.issues.length, 51);
+        assert.equal(current.updates.length, 1);
+        for (const entry of recent) {
+          const matches = current.issues.filter((issue) => metadata(issue).primary === entry.key);
+          assert.equal(matches.length, 1);
+          assert.equal(metadata(matches[0]).observations[0].reason, entry.reason);
+          assert.equal(matches[0].status, 'Backlog');
+        }
+        const overflow = current.issues.find((issue) => metadata(issue).primary === 'scan:items');
+        assert.ok(overflow);
+        assert.equal(overflow.status, 'Backlog');
+        if (identities) assert.deepEqual(current.issues.map((issue) => issue.uuid), identities);
+        identities = current.issues.map((issue) => issue.uuid);
+      }
+    });
+  }
+  if (process.env.ROO_RECONCILE_TERMINAL_REPORT) {
+    const proof = JSON.parse(fs.readFileSync(process.env.ROO_RECONCILE_TERMINAL_REPORT, 'utf8'));
+    for (const legacy of [false, true]) await run('terminal-identity-reuse' + (legacy ? '-legacy' : ''), async (home) => {
+      if (legacy) seedIssue('payment:payment-fixture');
+      for (const entry of proof.targeted.checks) current.checks[entry.key] = entry;
+      let identity;
+      for (const report of [proof.before, proof.listed, proof.after]) {
+        current.window = report;
+        const result = await invoke(home);
+        assert.equal(result.code, 0);
+        assert.equal(JSON.parse(result.stdout).result, 'mismatch');
+        assert.equal(current.issues.length, 1);
+        assert.equal(current.updates.length, 1);
+        assert.equal(current.issues[0].status, 'Backlog');
+        const state = metadata(current.issues[0]);
+        assert.ok(state.keys.includes('record:paymentRecord.fixture'));
+        assert.equal(state.observations.length, 1);
+        assert.equal(state.observations[0].key, 'record:paymentRecord.fixture');
+        if (identity) assert.equal(current.issues[0].uuid, identity);
+        identity = current.issues[0].uuid;
+      }
+    });
+  }
   if (baseline) {
     await run('legacy-daily-record', async (home) => {
       current.window = windowReport([fault()]);
