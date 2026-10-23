@@ -1,6 +1,21 @@
-const { test, expect } = require("@playwright/test");
+const { test, expect } = require("./fixtures/booking-flow.cjs");
+const http = require("node:http");
 
 test.use({ javaScriptEnabled: true });
+
+test("Discord suite refuses API requests outside the fixture", async ({ page }, testInfo) => {
+  let hits = 0;
+  const server = http.createServer((_request, response) => { hits++; response.end("outside fixture"); });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    await expect(page.request.get(`http://127.0.0.1:${server.address().port}/`)).rejects.toThrow(/outside the local fixture/);
+    expect(hits).toBe(0);
+    await testInfo.attach("guarded-banner-suite", { body: JSON.stringify({ refused: true, hits }), contentType: "application/json" });
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
 
 for (const failure of ["navigation", "abort", "body-abort", "server"]) {
   test(`Discord banner reports only real failures: ${failure}`, async ({ page }, testInfo) => {
