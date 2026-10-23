@@ -48,6 +48,8 @@ test('upgrade credit stays verified and belongs to one checkout', { timeout: 900
     for (const response of [result.lookup, result.quote, result.start]) {
       assert.ok(response.status >= 400 && response.status < 500, JSON.stringify(response));
     }
+    assert.equal(result.start.body.code, result.quote.body.code);
+    assert.notEqual(result.start.body.code, 'quote_fingerprint_mismatch');
     result.noMutation = isDeepStrictEqual(before, await fixture.snapshot());
     assert.equal(result.noMutation, true);
   };
