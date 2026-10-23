@@ -709,6 +709,59 @@ try{
     });
   }
   for (const variant of [
+    { name: 'matched' },
+    { name: 'unapplied', payment: { refund_status: null, refunds: [] }, reason: 'refund_not_applied' },
+    { name: 'partial', payment: { refund_status: 'partial' }, refund: { amount: 333, is_partial: true }, reason: 'refund_not_applied' },
+    { name: 'currency', refund: { currency: 'EUR' }, unavailable: true },
+    { name: 'malformed', payment: { refunds: null }, unavailable: true },
+    { name: 'binding', payment: { checkout_session_id: 'checkout-other' }, reason: 'dodo_payment_binding_mismatch' },
+    { name: 'recipient', booking: { referralCode: 'creator-wrong' }, reason: 'referral_binding_mismatch' },
+    { name: 'missing', providerStatus: 404, reason: 'booking_without_payment' },
+    { name: 'unavailable', providerStatus: 503, unavailable: true },
+    { name: 'grace', fresh: true },
+    { name: 'aged-out', agedOut: true, payment: { refund_status: null, refunds: [] }, reason: 'refund_not_applied' },
+  ]) {
+    await run(`reconcile-report-reverse-refunded-${variant.name}`, async () => {
+      await seed('dodo', 'booked', dodoBooking());
+      dodoPayment.created_at = new Date(Date.now() - 73 * 3600000).toISOString();
+      dodoPayment.refund_status = 'full';
+      dodoPayment.refunds = [dodoRefund];
+      const refund = await requestFlow('dodo', { req: dodoReq(dodoRefund, 'refund.succeeded') });
+      assert.equal(refund.status, 200, JSON.stringify(refund));
+      assert.equal((await row(bookingId)).payload.status, 'refunded');
+      if (variant.booking) await commerce.patch(bookingId).set(variant.booking).commit();
+      if (variant.agedOut) await commerce.patch(bookingId).set({ _createdAt: dodoPayment.created_at }).commit();
+      if (variant.refund) Object.assign(dodoRefund, variant.refund);
+      Object.assign(dodoPayment, variant.payment);
+      if (variant.fresh) dodoPayment.updated_at = new Date().toISOString();
+      if (variant.providerStatus) providerHook = (request, req, res) => {
+        if (request.path !== '/payments/payment-fixture') return false;
+        res.writeHead(variant.providerStatus, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ code: 'fixture_payment_unavailable' }));
+        return true;
+      };
+      dodoList = [];
+      const window = await authorizedReport('GET', true);
+      const targeted = await targetReport(canonicalKeys);
+      if (variant.unavailable) {
+        for (const result of [window, targeted]) {
+          assert.equal(result.status, 503, JSON.stringify(result.body));
+          assert.equal(Object.hasOwn(result.body, 'items'), false);
+        }
+      } else {
+        assert.equal(window.status, 200, JSON.stringify(window.body));
+        assert.deepEqual(reportReasons(window.body), variant.reason && !variant.agedOut ? [variant.reason] : []);
+        assert.deepEqual(window.body.complete, { payments: true, bookings: true, records: true, items: true });
+        assert.equal(targeted.status, 200, JSON.stringify(targeted.body));
+        const state = variant.fresh ? 'unknown' : variant.reason ? 'unresolved' : 'recovered';
+        assert.deepEqual(targeted.body.checks.map(check => check.state), canonicalKeys.map(() => state));
+        assert.equal(window.providerRequests.filter(request => request.path === '/payments/payment-fixture').length, variant.agedOut ? 0 : 1);
+        assert.equal(targeted.providerRequests.filter(request => request.path === '/payments/payment-fixture').length, 1);
+      }
+      return { refund, provider: dodoPayment, window, targeted };
+    });
+  }
+  for (const variant of [
     { name: 'sync-pending', record: { refundRequiresBookingSync: true } },
     { name: 'sync-unknown', record: { refundRequiresBookingSync: null } },
     { name: 'release-pending', record: { resourceReleasePending: true } },
@@ -2032,7 +2085,7 @@ try{
     assert.equal(JSON.stringify(report).includes('customer'), false);
     return report.items;
   });
-  await run('reconcile-report-booking-lookup-cap', async () => {
+  for (const status of ['captured', 'refunded']) await run(`reconcile-report-booking-lookup-cap${status === 'captured' ? '' : '-refunded'}`, async () => {
     let transaction = commerce.transaction();
     for (let index = 0; index < 201; index += 1) {
       transaction.create({
@@ -2040,7 +2093,7 @@ try{
         _type: 'booking',
         paymentProvider: 'dodo',
         dodoPaymentId: `payment-report-${index}`,
-        status: 'captured',
+        status,
         netAmount: 9.99,
         backendOwner: 'supabase',
         cutoverGeneration: 0,

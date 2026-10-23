@@ -73,6 +73,10 @@ That ceiling is a hard lifetime limit for a complete scan, even if every
 listed payment is healthy. Detail reads run in groups of eight, retain list
 order and share in-flight reads for repeated identities.
 
+The reverse scan includes recent captured, completed and refunded Dodo bookings,
+so a refunded booking is still checked against provider details when its payment
+is absent from the succeeded-payment listing. The same booking limit applies
+across those statuses; an incomplete scan cannot report clean.
 Fully refunded bookings earn no referral commission, even when they keep a
 historical commission amount. A full refund before booking is clean only when
 the provider's validated refund total matches the payment and the local record

@@ -14,6 +14,7 @@ const MAX_BOOKING_LOOKUPS = 200;
 const MAX_CHECKS = 20;
 const MAX_CHECK_QUERY_LENGTH = 2048;
 const KEPT_BOOKING_STATUSES = ["captured", "completed"];
+const AUDITED_BOOKING_STATUSES = [...KEPT_BOOKING_STATUSES, "refunded"];
 const SETTLED_DISPUTE_STATUSES = ["dispute_won", "dispute_cancelled"];
 const DISPUTE_STATUSES = [
   ...SETTLED_DISPUTE_STATUSES,
@@ -671,7 +672,7 @@ export const buildReconcileReport = async ({
   const dodoBookings = await readDocuments(client, "booking", {
     filters: [
       { path: "paymentProvider", op: "eq", value: "dodo" },
-      { path: "status", op: "in", value: KEPT_BOOKING_STATUSES },
+      { path: "status", op: "in", value: AUDITED_BOOKING_STATUSES },
       { path: "_createdAt", op: "gte", value: from },
       { path: "_createdAt", op: "lte", value: to },
     ],
@@ -684,7 +685,7 @@ export const buildReconcileReport = async ({
   for (const booking of dodoBookings.slice(0, MAX_BOOKING_LOOKUPS)) {
     if (
       booking.paymentProvider !== "dodo" ||
-      !KEPT_BOOKING_STATUSES.includes(booking.status) ||
+      !AUDITED_BOOKING_STATUSES.includes(booking.status) ||
       !inWindow(booking._createdAt, from, to)
     )
       continue;
