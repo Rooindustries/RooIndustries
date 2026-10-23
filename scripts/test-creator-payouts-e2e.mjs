@@ -847,8 +847,11 @@ try {
     assert.equal(creator.owedTotal, 5.5 - 2 * expected);
     const receipts = await sql`select payload from migration.source_documents where document_type='creatorPayout' and not tombstoned and payload->>'referralId'=${state.creator._id}`;
     assert.equal(receipts.length, expected);
+    const ledger = await sql`select legacy_sanity_id, amount_subunits, currency from commerce.referral_ledger where legacy_sanity_id=any(${receipts.map(receipt => receipt.payload._id)})`;
+    assert.equal(ledger.length, expected);
+    assert.ok(ledger.every(entry => String(entry.amount_subunits) === '200' && entry.currency === 'USD'));
     if (kind === 'revision-conflict') assert.equal(conflicted, true);
-    return { responses, creator, receipts, conflicted };
+    return { responses, creator, receipts, ledger, conflicted };
   });
 
   await run('R1-migration-preserves-settled-source-and-cron', async () => {
@@ -908,6 +911,7 @@ try {
       bookings: await sql`select legacy_sanity_id, booking_payload, status from commerce.bookings order by legacy_sanity_id`,
       creators: await sql`select legacy_sanity_id, payload from migration.source_documents where document_type='referral' and tombstoned=false order by legacy_sanity_id`,
       earnings: await sql`select legacy_sanity_id, public.roo_referral_earnings_summary(legacy_sanity_id, payload#>>'{slug,current}') as earnings from migration.source_documents where document_type='referral' and tombstoned=false order by legacy_sanity_id`,
+      payoutLedger: await sql`select legacy_sanity_id, creator_user_id, entry_type, amount_subunits, currency, idempotency_key, payload, source_revision, source_hash from commerce.referral_ledger order by legacy_sanity_id`,
     });
     const before = await snapshot();
     const after = {};
