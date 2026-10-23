@@ -176,9 +176,13 @@ const nextConfig = {
 export default withSentryConfig(nextConfig, {
   org: "rooindustries",
   project: "rooindustries-website",
+  authToken: process.env.SENTRY_AUTH_TOKEN,
   silent: true,
   telemetry: false,
-  sourcemaps: { disable: true },
+  sourcemaps: {
+    disable: !process.env.SENTRY_AUTH_TOKEN,
+    deleteSourcemapsAfterUpload: true,
+  },
   release: { create: false },
   bundleSizeOptimizations: { excludeDebugStatements: true },
   webpack: { autoInstrumentMiddleware: false },
