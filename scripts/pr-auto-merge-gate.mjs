@@ -210,7 +210,7 @@ export const decide = (input) => {
     add("models-disagree", "CodeRabbit and Codex do not both approve this head. The owning agent addresses the findings and pushes. Review requests go only to eligible reviewers without approval on that head.");
   }
   if (reviewCapped) {
-    add("review-cap", `CodeRabbit and Codex have not both approved, with no open threads, after ${MAX_REVIEW_ROUNDS} review rounds. It stays with the owner.`);
+    add("review-cap", `Review work remains after ${MAX_REVIEW_ROUNDS} review rounds. The pull request stays open for the owner.`);
   }
   if (git === "blocked" && input.baseIsAncestor === true && checksGreen && bothApprove && findings.length === 0 && changesRequestedBy.length === 0) {
     add("github-blocked", "The pull request meets the repo bar, and GitHub is still blocking the merge. Branch protection or a ruleset is the likely hold. This workflow does not change those settings.");
