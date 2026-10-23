@@ -3105,6 +3105,53 @@ const createOrReusePaymentRecordForStart = async ({
   return record;
 };
 
+export const recoverPaymentSession = async ({
+  body,
+  client = createCommerceWriteClient(),
+  backend = resolveStoreBackend(client?.backend),
+}) => {
+  const payload = normalizeObject(body?.bookingPayload);
+  const denied = { httpStatus: 403, body: { ok: false, code: "checkout_recovery_invalid", error: "This reservation does not match the checkout." } };
+  try {
+    const upgrade = String(payload.originalOrderId || "").trim();
+    const proof = upgrade
+      ? verifyUpgradeIntentToken({ token: payload.upgradeIntentToken, bookingId: upgrade,
+        email: payload.email, targetPackageTitle: payload.packageTitle, backend })
+      : verifyHoldToken({ token: payload.slotHoldToken, holdId: payload.slotHoldId,
+        startTimeUTC: payload.startTimeUTC, backend, ignoreExpiry: true });
+    if (!proof?.n || (!upgrade && (!payload.slotHoldId || !payload.startTimeUTC || proof.st !== payload.startTimeUTC))) return denied;
+    const scope = buildPaymentSessionScope({ bookingPayload: payload, holdNonce: proof.n }) + (upgrade ? `:${proof.n}` : "");
+    const record = await getPaymentRecordById(client, buildPaymentSessionRecordId(scope));
+    if (!record) return { httpStatus: 200, body: { ok: true, recovered: false } };
+    const stored = normalizeObject(record.bookingPayload);
+    if (record.sessionScope !== scope || resolveStoreBackend(record.backendOwner) !== backend ||
+        Number(record.cutoverGeneration || 0) !== Number(proof.gen || 0) ||
+        String(stored.packageTitle || "") !== String(payload.packageTitle || "") ||
+        String(stored.email || "").trim().toLowerCase() !== String(payload.email || "").trim().toLowerCase() ||
+        String(stored.originalOrderId || "") !== upgrade ||
+        (!upgrade && (stored.slotHoldId !== payload.slotHoldId || stored.startTimeUTC !== payload.startTimeUTC)) ||
+        (upgrade && record.upgradeIntentSnapshot?.intentId !== proof.n)) return denied;
+    if (!upgrade && !verifyHoldToken({ token: stored.slotHoldToken, holdId: payload.slotHoldId,
+      startTimeUTC: payload.startTimeUTC, holdNonce: proof.n, backend,
+      cutoverGeneration: proof.gen, ignoreExpiry: true })) return denied;
+    return {
+      httpStatus: 200,
+      body: {
+        ...await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record) }),
+        recovered: true,
+        quote: { ...record.pricingSnapshot, isFree: record.provider === "free" },
+        quoteFingerprint: record.quoteFingerprint,
+        checkoutCodes: { referralCode: stored.referralCode || "", couponCode: stored.couponCode || "" },
+        providerPayload: buildProviderPayloadFromRecord(record),
+        paymentAccessToken: issuePaymentAccessTokenForRecord(record),
+        refreshedHold: buildRefreshedHoldBody(record),
+      },
+    };
+  } catch (error) {
+    return buildPublicFailure({ error, fallbackStatus: 503, fallbackMessage: "Checkout recovery could not finish. Please try again." });
+  }
+};
+
 export const startPaymentSession = async ({
   body,
   client = createCommerceWriteClient(),

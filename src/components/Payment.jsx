@@ -1203,9 +1203,15 @@ export default function Payment({ hideFooter = false }) {
       }
       const persistedCheckout = Boolean(refreshedHold?.slotHoldId && refreshedHold?.slotHoldToken) || Boolean(recoveryCodes);
       if (persistedCheckout) writeStoredCheckout(nextCheckout);
+      const refreshCheckout = activeSession.provider === "dodo" || recoveryCodes || persistedCheckout;
+      if (refreshCheckout) {
+        setPreApplyingCodes(true);
+        setQuoteFingerprint("");
+        setServerQuote(null);
+      }
       clearPaymentSession("", operation.token);
       operation.token = "";
-      if (activeSession.provider === "dodo" || recoveryCodes || persistedCheckout) {
+      if (refreshCheckout) {
         dodoReturnHandled.current = "";
         const query = new URLSearchParams(location.search);
         query.delete("dodo_return");
@@ -1401,17 +1407,43 @@ export default function Payment({ hideFooter = false }) {
       }
 
       const startPayload = buildCheckoutPayload();
-      const { response, data } = await fetchJson("/api/payment/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider,
-          quoteFingerprint,
-          bookingPayload: startPayload,
-        }),
+      const recover = () => fetchJson("/api/payment/recover", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bookingPayload: startPayload }),
       });
+      let result = await recover();
+      if (!result.response.ok || result.data?.ok !== true) {
+        throw new Error(result.data?.error || "Checkout recovery could not finish. Please try again.");
+      }
+      if (!result.data.recovered) {
+        try {
+          result = await fetchJson("/api/payment/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ provider, quoteFingerprint, bookingPayload: startPayload }),
+          });
+        } catch (error) {
+          const recovered = await recover();
+          if (!recovered.response.ok || recovered.data?.recovered !== true) throw error;
+          result = recovered;
+        }
+      }
+      const { response, data } = result;
+      const recoveredSession = data?.recovered === true;
+      const sessionProvider = recoveredSession ? data.provider : provider;
+      const sessionFingerprint = recoveredSession ? JSON.stringify({
+        ...parseCheckoutFingerprint(checkoutFingerprint),
+        referralCode: data.checkoutCodes?.referralCode || "",
+        couponCode: data.checkoutCodes?.couponCode || "",
+      }) : checkoutFingerprint;
+      const returnedStatus = String(data?.status || "").trim().toLowerCase();
+      if (recoveredSession && sessionProvider === "free" &&
+          ["booked", "email_partial"].includes(returnedStatus) && operation.current()) {
+        await navigateToConfirmation("free", data, operation);
+        return { terminal: true, result: data };
+      }
 
-      const recoveringStart = !operation.current();
+      const recoveringStart = recoveredSession || !operation.current();
       if (recoveringStart) {
         const view = paymentViewRef.current;
         let sameStoredCheckout = false;
@@ -1432,10 +1464,12 @@ export default function Payment({ hideFooter = false }) {
             view.startIdentity !== paymentStartIdentity(startPayload) ||
             !paymentSessionMatchesCheckout(checkoutFingerprint, view.fingerprint) ||
             view.session?.paymentAccessToken || !sameStoredCheckout ||
-            provider === "free" || !response.ok || data?.ok !== true || data.provider !== provider ||
-            !["started", "booked", "email_partial", "refunded"].includes(String(data.status || "").trim().toLowerCase()) ||
+            sessionProvider === "free" || !response.ok || data?.ok !== true ||
+            !["dodo", "paypal", "razorpay"].includes(sessionProvider) || data.provider !== sessionProvider ||
+            !["started", "captured_client", "captured_webhook", "verified_server", "finalizing", "needs_recovery",
+              "booked", "email_partial", "refunded", "failed", "abandoned"].includes(returnedStatus) ||
             typeof data.paymentAccessToken !== "string" || !data.paymentAccessToken.trim() ||
-            String(data.quoteFingerprint || data.fingerprint || "").trim() !== quoteFingerprint ||
+            (!recoveredSession && String(data.quoteFingerprint || data.fingerprint || "").trim() !== quoteFingerprint) ||
             (!startPayload.originalOrderId && (returnedHold?.slotHoldId !== startPayload.slotHoldId ||
               typeof returnedHold.slotHoldToken !== "string" || !returnedHold.slotHoldToken))) {
           return { terminal: true, stale: true };
@@ -1498,15 +1532,14 @@ export default function Payment({ hideFooter = false }) {
       }
 
       const nextSession = {
-        provider,
-        fingerprint: checkoutFingerprint,
+        provider: sessionProvider,
+        fingerprint: sessionFingerprint,
         ...(recoveringStart ? { recoveryFingerprint: paymentViewRef.current.fingerprint } : {}),
         paymentAccessToken: String(data.paymentAccessToken || "").trim(),
         providerPayload: data.providerPayload || {},
         sessionExpiresAt: String(data.sessionExpiresAt || "").trim(),
         result: data,
       };
-      const returnedStatus = String(data.status || "").trim().toLowerCase();
       if (
         !recoveringStart && provider !== "free" &&
         (returnedStatus === "booked" || returnedStatus === "email_partial")
@@ -1524,7 +1557,7 @@ export default function Payment({ hideFooter = false }) {
         { persistent: true });
         return { ...nextSession, terminal: true, stale: true };
       }
-      if (provider !== "free") {
+      if (sessionProvider !== "free") {
         operation.token = nextSession.paymentAccessToken;
         persistPaymentSession(nextSession);
       }
@@ -1844,7 +1877,7 @@ export default function Payment({ hideFooter = false }) {
     const operation = createPaymentOperation();
     if (!operation.current()) return;
     if (!isFree) return;
-    if (validating || validatingCoupon) return;
+    if (preApplyingCodes || validating || validatingCoupon) return;
     if (otherCheckoutStarting("free")) return;
     if (!ensureSlotBeforeAction()) return;
 
@@ -1853,7 +1886,7 @@ export default function Payment({ hideFooter = false }) {
     try {
       showBanner("info", "Confirming your free booking...");
       const session = await startSessionCheckout("free", operation);
-      if (!operation.current() || session?.stale) return;
+      if (!operation.current() || session?.stale || session?.terminal) return;
       const data = session?.result || {};
       const status = String(data.status || "").trim().toLowerCase();
       if (!data.bookingId || (status !== "booked" && status !== "email_partial")) {
@@ -2366,7 +2399,7 @@ export default function Payment({ hideFooter = false }) {
               </p>
               <button
                 onClick={handleFreeBooking}
-                disabled={creatingFree || validating || validatingCoupon || quoteLoading || !quoteFingerprint || otherCheckoutStarting("free")}
+                disabled={creatingFree || preApplyingCodes || validating || validatingCoupon || quoteLoading || !quoteFingerprint || otherCheckoutStarting("free")}
                 className="glow-button px-4 py-3 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
               >
                 {creatingFree ? "Confirming..." : "Confirm Free Booking"}
@@ -2620,6 +2653,8 @@ export default function Payment({ hideFooter = false }) {
       {(isModalMode || !hideFooter) && (
         <motion.div
           variants={itemVariants}
+          initial="hidden"
+          animate="visible"
           className="mt-10 flex justify-center"
         >
           <Link

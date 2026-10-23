@@ -4,6 +4,7 @@ import { FaDiscord } from "react-icons/fa";
 import packagePricing from "../lib/packagePricing";
 import { readBookingPackageSelection } from "../lib/checkoutStorage";
 import PaymentMethods from "./PaymentMethods";
+import PackageSupportWarning from "./PackageSupportWarning";
 
 const { isTopPackageTitle } = packagePricing;
 
@@ -139,12 +140,7 @@ export default function Footer() {
         </div>
 
         {isXocBookingForm && (
-          <p className="mt-2 text-center text-[11px] text-ink-muted">
-            Refunds will not be issued in case you proceed with
-            unsupported/custom parts. Please join the Discord and open a ticket
-            or DM <span className="font-semibold">serviroo</span> to check for
-            eligibility or switch to one of our other specialized plans.
-          </p>
+          <PackageSupportWarning className="mt-2 text-center text-[11px] text-ink-muted" />
         )}
         </div>
       </div>

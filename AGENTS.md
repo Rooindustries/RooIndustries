@@ -96,6 +96,9 @@ Any PR that touches a money path, including a helper outside this list:
 
 ### Bookings and holds
 
+- Losing a payment-start response does not require restoring the old referral or coupon. `/api/payment/recover` uses the signed hold generation (or upgrade intent), checks the stored booking identity and backend, and returns the original checkout. Recovery keeps its original price until explicit cancellation; it never creates a second payment. (`src/server/api/payment/flow.js`, `src/components/Payment.jsx`, `tests/booking-recovery.spec.js`)
+- A delayed payment-cancellation response changes browser state only when both the current hold generation and stored payment session still match the operation. Newer reservations, checkout state and typed details survive either cancellation response shape. (`src/components/BookingForm.jsx`, `tests/booking-recovery.spec.js`)
+- The payment page's Back to Booking control starts its own visible animation when it mounts, including after an upgrade enters the payment dialog. (`src/components/Payment.jsx`, `tests/payment-start-lock.spec.js`)
 - A slot has at most one hold, keyed by its start time. A held slot is refused to anyone without the hold token, and an expired hold can be reclaimed. (`src/server/booking/holdSlot.js:241,346-373,415-451`)
 - A slot with an active booking lock or a blocking booking can't be held. This is rechecked after the hold read. (`src/server/booking/holdSlot.js:304-311,318-335`)
 - A slot that has already started can't be held. (`src/server/booking/holdSlot.js:337-342`)

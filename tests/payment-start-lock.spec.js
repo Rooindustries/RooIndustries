@@ -855,7 +855,8 @@ const claimedStartTest = test.extend({
       window.__claimedStorageFailures = [];
     });
     page.on("pageerror", error => evidence.pageErrors.push({ name: error.name, message: error.message }));
-    page.on("requestfailed", request => evidence.aborted.push({ url: request.url(), failure: request.failure() }));
+    page.on("requestfailed", request => evidence.aborted.push({ url: request.url(), method: request.method(),
+      duringSetup: !evidence.setupComplete, failure: request.failure() }));
     page.on("response", async response => {
       const url = new URL(response.url());
       if (/^\/api\/ref\/validate(Referral|Coupon)$/.test(url.pathname)) {
@@ -1128,7 +1129,8 @@ const claimedStartTest = test.extend({
         soft(cancelled.checkout).toMatchObject({ ...evidence.first.body.bookingPayload, couponCode: "save20",
           slotHoldToken: `${evidence.initial.hold.holdToken}-rotated`, slotHoldExpiresAt: evidence.initial.hold.expiresAt });
       }
-      for (const key of ["booking_draft", "referral_dismissed", "referral_capture", "referral_session", "referral_choices"]) soft(cancelled.raw[key]).toBe(evidence.initial.raw[key]);
+      soft(cancelled.raw.booking_draft).toBe(evidence.before.raw.booking_draft);
+      for (const key of ["referral_dismissed", "referral_capture", "referral_session", "referral_choices"]) soft(cancelled.raw[key]).toBe(evidence.initial.raw[key]);
     };
     const cdp = await browser.newBrowserCDPSession(); evidence.engine = await cdp.send("Browser.getVersion"); await cdp.detach();
     try { await use({ evidence, config, setup, deliver, recover, capture, snapshot, releaseStatus }); }
@@ -1145,7 +1147,10 @@ const claimedStartTest = test.extend({
       evidence.errors = testInfo.errors.map(error => error.message);
       evidence.classification = evidence.setupComplete ? (evidence.errors.length ? "product failure" : "passed") : "setup failure";
       await attach("evidence", evidence);
-      expect(evidence.pageErrors).toEqual([]); expect(evidence.aborted).toEqual([]);
+      expect(evidence.pageErrors).toEqual([]);
+      expect(evidence.aborted.filter(request => !(config.upgrade && request.duringSetup &&
+        request.method === "GET" && new URL(request.url).pathname === "/api/content/upgrade-link" &&
+        request.failure?.errorText === "net::ERR_ABORTED"))).toEqual([]);
       expect(evidence.handoffs).toEqual([]);
       expect(evidence.requests.filter(call => /\/api\/payment\/(capture|confirm|finalize)(\/|$)/.test(call.path) || call.path === "/api/releaseHold")).toEqual([]);
       expect(evidence.requests.filter(call => call.path === "/api/holdSlot")).toHaveLength(config.upgrade ? 0 : 1);

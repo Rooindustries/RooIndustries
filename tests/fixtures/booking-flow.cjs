@@ -129,6 +129,7 @@ const test = base.extend({
         });
       }
       if (path === "/api/payment/providers") return json(route, { ok: true, providers });
+      if (path === "/api/payment/recover") return json(route, { ok: true, recovered: false });
       if (path === "/api/payment/quote") {
         return json(route, { ok: true, quoteFingerprint: "fixture-quote", providers,
           quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false } });

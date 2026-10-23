@@ -221,6 +221,20 @@ jobs:
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);
           NODE
+      - name: Run the native booking recovery E2Es
+        env:
+          NEXT_DIST_DIR: .next-e2e-native-recovery
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-booking-recovery.json
+        run: |
+          npx playwright test --config=playwright.booking-recovery.config.js --workers=1 --project=chromium --output=test-results/booking-recovery-e2e --reporter=line,json
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const { stats } = require('./test-results/native-booking-recovery.json');
+          assert.equal(stats.expected, 9, 'All native booking recovery cases must pass');
+          assert.equal(stats.skipped, 0, 'Native booking recovery cases must not skip');
+          assert.equal(stats.unexpected, 0);
+          assert.equal(stats.flaky, 0);
+          NODE
       - name: Run booking-contact PostgreSQL 17 suite
         run: npm run test:booking-contact
       - name: Run booking hold API suite
