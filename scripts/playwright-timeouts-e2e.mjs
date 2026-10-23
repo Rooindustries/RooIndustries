@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
-import { once } from "node:events";
+import { spawn } from "node:child_process";
+import { on, once } from "node:events";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { crc32 } from "node:zlib";
+import { yauzl } from "playwright-core/lib/zipBundle";
 import { installNetworkGuard, refuseEnvFiles } from "./lib/test-target-safety.mjs";
 
 refuseEnvFiles();
@@ -108,14 +110,36 @@ module.exports = {
   const cases = tests(report.suites || []);
   const tracePaths = cases.flatMap(test => test.results.flatMap(result => result.attachments || []))
     .filter(attachment => attachment.name === "trace").map(attachment => attachment.path);
-  const validTraces = tracePaths.map(trace => {
-    execFileSync("unzip", ["-t", trace], { stdio: "pipe" });
-    const entries = execFileSync("unzip", ["-Z1", trace], { encoding: "utf8" }).trim().split("\n");
-    const content = entries.filter(entry => entry.endsWith(".trace")).map(entry =>
-      execFileSync("unzip", ["-p", trace, entry], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 })
-    ).join("\n");
-    return { path: trace, containsHungAction: content.includes("never-created"), validZip: true };
-  });
+  const validTraces = [];
+  for (const trace of tracePaths) {
+    const zip = await new Promise((resolve, reject) =>
+      yauzl.open(trace, { lazyEntries: true }, (error, archive) => error ? reject(error) : resolve(archive))
+    );
+    let containsHungAction = false;
+    try {
+      const entries = on(zip, "entry", { close: ["end"] });
+      zip.readEntry();
+      for await (const [entry] of entries) {
+        const isTrace = entry.fileName.endsWith(".trace");
+        if (isTrace) assert.ok(entry.uncompressedSize <= 16 * 1024 * 1024, "Trace entry exceeds 16 MiB.");
+        const stream = await new Promise((resolve, reject) =>
+          zip.openReadStream(entry, (error, stream) => error ? reject(error) : resolve(stream))
+        );
+        const chunks = [];
+        let checksum = 0;
+        for await (const chunk of stream) {
+          checksum = crc32(chunk, checksum);
+          if (isTrace) chunks.push(chunk);
+        }
+        assert.equal(checksum, entry.crc32, `Trace entry CRC mismatch: ${entry.fileName}`);
+        if (isTrace) containsHungAction ||= Buffer.concat(chunks).includes("never-created");
+        zip.readEntry();
+      }
+    } finally {
+      zip.close();
+    }
+    validTraces.push({ path: trace, containsHungAction, validZip: true });
+  }
   const result = {
     mode, code, signal, watchdogExpired, elapsedMs: Date.now() - started,
     setupDelayMs: mode === "group" ? 3000 : 0,
