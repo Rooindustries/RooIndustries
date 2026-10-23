@@ -12,7 +12,7 @@ const delay = ms => new Promise(done => setTimeout(done, ms));
 const stop = async child => {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
   const closed = new Promise(done => child.once('close', done));
-  process.kill(-child.pid, 'SIGTERM');
+  try { process.kill(-child.pid, 'SIGTERM'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
   const force = setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch {} }, 5000);
   await closed;
   clearTimeout(force);
@@ -268,7 +268,23 @@ export function GET() { throw new Error('Fixture edge error'); }
         cases.push({ name: mode.name, requestDetails, deployment: { nodeEnv: env.NODE_ENV, vercel: env.VERCEL, vercelEnv: env.VERCEL_ENV, ci: env.CI },
           envelopes: rows.length, events: events(rows), relayStatus: relay.status, browserRelayRequests: relayRequests.length });
       } finally {
-        await stop(active);
+        if (mode.name === 'local') {
+          const kill = process.kill;
+          let injected = false;
+          let closed = false;
+          const onClose = () => { closed = true; };
+          active.once('close', onClose);
+          process.kill = function (pid, signal) {
+            const result = kill.call(process, pid, signal);
+            if (!injected && pid === -active.pid && signal === 'SIGTERM') {
+              injected = true;
+              throw Object.assign(new Error('Fixture missing process group'), { code: 'ESRCH' });
+            }
+            return result;
+          };
+          try { await stop(active); } finally { process.kill = kill; active.removeListener('close', onClose); }
+          check('local: cleanup waits for child close after an ESRCH termination result', [injected, closed], [true, true]);
+        } else await stop(active);
         if (!mode.enabled) check(`${mode.name}: shutdown sends no late envelope`, received.length - from, 0);
         await writeFile(join(artifact, `${mode.name}-server.log`), Buffer.concat(logs));
       }
