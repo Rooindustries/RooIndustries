@@ -34,9 +34,10 @@ const publish = (request, data) => request.post("/api/admin/content/publish", { 
 const requestPage = async (request, url, headers) => {
   let response = await request.get(url, { headers, maxRedirects: 0 });
   if (response.status() === 307 && headers.rsc === "1") {
-    const destination = response.headers().location;
-    expect(new URL(destination, "http://fixture.invalid").pathname).toBe(new URL(url, "http://fixture.invalid").pathname);
-    response = await request.get(destination, { headers, maxRedirects: 0 });
+    const destination = new URL(response.headers().location, "http://fixture.invalid");
+    expect(destination.origin).toBe("http://fixture.invalid");
+    expect(destination.pathname).toBe(new URL(url, "http://fixture.invalid").pathname);
+    response = await request.get(`${destination.pathname}${destination.search}`, { headers, maxRedirects: 0 });
   }
   return response;
 };
@@ -57,6 +58,14 @@ const read = async (request, route, timeline, stage) => {
   if (expected[route]) expect.soft(html.includes(expected[route]), `${stage}: ${route} keeps its content`).toBe(true);
   expect.soft(html.includes("Application error"), `${stage}: ${route}`).toBe(false);
   return html;
+};
+const warm = async (request, timeline) => {
+  for (const route of PREBUILT_ROUTES) {
+    await expect.poll(async () => {
+      await read(request, route, timeline, "warm");
+      return timeline.at(-1).cache;
+    }, { timeout: 30000, message: `${route} finishes warming its cache` }).toBe("HIT");
+  }
 };
 const screenshots = async (browser, baseURL, testInfo, prefix) => {
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
@@ -85,7 +94,7 @@ test("a rejected publish preserves every cached public page during a CMS outage"
   try {
     await control(request, baseURL, { reset: true });
     await renew(request);
-    for (const route of PREBUILT_ROUTES) await read(request, route, timeline, "warm");
+    await warm(request, timeline);
     await control(request, baseURL, { outage: true });
     const rejected = await publish(request, { operation: "invalid" });
     expect(rejected.status()).toBe(400);
@@ -131,7 +140,24 @@ for (const mode of ["5xx", "timeout", "malformed", "malformed-icon", "invalid-js
     try {
       await control(request, baseURL, { reset: true });
       await renew(request);
-      for (const route of PREBUILT_ROUTES) await read(request, route, timeline, "warm");
+      await warm(request, timeline);
+      if (mode === "malformed") {
+        await control(request, baseURL, { failure: "timeout" });
+        await new Promise(resolve => setTimeout(resolve, 61000));
+        const recoveryStarted = Date.now();
+        await read(request, "/tools", timeline, "before CMS recovery");
+        expect(timeline.at(-1).cache).toBe("STALE");
+        let pending;
+        await expect.poll(async () => {
+          const state = await (await request.get(controlUrl(baseURL))).json();
+          pending = state.requests.find(call => call.receivedAt >= recoveryStarted && call.body?.p_document_types?.includes("tool") && call.delayMs > 0 && !call.respondedAt);
+          return Boolean(pending);
+        }).toBe(true);
+        await fs.writeFile(testInfo.outputPath("pending-recovery.json"), JSON.stringify(pending, null, 2));
+        await control(request, baseURL, { reset: true });
+        await renew(request);
+        await warm(request, timeline);
+      }
       const failure = mode === "5xx" ? { outage: true }
         : mode === "missing" ? { missing: ["hero", "contact", "privacyPolicy", "terms", "meetTheTeam"] }
         : mode === "malformed-icon" ? { patch: { _id: "tooling-cls-tool-0", icon: { asset: { _ref: { broken: true } } } } }
@@ -166,20 +192,36 @@ for (const mode of ["5xx", "timeout", "malformed", "malformed-icon", "invalid-js
 
 test("rebuilding every prebuilt route cannot cache visitor or RSC query markers", async ({ request, baseURL }, testInfo) => {
   const timeline = [];
+  const rscHeaders = { rsc: "1", "next-url": "/" };
   try {
     await control(request, baseURL, { reset: true });
     for (const route of PREBUILT_ROUTES) {
       for (const rsc of [false, true]) {
         await renew(request);
         const marker = `cmsquery${route.replaceAll("/", "") || "home"}${rsc ? "rsc" : "html"}`;
-        const trigger = await requestPage(request, `${route}?ref=${marker}&gclid=${marker}&_rsc=${marker}`, rsc ? { rsc: "1" } : { accept: "text/html" });
+        const target = new URL(route, baseURL);
+        target.search = new URLSearchParams({ ref: marker, gclid: marker, _rsc: marker }).toString();
+        let rscCorrection;
+        if (rsc) {
+          const correction = await request.get(`${route}?_rsc=${marker}`, { headers: rscHeaders, maxRedirects: 0 });
+          expect(correction.status(), `${route} checks the RSC hash`).toBe(307);
+          const destination = new URL(correction.headers().location, baseURL);
+          expect(destination.origin).toBe(new URL(baseURL).origin);
+          expect(destination.pathname).toBe(route);
+          expect([...destination.searchParams.keys()]).toEqual(["_rsc"]);
+          rscCorrection = destination.searchParams.get("_rsc");
+          expect(rscCorrection).not.toBe(marker);
+          expect(rscCorrection).not.toBe("");
+          target.searchParams.set("_rsc", rscCorrection);
+        }
+        const trigger = await requestPage(request, `${target.pathname}${target.search}`, rsc ? rscHeaders : { accept: "text/html" });
         expect.soft(trigger.status(), `${route} trigger`).toBe(200);
         await trigger.body();
-        for (const headers of [{ accept: "text/html" }, { rsc: "1" }]) {
+        for (const headers of [{ accept: "text/html" }, rscHeaders]) {
           const response = await requestPage(request, route, headers);
           const body = await response.text();
           await fs.writeFile(testInfo.outputPath(`${route.replaceAll("/", "") || "home"}-${rsc ? "rsc" : "html"}-trigger.${headers.rsc ? "rsc" : "html"}`), body);
-          timeline.push({ route, rsc, type: response.headers()["content-type"], marker, leaked: body.includes(marker) });
+          timeline.push({ route, rsc, type: response.headers()["content-type"], marker, rscCorrection, trigger: `${target.pathname}${target.search}`, leaked: body.includes(marker) });
           expect.soft(response.status(), route).toBe(200);
           expect.soft(response.headers()["content-type"], route).toContain(headers.rsc ? "text/x-component" : "text/html");
           expect.soft(body.includes(marker), `${route} ${JSON.stringify(headers)} is free of the marker`).toBe(false);
