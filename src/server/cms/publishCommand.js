@@ -95,7 +95,7 @@ export const getCmsCommandStatus = async ({ body, supabaseClient, actor = "admin
     if (current._rev !== result.revision) throw cmsError("The published version has been replaced.", 404, "CMS_NOT_FOUND");
     if (["privacyPolicy", "terms"].includes(body.type)) assertPublicContentShape(body.type === "privacyPolicy" ? "privacy-policy" : "terms", current, body.type);
   }
-  clearSupabasePublicContentCache();
+  clearSupabasePublicContentCache({ preserveStale: true });
   return { committed: true, ...(creating ? { createIntentId: body.createIntentId.toLowerCase() } : {}), ...(result.deleted ? { deleted: true } : {}), type: body.type, documentId: id, revision: result.revision };
 };
 export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = process.env, actor = "admin:key" } = {}) => {
@@ -121,6 +121,6 @@ export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = proc
   const mutation = { operation: body.operation, id, ...(document ? { document } : {}), ...(!creating ? { expected_revision: body.expectedRevision || "" } : {}) };
   const result = rpcData(await supabaseClient.rpc("roo_apply_cms_publish_command", { ...lookup, p_mutations: [mutation], p_assets: [], p_asset_links: [] }), "Content publish");
   const confirmed = committed(result, { body, id, lookup });
-  if (!confirmed.replayed) clearSupabasePublicContentCache();
+  if (!confirmed.replayed) clearSupabasePublicContentCache({ preserveStale: true });
   return confirmed;
 };

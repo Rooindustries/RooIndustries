@@ -67,27 +67,151 @@ const warm = async (request, timeline) => {
     }, { timeout: 30000, message: `${route} finishes warming its cache` }).toBe("HIT");
   }
 };
-const screenshots = async (browser, baseURL, testInfo, prefix) => {
+const screenshots = async (browser, baseURL, testInfo, prefix, content = expected) => {
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
-  const content = new URL(controlUrl(baseURL)).origin;
+  const contentOrigin = new URL(controlUrl(baseURL)).origin;
   for (const width of [360, 390, 1440]) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, javaScriptEnabled: true, reducedMotion: "reduce", serviceWorkers: "block" });
-    await guardBrowserContext(context, [baseURL, content]);
+    await guardBrowserContext(context, [baseURL, contentOrigin]);
     try {
       const page = await context.newPage();
       const errors = [];
       page.on("pageerror", error => errors.push(error.message));
-      for (const route of Object.keys(expected)) {
+      for (const route of Object.keys(content)) {
         await page.goto(route, { waitUntil: "domcontentloaded" });
         await page.waitForTimeout(200);
-        if (route === "/reviews") await expect.soft(page.getByAltText(expected[route]).first()).toBeVisible();
-        else await expect.soft(page.locator("body")).toContainText(expected[route]);
+        if (route === "/reviews") await expect.soft(page.getByAltText(content[route]).first()).toBeVisible();
+        else await expect.soft(page.locator("body")).toContainText(content[route]);
         await page.screenshot({ path: testInfo.outputPath(`${prefix}-${route.replaceAll("/", "") || "home"}-${width}.png`), fullPage: true, animations: "disabled", timeout: 30000 });
         expect.soft(errors.splice(0), `${route} browser errors`).toEqual([]);
       }
     } finally { await context.close(); }
   }
 };
+
+test("an in-flight render keeps good content when a later publish invalidates its pending read", async ({ request, page, baseURL }, testInfo) => {
+  const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+  await guardBrowserContext(page.context(), [baseURL, new URL(controlUrl(baseURL)).origin]);
+  const outcomes = {};
+  let firstVisit;
+  try {
+    await control(request, baseURL, { reset: true });
+    await expect.poll(async () => (await request.get("/contact")).headers()["x-nextjs-cache"], { timeout: 30000 }).toBe("HIT");
+    const { data } = await (await request.get("/api/admin/content/documents/tooling-contact", { headers: adminHeaders })).json();
+    const command = { operation: "replace", type: "contact", documentId: data.document._id, expectedRevision: data.revision, document: { ...data.document, subtitle: "The first publication before the delayed render" } };
+    const offset = (await (await request.get(controlUrl(baseURL))).json()).requests.length;
+    expect((await publish(request, command)).ok()).toBe(true);
+    await control(request, baseURL, { failure: "timeout" });
+    const startedAt = Date.now();
+    firstVisit = page.goto("/contact", { waitUntil: "domcontentloaded", timeout: 20000 });
+    let pending;
+    await expect.poll(async () => {
+      const state = await (await request.get(controlUrl(baseURL))).json();
+      pending = state.requests.find(call => call.receivedAt >= startedAt && call.body?.p_ids === null && call.body?.p_document_types?.includes("contact") && call.delayMs > 0 && !call.respondedAt);
+      return Boolean(pending);
+    }).toBe(true);
+    outcomes.pendingRead = pending;
+    await control(request, baseURL, { failure: "" });
+    const current = await (await request.get("/api/admin/content/documents/tooling-contact", { headers: adminHeaders })).json();
+    const marker = "Published while the previous render is waiting";
+    const latest = { ...command, expectedRevision: current.data.revision, document: { ...current.data.document, subtitle: marker } };
+    const result = await publish(request, latest);
+    expect(result.ok(), await result.text()).toBe(true);
+    outcomes.secondAcknowledgedAt = Date.now();
+    const response = await firstVisit;
+    outcomes.firstFinishedAt = Date.now();
+    outcomes.firstStatus = response.status();
+    await fs.writeFile(testInfo.outputPath("first-render.html"), await response.text());
+    await page.screenshot({ path: testInfo.outputPath("first-render.png"), fullPage: true });
+    expect.soft(response.status()).toBe(200);
+    await expect.soft(page.locator("body")).toContainText("Get In Touch", { timeout: 1000 });
+    const status = await request.post("/api/admin/content/publish/status", { headers: adminHeaders, data: latest });
+    expect(status.ok(), await status.text()).toBe(true);
+    await page.goto("/contact");
+    await expect(page.locator("body")).toContainText(marker);
+    await page.screenshot({ path: testInfo.outputPath("latest-render.png"), fullPage: true });
+    const state = await (await request.get(controlUrl(baseURL))).json();
+    const mutations = state.requests.slice(offset).filter(call => call.path.endsWith("/roo_apply_cms_publish_command"));
+    expect(mutations).toHaveLength(2);
+    outcomes.currentVisible = true;
+    outcomes.mutations = mutations.length;
+    await fs.writeFile(testInfo.outputPath("cms-requests.json"), JSON.stringify(state, null, 2));
+  } finally {
+    if (firstVisit) await firstVisit.catch(() => {});
+    await control(request, baseURL, { reset: true });
+    await fs.writeFile(testInfo.outputPath("in-flight-render.json"), JSON.stringify(outcomes, null, 2));
+  }
+});
+
+for (const mode of ["5xx", "timeout", "malformed", "invalid-json", "missing"]) {
+  for (const entry of ["publish", "replay", "status"]) {
+    test(`${entry} keeps public pages available when ${mode} CMS reads begin after acknowledgement`, async ({ request, browser, page, baseURL }, testInfo) => {
+      const timeline = [];
+      const content = { ...expected, "/contact": "Get In Touch" };
+      const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+      await guardBrowserContext(page.context(), [baseURL, new URL(controlUrl(baseURL)).origin]);
+      const errors = [];
+      page.on("pageerror", error => errors.push(error.message));
+      try {
+        await control(request, baseURL, { reset: true });
+        for (const route of PREBUILT_ROUTES) {
+          await expect.poll(async () => {
+            const response = await request.get(route);
+            return response.status() === 200 && response.headers()["x-nextjs-cache"] === "HIT";
+          }, { timeout: 30000 }).toBe(true);
+        }
+        const loaded = await request.get("/api/admin/content/documents/tooling-contact", { headers: adminHeaders });
+        expect(loaded.ok(), await loaded.text()).toBe(true);
+        const { data } = await loaded.json();
+        const marker = `Acknowledged ${entry} before ${mode} reads fail`;
+        const command = { operation: "replace", type: "contact", documentId: data.document._id, expectedRevision: data.revision, document: { ...data.document, subtitle: marker } };
+        const offset = (await (await request.get(controlUrl(baseURL))).json()).requests.length;
+        const committed = await publish(request, command);
+        expect(committed.ok(), await committed.text()).toBe(true);
+        if (entry === "replay") {
+          const replay = await publish(request, command);
+          expect(replay.ok(), await replay.text()).toBe(true);
+          expect((await replay.json()).data.replayed).toBe(true);
+        } else if (entry === "status") {
+          const confirmed = await request.post("/api/admin/content/publish/status", { headers: adminHeaders, data: command });
+          expect(confirmed.ok(), await confirmed.text()).toBe(true);
+        }
+        const failure = mode === "5xx" ? { outage: true }
+          : mode === "missing" ? { missing: ["hero", "contact", "privacyPolicy", "terms", "meetTheTeam"] }
+          : { failure: mode };
+        await control(request, baseURL, failure);
+        for (const route of PREBUILT_ROUTES) {
+          const response = await request.get(route, { timeout: 15000 });
+          const html = await response.text();
+          timeline.push({ route, status: response.status(), cache: response.headers()["x-nextjs-cache"], meaningful: html.includes(content[route]) });
+          expect.soft(response.status(), route).toBe(200);
+          expect.soft(html, route).toContain(content[route]);
+          expect.soft(html, route).not.toContain("Application error");
+          await fs.writeFile(testInfo.outputPath(`${route.replaceAll("/", "") || "home"}.html`), html);
+          await page.goto(route, { waitUntil: "domcontentloaded" });
+          await page.screenshot({ path: testInfo.outputPath(`${route.replaceAll("/", "") || "home"}-desktop.png`), fullPage: true });
+        }
+        expect(timeline.every(row => row.status === 200 && row.meaningful)).toBe(true);
+        expect(errors).toEqual([]);
+        if (entry === "publish") await screenshots(browser, baseURL, testInfo, `after-confirmed-${mode}`, content);
+        await control(request, baseURL, { outage: false, failure: "", missing: [] });
+        const recovered = await request.post("/api/admin/content/publish/status", { headers: adminHeaders, data: command });
+        expect(recovered.ok(), await recovered.text()).toBe(true);
+        const response = await request.get("/contact");
+        expect(response.status()).toBe(200);
+        expect(await response.text()).toContain(marker);
+        const state = await (await request.get(controlUrl(baseURL))).json();
+        const mutations = state.requests.slice(offset).filter(call => call.path.endsWith("/roo_apply_cms_publish_command"));
+        expect(mutations).toHaveLength(1);
+        await fs.writeFile(testInfo.outputPath("cms-requests.json"), JSON.stringify(state, null, 2));
+        await fs.writeFile(testInfo.outputPath("recovered-publication.json"), JSON.stringify({ marker, visible: true, mutations: mutations.length }, null, 2));
+      } finally {
+        await control(request, baseURL, { reset: true });
+        await fs.writeFile(testInfo.outputPath("confirmed-outage.json"), JSON.stringify({ mode, entry, timeline, errors }, null, 2));
+      }
+    });
+  }
+}
 
 test("a rejected publish preserves every cached public page during a CMS outage", async ({ request, browser, baseURL }, testInfo) => {
   const timeline = [];
