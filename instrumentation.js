@@ -2,7 +2,7 @@ import { isProductionDeployment } from "./src/lib/monitoring/deployment.mjs";
 
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
-    const { normalizeStaticPageRequests } = await import("./src/server/staticPageRequest");
+    const { normalizeStaticPageRequests } = await import("./src/server/staticPageRequest.js");
     normalizeStaticPageRequests();
   }
   if (isProductionDeployment() && process.env.NEXT_RUNTIME === "nodejs" && process.env.NEXT_PUBLIC_SENTRY_DSN) {
