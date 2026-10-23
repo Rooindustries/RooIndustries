@@ -51,8 +51,9 @@ export function computeEarningsFromBookings(bookings = []) {
 }
 
 export async function fetchReferralEarnings({ client, referralId, referralCode }) {
+  const code = typeof referralCode === "string" ? referralCode.toLowerCase() : "";
   if (typeof client?.referralEarnings === "function") {
-    const summary = await client.referralEarnings({ referralId, referralCode });
+    const summary = await client.referralEarnings({ referralId, referralCode: code });
     if (summary !== null && summary !== undefined) {
       return {
         xoc: normalizeNumber(summary?.xoc),
@@ -70,7 +71,9 @@ export async function fetchReferralEarnings({ client, referralId, referralCode }
         && status in ["captured", "completed"]
         && (
           referral._ref == $id
-          || (defined(referralCode) && lower(referralCode) == $code)
+          || ($code != "" && defined(referralCode) && lower(referralCode) == $code)
+          || ($code == "" && !(commissionCalculationVersion in [2, "2"])
+            && coalesce(referralCode, "") == "")
         )
       ]{
         _id,
@@ -84,7 +87,7 @@ export async function fetchReferralEarnings({ client, referralId, referralCode }
         commissionCalculationVersion,
         dodoOriginalCommissionAmount
       }`,
-    { id: referralId, code: referralCode }
+    { id: referralId, code }
   );
   for (const booking of bookings || []) {
     if (String(booking.commissionCalculationVersion) !== '2' && booking._id &&

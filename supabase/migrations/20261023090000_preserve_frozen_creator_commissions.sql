@@ -22,7 +22,11 @@ as $$
     from commerce.bookings booking
     where booking.status in ('captured', 'completed')
       and (booking.booking_payload#>>'{referral,_ref}' = p_referral_legacy_id
-        or lower(coalesce(booking.booking_payload->>'referralCode', '')) = lower(coalesce(p_referral_code, '')))
+        or (coalesce(p_referral_code, '') <> ''
+          and lower(booking.booking_payload->>'referralCode') = lower(p_referral_code))
+        or (booking.booking_payload->>'commissionCalculationVersion' is distinct from '2'
+          and coalesce(p_referral_code, '') = ''
+          and coalesce(booking.booking_payload->>'referralCode', '') = ''))
   ), normalized as (
     select
       regexp_replace(coalesce(package_title, 'Unknown'), '\s*\(upgrade\)\s*$', '', 'i') as package_title,

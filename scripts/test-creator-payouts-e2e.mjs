@@ -2898,6 +2898,180 @@ try {
     };
   });
 
+  await run('empty-code-forward-only-history', async () => {
+    const {functionDefinition} = await import(
+      './lib/sweep-postgres-fixture.mjs'
+    );
+    const historical = [await seed('dodo'), await seed('dodo')];
+    const creatorId = historical[0].creator._id;
+    for (const state of historical) {
+      await commerce
+        .patch(state.record.bookingId)
+        .unset(['commissionCalculationVersion'])
+        .set({referralCode: ''})
+        .commit();
+    }
+    await documents
+      .patch(creatorId)
+      .set({
+        slug: {_type: 'slug', current: ''},
+        vertexPayments: [
+          {
+            _key: 'historical-empty-code-payment',
+            _type: 'paymentLogVertex',
+            amount: 2,
+            paidOn: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      })
+      .commit();
+    await sql.unsafe(
+      functionDefinition(
+        '20260712092342_close_supabase_port_and_unified_auth.sql',
+        'public.roo_referral_earnings_summary'
+      )
+    );
+    const cron = async () => {
+      const response = await fetch(`${origin}/api/ref/cronSyncAll`, {
+        headers: {authorization: 'Bearer fixture'},
+      });
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      assert.equal(
+        result.results.find((row) => row.id === creatorId).pending,
+        undefined
+      );
+      return result;
+    };
+    const historicalIds = [
+      creatorId,
+      ...historical.map((state) => state.record.bookingId),
+    ];
+    const snapshot = () => sql`
+      select legacy_sanity_id, source_revision, source_hash, payload
+      from migration.source_documents
+      where legacy_sanity_id=any(${historicalIds}) order by legacy_sanity_id`;
+    const preSync = await cron();
+    const before = await snapshot();
+    const creatorBefore = await documents.getDocument(creatorId);
+    assert.equal(creatorBefore.earnedTotal, 11);
+    assert.equal(creatorBefore.paidTotal, 2);
+    assert.equal(creatorBefore.owedTotal, 9);
+
+    const newBookings = [];
+    for (const code of ['', null, undefined]) {
+      for (const version of [2, '2']) {
+        const state = await seed('dodo');
+        const patch = commerce.patch(state.record.bookingId).set({
+          commissionCalculationVersion: version,
+          status: version === 2 ? 'captured' : 'completed',
+        });
+        if (code === undefined) patch.unset(['referralCode']);
+        else patch.set({referralCode: code});
+        await patch.commit();
+        newBookings.push(await read(state.record.bookingId));
+      }
+    }
+    const recovery = await seed('dodo', {booking: false});
+    await commerce
+      .patch(recovery.record._id)
+      .set({
+        bookingPayload: {...recovery.record.bookingPayload, referralCode: ''},
+        pricingSnapshot: {
+          ...recovery.record.pricingSnapshot,
+          effectiveReferralCode: '',
+        },
+      })
+      .commit();
+    const capture = await webhook();
+    assert.equal(capture.status, 200, JSON.stringify(capture));
+    const recovered = await read((await read(recovery.record._id)).bookingId);
+    assert.equal(recovered.commissionCalculationVersion, 2);
+    assert.equal(recovered.referralCode, '');
+    assert.equal(recovered.referral._ref, recovery.creator._id);
+    assert.equal(recovered.commissionAmount, 5.5);
+    newBookings.push(recovered);
+    const projection = await applyCommissionMigration({traceProjections: true});
+    assert.equal(projection.calls.length, 0);
+    const summaries = [];
+    for (const code of ['', null, undefined]) {
+      const args = {referralId: creatorId, referralCode: code};
+      const native = await earnings.fetchReferralEarnings({
+        client: commerce,
+        ...args,
+      });
+      assert.equal(native.total, 11);
+      for (const result of [null, undefined]) {
+        const fallback = await earnings.fetchReferralEarnings({
+          client: {
+            fetch: commerce.fetch.bind(commerce),
+            referralEarnings: async () => result,
+          },
+          ...args,
+        });
+        assert.deepEqual(fallback, native);
+        summaries.push({requestedCode: code ?? null, native, fallback});
+      }
+    }
+    const postSync = await cron();
+    const after = await snapshot();
+    assert.deepEqual(after, before);
+    const rebuilt = {};
+    for (const rpc of [
+      'roo_project_operational_shadow',
+      'roo_refresh_operational_shadow',
+    ]) {
+      assert.equal((await fixture.client.rpc(rpc)).error, null);
+      await cron();
+      rebuilt[rpc] = await snapshot();
+      assert.deepEqual(rebuilt[rpc], before);
+    }
+
+    const idOnly = await seed('dodo');
+    await commerce
+      .patch(idOnly.record.bookingId)
+      .set({
+        referralCode: '',
+        referral: {_type: 'reference', _ref: creatorId},
+      })
+      .commit();
+    const idControl = await summary(
+      {...historical[0].creator, slug: {current: ''}},
+      16.5
+    );
+    await commerce
+      .patch(idOnly.record.bookingId)
+      .set({
+        referral: {_type: 'reference', _ref: idOnly.creator._id},
+      })
+      .commit();
+    await commerce
+      .patch(idOnly.record.bookingId)
+      .unset(['referral'])
+      .set({referralCode: idOnly.key.toUpperCase()})
+      .commit();
+    const codeControl = await summary(idOnly.creator, 5.5);
+    await cron();
+    assert.deepEqual(await snapshot(), before);
+    const creatorAfter = await documents.getDocument(creatorId);
+    current = historical[0];
+    return {
+      before,
+      after,
+      creatorBefore,
+      creatorAfter,
+      newBookings,
+      preSync,
+      postSync,
+      projection,
+      summaries,
+      rebuilt,
+      idControl,
+      codeControl,
+      historicalCorrectionDeferredTo: 'ROO-729',
+    };
+  });
+
   await run('all-payouts-projection-rebuilds', async () => {
     const snapshot = async () => ({
       bookings:
