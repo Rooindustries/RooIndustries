@@ -12,6 +12,11 @@ const host = process.env.ROO_TEST_HOST || '127.0.0.1';
 const originalFetch = globalThis.fetch;
 const baseline = process.argv.find(value => value.startsWith('--baseline='))?.slice(11);
 const sources = ['src/server/api/ref/payoutUtils.js', 'src/server/api/ref/bookingRefunds.js', 'src/server/api/ref/bookingCommit.js', 'src/server/api/payment/flow.js', 'src/server/api/ref/pricing.js', 'src/server/api/ref/createBooking.js', 'src/server/api/ref/updatePayments.js'];
+const moneySource = 'src/server/referrals/commissionMoney.js';
+try {
+  if (baseline) execFileSync('git', ['cat-file', '-e', `${baseline}:${moneySource}`], { stdio: 'ignore' });
+  sources.push(moneySource);
+} catch (error) { if (error.status !== 128) throw error; }
 const baselineSources = baseline ? Object.fromEntries(sources.map(file => [new URL(`../${file}`, import.meta.url).href, execFileSync('git', ['show', `${baseline}:${file}`], { encoding: 'utf8' })])) : {};
 const migrationPath = 'supabase/migrations/20261023090000_preserve_frozen_creator_commissions.sql';
 let baselineMigration;
@@ -54,6 +59,7 @@ const evidence = { productionRequests: 0, sentryDsnVariables: Object.keys(proces
 assert.deepEqual(evidence.sentryDsnVariables, []);
 evidence.source = { baseline: baseline || null, commit: execFileSync('git', ['rev-parse', baseline || 'HEAD'], { encoding: 'utf8' }).trim(), files: Object.fromEntries(sources.map(file => [file, crypto.createHash('sha256').update(baseline ? baselineSources[new URL(`../${file}`, import.meta.url).href] : fs.readFileSync(file)).digest('hex')])) };
 if (!baseline) for (const file of ['src/server/referrals/commissionMoney.js', 'supabase/migrations/20261023090000_preserve_frozen_creator_commissions.sql']) evidence.source.files[file] = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+if (baselineMigration) evidence.source.files[migrationPath] = crypto.createHash('sha256').update(baselineMigration).digest('hex');
 let fixture, server, origin, commerce, documents, sql, earnings;
 let current, sequence = 0, eventSequence = 0;
 const responses = [];
@@ -702,9 +708,9 @@ try {
     current.payment.metadata.paymentRecordId = current.record._id;
   };
   const moneyCases = [
-    { name: 'plain', amount: 54.95, rate: 10, original: 5.5, refund: 20, retained: 3.5 },
-    { name: 'referral-discount', amount: 54.95, rate: 10, discount: 20, original: 5.5, refund: 21.98, retained: 2.75 },
-    { name: 'combined-coupon', amount: 54.95, rate: 10, discount: 20, coupon: 20, original: 4.4, refund: 17.58, retained: 2.2 },
+    { name: 'plain', amount: 54.95, rate: 10, original: 5.5, refund: 20, retained: 3.5, legacyOriginal: 5.5, legacyExact: 5.495, legacyRetained: 3.5 },
+    { name: 'referral-discount', amount: 54.95, rate: 10, discount: 20, original: 5.5, refund: 21.98, retained: 2.75, legacyOriginal: 4.4, legacyExact: 4.396, legacyRetained: 2.2 },
+    { name: 'combined-coupon', amount: 54.95, rate: 10, discount: 20, coupon: 20, original: 4.4, refund: 17.58, retained: 2.2, legacyOriginal: 3.52, legacyExact: 3.517, legacyRetained: 1.76 },
     { name: 'half-cent', amount: 20.1, rate: 10, original: 2.01, refund: 10.05, retained: 1.01 },
     { name: 'below-half', amount: 20.1, rate: 10, original: 2.01, refund: 10.06, retained: 1 },
     { name: 'above-half', amount: 20.1, rate: 10, original: 2.01, refund: 10.04, retained: 1.01 },
@@ -852,6 +858,98 @@ try {
     assert.ok(ledger.every(entry => String(entry.amount_subunits) === '200' && entry.currency === 'USD'));
     if (kind === 'revision-conflict') assert.equal(conflicted, true);
     return { responses, creator, receipts, ledger, conflicted };
+  });
+
+  const legacyCases = moneyCases.filter(row => row.legacyOriginal !== undefined);
+  const seedLegacy = async (provider, row, stored) => {
+    const state = await seed(provider, row);
+    const pricingSnapshot = { ...state.record.pricingSnapshot };
+    delete pricingSnapshot.commissionAmount;
+    current.record = await commerce.patch(state.record._id).set({ pricingSnapshot }).commit();
+    let patch = commerce.patch(state.record.bookingId).unset(['commissionCalculationVersion', 'dodoOriginalCommissionAmount', 'originalCommissionAmount']);
+    patch = stored === 'missing' ? patch.unset(['commissionAmount']) : patch.set({ commissionAmount: stored === 'null' ? null : 0 });
+    await patch.commit();
+    await documents.patch(state.creator._id).set({ vertexPayments: [{ _key: 'historical', _type: 'paymentLogVertex', amount: 0.01, paidOn: '2026-01-01T00:00:00.000Z' }] }).commit();
+    return state;
+  };
+  for (const provider of ['paypal', 'razorpay', 'dodo']) for (const row of legacyCases) for (const stored of ['zero', 'null', 'missing']) await run(`legacy-original-refund-${provider}-${row.name}-${stored}`, async () => {
+    const state = await seedLegacy(provider, row, stored);
+    const before = await summary(state.creator, row.legacyOriginal);
+    const response = await refundCurrent(row.refund, 'legacy');
+    assert.equal(response.status, 200, JSON.stringify(response));
+    const booking = await read(state.record.bookingId);
+    assert.equal(booking[provider === 'dodo' ? 'dodoOriginalCommissionAmount' : 'originalCommissionAmount'], row.legacyOriginal);
+    assert.equal(booking.commissionAmount, row.legacyRetained);
+    const replay = await webhook(provider === 'paypal' ? 'PAYMENT.CAPTURE.REFUNDED' : provider === 'razorpay' ? 'refund.processed' : 'refund.succeeded');
+    assert.equal(replay.status, 200, JSON.stringify(replay));
+    assert.equal((await read(booking._id)).commissionAmount, row.legacyRetained);
+    return { row, before, booking, earnings: await summary(state.creator, row.legacyRetained) };
+  });
+  for (const row of legacyCases) for (const stored of ['zero', 'null', 'missing']) for (const restored of ['dispute_won', 'dispute_cancelled']) await run(`legacy-original-dispute-${row.name}-${stored}-${restored}`, async () => {
+    const state = await seedLegacy('dodo', row, stored);
+    const before = await summary(state.creator, row.legacyOriginal);
+    current.payment.disputes = [dispute('dispute_opened')];
+    assert.equal((await webhook('dispute.opened')).status, 200);
+    const opened = await read(state.record.bookingId);
+    assert.equal(opened.dodoOriginalCommissionAmount, row.legacyExact);
+    assert.equal(opened.commissionAmount, 0);
+    await summary(state.creator, 0);
+    current.payment.disputes = [dispute(restored)];
+    assert.equal((await webhook('dispute.resolved')).status, 200);
+    const booking = await read(state.record.bookingId);
+    assert.equal(booking.commissionAmount, row.legacyExact);
+    assert.equal(booking.commissionCalculationVersion, undefined);
+    return { row, before, opened, booking, earnings: await summary(state.creator, row.legacyOriginal) };
+  });
+  for (const provider of ['paypal', 'razorpay', 'dodo']) await run(`legacy-original-v2-zero-${provider}`, async () => {
+    const state = await seed(provider);
+    const pricingSnapshot = { ...state.record.pricingSnapshot };
+    delete pricingSnapshot.commissionAmount;
+    current.record = await commerce.patch(state.record._id).set({ pricingSnapshot }).commit();
+    await commerce.patch(state.record.bookingId).set({ commissionAmount: 0 }).commit();
+    assert.equal((await refundCurrent(20, 'zero')).status, 200);
+    const booking = await read(state.record.bookingId);
+    assert.equal(booking.commissionAmount, 0);
+    return { booking, earnings: await summary(state.creator, 0) };
+  });
+  for (const marker of [0, null]) for (const mode of ['refund', 'dispute']) await run(`legacy-original-frozen-dodo-${marker}-${mode}`, async () => {
+    const state = await seedLegacy('dodo', legacyCases[0], 'zero');
+    await commerce.patch(state.record.bookingId).set({ dodoOriginalCommissionAmount: marker }).commit();
+    await summary(state.creator, 0);
+    if (mode === 'refund') assert.equal((await refundCurrent(20, 'zero')).status, 200);
+    else {
+      current.payment.disputes = [dispute('dispute_opened')];
+      assert.equal((await webhook('dispute.opened')).status, 200);
+      current.payment.disputes = [dispute('dispute_won')];
+      assert.equal((await webhook('dispute.won')).status, 200);
+    }
+    const booking = await read(state.record.bookingId);
+    assert.equal(booking.dodoOriginalCommissionAmount, 0);
+    assert.equal(booking.commissionAmount, 0);
+    return { booking, earnings: await summary(state.creator, 0) };
+  });
+
+  for (const restored of ['dispute_won', 'dispute_cancelled']) await run(`legacy-original-fraction-restoration-${restored}`, async () => {
+    const first = await seedLegacy('dodo', { amount: 9.99, rate: 0.04 }, 'zero');
+    const second = await seedLegacy('dodo', { amount: 9.99, rate: 0.04 }, 'zero');
+    await commerce.patch(second.record.bookingId).set({ referral: { _type: 'reference', _ref: first.creator._id }, referralCode: first.key }).commit();
+    current = first;
+    const sync = async () => {
+      const response = await fetch(`${origin}/api/ref/cronSyncAll`, { headers: { authorization: 'Bearer fixture' } });
+      assert.equal(response.status, 200);
+      const creator = await documents.getDocument(first.creator._id);
+      return { earned: creator.earnedTotal, paid: creator.paidTotal, owed: creator.owedTotal };
+    };
+    const before = await sync();
+    assert.deepEqual(before, { earned: 0.01, paid: 0.01, owed: 0 });
+    current.payment.disputes = [dispute('dispute_opened')];
+    assert.equal((await webhook('dispute.opened')).status, 200);
+    await summary(first.creator, 0);
+    current.payment.disputes = [dispute(restored)];
+    assert.equal((await webhook('dispute.resolved')).status, 200);
+    const after = await sync();
+    assert.deepEqual(after, before);
+    return { before, after, booking: await read(first.record.bookingId), earnings: await summary(first.creator, 0.01) };
   });
 
   await run('R1-migration-preserves-settled-source-and-cron', async () => {

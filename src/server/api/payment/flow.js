@@ -1,6 +1,6 @@
 import { buildBrowserCompletionBody } from "./bookingSummary.js";
 import envValue from "../../supabase/envValue.cjs";
-import { calculateCreatorCommission } from "../../referrals/commissionMoney.js";
+import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
 const { resolveStoreBackend } = envValue;
 import { createDodoCheckout, inspectDodoCheckout, retrieveDodoPayment, retrieveDodoRefund, validateDodoPayment, verifyDodoCapture, unwrapDodoWebhook } from "./dodoProvider.js";
 import crypto from "crypto";
@@ -5957,11 +5957,14 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       if (booking && booking.status !== "refunded" && !booking.refundAccountingAppliedAt) {
         const originalStatus = booking.dodoDisputeActive
           ? booking.dodoDisputeBookingStatus : booking.status;
+        const preserveLegacyCommission = String(booking.commissionCalculationVersion) !== "2" &&
+          !Number(booking.refundedAmount || 0);
         const commission = calculateCreatorCommission(booking, {
-          originalAmount: booking.dodoOriginalCommissionAmount,
+          originalAmount: booking.dodoOriginalCommissionAmount ?? originalBookingCommission(booking),
           paidAmount: booking.dodoTotalAmount || booking.netAmount,
           refundedAmount: booking.refundedAmount,
           blocked: disputed,
+          preserveOriginalPrecision: preserveLegacyCommission,
         });
         const referralId = booking.referral?._ref;
         const reverseReferral = !!terminalDispute && !!referralId &&
@@ -5999,7 +6002,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
             dodoReferralReversedAfterDispute: referralReversed,
             dodoDisputeBookingStatus: originalStatus,
             dodoOriginalCommissionAmount: commission.originalAmount,
-            commissionCalculationVersion: 2,
+            ...(preserveLegacyCommission ? {} : { commissionCalculationVersion: 2 }),
             commissionAmount: commission.amount,
             paymentVerificationState: disputed ? "disputed" : "server_verified",
           });

@@ -8,7 +8,7 @@ import {
 } from "../../booking/bookingStatus.js";
 import { appendCouponRefund } from "./couponReservations.js";
 import { toSubunits } from "../payment/providerClients.js";
-import { calculateCreatorCommission } from "../../referrals/commissionMoney.js";
+import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
 
 export const resolvePaymentCurrency = (paymentRecord = {}, { booking = {}, refund = {}, fallback = "USD" } = {}) => {
   const values = [paymentRecord.pricingSnapshot?.currency, paymentRecord.bookingPayload?.currency,
@@ -158,7 +158,7 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
       return { bookingId: booking._id, idempotent: true };
     }
     const originalCommission = calculateCreatorCommission(booking, {
-      originalAmount: booking.dodoOriginalCommissionAmount,
+      originalAmount: booking.dodoOriginalCommissionAmount ?? originalBookingCommission(booking),
     }).originalAmount;
     const totalAmount = Number(paymentRecord.providerPublicData?.totalAmount || 0) / toSubunits(1, currency) || Number(booking.dodoTotalAmount || booking.netAmount || 1);
     let patch = client.patch(booking._id);
@@ -193,7 +193,7 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
     }
     const totalAmount = Number(paymentRecord.pricingSnapshot?.netAmount ?? booking.netAmount ?? booking.grossAmount);
     const originalCommissionAmount = calculateCreatorCommission(paymentRecord.pricingSnapshot || booking, {
-      originalAmount: booking.originalCommissionAmount ?? paymentRecord.pricingSnapshot?.commissionAmount ?? booking.commissionAmount,
+      originalAmount: booking.originalCommissionAmount ?? paymentRecord.pricingSnapshot?.commissionAmount ?? originalBookingCommission(booking),
     }).originalAmount;
     const commission = calculateCreatorCommission(booking, {
       originalAmount: originalCommissionAmount, paidAmount: totalAmount,
