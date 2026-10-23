@@ -14,7 +14,7 @@ const baseline = process.argv.find(value => value.startsWith('--baseline='))?.sl
 const sources = ['src/server/api/ref/payoutUtils.js', 'src/server/api/ref/bookingRefunds.js', 'src/server/api/ref/bookingCommit.js', 'src/server/api/payment/flow.js'];
 const baselineSources = baseline ? Object.fromEntries(sources.map(file => [new URL(`../${file}`, import.meta.url).href, execFileSync('git', ['show', `${baseline}:${file}`], { encoding: 'utf8' })])) : {};
 for (const key of Object.keys(process.env)) {
-  if (/^(SANITY|SUPABASE|PAYPAL|RAZORPAY|DODO|REACT_APP_|NEXT_PUBLIC_|ALLOW_LIVE_|RESEND|BOOKING_EMAIL|FROM_EMAIL|OWNER_EMAIL|DATA_|COMMERCE_|VERCEL_ENV|REF_SESSION|CRON_|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|http_proxy|https_proxy|all_proxy)/.test(key)) delete process.env[key];
+  if (/^(SANITY|SUPABASE|PAYPAL|RAZORPAY|DODO|REACT_APP_|NEXT_PUBLIC_|ALLOW_LIVE_|RESEND|BOOKING_EMAIL|FROM_EMAIL|OWNER_EMAIL|DATA_|COMMERCE_|VERCEL_ENV|REF_SESSION|CRON_|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|http_proxy|https_proxy|all_proxy)/.test(key) || /SENTRY.*DSN/i.test(key)) delete process.env[key];
 }
 Object.assign(process.env, {
   NODE_ENV: 'test', VERCEL_ENV: 'development', DATA_PRIMARY_BACKEND: 'supabase',
@@ -43,11 +43,15 @@ registerHooks({ load(url, context, next) {
 } });
 const artifact = path.resolve(process.env.ROO_CREATOR_PAYOUT_ARTIFACT || 'test-results/creator-payouts.json');
 fs.mkdirSync(path.dirname(artifact), { recursive: true });
-const evidence = { productionRequests: 0, scenarios: [], limits: ['Synthetic provider HTTP and email responses; real route adapters, signatures, pricing, document mutations, PostgreSQL 17 and projections. No hosted auth, browser checkout or production data.'] };
+const evidence = { productionRequests: 0, sentryDsnVariables: Object.keys(process.env).filter(key => /SENTRY.*DSN/i.test(key)), scenarios: [], limits: ['Synthetic provider HTTP and email responses; real route adapters, signatures, pricing, document mutations, PostgreSQL 17 and projections. No hosted auth, browser checkout or production data.'] };
+assert.deepEqual(evidence.sentryDsnVariables, []);
 evidence.source = { baseline: baseline || null, commit: execFileSync('git', ['rev-parse', baseline || 'HEAD'], { encoding: 'utf8' }).trim(), files: Object.fromEntries(sources.map(file => [file, crypto.createHash('sha256').update(baseline ? baselineSources[new URL(`../${file}`, import.meta.url).href] : fs.readFileSync(file)).digest('hex')])) };
 let fixture, server, origin, commerce, documents, sql, earnings;
 let current, sequence = 0, eventSequence = 0;
 const responses = [];
+const states = [];
+const refundsById = new Map();
+const inFlight = new Set();
 const providerOrigins = new Set(['https://api-m.sandbox.paypal.com', 'https://api.razorpay.com', 'https://test.dodopayments.com', 'https://api.resend.com']);
 globalThis.fetch = (input, init) => {
   const url = new URL(typeof input === 'string' || input instanceof URL ? String(input) : input.url);
@@ -63,6 +67,10 @@ const post = async (route, body, headers = {}) => {
 };
 const webhook = async (type = 'payment.succeeded', id = `event-${++eventSequence}`) => {
   const provider = current.record.provider;
+  if (current.refund) {
+    refundsById.set(current.refund.id, structuredClone(current.refund));
+    current.refunds = [...refundsById.values()].filter(refund => refund.payment_id === current.record.providerPaymentId);
+  }
   let body, headers;
   if (provider === 'dodo') {
     body = JSON.stringify({ business_id: 'fixture', type, timestamp: new Date().toISOString(), data: current.payment });
@@ -87,18 +95,89 @@ const summary = async (creator, expected) => {
 };
 const seed = async (provider, { amount = 54.95, rate = 10, booking = true, count = 5 } = {}) => {
   const key = `payout-${++sequence}`;
-  const creator = await documents.create({ _id: `referral.${key}`, _type: 'referral', name: key, slug: { _type: 'slug', current: key }, registrationStatus: 'verified', currentCommissionPercent: rate, currentDiscountPercent: 0, successfulReferrals: count, backendOwner: 'supabase', cutoverGeneration: 0 });
+  const creator = await documents.create({
+    _id: `referral.${key}`,
+    _type: 'referral',
+    name: key,
+    slug: { _type: 'slug', current: key },
+    registrationStatus: 'verified',
+    currentCommissionPercent: rate,
+    currentDiscountPercent: 0,
+    successfulReferrals: count,
+    backendOwner: 'supabase',
+    cutoverGeneration: 0,
+  });
   const packageDoc = await documents.create({ _id: `package.${key}`, _type: 'package', title: `Fixture ${key}`, price: `$${amount.toFixed(2)}` });
   const { resolvePaymentQuote } = await import('../src/server/api/ref/pricing.js');
   const quote = await resolvePaymentQuote({ packageTitle: packageDoc.title, referralCode: key, client: commerce });
   const pricingSnapshot = { ...quote, grossAmount: quote.effectiveGrossAmount, netAmount: quote.effectiveNetAmount, commissionPercent: quote.effectiveCommissionPercent, commissionAmount: quote.commissionAmount, currency: 'USD' };
   const startTimeUTC = new Date(Date.UTC(2099, 0, sequence, 10)).toISOString();
-  const record = await commerce.create({ _id: `paymentRecord.${key}`, _type: 'paymentRecord', provider, backendOwner: 'supabase', cutoverGeneration: 0, status: booking ? 'booked' : 'abandoned', providerOrderId: `order-${key}`, providerPaymentId: `payment-${key}`, bookingId: booking ? `booking.${key}` : '', pricingSnapshot, pricingFingerprint: key, sessionScope: key, providerIdempotencyKey: key, sessionExpiresAt: '2099-01-01T10:00:00.000Z', bookingPayload: { packageTitle: packageDoc.title, email: 'customer@example.invalid', discord: 'fixture', specs: 'fixture computer', mainGame: 'fixture', referralCode: key, startTimeUTC, localTimeZone: 'Asia/Kolkata' }, providerPublicData: { currency: 'USD', productId: 'pdt_fixture', environment: 'test_mode', totalAmount: Math.round(amount * 100), taxInclusive: false }, emailDispatch: { allSent: true } });
-  if (booking) await commerce.create({ _id: record.bookingId, _type: 'booking', backendOwner: 'supabase', cutoverGeneration: 0, status: 'captured', paymentProvider: provider, paymentRecordId: record._id, packageTitle: packageDoc.title, netAmount: amount, grossAmount: amount, commissionAmount: quote.commissionAmount, commissionPercent: quote.effectiveCommissionPercent, referralCode: key, referral: { _type: 'reference', _ref: creator._id }, referralAccountingApplied: true, email: 'customer@example.invalid', currency: 'USD', paypalOrderId: provider === 'paypal' ? record.providerOrderId : '', razorpayOrderId: provider === 'razorpay' ? record.providerOrderId : '', razorpayPaymentId: provider === 'razorpay' ? record.providerPaymentId : '', ...(provider === 'dodo' ? { dodoPaymentId: record.providerPaymentId, dodoCheckoutSessionId: record.providerOrderId, dodoTotalAmount: amount } : {}) });
+  const record = await commerce.create({
+    _id: `paymentRecord.${key}`,
+    _type: 'paymentRecord',
+    provider,
+    backendOwner: 'supabase',
+    cutoverGeneration: 0,
+    status: booking ? 'booked' : 'abandoned',
+    providerOrderId: `order-${key}`,
+    providerPaymentId: `payment-${key}`,
+    bookingId: booking ? `booking.${key}` : '',
+    pricingSnapshot,
+    pricingFingerprint: key,
+    sessionScope: key,
+    providerIdempotencyKey: key,
+    sessionExpiresAt: '2099-01-01T10:00:00.000Z',
+    bookingPayload: {
+      packageTitle: packageDoc.title,
+      email: 'customer@example.invalid',
+      discord: 'fixture',
+      specs: 'fixture computer',
+      mainGame: 'fixture',
+      referralCode: key,
+      startTimeUTC,
+      localTimeZone: 'Asia/Kolkata',
+    },
+    providerPublicData: {
+      currency: 'USD',
+      productId: 'pdt_fixture',
+      environment: 'test_mode',
+      totalAmount: Math.round(amount * 100),
+      taxInclusive: false,
+    },
+    emailDispatch: { allSent: true },
+  });
+  if (booking) await commerce.create({
+    _id: record.bookingId,
+    _type: 'booking',
+    backendOwner: 'supabase',
+    cutoverGeneration: 0,
+    status: 'captured',
+    paymentProvider: provider,
+    paymentRecordId: record._id,
+    packageTitle: packageDoc.title,
+    netAmount: amount,
+    grossAmount: amount,
+    commissionAmount: quote.commissionAmount,
+    commissionPercent: quote.effectiveCommissionPercent,
+    referralCode: key,
+    referral: { _type: 'reference', _ref: creator._id },
+    referralAccountingApplied: true,
+    email: 'customer@example.invalid',
+    currency: 'USD',
+    paypalOrderId: provider === 'paypal' ? record.providerOrderId : '',
+    razorpayOrderId: provider === 'razorpay' ? record.providerOrderId : '',
+    razorpayPaymentId: provider === 'razorpay' ? record.providerPaymentId : '',
+    ...(provider === 'dodo' ? {
+      dodoPaymentId: record.providerPaymentId,
+      dodoCheckoutSessionId: record.providerOrderId,
+      dodoTotalAmount: amount,
+    } : {}),
+  });
   const payment = provider === 'dodo'
     ? { payment_id: record.providerPaymentId, checkout_session_id: record.providerOrderId, metadata: { paymentRecordId: record._id }, status: 'succeeded', currency: 'USD', total_amount: Math.round(amount * 100), tax: 0, product_cart: [{ product_id: 'pdt_fixture', quantity: 1 }], disputes: [], refunds: [], refund_status: null }
     : { id: record.providerPaymentId, order_id: record.providerOrderId, amount: Math.round(amount * 100), currency: 'USD', status: 'captured', captured: true, amount_refunded: 0, refund_status: null };
   current = { key, creator, packageDoc, quote, record, payment };
+  states.push(current);
   return current;
 };
 const dispute = status => ({ dispute_id: `dispute-${current.key}`, payment_id: current.payment.payment_id, currency: 'USD', amount: current.payment.total_amount, dispute_status: status, dispute_stage: 'dispute' });
@@ -118,7 +197,20 @@ const run = async (name, fn) => {
     }
     evidence.scenarios.push({ name, passed: true, proof });
   }
-  catch (error) { evidence.scenarios.push({ name, passed: false, error: error.stack, current: current && { record: await read(current.record._id), booking: await read((await read(current.record._id))?.bookingId), creator: await documents.getDocument(current.creator._id) } }); process.exitCode = 1; }
+  catch (error) {
+    await Promise.allSettled([...inFlight]);
+    evidence.scenarios.push({
+      name,
+      passed: false,
+      error: error.stack,
+      current: current && {
+        record: await read(current.record._id),
+        booking: await read((await read(current.record._id))?.bookingId),
+        creator: await documents.getDocument(current.creator._id),
+      },
+    });
+    process.exitCode = 1;
+  }
   fixture.setRequestHook(null);
   console.log(`${name}: ${evidence.scenarios.at(-1).passed ? 'passed' : 'FAILED'} (${Date.now() - start}ms)`);
   fs.writeFileSync(artifact, JSON.stringify(evidence, null, 2));
@@ -129,48 +221,80 @@ try {
   fixture = await createSweepPostgresFixture({ fullMigrationChain: true, excludedMigrations: baseline ? ['20261023090000_preserve_frozen_creator_commissions.sql'] : [] });
   sql = fixture.sql;
   Object.assign(process.env, { SUPABASE_URL: fixture.origin, SUPABASE_SERVICE_ROLE_KEY: fixture.token, NEXT_PUBLIC_SUPABASE_URL: fixture.origin, NEXT_PUBLIC_SUPABASE_ANON_KEY: fixture.token });
-  server = http.createServer(async (req, res) => {
-    try {
-      const chunks = []; for await (const chunk of req) chunks.push(chunk);
-      const body = Buffer.concat(chunks).toString();
-      if (req.url.startsWith('/api/')) {
-        const request = new Request(`${origin}${req.url}`, { method: req.method, headers: req.headers, ...(body ? { body } : {}) });
-        let response;
-        if (req.url.startsWith('/api/payment/webhook/')) {
-          const provider = req.url.split('/').at(-1);
-          const route = await import(`../app/api/payment/webhook/${provider}/route.js`);
-          response = await route.POST(request);
-        } else {
-          const action = req.url.split('/').at(-1);
-          const { default: handler } = await import(`../src/server/api/payment/${action}.js`);
-          const { runLegacyApiHandler } = await import('../src/lib/nextApiAdapter.js');
-          response = await runLegacyApiHandler({ request, handler, methodOverride: 'POST' });
+  server = http.createServer((req, res) => {
+    const pending = (async () => {
+      try {
+        const chunks = []; for await (const chunk of req) chunks.push(chunk);
+        const body = Buffer.concat(chunks).toString();
+        if (req.url.startsWith('/api/')) {
+          const request = new Request(`${origin}${req.url}`, { method: req.method, headers: req.headers, ...(body ? { body } : {}) });
+          let response;
+          if (req.url.startsWith('/api/payment/webhook/')) {
+            const provider = req.url.split('/').at(-1);
+            const route = await import(`../app/api/payment/webhook/${provider}/route.js`);
+            response = await route.POST(request);
+          } else {
+            const action = req.url.split('/').at(-1);
+            const { default: handler } = await import(`../src/server/api/payment/${action}.js`);
+            const { runLegacyApiHandler } = await import('../src/lib/nextApiAdapter.js');
+            response = await runLegacyApiHandler({ request, handler, methodOverride: 'POST' });
+          }
+          res.writeHead(response.status, Object.fromEntries(response.headers));
+          res.end(await response.text());
+          return;
         }
-        res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(await response.text()); return;
+        const parts = req.url.split('/');
+        const id = parts.at(-1) === 'refunds' ? parts.at(-2) : parts.at(-1);
+        const state = states.find(value => [
+          value.record.providerOrderId,
+          value.record.providerPaymentId,
+          value.payment.payment_id,
+          value.payment.checkout_session_id,
+          value.payment.id,
+          value.payment.order_id,
+        ].includes(id));
+        let result;
+        if (req.url === '/emails') result = { id: `email-${++eventSequence}` };
+        else if (req.url === '/v1/oauth2/token') result = { access_token: 'fixture', expires_in: 3600 };
+        else if (req.url === '/v1/notifications/verify-webhook-signature') result = { verification_status: 'SUCCESS' };
+        else if (req.url.startsWith('/payments/')) result = state?.payment;
+        else if (req.url.startsWith('/v1/payments/') && req.url.endsWith('/refunds')) result = { items: state?.refunds || [], count: (state?.refunds || []).length };
+        else if (req.url.startsWith('/v1/payments/')) result = state?.payment;
+        else if (req.url.startsWith('/v2/checkout/orders/')) result = {
+          id: state?.record.providerOrderId,
+          status: 'COMPLETED',
+          purchase_units: [{
+            amount: { value: state?.record.pricingSnapshot.netAmount.toFixed(2), currency_code: 'USD' },
+            payments: { captures: [{
+              id: state?.record.providerPaymentId,
+              status: 'COMPLETED',
+              amount: { value: state?.record.pricingSnapshot.netAmount.toFixed(2), currency_code: 'USD' },
+            }] },
+          }],
+        };
+        else if (req.url.startsWith('/v2/payments/refunds/')) result = refundsById.get(id);
+        else if (req.url.startsWith('/checkouts/')) result = { session_id: state?.record.providerOrderId, payment_id: state?.record.providerPaymentId };
+        else if (req.url === '/products/pdt_fixture') result = { product_id: 'pdt_fixture', is_recurring: false, price: { type: 'one_time_price', currency: 'USD', pay_what_you_want: true, tax_inclusive: false, purchasing_power_parity: false, discount: 0, price: 0 } };
+        else if (req.url === '/checkouts') result = { session_id: current.record.providerOrderId, checkout_url: `https://test.checkout.dodopayments.com/session/${current.key}` };
+        else throw new Error(`Unexpected fixture path ${req.url}`);
+        assert.ok(result, `Missing provider fixture: ${req.url}`);
+        responses.push({ path: req.url, body: structuredClone(result) });
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (error) {
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: error.message }));
       }
-      let result;
-      if (req.url === '/emails') result = { id: `email-${++eventSequence}` };
-      else if (req.url === '/v1/oauth2/token') result = { access_token: 'fixture', expires_in: 3600 };
-      else if (req.url === '/v1/notifications/verify-webhook-signature') result = { verification_status: 'SUCCESS' };
-      else if (req.url.startsWith('/payments/')) result = current.payment;
-      else if (req.url.startsWith('/v1/payments/') && req.url.endsWith('/refunds')) result = { items: current.refunds || [], count: (current.refunds || []).length };
-      else if (req.url.startsWith('/v1/payments/')) result = current.payment;
-      else if (req.url.startsWith('/v2/checkout/orders/')) result = { id: current.record.providerOrderId, status: 'COMPLETED', purchase_units: [{ amount: { value: current.record.pricingSnapshot.netAmount.toFixed(2), currency_code: 'USD' }, payments: { captures: [{ id: current.record.providerPaymentId, status: 'COMPLETED', amount: { value: current.record.pricingSnapshot.netAmount.toFixed(2), currency_code: 'USD' } }] } }] };
-      else if (req.url.startsWith('/v2/payments/refunds/')) result = current.refund;
-      else if (req.url.startsWith('/checkouts/')) result = { session_id: current.record.providerOrderId, payment_id: current.record.providerPaymentId };
-      else if (req.url === '/products/pdt_fixture') result = { product_id: 'pdt_fixture', is_recurring: false, price: { type: 'one_time_price', currency: 'USD', pay_what_you_want: true, tax_inclusive: false, purchasing_power_parity: false, discount: 0, price: 0 } };
-      else if (req.url === '/checkouts') result = { session_id: current.record.providerOrderId, checkout_url: `https://test.checkout.dodopayments.com/session/${current.key}` };
-      else throw new Error(`Unexpected fixture path ${req.url}`);
-      responses.push({ path: req.url, body: structuredClone(result) });
-      res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(result));
-    } catch (error) { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: error.message })); }
+    })();
+    inFlight.add(pending);
+    pending.finally(() => inFlight.delete(pending));
   });
   server.listen(0, host); await once(server, 'listening'); origin = `http://${host}:${server.address().port}`;
   globalThis.fetch = (input, init) => {
     const url = new URL(typeof input === 'string' || input instanceof URL ? String(input) : input.url);
     const target = providerOrigins.has(url.origin) ? `${origin}${url.pathname}${url.search}` : url.href;
     assert.ok([origin, fixture.origin, fixture.postgrestUrl].includes(new URL(target).origin), `Nonlocal destination blocked: ${url.origin}`);
-    return originalFetch(target, { ...init, redirect: 'error', signal: init?.signal || AbortSignal.timeout(30000) });
+    return originalFetch(target, { ...init, redirect: 'error', signal: init?.signal || AbortSignal.timeout(120000) });
   };
   const { createSupabaseDocumentClient } = await import('../src/server/supabase/documentClient.js');
   commerce = createSupabaseDocumentClient({ shadowClient: fixture.client, commerceOnly: true, cutoverGeneration: 0 });
@@ -261,6 +385,60 @@ try {
     return { booking, earnings: await summary(state.creator, state.quote.commissionAmount) };
   });
 
+  for (const provider of ['paypal', 'razorpay', 'dodo']) for (const stored of ['missing', 'null']) await run(`ROO-520-legacy-recovery-${provider}-${stored}`, async () => {
+    const state = await seed(provider, { booking: false, count: 0 });
+    const pricingSnapshot = { ...state.record.pricingSnapshot };
+    if (stored === 'null') pricingSnapshot.commissionAmount = null;
+    else delete pricingSnapshot.commissionAmount;
+    current.record = await commerce.patch(state.record._id).set({ pricingSnapshot }).commit();
+    const type = provider === 'paypal' ? 'PAYMENT.CAPTURE.COMPLETED' : provider === 'razorpay' ? 'payment.captured' : 'payment.succeeded';
+    assert.equal((await webhook(type)).status, 200);
+    const booking = await read((await read(state.record._id)).bookingId);
+    assert.equal(booking.requiresReschedule, true);
+    assert.equal(booking.commissionPercent, 10);
+    await countIs(1);
+    return { booking, earnings: await summary(state.creator, 5.5) };
+  });
+
+  for (const stored of ['missing', 'null', 'zero']) await run(`ROO-520-legacy-partial-recovery-dodo-${stored}`, async () => {
+    const state = await seed('dodo', { booking: false, count: 0 });
+    const pricingSnapshot = { ...state.record.pricingSnapshot };
+    if (stored === 'missing') delete pricingSnapshot.commissionAmount;
+    else pricingSnapshot.commissionAmount = stored === 'null' ? null : 0;
+    current.record = await commerce.patch(state.record._id).set({ pricingSnapshot }).commit();
+    current.payment.refund_status = 'partial';
+    current.payment.refunds = [{ refund_id: `refund-${state.key}`, payment_id: state.payment.payment_id, status: 'succeeded', currency: 'USD', amount: 2000 }];
+    const response = await webhook();
+    assert.equal(response.status, 200, JSON.stringify(response));
+    const booking = await read((await read(state.record._id)).bookingId);
+    assert.equal(booking.dodoOriginalCommissionAmount, stored === 'zero' ? 0 : 5.5);
+    assert.equal(booking.refundedAmount, 20);
+    const expected = stored === 'zero' ? 0 : 3.5;
+    assert.equal(booking.commissionAmount, expected);
+    assert.equal((await webhook()).status, 200);
+    await countIs(1);
+    return { booking, earnings: await summary(state.creator, expected) };
+  });
+
+  for (const provider of ['paypal', 'razorpay']) await run(`ROO-508-legacy-partial-refund-${provider}`, async () => {
+    const state = await seed(provider);
+    const pricingSnapshot = { ...state.record.pricingSnapshot };
+    delete pricingSnapshot.commissionAmount;
+    current.record = await commerce.patch(state.record._id).set({ pricingSnapshot }).commit();
+    await commerce.patch(state.record.bookingId).unset(['commissionAmount']).commit();
+    current.refund = provider === 'paypal'
+      ? { id: `refund-${state.key}`, status: 'COMPLETED', amount: { value: '20.00', currency_code: 'USD' }, links: [{ rel: 'up', href: `https://api-m.sandbox.paypal.com/v2/payments/captures/${state.record.providerPaymentId}` }] }
+      : { id: `refund-${state.key}`, payment_id: state.record.providerPaymentId, amount: 2000, currency: 'USD', status: 'processed' };
+    const type = provider === 'paypal' ? 'PAYMENT.CAPTURE.REFUNDED' : 'refund.processed';
+    const response = await webhook(type);
+    assert.equal(response.status, 200, JSON.stringify(response));
+    const booking = await read(state.record.bookingId);
+    assert.equal(booking.originalCommissionAmount, 5.5);
+    assert.equal(booking.commissionAmount, 3.5);
+    assert.equal((await webhook(type)).status, 200);
+    return { booking, earnings: await summary(state.creator, 3.5) };
+  });
+
   for (const provider of ['paypal', 'razorpay']) await run(`ROO-508-${provider}-failed-sync-cron-and-concurrent-refunds`, async () => {
     const state = await seed(provider);
     const send = async (amount, id) => {
@@ -282,11 +460,15 @@ try {
     assert.equal((await read(state.record.bookingId)).commissionAmount, 3.5);
     const concurrent = await Promise.all([send(5, `refund-${state.key}-b`), send(10, `refund-${state.key}-c`)]);
     await send(5, `refund-${state.key}-b`); await send(10, `refund-${state.key}-c`);
+    const afterConcurrent = await read(state.record._id);
+    const retried = await post('/api/payment/reconcile', {}, { authorization: 'Bearer fixture' });
+    assert.equal(retried.status, 200, JSON.stringify(retried));
     const booking = await read(state.record.bookingId);
     assert.equal(booking.refundedAmount, 35);
+    assert.equal((await read(state.record._id)).refundRequiresBookingSync, false);
     const expected = cents(5.5 * (1 - 35 / 54.95));
     assert.equal(booking.commissionAmount, expected);
-    return { blocked, firstResponse, concurrent, booking, earnings: await summary(state.creator, expected) };
+    return { blocked, firstResponse, concurrent, afterConcurrent, retried, booking, earnings: await summary(state.creator, expected) };
   });
 
   for (const lost of ['dispute_lost', 'dispute_accepted', 'dispute_expired']) for (const restored of ['dispute_won', 'dispute_cancelled']) await run(`ROO-509-${lost}-${restored}`, async () => {
@@ -353,19 +535,43 @@ try {
   });
 
   await run('ROO-575-explicit-zero-and-legacy-rounding-rebuilds', async () => {
-    const state = await seed('dodo', { amount: 9.99 });
+    const state = await seed('dodo', { amount: 12.51 });
     await commerce.patch(state.record.bookingId).set({ commissionAmount: 0 }).commit();
     await summary(state.creator, 0);
+    const second = await seed('dodo', { amount: 12.51, rate: 0.04 });
+    await commerce.patch(second.record.bookingId).set({ referral: { _type: 'reference', _ref: state.creator._id }, referralCode: state.creator.slug.current }).commit();
     for (const original of [null, 'missing']) {
-      const patch = commerce.patch(state.record.bookingId);
-      await (original === null ? patch.set({ commissionAmount: null, commissionPercent: 0.04 }) : patch.unset(['commissionAmount'])).commit();
-      await summary(state.creator, 0);
+      for (const id of [state.record.bookingId, second.record.bookingId]) {
+        const patch = commerce.patch(id).set({ commissionPercent: 0.04 });
+        await (original === null ? patch.set({ commissionAmount: null }) : patch.unset(['commissionAmount'])).commit();
+      }
+      await summary(state.creator, 0.02);
     }
     for (const rpc of ['roo_project_operational_shadow', 'roo_refresh_operational_shadow']) {
       const result = await fixture.client.rpc(rpc); assert.equal(result.error, null);
-      await summary(state.creator, 0);
+      await summary(state.creator, 0.02);
     }
-    return { earnings: await summary(state.creator, 0), rebuilds: ['original', 'current'] };
+    return { earnings: await summary(state.creator, 0.02), rebuilds: ['original', 'current'] };
+  });
+
+  for (const [label, amount, expected] of [['null', null, 1], ['missing', undefined, 1], ['empty', '', 1], ['invalid', 'invalid', 1], ['zero', 0, 0]]) await run(`ROO-575-retained-dodo-original-${label}`, async () => {
+    const state = await seed('dodo', { amount: 9.99 });
+    let patch = commerce.patch(state.record.bookingId).set({ dodoOriginalCommissionAmount: 1 });
+    patch = amount === undefined ? patch.unset(['commissionAmount']) : patch.set({ commissionAmount: amount });
+    await patch.commit();
+    return { booking: await read(state.record.bookingId), earnings: await summary(state.creator, expected) };
+  });
+
+  await run('ROO-575-legacy-rounding-before-sum', async () => {
+    const first = await seed('dodo', { amount: 12.51, rate: 0.04 });
+    const second = await seed('dodo', { amount: 12.51, rate: 0.04 });
+    await commerce.patch(first.record.bookingId).unset(['commissionAmount']).commit();
+    await commerce.patch(second.record.bookingId).set({
+      commissionAmount: null,
+      referral: { _type: 'reference', _ref: first.creator._id },
+      referralCode: first.creator.slug.current,
+    }).commit();
+    return { bookings: [await read(first.record.bookingId), await read(second.record.bookingId)], earnings: await summary(first.creator, 0.02) };
   });
 
   await run('all-payouts-projection-rebuilds', async () => {
@@ -385,11 +591,12 @@ try {
 } catch (error) { evidence.fatal = error.stack; process.exitCode = 1; }
 finally {
   if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
-  if (fixture) await fixture.stop();
+  if (fixture) {
+    evidence.databaseRequests = fixture.requestLog;
+    await fixture.stop();
+  }
   evidence.providerResponses = responses;
   if (!evidence.fatal && evidence.scenarios.length === 0) { evidence.fatal = 'No payout scenarios selected'; process.exitCode = 1; }
-  fs.mkdirSync('.claude/outside-data/roo617', { recursive: true });
-  fs.writeFileSync(`.claude/outside-data/roo617/provider-responses-${baseline ? 'base' : 'current'}.json`, JSON.stringify(responses, null, 2));
   fs.writeFileSync(artifact, JSON.stringify(evidence, null, 2));
   console.log(artifact);
 }

@@ -31,6 +31,14 @@ export function classifyPackage(packageTitle = '') {
   return 'vertex';
 }
 
+export function resolveBookingCommissionAmount(booking = {}) {
+  if (/^-?[0-9]+([.][0-9]+)?$/.test(String(booking?.commissionAmount ?? '').trim())) {
+    return normalizeNumber(booking.commissionAmount);
+  }
+  const base = normalizeNumber(booking?.netAmount) || normalizeNumber(booking?.grossAmount);
+  return +(base * normalizeNumber(booking?.commissionPercent) / 100).toFixed(2);
+}
+
 export function computeEarningsFromBookings(bookings = []) {
   const totals = {xoc: 0, vertex: 0, total: 0};
   const byPackage = {};
@@ -38,16 +46,7 @@ export function computeEarningsFromBookings(bookings = []) {
   bookings.forEach((booking) => {
     const packageTitle = normalizePackageTitle(booking?.packageTitle);
     const pkg = classifyPackage(packageTitle);
-    const commissionAmount = normalizeNumber(booking?.commissionAmount);
-    const commissionPercent = normalizeNumber(booking?.commissionPercent);
-    const base =
-      normalizeNumber(booking?.netAmount) ||
-      normalizeNumber(booking?.grossAmount);
-
-    const earned =
-      booking?.commissionAmount != null || booking?.dodoOriginalCommissionAmount != null
-        ? commissionAmount
-        : +(base * ((commissionPercent || 0) / 100 || 0)).toFixed(2);
+    const earned = resolveBookingCommissionAmount(booking);
 
     if (packageTitle) {
       byPackage[packageTitle] =
@@ -94,7 +93,6 @@ export async function fetchReferralEarnings({ client, referralId, referralCode }
       ]{
         packageTitle,
         commissionAmount,
-        dodoOriginalCommissionAmount,
         commissionPercent,
         netAmount,
         grossAmount

@@ -8,6 +8,7 @@ import {
 } from "../../booking/bookingStatus.js";
 import { appendCouponRefund } from "./couponReservations.js";
 import { toSubunits } from "../payment/providerClients.js";
+import { resolveBookingCommissionAmount } from "./payoutUtils.js";
 
 export const resolvePaymentCurrency = (paymentRecord = {}, { booking = {}, refund = {}, fallback = "USD" } = {}) => {
   const values = [paymentRecord.pricingSnapshot?.currency, paymentRecord.bookingPayload?.currency,
@@ -187,7 +188,7 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
     const refundedAmount = Number(booking.refundedAmount || 0) + Number(refund.amount || 0);
     const totalAmount = Number(paymentRecord.pricingSnapshot?.netAmount ?? booking.netAmount ?? booking.grossAmount);
     const originalCommissionAmount = Number(booking.originalCommissionAmount ??
-      paymentRecord.pricingSnapshot?.commissionAmount ?? booking.commissionAmount ?? 0);
+      paymentRecord.pricingSnapshot?.commissionAmount ?? resolveBookingCommissionAmount(booking));
     if (!refundId || !Number.isFinite(refundedAmount) || Number(refund.amount) <= 0 ||
         !Number.isFinite(totalAmount) || totalAmount <= 0 || refundedAmount > totalAmount + 0.000001 ||
         !Number.isFinite(originalCommissionAmount) || originalCommissionAmount < 0) {
