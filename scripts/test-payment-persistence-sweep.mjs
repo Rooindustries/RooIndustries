@@ -2978,6 +2978,24 @@ try{
     try{gate.resolve();result=await a;assert.deepEqual(await snapshot({receipts:true}),before);}finally{gate.resolve();bGate.resolve();await a;await b;}
     return{obsoleteHttpStatus:result.status,ownerA,ownerB,fullSnapshotUnchangedBeforeBRelease:true,expectedStateWhileBVerifies:before,clockAdvanceMs:91000,actualNativeBookingCas:mode==='before-booking-commit'};
   });
+  await run('start-other-provider-same-reservation-refused', async () => {
+    const input = await startInput();
+    providerHook = async (request, req, res) => {
+      if (request.method !== 'POST' || request.path !== '/v2/checkout/orders') return false;
+      res.writeHead(201, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ id: 'order-fixture', status: 'CREATED' }));
+      return true;
+    };
+    const first = await requestFlow('start', { body: input });
+    assert.equal(first.status, 200, JSON.stringify(first));
+    const before = await snapshot({ receipts: true });
+    const requestsBefore = providerRequests.length;
+    const second = await requestFlow('start', { body: { ...input, provider: 'razorpay' } });
+    assert.equal(second.status, 409, JSON.stringify(second));
+    assert.deepEqual(await snapshot({ receipts: true }), before);
+    assert.equal(providerRequests.length, requestsBefore);
+    return { firstStatus: first.status, second, secondProviderOrderRequests: 0, unchanged: true };
+  });
   for(const revisionState of ['absent','null'])await run(`missing-start-hold-authorizing-revision${revisionState==='null'?'-null':''}`,async()=>{
     const input=await startInput();await removeRevision('slotHold.fixture',revisionState);let raced=false,before;
     fixture.setRequestHook(async(phase,request)=>{if(phase!=='after'||raced||!JSON.stringify(request.response).includes('fixture-hold-owner'))return;raced=true;fixture.setRequestHook(null);await commerce.patch('slotHold.fixture').set({holdNonce:'newer-hold-owner'}).commit();before=await snapshot();});

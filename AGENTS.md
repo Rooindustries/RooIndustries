@@ -22,6 +22,14 @@ A change is done when it works everywhere its behavior reaches. Say which of the
 - **Emails.** Booking emails (`src/server/api/ref/`) and creator account emails (`src/server/email/`).
 - **Tests.** CI runs Jest, the Playwright suites and the Postgres 17 suites (`.github/workflows/tests.yml`). Run the ones your change touches locally first.
 
+## Error tracking
+
+Sentry (project `rooindustries-website`) gets Node server and browser errors when `NEXT_PUBLIC_SENTRY_DSN` is set; Vercel sets it for Production and Preview. Missing or malformed values leave reporting off; reporting failures cannot stop server startup. Middleware (edge) stays without the SDK so it stays light. The browser SDK loads only after a page's first uncaught error or error boundary, so it adds nothing before the first paint, and it sends through `/api/client-report`, which forwards only the envelope body (no cookies or headers) and only for this DSN, so ad blockers don't drop reports. Errors that route handlers catch and log with `logSafeError` are reported as the log label plus stack frames, never the error message. The server traces 5% of requests on its own roll; incoming `sentry-trace`/`baggage` headers can't raise that. Events carry no user, cookies, query strings, bodies, local variables, source lines or headers, and emails, card numbers and URL query strings in messages are replaced (`src/lib/monitoring/scrub.js`).
+
+External DSNs require HTTPS; HTTP is allowed only for loopback fixtures. Invalid environment labels become `unknown` before SDK initialization. Automatic release-health sessions are disabled. Network breadcrumbs and HTTP client spans keep only the method, status and origin, so payment IDs in URL paths stay private. Caught-error reports keep the static label before any `: ` suffix and only unambiguous stack frames; local console logs keep the full label.
+
+Check monitoring with `npm run test:monitoring`. `npm run test:monitoring:startup` builds and starts an isolated production fixture with a malformed DSN; the homepage must stay available and the reporting endpoint must stay off. Both use local fixtures with production traffic blocked.
+
 ## How we ship
 
 - Small PRs, one fix each. Two fixes are two PRs.
