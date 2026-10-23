@@ -420,6 +420,8 @@ export default function Payment({ hideFooter = false }) {
   const checkingCode = validating || validatingCoupon;
   const [couponError, setCouponError] = useState("");
   const [preApplyingCodes, setPreApplyingCodes] = useState(true);
+  const appliedCodeSelectionRef = useRef("");
+  const pendingCodeLocationRef = useRef(null);
 
   const [banner, setBanner] = useState(null);
   const bannerRef = useRef(null);
@@ -438,10 +440,15 @@ export default function Payment({ hideFooter = false }) {
     }, 4000);
   };
 
+  const codeSelectionKey = (referralCode, couponCode, search = location.search) => JSON.stringify([
+    search, packageTitle, bookingData.email, bookingData.startTimeUTC,
+    bookingData.originalOrderId, referralCode || "", couponCode || "",
+  ]);
+
   const persistCheckoutCodes = (
     nextReferral,
     nextCoupon,
-    dismissedCode = bookingData.checkoutCodes?.dismissedReferralCode || ""
+    dismissedCode = bookingData.checkoutCodes?.dismissedReferralCode || bookingData.referralCode || ""
   ) => {
     const checkoutCodes = {
       referral: sanitizeReferralForCheckout(nextReferral),
@@ -454,20 +461,35 @@ export default function Payment({ hideFooter = false }) {
       couponCode: checkoutCodes.coupon?.code || "",
       checkoutCodes,
     };
+    const query = new URLSearchParams(location.search);
+    if (!nextReferral && dismissedCode) query.delete("ref");
+    const search = query.size ? `?${query}` : "";
+    pendingCodeLocationRef.current = search !== location.search ? { key: location.key } : null;
     writeStoredCheckout(nextCheckout);
+    appliedCodeSelectionRef.current = codeSelectionKey(nextCheckout.referralCode, nextCheckout.couponCode, search);
     try {
       const draft = JSON.parse(sessionStorage.getItem(BOOKING_DRAFT_STORAGE_KEY) || "null");
       const packageDraft = draft?.packages?.[packageTitle];
       const draftEmail = String(packageDraft?.form?.email || "").trim().toLowerCase();
       const bookingEmail = String(bookingData.email || "").trim().toLowerCase();
-      if (bookingEmail && draftEmail === bookingEmail) {
+      const bookingStart = String(bookingData.startTimeUTC || "");
+      const hold = JSON.parse(sessionStorage.getItem("my_slot_hold") || "null");
+      const sameHold = hold?.holdToken && hold.holdToken === (sessionHold?.slotHoldToken || bookingData.slotHoldToken) &&
+        hold.startTimeUTC === bookingStart;
+      const draftStart = String(packageDraft?.startTimeUTC || (sameHold ? bookingStart : ""));
+      if (bookingEmail && draftEmail === bookingEmail && bookingStart && draftStart === bookingStart && sameHold) {
+        packageDraft.startTimeUTC = bookingStart;
         packageDraft.checkoutCodes = checkoutCodes;
         sessionStorage.setItem(BOOKING_DRAFT_STORAGE_KEY, JSON.stringify(draft));
       }
     } catch {}
-    navigate({ pathname: location.pathname, search: location.search, hash: location.hash }, {
-      replace: true, state: { ...navState, bookingData: nextCheckout },
-    });
+    const state = { ...navState, bookingData: nextCheckout };
+    try {
+      if (window.history.state?.__rooLegacy) {
+        window.history.replaceState({ ...window.history.state, usr: state }, "", `${location.pathname}${search}${location.hash}`);
+      }
+    } catch {}
+    navigate({ pathname: location.pathname, search, hash: location.hash }, { replace: true, state });
   };
 
   useEffect(() => {
@@ -547,6 +569,7 @@ export default function Payment({ hideFooter = false }) {
   useBookingDialogPending(!hydrated || !providersSettled || (Boolean(packageTitle) && !quoteSettled));
   const [showInternalPayments, setShowInternalPayments] = useState(false);
   const [paymentSession, setPaymentSession] = useState(null);
+  const unsavedPaymentSessionRef = useRef(null);
   const [paymentStatusBusy, setPaymentStatusBusy] = useState(false);
   const [cancellingPayment, setCancellingPayment] = useState(false);
   const sessionStartRef = useRef(null);
@@ -652,7 +675,7 @@ export default function Payment({ hideFooter = false }) {
       token: String(expectedToken ?? activeSession?.paymentAccessToken ?? "").trim(),
       current: () => {
         if (!paymentMountedRef.current || paymentViewRef.current !== paymentView) return false;
-        const session = readStoredPaymentSession() || paymentView.session;
+        const session = readStoredPaymentSession() || unsavedPaymentSessionRef.current;
         return String(session?.paymentAccessToken || "").trim() === operation.token &&
           (!operation.token || paymentSessionMatchesCheckout(session?.fingerprint, paymentView.fingerprint));
       },
@@ -747,12 +770,26 @@ export default function Payment({ hideFooter = false }) {
   useEffect(() => {
     if (!hydrated || !packageTitle) return;
 
+    // A code edit can reach storage before the memory router reaches its URL.
+    // Do not restore the old link's candidate during that intermediate render.
+    if (pendingCodeLocationRef.current) {
+      if (pendingCodeLocationRef.current.key === location.key) {
+        setPreApplyingCodes(true);
+        return;
+      }
+      pendingCodeLocationRef.current = null;
+    }
+
     const params = new URLSearchParams(location.search);
     const dismissedCode = String(bookingData.checkoutCodes?.dismissedReferralCode || "").toLowerCase();
     const referralCode = [bookingData.referralCode, params.get("ref"), readStoredReferral()]
       .map(code => String(code || "").trim())
       .find(code => code && code.toLowerCase() !== dismissedCode) || "";
     const couponCode = String(bookingData.couponCode || "").trim();
+    if (appliedCodeSelectionRef.current === codeSelectionKey(referralCode, couponCode)) {
+      setPreApplyingCodes(false);
+      return;
+    }
     let active = true;
     setPreApplyingCodes(true);
     setCoupon(null);
@@ -763,6 +800,7 @@ export default function Payment({ hideFooter = false }) {
       let nextReferral = null;
       let referralUnavailable = false;
       let nextCoupon = null;
+      let couponUnavailable = false;
       let nextReferralInput = referralCode;
       let nextCouponInput = couponCode;
       let infoMessage = "";
@@ -782,7 +820,15 @@ export default function Payment({ hideFooter = false }) {
               setReferralError("Invalid or inactive referral code.");
             }
           } else {
-            nextCouponInput = "";
+            if (result?.unavailable) {
+              couponUnavailable = true;
+              nextCoupon = coupon || sanitizeCouponForCheckout({
+                ...bookingData.checkoutCodes?.coupon,
+                code: bookingData.couponCode,
+              });
+            } else {
+              nextCouponInput = "";
+            }
             setCouponError(result?.error || "Invalid coupon code.");
           }
           return;
@@ -845,7 +891,7 @@ export default function Payment({ hideFooter = false }) {
       setReferralInput(nextReferralInput);
       setCouponInput(nextCouponInput);
       if (!referralUnavailable) writeStoredReferral(nextReferral?.code || "");
-      if (!referralUnavailable && (
+      if (!referralUnavailable && !couponUnavailable && (
         (bookingData.referralCode || "") !== (nextReferral?.code || "") ||
         (bookingData.couponCode || "") !== (nextCoupon?.code || "")
       )) {
@@ -866,6 +912,7 @@ export default function Payment({ hideFooter = false }) {
     bookingData.couponCode,
     bookingData.referralCode,
     hydrated,
+    location.key,
     location.search,
     packageTitle,
   ]);
@@ -997,9 +1044,9 @@ export default function Payment({ hideFooter = false }) {
   }, [checkoutFingerprint, couponInput, hydrated, packageTitle, referralInput]);
 
   const persistPaymentSession = (nextSession) => {
+    unsavedPaymentSessionRef.current = writeStoredPaymentSession(nextSession) ? null : nextSession;
     paymentView.session = nextSession;
     setPaymentSession(nextSession);
-    writeStoredPaymentSession(nextSession);
   };
 
   const getActivePaymentSession = (provider) => {
@@ -1046,11 +1093,12 @@ export default function Payment({ hideFooter = false }) {
 
   const clearPaymentSession = (terminalStatus = "", expectedToken = "") => {
     const storedSession = readStoredPaymentSession();
-    const activeSession = storedSession || paymentSession;
+    const activeSession = storedSession || unsavedPaymentSessionRef.current;
     if (expectedToken && activeSession?.paymentAccessToken !== expectedToken) return true;
     sessionStartRef.current = null;
     setPaymentSession(null);
     paymentView.session = null;
+    unsavedPaymentSessionRef.current = null;
     clearStoredPaymentSession();
     if (activeSession?.provider !== "dodo" || isUpgrade ||
         !["failed", "abandoned", "refunded"].includes(terminalStatus) ||
@@ -1568,7 +1616,8 @@ export default function Payment({ hideFooter = false }) {
       const result = await resolveCheckoutCode(normalizedCode, packageTitle);
       if (!codeApplicationAllowedRef.current || !operation.current()) return;
       if (!result.ok) {
-        if (!result.unavailable && !referral) {
+        if (!result.unavailable && (!referral || referral.code.toLowerCase() === normalizedCode.toLowerCase())) {
+          setReferral(null);
           writeStoredReferral("");
           persistCheckoutCodes(null, coupon, normalizedCode);
         }
@@ -1639,9 +1688,11 @@ export default function Payment({ hideFooter = false }) {
       const result = await resolveCheckoutCode(normalizedCode, packageTitle);
       if (!codeApplicationAllowedRef.current || !operation.current()) return;
       if (!result.ok) {
-        setCoupon(null);
         setCouponError(result.error || "Invalid coupon code.");
-        if (!result.unavailable) persistCheckoutCodes(referral, null);
+        if (!result.unavailable) {
+          setCoupon(null);
+          persistCheckoutCodes(referral, null);
+        }
         return;
       }
 
@@ -1683,7 +1734,6 @@ export default function Payment({ hideFooter = false }) {
       showBanner("success", `Coupon applied: ${formatCouponValue(safeCoupon)}`);
     } catch {
       console.error("Coupon validation failed");
-      setCoupon(null);
       setCouponError(
         "We couldn't validate that coupon code. Please try again."
       );
@@ -2133,6 +2183,7 @@ export default function Payment({ hideFooter = false }) {
                       setCoupon(null);
                       setCouponInput("");
                       setCouponError("");
+                      persistCheckoutCodes(referral, null);
                     }}
                     disabled={creatingFree || checkingCode || !!lockedProvider}
                     className="text-xs text-ink-secondary underline underline-offset-2"

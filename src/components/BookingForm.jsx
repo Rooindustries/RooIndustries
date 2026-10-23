@@ -2416,6 +2416,7 @@ export default function BookingForm() {
       persistDraft({
         form: { ...form },
         selectedPackage: { ...selectedPackage },
+        startTimeUTC: selectedSlot.utcStart.toISOString(),
         checkoutCodes,
       });
     } catch {

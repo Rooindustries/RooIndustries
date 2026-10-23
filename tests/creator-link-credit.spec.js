@@ -59,6 +59,190 @@ test("adding a coupon does not restore a removed creator", async ({ page, flow }
   await expect(page.locator("#payment-referral-code")).toHaveValue("");
 });
 
+test("removing a payment coupon survives reload and booking review", async ({ page, flow }) => {
+  await page.goto("/?ref=friend");
+  await flow.review();
+  await flow.payment();
+  await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+  await page.locator("#payment-coupon-code").fill("save20");
+  await page.locator("#payment-coupon-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
+  await page.getByRole("button", { name: "Remove coupon", exact: true }).click();
+  await page.reload();
+  await expect(page.locator("#payment-coupon-code")).toBeEnabled();
+  await expect(page.locator("#payment-coupon-code")).toHaveValue("");
+  await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+  await page.getByRole("link", { name: "Back to Booking", exact: true }).click();
+  await resumeReview(page);
+  await expect(appliedCode(page, "friend")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remove coupon code save20", exact: true })).toHaveCount(0);
+  await flow.payment();
+  await expect(page.locator("#payment-coupon-code")).toHaveValue("");
+});
+
+test("an applied creator that becomes invalid is cleared on retry", async ({ page, context, flow }) => {
+  await page.goto("/?ref=friend");
+  await flow.review();
+  await flow.payment();
+  await page.reload();
+  await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+  await context.route("**/api/ref/validateReferral?code=friend", route => route.fulfill({
+    json: { ok: false, reason: "not_found" },
+  }));
+  await page.locator("#payment-referral-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(page.locator("#payment-referral-code-error")).toBeVisible();
+  await expect.poll(() => storedCode(page)).toBeNull();
+  expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("checkout_booking_state")).referralCode)).toBe("");
+});
+
+test("an invalidated selected creator does not hand credit to a later link", async ({ page, context, flow }) => {
+  await page.goto("/?ref=friend");
+  await flow.review();
+  await flow.payment();
+  await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+  await context.route("**/api/ref/validateReferral?code=friend", route => route.fulfill({
+    json: { ok: false, reason: "not_found" },
+  }));
+  await page.goto("/payment?ref=second");
+  await expect(page.locator("#payment-referral-code-error")).toBeVisible();
+  await expect(page.locator("#payment-referral-code")).toHaveValue("");
+  expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("checkout_booking_state")).referralCode)).toBe("");
+  await page.reload();
+  await expect(page.locator("#payment-referral-code")).toBeEnabled();
+  await expect(page.locator("#payment-referral-code")).toHaveValue("");
+});
+
+test("removing the selected creator does not apply an earlier incidental link", async ({ page, flow }) => {
+  await page.goto("/?ref=friend");
+  await flow.review();
+  await flow.payment();
+  await page.goto("/payment?ref=second");
+  await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+  await page.locator("#payment-referral-code").fill("");
+  await page.locator("#payment-referral-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
+  await page.reload();
+  await expect(page.locator("#payment-referral-code")).toBeEnabled();
+  await expect(page.locator("#payment-referral-code")).toHaveValue("");
+  await page.goto("/payment?ref=second");
+  await expect(page.locator("#payment-referral-code")).toHaveValue("second");
+});
+
+test("a restored incompatible coupon keeps its rejection and the applied creator", async ({ page, context, flow }) => {
+  await page.goto("/?ref=friend");
+  await flow.review();
+  await flow.payment();
+  await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+  await context.route("**/api/ref/validateCoupon?*", async route => {
+    if (new URL(route.request().url()).searchParams.get("code") !== "save20") return route.fallback();
+    await route.fulfill({ json: { ok: true, coupon: {
+      code: "save20", discountType: "percent", discountPercent: 20, canCombineWithReferral: false,
+    } } });
+  });
+  await page.evaluate(() => {
+    const checkout = JSON.parse(sessionStorage.getItem("checkout_booking_state"));
+    checkout.couponCode = "save20";
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+  });
+  await page.reload();
+  await expect(page.locator("#payment-coupon-code-error")).toHaveText("This coupon can't be used together with a referral discount.");
+  await expect(page.locator("#payment-coupon-code")).toBeEnabled();
+  await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+  await expect.poll(() => flow.state.calls.filter(call => call.path === "/api/payment/quote").at(-1)?.body).toMatchObject({
+    referralCode: "friend", couponCode: "",
+  });
+});
+
+test("an unavailable coupon lookup preserves the applied coupon for retry", async ({ page, flow }) => {
+  await page.goto("/?ref=friend");
+  await flow.review();
+  await flow.payment();
+  await page.locator("#payment-coupon-code").fill("save20");
+  await page.locator("#payment-coupon-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("checkout_booking_state"))?.couponCode)).toBe("save20");
+  flow.state.failures["/api/ref/validateCoupon"] = 503;
+  await page.reload();
+  await expect(page.locator("#payment-coupon-code-error")).toBeVisible();
+  await expect(page.locator("#payment-coupon-code")).toHaveValue("save20");
+  expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("checkout_booking_state"))?.couponCode)).toBe("save20");
+  await expect.poll(() => flow.state.calls.filter(call => call.path === "/api/payment/quote").at(-1)?.body).toMatchObject({
+    referralCode: "friend", couponCode: "save20",
+  });
+  delete flow.state.failures["/api/ref/validateCoupon"];
+  await page.locator("#payment-coupon-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(page.locator("#payment-coupon-code-error")).toHaveCount(0);
+  await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+});
+
+test("a checkout whose session cannot be stored stays available for recovery", async ({ page, flow }) => {
+  await page.goto("/?ref=friend");
+  await flow.review();
+  await flow.payment();
+  await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+  await page.evaluate(() => {
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === "payment_session_state") throw new Error("Fixture storage unavailable");
+      return setItem.call(this, key, value);
+    };
+  });
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "Your browser could not save this payment session." })).toBeVisible();
+  await expect(page).toHaveURL(/\/payment(?:\?|$)/);
+  await expect(page.getByRole("button", { name: "Check payment status", exact: true })).toBeVisible();
+});
+
+for (const replacement of [null, "paypal"]) {
+  test(`a late terminal response preserves the refreshed hold after session ${replacement || "removal"}`, async ({ page, context, flow }) => {
+    await page.goto("/packages");
+    await flow.review();
+    await flow.payment();
+    await expect(page.locator("#payment-referral-code")).toBeEnabled();
+    await page.evaluate(() => {
+      const checkout = JSON.parse(sessionStorage.getItem("checkout_booking_state"));
+      sessionStorage.setItem("payment_session_state", JSON.stringify({
+        provider: "dodo", paymentAccessToken: "old-payment-token", providerPayload: { orderId: "cks_old" },
+        fingerprint: JSON.stringify({ packageTitle: checkout.packageTitle, originalOrderId: "",
+          startTimeUTC: checkout.startTimeUTC, email: checkout.email, referralCode: "", couponCode: "" }),
+      }));
+    });
+    let release;
+    let received;
+    const requested = new Promise(resolve => { received = resolve; });
+    const pending = new Promise(resolve => { release = resolve; });
+    await context.route("**/api/payment/finalize", async route => {
+      received();
+      await pending;
+      await route.fulfill({ json: { ok: true, status: "abandoned" } });
+    });
+    await page.goto("/payment?dodo_return=1");
+    await requested;
+    try {
+      await page.evaluate(replacement => {
+        const checkout = JSON.parse(sessionStorage.getItem("checkout_booking_state"));
+        const session = JSON.parse(sessionStorage.getItem("payment_session_state"));
+        const hold = JSON.parse(sessionStorage.getItem("my_slot_hold"));
+        hold.holdToken = "refreshed-hold-token";
+        checkout.slotHoldToken = hold.holdToken;
+        sessionStorage.setItem("my_slot_hold", JSON.stringify(hold));
+        sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+        if (replacement) sessionStorage.setItem("payment_session_state", JSON.stringify({
+          ...session, provider: replacement, paymentAccessToken: "new-payment-token",
+        }));
+        else sessionStorage.removeItem("payment_session_state");
+      }, replacement);
+      const response = page.waitForResponse(value => value.url().endsWith("/api/payment/finalize"));
+      release();
+      await response;
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold"))?.holdToken)).toBe("refreshed-hold-token");
+      expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("checkout_booking_state"))?.slotHoldToken)).toBe("refreshed-hold-token");
+      expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("payment_session_state"))?.paymentAccessToken || null)).toBe(replacement ? "new-payment-token" : null);
+      await expect(page.getByText(/Go back to booking to choose a time/)).toHaveCount(0);
+    } finally {
+      release();
+    }
+  });
+}
+
 for (const route of ["/BIOSGuide", "/BIOSGuide/", "/BIOSGuide/index.html"]) {
   test(`creator link to ${route} reaches packages and booking`, async ({ page, flow }, testInfo) => {
     await page.goto(`${route}?ref=friend`);
@@ -213,9 +397,13 @@ test("Back and Forward keep a deliberate replacement over an older payment entry
   await page.locator("#payment-referral-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
   await expect.poll(() => storedCode(page)).toBe("second");
   await page.goBack();
+  await expect(packagesLink(page)).toBeVisible();
   await page.goBack();
   await expect(page.locator("#payment-referral-code")).toHaveValue("second");
+  await page.reload();
+  await expect(page.locator("#payment-referral-code")).toHaveValue("second");
   await page.goForward();
+  await expect(packagesLink(page)).toBeVisible();
   await page.goForward();
   await expect(page.locator("#payment-referral-code")).toHaveValue("second");
 });
@@ -306,6 +494,42 @@ test("an older payment view does not change a different visitor's booking draft"
   await expect.poll(() => storedCode(page)).toBe("second");
   expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("booking_draft"))
     .packages["Performance Vertex Overhaul"].checkoutCodes.referral.code)).toBe("friend");
+});
+
+test("an older payment view does not change a later slot's draft for the same visitor", async ({ page, flow }) => {
+  await page.goto("/?ref=friend");
+  await flow.review();
+  await flow.payment();
+  await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+  await page.evaluate(() => {
+    const checkout = JSON.parse(sessionStorage.getItem("checkout_booking_state"));
+    const draft = JSON.parse(sessionStorage.getItem("booking_draft"));
+    draft.packages[checkout.packageTitle].startTimeUTC = new Date(new Date(checkout.startTimeUTC).getTime() + 3600000).toISOString();
+    sessionStorage.setItem("booking_draft", JSON.stringify(draft));
+  });
+  await page.locator("#payment-referral-code").fill("second");
+  await page.locator("#payment-referral-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
+  await expect.poll(() => storedCode(page)).toBe("second");
+  expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("booking_draft"))
+    .packages["Performance Vertex Overhaul"].checkoutCodes.referral.code)).toBe("friend");
+});
+
+test("a legacy draft still saves a replacement for its current held slot", async ({ page, flow }) => {
+  await page.goto("/?ref=friend");
+  await flow.review();
+  await flow.payment();
+  await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+  await page.evaluate(() => {
+    const draft = JSON.parse(sessionStorage.getItem("booking_draft"));
+    delete draft.packages["Performance Vertex Overhaul"].startTimeUTC;
+    sessionStorage.setItem("booking_draft", JSON.stringify(draft));
+  });
+  await page.locator("#payment-referral-code").fill("second");
+  await page.locator("#payment-referral-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
+  await expect.poll(() => storedCode(page)).toBe("second");
+  await page.getByRole("link", { name: "Back to Booking", exact: true }).click();
+  await resumeReview(page);
+  await expect(appliedCode(page, "second")).toBeVisible();
 });
 
 test("a delayed code response cannot reopen or rewrite a closed checkout", async ({ page, context, flow }) => {
