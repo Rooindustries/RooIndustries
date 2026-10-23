@@ -702,7 +702,61 @@ try{
     else if(variant==='missing-details'){assert.equal(booking.refundedAmount,undefined);assert.equal(saved.refundState,'partial');assert.equal(saved.providerRefundDetailsMissing,true);assert.equal(saved.providerRecoveryTerminalReason,'provider_partial_refund_details_missing_owner_review');assert.equal(ledger.count,0);}
     else{assert.equal(booking.refundedAmount,4.99);assert.equal(booking.refundStatus,'partial');assert.deepEqual(booking.processedRefundIds,['refund-fixture']);assert.equal(saved.refundState,'partial');assert.ok(saved.events.some(event=>event.reason==='provider_partial_refund_observed'));assert.equal(saved.refundProcessedAmountInSubunits,499);assert.equal(ledger.count,1);assert.equal(ledger.amount,499);assert.equal(saved.refundRequiresBookingSync,variant==='reported-total');if(variant==='reported-total'){assert.equal(saved.providerRefundObservedAmountInSubunits,699);assert.equal(saved.providerRefundDetailsMissing,true);assert.equal(saved.providerRecoveryTerminalReason,'provider_partial_refund_details_missing_owner_review');}}
     const duplicate=await fetch(`${origin}/booking`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body})});const replay={status:duplicate.status,body:await duplicate.json()};assert.equal(replay.status,200,JSON.stringify(replay));const repeated=(await row(booking._id)).payload;assert.equal(repeated.refundedAmount,booking.refundedAmount);assert.deepEqual(repeated.processedRefundIds,booking.processedRefundIds);assert.equal(repeated.commissionAmount,commission);const [duplicateLedger]=await sql`select count(*)::int count,coalesce(sum(amount_subunits),0)::int amount from commerce.refunds where payment_record_id=(select id from commerce.payment_records where legacy_sanity_id=${saved._id})`;assert.deepEqual(duplicateLedger,ledger);
-    let fullProof=null;if(variant==='later-full'){const refunded=provider==='paypal'?await requestFlow('paypal',{req:paypalReq('PAYMENT.CAPTURE.REFUNDED',{id:'refund-final',status:'COMPLETED',supplementary_data:{related_ids:{order_id:'order-fixture',capture_id:'capture-fixture'}},amount:{value:'5.00',currency_code:'USD'}})}):await requestFlow('razorpay',{req:razorReq('refund.processed',{refund:{entity:{id:'refund-final',payment_id:'payment-fixture',status:'processed',amount:500,currency:'USD'}}})});assert.equal(refunded.status,200,JSON.stringify(refunded));const terminalPayment=(await row(saved._id)).payload,terminalBooking=(await row(booking._id)).payload;assert.equal(terminalPayment.refundState,'full');assert.equal(terminalPayment.refundProcessedAmountInSubunits,999);assert.equal(terminalBooking.status,'refunded');assert.equal(terminalBooking.refundedAmount,9.99);const oldRetry=await fetch(`${origin}/booking`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body})});const oldReplay={status:oldRetry.status,body:await oldRetry.json()};assert.equal(oldReplay.status,200,JSON.stringify(oldReplay));assert.deepEqual((await row(saved._id)).payload,terminalPayment);const repeatedBooking=(await row(booking._id)).payload;const emailBookkeeping=['_rev','_updatedAt','emailDispatchAttemptCount','emailDispatchLastAttemptAt'];const stable=value=>Object.fromEntries(Object.entries(value).filter(([key])=>!emailBookkeeping.includes(key)));assert.deepEqual(stable(repeatedBooking),stable(terminalBooking));assert.equal(repeatedBooking.emailDispatchAttemptCount,terminalBooking.emailDispatchAttemptCount+1);fullProof={refunded,terminalPayment,terminalBooking,repeatedBooking,oldReplay,emailBookkeeping,staleLegacyPartialSnapshotCannotDowngradeFull:true};}
+    let fullProof=null;
+    if(variant==='later-full'){
+      const refunded=provider==='paypal'
+        ?await requestFlow('paypal',{req:paypalReq('PAYMENT.CAPTURE.REFUNDED',{id:'refund-final',status:'COMPLETED',supplementary_data:{related_ids:{order_id:'order-fixture',capture_id:'capture-fixture'}},amount:{value:'5.00',currency_code:'USD'}})})
+        :await requestFlow('razorpay',{req:razorReq('refund.processed',{refund:{entity:{id:'refund-final',payment_id:'payment-fixture',status:'processed',amount:500,currency:'USD'}}})});
+      assert.equal(refunded.status,200,JSON.stringify(refunded));
+      const terminalPayment=(await row(saved._id)).payload,terminalBooking=(await row(booking._id)).payload;
+      assert.equal(terminalPayment.refundState,'full');
+      assert.equal(terminalPayment.refundProcessedAmountInSubunits,999);
+      assert.equal(terminalBooking.status,'refunded');
+      assert.equal(terminalBooking.refundedAmount,9.99);
+      const rowMetadata=['_rev','_updatedAt'];
+      const stable=value=>Object.fromEntries(Object.entries(value).filter(([key])=>!rowMetadata.includes(key)));
+      const emailLedger=()=>sql`select to_jsonb(dispatch)-'updated_at' as row from commerce.email_dispatches dispatch where booking_id=(select id from commerce.bookings where legacy_sanity_id=${booking._id}) order by dispatch_kind,recipient_type`;
+      const terminalLedger=await emailLedger();
+      assert.equal(terminalLedger.length,2);
+      assert.ok(terminalLedger.every(({row:dispatch})=>dispatch.status==='sent'&&dispatch.provider_message_id));
+      const refundLedger=()=>sql`select to_jsonb(refund)-'updated_at'-'source_revision'-'source_hash' as row,
+        refund.source_revision=source.source_revision as revision_matches,refund.source_hash=source.source_hash as hash_matches
+        from commerce.refunds refund join commerce.payment_records payment on payment.id=refund.payment_record_id
+        join migration.source_documents source on source.legacy_sanity_id=payment.legacy_sanity_id
+        where payment.legacy_sanity_id=${saved._id} order by refund.id`;
+      const terminalRefunds=await refundLedger();
+      assert.equal(terminalRefunds.length,2);
+      assert.ok(terminalRefunds.every(refund=>refund.revision_matches&&refund.hash_matches));
+      assert.equal(terminalRefunds.reduce((sum,{row:refund})=>sum+refund.amount_subunits,0),999);
+      const emailRequests=providerRequests.filter(request=>request.path==='/emails').length;
+      assert.equal(emailRequests,2);
+      const expectedPayment={...terminalPayment,emailDispatchRequired:false,emailDispatchToken:'',emailDeliveryReviewRequired:false,
+        emailDispatch:{allSent:false,deferred:false,deliveryEnabled:true,deliveryUnknown:false,suppressed:true,
+          client:{attempted:false,sent:false,skippedReason:'booking_inactive'},
+          owner:{attempted:false,sent:false,skippedReason:'booking_inactive'}}};
+      const expectedBooking={...terminalBooking,emailDispatchLastError:'booking_inactive'};
+      const replays=[];
+      for(let attempt=0;attempt<3;attempt++){
+        const oldRetry=await fetch(`${origin}/booking`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body})});
+        const oldReplay={status:oldRetry.status,body:await oldRetry.json()};
+        assert.equal(oldReplay.status,200,JSON.stringify(oldReplay));
+        assert.deepEqual(oldReplay.body.emailDispatch,expectedPayment.emailDispatch);
+        const repeatedPayment=(await row(saved._id)).payload,repeatedBooking=(await row(booking._id)).payload;
+        assert.deepEqual(stable(repeatedPayment),stable(expectedPayment));
+        assert.deepEqual(stable(repeatedBooking),stable(expectedBooking));
+        assert.equal(repeatedBooking.emailDispatchAttemptCount,terminalBooking.emailDispatchAttemptCount);
+        assert.equal(repeatedBooking.emailDispatchLastAttemptAt,terminalBooking.emailDispatchLastAttemptAt);
+        assert.deepEqual(await emailLedger(),terminalLedger);
+        assert.deepEqual(await refundLedger(),terminalRefunds);
+        assert.equal(providerRequests.filter(request=>request.path==='/emails').length,emailRequests);
+        replays.push({oldReplay,repeatedPayment,repeatedBooking});
+      }
+      const rebuilds=await a1RebuildProof(`fix-c-legacy-${provider}-later-full`);
+      assert.deepEqual(await emailLedger(),terminalLedger);
+      assert.deepEqual(await refundLedger(),terminalRefunds);
+      fullProof={refunded,terminalPayment,terminalBooking,terminalLedger,terminalRefunds,replays,rebuilds,rowMetadata,emailRequests,
+        staleLegacyPartialSnapshotCannotDowngradeFull:true,noReplayEmailAttempt:true};
+    }
     return{fullProof,result,recovered,committedBeforeRecovery,booking,saved,ledger,replay,partialGrantAndCommissionPolicyPreserved:true,duplicateRefundAccountingUnchanged:true,standIn:'Imported active sanity-owned hold in native store; no live legacy incidence or Sanity engine claimed'};
   });
   await run('a2-f6-lost-with-partial-refund-completion-failure',async()=>{
@@ -783,10 +837,38 @@ try{
   for(const recovery of [false,true])await run(`a1-terminal-${recovery?'reschedule-':''}ledger-unknown-delivery-disabled`,async()=>{
     const {sendBookingEmailsForBooking,dispatchRescheduleNotifications}=await import('../src/server/api/ref/bookingEmails.js'),prior=new Date(originalNow()-25*3600000).toISOString(),prefix=recovery?'recoveryNotification':'emailDispatch';
     const changes=recovery?{requiresReschedule:true,recoveryNotificationStatus:'delivery_unknown',recoveryNotificationLastError:'email_delivery_unknown',recoveryNotificationLastAttemptAt:prior,recoveryNotificationAttemptCount:1,recoveryClientFirstAttemptAt:prior,recoveryOwnerNotifiedAt:new Date().toISOString()}:{emailDispatchStatus:'delivery_unknown',emailDispatchLastError:'email_delivery_unknown',emailDispatchLastAttemptAt:prior,emailDispatchAttemptCount:1,emailDispatchClientFirstAttemptAt:prior,emailDispatchOwnerSentAt:new Date().toISOString()};
-    await seed('dodo','email_partial',{booking:changes});let booking=(await row(bookingId)).payload;await commerce.patch(bookingId).ifRevisionId(booking._rev).set({[`${prefix}Status`]:'partial'}).commit();const previous=process.env.FROM_EMAIL,calls=[];process.env.FROM_EMAIL='';
-    try{for(let i=0;i<3;i++)calls.push(recovery?await dispatchRescheduleNotifications({bookingId,client:commerce}):await sendBookingEmailsForBooking({bookingId,client:commerce}));}finally{process.env.FROM_EMAIL=previous;}
-    booking=(await row(bookingId)).payload;assert.equal(booking[`${prefix}Status`],'delivery_unknown');assert.equal(booking[`${prefix}NextAttemptAt`],'');assert.equal(booking[`${prefix}AttemptCount`],2);assert.ok(calls.every(r=>(r.body||r).retryable===false&&(r.body||r).deliveryUnknown===true));assert.equal(providerRequests.filter(r=>r.path==='/emails').length,0);
-    for(const rpc of ['roo_project_operational_shadow','roo_refresh_operational_shadow'])assert.equal((await fixture.client.rpc(rpc)).error,null);return{calls,booking,ledger:await sql`select recipient_type,status,next_attempt_at,lease_id from commerce.email_dispatches`,noProviderAttempt:true};
+    await seed('dodo','email_partial',{booking:changes});let booking=(await row(bookingId)).payload;await commerce.patch(bookingId).ifRevisionId(booking._rev).set({[`${prefix}Status`]:'partial'}).commit();const previous=process.env.FROM_EMAIL,calls=[],snapshots=[];process.env.FROM_EMAIL='';
+    const kind=recovery?'reschedule':'booking_confirmation';
+    const readLedger=()=>sql`select recipient_type,status,attempt_count,sent_at,provider_message_id,next_attempt_at,lease_id,lease_expires_at from commerce.email_dispatches where dispatch_kind=${kind} order by recipient_type`;
+    const beforeLedger=await readLedger();
+    assert.equal(beforeLedger.length,2);
+    assert.equal(beforeLedger.find(entry=>entry.recipient_type==='customer').status,'historical_unknown');
+    assert.equal(beforeLedger.find(entry=>entry.recipient_type==='owner').status,'sent');
+    const expectedAttempts=recovery?2:1;
+    const expectedLedger=beforeLedger.map(entry=>({...entry,attempt_count:expectedAttempts}));
+    try{
+      for(let i=0;i<3;i++){
+        const result=recovery?await dispatchRescheduleNotifications({bookingId,client:commerce}):await sendBookingEmailsForBooking({bookingId,client:commerce});
+        calls.push(result);
+        const snapshot=(await row(bookingId)).payload;
+        assert.equal(snapshot[`${prefix}Status`],'delivery_unknown');
+        assert.equal(snapshot[`${prefix}NextAttemptAt`],'');
+        assert.equal(snapshot[`${prefix}LeaseId`],'');
+        assert.equal(snapshot[`${prefix}LeaseExpiresAt`],'');
+        assert.equal(snapshot[`${prefix}AttemptCount`],expectedAttempts);
+        assert.equal(snapshot[recovery?'recoveryClientFirstAttemptAt':'emailDispatchClientFirstAttemptAt'],prior);
+        if(!recovery)assert.equal(snapshot.emailDispatchLastAttemptAt,prior);
+        assert.deepEqual([...(await readLedger())],expectedLedger);
+        assert.equal(providerRequests.filter(request=>request.path==='/emails').length,0);
+        snapshots.push(snapshot);
+      }
+    }finally{process.env.FROM_EMAIL=previous;}
+    booking=(await row(bookingId)).payload;assert.ok(calls.every(r=>(r.body||r).retryable===false&&(r.body||r).deliveryUnknown===true));
+    for(const rpc of ['roo_project_operational_shadow','roo_refresh_operational_shadow']){
+      assert.equal((await fixture.client.rpc(rpc)).error,null);
+      assert.deepEqual([...(await readLedger())],expectedLedger);
+    }
+    return{calls,booking,snapshots,beforeLedger,ledger:await readLedger(),noProviderAttempt:true};
   });
   await run('a1-completion-backend-ownership-transfer-preserved',async()=>{
     const checkout=await a1Start();let raced=false,transferred;
