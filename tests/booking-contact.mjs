@@ -207,8 +207,8 @@ test('booking contact validation over HTTP', { timeout: 300000 }, async t => {
       const created = await start(payload);
       assert.equal(created.status, 200, JSON.stringify(created));
       const record = await commerce.fetch(
-        '*[_type == "paymentRecord" && bookingPayload.originalOrderId == $id][0]',
-        { id: payload.originalOrderId }
+        '*[_type == "paymentRecord" && providerOrderId == $id][0]',
+        { id: created.body.providerPayload.orderId }
       );
       const legacy = { ...record.bookingPayload, discord: { legacy: true }, specs: ['legacy'],
         mainGame: 47, message: { legacy: true }, localTimeZone: 'Mars/Olympus' };

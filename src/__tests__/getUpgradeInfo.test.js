@@ -44,7 +44,15 @@ const createRes = () => ({
 const paidBooking = (overrides = {}) => ({
   _id: "booking_1",
   _type: "booking",
+  _rev: "booking_verified_rev",
   status: "completed",
+  paymentProvider: "paypal",
+  paymentRecordId: "paymentRecord.verified.booking_1",
+  paypalOrderId: "paypal_order_1",
+  currency: "USD",
+  netAmount: 84.99,
+  backendOwner: "sanity",
+  cutoverGeneration: 0,
   email: "client@example.com",
   payerEmail: "payer@example.com",
   packageTitle: "Performance Vertex Overhaul",
@@ -61,6 +69,26 @@ const setupFetch = ({ booking = paidBooking(), extraFetch = null } = {}) => {
     const q = String(query || "");
     const extra = extraFetch ? await extraFetch(q, params) : undefined;
     if (extra !== undefined) return extra;
+
+    if (q.includes('_type == "paymentRecord"') && params.id === booking.paymentRecordId) {
+      return {
+        _id: booking.paymentRecordId,
+        _type: "paymentRecord",
+        _rev: "payment_verified_rev",
+        provider: booking.paymentProvider,
+        providerOrderId: booking.paymentProvider === "dodo" ? booking.dodoCheckoutSessionId
+          : booking.paymentProvider === "razorpay" ? booking.razorpayOrderId : booking.paypalOrderId,
+        providerPaymentId: booking.paymentProvider === "dodo" ? booking.dodoPaymentId
+          : booking.paymentProvider === "razorpay" ? booking.razorpayPaymentId : "paypal_capture_1",
+        bookingId: booking._id,
+        status: "booked",
+        verificationState: "server_verified",
+        backendOwner: booking.backendOwner,
+        cutoverGeneration: booking.cutoverGeneration,
+        pricingSnapshot: { currency: "USD", netAmount: 84.99 },
+        providerPublicData: { currency: "USD", totalAmount: 8499, taxAmount: 0, taxInclusive: false },
+      };
+    }
 
     if (q.includes('_type == "package"') && q.includes("title in $titles")) {
       return {
@@ -126,7 +154,8 @@ beforeEach(() => {
 
 describe("getUpgradeInfo API", () => {
   test.each(["dodoCheckoutSessionId", "dodoPaymentId"])("resolves a Dodo %s for the booking owner", async (field) => {
-    const booking = paidBooking({ paymentProvider: "dodo", [field]: "dodo_order_1" });
+    const booking = paidBooking({ paymentProvider: "dodo", dodoCheckoutSessionId: "dodo_checkout_1",
+      dodoPaymentId: "dodo_payment_1", [field]: "dodo_order_1" });
     mockGetDocument.mockResolvedValue(null);
     setupFetch({
       booking,
@@ -432,7 +461,8 @@ describe("getUpgradeInfo API", () => {
   });
 
   test("looks up upgrades by paymentRecord _id with bookingId", async () => {
-    const booking = paidBooking();
+    const booking = paidBooking({ paymentProvider: "razorpay", razorpayOrderId: "razorpay_order_1",
+      razorpayPaymentId: "razorpay_payment_1", paymentRecordId: "paymentRecord.razorpay.order.razorpay_order_1" });
     mockGetDocument.mockResolvedValue({
       _id: "paymentRecord.razorpay.order.razorpay_order_1",
       _type: "paymentRecord",
@@ -457,7 +487,8 @@ describe("getUpgradeInfo API", () => {
   });
 
   test("looks up upgrades by paymentRecord providerPaymentId", async () => {
-    const booking = paidBooking({ razorpayPaymentId: "razorpay_payment_1" });
+    const booking = paidBooking({ paymentProvider: "razorpay", razorpayOrderId: "razorpay_order_1",
+      razorpayPaymentId: "razorpay_payment_1" });
     mockGetDocument.mockResolvedValue(null);
     setupFetch({
       booking,
