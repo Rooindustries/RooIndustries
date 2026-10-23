@@ -500,7 +500,8 @@ export default function Payment({ hideFooter = false }) {
   });
   const [providersSettled, setProvidersSettled] = useState(false);
   const [providerAvailabilityKnown, setProviderAvailabilityKnown] = useState(false);
-  useBookingDialogPending(!hydrated || !providersSettled || (Boolean(packageTitle) && !quoteSettled));
+  const paymentReady = hydrated && providersSettled && (!packageTitle || quoteSettled);
+  useBookingDialogPending(!paymentReady);
   const [showInternalPayments, setShowInternalPayments] = useState(false);
   const [paymentSession, setPaymentSession] = useState(null);
   const [paymentStatusBusy, setPaymentStatusBusy] = useState(false);
@@ -1820,6 +1821,7 @@ export default function Payment({ hideFooter = false }) {
 
   return (
     <motion.section
+      data-roo-flow-ready={paymentReady ? "payment" : undefined}
       className="booking-payment relative z-10 max-w-3xl mx-auto text-ink"
       variants={containerVariants}
       initial="hidden"

@@ -199,10 +199,19 @@ const checkPageRenders = (browser, base, pathname) => withSmokePage(browser, bas
     if (APP_ERROR_PATTERN.test(text)) throw new Error(`${pathname} shows an application error`);
     if (pathname === "/") {
       await page.waitForFunction(() => {
+        const visible = (element) => {
+          if (!element?.innerText.trim() || getComputedStyle(element).visibility !== "visible") return false;
+          const bounds = element.getBoundingClientRect();
+          if (bounds.width <= 0 || bounds.height <= 0) return false;
+          let opacity = 1;
+          for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) {
+            opacity *= Number(getComputedStyle(ancestor).opacity);
+          }
+          return opacity > 0;
+        };
         const heading = document.querySelector("#top h1");
         const bookingLink = document.querySelector('#top a[href="/#packages"]');
-        return heading?.innerText.trim() && heading.getBoundingClientRect().height > 0 &&
-          bookingLink?.innerText.trim() && bookingLink.getBoundingClientRect().height > 0;
+        return visible(heading) && visible(bookingLink);
       }, null, { timeout: markerTimeout })
         .catch(() => { throw new Error("/ is missing its homepage heading or booking link"); });
     }
@@ -212,6 +221,13 @@ const checkPageRenders = (browser, base, pathname) => withSmokePage(browser, bas
         timeout: markerTimeout,
       }).catch(() => { throw new Error(`${pathname} is missing "${marker}"`); });
     }
+    const flow = pathname === "/" ? "home" : pathname.slice(1);
+    await page.waitForFunction((expected) => document.querySelector(`[data-roo-flow-ready="${expected}"]`), flow, {
+      timeout: markerTimeout,
+    }).catch(() => {
+      if (errors.length) throw new Error(`${pathname} has a rendering error: ${errors[0]}`);
+      throw new Error(`${pathname} did not finish client initialization`);
+    });
     if (errors.length) throw new Error(`${pathname} has a rendering error: ${errors[0]}`);
     if (APP_ERROR_PATTERN.test(await page.evaluate(() => document.body.innerText))) {
       throw new Error(`${pathname} shows an application error`);

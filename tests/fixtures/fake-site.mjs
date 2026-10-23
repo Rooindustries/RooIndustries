@@ -65,6 +65,19 @@ export const startSite = (overrides = {}) => {
       res.writeHead(200, { "content-type": "text/javascript" });
       return res.end(REFERRAL_SCRIPT);
     }
+    if (url.pathname === "/__fixture/client-start.js") {
+      const pathname = url.searchParams.get("path");
+      const startup = overrides.startup?.[pathname] || {};
+      const flow = pathname === "/" ? "home" : pathname.slice(1);
+      return setTimeout(() => {
+        if (res.destroyed) return;
+        res.writeHead(200, { "content-type": "text/javascript" });
+        const action = startup.error
+          ? 'throw new Error("Fixture client startup failed")'
+          : `document.body.dataset.rooFlowReady = ${JSON.stringify(flow)}`;
+        res.end(`const initialize = () => { ${action}; }; if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize, { once: true }); else initialize();`);
+      }, startup.delay || 0);
+    }
     if (url.pathname === "/packages") {
       if (overrides.cspScriptBlock) res.setHeader("Content-Security-Policy", "script-src 'none'");
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -78,7 +91,7 @@ export const startSite = (overrides = {}) => {
         "/payment": "<h3>Booking Summary</h3>",
       };
       const body = overrides.bodies?.[url.pathname] ?? `${markers[url.pathname] || `<h1>${url.pathname}</h1>`}<p>Fixture page ${url.pathname} with its usual content.</p>`;
-      return res.end(page(body));
+      return res.end(page(body, `<script async src="/__fixture/client-start.js?path=${encodeURIComponent(url.pathname)}"></script>`));
     }
     res.writeHead(404);
     return res.end();

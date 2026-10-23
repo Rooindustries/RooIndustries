@@ -13,7 +13,7 @@ const script = path.join(root, "scripts/production-smoke.mjs");
 const run = (args, onSpawn, env = {}) => new Promise(resolve => {
   const child = spawn(process.execPath, [script, ...args], {
     cwd: root,
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, SMOKE_RETRY_MS: "50", SMOKE_MARKER_TIMEOUT_MS: "400", PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH, ...env },
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, SMOKE_RETRY_MS: "50", SMOKE_MARKER_TIMEOUT_MS: "2000", PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH, ...env },
   });
   onSpawn?.(child);
   let output = "";
@@ -200,6 +200,33 @@ for (const [name, body] of Object.entries({
     assert.deepEqual(site.requests.filter(request => request.method !== "GET"), []);
   }));
 }
+
+for (const [name, body] of Object.entries({
+  "transparent heading": '<header id="top"><h1 style="opacity:0">PC performance optimization</h1><a href="/#packages">Book an optimization</a></header>',
+  "hidden booking link": '<header id="top"><h1>PC performance optimization</h1><a href="/#packages" style="visibility:hidden">Book an optimization</a></header>',
+  "transparent ancestor": '<div style="opacity:0"><header id="top"><h1>PC performance optimization</h1><a href="/#packages">Book an optimization</a></header></div>',
+})) {
+  test(`homepage visibility rejects a ${name}`, () => withSite({ bodies: { "/": body } }, (site, result) => {
+    assert.equal(result.code, 2, result.output);
+    assert.match(result.output, /FAIL\s+home page renders/);
+  }));
+}
+
+for (const pathname of ["/", "/booking", "/payment"]) {
+  test(`client readiness rejects a late startup failure on ${pathname}`, () => withSite({
+    startup: { [pathname]: { delay: 500, error: true } },
+  }, (site, result) => {
+    assert.equal(result.code, 2, result.output);
+    assert.ok(result.output.includes(`${pathname} has a rendering error: Fixture client startup failed`), result.output);
+  }));
+}
+
+test("client readiness accepts a healthy delayed startup", () => withSite({
+  startup: { "/booking": { delay: 500 } },
+}, (site, result) => {
+  assert.equal(result.code, 0, result.output);
+  assert.deepEqual(site.requests.filter(request => request.method !== "GET"), []);
+}));
 
 test("refuses unknown options", async () => {
   const result = await run(["--bse", "https://www.rooindustries.com"]);
