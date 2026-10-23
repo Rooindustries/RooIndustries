@@ -980,6 +980,7 @@ test("confirmed publications and empty tool lists survive an eleven-minute CMS o
       } finally { await context.close(); }
     }
   };
+  const failures = [];
   try {
     await control(request, baseURL, { reset: true });
     await renew(request);
@@ -1030,7 +1031,6 @@ test("confirmed publications and empty tool lists survive an eleven-minute CMS o
     }, { timeout: 30000 }).toBe(true);
     await pages("recovered");
   } finally {
-    const failures = [];
     for (const cleanup of [
       () => setClock(null),
       () => fs.writeFile(testInfo.outputPath("prolonged-outage.json"), JSON.stringify({ deleted, timeline }, null, 2)),
@@ -1040,6 +1040,6 @@ test("confirmed publications and empty tool lists survive an eleven-minute CMS o
     ]) {
       try { await cleanup(); } catch (error) { failures.push(error); }
     }
-    if (failures.length) throw failures[0];
   }
+  if (failures.length) throw failures[0];
 });
