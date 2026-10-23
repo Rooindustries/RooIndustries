@@ -112,6 +112,10 @@ export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = proc
     if (removed.length) throw cmsError(`This row cannot be removed. ${UNUSED_FIELD_NOTE}`, 409, "CMS_UNUSED_ROW_PROTECTED", { paths: removed });
     const validation = validateContentDocument(body.type, document, { current });
     if (!validation.ok) throw cmsError("Content validation failed.", 400, "CMS_VALIDATION_FAILED", validation.errors);
+    if (["privacyPolicy", "terms"].includes(body.type)) {
+      try { assertPublicContentShape(body.type === "privacyPolicy" ? "privacy-policy" : "terms", document, body.type); }
+      catch { throw validationError("$.sections", "Add a title and at least one section with text."); }
+    }
     document = { ...document, _id: id, _type: body.type };
   }
   const mutation = { operation: body.operation, id, ...(document ? { document } : {}), ...(!creating ? { expected_revision: body.expectedRevision || "" } : {}) };

@@ -134,6 +134,74 @@ test("a successful publish and its replay refresh public content", async ({ requ
   } finally { await control(request, baseURL, { reset: true }); }
 });
 
+for (const [type, route] of [["privacyPolicy", "/privacy"], ["terms", "/terms"]]) {
+  test(`${type} rejects blank legal content before publishing and accepts corrected content`, async ({ request, browser, page, baseURL }, testInfo) => {
+    const outcomes = [];
+    const timeline = [];
+    const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+    await guardBrowserContext(page.context(), [baseURL, new URL(controlUrl(baseURL)).origin]);
+    const errors = [];
+    page.on("pageerror", error => errors.push(error.message));
+    const cases = [
+      { name: "blank-title", failure: "" },
+      { name: "empty-sections", failure: "" },
+      ...["", "5xx", "timeout", "invalid-receipt"].map(failure => ({ name: "blank-spans", failure })),
+    ];
+    try {
+      for (const { name, failure } of cases) {
+        await control(request, baseURL, { reset: true });
+        await renew(request);
+        await warm(request, timeline);
+        const loaded = await request.get(`/api/admin/content/documents/tooling-${type}`, { headers: adminHeaders });
+        expect(loaded.ok(), await loaded.text()).toBe(true);
+        const { data } = await loaded.json();
+        const invalid = structuredClone(data.document);
+        if (name === "blank-title") invalid.title = " \n\t ";
+        else if (name === "empty-sections") invalid.sections = [];
+        else for (const section of invalid.sections) for (const block of section.content) for (const span of block.children) span.text = " \n\t ";
+        const command = { operation: "replace", type, documentId: data.document._id, expectedRevision: data.revision, document: invalid };
+        await control(request, baseURL, { publishResponseFailure: failure });
+        const offset = (await (await request.get(controlUrl(baseURL))).json()).requests.length;
+        const rejected = await publish(request, command);
+        const rejection = await rejected.json();
+        const status = await request.post("/api/admin/content/publish/status", { headers: adminHeaders, data: command });
+        const saved = await (await request.get(`/api/admin/content/documents/${command.documentId}`, { headers: adminHeaders })).json();
+        const calls = (await (await request.get(controlUrl(baseURL))).json()).requests.slice(offset).filter(call => call.path.endsWith("/roo_apply_cms_publish_command"));
+        outcomes.push({ name, failure, rejected: rejected.status(), rejection, status: status.status(), savedUnchanged: JSON.stringify(saved.data.document) === JSON.stringify(data.document), mutations: calls });
+        expect.soft(rejected.status(), `${name}/${failure || "normal"} refuses the publish`).toBe(400);
+        expect.soft(rejection).toMatchObject({ ok: false, code: "CMS_VALIDATION_FAILED" });
+        expect.soft(status.status(), "Rejected legal content has no committed receipt").toBe(404);
+        expect.soft(saved.data.document).toEqual(data.document);
+        expect.soft(calls, "Invalid legal content never reaches the mutation").toEqual([]);
+        for (const publicRoute of PREBUILT_ROUTES) {
+          const html = await read(request, publicRoute, timeline, `${name}/${failure || "normal"}`);
+          expect.soft(timeline.at(-1).cache, `${publicRoute} keeps its cached page`).toBe("HIT");
+          if (publicRoute === route) await fs.writeFile(testInfo.outputPath(`${name}-${failure || "normal"}.html`), html);
+        }
+        if (failure === "invalid-receipt") await screenshots(browser, baseURL, testInfo, `rejected-${type}`);
+        const marker = `Corrected ${type} ${name} ${failure || "normal"}`;
+        const corrected = { ...command, expectedRevision: saved.data.revision, document: { ...data.document, title: marker } };
+        const result = await publish(request, corrected);
+        expect(result.status(), await result.text()).toBe(failure ? 503 : 200);
+        const confirmed = await request.post("/api/admin/content/publish/status", { headers: adminHeaders, data: corrected });
+        expect(confirmed.ok(), await confirmed.text()).toBe(true);
+        const response = await request.get(route);
+        const html = await response.text();
+        outcomes.at(-1).corrected = { status: result.status(), confirmation: confirmed.status(), publicStatus: response.status(), visible: html.includes(marker) };
+        expect(response.status()).toBe(200);
+        expect(html).toContain(marker);
+        await page.goto(route);
+        await expect(page.locator("body")).toContainText(marker);
+        await page.screenshot({ path: testInfo.outputPath(`corrected-${name}-${failure || "normal"}.png`), fullPage: true });
+        expect(errors.splice(0)).toEqual([]);
+      }
+    } finally {
+      await control(request, baseURL, { reset: true });
+      await fs.writeFile(testInfo.outputPath("legal-publish.json"), JSON.stringify({ type, route, outcomes, timeline }, null, 2));
+    }
+  });
+}
+
 for (const failure of ["5xx", "timeout", "invalid-receipt"]) {
   test(`confirmed publish recovery refreshes public pages after a ${failure} commit response`, async ({ request, page, baseURL }, testInfo) => {
     const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
