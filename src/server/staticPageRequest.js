@@ -1,6 +1,7 @@
-import { AppPageRouteModule } from "next/dist/server/route-modules/app-page/module.compiled";
-import routes from "../lib/routes";
+import { createRequire } from "node:module";
+import routes from "../lib/routes.js";
 
+const { AppPageRouteModule } = createRequire(import.meta.url)("next/dist/server/route-modules/app-page/module.compiled.js");
 const installed = Symbol.for("roo.staticPageRequest");
 const prebuiltRoutes = new Set(routes.PREBUILT_ROUTES);
 
