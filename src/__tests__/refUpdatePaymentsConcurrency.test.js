@@ -1,13 +1,21 @@
 const mockReadFetch = jest.fn();
 const mockWriteFetch = jest.fn();
 const mockPatch = jest.fn();
+const mockGetDocument = jest.fn();
+const mockTransaction = jest.fn();
+const mockCommit = jest.fn();
 const mockRequireAdminKey = jest.fn();
 const mockFetchReferralEarnings = jest.fn();
 
 jest.mock("../server/data/documentClient.js", () => ({
   createDataClient: () => ({
-    fetch: (...args) => String(args[0]).includes('"package"') ? mockReadFetch(...args) : mockWriteFetch(...args),
+    fetch: (...args) =>
+      String(args[0]).includes('"package"')
+        ? mockReadFetch(...args)
+        : mockWriteFetch(...args),
     patch: (...args) => mockPatch(...args),
+    getDocument: (...args) => mockGetDocument(...args),
+    transaction: (...args) => mockTransaction(...args),
   }),
 }));
 
@@ -51,8 +59,29 @@ const revisionConflict = () =>
   Object.assign(new Error("Revision changed"), { statusCode: 409 });
 
 describe("D6/O1 native referral payment update concurrency", () => {
+  let receipts;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    receipts = new Map();
+    mockGetDocument.mockImplementation(async (id) => receipts.get(id) || null);
+    mockTransaction.mockImplementation(() => {
+      let receipt;
+      let referralPatch;
+      const transaction = {
+        create(document) {
+          receipt = document;
+          return transaction;
+        },
+        patch(id, buildPatch) {
+          expect(id).toBe(receipt.referralId);
+          referralPatch = buildPatch();
+          return transaction;
+        },
+        commit: () => mockCommit(receipt, referralPatch),
+      };
+      return transaction;
+    });
     mockRequireAdminKey.mockReturnValue(true);
     mockReadFetch.mockResolvedValue([]);
     mockFetchReferralEarnings.mockResolvedValue({
@@ -77,24 +106,26 @@ describe("D6/O1 native referral payment update concurrency", () => {
     const revisions = [];
     const committedSets = [];
     mockPatch.mockImplementation(() => {
-      const operations = { revision: "", values: {} };
       const patch = {
+        revision: "",
+        values: {},
         ifRevisionId(revisionId) {
-          operations.revision = revisionId;
+          patch.revision = revisionId;
           revisions.push(revisionId);
           return patch;
         },
         set(values) {
-          Object.assign(operations.values, values);
+          Object.assign(patch.values, values);
           return patch;
-        },
-        async commit() {
-          committedSets.push(operations.values);
-          if (operations.revision === "revision-one") throw revisionConflict();
-          return { _rev: "revision-three" };
         },
       };
       return patch;
+    });
+    mockCommit.mockImplementation(async (receipt, patch) => {
+      committedSets.push(patch.values);
+      if (patch.revision === "revision-one") throw revisionConflict();
+      receipts.set(receipt._id, receipt);
+      return { _rev: "revision-three" };
     });
 
     const response = createResponse();
@@ -105,6 +136,7 @@ describe("D6/O1 native referral payment update concurrency", () => {
           referralId: "referral.creator",
           packageType: "xoc",
           amount: 20,
+          payoutId: "concurrent-transfer",
           paidOn: "2026-07-18T01:00:00.000Z",
         },
       },
@@ -115,27 +147,37 @@ describe("D6/O1 native referral payment update concurrency", () => {
     expect(revisions).toEqual(["revision-one", "revision-two"]);
     expect(committedSets[1].xocPayments).toEqual([
       concurrentEntry,
-      expect.objectContaining({ amount: 20, _type: "paymentLogXoc" }),
+      expect.objectContaining({
+        _key: "concurrent-transfer",
+        amount: 20,
+        _type: "paymentLogXoc",
+      }),
     ]);
     expect(committedSets[1]).toMatchObject({ paidXoc: 30, paidTotal: 30 });
     expect(response.body.logs.xoc).toEqual(committedSets[1].xocPayments);
+    expect(mockTransaction).toHaveBeenCalledTimes(2);
+    expect(receipts.size).toBe(1);
+    expect([...receipts.values()][0]).toMatchObject({
+      referralId: "referral.creator",
+      amount: 20,
+      paymentEntry: committedSets[1].xocPayments[1],
+    });
   });
 
   test("returns a conflict after bounded revision retries", async () => {
     mockWriteFetch
       .mockResolvedValueOnce(referral("revision-one"))
       .mockResolvedValueOnce(referral("revision-two"))
-      .mockResolvedValueOnce(referral("revision-three"));
+      .mockResolvedValueOnce(referral("revision-three"))
+      .mockResolvedValue(referral("revision-four"));
     mockPatch.mockImplementation(() => {
       const patch = {
         ifRevisionId: () => patch,
         set: () => patch,
-        commit: async () => {
-          throw revisionConflict();
-        },
       };
       return patch;
     });
+    mockCommit.mockRejectedValue(revisionConflict());
 
     const response = createResponse();
     await handler(
@@ -145,6 +187,7 @@ describe("D6/O1 native referral payment update concurrency", () => {
           referralId: "referral.creator",
           packageType: "vertex",
           amount: 25,
+          payoutId: "conflicted-transfer",
         },
       },
       response
@@ -156,6 +199,10 @@ describe("D6/O1 native referral payment update concurrency", () => {
       error: "Payment data changed while saving. Please try again.",
     });
     expect(mockPatch).toHaveBeenCalledTimes(3);
-    expect(mockWriteFetch).toHaveBeenCalledTimes(3);
+    expect(mockTransaction).toHaveBeenCalledTimes(3);
+    expect(mockCommit).toHaveBeenCalledTimes(3);
+    expect(mockWriteFetch).toHaveBeenCalledTimes(4);
+    expect(mockGetDocument).toHaveBeenCalledTimes(4);
+    expect(receipts.size).toBe(0);
   });
 });

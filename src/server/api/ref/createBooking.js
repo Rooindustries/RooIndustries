@@ -18,6 +18,7 @@ import {
 import { normalizeBookingStatus } from "../../booking/bookingStatus.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
+import { calculateCreatorCommission } from "../../referrals/commissionMoney.js";
 import {
   buildDeferredEmailDispatch,
   getBookingForEmailDispatch,
@@ -1309,7 +1310,7 @@ export default async function handler(req, res) {
           effectiveReferralId: String(
             frozenPricing.effectiveReferralId || ""
           ).trim(),
-          commissionAmount: Number(frozenPricing.commissionAmount || 0),
+          commissionAmount: calculateCreatorCommission(frozenPricing).amount,
         }
       : livePricing;
     const {
@@ -1621,12 +1622,17 @@ export default async function handler(req, res) {
       grossAmount: effectiveGrossAmount,
       netAmount: effectiveNetAmount,
       commissionPercent: effectiveCommissionPercent,
+      commissionBaseAmount: calculateCreatorCommission(resolvedPricing).baseAmount,
+      commissionCalculationVersion: 2,
       commissionAmount,
       ...(paymentProvider === "dodo" && internalPaymentRecord.refundState === "partial" ? {
         dodoOriginalCommissionAmount: commissionAmount,
         refundedAmount: Number(internalPaymentRecord.refundProcessedAmountInSubunits || 0) / 100,
         refundStatus: "partial",
-        commissionAmount: Math.round(commissionAmount * Math.max(0, 1 - Number(internalPaymentRecord.refundProcessedAmountInSubunits || 0) / (dodoTotalAmount * 100)) * 100) / 100,
+        commissionAmount: calculateCreatorCommission(resolvedPricing, {
+          paidAmount: dodoTotalAmount,
+          refundedAmount: Number(internalPaymentRecord.refundProcessedAmountInSubunits || 0) / 100,
+        }).amount,
       } : {}),
       hostDate: bookingDate,
       hostTime: bookingTime,

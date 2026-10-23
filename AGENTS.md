@@ -103,12 +103,14 @@ Any PR that touches a money path, including a helper outside this list:
 - The server never trusts the client's discount or commission.
   - It resolves the code itself: lowercased slug, creators whose `registrationStatus` isn't `pending_email`.
   - It takes discount and commission from that creator's current percentages. (`src/server/api/ref/pricing.js:227-228,443-463,610-616`)
-- **NOT ENFORCED (unknown or unverified code):** when no creator matches, `effectiveReferralCode` keeps the raw code at 0% commission (`src/server/api/ref/pricing.js:456-457`). Earnings match bookings by referral id or by lowercased code (`src/server/api/ref/payoutUtils.js:87-102`).
+- **NOT ENFORCED (unknown or unverified code):** when no creator matches, `effectiveReferralCode` keeps the raw code at 0% commission (`src/server/api/ref/pricing.js:456-457`). Earnings match bookings by referral id or by lowercased code (`src/server/api/ref/payoutUtils.js:69-87`).
   - The normal checkout validates codes first and drops unknown ones (`src/server/api/ref/validateReferral.js:93-107`, `src/components/Payment.jsx:719-726`). A raw API request can still store one.
   - A creator who books before verifying their email gets no credit on those bookings (ROO-512).
 - **NOT ENFORCED (self-referral):** nothing compares the buyer with the creator, so a creator can book with their own code and earn commission. Policy call pending (ROO-511).
 - Commission is frozen on the booking when it's created. (`src/server/api/ref/createBooking.js:1293-1320,1615-1621`)
-  - **NOT ENFORCED:** a PayPal or Razorpay capture recovered as a reschedule booking loses its commission (ROO-520). Only the Dodo branch copies the commission fields (`src/server/api/ref/bookingCommit.js:313-328`); the other branch keeps the referral but not the commission (`:329-374`), so earnings compute 0 (`src/server/api/ref/payoutUtils.js:41-50`).
+  - Recovery bookings copy the frozen commission percentage and amount for Dodo, PayPal and Razorpay, including zero. Legacy missing/null amounts derive from coupon-adjusted gross before the buyer referral discount, using the saved percentage. (`src/server/api/ref/bookingCommit.js:302-332`, `src/server/referrals/commissionMoney.js`; E2E `ROO-520-*` and `R1-money-table-*` in `scripts/test-creator-payouts-e2e.mjs`.)
+- New bookings use commission calculation version 2: stored zero is authoritative, missing commission uses coupon-adjusted gross, and each booking rounds in integer cents before summing. Historical bookings without a version keep their previous calculation and source rows, whether the creator has been paid or not. The migration changes only the earnings function, leaving historical earned, paid and owed balances intact. New bookings on those creators still use version 2. Native and fallback earnings agree for mixed histories. (`src/server/referrals/commissionMoney.js`, `supabase/migrations/20261023090000_preserve_frozen_creator_commissions.sql`; E2E `R1-migration-preserves-settled-source-and-cron` and `review-r2-unpaid-historical-balance`.)
+- Empty or missing codes cannot attribute version-2 bookings. A matching referral ID still earns commission. Unversioned historical empty-code contributions remain unchanged; deciding whether to correct those past balances belongs to ROO-729. Both earnings engines, migration, cron and projection rebuilds preserve that boundary. (`src/server/api/ref/payoutUtils.js`, `supabase/migrations/20261023090000_preserve_frozen_creator_commissions.sql`; E2E `empty-code-forward-only-history`.)
 
 ### Bookings and holds
 
@@ -189,9 +191,9 @@ Refunds:
 Disputes:
 
 - All seven dispute statuses and three stages are validated, and each dispute's id, payment id and currency must match the payment. Anything else gets a 409. (`src/server/api/payment/flow.js:5870-5876`)
-- An open dispute moves a `captured` or `completed` booking to `pending`, zeroes the commission and puts the record in `needs_recovery`. A cancelled booking stays cancelled, and a fully refunded booking isn't touched. Open means any status except `dispute_won` and `dispute_cancelled`. (`src/server/api/payment/flow.js:5884-5888,5906-5925,5939`)
-- `dispute_won` and `dispute_cancelled` restore the earlier status only if the booking is still `pending` with its dispute flag set, so an admin's cancellation in between stands. The commission returns at the retained share either way; a cancelled booking still earns nothing, since earnings count only `captured` and `completed`. (`src/server/api/payment/flow.js:5908-5921`, `src/server/api/ref/payoutUtils.js:87-93`)
-- A disputed payment never finalizes a booking. (`src/server/api/payment/dodoProvider.js:147-149`, `src/server/api/payment/flow.js:6073-6079`)
+- An open dispute moves a `captured` or `completed` booking to `pending`, zeroes the commission and puts the record in `needs_recovery`. A cancelled booking stays cancelled, and a fully refunded booking isn't touched. Open means any status except `dispute_won` and `dispute_cancelled`. (`src/server/api/payment/flow.js:5884-5888,5917-5923,5953-5983`)
+- `dispute_won` and `dispute_cancelled` restore the earlier status only if the booking is still `pending` with its dispute flag set, so an admin's cancellation in between stands. The commission returns at the retained share either way; a cancelled booking still earns nothing, since earnings count only `captured` and `completed`. (`src/server/api/payment/flow.js:5913-5923,5955-5956`, `src/server/api/ref/payoutUtils.js:69-74`)
+- A disputed payment never finalizes a booking. (`src/server/api/payment/dodoProvider.js:147-149`, `src/server/api/payment/flow.js:6115-6120`)
 
 Webhook delivery:
 
@@ -214,16 +216,16 @@ Webhook delivery:
   - restores the consumed coupon use;
   - decrements the creator's `successfulReferrals`.
   - (`src/server/api/ref/bookingRefunds.js:228-314`)
-- Commission counts only `captured` and `completed` bookings, so a fully refunded booking earns none. (`src/server/api/ref/payoutUtils.js:87-93`, `supabase/migrations/20260712092342_close_supabase_port_and_unified_auth.sql:1513`)
+- Commission counts only `captured` and `completed` bookings, so a fully refunded booking earns none. (`src/server/api/ref/payoutUtils.js:69-74`, `supabase/migrations/20260712092342_close_supabase_port_and_unified_auth.sql:1513`)
 - Refund accounting applies once:
   - full refunds through `refundAccountingAppliedAt`;
   - non-Dodo partial refunds through `processedRefundIds`;
   - Dodo partial refunds through a `refundedAmount` that only goes up.
   - (`src/server/api/ref/bookingRefunds.js:154-158,171-186,211-226`)
 - A Dodo partial refund scales commission to the retained share, or to 0 while a dispute is active. (`src/server/api/ref/bookingRefunds.js:154-168`, `supabase/migrations/20260909090000_add_dodo_payment_provider.sql:25-30`)
-- **NOT ENFORCED (ROO-508):** commission should never exceed the commission on the money we kept. A PayPal or Razorpay partial refund records `refundedAmount` but keeps the full `commissionAmount`. (`src/server/api/ref/bookingRefunds.js:187-201`)
-- **NOT ENFORCED (ROO-509):** `successfulReferrals` should count only bookings we kept.
-  - A lost chargeback zeroes commission (`src/server/api/payment/flow.js:5909-5925`) but never decrements the count. Only a full refund does (`src/server/api/ref/bookingRefunds.js:298-302`).
+- Pricing, ordinary completion, recovery, partial/full refunds and dispute restoration use the same exact commission function. Cumulative refunds add currency units before proportional rounding; exact half cents round away from zero. When an existing booking has no stored original, refunds and disputes resolve it using that booking's calculation version, including derived legacy zero. Unrefunded legacy disputes retain their original fractions and calculation version so a won or cancelled dispute restores the historical balance. Refund IDs and booking revisions prevent duplicate reductions. (`src/server/referrals/commissionMoney.js`, `src/server/api/ref/bookingRefunds.js`, `src/server/api/payment/flow.js`; E2E `R1-money-table-*`, `legacy-original-*` and `ROO-508-*`.)
+- Recording a creator payout requires a stable `payoutId` (or the same `Idempotency-Key` header or `entryId`). Repeat requests return the recorded transfer; reuse with changed creator, package, amount, date or notes is refused. Its receipt and payment log commit in one guarded transaction. Different transfers need different keys even when their amounts and dates match. Missing keys are refused; payment logs cannot be edited through this endpoint. (`src/server/api/ref/updatePayments.js`; E2E `R1-payout-record-*`.)
+- A lost, accepted or expired Dodo dispute consumes its referral accounting once, in the booking/payment transaction, even when the historical count is zero or missing. Only an actual decrement can be restored by a won or cancelled dispute, when no other active dispute, full refund or admin cancellation supersedes it. Updated snapshots, reopened disputes and later full refunds cannot consume another booking's count. Disputes and full refunds use one accounting-state resolver: previously recorded skipped decrements are preserved, while a bare historical terminal status without accounting flags is processed once. If the creator row is missing, booking and payment state still commit; no counter change is invented, and the accounting marker remains. (`src/server/referrals/disputeAccounting.js:10-26`, `src/server/api/payment/flow.js:5884-5965`, `src/server/api/ref/bookingRefunds.js:285-287`; E2E `ROO-509-*`, `legacy-dispute-accounting-*`.)
   - The count unlocks split editing at 5. (`src/server/api/ref/updateSplit.js:71-73`)
 - A new coupon reservation enforces `maxUses`, counting consumed uses plus active reservations, under revision guards. (`src/server/api/ref/couponReservations.js:83-88,119-131`)
   - **NOT ENFORCED as a hard ceiling:** a late paid capture consumes its released reservation even when the cap is already reached, and records `capacityExceededAtRecovery`. (`src/server/api/ref/couponReservations.js:188-226`, `src/server/api/ref/bookingCommit.js:416-424`)

@@ -1,3 +1,5 @@
+import { sumCreatorCommissions } from '../../referrals/commissionMoney.js';
+
 export function normalizeNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
@@ -32,46 +34,26 @@ export function classifyPackage(packageTitle = '') {
 }
 
 export function computeEarningsFromBookings(bookings = []) {
-  const totals = {xoc: 0, vertex: 0, total: 0};
-  const byPackage = {};
-
-  bookings.forEach((booking) => {
-    const packageTitle = normalizePackageTitle(booking?.packageTitle);
-    const pkg = classifyPackage(packageTitle);
-    const commissionAmount = normalizeNumber(booking?.commissionAmount);
-    const commissionPercent = normalizeNumber(booking?.commissionPercent);
-    const base =
-      normalizeNumber(booking?.netAmount) ||
-      normalizeNumber(booking?.grossAmount);
-
-    const earned =
-      commissionAmount || booking?.dodoOriginalCommissionAmount != null
-        ? commissionAmount
-        : +(base * ((commissionPercent || 0) / 100 || 0)).toFixed(2);
-
-    if (packageTitle) {
-      byPackage[packageTitle] =
-        normalizeNumber(byPackage[packageTitle]) + normalizeNumber(earned);
-    }
-
-    totals[pkg] += earned;
-    totals.total += earned;
-  });
-
+  const byPackage = new Map();
+  const groups = { xoc: [], vertex: [] };
+  for (const booking of bookings) {
+    const title = normalizePackageTitle(booking?.packageTitle);
+    if (!byPackage.has(title)) byPackage.set(title, []);
+    byPackage.get(title).push(booking);
+    groups[classifyPackage(title)].push(booking);
+  }
   return {
-    xoc: +totals.xoc.toFixed(2),
-    vertex: +totals.vertex.toFixed(2),
-    total: +totals.total.toFixed(2),
-    byPackage: Object.keys(byPackage).reduce((acc, key) => {
-      acc[key] = +byPackage[key].toFixed(2);
-      return acc;
-    }, {}),
+    xoc: sumCreatorCommissions(groups.xoc),
+    vertex: sumCreatorCommissions(groups.vertex),
+    total: sumCreatorCommissions(bookings),
+    byPackage: Object.fromEntries([...byPackage].map(([title, rows]) => [title, sumCreatorCommissions(rows)])),
   };
 }
 
 export async function fetchReferralEarnings({ client, referralId, referralCode }) {
+  const code = typeof referralCode === "string" ? referralCode.toLowerCase() : "";
   if (typeof client?.referralEarnings === "function") {
-    const summary = await client.referralEarnings({ referralId, referralCode });
+    const summary = await client.referralEarnings({ referralId, referralCode: code });
     if (summary !== null && summary !== undefined) {
       return {
         xoc: normalizeNumber(summary?.xoc),
@@ -89,18 +71,32 @@ export async function fetchReferralEarnings({ client, referralId, referralCode }
         && status in ["captured", "completed"]
         && (
           referral._ref == $id
-          || (defined(referralCode) && lower(referralCode) == $code)
+          || ($code != "" && defined(referralCode) && lower(referralCode) == $code)
+          || ($code == "" && !(commissionCalculationVersion in [2, "2"])
+            && coalesce(referralCode, "") == "")
         )
       ]{
+        _id,
         packageTitle,
         commissionAmount,
-        dodoOriginalCommissionAmount,
         commissionPercent,
         netAmount,
-        grossAmount
+        grossAmount,
+        couponDiscountAmount,
+        commissionBaseAmount,
+        commissionCalculationVersion,
+        dodoOriginalCommissionAmount
       }`,
-    { id: referralId, code: referralCode }
+    { id: referralId, code }
   );
+  for (const booking of bookings || []) {
+    if (String(booking.commissionCalculationVersion) !== '2' && booking._id &&
+        booking.commissionAmount != null && Number(booking.commissionAmount) === 0) {
+      const source = await client.fetch('*[_id == $id][0]', { id: booking._id });
+      if (!source) throw new Error('Historical commission source is unavailable.');
+      booking.legacyCommissionZeroIsFrozen = Object.hasOwn(source, 'dodoOriginalCommissionAmount');
+    }
+  }
   return computeEarningsFromBookings(bookings || []);
 }
 

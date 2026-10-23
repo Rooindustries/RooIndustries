@@ -1,5 +1,7 @@
 import { buildBrowserCompletionBody } from "./bookingSummary.js";
 import envValue from "../../supabase/envValue.cjs";
+import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
+import { isTerminalDisputeStatus, resolveDisputeReferralAccounting } from "../../referrals/disputeAccounting.js";
 const { resolveStoreBackend } = envValue;
 import { createDodoCheckout, inspectDodoCheckout, retrieveDodoPayment, retrieveDodoRefund, validateDodoPayment, verifyDodoCapture, unwrapDodoWebhook } from "./dodoProvider.js";
 import crypto from "crypto";
@@ -5930,13 +5932,14 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     amount: dispute.amount, currency: dispute.currency, businessId: dispute.business_id,
     createdAt: dispute.created_at, isResolvedByRdr: dispute.is_resolved_by_rdr ?? null, remarks: dispute.remarks ?? null,
   })) : record.dodoDisputes || [];
-  const terminalDispute = dodoDisputes.find(dispute => ["dispute_lost", "dispute_accepted", "dispute_expired"].includes(dispute.status));
+  const terminalDispute = dodoDisputes.find(dispute => isTerminalDisputeStatus(dispute.status));
   const disputed = disputes.some((dispute) => !["dispute_won", "dispute_cancelled"].includes(dispute.dispute_status)) ||
     (record.dodoDisputeActive === true && disputes.length === 0);
+  let disputeBooking;
   if ((disputed || record.dodoDisputeActive === true) && record.bookingId) {
-    const booking = await client.fetch(`*[_type == "booking" && _id == $id][0]{...}`, { id: record.bookingId });
-    if (booking && booking.status !== "refunded" && !booking.refundAccountingAppliedAt) {
-      requirePaymentRevision(booking);
+    disputeBooking = await client.fetch(`*[_type == "booking" && _id == $id][0]{...}`, { id: record.bookingId });
+    if (disputeBooking && disputeBooking.status !== "refunded" && !disputeBooking.refundAccountingAppliedAt) {
+      requirePaymentRevision(disputeBooking);
     }
   }
   if (disputed || record.dodoDisputeActive === true || disputes.length) {
@@ -5946,18 +5949,54 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       const previous = retainedDisputes.find(entry => entry.disputeId === dispute.disputeId);
       return previous && Object.entries(dispute).every(([key, value]) => previous[key] === value);
     });
+    const missingReferralAccounting = !!terminalDispute && disputeBooking &&
+      disputeBooking.status !== "refunded" && !disputeBooking.refundAccountingAppliedAt &&
+      disputeBooking.dodoReferralDisputeAccounted !== true;
     const unchanged = record.dodoDisputeActive === disputed && sameDisputes &&
-      record.providerRecoveryTerminal === !!terminalDispute;
+      record.providerRecoveryTerminal === !!terminalDispute && !missingReferralAccounting;
     if (!unchanged) {
-      const booking = record.bookingId
+      const booking = disputeBooking || (record.bookingId
         ? await client.fetch(`*[_type == "booking" && _id == $id][0]{...}`, { id: record.bookingId })
-        : null;
+        : null);
       const transaction = client.transaction();
       if (booking && booking.status !== "refunded" && !booking.refundAccountingAppliedAt) {
         const originalStatus = booking.dodoDisputeActive
           ? booking.dodoDisputeBookingStatus : booking.status;
-        const originalCommission = Number(booking.dodoOriginalCommissionAmount ?? booking.commissionAmount ?? 0);
-        const retainedFraction = Math.max(0, 1 - Number(booking.refundedAmount || 0) / Number(booking.dodoTotalAmount || booking.netAmount || 1));
+        const preserveLegacyCommission = String(booking.commissionCalculationVersion) !== "2" &&
+          !Number(booking.refundedAmount || 0);
+        const commission = calculateCreatorCommission(booking, {
+          originalAmount: booking.dodoOriginalCommissionAmount ?? originalBookingCommission(booking),
+          paidAmount: booking.dodoTotalAmount || booking.netAmount,
+          refundedAmount: booking.refundedAmount,
+          blocked: disputed,
+          preserveOriginalPrecision: preserveLegacyCommission,
+        });
+        const referralId = booking.referral?._ref;
+        const accounting = resolveDisputeReferralAccounting(booking, record);
+        let referralReversed = accounting.reversed;
+        let referralDisputeAccounted = accounting.consumed;
+        const reverseReferral = !!terminalDispute && !!referralId &&
+          booking.referralAccountingApplied !== false && booking.referralReversedAfterRefund !== true &&
+          !referralDisputeAccounted;
+        const restoreReferral = !disputed && !!referralId &&
+          referralReversed &&
+          ["captured", "completed"].includes(originalStatus) &&
+          (booking.status === "pending" || ["captured", "completed"].includes(booking.status));
+        if (reverseReferral || restoreReferral) {
+          const referral = await client.fetch(`*[_type == "referral" && _id == $id][0]{_id,_rev,successfulReferrals}`, { id: referralId });
+          if (referral?._id) requirePaymentRevision(referral);
+          if (referral?._id && (restoreReferral || Number(referral.successfulReferrals || 0) > 0)) {
+            transaction.patch(referral._id, (patch) => {
+              const guarded = guardPaymentRevision(patch, referral);
+              return restoreReferral
+                ? guarded.inc({ successfulReferrals: 1 })
+                : guarded.dec({ successfulReferrals: 1 });
+            });
+            referralReversed = !restoreReferral;
+          }
+        }
+        if (terminalDispute) referralDisputeAccounted = true;
+        else if (restoreReferral && !referralReversed) referralDisputeAccounted = false;
         transaction.patch(booking._id, (patch) => {
           const guarded = guardPaymentRevision(patch, booking);
           return guarded.set({
@@ -5966,9 +6005,12 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
               : !disputed && booking.dodoDisputeActive && booking.status === "pending"
                 ? originalStatus : booking.status,
             dodoDisputeActive: disputed,
+            dodoReferralDisputeAccounted: referralDisputeAccounted,
+            dodoReferralReversedAfterDispute: referralReversed,
             dodoDisputeBookingStatus: originalStatus,
-            dodoOriginalCommissionAmount: originalCommission,
-            commissionAmount: disputed ? 0 : Math.round(originalCommission * retainedFraction * 100) / 100,
+            dodoOriginalCommissionAmount: commission.originalAmount,
+            ...(preserveLegacyCommission ? {} : { commissionCalculationVersion: 2 }),
+            commissionAmount: commission.amount,
             paymentVerificationState: disputed ? "disputed" : "server_verified",
           });
         });

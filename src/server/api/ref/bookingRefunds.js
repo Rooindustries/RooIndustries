@@ -8,6 +8,8 @@ import {
 } from "../../booking/bookingStatus.js";
 import { appendCouponRefund } from "./couponReservations.js";
 import { toSubunits } from "../payment/providerClients.js";
+import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
+import { resolveDisputeReferralAccounting } from "../../referrals/disputeAccounting.js";
 
 export const resolvePaymentCurrency = (paymentRecord = {}, { booking = {}, refund = {}, fallback = "USD" } = {}) => {
   const values = [paymentRecord.pricingSnapshot?.currency, paymentRecord.bookingPayload?.currency,
@@ -156,15 +158,21 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
     if (booking.refundAccountingAppliedAt || refundedAmount <= Number(booking.refundedAmount || 0)) {
       return { bookingId: booking._id, idempotent: true };
     }
-    const originalCommission = Number(booking.dodoOriginalCommissionAmount ?? booking.commissionAmount ?? 0);
+    const originalCommission = calculateCreatorCommission(booking, {
+      originalAmount: booking.dodoOriginalCommissionAmount ?? originalBookingCommission(booking),
+    }).originalAmount;
     const totalAmount = Number(paymentRecord.providerPublicData?.totalAmount || 0) / toSubunits(1, currency) || Number(booking.dodoTotalAmount || booking.netAmount || 1);
-    const remaining = Math.max(0, 1 - refundedAmount / totalAmount);
     let patch = client.patch(booking._id);
     if (booking._rev) patch = patch.ifRevisionId(booking._rev);
     await patch.set({ refundedAmount, refundStatus: "partial", lastRefundAt: now,
       dodoOriginalCommissionAmount: originalCommission,
       dodoTotalAmount: totalAmount,
-      commissionAmount: booking.dodoDisputeActive === true ? 0 : Math.round(originalCommission * remaining * 100) / 100 }).commit();
+      commissionCalculationVersion: 2,
+      commissionAmount: calculateCreatorCommission(booking, {
+        originalAmount: originalCommission, paidAmount: totalAmount, refundedAmount,
+        currencyFactor: toSubunits(1, currency),
+        blocked: booking.dodoDisputeActive === true,
+      }).amount }).commit();
     return { bookingId: booking._id, idempotent: false, reopenedSlot: false, couponRestored: false };
   }
   if (!full) {
@@ -184,6 +192,22 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
         idempotent: true,
       };
     }
+    const totalAmount = Number(paymentRecord.pricingSnapshot?.netAmount ?? booking.netAmount ?? booking.grossAmount);
+    const originalCommissionAmount = calculateCreatorCommission(paymentRecord.pricingSnapshot || booking, {
+      originalAmount: booking.originalCommissionAmount ?? paymentRecord.pricingSnapshot?.commissionAmount ?? originalBookingCommission(booking),
+    }).originalAmount;
+    const commission = calculateCreatorCommission(booking, {
+      originalAmount: originalCommissionAmount, paidAmount: totalAmount,
+      refundedAmount: booking.refundedAmount, additionalRefundAmount: refund.amount,
+      currencyFactor: toSubunits(1, currency),
+    });
+    const refundedAmount = commission.refundedAmount;
+    if (!refundId || !Number.isFinite(Number(booking.refundedAmount || 0)) ||
+        !Number.isFinite(Number(refund.amount)) || Number(refund.amount) <= 0 ||
+        !Number.isFinite(totalAmount) || totalAmount <= 0 || refundedAmount > totalAmount + 0.000001 ||
+        !Number.isFinite(originalCommissionAmount) || originalCommissionAmount < 0) {
+      throw Object.assign(new Error("Partial refund accounting is invalid."), { status: 409, code: "partial_refund_accounting_invalid" });
+    }
     let partialPatch = client.patch(booking._id);
     if (booking._rev && typeof partialPatch.ifRevisionId === "function") {
       partialPatch = partialPatch.ifRevisionId(booking._rev);
@@ -192,7 +216,10 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
       .set({
         lastRefundId: refundId,
         lastRefundAt: refund.refundedAt || now,
-        refundedAmount: Number(booking.refundedAmount || 0) + Number(refund.amount || 0),
+        refundedAmount,
+        originalCommissionAmount,
+        commissionCalculationVersion: 2,
+        commissionAmount: commission.amount,
         refundStatus: "partial",
         processedRefundIds: refundId
           ? [...processedRefundIds, refundId]
@@ -256,7 +283,8 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
     });
   }
   const referralId = booking.referral?._ref || "";
-  const canReverseReferral = !!referralId && booking.referralAccountingApplied !== false;
+  const canReverseReferral = !!referralId && booking.referralAccountingApplied !== false &&
+    !resolveDisputeReferralAccounting(booking, paymentRecord).consumed;
   const referral = canReverseReferral
     ? await client.fetch(
         `*[_type == "referral" && _id == $id][0]{_id,_rev,successfulReferrals}`,
@@ -271,6 +299,8 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
     patch.set({
       status: "refunded",
       refundStatus: "full",
+      commissionCalculationVersion: 2,
+      commissionAmount: calculateCreatorCommission(booking, { blocked: true }).amount,
       lastRefundId: refundId,
       lastRefundAt: refund.refundedAt || now,
       refundedAmount: Number(refund.amount ||
