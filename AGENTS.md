@@ -137,7 +137,7 @@ Any PR that touches a money path, including a helper outside this list:
   - owner-review states, such as upgrade credit that dropped after capture (`src/server/api/payment/flow.js:1936-1965,3933-3942`);
   - exhausted retries: 12 failed finalizes set `reconciliationRecoveryTerminal` (`:105-117,1870-1911`), and reconcile then skips the record (`:4347`).
 - A definitive unpaid abandonment tries to release the hold and the coupon reservation. If the release fails it keeps `resourceReleasePending` and retries. (`src/server/api/payment/flow.js:1687,1746-1752,1781,2634,2696-2732`)
-  - Cancellation of an abandoned payment whose release is still pending returns `202` with `cancelled: false`; Booking keeps the hold, payment credentials and details for a retry (`src/server/api/payment/flow.js` `cancelPaymentSession`).
+  - Cancellation succeeds only when the abandoned record has no pending resource release, including after conflicting staging and completion writes. Pending release returns `202` with `cancelled: false` and never `slotReleased: true`; Booking keeps the hold, payment credentials and details for a retry (`src/server/api/payment/flow.js` `paymentAbandonmentComplete`, `cancelPaymentSession`).
   - A payment still pending after its hold expires releases only the hold; its coupon reservation stays. (`src/server/api/payment/flow.js:3828-3840,4848-4854`)
 - When a hold expires in the booking dialog or on `/payment`, the visitor stays in the flow, keeps what they typed, and sees "The reservation expired. Please choose a slot again."
   - On `/booking` and `/payment` the banner does not release or redirect (`src/components/ReservationBanner.jsx:21,199-202`). Away from those pages it records the expiry and keeps the draft (`:128-131,245-248`).
@@ -149,6 +149,7 @@ Any PR that touches a money path, including a helper outside this list:
   - An explicit successful release before expiry clears that package's details only while the same hold and draft revision remain current. Failed releases, slot replacement and edits made while release waits keep the details (`src/components/BookingForm.jsx` `releaseHold`). A new hold clears the old expiry marker (no-hold reset effect).
   - A release from the reservation banner that lands after the deadline counts as an expiry and keeps the draft (`src/components/ReservationBanner.jsx` release handler).
   - An expired ordinary hold returns to `/booking`. A matching payment-pending hold stays on Payment so its saved session can be checked; without that session, Payment directs the visitor to Booking's Check again action (`src/components/Payment.jsx` expiry effect, `finalizeSessionCheckout`).
+  - A confirmed cancellation without a refreshed hold returns an ordinary checkout to Booking's slot selection. Booking and Payment clear only the matching hold, checkout hold fields and payment session, mark expiry and retain the draft. A newer hold or payment session prevents that cleanup; upgrades keep their existing payment-method flow (`src/lib/checkoutStorage.js` `clearReleasedCheckoutHold`).
 
 ### Dodo payments and webhooks
 

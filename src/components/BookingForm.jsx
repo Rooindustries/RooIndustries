@@ -25,6 +25,7 @@ import {
   bookingHoldExpired,
   clearBookingHoldExpired,
   clearCompletedCheckoutDraft,
+  clearReleasedCheckoutHold,
   holdAwaitsPayment,
   markBookingHoldExpired,
   CHECKOUT_BOOKING_STORAGE_KEY,
@@ -2236,9 +2237,11 @@ export default function BookingForm() {
       }
       const refreshed = data.refreshedHold;
       if (!refreshed?.slotHoldId || !refreshed?.slotHoldToken) {
-        removeBrowserStorage("sessionStorage", PAYMENT_SESSION_STORAGE_KEY);
-        clearHoldState(true);
-        markBookingHoldExpired();
+        const cleared = clearReleasedCheckoutHold({
+          ...checkout, slotHoldId: myHold.holdId, slotHoldToken: myHold.holdToken,
+        }, paymentAccessToken);
+        if (!cleared) throw new Error("Your saved reservation changed or could not be updated. Please check it again.");
+        clearHoldState(true, false);
         setErrorStep1(RESERVATION_EXPIRED_ERROR);
         return;
       }

@@ -2643,6 +2643,10 @@ const finalizePaymentRecordInternal = async ({
   });
 };
 
+const paymentAbandonmentComplete = (record) =>
+  String(record?.status || "").trim().toLowerCase() === PAYMENT_STATUS_ABANDONED &&
+  record.resourceReleasePending !== true;
+
 const abandonStartedPaymentRecord = async ({
   client,
   record,
@@ -2659,7 +2663,7 @@ const abandonStartedPaymentRecord = async ({
 
   if (!canStageAbandonment) {
     return {
-      ok: currentStatus === PAYMENT_STATUS_ABANDONED,
+      ok: paymentAbandonmentComplete(current),
       httpStatus: isPaymentTerminalStatus(currentStatus) ? 200 : 202,
       paymentRecord: current,
       response: buildPublicStatusBody(current),
@@ -2695,9 +2699,7 @@ const abandonStartedPaymentRecord = async ({
       if (!isConflictError(error)) throw error;
       const fresh = (await getPaymentRecordById(client, current._id)) || current;
       return {
-        ok:
-          String(fresh.status || "").trim().toLowerCase() ===
-          PAYMENT_STATUS_ABANDONED,
+        ok: paymentAbandonmentComplete(fresh),
         httpStatus: 202,
         paymentRecord: fresh,
         response: buildPublicStatusBody(fresh),
@@ -2778,10 +2780,8 @@ const abandonStartedPaymentRecord = async ({
   }
 
   return {
-    ok:
-      String(nextRecord.status || "").trim().toLowerCase() ===
-      PAYMENT_STATUS_ABANDONED,
-    httpStatus: 200,
+    ok: paymentAbandonmentComplete(nextRecord),
+    httpStatus: nextRecord.resourceReleasePending === true ? 202 : 200,
     paymentRecord: nextRecord,
     response: buildPublicStatusBody(nextRecord),
   };
@@ -3575,7 +3575,7 @@ export const cancelPaymentSession = async ({
   let record = resolved.record;
   const status = String(record.status || "").trim().toLowerCase();
   if (status === PAYMENT_STATUS_ABANDONED) {
-    if (record.resourceReleasePending === true) {
+    if (!paymentAbandonmentComplete(record)) {
       const message = "Your payment is still being released. Please try again.";
       return {
         httpStatus: 202,
@@ -3735,7 +3735,7 @@ export const cancelPaymentSession = async ({
           ...abandoned.response,
           ok: abandoned.ok,
           cancelled: abandoned.ok,
-          slotReleased: true,
+          slotReleased: abandoned.ok,
         },
       };
     }

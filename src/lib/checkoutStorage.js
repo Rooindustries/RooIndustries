@@ -158,6 +158,35 @@ export const updateStoredCheckoutHold = (hold = {}) => {
   });
 };
 
+export const clearReleasedCheckoutHold = (bookingData, paymentAccessToken) => {
+  try {
+    const storage = window.sessionStorage;
+    const hold = JSON.parse(storage.getItem("my_slot_hold") || "null");
+    const checkout = JSON.parse(storage.getItem(CHECKOUT_BOOKING_STORAGE_KEY) || "null");
+    const payment = JSON.parse(storage.getItem("payment_session_state") || "null");
+    const holdId = String(bookingData?.slotHoldId || "").trim();
+    const holdToken = String(bookingData?.slotHoldToken || "").trim();
+    if (!holdId || !holdToken || !paymentAccessToken ||
+        (hold && (hold.holdId !== holdId || hold.holdToken !== holdToken)) ||
+        (checkout && (checkout.slotHoldId !== holdId || checkout.slotHoldToken !== holdToken)) ||
+        (payment && payment.paymentAccessToken !== paymentAccessToken)) return null;
+    const nextCheckout = {
+      ...(checkout || bookingData),
+      slotHoldId: "",
+      slotHoldToken: "",
+      slotHoldExpiresAt: "",
+    };
+    if (!removeBrowserStorage("sessionStorage", "my_slot_hold")) return null;
+    markBookingHoldExpired();
+    if (!writeBrowserStorage("sessionStorage", CHECKOUT_BOOKING_STORAGE_KEY, JSON.stringify(nextCheckout)) ||
+        !removeBrowserStorage("sessionStorage", "payment_session_state")) return null;
+    window.dispatchEvent(new CustomEvent("hold-state", { detail: null }));
+    return nextCheckout;
+  } catch {
+    return null;
+  }
+};
+
 export const migrateCheckoutStorageToSession = () => {
   if (typeof window === "undefined") return;
   LEGACY_CHECKOUT_KEYS.forEach((key) => {

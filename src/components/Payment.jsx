@@ -11,7 +11,7 @@ import { trackConfirmedPurchase } from "../lib/analytics";
 import { preloadConfirmationPage, preloadConfirmationPages } from "../lib/confirmationPages";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
 import { beginCheckoutConfirmation } from "../lib/checkoutConfirmation";
-import { clearCompletedCheckoutDraft, holdAwaitsPayment, readCheckoutDraftRevision } from "../lib/checkoutStorage";
+import { clearCompletedCheckoutDraft, clearReleasedCheckoutHold, holdAwaitsPayment, readCheckoutDraftRevision } from "../lib/checkoutStorage";
 import {
   calculateCheckoutDiscounts,
   formatCouponValue,
@@ -1068,6 +1068,20 @@ export default function Payment({ hideFooter = false }) {
       }
 
       const refreshedHold = data.refreshedHold || null;
+      if (!isUpgrade && (!refreshedHold?.slotHoldId || !refreshedHold?.slotHoldToken)) {
+        const nextCheckout = clearReleasedCheckoutHold({
+          ...bookingData,
+          slotHoldId: sessionHold?.slotHoldId || bookingData.slotHoldId,
+          slotHoldToken: sessionHold?.slotHoldToken || bookingData.slotHoldToken,
+        }, operation.token);
+        if (!nextCheckout) throw new Error("Your saved reservation changed or could not be updated. Please check it again.");
+        setSessionHold(null);
+        clearPaymentSession("", operation.token);
+        operation.token = "";
+        dodoReturnHandled.current = "";
+        navigate("/booking", { replace: true, state: { ...backToBookingState, bookingData: nextCheckout } });
+        return;
+      }
       if (refreshedHold?.slotHoldId && refreshedHold?.slotHoldToken) {
         setSessionHold(refreshedHold);
         const nextCheckout = {

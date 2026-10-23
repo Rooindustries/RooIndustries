@@ -3,6 +3,141 @@ const { test, expect } = require("./fixtures/booking-flow.cjs");
 
 test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata" });
 
+const recoverySnapshot = page => page.evaluate(() => Object.fromEntries(
+  ["my_slot_hold", "booking_draft", "checkout_booking_state", "payment_session_state", "booking_hold_expired"]
+    .map(key => [key, sessionStorage.getItem(key)])
+));
+
+const openSavedCheckout = async ({ page, flow }, destination) => {
+  await flow.review();
+  await flow.payment();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Checkout handoff", exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    const hold = JSON.parse(sessionStorage.getItem("my_slot_hold"));
+    const checkout = JSON.parse(sessionStorage.getItem("checkout_booking_state"));
+    hold.phase = "payment_pending";
+    hold.expiresAt = new Date(Date.now() - 60000).toISOString();
+    checkout.slotHoldExpiresAt = hold.expiresAt;
+    sessionStorage.setItem("my_slot_hold", JSON.stringify(hold));
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+  });
+  await page.goto(destination);
+};
+
+for (const width of [1280, 390]) {
+  for (const destination of ["/booking", "/payment"]) {
+    for (const replacement of ["hold-id", "hold-token", "checkout-token", "payment-token"]) {
+      test(`${width}px ${destination} cancellation preserves a newer ${replacement}`, async ({ page, flow }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        await openSavedCheckout({ page, flow }, destination);
+        let respond;
+        const reply = new Promise(resolve => { respond = resolve; });
+        let requested = false;
+        await page.route("**/api/payment/cancel", async route => {
+          requested = true;
+          await reply;
+          await route.fulfill({ json: { ok: true, cancelled: true, slotReleased: true } });
+        });
+        const button = page.getByRole("button", { name: destination === "/booking" ? "Release payment" : "Change payment method", exact: true });
+        await button.click();
+        await expect.poll(() => requested).toBe(true);
+        await page.evaluate(replacement => {
+          const hold = JSON.parse(sessionStorage.getItem("my_slot_hold"));
+          const checkout = JSON.parse(sessionStorage.getItem("checkout_booking_state"));
+          const payment = JSON.parse(sessionStorage.getItem("payment_session_state"));
+          if (replacement === "hold-id") hold.holdId = "newer-hold";
+          if (replacement === "hold-token") hold.holdToken = "newer-hold-token";
+          if (replacement === "checkout-token") checkout.slotHoldToken = "newer-checkout-token";
+          if (replacement === "payment-token") payment.paymentAccessToken = "newer-payment-token";
+          sessionStorage.setItem("my_slot_hold", JSON.stringify(hold));
+          sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+          sessionStorage.setItem("payment_session_state", JSON.stringify(payment));
+        }, replacement);
+        const before = await recoverySnapshot(page);
+        const finished = page.waitForResponse("**/api/payment/cancel");
+        respond();
+        await (await finished).finished();
+        if (destination === "/booking" || replacement !== "payment-token") {
+          await expect(page.getByText("Your saved reservation changed or could not be updated. Please check it again.", { exact: true })).toBeVisible();
+          await expect(button).toBeEnabled();
+        } else {
+          await expect(page.getByRole("button", { name: "Checking payment...", exact: true })).toBeDisabled();
+        }
+        expect(new URL(page.url()).pathname).toBe(destination);
+        const after = await recoverySnapshot(page);
+        expect(after).toEqual(before);
+        await testInfo.attach("newer-reservation-preserved", { body: JSON.stringify({ replacement, before, after }), contentType: "application/json" });
+      });
+    }
+
+    for (const failure of ["hold-removal", "checkout-write", "payment-removal"]) {
+      test(`${width}px ${destination} cancellation retains recovery when ${failure} fails`, async ({ page, flow }, testInfo) => {
+        await page.setViewportSize({ width, height: 900 });
+        await openSavedCheckout({ page, flow }, destination);
+        const before = await recoverySnapshot(page);
+        await page.evaluate(failure => {
+          const removeItem = Storage.prototype.removeItem;
+          const setItem = Storage.prototype.setItem;
+          Storage.prototype.removeItem = function(key) {
+            if (this === sessionStorage && ((failure === "hold-removal" && key === "my_slot_hold") ||
+                (failure === "payment-removal" && key === "payment_session_state"))) throw new DOMException("Fixture storage unavailable", "SecurityError");
+            return removeItem.call(this, key);
+          };
+          Storage.prototype.setItem = function(key, value) {
+            if (this === sessionStorage && failure === "checkout-write" && key === "checkout_booking_state") throw new DOMException("Fixture storage full", "QuotaExceededError");
+            return setItem.call(this, key, value);
+          };
+        }, failure);
+        await page.route("**/api/payment/cancel", route => route.fulfill({ json: { ok: true, cancelled: true, slotReleased: true } }));
+        await page.getByRole("button", { name: destination === "/booking" ? "Release payment" : "Change payment method", exact: true }).click();
+        await expect(page.getByText("Your saved reservation changed or could not be updated. Please check it again.", { exact: true })).toBeVisible();
+        const after = await recoverySnapshot(page);
+        expect(after.payment_session_state).toBe(before.payment_session_state);
+        expect(after.booking_draft).toBe(before.booking_draft);
+        if (failure === "hold-removal") expect(after).toEqual(before);
+        else expect(after.booking_hold_expired).toBe("1");
+        await testInfo.attach("release-storage-failure", { body: JSON.stringify({ failure, before, after }), contentType: "application/json" });
+      });
+    }
+  }
+
+  test(`${width}px Booking clears only the released checkout and retains its draft`, async ({ page, flow }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await openSavedCheckout({ page, flow }, "/booking");
+    const before = await recoverySnapshot(page);
+    await page.route("**/api/payment/cancel", route => route.fulfill({ json: { ok: true, cancelled: true, slotReleased: true } }));
+    await page.getByRole("button", { name: "Release payment", exact: true }).click();
+    await expect(page.getByText("The reservation expired. Please choose a slot again.", { exact: true })).toBeVisible();
+    const after = await recoverySnapshot(page);
+    expect(after.my_slot_hold).toBeNull();
+    expect(after.payment_session_state).toBeNull();
+    expect(after.booking_draft).toBe(before.booking_draft);
+    expect(after.booking_hold_expired).toBe("1");
+    expect(JSON.parse(after.checkout_booking_state)).toMatchObject({ slotHoldId: "", slotHoldToken: "", slotHoldExpiresAt: "" });
+    await testInfo.attach("released-booking-checkout", { body: JSON.stringify({ before, after }), contentType: "application/json" });
+  });
+
+  test(`${width}px upgrade cancellation keeps its payment-method flow`, async ({ page, flow }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await flow.upgrade();
+    await page.getByRole("button", { name: "Check eligibility", exact: true }).click();
+    await page.getByRole("button", { name: "Proceed to Payment", exact: true }).click();
+    await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Checkout handoff", exact: true })).toBeVisible();
+    await page.goto("/payment");
+    const before = await recoverySnapshot(page);
+    await page.route("**/api/payment/cancel", route => route.fulfill({ json: { ok: true, cancelled: true } }));
+    await page.getByRole("button", { name: "Change payment method", exact: true }).click();
+    await expect(page.getByText("Payment method released. Choose a payment method below.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Pay your way", exact: true })).toBeEnabled();
+    expect(new URL(page.url()).pathname).toBe("/payment");
+    const after = await recoverySnapshot(page);
+    expect(after).toEqual({ ...before, payment_session_state: null });
+    await testInfo.attach("upgrade-cancel", { body: JSON.stringify({ before, after }), contentType: "application/json" });
+  });
+}
+
 for (const width of [1280, 360, 390]) {
   for (const outcome of ["booked", "missing-token", "review", "unavailable", "unauthorized"]) {
     const savedToken = outcome !== "missing-token";
