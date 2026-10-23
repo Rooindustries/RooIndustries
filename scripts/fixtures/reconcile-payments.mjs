@@ -750,6 +750,27 @@ try {
       }
     });
   }
+  if (process.env.ROO_RECONCILE_REFUNDED_DISPUTES_REPORT) {
+    const scenarios = JSON.parse(fs.readFileSync(process.env.ROO_RECONCILE_REFUNDED_DISPUTES_REPORT, 'utf8'));
+    for (const { name, proof } of scenarios) await run(name.replace('reconcile-report-refund-during-dispute-full-', 'actual-refunded-dispute-'), async (home) => {
+      const keys = proof.targeted.body.checks[0].keys;
+      const primary = proof.targeted.body.checks[0].key;
+      const issue = seedIssue(primary, {}, { keys, observations: [item(primary, 'dispute_not_applied', proof.booking._id)] });
+      const { at, from, to } = windowReport();
+      current.window = { ...proof.window.body, at, from, to };
+      for (const entry of proof.targeted.body.checks) current.checks[entry.key] = entry;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const result = await invoke(home);
+        assert.equal(result.code, 0, result.stdout);
+        assert.equal(JSON.parse(result.stdout).result, 'clear');
+        assert.equal(issue.status, 'Done');
+        assert.equal(metadata(issue).state, 'recovered');
+        assert.deepEqual(new Set(metadata(issue).keys), new Set(keys));
+        assert.equal(current.issues.length, 1);
+        assert.equal(current.updates.length, 1);
+      }
+    });
+  }
   if (process.env.ROO_RECONCILE_REVIEW_REPORT) {
     const proof = JSON.parse(fs.readFileSync(process.env.ROO_RECONCILE_REVIEW_REPORT, 'utf8'));
     const receipt = report => {

@@ -126,7 +126,11 @@ share the same 200-booking limit. Missing or conflicting active flags are checke
 against provider details; correct dispute accounting preserves zero earnings for
 pending and cancelled bookings.
 Fully refunded bookings earn no referral commission, even when they keep a
-historical commission amount. A full refund before booking is clean only when
+historical commission amount. They can also keep their historical active-dispute
+flag after a won or cancelled dispute: the writer intentionally leaves fully
+refunded bookings untouched. This flag does not block recovery after full refund
+accounting is verified. Partial refunds and unfinished synchronization still stay
+unresolved. A full refund before booking is clean only when
 the provider's validated refund total matches the payment and the local record
 confirms completed refund synchronization and released resources. A payment
 without a booking still needs investigation if its refund is partial or

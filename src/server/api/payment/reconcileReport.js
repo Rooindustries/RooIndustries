@@ -412,7 +412,7 @@ const checkBooking = ({ payment, record, booking, refunded, pricing }) => {
   const cancelledDuringDispute = booking.status === "cancelled" && payment.disputes.length > 0;
   if (disputed && booking.status !== "refunded" && booking.dodoDisputeActive !== true)
     return "dispute_not_applied";
-  if (!disputed && booking.dodoDisputeActive === true) return "dispute_not_applied";
+  if (!fullRefund && !disputed && booking.dodoDisputeActive === true) return "dispute_not_applied";
   if (!fullRefund && !disputed && !cancelledDuringDispute && !KEPT_BOOKING_STATUSES.includes(booking.status))
     return "payment_record_mismatch";
   if (disputed && !cancelledDuringDispute && !["pending", "refunded"].includes(booking.status)) return "dispute_not_applied";

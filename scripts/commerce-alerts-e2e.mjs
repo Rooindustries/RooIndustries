@@ -142,6 +142,8 @@ try {
       'reconcile-report-old-refund-transition-full', 'reconcile-report-processed-full-refund-unbooked',
       'reconcile-report-review-old-terminal-providerRecoveryTerminal', 'reconcile-report-review-old-terminal-reconciliationRecoveryTerminal',
       'reconcile-report-review-recent-success-omitted', 'reconcile-report-review-recent-success-null',
+      ...['dispute_won', 'dispute_cancelled'].flatMap(status => ['listed', 'reverse'].map(discovery =>
+        `reconcile-report-refund-during-dispute-full-${status}-${discovery}`)),
     ];
     await child('scripts/test-payment-persistence-sweep.mjs', [
       '--full-chain', '--scenario=' + nativeScenarios.join(','),
@@ -149,7 +151,7 @@ try {
     const result = JSON.parse(await readFile(nativeArtifact, 'utf8'));
     assert.equal(result.ok, true);
     check('late captures without a booking or a payment record remain visible', () => {
-      assert.equal(result.scenarios.length, 12);
+      assert.equal(result.scenarios.length, 16);
       assert.ok(result.scenarios.every(scenario => scenario.passed));
     });
     nativeReport = result.scenarios.find(scenario => scenario.name === 'reconcile-report-payment-without-booking').proof.report;
@@ -169,12 +171,16 @@ try {
     await writeFile(join(artifact, 'transition-report.json'), JSON.stringify(transitionReport, null, 2));
     await writeFile(join(artifact, 'unbooked-refund-report.json'), JSON.stringify(unbookedRefundProof, null, 2));
     await writeFile(join(artifact, 'review-report.json'), JSON.stringify(reviewProof, null, 2));
+    await writeFile(join(artifact, 'refunded-disputes.json'), JSON.stringify(result.scenarios.filter(
+      scenario => scenario.name.startsWith('reconcile-report-refund-during-dispute-full-')), null, 2));
     const dailyCases = [
       'seeded-payment-alert', 'recent-findings-survive-history', 'terminal-identity-reuse', 'terminal-identity-reuse-legacy',
       'recent-refund-alert', 'actual-unbooked-refund-payment', 'actual-unbooked-refund-record',
       'old-terminal-providerRecoveryTerminal-install', 'old-terminal-providerRecoveryTerminal-outage',
       'old-terminal-reconciliationRecoveryTerminal-install', 'old-terminal-reconciliationRecoveryTerminal-outage',
       'recent-success-omitted', 'recent-success-null',
+      ...['dispute_won', 'dispute_cancelled'].flatMap(status => ['listed', 'reverse'].map(discovery =>
+        `actual-refunded-dispute-${status}-${discovery}`)),
     ];
     await child('scripts/fixtures/reconcile-payments.mjs', ['--case=' + dailyCases.join(',')], {
       ROO_RECONCILE_SEED_REPORT: join(artifact, 'seeded-report.json'),
@@ -184,6 +190,7 @@ try {
       ROO_RECONCILE_TRANSITION_REPORT: join(artifact, 'transition-report.json'),
       ROO_RECONCILE_UNBOOKED_REFUND_REPORT: join(artifact, 'unbooked-refund-report.json'),
       ROO_RECONCILE_REVIEW_REPORT: join(artifact, 'review-report.json'),
+      ROO_RECONCILE_REFUNDED_DISPUTES_REPORT: join(artifact, 'refunded-disputes.json'),
       ROO_RECONCILE_TEST_ARTIFACT: join(artifact, 'daily-check'),
     }, 'daily-check.log');
     const daily = JSON.parse(await readFile(join(artifact, 'daily-check/results.json'), 'utf8'));
@@ -198,6 +205,11 @@ try {
       const results = daily.results.filter(result => result.name.startsWith('actual-unbooked-refund-'));
       assert.equal(results.length, 2);
       assert.ok(results.every(result => result.passed && result.issues.length === 1 && result.issues[0].status === 'Done' && result.runs.length === 3));
+    });
+    check('a full refund during a later resolved dispute closes the retained owner issue and stays closed', () => {
+      const results = daily.results.filter(result => result.name.startsWith('actual-refunded-dispute-'));
+      assert.equal(results.length, 4);
+      assert.ok(results.every(result => result.passed && result.issues.length === 1 && result.issues[0].status === 'Done' && result.runs.length === 2));
     });
     check('both old terminal flags create one owner issue on installation or after a four-day gap', () => {
       const results = daily.results.filter(result => result.name.startsWith('old-terminal-'));
