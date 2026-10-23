@@ -136,7 +136,8 @@
     "test:tooling:dependencies": "node scripts/test-tooling-sweep-dependencies.mjs",
     "audit:lighthouse": "lhci autorun --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/ --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/reviews --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/tools",
     "audit:lighthouse:mobile": "lhci autorun --config=lighthouserc.mobile.json --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/",
-    "test:e2e:admin": "playwright test --config=playwright.admin.config.js"
+    "test:e2e:admin": "playwright test --config=playwright.admin.config.js",
+    "test:sourcemaps": "node scripts/sourcemaps-e2e.mjs"
   },
   "eslintConfig": {
     "extends": [

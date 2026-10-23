@@ -177,8 +177,12 @@ export default withSentryConfig(nextConfig, {
   org: "rooindustries",
   project: "rooindustries-website",
   authToken: process.env.SENTRY_AUTH_TOKEN,
+  widenClientFileUpload: true,
   silent: true,
   telemetry: false,
+  errorHandler() {
+    console.warn("Sentry source-map upload failed. Check the build token and Sentry availability.");
+  },
   sourcemaps: {
     disable: !process.env.SENTRY_AUTH_TOKEN,
     deleteSourcemapsAfterUpload: true,
