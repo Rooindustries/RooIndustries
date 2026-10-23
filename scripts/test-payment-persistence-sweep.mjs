@@ -704,6 +704,17 @@ try{
     const duplicate=await fetch(`${origin}/booking`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body})});const replay={status:duplicate.status,body:await duplicate.json()};assert.equal(replay.status,200,JSON.stringify(replay));const repeated=(await row(booking._id)).payload;assert.equal(repeated.refundedAmount,booking.refundedAmount);assert.deepEqual(repeated.processedRefundIds,booking.processedRefundIds);assert.equal(repeated.commissionAmount,commission);const [duplicateLedger]=await sql`select count(*)::int count,coalesce(sum(amount_subunits),0)::int amount from commerce.refunds where payment_record_id=(select id from commerce.payment_records where legacy_sanity_id=${saved._id})`;assert.deepEqual(duplicateLedger,ledger);
     let fullProof=null;
     if(variant==='later-full'){
+      const emailLedger=()=>sql`select to_jsonb(dispatch)-'updated_at'-'source_revision'-'source_hash' as row,
+        dispatch.source_revision=source.source_revision as revision_matches,dispatch.source_hash=source.source_hash as hash_matches
+        from commerce.email_dispatches dispatch join commerce.bookings stored_booking on stored_booking.id=dispatch.booking_id
+        join migration.source_documents source on source.legacy_sanity_id=stored_booking.legacy_sanity_id
+        where stored_booking.legacy_sanity_id=${booking._id} order by dispatch_kind,recipient_type`;
+      const beforeRefundLedger=await emailLedger();
+      assert.equal(beforeRefundLedger.length,2);
+      assert.ok(beforeRefundLedger.every(({row:dispatch})=>dispatch.status==='sent'&&dispatch.provider_message_id));
+      assert.ok(beforeRefundLedger.every(dispatch=>dispatch.revision_matches&&dispatch.hash_matches));
+      const emailRequests=providerRequests.filter(request=>request.path==='/emails').length;
+      assert.equal(emailRequests,2);
       const refunded=provider==='paypal'
         ?await requestFlow('paypal',{req:paypalReq('PAYMENT.CAPTURE.REFUNDED',{id:'refund-final',status:'COMPLETED',supplementary_data:{related_ids:{order_id:'order-fixture',capture_id:'capture-fixture'}},amount:{value:'5.00',currency_code:'USD'}})})
         :await requestFlow('razorpay',{req:razorReq('refund.processed',{refund:{entity:{id:'refund-final',payment_id:'payment-fixture',status:'processed',amount:500,currency:'USD'}}})});
@@ -715,15 +726,9 @@ try{
       assert.equal(terminalBooking.refundedAmount,9.99);
       const rowMetadata=['_rev','_updatedAt'];
       const stable=value=>Object.fromEntries(Object.entries(value).filter(([key])=>!rowMetadata.includes(key)));
-      const emailLedger=()=>sql`select to_jsonb(dispatch)-'updated_at'-'source_revision'-'source_hash' as row,
-        dispatch.source_revision=source.source_revision as revision_matches,dispatch.source_hash=source.source_hash as hash_matches
-        from commerce.email_dispatches dispatch join commerce.bookings stored_booking on stored_booking.id=dispatch.booking_id
-        join migration.source_documents source on source.legacy_sanity_id=stored_booking.legacy_sanity_id
-        where stored_booking.legacy_sanity_id=${booking._id} order by dispatch_kind,recipient_type`;
       const terminalLedger=await emailLedger();
-      assert.equal(terminalLedger.length,2);
-      assert.ok(terminalLedger.every(({row:dispatch})=>dispatch.status==='sent'&&dispatch.provider_message_id));
-      assert.ok(terminalLedger.every(dispatch=>dispatch.revision_matches&&dispatch.hash_matches));
+      assert.deepEqual(terminalLedger,beforeRefundLedger);
+      assert.equal(providerRequests.filter(request=>request.path==='/emails').length,emailRequests);
       const refundLedger=()=>sql`select to_jsonb(refund)-'updated_at'-'source_revision'-'source_hash' as row,
         refund.source_revision=source.source_revision as revision_matches,refund.source_hash=source.source_hash as hash_matches
         from commerce.refunds refund join commerce.payment_records payment on payment.id=refund.payment_record_id
@@ -733,8 +738,6 @@ try{
       assert.equal(terminalRefunds.length,2);
       assert.ok(terminalRefunds.every(refund=>refund.revision_matches&&refund.hash_matches));
       assert.equal(terminalRefunds.reduce((sum,{row:refund})=>sum+refund.amount_subunits,0),999);
-      const emailRequests=providerRequests.filter(request=>request.path==='/emails').length;
-      assert.equal(emailRequests,2);
       const expectedPayment={...terminalPayment,emailDispatchRequired:false,emailDispatchToken:'',emailDeliveryReviewRequired:false,
         emailDispatch:{allSent:false,deferred:false,deliveryEnabled:true,deliveryUnknown:false,suppressed:true,
           client:{attempted:false,sent:false,skippedReason:'booking_inactive'},
@@ -763,7 +766,7 @@ try{
       const rebuilds=await a1RebuildProof(`fix-c-legacy-${provider}-later-full`);
       assert.deepEqual(await emailLedger(),terminalLedger);
       assert.deepEqual(await refundLedger(),terminalRefunds);
-      fullProof={refunded,terminalPayment,terminalBooking,refreshedBooking,terminalLedger,terminalRefunds,replays,rebuilds,rowMetadata,emailRequests,
+      fullProof={refunded,beforeRefundLedger,terminalPayment,terminalBooking,refreshedBooking,terminalLedger,terminalRefunds,replays,rebuilds,rowMetadata,emailRequests,
         staleLegacyPartialSnapshotCannotDowngradeFull:true,noReplayEmailAttempt:true};
     }
     return{fullProof,result,recovered,committedBeforeRecovery,booking,saved,ledger,replay,partialGrantAndCommissionPolicyPreserved:true,duplicateRefundAccountingUnchanged:true,standIn:'Imported active sanity-owned hold in native store; no live legacy incidence or Sanity engine claimed'};
@@ -849,12 +852,13 @@ try{
     await seed('dodo','email_partial',{booking:changes});let booking=(await row(bookingId)).payload;await commerce.patch(bookingId).ifRevisionId(booking._rev).set({[`${prefix}Status`]:'partial'}).commit();const previous=process.env.FROM_EMAIL,calls=[],snapshots=[];process.env.FROM_EMAIL='';
     const kind=recovery?'reschedule':'booking_confirmation';
     const readLedger=()=>sql`select recipient_type,status,attempt_count,sent_at,provider_message_id,next_attempt_at,lease_id,lease_expires_at from commerce.email_dispatches where dispatch_kind=${kind} order by recipient_type`;
-    const beforeLedger=await readLedger();
+    const beforeLedger=[...(await readLedger())];
     assert.equal(beforeLedger.length,2);
     assert.equal(beforeLedger.find(entry=>entry.recipient_type==='customer').status,'historical_unknown');
     assert.equal(beforeLedger.find(entry=>entry.recipient_type==='owner').status,'sent');
+    assert.ok(beforeLedger.every(entry=>entry.attempt_count===1));
     const expectedAttempts=recovery?2:1;
-    const expectedLedger=beforeLedger.map(entry=>({...entry,attempt_count:expectedAttempts}));
+    const expectedLedger=recovery?beforeLedger.map(entry=>({...entry,attempt_count:entry.attempt_count+1})):beforeLedger;
     try{
       for(let i=0;i<3;i++){
         const result=recovery?await dispatchRescheduleNotifications({bookingId,client:commerce}):await sendBookingEmailsForBooking({bookingId,client:commerce});
