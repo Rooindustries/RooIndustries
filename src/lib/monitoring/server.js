@@ -1,4 +1,5 @@
-import { captureException, httpIntegration, init } from "@sentry/nextjs";
+import { createHash } from "node:crypto";
+import { captureEvent, captureException, flush, httpIntegration, init } from "@sentry/nextjs";
 import {
   NO_DATA_COLLECTION,
   envelopeHeaderScrubber,
@@ -27,6 +28,33 @@ export function startServerMonitoring(value) {
     beforeBreadcrumb: scrubBreadcrumb,
   });
   client?.on("beforeEnvelope", envelopeHeaderScrubber(client.getDsn()?.publicKey, monitoringEnvironment()));
+  globalThis[Symbol.for("roo.reportCommerceAlert")] = async (alert) => {
+    try {
+      if (alert.kind === "route") {
+        captureEvent({
+          level: "error",
+          message: "Commerce route failed",
+          fingerprint: ["commerce-route", alert.route, String(alert.status)],
+          tags: {
+            commerce_surface: alert.surface,
+            commerce_route: alert.route,
+            error_status: String(alert.status),
+          },
+        });
+      } else if (alert.kind === "reconciliation") {
+        for (const { key, reason } of alert.items) {
+          const identity = createHash("sha256").update(key).digest("hex");
+          captureEvent({
+            level: "error",
+            message: "Payment reconciliation needs attention",
+            fingerprint: ["payment-reconciliation", identity, reason],
+            tags: { commerce_surface: "reconciliation", reconciliation_reason: reason },
+          });
+        }
+      }
+      await flush(2000);
+    } catch {}
+  };
   globalThis[Symbol.for("roo.reportServerError")] = (label, error, metadata) => {
     try {
       const message = label.split(": ", 1)[0];

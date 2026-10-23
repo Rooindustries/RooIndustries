@@ -22,7 +22,7 @@ def owner_codes:
    "dodo_dispute_lost_owner_review","dodo_dispute_accepted_owner_review",
    "dodo_dispute_expired_owner_review","dodo_payment_failed","dodo_payment_cancelled",
    "provider_partial_refund_details_missing_owner_review",
-   "provider_order_not_found_after_late_capture_watch","unknown"];
+   "provider_order_not_found_after_late_capture_watch","upgrade_credit_changed_after_quote","unknown"];
 def source_reason:
   . as $reason |
   (["payment_without_record","payment_record_mismatch","payment_without_booking",

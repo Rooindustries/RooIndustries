@@ -530,6 +530,26 @@ const run = async (name, fn) => {
     issues: current.issues, comments: current.comments, updates: current.updates, runs: current.runs });
 };
 try {
+  if (process.env.ROO_RECONCILE_SEED_REPORT) {
+    await run('seeded-payment-alert', async (home) => {
+      const report = JSON.parse(fs.readFileSync(process.env.ROO_RECONCILE_SEED_REPORT, 'utf8'));
+      assert.equal(report.ok, true);
+      assert.equal(report.count, 1);
+      assert.equal(report.items[0].reason, 'payment_without_booking');
+      current.window = report;
+      const entry = report.items[0];
+      current.checks[entry.key] = check(entry.key, 'unresolved', [entry]);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const result = await invoke(home);
+        assert.equal(result.code, 0);
+        assert.equal(JSON.parse(result.stdout).result, 'mismatch');
+        assert.equal(result.alert.severity, 'red');
+        assert.equal(current.issues.length, 1);
+        assert.equal(current.updates.length, 1);
+        assert.equal(metadata(current.issues[0]).observations[0].reason, entry.reason);
+      }
+    });
+  }
   if (baseline) {
     await run('legacy-daily-record', async (home) => {
       current.window = windowReport([fault()]);
@@ -1230,6 +1250,7 @@ try {
         'owner_review_provider_order_not_found_after_late_capture_wat',
         'owner_review_provider_partial_refund_details_missing_owner_r',
         'owner_review_unknown',
+        'owner_review_upgrade_credit_changed_after_quote',
       ];
       current.window = windowReport(reasons.map((reason, index) => item('payment:case-' + index, reason)));
       assert.equal((await invoke(home)).code, 0);

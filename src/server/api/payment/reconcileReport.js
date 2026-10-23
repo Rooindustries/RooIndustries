@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { createCommerceReadClient } from "../ref/documentStore.js";
 import { createDodoClient, validateDodoPayment } from "./dodoProvider.js";
 import { fetchShadowDocuments } from "../../supabase/shadowStore.js";
+import { reportPaymentMismatches } from "../../../lib/monitoring/commerce.js";
 
 const WINDOW_HOURS = 72;
 const SETTLE_MINUTES = 30;
@@ -51,6 +52,7 @@ const OWNER_REVIEW_CODES = new Set([
   "dodo_payment_cancelled",
   "provider_partial_refund_details_missing_owner_review",
   "provider_order_not_found_after_late_capture_watch",
+  "upgrade_credit_changed_after_quote",
 ]);
 
 const unavailable = () => new Error("reconcile_report_unavailable");
@@ -128,12 +130,12 @@ const toItem = ({ key, id, ref = "", cents = null, currency = "", reason }) => (
   ),
 });
 
-const listDodoPayments = async ({ dodo, from, to }) => {
+const listDodoPayments = async ({ dodo, to }) => {
   const payments = [];
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const response = await dodo.payments
       .list({
-        created_at_gte: from,
+        status: "succeeded",
         created_at_lte: to,
         page_size: PAGE_SIZE,
         page_number: page,
@@ -602,7 +604,7 @@ export const buildReconcileReport = async ({
     return response(results, { payments: false, bookings: false, records: false });
   }
 
-  const { payments: listed, truncated } = await listDodoPayments({ dodo, from, to });
+  const { payments: listed, truncated } = await listDodoPayments({ dodo, to });
   if (truncated)
     report({ key: "scan:dodo-payments", id: "dodo-payments", reason: "report_truncated" });
   const productIds = readSiteProductIds();
@@ -719,7 +721,9 @@ export default async function handler(req, res) {
     }
   }
   try {
-    return res.status(200).json({ ok: true, ...(await buildReconcileReport({ checks })) });
+    const report = await buildReconcileReport({ checks });
+    await reportPaymentMismatches(report);
+    return res.status(200).json({ ok: true, ...report });
   } catch {
     return res.status(503).json({
       ok: false,

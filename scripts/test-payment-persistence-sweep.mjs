@@ -1118,11 +1118,43 @@ try{
     await seed('dodo', 'captured_webhook', dodoBooking({}, { bookingId: 'booking-missing' }));
     await commerce.delete(bookingId);
     dodoList = [dodoSummary()];
-    const report = await reconcileReport();
+    const result = await authorizedReport('GET', true);
+    assert.equal(result.status, 200);
+    const report = result.body;
     assert.deepEqual(reportReasons(report), ['payment_without_booking']);
     assert.equal(report.items[0].ref, recordId);
-    return report.items;
+    return { report, readOnly: true, throughNextRoute: true };
   });
+  for (const missing of ['booking', 'record']) {
+    await run(`reconcile-report-late-capture-without-${missing}`, async () => {
+      await seed('dodo', 'captured_webhook', dodoBooking({}, { bookingId: 'booking-missing' }));
+      await commerce.delete(bookingId);
+      if (missing === 'record') {
+        await commerce.delete(recordId);
+        dodoPayment.metadata = {};
+      }
+      dodoPayment.created_at = new Date(Date.now() - 10 * 86400000).toISOString();
+      dodoList = [dodoSummary()];
+      providerHook = async (_request, req, res) => {
+        if (!req.url.startsWith('/payments?')) return false;
+        const query = new URL(req.url, origin).searchParams;
+        const included = !query.has('created_at_gte') ||
+          Date.parse(query.get('created_at_gte')) <= Date.parse(dodoPayment.created_at);
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ items: included ? dodoList : [] }));
+        return true;
+      };
+      const result = await authorizedReport('GET', true);
+      assert.equal(result.status, 200);
+      assert.deepEqual(reportReasons(result.body), [`payment_without_${missing}`]);
+      assert.ok(result.providerRequests.some(request => {
+        if (!request.path.startsWith('/payments?')) return false;
+        const query = new URL(request.path, origin).searchParams;
+        return !query.has('created_at_gte') && query.get('status') === 'succeeded';
+      }));
+      return { report: result.body, readOnly: true, createdDaysBeforeSettlement: 10 };
+    });
+  }
   await run('reconcile-report-booking-amount-mismatch', async () => {
     await seed('dodo', 'booked', dodoBooking({ netAmount: 19.99 }));
     dodoList = [dodoSummary()];
@@ -1191,6 +1223,17 @@ try{
     dodoList = [];
     const report = await reconcileReport();
     assert.deepEqual(reportReasons(report), ['owner_review_dodo_dispute_lost_owner_review']);
+    return report.items;
+  });
+  await run('reconcile-report-upgrade-credit-owner-review', async () => {
+    await seed('dodo', 'needs_recovery', dodoBooking({}, {
+      providerRecoveryTerminal: true,
+      providerRecoveryTerminalReason: 'upgrade_credit_changed_after_quote',
+      updatedAt: new Date().toISOString(),
+    }));
+    dodoList = [];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['owner_review_upgrade_credit_changed_after_quote']);
     return report.items;
   });
   await run('reconcile-report-booking-without-payment', async () => {

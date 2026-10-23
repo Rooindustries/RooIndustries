@@ -124,7 +124,7 @@ Any PR that touches a money path, including a helper outside this list:
   - one payment proof can't fund two bookings (`:162-165`);
   - the slot lock and the hold consumption commit in one transaction (`:186-215,261-266`).
 - A recognized, validated capture whose booking fails on a slot conflict or a payload problem becomes a "requires reschedule" booking. This happens from the 5-minute reconcile (`vercel.json:66`, `src/server/api/payment/flow.js:4779-4789,4892-4917`) and from a late capture after abandonment (`:2384-2400`). The record is built at `:4027-4060`.
-- **NOT ENFORCED (capture without a booking, ROO-499):** some captures end with neither a booking nor a reschedule record:
+- **NOT ENFORCED (automatic booking recovery):** some captures end with neither a booking nor a reschedule record. The daily audit detects them; it does not create a booking:
   - owner-review states, such as upgrade credit that dropped after capture (`src/server/api/payment/flow.js:1936-1965,3933-3942`);
   - exhausted retries: 12 failed finalizes set `reconciliationRecoveryTerminal` (`:105-117,1870-1911`), and reconcile then skips the record (`:4347`).
 - A definitive unpaid abandonment tries to release the hold and the coupon reservation. If the release fails it keeps `resourceReleasePending` and retries. (`src/server/api/payment/flow.js:1687,1746-1752,1781,2634,2696-2732`)
@@ -155,11 +155,8 @@ Validating a payment, on every path (webhook, return page, reconcile):
 - A succeeded payment must have exactly one cart line, with quantity 1, for the recorded product. A missing cart fails. (`src/server/api/payment/dodoProvider.js:103-106`)
 - Refunds and disputes must be arrays. (`src/server/api/payment/dodoProvider.js:107-108`)
 - Payment data from the client is never trusted. The return page triggers a server lookup. (`src/server/api/payment/flow.js:1011`, `src/server/api/payment/dodoProvider.js:137-140`)
-- **NOT ENFORCED (owner alerts, ROO-499):** a captured payment that fails validation or ends in owner review should reach the owner. Today it ends silently.
-  - It becomes `needs_recovery` with `providerRecoveryTerminal`, and reconcile skips it from then on. (`src/server/api/payment/flow.js:4441-4442,4459,4465-4472`)
-  - Or the webhook acknowledges a binding mismatch with 200 (`:6141`).
-  - The same silent end applies to lost, accepted or expired disputes (`:5883,5936`), upgrade-credit reviews (`:1945-1964`) and refunds with incomplete details (`:5990-5996`).
-- **NOT ENFORCED (rare, ROO-498):** a payment without `metadata.paymentRecordId`, such as one through the product's public buy link, is acknowledged and dropped. (`src/server/api/payment/flow.js:6122`)
+- The read-only daily audit reports missing bookings, binding/amount/currency mismatches and owner-review states, including terminal disputes, changed upgrade credit and incomplete refunds (`src/server/api/payment/reconcileReport.js:456-505,664-697`). Its reporting job reuses one owner issue across retries (`scripts/reconcile-payments.sh`). Sentry receives sanitized mismatch events (`src/lib/monitoring/commerce.js:32`, `src/lib/monitoring/server.js:45`). Preview delivery is verified; production timer and notification activation remain release steps (ROO-498, ROO-499).
+- A payment without `metadata.paymentRecordId`, such as one through the product's public buy link, is still acknowledged by the webhook without booking (`src/server/api/payment/flow.js:6122`). The daily audit detects a matching site product as `payment_without_record`, including payments created days before they settle (`src/server/api/payment/reconcileReport.js:133-143,479,607-626`). A capped or unavailable scan cannot report clean. The audit never writes a booking or referral credit.
 - Fields read from a payment: `payment_id`, `status`, `total_amount`, `tax`, `currency`, `checkout_session_id`, `metadata.paymentRecordId`, `product_cart`, `refund_status`, `refunds` and `disputes`. `customer.email` is kept only as a fallback contact email for a recovered booking (`src/server/api/payment/dodoProvider.js:159`, `src/server/api/ref/bookingCommit.js:334`). No money decision reads any other field (customer, billing, card and payment method details, brand and business ids, discounts, settlement amounts), so none of them can change one.
 
 Payment statuses:

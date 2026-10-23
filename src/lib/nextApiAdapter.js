@@ -1,5 +1,6 @@
 import { readBoundedBody } from "../server/request/boundedJson.js";
 import { isSameOriginMutation } from "../server/request/sameOrigin.js";
+import { reportCommerceFailure } from "./monitoring/commerce.js";
 
 const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 const MAX_REQUEST_BODY_BYTES = 128 * 1024;
@@ -274,7 +275,7 @@ const createMutableResponse = (method) => {
   };
 };
 
-export const runLegacyApiHandler = async ({
+const executeLegacyApiHandler = async ({
   request,
   handler,
   query = {},
@@ -342,4 +343,16 @@ export const runLegacyApiHandler = async ({
   }
 
   return finalizeDefault();
+};
+
+export const runLegacyApiHandler = async (options) => {
+  let response;
+  try {
+    response = await executeLegacyApiHandler(options);
+  } catch (error) {
+    await reportCommerceFailure(options.request.url, 500);
+    throw error;
+  }
+  await reportCommerceFailure(options.request.url, response.status);
+  return response;
 };
