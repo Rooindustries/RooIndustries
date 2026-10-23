@@ -9,6 +9,7 @@ import {
 import { appendCouponRefund } from "./couponReservations.js";
 import { toSubunits } from "../payment/providerClients.js";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
+import { resolveDisputeReferralAccounting } from "../../referrals/disputeAccounting.js";
 
 export const resolvePaymentCurrency = (paymentRecord = {}, { booking = {}, refund = {}, fallback = "USD" } = {}) => {
   const values = [paymentRecord.pricingSnapshot?.currency, paymentRecord.bookingPayload?.currency,
@@ -283,7 +284,7 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
   }
   const referralId = booking.referral?._ref || "";
   const canReverseReferral = !!referralId && booking.referralAccountingApplied !== false &&
-    booking.dodoReferralReversedAfterDispute !== true && booking.dodoReferralDisputeAccounted !== true;
+    !resolveDisputeReferralAccounting(booking, paymentRecord).consumed;
   const referral = canReverseReferral
     ? await client.fetch(
         `*[_type == "referral" && _id == $id][0]{_id,_rev,successfulReferrals}`,

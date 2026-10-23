@@ -1,6 +1,7 @@
 import { buildBrowserCompletionBody } from "./bookingSummary.js";
 import envValue from "../../supabase/envValue.cjs";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
+import { isTerminalDisputeStatus, resolveDisputeReferralAccounting } from "../../referrals/disputeAccounting.js";
 const { resolveStoreBackend } = envValue;
 import { createDodoCheckout, inspectDodoCheckout, retrieveDodoPayment, retrieveDodoRefund, validateDodoPayment, verifyDodoCapture, unwrapDodoWebhook } from "./dodoProvider.js";
 import crypto from "crypto";
@@ -5931,8 +5932,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     amount: dispute.amount, currency: dispute.currency, businessId: dispute.business_id,
     createdAt: dispute.created_at, isResolvedByRdr: dispute.is_resolved_by_rdr ?? null, remarks: dispute.remarks ?? null,
   })) : record.dodoDisputes || [];
-  const terminalDisputeStatuses = ["dispute_lost", "dispute_accepted", "dispute_expired"];
-  const terminalDispute = dodoDisputes.find(dispute => terminalDisputeStatuses.includes(dispute.status));
+  const terminalDispute = dodoDisputes.find(dispute => isTerminalDisputeStatus(dispute.status));
   const disputed = disputes.some((dispute) => !["dispute_won", "dispute_cancelled"].includes(dispute.dispute_status)) ||
     (record.dodoDisputeActive === true && disputes.length === 0);
   let disputeBooking;
@@ -5972,23 +5972,20 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
           preserveOriginalPrecision: preserveLegacyCommission,
         });
         const referralId = booking.referral?._ref;
-        let referralReversed = booking.dodoReferralReversedAfterDispute === true;
-        let referralDisputeAccounted = booking.dodoReferralDisputeAccounted === true || referralReversed ||
-          (booking.dodoDisputeActive === true && retainedDisputes.some(dispute => terminalDisputeStatuses.includes(dispute.status)));
+        const accounting = resolveDisputeReferralAccounting(booking, record);
+        let referralReversed = accounting.reversed;
+        let referralDisputeAccounted = accounting.consumed;
         const reverseReferral = !!terminalDispute && !!referralId &&
           booking.referralAccountingApplied !== false && booking.referralReversedAfterRefund !== true &&
           !referralDisputeAccounted;
         const restoreReferral = !disputed && !!referralId &&
-          booking.dodoReferralReversedAfterDispute === true &&
+          referralReversed &&
           ["captured", "completed"].includes(originalStatus) &&
           (booking.status === "pending" || ["captured", "completed"].includes(booking.status));
         if (reverseReferral || restoreReferral) {
           const referral = await client.fetch(`*[_type == "referral" && _id == $id][0]{_id,_rev,successfulReferrals}`, { id: referralId });
-          if (!referral?._id) {
-            throw Object.assign(new Error("Disputed booking creator was not found."), { status: 409, code: "dispute_referral_missing" });
-          }
-          requirePaymentRevision(referral);
-          if (restoreReferral || Number(referral.successfulReferrals || 0) > 0) {
+          if (referral?._id) requirePaymentRevision(referral);
+          if (referral?._id && (restoreReferral || Number(referral.successfulReferrals || 0) > 0)) {
             transaction.patch(referral._id, (patch) => {
               const guarded = guardPaymentRevision(patch, referral);
               return restoreReferral
@@ -5999,7 +5996,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
           }
         }
         if (terminalDispute) referralDisputeAccounted = true;
-        else if (restoreReferral) referralDisputeAccounted = false;
+        else if (restoreReferral && !referralReversed) referralDisputeAccounted = false;
         transaction.patch(booking._id, (patch) => {
           const guarded = guardPaymentRevision(patch, booking);
           return guarded.set({
