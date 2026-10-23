@@ -219,19 +219,32 @@ test("the merge is bound to the head that was reviewed, and runs serialize", () 
   assert.match(apply, /mergePullRequest\(number, snapshot\.headSha\)/);
   assert.match(apply, /botNamed\(comment\.user, "github-actions"\)/);
   assert.match(apply, /paginate\(`repos\/\$\{repo\}\/commits\/\$\{pull\.head\.sha\}\/statuses`\)/);
-  assert.match(apply, /latest\.base\.sha !== snapshot\.baseSha/);
+  assert.match(apply, /decide\(latest\)\.action !== "merge"/);
+  assert.match(apply, /latest\.baseRef !== "main"/);
+  assert.match(apply, /order: run\.id/);
+  assert.match(apply, /order: entry\.id/);
   const workflow = readFileSync(new URL("../.github/workflows/auto-merge.yml", import.meta.url), "utf8");
   assert.match(workflow, /group: auto-merge\n/);
   assert.match(workflow, /cancel-in-progress: false/);
 });
 
-test("a queued rerun keeps the check pending even after an earlier success", () => {
-  const rerun = [...checks(), { name: "Jest", status: "queued", conclusion: null, completedAt: "" }];
-  const decision = decide(safe({ checks: rerun }));
-  assert.equal(decision.action, "wait");
-  assert.ok(decision.reasons.includes("checks-pending"));
-  const reversed = decide(safe({ checks: [{ name: "Jest", status: "in_progress", conclusion: null, completedAt: "" }, ...checks()] }));
-  assert.ok(reversed.reasons.includes("checks-pending"));
+test("the newest record per check decides: a queued rerun is pending, a newer success clears an older pending status", () => {
+  const rerun = [
+    ...checks().map((check, index) => ({ ...check, source: "check-run", order: 100 + index })),
+    { name: "Jest", source: "check-run", order: 500, status: "queued", conclusion: null, completedAt: "" },
+  ];
+  assert.ok(decide(safe({ checks: rerun })).reasons.includes("checks-pending"));
+  const statusHistory = [
+    ...checks().map((check, index) => ({ ...check, source: "check-run", order: 100 + index })),
+    { name: "Vercel", source: "status", order: 900, status: "completed", conclusion: "success", completedAt: "2026-10-22T00:05:00Z" },
+    { name: "Vercel", source: "status", order: 800, status: "pending", conclusion: "pending", completedAt: "2026-10-22T00:01:00Z" },
+  ];
+  assert.equal(decide(safe({ checks: statusHistory })).action, "merge");
+  const split = [
+    ...checks().map((check, index) => ({ ...check, source: "check-run", order: 100 + index })),
+    { name: "Jest", source: "status", order: 50, status: "completed", conclusion: "failure", completedAt: "2026-10-22T00:00:00Z" },
+  ];
+  assert.ok(decide(safe({ checks: split })).reasons.includes("checks-red"));
 });
 
 test("the required check names are the jobs the Tests workflow runs", () => {

@@ -104,12 +104,16 @@ const collectSnapshot = async (number) => {
   const ownComments = comments.filter((comment) => botNamed(comment.user, "github-actions"));
   const checks = [
     ...checkRuns.map((run) => ({
+      source: "check-run",
+      order: run.id,
       name: run.name,
       status: run.status,
       conclusion: run.conclusion,
       completedAt: run.completed_at || run.started_at || "",
     })),
     ...statuses.map((entry) => ({
+      source: "status",
+      order: entry.id,
       name: entry.context,
       status: entry.state === "pending" ? "pending" : "completed",
       conclusion: entry.state === "error" ? "failure" : entry.state,
@@ -241,9 +245,11 @@ const applyOne = async (number) => {
     if (!counted) await recordReviewRound(snapshot);
   }
   if (decision.action === "merge") {
-    // The merge call can pin only the head, so re-read the base right before it and defer if main moved.
-    const { payload: latest } = await api(readToken, `repos/${repo}/pulls/${number}`);
-    const baseMoved = latest.base.sha !== snapshot.baseSha || latest.head.sha !== snapshot.headSha || latest.mergeable_state !== "clean";
+    // The merge call can pin only the head, so run the whole gate again on fresh data right before it:
+    // reviews, threads, checks, the base branch and both SHAs can all change while the first pass runs.
+    const latest = await collectSnapshot(number);
+    const baseMoved = decide(latest).action !== "merge" || latest.headSha !== snapshot.headSha ||
+      latest.baseSha !== snapshot.baseSha || latest.baseRef !== "main" || !latest.sameRepository;
     const { error: mergeError, headMoved } = baseMoved
       ? { error: "", headMoved: true }
       : await mergePullRequest(number, snapshot.headSha);

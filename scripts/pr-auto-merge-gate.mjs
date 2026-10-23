@@ -53,21 +53,36 @@ const worse = (left, right) => {
   return rank(right) > rank(left) ? right : left;
 };
 
+// Each source keeps only its newest record per name: GitHub ids grow with every check run and status, so a
+// queued rerun outranks an older success and a newer success outranks an older pending status. When both
+// a check run and a commit status carry the same name, the worse of the two counts.
+const newer = (left, right) => {
+  if (Number.isFinite(left.order) && Number.isFinite(right.order)) return right.order > left.order ? right : left;
+  return right.completedAt > left.completedAt ? right : left;
+};
+
 export const latestChecks = (checks) => {
-  const byName = new Map();
+  const bySource = new Map();
   for (const check of checks || []) {
     if (!check?.name) continue;
     const current = {
       name: check.name,
+      source: check.source || "",
+      order: Number(check.order),
       status: check.status || "completed",
       conclusion: check.conclusion || "",
       completedAt: check.completedAt || check.startedAt || "",
     };
+    const key = JSON.stringify([current.source, current.name]);
+    const previous = bySource.get(key);
+    if (!previous) bySource.set(key, current);
+    else if (current.completedAt === previous.completedAt && !Number.isFinite(current.order)) bySource.set(key, worse(previous, current));
+    else bySource.set(key, newer(previous, current));
+  }
+  const byName = new Map();
+  for (const check of bySource.values()) {
     const previous = byName.get(check.name);
-    // A queued or running attempt has no finish time; it outranks any earlier finished attempt.
-    if (previous && previous.status !== "completed") continue;
-    if (!previous || current.status !== "completed" || current.completedAt > previous.completedAt) byName.set(check.name, current);
-    else if (current.completedAt === previous.completedAt) byName.set(check.name, { ...worse(previous, current), completedAt: current.completedAt });
+    byName.set(check.name, previous ? worse(previous, check) : check);
   }
   return [...byName.values()];
 };
