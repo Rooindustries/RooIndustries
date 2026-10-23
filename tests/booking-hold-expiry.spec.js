@@ -41,6 +41,40 @@ test("expiry on the details step keeps the booking open with the typed details",
   await reserveAgainKeepsDetails(page, flow);
 });
 
+test("a full browser store still keeps the typed details when the reservation expires", async ({ page, flow }) => {
+  flow.state.holdMs = shortHold;
+  await flow.reserve();
+  await flow.details();
+  expect(await draftEmail(page)).toBe("visitor@example.invalid");
+  const quota = await page.evaluate(() => {
+    const text = "x".repeat(8 * 1024 * 1024);
+    let low = 0;
+    let high = text.length;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      try {
+        sessionStorage.setItem("roo-hold-quota", text.slice(0, middle));
+        low = middle;
+      } catch {
+        high = middle - 1;
+      }
+    }
+    try {
+      sessionStorage.setItem("roo-hold-quota-extra", "x");
+      return "";
+    } catch (error) {
+      return error.name;
+    }
+  });
+  expect(quota).toBe("QuotaExceededError");
+  await expect(page.getByRole("alert").filter({ hasText: expiredMessage })).toBeVisible({ timeout: 25000 });
+  expect(await storedHold(page)).toBeNull();
+  expect(await draftEmail(page)).toBe("visitor@example.invalid");
+  await page.reload();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  expect(await draftEmail(page)).toBe("visitor@example.invalid");
+});
+
 test("expiry on the payment page returns to slot selection with the reason", async ({ page, flow }) => {
   flow.state.holdMs = shortHold;
   await flow.review();
