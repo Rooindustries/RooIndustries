@@ -1,6 +1,11 @@
+import { writeBrowserStorage } from "./browserStorage";
+
 export const BOOKING_DRAFT_STORAGE_KEY = "booking_draft";
 export const CHECKOUT_BOOKING_STORAGE_KEY = "checkout_booking_state";
 export const BOOKING_HOLD_EXPIRED_STORAGE_KEY = "booking_hold_expired";
+// A hold whose payment has started is never dropped by the browser after its deadline; payment status or a release settles it.
+export const holdAwaitsPayment = (hold) => String(hold?.phase || "").trim().toLowerCase() === "payment_pending";
+export const markBookingHoldExpired = () => writeBrowserStorage("sessionStorage", BOOKING_HOLD_EXPIRED_STORAGE_KEY, "1");
 
 const LEGACY_CHECKOUT_KEYS = [
   "my_slot_hold",
