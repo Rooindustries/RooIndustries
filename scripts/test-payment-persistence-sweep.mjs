@@ -1820,6 +1820,21 @@ try{
       assert.equal(response.body.ok, false);
       assert.notEqual(response.body.slotReleased, true);
     }
+    const retry = await requestFlow('cancel', { paymentAccessToken: tokenFor(payment) });
+    const completed = (await row(checkout.id)).payload;
+    const releasedHold = (await row(payment.holdSnapshot.slotHoldId)).payload;
+    assert.equal(retry.status, 200, JSON.stringify(retry));
+    assert.equal(retry.body.cancelled, true);
+    assert.equal(retry.body.slotReleased, true);
+    assert.equal(completed.resourceReleasePending, false);
+    assert.equal(releasedHold.phase, 'released');
+    const beforeReplay = await snapshot();
+    const replay = await requestFlow('cancel', { paymentAccessToken: tokenFor(payment) });
+    assert.equal(replay.status, 200);
+    assert.equal(replay.body.cancelled, true);
+    assert.deepEqual(await snapshot(), beforeReplay);
+    proof.retry = { retry, completed, releasedHold, replay, unchangedOnReplay: true };
+    fs.writeFileSync(`${artifact}.cancel-staging-race.json`, JSON.stringify(proof, null, 2));
     return proof;
   });
 
@@ -1847,13 +1862,21 @@ try{
     assert.equal(conflicted, true);
     assert.equal(saved.resourceReleasePending, true);
     assert.equal(hold.phase, 'released');
-    for (const response of [first, replay]) {
-      assert.equal(response.status, 202, JSON.stringify(response));
-      assert.equal(response.body.cancelled, false);
-      assert.equal(response.body.ok, false);
-      assert.notEqual(response.body.slotReleased, true);
-    }
-    assert.deepEqual(afterReplay, beforeReplay);
+    assert.equal(first.status, 202, JSON.stringify(first));
+    assert.equal(first.body.cancelled, false);
+    assert.equal(first.body.ok, false);
+    assert.notEqual(first.body.slotReleased, true);
+    assert.equal(replay.status, 200, JSON.stringify(replay));
+    assert.equal(replay.body.cancelled, true);
+    assert.equal(replay.body.slotReleased, true);
+    assert.equal((await row(checkout.id)).payload.resourceReleasePending, false);
+    assert.equal((await row(holdId)).payload.phase, 'released');
+    const settledReplay = await requestFlow('cancel', { paymentAccessToken: tokenFor(payment) });
+    assert.equal(settledReplay.body.cancelled, true);
+    assert.deepEqual(await snapshot(), afterReplay);
+    proof.settledReplay = settledReplay;
+    proof.completed = (await row(checkout.id)).payload;
+    fs.writeFileSync(`${artifact}.cancel-final-write-conflict.json`, JSON.stringify(proof, null, 2));
     return proof;
   });
 
@@ -1896,10 +1919,14 @@ try{
     const after = await snapshot();
     const proof = { pending, response, before, after };
     fs.writeFileSync(`${artifact}.cancel-release-${pending ? 'pending' : 'complete'}.json`, JSON.stringify(proof, null, 2));
-    assert.equal(response.status, pending ? 202 : 200, JSON.stringify(response));
-    assert.equal(response.body.cancelled, !pending);
-    assert.equal(response.body.ok, !pending);
-    assert.deepEqual(after, before);
+    assert.equal(response.status, 200, JSON.stringify(response));
+    assert.equal(response.body.cancelled, true);
+    assert.equal(response.body.ok, true);
+    if (pending) {
+      assert.equal(response.body.slotReleased, true);
+      assert.equal((await record()).resourceReleasePending, false);
+      assert.equal((await row(holdId)).payload.phase, 'released');
+    } else assert.deepEqual(after, before);
     return proof;
   });
 

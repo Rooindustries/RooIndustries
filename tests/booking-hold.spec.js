@@ -94,6 +94,10 @@ for (const width of [1280, 390]) {
     const expired = await openExpiredPayment({ page, context, flow, native }, "/booking");
     let proof;
     await page.route("**/api/payment/cancel", async route => {
+      if (proof) {
+        const retry = await native.post("/api/payment/cancel", {}, route.request().headers().authorization);
+        return route.fulfill({ status: retry.status, json: retry.body });
+      }
       proof = await native.cancelRace(expired._id, route.request().headers().authorization);
       await route.fulfill({ status: proof.first.status, json: proof.first.body });
     });
@@ -110,6 +114,18 @@ for (const width of [1280, 390]) {
     expect(after).toEqual(before);
     await expect(release).toBeEnabled();
     await expect(page.getByText("The reservation expired. Please choose a slot again.", { exact: true })).toHaveCount(0);
+    await release.click();
+    await expect(page).toHaveURL(/\/booking$/);
+    await expect(page.getByText("The reservation expired. Please choose a slot again.", { exact: true })).toBeVisible();
+    const completed = await recoveryState(page);
+    expect(completed.my_slot_hold).toBeNull();
+    expect(completed.payment_session_state).toBeNull();
+    expect(completed.booking_draft).toBe(before.booking_draft);
+    expect((await native.getHold(expired._id)).phase).toBe("released");
+    await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+    await page.getByRole("button", { name: "Next", exact: true }).last().click();
+    await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveValue("visitor@example.invalid");
+    await testInfo.attach("cancel-retry-released", { body: JSON.stringify({ completed, hold: await readHold(page) }), contentType: "application/json" });
   });
 
   for (const replay of [false, true]) {

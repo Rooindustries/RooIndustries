@@ -3573,7 +3573,18 @@ export const cancelPaymentSession = async ({
   }
 
   let record = resolved.record;
-  const status = String(record.status || "").trim().toLowerCase();
+  let status = String(record.status || "").trim().toLowerCase();
+  let releaseRetry;
+  if (status === PAYMENT_STATUS_ABANDONED && record.resourceReleasePending === true) {
+    releaseRetry = await abandonStartedPaymentRecord({
+      client,
+      record,
+      reason: "customer_retried_payment_release",
+      releaseCouponReservation,
+    });
+    record = releaseRetry.paymentRecord;
+    status = String(record.status || "").trim().toLowerCase();
+  }
   if (status === PAYMENT_STATUS_ABANDONED) {
     if (!paymentAbandonmentComplete(record)) {
       const message = "Your payment is still being released. Please try again.";
@@ -3594,6 +3605,9 @@ export const cancelPaymentSession = async ({
         ...await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record) }),
         ok: true,
         cancelled: true,
+        ...(releaseRetry && !normalizeObject(record.cancelledHoldSnapshot).slotHoldId
+          ? { slotReleased: true }
+          : {}),
         refreshedHold: normalizeObject(record.cancelledHoldSnapshot),
       },
     };
