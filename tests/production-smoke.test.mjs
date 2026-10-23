@@ -212,6 +212,47 @@ test("CI refuses the production smoke target before sending a request", async ()
   assert.match(result.output, /CI requires an explicit loopback smoke target/);
 });
 
+for (const scenario of ["image", "redirect", "redirect chain"]) {
+  test(`CI blocks a browser ${scenario} to a destination outside its allowlist`, async () => {
+    let escaped = 0;
+    const external = http.createServer((request, response) => {
+      escaped += 1;
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end("<h3>Booking Summary</h3><p>The fixture payment page works.</p>");
+    });
+    await new Promise(resolve => external.listen(0, "127.0.0.2", resolve));
+    const target = `http://127.0.0.2:${external.address().port}/outside`;
+    let site;
+    try {
+      site = await startSite(scenario === "image" ? { bodies: {
+        "/payment": `<h3>Booking Summary</h3><p>The payment page works.</p><img src="${target}" alt="Optional image">`,
+      } } : { browserRedirects: {
+        "/payment": scenario === "redirect" ? target : "/redirect-hop",
+        "/redirect-hop": target,
+      } });
+      const result = await run(["--base", site.base], null, { GITHUB_ACTIONS: "true" });
+      assert.equal(escaped, 0, result.output);
+      assert.equal(result.code, scenario === "image" ? 0 : 2, result.output);
+    } finally {
+      await site?.close();
+      external.closeAllConnections();
+      await new Promise(resolve => external.close(resolve));
+    }
+  });
+}
+
+test("CI keeps a reset required script classified as a runner connection failure", async () => {
+  const site = await startSite({ packages: { externalReferral: true }, resetReferralScript: true });
+  try {
+    const result = await run(["--base", site.base], null, { GITHUB_ACTIONS: "true" });
+    assert.equal(result.code, 1, result.output);
+    assert.match(result.output, /couldn't load \/referral\.js/);
+    assert.doesNotMatch(result.output, /money-path check\(s\) failed/);
+  } finally {
+    await site.close();
+  }
+});
+
 const gate = path.join(root, "scripts/production-deploy-gate.mjs");
 const LIVE_URL = "https://rooindustries-live-roo-industries.vercel.app";
 const PREVIOUS_URL = "https://rooindustries-previous-roo-industries.vercel.app";
@@ -250,26 +291,28 @@ const withGate = async ({ site: siteOverrides, vercel: vercelOptions } = {}, bod
 
 const vercelChanges = vercel => vercel.requests.filter(request => request.method !== "GET");
 
-test("deploy gate: a stalled decorative image leaves a healthy deployment live", async () => {
-  let imageRequests = 0;
-  const external = http.createServer(() => { imageRequests += 1; });
-  await new Promise(resolve => external.listen(0, "127.0.0.1", resolve));
-  const imageUrl = `http://127.0.0.1:${external.address().port}/payment-logo.svg`;
-  try {
-    await withGate({ site: { bodies: {
-      "/payment": `<h3>Booking Summary</h3><p>The payment page works.</p><img src="${imageUrl}" alt="Payment provider logo">`,
-    } } }, async ({ vercel, exec }) => {
-      const result = await exec();
-      assert.equal(result.code, 0, result.output);
-      assert.ok(imageRequests > 0, "The browser must request the independent image origin.");
-      assert.deepEqual(vercelChanges(vercel), []);
-      assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
-    });
-  } finally {
-    external.closeAllConnections();
-    await new Promise(resolve => external.close(resolve));
-  }
-});
+for (const ci of [false, true]) {
+  test(`deploy gate: a stalled decorative image leaves a healthy deployment live${ci ? " in a CI fixture" : ""}`, async () => {
+    let imageRequests = 0;
+    const external = http.createServer(() => { imageRequests += 1; });
+    await new Promise(resolve => external.listen(0, "127.0.0.1", resolve));
+    const imageUrl = `http://127.0.0.1:${external.address().port}/payment-logo.svg`;
+    try {
+      await withGate({ site: { bodies: {
+        "/payment": `<h3>Booking Summary</h3><p>The payment page works.</p><img src="${imageUrl}" alt="Payment provider logo">`,
+      } } }, async ({ vercel, exec }) => {
+        const result = await exec(ci ? { GITHUB_ACTIONS: "true" } : {});
+        assert.equal(result.code, 0, result.output);
+        assert.ok(imageRequests > 0, "The browser must request the independent image origin.");
+        assert.deepEqual(vercelChanges(vercel), []);
+        assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
+      });
+    } finally {
+      external.closeAllConnections();
+      await new Promise(resolve => external.close(resolve));
+    }
+  });
+}
 
 test("deploy gate: CI rejects a nonlocal smoke before contacting the deployment provider", () => withGate({}, async ({ site, vercel, exec }) => {
   const result = await exec({ GITHUB_ACTIONS: "true", SMOKE_BASE_URL: "https://example.com" });

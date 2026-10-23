@@ -39,6 +39,10 @@ export const startSite = (overrides = {}) => {
       return res.end("busy");
     }
     if (overrides.hang?.includes(url.pathname)) return;
+    if (overrides.browserRedirects?.[url.pathname] && /Mozilla/.test(req.headers["user-agent"] || "")) {
+      res.writeHead(302, { Location: overrides.browserRedirects[url.pathname] });
+      return res.end();
+    }
     if (overrides.redirectLoop?.includes(url.pathname)) {
       res.writeHead(302, { Location: url.pathname });
       return res.end();

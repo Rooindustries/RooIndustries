@@ -9,6 +9,8 @@ const RETRY_MS = Number(process.env.SMOKE_RETRY_MS || 10000);
 const SMOKE_DEADLINE_MS = Number(process.env.SMOKE_DEADLINE_MS || 180000);
 const REQUEST_TIMEOUT_MS = Number(process.env.SMOKE_REQUEST_TIMEOUT_MS || 20000);
 const PRICE_PATTERN = /^\$\d{1,3}(?:,\d{3})*(?:\.\d{2})?$/;
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+const isCiTarget = (url) => url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname) && !url.username && !url.password;
 
 class Refusal extends Error {}
 
@@ -67,8 +69,7 @@ const resolveBase = (value) => {
   } catch {
     throw new Refusal(`"${value}" is not a URL.`);
   }
-  if (process.env.GITHUB_ACTIONS === "true" &&
-      (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname))) {
+  if (process.env.GITHUB_ACTIONS === "true" && !isCiTarget(url)) {
     throw new Refusal("CI requires an explicit loopback smoke target; live monitoring is disabled.");
   }
   if (url.origin === PRODUCTION) return url.origin;
@@ -104,13 +105,36 @@ const expectAvailability = async (response) => {
   if (!Array.isArray(body?.bookedSlots)) throw new Error("has no bookedSlots list");
 };
 
-const allowOnlyGet = (context) => context.route("**/*", (route) =>
-  route.request().method() === "GET" ? route.continue() : route.abort());
+const allowOnlyGet = async (context) => {
+  await context.route("**/*", async (route) => {
+    const request = route.request();
+    const allowed = request.method() === "GET" &&
+      (process.env.GITHUB_ACTIONS !== "true" || isCiTarget(new URL(request.url())));
+    if (!allowed) return route.abort("blockedbyclient");
+    if (process.env.GITHUB_ACTIONS !== "true") return route.continue();
+    try {
+      // Playwright skips routing later redirects, so CI refuses them before delivery.
+      const response = await route.fetch({ maxRedirects: 0, timeout: REQUEST_TIMEOUT_MS });
+      if (response.status() >= 300 && response.status() < 400) return route.abort("blockedbyclient");
+      return await route.fulfill({ response });
+    } catch (error) {
+      const codes = [
+        [/ECONNRESET|socket hang up/, "connectionreset"],
+        [/ECONNREFUSED/, "connectionrefused"],
+        [/ENOTFOUND|EAI_AGAIN/, "namenotresolved"],
+        [/EHOSTUNREACH|ENETUNREACH/, "addressunreachable"],
+      ];
+      const reason = codes.find(([pattern]) => pattern.test(error.message))?.[1] || "failed";
+      await route.abort(reason).catch(() => {});
+    }
+  });
+  await context.routeWebSocket(/.*/, (socket) => socket.close());
+};
 
 // Each browser check gets its own GET-only page. Only connection failures on the site's own GET requests count
 // as requests the runner couldn't load; resources the site blocks or refuses remain site failures.
 const withSmokePage = async (browser, base, contextOptions, check) => {
-  const context = await browser.newContext(contextOptions);
+  const context = await browser.newContext({ ...contextOptions, serviceWorkers: "block" });
   const lost = [];
   try {
     await allowOnlyGet(context);
