@@ -89,101 +89,6 @@ const screenshots = async (browser, baseURL, testInfo, prefix, content = expecte
   }
 };
 
-test("confirmed publications and empty tool lists survive an eleven-minute CMS outage", async ({ request, browser, baseURL }, testInfo) => {
-  const fixtureUrl = new URL("/__fixture", controlUrl(baseURL)).href;
-  const marker = "Most recently confirmed headline through a prolonged outage";
-  const recoveredMarker = "Fresh source after the prolonged outage";
-  const timeline = [];
-  const deleted = [];
-  const setClock = async clockNow => {
-    const response = await request.post(fixtureUrl, { data: { clockNow } });
-    expect(response.status()).toBe(200);
-  };
-  const content = async (resource, stage) => {
-    const response = await request.get(`/api/content/${resource}`);
-    const body = await response.json();
-    timeline.push({ stage, resource, status: response.status(), body });
-    expect.soft(response.status(), `${stage}/${resource}`).toBe(200);
-    return body.data;
-  };
-  const pages = async stage => {
-    const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
-    for (const width of [360, 390, 1440]) {
-      const context = await browser.newContext({ viewport: { width, height: 900 }, javaScriptEnabled: true, reducedMotion: "reduce" });
-      await guardBrowserContext(context, [baseURL, new URL(fixtureUrl).origin]);
-      const errors = [];
-      context.on("page", page => page.on("pageerror", error => errors.push(error.message)));
-      try {
-        const page = await context.newPage();
-        await page.goto("/");
-        await expect.soft(page.locator("main")).toContainText(stage === "recovered" ? recoveredMarker : marker);
-        await page.screenshot({ path: testInfo.outputPath(`${stage}-home-${width}.png`), fullPage: true });
-        await page.goto("/tools");
-        await expect.soft(page.getByRole("article")).toHaveCount(0);
-        await expect.soft(page.locator("body")).not.toContainText("Application error");
-        await page.screenshot({ path: testInfo.outputPath(`${stage}-tools-${width}.png`), fullPage: true });
-        expect.soft(errors, `${stage}/${width} hydration`).toEqual([]);
-      } finally { await context.close(); }
-    }
-  };
-  try {
-    await control(request, baseURL, { reset: true });
-    await renew(request);
-    const loaded = await request.get("/api/admin/content/documents/tooling-hero", { headers: adminHeaders });
-    const hero = (await loaded.json()).data;
-    expect(loaded.status()).toBe(200);
-    const command = { operation: "replace", type: "hero", documentId: "tooling-hero", expectedRevision: hero.revision, document: { ...hero.document, headingLine1: marker } };
-    expect((await publish(request, command)).status()).toBe(200);
-    expect((await content("hero", "confirmed publish")).headingLine1).toBe(marker);
-    const tools = await content("tools", "before deletion");
-    expect(tools).toHaveLength(4);
-    for (const tool of tools) {
-      const response = await request.get(`/api/admin/content/documents/${tool._id}`, { headers: adminHeaders });
-      const saved = (await response.json()).data;
-      expect(response.status()).toBe(200);
-      const deletion = { operation: "delete", type: "tool", documentId: tool._id, expectedRevision: saved.revision };
-      const committed = await publish(request, deletion);
-      expect(committed.status()).toBe(200);
-      const confirmed = await request.post("/api/admin/content/publish/status", { headers: adminHeaders, data: deletion });
-      expect(confirmed.status()).toBe(200);
-      expect((await confirmed.json()).data).toMatchObject({ committed: true, deleted: true, documentId: tool._id });
-      deleted.push(tool._id);
-    }
-    expect(await content("tools", "confirmed empty list")).toEqual([]);
-    expect((await content("hero", "latest confirmed state")).headingLine1).toBe(marker);
-    for (const route of ["/", "/tools"]) await expect.poll(async () => {
-      const response = await request.get(route);
-      return response.headers()["x-nextjs-cache"];
-    }, { timeout: 30000 }).toBe("HIT");
-    let clock = Date.now() + 11 * 60 * 1000;
-    await control(request, baseURL, { outage: true });
-    await setClock(clock);
-    expect.soft((await content("hero", "eleven-minute outage"))?.headingLine1).toBe(marker);
-    expect.soft(await content("tools", "eleven-minute outage")).toEqual([]);
-    await pages("outage");
-    await setClock(clock += 6000);
-    expect.soft((await content("hero", "continued outage retry"))?.headingLine1).toBe(marker);
-    expect.soft(await content("tools", "continued outage retry")).toEqual([]);
-    await control(request, baseURL, { outage: false, patch: { _id: "tooling-hero", headingLine1: recoveredMarker } });
-    await setClock(clock += 6000);
-    expect((await content("hero", "source recovered")).headingLine1).toBe(recoveredMarker);
-    expect(await content("tools", "source recovered")).toEqual([]);
-    await new Promise(resolve => setTimeout(resolve, 61000));
-    for (const route of ["/", "/tools"]) await expect.poll(async () => {
-      const response = await request.get(route);
-      const html = await response.text();
-      return response.headers()["x-nextjs-cache"] === "HIT" && (route !== "/" || html.includes(recoveredMarker));
-    }, { timeout: 30000 }).toBe(true);
-    await pages("recovered");
-  } finally {
-    await fs.writeFile(testInfo.outputPath("prolonged-outage.json"), JSON.stringify({ deleted, timeline }, null, 2));
-    await fs.writeFile(testInfo.outputPath("cms-requests.json"), JSON.stringify(await (await request.get(controlUrl(baseURL))).json(), null, 2));
-    await setClock(null);
-    await control(request, baseURL, { reset: true });
-    await renew(request);
-  }
-});
-
 test("an in-flight render keeps good content when a later publish invalidates its pending read", async ({ request, page, baseURL }, testInfo) => {
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
   await guardBrowserContext(page.context(), [baseURL, new URL(controlUrl(baseURL)).origin]);
@@ -1036,4 +941,99 @@ test("replaying an old deletion preserves the cache and the restored document", 
     expect(after.requests.filter(call => call.path.endsWith("/roo_apply_cms_publish_command") && call.body.p_mutations?.[0]?.operation === "delete")).toEqual([]);
     await fs.writeFile(testInfo.outputPath("restored-tool.html"), html);
   } finally { await control(request, baseURL, { reset: true }); }
+});
+
+test("confirmed publications and empty tool lists survive an eleven-minute CMS outage", async ({ request, browser, baseURL }, testInfo) => {
+  const fixtureUrl = new URL("/__fixture", controlUrl(baseURL)).href;
+  const marker = "Most recently confirmed headline through a prolonged outage";
+  const recoveredMarker = "Fresh source after the prolonged outage";
+  const timeline = [];
+  const deleted = [];
+  const setClock = async clockNow => {
+    const response = await request.post(fixtureUrl, { data: { clockNow } });
+    expect(response.status()).toBe(200);
+  };
+  const content = async (resource, stage) => {
+    const response = await request.get(`/api/content/${resource}`);
+    const body = await response.json();
+    timeline.push({ stage, resource, status: response.status(), body });
+    expect.soft(response.status(), `${stage}/${resource}`).toBe(200);
+    return body.data;
+  };
+  const pages = async stage => {
+    const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+    for (const width of [360, 390, 1440]) {
+      const context = await browser.newContext({ viewport: { width, height: 900 }, javaScriptEnabled: true, reducedMotion: "reduce" });
+      await guardBrowserContext(context, [baseURL, new URL(fixtureUrl).origin]);
+      const errors = [];
+      context.on("page", page => page.on("pageerror", error => errors.push(error.message)));
+      try {
+        const page = await context.newPage();
+        await page.goto("/");
+        await expect.soft(page.locator("main")).toContainText(stage === "recovered" ? recoveredMarker : marker);
+        await page.screenshot({ path: testInfo.outputPath(`${stage}-home-${width}.png`), fullPage: true });
+        await page.goto("/tools");
+        await expect.soft(page.getByRole("article")).toHaveCount(0);
+        await expect.soft(page.locator("body")).not.toContainText("Application error");
+        await page.screenshot({ path: testInfo.outputPath(`${stage}-tools-${width}.png`), fullPage: true });
+        expect.soft(errors, `${stage}/${width} hydration`).toEqual([]);
+      } finally { await context.close(); }
+    }
+  };
+  try {
+    await control(request, baseURL, { reset: true });
+    await renew(request);
+    const loaded = await request.get("/api/admin/content/documents/tooling-hero", { headers: adminHeaders });
+    const hero = (await loaded.json()).data;
+    expect(loaded.status()).toBe(200);
+    const command = { operation: "replace", type: "hero", documentId: "tooling-hero", expectedRevision: hero.revision, document: { ...hero.document, headingLine1: marker } };
+    expect((await publish(request, command)).status()).toBe(200);
+    expect((await content("hero", "confirmed publish")).headingLine1).toBe(marker);
+    const tools = await content("tools", "before deletion");
+    expect(tools).toHaveLength(4);
+    for (const tool of tools) {
+      const response = await request.get(`/api/admin/content/documents/${tool._id}`, { headers: adminHeaders });
+      const saved = (await response.json()).data;
+      expect(response.status()).toBe(200);
+      const deletion = { operation: "delete", type: "tool", documentId: tool._id, expectedRevision: saved.revision };
+      const committed = await publish(request, deletion);
+      expect(committed.status()).toBe(200);
+      const confirmed = await request.post("/api/admin/content/publish/status", { headers: adminHeaders, data: deletion });
+      expect(confirmed.status()).toBe(200);
+      expect((await confirmed.json()).data).toMatchObject({ committed: true, deleted: true, documentId: tool._id });
+      deleted.push(tool._id);
+    }
+    expect(await content("tools", "confirmed empty list")).toEqual([]);
+    expect((await content("hero", "latest confirmed state")).headingLine1).toBe(marker);
+    for (const route of ["/", "/tools"]) await expect.poll(async () => {
+      const response = await request.get(route);
+      return response.headers()["x-nextjs-cache"];
+    }, { timeout: 30000 }).toBe("HIT");
+    let clock = Date.now() + 11 * 60 * 1000;
+    await control(request, baseURL, { outage: true });
+    await setClock(clock);
+    expect.soft((await content("hero", "eleven-minute outage"))?.headingLine1).toBe(marker);
+    expect.soft(await content("tools", "eleven-minute outage")).toEqual([]);
+    await pages("outage");
+    await setClock(clock += 6000);
+    expect.soft((await content("hero", "continued outage retry"))?.headingLine1).toBe(marker);
+    expect.soft(await content("tools", "continued outage retry")).toEqual([]);
+    await control(request, baseURL, { outage: false, patch: { _id: "tooling-hero", headingLine1: recoveredMarker } });
+    await setClock(clock += 6000);
+    expect((await content("hero", "source recovered")).headingLine1).toBe(recoveredMarker);
+    expect(await content("tools", "source recovered")).toEqual([]);
+    await new Promise(resolve => setTimeout(resolve, 61000));
+    for (const route of ["/", "/tools"]) await expect.poll(async () => {
+      const response = await request.get(route);
+      const html = await response.text();
+      return response.headers()["x-nextjs-cache"] === "HIT" && (route !== "/" || html.includes(recoveredMarker));
+    }, { timeout: 30000 }).toBe(true);
+    await pages("recovered");
+  } finally {
+    await fs.writeFile(testInfo.outputPath("prolonged-outage.json"), JSON.stringify({ deleted, timeline }, null, 2));
+    await fs.writeFile(testInfo.outputPath("cms-requests.json"), JSON.stringify(await (await request.get(controlUrl(baseURL))).json(), null, 2));
+    await setClock(null);
+    await control(request, baseURL, { reset: true });
+    await renew(request);
+  }
 });
