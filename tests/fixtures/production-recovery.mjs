@@ -27,7 +27,7 @@ export const withLockTools = async (names, body) => {
   }
 };
 
-export const execute = (script, args, env) => new Promise(resolve => {
+export const execute = (script, args, env, onSpawn) => new Promise(resolve => {
   const child = spawn(process.execPath, [path.join(root, "scripts", script), ...args], {
     cwd: root, env: Object.fromEntries(Object.entries({
       PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
@@ -36,6 +36,7 @@ export const execute = (script, args, env) => new Promise(resolve => {
       ROLLBACK_VERIFY_TIMEOUT_MS: "200", ...env,
     }).filter(([,value]) => value !== undefined)),
   });
+  onSpawn?.(child);
   let output = "";
   child.stdout.on("data", chunk => { output += chunk; });
   child.stderr.on("data", chunk => { output += chunk; });

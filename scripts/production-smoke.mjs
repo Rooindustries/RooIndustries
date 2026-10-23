@@ -20,6 +20,7 @@ class Refusal extends Error {}
 // A deployment can't cause these, so they mean "the smoke could not run", never a money-path failure.
 class CouldNotRun extends Error {}
 class ApplicationFailure extends Error {}
+class ResponseFailure extends ApplicationFailure {}
 class InitializationIncomplete extends Error {}
 // Only failures of the connection itself are the runner's: a deploy can't cause them. Anything the browser
 // refused on the site's say-so (CSP, CORS, redirects, bad responses) is the site's failure.
@@ -85,11 +86,19 @@ const resolveBase = (value) => {
   throw new Refusal(`the smoke only runs against ${PRODUCTION} or a local test server, not ${url.origin}.`);
 };
 
-const getWithRetries = async (url, check) => {
+const smokeHeaders = (url, base, original = {}) => {
+  const headers = { ...original };
+  delete headers["x-vercel-protection-bypass"];
+  const bypass = String(process.env.VERCEL_AUTOMATION_BYPASS_SECRET || "").trim();
+  if (bypass && new URL(url).origin === base) headers["x-vercel-protection-bypass"] = bypass;
+  return headers;
+};
+
+const getWithRetries = async (url, check, base) => {
   let lastError;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
     try {
-      const response = await fetch(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+      const response = await fetch(url, { method: "GET", headers: smokeHeaders(url, base), redirect: "manual", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
       return await check(response);
     } catch (error) {
       lastError = asRunnerFault(error, url);
@@ -113,7 +122,7 @@ const expectAvailability = async (response) => {
   if (!Array.isArray(body?.bookedSlots)) throw new Error("has no bookedSlots list");
 };
 
-const allowSmokeRequests = async (context, base, checkout) => {
+const allowSmokeRequests = async (context, base, checkout, quoteFailed) => {
   const active = new Set();
   const blockedScripts = [];
   context.on("close", () => { for (const controller of active) controller.abort(); });
@@ -135,21 +144,25 @@ const allowSmokeRequests = async (context, base, checkout) => {
       if (request.resourceType() === "script" && url.origin !== base) blockedScripts.push(url.origin);
       return route.abort("blockedbyclient");
     }
-    if (process.env.GITHUB_ACTIONS !== "true" && !quote) return route.continue();
+    const headers = smokeHeaders(request.url(), base, request.headers());
     const controller = new AbortController();
     active.add(controller);
     try {
       // Playwright skips routing later redirects, so CI refuses them before delivery.
       const response = await fetch(request.url(), {
-        method: request.method(), headers: request.headers(), body: quote ? request.postData() : undefined,
+        method: request.method(), headers, body: quote ? request.postData() : undefined,
         redirect: "manual", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
       });
+      if (quote && response.status !== 200) {
+        quoteFailed(response.status);
+        return await route.abort("blockedbyclient");
+      }
       if (response.status >= 300 && response.status < 400) return route.abort("blockedbyclient");
       const body = Buffer.from(await response.arrayBuffer());
-      const headers = Object.fromEntries(response.headers);
-      delete headers["content-encoding"];
-      delete headers["content-length"];
-      return await route.fulfill({ status: response.status, headers, body });
+      const responseHeaders = Object.fromEntries(response.headers);
+      delete responseHeaders["content-encoding"];
+      delete responseHeaders["content-length"];
+      return await route.fulfill({ status: response.status, headers: responseHeaders, body });
     } catch (error) {
       const codes = [
         [/ECONNRESET|socket hang up/, "connectionreset"],
@@ -176,30 +189,35 @@ const withSmokePage = async (browser, base, contextOptions, check) => {
   const lost = [];
   const pending = new Set();
   let blockedScripts = [];
+  let page;
+  let confirmedError;
+  const hasApplicationError = pattern => new RegExp(pattern, "i").test(document.body?.innerText || "");
+  let fail;
+  const applicationError = new Promise((_, reject) => {
+    fail = error => {
+      if (error instanceof ApplicationFailure && (!confirmedError || confirmedError instanceof ResponseFailure)) confirmedError = error;
+      reject(error);
+    };
+  });
   try {
-    blockedScripts = await allowSmokeRequests(context, base, checkout);
+    blockedScripts = await allowSmokeRequests(context, base, checkout, status => fail(new ResponseFailure(`/payment quote answered ${status}`)));
     if (checkout) await context.addInitScript((booking) => {
       sessionStorage.setItem("checkout_booking_state", JSON.stringify(booking));
     }, checkout);
-    const page = await context.newPage();
+    page = await context.newPage();
     const origin = new URL(base).origin;
-    const applicationError = new Promise((_, reject) => {
-      page.on("response", response => {
-        if (checkout && response.url() === `${base}/api/payment/quote` && response.request().method() === "POST" && response.status() !== 200) {
-          reject(new ApplicationFailure(`/payment quote answered ${response.status()}`));
-        }
-      });
-      page.on("pageerror", error => {
-        const sources = (error.stack || "").split("\n").filter(frame => /^\s+at /.test(frame))
-          .flatMap(frame => frame.match(/https?:\/\/[^\s)]+/g) || []);
-        const origins = sources.map(source => { try { return new URL(source).origin; } catch { return null; } });
-        if (origins.length && origins.every(source => source && source !== origin)) return;
-        if (lost.length && (runnerNetError(error.message) || /^(Failed to fetch|Load failed|NetworkError)/i.test(error.message))) {
-          reject(new CouldNotRun(`couldn't load ${lost[0]}: ${error.message}`));
-          return;
-        }
-        reject(new ApplicationFailure(`${new URL(page.url()).pathname} has a rendering error: ${error.message}`));
-      });
+    page.on("pageerror", error => {
+      const sources = (error.stack || "").split("\n").filter(frame => /^\s+at /.test(frame))
+        .flatMap(frame => frame.match(/https?:\/\/[^\s)]+/g) || []);
+      const origins = sources.map(source => { try { return new URL(source).origin; } catch { return null; } });
+      if (origins.length && origins.every(source => source && source !== origin)) return;
+      const fetchError = runnerNetError(error.message) || /^(Failed to fetch|Load failed|NetworkError)/i.test(error.message);
+      if (fetchError && confirmedError instanceof ResponseFailure) return;
+      if (lost.length && fetchError) {
+        fail(new CouldNotRun(`couldn't load ${lost[0]}: ${error.message}`));
+        return;
+      }
+      fail(new ApplicationFailure(`${new URL(page.url()).pathname} has a rendering error: ${error.message}`));
     });
     page.on("request", request => {
       if (new URL(request.url()).origin === origin && ["document", "script", "stylesheet", "xhr", "fetch"].includes(request.resourceType())) pending.add(request);
@@ -212,9 +230,24 @@ const withSmokePage = async (browser, base, contextOptions, check) => {
         lost.push(`${new URL(request.url()).pathname} (${reason || "failed"})`);
       }
     });
-    return await Promise.race([check(page), applicationError]);
+    const renderedError = page.waitForFunction(hasApplicationError, APP_ERROR_PATTERN.source, { polling: 50, timeout: 0 }).then(() => {
+      fail(new ApplicationFailure(`${new URL(page.url()).pathname} shows an application error`));
+      throw confirmedError;
+    });
+    const result = await Promise.race([check(page), applicationError, renderedError]);
+    if (await page.evaluate(hasApplicationError, APP_ERROR_PATTERN.source)) {
+      fail(new ApplicationFailure(`${new URL(page.url()).pathname} shows an application error`));
+    }
+    if (confirmedError) throw confirmedError;
+    return result;
   } catch (error) {
-    if (error instanceof ApplicationFailure) throw error;
+    if (confirmedError && !(confirmedError instanceof ResponseFailure)) throw confirmedError;
+    if (error instanceof ApplicationFailure && !(error instanceof ResponseFailure)) throw error;
+    if (page && await page.evaluate(hasApplicationError, APP_ERROR_PATTERN.source).catch(() => false)) {
+      throw new ApplicationFailure(`${new URL(page.url()).pathname} shows an application error`);
+    }
+    if (confirmedError) throw confirmedError;
+    if (error instanceof ResponseFailure) throw error;
     if (lost.length && !(error instanceof CouldNotRun)) throw new CouldNotRun(`couldn't load ${lost[0]}: ${error.message}`);
     if (pending.size && !(error instanceof CouldNotRun)) throw new CouldNotRun(`client resources are still loading: ${error.message}`);
     if (blockedScripts.length && !(error instanceof CouldNotRun)) throw new CouldNotRun(`the smoke blocked external scripts from ${blockedScripts[0]}: ${error.message}`);
@@ -232,22 +265,23 @@ const nodes = (value) => {
 
 const checkPrices = (browser, base, selectCheckout) => withSmokePage(browser, base, { javaScriptEnabled: false }, async (page) => {
     const response = await page.goto(`${base}/packages`, { waitUntil: "domcontentloaded", timeout: 30000 });
-    if (response?.status() !== 200) throw new Error(`/packages answered ${response?.status()}`);
+    if (response?.status() !== 200) throw new ResponseFailure(`/packages answered ${response?.status()}`);
     const cards = await page.locator(".ri-package-card").evaluateAll((elements) => elements.map((card) => ({
       name: card.querySelector("h3")?.textContent?.trim() || "",
       price: card.querySelector(".ri-price-current")?.textContent?.trim() || "",
     })));
-    if (!cards.length) throw new Error("no package cards rendered");
+    if (!cards.length) throw new ApplicationFailure("no package cards rendered");
+    const selected = cards.find(card => card.name && PRICE_PATTERN.test(card.price));
+    if (selected) selectCheckout({ packageTitle: selected.name, packagePrice: selected.price });
     const unpriced = cards.filter((card) => !card.name || !PRICE_PATTERN.test(card.price));
-    if (unpriced.length) throw new Error(`cards without a name or price: ${JSON.stringify(unpriced)}`);
+    if (unpriced.length) throw new ApplicationFailure(`cards without a name or price: ${JSON.stringify(unpriced)}`);
     const scripts = await page.locator('script[type="application/ld+json"]').allTextContents();
     const offers = nodes(scripts.map((text) => JSON.parse(text))).filter((node) => node["@type"] === "Offer");
     const published = offers.map((offer) => ({ name: offer.itemOffered?.name, price: Number(offer.price) }));
     const shown = cards.map((card) => ({ name: card.name, price: Number(card.price.replace(/[$,]/g, "")) }));
     if (JSON.stringify(published) !== JSON.stringify(shown)) {
-      throw new Error(`structured data offers ${JSON.stringify(published)} don't match the cards ${JSON.stringify(shown)}`);
+      throw new ApplicationFailure(`structured data offers ${JSON.stringify(published)} don't match the cards ${JSON.stringify(shown)}`);
     }
-    selectCheckout({ packageTitle: cards[0].name, packagePrice: cards[0].price });
     return `${cards.length} packages priced`;
 });
 
@@ -258,15 +292,21 @@ const FLOW_MARKERS = {
 };
 
 const checkPageRenders = (browser, base, pathname, checkout) => withSmokePage(browser, base, { checkout }, async (page) => {
+    const flow = pathname === "/" ? "home" : pathname.slice(1);
+    const uiFailure = async message => {
+      const initialized = await page.locator(`[data-roo-flow-ready="${flow}"]`).count();
+      const Failure = initialized ? ApplicationFailure : InitializationIncomplete;
+      return new Failure(message);
+    };
     let quoted = false;
     if (pathname === "/payment") page.on("response", (response) => {
       if (response.url() === `${base}/api/payment/quote` && response.request().method() === "POST" && response.status() === 200) quoted = true;
     });
     const response = await page.goto(`${base}${pathname}`, { waitUntil: "domcontentloaded", timeout: 30000 });
-    if (response?.status() !== 200) throw new ApplicationFailure(`${pathname} answered ${response?.status()}`);
+    if (response?.status() !== 200) throw new ResponseFailure(`${pathname} answered ${response?.status()}`);
     const markerTimeout = Number(process.env.SMOKE_MARKER_TIMEOUT_MS || 15000);
     await page.waitForFunction(() => document.body.innerText.trim().length >= 20, null, { timeout: markerTimeout })
-      .catch(() => { throw new Error(`${pathname} rendered no visible content`); });
+      .catch(async () => { throw await uiFailure(`${pathname} rendered no visible content`); });
     const text = await page.evaluate(() => document.body.innerText);
     if (APP_ERROR_PATTERN.test(text)) throw new ApplicationFailure(`${pathname} shows an application error`);
     if (pathname === "/") {
@@ -285,19 +325,16 @@ const checkPageRenders = (browser, base, pathname, checkout) => withSmokePage(br
         const bookingLink = document.querySelector('#top a[href="/#packages"]');
         return visible(heading) && visible(bookingLink);
       }, null, { timeout: markerTimeout })
-        .catch(() => { throw new Error("/ is missing its homepage heading or booking link"); });
+        .catch(async () => { throw await uiFailure("/ is missing its homepage heading or booking link"); });
     }
     const marker = FLOW_MARKERS[pathname];
     if (marker) {
       await page.waitForFunction((expected) => document.body.innerText.includes(expected), marker, {
         timeout: markerTimeout,
       }).catch(async () => {
-        const initialized = await page.locator(`[data-roo-flow-ready="${pathname.slice(1)}"]`).count();
-        const Failure = initialized ? ApplicationFailure : InitializationIncomplete;
-        throw new Failure(`${pathname} is missing "${marker}"`);
+        throw await uiFailure(`${pathname} is missing "${marker}"`);
       });
     }
-    const flow = pathname === "/" ? "home" : pathname.slice(1);
     await page.waitForFunction((expected) => document.querySelector(`[data-roo-flow-ready="${expected}"]`), flow, {
       timeout: markerTimeout,
     }).catch(() => {
@@ -328,10 +365,10 @@ const checkPageRenders = (browser, base, pathname, checkout) => withSmokePage(br
         await usable(input);
         await input.click({ trial: true, timeout: markerTimeout });
       } catch {
-        throw new Error(`${pathname} content or controls are not visible and usable`);
+        throw await uiFailure(`${pathname} content or controls are not visible and usable`);
       }
     }
-    if (pathname === "/payment" && !quoted) throw new Error("/payment did not confirm a real checkout quote");
+    if (pathname === "/payment" && !quoted) throw await uiFailure("/payment did not confirm a real checkout quote");
     if (APP_ERROR_PATTERN.test(await page.evaluate(() => document.body.innerText))) {
       throw new ApplicationFailure(`${pathname} shows an application error`);
     }
@@ -340,7 +377,7 @@ const checkPageRenders = (browser, base, pathname, checkout) => withSmokePage(br
 
 const checkReferral = (browser, base) => withSmokePage(browser, base, {}, async (page) => {
     const response = await page.goto(`${base}/packages?ref=${REFERRAL_CODE}`, { waitUntil: "domcontentloaded", timeout: 30000 });
-    if (response?.status() !== 200) throw new Error(`/packages?ref answered ${response?.status()}`);
+    if (response?.status() !== 200) throw new ResponseFailure(`/packages?ref answered ${response?.status()}`);
     await page.waitForFunction((code) => window.sessionStorage.getItem("referral_session") === code, REFERRAL_CODE, { timeout: 15000 })
       .catch(() => { throw new Error("the ?ref code was not remembered for checkout"); });
     return "code remembered";
@@ -348,17 +385,16 @@ const checkReferral = (browser, base) => withSmokePage(browser, base, {}, async 
 
 const withBrowserRetries = async (browser, base, check) => {
   let lastError;
-  let applicationFailure;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
     try {
       return await check(browser, base);
     } catch (error) {
-      if (error instanceof ApplicationFailure) applicationFailure = error;
+      if (error instanceof ApplicationFailure && !(error instanceof ResponseFailure)) throw error;
       lastError = browser.isConnected() ? asRunnerFault(error, base) : new CouldNotRun(`the browser closed: ${error.message}`);
       if (attempt < ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
     }
   }
-  throw applicationFailure || lastError;
+  throw lastError;
 };
 
 const main = async () => {
@@ -382,8 +418,8 @@ const main = async () => {
     }
   };
   const checks = [
-    ...MONEY_PAGES.map((path) => [`page ${path}`, () => getWithRetries(`${base}${path}`, expectHtml)]),
-    ["booking availability", () => getWithRetries(`${base}/api/bookingAvailability`, expectAvailability)],
+    ...MONEY_PAGES.map((path) => [`page ${path}`, () => getWithRetries(`${base}${path}`, expectHtml, base)]),
+    ["booking availability", () => getWithRetries(`${base}/api/bookingAvailability`, expectAvailability, base)],
   ];
   let chromium;
   try {
@@ -391,7 +427,9 @@ const main = async () => {
   } catch (error) {
     throw new Error(`Playwright is not installed: ${error.message}`);
   }
-  const browser = await chromium.launch();
+  const browserEnv = { ...process.env };
+  for (const key of ["VERCEL_AUTOMATION_BYPASS_SECRET", "VERCEL_TOKEN", "GITHUB_TOKEN"]) delete browserEnv[key];
+  const browser = await chromium.launch({ env: browserEnv });
   const results = [];
   let checkout;
   try {
@@ -400,7 +438,14 @@ const main = async () => {
       ["referral capture", () => withBrowserRetries(browser, base, checkReferral)],
       ["home page renders", () => withBrowserRetries(browser, base, (b, url) => checkPageRenders(b, url, "/"))],
       ["booking page renders", () => withBrowserRetries(browser, base, (b, url) => checkPageRenders(b, url, "/booking"))],
-      ["payment page renders", () => withBrowserRetries(browser, base, (b, url) => checkPageRenders(b, url, "/payment", checkout))],
+      ["payment page renders", () => {
+        if (!checkout) {
+          const prices = results.find(row => row.name === "package prices");
+          const Failure = prices?.couldNotRun ? CouldNotRun : ApplicationFailure;
+          throw new Failure("/payment has no usable checkout package because the package prices check failed");
+        }
+        return withBrowserRetries(browser, base, (b, url) => checkPageRenders(b, url, "/payment", checkout));
+      }],
     );
     for (const [name, run] of checks) {
       try {

@@ -76,7 +76,7 @@ const main = async () => {
       try { report = JSON.parse(fs.readFileSync(filename, "utf8")); } catch {}
       return { code: result.code, report };
     };
-    const sourceBase = process.env.SMOKE_BASE_URL || (confirmedLive || monitoring ? deploymentUrl : "https://www.rooindustries.com");
+    const sourceBase = process.env.SMOKE_BASE_URL || (confirmedLive ? deploymentUrl : "https://www.rooindustries.com");
     const first = await smoke(sourceBase);
     if (first.code === 0) {
       validateReport(first.report);

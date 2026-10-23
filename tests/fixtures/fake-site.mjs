@@ -30,7 +30,12 @@ export const startSite = (overrides = {}) => {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://site");
     const entry = { method: req.method, path: url.pathname, at: Date.now() };
+    if (req.headers["x-vercel-protection-bypass"]) entry.bypass = req.headers["x-vercel-protection-bypass"];
     requests.push(entry);
+    if (overrides.protection && entry.bypass !== overrides.protection) {
+      res.writeHead(401, { "content-type": "text/html" });
+      return res.end(page("Deployment authentication required"));
+    }
     if (overrides.dropNonBrowser && !/Mozilla/.test(req.headers["user-agent"] || "")) return req.socket.destroy();
     overrides.onRequest?.(url.pathname);
     const pending = failures.get(url.pathname);

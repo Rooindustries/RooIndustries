@@ -176,6 +176,7 @@ const checkTarget = (deployment, state, { rollback }) => {
   if (deployment.projectId !== state.project.id) problems.push(`it belongs to project ${deployment.projectId}`);
   if (deployment.target !== "production") problems.push(`its target is ${deployment.target}`);
   if (readyState(deployment) !== "READY") problems.push(`it is ${readyState(deployment)}`);
+  if (deployment.readySubstate === "ROLLING") problems.push("it is part of a rolling release");
   if (deployment.softDeletedByRetention === true || deployment.deletedAt) problems.push("it was deleted");
   if (rollback) {
     const eligible = deployment.isRollbackCandidate === true ||
@@ -192,7 +193,7 @@ const refuseBusyProject = (state) => {
   if (job && PENDING_JOBS.has(job.jobStatus)) {
     throw new Refusal(`A ${job.type} to ${job.toDeploymentId} is still ${job.jobStatus}; wait for it to finish.`);
   }
-  if (state.live.readySubstate === "ROLLING") throw new Refusal("A rolling release is moving traffic; finish or abort it in Vercel first.");
+  if (state.live.readySubstate === "ROLLING" || state.newest?.readySubstate === "ROLLING") throw new Refusal("A rolling release is moving traffic; finish or abort it in Vercel first.");
 };
 
 // Vercel's last promote or rollback says which deployment served production before the live one,
@@ -267,7 +268,8 @@ const automaticPlan = async (api, state, options) => {
 const restoreDisplacedDeployment = async (api, state, domain, targetId, displacedId, restorations) => {
   if (restorations >= 3) throw new Error("Production kept changing during race restoration. Stop competing alias writers and check production immediately.");
   const displaced = await resolveDeployment(api, state, displacedId);
-  if (deploymentId(displaced) !== displacedId || !isLiveable(displaced, state.project.id) || createdAt(displaced) <= createdAt(state.live)) {
+  if (deploymentId(displaced) !== displacedId || !isLiveable(displaced, state.project.id) ||
+      displaced.readySubstate === "ROLLING" || createdAt(displaced) <= createdAt(state.live)) {
     throw new Error("The rollback replaced an unexpected deployment whose safe restoration cannot be established. Check production immediately.");
   }
   const current = await loadState(api, domain);
@@ -296,6 +298,9 @@ const waitForDomain = async (api, state, domain, targetId, { autoAssign, expecte
     const jobTargetsThis = job?.toDeploymentId === targetId;
     const assignmentReady = autoAssign === undefined ||
       (autoAssign ? project?.autoAssignCustomDomains === true : project?.autoAssignCustomDomains === false);
+    if (domainMoved && jobTargetsThis && Object.hasOwn(job, "fromRollingReleaseId")) {
+      throw new Error(`Vercel recorded a rolling release source from ${job.fromDeploymentId} toward ${JSON.stringify(job.fromRollingReleaseId)}; recovery is not confirmed. Its traffic split cannot be restored from alias history. Check production immediately.`);
+    }
     if (automatic && domainMoved && jobTargetsThis && job.fromDeploymentId && job.fromDeploymentId !== expectedFrom &&
         (job.jobStatus === "succeeded" || FAILED_JOBS.has(job.jobStatus))) {
       await restoreDisplacedDeployment(api, state, domain, targetId, job.fromDeploymentId, restorations);

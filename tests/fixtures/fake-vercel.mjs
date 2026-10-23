@@ -49,6 +49,7 @@ export const startVercel = ({
   historyWriteError = false,
   restoreError = false,
   swapLiveBeforePromote = false,
+  mutationJob = job => job,
 } = {}) => {
   const state = structuredClone(fixture);
   state.history = [];
@@ -205,25 +206,25 @@ export const startVercel = ({
       if (dropAcceptedRollback) {
         state.project.autoAssignCustomDomains = false;
         rollbackPosts += 1;
-        state.project.lastAliasRequest = {
+        state.project.lastAliasRequest = mutationJob({
           type: "rollback",
           jobStatus: "in-progress",
           fromDeploymentId: from,
           toDeploymentId: match[2],
           requestedAt: Date.now(),
-        };
+        });
         res.destroy();
         return;
       }
       state.project.autoAssignCustomDomains = false;
       rollbackPosts += 1;
-      state.project.lastAliasRequest = {
+      state.project.lastAliasRequest = mutationJob({
         type: "rollback",
         jobStatus: aliasJobStatus || (aliasSettlePolls ? "in-progress" : "succeeded"),
         fromDeploymentId: omitFromDeployment ? null : from,
         toDeploymentId: match[2],
         requestedAt: Date.now(),
-      };
+      });
       return dropMutationResponse ? req.socket.destroy() : send(201);
     }
     if (req.method === "POST" && (match = url.pathname.match(/^\/v10\/projects\/([^/]+)\/promote\/([^/]+)$/))) {
@@ -233,7 +234,7 @@ export const startVercel = ({
       moveAlias(match[2]);
       promotePosted = true;
       state.project.autoAssignCustomDomains = promoteAssignPolls > 0 ? false : true;
-      state.project.lastAliasRequest = { type: "promote", jobStatus: "succeeded", fromDeploymentId: from, toDeploymentId: match[2], requestedAt: Date.now() };
+      state.project.lastAliasRequest = mutationJob({ type: "promote", jobStatus: "succeeded", fromDeploymentId: from, toDeploymentId: match[2], requestedAt: Date.now() });
       return dropMutationResponse ? req.socket.destroy() : send(promoteStatus);
     }
     return notFound();

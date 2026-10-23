@@ -55,7 +55,8 @@ export const verifyHistoryTarget = (record, state, target, domain) => {
       record.createdAt !== Number(target.created ?? target.createdAt) || record.epoch !== recoveryEpoch()) {
     throw new Error("The previous deployment does not match the latest passed-gate history and compatibility epoch.");
   }
-  if (!job || job.jobStatus !== "succeeded" || job.type === "rollback" || job.toDeploymentId !== sourceId || job.fromDeploymentId !== targetId) {
+  if (!job || job.jobStatus !== "succeeded" || job.type === "rollback" || Object.hasOwn(job, "fromRollingReleaseId") ||
+      job.toDeploymentId !== sourceId || job.fromDeploymentId !== targetId) {
     throw new Error("Production alias history does not identify the passed gate as the immediately previous deployment.");
   }
   const sourceSha = state.live.meta?.githubCommitSha;

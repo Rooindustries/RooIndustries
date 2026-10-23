@@ -12,6 +12,7 @@ import { withRecovery } from "./fixtures/production-recovery.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const script = path.join(root, "scripts/production-smoke.mjs");
+const protection = "fixture-event-bypass-6b1c";
 
 const closeOwnedBrowser = smokePid => {
   const children = execFileSync("ps", ["-o", "pid=", "--ppid", String(smokePid)], { encoding: "utf8" }).trim();
@@ -393,7 +394,7 @@ test("review regression: concurrent gates recover a broken deployment exactly on
 }));
 
 test("the production deployment event invokes recovery on the free laptop runner using only fake services", () => withGate({
-  site: { status: { "/payment": 500 } },
+  site: { status: { "/payment": 500 }, protection }, previous: { protection },
 }, async ({ site, previous, vercel, exec }) => {
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/production-smoke.yml"), "utf8");
   const runner = workflow.match(/^    runs-on: \[([^\]]+)\]$/m)?.[1].split(/,\s*/);
@@ -408,6 +409,7 @@ test("the production deployment event invokes recovery on the free laptop runner
     const env = { GITHUB_ACTIONS: "true", GITHUB_EVENT_NAME: "deployment_status", GITHUB_EVENT_PATH: eventPath,
       RUNNER_ENVIRONMENT: "self-hosted", RUNNER_OS: "Linux", RUNNER_ARCH: "X64",
       GITHUB_WORKFLOW_REF: "Rooindustries/RooIndustries/.github/workflows/production-smoke.yml@refs/heads/main",
+      VERCEL_AUTOMATION_BYPASS_SECRET: protection,
       ROO_TEST_MONITOR_ORIGIN: site.base, ROO_TEST_PREVIOUS_ORIGIN: previous.base, SMOKE_BASE_URL: undefined,
       NODE_OPTIONS: `--import=${path.join(root, "tests/fixtures/production-monitor-loader.mjs")}` };
     const refused = await exec({ ...env, GITHUB_WORKFLOW_REF: "Rooindustries/RooIndustries/.github/workflows/tests.yml@refs/heads/main" });
@@ -416,6 +418,14 @@ test("the production deployment event invokes recovery on the free laptop runner
     assert.equal(site.requests.length, 0);
     const result = await exec(env);
     assert.equal(result.code, 1, result.output);
+    assert.match(result.output, /FAIL\s+page \/payment: answered 500/);
+    assert.match(result.output, /Waiting 120 seconds/);
+    const quotes = previous.requests.filter(request => request.path === "/api/payment/quote");
+    assert.equal(quotes.length, 2, result.output);
+    assert.ok(site.requests.some(request => request.path === "/" && request.at - quotes[0].at >= 120000));
+    assert.ok(site.requests.filter(request => request.path === "/payment").length >= 4);
+    assert.ok([...site.requests, ...previous.requests].every(request => request.bypass === protection));
+    assert.doesNotMatch(result.output, /\[test-target\]|ERR_FAILED/);
     assert.match(result.output, /production was rolled back/);
     assert.equal(vercelChanges(vercel).length, 1);
     assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
