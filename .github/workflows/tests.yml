@@ -215,6 +215,8 @@ jobs:
         run: npm run test:booking:holds
       - name: Run payment persistence sweep on the full migration chain
         run: node scripts/test-payment-persistence-sweep.mjs --full-chain
+      - name: Check creator links through paid booking and commission
+        run: npm run test:creator-credit
       - name: Run the remaining PostgreSQL 17 suites
         run: |
           failed=()
