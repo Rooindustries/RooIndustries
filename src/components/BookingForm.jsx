@@ -10,7 +10,7 @@ import React, {
 import { createPortal } from "react-dom";
 import { useDialogFocus } from "../lib/useDialogFocus";
 import { BookingDialogActionsContext, useBookingDialogPending } from "../lib/bookingDialogHold";
-import { readBrowserStorage, removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
+import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { getPublicContent } from "../lib/publicContentClient";
 import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
 import { useLocation, useNavigate, Link } from "react-router-dom";
@@ -22,7 +22,8 @@ import PriceDisplay from "./PriceDisplay";
 import { getWarrantyCallout } from "../lib/packageWarranty";
 import {
   BOOKING_DRAFT_STORAGE_KEY,
-  BOOKING_HOLD_EXPIRED_STORAGE_KEY,
+  bookingHoldExpired,
+  clearBookingHoldExpired,
   holdAwaitsPayment,
   markBookingHoldExpired,
   CHECKOUT_BOOKING_STORAGE_KEY,
@@ -759,13 +760,13 @@ export default function BookingForm() {
         setReferralReadyScope(scope);
       }
       clearedNoHoldRef.current = false;
-      removeBrowserStorage("sessionStorage", BOOKING_HOLD_EXPIRED_STORAGE_KEY);
+      clearBookingHoldExpired();
       return;
     }
     if (clearedNoHoldRef.current) return;
 
     restoredHoldIdRef.current = null;
-    if (readBrowserStorage("sessionStorage", BOOKING_HOLD_EXPIRED_STORAGE_KEY)) {
+    if (bookingHoldExpired()) {
       // An expiry keeps the checkout as the visitor left it: typed details, applied codes and this scope's choice.
       referralReadyScopeRef.current = scope;
       setReferralReadyScope(scope);
@@ -2189,8 +2190,8 @@ export default function BookingForm() {
       currentHoldRef.current?.holdId === holdIdToDelete &&
       currentHoldRef.current?.holdToken === holdTokenToDelete;
     if (classifyHoldResponse({ endpoint: "release", expired: hasExpired() }) === "clear" && isCurrentHold()) {
-      markBookingHoldExpired();
       clearHoldState(resetStep);
+      markBookingHoldExpired();
       setErrorStep1(RESERVATION_EXPIRED_ERROR);
       setErrorStep2("");
     }
@@ -2226,8 +2227,8 @@ export default function BookingForm() {
     }
     if (outcome !== "keep") {
       if (isCurrentHold() && hasExpired()) {
-        markBookingHoldExpired();
         clearHoldState(resetStep);
+        markBookingHoldExpired();
         setErrorStep1(RESERVATION_EXPIRED_ERROR);
         setErrorStep2("");
         return true;
@@ -2280,8 +2281,8 @@ export default function BookingForm() {
       const refreshed = data.refreshedHold;
       if (!refreshed?.slotHoldId || !refreshed?.slotHoldToken) {
         removeBrowserStorage("sessionStorage", PAYMENT_SESSION_STORAGE_KEY);
-        markBookingHoldExpired();
         clearHoldState(true);
+        markBookingHoldExpired();
         setErrorStep1(RESERVATION_EXPIRED_ERROR);
         return;
       }
@@ -2317,14 +2318,8 @@ export default function BookingForm() {
   };
 
   const handleLockAndGoNext = async (recheckOtherTab = false) => {
+    // Check again always asks the server, even past the deadline: the other tab's payment may still be running.
     const recheckingPayment = recheckOtherTab === true && paymentInOtherTab;
-    if (recheckingPayment && new Date(myHold.expiresAt).getTime() <= Date.now()) {
-      markBookingHoldExpired();
-      clearHoldState(true);
-      setErrorStep2("");
-      setErrorStep1(RESERVATION_EXPIRED_ERROR);
-      return;
-    }
     if (isPaymentPendingHold && !recheckingPayment) {
       const message = "Your payment session is already in progress. Return to payment to finish it.";
       if (myHold.startTimeUTC === selectedSlot?.utcStart?.toISOString()) {
