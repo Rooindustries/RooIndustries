@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { homedir } from 'node:os';
+import { homedir, networkInterfaces } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 
@@ -25,8 +25,10 @@ if (process.argv[2] !== '--sandbox') {
   const artifact = join(root, 'test-results/monitoring-deployments', new Date().toISOString().replace(/[:.]/g, '-'));
   await mkdir(artifact, { recursive: true });
   await mkdir(join(scratch, 'home'));
-  const child = spawn('bwrap', ['--unshare-net', '--die-with-parent', '--bind', '/', '/', '--dev', '/dev', '--proc', '/proc',
-    process.execPath, fileURLToPath(import.meta.url), '--sandbox', scratch, artifact], {
+  const hostNetwork = await readlink('/proc/self/ns/net');
+  const child = spawn('unshare', ['--user', '--map-root-user', '--net', '--',
+    'sh', '-ec', 'ip link set lo up; exec "$@"', 'monitoring-sandbox',
+    process.execPath, fileURLToPath(import.meta.url), '--sandbox', scratch, artifact, hostNetwork], {
     cwd: root, detached: true, stdio: 'inherit',
     env: {
       PATH: process.env.PATH, HOME: join(scratch, 'home'), TMPDIR: scratch,
@@ -45,10 +47,10 @@ if (process.argv[2] !== '--sandbox') {
     console.log(`report: ${join(artifact, 'report.json')}`);
   }
 } else {
-  await run(process.argv[3], process.argv[4]);
+  await run(process.argv[3], process.argv[4], process.argv[5]);
 }
 
-async function run(scratch, artifact) {
+async function run(scratch, artifact, hostNetwork) {
   const { installNetworkGuard, inheritTestProcessGuard, refuseEnvFiles } = await import('./lib/test-target-safety.mjs');
   const { createToolingContentFixture } = await import('../tests/fixtures/tooling-content.mjs');
   const { apiRouteSecrets } = await import('../tests/fixtures/api-routes.mjs');
@@ -63,6 +65,8 @@ async function run(scratch, artifact) {
     checks.push({ name, ok, actual, expected });
     console.log(`${ok ? 'ok' : 'FAIL'} ${name}`);
   };
+  check('test network namespace differs from the host', await readlink('/proc/self/ns/net') === hostNetwork, false);
+  check('test network has only loopback interfaces', Object.keys(networkInterfaces()), ['lo']);
   const requests = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);

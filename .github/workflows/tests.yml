@@ -29,9 +29,19 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install chromium
+      - name: Allow isolated monitoring on GitHub-hosted runners
+        if: ${{ runner.environment == 'github-hosted' }}
+        run: |
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] &&
+             [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = 1 ]; then
+            printf '%s\n' 'abi <abi/4.0>,' \
+              'profile roo-monitoring-unshare /usr/bin/unshare flags=(unconfined) {' \
+              '  userns,' '}' | sudo apparmor_parser --replace
+          fi
       - name: Check network isolation tools
         run: |
-          command -v bwrap
+          command -v unshare
+          command -v ip
           command -v cc
       - name: Check monitoring
         run: |

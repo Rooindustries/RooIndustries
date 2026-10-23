@@ -14,7 +14,9 @@ Sentry reports only from production deployments: `VERCEL=1`, `VERCEL_ENV=product
 
 The server checks the deployment when it starts reporting or handles a browser envelope. The browser uses `NEXT_PUBLIC_ROO_SENTRY_ENABLED`, which `next.config.mjs` derives from those same deployment checks. Setting that public variable yourself cannot enable reporting. Rebuild when changing deployment environments; [Next.js freezes public variables at build time](https://nextjs.org/docs/app/guides/environment-variables). [Vercel supplies its deployment markers at build and runtime](https://vercel.com/docs/environment-variables/system-environment-variables).
 
-Run `npm run test:monitoring:deployments` on Linux with Node 24, Bubblewrap, a C compiler and Playwright Chromium installed. It builds a disposable copy of the website, uses local Sentry and Supabase stand-ins, and writes its report, browser traces and screenshots under `test-results/monitoring-deployments/`. Its network namespace and connection audit keep traffic local; the Sentry CLI has telemetry disabled. `npm run test:monitoring` checks the reporting and privacy behavior within an explicitly production-flagged local fixture.
+Run `npm run test:monitoring:deployments` on Linux with Node 24, `unshare` (util-linux), `ip` (iproute2), a C compiler and Playwright Chromium installed. It builds a disposable copy of the website, uses local Sentry and Supabase stand-ins, and writes its report, browser traces and screenshots under `test-results/monitoring-deployments/`. Its network namespace and connection audit keep traffic local; the Sentry CLI has telemetry disabled. `npm run test:monitoring` checks the reporting and privacy behavior within an explicitly production-flagged local fixture.
+
+The host must allow unprivileged user and network namespaces. On GitHub-hosted Ubuntu runners, the monitoring job loads an AppArmor profile permitting user namespaces only for `/usr/bin/unshare`, without changing the system-wide restriction. Self-hosted runners keep their existing security settings.
 
 ## Code of Conduct
 
