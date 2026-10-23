@@ -17,6 +17,13 @@ omit it for the production build and server. Production builds require a fresh
 directory when their source fingerprint changes. Generated HTTP attachments,
 screenshots, traces, and logs belong under `test-results/`.
 
+With that server running, `BASE_URL=http://127.0.0.1:<port> npm run
+test:nav:sections:repeat` runs the complete section-navigation suite five times
+with one worker and no retries. Commit changes first: the command records the
+commit and preserves each run's report, timings and console logs separately
+under `test-results/section-nav-consecutive/`. It stops at the first failure.
+Keep real Sentry DSNs unset in both the fixture server and browser process.
+
 `npm run test:booking:holds` starts the real hold handler and request adapter over
 HTTP, using the same content fixture and a clock mock confined to that test
 process. It owns both servers and stops them on completion. `BOOKING_ROUTE_PORT`

@@ -2,6 +2,7 @@ const testHost = process.env.ROO_TEST_HOST || '127.0.0.1';
 const fs = require("fs");
 const path = require("path");
 const { test, expect } = require("@playwright/test");
+const { waitForTargetSettle: measureTargetSettle, waitForHash } = require("./fixtures/section-nav.cjs");
 
 const BASE_URL = process.env.BASE_URL;
 if (!BASE_URL) {
@@ -138,18 +139,6 @@ const ensureAuditDir = () => {
 
 const nowMs = () => Date.now();
 
-const waitForHash = async (page, expectedHash, timeoutMs) => {
-  const start = nowMs();
-  while (nowMs() - start <= timeoutMs) {
-    const currentHash = new URL(page.url()).hash;
-    if (currentHash === expectedHash) {
-      return { ok: true, latencyMs: nowMs() - start };
-    }
-    await page.waitForTimeout(25);
-  }
-  return { ok: false, latencyMs: nowMs() - start };
-};
-
 const measureOffset = async (page, hash) =>
   page.evaluate((selector) => {
     const el = document.querySelector(selector);
@@ -157,32 +146,8 @@ const measureOffset = async (page, hash) =>
     return Math.round(el.getBoundingClientRect().top);
   }, hash);
 
-const waitForTargetSettle = async (page, hash, timeoutMs) => {
-  const start = nowMs();
-  let top = null;
-  let lastTop = null;
-  let stableSince = null;
-  while (nowMs() - start <= timeoutMs) {
-    top = await measureOffset(page, hash);
-    if (top !== null && Math.abs(top) <= FINAL_OFFSET_MAX) {
-      if (stableSince === null || lastTop === null || Math.abs(top - lastTop) > 1) {
-        stableSince = nowMs();
-      }
-      if (nowMs() - stableSince >= 150) {
-        return { ok: true, timeToTargetMs: nowMs() - start, top };
-      }
-    } else {
-      stableSince = null;
-    }
-    lastTop = top;
-    await page.waitForTimeout(50);
-  }
-  return {
-    ok: false,
-    timeToTargetMs: nowMs() - start,
-    top,
-  };
-};
+const waitForTargetSettle = (page, hash, timeoutMs) =>
+  measureTargetSettle(page, hash, timeoutMs, FINAL_OFFSET_MAX);
 
 const waitForReactHydratedSelector = async (page, selector) => {
   await page.waitForFunction(
@@ -190,7 +155,8 @@ const waitForReactHydratedSelector = async (page, selector) => {
       const element = document.querySelector(targetSelector);
       return Boolean(
         element &&
-          Object.keys(element).some((key) => key.startsWith("__reactProps$"))
+          Object.keys(element).some((key) => key.startsWith("__reactProps$")) &&
+          window.history.state?.__rooLegacy === true
       );
     },
     selector,
@@ -214,10 +180,9 @@ const clickNav = async (page, target, viewportName) => {
     await mobileLink.click();
     return;
   }
-  await page
-    .locator(`[data-nav-surface="desktop"][data-nav-target="${target}"]`)
-    .first()
-    .click();
+  const selector = `[data-nav-surface="desktop"][data-nav-target="${target}"]`;
+  await waitForReactHydratedSelector(page, selector);
+  await page.locator(selector).first().click();
 };
 
 const getDesktopNavRowMetrics = async (page) =>

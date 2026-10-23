@@ -117,6 +117,7 @@
     "test:sweep": "playwright test tests/public-route-sweep.spec.js --project=chromium",
     "test:hero-heading-fit": "playwright test tests/hero-heading-fit.spec.js --project=chromium",
     "test:nav:sections": "cross-env BASE_URL=${BASE_URL:-http://${ROO_TEST_HOST:-127.0.0.1}:${PW_PORT:-3001}} playwright test tests/section-nav.spec.js",
+    "test:nav:sections:repeat": "node scripts/test-section-nav-repeated.mjs",
     "test:nav:chaos": "cross-env BASE_URL=${BASE_URL:-http://${ROO_TEST_HOST:-127.0.0.1}:${PW_PORT:-3001}} playwright test tests/nav-chaos.spec.js",
     "test:footer": "playwright test tests/footer.spec.js",
     "audit:phase1:context": "cross-env BASE_URL=${BASE_URL:-http://${ROO_TEST_HOST:-127.0.0.1}:${PW_PORT:-3001}} node scripts/phase1-run-context.js",
