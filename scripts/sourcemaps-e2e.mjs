@@ -43,7 +43,7 @@ if (process.argv[2] === '--build') {
     const body = Buffer.concat(chunks);
     requests.push({ method: request.method, path: request.url, bytes: body.length });
     response.setHeader('Content-Type', 'application/json');
-    if (rejectUpload) response.writeHead(403).end(JSON.stringify({ detail: 'fixture rejects upload' }));
+    if (rejectUpload && request.url === '/chunks/') response.writeHead(403).end(JSON.stringify({ detail: 'fixture rejects upload' }));
     else if (request.url.endsWith('/chunk-upload/')) response.end(JSON.stringify({
       url: `${origin}/chunks/`, chunkSize: 8388608, chunksPerRequest: 16, maxFileSize: 2147483648,
       maxRequestSize: 33554432, hashAlgorithm: 'sha1', concurrency: 1, compression: ['gzip'], accept: ['artifact_bundles'],
@@ -57,14 +57,14 @@ if (process.argv[2] === '--build') {
   await new Promise(resolveListen => server.listen(0, '127.0.0.1', resolveListen));
   const origin = `http://127.0.0.1:${server.address().port}`;
 
-  async function build(name, token) {
+  async function build(name, token, release = 'source-map-fixture-release') {
     const directory = join(fixture, name);
     await mkdir(directory);
     await writeFile(join(directory, 'entry.js'), 'console.log("source-map fixture");\n');
     const child = spawn(process.execPath, [self, '--build', directory], {
       cwd: root, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, NODE_ENV: 'production', SENTRY_AUTH_TOKEN: token, SENTRY_URL: origin,
-        NEXT_PUBLIC_SENTRY_DSN: '', SENTRY_LOG_LEVEL: 'error', SENTRY_DISABLE_UPDATE_CHECK: '1', SENTRY_FORCE_ENV_TOKEN: '1' },
+      env: { ...process.env, NODE_ENV: 'production', VERCEL: '1', VERCEL_ENV: 'preview', VERCEL_TARGET_ENV: 'preview', SENTRY_AUTH_TOKEN: token, SENTRY_URL: origin,
+        SENTRY_RELEASE: release, VERCEL_GIT_COMMIT_SHA: '', NEXT_PUBLIC_SENTRY_DSN: '', SENTRY_LOG_LEVEL: 'error', SENTRY_DISABLE_UPDATE_CHECK: '1', SENTRY_FORCE_ENV_TOKEN: '1' },
     });
     const logs = [];
     child.stdout.on('data', data => logs.push(data));
@@ -73,7 +73,7 @@ if (process.argv[2] === '--build') {
     let escalation;
     const timer = setTimeout(() => { stop('SIGTERM'); escalation = setTimeout(() => stop('SIGKILL'), 2000); }, 60000);
     const status = await new Promise((resolveExit, reject) => {
-      child.once('error', reject); child.once('exit', resolveExit);
+      child.once('error', reject); child.once('close', resolveExit);
     }).finally(() => { clearTimeout(timer); clearTimeout(escalation); });
     const log = Buffer.concat(logs).toString();
     await writeFile(join(artifact, `${name}.log`), log);
@@ -87,16 +87,24 @@ if (process.argv[2] === '--build') {
     assert.equal(requests.length, 0);
     const uploaded = await build('uploaded', 'fixture-token');
     assert.equal(uploaded.status, 0);
+    assert(!uploaded.log.includes('Sentry source-map upload failed.'));
     assert(chunkUploaded, 'The main browser chunk must be uploaded.');
     assert(requests.some(request => request.path.endsWith('/artifactbundle/assemble/')));
     assert.equal((await readdir(uploaded.output)).some(file => file.endsWith('.map')), false);
     const js = await readFile(join(uploaded.output, 'main-fixture.js'), 'utf8');
     assert(js.includes('_sentryDebugIds'));
     assert(!js.includes('sourceMappingURL='));
+    const withoutRelease = await build('without-release', 'fixture-token', '');
+    assert.equal(withoutRelease.status, 0);
+    assert(!withoutRelease.log.includes('Sentry source-map upload failed.'));
+    assert(!requests.some(request => request.path.includes('/releases/')));
     rejectUpload = true;
+    chunkUploaded = false;
+    const rejectedStart = requests.length;
     const rejected = await build('rejected', 'fixture-token');
     assert.equal(rejected.status, 0);
     assert(rejected.log.includes('Sentry source-map upload failed.'));
+    assert(requests.slice(rejectedStart).some(request => request.method === 'POST' && request.path === '/chunks/'));
     assert.equal((await readdir(rejected.output)).some(file => file.endsWith('.map')), false);
     await writeFile(join(artifact, 'report.json'), JSON.stringify({ ok: true, noTokenNeedsNoUpload: true,
       mainBrowserChunkUploaded: true, debugIdsPresent: true, publicMapsRemoved: true,

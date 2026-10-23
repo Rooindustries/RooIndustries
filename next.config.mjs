@@ -187,7 +187,10 @@ export default withSentryConfig(nextConfig, {
     disable: !process.env.SENTRY_AUTH_TOKEN,
     deleteSourcemapsAfterUpload: true,
   },
-  release: { create: false },
+  release: {
+    name: process.env.SENTRY_RELEASE || process.env.VERCEL_GIT_COMMIT_SHA || "",
+    create: false, finalize: false, setCommits: false, deploy: false,
+  },
   bundleSizeOptimizations: { excludeDebugStatements: true },
   webpack: { autoInstrumentMiddleware: false },
 });
