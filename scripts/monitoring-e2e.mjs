@@ -224,7 +224,11 @@ try {
   });
   check('adverse environment is replaced before SDK initialization', sdk.getClient().getOptions().environment, 'unknown');
   const { monitoringDsn } = await import('../src/lib/monitoring/scrub.js');
-  check('external HTTP is refused while external HTTPS and loopback HTTP remain valid', [monitoringDsn('http://fixturekey@public.invalid/42') ?? null, monitoringDsn('https://fixturekey@public.invalid/42'), monitoringDsn(dsn)], [null, 'https://fixturekey@public.invalid/42', dsn]);
+  check('local monitoring refuses external DSNs while loopback remains valid', [monitoringDsn('http://fixturekey@public.invalid/42') ?? null, monitoringDsn('https://fixturekey@public.invalid/42') ?? null, monitoringDsn(dsn)], [null, null, dsn]);
+  const previousEnvironment = process.env.NEXT_PUBLIC_VERCEL_ENV;
+  process.env.NEXT_PUBLIC_VERCEL_ENV = 'production';
+  check('production still accepts the configured HTTPS DSN', monitoringDsn('https://fixturekey@public.invalid/42'), 'https://fixturekey@public.invalid/42');
+  process.env.NEXT_PUBLIC_VERCEL_ENV = previousEnvironment;
   const envelope = (target, message) => `${JSON.stringify({ dsn: target })}\n{"type":"event"}\n${JSON.stringify({ message })}\n`;
   const post = (body, headers = {}) => fetch(`${origin}/api/client-report`, {
     method: 'POST',

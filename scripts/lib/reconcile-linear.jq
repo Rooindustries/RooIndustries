@@ -45,7 +45,7 @@ def safe_item($local):
 def report_base:
   exact(["ok","at","from","to","mode","checks","complete","count","items"])
   and .ok == true and (.at | timestamp) and (.from | timestamp) and (.to | timestamp)
-  and ((now - (.at | epoch)) >= 0) and ((now - (.at | epoch)) <= 900)
+  and ((now - (.at | epoch)) >= -60) and ((now - (.at | epoch)) <= 900)
   and ((((.at|epoch) - (.from|epoch)) - 259200) | fabs) <= 1
   and ((((.at|epoch) - (.to|epoch)) - 1800) | fabs) <= 1
   and (.complete | exact(["payments","bookings","records","items"]) and all(.[]; type == "boolean"))

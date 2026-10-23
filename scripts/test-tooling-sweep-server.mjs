@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
 import { createToolingContentFixture } from "../tests/fixtures/tooling-content.mjs";
 import { apiRouteSecrets } from "../tests/fixtures/api-routes.mjs";
+import { localMonitoringEnv } from "./lib/local-monitoring-env.mjs";
 
 if (process.env.ROO_ADMIN_FIXTURE === "1") {
   await import("./test-admin-server.mjs");
@@ -22,7 +23,7 @@ if (!Number.isInteger(contentPort) || contentPort < 1024 || contentPort > 65535 
 const contentURL = localOrigin(`http://${testHost}:${contentPort}`);
 installNetworkGuard([baseURL, contentURL]);
 const apiRoutes = process.env.TOOLING_API_ROUTES === "1";
-const env = {
+const env = localMonitoringEnv({
   PATH: process.env.PATH,
   HOME: process.env.HOME,
   CI: "true",
@@ -48,13 +49,12 @@ const env = {
     NEXT_PUBLIC_BASE_URL: baseURL,
   } : {}),
   NEXT_TELEMETRY_DISABLED: "1",
-  NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN || "",
   BASE_URL: baseURL,
   ROO_TEST_HOST: testHost,
   NEXT_DIST_DIR: dist,
   TOOLING_NETWORK_GUARD: "1",
   NODE_OPTIONS: `--import=${fileURLToPath(new URL("./lib/test-target-safety.mjs", import.meta.url))}`,
-};
+}, process.env.NEXT_PUBLIC_SENTRY_DSN);
 const next = path.resolve("node_modules/next/dist/bin/next");
 const development = process.env.TOOLING_DEV_SERVER === "1";
 const fingerprint = createHash("sha256");

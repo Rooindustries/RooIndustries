@@ -1070,6 +1070,29 @@ try{
     assert.equal(providerRequests.filter((request) => request.path === '/payments/payment-fixture').length, 1);
     return result;
   });
+  await run('reconcile-report-bounded-payment-lookups', async () => {
+    dodoPayment.metadata = {};
+    const payments = Array.from({ length: 32 }, (_, index) => ({ ...structuredClone(dodoPayment), payment_id: `payment-parallel-${index}` }));
+    dodoList = payments.map(dodoSummary);
+    let active = 0, maximum = 0;
+    providerHook = async (_request, req, res) => {
+      const payment = payments.find(payment => req.url === `/payments/${payment.payment_id}`);
+      if (!payment) return false;
+      active++;
+      maximum = Math.max(maximum, active);
+      await new Promise(resolve => setTimeout(resolve, (32 - payments.indexOf(payment)) * 2));
+      active--;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(payment));
+      return true;
+    };
+    const result = await authorizedReport('GET', true);
+    assert.equal(result.status, 200);
+    assert.ok(maximum > 1 && maximum <= 8, `expected 2..8 concurrent lookups, observed ${maximum}`);
+    assert.deepEqual(result.body.items.map(item => item.id), payments.map(payment => payment.payment_id));
+    assert.ok(result.body.items.every(item => item.reason === 'payment_without_record'));
+    return { maximumConcurrency: maximum, payments: payments.length, report: result.body, readOnly: true };
+  });
   await run('reconcile-report-distinct-booking-identities', async () => {
     await seed('dodo', 'booked', dodoBooking());
     await commerce.patch(bookingId).set({ paymentRecordId: recordId }).commit();

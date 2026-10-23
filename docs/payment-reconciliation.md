@@ -57,6 +57,9 @@ a payment can settle days later. The 72-hour `from` value applies to the reverse
 booking scan and recently changed owner-review records. Each payment is read
 again before comparison. The scan stops after 2,000 listed payments and reports
 incomplete coverage if that limit is reached; it cannot report clean then.
+That ceiling is a hard lifetime limit for a complete scan, even if every
+listed payment is healthy. Detail reads run in groups of eight, retain list
+order and share in-flight reads for repeated identities.
 
 Run `npm run test:reconcile-payments` for repeatable local HTTP and CLI
 fixtures. Test mode requires a private HTTP origin and an explicit fake-CLI
@@ -72,11 +75,21 @@ thrown errors. Expected client errors, such as a slot conflict or an invalid
 signature, do not send a route alert. Sentry delivery has a two-second limit
 and cannot change the route's result.
 
-The [preview alert](https://rooindustries.sentry.io/monitors/alerts/1407819/)
-emails the owner when a new issue appears or a resolved issue regresses.
-It applies to the website's error monitor in the `preview` environment and
-requires the `commerce_surface` tag. Production activation stays with release.
-Existing alerts are unchanged. Disable this alert in Sentry to roll it back.
+Local test and preview servers must unset Sentry DSNs, including server and
+public/client aliases, or use a loopback collector. The maintained local
+launcher removes inherited aliases and accepts only a loopback DSN. Monitoring
+also refuses external DSNs outside the production environment. Keep builds
+isolated so a previous build cannot retain a public DSN. Never use real Sentry
+issues or notifications as local test fixtures. Production notification
+activation stays with release.
+
+Run `npm run test:commerce-alerts:preview` to exercise actual Next checkout,
+booking and signed Dodo webhook failures against the local collector. It also
+checks that inherited aliases are removed, an external fixture DSN is refused,
+and the browser relay is disabled or sends to the local collector. Each mode
+gets a fresh isolated build directory. Its guard allows only the owned Next
+server and local collector/database fixture. Results and envelopes go to
+`test-results/commerce-alerts-preview/`; all owned processes stop afterward.
 
 Run `npm run test:commerce-alerts` with the same Postgres 17 and PostgREST
 setup as native CI. It seeds a succeeded test-mode payment without a booking,
@@ -86,3 +99,5 @@ The owner issue and daily update are reused on the second attempt. The check
 also confirms the audit left payment and booking records unchanged.
 `npm run test:commerce-alerts:routes` runs the route and transport checks
 without Postgres. Both commands use local services and fake reporting accounts.
+The daily bridge accepts up to 60 seconds of server clock lead; reports older
+than 15 minutes or farther in the future remain unavailable.

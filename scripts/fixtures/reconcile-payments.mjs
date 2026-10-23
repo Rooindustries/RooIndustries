@@ -287,7 +287,7 @@ const server = http.createServer(async (req, res) => {
           return;
         }
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify(body));
+        res.end(JSON.stringify(current.targetTransform ? current.targetTransform(body) : body));
       } else {
         const body = typeof current.window === 'function' ? current.window() : current.window;
         if (current.reportedCount !== null) body.count = current.reportedCount;
@@ -530,6 +530,35 @@ const run = async (name, fn) => {
     issues: current.issues, comments: current.comments, updates: current.updates, runs: current.runs });
 };
 try {
+  for (const mode of ['window', 'checks']) {
+    await run('clock-skew-' + mode, async (home) => {
+      if (mode === 'checks') {
+        await firstMismatch(home);
+        current.window = windowReport();
+        current.checks['payment:fixture'] = recovered('payment:fixture');
+      } else current.window = windowReport([item('payment:fixture')]);
+      const shift = report => {
+        for (const field of ['at', 'from', 'to']) report[field] = new Date(Date.parse(report[field]) + 30000).toISOString();
+        return report;
+      };
+      if (mode === 'window') shift(current.window);
+      else current.targetTransform = shift;
+      const result = await invoke(home);
+      assert.equal(result.code, 0);
+      assert.notEqual(JSON.parse(result.stdout).result, 'unavailable');
+      if (mode === 'checks') assert.equal(JSON.parse(result.stdout).result, 'clear');
+    });
+  }
+  for (const [name, offset] of [['future', 90000], ['stale', -901000]]) {
+    await run('clock-skew-refuse-' + name, async (home) => {
+      current.window = windowReport();
+      for (const field of ['at', 'from', 'to']) current.window[field] = new Date(Date.parse(current.window[field]) + offset).toISOString();
+      const result = await invoke(home);
+      assert.equal(JSON.parse(result.stdout).result, 'unavailable');
+      assert.equal(JSON.parse(result.stdout).complete, false);
+      assert.ok(current.issues.every(issue => issue.description.includes('Reconciliation key: scan:')));
+    });
+  }
   if (process.env.ROO_RECONCILE_SEED_REPORT) {
     await run('seeded-payment-alert', async (home) => {
       const report = JSON.parse(fs.readFileSync(process.env.ROO_RECONCILE_SEED_REPORT, 'utf8'));

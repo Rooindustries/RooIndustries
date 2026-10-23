@@ -7,6 +7,7 @@ import { reportPaymentMismatches } from "../../../lib/monitoring/commerce.js";
 const WINDOW_HOURS = 72;
 const SETTLE_MINUTES = 30;
 const PAGE_SIZE = 100;
+const PAYMENT_LOOKUP_CONCURRENCY = 8;
 const MAX_PAGES = 20;
 const MAX_ITEMS = 50;
 const MAX_BOOKING_LOOKUPS = 200;
@@ -436,10 +437,8 @@ export const buildReconcileReport = async ({
   });
   const paymentCache = new Map();
   const getPayment = async (id, allowMissing = false) => {
-    if (paymentCache.has(id)) return paymentCache.get(id);
-    const payment = await retrievePayment(dodo, id, allowMissing);
-    paymentCache.set(id, payment);
-    return payment;
+    if (!paymentCache.has(id)) paymentCache.set(id, retrievePayment(dodo, id, allowMissing));
+    return paymentCache.get(id);
   };
   const records = new Map();
   const bookings = new Map();
@@ -609,14 +608,16 @@ export const buildReconcileReport = async ({
     report({ key: "scan:dodo-payments", id: "dodo-payments", reason: "report_truncated" });
   const productIds = readSiteProductIds();
   const payments = [];
-  for (const summary of listed) {
-    if (summary?.status && summary.status !== "succeeded") continue;
-    const payment = await getPayment(summary.payment_id);
-    if (summary.status === "succeeded" && payment.status !== "succeeded") throw unavailable();
-    if (!String(payment.metadata?.paymentRecordId || "").trim() && productIds.size === 0)
-      throw unavailable();
-    if (payment?.status === "succeeded" && belongsToSite(payment, productIds))
-      payments.push(payment);
+  for (let offset = 0; offset < listed.length; offset += PAYMENT_LOOKUP_CONCURRENCY) {
+    const batch = await Promise.all(listed.slice(offset, offset + PAYMENT_LOOKUP_CONCURRENCY).map(async (summary) => {
+      if (summary?.status && summary.status !== "succeeded") return null;
+      const payment = await getPayment(summary.payment_id);
+      if (summary.status === "succeeded" && payment.status !== "succeeded") throw unavailable();
+      if (!String(payment.metadata?.paymentRecordId || "").trim() && productIds.size === 0)
+        throw unavailable();
+      return payment?.status === "succeeded" && belongsToSite(payment, productIds) ? payment : null;
+    }));
+    payments.push(...batch.filter(Boolean));
   }
   for (const [id, record] of await fetchByIds(
     client,
