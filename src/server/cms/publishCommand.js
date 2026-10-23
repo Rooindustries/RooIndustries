@@ -4,6 +4,7 @@ import { stableCmsJson } from "../../lib/globalCmsContract.js";
 import { UNUSED_FIELD_NOTE } from "../../lib/cms/fieldUsage.js";
 import { CMS_SYSTEM_FIELDS as system, preserveContentDocument, removedProtectedRows } from "../../lib/cms/contentPreservation.js";
 import { clearSupabasePublicContentCache } from "../content/publicContent.js";
+import { assertPublicContentShape } from "../content/publicContentShape.js";
 import { contentType, documentId, loadDocument } from "./documents.js";
 import { cmsError, rpcData, validationError } from "./errors.js";
 import { assertGlobalCmsWritesAllowed } from "./writeControl.js";
@@ -83,6 +84,14 @@ export const getCmsCommandStatus = async ({ body, supabaseClient, actor = "admin
       typeof record?._rev !== "string" || !record._rev.trim()) {
     throw cmsError("The committed content receipt could not be confirmed.", 503, "CMS_RECEIPT_INVALID");
   }
+  const current = await loadDocument(supabaseClient, id);
+  if (!current) throw cmsError("Published content was not found.", 404, "CMS_NOT_FOUND");
+  if (current._id !== id || current._type !== body.type || typeof current._rev !== "string" || !current._rev.trim() ||
+      !validateContentDocument(body.type, current, { current }).ok) {
+    throw cmsError("The saved content could not be confirmed.", 503, "CMS_RECEIPT_INVALID");
+  }
+  if (current._rev !== record._rev) throw cmsError("The published version has been replaced.", 404, "CMS_NOT_FOUND");
+  if (["privacyPolicy", "terms"].includes(body.type)) assertPublicContentShape(body.type === "privacyPolicy" ? "privacy-policy" : "terms", current, body.type);
   clearSupabasePublicContentCache();
   return { committed: true, ...(creating ? { createIntentId: body.createIntentId.toLowerCase() } : {}), type: body.type, documentId: resultId, revision: record._rev };
 };
