@@ -6,9 +6,11 @@ export const REQUIRED_CHECKS = [
   "Playwright rest-2",
   "Playwright rest-3",
   "Playwright rest-4",
-  "Playwright creator portal and API routes",
+  "Playwright api-routes",
+  "Playwright creator-portal",
   "Native PostgreSQL 17 suites",
-  "Playwright revalidation",
+  "Playwright benchmarks-revalidation",
+  "Playwright static-revalidation",
 ];
 
 export const MAX_REVIEW_ROUNDS = 8;

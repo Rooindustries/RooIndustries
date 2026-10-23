@@ -15,7 +15,19 @@ refuseEnvFiles();
 const root = fileURLToPath(new URL("../", import.meta.url));
 const require = createRequire(import.meta.url);
 const config = require(path.join(root, "playwright.config.js"));
+const cmsConfig = require(path.join(root, "playwright.cms.config.js"));
 const workflow = yaml.safeLoad(await readFile(path.join(root, ".github/workflows/tests.yml"), "utf8"));
+const cmsRuntimeMs = 27.5 * 60 * 1000;
+const cmsJobTimeoutMs = 45 * 60 * 1000;
+if (workflow.jobs["cms-resilience"]) assert.equal(workflow.jobs["cms-resilience"]["timeout-minutes"] * 60 * 1000, cmsJobTimeoutMs);
+const cmsBudget = {
+  measuredRuntimeMs: cmsRuntimeMs, groupTimeoutMs: cmsConfig.metadata.groupTimeoutMs,
+  globalTimeoutMs: cmsConfig.globalTimeout, jobTimeoutMs: cmsJobTimeoutMs,
+  workflowJobPresent: Boolean(workflow.jobs["cms-resilience"]),
+  testMatch: String(cmsConfig.testMatch), workers: cmsConfig.workers, retries: cmsConfig.retries,
+};
+const cmsBudgetFits = cmsRuntimeMs < cmsBudget.groupTimeoutMs && cmsBudget.groupTimeoutMs < cmsBudget.globalTimeoutMs &&
+  cmsBudget.globalTimeoutMs < cmsJobTimeoutMs && config.metadata.groupTimeoutMs === 20 * 60 * 1000 && config.globalTimeout === 22 * 60 * 1000;
 const jobPlans = {};
 for (const [name, scripts] of Object.entries({
   routes: ["test:api:routes", "test:creator:portal"],
@@ -74,18 +86,22 @@ function tests(suites) {
 }
 
 async function check(mode, job) {
-  const isGroup = mode.startsWith("group");
+  const isCms = mode.startsWith("cms-");
+  const isGroup = mode.startsWith("group") || mode === "cms-hang";
+  const base = isCms ? cmsConfig : config;
+  const configFile = path.join(root, isCms ? "playwright.cms.config.js" : "playwright.config.js");
   const setupDelayMs = mode === "group-first" ? 10000 : 0;
-  const groupTimeoutMs = config.metadata.groupTimeoutMs / (isGroup ? 40 : 20);
-  const globalTimeoutMs = isGroup ? config.globalTimeout / 40 + 10000 : config.globalTimeout / 20;
-  assert.ok(groupTimeoutMs > 0 && globalTimeoutMs > groupTimeoutMs && config.timeout > 0);
+  const scale = isGroup || isCms ? 40 : 20;
+  const groupTimeoutMs = base.metadata.groupTimeoutMs / scale;
+  const globalTimeoutMs = base.globalTimeout / scale + (isGroup && !isCms ? 10000 : 0);
+  assert.ok(groupTimeoutMs > 0 && globalTimeoutMs > groupTimeoutMs && base.timeout > 0);
   if (job && !jobDeadlines.has(job.id)) jobDeadlines.set(job.id, Date.now() + job.timeoutMs / 40);
   const directory = path.join(artifact, mode);
   await mkdir(directory);
   const reportPath = path.join(directory, "results.json");
   const configPath = path.join(directory, "config.cjs");
   await writeFile(configPath, `
-const config = require(${JSON.stringify(path.join(root, "playwright.config.js"))});
+const config = require(${JSON.stringify(configFile)});
 ${setupDelayMs ? `if (process.env.TEST_WORKER_INDEX === undefined) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${setupDelayMs});` : ""}
 module.exports = {
   ...config,
@@ -115,7 +131,8 @@ module.exports = {
     ROO_TEST_NETWORK_ORIGINS: JSON.stringify([origin]),
     NODE_OPTIONS: `--import=${fileURLToPath(new URL("./lib/test-target-safety.mjs", import.meta.url))}`,
     PLAYWRIGHT_TIMEOUT_CASE: mode,
-    ...(!isGroup ? { PLAYWRIGHT_ACTION_TIMEOUT_MS: String(config.timeout / 12) } : {}),
+    ...(!isGroup ? { PLAYWRIGHT_ACTION_TIMEOUT_MS: String(base.timeout / 12) } : {}),
+    ...(mode === "cms-pass" ? { PLAYWRIGHT_CMS_RUNTIME_MS: String(cmsRuntimeMs / scale) } : {}),
   };
   const logs = [];
   const started = Date.now();
@@ -200,7 +217,11 @@ module.exports = {
 
 try {
   const results = [];
-  for (const [mode, job] of [["pass"], ["test"], ["retry"], ["group-first", jobPlans.routes[0]], ["group-second", jobPlans.routes[1]]]) {
+  for (const [mode, job] of [
+    ["pass"], ["test"], ["retry"], ["group-first", jobPlans.routes[0]], ["group-second", jobPlans.routes[1]],
+    ["cms-pass", { id: "cms-pass", timeoutMs: cmsJobTimeoutMs }],
+    ["cms-hang", { id: "cms-hang", timeoutMs: cmsJobTimeoutMs }],
+  ]) {
     assert.ok(!cancelled, "The timeout check was cancelled.");
     results.push(await check(mode, job));
   }
@@ -208,10 +229,14 @@ try {
   const retryRecovered = retry.tests.length === 1 && JSON.stringify(retry.tests[0].statuses) === JSON.stringify(["timedOut", "passed"]);
   const healthy = results.find(result => result.mode === "pass");
   const healthyPassed = healthy.code === 0 && healthy.tests.length === 1 && JSON.stringify(healthy.tests[0].statuses) === JSON.stringify(["passed"]);
-  const ok = !cancelled && workflowBudgetsFit && healthyPassed && retryRecovered && results.filter(result => result.mode !== "pass").every(result => result.code !== 0 &&
+  const cmsNormal = results.find(result => result.mode === "cms-pass");
+  const cmsNormalPassed = cmsNormal.code === 0 && !cmsNormal.watchdogExpired && !cmsNormal.jobDeadlineExpired &&
+    cmsNormal.elapsedMs > config.globalTimeout / 40 && cmsNormal.tests.length === 1 && JSON.stringify(cmsNormal.tests[0].statuses) === JSON.stringify(["passed"]);
+  const ok = !cancelled && workflowBudgetsFit && healthyPassed && retryRecovered && cmsBudgetFits && cmsNormalPassed &&
+    results.filter(result => !["pass", "cms-pass"].includes(result.mode)).every(result => result.code !== 0 &&
     !result.watchdogExpired && !result.jobDeadlineExpired && result.namedFailure &&
     result.deadlineReported && result.deadlineIncludesSetup && result.traces.length > 0 && result.traces.every(trace => trace.containsHungAction));
-  const report = { ok, artifact, workflowBudgetsFit, healthyPassed, retryRecovered, jobPlans, results };
+  const report = { ok, artifact, workflowBudgetsFit, healthyPassed, retryRecovered, cmsBudgetFits, cmsNormalPassed, cmsBudget, jobPlans, results };
   await writeFile(path.join(output, "playwright-timeouts.json"), JSON.stringify(report, null, 2) + "\n");
   console.log(JSON.stringify(report));
   assert.ok(ok, "A hung browser action did not fail at its own deadline with its name and a valid trace.");
