@@ -437,6 +437,7 @@ export async function guardBrowserContext(context, origins) {
       let response;
       try { response = await route.fetch({ maxRedirects: 0 }); }
       catch { if (frame) navigationRedirects.delete(frame); return route.abort("failed"); }
+      let handlingFailed = false;
       try {
         const location = response.headers().location;
         if (response.status() < 300 || response.status() >= 400 || location === undefined) {
@@ -469,12 +470,15 @@ export async function guardBrowserContext(context, origins) {
         catch (error) { resolve({ error }); }
         return;
       } catch (error) {
-        if (!closing || !String(error).includes("Response has been disposed")) throw error;
+        if (!closing || !String(error).includes("Response has been disposed")) {
+          handlingFailed = true;
+          throw error;
+        }
         return;
       } finally {
         try { await response.dispose(); }
         catch (error) {
-          if (!closing || !String(error).includes("apiResponse.dispose: Target page, context or browser has been closed")) throw error;
+          if (!handlingFailed && (!closing || !String(error).includes("apiResponse.dispose: Target page, context or browser has been closed"))) throw error;
         }
       }
     }

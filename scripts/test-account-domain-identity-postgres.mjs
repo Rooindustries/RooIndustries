@@ -559,20 +559,29 @@ try {
   if (fs.existsSync(postgresLog)) process.stderr.write(fs.readFileSync(postgresLog, "utf8"));
   throw error;
 } finally {
+  const cleanupErrors = [];
   try {
-    try {
-      if (sql) await sql.end({ timeout: 1 });
-    } finally {
-      if (started || fs.existsSync(path.join(dataDir, "postmaster.pid"))) {
-        run(
-          path.join(pgBin, "pg_ctl"),
-          ["-D", dataDir, "-m", "fast", "-w", "stop"],
-          { logFile: path.join(artifacts, "pg_ctl-stop.log") }
-        );
-      }
+    if (sql) await sql.end({ timeout: 1 });
+  } catch (error) { cleanupErrors.push(error); }
+  let stopped = false;
+  try {
+    if (started || fs.existsSync(path.join(dataDir, "postmaster.pid"))) {
+      run(
+        path.join(pgBin, "pg_ctl"),
+        ["-D", dataDir, "-m", "fast", "-w", "stop"],
+        { logFile: path.join(artifacts, "pg_ctl-stop.log") }
+      );
     }
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  } catch (cleanupError) {
+    stopped = true;
+  } catch (error) { cleanupErrors.push(error); }
+  if (stopped) {
+    try { fs.rmSync(tempRoot, { recursive: true, force: true }); }
+    catch (error) { cleanupErrors.push(error); }
+  }
+  if (cleanupErrors.length) {
+    const cleanupError = cleanupErrors.length === 1
+      ? cleanupErrors[0]
+      : new AggregateError(cleanupErrors, "Account fixture cleanup failed");
     if (failure) throw new AggregateError([failure, cleanupError], "Account fixture and cleanup failed");
     throw cleanupError;
   }

@@ -29,6 +29,10 @@ failures and print the native server log before owned-cluster cleanup.
 The CLI E2E retains both invocations under `test-results/account-domain-startup/`;
 `ROO_ACCOUNT_DOMAIN_STARTUP_ARTIFACT_DIR` changes that artifact parent directory.
 The native CI job uploads `test-results/` even when the fixture fails.
+Client-close failures still stop the owned server and remove its cluster.
+Stop failures retain the cluster; close, stop and removal errors remain visible
+together. Cleanup E2Es inject a rejection after the real client closes, a failing
+stop command, and a removal permission error on the owned temporary directory.
 
 `npm run test:remote-browser-guard` exercises connected and native browsers with
 local HTTP fixtures. Native runs keep the Node and browser guards active together.
@@ -47,6 +51,9 @@ Every hop and final load wait share the original navigation deadline, including
 page/context defaults. Explicit zero and inherited unlimited timeouts remain
 unlimited. Real timeout and cancellation failures still reject the navigation.
 The browser E2Es also check ordinary POST bodies, server failures and images.
+Response cleanup cannot replace an earlier redirect refusal. A local WebSocket
+relay injects disposal failures after the real server command completes, checking
+the original refusal, cleanup-only errors and the unchanged successful result.
 An initial popup request can arrive before its frame exists. Its ordinary
 response stays guarded; a redirect without a frame is recorded and refused.
 

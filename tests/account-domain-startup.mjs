@@ -101,3 +101,67 @@ test("account identity retains failed PostgreSQL startup logs after owned cleanu
     fs.rmSync(jobDir, { recursive: true, force: true });
   }
 });
+
+test("account identity cleanup retains client close errors", { timeout: 180_000 }, async t => {
+  const pgBin = process.env.PG_BIN || spawnSync(process.env.PG_CONFIG || "pg_config", ["--bindir"], { encoding: "utf8" }).stdout?.trim();
+  for (const mode of ["client", "stop", "remove"]) await t.test(mode, async () => {
+    const jobDir = fs.mkdtempSync(path.join(os.tmpdir(), "roo-account-close-"));
+    const scratch = path.join(jobDir, "tmp");
+    const output = fs.mkdtempSync(path.join(artifacts, `${mode}-`));
+    fs.mkdirSync(scratch);
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/sentry.*dsn/i.test(key)));
+    Object.assign(env, { PG_BIN: pgBin, ROO_JOB_DIR: jobDir, ROO_CLOSE_FIXTURE_MODE: mode, ROO_ACCOUNT_DOMAIN_ARTIFACT_DIR: output });
+    if (mode === "stop") {
+      const bin = path.join(jobDir, "bin"); fs.mkdirSync(bin);
+      for (const command of ["initdb", "psql"]) fs.symlinkSync(path.join(pgBin, command), path.join(bin, command));
+      fs.writeFileSync(path.join(bin, "pg_ctl"), `#!${process.execPath}\nconst {spawnSync}=require('node:child_process');\nconst args=process.argv.slice(2);\nif(args.includes('stop')) {process.stderr.write('fixture-stop-failure\\n');process.exit(1);}\nconst result=spawnSync(${JSON.stringify(path.join(pgBin, "pg_ctl"))},args,{stdio:'inherit'});\nprocess.exit(result.status??1);\n`, { mode: 0o700 });
+      env.PG_BIN = bin;
+    }
+    let pid;
+    try {
+      const child = spawn(process.execPath, ["--import", "./tests/fixtures/account-domain-close-failure.mjs", "scripts/test-account-domain-identity-postgres.mjs"], {
+        cwd: root, env, stdio: ["ignore", "pipe", "pipe"], timeout: 50_000,
+      });
+      let stdout = "", stderr = "";
+      child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });
+      child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+      const [code, signal] = await once(child, "close");
+      const run = fs.readdirSync(output).find(name => name.startsWith("run-"));
+      const nativeLog = fs.readFileSync(path.join(output, run, "postgres.log"), "utf8");
+      pid = Number(nativeLog.match(/\[(\d+)\] LOG:\s+starting PostgreSQL/)[1]);
+      const clusters = fs.readdirSync(scratch);
+      const observation = { mode, code, signal, stdout, stderr, pid, nativeLog, clusters };
+      fs.writeFileSync(path.join(output, "result.json"), `${JSON.stringify(observation, null, 2)}\n`);
+      t.diagnostic(`Artifacts: ${output}`);
+      assert.equal(code, 1, stderr);
+      assert.equal(signal, null);
+      const identity = JSON.parse(stdout);
+      assert.equal(identity.ok, true);
+      assert.match(identity.postgres, /^17\./);
+      assert.equal(identity.verified.length, 9);
+      assert.match(stderr, /fixture-client-close-failure/);
+      if (mode === "stop") {
+        assert.match(stderr, /fixture-stop-failure/);
+        assert.equal(clusters.length, 1, "Failed native stop must retain its cluster");
+        assert.doesNotThrow(() => process.kill(pid, 0), "Fixture did not exercise a failed stop with the server alive");
+      } else {
+        assert.match(nativeLog, /database system is shut down/);
+        assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+        if (mode === "remove") { assert.match(stderr, /EACCES|EPERM/); assert.equal(clusters.length, 1); }
+        else assert.deepEqual(clusters, [], "Client-close failure skipped cluster removal");
+      }
+    } finally {
+      for (const name of fs.readdirSync(scratch)) {
+        const cluster = path.join(scratch, name); fs.chmodSync(cluster, 0o700);
+        const dataDir = path.join(cluster, "pgdata");
+        if (fs.existsSync(path.join(dataDir, "postmaster.pid"))) {
+          const stopped = spawnSync(path.join(pgBin, "pg_ctl"), ["-D", dataDir, "-m", "fast", "-w", "stop"], { encoding: "utf8", env });
+          assert.equal(stopped.status, 0, `${stopped.stdout}\n${stopped.stderr}`);
+          fs.writeFileSync(path.join(output, "owned-stop.log"), `${stopped.stdout}\n${stopped.stderr}`);
+        }
+      }
+      fs.rmSync(jobDir, { recursive: true, force: true });
+      if (pid) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" }, "Owned database process survived E2E cleanup");
+    }
+  });
+});

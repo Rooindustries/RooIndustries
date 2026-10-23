@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import http from "node:http";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "@playwright/test";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
+const { ws: WebSocket, wsServer: WebSocketServer } = createRequire(import.meta.url)("playwright-core/lib/utilsBundle");
 const fixture = http.createServer((request, response) => {
   fixtureRequests++;
   if (["/redirect-budget", "/budget-landing", "/redirect-unending"].includes(request.url)) {
@@ -333,6 +335,92 @@ test("native browser redirects remain guarded with the Node guard active", { tim
     assert.ok(entry.redirectedFrom.startsWith(fixtureOrigin + "/redirect?status="));
   }
   assert.equal(sinkRequests, beforeRequests);
+});
+
+test("browser redirect errors survive response cleanup failures", { timeout: 65_000 }, async t => {
+  const server = http.createServer();
+  const relay = new WebSocketServer({ server });
+  const sockets = new Set();
+  let inject = false;
+  let injected = 0;
+  relay.on("connection", client => {
+    const upstream = new WebSocket(endpoint);
+    sockets.add(client); sockets.add(upstream);
+    const pending = [];
+    const disposals = new Set();
+    let faultSent = false;
+    upstream.on("open", () => { for (const message of pending) upstream.send(message); });
+    client.on("message", bytes => {
+      const message = JSON.parse(bytes.toString());
+      if (inject && !faultSent && message.method === "disposeAPIResponse") { disposals.add(message.id); faultSent = true; }
+      if (upstream.readyState === WebSocket.OPEN) upstream.send(bytes);
+      else pending.push(bytes);
+    });
+    upstream.on("message", bytes => {
+      const message = JSON.parse(bytes.toString());
+      if (disposals.delete(message.id) && !message.error) {
+        injected++;
+        client.send(JSON.stringify({ id: message.id, error: { error: { name: "Error", message: "fixture-dispose-failure", stack: "fixture-dispose-failure" } } }));
+      } else if (client.readyState === WebSocket.OPEN) client.send(bytes);
+    });
+    for (const socket of [client, upstream]) {
+      socket.on("error", () => {});
+      socket.on("close", () => { sockets.delete(socket); if (socket === client) upstream.close(); else client.close(); });
+    }
+  });
+  await listen(server);
+  const proxy = `ws://127.0.0.1:${server.address().port}/cleanup`;
+  try {
+    for (const mode of ["redirect-and-dispose", "dispose-only", "control"]) await t.test(mode, async () => {
+      const beforeSink = sinkRequests, beforeInjected = injected;
+      inject = mode !== "control";
+      const child = await runChild(`
+        import { chromium } from "@playwright/test";
+        const { guardBrowserContext } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+        const errors = [];
+        let observed;
+        const failure = new Promise(resolve => { observed = resolve; });
+        process.on("unhandledRejection", error => { errors.push(String(error)); observed(); });
+        const browser = await chromium.connect(${JSON.stringify(proxy)});
+        try {
+          const context = await browser.newContext({ baseURL: ${JSON.stringify(fixtureOrigin)} });
+          const guard = await guardBrowserContext(context, [${JSON.stringify(fixtureOrigin)}]);
+          const page = await context.newPage();
+          let navigationError = null, status = null;
+          try { status = (await page.goto(${JSON.stringify(mode === "redirect-and-dispose" ? "/redirect" : "/")})).status(); }
+          catch (error) { navigationError = String(error); }
+          if (${mode !== "control"}) {
+            let timer;
+            try { await Promise.race([failure, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Cleanup failure was not reported")), 5000); })]); }
+            finally { clearTimeout(timer); }
+          }
+          await context.close();
+          console.log(JSON.stringify({ errors, navigationError, status, guard }));
+        } finally { await browser.close(); }
+      `, proxy);
+      t.diagnostic(JSON.stringify({ mode, child, injected: injected - beforeInjected, sinkRequests: sinkRequests - beforeSink }));
+      const value = result(child);
+      assert.equal(sinkRequests, beforeSink, "Forbidden redirect reached its origin");
+      if (mode === "redirect-and-dispose") {
+        assert.ok(injected > beforeInjected, "The native disposal response did not reach the fault relay");
+        assert.ok(value.navigationError);
+        assert.equal(value.errors.length, 1);
+        assert.match(value.errors[0], /Browser redirect refused/);
+        assert.doesNotMatch(value.errors[0], /fixture-dispose-failure/);
+        assert.equal(value.guard.unexpectedRequests[0].action, "unexpected-nonlocal-redirect");
+      } else {
+        assert.equal(value.status, 200);
+        assert.equal(value.navigationError, null);
+        assert.deepEqual(value.guard.unexpectedRequests, []);
+        if (mode === "dispose-only") { assert.ok(injected > beforeInjected); assert.match(value.errors[0], /fixture-dispose-failure/); }
+        else { assert.equal(injected, beforeInjected); assert.deepEqual(value.errors, []); }
+      }
+    });
+  } finally {
+    for (const socket of sockets) socket.terminate();
+    await new Promise(resolve => relay.close(resolve));
+    await close(server);
+  }
 });
 
 test("caller HTTP Agents cannot redirect an allowed request to another origin", { timeout: 65_000 }, async t => {
