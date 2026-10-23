@@ -182,7 +182,7 @@ const seed = async (provider, { amount = 54.95, rate = 10, booking = true, count
 };
 const dispute = status => ({ dispute_id: `dispute-${current.key}`, payment_id: current.payment.payment_id, currency: 'USD', amount: current.payment.total_amount, dispute_status: status, dispute_stage: 'dispute' });
 const countIs = async expected => { assert.equal((await documents.getDocument(current.creator._id)).successfulReferrals, expected); };
-const run = async (name, fn) => {
+const run = async (name, fn, { expectedFailure = false } = {}) => {
   if (process.env.ROO_PAYOUT_CASE && !name.includes(process.env.ROO_PAYOUT_CASE)) return;
   const start = Date.now();
   try {
@@ -199,20 +199,28 @@ const run = async (name, fn) => {
   }
   catch (error) {
     await Promise.allSettled([...inFlight]);
-    evidence.scenarios.push({
+    const failure = {
       name,
       passed: false,
       error: error.stack,
-      current: current && {
-        record: await read(current.record._id),
-        booking: await read((await read(current.record._id))?.bookingId),
-        creator: await documents.getDocument(current.creator._id),
-      },
-    });
-    process.exitCode = 1;
+    };
+    evidence.scenarios.push(failure);
+    try {
+      if (current) {
+        const record = await read(current.record._id);
+        failure.current = {
+          record,
+          booking: record?.bookingId ? await read(record.bookingId) : null,
+          creator: await documents.getDocument(current.creator._id),
+        };
+      }
+    } catch (snapshotError) {
+      failure.current = { snapshotError: snapshotError.stack };
+    }
+    if (!expectedFailure) process.exitCode = 1;
   }
   fixture.setRequestHook(null);
-  console.log(`${name}: ${evidence.scenarios.at(-1).passed ? 'passed' : 'FAILED'} (${Date.now() - start}ms)`);
+  console.log(`${name}: ${evidence.scenarios.at(-1).passed ? 'passed' : expectedFailure ? 'expected failure' : 'FAILED'} (${Date.now() - start}ms)`);
   fs.writeFileSync(artifact, JSON.stringify(evidence, null, 2));
 };
 
@@ -572,6 +580,74 @@ try {
       referralCode: first.creator.slug.current,
     }).commit();
     return { bookings: [await read(first.record.bookingId), await read(second.record.bookingId)], earnings: await summary(first.creator, 0.02) };
+  });
+
+  for (const [label, amount, rate, expected, stored] of [
+    ['half-cent', 1.05, 10, 0.11, {}],
+    ['fractional-rate', 1, 7.5, 0.08, {}],
+    ['decimal-text', 1.05, 10, 0.11, { netAmount: '1.05', commissionPercent: '10' }],
+    ['gross-fallback', 1.05, 10, 0.11, { netAmount: 0, grossAmount: 1.05 }],
+    ['invalid-stored-text', 1.05, 10, 0.11, { commissionAmount: '0\t' }],
+  ]) await run(`ROO-575-decimal-rounding-${label}`, async () => {
+    const state = await seed('dodo', { amount, rate });
+    await commerce.patch(state.record.bookingId).unset(['commissionAmount']).set(stored).commit();
+    return { booking: await read(state.record.bookingId), earnings: await summary(state.creator, expected) };
+  });
+
+  for (const provider of ['paypal', 'razorpay', 'dodo']) await run(`ROO-520-decimal-rounding-${provider}`, async () => {
+    const state = await seed(provider, { amount: 1.05, booking: false, count: 0 });
+    const pricingSnapshot = { ...state.record.pricingSnapshot };
+    delete pricingSnapshot.commissionAmount;
+    current.record = await commerce.patch(state.record._id).set({ pricingSnapshot }).commit();
+    const type = provider === 'paypal' ? 'PAYMENT.CAPTURE.COMPLETED' : provider === 'razorpay' ? 'payment.captured' : 'payment.succeeded';
+    assert.equal((await webhook(type)).status, 200);
+    const booking = await read((await read(state.record._id)).bookingId);
+    assert.equal(booking.commissionAmount, 0.11);
+    return { booking, earnings: await summary(state.creator, 0.11) };
+  });
+
+  for (const provider of ['paypal', 'razorpay']) await run(`ROO-508-decimal-rounding-${provider}`, async () => {
+    const state = await seed(provider, { amount: 1.05 });
+    const pricingSnapshot = { ...state.record.pricingSnapshot };
+    delete pricingSnapshot.commissionAmount;
+    current.record = await commerce.patch(state.record._id).set({ pricingSnapshot }).commit();
+    await commerce.patch(state.record.bookingId).unset(['commissionAmount']).commit();
+    current.refund = provider === 'paypal'
+      ? { id: `refund-${state.key}`, status: 'COMPLETED', amount: { value: '0.05', currency_code: 'USD' }, links: [{ rel: 'up', href: `https://api-m.sandbox.paypal.com/v2/payments/captures/${state.record.providerPaymentId}` }] }
+      : { id: `refund-${state.key}`, payment_id: state.record.providerPaymentId, amount: 5, currency: 'USD', status: 'processed' };
+    const response = await webhook(provider === 'paypal' ? 'PAYMENT.CAPTURE.REFUNDED' : 'refund.processed');
+    assert.equal(response.status, 200);
+    const booking = await read(state.record.bookingId);
+    assert.equal(booking.originalCommissionAmount, 0.11);
+    assert.equal(booking.commissionAmount, 0.1);
+    return { booking, earnings: await summary(state.creator, 0.1) };
+  });
+
+  for (const snapshotState of ['read-error', 'missing-booking']) await run(`runner-snapshot-${snapshotState}`, async () => {
+    await seed('dodo', { booking: snapshotState !== 'missing-booking' });
+    if (snapshotState === 'read-error') fixture.setRequestHook((phase, request) => {
+      if (phase === 'before' && request.path.includes('roo_fetch_shadow_documents_targeted')) {
+        throw new Error('Synthetic diagnostic read failure');
+      }
+    });
+    try {
+      await run(`runner-snapshot-${snapshotState}/probe`, async () => {
+        throw new Error('Synthetic original scenario failure');
+      }, { expectedFailure: true });
+    } finally {
+      fixture.setRequestHook(null);
+    }
+    const failure = evidence.scenarios.pop();
+    assert.equal(failure.passed, false);
+    assert.match(failure.error, /Synthetic original scenario failure/);
+    if (snapshotState === 'read-error') {
+      assert.match(failure.current.snapshotError, /Supabase targeted shadow fetch failed/);
+    } else {
+      assert.equal(failure.current.booking, null);
+      assert.equal(failure.current.record._id, current.record._id);
+      assert.equal(failure.current.creator._id, current.creator._id);
+    }
+    return { failure };
   });
 
   await run('all-payouts-projection-rebuilds', async () => {

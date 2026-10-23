@@ -31,12 +31,33 @@ export function classifyPackage(packageTitle = '') {
   return 'vertex';
 }
 
+const decimalParts = (value) => {
+  const pattern = typeof value === 'number'
+    ? /^(-?)([0-9]+)(?:[.]([0-9]+))?(?:e([+-]?[0-9]+))?$/i
+    : /^(-?)([0-9]+)(?:[.]([0-9]+))?$/;
+  const match = String(value ?? '').replace(/^ +| +$/g, '').match(pattern);
+  if (!match) return null;
+  const fraction = match[3] || '';
+  const scale = fraction.length - Number(match[4] || 0);
+  return {
+    numerator: BigInt(`${match[1]}${match[2]}${fraction}`) * 10n ** BigInt(Math.max(0, -scale)),
+    denominator: 10n ** BigInt(Math.max(0, scale)),
+  };
+};
+
 export function resolveBookingCommissionAmount(booking = {}) {
-  if (/^-?[0-9]+([.][0-9]+)?$/.test(String(booking?.commissionAmount ?? '').trim())) {
+  if (decimalParts(booking?.commissionAmount)) {
     return normalizeNumber(booking.commissionAmount);
   }
-  const base = normalizeNumber(booking?.netAmount) || normalizeNumber(booking?.grossAmount);
-  return +(base * normalizeNumber(booking?.commissionPercent) / 100).toFixed(2);
+  const net = decimalParts(booking?.netAmount);
+  const base = net?.numerator ? net : decimalParts(booking?.grossAmount);
+  const percent = decimalParts(booking?.commissionPercent);
+  if (!base || !percent) return 0;
+  const product = base.numerator * percent.numerator;
+  const magnitude = product < 0n ? -product : product;
+  const denominator = base.denominator * percent.denominator;
+  const roundedCents = (2n * magnitude + denominator) / (2n * denominator);
+  return Number(product < 0n ? -roundedCents : roundedCents) / 100;
 }
 
 export function computeEarningsFromBookings(bookings = []) {

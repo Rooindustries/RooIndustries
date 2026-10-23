@@ -108,8 +108,8 @@ Any PR that touches a money path, including a helper outside this list:
   - A creator who books before verifying their email gets no credit on those bookings (ROO-512).
 - **NOT ENFORCED (self-referral):** nothing compares the buyer with the creator, so a creator can book with their own code and earn commission. Policy call pending (ROO-511).
 - Commission is frozen on the booking when it's created. (`src/server/api/ref/createBooking.js:1293-1320,1615-1621`)
-  - Recovery bookings copy the frozen commission percentage and amount for Dodo, PayPal and Razorpay, including zero. Legacy missing/null amounts derive from the saved percentage and base before any partial Dodo refund scales them. (`src/server/api/ref/bookingCommit.js:302-330`, `src/server/api/ref/payoutUtils.js:34-40`; E2E `ROO-520-*` in `scripts/test-creator-payouts-e2e.mjs`.)
-- A stored commission of zero remains zero in both native and JavaScript earnings. Legacy missing/null/empty/invalid commissions are derived and rounded per booking before summing, even when a retained Dodo original commission exists. (`src/server/api/ref/payoutUtils.js:34-40`, `supabase/migrations/20261023090000_preserve_frozen_creator_commissions.sql:18-33`; E2E `ROO-575-*`.)
+  - Recovery bookings copy the frozen commission percentage and amount for Dodo, PayPal and Razorpay, including zero. Legacy missing/null amounts derive from the saved percentage and base before any partial Dodo refund scales them. (`src/server/api/ref/bookingCommit.js:302-330`, `src/server/api/ref/payoutUtils.js:48-60`; E2E `ROO-520-*` in `scripts/test-creator-payouts-e2e.mjs`.)
+- A stored commission of zero remains zero in both native and JavaScript earnings. Legacy missing/null/empty/invalid commissions are derived with exact decimal arithmetic and rounded per booking before summing, even when a retained Dodo original commission exists. Half cents round away from zero in both engines. (`src/server/api/ref/payoutUtils.js:34-60`, `supabase/migrations/20261023090000_preserve_frozen_creator_commissions.sql:18-33`; E2E `ROO-575-*`.)
 
 ### Bookings and holds
 
