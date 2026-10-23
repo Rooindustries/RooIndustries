@@ -27,13 +27,23 @@ export const withRecoveryLock = async (domain, run) => {
   }
   const file = await open(filename, "a", 0o600);
   try {
-    const code = await new Promise((resolve, reject) => {
-      const child = spawn("flock", ["--exclusive", "--timeout", "600", "3"], {
-        stdio: ["ignore", "ignore", "ignore", file.fd],
-      });
-      child.on("error", reject);
-      child.on("close", resolve);
-    });
+    let code;
+    for (const [command, args] of [
+      ["flock", ["--exclusive", "--timeout", "600", "3"]],
+      ["perl", ["-e", 'use Config; use Fcntl qw(LOCK_EX); exit 78 unless $Config{d_flock} eq "define"; open(my $lock, ">>&=", 3) or exit 1; alarm 600; flock($lock, LOCK_EX) or exit 1;']],
+    ]) {
+      try {
+        code = await new Promise((resolve, reject) => {
+          const child = spawn(command, args, { stdio: ["ignore", "ignore", "ignore", file.fd] });
+          child.on("error", reject);
+          child.on("close", resolve);
+        });
+        break;
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+    }
+    if (code === undefined || code === 78) throw new Error("Recovery locking requires flock or Perl with native flock support; nothing changed.");
     if (code !== 0) throw new Error("Could not acquire the production recovery lock; nothing changed.");
     recoveryLock = file.fd;
     process.env.ROO_RECOVERY_LOCK = key;

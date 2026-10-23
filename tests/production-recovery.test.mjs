@@ -3,8 +3,18 @@ import { test } from "node:test";
 import fs from "node:fs";
 import path from "node:path";
 import { DOMAIN, TOKEN } from "./fixtures/fake-vercel.mjs";
-import { changes, execute, withRecovery, LIVE_URL } from "./fixtures/production-recovery.mjs";
+import { changes, execute, withLockTools, withRecovery, LIVE_URL } from "./fixtures/production-recovery.mjs";
 import { startSite } from "./fixtures/fake-site.mjs";
+
+test("without flock, concurrent gates recover once while sharing the inherited lock", () => withLockTools(["perl", "git"], toolPath => withRecovery({
+  site: { status: { "/payment": 500 } },
+}, async ({ exec, vercel }) => {
+  const results = await Promise.all([exec({ PATH: toolPath }), exec({ PATH: toolPath })]);
+  assert.ok(results.every(result => result.code === 1), JSON.stringify(results));
+  assert.equal(changes(vercel).length, 1, JSON.stringify(results));
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
+  assert.ok(results.some(result => /production was rolled back/.test(result.output)), JSON.stringify(results));
+})));
 
 test("round 2: a shared backend outage alerts without rolling back either release", () => withRecovery({
   site: { status: { "/api/bookingAvailability": 503 } },

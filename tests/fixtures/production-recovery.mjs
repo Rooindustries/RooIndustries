@@ -11,6 +11,22 @@ export const LIVE_URL = "https://rooindustries-live-roo-industries.vercel.app";
 export const PREVIOUS_URL = "https://rooindustries-previous-roo-industries.vercel.app";
 export const changes = vercel => vercel.requests.filter(request => request.method === "POST" && !request.path.startsWith("/repos/"));
 
+export const withLockTools = async (names, body) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "roo702-lock-tools-"));
+  try {
+    for (const name of names) {
+      const executable = process.env.PATH.split(path.delimiter).map(entry => path.resolve(entry, name)).find(filename => {
+        try { fs.accessSync(filename, fs.constants.X_OK); return true; } catch { return false; }
+      });
+      if (!executable) throw new Error(`Lock fixture requires ${name}.`);
+      fs.symlinkSync(executable, path.join(directory, name));
+    }
+    await body(directory);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+};
+
 export const execute = (script, args, env) => new Promise(resolve => {
   const child = spawn(process.execPath, [path.join(root, "scripts", script), ...args], {
     cwd: root, env: Object.fromEntries(Object.entries({
