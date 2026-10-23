@@ -3792,9 +3792,9 @@ try{
     const response=await requestFlow(provider,{req});
     if(mode==='booking-sync-failure'){assert.equal(blocked,true);assert.equal((await record()).refundRequiresBookingSync,true);assert.deepEqual((await row(bookingId)).payload,beforeBooking);fixture.setRequestHook(null);const recovery=await requestFlow('reconcile');assert.equal(recovery.status,200,JSON.stringify(recovery));assert.equal(recovery.body.summary.refundsSynced,1);}
     else assert.equal(response.status,200,JSON.stringify(response));
-    const proof=await a2PartialProof(recordId,cents,currency);assert.equal(proof.booking.commissionAmount,beforeBooking.commissionAmount);
+    const proof=await a2PartialProof(recordId,cents,currency);assert.equal(proof.booking.commissionAmount,Math.round(beforeBooking.commissionAmount*(1-cents/total)*100)/100);
     const stable=await snapshot();assert.equal((await requestFlow(provider,{req})).status,200);assert.deepEqual(await snapshot(),stable);
-    return{response,proof,blocked,idempotentReplay:true,commissionUnchanged:true};
+    return{response,proof,blocked,idempotentReplay:true,commissionScaled:true};
   });
   for(const provider of ['paypal','razorpay'])for(const variant of ['normal','coupon'])await run(`a2-f3-${provider}-full-refund-before-booking${variant==='coupon'?'-coupon-control':''}`,async()=>{
     const checkout=await a1Start(provider,variant),saved=(await row(checkout.id)).payload,total=providers.toSubunits(saved.pricingSnapshot.netAmount,'USD');

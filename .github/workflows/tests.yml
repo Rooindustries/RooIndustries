@@ -13,6 +13,55 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  monitoring:
+    name: Production-only monitoring
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SENTRY_CLI_NO_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium
+      - name: Allow isolated monitoring on GitHub-hosted runners
+        if: ${{ runner.environment == 'github-hosted' }}
+        run: |
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] &&
+             [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = 1 ]; then
+            printf '%s\n' 'abi <abi/4.0>,' \
+              'profile roo-monitoring-unshare /usr/bin/unshare flags=(unconfined) {' \
+              '  userns,' '}' | sudo apparmor_parser --replace
+          fi
+      - name: Check network isolation tools
+        run: |
+          command -v unshare
+          command -v ip
+          command -v cc
+      - name: Check monitoring
+        run: |
+          if command -v heavy >/dev/null; then
+            heavy npm run test:monitoring
+            heavy npm run test:monitoring:startup
+            heavy npm run test:monitoring:deployments
+          else
+            npm run test:monitoring
+            npm run test:monitoring:startup
+            npm run test:monitoring:deployments
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: monitoring-deployments
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 7
+
   jest:
     name: Jest
     runs-on: ubuntu-24.04
@@ -267,7 +316,7 @@ jobs:
       - name: Run the remaining PostgreSQL 17 suites
         run: |
           failed=()
-          for suite in booking-hold upgrade-credit upgrade-credit:ownership emails:postgres17 payment-recovery:postgres17 commerce-alerts referral:postgres17 referral-social:postgres17 backend-integrity:postgres17 referral-authority:postgres17 referral-email:postgres17 referral-integrity:postgres17 account-domain:postgres17 commerce-readiness:postgres17 referral-email:origins tooling:safety; do
+          for suite in booking-hold upgrade-credit upgrade-credit:ownership emails:postgres17 payment-recovery:postgres17 commerce-alerts referral:postgres17 creator-payouts:postgres17 referral-social:postgres17 backend-integrity:postgres17 referral-authority:postgres17 referral-email:postgres17 referral-integrity:postgres17 account-domain:postgres17 commerce-readiness:postgres17 referral-email:origins tooling:safety; do
             npm run "test:$suite" || failed+=("$suite")
           done
           if [ ${#failed[@]} -gt 0 ]; then

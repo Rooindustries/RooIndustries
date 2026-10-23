@@ -1,6 +1,8 @@
 import { monitoringDsn } from "./scrub";
 
-const dsn = monitoringDsn(process.env.NEXT_PUBLIC_SENTRY_DSN);
+const dsn = process.env.NEXT_PUBLIC_ROO_SENTRY_ENABLED === "1"
+  ? monitoringDsn(process.env.NEXT_PUBLIC_SENTRY_DSN)
+  : undefined;
 const MAX_PENDING = 10;
 let pending = [];
 let sentry = null;

@@ -23,6 +23,10 @@ if (!Number.isInteger(contentPort) || contentPort < 1024 || contentPort > 65535 
 const contentURL = localOrigin(`http://${testHost}:${contentPort}`);
 installNetworkGuard([baseURL, contentURL]);
 const apiRoutes = process.env.TOOLING_API_ROUTES === "1";
+const monitoringStartup = process.env.TOOLING_MONITORING_STARTUP === "1";
+if (monitoringStartup && (process.env.NEXT_PUBLIC_SENTRY_DSN !== "false" || process.env.TOOLING_DEV_SERVER === "1")) {
+  throw new Error("Production monitoring startup requires the malformed DSN fixture and next start.");
+}
 const env = localMonitoringEnv({
   PATH: process.env.PATH,
   HOME: process.env.HOME,
@@ -49,12 +53,14 @@ const env = localMonitoringEnv({
     NEXT_PUBLIC_BASE_URL: baseURL,
   } : {}),
   NEXT_TELEMETRY_DISABLED: "1",
+  SENTRY_CLI_NO_TELEMETRY: "1",
   BASE_URL: baseURL,
   ROO_TEST_HOST: testHost,
   NEXT_DIST_DIR: dist,
   TOOLING_NETWORK_GUARD: "1",
   NODE_OPTIONS: `--import=${fileURLToPath(new URL("./lib/test-target-safety.mjs", import.meta.url))}`,
 }, process.env.NEXT_PUBLIC_SENTRY_DSN);
+if (monitoringStartup) Object.assign(env, { NODE_ENV: "production", VERCEL: "1", VERCEL_ENV: "production", NEXT_PUBLIC_SENTRY_DSN: "false" });
 const next = path.resolve("node_modules/next/dist/bin/next");
 const development = process.env.TOOLING_DEV_SERVER === "1";
 const fingerprint = createHash("sha256");
@@ -67,6 +73,7 @@ for (const file of tracked.filter(file => /^(?:src\/|app\/|scripts\/|tests\/fixt
 fingerprint.update(fs.readFileSync(fileURLToPath(import.meta.url)));
 fingerprint.update(fs.readFileSync(fileURLToPath(new URL("./lib/test-target-safety.mjs", import.meta.url))));
 fingerprint.update(env.NEXT_PUBLIC_SENTRY_DSN);
+fingerprint.update(String(monitoringStartup));
 const sourceHash = fingerprint.digest("hex");
 const manifestPath = path.join(dist, "tooling-build.json");
 let active;
@@ -101,7 +108,7 @@ try {
       if (built) console.log("Fixture content differs from the reused build; rebuilding.");
       const buildEnv = { ...env, VERCEL_ENV: "development" };
       await execute(["scripts/validate-runtime-env.js"], buildEnv);
-      await execute([next, "build"], buildEnv);
+      await execute([next, "build"], monitoringStartup ? env : buildEnv);
       fs.writeFileSync(manifestPath, JSON.stringify({ version: 1, sourceHash, baseURL, contentURL, ...content }));
     }
     await execute([next, "start", "--hostname", testHost, "--port", target.port]);

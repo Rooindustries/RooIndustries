@@ -1,6 +1,7 @@
 import { withSentryConfig } from "@sentry/nextjs/config";
 import { readdirSync, lstatSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
+import { isProductionDeployment } from "./src/lib/monitoring/deployment.mjs";
 
 export function validateDistDir(value, { isolated = false } = {}) {
   if (typeof value !== "string" || !/^\.next(?:-[a-zA-Z0-9_-]+)?$/.test(value) ||
@@ -93,10 +94,10 @@ const globalSecurityHeaders = [
 ];
 
 const nextConfig = {
-  poweredByHeader: false,
   env: {
-    NEXT_PUBLIC_SENTRY_HOSTED: process.env.VERCEL === "1" && isProduction ? "1" : "0",
+    NEXT_PUBLIC_ROO_SENTRY_ENABLED: isProductionDeployment() ? "1" : "0",
   },
+  poweredByHeader: false,
   distDir: validateDistDir(process.env.NEXT_DIST_DIR || ".next"),
   outputFileTracingRoot: process.cwd(),
   outputFileTracingIncludes: {
@@ -176,13 +177,32 @@ const nextConfig = {
   },
 };
 
+process.env.SENTRY_CLI_NO_TELEMETRY = "1";
+const productionDeployment = process.env.VERCEL === "1" && process.env.VERCEL_ENV === "production";
+const uploadSourceMaps = productionDeployment && Boolean(process.env.SENTRY_AUTH_TOKEN);
+if (productionDeployment && !uploadSourceMaps && process.env.ROO_SENTRY_MISSING_TOKEN_WARNED !== "1") {
+  process.env.ROO_SENTRY_MISSING_TOKEN_WARNED = "1";
+  console.warn("Sentry source-map upload skipped: SENTRY_AUTH_TOKEN is missing for the Vercel production build.");
+}
+
 export default withSentryConfig(nextConfig, {
   org: "rooindustries",
   project: "rooindustries-website",
+  authToken: uploadSourceMaps ? process.env.SENTRY_AUTH_TOKEN : undefined,
+  widenClientFileUpload: true,
   silent: true,
   telemetry: false,
-  sourcemaps: { disable: true },
-  release: { create: false },
+  errorHandler() {
+    console.warn("Sentry source-map upload failed. Check the build token and Sentry availability.");
+  },
+  sourcemaps: {
+    disable: !uploadSourceMaps,
+    deleteSourcemapsAfterUpload: true,
+  },
+  release: {
+    name: process.env.SENTRY_RELEASE || process.env.VERCEL_GIT_COMMIT_SHA || "",
+    create: false, finalize: false, setCommits: false, deploy: false,
+  },
   bundleSizeOptimizations: { excludeDebugStatements: true },
   webpack: { autoInstrumentMiddleware: false },
 });

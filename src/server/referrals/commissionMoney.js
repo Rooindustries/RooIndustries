@@ -1,0 +1,91 @@
+const decimal = (value) => {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  if (!Number.isFinite(Number(value))) return null;
+  const match = String(value).replace(/^ +| +$/g, '').match(typeof value === 'number' ? /^(-?)([0-9]+)(?:[.]([0-9]+))?(?:e([+-]?[0-9]+))?$/i : /^(-?)([0-9]+)(?:[.]([0-9]+))?$/);
+  if (!match) return null;
+  const scale = (match[3] || '').length - Number(match[4] || 0);
+  if (Math.abs(scale) > 400) return null;
+  return {
+    n: BigInt(`${match[1]}${match[2]}${match[3] || ''}`) * 10n ** BigInt(Math.max(0, -scale)),
+    d: 10n ** BigInt(Math.max(0, scale)),
+  };
+};
+
+const rounded = (n, d) => {
+  const magnitude = n < 0n ? -n : n;
+  const result = (2n * magnitude + d) / (2n * d);
+  return n < 0n ? -result : result;
+};
+const cents = value => {
+  const parsed = decimal(value);
+  return parsed ? rounded(parsed.n * 100n, parsed.d) : 0n;
+};
+const decimalNumber = ({ n, d }) => Number(`${n}e-${d.toString().length - 1}`);
+
+export function calculateCreatorCommission(terms = {}, {
+  originalAmount,
+  paidAmount = terms.netAmount ?? terms.effectiveNetAmount,
+  refundedAmount = 0,
+  additionalRefundAmount = 0,
+  currencyFactor = 100,
+  blocked = false,
+  preserveOriginalPrecision = false,
+} = {}) {
+  const gross = terms.grossAmount ?? terms.effectiveGrossAmount;
+  const base = terms.commissionBaseAmount == null
+    ? (decimal(gross) ? cents(gross) - cents(terms.couponDiscountAmount) : cents(paidAmount))
+    : cents(terms.commissionBaseAmount);
+  const percent = decimal(terms.commissionPercent ?? terms.effectiveCommissionPercent);
+  const stored = decimal(originalAmount ?? terms.commissionAmount);
+  const originalCents = stored ? cents(originalAmount ?? terms.commissionAmount)
+    : percent ? rounded((base < 0n ? 0n : base) * percent.n, percent.d * 100n) : 0n;
+  const units = value => {
+    const parsed = decimal(value);
+    return parsed ? rounded(parsed.n * BigInt(currencyFactor), parsed.d) : 0n;
+  };
+  const paid = units(paidAmount);
+  const refund = units(refundedAmount) + units(additionalRefundAmount);
+  let earnedCents = originalCents;
+  if (blocked) earnedCents = 0n;
+  else if (refund > 0n) {
+    const retained = paid - refund;
+    earnedCents = retained <= 0n ? 0n : rounded(originalCents * retained, paid);
+  }
+  const preciseOriginal = preserveOriginalPrecision && refund === 0n && stored;
+  const original = preciseOriginal ? decimalNumber(stored) : Number(originalCents) / 100;
+  return {
+    baseAmount: Number(base < 0n ? 0n : base) / 100,
+    originalAmount: original,
+    amount: preciseOriginal ? (blocked ? 0 : original) : Number(earnedCents) / 100,
+    refundedAmount: Number(refund) / currencyFactor,
+  };
+}
+
+const bookingCommissionFraction = booking => {
+  if (String(booking.commissionCalculationVersion) === '2') {
+    return decimal(calculateCreatorCommission(booking).amount);
+  }
+  const stored = decimal(booking.commissionAmount);
+  const frozen = booking.legacyCommissionZeroIsFrozen ?? Object.hasOwn(booking, 'dodoOriginalCommissionAmount');
+  if (stored && (stored.n !== 0n || frozen)) return stored;
+  const net = decimal(booking.netAmount);
+  const base = net?.n ? net : decimal(booking.grossAmount);
+  const percent = decimal(booking.commissionPercent);
+  return base && percent ? { n: base.n * percent.n, d: base.d * percent.d * 100n } : null;
+};
+
+export function originalBookingCommission(booking = {}) {
+  const original = bookingCommissionFraction(booking);
+  return original ? decimalNumber(original) : 0;
+}
+
+export function sumCreatorCommissions(bookings = []) {
+  let total = { n: 0n, d: 1n };
+  for (const booking of bookings) {
+    const earned = bookingCommissionFraction(booking);
+    if (!earned) continue;
+    const denominator = total.d > earned.d ? total.d : earned.d;
+    total = { n: total.n * (denominator / total.d) + earned.n * (denominator / earned.d), d: denominator };
+  }
+  return Number(rounded(total.n * 100n, total.d)) / 100;
+}

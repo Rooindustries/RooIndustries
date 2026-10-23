@@ -55,6 +55,7 @@
     "test:commerce-alerts": "node scripts/commerce-alerts-e2e.mjs",
     "test:commerce-alerts:routes": "node scripts/commerce-alerts-e2e.mjs --routes",
     "test:commerce-alerts:preview": "node scripts/commerce-alerts-preview-e2e.mjs",
+    "test:monitoring:deployments": "node scripts/monitoring-deployment-e2e.mjs",
     "test:monitoring:startup": "node scripts/monitoring-next-startup-e2e.mjs",
     "test:smoke:production": "node --test tests/production-smoke.test.mjs",
     "test:contact:csp": "playwright test tests/contact-form-csp.spec.js --project=chromium",
@@ -97,6 +98,7 @@
     "check:supabase:migrations": "node scripts/check-supabase-migrations.mjs",
     "test:supabase:migration:fixtures": "psql \"$SUPABASE_TEST_DATABASE_URL\" -v ON_ERROR_STOP=1 -f supabase/tests/commerce_integrity.sql -f supabase/tests/tourney_auth_integrity.sql -f supabase/tests/social_auth_integrity.sql -f supabase/tests/operational_projection_integrity.sql -f supabase/tests/shadow_lookup_integrity.sql",
     "test:referral:postgres17": "node scripts/test-referral-creator-terms-postgres.mjs",
+    "test:creator-payouts:postgres17": "node scripts/test-creator-payouts-e2e.mjs",
     "test:referral-social:postgres17": "node scripts/test-referral-social-reclaim-postgres.mjs",
     "test:backend-integrity:postgres17": "node scripts/test-backend-integrity-postgres.mjs",
     "test:referral-authority:postgres17": "node scripts/test-referral-fallback-authority-postgres.mjs",
@@ -141,7 +143,8 @@
     "test:tooling:dependencies": "node scripts/test-tooling-sweep-dependencies.mjs",
     "audit:lighthouse": "lhci autorun --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/ --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/reviews --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/tools",
     "audit:lighthouse:mobile": "lhci autorun --config=lighthouserc.mobile.json --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/",
-    "test:e2e:admin": "playwright test --config=playwright.admin.config.js"
+    "test:e2e:admin": "playwright test --config=playwright.admin.config.js",
+    "test:sourcemaps": "node scripts/sourcemaps-e2e.mjs"
   },
   "eslintConfig": {
     "extends": [
