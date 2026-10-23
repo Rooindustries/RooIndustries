@@ -1030,10 +1030,16 @@ test("confirmed publications and empty tool lists survive an eleven-minute CMS o
     }, { timeout: 30000 }).toBe(true);
     await pages("recovered");
   } finally {
-    await fs.writeFile(testInfo.outputPath("prolonged-outage.json"), JSON.stringify({ deleted, timeline }, null, 2));
-    await fs.writeFile(testInfo.outputPath("cms-requests.json"), JSON.stringify(await (await request.get(controlUrl(baseURL))).json(), null, 2));
-    await setClock(null);
-    await control(request, baseURL, { reset: true });
-    await renew(request);
+    const failures = [];
+    for (const cleanup of [
+      () => setClock(null),
+      () => fs.writeFile(testInfo.outputPath("prolonged-outage.json"), JSON.stringify({ deleted, timeline }, null, 2)),
+      async () => fs.writeFile(testInfo.outputPath("cms-requests.json"), JSON.stringify(await (await request.get(controlUrl(baseURL))).json(), null, 2)),
+      () => control(request, baseURL, { reset: true }),
+      () => renew(request),
+    ]) {
+      try { await cleanup(); } catch (error) { failures.push(error); }
+    }
+    if (failures.length) throw failures[0];
   }
 });
