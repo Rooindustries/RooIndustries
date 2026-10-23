@@ -118,10 +118,12 @@ const isDraftEmpty = (formObj) =>
   !String(formObj?.specs || "").trim() &&
   !String(formObj?.mainGame || "").trim() &&
   !String(formObj?.notes || "").trim();
-// Payment hands back what was submitted; it fills only fields a full store kept from being saved.
-const fillFromHandedBack = (form, bookingData, packageTitle) => {
+const readFormRevision = (value) => Number.isSafeInteger(value) && value > 0 ? value : 0;
+const fillFromHandedBack = (form, bookingData, packageTitle, storedRevision) => {
   if (!bookingData || bookingData.packageTitle !== packageTitle) return form;
   const handedBack = normalizeForm({ ...bookingData, notes: bookingData.message });
+  const revision = readFormRevision(bookingData.formRevision);
+  if (revision || storedRevision) return revision > storedRevision ? handedBack : form;
   return Object.fromEntries(Object.entries(form).map(([field, value]) => [field, String(value).trim() ? value : handedBack[field]]));
 };
 
@@ -555,6 +557,11 @@ export default function BookingForm() {
   }, []);
 
   const [form, setForm] = useState(createFreshForm);
+  const draftRevisionRef = useRef(0);
+  const nextDraftRevision = () => {
+    draftRevisionRef.current = Math.max(Date.now(), draftRevisionRef.current + 1);
+    return draftRevisionRef.current;
+  };
   const [codeEntryOpen, setCodeEntryOpen] = useState(false);
   const [codeInput, setCodeInput] = useState("");
   const [codeError, setCodeError] = useState("");
@@ -1247,6 +1254,7 @@ export default function BookingForm() {
   // Load persisted booking draft (keeps form + package when returning)
   useEffect(() => {
     let storedForm = null;
+    let storedRevision = 0;
     try {
       setAppliedReferral(null);
       setAppliedCoupon(null);
@@ -1266,6 +1274,7 @@ export default function BookingForm() {
           null;
         if (draftForPkg) {
           if (draftForPkg.form) storedForm = normalizeForm(draftForPkg.form);
+          storedRevision = readFormRevision(draftForPkg.formRevision);
           if (draftForPkg.selectedPackage) {
             setPersistedPackage(draftForPkg.selectedPackage);
           }
@@ -1297,10 +1306,14 @@ export default function BookingForm() {
       console.error("Failed to load booking draft");
       setDraftLoading(false);
     }
-    setForm((prev) => fillFromHandedBack(storedForm || prev, location.state?.bookingData, selectedPackage.title));
+    const bookingData = location.state?.bookingData;
+    const handedBackRevision = readFormRevision(bookingData?.formRevision);
+    draftRevisionRef.current = Math.max(draftRevisionRef.current, storedRevision, handedBackRevision);
+    setForm((prev) => fillFromHandedBack(storedForm || prev, bookingData, selectedPackage.title, storedRevision));
   }, [selectedPackage.title]);
 
   const persistDraft = (payload) => {
+    const formRevision = nextDraftRevision();
     try {
       const current = sessionStorage.getItem(BOOKING_DRAFT_KEY);
       let parsed = { packages: {}, lastTitle: null };
@@ -1311,6 +1324,7 @@ export default function BookingForm() {
       parsed.packages[key] = {
         ...(parsed.packages[key] || {}),
         ...payload,
+        formRevision,
       };
       parsed.lastTitle = key;
       setDrafts(parsed.packages);
@@ -2411,6 +2425,7 @@ export default function BookingForm() {
     const finalCouponCode = String(appliedCoupon?.code || "").trim();
 
     const payload = {
+      formRevision: nextDraftRevision(),
       salesAttribution: captureSalesAttribution(),
       displayDate,
       displayTime,
