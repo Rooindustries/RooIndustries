@@ -26,6 +26,8 @@ const monitoringStartup = process.env.TOOLING_MONITORING_STARTUP === "1";
 if (monitoringStartup && (process.env.NEXT_PUBLIC_SENTRY_DSN !== "false" || process.env.TOOLING_DEV_SERVER === "1")) {
   throw new Error("Production monitoring startup requires the malformed DSN fixture and next start.");
 }
+const clockFile = apiRoutes ? path.resolve(`${dist}-clock.json`) : undefined;
+if (clockFile) fs.writeFileSync(clockFile, "null");
 const env = {
   PATH: process.env.PATH,
   HOME: process.env.HOME,
@@ -64,11 +66,19 @@ const env = {
   ROO_TEST_HOST: testHost,
   NEXT_DIST_DIR: dist,
   TOOLING_NETWORK_GUARD: "1",
-  NODE_OPTIONS: `--import=${fileURLToPath(new URL("./lib/test-target-safety.mjs", import.meta.url))}`,
+  ...(clockFile ? { TOOLING_CLOCK_FILE: clockFile } : {}),
+  NODE_OPTIONS: `--import=${fileURLToPath(new URL("./lib/test-target-safety.mjs", import.meta.url))}${apiRoutes ? ` --import=${fileURLToPath(new URL("../tests/fixtures/server-clock.mjs", import.meta.url))}` : ""}`,
 };
 if (monitoringStartup) Object.assign(env, { NODE_ENV: "production", VERCEL: "1", VERCEL_ENV: "production", NEXT_PUBLIC_SENTRY_DSN: "false" });
 const next = path.resolve("node_modules/next/dist/bin/next");
 const development = process.env.TOOLING_DEV_SERVER === "1";
+if (process.env.TOOLING_RAM_PRICE === "1") Object.assign(env, {
+  HERO_RAM_PRICE_SOURCE_URL: `${contentURL}/storefront`,
+  CRON_SECRET: "fixture-only-ram-price-cron",
+  REF_ADMIN_KEY: "fixture-only-ram-price-admin",
+  CMS_WRITES_PAUSED: "0",
+  SALES_PREVIEW_READ_ONLY: "0",
+});
 const fingerprint = createHash("sha256");
 const tracked = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean);
 for (const file of tracked.filter(file => /^(?:src\/|app\/|scripts\/|tests\/fixtures\/|package(?:-lock)?\.json$|next\.config\.mjs$|instrumentation(?:-client)?\.js$|middleware\.js$|jsconfig\.json$|(?:tailwind|postcss)\.config)/.test(file)).sort()) {
@@ -101,7 +111,7 @@ if (development) {
 } else {
   if (fs.existsSync(dist)) throw new Error("Incomplete isolated build exists; choose a fresh NEXT_DIST_DIR.");
 }
-const fixture = await createToolingContentFixture({ origin: contentURL, artifact: process.env.TOOLING_CONTENT_ARTIFACT, apiRoutes, cms: process.env.TOOLING_CMS_RESILIENCE === "1" });
+const fixture = await createToolingContentFixture({ origin: contentURL, artifact: process.env.TOOLING_CONTENT_ARTIFACT, apiRoutes, cms: process.env.TOOLING_CMS_RESILIENCE === "1" || process.env.TOOLING_RAM_PRICE === "1", clockFile });
 try {
   await execute(["scripts/generate-sitemap.js"]);
   await execute(["scripts/generate-robots.js"], { ...env, VERCEL_ENV: "production" });
@@ -121,6 +131,9 @@ try {
   }
 } catch (error) {
   if (!stopping) throw error;
-} finally { await fixture.close(); }
+} finally {
+  await fixture.close();
+  if (clockFile) fs.rmSync(clockFile, { force: true });
+}
 
 }

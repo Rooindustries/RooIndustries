@@ -13,6 +13,7 @@ module.exports = defineConfig({
   workers: 1,
   retries: 0,
   timeout: 600000,
+  globalTimeout: 45 * 60 * 1000,
   projects: [{ name: "chromium", use: { browserName: "chromium" } }],
   use: { ...config.use, headless: true, javaScriptEnabled: true, video: "off" },
   webServer: config.webServer ? {
