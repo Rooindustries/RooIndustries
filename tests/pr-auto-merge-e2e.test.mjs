@@ -855,6 +855,24 @@ test("policy: local-ci permits a head with no Actions run or check yet", async (
   assert.equal(result.merges.length, 1);
 });
 
+for (const [name, mutate, canMerge] of [
+  ["null-runner", job => { job.runner_id = null; }, true],
+  ["missing-runner", job => { delete job.runner_id; }, false],
+  ["invalid-runner", job => { job.runner_id = "0"; }, false],
+  ["null-runner-missing-steps", job => { job.runner_id = null; delete job.steps; }, false],
+  ["null-runner-null-steps", job => { job.runner_id = null; job.steps = null; }, false],
+  ["null-runner-started-step", job => { job.runner_id = null; job.steps = [{ status: "completed", started_at: "2026-10-23T00:00:00Z" }]; }, false],
+  ["null-runner-running-job", job => { job.runner_id = null; job.status = "in_progress"; }, false],
+]) {
+  test(`policy: local-ci ${canMerge ? "accepts" : "refuses"} ${name}`, async () => {
+    const result = await runScenario(`local-ci-${name}`, { setup: state => {
+      localCi(state);
+      state.jobs.forEach(mutate);
+    } });
+    assert.equal(result.merges.length, canMerge ? 1 : 0);
+  });
+}
+
 test("policy: local-ci replaces jobs rejected before any runner or step started", async () => {
   const result = await runScenario("local-ci-unstarted-failure", { setup: state => {
     localCi(state);

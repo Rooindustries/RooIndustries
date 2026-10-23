@@ -95,7 +95,7 @@ const unstartedTests = async ({ runsBySuite, checkRuns, testsWorkflowId, headSha
   if (histories.some(({ run, jobs }) => jobs.some(job => !Number.isSafeInteger(job.id) || job.id <= 0 ||
     typeof job.name !== "string" || !job.name || job.run_id !== run.id || job.head_sha !== headSha))) return [];
   const jobs = histories.flatMap(history => history.jobs);
-  const neverStarted = job => job.runner_id === 0 && ["queued", "pending", "waiting", "requested", "completed"].includes(job.status) &&
+  const neverStarted = job => (job.runner_id === 0 || job.runner_id === null) && ["queued", "pending", "waiting", "requested", "completed"].includes(job.status) &&
     Array.isArray(job.steps) && job.steps.every(step => !step.started_at && ["pending", "queued", "waiting", "skipped"].includes(step.status));
   return REQUIRED_CHECKS.filter(name => {
     const namedJobs = jobs.filter(job => job.name === name);
