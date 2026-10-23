@@ -15,7 +15,8 @@ const MAX_BOOKING_LOOKUPS = 200;
 const MAX_CHECKS = 20;
 const MAX_CHECK_QUERY_LENGTH = 2048;
 const KEPT_BOOKING_STATUSES = ["captured", "completed"];
-const AUDITED_BOOKING_STATUSES = [...KEPT_BOOKING_STATUSES, "refunded"];
+const DISPUTED_BOOKING_STATUSES = ["pending", "cancelled"];
+const AUDITED_BOOKING_STATUSES = [...KEPT_BOOKING_STATUSES, "refunded", ...DISPUTED_BOOKING_STATUSES];
 const SETTLED_DISPUTE_STATUSES = ["dispute_won", "dispute_cancelled"];
 const DISPUTE_STATUSES = [
   ...SETTLED_DISPUTE_STATUSES,
@@ -140,37 +141,40 @@ const toItem = ({ key, id, ref = "", cents = null, currency = "", reason }) => (
   ),
 });
 
-const listDodoPayments = async ({ dodo, to, deadline }) => {
+const listDodoPayments = async ({ dodo, from, to, deadline }) => {
   const payments = [];
-  for (let page = 0; page < MAX_PAGES; page += 1) {
-    checkBudget(deadline);
-    const response = await dodo.payments
-      .list({
-        status: "succeeded",
-        created_at_lte: to,
-        page_size: PAGE_SIZE,
-        page_number: page,
-      }, { signal: AbortSignal.timeout(8000) })
-      .asResponse();
-    const result = await response.json();
-    checkBudget(deadline);
-    const items = result?.items;
-    if (
-      !Array.isArray(items) ||
-      items.length > PAGE_SIZE ||
-      items.some(
-        (item) =>
-          !item ||
-          typeof item.payment_id !== "string" ||
-          !item.payment_id ||
-          (item.status != null && !PAYMENT_STATUSES.includes(item.status)),
+  for (const range of [{ created_at_gte: from, created_at_lte: to }, { created_at_lte: from }]) {
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      checkBudget(deadline);
+      const response = await dodo.payments
+        .list({
+          status: "succeeded",
+          ...range,
+          page_size: PAGE_SIZE,
+          page_number: page,
+        }, { signal: AbortSignal.timeout(8000) })
+        .asResponse();
+      const result = await response.json();
+      checkBudget(deadline);
+      const items = result?.items;
+      if (
+        !Array.isArray(items) ||
+        items.length > PAGE_SIZE ||
+        items.some(
+          (item) =>
+            !item ||
+            typeof item.payment_id !== "string" ||
+            !item.payment_id ||
+            (item.status != null && !PAYMENT_STATUSES.includes(item.status)),
+        )
       )
-    )
-      throw unavailable();
-    payments.push(...items);
-    if (items.length < PAGE_SIZE) return { payments, truncated: false };
+        throw unavailable();
+      payments.push(...items.slice(0, MAX_PAGES * PAGE_SIZE - payments.length));
+      if (payments.length === MAX_PAGES * PAGE_SIZE) return { payments, truncated: true };
+      if (items.length < PAGE_SIZE) break;
+    }
   }
-  return { payments, truncated: true };
+  return { payments, truncated: false };
 };
 
 const readDocuments = async (client, type, options, deadline) => {
@@ -745,7 +749,7 @@ export const buildReconcileReport = async ({
       terminalReview(record);
     }
 
-    const { payments: listed, truncated } = await listDodoPayments({ dodo, to, deadline });
+    const { payments: listed, truncated } = await listDodoPayments({ dodo, from, to, deadline });
     if (truncated)
       report({ key: "scan:dodo-payments", id: "dodo-payments", reason: "report_truncated" });
     const productIds = readSiteProductIds();
@@ -782,12 +786,15 @@ export const buildReconcileReport = async ({
       { path: "lastRefundAt", to: new Date(now).toISOString(), statuses: AUDITED_BOOKING_STATUSES },
       { path: "updatedAt", to: new Date(now).toISOString(), statuses: ["refunded"] },
       { path: "updatedAt", to: new Date(now).toISOString(), statuses: KEPT_BOOKING_STATUSES, refund: true },
+      { path: "_updatedAt", to: new Date(now).toISOString(), statuses: DISPUTED_BOOKING_STATUSES },
+      { path: "_updatedAt", to: new Date(now).toISOString(), statuses: AUDITED_BOOKING_STATUSES, dispute: true },
     ];
     const bookingGroups = await Promise.all(bookingWindows.map((window) => readDocuments(client, "booking", {
       filters: [
         { path: "paymentProvider", op: "eq", value: "dodo" },
         { path: "status", op: "in", value: window.statuses },
         ...(window.refund ? [{ path: "refundStatus", op: "in", value: ["full", "partial"] }] : []),
+        ...(window.dispute ? [{ path: "dodoDisputeActive", op: "defined" }] : []),
         { path: window.path, op: "gte", value: from },
         { path: window.path, op: "lte", value: window.to },
       ],
@@ -804,6 +811,7 @@ export const buildReconcileReport = async ({
         !AUDITED_BOOKING_STATUSES.includes(booking.status) ||
         !bookingWindows.some((window) => window.statuses.includes(booking.status) &&
           (!window.refund || ["full", "partial"].includes(booking.refundStatus)) &&
+          (!window.dispute || booking.dodoDisputeActive != null) &&
           inWindow(booking[window.path], from, window.to))
       )
         continue;

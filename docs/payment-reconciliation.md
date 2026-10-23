@@ -55,9 +55,13 @@ The job changes only sanitized Linear reporting records and its local
 status files. It does not change bookings, referral credits, prices or
 refunds. Investigate money differences in fixtures or test mode.
 
-The Dodo scan requests succeeded payments created at least 30 minutes before
-the check, with no lower creation-date bound because a payment can settle days
-later. Before ordinary comparisons, details must also be at least 30 minutes
+The Dodo scan first requests succeeded payments created in the last 72 hours,
+excluding the most recent 30 minutes, then older checkouts with no lower
+creation-date bound. Both ranges share the 2,000-summary limit. This prioritizes
+recent payments without depending on provider ordering or excluding older
+checkouts by creation date. The split boundary may appear in both ranges; details and
+findings share identity caches. At most 21 pages are read, including the short
+page that can finish each range. Before ordinary comparisons, details must also be at least 30 minutes
 past the latest supplied payment `updated_at` or refund/dispute `created_at`.
 A just-settled old checkout therefore waits for its webhook or reconciliation
 to finish. During that grace period, daily findings omit it and targeted checks
@@ -70,7 +74,7 @@ checks remain unknown and the window reports incomplete coverage; creation
 time alone cannot establish settlement age. The endpoint writes no observation
 record. Such a payment stays deferred until trustworthy timing becomes available.
 Malformed or materially future timestamps make the report unavailable.
-The 72-hour `from` value applies to the reverse booking scan.
+The 72-hour `from` value divides those payment ranges and bounds reverse booking transitions.
 Stopped owner-review records, including exhausted booking recovery, are
 discovered regardless of update age. Either terminal flag keeps a record unresolved
 in daily and targeted checks. The two flag scans share a deduplicated limit of
@@ -105,7 +109,7 @@ A payment-key issue from an earlier report learns that record alias through
 its own targeted check, so a change in provider listing membership reuses the
 same owner issue and Sentry group.
 
-The reverse scan includes recent captured, completed and refunded Dodo bookings,
+The reverse scan includes recent captured, completed, refunded, pending and cancelled Dodo bookings,
 so a refunded booking is still checked against provider details when its payment
 is absent from the succeeded-payment listing. The same booking limit applies
 across those statuses; an incomplete scan cannot report clean.
@@ -115,6 +119,12 @@ creation, last refund time and refund-state updates form one deduplicated
 updates to old captured bookings do not consume the refund window. Matching
 refunds still need provider validation, and recent provider changes retain
 their settlement grace period.
+Recent dispute changes on older bookings use the stored `_updatedAt` timestamp.
+Pending and cancelled bookings are included, as are other audited statuses with
+a known dispute flag, including its false value after resolution. These windows
+share the same 200-booking limit. Missing or conflicting active flags are checked
+against provider details; correct dispute accounting preserves zero earnings for
+pending and cancelled bookings.
 Fully refunded bookings earn no referral commission, even when they keep a
 historical commission amount. A full refund before booking is clean only when
 the provider's validated refund total matches the payment and the local record
