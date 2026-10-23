@@ -85,6 +85,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     let paymentTax = 0;
     let paymentTaxInclusive = false;
     let paymentAmountOverrides = {};
+    let emailFailure = false;
     database.setProviderHandler(async request => {
       if (request.path === '/emails') {
         request.bookings = await database.sql`select legacy_sanity_id as id, payload->>'status' as status
@@ -122,7 +123,9 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
           ...paymentAmountOverrides,
         } };
       }
-      if (request.path === '/emails') return { body: { id: `email_fixture_${evidence.providerRequests.length}` } };
+      if (request.path === '/emails') return emailFailure
+        ? { status: 429, body: { name: 'rate_limit_exceeded', message: 'Synthetic email failure' } }
+        : { body: { id: `email_fixture_${evidence.providerRequests.length}` } };
       throw new Error(`Unhandled local provider request ${request.path}`);
     });
     const providerOrigins = new Set(['https://test.dodopayments.com', 'https://api.resend.com']);
@@ -284,6 +287,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     };
     return { post, start, hold, snapshot, recordFor, seedUpgrade, commerce, database, details, evidence, save, stop,
       setPaymentTax, setPaymentTaxInclusive, setPaymentAmountOverrides, refundPayment, dodoWebhook,
+      setEmailFailure(value) { emailFailure = value; },
       setRequestHook: database.setRequestHook };
   } catch (error) {
     await stop();

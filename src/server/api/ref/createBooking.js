@@ -936,7 +936,9 @@ export default async function handler(req, res) {
             email: resolvedEmail,
             packageTitle,
             startTimeUTC: resolvedStartTimeUTC,
-            originalOrderId,
+            originalOrderId: isInternalPaymentFinalization && originalBooking
+              ? originalBooking.originalOrderId || originalBooking._id
+              : originalOrderId,
             couponCode,
             paymentProvider,
             ...(isInternalPaymentFinalization ? {

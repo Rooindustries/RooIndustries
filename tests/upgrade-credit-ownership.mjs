@@ -295,6 +295,55 @@ test('upgrade credit stays verified and belongs to one checkout', { timeout: 900
       result.finalize = await post('/api/payment/finalize', {}, result.replacement.body.paymentAccessToken);
       assert.equal(result.finalize.status, 200, JSON.stringify(result.finalize));
     });
+    await check('a refund whose lock cleanup fails cannot replay a closed checkout', async result => {
+      const scenario = await original();
+      const first = await fixture.start(scenario.payload);
+      assert.equal(first.status, 200, JSON.stringify(first));
+      const finalized = await post('/api/payment/finalize', {}, first.body.paymentAccessToken);
+      assert.equal(finalized.status, 200, JSON.stringify(finalized));
+      const record = await paymentFor(first);
+      let releaseFailed = false;
+      fixture.setRequestHook((phase, request) => {
+        if (!releaseFailed && phase === 'before' &&
+            request.path === '/rest/v1/rpc/roo_apply_commerce_document_mutations' &&
+            request.body.p_mutations?.some(mutation => mutation.operation === 'delete' && mutation.id === record.startClaimId)) {
+          releaseFailed = true;
+          throw new Error('Synthetic upgrade lock release failure');
+        }
+      });
+      const paymentId = `payment_${record.providerOrderId}`;
+      const refunds = [{ refund_id: 'ownership_retained_refund', payment_id: paymentId,
+        status: 'succeeded', amount: 4500, currency: 'USD', is_partial: false }];
+      try {
+        result.refund = await fixture.refundPayment(paymentId, refunds, 'ownership_retained_refund_event');
+      } finally {
+        fixture.setRequestHook(null);
+      }
+      assert.equal(releaseFailed, true);
+      assert.equal(result.refund.status, 503, JSON.stringify(result.refund));
+      result.refunded = await commerce.getDocument(record._id);
+      assert.equal(result.refunded.status, 'refunded');
+      assert.equal(result.refunded.refundRequiresBookingSync, true);
+      assert.equal((await commerce.getDocument(finalized.body.bookingId)).status, 'refunded');
+      assert.equal((await commerce.getDocument(record.startClaimId)).paymentRecordId, record._id);
+      result.replay = await fixture.start(scenario.payload);
+      assert.equal(result.replay.status, 409, JSON.stringify(result.replay));
+      assert.equal(result.replay.body.code, 'upgrade_checkout_closed');
+      result.pending = await fixture.start(await freshIntent(scenario));
+      assert.equal(result.pending.status, 409, JSON.stringify(result.pending));
+      assert.equal(result.pending.body.code, 'upgrade_checkout_closed');
+      result.retry = await fixture.refundPayment(paymentId, refunds, 'ownership_retained_refund_event');
+      assert.equal(result.retry.status, 200, JSON.stringify(result.retry));
+      assert.equal((await commerce.getDocument(record._id)).refundRequiresBookingSync, false);
+      result.replacement = await fixture.start(await freshIntent(scenario));
+      assert.equal(result.replacement.status, 200, JSON.stringify(result.replacement));
+      const replacement = await paymentFor(result.replacement);
+      assert.notEqual(replacement._id, record._id);
+      assert.equal((await commerce.getDocument(record.startClaimId)).paymentRecordId, replacement._id);
+      result.duplicate = await fixture.refundPayment(paymentId, refunds, 'ownership_retained_refund_duplicate');
+      assert.equal(result.duplicate.status, 200, JSON.stringify(result.duplicate));
+      assert.equal((await commerce.getDocument(record.startClaimId)).paymentRecordId, replacement._id);
+    });
     await check('a completed upgrade can advance again through either chain booking id', async result => {
       const scenario = await original();
       const first = await fixture.start(scenario.payload);
@@ -322,6 +371,45 @@ test('upgrade credit stays verified and belongs to one checkout', { timeout: 900
       const allHigher = await commerce.fetch('*[_type == "booking" && packageTitle == $title && originalOrderId == $id]',
         { title: 'Fixture higher upgrade', id: scenario.booking._id });
       assert.equal(allHigher.length, 1);
+    });
+    await check('a child-booking upgrade can retry failed confirmation emails', async result => {
+      const scenario = await original();
+      const first = await fixture.start(scenario.payload);
+      assert.equal(first.status, 200, JSON.stringify(first));
+      const completed = await post('/api/payment/finalize', {}, first.body.paymentAccessToken);
+      assert.equal(completed.status, 200, JSON.stringify(completed));
+      await fixture.database.client.rpc('roo_apply_document_mutations', { p_mutations: [{ operation: 'create',
+        document: { _id: 'package.fixture.retry', _type: 'package', title: 'Fixture retry upgrade', price: '$149.95' } }] });
+      const { issueUpgradeIntentToken } = await import('../src/server/api/ref/upgradeIntentToken.js');
+      const payload = { ...scenario.payload, originalOrderId: completed.body.bookingId, packageTitle: 'Fixture retry upgrade',
+        upgradeIntentToken: issueUpgradeIntentToken({ bookingId: completed.body.bookingId, email: scenario.booking.email,
+          targetPackageTitle: 'Fixture retry upgrade', backend: 'supabase', cutoverGeneration: 0 }) };
+      const started = await fixture.start(payload);
+      assert.equal(started.status, 200, JSON.stringify(started));
+      fixture.setEmailFailure(true);
+      try {
+        result.finalize = await post('/api/payment/finalize', {}, started.body.paymentAccessToken);
+      } finally {
+        fixture.setEmailFailure(false);
+      }
+      assert.equal(result.finalize.status, 200, JSON.stringify(result.finalize));
+      const record = await paymentFor(started);
+      result.before = record;
+      assert.equal(record.status, 'email_partial');
+      assert.equal(record.bookingPayload.originalOrderId, completed.body.bookingId);
+      assert.equal((await commerce.getDocument(record.bookingId)).originalOrderId, scenario.booking._id);
+      result.fixtureClock = 'Made only the synthetic failed email ledger entries due now; the database clock is unchanged.';
+      await fixture.database.sql`update commerce.email_dispatches set next_attempt_at = now() - interval '1 second'
+        where booking_id = (select id from commerce.bookings where legacy_sanity_id = ${record.bookingId})
+        and status = 'retry'`;
+      result.retry = await fixture.dodoWebhook(`payment_${record.providerOrderId}`, 'payment.succeeded', 'ownership_child_confirmation');
+      assert.equal(result.retry.status, 200, JSON.stringify(result.retry));
+      result.after = await commerce.getDocument(record._id);
+      assert.equal(result.after.status, 'booked');
+      assert.equal(result.after.emailDispatch.allSent, true);
+      result.bookings = await commerce.fetch('*[_type == "booking" && paymentRecordId == $id]', { id: record._id });
+      assert.equal(result.bookings.length, 1);
+      assert.equal(result.bookings[0].originalOrderId, scenario.booking._id);
     });
     await check('all requests stayed in local fixtures', async () => assert.deepEqual(evidence.blocked, []));
   } finally {
