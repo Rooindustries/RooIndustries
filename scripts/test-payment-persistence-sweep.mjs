@@ -715,10 +715,15 @@ try{
       assert.equal(terminalBooking.refundedAmount,9.99);
       const rowMetadata=['_rev','_updatedAt'];
       const stable=value=>Object.fromEntries(Object.entries(value).filter(([key])=>!rowMetadata.includes(key)));
-      const emailLedger=()=>sql`select to_jsonb(dispatch)-'updated_at' as row from commerce.email_dispatches dispatch where booking_id=(select id from commerce.bookings where legacy_sanity_id=${booking._id}) order by dispatch_kind,recipient_type`;
+      const emailLedger=()=>sql`select to_jsonb(dispatch)-'updated_at'-'source_revision'-'source_hash' as row,
+        dispatch.source_revision=source.source_revision as revision_matches,dispatch.source_hash=source.source_hash as hash_matches
+        from commerce.email_dispatches dispatch join commerce.bookings stored_booking on stored_booking.id=dispatch.booking_id
+        join migration.source_documents source on source.legacy_sanity_id=stored_booking.legacy_sanity_id
+        where stored_booking.legacy_sanity_id=${booking._id} order by dispatch_kind,recipient_type`;
       const terminalLedger=await emailLedger();
       assert.equal(terminalLedger.length,2);
       assert.ok(terminalLedger.every(({row:dispatch})=>dispatch.status==='sent'&&dispatch.provider_message_id));
+      assert.ok(terminalLedger.every(dispatch=>dispatch.revision_matches&&dispatch.hash_matches));
       const refundLedger=()=>sql`select to_jsonb(refund)-'updated_at'-'source_revision'-'source_hash' as row,
         refund.source_revision=source.source_revision as revision_matches,refund.source_hash=source.source_hash as hash_matches
         from commerce.refunds refund join commerce.payment_records payment on payment.id=refund.payment_record_id
@@ -735,6 +740,10 @@ try{
           client:{attempted:false,sent:false,skippedReason:'booking_inactive'},
           owner:{attempted:false,sent:false,skippedReason:'booking_inactive'}}};
       const expectedBooking={...terminalBooking,emailDispatchLastError:'booking_inactive'};
+      const refreshedBooking=await commerce.patch(booking._id).ifRevisionId(terminalBooking._rev)
+        .set({emailDispatchLastError:terminalBooking.emailDispatchLastError}).commit();
+      assert.notEqual(refreshedBooking._rev,terminalBooking._rev);
+      assert.deepEqual(stable(refreshedBooking),stable(terminalBooking));
       const replays=[];
       for(let attempt=0;attempt<3;attempt++){
         const oldRetry=await fetch(`${origin}/booking`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body})});
@@ -754,7 +763,7 @@ try{
       const rebuilds=await a1RebuildProof(`fix-c-legacy-${provider}-later-full`);
       assert.deepEqual(await emailLedger(),terminalLedger);
       assert.deepEqual(await refundLedger(),terminalRefunds);
-      fullProof={refunded,terminalPayment,terminalBooking,terminalLedger,terminalRefunds,replays,rebuilds,rowMetadata,emailRequests,
+      fullProof={refunded,terminalPayment,terminalBooking,refreshedBooking,terminalLedger,terminalRefunds,replays,rebuilds,rowMetadata,emailRequests,
         staleLegacyPartialSnapshotCannotDowngradeFull:true,noReplayEmailAttempt:true};
     }
     return{fullProof,result,recovered,committedBeforeRecovery,booking,saved,ledger,replay,partialGrantAndCommissionPolicyPreserved:true,duplicateRefundAccountingUnchanged:true,standIn:'Imported active sanity-owned hold in native store; no live legacy incidence or Sanity engine claimed'};
