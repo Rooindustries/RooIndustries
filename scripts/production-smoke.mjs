@@ -7,6 +7,7 @@ const REFERRAL_CODE = "roo-smoke-check";
 const ATTEMPTS = 3;
 const RETRY_MS = Number(process.env.SMOKE_RETRY_MS || 10000);
 const SMOKE_DEADLINE_MS = Number(process.env.SMOKE_DEADLINE_MS || 180000);
+const REQUEST_TIMEOUT_MS = Number(process.env.SMOKE_REQUEST_TIMEOUT_MS || 20000);
 const PRICE_PATTERN = /^\$\d{1,3}(?:,\d{3})*(?:\.\d{2})?$/;
 
 class Refusal extends Error {}
@@ -56,7 +57,7 @@ const getWithRetries = async (url, check) => {
   let lastError;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
     try {
-      const response = await fetch(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(20000) });
+      const response = await fetch(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
       return await check(response);
     } catch (error) {
       lastError = asRunnerFault(error, url);
@@ -178,13 +179,13 @@ const main = async () => {
   const deadline = Date.now() + SMOKE_DEADLINE_MS;
   const withinDeadline = async (run) => {
     const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new Error("the smoke deadline passed");
+    if (remaining <= 0) throw new CouldNotRun("the smoke deadline passed");
     let timer;
     try {
       return await Promise.race([
         run(),
         new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error("the smoke deadline passed")), remaining);
+          timer = setTimeout(() => reject(new CouldNotRun("the smoke deadline passed")), remaining);
         }),
       ]);
     } finally {
@@ -216,11 +217,12 @@ const main = async () => {
         results.push({ name, ok: true, detail: detail || "" });
         console.log(`ok    ${name}${detail ? ` (${detail})` : ""}`);
       } catch (error) {
-        const fault = browser.isConnected() || /smoke deadline/.test(error.message) ? error : new CouldNotRun(`the browser closed: ${error.message}`);
+        // Running out of the smoke's own time budget is the runner's problem; only evidence from the site counts against a deploy.
+        const fault = browser.isConnected() || error instanceof CouldNotRun ? error : new CouldNotRun(`the browser closed: ${error.message}`);
         if (fault instanceof CouldNotRun) {
           results.push({ name, ok: false, couldNotRun: true, detail: fault.message });
           console.log(`SKIP  ${name}: ${fault.message}`);
-          if (!browser.isConnected()) break;
+          if (!browser.isConnected() || Date.now() >= deadline) break;
           continue;
         }
         results.push({ name, ok: false, detail: error.message });

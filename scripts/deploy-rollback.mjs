@@ -18,6 +18,7 @@ const PENDING_JOBS = new Set(["pending", "in-progress"]);
 const FAILED_JOBS = new Set(["failed", "error", "canceled", "cancelled"]);
 const VERIFY_INTERVAL_MS = Number(process.env.ROLLBACK_VERIFY_INTERVAL_MS || 3000);
 const VERIFY_TIMEOUT_MS = Number(process.env.ROLLBACK_VERIFY_TIMEOUT_MS || 120000);
+const CANDIDATE_PAGES = 10;
 let mutationAccepted = false;
 
 class Refusal extends Error {}
@@ -180,25 +181,29 @@ const findRollbackTarget = async (api, state) => {
   const settled = job?.jobStatus === "succeeded" && job?.fromDeploymentId;
   const previous = settled && job.type !== "rollback" && job.toDeploymentId === deploymentId(state.live) ? job.fromDeploymentId : null;
   const rolledAwayFrom = settled && job.type === "rollback" ? job.fromDeploymentId : null;
-  const { body: listing } = await api("GET", "/v7/deployments", {
-    projectId: state.project.id,
-    target: "production",
-    state: "READY",
-    rollbackCandidate: true,
-    until: createdAt(state.live),
-    limit: 20,
-    teamId: state.teamId,
-  });
-  const candidates = (Array.isArray(listing?.deployments) ? listing.deployments : [])
-    .filter((deployment) => deploymentId(deployment) !== deploymentId(state.live) && deploymentId(deployment) !== rolledAwayFrom)
-    .sort((a, b) => createdAt(b) - createdAt(a));
-  if (previous) {
-    const target = candidates.find((deployment) => deploymentId(deployment) === previous);
-    if (!target) throw new Refusal(`No earlier production deployment to roll back to: ${previous}, which served production before ${deploymentId(state.live)}, is no longer a rollback candidate.`);
-    return target;
+  const wanted = (deployment) => previous
+    ? deploymentId(deployment) === previous
+    : deploymentId(deployment) !== deploymentId(state.live) && deploymentId(deployment) !== rolledAwayFrom;
+  // Vercel lists 20 deployments per page, newest first; follow pagination.next until the target turns up.
+  let until = createdAt(state.live);
+  for (let page = 0; page < CANDIDATE_PAGES && until; page += 1) {
+    const { body: listing } = await api("GET", "/v7/deployments", {
+      projectId: state.project.id,
+      target: "production",
+      state: "READY",
+      rollbackCandidate: true,
+      until,
+      limit: 20,
+      teamId: state.teamId,
+    });
+    const target = (Array.isArray(listing?.deployments) ? listing.deployments : [])
+      .filter(wanted)
+      .sort((a, b) => createdAt(b) - createdAt(a))[0];
+    if (target) return target;
+    until = Number(listing?.pagination?.next) || null;
   }
-  if (!candidates.length) throw new Refusal("No earlier production deployment to roll back to.");
-  return candidates[0];
+  if (previous) throw new Refusal(`No earlier production deployment to roll back to: ${previous}, which served production before ${deploymentId(state.live)}, is no longer a rollback candidate.`);
+  throw new Refusal("No earlier production deployment to roll back to.");
 };
 
 const resolveDeployment = async (api, state, value) => {

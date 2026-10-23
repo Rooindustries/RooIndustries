@@ -39,14 +39,26 @@ test("a healthy site passes every money-path check with GET requests only", () =
   assert.deepEqual(site.requests.filter(request => request.method !== "GET"), []);
 }));
 
-test("a hung money page fails inside the smoke deadline", async () => {
+test("a hung money page that times out is a money-path failure inside the smoke deadline", async () => {
   const site = await startSite({ hang: ["/"] });
   try {
     const started = Date.now();
-    const result = await run(["--base", site.base], null, { SMOKE_DEADLINE_MS: "500" });
+    const result = await run(["--base", site.base], null, { SMOKE_DEADLINE_MS: "5000", SMOKE_REQUEST_TIMEOUT_MS: "300" });
     assert.equal(result.code, 2, result.output);
-    assert.match(result.output, /smoke deadline/);
+    assert.match(result.output, /FAIL\s+page \/:/);
     assert.ok(Date.now() - started < 15000, `took ${Date.now() - started}ms`);
+  } finally {
+    await site.close();
+  }
+});
+
+test("running out of the smoke's own time budget is a smoke that could not run", async () => {
+  const site = await startSite({ dropNonBrowser: true });
+  try {
+    const result = await run(["--base", site.base], null, { SMOKE_DEADLINE_MS: "400" });
+    assert.equal(result.code, 1, result.output);
+    assert.match(result.output, /smoke deadline/);
+    assert.doesNotMatch(result.output, /money-path check\(s\) failed/);
   } finally {
     await site.close();
   }

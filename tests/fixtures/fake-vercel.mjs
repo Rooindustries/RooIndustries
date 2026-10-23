@@ -160,8 +160,9 @@ export const startVercel = ({
         if (query.get("rollbackCandidate")) list = list.filter(item => String(item.isRollbackCandidate) === query.get("rollbackCandidate"));
         if (query.get("until")) list = list.filter(item => item.created < Number(query.get("until")));
       }
-      list = list.slice(0, Number(query.get("limit") || 20));
-      return send(200, { deployments: list, pagination: { count: list.length, next: null, prev: null } });
+      const page = list.slice(0, Number(query.get("limit") || 20));
+      const next = list.length > page.length ? page[page.length - 1].created : null;
+      return send(200, { deployments: page, pagination: { count: page.length, next, prev: null } });
     }
     if (req.method === "POST" && (match = url.pathname.match(/^\/v1\/projects\/([^/]+)\/rollback\/([^/]+)$/))) {
       if (rollbackError) return send(rollbackError.status, { error: { code: rollbackError.code, message: rollbackError.message } });

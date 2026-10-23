@@ -164,6 +164,20 @@ test("rollback returns to the deployment that served production before the live 
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_older");
 }));
 
+test("rollback finds the deployment that served production before the live one past the first page of candidates", () => withVercel({
+  tweak: state => {
+    const older = state.deployments.find(item => item.uid === "dpl_older");
+    for (let index = 1; index <= 25; index += 1) {
+      state.deployments.push({ ...structuredClone(older), uid: `dpl_mid${index}`, url: `rooindustries-mid${index}-roo-industries.vercel.app`, created: older.created + index * 100, createdAt: older.created + index * 100, ready: older.created + index * 100 });
+    }
+    state.project.lastAliasRequest = { type: "promote", jobStatus: "succeeded", fromDeploymentId: "dpl_older", toDeploymentId: "dpl_live", requestedAt: 1760995000000 };
+  },
+}, async (vercel, exec) => {
+  const result = await exec([]);
+  assert.equal(result.code, 0, result.output);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_older");
+}));
+
 test("rollback never returns to a deployment an earlier rollback moved away from", () => withVercel({
   tweak: state => {
     state.project.lastAliasRequest = { type: "rollback", jobStatus: "succeeded", fromDeploymentId: "dpl_previous", toDeploymentId: "dpl_older", requestedAt: 1760985000000 };
