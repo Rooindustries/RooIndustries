@@ -13,22 +13,35 @@ export default function DiscordGuideBanner({ hidden = false }) {
 
   useEffect(() => {
     let mounted = true;
-    const controller = new AbortController();
-    getPublicContent("discord-banner", {}, { signal: controller.signal })
-      .then((data) => {
-        if (!mounted || !data) return;
-        setBanner((prev) => ({
-          text: DEFAULT_BANNER.text,
-          mobileText: DEFAULT_BANNER.mobileText,
-          link: data.link || prev.link,
-        }));
-      })
-      .catch((error) => {
-        if (!controller.signal.aborted && error?.name !== "AbortError") console.error(error);
-      });
+    let controller;
+    const load = () => {
+      const request = new AbortController();
+      controller = request;
+      getPublicContent("discord-banner", {}, { signal: request.signal })
+        .then((data) => {
+          if (!mounted || request.signal.aborted || !data) return;
+          setBanner((prev) => ({
+            text: DEFAULT_BANNER.text,
+            mobileText: DEFAULT_BANNER.mobileText,
+            link: data.link || prev.link,
+          }));
+        })
+        .catch((error) => {
+          if (!request.signal.aborted && error?.name !== "AbortError") console.error(error);
+        });
+    };
+    const abort = () => controller?.abort();
+    const restore = (event) => {
+      if (event.persisted && controller?.signal.aborted) load();
+    };
+    window.addEventListener("pagehide", abort);
+    window.addEventListener("pageshow", restore);
+    load();
     return () => {
       mounted = false;
-      controller.abort();
+      window.removeEventListener("pagehide", abort);
+      window.removeEventListener("pageshow", restore);
+      abort();
     };
   }, []);
 
