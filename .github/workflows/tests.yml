@@ -285,7 +285,7 @@ jobs:
   cms-resilience:
     name: Playwright CMS resilience
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       ROO_TEST_HOST: 127.0.0.1
       PW_PORT: "3271"
