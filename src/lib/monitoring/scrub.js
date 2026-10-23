@@ -176,10 +176,7 @@ export function monitoringEnvironment(value = process.env.NEXT_PUBLIC_VERCEL_ENV
 export function monitoringDsn(value) {
   try {
     const url = new URL(value);
-    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-    const environment = monitoringEnvironment();
-    if (!loopback && environment !== "production") return undefined;
-    const loopbackHttp = url.protocol === "http:" && loopback;
+    const loopbackHttp = url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
     if ((url.protocol !== "https:" && !loopbackHttp) || !/^\w+$/.test(url.username) || !/\/\d+$/.test(url.pathname) || url.search || url.hash) return undefined;
     url.password = "";
     return url.href;
