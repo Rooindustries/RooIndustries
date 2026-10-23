@@ -18,6 +18,30 @@ mkdir -p "$scratch/checkout/nested" "$scratch/outside"
 git -C "$repo" archive "${ROO_SKILLS_TREEISH:-HEAD}" .agents/skills .claude/skills | tar -x -C "$scratch/checkout"
 git -C "$scratch/checkout" init -q
 
+git init --quiet --bare --initial-branch=main "$scratch/origin.git"
+git init --quiet --initial-branch=main "$scratch/source"
+git -C "$scratch/source" -c user.name=Fixture -c user.email=fixture@example.invalid commit --quiet --allow-empty -m fixture
+git -C "$scratch/source" push --quiet "$scratch/origin.git" main
+git clone --quiet "$scratch/origin.git" "$scratch/client"
+git -C "$scratch/source" branch renamed
+git -C "$scratch/source" push --quiet "$scratch/origin.git" renamed
+git -C "$scratch/origin.git" symbolic-ref HEAD refs/heads/renamed
+git -C "$scratch/client" fetch --quiet origin
+before=$(git -C "$scratch/client" symbolic-ref --short refs/remotes/origin/HEAD)
+[[ "$before" == origin/main ]]
+git -C "$scratch/client" remote set-head origin --auto > /dev/null
+after=$(git -C "$scratch/client" symbolic-ref --short refs/remotes/origin/HEAD)
+[[ "$after" == origin/renamed && $(git -C "$scratch/client" branch --show-current) == main ]]
+git -C "$scratch/client" remote set-url origin https://fixture-user:fixture-token@example.invalid/Rooindustries/RooIndustries.git
+{
+  git -C "$scratch/client" rev-parse --show-toplevel
+  git -C "$scratch/client" remote
+  git -C "$scratch/client" worktree list --porcelain
+  git -C "$scratch/client" branch -a
+} > "$scratch/identification.txt"
+if grep -Fq 'fixture-token' "$scratch/identification.txt"; then exit 1; fi
+jq -n --arg before "$before" --arg after "$after" '{cached:$before,refreshed:$after,worktreeBranch:"main",credentialsExposed:false}' > "$artifacts/git-workflow.json"
+
 for skill in $(jq -r '.[]' <<<"$expected"); do
   target=$(realpath "$scratch/checkout/.claude/skills/$skill")
   [[ "$target" == "$scratch/checkout/.agents/skills/$skill" ]]
@@ -65,5 +89,5 @@ catalog "$scratch/checkout/nested" nested "$scratch/checkout"
 catalog "$scratch/outside" outside ''
 
 jq -n --argjson skills "$expected" --arg codex "$(codex --version)" \
-  '{result:"passed",skills:$skills,codex:$codex,checks:["tracked skill files and relative links","repo discovery","clean checkout discovery","nested discovery","outside has no repo skills"]}' > "$artifacts/result.json"
+  '{result:"passed",skills:$skills,codex:$codex,checks:["remote default branch refresh","repository identity without credentials","tracked skill files and relative links","repo discovery","clean checkout discovery","nested discovery","outside has no repo skills"]}' > "$artifacts/result.json"
 printf 'Repo skills E2E passed. Artifacts: %s\n' "$artifacts"

@@ -10,7 +10,9 @@ authorize launching more agents or threads. Read the session's worker rules
 before delegating; a delegated worker stays within its assigned checkout.
 
 1. Identify the current repository and its worktrees with
-   `git remote get-url origin`, `git worktree list --porcelain` and `git branch -a`.
+   `git rev-parse --show-toplevel`, `git remote`, `git worktree list --porcelain`
+   and `git branch -a`. Confirm the intended origin privately; redact credentials
+   before reporting any remote URL.
    Reuse the assigned branch/worktree when it exists. Keep other workers'
    branches, working files and servers untouched.
 2. Give each task a branch, worktree, allowed files, shared-file restrictions and

@@ -17,14 +17,21 @@ Run from the assigned repository root:
 git status --short --branch
 git worktree list --porcelain
 git branch -a
+```
+
+If current remote state is needed, refresh the remote branches and cached
+default branch without moving this checkout:
+
+```bash
+git fetch origin
+git remote set-head origin --auto
 git symbolic-ref --quiet --short refs/remotes/origin/HEAD
 ```
 
-If current remote state is needed, `git fetch origin` updates remote references
-without moving this checkout. Resolve the remote default branch from
-`refs/remotes/origin/HEAD`, then use `git merge-base --is-ancestor <remote-default>
-HEAD` to check freshness. Report detached HEAD, dirty files, missing remote
-default or divergence rather than guessing `main` or moving branches.
+Fetch alone does not refresh the cached default after a remote branch rename.
+Use `git merge-base --is-ancestor <remote-default> HEAD` with the refreshed
+reference to check freshness. Report detached HEAD, dirty files, failed remote
+refresh or divergence rather than guessing `main` or moving branches.
 
 ## Fresh: explicit normalization
 
@@ -33,8 +40,8 @@ confirm no other worker owns it and use `roo-single-writer-lock` for the entire
 mutation. Require a clean index and working tree, including untracked files.
 Preserve dirty work and stop if it exists; do not automatically stash or reset.
 
-Fetch origin, resolve its default branch, and inspect `git worktree list` before
-switching. If the default branch is occupied elsewhere, use an isolated
+Run the same remote refresh sequence above, then inspect `git worktree list`
+before switching. If the default branch is occupied elsewhere, use an isolated
 worktree instead. Otherwise switch to the local default branch (create it to
 track the remote default only if missing) and fast-forward with
 `git merge --ff-only <remote-default>`. Divergence must remain intact.
