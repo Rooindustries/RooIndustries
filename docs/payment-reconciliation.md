@@ -77,8 +77,10 @@ and cannot change the route's result.
 
 Local test and preview servers must unset Sentry DSNs, including server and
 public/client aliases, or use a loopback collector. The maintained local
-launcher removes inherited aliases and accepts only a loopback DSN. Monitoring
-also refuses external DSNs outside the production environment. Keep builds
+launcher removes inherited aliases and hosting markers and accepts only a
+loopback DSN. Monitoring accepts external HTTPS DSNs in Production and hosted
+Vercel Preview builds. A public build marker comes from Vercel's hosting flag
+and a production build; local Preview keeps external reporting off. Keep builds
 isolated so a previous build cannot retain a public DSN. Never use real Sentry
 issues or notifications as local test fixtures. Production notification
 activation stays with release.

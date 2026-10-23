@@ -1,5 +1,6 @@
 export function localMonitoringEnv(env, dsn = "") {
-  const clean = Object.fromEntries(Object.entries(env).filter(([name]) => !/SENTRY.*DSN/i.test(name)));
+  const clean = Object.fromEntries(Object.entries(env).filter(([name]) =>
+    !/SENTRY.*DSN/i.test(name) && name !== "VERCEL" && name !== "NEXT_PUBLIC_SENTRY_HOSTED"));
   clean.NEXT_PUBLIC_SENTRY_DSN = "";
   try {
     const url = new URL(dsn);

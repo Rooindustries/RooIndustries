@@ -235,6 +235,18 @@ try {
     body,
     headers: { origin, 'content-type': 'text/plain', ...headers },
   });
+  const previousHosted = process.env.NEXT_PUBLIC_SENTRY_HOSTED;
+  process.env.NEXT_PUBLIC_VERCEL_ENV = 'preview';
+  process.env.NEXT_PUBLIC_SENTRY_DSN = 'https://fixturekey@public.invalid/42';
+  delete process.env.NEXT_PUBLIC_SENTRY_HOSTED;
+  check('local preview refuses an inherited external DSN at the HTTP relay', (await post(envelope(dsn, 'fixture-local-external'))).status, 404);
+  process.env.NEXT_PUBLIC_SENTRY_HOSTED = '1';
+  check('hosted preview retains HTTPS configuration without external delivery', monitoringDsn(process.env.NEXT_PUBLIC_SENTRY_DSN), 'https://fixturekey@public.invalid/42');
+  check('hosted preview relay validates the configured DSN instead of disabling reporting', (await post(envelope(dsn, 'fixture-hosted-wrong-project'))).status, 400);
+  process.env.NEXT_PUBLIC_SENTRY_DSN = dsn;
+  process.env.NEXT_PUBLIC_VERCEL_ENV = previousEnvironment;
+  if (previousHosted === undefined) delete process.env.NEXT_PUBLIC_SENTRY_HOSTED;
+  else process.env.NEXT_PUBLIC_SENTRY_HOSTED = previousHosted;
   check('same-origin envelope is accepted', (await post(envelope(dsn, 'fixture-relay'), { cookie: 'fixture-private-cookie', authorization: 'Bearer fixture-private-auth', 'x-forwarded-for': '203.0.113.42' })).status, 200);
   const relayed = received.find(item => item.body.includes('fixture-relay'));
   check('relay targets this DSN project', relayed?.path, '/api/42/envelope/');

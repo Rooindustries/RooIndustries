@@ -87,7 +87,8 @@ try {
     await new Promise(resolve => reservation.close(resolve));
     restoreGuard = installNetworkGuard([origin, fixtureOrigin]);
     const aliases = ['SENTRY_DSN', 'NEXT_PUBLIC_SENTRY_DSN', 'PUBLIC_SENTRY_DSN', 'VITE_SENTRY_DSN', 'REACT_APP_SENTRY_DSN'];
-    const inherited = Object.fromEntries(aliases.map(name => [name, 'https://fixturekey@ingest.invalid/42']));
+    const inherited = { ...Object.fromEntries(aliases.map(name => [name, 'https://fixturekey@ingest.invalid/42'])),
+      VERCEL: '1', NEXT_PUBLIC_SENTRY_HOSTED: '1' };
     const env = localMonitoringEnv({
       PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR,
       ...inherited,
@@ -108,6 +109,8 @@ try {
     check(`${mode}: inherited server and public/client DSN aliases are removed`, () => {
       assert.deepEqual(Object.keys(env).filter(name => /SENTRY.*DSN/i.test(name)), ['NEXT_PUBLIC_SENTRY_DSN']);
       assert.equal(env.NEXT_PUBLIC_SENTRY_DSN, mode === 'local' ? dsn : '');
+      assert.equal(env.VERCEL, undefined);
+      assert.equal(env.NEXT_PUBLIC_SENTRY_HOSTED, undefined);
     });
     if (mode === 'external') env.NEXT_PUBLIC_SENTRY_DSN = inherited.NEXT_PUBLIC_SENTRY_DSN;
     const log = join(artifact, `${mode}-next.log`);

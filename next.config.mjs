@@ -94,6 +94,9 @@ const globalSecurityHeaders = [
 
 const nextConfig = {
   poweredByHeader: false,
+  env: {
+    NEXT_PUBLIC_SENTRY_HOSTED: process.env.VERCEL === "1" && isProduction ? "1" : "0",
+  },
   distDir: validateDistDir(process.env.NEXT_DIST_DIR || ".next"),
   outputFileTracingRoot: process.cwd(),
   outputFileTracingIncludes: {

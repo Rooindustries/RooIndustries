@@ -175,7 +175,9 @@ export function monitoringDsn(value) {
   try {
     const url = new URL(value);
     const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-    if (!loopback && monitoringEnvironment() !== "production") return undefined;
+    const environment = monitoringEnvironment();
+    const hostedPreview = environment === "preview" && process.env.NEXT_PUBLIC_SENTRY_HOSTED === "1";
+    if (!loopback && environment !== "production" && !hostedPreview) return undefined;
     const loopbackHttp = url.protocol === "http:" && loopback;
     if ((url.protocol !== "https:" && !loopbackHttp) || !/^\w+$/.test(url.username) || !/\/\d+$/.test(url.pathname) || url.search || url.hash) return undefined;
     url.password = "";
