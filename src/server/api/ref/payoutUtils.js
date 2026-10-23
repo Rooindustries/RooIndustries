@@ -45,7 +45,7 @@ export function computeEarningsFromBookings(bookings = []) {
       normalizeNumber(booking?.grossAmount);
 
     const earned =
-      commissionAmount || booking?.dodoOriginalCommissionAmount != null
+      booking?.commissionAmount != null || booking?.dodoOriginalCommissionAmount != null
         ? commissionAmount
         : +(base * ((commissionPercent || 0) / 100 || 0)).toFixed(2);
 

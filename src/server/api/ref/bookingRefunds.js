@@ -184,6 +184,15 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
         idempotent: true,
       };
     }
+    const refundedAmount = Number(booking.refundedAmount || 0) + Number(refund.amount || 0);
+    const totalAmount = Number(paymentRecord.pricingSnapshot?.netAmount ?? booking.netAmount ?? booking.grossAmount);
+    const originalCommissionAmount = Number(booking.originalCommissionAmount ??
+      paymentRecord.pricingSnapshot?.commissionAmount ?? booking.commissionAmount ?? 0);
+    if (!refundId || !Number.isFinite(refundedAmount) || Number(refund.amount) <= 0 ||
+        !Number.isFinite(totalAmount) || totalAmount <= 0 || refundedAmount > totalAmount + 0.000001 ||
+        !Number.isFinite(originalCommissionAmount) || originalCommissionAmount < 0) {
+      throw Object.assign(new Error("Partial refund accounting is invalid."), { status: 409, code: "partial_refund_accounting_invalid" });
+    }
     let partialPatch = client.patch(booking._id);
     if (booking._rev && typeof partialPatch.ifRevisionId === "function") {
       partialPatch = partialPatch.ifRevisionId(booking._rev);
@@ -192,7 +201,9 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
       .set({
         lastRefundId: refundId,
         lastRefundAt: refund.refundedAt || now,
-        refundedAmount: Number(booking.refundedAmount || 0) + Number(refund.amount || 0),
+        refundedAmount: Math.round(refundedAmount * toSubunits(1, currency)) / toSubunits(1, currency),
+        originalCommissionAmount,
+        commissionAmount: Math.round(originalCommissionAmount * Math.max(0, 1 - refundedAmount / totalAmount) * 100) / 100,
         refundStatus: "partial",
         processedRefundIds: refundId
           ? [...processedRefundIds, refundId]
@@ -256,7 +267,8 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
     });
   }
   const referralId = booking.referral?._ref || "";
-  const canReverseReferral = !!referralId && booking.referralAccountingApplied !== false;
+  const canReverseReferral = !!referralId && booking.referralAccountingApplied !== false &&
+    booking.dodoReferralReversedAfterDispute !== true;
   const referral = canReverseReferral
     ? await client.fetch(
         `*[_type == "referral" && _id == $id][0]{_id,_rev,successfulReferrals}`,

@@ -5958,6 +5958,31 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
           ? booking.dodoDisputeBookingStatus : booking.status;
         const originalCommission = Number(booking.dodoOriginalCommissionAmount ?? booking.commissionAmount ?? 0);
         const retainedFraction = Math.max(0, 1 - Number(booking.refundedAmount || 0) / Number(booking.dodoTotalAmount || booking.netAmount || 1));
+        const referralId = booking.referral?._ref;
+        const reverseReferral = !!terminalDispute && !!referralId &&
+          booking.referralAccountingApplied !== false && booking.referralReversedAfterRefund !== true &&
+          booking.dodoReferralReversedAfterDispute !== true;
+        const restoreReferral = !disputed && !!referralId &&
+          booking.dodoReferralReversedAfterDispute === true &&
+          ["captured", "completed"].includes(originalStatus) &&
+          (booking.status === "pending" || ["captured", "completed"].includes(booking.status));
+        let referralReversed = booking.dodoReferralReversedAfterDispute === true;
+        if (reverseReferral || restoreReferral) {
+          const referral = await client.fetch(`*[_type == "referral" && _id == $id][0]{_id,_rev,successfulReferrals}`, { id: referralId });
+          if (!referral?._id) {
+            throw Object.assign(new Error("Disputed booking creator was not found."), { status: 409, code: "dispute_referral_missing" });
+          }
+          requirePaymentRevision(referral);
+          if (restoreReferral || Number(referral.successfulReferrals || 0) > 0) {
+            transaction.patch(referral._id, (patch) => {
+              const guarded = guardPaymentRevision(patch, referral);
+              return restoreReferral
+                ? guarded.inc({ successfulReferrals: 1 })
+                : guarded.dec({ successfulReferrals: 1 });
+            });
+            referralReversed = !restoreReferral;
+          }
+        }
         transaction.patch(booking._id, (patch) => {
           const guarded = guardPaymentRevision(patch, booking);
           return guarded.set({
@@ -5966,6 +5991,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
               : !disputed && booking.dodoDisputeActive && booking.status === "pending"
                 ? originalStatus : booking.status,
             dodoDisputeActive: disputed,
+            dodoReferralReversedAfterDispute: referralReversed,
             dodoDisputeBookingStatus: originalStatus,
             dodoOriginalCommissionAmount: originalCommission,
             commissionAmount: disputed ? 0 : Math.round(originalCommission * retainedFraction * 100) / 100,

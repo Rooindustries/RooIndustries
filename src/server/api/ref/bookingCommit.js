@@ -316,12 +316,12 @@ export const createRequiresRescheduleBooking = async ({
       backendOwner:
         resolveStoreBackend(paymentRecord.backendOwner),
       paymentProvider: paymentRecord.provider,
+      commissionPercent: Number(pricing.commissionPercent || 0),
+      commissionAmount: Number(pricing.commissionAmount || 0),
       ...(paymentRecord.provider === "dodo" ? {
         dodoCheckoutSessionId: paymentRecord.providerOrderId,
         dodoPaymentId: paymentRecord.providerPaymentId,
         dodoTotalAmount,
-        commissionPercent: Number(pricing.commissionPercent || 0),
-        commissionAmount: Number(pricing.commissionAmount || 0),
         paymentVerificationState: paymentRecord.verificationState || "",
         ...(paymentRecord.refundState === "partial" ? {
           dodoOriginalCommissionAmount: Number(pricing.commissionAmount || 0),

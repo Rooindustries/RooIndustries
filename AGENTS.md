@@ -108,7 +108,8 @@ Any PR that touches a money path, including a helper outside this list:
   - A creator who books before verifying their email gets no credit on those bookings (ROO-512).
 - **NOT ENFORCED (self-referral):** nothing compares the buyer with the creator, so a creator can book with their own code and earn commission. Policy call pending (ROO-511).
 - Commission is frozen on the booking when it's created. (`src/server/api/ref/createBooking.js:1293-1320,1615-1621`)
-  - **NOT ENFORCED:** a PayPal or Razorpay capture recovered as a reschedule booking loses its commission (ROO-520). Only the Dodo branch copies the commission fields (`src/server/api/ref/bookingCommit.js:313-328`); the other branch keeps the referral but not the commission (`:329-374`), so earnings compute 0 (`src/server/api/ref/payoutUtils.js:41-50`).
+  - Recovery bookings copy the frozen commission percentage and amount for Dodo, PayPal and Razorpay, including zero. (`src/server/api/ref/bookingCommit.js:312-318`; E2E `ROO-520-*-recovery-frozen-and-replayed-*` in `scripts/test-creator-payouts-e2e.mjs`.)
+- A stored commission of zero remains zero in both native and JavaScript earnings. Legacy missing/null commissions are derived and rounded per booking before summing. (`src/server/api/ref/payoutUtils.js:47-50`, `supabase/migrations/20261023090000_preserve_frozen_creator_commissions.sql:18-33`; E2E `ROO-575-*`.)
 
 ### Bookings and holds
 
@@ -221,9 +222,8 @@ Webhook delivery:
   - Dodo partial refunds through a `refundedAmount` that only goes up.
   - (`src/server/api/ref/bookingRefunds.js:154-158,171-186,211-226`)
 - A Dodo partial refund scales commission to the retained share, or to 0 while a dispute is active. (`src/server/api/ref/bookingRefunds.js:154-168`, `supabase/migrations/20260909090000_add_dodo_payment_provider.sql:25-30`)
-- **NOT ENFORCED (ROO-508):** commission should never exceed the commission on the money we kept. A PayPal or Razorpay partial refund records `refundedAmount` but keeps the full `commissionAmount`. (`src/server/api/ref/bookingRefunds.js:187-201`)
-- **NOT ENFORCED (ROO-509):** `successfulReferrals` should count only bookings we kept.
-  - A lost chargeback zeroes commission (`src/server/api/payment/flow.js:5909-5925`) but never decrements the count. Only a full refund does (`src/server/api/ref/bookingRefunds.js:298-302`).
+- PayPal and Razorpay partial refunds preserve the original frozen commission and scale it against cumulative settled refunds; refund IDs and booking revisions prevent duplicate reductions. (`src/server/api/ref/bookingRefunds.js:171-220`; E2E `ROO-508-*`.)
+- A lost, accepted or expired Dodo dispute decrements a counted referral once, in the booking/payment transaction. A won or cancelled dispute restores that decrement only when no other active dispute, full refund or admin cancellation supersedes it. A later full refund does not decrement twice. (`src/server/api/payment/flow.js:5912-5950`, `src/server/api/ref/bookingRefunds.js:278-280`; E2E `ROO-509-*`.)
   - The count unlocks split editing at 5. (`src/server/api/ref/updateSplit.js:71-73`)
 - A new coupon reservation enforces `maxUses`, counting consumed uses plus active reservations, under revision guards. (`src/server/api/ref/couponReservations.js:83-88,119-131`)
   - **NOT ENFORCED as a hard ceiling:** a late paid capture consumes its released reservation even when the cap is already reached, and records `capacityExceededAtRecovery`. (`src/server/api/ref/couponReservations.js:188-226`, `src/server/api/ref/bookingCommit.js:416-424`)

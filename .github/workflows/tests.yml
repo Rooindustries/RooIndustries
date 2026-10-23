@@ -218,7 +218,7 @@ jobs:
       - name: Run the remaining PostgreSQL 17 suites
         run: |
           failed=()
-          for suite in booking-hold upgrade-credit upgrade-credit:ownership emails:postgres17 payment-recovery:postgres17 referral:postgres17 referral-social:postgres17 backend-integrity:postgres17 referral-authority:postgres17 referral-email:postgres17 referral-integrity:postgres17 account-domain:postgres17 commerce-readiness:postgres17 referral-email:origins tooling:safety; do
+          for suite in booking-hold upgrade-credit upgrade-credit:ownership emails:postgres17 payment-recovery:postgres17 referral:postgres17 creator-payouts:postgres17 referral-social:postgres17 backend-integrity:postgres17 referral-authority:postgres17 referral-email:postgres17 referral-integrity:postgres17 account-domain:postgres17 commerce-readiness:postgres17 referral-email:origins tooling:safety; do
             npm run "test:$suite" || failed+=("$suite")
           done
           if [ ${#failed[@]} -gt 0 ]; then
