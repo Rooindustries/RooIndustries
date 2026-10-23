@@ -25,8 +25,19 @@ git -C "$scratch/checkout" init -q
 git -C "$scratch/outside" init -q
 
 prompt='This is a read-only skill discovery check. Do not call tools, inspect files, or delegate. From the skills already offered in your current context, output only a JSON array of skill names beginning with roo-. Use [] if none are offered. Do not infer names from repository instructions.'
-server_keys=$(codex mcp list --json | jq -r '.[].name')
-codex_config=()
+codex_config=(
+  -c 'features.shell_tool=false'
+  -c 'features.multi_agent=false'
+  -c 'features.view_image=false'
+  -c 'features.apps=false'
+  -c 'features.plugins=false'
+  -c 'features.hooks=false'
+  -c 'features.browser_use=false'
+  -c 'features.computer_use=false'
+  -c 'features.image_generation=false'
+  -c 'web_search="disabled"'
+)
+server_keys=$(codex "${codex_config[@]}" mcp list --json | jq -r '.[].name')
 while IFS= read -r key; do
   [[ -z "$key" ]] || codex_config+=(-c "mcp_servers.$key.enabled=false")
 done <<<"$server_keys"
