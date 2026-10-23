@@ -18,6 +18,18 @@ directory when their source fingerprint changes. Generated HTTP attachments,
 screenshots, traces, and logs belong under `test-results/`.
 Keep real Sentry DSNs unset in the fixture server and browser process.
 
+`npm run test:account-domain:postgres17` checks the account fixture against native
+PostgreSQL 17, including startup with an occupied loopback port and the complete
+normal account identity run. Set `PG_BIN` or provide `pg_config` on `PATH`.
+The fixture keeps native server output and init/start/stop command output under
+`test-results/account-domain-postgres/run-*/`, outside its temporary cluster.
+`ROO_ACCOUNT_DOMAIN_ARTIFACT_DIR` changes that artifact parent directory, and
+`ROO_TEST_POSTGRES_PORT` selects an explicit test port. Startup failures remain
+failures and print the native server log before owned-cluster cleanup.
+The CLI E2E retains both invocations under `test-results/account-domain-startup/`;
+`ROO_ACCOUNT_DOMAIN_STARTUP_ARTIFACT_DIR` changes that artifact parent directory.
+The native CI job uploads `test-results/` even when the fixture fails.
+
 `npm run test:remote-browser-guard` exercises connected and native browsers with
 local HTTP fixtures. Native runs keep the Node and browser guards active together.
 Chromium receives local-network permission only for the allowed fixture origins,

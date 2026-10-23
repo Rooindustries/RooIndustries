@@ -30,6 +30,12 @@ const pgBin = String(process.env.PG_BIN || "").trim() || spawnSync(
 const temporaryBase = process.env.ROO_JOB_DIR
   ? path.join(process.env.ROO_JOB_DIR, "tmp")
   : os.tmpdir();
+const artifactBase = process.env.ROO_ACCOUNT_DOMAIN_ARTIFACT_DIR
+  || path.join(root, "test-results/account-domain-postgres");
+fs.mkdirSync(artifactBase, { recursive: true });
+const artifacts = fs.mkdtempSync(path.join(artifactBase, "run-"));
+const postgresLog = path.join(artifacts, "postgres.log");
+process.stderr.write(`[account-domain] PostgreSQL logs: ${artifacts}\n`);
 const tempRoot = fs.mkdtempSync(path.join(temporaryBase, "roo-account-domain-"));
 const dataDir = path.join(tempRoot, "pgdata");
 const postgresHost = process.env.ROO_TEST_POSTGRES_HOST || "127.0.0.1";
@@ -39,20 +45,31 @@ const port = 57832 + Math.floor(Math.random() * 300);
 // makes the postmaster abort at startup with "postmaster became multithreaded
 // during startup", which reads like a cluster fault rather than a locale problem.
 const run = (command, args, options = {}) => {
+  const { logFile, ...spawnOptions } = options;
   const result = spawnSync(command, args, {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, LC_ALL: "C" },
-    ...options,
+    ...spawnOptions,
   });
+  const output = [result.stdout, result.stderr, result.error?.message].filter(Boolean).join("\n");
+  if (logFile) fs.writeFileSync(logFile, output);
   if (result.status !== 0) {
     throw new Error(
-      [`${command} ${args.join(" ")} failed`, result.stdout, result.stderr]
+      [`${command} ${args.join(" ")} failed`, output]
         .filter(Boolean)
         .join("\n")
     );
   }
   return result.stdout;
+};
+
+const fixturePort = () => {
+  const selected = process.env.ROO_TEST_POSTGRES_PORT
+    ? Number(process.env.ROO_TEST_POSTGRES_PORT)
+    : port;
+  assert.ok(Number.isInteger(selected) && selected >= 1024 && selected <= 65535, "Invalid fixture port");
+  return selected;
 };
 
 // Only what the migration's two functions actually touch. auth.users and
@@ -126,19 +143,22 @@ const digest = (label) => crypto.createHash("sha256").update(label).digest("hex"
 
 let started = false;
 let sql = null;
+let failure;
 try {
-  run(path.join(pgBin, "initdb"), ["-D", dataDir, "--auth=trust", "--no-locale"]);
+  run(path.join(pgBin, "initdb"), ["-D", dataDir, "--auth=trust", "--no-locale"], {
+    logFile: path.join(artifacts, "initdb.log"),
+  });
   fs.appendFileSync(path.join(dataDir, "pg_hba.conf"), "\nhost all all samehost trust\n");
   run(
     path.join(pgBin, "pg_ctl"),
-    ["-D", dataDir, "-o", `-p ${port} -h ${postgresHost} -k ''`, "-w", "start"],
-    { stdio: "ignore" }
+    ["-D", dataDir, "-l", postgresLog, "-o", `-p ${fixturePort()} -h ${postgresHost} -k ''`, "-w", "start"],
+    { logFile: path.join(artifacts, "pg_ctl-start.log") }
   );
   started = true;
 
   const psql = (args) =>
     run(path.join(pgBin, "psql"), [
-      "-h", postgresHost, "-p", String(port), "-d", "postgres",
+      "-h", postgresHost, "-p", String(fixturePort()), "-d", "postgres",
       "-v", "ON_ERROR_STOP=1", ...args,
     ]);
 
@@ -148,7 +168,7 @@ try {
 
   sql = postgres({
     host: [postgresHost],
-    port: [port],
+    port: [fixturePort()],
     database: "postgres",
     max: 4,
     prepare: false,
@@ -534,14 +554,26 @@ try {
       2
     )}\n`
   );
+} catch (error) {
+  failure = error;
+  if (fs.existsSync(postgresLog)) process.stderr.write(fs.readFileSync(postgresLog, "utf8"));
+  throw error;
 } finally {
-  if (sql) await sql.end({ timeout: 1 });
-  if (started) {
-    spawnSync(
-      path.join(pgBin, "pg_ctl"),
-      ["-D", dataDir, "-m", "fast", "-w", "stop"],
-      { encoding: "utf8" }
-    );
+  try {
+    try {
+      if (sql) await sql.end({ timeout: 1 });
+    } finally {
+      if (started || fs.existsSync(path.join(dataDir, "postmaster.pid"))) {
+        run(
+          path.join(pgBin, "pg_ctl"),
+          ["-D", dataDir, "-m", "fast", "-w", "stop"],
+          { logFile: path.join(artifacts, "pg_ctl-stop.log") }
+        );
+      }
+    }
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  } catch (cleanupError) {
+    if (failure) throw new AggregateError([failure, cleanupError], "Account fixture and cleanup failed");
+    throw cleanupError;
   }
-  fs.rmSync(tempRoot, { recursive: true, force: true });
 }
