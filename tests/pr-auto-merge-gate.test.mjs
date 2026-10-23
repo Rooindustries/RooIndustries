@@ -102,6 +102,18 @@ test("Codex approves from its review-state comment, and unresolved findings disa
   assert.equal(decision.reviewRound, true);
 });
 
+test("a Codex review-state comment edited by someone else does not approve the head", () => {
+  const decision = decide(safe({ codexEditor: "someone" }));
+  assert.equal(decision.action, "wait");
+  assert.ok(decision.reasons.includes("codex-edited"));
+  assert.ok(decision.reasons.includes("codex-pending"));
+  assert.ok(decision.lines.includes("Codex's review comment was last edited by someone, so it doesn't count as Codex's review."));
+  assert.equal(decision.requestReviews, true);
+  for (const codexEditor of ["chatgpt-codex-connector[bot]", "chatgpt-codex-connector", ""]) {
+    assert.equal(decide(safe({ codexEditor })).action, "merge");
+  }
+});
+
 test("an open Seer thread blocks a merge that both models approved", () => {
   const decision = decide(safe({
     threads: [{ author: "sentry", path: "src/components/Footer.jsx", isResolved: false, isOutdated: false }],
@@ -226,6 +238,7 @@ test("only the real review bots count: a human named like one approves nothing",
 
 test("the merge is bound to the head that was reviewed, and runs serialize", () => {
   const apply = readFileSync(new URL("../scripts/pr-auto-merge-apply.mjs", import.meta.url), "utf8");
+  assert.match(apply, /editor \{ login \}/);
   assert.match(apply, /merge_method: "squash", sha/);
   assert.match(apply, /mergePullRequest\(number, snapshot\.headSha\)/);
   assert.match(apply, /botNamed\(comment\.user, "github-actions"\)/);

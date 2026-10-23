@@ -101,6 +101,9 @@ const collectSnapshot = async (number) => {
   ]);
   const comments = Array.isArray(commentPage) ? commentPage : [];
   const codexComment = [...comments].reverse().find((comment) => botNamed(comment.user, "chatgpt-codex-connector") && comment.body?.includes("codex-review-state:v1"));
+  const editor = codexComment ? (await graphql(`query($id: ID!) {
+    node(id: $id) { ... on IssueComment { editor { login } } }
+  }`, { id: codexComment.node_id })).node?.editor : null;
   const ownComments = comments.filter((comment) => botNamed(comment.user, "github-actions"));
   const checks = [
     ...checkRuns.map((run) => ({
@@ -141,6 +144,7 @@ const collectSnapshot = async (number) => {
     })),
     threads: await collectThreads(number),
     codex: parseCodexState(codexComment?.body || ""),
+    codexEditor: editor?.login || "",
     reviewRounds: countReviewRounds(ownComments.map((comment) => comment.body || "")),
     comments: ownComments,
   };

@@ -52,7 +52,7 @@ No coding agent merges a pull request. The Grok Bot assistant does not merge one
 
 Green means merge. No kind of change waits for the owner once it meets this bar: money paths, workflows, the merge gate, deploy and rollback scripts and migrations merge the same way.
 
-CodeRabbit and Codex are the two review models. CodeRabbit approves by a GitHub approval on that head with no later request for changes. Codex does not use GitHub's Approve button. Codex approves when its review-state comment records a completed review of that head with no unresolved findings. Seer and the other bots do not stand in for either approval. An open finding from any of them still blocks the merge, and the owning agent clears it.
+CodeRabbit and Codex are the two review models. CodeRabbit approves by a GitHub approval on that head with no later request for changes. Codex does not use GitHub's Approve button. Codex approves when its review-state comment records a completed review of that head with no unresolved findings. A Codex review-state comment last edited by anyone other than Codex doesn't count. Seer and the other bots do not stand in for either approval. An open finding from any of them still blocks the merge, and the owning agent clears it.
 
 A squash-merge to `main` is the production deploy. The Vercel project ships `main`. The workflow does not deploy by any other path. The owner should not have to merge a pull request that has already met this bar.
 

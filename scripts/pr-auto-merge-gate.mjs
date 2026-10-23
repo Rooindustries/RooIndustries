@@ -165,7 +165,8 @@ export const decide = (input) => {
 
   const checks = assessChecks(input.checks);
   const rabbit = coderabbitVerdict(input.reviews, input.headSha);
-  const codex = codexVerdict(input.codex, input.headSha);
+  const codexEdited = Boolean(input.codexEditor) && login(input.codexEditor) !== CODEX;
+  const codex = codexEdited ? "pending" : codexVerdict(input.codex, input.headSha);
   const findings = openFindings(input.threads);
   const changesRequestedBy = peopleRequestingChanges(input.reviews);
   const git = input.mergeableState || "unknown";
@@ -184,6 +185,7 @@ export const decide = (input) => {
   if (changesRequestedBy.length) add("changes-requested", `${changesRequestedBy.join(", ")} requested changes. That stands until they approve or the review is dismissed.`);
   if (rabbit === "pending") add("coderabbit-pending", `CodeRabbit has not approved ${sha}.`);
   if (rabbit === "hold") add("coderabbit-hold", `CodeRabbit has not approved ${sha}.`);
+  if (codexEdited) add("codex-edited", `Codex's review comment was last edited by ${input.codexEditor}, so it doesn't count as Codex's review.`);
   if (codex === "pending") add("codex-pending", `Codex has not completed a review of ${sha} with no unresolved findings.`);
   if (codex === "hold") add("codex-hold", `Codex still has unresolved findings on ${sha}.`);
 
