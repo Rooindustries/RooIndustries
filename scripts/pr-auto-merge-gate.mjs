@@ -104,6 +104,18 @@ const reviewOnHead = (reviews, author, headSha) => (reviews || [])
   .filter((review) => review.bot === true && login(review.author) === author && review.commitSha === headSha)
   .sort((left, right) => String(left.submittedAt).localeCompare(String(right.submittedAt)));
 
+// A person's request for changes stands, on any commit, until that person approves or the review is dismissed.
+const peopleRequestingChanges = (reviews) => {
+  const latest = new Map();
+  const ordered = [...(reviews || [])]
+    .filter((review) => review.bot !== true && login(review.author))
+    .sort((left, right) => String(left.submittedAt).localeCompare(String(right.submittedAt)));
+  for (const review of ordered) {
+    if (["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(review.state)) latest.set(login(review.author), review.state);
+  }
+  return [...latest].filter(([, state]) => state === "CHANGES_REQUESTED").map(([who]) => who);
+};
+
 const coderabbitVerdict = (reviews, headSha) => {
   const mine = reviewOnHead(reviews, CODERABBIT, headSha);
   let approved = false;
@@ -155,6 +167,7 @@ export const decide = (input) => {
   const rabbit = coderabbitVerdict(input.reviews, input.headSha);
   const codex = codexVerdict(input.codex, input.headSha);
   const findings = openFindings(input.threads);
+  const changesRequestedBy = peopleRequestingChanges(input.reviews);
   const git = input.mergeableState || "unknown";
   const reviewRounds = Number(input.reviewRounds) || 0;
   const sha = shortSha(input.headSha);
@@ -168,6 +181,7 @@ export const decide = (input) => {
     add("merge-state-unknown", "GitHub has not finished computing whether the branch merges.");
   }
   if (findings.length) add("open-findings", findingLine(findings));
+  if (changesRequestedBy.length) add("changes-requested", `${changesRequestedBy.join(", ")} requested changes. That stands until they approve or the review is dismissed.`);
   if (rabbit === "pending") add("coderabbit-pending", `CodeRabbit has not approved ${sha}.`);
   if (rabbit === "hold") add("coderabbit-hold", `CodeRabbit has not approved ${sha}.`);
   if (codex === "pending") add("codex-pending", `Codex has not completed a review of ${sha} with no unresolved findings.`);
@@ -177,8 +191,8 @@ export const decide = (input) => {
   const disagree = rabbit !== "pending" && codex !== "pending" && rabbit !== codex;
   const bothApprove = rabbit === "approve" && codex === "approve";
   const clean = git === "clean";
-  const canMerge = checksGreen && clean && bothApprove && findings.length === 0;
-  const reviewWork = disagree || findings.length > 0 || rabbit === "hold" || codex === "hold";
+  const canMerge = checksGreen && clean && bothApprove && findings.length === 0 && changesRequestedBy.length === 0;
+  const reviewWork = disagree || findings.length > 0 || changesRequestedBy.length > 0 || rabbit === "hold" || codex === "hold";
   const reviewCapped = reviewWork && reviewRounds >= MAX_REVIEW_ROUNDS;
 
   if (disagree && !reviewCapped) {

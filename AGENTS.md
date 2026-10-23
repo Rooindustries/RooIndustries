@@ -48,6 +48,7 @@ No coding agent merges a pull request. The Grok Bot assistant does not merge one
 
 - Every check on the head is green. Success, skipped, and neutral count as green. Pending, failed, and cancelled do not. The branch is up to date with `main` (`mergeable_state` is `clean`).
 - CodeRabbit and Codex both approve that head, and no review thread is still open.
+- No person has an open request for changes. It stands, on any commit, until that person approves or the review is dismissed.
 
 Green means merge. No kind of change waits for the owner once it meets this bar: money paths, workflows, the merge gate, deploy and rollback scripts and migrations merge the same way.
 

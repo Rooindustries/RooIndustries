@@ -208,6 +208,17 @@ test("the gate comment names the owner only on a hold", () => {
   assert.match(held, /needs you/);
 });
 
+test("a person's request for changes blocks the merge until they approve or it is dismissed", () => {
+  const person = (state, submittedAt, commitSha = head) => ({ author: "serviroo", bot: false, state, commitSha, submittedAt });
+  const blocked = decide(safe({ reviews: [approved("coderabbitai"), person("CHANGES_REQUESTED", "2026-10-22T01:00:00Z", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")] }));
+  assert.equal(blocked.action, "wait");
+  assert.ok(blocked.reasons.includes("changes-requested"));
+  assert.match(blocked.lines.join("\n"), /serviroo requested changes/);
+  assert.equal(decide(safe({ reviews: [approved("coderabbitai"), person("CHANGES_REQUESTED", "2026-10-22T01:00:00Z"), person("COMMENTED", "2026-10-22T02:00:00Z")] })).action, "wait");
+  assert.equal(decide(safe({ reviews: [approved("coderabbitai"), person("CHANGES_REQUESTED", "2026-10-22T01:00:00Z"), person("APPROVED", "2026-10-22T02:00:00Z")] })).action, "merge");
+  assert.equal(decide(safe({ reviews: [approved("coderabbitai"), person("CHANGES_REQUESTED", "2026-10-22T01:00:00Z"), person("DISMISSED", "2026-10-22T02:00:00Z")] })).action, "merge");
+});
+
 test("only the real review bots count: a human named like one approves nothing", () => {
   const human = { ...approved("coderabbitai"), bot: false };
   assert.equal(decide(safe({ reviews: [human] })).action, "wait");
