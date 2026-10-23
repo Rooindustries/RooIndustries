@@ -1821,7 +1821,7 @@ export default function Payment({ hideFooter = false }) {
 
   return (
     <motion.section
-      data-roo-flow-ready={paymentReady ? "payment" : undefined}
+      data-roo-flow-ready={paymentReady && providerAvailabilityKnown ? "payment" : undefined}
       className="booking-payment relative z-10 max-w-3xl mx-auto text-ink"
       variants={containerVariants}
       initial="hidden"

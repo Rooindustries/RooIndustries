@@ -71,7 +71,7 @@ test("a hung money page that times out is a money-path failure inside the smoke 
 });
 
 test("running out of the smoke's own time budget is a smoke that could not run", async () => {
-  const site = await startSite({ dropNonBrowser: true });
+  const site = await startSite({ hang: ["/"] });
   try {
     const result = await run(["--base", site.base], null, { SMOKE_DEADLINE_MS: "400" });
     assert.equal(result.code, 1, result.output);
