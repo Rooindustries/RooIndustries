@@ -1,10 +1,10 @@
 const HOME_COPY = {
   hero: {
     tagline: "",
-    headingLine1: "Before You Buy RAM,",
-    headingLine2: "Tune The PC You Have.",
+    headingLine1: "Why Pay $400 For RAM?",
+    headingLine2: "Tune Yours For $99.95.",
     description:
-      "We'll tune your RAM and the rest of your PC for the games you play.",
+      "A 32GB DDR5 kit that was around $100 in early 2025 costs $400 now. You probably don't need a new one. We'll tune the RAM you have, and the rest of your PC, for more FPS and steadier 1% lows.",
     subtext:
       "One remote session. Before-and-after benchmarks so you see exactly what changed.",
     ctaPrimaryText: "Tune My PC",
@@ -152,12 +152,6 @@ const keyed = (sourceItems = [], canonicalItems = []) =>
     _key: sourceItems?.[index]?._key || item._key || `copy-${index}`,
   }));
 
-const RETIRED_HERO_COPY = {
-  headingLine1: /^Why Pay \$(?:400|450) For RAM\?$/i,
-  headingLine2: /^Tune Yours For \$99\.95\.$/i,
-  description: /^A 32GB DDR5 kit that was around \$100 in early 2025 costs \$(?:400|450) now\./i,
-};
-
 const resolveHeroCopy = (value) =>
   Object.fromEntries(
     Object.entries(HOME_COPY.hero).map(([key, fallback]) => {
@@ -170,8 +164,7 @@ const resolveHeroCopy = (value) =>
       }
       return [
         key,
-        typeof candidate === "string" && candidate.trim() &&
-        !RETIRED_HERO_COPY[key]?.test(candidate.trim().replace(/\s+/g, " ")) ? candidate : fallback,
+        typeof candidate === "string" && candidate.trim() ? candidate : fallback,
       ];
     })
   );
