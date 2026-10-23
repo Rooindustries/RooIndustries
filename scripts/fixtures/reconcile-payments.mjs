@@ -270,7 +270,20 @@ const server = http.createServer(async (req, res) => {
       assert.equal(req.method, 'GET');
       assert.equal(req.headers.authorization, 'Bearer ' + token);
       const keys = url.searchParams.has('check') ? JSON.parse(url.searchParams.get('check')) : null;
-      current.requests.push({ method: req.method, path: url.pathname, checks: keys });
+      const request = { method: req.method, path: url.pathname, checks: keys };
+      current.requests.push(request);
+      const delay = current.reportDelay?.(keys) || 0;
+      if (delay) {
+        const started = performance.now();
+        await new Promise(resolve => {
+          const timer = setTimeout(done, delay);
+          function done() { clearTimeout(timer); res.off('close', done); resolve(); }
+          res.once('close', done);
+        });
+        request.delayMs = delay;
+        request.elapsedMs = Math.round(performance.now() - started);
+        if (res.destroyed) return;
+      }
       if (keys) {
         const outcomes = keys.map((key) => current.checks[key] || check(key));
         const items = [...new Map(outcomes.flatMap((outcome) => outcome.items).map((entry) => [JSON.stringify(entry), entry])).values()];
@@ -530,6 +543,51 @@ const run = async (name, fn) => {
     issues: current.issues, comments: current.comments, updates: current.updates, runs: current.runs });
 };
 try {
+  for (const mode of ['window', 'checks']) {
+    await run('slow-report-' + mode, async (home) => {
+      const issues = Array.from({ length: 20 }, (_, index) => seedIssue('payment:slow-' + index));
+      for (const issue of issues) {
+        const key = metadata(issue).primary;
+        current.checks[key] = recovered(key, key.slice('payment:'.length));
+      }
+      current.reportDelay = keys => Boolean(keys) === (mode === 'checks') ? 48000 : 0;
+      const result = await invoke(home);
+      assert.equal(result.code, 0, result.stdout);
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.result, 'clear');
+      assert.equal(output.complete, true);
+      assert.equal(output.recovered, 20);
+      assert.equal(output.unknown, 0);
+      assert.ok(issues.every(issue => issue.status === 'Done' && metadata(issue).state === 'recovered'));
+      const delayed = result.boundary.sourceRequests.filter(request => request.delayMs);
+      assert.equal(delayed.length, 1);
+      assert.ok(delayed[0].elapsedMs >= 47500);
+      assert.equal(result.boundary.sourceRequests.find(request => request.checks)?.checks.length, 20);
+    });
+  }
+  for (const mode of ['window', 'checks']) {
+    await run('report-stale-during-collection-' + mode, async (home) => {
+      const issues = Array.from({ length: 21 }, (_, index) => seedIssue('payment:stale-' + index));
+      for (const issue of issues) {
+        const key = metadata(issue).primary;
+        current.checks[key] = recovered(key, key.slice('payment:'.length));
+      }
+      const expireSoon = body => {
+        for (const field of ['at', 'from', 'to']) body[field] = new Date(Date.parse(body[field]) - 898000).toISOString();
+        return body;
+      };
+      if (mode === 'window') current.window = () => expireSoon(windowReport());
+      else current.targetTransform = body => body.checks.length === 20 ? expireSoon(body) : body;
+      current.reportDelay = keys => keys && (mode === 'window' || keys.length === 1) ? 4000 : 0;
+      const result = await invoke(home);
+      assert.notEqual(result.code, 0);
+      assert.equal(JSON.parse(result.stdout).complete, false);
+      assert.equal(result.alert.severity, 'amber');
+      assert.ok(issues.every(issue => issue.status === 'Backlog' && metadata(issue).state !== 'recovered'));
+      assert.equal(result.boundary.calls.some(call => call.method === 'save_issue' && call.args.state === 'Done'), false);
+      assert.equal(result.boundary.sourceRequests.filter(request => request.checks).length, 2);
+    });
+  }
   for (const mode of ['window', 'checks']) {
     await run('clock-skew-' + mode, async (home) => {
       if (mode === 'checks') {

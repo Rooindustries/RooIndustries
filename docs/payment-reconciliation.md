@@ -16,6 +16,10 @@ A clean scan does not close an old issue. The job checks open entities by ID,
 including those outside the 72-hour scan, and closes an issue only after a
 fresh positive audit. Missing entities, partial scans, ambiguous identity and
 failed requests keep issues open. Identity errors need owner investigation.
+Each report request has a finite 310-second client limit, allowing the route's
+300-second budget plus a small transfer margin. After collecting the batches,
+the job checks report freshness again before planning recovery. Evidence that
+expired during a later request cannot close an issue or report a clean scan.
 Unresolved canceled and archived issues stay in the audit. Their workflow
 states stay unchanged; clearing uncertainty requires fresh positive evidence.
 

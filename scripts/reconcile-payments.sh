@@ -265,7 +265,7 @@ fetch_report() {
   local -a query=()
   if [[ -n "$keys" ]]; then query=(--get --data-urlencode "check=$keys"); fi
   status=$(printf 'header = "Authorization: Bearer %s"\n' "$token" |
-    curl --config - --silent --show-error --fail-with-body --max-time 45 --max-redirs 0 \
+    curl --config - --silent --show-error --fail-with-body --max-time 310 --max-redirs 0 \
       --proto "$protocol" --output "$destination" --write-out '%{http_code}' "${query[@]}" "$url" 2>/dev/null) || return 1
   [[ "$status" == 200 ]]
 }
@@ -277,6 +277,7 @@ else cp "$work/source.json" "$work/window.json"; fi
 jq_module -c --slurpfile window "$work/window.json" 'include "reconcile-linear"; select_targets($window[0] // {items:[]})' "$work/managed.json" > "$work/eligible.json"
 coverage=$(jq 'length<=200' "$work/eligible.json")
 printf '[]\n' > "$work/checks.json"
+printf '[]\n' > "$work/receipts.json"
 targets_ok=true
 if [[ "$source_ok" == true ]]; then
   total=$(jq 'length|if .>200 then 200 else . end' "$work/eligible.json")
@@ -286,13 +287,24 @@ if [[ "$source_ok" == true ]]; then
       ! jq_module -e --argjson requested "$keys" 'include "reconcile-linear"; valid_targets($requested)' "$work/target.json" >/dev/null 2>&1; then
       targets_ok=false
       error_code=report_targets_unavailable
-      printf '[]\n' > "$work/checks.json"
       break
     fi
+    jq -sc '.[0]+[.[1]]' "$work/receipts.json" "$work/target.json" > "$work/receipts-next.json"
+    mv "$work/receipts-next.json" "$work/receipts.json"
     jq -c --slurpfile target "$work/target.json" '.+$target[0].checks' "$work/checks.json" > "$work/next.json"
     mv "$work/next.json" "$work/checks.json"
   done
 else targets_ok=false; fi
+if [[ "$source_ok" == true ]] && ! jq_module -e 'include "reconcile-linear"; valid_window' "$work/window.json" >/dev/null 2>&1; then
+  source_ok=false
+  error_code=report_source_unavailable
+  printf 'null\n' > "$work/window.json"
+fi
+if [[ "$targets_ok" == true ]] && ! jq_module -e 'include "reconcile-linear"; all(.[];report_base)' "$work/receipts.json" >/dev/null 2>&1; then
+  targets_ok=false
+  error_code=report_targets_unavailable
+fi
+if [[ "$source_ok" != true || "$targets_ok" != true ]]; then printf '[]\n' > "$work/checks.json"; fi
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 jq_module -nc --slurpfile window "$work/window.json" --slurpfile managed "$work/managed.json" --slurpfile checks "$work/checks.json" \
   --argjson sourceOK "$source_ok" --argjson targetsOK "$targets_ok" --argjson coverage "$coverage" --arg run "$run" --arg at "$at" \
