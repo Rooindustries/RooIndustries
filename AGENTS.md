@@ -54,7 +54,7 @@ The required Tests jobs count only as GitHub Actions check runs; a commit status
 
 Green means merge. No kind of change waits for the owner once it meets this bar: money paths, workflows, the merge gate, deploy and rollback scripts and migrations merge the same way.
 
-CodeRabbit and Codex are the two review models. CodeRabbit approves by a GitHub approval on that head with no later request for changes. Codex does not use GitHub's Approve button. Codex approves when its review-state comment records a completed review of that head with no unresolved findings. A Codex review-state comment last edited by anyone other than Codex doesn't count. Seer and the other bots do not stand in for either approval. An open finding from any of them still blocks the merge, and the owning agent clears it.
+CodeRabbit and Codex are the two review models. CodeRabbit approves by a GitHub approval on that head with no later request for changes. Codex does not use GitHub's Approve button. Codex approves when its review-state comment records a completed review of that head with `has_unresolved_findings` exactly `false`. Missing or non-boolean values do not approve. A Codex review-state comment last edited by anyone other than Codex doesn't count. Seer and the other bots do not stand in for either approval. An open finding from any of them still blocks the merge, and the owning agent clears it.
 
 A squash-merge to `main` is the production deploy. The Vercel project ships `main`. The workflow does not deploy by any other path. The owner should not have to merge a pull request that has already met this bar.
 
@@ -63,6 +63,8 @@ When CodeRabbit and Codex do not both approve, or a review thread is still open,
 The workflow flags the owner only when the loop cannot finish on its own: after 8 review rounds without agreement, a requested review remains pending for 24 hours, or GitHub blocks or rejects a merge that meets the bar. Human change requests stay with the owning agent until the review cap. Flagging is a `needs-owner` label and one comment on the pull request, from the workflow. Leave the pull request open. Money-path pull requests also follow the rules in Money paths (one at a time, Sol review, the local suites) before their final push.
 
 Review mentions use `AUTO_MERGE_TOKEN` when available so integrations can receive a user-authored request. The workflow records its own receipt for that head; human-authored markers do not suppress requests. The merge snapshots read the current `main` ref directly because the PR payload's base SHA can remain older.
+
+The workflow's own GitHub Actions check is named `auto-merge-gate` and is excluded from merge snapshots, including manual dispatches on a pull request branch. Every other check still counts.
 
 The workflow does not call any agent API. The owning agent finds out about a red check, a conflict, a new review or a new comment through its own pull request watch (in T3, `watch_pull_request` on that thread wakes it), fixes the branch and pushes. Keep that watch on until the pull request merges, closes, or is flagged `needs-owner`. If the watch ends or the thread is gone, the pull request has nobody waiting on it: whoever picks it up next reopens the loop with a fresh watch. The workflow only counts review rounds (a marker comment per head that still had open review work); after 8 of them it adds `needs-owner`.
 

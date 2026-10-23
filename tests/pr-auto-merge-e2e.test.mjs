@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import fs from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { REQUIRED_CHECKS } from "../scripts/pr-auto-merge-gate.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const head = "a".repeat(40);
@@ -16,6 +16,13 @@ const prefix = `/repos/${repo}`;
 const bot = login => ({ login: `${login}[bot]`, type: "Bot" });
 const token = "fixture-github-token";
 const userToken = "fixture-user-token";
+const workflow = readFileSync(new URL("../.github/workflows/tests.yml", import.meta.url), "utf8");
+const matrixNames = [...workflow.matchAll(/^ {10}- name:\s*(\S+)\s*$/gm)].map(([, name]) => name);
+const checkNames = [...workflow.matchAll(/^ {4}name:\s*(.+?)\s*$/gm)].flatMap(([, name]) =>
+  name.includes("${{ matrix.suite.name }}")
+    ? matrixNames.map(suite => name.replace("${{ matrix.suite.name }}", suite))
+    : [name]
+);
 
 const baseline = () => ({
   pull: { number: 1, html_url: "https://github.com/fixture/website/pull/1", title: "Fixture PR", state: "open", draft: false,
@@ -23,7 +30,7 @@ const baseline = () => ({
     head: { ref: "fixture-change", sha: head, repo: { full_name: repo } }, mergeable_state: "clean" },
   baseTip: "b".repeat(40),
   reviews: [{ user: bot("coderabbitai"), state: "APPROVED", commit_id: head, submitted_at: "2026-10-23T00:00:00Z" }],
-  checks: REQUIRED_CHECKS.map((name, index) => ({ id: index + 1, name, app: { slug: "github-actions" },
+  checks: checkNames.map((name, index) => ({ id: index + 1, name, app: { slug: "github-actions" },
     status: "completed", conclusion: "success", completed_at: "2026-10-23T00:00:00Z" })),
   statuses: [],
   comments: [{ id: 10, node_id: "codex-review", user: bot("chatgpt-codex-connector"),
@@ -120,6 +127,40 @@ test("CLI merges only the evaluated head after two complete snapshots", async ()
   assert.ok(result.comments.some(body => body.includes("Squash-merged into main")));
 });
 
+for (const [name, value] of [
+  ["missing", undefined], ["null", null], ["string-false", "false"], ["string-true", "true"],
+  ["zero", 0], ["one", 1], ["array", []], ["object", {}], ["unresolved", true],
+]) {
+  test(`CLI leaves a ${name} unresolved-findings flag unmerged`, async () => {
+    const result = await runScenario(`codex-flag-${name}`, { setup: state => {
+      state.comments[0].body = `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: {
+        commit_sha: head, status: "completed", has_unresolved_findings: value,
+      } })} -->`;
+    } });
+    assert.deepEqual(result.merges, []);
+  });
+}
+
+test("CLI rejects a malformed verdict that arrives at the final snapshot", async () => {
+  const result = await runScenario("codex-flag-changed", { changeSecond: state => {
+    state.comments[0].body = `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: {
+      commit_sha: head, status: "completed", has_unresolved_findings: "false",
+    } })} -->`;
+  } });
+  assert.equal(result.snapshots, 2);
+  assert.deepEqual(result.merges, []);
+});
+
+for (const [status, conclusion] of [["queued", null], ["in_progress", null], ["completed", "failure"], ["completed", "success"]]) {
+  test(`CLI ignores its own ${status} ${conclusion || ""} gate check on a manual dispatch`, async () => {
+    const result = await runScenario(`self-check-${status}-${conclusion}`, {
+      event: "workflow_dispatch", eventBody: {},
+      setup: state => state.checks.push({ id: 1000, name: "auto-merge-gate", app: { slug: "github-actions" }, status, conclusion }),
+    });
+    assert.deepEqual(result.merges.map(request => request.body), [{ merge_method: "squash", sha: head }]);
+  });
+}
+
 const refusals = {
   "human-statuses": state => { state.statuses = state.checks.map(check => ({ id: check.id, context: check.name, state: "success" })); state.checks = []; },
   "foreign-app": state => { state.checks.forEach(check => { check.app.slug = "other-app"; }); },
@@ -134,6 +175,9 @@ const refusals = {
   "behind-main": state => { state.pull.mergeable_state = "behind"; },
   "draft": state => { state.pull.draft = true; },
   "fork": state => { state.pull.head.repo.full_name = "other/website"; },
+  "renamed-required-job": state => { state.checks.find(check => check.name === "Playwright booking").name = "Playwright reservation"; },
+  "foreign-self-check-name": state => { state.checks.push({ id: 1000, name: "auto-merge-gate", app: { slug: "other-app" }, status: "completed", conclusion: "failure" }); },
+  "other-workflow-failure": state => { state.checks.push({ id: 1000, name: "another-workflow", app: { slug: "github-actions" }, status: "completed", conclusion: "failure" }); },
 };
 for (const [name, setup] of Object.entries(refusals)) {
   test(`CLI leaves ${name} unmerged`, async () => {

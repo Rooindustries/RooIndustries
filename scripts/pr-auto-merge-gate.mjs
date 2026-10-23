@@ -29,11 +29,11 @@ export const parseCodexState = (body) => {
   if (!match) return null;
   try {
     const state = JSON.parse(match[1]).code_review;
-    if (!state || typeof state !== "object") return null;
+    if (!state || typeof state !== "object" || typeof state.has_unresolved_findings !== "boolean") return null;
     return {
       commitSha: state.commit_sha || "",
       status: state.status || "",
-      hasUnresolvedFindings: state.has_unresolved_findings === true,
+      hasUnresolvedFindings: state.has_unresolved_findings,
       hasAnyFindings: state.has_any_findings === true,
     };
   } catch {
@@ -140,7 +140,7 @@ const coderabbitVerdict = (reviews, headSha) => {
 
 const codexVerdict = (codex, headSha) => {
   if (!codex || codex.commitSha !== headSha || codex.status !== "completed") return "pending";
-  return codex.hasUnresolvedFindings ? "hold" : "approve";
+  return codex.hasUnresolvedFindings === false ? "approve" : "hold";
 };
 
 const openFindings = (threads) => (threads || []).filter((thread) => thread && thread.isResolved !== true);

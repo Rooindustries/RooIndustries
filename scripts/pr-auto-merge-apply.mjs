@@ -111,7 +111,7 @@ const collectSnapshot = async (number) => {
   const requested = ownComments.find((comment) => String(comment.body).includes(`${REVIEW_REQUEST_PREFIX}${pull.head.sha}`));
   const requestedAt = Date.parse(requested?.created_at);
   const checks = [
-    ...checkRuns.map((run) => ({
+    ...checkRuns.filter((run) => !(run.app?.slug === "github-actions" && run.name === "auto-merge-gate")).map((run) => ({
       source: "check-run",
       app: run.app?.slug || "",
       order: run.id,
