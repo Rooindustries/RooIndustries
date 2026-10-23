@@ -1,7 +1,8 @@
 import {createDataClient as createClient} from '../../data/documentClient.js';
-import {randomUUID} from 'crypto';
+import {createHash} from 'crypto';
 import {requireAdminKey} from './auth.js';
 import {logSafeError} from '../../safeErrorLog.js';
+import {calculateCreatorCommission} from '../../referrals/commissionMoney.js';
 import {
   buildBalance,
   fetchReferralEarnings,
@@ -84,7 +85,8 @@ export default async function handler(req, res) {
       amount,
       paidOn,
       note = '',
-      entryId = '',
+      entryId,
+      payoutId,
       internalNotes,
     } = req.body || {};
 
@@ -103,7 +105,8 @@ export default async function handler(req, res) {
     }
 
     const numericAmount = Number(amount);
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    const roundedAmount = calculateCreatorCommission({commissionAmount: numericAmount}).amount;
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0 || roundedAmount !== numericAmount || !Number.isSafeInteger(Math.round(numericAmount * 100))) {
       return res
         .status(400)
         .json({ok: false, error: 'Amount must be a positive number'});
@@ -116,20 +119,31 @@ export default async function handler(req, res) {
         .json({ok: false, error: 'Invalid payment date supplied'});
     }
 
+    const suppliedKeys = [payoutId, req.headers?.['idempotency-key'], entryId].filter(value => value != null && value !== '');
+    const key = suppliedKeys[0];
+    if (typeof key !== 'string' || !key.trim() || key.length > 256 || suppliedKeys.some(value => value !== key)) {
+      return res.status(400).json({ok: false, error: 'Supply the same stable payoutId for every attempt to record a transfer.'});
+    }
+
     let referral = await fetchReferral(referralId);
 
     if (!referral) {
       return res.status(404).json({ok: false, error: 'Referral not found'});
     }
 
-    const key = entryId || randomUUID();
     const entry = {
       _key: key,
       _type: packageType === 'xoc' ? 'paymentLogXoc' : 'paymentLogVertex',
-      amount: +numericAmount.toFixed(2),
+      amount: roundedAmount,
       paidOn: paymentDate.toISOString(),
       ...(note ? {note: String(note)} : {}),
     };
+    const receiptId = `creatorPayout.${createHash('sha256').update(key).digest('hex')}`;
+    const requestHash = createHash('sha256').update(JSON.stringify({
+      referralId, packageType, amount: roundedAmount,
+      paidOn: paidOn ? paymentDate.toISOString() : null,
+      note: String(note || ''), internalNotes: typeof internalNotes === 'string' ? internalNotes : null,
+    })).digest('hex');
 
     const code = (referral?.slug?.current || '').toLowerCase();
     const [earnings, packages] = await Promise.all([
@@ -168,11 +182,23 @@ export default async function handler(req, res) {
 
     let committedUpdate = null;
     for (let attempt = 0; attempt < MAX_PAYMENT_UPDATE_ATTEMPTS; attempt += 1) {
+      const receipt = await writeClient.getDocument(receiptId);
+      if (receipt && receipt.requestHash !== requestHash) {
+        return res.status(409).json({ok: false, error: 'This payoutId already records a different transfer.'});
+      }
+      if (receipt) {
+        referral = await fetchReferral(referralId);
+        committedUpdate = buildPaymentUpdate({referral, packageType, entry: receipt.paymentEntry, entryId: key, earnings});
+        break;
+      }
+      if ([...(referral.xocPayments || []), ...(referral.vertexPayments || [])].some(payment => payment?._key === key)) {
+        return res.status(409).json({ok: false, error: 'This key belongs to an existing payment log. Use a new payoutId for a new transfer.'});
+      }
       const update = buildPaymentUpdate({
         referral,
         packageType,
         entry,
-        entryId,
+        entryId: key,
         earnings,
       });
       const {payments: paymentsTotal, owed} = update.balance;
@@ -198,7 +224,11 @@ export default async function handler(req, res) {
       }
 
       try {
-        await patch.commit();
+        await writeClient.transaction().create({
+          _id: receiptId, _type: 'creatorPayout', referralId, packageType, amount: roundedAmount,
+          creator: {_type: 'reference', _ref: referralId}, paidAt: entry.paidOn,
+          requestHash, paymentEntry: entry,
+        }).patch(referralId, () => patch).commit();
         committedUpdate = update;
         break;
       } catch (error) {

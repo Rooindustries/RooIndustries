@@ -1,3 +1,5 @@
+import { sumCreatorCommissions } from '../../referrals/commissionMoney.js';
+
 export function normalizeNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
@@ -31,61 +33,20 @@ export function classifyPackage(packageTitle = '') {
   return 'vertex';
 }
 
-const decimalParts = (value) => {
-  const pattern = typeof value === 'number'
-    ? /^(-?)([0-9]+)(?:[.]([0-9]+))?(?:e([+-]?[0-9]+))?$/i
-    : /^(-?)([0-9]+)(?:[.]([0-9]+))?$/;
-  const match = String(value ?? '').replace(/^ +| +$/g, '').match(pattern);
-  if (!match) return null;
-  const fraction = match[3] || '';
-  const scale = fraction.length - Number(match[4] || 0);
-  return {
-    numerator: BigInt(`${match[1]}${match[2]}${fraction}`) * 10n ** BigInt(Math.max(0, -scale)),
-    denominator: 10n ** BigInt(Math.max(0, scale)),
-  };
-};
-
-export function resolveBookingCommissionAmount(booking = {}) {
-  if (decimalParts(booking?.commissionAmount)) {
-    return normalizeNumber(booking.commissionAmount);
-  }
-  const net = decimalParts(booking?.netAmount);
-  const base = net?.numerator ? net : decimalParts(booking?.grossAmount);
-  const percent = decimalParts(booking?.commissionPercent);
-  if (!base || !percent) return 0;
-  const product = base.numerator * percent.numerator;
-  const magnitude = product < 0n ? -product : product;
-  const denominator = base.denominator * percent.denominator;
-  const roundedCents = (2n * magnitude + denominator) / (2n * denominator);
-  return Number(product < 0n ? -roundedCents : roundedCents) / 100;
-}
-
 export function computeEarningsFromBookings(bookings = []) {
-  const totals = {xoc: 0, vertex: 0, total: 0};
-  const byPackage = {};
-
-  bookings.forEach((booking) => {
-    const packageTitle = normalizePackageTitle(booking?.packageTitle);
-    const pkg = classifyPackage(packageTitle);
-    const earned = resolveBookingCommissionAmount(booking);
-
-    if (packageTitle) {
-      byPackage[packageTitle] =
-        normalizeNumber(byPackage[packageTitle]) + normalizeNumber(earned);
-    }
-
-    totals[pkg] += earned;
-    totals.total += earned;
-  });
-
+  const byPackage = new Map();
+  const groups = { xoc: [], vertex: [] };
+  for (const booking of bookings) {
+    const title = normalizePackageTitle(booking?.packageTitle);
+    if (!byPackage.has(title)) byPackage.set(title, []);
+    byPackage.get(title).push(booking);
+    groups[classifyPackage(title)].push(booking);
+  }
   return {
-    xoc: +totals.xoc.toFixed(2),
-    vertex: +totals.vertex.toFixed(2),
-    total: +totals.total.toFixed(2),
-    byPackage: Object.keys(byPackage).reduce((acc, key) => {
-      acc[key] = +byPackage[key].toFixed(2);
-      return acc;
-    }, {}),
+    xoc: sumCreatorCommissions(groups.xoc),
+    vertex: sumCreatorCommissions(groups.vertex),
+    total: sumCreatorCommissions(bookings),
+    byPackage: Object.fromEntries([...byPackage].map(([title, rows]) => [title, sumCreatorCommissions(rows)])),
   };
 }
 
@@ -112,14 +73,27 @@ export async function fetchReferralEarnings({ client, referralId, referralCode }
           || (defined(referralCode) && lower(referralCode) == $code)
         )
       ]{
+        _id,
         packageTitle,
         commissionAmount,
         commissionPercent,
         netAmount,
-        grossAmount
+        grossAmount,
+        couponDiscountAmount,
+        commissionBaseAmount,
+        commissionCalculationVersion,
+        dodoOriginalCommissionAmount
       }`,
     { id: referralId, code: referralCode }
   );
+  for (const booking of bookings || []) {
+    if (String(booking.commissionCalculationVersion) !== '2' && booking._id &&
+        booking.commissionAmount != null && Number(booking.commissionAmount) === 0) {
+      const source = await client.fetch('*[_id == $id][0]', { id: booking._id });
+      if (!source) throw new Error('Historical commission source is unavailable.');
+      booking.legacyCommissionZeroIsFrozen = Object.hasOwn(source, 'dodoOriginalCommissionAmount');
+    }
+  }
   return computeEarningsFromBookings(bookings || []);
 }
 

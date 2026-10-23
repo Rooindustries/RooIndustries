@@ -3,6 +3,7 @@ import packagePricing from "../../../lib/packagePricing.js";
 import { resolvePaymentCurrency } from "./bookingRefunds.js";
 import { parseMoneySubunits } from "../payment/providerClients.js";
 import { logSafeError } from "../../safeErrorLog.js";
+import { calculateCreatorCommission } from "../../referrals/commissionMoney.js";
 import { buildPaymentUpgradeLockId } from "../payment/paymentRecord.js";
 
 const {
@@ -638,13 +639,11 @@ export async function resolveBookingPricing({
       ? toMoney((effectiveDiscountAmount / effectiveGrossAmount) * 100)
       : 0;
 
-  const commissionBase =
-    paymentProvider === "free"
-      ? 0
-      : referralBaseAmount || effectiveGrossAmount || 0;
-  const commissionAmount = toMoney(
-    commissionBase * (effectiveCommissionPercent / 100)
-  );
+  const commissionAmount = calculateCreatorCommission({
+    grossAmount: effectiveGrossAmount,
+    couponDiscountAmount,
+    commissionPercent: effectiveCommissionPercent,
+  }, { blocked: paymentProvider === "free" || effectiveNetAmount <= 0 }).amount;
 
   return {
     ...(resolvedUpgradeContext ? { upgradeContext: resolvedUpgradeContext } : {}),

@@ -10,7 +10,7 @@ import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
 import { appendCouponConsumption } from "./couponReservations.js";
 import { dispatchRescheduleNotifications } from "./bookingEmails.js";
 import { getSafeErrorCode } from "../../safeErrorLog.js";
-import { resolveBookingCommissionAmount } from "./payoutUtils.js";
+import { calculateCreatorCommission } from "../../referrals/commissionMoney.js";
 
 const normalize = (value) => String(value || "").trim();
 
@@ -304,7 +304,8 @@ export const createRequiresRescheduleBooking = async ({
   }
   const payload = paymentRecord.bookingPayload || {};
   const pricing = paymentRecord.pricingSnapshot || {};
-  const originalCommissionAmount = resolveBookingCommissionAmount(pricing);
+  const commission = calculateCreatorCommission(pricing);
+  const originalCommissionAmount = commission.originalAmount;
   const dodoTotalAmount = Number(paymentRecord.providerPublicData?.totalAmount || Number(pricing.netAmount) * 100) / 100;
   const resolvedReferralId = preserveHistoricalAccounting
     ? ""
@@ -319,6 +320,8 @@ export const createRequiresRescheduleBooking = async ({
         resolveStoreBackend(paymentRecord.backendOwner),
       paymentProvider: paymentRecord.provider,
       commissionPercent: Number(pricing.commissionPercent || 0),
+      commissionBaseAmount: commission.baseAmount,
+      commissionCalculationVersion: 2,
       commissionAmount: originalCommissionAmount,
       ...(paymentRecord.provider === "dodo" ? {
         dodoCheckoutSessionId: paymentRecord.providerOrderId,
@@ -329,9 +332,10 @@ export const createRequiresRescheduleBooking = async ({
           dodoOriginalCommissionAmount: originalCommissionAmount,
           refundedAmount: Number(paymentRecord.refundProcessedAmountInSubunits || 0) / 100,
           refundStatus: "partial",
-          commissionAmount: dodoTotalAmount > 0
-            ? Math.round(originalCommissionAmount * Math.max(0, 1 - Number(paymentRecord.refundProcessedAmountInSubunits || 0) / (dodoTotalAmount * 100)) * 100) / 100
-            : 0,
+          commissionAmount: calculateCreatorCommission(pricing, {
+            paidAmount: dodoTotalAmount,
+            refundedAmount: Number(paymentRecord.refundProcessedAmountInSubunits || 0) / 100,
+          }).amount,
         } : {}),
       } : {}),
       paypalOrderId:

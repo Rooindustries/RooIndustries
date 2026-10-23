@@ -1,5 +1,6 @@
 import { buildBrowserCompletionBody } from "./bookingSummary.js";
 import envValue from "../../supabase/envValue.cjs";
+import { calculateCreatorCommission } from "../../referrals/commissionMoney.js";
 const { resolveStoreBackend } = envValue;
 import { createDodoCheckout, inspectDodoCheckout, retrieveDodoPayment, retrieveDodoRefund, validateDodoPayment, verifyDodoCapture, unwrapDodoWebhook } from "./dodoProvider.js";
 import crypto from "crypto";
@@ -5956,8 +5957,12 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       if (booking && booking.status !== "refunded" && !booking.refundAccountingAppliedAt) {
         const originalStatus = booking.dodoDisputeActive
           ? booking.dodoDisputeBookingStatus : booking.status;
-        const originalCommission = Number(booking.dodoOriginalCommissionAmount ?? booking.commissionAmount ?? 0);
-        const retainedFraction = Math.max(0, 1 - Number(booking.refundedAmount || 0) / Number(booking.dodoTotalAmount || booking.netAmount || 1));
+        const commission = calculateCreatorCommission(booking, {
+          originalAmount: booking.dodoOriginalCommissionAmount,
+          paidAmount: booking.dodoTotalAmount || booking.netAmount,
+          refundedAmount: booking.refundedAmount,
+          blocked: disputed,
+        });
         const referralId = booking.referral?._ref;
         const reverseReferral = !!terminalDispute && !!referralId &&
           booking.referralAccountingApplied !== false && booking.referralReversedAfterRefund !== true &&
@@ -5993,8 +5998,9 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
             dodoDisputeActive: disputed,
             dodoReferralReversedAfterDispute: referralReversed,
             dodoDisputeBookingStatus: originalStatus,
-            dodoOriginalCommissionAmount: originalCommission,
-            commissionAmount: disputed ? 0 : Math.round(originalCommission * retainedFraction * 100) / 100,
+            dodoOriginalCommissionAmount: commission.originalAmount,
+            commissionCalculationVersion: 2,
+            commissionAmount: commission.amount,
             paymentVerificationState: disputed ? "disputed" : "server_verified",
           });
         });

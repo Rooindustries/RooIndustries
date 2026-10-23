@@ -11,8 +11,14 @@ import { execFileSync } from 'node:child_process';
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';
 const originalFetch = globalThis.fetch;
 const baseline = process.argv.find(value => value.startsWith('--baseline='))?.slice(11);
-const sources = ['src/server/api/ref/payoutUtils.js', 'src/server/api/ref/bookingRefunds.js', 'src/server/api/ref/bookingCommit.js', 'src/server/api/payment/flow.js'];
+const sources = ['src/server/api/ref/payoutUtils.js', 'src/server/api/ref/bookingRefunds.js', 'src/server/api/ref/bookingCommit.js', 'src/server/api/payment/flow.js', 'src/server/api/ref/pricing.js', 'src/server/api/ref/createBooking.js', 'src/server/api/ref/updatePayments.js'];
 const baselineSources = baseline ? Object.fromEntries(sources.map(file => [new URL(`../${file}`, import.meta.url).href, execFileSync('git', ['show', `${baseline}:${file}`], { encoding: 'utf8' })])) : {};
+const migrationPath = 'supabase/migrations/20261023090000_preserve_frozen_creator_commissions.sql';
+let baselineMigration;
+if (baseline) {
+  try { baselineMigration = execFileSync('git', ['show', `${baseline}:${migrationPath}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+  catch (error) { if (!/does not exist|exists on disk, but not in/.test(String(error.stderr))) throw error; }
+}
 for (const key of Object.keys(process.env)) {
   if (/^(SANITY|SUPABASE|PAYPAL|RAZORPAY|DODO|REACT_APP_|NEXT_PUBLIC_|ALLOW_LIVE_|RESEND|BOOKING_EMAIL|FROM_EMAIL|OWNER_EMAIL|DATA_|COMMERCE_|VERCEL_ENV|REF_SESSION|CRON_|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|http_proxy|https_proxy|all_proxy)/.test(key) || /SENTRY.*DSN/i.test(key)) delete process.env[key];
 }
@@ -22,6 +28,7 @@ Object.assign(process.env, {
   PAYPAL_ENV: 'sandbox', PAYPAL_CLIENT_ID: 'fixture', PAYPAL_CLIENT_SECRET: 'fixture', PAYPAL_WEBHOOK_ID: 'fixture',
   RAZORPAY_KEY_ID: 'rzp_test_fixture', RAZORPAY_KEY_SECRET: 'fixture', RAZORPAY_WEBHOOK_SECRET: 'fixture',
   PAYMENT_SESSION_SECRET: 'fixture', REF_SESSION_SECRET: 'fixture', CRON_SECRET: 'fixture',
+  REF_ADMIN_KEY: 'fixture-admin',
   DODO_PAYMENTS_ENVIRONMENT: 'test_mode', DODO_PAYMENTS_API_KEY: 'fixture',
   DODO_PAYMENTS_WEBHOOK_KEY: `whsec_${Buffer.from('fixture').toString('base64')}`,
   DODO_PAYMENTS_PRODUCT_ID: 'pdt_fixture', DODO_PAYMENTS_RETURN_URL: 'https://example.invalid/payment',
@@ -46,6 +53,7 @@ fs.mkdirSync(path.dirname(artifact), { recursive: true });
 const evidence = { productionRequests: 0, sentryDsnVariables: Object.keys(process.env).filter(key => /SENTRY.*DSN/i.test(key)), scenarios: [], limits: ['Synthetic provider HTTP and email responses; real route adapters, signatures, pricing, document mutations, PostgreSQL 17 and projections. No hosted auth, browser checkout or production data.'] };
 assert.deepEqual(evidence.sentryDsnVariables, []);
 evidence.source = { baseline: baseline || null, commit: execFileSync('git', ['rev-parse', baseline || 'HEAD'], { encoding: 'utf8' }).trim(), files: Object.fromEntries(sources.map(file => [file, crypto.createHash('sha256').update(baseline ? baselineSources[new URL(`../${file}`, import.meta.url).href] : fs.readFileSync(file)).digest('hex')])) };
+if (!baseline) for (const file of ['src/server/referrals/commissionMoney.js', 'supabase/migrations/20261023090000_preserve_frozen_creator_commissions.sql']) evidence.source.files[file] = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 let fixture, server, origin, commerce, documents, sql, earnings;
 let current, sequence = 0, eventSequence = 0;
 const responses = [];
@@ -93,7 +101,7 @@ const summary = async (creator, expected) => {
   assert.deepEqual(fallback, native);
   return { native, fallback };
 };
-const seed = async (provider, { amount = 54.95, rate = 10, booking = true, count = 5 } = {}) => {
+const seed = async (provider, { amount = 54.95, rate = 10, booking = true, count = 5, discount = 0, coupon = 0 } = {}) => {
   const key = `payout-${++sequence}`;
   const creator = await documents.create({
     _id: `referral.${key}`,
@@ -102,14 +110,16 @@ const seed = async (provider, { amount = 54.95, rate = 10, booking = true, count
     slug: { _type: 'slug', current: key },
     registrationStatus: 'verified',
     currentCommissionPercent: rate,
-    currentDiscountPercent: 0,
+    currentDiscountPercent: discount,
     successfulReferrals: count,
     backendOwner: 'supabase',
     cutoverGeneration: 0,
   });
   const packageDoc = await documents.create({ _id: `package.${key}`, _type: 'package', title: `Fixture ${key}`, price: `$${amount.toFixed(2)}` });
+  const couponCode = coupon ? `coupon-${key}` : '';
+  if (coupon) await documents.create({ _id: `coupon.${key}`, _type: 'coupon', code: couponCode, isActive: true, canCombineWithReferral: true, discountType: 'percent', discountPercent: coupon });
   const { resolvePaymentQuote } = await import('../src/server/api/ref/pricing.js');
-  const quote = await resolvePaymentQuote({ packageTitle: packageDoc.title, referralCode: key, client: commerce });
+  const quote = await resolvePaymentQuote({ packageTitle: packageDoc.title, referralCode: key, couponCode, client: commerce });
   const pricingSnapshot = { ...quote, grossAmount: quote.effectiveGrossAmount, netAmount: quote.effectiveNetAmount, commissionPercent: quote.effectiveCommissionPercent, commissionAmount: quote.commissionAmount, currency: 'USD' };
   const startTimeUTC = new Date(Date.UTC(2099, 0, sequence, 10)).toISOString();
   const record = await commerce.create({
@@ -134,6 +144,7 @@ const seed = async (provider, { amount = 54.95, rate = 10, booking = true, count
       specs: 'fixture computer',
       mainGame: 'fixture',
       referralCode: key,
+      couponCode,
       startTimeUTC,
       localTimeZone: 'Asia/Kolkata',
     },
@@ -141,7 +152,7 @@ const seed = async (provider, { amount = 54.95, rate = 10, booking = true, count
       currency: 'USD',
       productId: 'pdt_fixture',
       environment: 'test_mode',
-      totalAmount: Math.round(amount * 100),
+      totalAmount: Math.round(quote.effectiveNetAmount * 100),
       taxInclusive: false,
     },
     emailDispatch: { allSent: true },
@@ -152,10 +163,12 @@ const seed = async (provider, { amount = 54.95, rate = 10, booking = true, count
     backendOwner: 'supabase',
     cutoverGeneration: 0,
     status: 'captured',
+    commissionCalculationVersion: 2,
     paymentProvider: provider,
     paymentRecordId: record._id,
     packageTitle: packageDoc.title,
-    netAmount: amount,
+    netAmount: quote.effectiveNetAmount,
+    couponDiscountAmount: quote.couponDiscountAmount,
     grossAmount: amount,
     commissionAmount: quote.commissionAmount,
     commissionPercent: quote.effectiveCommissionPercent,
@@ -170,12 +183,12 @@ const seed = async (provider, { amount = 54.95, rate = 10, booking = true, count
     ...(provider === 'dodo' ? {
       dodoPaymentId: record.providerPaymentId,
       dodoCheckoutSessionId: record.providerOrderId,
-      dodoTotalAmount: amount,
+      dodoTotalAmount: quote.effectiveNetAmount,
     } : {}),
   });
   const payment = provider === 'dodo'
-    ? { payment_id: record.providerPaymentId, checkout_session_id: record.providerOrderId, metadata: { paymentRecordId: record._id }, status: 'succeeded', currency: 'USD', total_amount: Math.round(amount * 100), tax: 0, product_cart: [{ product_id: 'pdt_fixture', quantity: 1 }], disputes: [], refunds: [], refund_status: null }
-    : { id: record.providerPaymentId, order_id: record.providerOrderId, amount: Math.round(amount * 100), currency: 'USD', status: 'captured', captured: true, amount_refunded: 0, refund_status: null };
+    ? { payment_id: record.providerPaymentId, checkout_session_id: record.providerOrderId, metadata: { paymentRecordId: record._id }, status: 'succeeded', currency: 'USD', total_amount: Math.round(quote.effectiveNetAmount * 100), tax: 0, product_cart: [{ product_id: 'pdt_fixture', quantity: 1 }], disputes: [], refunds: [], refund_status: null }
+    : { id: record.providerPaymentId, order_id: record.providerOrderId, amount: Math.round(quote.effectiveNetAmount * 100), currency: 'USD', status: 'captured', captured: true, amount_refunded: 0, refund_status: null };
   current = { key, creator, packageDoc, quote, record, payment };
   states.push(current);
   return current;
@@ -228,6 +241,13 @@ try {
   const { createSweepPostgresFixture } = await import('./lib/sweep-postgres-fixture.mjs');
   fixture = await createSweepPostgresFixture({ fullMigrationChain: true, excludedMigrations: baseline ? ['20261023090000_preserve_frozen_creator_commissions.sql'] : [] });
   sql = fixture.sql;
+  const applyCommissionMigration = async () => {
+    const connection = await sql.reserve();
+    try { await connection.unsafe(baselineMigration || fs.readFileSync(migrationPath, 'utf8')); }
+    catch (error) { await connection.unsafe('rollback'); throw error; }
+    finally { connection.release(); }
+  };
+  if (baselineMigration) await applyCommissionMigration();
   Object.assign(process.env, { SUPABASE_URL: fixture.origin, SUPABASE_SERVICE_ROLE_KEY: fixture.token, NEXT_PUBLIC_SUPABASE_URL: fixture.origin, NEXT_PUBLIC_SUPABASE_ANON_KEY: fixture.token });
   server = http.createServer((req, res) => {
     const pending = (async () => {
@@ -237,7 +257,11 @@ try {
         if (req.url.startsWith('/api/')) {
           const request = new Request(`${origin}${req.url}`, { method: req.method, headers: req.headers, ...(body ? { body } : {}) });
           let response;
-          if (req.url.startsWith('/api/payment/webhook/')) {
+          if (req.url.startsWith('/api/ref/')) {
+            const action = req.url.split('/').at(-1);
+            const route = await import('../app/api/ref/[action]/route.js');
+            response = await route[req.method](request, { params: Promise.resolve({ action }) });
+          } else if (req.url.startsWith('/api/payment/webhook/')) {
             const provider = req.url.split('/').at(-1);
             const route = await import(`../app/api/payment/webhook/${provider}/route.js`);
             response = await route.POST(request);
@@ -648,6 +672,235 @@ try {
       assert.equal(failure.current.creator._id, current.creator._id);
     }
     return { failure };
+  });
+
+  const startDodoCheckout = async state => {
+    const settingsId = '6d8a3646-0ed2-44b5-ad45-c5c9d578126a';
+    const settings = await documents.getDocument(settingsId);
+    await documents.createOrReplace({ ...settings, _id: settingsId, _type: 'bookingSettings', dateSlots: [
+      ...(settings?.dateSlots || []), { date: state.record.bookingPayload.startTimeUTC.slice(0, 10), times: ['15:30'] },
+    ] });
+    await commerce.delete(state.record._id);
+    current.record = { ...state.record, providerOrderId: 'checkout-' + state.key };
+    current.payment.checkout_session_id = current.record.providerOrderId;
+    current.payment.payment_id = 'captured-' + state.key;
+    const expiresAt = new Date(Date.now() + 1200000).toISOString();
+    const hold = await commerce.create({ _id: 'slotHold.' + state.key, _type: 'slotHold', backendOwner: 'supabase', cutoverGeneration: 0, phase: 'holding', holdNonce: state.key, expiresAt, startTimeUTC: state.record.bookingPayload.startTimeUTC, packageTitle: state.packageDoc.title });
+    const { issueHoldToken } = await import('../src/server/booking/holdToken.js');
+    const bookingPayload = { ...state.record.bookingPayload, slotHoldId: hold._id, slotHoldToken: issueHoldToken({ holdId: hold._id, startTimeUTC: hold.startTimeUTC, expiresAt, holdNonce: state.key, backend: 'supabase', cutoverGeneration: 0 }) };
+    const { buildQuoteFingerprint } = await import('../src/server/api/payment/paymentRecord.js');
+    const provider = state.quote.effectiveNetAmount === 0 ? 'free' : 'dodo';
+    const started = await post('/api/payment/start', { provider, bookingPayload, quoteFingerprint: buildQuoteFingerprint({ bookingPayload, quote: state.quote }) });
+    assert.equal(started.status, 200, JSON.stringify(started));
+    if (provider === 'free') {
+      current.record = await read((await read(started.body.bookingId)).paymentRecordId);
+      assert.ok(current.record?._id);
+      return started;
+    }
+    current.record = await commerce.fetch('*[_type == "paymentRecord" && providerOrderId == $id][0]', { id: current.record.providerOrderId });
+    assert.ok(current.record?._id);
+    current.payment.metadata.paymentRecordId = current.record._id;
+  };
+  const moneyCases = [
+    { name: 'plain', amount: 54.95, rate: 10, original: 5.5, refund: 20, retained: 3.5 },
+    { name: 'referral-discount', amount: 54.95, rate: 10, discount: 20, original: 5.5, refund: 21.98, retained: 2.75 },
+    { name: 'combined-coupon', amount: 54.95, rate: 10, discount: 20, coupon: 20, original: 4.4, refund: 17.58, retained: 2.2 },
+    { name: 'half-cent', amount: 20.1, rate: 10, original: 2.01, refund: 10.05, retained: 1.01 },
+    { name: 'below-half', amount: 20.1, rate: 10, original: 2.01, refund: 10.06, retained: 1 },
+    { name: 'above-half', amount: 20.1, rate: 10, original: 2.01, refund: 10.04, retained: 1.01 },
+  ];
+  const refundCurrent = async (amount, suffix, full = false) => {
+    const id = `refund-${current.key}-${suffix}`;
+    if (current.record.provider === 'dodo') {
+      current.payment.refunds.push({ refund_id: id, payment_id: current.payment.payment_id, status: 'succeeded', currency: 'USD', amount: Math.round(amount * 100) });
+      current.payment.refund_status = full ? 'full' : 'partial';
+      return webhook('refund.succeeded');
+    }
+    current.refund = current.record.provider === 'paypal'
+      ? { id, status: 'COMPLETED', amount: { value: amount.toFixed(2), currency_code: 'USD' }, links: [{ rel: 'up', href: `https://api-m.sandbox.paypal.com/v2/payments/captures/${current.record.providerPaymentId}` }] }
+      : { id, payment_id: current.record.providerPaymentId, amount: Math.round(amount * 100), currency: 'USD', status: 'processed' };
+    return webhook(current.record.provider === 'paypal' ? 'PAYMENT.CAPTURE.REFUNDED' : 'refund.processed');
+  };
+  for (const provider of ['dodo', 'paypal', 'razorpay']) for (const row of moneyCases) await run(`R1-money-table-${provider}-${row.name}`, async () => {
+    const state = await seed(provider, { ...row, booking: false, count: 0 });
+    assert.equal(state.quote.commissionAmount, row.original);
+    const pricingSnapshot = { ...state.record.pricingSnapshot };
+    delete pricingSnapshot.commissionAmount;
+    current.record = await commerce.patch(state.record._id).set({ pricingSnapshot }).commit();
+    await documents.patch(state.creator._id).set({ currentCommissionPercent: 1, currentDiscountPercent: 0 }).commit();
+    const captureType = provider === 'paypal' ? 'PAYMENT.CAPTURE.COMPLETED' : provider === 'razorpay' ? 'payment.captured' : 'payment.succeeded';
+    const captured = await webhook(captureType);
+    assert.equal(captured.status, 200, JSON.stringify(captured));
+    const bookingId = (await read(state.record._id)).bookingId;
+    const before = await read(bookingId);
+    assert.equal(before.commissionAmount, row.original);
+    assert.equal((await refundCurrent(row.refund, 'partial')).status, 200);
+    const partial = await read(bookingId);
+    assert.equal(partial.commissionAmount, row.retained);
+    await summary(state.creator, row.retained);
+    if (provider === 'dodo') {
+      current.payment.disputes = [dispute('dispute_opened')];
+      assert.equal((await webhook('dispute.opened')).status, 200);
+      assert.equal((await read(bookingId)).commissionAmount, 0);
+      current.payment.disputes = [dispute('dispute_won')];
+      assert.equal((await webhook('dispute.won')).status, 200);
+      assert.equal((await read(bookingId)).commissionAmount, row.retained);
+    }
+    assert.equal((await refundCurrent(cents(state.quote.effectiveNetAmount - row.refund), 'remaining', true)).status, 200);
+    const full = await read(bookingId);
+    assert.equal(full.status, 'refunded');
+    assert.equal(full.commissionAmount, 0);
+    return { row, quote: state.quote, before, partial, full, earnings: await summary(state.creator, 0) };
+  });
+  for (const row of moneyCases) await run(`R1-money-table-dodo-partial-before-recovery-${row.name}`, async () => {
+    const state = await seed('dodo', { ...row, booking: false, count: 0 });
+    const pricingSnapshot = { ...state.record.pricingSnapshot };
+    delete pricingSnapshot.commissionAmount;
+    current.record = await commerce.patch(state.record._id).set({ pricingSnapshot }).commit();
+    current.payment.refunds = [{ refund_id: `refund-${state.key}`, payment_id: current.payment.payment_id, status: 'succeeded', currency: 'USD', amount: Math.round(row.refund * 100) }];
+    current.payment.refund_status = 'partial';
+    const response = await webhook();
+    assert.equal(response.status, 200, JSON.stringify(response));
+    const booking = await read((await read(state.record._id)).bookingId);
+    assert.equal(booking.dodoOriginalCommissionAmount, row.original);
+    assert.equal(booking.commissionAmount, row.retained);
+    return { row, quote: state.quote, booking, earnings: await summary(state.creator, row.retained) };
+  });
+
+  for (const row of moneyCases) await run('R1-money-table-dodo-ordinary-checkout-' + row.name, async () => {
+    const state = await seed('dodo', { ...row, booking: false, count: 0 });
+    await startDodoCheckout(state);
+    assert.equal(current.record.pricingSnapshot.commissionAmount, row.original);
+    current.payment.refunds = [{ refund_id: 'refund-' + state.key, payment_id: current.payment.payment_id, status: 'succeeded', currency: 'USD', amount: Math.round(row.refund * 100) }];
+    current.payment.refund_status = 'partial';
+    const response = await webhook();
+    assert.equal(response.status, 200, JSON.stringify(response));
+    const booking = await read((await read(current.record._id)).bookingId);
+    assert.equal(booking.requiresReschedule, undefined);
+    assert.equal(booking.commissionCalculationVersion, 2);
+    assert.equal(booking.dodoOriginalCommissionAmount, row.original);
+    assert.equal(booking.commissionAmount, row.retained);
+    return { row, quote: state.quote, booking, earnings: await summary(state.creator, row.retained) };
+  });
+  await run('R1-money-table-free-coupon', async () => {
+    const state = await seed('dodo', { coupon: 100, booking: false, count: 0 });
+    const response = await startDodoCheckout(state);
+    assert.equal(state.quote.effectiveNetAmount, 0);
+    assert.equal(state.quote.commissionAmount, 0);
+    const booking = await read((await read(current.record._id)).bookingId);
+    assert.equal(booking.commissionAmount, 0);
+    assert.equal(booking.paymentProvider, 'free');
+    return { quote: state.quote, response, booking, earnings: await summary(state.creator, 0) };
+  });
+  for (const provider of ['paypal', 'razorpay']) await run('R1-money-table-cumulative-half-' + provider, async () => {
+    const state = await seed(provider, { amount: 0.6, rate: 1.67 });
+    assert.equal(state.quote.commissionAmount, 0.01);
+    assert.equal((await refundCurrent(0.1, 'first')).status, 200);
+    assert.equal((await refundCurrent(0.2, 'second')).status, 200);
+    const booking = await read(state.record.bookingId);
+    assert.equal(booking.refundedAmount, 0.3);
+    assert.equal(booking.commissionAmount, 0.01);
+    return { booking, earnings: await summary(state.creator, 0.01) };
+  });
+
+  for (const kind of ['retry', 'concurrent', 'conflict', 'distinct', 'missing-key', 'cross-creator', 'retry-no-date', 'header', 'concurrent-distinct', 'revision-conflict']) await run(`R1-payout-record-${kind}`, async () => {
+    const state = await seed('dodo');
+    const body = { referralId: state.creator._id, packageType: 'vertex', amount: 2, paidOn: '2026-10-23T10:00:00.000Z', note: 'Fixture transfer', payoutId: `transfer-${state.key}` };
+    if (kind === 'retry-no-date') delete body.paidOn;
+    const submit = value => {
+      if (kind !== 'header') return post('/api/ref/updatePayments', value, { 'x-admin-key': 'fixture-admin' });
+      const { payoutId, ...payload } = value;
+      return post('/api/ref/updatePayments', payload, { 'x-admin-key': 'fixture-admin', 'idempotency-key': payoutId });
+    };
+    if (kind === 'missing-key') {
+      delete body.payoutId;
+      const response = await submit(body);
+      assert.equal(response.status, 400);
+      assert.equal((await documents.getDocument(state.creator._id)).vertexPayments?.length || 0, 0);
+      return { response };
+    }
+    let conflicted = false;
+    if (kind === 'revision-conflict') fixture.setRequestHook(async (phase, request) => {
+      if (phase !== 'before' || conflicted || !request.body?.p_mutations?.some(mutation => mutation.document?._type === 'creatorPayout')) return;
+      conflicted = true;
+      await documents.patch(state.creator._id).set({ notes: 'Fixture concurrent write' }).commit();
+    });
+    let responses;
+    if (['concurrent', 'concurrent-distinct'].includes(kind)) responses = await Promise.all([submit(body), submit({ ...body, payoutId: kind === 'concurrent-distinct' ? `${body.payoutId}-second` : body.payoutId })]);
+    else {
+      responses = [await submit(body)];
+      if (kind === 'cross-creator') {
+        const other = await seed('dodo');
+        responses.push(await submit({ ...body, referralId: other.creator._id }));
+        current = state;
+      } else responses.push(await submit({ ...body,
+        ...(kind === 'conflict' ? { amount: 3 } : {}),
+        ...(kind === 'distinct' ? { payoutId: `${body.payoutId}-second` } : {}),
+      }));
+    }
+    assert.equal(responses[0].status, 200, JSON.stringify(responses));
+    assert.equal(responses[1].status, ['conflict', 'cross-creator'].includes(kind) ? 409 : 200, JSON.stringify(responses));
+    const creator = await documents.getDocument(state.creator._id);
+    const expected = ['distinct', 'concurrent-distinct'].includes(kind) ? 2 : 1;
+    assert.equal(creator.vertexPayments.length, expected);
+    assert.equal(creator.paidTotal, 2 * expected);
+    assert.equal(creator.owedTotal, 5.5 - 2 * expected);
+    const receipts = await sql`select payload from migration.source_documents where document_type='creatorPayout' and not tombstoned and payload->>'referralId'=${state.creator._id}`;
+    assert.equal(receipts.length, expected);
+    if (kind === 'revision-conflict') assert.equal(conflicted, true);
+    return { responses, creator, receipts, conflicted };
+  });
+
+  await run('R1-migration-preserves-settled-source-and-cron', async () => {
+    const { functionDefinition } = await import('./lib/sweep-postgres-fixture.mjs');
+    await sql.unsafe(functionDefinition('20260712092342_close_supabase_port_and_unified_auth.sql', 'public.roo_referral_earnings_summary')
+      .replace("and (booking.booking_payload->>'commissionAmount')::numeric <> 0", "and ((booking.booking_payload->>'commissionAmount')::numeric <> 0 or booking.booking_payload ? 'dodoOriginalCommissionAmount')"));
+    const cohorts = [];
+    for (const settled of [true, false]) {
+      const first = await seed('dodo', { amount: 12.51, rate: 0.04 });
+      const second = await seed('dodo', { amount: 12.51, rate: 0.04 });
+      await commerce.patch(first.record.bookingId).unset(['commissionAmount', 'commissionCalculationVersion']).commit();
+      await commerce.patch(second.record.bookingId).unset(['commissionAmount', 'commissionCalculationVersion']).set({ referral: { _type: 'reference', _ref: first.creator._id }, referralCode: first.key }).commit();
+      if (settled) await documents.patch(first.creator._id).set({ vertexPayments: [{ _key: 'historical', _type: 'paymentLogVertex', amount: 0.01, paidOn: '2026-01-01T00:00:00.000Z' }] }).commit();
+      cohorts.push({ settled, first, ids: [first.record.bookingId, second.record.bookingId] });
+    }
+    const cron = async () => {
+      const response = await fetch(`${origin}/api/ref/cronSyncAll`, { headers: { authorization: 'Bearer fixture' } });
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    await cron();
+    const settled = cohorts[0];
+    const before = await sql`select legacy_sanity_id, source_revision, source_hash, payload from migration.source_documents where legacy_sanity_id=any(${[settled.first.creator._id, ...settled.ids]}) order by legacy_sanity_id`;
+    await applyCommissionMigration();
+    await cron();
+    const after = await sql`select legacy_sanity_id, source_revision, source_hash, payload from migration.source_documents where legacy_sanity_id=any(${[settled.first.creator._id, ...settled.ids]}) order by legacy_sanity_id`;
+    assert.deepEqual(after, before);
+    const paidCreator = await documents.getDocument(settled.first.creator._id);
+    assert.equal(paidCreator.earnedTotal, 0.01);
+    assert.equal(paidCreator.owedTotal, 0);
+    await summary(settled.first.creator, 0.01);
+    const unpaidCreator = await documents.getDocument(cohorts[1].first.creator._id);
+    assert.equal(unpaidCreator.earnedTotal, 0.02);
+    assert.equal(unpaidCreator.owedTotal, 0.02);
+    await summary(cohorts[1].first.creator, 0.02);
+    const newBookings = [];
+    for (let index = 0; index < 2; index++) {
+      const next = await seed('dodo', { amount: 9.99, rate: 0.04 });
+      newBookings.push(await commerce.patch(next.record.bookingId).set({ referral: { _type: 'reference', _ref: settled.first.creator._id }, referralCode: settled.first.key }).commit());
+    }
+    await summary(settled.first.creator, 0.01);
+    current = cohorts[1].first;
+    return { before, after, paidCreator, unpaidCreator, newBookings };
+  });
+
+  await run('R1-paid-legacy-zero-preserves-marker-presence', async () => {
+    const first = await seed('dodo', { amount: 12.51, rate: 0.04 });
+    const second = await seed('dodo', { amount: 12.51, rate: 0.04 });
+    await documents.patch(first.creator._id).set({ vertexPayments: [{ _key: 'historical', _type: 'paymentLogVertex', amount: 0.01, paidOn: '2026-01-01T00:00:00.000Z' }] }).commit();
+    await commerce.patch(first.record.bookingId).unset(['commissionCalculationVersion', 'dodoOriginalCommissionAmount']).set({ commissionAmount: 0 }).commit();
+    await commerce.patch(second.record.bookingId).unset(['commissionCalculationVersion']).set({ commissionAmount: 0, dodoOriginalCommissionAmount: null, referral: { _type: 'reference', _ref: first.creator._id }, referralCode: first.key }).commit();
+    return { bookings: [await read(first.record.bookingId), await read(second.record.bookingId)], earnings: await summary(first.creator, 0.01) };
   });
 
   await run('all-payouts-projection-rebuilds', async () => {
