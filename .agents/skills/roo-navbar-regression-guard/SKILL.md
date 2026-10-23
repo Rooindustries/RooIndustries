@@ -22,11 +22,13 @@ change; the retained APNG is not the navbar's animated source.
 Run the existing fixture-backed suites from the repository root:
 
 ```bash
-npm run test:nav:sections -- --project=chromium --reporter=line
-npm run test:nav:chaos -- --project=chromium --reporter=line
+env -u BASE_URL ./node_modules/.bin/playwright test \
+  tests/section-nav.spec.js tests/nav-chaos.spec.js --project=chromium --reporter=line
 ```
 
-Leave `BASE_URL` unset so `playwright.config.js` starts its isolated local fixture.
+This invokes Playwright directly so `playwright.config.js` starts its isolated
+local fixture. The `npm run test:nav:*` wrappers synthesize `BASE_URL` and assume
+an already running server; use the direct command for this check.
 Use a free `PW_PORT` and `ROO_TEST_HOST` for this checkout when other tests run.
 The suites cover navigation and desktop layout; they do not prove logo pixel
 transparency. Check rendered logos, computed wrapper styles and asset alpha at

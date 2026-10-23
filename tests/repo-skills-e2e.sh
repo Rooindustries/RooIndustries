@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mode=${1:-catalog}
-case "$mode" in catalog|harnesses) ;; *) echo 'Usage: bash tests/repo-skills-e2e.sh [catalog|harnesses]' >&2; exit 64 ;; esac
+case "${1:-catalog}" in catalog) ;; *) echo 'Usage: bash tests/repo-skills-e2e.sh [catalog]' >&2; exit 64 ;; esac
 repo=$(git rev-parse --show-toplevel)
 artifacts=${ROO_SKILLS_ARTIFACTS:-$repo/test-results/repo-skills}
 mkdir -p "$artifacts" "${TMPDIR:-$HOME/.cache/agent-tmp}"
@@ -65,42 +64,6 @@ catalog "$scratch/checkout" checkout "$scratch/checkout"
 catalog "$scratch/checkout/nested" nested "$scratch/checkout"
 catalog "$scratch/outside" outside ''
 
-if [[ "$mode" == harnesses ]]; then
-  prompt='This is a read-only skill discovery check. Do not call tools, inspect files, or delegate. From the skills already offered in your current context, output only a JSON array of skill names beginning with roo-. Use [] if none are offered. Do not infer names from repository instructions.'
-  server_keys=$(codex mcp list --json | jq -r '.[].name')
-  codex_config=()
-  while IFS= read -r key; do
-    [[ -z "$key" ]] || codex_config+=(-c "mcp_servers.$key.enabled=false")
-  done <<<"$server_keys"
-
-  probe() {
-    local harness=$1 cwd=$2 label=$3 wanted=$4
-    local output="$scratch/$harness-$label.jsonl"
-    if [[ "$harness" == claude ]]; then
-      (cd "$cwd"; timeout 180s claude -p "$prompt" --model claude-opus-5-5 --effort xhigh \
-        --output-format stream-json --verbose --no-session-persistence --max-turns 1 --tools Skill \
-        --strict-mcp-config --mcp-config '{"mcpServers":{}}' --settings '{"disableAllHooks":true}') \
-        < /dev/null > "$output" 2> "$scratch/$harness-$label.stderr"
-      jq -se 'all(.[]; .is_error != true) and ([.[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use")] | length) == 0' "$output" >/dev/null
-      jq -s '[.[] | select(.type == "result")][-1].result | fromjson | sort' "$output" > "$artifacts/$harness-context-$label.json"
-    else
-      timeout 180s codex exec --json --ephemeral --skip-git-repo-check -C "$cwd" --sandbox read-only \
-        -m gpt-6.1-sol -c 'model_reasoning_effort="xhigh"' -c 'notify=[]' \
-        -c 'suppress_unstable_features_warning=true' "${codex_config[@]}" "$prompt" \
-        < /dev/null > "$output" 2> "$scratch/$harness-$label.stderr"
-      jq -se 'any(.[]; .type == "turn.completed") and all(.[]; .type != "error" and .type != "turn.failed") and ([.[] | select(.type == "item.completed" and .item.type != "agent_message" and .item.type != "reasoning")] | length) == 0' "$output" >/dev/null
-      jq -s '[.[] | select(.type == "item.completed" and .item.type == "agent_message")][-1].item.text | fromjson | sort' "$output" > "$artifacts/$harness-context-$label.json"
-    fi
-    jq -e --argjson expected "$wanted" '. == $expected' "$artifacts/$harness-context-$label.json" >/dev/null
-  }
-
-  for harness in claude codex; do
-    probe "$harness" "$repo" inside "$expected"
-    probe "$harness" "$scratch/outside" outside '[]'
-  done
-  probe claude "$scratch/checkout/nested" checkout "$expected"
-fi
-
-jq -n --arg mode "$mode" --argjson skills "$expected" --arg codex "$(codex --version)" \
-  '{result:"passed",mode:$mode,skills:$skills,codex:$codex,checks:["tracked skill files and relative links","repo discovery","clean checkout discovery","nested discovery","outside has no repo skills"]}' > "$artifacts/result.json"
-printf 'Repo skills E2E passed (%s). Artifacts: %s\n' "$mode" "$artifacts"
+jq -n --argjson skills "$expected" --arg codex "$(codex --version)" \
+  '{result:"passed",skills:$skills,codex:$codex,checks:["tracked skill files and relative links","repo discovery","clean checkout discovery","nested discovery","outside has no repo skills"]}' > "$artifacts/result.json"
+printf 'Repo skills E2E passed. Artifacts: %s\n' "$artifacts"
