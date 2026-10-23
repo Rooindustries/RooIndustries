@@ -1,5 +1,5 @@
 import { captureException, httpIntegration, init } from "@sentry/nextjs";
-import { isProductionDeployment } from "./deployment";
+import { isProductionDeployment } from "./deployment.mjs";
 import {
   NO_DATA_COLLECTION,
   envelopeHeaderScrubber,

@@ -1,7 +1,7 @@
 import { withSentryConfig } from "@sentry/nextjs/config";
 import { readdirSync, lstatSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
-import { isProductionDeployment } from "./src/lib/monitoring/deployment.js";
+import { isProductionDeployment } from "./src/lib/monitoring/deployment.mjs";
 
 export function validateDistDir(value, { isolated = false } = {}) {
   if (typeof value !== "string" || !/^\.next(?:-[a-zA-Z0-9_-]+)?$/.test(value) ||

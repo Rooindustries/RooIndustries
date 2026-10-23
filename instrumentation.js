@@ -1,4 +1,4 @@
-import { isProductionDeployment } from "./src/lib/monitoring/deployment";
+import { isProductionDeployment } from "./src/lib/monitoring/deployment.mjs";
 
 export async function register() {
   if (isProductionDeployment() && process.env.NEXT_RUNTIME === "nodejs" && process.env.NEXT_PUBLIC_SENTRY_DSN) {

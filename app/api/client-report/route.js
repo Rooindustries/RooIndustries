@@ -1,5 +1,5 @@
 import { monitoringDsn } from "../../../src/lib/monitoring/scrub";
-import { isProductionDeployment } from "../../../src/lib/monitoring/deployment";
+import { isProductionDeployment } from "../../../src/lib/monitoring/deployment.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
