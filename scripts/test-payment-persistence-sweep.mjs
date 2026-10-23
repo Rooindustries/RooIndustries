@@ -13,6 +13,7 @@ const originalFetch=globalThis.fetch;
 const originalNow=Date.now;
 const originalDate=Date;
 const fullChain=process.argv.includes('--full-chain');
+const reviewMode = fullChain || process.argv.includes('--review');
 const legacyOwner=process.argv.includes('--legacy-owner');
 const legacyVendorEnvironment=process.argv.includes('--leftover-vendor-env');
 const sourceText=name=>fs.readFileSync(path.join(process.cwd(),name),'utf8');
@@ -22,7 +23,7 @@ const summaryWarnings = [];
 const originalWarn = console.warn;
 console.warn = (...values) => { summaryWarnings.push(values); originalWarn(...values); };
 restores.push(() => { console.warn = originalWarn; });
-for(const key of Object.keys(process.env))if(/^(SANITY|SUPABASE|PAYPAL|RAZORPAY|DODO|REACT_APP_|NEXT_PUBLIC_|ALLOW_LIVE_|RESEND|BOOKING_EMAIL|FROM_EMAIL|OWNER_EMAIL|DATA_|COMMERCE_|VERCEL_ENV|REF_SESSION|CRON_|RATE_LIMIT_|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|http_proxy|https_proxy|all_proxy|NODE_USE_ENV_PROXY)/.test(key))delete process.env[key];
+for(const key of Object.keys(process.env))if(/^(SANITY|SUPABASE|PAYPAL|RAZORPAY|DODO|SENTRY_|VITE_SENTRY|REACT_APP_|NEXT_PUBLIC_|ALLOW_LIVE_|RESEND|BOOKING_EMAIL|FROM_EMAIL|OWNER_EMAIL|DATA_|COMMERCE_|VERCEL_ENV|REF_SESSION|CRON_|RATE_LIMIT_|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|http_proxy|https_proxy|all_proxy|NODE_USE_ENV_PROXY)/.test(key))delete process.env[key];
 process.env.RESEND_API_KEY='re_fixture';
 if(a1Mode||process.argv.includes('--a2'))Object.assign(process.env,{FROM_EMAIL:'noreply@example.invalid',OWNER_EMAIL:'owner@example.invalid'});
 Object.assign(process.env,{NODE_ENV:'test',VERCEL_ENV:'development',DATA_PRIMARY_BACKEND:'supabase',COMMERCE_PRIMARY_BACKEND:'supabase',COMMERCE_FAILOVER_GENERATION:'0',PAYPAL_ENV:'sandbox',PAYPAL_CLIENT_ID:'fixture-client',PAYPAL_CLIENT_SECRET:'fixture-secret',PAYPAL_WEBHOOK_ID:'fixture-webhook',RAZORPAY_KEY_ID:'rzp_test_fixture',RAZORPAY_KEY_SECRET:'fixture-secret',RAZORPAY_WEBHOOK_SECRET:'fixture-webhook-secret',PAYMENT_SESSION_SECRET:'fixture-session-secret',REF_SESSION_SECRET:'fixture-ref-session-secret',CRON_SECRET:'fixture-cron',DODO_PAYMENTS_ENVIRONMENT:'test_mode',DODO_PAYMENTS_API_KEY:'fixture-dodo',DODO_PAYMENTS_WEBHOOK_KEY:`whsec_${Buffer.from('fixture-dodo-secret').toString('base64')}`,DODO_PAYMENTS_PRODUCT_ID:'pdt_fixture',DODO_PAYMENTS_RETURN_URL:'https://example.invalid/checkout'});
@@ -52,6 +53,17 @@ fs.mkdirSync(path.dirname(artifact),{recursive:true});
 const evidence={checkedAt:new Date().toISOString(),productionRequests:0,scenarios:[],standIns:[{boundary:'Provider HTTP',scope:'Synthetic PayPal/Razorpay/Dodo response shapes and held requests/disconnects through actual provider clients and Dodo SDK; no live API.'},{boundary:'Coupon dependency failure',scope:'The release case throws through an injected callback; release-stored reruns the boundary through the real coupon release module against a missing revision in PostgreSQL.'},{boundary:'Clock',scope:'For takeover cases Date.now advances91000ms inside this isolated process; stored90s lease timestamps and actual native projection remain real. PostgreSQL clock is not changed.'},{boundary:'Auth HTTP',scope:'Synthetic signed user response; actual installed SSR/AuthSDK selects submitted cookies and actual account/domain SQL evaluates identity. Hosted GoTrue excluded.'},{boundary:'Local infrastructure/grants',scope:'Shared fixture bootstrap auth/storage tables and expanded service_role grants. Actual repository account/commerce/migration SQL; hosted RLS and migration ledger excluded.'}],limits:['No Sanity query engine, hosted GoTrue/RLS, provider services, UI/browser, production Next server or full build.']};
 let fixture,server,origin,commerce,documents,flow,access,sql,providers,a1Ui;
 evidence.sourceEdition='current source';
+if (reviewMode) evidence.dodoContract = {
+  checkedAt: '2026-10-24',
+  sources: [
+    'https://docs.dodopayments.com/developer-resources/webhooks',
+    'https://docs.dodopayments.com/developer-resources/webhooks/intents/payment',
+    'https://docs.dodopayments.com/api-reference/payments/get-payments-1',
+  ],
+  signature: 'HMAC-SHA256 of webhook-id.webhook-timestamp.rawBody; base64 v1 signature; five-minute tolerance',
+  transport: 'Actual Next route exports through local HTTP, installed Dodo SDK and PostgreSQL 17; provider HTTP is a contract fake',
+  hostedDodo: 'Deferred to ROO-739; no hosted payment or refund was sent',
+};
 let razorpayRefunds=[];
 let dodoPayment,dodoRefund,paypalOrder,paypalCapture,razorpayPayment,verificationStatus,verificationDisconnect,providerHook;
 let providerRequests=[],blockedNetwork=0,authUnlinks=0,scenarioNumber=0,authUser,emailFailure=false;
@@ -99,8 +111,27 @@ const seed=async(provider='paypal',status='booked',changes={})=>{
 const tokenFor=r=>access.createPaymentAccessToken({paymentRecordId:r._id,provider:r.provider,pricingFingerprint:r.pricingFingerprint,backend:'supabase',cutoverGeneration:0,expirySeconds:600});
 const paypalReq=(type,resource,id=`event-fixture-${scenarioNumber}`)=>{const body={id,event_type:type,resource};return{body,rawBody:JSON.stringify(body),headers:{'paypal-transmission-id':'fixture-transmission','paypal-transmission-time':new Date().toISOString(),'paypal-transmission-sig':'fixture-signature','paypal-cert-url':'https://example.invalid/cert','paypal-auth-algo':'SHA256withRSA'}};};
 const razorReq=(type,payload)=>{const body={event:type,payload};const rawBody=JSON.stringify(body);return{body,rawBody,headers:{'x-razorpay-signature':crypto.createHmac('sha256',process.env.RAZORPAY_WEBHOOK_SECRET).update(rawBody).digest('hex')}};};
-const dodoReq=(payment=dodoPayment,type='payment.succeeded')=>{const body={business_id:'business-fixture',type,timestamp:'2026-01-01T00:00:00.000Z',data:payment};const rawBody=JSON.stringify(body),timestamp=String(Math.floor(Date.now()/1000)),id=`dodo-fixture-${scenarioNumber}`;const signature=crypto.createHmac('sha256',Buffer.from('fixture-dodo-secret')).update(`${id}.${timestamp}.${rawBody}`).digest('base64');return{body,rawBody,headers:{'webhook-id':id,'webhook-timestamp':timestamp,'webhook-signature':`v1,${signature}`}};};
+const dodoReq = (payment = dodoPayment, type = 'payment.succeeded', eventSuffix = '') => {
+  const payloadType = type.startsWith('refund.') ? 'Refund' : type.startsWith('dispute.') ? 'Dispute' : 'Payment';
+  const body = { business_id: 'business-fixture', type, timestamp: '2026-01-01T00:00:00.000Z',
+    data: { payload_type: payloadType, ...payment } };
+  const rawBody = JSON.stringify(body);
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const id = `dodo-fixture-${scenarioNumber}${eventSuffix ? `-${eventSuffix}` : ''}`;
+  const signature = crypto.createHmac('sha256', Buffer.from('fixture-dodo-secret'))
+    .update(`${id}.${timestamp}.${rawBody}`).digest('base64');
+  return { body, rawBody, headers: {
+    'webhook-id': id, 'webhook-timestamp': timestamp, 'webhook-signature': `v1,${signature}`,
+  } };
+};
 const requestFlow=async(action,input={})=>{const response=await fetch(`${origin}/flow/${action}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.timeout(30000)});return{status:response.status,body:await response.json()};};
+const requestRoute = async (pathname, body = {}, headers = {}) => {
+  const response = await fetch(`${origin}${pathname}`, {
+    method: 'POST', headers: { 'content-type': 'application/json', origin, ...headers },
+    body: JSON.stringify(body), signal: AbortSignal.timeout(30000),
+  });
+  return { status: response.status, body: await response.json() };
+};
 const assertRefund=async({reversed=false}={})=>{
   const r=await record(),b=(await row(bookingId)).payload;
   const [p]=await sql`select status,refund_state,source_revision,backend_owner from commerce.payment_records where legacy_sanity_id=${recordId}`;
@@ -119,7 +150,7 @@ const a1RebuildProof=async(name)=>{
 const run = async (name, fn) => {
   if (!supportedScenario(name) || (only && !only.includes(name))) return;
   const emailSettings = { FROM_EMAIL: process.env.FROM_EMAIL, OWNER_EMAIL: process.env.OWNER_EMAIL };
-  if (name.startsWith('recovery-')) {
+  if (name.startsWith('recovery-') || name.startsWith('review-')) {
     Object.assign(process.env, { FROM_EMAIL: 'noreply@example.invalid', OWNER_EMAIL: 'owner@example.invalid' });
   }
   const start = originalNow();
@@ -151,6 +182,25 @@ try{
 
   server=http.createServer(async(req,res)=>{try{
     const chunks=[];for await(const c of req)chunks.push(c);const raw=Buffer.concat(chunks).toString();
+    if (reviewMode && req.url.startsWith('/api/')) {
+      const request = new Request(`${origin}${req.url}`, {
+        method: req.method, headers: req.headers, body: raw || undefined,
+      });
+      let response;
+      if (req.url === '/api/holdSlot') {
+        response = await (await import('../app/api/holdSlot/route.js')).POST(request);
+      } else if (req.url.startsWith('/api/payment/webhook/')) {
+        const provider = req.url.split('/').at(-1);
+        const route = await import(`../app/api/payment/webhook/${provider}/route.js`);
+        response = await route.POST(request);
+      } else {
+        const route = await import('../app/api/payment/[action]/route.js');
+        response = await route.POST(request, { params: Promise.resolve({ action: req.url.split('/').at(-1) }) });
+      }
+      res.writeHead(response.status, Object.fromEntries(response.headers));
+      res.end(await response.text());
+      return;
+    }
     if(req.url==='/a1-ui-complete'){assert.ok(a1Ui);a1Ui.done.resolve(JSON.parse(raw));res.writeHead(200,{'content-type':'application/json'});res.end('{}');return;}
     if(req.url==='/a1-paypal-stale-capture'){
       assert.ok(a1Ui);const source=sourceText('src/components/Payment.jsx');
@@ -219,6 +269,7 @@ try{
   sql = fixture.sql;
   if (!fullChain) await fixture.apply('20261005000500_project_booking_payment_currency_subunits.sql');
   if (!fullChain) await fixture.apply('20261013000000_skip_review_only_recovery_rows.sql');
+  if (!fullChain && reviewMode) await fixture.apply('20261024000000_resume_reviewed_bookings.sql');
   const providerOrigins=new Set(['https://api-m.sandbox.paypal.com','https://api.razorpay.com','https://test.dodopayments.com','https://api.resend.com']);
   globalThis.fetch=(input,init)=>{const url=new URL(typeof input==='string'||input instanceof URL?String(input):input.url);let target;
     if([fixture.origin,origin].includes(url.origin))target=url.href;else if(providerOrigins.has(url.origin))target=`${origin}${url.pathname}${url.search}`;else{blockedNetwork++;throw new Error(`Nonlocal destination blocked ${url.origin}`);}return originalFetch(target,{...init,redirect:'error',signal:init?.signal||AbortSignal.timeout(30000)});};
@@ -284,20 +335,30 @@ try{
     fixture.setRequestHook(async(phase,request)=>{if(phase!=='after'||raced||!request.response)return;const raw=JSON.stringify(request.response);if(!raw.includes(recordId)||!raw.includes('pricingSnapshot')||++reads!==2)return;raced=true;fixture.setRequestHook(null);const current=await record();await commerce.patch(recordId).set({status:'finalizing',finalizationLeaseId:'newer-owner',finalizationLeaseExpiresAt:new Date(originalNow()+120000).toISOString()}).commit();before=await snapshot({receipts:true});});
     const result=await requestFlow('finalize',{paymentAccessToken:tokenFor({_id:recordId,provider:'paypal',pricingFingerprint:'fixture-pricing'}),body:{paypalOrderId:'order-fixture'}});assert.equal(raced,true);assert.deepEqual(await snapshot({receipts:true}),before);assert.equal((await record()).finalizationLeaseId,'newer-owner');assert.equal(providerRequests.filter(x=>x.path.includes('/checkout/orders/')).length,0);assert.ok(result.status>=400||result.status===202);return{status:result.status,revisionState,fullSnapshotUnchanged:true,snapshotAfterConcurrentWriter:before,snapshotAfterObsoleteFinalize:await snapshot({receipts:true}),newerOwnerRetained:true,providerVerificationRequests:0};
   });
-  const startInput=async()=>{
+  const startInput=async(realRoutes=false)=>{
     const packageTitle='Fixture Payment';
     for(const doc of [{_id:'package.payment-integration',_type:'package',title:packageTitle,price:'$9.99'},{_id:'6d8a3646-0ed2-44b5-ad45-c5c9d578126a',_type:'bookingSettings',dateSlots:[{date:'2099-01-01',times:['15:30']}]}]){
       const current=await documents.fetch('*[_id == $id][0]',{id:doc._id});if(current)await documents.patch(doc._id).ifRevisionId(current._rev).set(doc).commit();else await documents.create(doc);
     }
     const expiresAt=new Date(originalNow()+1800000).toISOString();
-    const hold={_id:'slotHold.fixture',_type:'slotHold',backendOwner:'supabase',cutoverGeneration:0,startTimeUTC:'2099-01-01T10:00:00.000Z',packageTitle,phase:'holding',holdNonce:'fixture-hold-owner',expiresAt};await commerce.create(hold);
+    const hold={_id:'slotHold.fixture',_type:'slotHold',backendOwner:'supabase',cutoverGeneration:0,startTimeUTC:'2099-01-01T10:00:00.000Z',packageTitle,phase:'holding',holdNonce:'fixture-hold-owner',expiresAt};
+    let routeHold;
+    if (realRoutes) {
+      routeHold = await requestRoute('/api/holdSlot', { packageTitle, startTimeUTC: hold.startTimeUTC });
+      assert.equal(routeHold.status, 200, JSON.stringify(routeHold));
+    } else await commerce.create(hold);
     const {issueHoldToken}=await import('../src/server/booking/holdToken.js');
     const bookingPayload={packageTitle,email:'customer@example.invalid',discord:'fixture',specs:'synthetic computer',mainGame:'fixture game',localTimeZone:'Asia/Kolkata',startTimeUTC:hold.startTimeUTC,slotHoldId:hold._id,slotHoldToken:issueHoldToken({holdId:hold._id,startTimeUTC:hold.startTimeUTC,expiresAt,holdNonce:hold.holdNonce,backend:'supabase',cutoverGeneration:0})};
+    if (routeHold) Object.assign(bookingPayload, {
+      slotHoldId: routeHold.body.holdId, slotHoldToken: routeHold.body.holdToken,
+      slotHoldExpiresAt: routeHold.body.expiresAt,
+    });
     const {resolvePaymentQuote}=await import('../src/server/api/ref/pricing.js');const quote=await resolvePaymentQuote({packageTitle,client:commerce});const {buildQuoteFingerprint}=await import('../src/server/api/payment/paymentRecord.js');return{provider:'paypal',bookingPayload,quoteFingerprint:buildQuoteFingerprint({bookingPayload,quote})};
   };
   const a1Start=async(provider='paypal',variant='normal')=>{
     fixture.setRequestHook(async(phase,request)=>{if(phase==='after'&&(request.status>=400||request.response?.ok===false||request.response?.error)){evidence.databaseErrors||=[];evidence.databaseErrors.push({scenario:scenarioNumber,response:request.response});}});
-    const input=await startInput();input.provider=provider;input.bookingPayload.message='Original note';emailFailure=variant==='email-failure';
+    const realRoutes = variant.startsWith('review-');
+    const input=await startInput(realRoutes);input.provider=provider;input.bookingPayload.message='Original note';emailFailure=variant==='email-failure';
     if (variant === 'upgrade') {
       const original = { ...input.bookingPayload, _id: 'booking.original', _type: 'booking',
         backendOwner: 'supabase', cutoverGeneration: 0, status: 'captured',
@@ -321,12 +382,13 @@ try{
       input.bookingPayload = { originalOrderId: original._id, packageTitle: target.title, email: original.email,
         upgradeIntentToken: issueUpgradeIntentToken({ bookingId: original._id, email: original.email, targetPackageTitle: target.title, backend: 'supabase', cutoverGeneration: 0 }) };
     }
-    if(variant==='referral'){
+    if(variant==='referral'||variant==='review-referral'){
       const referral={_id:'referral.a1',_type:'referral',slug:{_type:'slug',current:'fixture'},registrationStatus:'verified',currentDiscountPercent:0,currentCommissionPercent:10,totalSales:0,totalEarnings:0,backendOwner:'supabase',cutoverGeneration:0};
+      if (realRoutes) referral.successfulReferrals = 0;
       const current=await documents.getDocument(referral._id);if(current)await documents.patch(referral._id).ifRevisionId(current._rev).set(referral).commit();else await documents.create(referral);
       input.bookingPayload.referralCode='FIXTURE';
     }
-    if(variant==='coupon'||provider==='free'){
+    if(variant==='coupon'||variant==='review-coupon'||provider==='free'){
       const code=`A1${scenarioNumber}`,percent=provider==='free'?100:10;
       await commerce.create({_id:`coupon.a1.${scenarioNumber}`,_type:'coupon',code,isActive:true,discountType:'percent',discountPercent:percent,canCombineWithReferral:true,timesUsed:0,activeReservations:0,maxUses:0,backendOwner:'supabase',cutoverGeneration:0});input.bookingPayload.couponCode=code;
     }
@@ -345,7 +407,8 @@ try{
     };
     paypalOrder.status='CREATED';paypalOrder.purchase_units[0].amount={value,currency_code:'USD'};paypalOrder.purchase_units[0].payments={captures:[]};
     const browserResponse = variant === 'browser' ? await fetch(`${origin}/start-route`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }) : null;
-    const started = browserResponse ? { status: browserResponse.status, body: await browserResponse.json(), cacheControl: browserResponse.headers.get('cache-control') } : await requestFlow('start', { body: input });
+    const started = realRoutes ? await requestRoute('/api/payment/start', input)
+      : browserResponse ? { status: browserResponse.status, body: await browserResponse.json(), cacheControl: browserResponse.headers.get('cache-control') } : await requestFlow('start', { body: input });
     assert.equal(started.status,200,JSON.stringify(started));
     const payment = provider === 'free'
       ? await commerce.fetch('*[_type == "paymentRecord" && bookingId == $id][0]', { id: started.body.bookingId })
@@ -357,6 +420,12 @@ try{
     return{input,quote,started,id:payment._id,proof};
   };
   const a1Hook=async provider=>requestFlow(provider,{req:provider==='paypal'?paypalReq('PAYMENT.CAPTURE.COMPLETED',{id:'capture-fixture',supplementary_data:{related_ids:{order_id:'order-fixture'}}}):provider==='razorpay'?razorReq('payment.captured',{payment:{entity:razorpayPayment}}):dodoReq()});
+  if (reviewMode) {
+    const { runPaymentReviewScenarios } = await import('./lib/payment-review-scenarios.mjs');
+    await runPaymentReviewScenarios({ run, a1Start, a1Hook, row, sql, commerce, requestFlow,
+      tokenFor, originalNow, providerRequests: () => providerRequests,
+      dodoPayment: () => dodoPayment, snapshot, requestRoute, dodoReq, originalDate, documents });
+  }
   for (const mode of ['complete', 'partial', 'missing-details']) await run(`recovery-reschedule-created-${mode}`, async () => {
     const checkout = await a1Start();
     const missing = mode === 'missing-details';
