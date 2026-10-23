@@ -1939,6 +1939,32 @@ test("content fixture reset removes created documents and preserves referrals", 
   await evidence(page, testInfo, { createdId: receipt.documentId, restoredId: deletedId, benchmarkIds: reset.documents.map(document => document._id), referralCount: referralSnapshot.length });
 });
 
+test("blank legal create and replace commands preserve stored content", async ({ page, request, baseURL }, testInfo) => {
+  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  const outcomes = [];
+  for (const type of ["privacyPolicy", "terms"]) {
+    const rows = await cms(request, `/api/admin/content/documents?type=${type}`);
+    const original = await cms(request, `/api/admin/content/documents/${rows.documents[0]._id}`);
+    const document = structuredClone(Object.fromEntries(Object.entries(original.document).filter(([key]) => !key.startsWith("_"))));
+    for (const section of document.sections) for (const block of section.content) for (const span of block.children) span.text = " \n\t ";
+    for (const operation of ["create", "replace"]) {
+      const before = await contentCounts(request, control);
+      const command = { operation, type, document, ...(operation === "create" ? { createIntentId: randomUUID() } : { documentId: original.document._id, expectedRevision: original.revision }) };
+      const response = await request.post("/api/admin/content/publish", { headers: { "x-admin-key": ADMIN_KEY }, data: command });
+      const body = await response.json();
+      const after = await contentCounts(request, control);
+      outcomes.push({ type, operation, status: response.status(), body, before, after });
+      expect.soft(response.status()).toBe(400);
+      expect.soft(body).toMatchObject({ ok: false, code: "CMS_VALIDATION_FAILED" });
+      expect.soft(after, "No document or command receipt is written").toEqual(before);
+      expect.soft((await cms(request, `/api/admin/content/documents/${original.document._id}`)).document).toEqual(original.document);
+    }
+  }
+  await login(page);
+  await choose(page, "Privacy Policy Page");
+  await evidence(page, testInfo, { outcomes });
+});
+
 test("empty Portable Text exposes validation on its accessible field", async ({ page }, testInfo) => {
   await page.route("**/api/admin/content/documents/tooling-privacyPolicy", async route => {
     const response = await route.fetch();
