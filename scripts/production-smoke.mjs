@@ -11,6 +11,15 @@ const PRICE_PATTERN = /^\$\d{1,3}(?:,\d{3})*(?:\.\d{2})?$/;
 
 class Refusal extends Error {}
 
+// The runner could not reach the site at all (DNS, TLS, refused or reset connections, a dead browser).
+// A deployment can't cause these, so they mean "the smoke could not run", never a money-path failure.
+class CouldNotRun extends Error {}
+const asRunnerFault = (error, what) => {
+  if (error instanceof CouldNotRun) return error;
+  const transport = (error?.name === "TypeError" && /fetch failed/.test(error.message)) || /net::ERR_/.test(String(error?.message));
+  return transport ? new CouldNotRun(`couldn't reach ${what}: ${error.cause?.code || error.cause?.message || error.message}`) : error;
+};
+
 const parseArgs = (argv) => {
   const options = { base: PRODUCTION };
   for (let index = 0; index < argv.length; index += 1) {
@@ -50,7 +59,7 @@ const getWithRetries = async (url, check) => {
       const response = await fetch(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(20000) });
       return await check(response);
     } catch (error) {
-      lastError = error;
+      lastError = asRunnerFault(error, url);
       if (attempt < ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
     }
   }
@@ -157,7 +166,7 @@ const withBrowserRetries = async (browser, base, check) => {
     try {
       return await check(browser, base);
     } catch (error) {
-      lastError = error;
+      lastError = browser.isConnected() ? asRunnerFault(error, base) : new CouldNotRun(`the browser closed: ${error.message}`);
       if (attempt < ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
     }
   }
@@ -207,9 +216,12 @@ const main = async () => {
         results.push({ name, ok: true, detail: detail || "" });
         console.log(`ok    ${name}${detail ? ` (${detail})` : ""}`);
       } catch (error) {
-        if (!browser.isConnected() && !/smoke deadline/.test(error.message)) {
-          if (results.some((result) => !result.ok)) break;
-          throw error;
+        const fault = browser.isConnected() || /smoke deadline/.test(error.message) ? error : new CouldNotRun(`the browser closed: ${error.message}`);
+        if (fault instanceof CouldNotRun) {
+          results.push({ name, ok: false, couldNotRun: true, detail: fault.message });
+          console.log(`SKIP  ${name}: ${fault.message}`);
+          if (!browser.isConnected()) break;
+          continue;
         }
         results.push({ name, ok: false, detail: error.message });
         console.log(`FAIL  ${name}: ${error.message}`);
@@ -219,13 +231,16 @@ const main = async () => {
   } finally {
     await browser.close();
   }
-  const failed = results.filter((result) => !result.ok);
+  const failed = results.filter((result) => !result.ok && !result.couldNotRun);
+  const unreachable = results.filter((result) => result.couldNotRun);
   if (process.env.GITHUB_STEP_SUMMARY) {
-    const rows = results.map((result) => `| ${result.ok ? "ok" : "FAIL"} | ${result.name} | ${result.detail.replace(/\|/g, "\\|")} |`);
+    const rows = results.map((result) => `| ${result.ok ? "ok" : result.couldNotRun ? "SKIP" : "FAIL"} | ${result.name} | ${result.detail.replace(/\|/g, "\\|")} |`);
     fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [`### Money-path smoke on ${base}`, "", "| Result | Check | Detail |", "| --- | --- | --- |", ...rows, ""].join("\n"));
   }
-  console.log(failed.length ? `${failed.length} money-path check(s) failed on ${base}.` : `All money-path checks passed on ${base}.`);
-  const code = failed.length ? 2 : 0;
+  if (failed.length) console.log(`${failed.length} money-path check(s) failed on ${base}.`);
+  else if (unreachable.length) console.log(`Smoke could not run: ${unreachable.length} check(s) couldn't reach ${base} from this runner.`);
+  else console.log(`All money-path checks passed on ${base}.`);
+  const code = failed.length ? 2 : unreachable.length ? 1 : 0;
   if (Date.now() >= deadline) {
     await browser.close().catch(() => {});
     process.exit(code);

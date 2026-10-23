@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -254,6 +255,24 @@ test("deploy gate: without VERCEL_TOKEN a failure is reported but nothing is rol
   assert.match(result.output, /not rolled back/);
   assert.deepEqual(vercel.requests, []);
 }));
+
+test("a runner that can't reach the site is a smoke that could not run, not a money-path failure", () => withSite({ dropNonBrowser: true }, (site, result) => {
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /Smoke could not run/);
+  assert.doesNotMatch(result.output, /money-path check\(s\) failed/);
+}));
+
+test("deploy gate: a runner that can't reach production rolls nothing back", () => withGate({ site: { dropNonBrowser: true } }, async ({ vercel, exec }) => {
+  const result = await exec();
+  assert.equal(result.code, 1, result.output);
+  assert.deepEqual(vercelChanges(vercel), []);
+}));
+
+test("only successful Production deployments share the smoke queue, so a Preview event can't replace a pending Production smoke", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/production-smoke.yml", import.meta.url), "utf8");
+  assert.match(workflow, /group: production-smoke-\$\{\{ github\.event\.deployment\.environment \}\}-\$\{\{ github\.event\.deployment_status\.state \}\}/);
+  assert.match(workflow, /cancel-in-progress: false/);
+});
 
 test("deploy gate: a smoke that can't run doesn't roll anything back", () => withGate({}, async ({ vercel, exec }) => {
   const result = await exec({ SMOKE_BASE_URL: "https://example.com" });

@@ -36,6 +36,7 @@ export const startVercel = ({
   swapLiveOnAliasRead = 0,
   swapLiveTo = null,
   dropMutationResponse = false,
+  swapLiveBeforeMutation = false,
   swapNewestOnDeploymentRead = 0,
   dropAcceptedRollback = false,
   promoteAssignPolls = 0,
@@ -76,6 +77,25 @@ export const startVercel = ({
       return send(400, { error: { code: "bad_request", message: "Expected a JSON object body" } });
     }
     const owned = url.searchParams.get("teamId") === state.project.accountId;
+    const goLiveNewer = alias => {
+      const newerId = swapLiveTo || "dpl_newer";
+      const current = state.deployments.find(item => item.uid === alias.deploymentId);
+      if (current && !state.deployments.some(item => item.uid === newerId)) {
+        state.deployments.unshift({
+          ...structuredClone(current),
+          uid: newerId,
+          url: "rooindustries-newer-roo-industries.vercel.app",
+          created: current.created + 1000,
+          createdAt: current.createdAt + 1000,
+          ready: (current.ready || current.created) + 1000,
+          meta: {
+            githubCommitSha: "9999999999999999999999999999999999999999",
+            githubCommitMessage: "fix: a newer deploy went live",
+          },
+        });
+      }
+      alias.deploymentId = newerId;
+    };
     const moveAlias = deploymentId => {
       if (!freezeAlias) state.aliases[DOMAIN].deploymentId = deploymentId;
     };
@@ -87,25 +107,7 @@ export const startVercel = ({
       const alias = owned ? state.aliases[decodeURIComponent(match[1])] : null;
       if (alias) {
         aliasReads += 1;
-        if (swapLiveOnAliasRead && aliasReads === swapLiveOnAliasRead) {
-          const newerId = swapLiveTo || "dpl_newer";
-          const current = state.deployments.find(item => item.uid === alias.deploymentId);
-          if (current && !state.deployments.some(item => item.uid === newerId)) {
-            state.deployments.unshift({
-              ...structuredClone(current),
-              uid: newerId,
-              url: "rooindustries-newer-roo-industries.vercel.app",
-              created: current.created + 1000,
-              createdAt: current.createdAt + 1000,
-              ready: (current.ready || current.created) + 1000,
-              meta: {
-                githubCommitSha: "9999999999999999999999999999999999999999",
-                githubCommitMessage: "fix: a newer deploy went live",
-              },
-            });
-          }
-          alias.deploymentId = newerId;
-        }
+        if (swapLiveOnAliasRead && aliasReads === swapLiveOnAliasRead) goLiveNewer(alias);
       }
       return alias ? send(200, alias) : notFound();
     }
@@ -163,6 +165,7 @@ export const startVercel = ({
     }
     if (req.method === "POST" && (match = url.pathname.match(/^\/v1\/projects\/([^/]+)\/rollback\/([^/]+)$/))) {
       if (rollbackError) return send(rollbackError.status, { error: { code: rollbackError.code, message: rollbackError.message } });
+      if (swapLiveBeforeMutation) goLiveNewer(state.aliases[DOMAIN]);
       const from = state.aliases[DOMAIN].deploymentId;
       moveAlias(match[2]);
       if (dropAcceptedRollback) {

@@ -6,8 +6,10 @@ on:
 permissions:
   contents: read
 
+# GitHub keeps one pending run per group. Keying the group on environment and state keeps Preview and
+# unfinished deployment events from replacing a pending Production smoke.
 concurrency:
-  group: production-smoke
+  group: production-smoke-${{ github.event.deployment.environment }}-${{ github.event.deployment_status.state }}
   cancel-in-progress: false
 
 jobs:

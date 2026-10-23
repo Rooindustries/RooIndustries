@@ -19,7 +19,6 @@ const FAILED_JOBS = new Set(["failed", "error", "canceled", "cancelled"]);
 const VERIFY_INTERVAL_MS = Number(process.env.ROLLBACK_VERIFY_INTERVAL_MS || 3000);
 const VERIFY_TIMEOUT_MS = Number(process.env.ROLLBACK_VERIFY_TIMEOUT_MS || 120000);
 let mutationAccepted = false;
-let mutationAttempted = false;
 
 class Refusal extends Error {}
 
@@ -174,7 +173,13 @@ const refuseBusyProject = (state) => {
   if (state.live.readySubstate === "ROLLING") throw new Refusal("A rolling release is moving traffic; finish or abort it in Vercel first.");
 };
 
+// Vercel's last promote or rollback says which deployment served production before the live one,
+// and which one a rollback already moved away from. Creation order alone can pick a known-bad deployment.
 const findRollbackTarget = async (api, state) => {
+  const job = state.project.lastAliasRequest;
+  const settled = job?.jobStatus === "succeeded" && job?.fromDeploymentId;
+  const previous = settled && job.type !== "rollback" && job.toDeploymentId === deploymentId(state.live) ? job.fromDeploymentId : null;
+  const rolledAwayFrom = settled && job.type === "rollback" ? job.fromDeploymentId : null;
   const { body: listing } = await api("GET", "/v7/deployments", {
     projectId: state.project.id,
     target: "production",
@@ -184,11 +189,16 @@ const findRollbackTarget = async (api, state) => {
     limit: 20,
     teamId: state.teamId,
   });
-  const [target] = (Array.isArray(listing?.deployments) ? listing.deployments : [])
-    .filter((deployment) => deploymentId(deployment) !== deploymentId(state.live))
+  const candidates = (Array.isArray(listing?.deployments) ? listing.deployments : [])
+    .filter((deployment) => deploymentId(deployment) !== deploymentId(state.live) && deploymentId(deployment) !== rolledAwayFrom)
     .sort((a, b) => createdAt(b) - createdAt(a));
-  if (!target) throw new Refusal("No earlier production deployment to roll back to.");
-  return target;
+  if (previous) {
+    const target = candidates.find((deployment) => deploymentId(deployment) === previous);
+    if (!target) throw new Refusal(`No earlier production deployment to roll back to: ${previous}, which served production before ${deploymentId(state.live)}, is no longer a rollback candidate.`);
+    return target;
+  }
+  if (!candidates.length) throw new Refusal("No earlier production deployment to roll back to.");
+  return candidates[0];
 };
 
 const resolveDeployment = async (api, state, value) => {
@@ -215,7 +225,7 @@ const checkAutomaticRollback = async (api, state, ifLive) => {
   }
 };
 
-const waitForDomain = async (api, state, domain, targetId, { autoAssign } = {}) => {
+const waitForDomain = async (api, state, domain, targetId, { autoAssign, expectedFrom } = {}) => {
   const deadline = Date.now() + VERIFY_TIMEOUT_MS;
   let alias = null;
   let job = null;
@@ -227,7 +237,12 @@ const waitForDomain = async (api, state, domain, targetId, { autoAssign } = {}) 
     const jobTargetsThis = job?.toDeploymentId === targetId;
     const assignmentReady = autoAssign === undefined ||
       (autoAssign ? project?.autoAssignCustomDomains !== false : project?.autoAssignCustomDomains === false);
-    if (domainMoved && job?.jobStatus === "succeeded" && jobTargetsThis && assignmentReady) return;
+    if (domainMoved && job?.jobStatus === "succeeded" && jobTargetsThis && assignmentReady) {
+      if (expectedFrom && job.fromDeploymentId && job.fromDeploymentId !== expectedFrom) {
+        throw new Error(`${domain} now serves ${targetId}, but Vercel moved it away from ${job.fromDeploymentId}, not ${expectedFrom}: a newer deployment went live just before the request. Check it, and run \`npm run deploy:rollback -- --undo\` if it was healthy.`);
+      }
+      return;
+    }
     if (job && FAILED_JOBS.has(job.jobStatus) && (jobTargetsThis || domainMoved)) {
       throw new Error(`Vercel accepted the request, but the ${job.type || "alias"} job ${job.jobStatus} for ${targetId}. ${domain} serves ${alias?.deploymentId}. Check the Vercel dashboard.`);
     }
@@ -240,26 +255,18 @@ const waitForDomain = async (api, state, domain, targetId, { autoAssign } = {}) 
 const ambiguousDelivery = (error) =>
   !(error instanceof Refusal) && !(error instanceof ApiError && error.status < 500);
 
-const rememberAmbiguousMutation = async (api, domain, targetId) => {
-  try {
-    const fresh = await loadState(api, domain);
-    const job = fresh.project.lastAliasRequest;
-    const moved = deploymentId(fresh.live) === targetId;
-    const jobForTarget = job?.toDeploymentId === targetId &&
-      (PENDING_JOBS.has(job.jobStatus) || job.jobStatus === "succeeded");
-    if (moved || jobForTarget) mutationAccepted = true;
-  } catch {
-    mutationAccepted = true;
+// The Vercel promote and rollback calls take no "expected live deployment", so read the domain once more right
+// before sending: that keeps the window in which a newer deploy can go live down to a single request.
+const postMutation = async (api, state, domain, pathname, query, payload = {}) => {
+  const { body: alias } = await api("GET", `/v4/aliases/${encodeURIComponent(domain)}`, { teamId: state.teamId });
+  if (alias?.deploymentId !== deploymentId(state.live)) {
+    throw new Refusal(`${deploymentId(state.live)} is no longer live (${alias?.deploymentId} is); leaving production alone.`);
   }
-};
-
-const postMutation = async (api, domain, targetId, pathname, query, payload = {}) => {
-  mutationAttempted = true;
   try {
     await api("POST", pathname, query, payload);
     mutationAccepted = true;
   } catch (error) {
-    if (mutationAttempted && ambiguousDelivery(error)) await rememberAmbiguousMutation(api, domain, targetId);
+    if (ambiguousDelivery(error)) mutationAccepted = true;
     if (mutationAccepted) {
       throw new Error(`${error.message}. Vercel may have applied the request anyway, so production's state is unknown. Run \`npm run deploy:rollback -- --status\` and check the Vercel dashboard before trying again.`);
     }
@@ -323,8 +330,8 @@ const main = async () => {
       throw new Refusal(`The undo target changed from ${deploymentId(target)} to ${deploymentId(freshTarget)}; leaving production alone.`);
     }
     if (deploymentId(freshTarget) !== deploymentId(fresh.live)) checkTarget(freshTarget, fresh, { rollback: false });
-    await postMutation(api, options.domain, deploymentId(freshTarget), `/v10/projects/${encodeURIComponent(fresh.project.id)}/promote/${encodeURIComponent(deploymentId(freshTarget))}`, { teamId: fresh.teamId });
-    await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget), { autoAssign: true });
+    await postMutation(api, fresh, options.domain, `/v10/projects/${encodeURIComponent(fresh.project.id)}/promote/${encodeURIComponent(deploymentId(freshTarget))}`, { teamId: fresh.teamId });
+    await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget), { autoAssign: true, expectedFrom: deploymentId(fresh.live) });
     console.log(`${options.domain} now serves ${deploymentId(target)}, and new production deployments go live automatically again.`);
     return;
   }
@@ -349,11 +356,11 @@ const main = async () => {
   if (deploymentId(freshTarget) !== deploymentId(target)) {
     throw new Refusal(`The rollback target changed from ${deploymentId(target)} to ${deploymentId(freshTarget)}; leaving production alone.`);
   }
-  await postMutation(api, options.domain, deploymentId(freshTarget), `/v1/projects/${encodeURIComponent(fresh.project.id)}/rollback/${encodeURIComponent(deploymentId(freshTarget))}`, {
+  await postMutation(api, fresh, options.domain, `/v1/projects/${encodeURIComponent(fresh.project.id)}/rollback/${encodeURIComponent(deploymentId(freshTarget))}`, {
     teamId: fresh.teamId,
     description: options.reason || "npm run deploy:rollback",
   });
-  await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget));
+  await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget), { expectedFrom: deploymentId(fresh.live) });
   console.log(`${options.domain} now serves ${deploymentId(target)}.`);
   console.log("New production deployments stay off the domain until you run `npm run deploy:rollback -- --undo`.");
 };

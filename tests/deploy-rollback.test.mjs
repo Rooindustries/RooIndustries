@@ -135,13 +135,43 @@ test("a dropped rollback response exits 2 when Vercel already accepted it", () =
   assert.equal(mutations(vercel.requests).length, 1);
 }));
 
-test("a rejected rollback exits 1 and leaves production alone", () => withVercel({
+test("a 5xx answer to the rollback leaves production's state unknown even when nothing has moved yet", () => withVercel({
   rollbackError: { status: 500, code: "internal_error", message: "temporarily unavailable" },
 }, async (vercel, exec) => {
   const result = await exec([]);
-  assert.equal(result.code, 1, result.output);
+  assert.equal(result.code, 2, result.output);
   assert.match(result.output, /500/);
+  assert.match(result.output, /state is unknown/);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
+}));
+
+test("a newer deployment that goes live right before the rollback is reported, not silently replaced", () => withVercel({
+  swapLiveBeforeMutation: true,
+}, async (vercel, exec) => {
+  const result = await exec(["--if-live", LIVE_URL]);
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /moved it away from dpl_newer, not dpl_live/);
+  assert.match(result.output, /--undo/);
+}));
+
+test("rollback returns to the deployment that served production before the live one, not to a newer bad one", () => withVercel({
+  tweak: state => {
+    state.project.lastAliasRequest = { type: "promote", jobStatus: "succeeded", fromDeploymentId: "dpl_older", toDeploymentId: "dpl_live", requestedAt: 1760995000000 };
+  },
+}, async (vercel, exec) => {
+  const result = await exec([]);
+  assert.equal(result.code, 0, result.output);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_older");
+}));
+
+test("rollback never returns to a deployment an earlier rollback moved away from", () => withVercel({
+  tweak: state => {
+    state.project.lastAliasRequest = { type: "rollback", jobStatus: "succeeded", fromDeploymentId: "dpl_previous", toDeploymentId: "dpl_older", requestedAt: 1760985000000 };
+  },
+}, async (vercel, exec) => {
+  const result = await exec([]);
+  assert.equal(result.code, 0, result.output);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_older");
 }));
 
 test("dry run of undo shows the deployment it would promote and changes nothing", () => withVercel({
