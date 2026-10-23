@@ -19,6 +19,7 @@ import {
   isReferralDismissed,
   recordAutomaticReferral,
   referralScope,
+  rememberDraftCoupon,
   selectStoredReferral,
   subscribeReferralRestore,
   REFERRAL_STORAGE_ERROR,
@@ -279,10 +280,15 @@ export default function Payment({ hideFooter = false }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, location.search, navState.bookingData]);
 
-  const dropCheckoutCoupon = () => {
+  // Set when a coupon choice rewrites this history entry, so the code pre-apply doesn't redo that choice and clear its message.
+  const keepCodeChoiceRef = useRef(false);
+  const saveCheckoutCoupon = (nextCoupon) => {
+    const couponCode = nextCoupon?.code || "";
+    rememberDraftCoupon(bookingData.packageTitle || "", sanitizeCouponForCheckout(nextCoupon));
     const stored = readStoredCheckout();
     const source = navState.bookingData || stored || bookingData;
-    const nextBooking = { ...source, couponCode: "" };
+    if ((source.couponCode || "") === couponCode && (stored?.couponCode || "") === couponCode) return;
+    const nextBooking = { ...source, couponCode };
     if (stored?.slotHoldId && stored?.slotHoldToken &&
         (stored.slotHoldId !== source.slotHoldId || stored.slotHoldToken !== source.slotHoldToken)) {
       nextBooking.slotHoldId = stored.slotHoldId;
@@ -290,6 +296,7 @@ export default function Payment({ hideFooter = false }) {
       nextBooking.slotHoldExpiresAt = stored.slotHoldExpiresAt || "";
     }
     writeStoredCheckout(nextBooking);
+    keepCodeChoiceRef.current = !preApplyingCodes;
     navigate(
       { pathname: location.pathname, search: location.search, hash: location.hash },
       { replace: true, state: { ...navState, bookingData: nextBooking, paymentViewKey: paymentViewRef.current?.key || location.key } }
@@ -423,6 +430,10 @@ export default function Payment({ hideFooter = false }) {
 
   const [couponInput, setCouponInput] = useState("");
   const [coupon, setCoupon] = useState(null);
+  const chooseCoupon = (nextCoupon) => {
+    setCoupon(nextCoupon);
+    saveCheckoutCoupon(nextCoupon);
+  };
   const [validatingCoupon, setValidatingCoupon] = useState(false);
   const checkingCode = validating || validatingCoupon;
   const [couponError, setCouponError] = useState("");
@@ -452,8 +463,10 @@ export default function Payment({ hideFooter = false }) {
     }
   }, [banner]);
 
+  const [pendingStartCount, setPendingStartCount] = useState(0);
+  // A start the server may have accepted can renew the hold, so the old deadline waits for its answer.
   useEffect(() => {
-    if (!holdExpiresAt || processingDodoReturn || creatingFree) return;
+    if (!holdExpiresAt || processingDodoReturn || creatingFree || pendingStartCount > 0) return;
     const expiresAtMs = new Date(holdExpiresAt).getTime();
     if (!Number.isFinite(expiresAtMs)) return;
 
@@ -491,7 +504,7 @@ export default function Payment({ hideFooter = false }) {
 
     scheduleExpiry();
     return () => clearTimeout(timeoutId);
-  }, [holdExpiresAt, processingDodoReturn, creatingFree, navigate, navState, location]);
+  }, [holdExpiresAt, processingDodoReturn, creatingFree, pendingStartCount, navigate, navState, location]);
 
   const liveDiscounts = calculateCheckoutDiscounts({
     baseAmount,
@@ -518,7 +531,6 @@ export default function Payment({ hideFooter = false }) {
   const sessionStartRef = useRef(null);
   const pendingStartsRef = useRef([]);
   const paypalStaleOrderRef = useRef(false);
-  const [, setPendingStartCount] = useState(0);
   const setPendingStarts = (next) => {
     pendingStartsRef.current = next;
     setPendingStartCount(next.length);
@@ -775,6 +787,10 @@ export default function Payment({ hideFooter = false }) {
   ]);
 
   useEffect(() => {
+    if (keepCodeChoiceRef.current) {
+      keepCodeChoiceRef.current = false;
+      return undefined;
+    }
     if (!hydrated || !packageTitle) return;
 
     const params = new URLSearchParams(location.search);
@@ -1709,7 +1725,7 @@ export default function Payment({ hideFooter = false }) {
           );
           return;
         }
-        setCoupon(safeCoupon);
+        chooseCoupon(safeCoupon);
         setCouponInput(safeCoupon.code);
         setReferralInput(referral?.code || "");
         showBanner("info", "This code is a coupon, so it was applied as a coupon.");
@@ -1730,7 +1746,7 @@ export default function Payment({ hideFooter = false }) {
       setReferral(safeReferral);
       setReferralInput(safeReferral.code);
       if (coupon?.canCombineWithReferral === false) {
-        setCoupon(null);
+        chooseCoupon(null);
         setCouponInput("");
         showBanner(
           "info",
@@ -1752,7 +1768,7 @@ export default function Payment({ hideFooter = false }) {
     if (creatingFree || validating || validatingCoupon) return;
     const normalizedCode = String(code || "").trim();
     if (!normalizedCode) {
-      setCoupon(null);
+      chooseCoupon(null);
       setCouponError("");
       return;
     }
@@ -1768,7 +1784,7 @@ export default function Payment({ hideFooter = false }) {
       const result = await resolveCheckoutCode(normalizedCode, packageTitle);
       if (!isCurrent()) return;
       if (!result.ok) {
-        setCoupon(null);
+        chooseCoupon(null);
         setCouponError(result.error || "Invalid coupon code.");
         return;
       }
@@ -1787,7 +1803,7 @@ export default function Payment({ hideFooter = false }) {
         pendingAutomaticReferralRef.current = null;
         setReferral(safeReferral);
         setReferralInput(safeReferral.code);
-        setCoupon(null);
+        chooseCoupon(null);
         setCouponInput("");
         showBanner(
           "info",
@@ -1802,20 +1818,20 @@ export default function Payment({ hideFooter = false }) {
         return;
       }
       if (safeCoupon.canCombineWithReferral === false && referral) {
-        setCoupon(null);
+        chooseCoupon(null);
         setCouponError(
           "This coupon can't be used together with a referral discount. Remove the referral or use a different coupon."
         );
         return;
       }
 
-      setCoupon(safeCoupon);
+      chooseCoupon(safeCoupon);
       setCouponInput(safeCoupon.code);
       showBanner("success", `Coupon applied: ${formatCouponValue(safeCoupon)}`);
     } catch {
       if (!isCurrent()) return;
       console.error("Coupon validation failed");
-      setCoupon(null);
+      chooseCoupon(null);
       setCouponError(
         "We couldn't validate that coupon code. Please try again."
       );
@@ -2279,10 +2295,9 @@ export default function Payment({ hideFooter = false }) {
                   <button
                     onClick={() => {
                       if (creatingFree || validating || validatingCoupon) return;
-                      setCoupon(null);
+                      chooseCoupon(null);
                       setCouponInput("");
                       setCouponError("");
-                      dropCheckoutCoupon();
                     }}
                     disabled={creatingFree || checkingCode || !!lockedProvider}
                     className="text-xs text-ink-secondary underline underline-offset-2"

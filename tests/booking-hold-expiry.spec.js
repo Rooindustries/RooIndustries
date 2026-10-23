@@ -314,3 +314,116 @@ test("an applied coupon survives an expiry and reaches the next payment quote", 
   await expect.poll(() => flow.state.calls.filter(call => call.path === "/api/payment/quote").length).toBeGreaterThan(0);
   expect(flow.state.calls.filter(call => call.path === "/api/payment/quote").at(-1).body.couponCode).toBe("save20");
 });
+
+const lastQuoteCoupon = flow => flow.state.calls.filter(call => call.path === "/api/payment/quote").at(-1)?.body.couponCode;
+const quoteSettles = async (page, flow, code) => {
+  await expect.poll(() => lastQuoteCoupon(flow)).toBe(code);
+  await expect(page.getByRole("button", { name: "Pay your way", exact: true })).toBeEnabled();
+};
+const applyPaymentCoupon = async (page, code) => {
+  const input = page.getByRole("textbox", { name: "Coupon Code (optional)", exact: true });
+  await input.fill(code);
+  await input.locator("..").getByRole("button", { name: "Apply", exact: true }).click();
+};
+const expireAndReturnToPayment = async (page, flow) => {
+  await expect(page).toHaveURL(/\/booking$/, { timeout: 25000 });
+  await expect(page.getByRole("alert").filter({ hasText: expiredMessage })).toBeVisible();
+  await reserveAgainKeepsDetails(page, flow, 30 * 60 * 1000);
+  await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+  await flow.payment();
+};
+
+test("a coupon removed on the payment page stays removed after an expiry", async ({ page, flow }) => {
+  flow.state.holdMs = shortHold;
+  await flow.review();
+  await flow.codeInput("save20");
+  await expect(page.getByRole("button", { name: "Remove coupon code save20", exact: true })).toBeVisible();
+  await flow.payment();
+  await quoteSettles(page, flow, "save20");
+  await page.getByRole("button", { name: "Remove coupon", exact: true }).click();
+  await quoteSettles(page, flow, "");
+  await expireAndReturnToPayment(page, flow);
+  await quoteSettles(page, flow, "");
+});
+
+test("a coupon applied on the payment page survives an expiry", async ({ page, flow }) => {
+  flow.state.holdMs = shortHold;
+  await flow.review();
+  await flow.payment();
+  await quoteSettles(page, flow, "");
+  await applyPaymentCoupon(page, "save20");
+  await quoteSettles(page, flow, "save20");
+  await expireAndReturnToPayment(page, flow);
+  await quoteSettles(page, flow, "save20");
+});
+
+test("a coupon cleared on the payment page stays cleared after a reload", async ({ page, flow }) => {
+  await flow.review();
+  await flow.codeInput("save20");
+  await expect(page.getByRole("button", { name: "Remove coupon code save20", exact: true })).toBeVisible();
+  await flow.payment();
+  await quoteSettles(page, flow, "save20");
+  await applyPaymentCoupon(page, "");
+  await quoteSettles(page, flow, "");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+  await quoteSettles(page, flow, "");
+});
+
+test("an invalid coupon on the payment page keeps its message after replacing the earlier coupon", async ({ page, flow }) => {
+  await flow.review();
+  await flow.payment();
+  await quoteSettles(page, flow, "");
+  await applyPaymentCoupon(page, "save20");
+  await quoteSettles(page, flow, "save20");
+  await applyPaymentCoupon(page, "nosuchcode");
+  await expect(page.locator("#payment-coupon-code-error")).toHaveText("Invalid referral or coupon code.");
+  await quoteSettles(page, flow, "");
+  await expect(page.locator("#payment-coupon-code-error")).toHaveText("Invalid referral or coupon code.");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+  await quoteSettles(page, flow, "");
+});
+
+const startNearDeadline = async (page, flow) => {
+  flow.state.holdMs = 20000;
+  await flow.review();
+  await flow.payment();
+  await quoteSettles(page, flow, "");
+  const start = {};
+  await page.route("**/api/payment/start", route => {
+    start.route = route;
+    start.body = route.request().postDataJSON();
+  });
+  const original = await storedHold(page);
+  await expect.poll(() => Date.parse(original.expiresAt) - Date.now() < 3000, { timeout: 20000 }).toBe(true);
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect.poll(() => Boolean(start.route)).toBe(true);
+  await expect.poll(() => Date.now() > Date.parse(original.expiresAt) + 1500, { timeout: 10000 }).toBe(true);
+  await expect(page).toHaveURL(/\/payment$/);
+  return { original, start };
+};
+
+test("a payment start answered after the old deadline keeps the renewed reservation and its payment", async ({ page, flow }) => {
+  const { original, start } = await startNearDeadline(page, flow);
+  const renewed = new Date(Date.now() + 20 * 60 * 1000).toISOString();
+  await start.route.fulfill({ json: {
+    ok: true, provider: "dodo", status: "started", paymentAccessToken: "fixture-accepted-payment",
+    quoteFingerprint: start.body.quoteFingerprint, sessionExpiresAt: renewed,
+    providerPayload: { checkoutUrl: new URL("/__test/checkout-handoff", page.url()).href },
+    quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
+    refreshedHold: { slotHoldId: original.holdId, slotHoldToken: original.holdToken, slotHoldExpiresAt: renewed, phase: "payment_pending" },
+  } });
+  await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+  expect(JSON.parse(await paymentSession(page))).toMatchObject({ paymentAccessToken: "fixture-accepted-payment" });
+  expect(await storedHold(page)).toMatchObject({ holdId: original.holdId, phase: "payment_pending", expiresAt: renewed });
+});
+
+test("a payment start refused after the old deadline returns to slot selection with the details", async ({ page, flow }) => {
+  const { start } = await startNearDeadline(page, flow);
+  await start.route.fulfill({ status: 409, json: { ok: false, error: "This reservation expired." } });
+  await expect(page).toHaveURL(/\/booking$/, { timeout: 10000 });
+  await expect(page.getByRole("alert").filter({ hasText: expiredMessage })).toBeVisible();
+  expect(await paymentSession(page)).toBeNull();
+  await reserveAgainKeepsDetails(page, flow);
+});

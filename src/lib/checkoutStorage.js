@@ -110,6 +110,18 @@ export const writeStoredCheckoutBooking = (bookingData) => {
   }
 };
 
+export const rememberDraftCoupon = (packageTitle, coupon) => {
+  try {
+    const draft = JSON.parse(readBrowserStorage("sessionStorage", BOOKING_DRAFT_STORAGE_KEY) || "null");
+    const entry = draft?.packages?.[packageTitle];
+    if (!entry) return false;
+    draft.packages[packageTitle] = { ...entry, checkoutCodes: { ...entry.checkoutCodes, coupon: coupon || null } };
+    return writeBrowserStorage("sessionStorage", BOOKING_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+  } catch {
+    return false;
+  }
+};
+
 export const updateStoredCheckoutHold = (hold = {}) => {
   const current = readStoredCheckoutBooking();
   const slotHoldId = String(hold.slotHoldId || "").trim();
