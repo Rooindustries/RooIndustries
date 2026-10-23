@@ -27,6 +27,15 @@ command exits successfully. `npm run test:tooling:dependencies` also exercises
 interrupted, missing-evidence and complete rounds through isolated CLI fixtures.
 Keep real Sentry DSNs unset in both the fixture server and browser process.
 
+`npm run test:remote-browser-guard` exercises the real browser connection and
+local HTTP fixtures. Browser requests are fetched with automatic redirects off.
+GET page redirects are checked and started as fresh guarded navigations, with
+at most 20 hops. Fetches, image requests and POST forms refuse redirects
+instead of replaying requests. Forbidden targets, credentials, malformed
+locations and redirect loops are recorded before refusal. Allowed navigation
+chains retain their final URL, response, load wait and Back/Forward history;
+the browser E2Es also check ordinary POST bodies, server failures and images.
+
 `npm run test:booking:holds` starts the real hold handler and request adapter over
 HTTP, using the same content fixture and a clock mock confined to that test
 process. It owns both servers and stops them on completion. `BOOKING_ROUTE_PORT`

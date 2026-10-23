@@ -10,12 +10,33 @@ import { chromium } from "@playwright/test";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const fixture = http.createServer((request, response) => {
   fixtureRequests++;
-  if (request.method === "GET" && request.url === "/") {
+  if (request.method === "GET" && ["/", "/landing"].includes(request.url)) {
     response.writeHead(200, { "Content-Type": "text/html" });
-    response.end("<p>fixture-ok</p>");
-  } else if (request.url === "/redirect") {
-    response.writeHead(302, { Location: `http://127.0.0.1:${sink.address().port}/` });
+    response.end('<p>fixture-ok</p>' + (request.url === "/landing" ? '<img src="/delayed.svg" alt="Delayed fixture">' : ""));
+  } else if (request.url.startsWith("/redirect")) {
+    const url = new URL(request.url, "http://fixture.invalid");
+    const targets = {
+      "/redirect-local": "/landing#fixture",
+      "/redirect-local-hop": "/redirect-local",
+      "/redirect-hop": "/redirect?status=307",
+      "/redirect-loop": "/redirect-loop#fixture",
+      "/redirect-invalid": "http://[",
+      "/redirect-credentials": `http://fixture:fixture@127.0.0.1:${fixture.address().port}/`,
+      "/redirect-scheme": "data:text/html,refused",
+      "/redirect-slow": "/slow",
+    };
+    const location = targets[url.pathname] || `http://127.0.0.1:${sink.address().port}/`;
+    response.writeHead(Number(url.searchParams.get("status") || 302), { Location: location });
     response.end();
+  } else if (request.url === "/delayed.svg" || request.url === "/slow") {
+    setTimeout(() => { response.setHeader("Content-Type", "image/svg+xml"); response.end('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'); }, request.url === "/slow" ? 5000 : 250).unref();
+  } else if (request.url === "/echo") {
+    let body = "";
+    request.on("data", chunk => { body += chunk; });
+    request.on("end", () => { response.setHeader("Content-Type", "application/json"); response.end(JSON.stringify({ method: request.method, body })); });
+  } else if (request.url === "/failure") {
+    response.writeHead(503);
+    response.end("fixture-unavailable");
   } else {
     response.writeHead(404);
     response.end();
@@ -23,9 +44,16 @@ const fixture = http.createServer((request, response) => {
 });
 const sink = http.createServer((_request, response) => {
   sinkRequests++;
+  response.setHeader("Access-Control-Allow-Origin", "*");
   response.end("sink");
 });
 const redirect = http.createServer();
+let assetOutsideRequests = 0;
+const assets = http.createServer((request, response) => {
+  if (request.url === "/storage/v1/redirect") { response.writeHead(307, { Location: `http://127.0.0.1:${sink.address().port}/` }); response.end(); }
+  else if (request.url === "/storage/v1/path-redirect") { response.writeHead(302, { Location: "/outside.svg" }); response.end(); }
+  else { if (request.url === "/outside.svg") assetOutsideRequests++; response.setHeader("Content-Type", "image/svg+xml"); response.end('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'); }
+});
 const standIn = http.createServer((_request, response) => { response.writeHead(404); response.end(); });
 let standInBytes = 0;
 const standInUpgrades = [];
@@ -82,7 +110,7 @@ const close = server => new Promise((resolve, reject) => {
 });
 
 before(async () => {
-  await Promise.all([listen(fixture), listen(sink), listen(redirect), listen(standIn)]);
+  await Promise.all([listen(fixture), listen(sink), listen(redirect), listen(standIn), listen(assets)]);
   fixtureOrigin = `http://127.0.0.1:${fixture.address().port}`;
   if (process.env.PW_TEST_CONNECT_WS_ENDPOINT) endpoint = process.env.PW_TEST_CONNECT_WS_ENDPOINT;
   else {
@@ -97,7 +125,7 @@ before(async () => {
 after(async () => {
   await browserServer?.close();
   for (const socket of standInSockets) socket.destroy();
-  await Promise.all([close(fixture), close(sink), close(redirect), close(standIn)]);
+  await Promise.all([close(fixture), close(sink), close(redirect), close(standIn), close(assets)]);
 });
 
 const runChild = (code, endpointEnv) => new Promise((resolve, reject) => {
@@ -149,17 +177,22 @@ test("page and context API requests cannot escape the fixture on a connected bro
       await guardBrowserContext(context, [${JSON.stringify(fixtureOrigin)}]);
       const page = await context.newPage();
       const refusals = [];
+      let rawRedirect;
       for (const api of [page.request, context.request]) {
         for (const method of ["get", "post", "put", "patch", "delete", "head", "fetch"]) {
           await assert.rejects(api[method](${JSON.stringify(`http://127.0.0.1:${sink.address().port}/`)}), /outside the local fixture/);
           refusals.push(method);
         }
         await assert.rejects(api.get("/redirect"), /redirects are refused/);
+        const redirect = await api.get("/redirect", { maxRedirects: 0 });
+        assert.equal(redirect.status(), 302);
+        rawRedirect = { url: redirect.url(), status: redirect.status(), headers: redirect.headers(), body: await redirect.text() };
+        await redirect.dispose();
         const response = await api.get("/");
         assert.equal(response.status(), 200);
         assert.match(await response.text(), /fixture-ok/);
       }
-      console.log(JSON.stringify({ refusals, fixtureStatus: 200 }));
+      console.log(JSON.stringify({ refusals, fixtureStatus: 200, rawRedirect }));
       await context.close();
     } finally { await browser.close(); }
   `, endpoint);
@@ -167,6 +200,268 @@ test("page and context API requests cannot escape the fixture on a connected bro
   const value = result(child);
   assert.equal(value.refusals.length, 14);
   assert.equal(sinkRequests, beforeRequests);
+});
+
+for (const mode of ["fetch", "navigation"]) {
+  for (const target of ["/redirect?status=301", "/redirect?status=302", "/redirect?status=303", "/redirect?status=307", "/redirect?status=308", "/redirect-hop", "/redirect-invalid", "/redirect-credentials", "/redirect-scheme", "/redirect-loop", ...(mode === "fetch" ? ["/redirect-local"] : [])]) {
+    test(`browser ${mode} refuses and records the fixture redirect ${target}`, { timeout: 65_000 }, async t => {
+      const beforeRequests = sinkRequests;
+      const child = await runChild(`
+        import { chromium } from "@playwright/test";
+        const { guardBrowserContext } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+        const refusals = [];
+        process.on("unhandledRejection", error => {
+          if (!String(error).includes("[test-target]")) throw error;
+          refusals.push(String(error));
+        });
+        const browser = await chromium.connect(${JSON.stringify(endpoint)}, { exposeNetwork: "<loopback>" });
+        try {
+          const context = await browser.newContext({ baseURL: ${JSON.stringify(fixtureOrigin)} });
+          const guard = await guardBrowserContext(context, [${JSON.stringify(fixtureOrigin)}]);
+          const page = await context.newPage();
+          await page.goto(${JSON.stringify(fixtureOrigin)});
+          let outcome;
+          if (${JSON.stringify(mode)} === "fetch") {
+            outcome = await page.evaluate(async target => {
+              try { const response = await fetch(target); return { status: response.status, body: await response.text(), error: null }; }
+              catch (error) { return { error: String(error) }; }
+            }, ${JSON.stringify(target)});
+          } else {
+            try { await page.goto(${JSON.stringify(fixtureOrigin + target)}); outcome = { url: page.url(), error: null }; }
+            catch (error) { outcome = { error: String(error) }; }
+          }
+          await context.close();
+          console.log(JSON.stringify({ outcome, guard, refusals }));
+        } finally { await browser.close(); }
+      `, endpoint);
+      t.diagnostic(JSON.stringify({ child, sinkRequests: sinkRequests - beforeRequests }));
+      const value = result(child);
+      assert.equal(sinkRequests, beforeRequests, "The forbidden redirect destination received a request.");
+      assert.ok(value.outcome.error, "The browser followed a forbidden redirect.");
+      const action = target === "/redirect-invalid" ? "invalid-browser-redirect" : target === "/redirect-loop" || target === "/redirect-local" || mode === "fetch" && target === "/redirect-hop" ? "unexpected-browser-redirect" : "unexpected-nonlocal-redirect";
+      assert.ok(value.guard.unexpectedRequests.some(entry => entry.action === action && entry.status >= 300 && entry.status < 400 && entry.redirectedFrom.startsWith(fixtureOrigin)));
+      if (target.startsWith("/redirect?")) assert.equal(value.guard.unexpectedRequests[0].url, `http://127.0.0.1:${sink.address().port}/`);
+    });
+  }
+  if (mode === "navigation") test("browser navigation retains an allowed fixture redirect", { timeout: 65_000 }, async t => {
+    const child = await runChild(`
+      import { chromium } from "@playwright/test";
+      const { guardBrowserContext } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+      const browser = await chromium.connect(${JSON.stringify(endpoint)}, { exposeNetwork: "<loopback>" });
+      try {
+        const context = await browser.newContext({ baseURL: ${JSON.stringify(fixtureOrigin)} });
+        const guard = await guardBrowserContext(context, [${JSON.stringify(fixtureOrigin)}]);
+        const page = await context.newPage();
+        await page.goto(${JSON.stringify(fixtureOrigin)});
+        const response = await page.goto(${JSON.stringify(fixtureOrigin + "/redirect-local-hop")});
+        const outcome = { status: response.status(), body: await page.textContent("body"), url: page.url() };
+        outcome.imageLoaded = await page.getByAltText("Delayed fixture").evaluate(image => image.complete && image.naturalWidth === 1);
+        await page.goBack();
+        outcome.back = page.url();
+        await page.goForward();
+        outcome.forward = page.url();
+        await page.goto(${JSON.stringify(fixtureOrigin)});
+        await page.evaluate(() => { const link = document.createElement("a"); link.href = "/redirect-local-hop"; link.textContent = "Fixture redirect"; document.body.append(link); });
+        await Promise.all([page.waitForURL(${JSON.stringify(fixtureOrigin + "/landing#fixture")}), page.getByRole("link", { name: "Fixture redirect" }).click()]);
+        outcome.clicked = page.url();
+        await context.close();
+        console.log(JSON.stringify({ outcome, guard }));
+      } finally { await browser.close(); }
+    `, endpoint);
+    t.diagnostic(JSON.stringify({ child }));
+    const value = result(child);
+    assert.equal(value.outcome.status, 200);
+    assert.match(value.outcome.body, /fixture-ok/);
+    assert.deepEqual(value.guard.unexpectedRequests, []);
+    assert.equal(value.outcome.url, fixtureOrigin + "/landing#fixture");
+    assert.equal(value.outcome.back, fixtureOrigin + "/");
+    assert.equal(value.outcome.forward, fixtureOrigin + "/landing#fixture");
+    assert.equal(value.outcome.clicked, fixtureOrigin + "/landing#fixture");
+    assert.equal(value.outcome.imageLoaded, true);
+  });
+}
+
+test("browser redirect guard preserves request bodies, HTTP failures and static images", { timeout: 65_000 }, async t => {
+  const beforeRequests = sinkRequests;
+  const beforeOutside = assetOutsideRequests;
+  const child = await runChild(`
+    import { chromium } from "@playwright/test";
+    const { guardBrowserContext } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+    const refusals = [];
+    process.on("unhandledRejection", error => {
+      if (!String(error).includes("[test-target]")) throw error;
+      refusals.push(String(error));
+    });
+    process.env.TOOLING_CONTENT_PORT = ${JSON.stringify(String(assets.address().port))};
+    const browser = await chromium.connect(${JSON.stringify(endpoint)}, { exposeNetwork: "<loopback>" });
+    try {
+      const context = await browser.newContext({ baseURL: ${JSON.stringify(fixtureOrigin)} });
+      const guard = await guardBrowserContext(context, [${JSON.stringify(fixtureOrigin)}]);
+      const page = await context.newPage();
+      await page.goto(${JSON.stringify(fixtureOrigin)});
+      const body = await page.evaluate(async () => (await fetch("/echo", { method: "POST", body: "guarded-body" })).json());
+      const failure = await page.evaluate(async () => { const response = await fetch("/failure"); return { status: response.status, body: await response.text() }; });
+      const images = [];
+      for (const url of ${JSON.stringify([`http://127.0.0.1:${assets.address().port}/storage/v1/image.svg`, "https://razorpay.com/assets/razorpay-logo.svg", "https://www.paypalobjects.com/webstatic/mktg/Logo/pp-logo-100px.png", `http://127.0.0.1:${assets.address().port}/storage/v1/redirect`, `http://127.0.0.1:${assets.address().port}/storage/v1/path-redirect`])}) {
+        images.push(await page.evaluate(url => new Promise(resolve => {
+          const image = new Image();
+          image.onload = () => resolve({ loaded: true, width: image.naturalWidth });
+          image.onerror = () => resolve({ loaded: false });
+          image.src = url;
+        }), url));
+      }
+      await context.close();
+      console.log(JSON.stringify({ body, failure, images, guard, refusals }));
+    } finally { await browser.close(); }
+  `, endpoint);
+  t.diagnostic(JSON.stringify({ child, sinkRequests: sinkRequests - beforeRequests, assetOutsideRequests: assetOutsideRequests - beforeOutside }));
+  const value = result(child);
+  assert.deepEqual(value.body, { method: "POST", body: "guarded-body" });
+  assert.deepEqual(value.failure, { status: 503, body: "fixture-unavailable" });
+  assert.deepEqual(value.images.map(image => image.loaded), [true, true, true, false, false]);
+  assert.equal(value.guard.staticAssets.length, 2);
+  assert.equal(value.guard.unexpectedRequests.length, 2);
+  assert.ok(value.guard.unexpectedRequests.every(entry => entry.resourceType === "image" && entry.action === "unexpected-nonlocal-redirect"));
+  assert.equal(sinkRequests, beforeRequests);
+  assert.equal(assetOutsideRequests, beforeOutside);
+});
+
+test("browser redirect guard refuses a form navigation without replaying its body", { timeout: 65_000 }, async t => {
+  const beforeRequests = fixtureRequests;
+  const child = await runChild(`
+    import { chromium } from "@playwright/test";
+    const { guardBrowserContext } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+    const refusals = [];
+    process.on("unhandledRejection", error => {
+      if (!String(error).includes("[test-target]")) throw error;
+      refusals.push(String(error));
+    });
+    const browser = await chromium.connect(${JSON.stringify(endpoint)}, { exposeNetwork: "<loopback>" });
+    try {
+      const context = await browser.newContext({ baseURL: ${JSON.stringify(fixtureOrigin)} });
+      const guard = await guardBrowserContext(context, [${JSON.stringify(fixtureOrigin)}]);
+      const page = await context.newPage();
+      await page.goto(${JSON.stringify(fixtureOrigin)});
+      const failed = page.waitForEvent("requestfailed", request => request.isNavigationRequest() && request.method() === "POST");
+      await page.evaluate(() => { const form = document.createElement("form"); form.method = "POST"; form.action = "/redirect-local?status=307"; document.body.append(form); form.submit(); });
+      await failed;
+      await context.close();
+      console.log(JSON.stringify({ guard, refusals }));
+    } finally { await browser.close(); }
+  `, endpoint);
+  t.diagnostic(JSON.stringify({ child, fixtureRequests: fixtureRequests - beforeRequests }));
+  const value = result(child);
+  assert.ok(value.guard.unexpectedRequests.some(entry => entry.action === "unexpected-browser-redirect" && entry.method === "POST" && entry.status === 307));
+  assert.equal(fixtureRequests - beforeRequests, 2);
+});
+
+test("browser redirect guard preserves CORS refusal between permitted fixtures", { timeout: 65_000 }, async t => {
+  const child = await runChild(`
+    import { chromium } from "@playwright/test";
+    const { guardBrowserContext } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+    const browser = await chromium.connect(${JSON.stringify(endpoint)}, { exposeNetwork: "<loopback>" });
+    try {
+      const context = await browser.newContext({ baseURL: ${JSON.stringify(fixtureOrigin)} });
+      const guard = await guardBrowserContext(context, ${JSON.stringify([fixtureOrigin, `http://127.0.0.1:${assets.address().port}`])});
+      const page = await context.newPage();
+      await page.goto(${JSON.stringify(fixtureOrigin)});
+      const outcome = await page.evaluate(async url => {
+        try { const response = await fetch(url); return { status: response.status, error: null }; }
+        catch (error) { return { error: String(error) }; }
+      }, ${JSON.stringify(`http://127.0.0.1:${assets.address().port}/outside.svg`)});
+      await context.close();
+      console.log(JSON.stringify({ outcome, guard }));
+    } finally { await browser.close(); }
+  `, endpoint);
+  t.diagnostic(JSON.stringify({ child }));
+  const value = result(child);
+  assert.ok(value.outcome.error);
+  assert.deepEqual(value.guard.unexpectedRequests, []);
+});
+
+test("browser navigation keeps its timeout after an allowed redirect", { timeout: 65_000 }, async t => {
+  const child = await runChild(`
+    import { chromium } from "@playwright/test";
+    const { guardBrowserContext } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+    const browser = await chromium.connect(${JSON.stringify(endpoint)}, { exposeNetwork: "<loopback>" });
+    try {
+      const context = await browser.newContext({ baseURL: ${JSON.stringify(fixtureOrigin)} });
+      await guardBrowserContext(context, [${JSON.stringify(fixtureOrigin)}]);
+      const page = await context.newPage();
+      await page.goto(${JSON.stringify(fixtureOrigin)});
+      const requests = [];
+      page.on("request", request => requests.push(request.url()));
+      const started = Date.now();
+      let failure;
+      try { await page.goto(${JSON.stringify(fixtureOrigin + "/redirect-slow")}, { timeout: 500 }); }
+      catch (error) { failure = { name: error.name, message: error.message }; }
+      const elapsed = Date.now() - started;
+      await context.close();
+      console.log(JSON.stringify({ failure, elapsed, requests }));
+    } finally { await browser.close(); }
+  `, endpoint);
+  t.diagnostic(JSON.stringify({ child }));
+  const value = result(child);
+  assert.equal(value.failure?.name, "TimeoutError");
+  assert.ok(value.requests.includes(fixtureOrigin + "/slow"));
+  assert.ok(value.elapsed < 2000);
+});
+
+for (const phase of ["fulfillment", "disposal", "active disposal"]) test(`browser response ${phase} follows the context lifetime`, { timeout: 65_000 }, async t => {
+  const child = await runChild(`
+    import { chromium } from "@playwright/test";
+    const { guardBrowserContext } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+    const lateErrors = [];
+    let observed;
+    const failed = new Promise(resolve => { observed = resolve; });
+    process.on("unhandledRejection", error => { lateErrors.push(String(error)); observed(); });
+    const browser = await chromium.connect(${JSON.stringify(endpoint)}, { exposeNetwork: "<loopback>" });
+    let closures = 0;
+    let closing;
+    try {
+      const context = await browser.newContext({ baseURL: ${JSON.stringify(fixtureOrigin)} });
+      await guardBrowserContext(context, [${JSON.stringify(fixtureOrigin)}]);
+      await context.route("**/*", async route => {
+        const fetch = route.fetch.bind(route);
+        route.fetch = async options => {
+          const response = await fetch(options);
+          if (${JSON.stringify(phase)} === "fulfillment") {
+            let finish;
+            let disposed;
+            const pause = new Promise(resolve => { finish = resolve; });
+            const disposal = new Promise(resolve => { disposed = resolve; });
+            const dispose = context.request.dispose.bind(context.request);
+            context.request.dispose = async options => { await dispose(options); disposed(); await pause; };
+            closing = context.close().catch(error => lateErrors.push(String(error)));
+            await disposal;
+            closures++;
+            setTimeout(finish, 100);
+          } else if (${JSON.stringify(phase)} === "active disposal") { await response.dispose(); closures++; }
+          else {
+            const dispose = response.dispose.bind(response);
+            response.dispose = async () => { await context.close(); closures++; return dispose(); };
+          }
+          return response;
+        };
+        await route.fallback();
+      });
+      const page = await context.newPage();
+      const navigation = page.goto(${JSON.stringify(fixtureOrigin)}).catch(() => {});
+      if (${JSON.stringify(phase)} === "active disposal") {
+        await Promise.race([failed, navigation]);
+        await context.close();
+      }
+      await navigation;
+      await closing;
+      await new Promise(resolve => setTimeout(resolve, 50));
+      console.log(JSON.stringify({ closures, lateErrors }));
+    } finally { await browser.close(); }
+  `, endpoint);
+  t.diagnostic(JSON.stringify({ child }));
+  const value = result(child);
+  assert.ok(value.closures > 0);
+  if (phase === "active disposal") assert.ok(value.lateErrors.some(error => error.includes("Response has been disposed")));
+  else assert.deepEqual(value.lateErrors, []);
 });
 const requestHelpers = `
   import http from "node:http";

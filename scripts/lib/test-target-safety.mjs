@@ -373,17 +373,103 @@ export async function guardBrowserContext(context, origins) {
     return url.origin;
   }));
   const evidence = { staticAssets: [], unexpectedRequests: [] };
-  const record = (kind, request) => {
-    const entry = { url: request.url(), method: request.method(), resourceType: request.resourceType(), action: kind, time: new Date().toISOString() };
+  let closing = false;
+  const close = context.close;
+  context.close = function(...args) { closing = true; return close.apply(this, args); };
+  context.once("close", () => { closing = true; });
+  const navigationRedirects = new WeakMap();
+  const navigationOperations = new WeakMap();
+  const protectedFrames = new WeakSet();
+  const wrapNavigation = (owner, method, frame) => {
+    const original = owner[method];
+    owner[method] = async function(...args) {
+      const options = (method === "goto" ? args[1] : args[0]) || {};
+      const operation = { options, redirect: null, started: Date.now() };
+      if (!navigationOperations.has(frame)) navigationOperations.set(frame, new Set());
+      const operations = navigationOperations.get(frame);
+      operations.add(operation);
+      try { return await original.apply(this, args); }
+      catch (error) {
+        if (!operation.redirect) throw error;
+        const result = await operation.redirect;
+        if (result.error) throw result.error;
+        const timeout = options.timeout > 0 ? Math.max(1, options.timeout - (Date.now() - operation.started)) : options.timeout;
+        if (options.url) await frame.waitForURL(options.url, { ...options, timeout });
+        if (options.waitUntil !== "commit") await frame.waitForLoadState(options.waitUntil || "load", { timeout });
+        return result.response;
+      } finally { operations.delete(operation); }
+    };
+  };
+  const protectFrame = frame => {
+    if (protectedFrames.has(frame)) return;
+    protectedFrames.add(frame);
+    wrapNavigation(frame, "goto", frame);
+    wrapNavigation(frame, "waitForNavigation", frame);
+  };
+  const protectPage = page => {
+    for (const frame of page.frames()) protectFrame(frame);
+    page.on("frameattached", protectFrame);
+    for (const method of ["goBack", "goForward", "reload"]) wrapNavigation(page, method, page.mainFrame());
+  };
+  context.on("page", protectPage);
+  for (const page of context.pages()) protectPage(page);
+  const record = (kind, request, details = {}) => {
+    const entry = { url: request.url(), method: request.method(), resourceType: request.resourceType(), action: kind, time: new Date().toISOString(), ...details };
     evidence[kind === "fulfilled-static-asset" ? "staticAssets" : "unexpectedRequests"].push(entry);
     if (process.env.ROO_BROWSER_GUARD_ARTIFACT) fs.appendFileSync(process.env.ROO_BROWSER_GUARD_ARTIFACT, JSON.stringify(entry) + "\n");
   };
   await context.route("**/*", async route => {
     const request = route.request();
     const url = new URL(request.url());
-    if (allowed.has(url.origin) && !url.username && !url.password) return route.continue();
-    if (contentAssetOrigins.has(url.origin) && !url.username && !url.password && request.method() === "GET" &&
-        request.resourceType() === "image" && url.pathname.startsWith("/storage/v1/")) return route.continue();
+    const permits = target => !target.username && !target.password && (allowed.has(target.origin) ||
+      contentAssetOrigins.has(target.origin) && request.method() === "GET" && request.resourceType() === "image" && target.pathname.startsWith("/storage/v1/"));
+    if (permits(url)) {
+      const frame = request.isNavigationRequest() ? request.frame() : null;
+      let response;
+      try { response = await route.fetch({ maxRedirects: 0 }); }
+      catch { if (frame) navigationRedirects.delete(frame); return route.abort("failed"); }
+      try {
+        const location = response.headers().location;
+        if (response.status() < 300 || response.status() >= 400 || location === undefined) {
+          if (frame) navigationRedirects.delete(frame);
+          return await route.fulfill({ status: response.status(), body: await response.body(), headers: { "access-control-allow-origin": "", ...response.headers() } });
+        }
+        let target;
+        try { target = new URL(location, url); } catch {}
+        const previous = frame ? navigationRedirects.get(frame) : null;
+        const count = previous?.url === url.href ? previous.count : 0;
+        if (!target || !permits(target) || !frame || request.method() !== "GET" || count >= 20) {
+          const action = !target ? "invalid-browser-redirect" : !permits(target) ? "unexpected-nonlocal-redirect" : "unexpected-browser-redirect";
+          record(action, request, { url: target?.href || url.href, redirectedFrom: url.href, status: response.status() });
+          if (frame) navigationRedirects.delete(frame);
+          await route.abort("blockedbyclient");
+          fail(`Browser redirect refused: ${request.method()} ${url.href}`);
+        }
+        navigationRedirects.set(frame, { url: target.href.split("#")[0], count: count + 1 });
+        protectFrame(frame);
+        let resolve;
+        const redirect = new Promise(done => { resolve = done; });
+        const operations = navigationOperations.get(frame);
+        for (const operation of operations || []) if (!operation.redirect) operation.redirect = redirect;
+        const operation = operations?.values().next().value;
+        const options = operation?.options || {};
+        const timeout = options.timeout > 0 ? Math.max(1, options.timeout - (Date.now() - operation.started)) : options.timeout;
+        try {
+          await route.abort("aborted");
+          resolve({ response: await frame.goto(target.href, { waitUntil: "commit", timeout, referer: options.referer }) });
+        }
+        catch (error) { resolve({ error }); }
+        return;
+      } catch (error) {
+        if (!closing || !String(error).includes("Response has been disposed")) throw error;
+        return;
+      } finally {
+        try { await response.dispose(); }
+        catch (error) {
+          if (!closing || !String(error).includes("apiResponse.dispose: Target page, context or browser has been closed")) throw error;
+        }
+      }
+    }
     if (request.url() === "https://razorpay.com/assets/razorpay-logo.svg" && request.method() === "GET" && request.resourceType() === "image") {
       record("fulfilled-static-asset", request);
       return route.fulfill({ status: 200, contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1"><rect width="1" height="1" fill="none"/></svg>' });
