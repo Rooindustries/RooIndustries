@@ -13,7 +13,8 @@ export default function DiscordGuideBanner({ hidden = false }) {
 
   useEffect(() => {
     let mounted = true;
-    getPublicContent("discord-banner")
+    const controller = new AbortController();
+    getPublicContent("discord-banner", {}, { signal: controller.signal })
       .then((data) => {
         if (!mounted || !data) return;
         setBanner((prev) => ({
@@ -22,9 +23,12 @@ export default function DiscordGuideBanner({ hidden = false }) {
           link: data.link || prev.link,
         }));
       })
-      .catch(console.error);
+      .catch((error) => {
+        if (!controller.signal.aborted && error?.name !== "AbortError") console.error(error);
+      });
     return () => {
       mounted = false;
+      controller.abort();
     };
   }, []);
 

@@ -7,6 +7,13 @@ const providers = {
 };
 
 const test = base.extend({
+  networkGuard: [async ({ context, baseURL }, use) => {
+    const { guardBrowserContext } = await import("../../scripts/lib/test-target-safety.mjs");
+    const contentURL = new URL(baseURL);
+    contentURL.port = String(Number(contentURL.port) + 1);
+    await guardBrowserContext(context, [baseURL, contentURL.origin]);
+    await use();
+  }, { auto: true }],
   cpuThrottling: [async ({ page, browserName }, use, testInfo) => {
     const rate = Number(process.env.PW_CPU_THROTTLING_RATE || 1);
     if (!Number.isFinite(rate) || rate < 1) throw new Error("Invalid CPU throttling rate.");
@@ -24,10 +31,6 @@ const test = base.extend({
     }
   }, { auto: true }],
   flow: async ({ page, context, baseURL }, use, testInfo) => {
-    const { guardBrowserContext } = await import("../../scripts/lib/test-target-safety.mjs");
-    const contentURL = new URL(baseURL);
-    contentURL.port = String(Number(contentURL.port) + 1);
-    await guardBrowserContext(context, [baseURL, contentURL.origin]);
     const date = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
     const state = {
       calls: [],

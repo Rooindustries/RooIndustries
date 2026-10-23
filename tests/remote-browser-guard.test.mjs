@@ -13,6 +13,9 @@ const fixture = http.createServer((request, response) => {
   if (request.method === "GET" && request.url === "/") {
     response.writeHead(200, { "Content-Type": "text/html" });
     response.end("<p>fixture-ok</p>");
+  } else if (request.url === "/redirect") {
+    response.writeHead(302, { Location: `http://127.0.0.1:${sink.address().port}/` });
+    response.end();
   } else {
     response.writeHead(404);
     response.end();
@@ -133,6 +136,38 @@ const attemptConnect = url => `
   finally { await browser?.close(); }
   console.log(JSON.stringify({ error }));
 `;
+
+test("page and context API requests cannot escape the fixture on a connected browser", { timeout: 65_000 }, async t => {
+  const beforeRequests = sinkRequests;
+  const child = await runChild(`
+    import assert from "node:assert/strict";
+    import { chromium } from "@playwright/test";
+    const { guardBrowserContext } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+    const browser = await chromium.connect(${JSON.stringify(endpoint)}, { exposeNetwork: "<loopback>" });
+    try {
+      const context = await browser.newContext({ baseURL: ${JSON.stringify(fixtureOrigin)} });
+      await guardBrowserContext(context, [${JSON.stringify(fixtureOrigin)}]);
+      const page = await context.newPage();
+      const refusals = [];
+      for (const api of [page.request, context.request]) {
+        for (const method of ["get", "post", "put", "patch", "delete", "head", "fetch"]) {
+          await assert.rejects(api[method](${JSON.stringify(`http://127.0.0.1:${sink.address().port}/`)}), /outside the local fixture/);
+          refusals.push(method);
+        }
+        await assert.rejects(api.get("/redirect"), /redirects are refused/);
+        const response = await api.get("/");
+        assert.equal(response.status(), 200);
+        assert.match(await response.text(), /fixture-ok/);
+      }
+      console.log(JSON.stringify({ refusals, fixtureStatus: 200 }));
+      await context.close();
+    } finally { await browser.close(); }
+  `, endpoint);
+  t.diagnostic(JSON.stringify({ child, sinkRequests: sinkRequests - beforeRequests }));
+  const value = result(child);
+  assert.equal(value.refusals.length, 14);
+  assert.equal(sinkRequests, beforeRequests);
+});
 const requestHelpers = `
   import http from "node:http";
   import https from "node:https";

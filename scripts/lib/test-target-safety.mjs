@@ -70,6 +70,7 @@ const guardTunnelSocket = (socket, pathname) => {
 if (process.env.ROO_TEST_HOST && !isPrivateTestHost(process.env.ROO_TEST_HOST)) fail("ROO_TEST_HOST must be a private IP literal.");
 const childGuardImports = new Set([import.meta.url]);
 const childGuardOrigins = [];
+const networkGuards = [];
 const nonNodeBinaries = new Set(["postgres", "postgrest", "pg_ctl", "initdb", "psql", "pg_config", "git", "mkfifo", "tar", "gzip", "unzip", "python3", "chrome", "chromium", "google-chrome", "google-chrome-stable"]);
 
 const originalInheritedOrigins = process.env.ROO_TEST_NETWORK_ORIGINS;
@@ -198,6 +199,7 @@ export function installNetworkGuard(origins) {
   };
   const allowed = new Set(origins.map(localOrigin).flatMap(loopbackAliases));
   const inheritedOrigins = [...allowed];
+  const guard = { active: true, restore: null };
   childGuardOrigins.push(inheritedOrigins);
   refreshInheritedGuardEnvironment();
   const check = value => {
@@ -209,10 +211,11 @@ export function installNetworkGuard(origins) {
   const originalFetch = globalThis.fetch;
   const originalDispatcher = getGlobalDispatcher();
   setGlobalDispatcher({ dispatch(options, handler) {
-    check(options.origin);
+    if (guard.active) check(options.origin);
     return originalDispatcher.dispatch(options, handler);
   } });
   globalThis.fetch = async (input, init) => {
+    if (!guard.active) return originalFetch(input, init);
     check(typeof input === "string" || input instanceof URL ? String(input) : input.url);
     const signals = [AbortSignal.timeout(30000), init?.signal || (typeof input === "object" ? input.signal : null)].filter(Boolean);
     const redirect = init?.redirect ?? (typeof input === "object" ? input.redirect : undefined);
@@ -223,6 +226,7 @@ export function installNetworkGuard(origins) {
     const request = module.request, get = module.get;
     originals.push(() => { module.request = request; module.get = get; });
     module.request = function(input, options, callback) {
+      if (!guard.active) return request.call(this, input, options, callback);
       let tunnelSocket = null;
       const createConnection = ({ timeout } = {}) => {
         if (tunnelSocket) throw new Error(tunnelRefusal);
@@ -283,13 +287,19 @@ export function installNetworkGuard(origins) {
     module.get = function(...args) { const req = module.request(...args); req.end(); return req; };
   }
   syncBuiltinESMExports();
-  let restored = false;
+  guard.restore = () => {
+    globalThis.fetch = originalFetch;
+    setGlobalDispatcher(originalDispatcher);
+    originals.forEach(restore => restore());
+  };
+  networkGuards.push(guard);
   return () => {
-    if (restored) return;
-    restored = true;
+    if (!guard.active) return;
+    guard.active = false;
     childGuardOrigins.splice(childGuardOrigins.indexOf(inheritedOrigins), 1);
     refreshInheritedGuardEnvironment();
-    globalThis.fetch = originalFetch; setGlobalDispatcher(originalDispatcher); originals.forEach(restore => restore()); syncBuiltinESMExports();
+    while (networkGuards.length && !networkGuards.at(-1).active) networkGuards.pop().restore();
+    syncBuiltinESMExports();
   };
 }
 
@@ -344,6 +354,19 @@ export function prepareTestTarget({ browser = false } = {}) {
 
 export async function guardBrowserContext(context, origins) {
   const allowed = new Set(origins.map(localOrigin));
+  const api = context.request;
+  const fetch = api.fetch;
+  api.fetch = async function(input, options = {}) {
+    if (options.url !== undefined || options.request !== undefined) fail("Custom request targets are refused.");
+    const url = new URL(typeof input === "string" ? input : input.url(), origins[0]);
+    if (!allowed.has(url.origin) || url.username || url.password) fail("Request destination is outside the local fixture.");
+    const response = await fetch.call(this, typeof input === "string" ? url.href : input, { ...options, maxRedirects: 0 });
+    if (response.status() >= 300 && response.status() < 400 && options.maxRedirects !== 0) {
+      await response.dispose();
+      fail("HTTP redirects are refused.");
+    }
+    return response;
+  };
   const contentAssetOrigins = new Set([...allowed].map(origin => {
     const url = new URL(origin);
     url.port = process.env.TOOLING_CONTENT_PORT || String(Number(url.port) + 1);
