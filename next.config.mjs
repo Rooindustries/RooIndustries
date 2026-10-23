@@ -173,10 +173,18 @@ const nextConfig = {
   },
 };
 
+process.env.SENTRY_CLI_NO_TELEMETRY = "1";
+const productionDeployment = process.env.VERCEL === "1" && process.env.VERCEL_ENV === "production";
+const uploadSourceMaps = productionDeployment && Boolean(process.env.SENTRY_AUTH_TOKEN);
+if (productionDeployment && !uploadSourceMaps && process.env.ROO_SENTRY_MISSING_TOKEN_WARNED !== "1") {
+  process.env.ROO_SENTRY_MISSING_TOKEN_WARNED = "1";
+  console.warn("Sentry source-map upload skipped: SENTRY_AUTH_TOKEN is missing for the Vercel production build.");
+}
+
 export default withSentryConfig(nextConfig, {
   org: "rooindustries",
   project: "rooindustries-website",
-  authToken: process.env.SENTRY_AUTH_TOKEN,
+  authToken: uploadSourceMaps ? process.env.SENTRY_AUTH_TOKEN : undefined,
   widenClientFileUpload: true,
   silent: true,
   telemetry: false,
@@ -184,7 +192,7 @@ export default withSentryConfig(nextConfig, {
     console.warn("Sentry source-map upload failed. Check the build token and Sentry availability.");
   },
   sourcemaps: {
-    disable: !process.env.SENTRY_AUTH_TOKEN,
+    disable: !uploadSourceMaps,
     deleteSourcemapsAfterUpload: true,
   },
   release: {
