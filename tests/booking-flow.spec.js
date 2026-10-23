@@ -176,13 +176,13 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     });
 
     test("expired other-tab reservation: Check again that finds the slot gone keeps the typed details", async ({ page, flow }) => {
-      await page.clock.install();
       await flow.reserve();
       await flow.details();
-      const original = { ...await hold(page), phase: "payment_pending", paymentStartedElsewhere: true };
+      const original = {
+        ...await hold(page), phase: "payment_pending", paymentStartedElsewhere: true, expiresAt: new Date(Date.now() - 60000).toISOString(),
+      };
       await page.evaluate(value => sessionStorage.setItem("my_slot_hold", JSON.stringify(value)), original);
       await page.reload();
-      await page.clock.fastForward(21 * 60 * 1000);
       await expect(page.getByRole("alert").filter({ hasText: "This reservation expired. Use Check again to choose a slot again." })).toBeVisible();
       await page.route("**/api/holdSlot", route => route.fulfill({
         status: 409, contentType: "application/json",
