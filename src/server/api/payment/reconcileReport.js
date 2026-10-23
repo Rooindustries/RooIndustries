@@ -510,7 +510,7 @@ export const buildReconcileReport = async ({
   const recentRefs = new Set();
   const finishWindow = (complete) => {
     const priority = (item) =>
-      item.key.startsWith("scan:") ? 0 : recentRefs.has(item.ref) ? 1 : 2;
+      item.key.startsWith("scan:") ? 0 : recentRefs.has(item.ref) || recentRefs.has(item.id) ? 1 : 2;
     items.sort((left, right) => priority(left) - priority(right));
     return response([], complete);
   };
@@ -605,6 +605,18 @@ export const buildReconcileReport = async ({
       )
         throw unavailable();
     }
+    const terminalDispute = payment.disputes.find(dispute =>
+      ["dispute_lost", "dispute_accepted", "dispute_expired"].includes(dispute.dispute_status));
+    if (terminalDispute)
+      return mismatch(booking?._id || record._id, `owner_review_dodo_${terminalDispute.dispute_status}_owner_review`);
+    const disputed = openDispute(payment);
+    if (
+      (record.dodoDisputeActive === true) !== disputed ||
+      (record.verificationState === "disputed") !== disputed ||
+      (Object.hasOwn(record, "dodoDisputeActive") && typeof record.dodoDisputeActive !== "boolean") ||
+      (Object.hasOwn(record, "verificationState") && typeof record.verificationState !== "string")
+    )
+      return mismatch(booking?._id || record._id, "dispute_not_applied");
     if (!booking) {
       if (
         bookingId ||
@@ -815,7 +827,8 @@ export const buildReconcileReport = async ({
           inWindow(booking[window.path], from, window.to))
       )
         continue;
-      recentRefs.add(booking._id);
+      for (const ref of [booking._id, booking.paymentRecordId, booking.dodoPaymentId])
+        if (isIdentity(ref)) recentRefs.add(ref);
       if (checkedBookingIds.has(booking._id)) continue;
       const paymentId = String(booking.dodoPaymentId || "").trim();
       const payment = paymentId ? await getPayment(paymentId, true) : null;

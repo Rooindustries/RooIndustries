@@ -1019,7 +1019,31 @@ try{
       assert.equal(refundedBooking.status, full ? 'refunded' : 'pending');
       assert.equal(refundedBooking.dodoDisputeActive, true);
       dodoPayment.disputes = [dodoDispute(resolvedStatus)];
-      const resolved = await requestFlow('dodo', { req: dodoReq(dodoPayment.disputes[0], 'dispute.' + resolvedStatus.slice(8), 'dispute-resolved-' + scenarioNumber) });
+      const resolutionReq = dodoReq(dodoPayment.disputes[0], 'dispute.' + resolvedStatus.slice(8), 'dispute-resolved-' + scenarioNumber);
+      let faulted = false;
+      fixture.setRequestHook(async (phase, request) => {
+        if (phase === 'before' && request.body?.p_mutations?.some(mutation => mutation.document?._id === recordId && mutation.document.dodoDisputeActive === false)) {
+          faulted = true;
+          throw new Error('Dispute resolution record transaction unavailable');
+        }
+      });
+      const failedResolution = await requestFlow('dodo', { req: resolutionReq });
+      fixture.setRequestHook(null);
+      assert.equal(faulted, true);
+      assert.equal(failedResolution.status, 503, JSON.stringify(failedResolution));
+      const pendingRecord = await record();
+      assert.equal(pendingRecord.dodoDisputeActive, true);
+      assert.equal(pendingRecord.verificationState, 'disputed');
+      assert.equal(pendingRecord.refundRequiresBookingSync, false);
+      assert.deepEqual((await row(bookingId)).payload, refundedBooking);
+      dodoList = listed ? [dodoSummary()] : [];
+      Date.now = () => observedAt + 1800000;
+      const pendingWindow = await authorizedReport('GET', true);
+      const pendingTargets = await targetReport(canonicalKeys);
+      assert.deepEqual(reportReasons(pendingWindow.body), ['dispute_not_applied'], JSON.stringify(pendingWindow.body));
+      assertTarget(pendingTargets, canonicalKeys, Array(3).fill('unresolved'), ['dispute_not_applied']);
+      Date.now = originalNow;
+      const resolved = await requestFlow('dodo', { req: resolutionReq });
       assert.equal(resolved.status, 200, JSON.stringify(resolved));
       const saved = await record();
       const booking = (await row(bookingId)).payload;
@@ -1039,6 +1063,25 @@ try{
       const earnings = await commerce.referralEarnings({ referralId: 'referral.correct', referralCode: 'creator-correct' });
       assert.equal(earnings.total, full ? 0 : 0.5);
       const controls = [];
+      for (const [field, value] of [
+        ['dodoDisputeActive', true],
+        ['verificationState', 'disputed'],
+        ['dodoDisputeActive', 'false'],
+        ['verificationState', true],
+      ]) {
+        const original = saved[field];
+        await sql`update migration.source_documents set payload=jsonb_set(payload,ARRAY[${field}]::text[],${sql.json(value)}) where legacy_sanity_id=${recordId}`;
+        assert.deepEqual((await record())[field], value);
+        const report = await targetReport(canonicalKeys);
+        assertTarget(report, canonicalKeys, Array(3).fill('unresolved'), ['dispute_not_applied']);
+        controls.push({ id: recordId, field, report });
+        await sql`update migration.source_documents set payload=jsonb_set(payload,ARRAY[${field}]::text[],${sql.json(original)}) where legacy_sanity_id=${recordId}`;
+        assert.deepEqual((await record())[field], original);
+      }
+      dodoPayment.disputes[0].dispute_status = 'dispute_opened';
+      const unappliedOpenDispute = await targetReport(canonicalKeys);
+      assertTarget(unappliedOpenDispute, canonicalKeys, Array(3).fill('unresolved'), ['dispute_not_applied']);
+      dodoPayment.disputes[0].dispute_status = resolvedStatus;
       for (const [id, field, value] of [
         [recordId, 'refundRequiresBookingSync', true],
         [bookingId, 'refundedAmount', (dodoRefund.amount - 1) / 100],
@@ -1066,7 +1109,54 @@ try{
       dodoRefund.currency = 'USD';
       const recovered = await targetReport(canonicalKeys);
       assertTarget(recovered, canonicalKeys, Array(3).fill('recovered'), []);
-      return { opened, refund, refundedBooking, resolved, saved, booking, window, targeted, earnings, controls, invalidProviderRefund, recovered };
+      return { opened, refund, refundedBooking, failedResolution, pendingRecord, pendingWindow, pendingTargets, resolved, saved, booking, window, targeted, earnings, controls, unappliedOpenDispute, invalidProviderRefund, recovered };
+    });
+  }
+  for (const status of ['dispute_lost', 'dispute_accepted', 'dispute_expired']) {
+    await run('reconcile-report-terminal-dispute-transaction-' + status, async () => {
+      const observedAt = originalNow();
+      await seed('dodo', 'booked', dodoBooking());
+      dodoPayment.updated_at = new Date(observedAt).toISOString();
+      dodoPayment.disputes = [dodoDispute('dispute_opened')];
+      assert.equal((await requestFlow('dodo', { req: dodoReq(dodoPayment.disputes[0], 'dispute.opened', 'opened-' + scenarioNumber) })).status, 200);
+      dodoPayment.refund_status = 'full';
+      dodoPayment.refunds = [dodoRefund];
+      assert.equal((await requestFlow('dodo', { req: dodoReq(dodoRefund, 'refund.succeeded', 'refund-' + scenarioNumber) })).status, 200);
+      const booking = (await row(bookingId)).payload;
+      dodoPayment.disputes = [dodoDispute(status)];
+      const req = dodoReq(dodoPayment.disputes[0], 'dispute.' + status.slice(8), 'terminal-' + scenarioNumber);
+      let faulted = false;
+      fixture.setRequestHook(async (phase, request) => {
+        if (phase === 'before' && request.body?.p_mutations?.some(mutation => mutation.document?._id === recordId && mutation.document.providerRecoveryTerminal === true)) {
+          faulted = true;
+          throw new Error('Terminal dispute record transaction unavailable');
+        }
+      });
+      const failed = await requestFlow('dodo', { req });
+      fixture.setRequestHook(null);
+      assert.equal(faulted, true);
+      assert.equal(failed.status, 503);
+      const pending = await record();
+      assert.equal(pending.dodoDisputeActive, true);
+      assert.equal(pending.verificationState, 'disputed');
+      assert.notEqual(pending.providerRecoveryTerminal, true);
+      assert.equal(pending.refundRequiresBookingSync, false);
+      dodoList = [];
+      Date.now = () => observedAt + 1800000;
+      const window = await authorizedReport('GET', true);
+      const targeted = await targetReport(canonicalKeys);
+      const reason = 'owner_review_dodo_' + status + '_owner_review';
+      assert.deepEqual(reportReasons(window.body), [reason]);
+      assertTarget(targeted, canonicalKeys, Array(3).fill('unresolved'), [reason]);
+      Date.now = originalNow;
+      const retry = await requestFlow('dodo', { req });
+      assert.equal(retry.status, 200);
+      assert.equal((await record()).providerRecoveryTerminal, true);
+      assert.deepEqual((await row(bookingId)).payload, booking);
+      Date.now = () => observedAt + 1800000;
+      const terminal = await targetReport(canonicalKeys);
+      assertTarget(terminal, canonicalKeys, Array(3).fill('unresolved'), [reason]);
+      return { failed, pending, window, targeted, retry, terminal, booking };
     });
   }
   for (const commission of [0.29, 0.57]) await run(`reconcile-report-refund-half-cent-${commission}`, async () => {
@@ -1189,6 +1279,9 @@ try{
     });
   }
   for (const variant of [
+    { name: 'dispute-active', record: { dodoDisputeActive: true, verificationState: 'disputed' } },
+    { name: 'dispute-verification-pending', record: { dodoDisputeActive: false, verificationState: 'disputed' } },
+    { name: 'dispute-flag-malformed', importedDisputeFlag: 'false' },
     { name: 'sync-pending', record: { refundRequiresBookingSync: true } },
     { name: 'sync-unknown', record: { refundRequiresBookingSync: null } },
     { name: 'release-pending', record: { resourceReleasePending: true } },
@@ -1216,6 +1309,7 @@ try{
       assert.equal(refund.status, 200, JSON.stringify(refund));
       if (variant.record) await commerce.patch(recordId).set(variant.record).commit();
       if (variant.importedCurrency) await sql`update migration.source_documents set payload=jsonb_set(payload,'{refundCurrency}',${sql.json(variant.importedCurrency)}) where legacy_sanity_id=${recordId}`;
+      if (variant.importedDisputeFlag) await sql`update migration.source_documents set payload=jsonb_set(payload,'{dodoDisputeActive}',${sql.json(variant.importedDisputeFlag)}) where legacy_sanity_id=${recordId}`;
       if (variant.refund) Object.assign(dodoRefund, variant.refund);
       Object.assign(dodoPayment, variant.payment);
       dodoList = [dodoSummary()];
@@ -1504,7 +1598,10 @@ try{
       if (refunded) {
         dodoPayment.refund_status = 'full';
         dodoPayment.refunds = [dodoRefund];
-      } else dodoPayment.disputes = [dodoDispute('dispute_opened')];
+      } else {
+        dodoPayment.disputes = [dodoDispute('dispute_opened')];
+        await commerce.patch(recordId).set({ status: 'needs_recovery', dodoDisputeActive: true, verificationState: 'disputed' }).commit();
+      }
       const booking = (await row(bookingId)).payload;
       assert.equal(Object.hasOwn(booking, 'dodoOriginalCommissionAmount'), false);
       const report = await expectReport([]);
@@ -1522,7 +1619,7 @@ try{
       refundedAmount: 9.98,
       refundStatus: 'partial',
       commissionAmount: 0,
-    }));
+    }, { status: 'needs_recovery', dodoDisputeActive: true, verificationState: 'disputed' }));
     dodoPayment.refund_status = 'partial';
     dodoPayment.refunds = [{ ...dodoRefund, amount: 998, is_partial: true }];
     dodoPayment.disputes = [dodoDispute('dispute_opened')];
@@ -1550,7 +1647,7 @@ try{
         dodoDisputeActive: active,
         commissionAmount: active ? 0 : 1,
         dodoOriginalCommissionAmount: 1,
-      }));
+      }, { status: active ? 'needs_recovery' : 'booked', dodoDisputeActive: active, verificationState: active ? 'disputed' : 'server_verified' }));
       dodoPayment.disputes = [dodoDispute(status)];
       dodoList = [dodoSummary()];
       return expectReport([]);
@@ -2427,7 +2524,7 @@ try{
     }
   }
   await run('reconcile-report-disputed-pending-commission', async () => {
-    await seed('dodo', 'needs_recovery', dodoBooking({ status: 'pending', dodoDisputeActive: true }));
+    await seed('dodo', 'needs_recovery', dodoBooking({ status: 'pending', dodoDisputeActive: true }, { dodoDisputeActive: true, verificationState: 'disputed' }));
     dodoPayment.disputes = [
       {
         dispute_id: 'dispute-fixture',
@@ -2890,7 +2987,8 @@ try{
     { name: 'resolved', booking: { dodoDisputeActive: true }, repair: { dodoDisputeActive: false }, reason: 'dispute_not_applied' },
   ]) {
     await run('reconcile-report-target-' + variant.name + '-recovery', async () => {
-      await seed('dodo', variant.name === 'full' ? 'refunded' : 'booked', dodoBooking(variant.booking));
+      await seed('dodo', variant.name === 'full' ? 'refunded' : 'booked', dodoBooking(variant.booking,
+        variant.name === 'active' ? { status: 'needs_recovery', dodoDisputeActive: true, verificationState: 'disputed' } : {}));
       if (variant.name === 'partial' || variant.name === 'full') {
         dodoPayment.refund_status = variant.name;
         dodoPayment.refunds = [{ ...dodoRefund, amount: variant.name === 'partial' ? 333 : 999, is_partial: variant.name === 'partial' }];
@@ -3160,8 +3258,14 @@ try{
     if (count > 200) assert.equal(report.body.items[0].key, 'scan:dodo-bookings');
     return { count, lookups: lookups.length, report };
   });
-  for (const history of [49, 50, 51]) for (const listed of [false, true]) await run(`reconcile-report-recent-priority-${history}-${listed ? 'listed' : 'reverse'}`, async () => {
-    await seed('dodo', 'booked', dodoBooking({ referralCode: 'wrong-creator' }));
+  for (const history of [49, 50, 51]) for (const listed of [false, true]) for (const variant of ['booking', 'pricing', 'currency', 'payment']) await run(`reconcile-report-recent-priority-${history}-${listed ? 'listed' : 'reverse'}${variant === 'booking' ? '' : '-' + variant}`, async () => {
+    await seed('dodo', 'booked', dodoBooking(
+      variant === 'booking' ? { referralCode: 'wrong-creator' } : variant === 'payment' ? { paymentRecordId: 'paymentRecord.other' } : {},
+      variant === 'pricing' ? { pricingSnapshot: { netAmount: null } } : {},
+    ));
+    if (['currency', 'payment'].includes(variant)) dodoPayment.currency = 'EUR';
+    const recentRef = variant === 'booking' ? bookingId : recordId;
+    const expectedReason = { booking: 'referral_binding_mismatch', pricing: 'frozen_pricing_unavailable', currency: 'dodo_currency_mismatch', payment: 'dodo_currency_mismatch' }[variant];
     const owners = ['provider', 'reconciliation'].map((kind) => ({
       _type: 'paymentRecord', _id: 'paymentRecord.recent-' + kind, provider: 'dodo',
       status: 'needs_recovery', [kind + 'RecoveryTerminal']: true,
@@ -3181,20 +3285,20 @@ try{
       return true;
     };
     const report = await authorizedReport('GET', true);
-    const recentRefs = [bookingId, ...owners.map((owner) => owner._id)];
+    const recentRefs = [recentRef, ...owners.map((owner) => owner._id)];
     assert.equal(report.status, 200);
     assert.equal(report.body.count, history + 3);
     assert.equal(report.body.items.length, 50);
     assert.deepEqual(report.body.complete, { payments: true, bookings: true, records: true, items: false });
     assert.deepEqual(report.body.items.slice(0, 3).map((item) => item.ref).sort(), [...recentRefs].sort(), JSON.stringify(report.body));
-    assert.equal(report.body.items.find((item) => item.ref === bookingId).reason, 'referral_binding_mismatch');
+    assert.equal(report.body.items.find((item) => item.ref === recentRef).reason, expectedReason);
     assert.ok(report.body.items.filter((item) => owners.some(owner => owner._id === item.ref)).every((item) => item.reason === 'owner_review_dodo_currency_mismatch'));
     for (const ref of recentRefs) assert.equal(report.body.items.filter((item) => item.ref === ref).length, 1);
     const retry = await authorizedReport('GET', true);
     assert.deepEqual(retry.body.items, report.body.items);
     const omitted = 'payment:payment-history-' + (history - 1);
     assert.equal(report.body.items.some((item) => item.key === omitted), false);
-    const target = await targetReport([omitted, ...recentRefs.map((id, index) => (index ? 'record:' : 'booking:') + id)]);
+    const target = await targetReport([omitted, ...recentRefs.map((id, index) => (index || variant !== 'booking' ? 'record:' : 'booking:') + id)]);
     assert.equal(target.status, 200);
     assert.ok(target.body.checks.every((entry) => entry.state === 'unresolved'));
     assert.equal(target.body.items[0].reason, 'payment_without_record');

@@ -658,8 +658,9 @@ try {
       for (const entry of report.items) current.checks[entry.key] = check(entry.key, 'unresolved', [entry]);
       const recent = report.items.slice(0, 3);
       assert.deepEqual(recent.map((entry) => entry.ref).sort(), [
-        'booking.fixture', 'paymentRecord.recent-provider', 'paymentRecord.recent-reconciliation',
+        'paymentRecord.fixture', 'paymentRecord.recent-provider', 'paymentRecord.recent-reconciliation',
       ].sort());
+      assert.equal(recent.find(entry => entry.ref === 'paymentRecord.fixture').reason, 'frozen_pricing_unavailable');
       let identities;
       for (let attempt = 0; attempt < 2; attempt++) {
         const result = await invoke(home);
@@ -757,6 +758,14 @@ try {
       const primary = proof.targeted.body.checks[0].key;
       const issue = seedIssue(primary, {}, { keys, observations: [item(primary, 'dispute_not_applied', proof.booking._id)] });
       const { at, from, to } = windowReport();
+      current.window = { ...proof.pendingWindow.body, at, from, to };
+      for (const entry of proof.pendingTargets.body.checks) current.checks[entry.key] = entry;
+      const pending = await invoke(home);
+      assert.equal(pending.code, 0, pending.stdout);
+      assert.equal(JSON.parse(pending.stdout).result, 'mismatch');
+      assert.notEqual(issue.status, 'Done');
+      assert.equal(metadata(issue).state, 'unresolved');
+      assert.equal(current.issues.length, 1);
       current.window = { ...proof.window.body, at, from, to };
       for (const entry of proof.targeted.body.checks) current.checks[entry.key] = entry;
       for (let attempt = 0; attempt < 2; attempt++) {

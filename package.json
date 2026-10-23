@@ -56,6 +56,7 @@
     "test:commerce-alerts:routes": "node scripts/commerce-alerts-e2e.mjs --routes",
     "test:commerce-alerts:preview": "node scripts/commerce-alerts-preview-e2e.mjs",
     "test:monitoring:deployments": "node scripts/monitoring-deployment-e2e.mjs",
+    "test:commerce-alerts:production": "node scripts/commerce-alerts-preview-e2e.mjs --production",
     "test:monitoring:startup": "node scripts/monitoring-next-startup-e2e.mjs",
     "test:smoke:production": "node --test tests/production-smoke.test.mjs",
     "test:contact:csp": "playwright test tests/contact-form-csp.spec.js --project=chromium",

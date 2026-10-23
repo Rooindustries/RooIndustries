@@ -20,11 +20,12 @@ Object.assign(process.env, cleanEnv);
 const artifact = resolve(process.env.ROO_COMMERCE_GATE_ARTIFACT || 'test-results/commerce-monitoring-gate');
 await mkdir(artifact, { recursive: true });
 const mode = process.argv.find(arg => arg.startsWith('--mode='))?.slice(7);
+const loopback = process.argv.includes('--loopback');
 const modes = ['hosted-preview', 'ci', 'local-start', 'production'];
 if (!mode) {
   const results = [];
   for (const selected of modes) {
-    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--mode=' + selected], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--mode=' + selected, ...(loopback ? ['--loopback'] : [])], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     child.stdout.on('data', chunk => { output += chunk; });
     child.stderr.on('data', chunk => { output += chunk; });
@@ -103,7 +104,7 @@ if (!mode) {
         throw cause;
       }
     } });
-    process.env.NEXT_PUBLIC_SENTRY_DSN = mode === 'production' ? `http://fixturekey@127.0.0.1:${fixture.address().port}/42` : 'https://fixturekey@ingest.invalid/42';
+    process.env.NEXT_PUBLIC_SENTRY_DSN = mode === 'production' || loopback ? `http://fixturekey@127.0.0.1:${fixture.address().port}/42` : 'https://fixturekey@ingest.invalid/42';
     sdk = await import('@sentry/nextjs');
     const { startServerMonitoring } = await import('../src/lib/monitoring/server.js');
     ({ runLegacyApiHandler } = await import('../src/lib/nextApiAdapter.js'));

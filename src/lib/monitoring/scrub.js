@@ -191,8 +191,7 @@ export function monitoringDsn(value) {
 export function serverMonitoringDsn(value) {
   const dsn = monitoringDsn(value);
   if (!dsn) return undefined;
-  return isProductionDeployment() || ["localhost", "127.0.0.1", "[::1]"].includes(new URL(dsn).hostname)
-    ? dsn : undefined;
+  return isProductionDeployment() ? dsn : undefined;
 }
 
 export function envelopeHeaderScrubber(publicKey, environment) {

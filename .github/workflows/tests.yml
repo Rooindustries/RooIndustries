@@ -116,7 +116,7 @@ jobs:
   commerce-alerts-preview:
     name: Commerce alerts in local Next preview
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -127,11 +127,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:commerce-alerts:preview
+      - run: npm run test:commerce-alerts:production
+        env:
+          ROO_COMMERCE_PREVIEW_ARTIFACT: test-results/commerce-alerts-production
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: commerce-alerts-preview
-          path: test-results/commerce-alerts-preview/
+          path: |
+            test-results/commerce-alerts-preview/
+            test-results/commerce-alerts-production/
           if-no-files-found: ignore
 
   playwright:

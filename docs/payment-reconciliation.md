@@ -102,6 +102,9 @@ findings tied to recent reverse-scan bookings or terminal recovery records,
 then other lifetime payment findings. This keeps historical mismatches from
 crowding out recent booking and owner-review alerts. Ordering stays stable
 within each group, including entities already found by the forward scan.
+Recent booking priority includes its booking, payment-record and payment IDs,
+so early pricing and provider-binding failures retain that priority even
+when their finding references the record instead of the booking.
 The count still includes every finding, and overflow remains incomplete.
 Retained historical issues remain eligible for targeted checks.
 Terminal recovery findings use their payment-record identity in every scan.
@@ -129,8 +132,12 @@ Fully refunded bookings earn no referral commission, even when they keep a
 historical commission amount. They can also keep their historical active-dispute
 flag after a won or cancelled dispute: the writer intentionally leaves fully
 refunded bookings untouched. This flag does not block recovery after full refund
-accounting is verified. Partial refunds and unfinished synchronization still stay
-unresolved. A full refund before booking is clean only when
+accounting is verified and the payment record's current dispute state agrees
+with the provider. A failed dispute update cannot close an issue, including for
+an unbooked refund. Partial refunds also require the booking flag to agree.
+Lost, accepted and expired disputes remain unresolved even if their saved
+owner-review marker has not caught up with the provider.
+A full refund before booking is clean only when
 the provider's validated refund total matches the payment and the local record
 confirms completed refund synchronization and released resources. A payment
 without a booking still needs investigation if its refund is partial or
@@ -189,22 +196,42 @@ metric-store errors keep their existing error reporting.
 Local test and preview servers must unset Sentry DSNs, including server and
 public/client aliases, or use a loopback collector. The maintained local
 launcher removes inherited aliases and hosting markers and accepts only a
-loopback DSN. External server reporting requires `NODE_ENV=production`,
+loopback DSN. Server reporting requires `NODE_ENV=production`,
 `VERCEL=1` and `VERCEL_ENV=production` together. Hosted Preview, CI and a local
 production build do not qualify. Initialization, automatic request capture and
-commerce alerts share this gate; explicit loopback collectors remain available.
+commerce alerts share this gate, including loopback delivery. Positive local
+E2Es set those markers explicitly and send only to their loopback collector.
 Browser build and relay deployment gating belongs to ROO-719. Keep builds
 isolated so a previous build cannot retain a public DSN. Never use real Sentry
 issues or notifications as local test fixtures. Production notification
 activation stays with release.
 
 Run `npm run test:commerce-alerts:preview` to exercise actual Next checkout,
-booking and signed Dodo webhook failures against the local collector. It also
+booking and signed Dodo webhook failures against the local collector. Its
+positive case builds and starts Next with all production markers. It also
 checks that inherited aliases are removed, an external fixture DSN is refused,
 and the browser relay is disabled or sends to the local collector. Each mode
 gets a fresh isolated build directory. Its guard allows only the owned Next
-server and local collector/database fixture. Results and envelopes go to
+server and local collector/database fixture. Next's exact development version
+check uses installed-version metadata supplied in process, with a separate
+audit; all other requests still pass through the network guard. Results and
+envelopes go to
 `test-results/commerce-alerts-preview/`; all owned processes stop afterward.
+
+Run `npm run test:commerce-alerts:production` for the shared production-only
+gate. One real production artifact starts as local, CI, hosted Preview and
+Production, with the same valid loopback DSN. Every mode executes an actual
+checkout start failure, signed test-mode Dodo webhook and booking failure.
+Only Production sends one sanitized route event per category. The matrix
+checks shutdown for late events and retains process markers, source hashes,
+build logs and envelopes. Set `ROO_COMMERCE_PREVIEW_ARTIFACT` to choose its
+artifact directory. Browser-build and relay gating remain owned by ROO-719.
+The production fixture copies the site into its own temporary directory and
+replaces only that copy's provider runtime-policy predicate with a test-only
+predicate. Production hosting markers otherwise forbid Dodo test mode before
+signature verification. The original production payment policy is unchanged;
+actual route handling, signature verification and monitoring run, with local
+database faults. This check asserts alert delivery, not a financial outcome.
 
 Run `npm run test:commerce-alerts` with the same Postgres 17 and PostgREST
 setup as native CI. It seeds a succeeded test-mode payment without a booking,

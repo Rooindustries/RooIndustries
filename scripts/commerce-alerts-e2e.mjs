@@ -138,7 +138,7 @@ try {
     const nativeScenarios = [
       'reconcile-report-payment-without-booking', 'reconcile-report-late-capture-without-booking',
       'reconcile-report-late-capture-without-record', 'reconcile-report-transition-grace-settlement',
-      'reconcile-report-recent-priority-50-reverse', 'reconcile-report-terminal-identity-providerRecoveryTerminal',
+      'reconcile-report-recent-priority-50-reverse-pricing', 'reconcile-report-terminal-identity-providerRecoveryTerminal',
       'reconcile-report-old-refund-transition-full', 'reconcile-report-processed-full-refund-unbooked',
       'reconcile-report-review-old-terminal-providerRecoveryTerminal', 'reconcile-report-review-old-terminal-reconciliationRecoveryTerminal',
       'reconcile-report-review-recent-success-omitted', 'reconcile-report-review-recent-success-null',
@@ -156,7 +156,7 @@ try {
     });
     nativeReport = result.scenarios.find(scenario => scenario.name === 'reconcile-report-payment-without-booking').proof.report;
     graceReport = result.scenarios.find(scenario => scenario.name === 'reconcile-report-transition-grace-settlement').proof.before.body;
-    priorityReport = result.scenarios.find(scenario => scenario.name === 'reconcile-report-recent-priority-50-reverse').proof.report;
+    priorityReport = result.scenarios.find(scenario => scenario.name === 'reconcile-report-recent-priority-50-reverse-pricing').proof.report;
     terminalProof = result.scenarios.find(scenario => scenario.name === 'reconcile-report-terminal-identity-providerRecoveryTerminal').proof;
     transitionReport = result.scenarios.find(scenario => scenario.name === 'reconcile-report-old-refund-transition-full').proof.report.body;
     unbookedRefundProof = result.scenarios.find(scenario => scenario.name === 'reconcile-report-processed-full-refund-unbooked').proof;
@@ -206,10 +206,10 @@ try {
       assert.equal(results.length, 2);
       assert.ok(results.every(result => result.passed && result.issues.length === 1 && result.issues[0].status === 'Done' && result.runs.length === 3));
     });
-    check('a full refund during a later resolved dispute closes the retained owner issue and stays closed', () => {
+    check('a refunded dispute stays open after failed record synchronization and closes only after repair', () => {
       const results = daily.results.filter(result => result.name.startsWith('actual-refunded-dispute-'));
       assert.equal(results.length, 4);
-      assert.ok(results.every(result => result.passed && result.issues.length === 1 && result.issues[0].status === 'Done' && result.runs.length === 2));
+      assert.ok(results.every(result => result.passed && result.issues.length === 1 && result.issues[0].status === 'Done' && result.runs.length === 3));
     });
     check('both old terminal flags create one owner issue on installation or after a four-day gap', () => {
       const results = daily.results.filter(result => result.name.startsWith('old-terminal-'));
@@ -243,7 +243,7 @@ try {
   await once(server, 'listening');
   origin = `http://127.0.0.1:${server.address().port}`;
   restoreGuard = installNetworkGuard([origin]);
-  Object.assign(process.env, { NEXT_PUBLIC_VERCEL_ENV: 'preview', NEXT_RUNTIME: 'nodejs' });
+  Object.assign(process.env, { NODE_ENV: 'production', VERCEL: '1', VERCEL_ENV: 'production', NEXT_PUBLIC_VERCEL_ENV: 'production', NEXT_RUNTIME: 'nodejs' });
   sdk = await import('@sentry/nextjs');
   const { startServerMonitoring } = await import('../src/lib/monitoring/server.js');
   ({ runLegacyApiHandler } = await import('../src/lib/nextApiAdapter.js'));
@@ -426,8 +426,8 @@ try {
   ingestStatus = 503;
   const failedIngest = await send('/api/payment/quote', 599);
   check('Sentry outage does not change the route response', () => assert.equal(failedIngest.status, 599));
-  check('all events have preview environment and no personal data', () => {
-    for (const event of events) assert.equal(event.environment, 'preview');
+  check('all events have production environment and no personal data', () => {
+    for (const event of events) assert.equal(event.environment, 'production');
     for (const value of privateValues) assert.equal(JSON.stringify(events).includes(value), false);
   });
 } catch (cause) {
