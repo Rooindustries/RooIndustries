@@ -162,6 +162,61 @@ test("a release that finishes after the deadline keeps the typed details and the
   expect(await draftEmail(page)).toBe("visitor@example.invalid");
 });
 
+const startPayment = async (page, flow) => {
+  await page.clock.install();
+  await flow.reserve();
+  await flow.details();
+  const hold = { ...await storedHold(page), phase: "payment_pending" };
+  await page.evaluate(value => {
+    sessionStorage.setItem("my_slot_hold", JSON.stringify(value));
+    sessionStorage.setItem("payment_session_state", JSON.stringify({ paymentAccessToken: "fixture-payment" }));
+  }, hold);
+  return hold;
+};
+const paymentSession = page => page.evaluate(() => sessionStorage.getItem("payment_session_state"));
+
+test("reloading after a payment-pending reservation expired keeps its payment controls", async ({ page, flow }) => {
+  const hold = await startPayment(page, flow);
+  await page.clock.setSystemTime(Date.parse(hold.expiresAt) + 1000);
+  await page.reload();
+  await expect(page.getByRole("alert").filter({ hasText: "This reservation expired while payment is still pending." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Release payment", exact: true })).toBeVisible();
+  expect(await storedHold(page)).toMatchObject({ holdId: hold.holdId, phase: "payment_pending" });
+  expect(await paymentSession(page)).not.toBeNull();
+});
+
+test("a payment-pending reservation that expires away from the booking flow is kept for its payment", async ({ page, flow }) => {
+  const hold = await startPayment(page, flow);
+  await page.reload();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.clock.fastForward(holdLifetime);
+  await page.clock.runFor(2000);
+  expect(await storedHold(page)).toMatchObject({ holdId: hold.holdId, phase: "payment_pending" });
+  expect(await paymentSession(page)).not.toBeNull();
+  await page.clock.setSystemTime(Date.parse(hold.expiresAt) + 5000);
+  await page.reload();
+  expect(await storedHold(page)).toMatchObject({ holdId: hold.holdId, phase: "payment_pending" });
+});
+
+test("a banner release that lands after the deadline keeps the typed details", async ({ page, flow }) => {
+  await page.clock.install();
+  await flow.reserve();
+  await flow.details();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const { expiresAt } = await storedHold(page);
+  await page.clock.setSystemTime(Date.parse(expiresAt) - 300);
+  await page.route("**/api/releaseHold", async route => {
+    await page.clock.setSystemTime(Date.parse(expiresAt) + 200);
+    await route.fulfill({ json: { ok: true } });
+  });
+  await page.getByRole("button", { name: "Release", exact: true }).click();
+  await expect.poll(() => storedHold(page)).toBeNull();
+  expect(await page.evaluate(() => sessionStorage.getItem("booking_hold_expired"))).toBe("1");
+  expect(await draftEmail(page)).toBe("visitor@example.invalid");
+});
+
 test("expiry away from the booking flow clears the reservation without moving the visitor and keeps the details", async ({ page, flow }) => {
   flow.state.holdMs = shortHold;
   await flow.reserve();

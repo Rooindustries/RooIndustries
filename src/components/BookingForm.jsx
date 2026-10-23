@@ -23,6 +23,8 @@ import { getWarrantyCallout } from "../lib/packageWarranty";
 import {
   BOOKING_DRAFT_STORAGE_KEY,
   BOOKING_HOLD_EXPIRED_STORAGE_KEY,
+  holdAwaitsPayment,
+  markBookingHoldExpired,
   CHECKOUT_BOOKING_STORAGE_KEY,
   persistBookingPackageSelection,
   readStoredCheckoutBooking,
@@ -70,7 +72,6 @@ const REASSURANCE_COPY =
 const PAYMENT_PENDING_EXPIRY_ERROR =
   "This reservation expired while payment is still pending. Return to payment to check its status or release payment to try again.";
 const RESERVATION_EXPIRED_ERROR = "The reservation expired. Please choose a slot again.";
-const markHoldExpired = () => writeBrowserStorage("sessionStorage", BOOKING_HOLD_EXPIRED_STORAGE_KEY, "1");
 const REQUIRED_DETAIL_FIELDS = ["discord", "email", "specs", "mainGame"];
 const REQUIRED_DETAILS_ERROR = "Please fill out all required fields.";
 const CALENDAR_AVAILABILITY_LABELS = Object.freeze({
@@ -794,7 +795,7 @@ export default function BookingForm() {
       const stored = sessionStorage.getItem(HOLD_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (new Date(parsed.expiresAt) > new Date()) {
+        if (new Date(parsed.expiresAt) > new Date() || holdAwaitsPayment(parsed)) {
           const normalizedHold = {
             holdId: parsed.holdId,
             holdToken: parsed.holdToken,
@@ -817,7 +818,7 @@ export default function BookingForm() {
           broadcastHold(normalizedHold);
         } else {
           sessionStorage.removeItem(HOLD_STORAGE_KEY);
-          markHoldExpired();
+          markBookingHoldExpired();
           setErrorStep1(RESERVATION_EXPIRED_ERROR);
         }
       }
@@ -895,9 +896,7 @@ export default function BookingForm() {
       if (diff <= 0) {
         hasActiveHoldRef.current = false;
         setHoldCountdownMs(0);
-        const paymentPending =
-          String(myHold.phase || "").trim().toLowerCase() === "payment_pending";
-        if (paymentPending) {
+        if (holdAwaitsPayment(myHold)) {
           setErrorStep2(paymentInOtherTab
             ? "This reservation expired. Use Check again to choose a slot again."
             : PAYMENT_PENDING_EXPIRY_ERROR);
@@ -2103,7 +2102,7 @@ export default function BookingForm() {
       currentHoldRef.current?.holdId === holdIdToDelete &&
       currentHoldRef.current?.holdToken === holdTokenToDelete;
     if (classifyHoldResponse({ endpoint: "release", expired: hasExpired() }) === "clear") {
-      markHoldExpired();
+      markBookingHoldExpired();
       clearHoldState(resetStep);
       setErrorStep1(RESERVATION_EXPIRED_ERROR);
       setErrorStep2("");
@@ -2141,7 +2140,7 @@ export default function BookingForm() {
     if (outcome !== "keep") {
       const expired = hasExpired();
       if (expired && isCurrentHold()) {
-        markHoldExpired();
+        markBookingHoldExpired();
         clearHoldState(resetStep);
         setErrorStep1(RESERVATION_EXPIRED_ERROR);
         setErrorStep2("");
@@ -2195,7 +2194,7 @@ export default function BookingForm() {
       const refreshed = data.refreshedHold;
       if (!refreshed?.slotHoldId || !refreshed?.slotHoldToken) {
         removeBrowserStorage("sessionStorage", PAYMENT_SESSION_STORAGE_KEY);
-        markHoldExpired();
+        markBookingHoldExpired();
         clearHoldState(true);
         setErrorStep1(RESERVATION_EXPIRED_ERROR);
         return;
@@ -2234,7 +2233,7 @@ export default function BookingForm() {
   const handleLockAndGoNext = async (recheckOtherTab = false) => {
     const recheckingPayment = recheckOtherTab === true && paymentInOtherTab;
     if (recheckingPayment && new Date(myHold.expiresAt).getTime() <= Date.now()) {
-      markHoldExpired();
+      markBookingHoldExpired();
       clearHoldState(true);
       setErrorStep2("");
       setErrorStep1(RESERVATION_EXPIRED_ERROR);
