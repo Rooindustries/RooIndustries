@@ -2746,7 +2746,7 @@ try {
     const versionsAfter =
       await sql`select legacy_sanity_id, payload->>'commissionCalculationVersion' as version from migration.source_documents where document_type='booking' and not tombstoned order by legacy_sanity_id`;
     assert.deepEqual(versionsAfter, versionsBefore);
-    assert.deepEqual(projection.calls, []);
+    assert.equal(projection.calls.length, 0);
     await cron();
     const after =
       await sql`select legacy_sanity_id, source_revision, source_hash, payload from migration.source_documents where legacy_sanity_id=any(${historicalIds}) order by legacy_sanity_id`;
