@@ -3068,7 +3068,7 @@ const createOrReusePaymentRecordForStart = async ({
     creditSources: isUpgrade ? quote.upgradeContext.creditSources : [],
   });
 
-  if (isUpgrade && [PAYMENT_STATUS_ABANDONED, PAYMENT_STATUS_FAILED, PAYMENT_STATUS_REFUNDED].includes(record.status)) {
+  if (isUpgrade && ![PAYMENT_STATUS_STARTED, PAYMENT_STATUS_BOOKED, PAYMENT_STATUS_EMAIL_PARTIAL].includes(record.status)) {
     throw Object.assign(new Error("The previous upgrade checkout is closed. Please start a new upgrade."), {
       status: 409, code: "upgrade_checkout_closed",
     });

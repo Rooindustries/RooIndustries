@@ -372,6 +372,37 @@ test('upgrade credit stays verified and belongs to one checkout', { timeout: 900
         { title: 'Fixture higher upgrade', id: scenario.booking._id });
       assert.equal(allHigher.length, 1);
     });
+    for (const status of ['captured_client', 'captured_webhook', 'finalizing', 'needs_recovery', 'verified_server', 'unexpected']) {
+      await check(`a ${status} upgrade cannot return its old checkout`, async result => {
+        const scenario = await original();
+        const started = await fixture.start(scenario.payload);
+        assert.equal(started.status, 200, JSON.stringify(started));
+        const record = await paymentFor(started);
+        const state = { status, providerPaymentId: `payment_${record.providerOrderId}`, verificationState: 'server_verified',
+          ...(status === 'finalizing' ? { finalizationLeaseId: 'fixture_finalizing_lease',
+            finalizationLeaseExpiresAt: new Date(Date.now() + 90000).toISOString() } : {}),
+          ...(status === 'needs_recovery' ? { recoveryReason: 'booking_commit_retry' } : {}) };
+        if (status === 'unexpected') {
+          result.source = 'Synthetic imported source with an undocumented payment state.';
+          await fixture.database.sql`update migration.source_documents set payload = payload || ${fixture.database.sql.json(state)}
+            where legacy_sanity_id = ${record._id}`;
+        } else {
+          await commerce.patch(record._id).set(state).commit();
+        }
+        const nextPayload = await freshIntent(scenario);
+        const before = await fixture.snapshot();
+        const providerStarts = evidence.providerRequests.filter(request => request.path === '/checkouts').length;
+        result.replay = await fixture.start(scenario.payload);
+        result.fresh = await fixture.start(nextPayload);
+        for (const response of [result.replay, result.fresh]) {
+          assert.equal(response.status, 409, JSON.stringify(response));
+          assert.equal(response.body.code, 'upgrade_checkout_closed');
+        }
+        assert.equal(isDeepStrictEqual(before, await fixture.snapshot()), true);
+        assert.equal(evidence.providerRequests.filter(request => request.path === '/checkouts').length, providerStarts);
+        assert.equal((await commerce.getDocument(record.startClaimId)).paymentRecordId, record._id);
+      });
+    }
     await check('a child-booking upgrade can retry failed confirmation emails', async result => {
       const scenario = await original();
       const first = await fixture.start(scenario.payload);
