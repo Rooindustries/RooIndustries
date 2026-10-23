@@ -1,4 +1,5 @@
 import { captureException, httpIntegration, init } from "@sentry/nextjs";
+import { isProductionDeployment } from "./deployment";
 import {
   NO_DATA_COLLECTION,
   envelopeHeaderScrubber,
@@ -9,6 +10,7 @@ import {
 } from "./scrub";
 
 export function startServerMonitoring(value) {
+  if (!isProductionDeployment()) return;
   const dsn = monitoringDsn(value);
   if (!dsn) return;
   const client = init({

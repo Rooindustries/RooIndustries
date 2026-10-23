@@ -13,6 +13,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  monitoring:
+    name: Production-only monitoring
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SENTRY_CLI_NO_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium
+      - name: Check network isolation tools
+        run: |
+          command -v bwrap
+          command -v cc
+      - name: Check monitoring
+        run: |
+          if command -v heavy >/dev/null; then
+            heavy npm run test:monitoring
+            heavy npm run test:monitoring:deployments
+          else
+            npm run test:monitoring
+            npm run test:monitoring:deployments
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: monitoring-deployments
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 7
+
   jest:
     name: Jest
     runs-on: ubuntu-24.04
