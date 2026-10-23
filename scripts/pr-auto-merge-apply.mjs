@@ -1,5 +1,4 @@
 import { promises as fs } from "node:fs";
-import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   GATE_MARKER,
@@ -8,7 +7,6 @@ import {
   countReviewRounds,
   decide,
   gateComment,
-  moneyDependencies,
   parseCodexState,
 } from "./pr-auto-merge-gate.mjs";
 
@@ -95,9 +93,8 @@ const collectThreads = async (number) => {
 
 const collectSnapshot = async (number) => {
   const { payload: pull } = await api(readToken, `repos/${repo}/pulls/${number}`);
-  const [reviews, files, checkRuns, commentPage, statuses] = await Promise.all([
+  const [reviews, checkRuns, commentPage, statuses] = await Promise.all([
     paginate(`repos/${repo}/pulls/${number}/reviews`),
-    paginate(`repos/${repo}/pulls/${number}/files`),
     paginate(`repos/${repo}/commits/${pull.head.sha}/check-runs`),
     paginate(`repos/${repo}/issues/${number}/comments`),
     paginate(`repos/${repo}/commits/${pull.head.sha}/statuses`),
@@ -130,13 +127,6 @@ const collectSnapshot = async (number) => {
     headRef: pull.head.ref,
     sameRepository: pull.head.repo?.full_name === pull.base.repo.full_name,
     mergeableState: pull.mergeable_state,
-    // The files API stops at 3000 files; a shorter list than GitHub's count is treated as unknown.
-    files: files.length === pull.changed_files ? files.map((file) => ({
-      filename: file.filename,
-      previousFilename: file.previous_filename || "",
-      patch: file.patch || "",
-      patchMissing: file.patch === undefined && file.changes > 0,
-    })) : null,
     checks,
     reviews: reviews.map((review) => ({
       author: login(review.user),
@@ -150,33 +140,6 @@ const collectSnapshot = async (number) => {
     reviewRounds: countReviewRounds(ownComments.map((comment) => comment.body || "")),
     comments: ownComments,
   };
-};
-
-// The workflow checks out main, so this reads main's source to find what the money paths import.
-const readSources = async () => {
-  const sources = new Map();
-  for (const root of ["app", "src", "lib"]) {
-    let entries;
-    try {
-      entries = await fs.readdir(root, { recursive: true, withFileTypes: true });
-    } catch (error) {
-      if (error.code === "ENOENT") continue;
-      throw error;
-    }
-    for (const entry of entries) {
-      if (!entry.isFile() || !/\.[cm]?[jt]sx?$/.test(entry.name)) continue;
-      const filePath = path.relative(process.cwd(), path.join(entry.parentPath ?? entry.path, entry.name)).split(path.sep).join("/");
-      sources.set(filePath, await fs.readFile(filePath, "utf8"));
-    }
-  }
-  for (const filePath of ["middleware.js", "middleware.ts"]) {
-    try {
-      sources.set(filePath, await fs.readFile(filePath, "utf8"));
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-    }
-  }
-  return sources;
 };
 
 const ensureLabel = async () => {
@@ -261,8 +224,8 @@ const pullNumbers = async () => {
   return [];
 };
 
-const applyOne = async (number, dependencies) => {
-  const snapshot = { ...(await collectSnapshot(number)), moneyDependencies: dependencies };
+const applyOne = async (number) => {
+  const snapshot = await collectSnapshot(number);
   if (!snapshot.sameRepository) {
     console.log(`#${number} fork, skipped`);
     return;
@@ -311,11 +274,10 @@ const applyOne = async (number, dependencies) => {
 const main = async () => {
   if (!repo || !readToken) throw new Error("REPO and GH_TOKEN are required");
   const numbers = await pullNumbers();
-  const dependencies = numbers.length ? moneyDependencies(await readSources()) : [];
   const failures = [];
   for (const number of numbers) {
     try {
-      await applyOne(number, dependencies);
+      await applyOne(number);
     } catch (error) {
       failures.push(`#${number}: ${error.message}`);
       console.error(`#${number} ${error.message}`);

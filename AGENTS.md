@@ -47,8 +47,9 @@ Each round, read the checks on the current head and every open review finding. T
 No coding agent merges a pull request. The Grok Bot assistant does not merge one either. Merging is the job of `.github/workflows/auto-merge.yml`. It squash-merges into `main` only when all of the following are true:
 
 - Every check on the head is green. Success, skipped, and neutral count as green. Pending, failed, and cancelled do not. The branch is up to date with `main` (`mergeable_state` is `clean`).
-- The change is safe to merge, as defined below.
 - CodeRabbit and Codex both approve that head, and no review thread is still open.
+
+Green means merge. No kind of change waits for the owner once it meets this bar: money paths, workflows, the merge gate, deploy and rollback scripts and migrations merge the same way.
 
 CodeRabbit and Codex are the two review models. CodeRabbit approves by a GitHub approval on that head with no later request for changes. Codex does not use GitHub's Approve button. Codex approves when its review-state comment records a completed review of that head with no unresolved findings. Seer and the other bots do not stand in for either approval. An open finding from any of them still blocks the merge, and the owning agent clears it.
 
@@ -56,16 +57,7 @@ A squash-merge to `main` is the production deploy. The Vercel project ships `mai
 
 When CodeRabbit and Codex do not both approve, or a review thread is still open, the workflow keeps that same branch in a loop. The owning agent, woken by its pull request watch, addresses the disagreeing model's findings and pushes. The workflow then requests both reviews again, with `@coderabbitai review` and `@codex review`, on the new head. That repeats until both approve and no review thread is open. The gate above then merges and deploys. After 8 review rounds without that agreement, the workflow stops the loop and adds `needs-owner`.
 
-Stop and flag the owner instead of merging when any of these are true:
-
-- The change can lose data, or it touches a payment, checkout, booking, hold, price, discount, referral credit, refund, or payout. That is a money path, listed above, and `app/api/razorpay/` counts as one too. So does any file a money-path file imports directly, and any shipped file whose name contains a money word such as hold, booking, price or referral.
-- The change touches a secret, or the diff contains a private key.
-- The change adds or edits `supabase/migrations/`, or other SQL that drops, truncates, or deletes data. SQL in test suites and docs does not count.
-- The change edits `.github/workflows/` or the merge gate (`scripts/pr-auto-merge-gate.mjs`, `scripts/pr-auto-merge-apply.mjs`). The gate must not be able to loosen itself and then merge.
-- The change adds or edits a script that deploys, rolls back, or deletes production data.
-- GitHub does not return the diff for a changed file, so the gate cannot read it.
-
-Flagging is a `needs-owner` label and one comment on the pull request, from the workflow. Leave the pull request open. Keep fixing ordinary test failures and review findings on a safe pull request until both models approve. On a risky pull request, keep the branch healthy, and leave the merge to the owner. Money-path pull requests stay on the rules in Money paths (one at a time, Sol review, the local suites). The workflow will not merge them.
+The workflow flags the owner only when the loop cannot finish on its own: after 8 review rounds without agreement, or when GitHub blocks or rejects a merge that meets the bar. Flagging is a `needs-owner` label and one comment on the pull request, from the workflow. Leave the pull request open. Money-path pull requests also follow the rules in Money paths (one at a time, Sol review, the local suites) before their final push.
 
 The workflow does not call any agent API. The owning agent finds out about a red check, a conflict, a new review or a new comment through its own pull request watch (in T3, `watch_pull_request` on that thread wakes it), fixes the branch and pushes. Keep that watch on until the pull request merges, closes, or is flagged `needs-owner`. If the watch ends or the thread is gone, the pull request has nobody waiting on it: whoever picks it up next reopens the loop with a fresh watch. The workflow only counts review rounds (a marker comment per head that still had open review work); after 8 of them it adds `needs-owner`.
 

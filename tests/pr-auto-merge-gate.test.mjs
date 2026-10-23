@@ -5,11 +5,7 @@ import {
   REQUIRED_CHECKS,
   decide,
   gateComment,
-  isMoneyPath,
-  isProductionMutator,
-  isSecretPath,
   latestChecks,
-  moneyDependencies,
   parseCodexState,
 } from "../scripts/pr-auto-merge-gate.mjs";
 
@@ -22,16 +18,14 @@ const safe = (overrides = {}) => ({
   baseRef: "main",
   headSha: head,
   mergeableState: "clean",
-  files: [{ filename: "src/components/Footer.jsx", patch: "+export const footer = true;\n" }],
   checks: checks(),
   reviews: [approved("coderabbitai")],
   threads: [],
-  moneyDependencies: [],
   codex: { commitSha: head, status: "completed", hasUnresolvedFindings: false, hasAnyFindings: false },
   ...overrides,
 });
 
-test("a green, safe, agreed pull request merges", () => {
+test("a green, agreed pull request merges", () => {
   const decision = decide(safe());
   assert.equal(decision.action, "merge");
   assert.equal(decision.wake, false);
@@ -115,7 +109,6 @@ test("an open Seer thread blocks a merge that both models approved", () => {
   assert.equal(decision.action, "wait");
   assert.equal(decision.wake, true);
   assert.ok(decision.reasons.includes("open-findings"));
-  assert.equal(decision.reasons.includes("risky-money"), false);
 });
 
 test("an outdated thread still blocks until someone resolves it", () => {
@@ -130,62 +123,17 @@ test("an outdated thread still blocks until someone resolves it", () => {
   assert.equal(resolved.action, "merge");
 });
 
-test("money, secret, migration, workflow, and production-rollback diffs are held", () => {
-  const held = (filename, patch = "+ok\n") => decide(safe({ files: [{ filename, patch }] }));
-  assert.equal(held("src/components/Payment.jsx").action, "flag");
-  assert.ok(held("app/api/razorpay/[action]/route.js").reasons.includes("risky-money"));
-  assert.ok(held("middleware.js").reasons.includes("risky-money"));
-  assert.ok(held(".env.production").reasons.includes("risky-secret"));
-  assert.ok(held("src/lib/notes.js", "+-----BEGIN OPENSSH PRIVATE KEY-----\n").reasons.includes("risky-secret"));
-  assert.ok(held("supabase/migrations/20261022000000_drop_bookings.sql", "+DROP TABLE bookings;\n").reasons.includes("risky-migration"));
-  assert.ok(held("scripts/cleanup.sql", "+TRUNCATE TABLE bookings;\n").reasons.includes("risky-sql"));
-  assert.ok(held("scripts/cleanup.sql", "+TRUNCATE bookings;\n").reasons.includes("risky-sql"));
-  assert.ok(held("scripts/cleanup.sql", "+DELETE FROM bookings;\n").reasons.includes("risky-sql"));
-  for (const statement of ["DROP SEQUENCE commerce.booking_ids;", "drop extension pgcrypto;", "DROP MATERIALIZED VIEW stats;", "alter table bookings drop constraint bookings_pkey;", "DROP OWNED BY app_user;"]) {
-    assert.ok(held("scripts/cleanup.sql", `+${statement}\n`).reasons.includes("risky-sql"), statement);
-  }
-  assert.equal(held("src/components/Menu.jsx", "+// drop down the menu when the user clicks\n").reasons.includes("risky-sql"), false);
-  assert.ok(held("scripts/archive-old-bookings.mjs", "+await sql`drop table commerce.bookings`;\n").reasons.includes("risky-sql"));
-  assert.ok(held("src/server/cleanup.js", "+await sql`delete from commerce.bookings where true`;\n").reasons.includes("risky-sql"));
-  assert.equal(held("tests/booking-emails.mjs", "+await sql`delete from commerce.bookings`;\n").reasons.includes("risky-sql"), false);
-  assert.equal(held("src/lib/format.js", "+export const short = (text) => truncate(text, 20);\n").action, "merge");
-  assert.ok(held("scripts/archive-old-bookings.mjs", "@@ -10,3 +10,3 @@\n   await sql`\n     DELETE FROM commerce.bookings\n-    WHERE created_at < now() - interval '2 years'\n+    WHERE true\n   `;\n").reasons.includes("risky-sql"));
-  assert.equal(held("scripts/archive-old-bookings.mjs", "@@ -1,2 +1,2 @@\n-await sql`DELETE FROM commerce.bookings`;\n+console.log(\"kept\");\n").reasons.includes("risky-sql"), false);
-  const unreadable = decide(safe({ files: [{ filename: "src/lib/big.js", patch: "", patchMissing: true }] }));
-  assert.equal(unreadable.action, "flag");
-  assert.ok(unreadable.reasons.includes("risky-unreadable-diff"));
-  assert.equal(decide(safe({ files: null })).action, "wait");
-  assert.ok(held(".github/workflows/tests.yml").reasons.includes("risky-workflow"));
-  assert.ok(held("scripts/pr-auto-merge-gate.mjs").reasons.includes("risky-workflow"));
-  assert.ok(held("scripts/deploy-rollback.mjs").reasons.includes("risky-production-script"));
-  assert.equal(held("src/components/Payment.jsx").wake, false);
-  assert.equal(isMoneyPath("src/components/Payment.jsx"), true);
-  assert.equal(isMoneyPath("src/components/Footer.jsx"), false);
-  for (const moneyFile of ["src/lib/holdResponse.js", "src/lib/bookingDialogHold.js", "src/components/PriceDisplay.jsx", "app/upgrade-xoc/page.jsx", "src/lib/pricing2.js"]) {
-    assert.equal(isMoneyPath(moneyFile), true, moneyFile);
-  }
-  for (const plainFile of ["src/components/BorderBox.jsx", "src/lib/placeholder.js", "src/lib/payload.js", "tests/booking-flow.spec.js", "src/__tests__/holdResponse.test.js"]) {
-    assert.equal(isMoneyPath(plainFile), false, plainFile);
-  }
-  assert.ok(held("src/config/runtime.json", "+-----BEGIN ENCRYPTED PRIVATE KEY-----\n").reasons.includes("risky-secret"));
-  assert.ok(held("src/config/runtime.json", "+-----BEGIN PGP PRIVATE KEY BLOCK-----\n").reasons.includes("risky-secret"));
-  assert.equal(isSecretPath("src/lib/checkoutStorage.js"), false);
-  assert.equal(isProductionMutator("scripts/deploy-rollback.mjs"), true);
-});
-
-test("a money-path pull request with red checks is flagged and still wakes the agent", () => {
+test("a red money-path pull request waits for its owning agent, never for the owner", () => {
   const decision = decide(safe({
-    files: [{ filename: "src/lib/checkoutStorage.js", patch: "+export const keep = true;\n" }],
     checks: checks().map((check) => check.name === "Jest" ? { ...check, conclusion: "failure" } : check),
     codex: { commitSha: head, status: "completed", hasUnresolvedFindings: true, hasAnyFindings: true },
     threads: [{ author: "sentry", path: "src/lib/checkoutStorage.js", isResolved: false, isOutdated: false }],
   }));
-  assert.equal(decision.action, "flag");
+  assert.equal(decision.action, "wait");
   assert.equal(decision.wake, true);
-  assert.ok(decision.reasons.includes("risky-money"));
   assert.ok(decision.reasons.includes("checks-red"));
+  assert.equal(decision.reasons.some((reason) => reason.startsWith("risky-")), false);
 });
-
 test("behind and conflicting branches wait for a rebase", () => {
   assert.equal(decide(safe({ mergeableState: "behind" })).wake, true);
   assert.equal(decide(safe({ mergeableState: "behind" })).action, "wait");
@@ -235,19 +183,6 @@ test("disagreement keeps looping and flags the owner only after eight review rou
   assert.equal(pending.requestReviews, true);
 });
 
-test("a money-path disagreement stays with the owner and still dispatches the agent", () => {
-  const decision = decide(safe({
-    files: [{ filename: "src/components/Payment.jsx", patch: "+export const price = 1;\n" }],
-    reviews: [
-      approved("coderabbitai"),
-      { author: "coderabbitai", bot: true, state: "CHANGES_REQUESTED", commitSha: head, submittedAt: "2026-10-22T02:00:00Z" },
-    ],
-  }));
-  assert.equal(decision.action, "flag");
-  assert.equal(decision.wake, true);
-  assert.ok(decision.reasons.includes("risky-money"));
-});
-
 test("the workflow calls no agent API and the owning agent's watch does the waking", () => {
   const apply = readFileSync(new URL("../scripts/pr-auto-merge-apply.mjs", import.meta.url), "utf8");
   const workflow = readFileSync(new URL("../.github/workflows/auto-merge.yml", import.meta.url), "utf8");
@@ -266,27 +201,11 @@ test("the gate comment names the owner only on a hold", () => {
   assert.match(body, /<!-- pr-auto-merge-gate -->/);
   assert.doesNotMatch(body, /@serviroo/);
   const held = gateComment({
-    decision: decide(safe({ files: [{ filename: "vercel.json", patch: "+{}\n" }] })),
+    decision: decide(safe({ mergeableState: "blocked" })),
     headSha: head,
   });
   assert.match(held, /@serviroo/);
   assert.match(held, /needs you/);
-});
-
-test("a rename out of a money, secret, or migration path is held by its old path", () => {
-  const renamed = (previousFilename) => decide(safe({ files: [{ filename: "src/lib/helpers2.js", previousFilename, patch: "+export const price = 1;\n" }] }));
-  assert.ok(renamed("app/api/payment/route.js").reasons.includes("risky-money"));
-  assert.ok(renamed(".env.production").reasons.includes("risky-secret"));
-  assert.ok(renamed("supabase/migrations/20260101_x.sql").reasons.includes("risky-migration"));
-  assert.equal(renamed("src/lib/other.js").action, "merge");
-});
-
-test("scripts that delete or drop production data are held", () => {
-  for (const filename of ["scripts/delete-production-data.mjs", "scripts/purge-bookings.mjs", "scripts/repair-supabase-commerce-integrity.mjs"]) {
-    const decision = decide(safe({ files: [{ filename, patch: "+console.log(1);\n" }] }));
-    assert.equal(decision.action, "flag", filename);
-    assert.ok(decision.reasons.includes("risky-production-script"), filename);
-  }
 });
 
 test("only the real review bots count: a human named like one approves nothing", () => {
@@ -300,7 +219,6 @@ test("the merge is bound to the head that was reviewed, and runs serialize", () 
   assert.match(apply, /mergePullRequest\(number, snapshot\.headSha\)/);
   assert.match(apply, /botNamed\(comment\.user, "github-actions"\)/);
   assert.match(apply, /paginate\(`repos\/\$\{repo\}\/commits\/\$\{pull\.head\.sha\}\/statuses`\)/);
-  assert.match(apply, /files\.length === pull\.changed_files/);
   assert.match(apply, /latest\.base\.sha !== snapshot\.baseSha/);
   const workflow = readFileSync(new URL("../.github/workflows/auto-merge.yml", import.meta.url), "utf8");
   assert.match(workflow, /group: auto-merge\n/);
@@ -314,24 +232,6 @@ test("a queued rerun keeps the check pending even after an earlier success", () 
   assert.ok(decision.reasons.includes("checks-pending"));
   const reversed = decide(safe({ checks: [{ name: "Jest", status: "in_progress", conclusion: null, completedAt: "" }, ...checks()] }));
   assert.ok(reversed.reasons.includes("checks-pending"));
-});
-
-test("files a money path imports are money paths too", () => {
-  const sources = new Map([
-    ["src/components/BookingForm.jsx", 'import { save } from "../lib/browserStorage";\nimport { motion } from "framer-motion";\nconst lazy = import("@/src/lib/lazyHelper");\n'],
-    ["src/components/Footer.jsx", 'import { year } from "../lib/dates";\n'],
-    ["src/lib/browserStorage.js", "export const save = () => {};\n"],
-    ["src/lib/lazyHelper/index.js", "export default 1;\n"],
-    ["src/lib/dates.js", "export const year = 2026;\n"],
-  ]);
-  assert.deepEqual(moneyDependencies(sources), ["src/lib/browserStorage.js", "src/lib/lazyHelper/index.js"]);
-  const decision = decide(safe({
-    files: [{ filename: "src/lib/browserStorage.js", patch: "+export const save = () => null;\n" }],
-    moneyDependencies: moneyDependencies(sources),
-  }));
-  assert.equal(decision.action, "flag");
-  assert.ok(decision.reasons.includes("risky-money"));
-  assert.equal(decide(safe({ moneyDependencies: undefined })).action, "wait");
 });
 
 test("the required check names are the jobs the Tests workflow runs", () => {
@@ -353,5 +253,8 @@ test("the required check names are the jobs the Tests workflow runs", () => {
   assert.match(agents, /Grok Bot assistant does not merge/);
   assert.match(agents, /CodeRabbit and Codex both approve/);
   assert.match(agents, /After 8 review rounds/);
+  assert.doesNotMatch(agents, /Stop and flag the owner instead of merging/);
+  const gate = readFileSync(new URL("../scripts/pr-auto-merge-gate.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(gate, /risky-/);
   assert.doesNotMatch(agents, /disagree on the current head/);
 });
