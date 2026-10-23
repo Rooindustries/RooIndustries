@@ -67,6 +67,10 @@ for (const route of ["/booking", "/payment"]) {
       sessionStorage.setItem("my_slot_hold", JSON.stringify({ ...hold, expiresAt }));
       const checkout = JSON.parse(sessionStorage.getItem("checkout_booking_state") || "null");
       if (checkout) sessionStorage.setItem("checkout_booking_state", JSON.stringify({ ...checkout, slotHoldExpiresAt: expiresAt }));
+      const state = history.state;
+      if (state?.usr?.bookingData) {
+        history.replaceState({ ...state, usr: { ...state.usr, bookingData: { ...state.usr.bookingData, slotHoldExpiresAt: expiresAt } } }, "");
+      }
     });
     await page.reload();
     await expect(page).toHaveURL(/\/booking$/);
