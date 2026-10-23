@@ -91,6 +91,9 @@ const ownerReviewReason = (record) => {
   const code = record.providerRecoveryTerminalReason || record.recoveryReason;
   return `owner_review_${OWNER_REVIEW_CODES.has(code) ? code : "unknown"}`;
 };
+const isTerminalRecovery = (record) =>
+  String(record.status).toLowerCase() === "needs_recovery" &&
+  (record.providerRecoveryTerminal === true || record.reconciliationRecoveryTerminal === true);
 
 const readBearer = (req) => {
   const header = req?.headers?.authorization || req?.headers?.Authorization || "";
@@ -472,10 +475,7 @@ export const buildReconcileReport = async ({
     if (suppliedBooking && bookingId !== suppliedBooking._id) {
       return mismatch(suppliedBooking._id, "payment_record_mismatch");
     }
-    if (
-      record.providerRecoveryTerminal === true &&
-      String(record.status).toLowerCase() === "needs_recovery"
-    ) {
+    if (isTerminalRecovery(record)) {
       return mismatch(record._id, ownerReviewReason(record));
     }
     const pricing = frozenPricing(record);
@@ -587,10 +587,7 @@ export const buildReconcileReport = async ({
       cents: cents(record.pricingSnapshot?.netAmount),
       currency: "USD",
     };
-    if (
-      record.providerRecoveryTerminal === true &&
-      String(record.status).toLowerCase() === "needs_recovery"
-    )
+    if (isTerminalRecovery(record))
       return unresolved({ ...base, reason: ownerReviewReason(record) });
     let paymentId = record.providerPaymentId;
     if (paymentId != null && paymentId !== "" && !isIdentity(paymentId)) return unknown();
@@ -680,25 +677,29 @@ export const buildReconcileReport = async ({
   }
 
   const reportedRecords = new Set(items.map((item) => item.ref));
-  const terminalRecords = await readDocuments(client, "paymentRecord", {
-    filters: [
-      { path: "provider", op: "eq", value: "dodo" },
-      { path: "providerRecoveryTerminal", op: "eq", value: true },
-      { path: "status", op: "ieq", value: "needs_recovery" },
-      { path: "updatedAt", op: "gte", value: from },
-      { path: "updatedAt", op: "lte", value: new Date(now).toISOString() },
-    ],
-    limit: MAX_BOOKING_LOOKUPS + 1,
-  });
-  if (!Array.isArray(terminalRecords)) throw unavailable();
+  const terminalGroups = await Promise.all(
+    ["providerRecoveryTerminal", "reconciliationRecoveryTerminal"].map((flag) =>
+      readDocuments(client, "paymentRecord", {
+        filters: [
+          { path: "provider", op: "eq", value: "dodo" },
+          { path: flag, op: "eq", value: true },
+          { path: "status", op: "ieq", value: "needs_recovery" },
+          { path: "updatedAt", op: "gte", value: from },
+          { path: "updatedAt", op: "lte", value: new Date(now).toISOString() },
+        ],
+        limit: MAX_BOOKING_LOOKUPS + 1,
+      }),
+    ),
+  );
+  if (terminalGroups.some((group) => !Array.isArray(group))) throw unavailable();
+  const terminalRecords = [...new Map(terminalGroups.flat().map((record) => [record._id, record])).values()];
   const recordCap = terminalRecords.length > MAX_BOOKING_LOOKUPS;
   if (recordCap)
     report({ key: "scan:dodo-records", id: "dodo-records", reason: "report_truncated" });
   for (const record of terminalRecords.slice(0, MAX_BOOKING_LOOKUPS)) {
     if (
       record.provider !== "dodo" ||
-      record.providerRecoveryTerminal !== true ||
-      String(record.status).toLowerCase() !== "needs_recovery" ||
+      !isTerminalRecovery(record) ||
       !inWindow(record.updatedAt, from, new Date(now).toISOString())
     )
       continue;

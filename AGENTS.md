@@ -134,7 +134,7 @@ Any PR that touches a money path, including a helper outside this list:
   - one payment proof can't fund two bookings (`:162-165`);
   - the slot lock and the hold consumption commit in one transaction (`:186-215,261-266`).
 - A recognized, validated capture whose booking fails on a slot conflict or a payload problem becomes a "requires reschedule" booking. This happens from the 5-minute reconcile (`vercel.json:66`, `src/server/api/payment/flow.js:4779-4789,4892-4917`) and from a late capture after abandonment (`:2384-2400`). The record is built at `:4027-4060`.
-- **NOT ENFORCED (automatic booking recovery):** some captures end with neither a booking nor a reschedule record. The daily audit detects them; it does not create a booking:
+- **NOT ENFORCED (automatic booking recovery):** some captures end with neither a booking nor a reschedule record. The daily audit detects them; it does not create a booking. Recent records terminal under either provider or reconciliation recovery are scanned even outside the capped provider listing, share a deduplicated record limit, and remain unresolved on targeted checks (`src/server/api/payment/reconcileReport.js`, `recovery-report-exhausted-finalize-outside-provider-cap`):
   - owner-review states, such as upgrade credit that dropped after capture (`src/server/api/payment/flow.js:1936-1965,3933-3942`);
   - exhausted retries: 12 failed finalizes set `reconciliationRecoveryTerminal` (`:105-117,1870-1911`), and reconcile then skips the record (`:4347`).
 - A definitive unpaid abandonment tries to release the hold and the coupon reservation. If the release fails it keeps `resourceReleasePending` and retries. (`src/server/api/payment/flow.js:1687,1746-1752,1781,2634,2696-2732`)

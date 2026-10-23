@@ -54,8 +54,11 @@ refunds. Investigate money differences in fixtures or test mode.
 The Dodo scan reads succeeded payments across their history, ending 30 minutes
 before the check. It does not filter by the payment's creation date, because
 a payment can settle days later. The 72-hour `from` value applies to the reverse
-booking scan and recently changed owner-review records. Each payment is read
-again before comparison. The scan stops after 2,000 listed payments and reports
+booking scan and recently changed owner-review records, including exhausted
+booking recovery. Either terminal flag keeps a record awaiting recovery unresolved
+in daily and targeted checks. The two flag scans share a deduplicated limit of
+200 records and report incomplete coverage when that limit is exceeded. Each
+payment is read again before comparison. The scan stops after 2,000 listed payments and reports
 incomplete coverage if that limit is reached; it cannot report clean then.
 That ceiling is a hard lifetime limit for a complete scan, even if every
 listed payment is healthy. Detail reads run in groups of eight, retain list

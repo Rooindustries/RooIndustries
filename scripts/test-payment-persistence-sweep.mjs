@@ -1354,6 +1354,52 @@ try{
     assert.deepEqual(reportReasons(report), ['owner_review_dodo_dispute_lost_owner_review']);
     return report.items;
   });
+  for (const variant of [
+    { name: 'reconciliation', flag: true, expected: 'owner_review_unknown' },
+    { name: 'both', flag: true, providerFlag: true, expected: 'owner_review_dodo_currency_mismatch' },
+    { name: 'false', flag: false },
+    { name: 'absent' },
+    { name: 'null', flag: null },
+    { name: 'string', flag: 'true' },
+    { name: 'booked', flag: true, status: 'booked' },
+    { name: 'other-provider', flag: true, provider: 'paypal' },
+    { name: 'old', flag: true, age: 96 * 3600000 },
+    { name: 'future', flag: true, age: -2 * 3600000 },
+  ]) await run(`reconcile-report-terminal-record-${variant.name}`, async () => {
+    const data = dodoBooking({}, {
+      bookingId: '', updatedAt: new Date(originalNow() - (variant.age || 0)).toISOString(),
+      ...(Object.hasOwn(variant, 'flag') ? { reconciliationRecoveryTerminal: variant.flag } : {}),
+      ...(variant.providerFlag ? { providerRecoveryTerminal: true, providerRecoveryTerminalReason: 'dodo_currency_mismatch' } : {}),
+    });
+    data.booking = null;
+    await seed(variant.provider || 'dodo', variant.status || 'needs_recovery', data);
+    const window = await authorizedReport('GET', true);
+    assert.equal(window.status, 200, JSON.stringify(window.body));
+    assert.deepEqual(reportReasons(window.body), variant.expected ? [variant.expected] : [], JSON.stringify(window.body));
+    assert.equal(window.body.complete.records, true);
+    let targeted;
+    if (variant.expected) {
+      assert.equal(window.body.items[0].key, `record:${recordId}`);
+      targeted = await targetReport([`record:${recordId}`, 'payment:payment-fixture']);
+      assert.equal(targeted.status, 200, JSON.stringify(targeted.body));
+      assert.deepEqual(targeted.body.checks.map(check => check.state), ['unresolved', 'unresolved']);
+      assert.ok(targeted.body.items.every(item => item.reason === variant.expected));
+    }
+    return { variant, window, targeted };
+  });
+  await run('reconcile-report-reconciliation-terminal-read-unavailable', async () => {
+    let failed = false;
+    fixture.setRequestHook((phase, request) => {
+      if (phase !== 'before' || !request.body?.p_filters?.some(filter => filter.path === 'reconciliationRecoveryTerminal')) return;
+      failed = true;
+      throw new Error('fixture_terminal_read_unavailable');
+    });
+    const report = await authorizedReport('GET', true);
+    assert.equal(failed, true);
+    assert.equal(report.status, 503);
+    assert.equal(report.body.code, 'reconcile_report_unavailable');
+    return report;
+  });
   await run('reconcile-report-upgrade-credit-owner-review', async () => {
     await seed('dodo', 'needs_recovery', dodoBooking({}, {
       providerRecoveryTerminal: true,
@@ -2341,13 +2387,16 @@ try{
     assert.ok(report.body.items.every((item) => item.key === 'payment:' + item.id));
     return report;
   });
-  await run('reconcile-report-terminal-cap-completeness', async () => {
+  for (const mode of ['provider', 'reconciliation', 'both', 'mixed']) await run('reconcile-report-terminal-cap-completeness' + (mode === 'provider' ? '' : '-' + mode), async () => {
     let transaction = commerce.transaction();
     for (let index = 0; index < 201; index += 1) {
       transaction.create({
         _type: 'paymentRecord', _id: 'paymentRecord.cap-' + index, provider: 'dodo',
-        status: 'needs_recovery', providerRecoveryTerminal: true,
-        providerRecoveryTerminalReason: 'dodo_currency_mismatch',
+        status: 'needs_recovery',
+        providerRecoveryTerminal: mode === 'provider' || mode === 'both' || (mode === 'mixed' && index % 2 === 0),
+        reconciliationRecoveryTerminal: mode === 'reconciliation' || mode === 'both' || (mode === 'mixed' && index % 2 !== 0),
+        recoveryReason: 'create_booking_failed',
+        ...(mode === 'reconciliation' ? {} : { providerRecoveryTerminalReason: 'dodo_currency_mismatch' }),
         updatedAt: new Date().toISOString(), pricingSnapshot: { netAmount: 9.99 },
         backendOwner: 'supabase', cutoverGeneration: 0,
       });
@@ -2454,6 +2503,80 @@ try{
     return{input,quote,started,id:payment._id,proof};
   };
   const a1Hook=async provider=>requestFlow(provider,{req:provider==='paypal'?paypalReq('PAYMENT.CAPTURE.COMPLETED',{id:'capture-fixture',supplementary_data:{related_ids:{order_id:'order-fixture'}}}):provider==='razorpay'?razorReq('payment.captured',{payment:{entity:razorpayPayment}}):dodoReq()});
+  await run('recovery-report-exhausted-finalize-outside-provider-cap', async () => {
+    const checkout = await a1Start('dodo');
+    await sql.unsafe(`create or replace function public.payment_capture_failure_fixture() returns trigger language plpgsql as $$
+      begin
+        if new.document_type = 'booking' then raise exception 'Synthetic booking storage failure'; end if;
+        return new;
+      end $$;
+      create trigger payment_capture_failure_fixture before insert or update on migration.source_documents
+      for each row execute function public.payment_capture_failure_fixture();`);
+    const attempts = [];
+    let exhausted;
+    try {
+      await a1Hook('dodo');
+      for (let index = 0; index < 12; index += 1) {
+        const current = (await row(checkout.id)).payload;
+        attempts.push(current.recoveryFailureCount);
+        if (current.recoveryFailureCount === 12) { exhausted = current; break; }
+        const when = new originalDate(current.nextRecoveryAt).getTime() + 1;
+        globalThis.Date = class extends originalDate {
+          constructor(...args) { super(...(args.length ? args : [when])); }
+          static now() { return when; }
+        };
+        const retried = await requestFlow('reconcile');
+        assert.ok(retried.body.summary, JSON.stringify(retried));
+        assert.equal(retried.body.summary.scanned, 1, JSON.stringify(retried));
+        assert.equal(retried.body.summary.providerUnavailable, 0);
+        assert.equal(retried.status, retried.body.summary.failed ? 503 : 200, JSON.stringify(retried));
+      }
+    } finally {
+      await sql.unsafe('drop trigger payment_capture_failure_fixture on migration.source_documents');
+    }
+    assert.equal(attempts[0], 1);
+    assert.equal(attempts.at(-1), 12);
+    assert.ok(attempts.every((count, index) => index === 0 || count > attempts[index - 1]));
+    assert.equal(exhausted.status, 'needs_recovery');
+    assert.equal(exhausted.reconciliationRecoveryTerminal, true);
+    assert.notEqual(exhausted.providerRecoveryTerminal, true);
+    assert.equal(exhausted.bookingId, '');
+    const foreign = { ...dodoPayment, payment_id: 'payment-foreign-history', metadata: {},
+      product_cart: [{ product_id: 'pdt_other_site', quantity: 1 }] };
+    dodoList = Array.from({ length: 2000 }, () => dodoSummary(foreign));
+    providerHook = (request, req, res) => {
+      let body;
+      if (request.path.startsWith('/payments?')) {
+        const page = Number(new URL(request.path, origin).searchParams.get('page_number'));
+        body = { items: dodoList.slice(page * 100, (page + 1) * 100) };
+      } else if (request.path === '/payments/payment-foreign-history') body = foreign;
+      else return;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(body));
+      return true;
+    };
+    const window = await authorizedReport('GET', true);
+    assert.equal(window.status, 200, JSON.stringify(window.body));
+    assert.deepEqual(reportReasons(window.body), ['report_truncated', 'owner_review_unknown'], JSON.stringify(window.body));
+    assert.equal(window.body.items[1].key, `record:${checkout.id}`);
+    assert.equal(window.body.complete.payments, false);
+    assert.equal(window.body.complete.records, true);
+    const keys = [`record:${checkout.id}`, 'payment:payment-fixture'];
+    const targeted = await targetReport(keys);
+    assert.equal(targeted.status, 200, JSON.stringify(targeted.body));
+    assert.deepEqual(targeted.body.checks.map(check => check.state), ['unresolved', 'unresolved']);
+    assert.ok(targeted.body.items.every(item => item.reason === 'owner_review_unknown'));
+    assert.equal((await requestFlow('reconcile')).body.summary.scanned, 0);
+    await commerce.patch(checkout.id).set({ reconciliationRecoveryTerminal: false, nextRecoveryAt: '' }).commit();
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    const repaired = (await row(checkout.id)).payload;
+    assert.ok(repaired.bookingId, JSON.stringify(repaired));
+    const recovered = await targetReport(keys);
+    assert.equal(recovered.status, 200, JSON.stringify(recovered.body));
+    assert.deepEqual(recovered.body.checks.map(check => check.state), ['recovered', 'recovered']);
+    return { attempts, exhausted, window, targeted, repaired, recovered,
+      repairStandIn: 'Fixture operator clears terminal after the actual database failure is removed; cron commits the booking.' };
+  });
   for (const variant of ['blank-referral', 'unknown-referral', 'referral']) for (const via of ['webhook', 'cron']) {
     await run(`recovery-reschedule-${variant}-${via}`, async () => {
       const checkout = await a1Start('dodo', variant);
