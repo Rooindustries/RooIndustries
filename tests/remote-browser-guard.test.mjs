@@ -407,6 +407,62 @@ test("browser navigation keeps its timeout after an allowed redirect", { timeout
   assert.ok(value.elapsed < 2000);
 });
 
+for (const mode of ["window.open", "target=_blank"]) for (const redirect of [false, true]) {
+  test(`browser popup ${mode} ${redirect ? "records a forbidden redirect" : "loads its allowed initial request"}`, { timeout: 65_000 }, async t => {
+    const beforeRequests = sinkRequests;
+    const target = fixtureOrigin + (redirect ? "/redirect?status=307" : "/landing");
+    const child = await runChild(`
+      import { chromium } from "@playwright/test";
+      const { guardBrowserContext } = await import(${JSON.stringify(pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href)});
+      const errors = [];
+      let observed;
+      const failed = new Promise(resolve => { observed = resolve; });
+      process.on("unhandledRejection", error => { errors.push(String(error)); observed({ error: String(error) }); });
+      const browser = await chromium.connect(${JSON.stringify(endpoint)}, { exposeNetwork: "<loopback>" });
+      try {
+        const context = await browser.newContext({ baseURL: ${JSON.stringify(fixtureOrigin)} });
+        const missingFrames = [];
+        context.on("request", request => {
+          if (!request.isNavigationRequest()) return;
+          try { request.frame(); } catch (error) { missingFrames.push({ url: request.url(), error: String(error) }); }
+        });
+        const guard = await guardBrowserContext(context, [${JSON.stringify(fixtureOrigin)}]);
+        const page = await context.newPage();
+        await page.goto(${JSON.stringify(fixtureOrigin)});
+        const opened = ${JSON.stringify(redirect)} ? null : context.waitForEvent("page", { timeout: 10000 }).then(async popup => {
+          await popup.waitForLoadState("load", { timeout: 10000 });
+          return { url: popup.url(), body: await popup.textContent("body") };
+        }).catch(error => ({ error: String(error) }));
+        await page.evaluate(({ mode, target }) => {
+          if (mode === "window.open") window.open(target, "_blank", "noopener,noreferrer");
+          else {
+            const link = document.createElement("a");
+            link.href = target; link.target = "_blank"; link.rel = "noopener noreferrer";
+            document.body.append(link); link.click();
+          }
+        }, { mode: ${JSON.stringify(mode)}, target: ${JSON.stringify(target)} });
+        const outcome = await Promise.race([opened || new Promise(() => {}), failed]);
+        await context.close();
+        console.log(JSON.stringify({ outcome, errors, missingFrames, guard }));
+      } finally { await browser.close(); }
+    `, endpoint);
+    t.diagnostic(JSON.stringify({ child, sinkRequests: sinkRequests - beforeRequests }));
+    const value = result(child);
+    assert.ok(value.missingFrames.some(row => row.url === target && row.error.includes("Frame for this navigation request is not available")));
+    assert.equal(sinkRequests, beforeRequests);
+    if (redirect) {
+      assert.ok(value.outcome.error);
+      assert.ok(value.errors.every(error => error.includes("[test-target] Browser redirect refused")));
+      assert.ok(value.guard.unexpectedRequests.some(row => row.action === "unexpected-nonlocal-redirect" && row.status === 307 && row.redirectedFrom === target));
+    } else {
+      assert.equal(value.outcome.url, target);
+      assert.match(value.outcome.body, /fixture-ok/);
+      assert.deepEqual(value.errors, []);
+      assert.deepEqual(value.guard.unexpectedRequests, []);
+    }
+  });
+}
+
 for (const phase of ["fulfillment", "disposal", "active disposal"]) test(`browser response ${phase} follows the context lifetime`, { timeout: 65_000 }, async t => {
   const child = await runChild(`
     import { chromium } from "@playwright/test";

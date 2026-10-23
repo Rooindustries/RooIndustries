@@ -424,7 +424,13 @@ export async function guardBrowserContext(context, origins) {
     const permits = target => !target.username && !target.password && (allowed.has(target.origin) ||
       contentAssetOrigins.has(target.origin) && request.method() === "GET" && request.resourceType() === "image" && target.pathname.startsWith("/storage/v1/"));
     if (permits(url)) {
-      const frame = request.isNavigationRequest() ? request.frame() : null;
+      let frame;
+      if (request.isNavigationRequest()) {
+        try { frame = request.frame(); }
+        catch (error) {
+          if (!String(error).includes("Frame for this navigation request is not available")) throw error;
+        }
+      }
       let response;
       try { response = await route.fetch({ maxRedirects: 0 }); }
       catch { if (frame) navigationRedirects.delete(frame); return route.abort("failed"); }
