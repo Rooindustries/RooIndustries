@@ -34,7 +34,7 @@ probe() {
   local harness=$1 cwd=$2 label=$3 wanted=$4
   local output="$scratch/$harness-$label.jsonl"
   if [[ "$harness" == claude ]]; then
-    (cd "$cwd"; timeout 180s claude -p "$prompt" --model claude-opus-5-5 --effort xhigh \
+    (cd "$cwd"; timeout 180s claude -p "$prompt" \
       --output-format stream-json --verbose --no-session-persistence --max-turns 1 --tools Skill \
       --strict-mcp-config --mcp-config '{"mcpServers":{}}' --settings '{"disableAllHooks":true}') \
       < /dev/null > "$output" 2> "$scratch/$harness-$label.stderr"
@@ -42,7 +42,7 @@ probe() {
     jq -s '[.[] | select(.type == "result")][-1].result | fromjson | sort' "$output" > "$artifacts/$harness-context-$label.json"
   else
     timeout 180s codex exec --json --ephemeral --skip-git-repo-check -C "$cwd" --sandbox read-only \
-      -m gpt-6.1-sol -c 'model_reasoning_effort="xhigh"' -c 'notify=[]' \
+      -c 'notify=[]' \
       -c 'suppress_unstable_features_warning=true' "${codex_config[@]}" "$prompt" \
       < /dev/null > "$output" 2> "$scratch/$harness-$label.stderr"
     jq -se 'any(.[]; .type == "turn.completed") and all(.[]; .type != "error" and .type != "turn.failed") and ([.[] | select(.type == "item.completed" and .item.type != "agent_message" and .item.type != "reasoning")] | length) == 0' "$output" >/dev/null

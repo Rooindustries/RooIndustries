@@ -22,12 +22,19 @@ change; the retained APNG is not the navbar's animated source.
 Run the existing fixture-backed suites from the repository root:
 
 ```bash
-env -u BASE_URL ./node_modules/.bin/playwright test \
-  tests/section-nav.spec.js tests/nav-chaos.spec.js --project=chromium --reporter=line
+(
+  while IFS= read -r key; do
+    case "$key" in SENTRY_DSN|*_SENTRY_DSN) unset "$key" ;; esac
+  done < <(compgen -e)
+  env -u BASE_URL -u NEXT_DIST_DIR -u PW_SERVER_ID \
+    ./node_modules/.bin/playwright test \
+    tests/section-nav.spec.js tests/nav-chaos.spec.js --project=chromium --reporter=line
+)
 ```
 
-This invokes Playwright directly so `playwright.config.js` starts its isolated
-local fixture. The `npm run test:nav:*` wrappers synthesize `BASE_URL` and assume
+This clears inherited Sentry DSNs and fixture IDs, then invokes Playwright
+directly so `playwright.config.js` starts a separate local fixture for each
+process. The `npm run test:nav:*` wrappers synthesize `BASE_URL` and assume
 an already running server; use the direct command for this check.
 Use a free `PW_PORT` and `ROO_TEST_HOST` for this checkout when other tests run.
 The suites cover navigation and desktop layout; they do not prove logo pixel

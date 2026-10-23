@@ -10,13 +10,19 @@ Read `src/lib/routes.js`, `src/lib/seo.js`, `scripts/check-seo.js` and
 the static `public/BIOSGuide/` page, Markdown variants, `public/llms.txt`,
 generated sitemap and robots rules when the change reaches them.
 
-Run from the assigned checkout with a free test port. Leave `BASE_URL` unset;
-the Playwright config starts an isolated fixture and blocks public-site tests.
+Run from the assigned checkout with a free test port. Clear inherited fixture
+IDs and Sentry DSNs so each Playwright process gets its own local fixture.
 
 ```bash
-npm run check:seo
-npm run test:seo:nonjs -- --project=chromium --reporter=line
-npm run test:seo:structured-data -- --project=chromium --reporter=line
+(
+  while IFS= read -r key; do
+    case "$key" in SENTRY_DSN|*_SENTRY_DSN) unset "$key" ;; esac
+  done < <(compgen -e)
+  unset BASE_URL NEXT_DIST_DIR PW_SERVER_ID
+  npm run check:seo
+  npm run test:seo:nonjs -- --project=chromium --reporter=line
+  npm run test:seo:structured-data -- --project=chromium --reporter=line
+)
 ```
 
 Use `ROO_TEST_HOST` and `PW_PORT` to select this checkout's local test endpoint.
