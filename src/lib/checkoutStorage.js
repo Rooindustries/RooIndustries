@@ -94,6 +94,37 @@ export const readStoredCheckoutBooking = () => {
   }
 };
 
+export const readCheckoutDraftRevision = (bookingData) => {
+  try {
+    const parsed = JSON.parse(readBrowserStorage("sessionStorage", BOOKING_DRAFT_STORAGE_KEY) || "null");
+    const draft = parsed?.packages?.[bookingData?.packageTitle];
+    if (!draft?.form) return null;
+    const matches = ["discord", "email", "specs", "mainGame", "notes"].every(key =>
+      String(draft.form[key] || "").trim() === String(bookingData[key === "notes" ? "message" : key] || "").trim()
+    );
+    const revision = Number(draft.formRevision || 0);
+    return matches && Number.isSafeInteger(revision) && revision >= 0 ? revision : null;
+  } catch {
+    return null;
+  }
+};
+
+export const clearCompletedCheckoutDraft = (bookingData, expectedRevision) => {
+  if (expectedRevision === null || readCheckoutDraftRevision(bookingData) !== expectedRevision) return null;
+  try {
+    const parsed = JSON.parse(readBrowserStorage("sessionStorage", BOOKING_DRAFT_STORAGE_KEY));
+    const title = bookingData.packageTitle;
+    const current = parsed.packages[title];
+    const formRevision = Math.max(Date.now(), expectedRevision + 1);
+    parsed.packages[title] = { selectedPackage: current.selectedPackage, formRevision };
+    if (!writeBrowserStorage("sessionStorage", BOOKING_DRAFT_STORAGE_KEY, JSON.stringify(parsed))) return null;
+    clearBookingHoldExpired();
+    return formRevision;
+  } catch {
+    return null;
+  }
+};
+
 export const writeStoredCheckoutBooking = (bookingData) => {
   if (typeof window === "undefined") return null;
   if (!bookingData || typeof bookingData !== "object" || Array.isArray(bookingData)) {

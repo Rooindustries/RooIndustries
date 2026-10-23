@@ -1781,7 +1781,7 @@ try{
     return { responses, unchanged };
   });
 
-  for (const pending of [true, false]) await run(`confirmation-cancel-release-${pending ? 'pending' : 'complete'}`, async () => {
+  for (const pending of [true, false]) await run(`recovery-cancel-release-${pending ? 'pending' : 'complete'}`, async () => {
     const holdId = 'slotHold.pending-cancel';
     const expiresAt = pending ? '2099-01-01T10:00:00.000Z' : '2020-01-01T10:00:00.000Z';
     const payment = await seed('paypal', 'abandoned', { record: {

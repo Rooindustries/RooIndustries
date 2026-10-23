@@ -24,11 +24,13 @@ import {
   BOOKING_DRAFT_STORAGE_KEY,
   bookingHoldExpired,
   clearBookingHoldExpired,
+  clearCompletedCheckoutDraft,
   holdAwaitsPayment,
   markBookingHoldExpired,
   CHECKOUT_BOOKING_STORAGE_KEY,
   persistBookingPackageSelection,
   readStoredCheckoutBooking,
+  readCheckoutDraftRevision,
   updateStoredCheckoutHold,
 } from "../lib/checkoutStorage";
 import {
@@ -2081,7 +2083,7 @@ export default function BookingForm() {
     navigate("/payment", { state: getPaymentNavigationState() });
   };
 
-  const showCapturedPaymentResult = (data = {}) => {
+  const showCapturedPaymentResult = (data, checkout, completedDraftRevision) => {
     const status = String(data.status || "").trim().toLowerCase();
     const bookingId = String(data.bookingId || "").trim();
     if (
@@ -2093,6 +2095,11 @@ export default function BookingForm() {
     }
 
     const bookingConfirmation = createBookingConfirmation(data);
+    const clearedRevision = clearCompletedCheckoutDraft(checkout, completedDraftRevision);
+    if (clearedRevision !== null) {
+      draftRevisionRef.current = Math.max(draftRevisionRef.current, clearedRevision);
+      setForm(createFreshForm());
+    }
     try {
       sessionStorage.removeItem(PAYMENT_SESSION_STORAGE_KEY);
       sessionStorage.removeItem(CHECKOUT_BOOKING_STORAGE_KEY);
@@ -2200,6 +2207,8 @@ export default function BookingForm() {
     setReleasingPayment(true);
     setErrorStep2("");
     setPaymentReleaseStatus("");
+    const checkout = readStoredCheckoutBooking();
+    const completedDraftRevision = readCheckoutDraftRevision(checkout);
     try {
       const stored = JSON.parse(
         sessionStorage.getItem(PAYMENT_SESSION_STORAGE_KEY) || "null"
@@ -2219,7 +2228,7 @@ export default function BookingForm() {
       });
       const data = await response.json().catch(() => ({}));
       if (data?.captured) {
-        showCapturedPaymentResult(data);
+        showCapturedPaymentResult(data, checkout, completedDraftRevision);
         return;
       }
       if (!response.ok || data?.cancelled !== true) {

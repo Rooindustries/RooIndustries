@@ -11,6 +11,7 @@ import { trackConfirmedPurchase } from "../lib/analytics";
 import { preloadConfirmationPage, preloadConfirmationPages } from "../lib/confirmationPages";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
 import { beginCheckoutConfirmation } from "../lib/checkoutConfirmation";
+import { clearCompletedCheckoutDraft, holdAwaitsPayment, readCheckoutDraftRevision } from "../lib/checkoutStorage";
 import {
   calculateCheckoutDiscounts,
   formatCouponValue,
@@ -242,6 +243,7 @@ export default function Payment({ hideFooter = false }) {
       return baseState;
     }
 
+    clearCompletedCheckoutDraft(bookingData, completedDraftRevision);
     const bookingConfirmation = createBookingConfirmation(responseBody);
 
     return {
@@ -433,7 +435,16 @@ export default function Payment({ hideFooter = false }) {
   }, [banner]);
 
   useEffect(() => {
-    if (!holdExpiresAt || processingDodoReturn || creatingFree) return;
+    if (!hydrated || !holdExpiresAt || processingDodoReturn || creatingFree) return;
+    try {
+      const hold = JSON.parse(sessionStorage.getItem("my_slot_hold") || "null");
+      if (hold?.holdId === (sessionHold?.slotHoldId || bookingData?.slotHoldId) && holdAwaitsPayment(hold)) {
+        if (!paymentSessionMatchesCheckout(readStoredPaymentSession()?.fingerprint, checkoutFingerprint)) {
+          showBanner("info", "Your payment reservation is saved. Go back to booking and choose Check again to recover it.", { persistent: true });
+        }
+        return;
+      }
+    } catch {}
     const expiresAtMs = new Date(holdExpiresAt).getTime();
     if (!Number.isFinite(expiresAtMs)) return;
 
@@ -471,7 +482,7 @@ export default function Payment({ hideFooter = false }) {
 
     scheduleExpiry();
     return () => clearTimeout(timeoutId);
-  }, [holdExpiresAt, processingDodoReturn, creatingFree, navigate, navState, location]);
+  }, [hydrated, holdExpiresAt, processingDodoReturn, creatingFree, navigate, navState, location, sessionHold?.slotHoldId, bookingData?.slotHoldId]);
 
   const {
     referralPercent,
@@ -589,6 +600,7 @@ export default function Payment({ hideFooter = false }) {
   }
   const paymentView = paymentViewRef.current;
   paymentView.session = paymentSession;
+  const completedDraftRevision = useMemo(() => readCheckoutDraftRevision(bookingData), [bookingData, paymentView]);
   useEffect(() => {
     paymentMountedRef.current = true;
     return () => { paymentMountedRef.current = false; };

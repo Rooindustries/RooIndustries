@@ -140,7 +140,7 @@ export async function createBookingHoldFixture() {
       assert.equal(quote.status, 200, JSON.stringify(quote));
       return post("/api/payment/start", { provider: "dodo", bookingPayload, quoteFingerprint: quote.body.quoteFingerprint });
     };
-    return { baseURL, post, hold, start, nextSlotDate, commerce, details, evidence, save, stop };
+    return { baseURL, post, hold, start, nextSlotDate, commerce, sql: database.sql, details, evidence, save, stop };
   } catch (error) { await stop(); throw error; }
 }
 
