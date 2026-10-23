@@ -36,8 +36,9 @@ test("Lighthouse's HTTP fixture serves the site through the patched dependencies
   const server = new FallbackServer(artifactDir, false);
   await server.listen();
   const origin = `http://127.0.0.1:${server.port}`;
-  const restore = installNetworkGuard([origin]);
+  let restore;
   try {
+    restore = installNetworkGuard([origin]);
     const response = await lighthouseFetch(`${origin}/index.html?items[0]=first&items[1]=second`);
     assert.equal(response.status, 200);
     assert.match(await response.text(), /<h1>Fixture ready<\/h1>/);
@@ -49,7 +50,26 @@ test("Lighthouse's HTTP fixture serves the site through the patched dependencies
       selectorParser: require("postcss-selector-parser/package.json").version,
     }, null, 2));
   } finally {
-    restore();
+    restore?.();
     await server.close();
   }
+});
+
+test("Lighthouse fixture exits when a proxy prevents guard installation", async () => {
+  await fs.mkdir(artifactDir, { recursive: true });
+  let failure;
+  try {
+    await exec(process.execPath, [
+      "--test", "--test-isolation=none", "--test-name-pattern=^Lighthouse's HTTP fixture",
+      "tests/toolchain.test.mjs",
+    ], { env: { ...process.env, HTTP_PROXY: "http://127.0.0.1:9" }, timeout: 10_000 });
+  } catch (error) {
+    failure = error;
+  }
+  assert.equal(failure?.code, 1, "The refused fixture must exit without timing out");
+  assert.equal(failure.killed, false);
+  assert.match(`${failure.stdout}${failure.stderr}`, /Proxy transports are refused/);
+  await fs.writeFile(path.join(artifactDir, "proxy-refusal.json"), JSON.stringify({
+    exitCode: failure.code, killed: failure.killed, signal: failure.signal,
+  }, null, 2));
 });
