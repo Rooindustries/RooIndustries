@@ -29,7 +29,8 @@ const main = async () => {
   if (process.env.GITHUB_ACTIONS === "true") {
     let base;
     try { base = new URL(process.env.SMOKE_BASE_URL); } catch { base = null; }
-    if (base?.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(base?.hostname)) {
+    if (base?.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(base?.hostname) ||
+        base?.username || base?.password) {
       annotate("error", "CI requires an explicit loopback SMOKE_BASE_URL; live monitoring is disabled.");
       return 1;
     }

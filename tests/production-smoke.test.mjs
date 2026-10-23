@@ -428,6 +428,23 @@ test("deploy gate: CI rejects a nonlocal smoke before contacting the deployment 
   assert.deepEqual(site.requests, []);
 }));
 
+for (const host of ["127.0.0.1", "localhost", "[::1]"]) {
+  for (const credentials of ["username", "password", "both"]) {
+    test(`deploy gate: CI rejects ${credentials} credentials on ${host} before provider access`, () => withGate({}, async ({ site, vercel, exec }) => {
+      const target = new URL(site.base);
+      target.hostname = host;
+      if (credentials !== "password") target.username = "fixture-user";
+      if (credentials !== "username") target.password = "fixture-password";
+      const result = await exec({ GITHUB_ACTIONS: "true", SMOKE_BASE_URL: target.href });
+      assert.equal(result.code, 1, result.output);
+      assert.equal(vercel.requests.length, 0, "CI preflight contacted the deployment provider");
+      assert.equal(site.requests.length, 0, "CI preflight contacted the smoke target");
+      assert.match(result.output, /CI requires an explicit loopback SMOKE_BASE_URL/);
+      assert.doesNotMatch(result.output, /fixture-user|fixture-password/);
+    }));
+  }
+}
+
 test("deploy gate: a healthy live deployment passes and nothing is rolled back", () => withGate({}, async ({ site, vercel, exec }) => {
   const result = await exec({ GITHUB_ACTIONS: "true" });
   assert.equal(result.code, 0, result.output);
