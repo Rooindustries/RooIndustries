@@ -22,12 +22,30 @@ const run = (args, onSpawn, env = {}) => new Promise(resolve => {
   child.on("close", code => resolve({ code, output }));
 });
 
-const withSite = async (overrides, body) => {
+const withSite = async (overrides, body, env = {}) => {
   const site = await startSite(overrides);
   try {
-    await body(site, await run(["--base", site.base]));
+    await body(site, await run(["--base", site.base], null, env));
   } finally {
     await site.close();
+  }
+};
+
+const withExternalScript = async (script, body) => {
+  const requests = [];
+  const server = http.createServer((request, response) => {
+    requests.push(request.method);
+    response.writeHead(200, { "content-type": "text/javascript", "access-control-allow-origin": "*" });
+    response.end(script);
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    await body(`http://127.0.0.1:${server.address().port}/external.js`);
+    assert.ok(requests.length > 0, "the external script must execute");
+    assert.deepEqual(requests.filter(method => method !== "GET"), []);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
   }
 };
 
@@ -227,6 +245,67 @@ test("client readiness accepts a healthy delayed startup", () => withSite({
   assert.equal(result.code, 0, result.output);
   assert.deepEqual(site.requests.filter(request => request.method !== "GET"), []);
 }));
+
+for (const pathname of ["/", "/booking", "/payment"]) {
+  test(`an optional external script error does not fail initialized ${pathname}`, () => withExternalScript(
+    'throw new Error("Optional external fixture failed");',
+    source => withSite({ scriptSources: { [pathname]: source } }, (site, result) => {
+      assert.equal(result.code, 0, result.output);
+      assert.deepEqual(site.requests.filter(request => request.method !== "GET"), []);
+    }),
+  ));
+
+  test(`a required external script error still fails uninitialized ${pathname}`, () => withExternalScript(
+    'throw new Error("Required external fixture failed");',
+    source => withSite({
+      scriptSources: { [pathname]: source }, startup: { [pathname]: { requiresExternalReady: true } },
+    }, (site, result) => {
+      assert.equal(result.code, 2, result.output);
+      assert.ok(result.output.includes(`${pathname} did not finish client initialization`), result.output);
+    }),
+  ));
+}
+
+test("an optional external script error stays harmless in a CI fixture", () => withExternalScript(
+  'throw new Error("Optional external fixture failed");',
+  source => withSite({ scriptSources: { "/payment": source } }, (site, result) => {
+    assert.equal(result.code, 0, result.output);
+    assert.deepEqual(site.requests.filter(request => request.method !== "GET"), []);
+  }, { GITHUB_ACTIONS: "true" }),
+));
+
+test("an optional external script without crossorigin stays harmless", () => withExternalScript(
+  'throw new Error("Optional external fixture failed");',
+  source => withSite({
+    bodies: { "/payment": `<h3>Booking Summary</h3><p>Fixture checkout content remains visible.</p><script src="${source}"></script>` },
+  }, (site, result) => { assert.equal(result.code, 0, result.output); }),
+));
+
+test("a required external script can initialize the page", () => withExternalScript(
+  "window.fixtureExternalReady = true;",
+  source => withSite({
+    scriptSources: { "/booking": source }, startup: { "/booking": { requiresExternalReady: true } },
+  }, (site, result) => { assert.equal(result.code, 0, result.output); }),
+));
+
+test("an external script error called from the page remains a rendering failure", () => withExternalScript(
+  'window.fixtureExternalStart = () => { throw new Error("Page called external fixture failure"); };',
+  source => withSite({
+    scriptSources: { "/payment": source },
+    bodies: { "/payment": '<h3>Booking Summary</h3><p>Fixture checkout content remains visible.</p><script>window.fixtureExternalStart();</script>' },
+  }, (site, result) => {
+    assert.equal(result.code, 2, result.output);
+    assert.match(result.output, /\/payment has a rendering error: Page called external fixture failure/);
+  }),
+));
+
+test("an unattributed script error stays a rendering failure", () => withExternalScript(
+  'throw "Unattributed fixture failure";',
+  source => withSite({ scriptSources: { "/": source } }, (site, result) => {
+    assert.equal(result.code, 2, result.output);
+    assert.match(result.output, /\/ has a rendering error:.*Unattributed fixture failure/);
+  }),
+));
 
 test("refuses unknown options", async () => {
   const result = await run(["--bse", "https://www.rooindustries.com"]);

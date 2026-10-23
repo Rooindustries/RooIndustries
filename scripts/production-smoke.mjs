@@ -189,7 +189,17 @@ const FLOW_MARKERS = {
 
 const checkPageRenders = (browser, base, pathname) => withSmokePage(browser, base, {}, async (page) => {
     const errors = [];
-    page.on("pageerror", (error) => { errors.push(error.message); });
+    const origin = new URL(base).origin;
+    page.on("pageerror", (error) => {
+      const sources = (error.stack || "").split("\n")
+        .filter((frame) => /^\s+at /.test(frame))
+        .flatMap((frame) => frame.match(/https?:\/\/[^\s)]+/g) || []);
+      const origins = sources.map((source) => {
+        try { return new URL(source).origin; } catch { return null; }
+      });
+      if (origins.length && origins.every((source) => source && source !== origin)) return;
+      errors.push(error.message);
+    });
     const response = await page.goto(`${base}${pathname}`, { waitUntil: "domcontentloaded", timeout: 30000 });
     if (response?.status() !== 200) throw new Error(`${pathname} answered ${response?.status()}`);
     const markerTimeout = Number(process.env.SMOKE_MARKER_TIMEOUT_MS || 15000);

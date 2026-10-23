@@ -75,7 +75,8 @@ export const startSite = (overrides = {}) => {
         const action = startup.error
           ? 'throw new Error("Fixture client startup failed")'
           : `document.body.dataset.rooFlowReady = ${JSON.stringify(flow)}`;
-        res.end(`const initialize = () => { ${action}; }; if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize, { once: true }); else initialize();`);
+        const readyCheck = startup.requiresExternalReady ? "if (!window.fixtureExternalReady) return;" : "";
+        res.end(`const initialize = () => { ${readyCheck} ${action}; }; if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize, { once: true }); else initialize();`);
       }, startup.delay || 0);
     }
     if (url.pathname === "/packages") {
@@ -91,7 +92,10 @@ export const startSite = (overrides = {}) => {
         "/payment": "<h3>Booking Summary</h3>",
       };
       const body = overrides.bodies?.[url.pathname] ?? `${markers[url.pathname] || `<h1>${url.pathname}</h1>`}<p>Fixture page ${url.pathname} with its usual content.</p>`;
-      return res.end(page(body, `<script async src="/__fixture/client-start.js?path=${encodeURIComponent(url.pathname)}"></script>`));
+      const external = overrides.scriptSources?.[url.pathname];
+      const scripts = `<script async src="/__fixture/client-start.js?path=${encodeURIComponent(url.pathname)}"></script>` +
+        (external ? `<script crossorigin="anonymous" src="${external}"></script>` : "");
+      return res.end(page(body, scripts));
     }
     res.writeHead(404);
     return res.end();
