@@ -44,6 +44,7 @@ yarn-error.log*
 *.md
 !/AGENTS.md
 !/CLAUDE.md
+!/.agents/skills/**/SKILL.md
 
 # Local-only tooling: probe scripts and bytecode caches.
 .local-probes/

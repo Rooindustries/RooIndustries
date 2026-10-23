@@ -68,6 +68,8 @@
     "test:emails:postgres17": "node --test tests/booking-emails.mjs",
     "test:payment-recovery:postgres17": "cross-env ROO_PAYMENT_PERSISTENCE_ARTIFACT=test-results/payment-persistence-recovery.json node scripts/test-payment-persistence-sweep.mjs --recovery --full-chain",
     "test:agent-readiness": "node --test tests/agent-readiness.test.mjs",
+    "test:repo-skills": "bash tests/repo-skills-e2e.sh",
+    "diagnose:repo-skills": "bash scripts/diagnose-repo-skill-harnesses.sh",
     "test:traffic-recovery": "node --test tests/traffic-recovery.test.mjs",
     "test:remote-browser-guard": "node --test tests/remote-browser-guard.test.mjs",
     "test:creator:portal": "cross-env TOOLING_CREATOR_PORTAL=1 TOOLING_API_ROUTES=1 NODE_OPTIONS=--import=./tests/fixtures/creator-portal-loader.mjs playwright test tests/creator-portal.spec.js --project=chromium",
