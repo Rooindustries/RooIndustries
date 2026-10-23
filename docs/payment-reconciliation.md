@@ -87,6 +87,11 @@ the provider's validated refund total matches the payment and the local record
 confirms completed refund synchronization and released resources. A payment
 without a booking still needs investigation if its refund is partial or
 unfinished, or its record points to a missing booking.
+Booked refunds remain unresolved until the payment record agrees with the
+provider's cumulative refund total, currency and full or partial state, and
+confirms completed booking synchronization. Updating the booking alone cannot
+close its issue while that record still has pending or inconsistent refund work.
+Pending, failed and review refunds with no succeeded amount do not change earnings.
 An admin cancellation preserved during a dispute stays cancelled after the
 dispute closes and earns no referral commission. The audit accepts that state
 only after the provider dispute and local booking flags agree.

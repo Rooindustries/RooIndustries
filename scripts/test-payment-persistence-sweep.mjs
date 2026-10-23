@@ -407,6 +407,12 @@ try{
       ...changes,
     },
     record: {
+      ...(['full', 'partial'].includes(changes.refundStatus) ? {
+        refundState: changes.refundStatus,
+        refundProcessedAmountInSubunits: Math.round(changes.refundedAmount * 100),
+        refundCurrency: 'USD',
+        refundRequiresBookingSync: false,
+      } : {}),
       ...recordChanges,
       pricingSnapshot: {
         currency: 'USD',
@@ -706,6 +712,126 @@ try{
         assert.equal(missing.body.checks[0].state, 'unknown');
       }
       return { refund, saved, earnings, window, targeted };
+    });
+  }
+  for (const full of [false, true]) for (const listed of [false, true]) {
+    await run(`reconcile-report-booked-refund-sync-${full ? 'full' : 'partial'}-${listed ? 'listed' : 'reverse'}`, async () => {
+      await seed('dodo', 'booked', dodoBooking());
+      dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+      Object.assign(dodoRefund, { amount: full ? 999 : 499, is_partial: !full });
+      dodoPayment.refund_status = full ? 'full' : 'partial';
+      dodoPayment.refunds = [dodoRefund];
+      dodoList = listed ? [dodoSummary()] : [];
+      await sql.unsafe(`create or replace function public.refund_sync_failure_fixture() returns trigger language plpgsql as $$
+        begin
+          if new.legacy_sanity_id = 'paymentRecord.fixture'
+            and old.payload->>'refundRequiresBookingSync' = 'true'
+            and new.payload->>'refundRequiresBookingSync' = 'false'
+          then raise exception 'Synthetic refund completion storage failure'; end if;
+          return new;
+        end $$;
+        create trigger refund_sync_failure_fixture before update on migration.source_documents
+        for each row execute function public.refund_sync_failure_fixture();`);
+      let refund, pending, window, targeted, booking;
+      try {
+        refund = await requestFlow('dodo', { req: dodoReq(dodoRefund, 'refund.succeeded') });
+        pending = await record();
+        booking = (await row(bookingId)).payload;
+        assert.equal(pending.refundRequiresBookingSync, true, JSON.stringify({ refund, pending }));
+        assert.equal(pending.refundProcessedAmountInSubunits, dodoRefund.amount);
+        assert.equal(booking.refundedAmount, dodoRefund.amount / 100);
+        assert.equal(booking.refundStatus, full ? 'full' : 'partial');
+        window = await authorizedReport('GET', true);
+        targeted = await targetReport(canonicalKeys);
+      } finally {
+        await sql.unsafe('drop trigger refund_sync_failure_fixture on migration.source_documents');
+      }
+      const earnings = await commerce.referralEarnings({ referralId: 'referral.correct', referralCode: 'creator-correct' });
+      const recovery = await requestFlow('reconcile');
+      const saved = await record();
+      const control = await authorizedReport('GET', true);
+      const controlTargets = await targetReport(canonicalKeys);
+      assert.equal(window.status, 200, JSON.stringify(window.body));
+      assert.deepEqual(reportReasons(window.body), ['refund_not_applied'], JSON.stringify({
+        refundStatus: refund.status, pendingSync: pending.refundRequiresBookingSync,
+        recordTotal: pending.refundProcessedAmountInSubunits, providerTotal: dodoRefund.amount,
+        bookingRefund: booking.refundedAmount, window: window.body, targeted: targeted.body,
+      }));
+      assertTarget(targeted, canonicalKeys, Array(3).fill('unresolved'), ['refund_not_applied']);
+      assert.equal(recovery.status, 200, JSON.stringify(recovery));
+      assert.equal(saved.refundRequiresBookingSync, false);
+      assert.equal(control.body.count, 0, JSON.stringify(control.body));
+      assertTarget(controlTargets, canonicalKeys, Array(3).fill('recovered'), []);
+      assert.deepEqual((await row(bookingId)).payload, booking);
+      assert.deepEqual(await commerce.referralEarnings({ referralId: 'referral.correct', referralCode: 'creator-correct' }), earnings);
+      return { refund, pending, booking, earnings, window, targeted, recovery, saved, control, controlTargets };
+    });
+  }
+  for (const full of [false, true]) for (const [name, field, value] of [
+    ['sync-pending', 'refundRequiresBookingSync', true],
+    ['sync-null', 'refundRequiresBookingSync', null],
+    ['sync-missing', 'refundRequiresBookingSync', undefined],
+    ['amount-wrong', 'refundProcessedAmountInSubunits', 1],
+    ['amount-null', 'refundProcessedAmountInSubunits', null],
+    ['amount-missing', 'refundProcessedAmountInSubunits', undefined],
+    ['amount-string', 'refundProcessedAmountInSubunits', String(full ? 999 : 499)],
+    ['currency-wrong', 'refundCurrency', 'EUR'],
+    ['currency-null', 'refundCurrency', null],
+    ['currency-missing', 'refundCurrency', undefined],
+    ['state-wrong', 'refundState', full ? 'partial' : 'full'],
+    ['state-null', 'refundState', null],
+    ['state-missing', 'refundState', undefined],
+    ['status-wrong', 'status', full ? 'booked' : 'refunded'],
+  ]) {
+    await run(`reconcile-report-booked-refund-${full ? 'full' : 'partial'}-${name}`, async () => {
+      await seed('dodo', 'booked', dodoBooking());
+      dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+      Object.assign(dodoRefund, { amount: full ? 999 : 499, is_partial: !full });
+      dodoPayment.refund_status = full ? 'full' : 'partial';
+      dodoPayment.refunds = [dodoRefund];
+      dodoList = [dodoSummary()];
+      const refund = await requestFlow('dodo', { req: dodoReq(dodoRefund, 'refund.succeeded') });
+      assert.equal(refund.status, 200, JSON.stringify(refund));
+      const original = await record();
+      if (value === undefined) await sql`update migration.source_documents set payload=payload-${field} where legacy_sanity_id=${recordId}`;
+      else await sql`update migration.source_documents set payload=jsonb_set(payload,ARRAY[${field}]::text[],coalesce(${sql.json(value)},'null'::jsonb)) where legacy_sanity_id=${recordId}`;
+      if (value === undefined) assert.equal(Object.hasOwn(await record(), field), false);
+      else assert.deepEqual((await record())[field], value);
+      const window = await expectReport(['refund_not_applied']);
+      const targeted = await targetReport(canonicalKeys);
+      assertTarget(targeted, canonicalKeys, Array(3).fill('unresolved'), ['refund_not_applied']);
+      await sql`update migration.source_documents set payload=jsonb_set(payload,ARRAY[${field}]::text[],${sql.json(original[field])}) where legacy_sanity_id=${recordId}`;
+      assert.deepEqual((await record())[field], original[field]);
+      const control = await expectReport([]);
+      const controlTargets = await targetReport(canonicalKeys);
+      assertTarget(controlTargets, canonicalKeys, Array(3).fill('recovered'), []);
+      return { refund, field, importedValue: value, original, window, targeted, control, controlTargets };
+    });
+  }
+  for (const status of ['pending', 'failed', 'review']) {
+    await run(`reconcile-report-booked-refund-unprocessed-${status}`, async () => {
+      await seed('dodo', 'booked', dodoBooking());
+      dodoRefund.status = status;
+      dodoPayment.refunds = [dodoRefund];
+      dodoList = [dodoSummary()];
+      const observed = await requestFlow('dodo', { req: dodoReq() });
+      assert.equal(observed.status, 200, JSON.stringify(observed));
+      const window = await expectReport([]);
+      const targeted = await targetReport(canonicalKeys);
+      assertTarget(targeted, canonicalKeys, Array(3).fill('recovered'), []);
+      return { observed, saved: await record(), window, targeted };
+    });
+  }
+  for (const [field, value] of [
+    ['refundState', 'full'], ['refundProcessedAmountInSubunits', 999], ['refundRequiresBookingSync', true],
+  ]) {
+    await run(`reconcile-report-booked-refund-provider-zero-${field}`, async () => {
+      await seed('dodo', 'booked', dodoBooking({}, { [field]: value }));
+      dodoList = [dodoSummary()];
+      const window = await expectReport(['refund_not_applied']);
+      const targeted = await targetReport(canonicalKeys);
+      assertTarget(targeted, canonicalKeys, Array(3).fill('unresolved'), ['refund_not_applied']);
+      return { field, value, window, targeted };
     });
   }
   for (const variant of [
@@ -2333,6 +2459,10 @@ try{
       const report = await targetReport(canonicalKeys);
       assertTarget(report, canonicalKeys, Array(3).fill('unresolved'), [variant.reason]);
       await commerce.patch(bookingId).set(variant.repair).commit();
+      if (variant.name === 'full') {
+        const synchronized = await requestFlow('dodo', { req: dodoReq(dodoPayment.refunds[0], 'refund.succeeded') });
+        assert.equal(synchronized.status, 200, JSON.stringify(synchronized));
+      }
       const control = await targetReport(canonicalKeys);
       assertTarget(control, canonicalKeys, Array(3).fill('recovered'), []);
       assert.equal(report.providerRequests.length, 1);

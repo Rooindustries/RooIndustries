@@ -361,7 +361,19 @@ const checkBooking = ({ payment, record, booking, refunded, pricing }) => {
     (fullRefund && booking.status !== "refunded") ||
     (refunded > 0 && booking.refundStatus !== (fullRefund ? "full" : "partial")) ||
     (refunded === 0 && ["full", "partial"].includes(booking.refundStatus)) ||
-    (refunded > 0 && booking.refundCurrency != null && booking.refundCurrency !== payment.currency)
+    (refunded > 0 && booking.refundCurrency != null && booking.refundCurrency !== payment.currency) ||
+    record.refundRequiresBookingSync === true ||
+    (refunded > 0 && (
+      record.refundProcessedAmountInSubunits !== refunded ||
+      record.refundCurrency !== payment.currency ||
+      record.refundState !== (fullRefund ? "full" : "partial") ||
+      record.refundRequiresBookingSync !== false ||
+      (record.status === "refunded") !== fullRefund
+    )) ||
+    (refunded === 0 && (
+      ["full", "partial"].includes(record.refundState) ||
+      (record.refundProcessedAmountInSubunits != null && record.refundProcessedAmountInSubunits !== 0)
+    ))
   )
     return "refund_not_applied";
   const disputed = openDispute(payment);
