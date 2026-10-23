@@ -512,17 +512,69 @@ try {
       : [],
   });
   sql = fixture.sql;
-  const applyCommissionMigration = async () => {
+  const applyCommissionMigration = async ({traceProjections = false} = {}) => {
     const connection = await sql.reserve();
+    const definitions = [];
     try {
+      let writerDefinition;
+      if (traceProjections) {
+        await connection`create temporary table payout_projection_calls (kind text, ids text[])`;
+        for (const [signature, kind, ids] of [
+          [
+            'migration.project_commerce_document_ids(text[])',
+            'targeted',
+            'p_document_ids',
+          ],
+          [
+            'public.roo_project_operational_shadow()',
+            'full_project',
+            'null::text[]',
+          ],
+          [
+            'public.roo_refresh_operational_shadow()',
+            'full_refresh',
+            'null::text[]',
+          ],
+        ]) {
+          const [{definition}] =
+            await connection`select pg_get_functiondef(${signature}::regprocedure) as definition`;
+          definitions.push({signature, definition});
+          const traced = definition.replace(
+            /\nbegin\n/i,
+            `\nbegin\n  insert into pg_temp.payout_projection_calls values ('${kind}', ${ids});\n`
+          );
+          assert.notEqual(traced, definition, signature);
+          await connection.unsafe(traced);
+        }
+        const [writer] =
+          await connection`select pg_get_functiondef('migration.roo_apply_commerce_document_mutations_unbounded(text,jsonb,integer)'::regprocedure) as definition`;
+        writerDefinition = writer.definition;
+      }
       await connection.unsafe(
         baselineMigration || fs.readFileSync(migrationPath, 'utf8')
       );
+      return traceProjections
+        ? {
+            calls:
+              await connection`select kind, ids from pg_temp.payout_projection_calls`,
+            definitions,
+            writerDefinition,
+          }
+        : null;
     } catch (error) {
       await connection.unsafe('rollback');
       throw error;
     } finally {
-      connection.release();
+      try {
+        for (const {definition} of definitions.reverse()) {
+          await connection.unsafe(definition);
+        }
+        if (traceProjections) {
+          await connection`drop table if exists pg_temp.payout_projection_calls`;
+        }
+      } finally {
+        connection.release();
+      }
     }
   };
   if (baselineMigration) await applyCommissionMigration();
@@ -2684,7 +2736,35 @@ try {
     const settled = cohorts[0];
     const before =
       await sql`select legacy_sanity_id, source_revision, source_hash, payload from migration.source_documents where legacy_sanity_id=any(${[settled.first.creator._id, ...settled.ids]}) order by legacy_sanity_id`;
-    await applyCommissionMigration();
+    const versionsBefore =
+      await sql`select legacy_sanity_id, payload->>'commissionCalculationVersion' as version from migration.source_documents where document_type='booking' and not tombstoned order by legacy_sanity_id`;
+    const projection = await applyCommissionMigration({traceProjections: true});
+    const versionsAfter =
+      await sql`select legacy_sanity_id, payload->>'commissionCalculationVersion' as version from migration.source_documents where document_type='booking' and not tombstoned order by legacy_sanity_id`;
+    const previousVersions = new Map(
+      versionsBefore.map((row) => [row.legacy_sanity_id, row.version])
+    );
+    const migratedIds = versionsAfter
+      .filter(
+        (row) =>
+          row.version === '2' &&
+          previousVersions.get(row.legacy_sanity_id) !== '2'
+      )
+      .map((row) => row.legacy_sanity_id);
+    assert.ok(migratedIds.length > 0);
+    assert.deepEqual(
+      projection.calls.filter((call) => call.kind !== 'targeted'),
+      []
+    );
+    assert.ok(
+      projection.calls.every(
+        (call) => call.ids?.length > 0 && call.ids.length <= 100
+      )
+    );
+    const projectedIds = projection.calls.flatMap((call) => call.ids).sort();
+    assert.deepEqual(projectedIds, migratedIds.sort());
+    assert.ok(settled.ids.every((id) => !projectedIds.includes(id)));
+    projection.migratedIds = migratedIds;
     await cron();
     const after =
       await sql`select legacy_sanity_id, source_revision, source_hash, payload from migration.source_documents where legacy_sanity_id=any(${[settled.first.creator._id, ...settled.ids]}) order by legacy_sanity_id`;
@@ -2714,7 +2794,7 @@ try {
     }
     await summary(settled.first.creator, 0.01);
     current = cohorts[1].first;
-    return {before, after, paidCreator, unpaidCreator, newBookings};
+    return {before, after, paidCreator, unpaidCreator, newBookings, projection};
   });
 
   await run('R1-paid-legacy-zero-preserves-marker-presence', async () => {
