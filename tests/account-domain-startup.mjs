@@ -6,6 +6,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { cleanupAccountFixture } from "./fixtures/account-domain-cleanup.mjs";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 const artifactBase = process.env.ROO_ACCOUNT_DOMAIN_STARTUP_ARTIFACT_DIR
@@ -45,6 +46,7 @@ test("account identity retains failed PostgreSQL startup logs after owned cleanu
       postgresLogs: runs.map((name) => path.join(output, name, "postgres.log")),
     };
   };
+  const failures = [];
   try {
     const failure = await run("occupied");
     const socket = net.connect({ host: "127.0.0.1", port });
@@ -88,17 +90,12 @@ test("account identity retains failed PostgreSQL startup logs after owned cleanu
     assert.match(fs.readFileSync(path.join(path.dirname(normal.postgresLogs[0]), "pg_ctl-stop.log"), "utf8"), /server stopped/);
     const pid = Number(normalLog.match(/\[(\d+)\] LOG:\s+starting PostgreSQL/)[1]);
     assert.throws(() => process.kill(pid, 0), { code: "ESRCH" }, "Owned PostgreSQL process is still running");
-  } finally {
-    if (owner.listening) await new Promise((resolve) => owner.close(resolve));
+  } catch (error) { failures.push(error); }
+  finally {
+    try { if (owner.listening) await new Promise((resolve, reject) => owner.close(error => error ? reject(error) : resolve())); }
+    catch (error) { failures.push(error); }
     const pgBin = process.env.PG_BIN || spawnSync(process.env.PG_CONFIG || "pg_config", ["--bindir"], { encoding: "utf8" }).stdout?.trim();
-    for (const name of fs.readdirSync(temporaryBase)) {
-      const dataDir = path.join(temporaryBase, name, "pgdata");
-      if (fs.existsSync(path.join(dataDir, "postmaster.pid"))) {
-        const stopped = spawnSync(path.join(pgBin, "pg_ctl"), ["-D", dataDir, "-m", "fast", "-w", "stop"], { env, encoding: "utf8" });
-        assert.equal(stopped.status, 0, `${stopped.stdout}\n${stopped.stderr}`);
-      }
-    }
-    fs.rmSync(jobDir, { recursive: true, force: true });
+    cleanupAccountFixture({ jobDir, pgBin, env, failures, output: path.join(artifacts, "startup-owned-cleanup") });
   }
 });
 
@@ -118,6 +115,7 @@ test("account identity cleanup retains client close errors", { timeout: 180_000 
       env.PG_BIN = bin;
     }
     let pid;
+    const failures = [];
     try {
       const child = spawn(process.execPath, ["--import", "./tests/fixtures/account-domain-close-failure.mjs", "scripts/test-account-domain-identity-postgres.mjs"], {
         cwd: root, env, stdio: ["ignore", "pipe", "pipe"], timeout: 50_000,
@@ -150,18 +148,56 @@ test("account identity cleanup retains client close errors", { timeout: 180_000 
         if (mode === "remove") { assert.match(stderr, /EACCES|EPERM/); assert.equal(clusters.length, 1); }
         else assert.deepEqual(clusters, [], "Client-close failure skipped cluster removal");
       }
-    } finally {
-      for (const name of fs.readdirSync(scratch)) {
-        const cluster = path.join(scratch, name); fs.chmodSync(cluster, 0o700);
-        const dataDir = path.join(cluster, "pgdata");
-        if (fs.existsSync(path.join(dataDir, "postmaster.pid"))) {
-          const stopped = spawnSync(path.join(pgBin, "pg_ctl"), ["-D", dataDir, "-m", "fast", "-w", "stop"], { encoding: "utf8", env });
-          assert.equal(stopped.status, 0, `${stopped.stdout}\n${stopped.stderr}`);
-          fs.writeFileSync(path.join(output, "owned-stop.log"), `${stopped.stdout}\n${stopped.stderr}`);
-        }
-      }
-      fs.rmSync(jobDir, { recursive: true, force: true });
-      if (pid) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" }, "Owned database process survived E2E cleanup");
+    } catch (error) { failures.push(error); }
+    finally {
+      cleanupAccountFixture({ jobDir, pgBin, env, failures, pids: [pid], output: path.join(output, "owned-cleanup") });
     }
+  });
+});
+
+test("account fixture cleanup retains failed stops and continues other clusters", { timeout: 120_000 }, async t => {
+  const pgBin = process.env.PG_BIN || spawnSync(process.env.PG_CONFIG || "pg_config", ["--bindir"], { encoding: "utf8" }).stdout?.trim();
+  for (const mode of ["rejected", "false-success"]) await t.test(mode, async () => {
+    const jobDir = fs.mkdtempSync(path.join(os.tmpdir(), "roo-account-recovery-"));
+    const scratch = path.join(jobDir, "tmp"); fs.mkdirSync(scratch);
+    const output = fs.mkdtempSync(path.join(artifacts, `${mode}-`));
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/sentry.*dsn/i.test(key)));
+    const pids = [], failures = [], clusters = [];
+    try {
+      for (const label of ["first", "second"]) {
+        const cluster = path.join(scratch, `roo-account-domain-${label}`); fs.mkdirSync(cluster); clusters.push(cluster);
+        const dataDir = path.join(cluster, "pgdata");
+        const initialized = spawnSync(path.join(pgBin, "initdb"), ["-D", dataDir, "--auth=trust", "--no-locale"], { encoding: "utf8", env: { ...env, LC_ALL: "C" } });
+        fs.writeFileSync(path.join(output, `${label}-initdb.log`), `${initialized.stdout}\n${initialized.stderr}`);
+        assert.equal(initialized.status, 0, `${initialized.stdout}\n${initialized.stderr}`);
+        const portOwner = net.createServer(); portOwner.listen(0, "127.0.0.1"); await once(portOwner, "listening");
+        const port = portOwner.address().port; await new Promise(resolve => portOwner.close(resolve));
+        const started = spawnSync(path.join(pgBin, "pg_ctl"), ["-D", dataDir, "-l", path.join(output, `${label}-postgres.log`), "-o", `-h 127.0.0.1 -p ${port} -k ''`, "-w", "start"], { encoding: "utf8", env: { ...env, LC_ALL: "C" } });
+        fs.writeFileSync(path.join(output, `${label}-pg_ctl.log`), `${started.stdout}\n${started.stderr}`);
+        assert.equal(started.status, 0, `${started.stdout}\n${started.stderr}`);
+        pids.push(Number(fs.readFileSync(path.join(dataDir, "postmaster.pid"), "utf8").split("\n")[0]));
+      }
+      const bin = path.join(jobDir, "bin"); fs.mkdirSync(bin);
+      fs.writeFileSync(path.join(bin, "pg_ctl"), `#!${process.execPath}\nconst {spawnSync}=require('node:child_process');\nconst args=process.argv.slice(2);\nif(args.includes(${JSON.stringify(path.join(clusters[0], "pgdata"))})){process.stderr.write('fixture-owned-stop-failure\\n');process.exit(${mode === "rejected" ? 1 : 0});}\nconst r=spawnSync(${JSON.stringify(path.join(pgBin, "pg_ctl"))},args,{stdio:'inherit'});process.exit(r.status??1);\n`, { mode: 0o700 });
+      const primary = new Error("fixture-original-assertion");
+      let failure;
+      try { cleanupAccountFixture({ jobDir, pgBin: bin, env, output: path.join(output, "failure"), pids, failures: [primary] }); }
+      catch (error) { failure = error; }
+      assert.ok(failure instanceof AggregateError);
+      assert.equal(failure.errors[0], primary, "Cleanup replaced the original assertion");
+      assert.ok(failure.errors.some(error => /still running/.test(String(error))), "Failed stop skipped the owned-process check");
+      if (mode === "rejected") assert.ok(failure.errors.some(error => /fixture-owned-stop-failure/.test(String(error))));
+      const report = JSON.parse(fs.readFileSync(path.join(output, "failure/owned-cleanup.json"), "utf8"));
+      assert.equal(report.stops.length, 2, "Failed stop prevented the next cluster from stopping");
+      assert.equal(report.stops[0].status, mode === "rejected" ? 1 : 0);
+      assert.equal(report.stops[1].status, 0);
+      assert.deepEqual(report.processes, [{ pid: pids[0], alive: true }, { pid: pids[1], alive: false }]);
+      assert.equal(report.removed, false);
+      assert.equal(fs.existsSync(jobDir), true, "Cleanup removed the failed-stop cluster");
+      assert.match(fs.readFileSync(path.join(output, "failure/roo-account-domain-first-owned-stop.log"), "utf8"), /fixture-owned-stop-failure/);
+      assert.match(fs.readFileSync(path.join(output, "failure/roo-account-domain-second-owned-stop.log"), "utf8"), /server stopped/);
+      t.diagnostic(`Artifacts: ${output}`);
+    } catch (error) { failures.push(error); }
+    finally { cleanupAccountFixture({ jobDir, pgBin, env, failures, pids, output: path.join(output, "recovery") }); }
   });
 });

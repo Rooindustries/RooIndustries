@@ -33,6 +33,11 @@ Client-close failures still stop the owned server and remove its cluster.
 Stop failures retain the cluster; close, stop and removal errors remain visible
 together. Cleanup E2Es inject a rejection after the real client closes, a failing
 stop command, and a removal permission error on the owned temporary directory.
+Both E2E teardown paths share cleanup that retains each stop log before checking
+its result, attempts every cluster and checks every known postmaster PID. Failed
+stops retain the temporary root and all errors, including an earlier assertion.
+Native cases cover a rejected stop and a command that reports success while its
+server remains alive; a second cluster must still stop in both cases.
 
 `npm run test:remote-browser-guard` exercises connected and native browsers with
 local HTTP fixtures. Native runs keep the Node and browser guards active together.
