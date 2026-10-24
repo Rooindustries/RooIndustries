@@ -32,11 +32,47 @@ Check monitoring with `npm run test:monitoring`. `npm run test:monitoring:startu
 
 ## How we ship
 
-- Small PRs, one fix each. Two fixes are two PRs.
-- Run the affected suites locally, then push once per round. Every push restarts CI.
+- Keep related fixes for one task together in the same PR.
+- Run the affected suites locally, then push once per round. Every push restarts CI. A round is the push after you have read the latest checks and reviews. Wait for those results before the next push.
+- Do not buy GitHub Actions minutes. Private repos run CI locally on the exact head and post a `local-ci` commit status with the result. Run only affected browser groups while iterating, one at a time and headless on linux-dev-laptop; run the full suite once on the final head before posting success. Never use `pw-remote` or wake the 9950X3D for tests.
 - Tests talk only to local fixtures: `scripts/test-tooling-sweep-server.mjs` refuses env files and outbound requests outside its allowed local fixture origins. Never point a test or script at production. The one exception is `npm run smoke:production`, which sends read-only GET requests to www.rooindustries.com.
 - After every production deploy, `.github/workflows/production-smoke.yml` runs `npm run deploy:gate`: it smokes the money path (the money pages, booking availability, package prices, `?ref` capture) and, if that fails while the new deployment is live, rolls production back one step.
 - Undo a bad deploy by hand with `VERCEL_TOKEN=… npm run deploy:rollback` (`-- --dry-run` to preview). A rollback pins production to the older deployment, so new deploys stay off the domain until `npm run deploy:rollback -- --undo` promotes the newest one.
+
+### Own the pull request until it ships
+
+The agent that opens a pull request owns it until the production deployment is verified, or until it has to stop for the owner. Opening the pull request is the start of that loop. Merging does not end ownership.
+
+Each round, read the checks on the current head and every open review finding. The checks include the jobs in `.github/workflows/tests.yml` and the other checks on the pull request (Vercel, GitGuardian, CodeRabbit, Seer, and anything else that reported). The findings include every unresolved thread from CodeRabbit, Seer/Sentry, Codex, and any other reviewer. Fix the failures and the findings, push to the same branch, and repeat. When the branch is behind `main` or GitHub reports conflicts, rebase onto `main` and resolve the conflicts. A cancelled check is not green. Put the suites back on the head.
+
+No coding agent merges a pull request. The Grok Bot assistant does not merge one either. Merging is the job of `.github/workflows/auto-merge.yml`. It squash-merges into `main` only when all of the following are true:
+
+- Checks on the head pass. Success, skipped, and neutral count as green. Required Tests jobs that never started may instead be covered by a successful `local-ci` status on that exact head, as described below. Other pending, failed, and cancelled checks still block.
+- CodeRabbit approves that head, and no review thread is still open. CodeRabbit is managed through the `serviroo2` account; the approval must still come from the real CodeRabbit bot.
+- Sentry Seer has finished a clean review of that exact head. Its latest `Seer Code Review` check must be `completed` with conclusion `success`, from the installed Sentry app (id `12637`, slug `sentry`). A missing, pending, skipped, neutral or failed review does not pass this gate.
+- No person has an open request for changes. It stands, on any commit, until that person approves or the review is dismissed.
+
+The required Tests jobs are GitHub Actions check runs from this repository's `.github/workflows/tests.yml`, matched through workflow and check-suite identities. A same-named check from another app or workflow never stands in for one. A successful `local-ci` commit status can cover missing Tests jobs or jobs that never started. The collector checks every job attempt on the head: the replaced job must have no assigned runner (`runner_id` is `0` or `null`) and no executed step, and any existing check must match its job record. Missing or conflicting job evidence, including an absent runner field or steps array, does not count. Queued jobs can already have `started_at` timestamps, so those timestamps alone do not prove execution. A started or failed executed job keeps its real result; local CI cannot hide it. All other checks still apply.
+
+Only the latest `local-ci` commit status from the current head counts. An old-head status, a PR comment, or a check run named `local-ci` is not proof. A pending or failed newer status supersedes an older success. Both merge snapshots repeat these checks. Current `main` must be an ancestor of the PR head. The branch must be clean, or GitHub may report `unstable` solely because the unstarted Tests checks covered by local CI are still pending; conflicts, an outdated base and other unfinished checks still block.
+
+Green means merge. No kind of change waits for the owner once it meets this bar: money paths, workflows, the merge gate, deploy and rollback scripts and migrations merge the same way.
+
+CodeRabbit approves by a GitHub approval on that head with no later request for changes or dismissal. Sentry Seer's clean check is a separate requirement; neither reviewer replaces the other. Codex's GitHub review is optional: the workflow does not request it, wait for its verdict or apply a timeout to it. An existing open finding from any reviewer still blocks the merge, and the owning agent clears it.
+
+A squash-merge to `main` starts the production deployment. The Vercel project ships `main`. The owning agent follows that deployment, checks the production smoke result, and confirms the intended version is live before finishing. If deployment or smoke fails, including an automatic rollback, the agent investigates, fixes the failure or reports the blocker, and verifies recovery. A failed or rolled-back deployment does not count as shipped. The owner should not have to merge a pull request that has already met the merge bar.
+
+When CodeRabbit and Sentry Seer do not both approve, or a review thread is still open, the workflow keeps that same branch in a loop. The owning agent, woken by its pull request watch, addresses the findings and pushes. Review requests go only to eligible gating reviewers without approval on the current head, using `@coderabbitai review` or `@sentry review` as needed. A dismissed review reopens its request. A held review can be requested again once the findings are resolved, without an empty commit. That repeats until both approve and no review thread is open. The gate then merges, and the agent verifies production. After 8 review rounds without agreement, the workflow stops the loop and adds `needs-owner`.
+
+The workflow flags the owner only when the loop cannot finish on its own: after 8 review rounds without agreement, a requested review remains pending for 24 hours, or GitHub blocks or rejects a merge that meets the bar. Human change requests stay with the owning agent until the review cap. Flagging is a `needs-owner` label and one comment on the pull request, from the workflow. Leave the pull request open. Money-path pull requests also follow the rules in Money paths (one at a time, Sol review, the local suites) before their final push.
+
+Review mentions use `AUTO_MERGE_TOKEN` when available so integrations can receive a user-authored request. Only CodeRabbit and Seer without approval on the current head are requested. Each receipt and 24-hour deadline belongs to a reviewer, head and review state. A finished response or dismissal retires the previous receipt; a pending update keeps the active request and deadline. Human-authored markers do not suppress requests. Legacy receipts count only before that reviewer's first completed response on the head and only when they identify that reviewer. An older receipt explicitly requesting both CodeRabbit and Codex still covers CodeRabbit, but never Seer. The merge snapshots read the current `main` ref directly because the PR payload's base SHA can remain older.
+
+The workflow's own GitHub Actions check is named `auto-merge-gate` and is excluded from merge snapshots only when its check-suite identity belongs to the current Auto-merge workflow run, including manual dispatches on a pull request branch. Every other check still counts, including another workflow's job with that name and earlier Auto-merge runs.
+
+The workflow does not call any agent API. The owning agent finds out about a red check, a conflict, a new review or a new comment through its own pull request watch (in T3, `watch_pull_request` on that thread wakes it), fixes the branch and pushes. Keep that watch on while the pull request is open, until it closes or is flagged `needs-owner`. After merge, continue following Vercel and the production smoke workflow until production is verified; a pull request watch ending is not task completion. If the watch ends before merge or the thread is gone, whoever picks up the pull request next reopens the loop with a fresh watch. The workflow records one review-round marker for each head and completed review state that still needs work. Repeated runs on the same state do not add rounds; new completed attempts on the same head do. After 8 rounds it adds `needs-owner`.
+
+The workflow merges with the GitHub Actions token. That token can land the squash commit, and it does not start a new Actions run on the merge commit. Vercel still receives the push and deploys `main`. If GitHub rejects the merge because of branch protection, the pull request comment says so. A repository secret named `AUTO_MERGE_TOKEN`, holding a token that can write to this repository, merges as that user instead, which also lets the Tests workflow run on the merge commit. This repository does not change branch protection or rulesets from the workflow.
 
 ## Invariants
 
@@ -260,6 +296,7 @@ Only files a maintainer can run or read on purpose belong in the repository. Nev
 
 ## Before opening a pull request
 
+- After the pull request is open, follow "Own the pull request until it ships". The open pull request is not the end of the task.
 - `git status` shows only the files the change needs. Delete scratch files instead of renaming or parking them.
 - Every new script runs from a clean checkout without machine-specific paths; fixture locations come from environment variables with documented defaults.
 - Branch names use the `servi/` prefix with a short description, for example `servi/review-carousel-loop`.
