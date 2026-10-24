@@ -106,6 +106,7 @@ async function fetchHomePageData({
 
   return applyHomePageCopyOverrides({
     hero: resolveHeroCopy(hero, packagesList),
+    heroPackages: packagesList.map(({ title, price }) => ({ title, price })),
     reviews,
     about,
     services,

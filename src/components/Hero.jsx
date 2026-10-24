@@ -5,7 +5,7 @@ import homeCopy from "../lib/homeCopy";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import { trackEvent } from "../lib/analytics";
 
-const { resolveHeroCopy } = homeCopy;
+const { resolveHeroCopy, getHeroTunePrice } = homeCopy;
 
 const normalizeText = (s = "") =>
   String(s)
@@ -95,8 +95,8 @@ export default function Hero({ initialData = null, initialPackages = null, headi
   const Heading = headingTag;
   const [fetchedHero, setFetchedHero] = useState(null);
   const [fetchedPackages, setFetchedPackages] = useState(null);
-  const hasInitialPackages = Array.isArray(initialPackages) && initialPackages.length > 0;
-  const heroData = resolveHeroCopy(initialData || fetchedHero, hasInitialPackages ? initialPackages : fetchedPackages);
+  const hasInitialPackagePrice = Boolean(getHeroTunePrice(initialPackages));
+  const heroData = resolveHeroCopy(initialData || fetchedHero, hasInitialPackagePrice ? initialPackages : fetchedPackages);
   const handleHomeSectionLink = useHomeSectionLinkHandler();
 
   const handleHeroCta = (event, hash, cta) => {
@@ -105,7 +105,7 @@ export default function Hero({ initialData = null, initialPackages = null, headi
   };
 
   useEffect(() => {
-    if (initialData && hasInitialPackages) return undefined;
+    if (initialData && hasInitialPackagePrice) return undefined;
     let cancelled = false;
     let packageRequest;
     let packageTimeout;
@@ -118,23 +118,24 @@ export default function Hero({ initialData = null, initialPackages = null, headi
     const loadPackages = async (attempt = 0) => {
       packageRequest = new AbortController();
       packageTimeout = setTimeout(() => packageRequest.abort(), 5000);
+      let retry = true;
       try {
         const packages = await getPublicContent("packages-list", {}, { signal: packageRequest.signal });
+        retry = !getHeroTunePrice(packages);
         if (!cancelled) setFetchedPackages(packages);
-      } catch {
-        if (!cancelled && attempt < 2) retryTimeout = setTimeout(() => loadPackages(attempt + 1), (attempt + 1) * 1000);
-      } finally {
+      } catch {} finally {
         clearTimeout(packageTimeout);
       }
+      if (retry && !cancelled && attempt < 2) retryTimeout = setTimeout(() => loadPackages(attempt + 1), (attempt + 1) * 1000);
     };
-    if (!hasInitialPackages) loadPackages();
+    if (!hasInitialPackagePrice) loadPackages();
     return () => {
       cancelled = true;
       clearTimeout(packageTimeout);
       clearTimeout(retryTimeout);
       packageRequest?.abort();
     };
-  }, [initialData, hasInitialPackages]);
+  }, [initialData, hasInitialPackagePrice]);
 
   const {
     headingLine1,

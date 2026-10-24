@@ -11,11 +11,15 @@ hero from main. Its $400 headline has no retailer label or checked date. A faile
 first read creates no quote and does not rewrite that approved copy. Once a
 verified quote exists, failed reads keep that amount and its actual checked date.
 
-The numeric tune heading also needs a valid package price. While that price is
-unavailable, a verified RAM quote stays visible and the heading says "Tune Yours."
-The browser retries the package read up to three times, with a five-second timeout
-per request and one- then two-second delays. A recovered read restores the actual
-package price; leaving the hero cancels pending requests and retries.
+The numeric tune heading needs a positive price on the actual Max source record,
+before any presentation override. Server rendering retains the raw title and
+price for hydration rather than using an offer whose override filled a gap.
+While that source price is unusable, a verified RAM quote stays visible and the
+heading says "Tune Yours."
+The browser retries failed reads and successful empty or unusable lists up to
+three times, with a five-second timeout per request and retry delays of one
+second, then two seconds. A recovered read restores the actual package price;
+leaving the hero cancels pending requests and retries.
 
 ## Source
 

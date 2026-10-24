@@ -22,6 +22,8 @@ test.beforeEach(async ({ request, baseURL, context }) => {
 });
 
 test('source price reaches the rendered hero through the CMS command', async ({ page, request, baseURL }, testInfo) => {
+  await publishHero(request);
+  await cachedHero(request, 'Why Pay $400 For RAM?');
   const before = await state(request);
   await page.goto('/');
   await expect(page.locator('#top h1')).toContainText('Why Pay $400 For RAM?');
@@ -325,4 +327,112 @@ test('leaving the hero cancels pending package read retries', async ({ page, req
   await page.waitForTimeout(3500);
   expect(reads).toBe(readsOnExit);
   await testInfo.attach('cancelled-package-retries', { body: JSON.stringify({ readsOnExit, readsAfterExit: reads }), contentType: 'application/json' });
+});
+
+const publishHero = async request => {
+  const { hero } = await state(request);
+  const response = await request.post('/api/admin/content/publish', {
+    headers: { 'x-admin-key': 'fixture-only-ram-price-admin' },
+    data: { operation: 'replace', type: 'hero', documentId: hero._id, expectedRevision: hero._rev, document: hero },
+  });
+  expect(response.status(), await response.text()).toBe(200);
+};
+const patchPackageSource = async (request, patch) => {
+  expect((await request.post(`${fixture}/__content`, { data: { patch } })).ok()).toBe(true);
+  await publishHero(request);
+};
+const cachedHero = async (request, expected) => {
+  let html;
+  await expect.poll(async () => {
+    const response = await request.get('/');
+    expect(response.ok()).toBe(true);
+    html = await response.text();
+    return response.headers()['x-nextjs-cache'] === 'HIT' && html.includes(expected);
+  }, { timeout: 30000 }).toBe(true);
+  return html.match(/<h1\b[^>]*>[\s\S]*?<\/h1>/)?.[0] || '';
+};
+
+test.describe('unusable Max sources', () => {
+test.afterEach(async ({ request }) => {
+  expect((await request.post(`${fixture}/__content`, { data: { reset: true } })).ok()).toBe(true);
+});
+
+test('unusable Max source prices never manufacture a tune price in SSR SPA or Markdown', async ({ page, request }, testInfo) => {
+  expect((await refresh(request)).status()).toBe(200);
+  const { packages } = await state(request);
+  const max = packages.find(pkg => /max|xoc/i.test(pkg.title));
+  const observations = [];
+  for (const price of [null, '', 0, '0', 'invalid', '$123.45']) {
+    await patchPackageSource(request, { _id: max._id, price });
+    const valid = price === '$123.45';
+    const expected = valid ? 'Tune Yours For $123.45.' : 'Tune Yours.';
+    const ssr = await cachedHero(request, valid ? expected : 'Why Pay $500 For RAM?');
+    const api = await (await request.get('/api/content/packages-list')).json();
+    expect(api.data.find(pkg => pkg._id === max._id).price).toBe(price);
+    const markdown = (await (await request.get('/markdown?path=/')).text()).replaceAll('\\', '');
+    await page.goto('/about');
+    await page.locator('footer a[href="/"]').first().click();
+    await expect(page.locator('#top h1')).toContainText('Why Pay $500 For RAM?');
+    await expect(page.locator('#top h1')).toContainText(valid ? '$123.45' : 'Tune Yours');
+    const spa = await page.locator('#top h1').innerText();
+    for (const [surface, heading] of Object.entries({ ssr, spa, markdown })) {
+      expect.soft(heading, `${surface}, source price=${JSON.stringify(price)}`).toContain(expected);
+      if (!valid) expect.soft(heading, `${surface}, source price=${JSON.stringify(price)}`).not.toContain('Tune Yours For $99.95');
+    }
+    await page.goto('/');
+    await expect(page.locator('#top h1')).toContainText('Why Pay $500 For RAM?');
+    expect.soft(await page.locator('#top h1').innerText(), `hydrated source price=${JSON.stringify(price)}`).toContain(expected);
+    if (price === null) await page.locator('#top').screenshot({ path: testInfo.outputPath('null-Max-source-price.png') });
+    observations.push({ price, ssr, spa, markdown });
+  }
+  await testInfo.attach('raw-price-surfaces', { body: JSON.stringify(observations, null, 2), contentType: 'application/json' });
+});
+
+for (const missing of ['empty list', 'missing Max', 'invalid Max price']) {
+  test(`successful ${missing} recovers the actual package price on the same page`, async ({ page, request }, testInfo) => {
+    expect((await refresh(request)).status()).toBe(200);
+    const { packages } = await state(request);
+    const max = packages.find(pkg => /max|xoc/i.test(pkg.title));
+    if (missing === 'empty list') {
+      expect((await request.post(`${fixture}/__content`, { data: { missing: ['package'] } })).ok()).toBe(true);
+      await publishHero(request);
+    } else {
+      await patchPackageSource(request, { _id: max._id, ...(missing === 'missing Max' ? { title: 'Other package' } : { price: null }) });
+    }
+    await cachedHero(request, 'Why Pay $500 For RAM?');
+    let reads = 0;
+    await page.route('**/api/content/packages-list', route => { reads++; return route.continue(); });
+    await page.goto(missing === 'empty list' ? '/about' : '/');
+    await page.evaluate(() => { window.__ramRecoveryDocument = true; });
+    if (missing === 'empty list') await page.locator('footer a[href="/"]').first().click();
+    await expect(page.locator('#top h1')).toContainText('Tune Yours.');
+    const beforeRepair = await page.locator('#top h1').innerText();
+    expect((await request.post(`${fixture}/__content`, { data: { missing: [] } })).ok()).toBe(true);
+    await patchPackageSource(request, { _id: max._id, title: max.title, price: '$123.45' });
+    await expect(page.locator('#top h1')).toContainText('Tune Yours For $123.45.');
+    expect(await page.evaluate(() => window.__ramRecoveryDocument)).toBe(true);
+    expect(reads).toBeGreaterThan(0);
+    await page.locator('#top').screenshot({ path: testInfo.outputPath('source-repaired-without-navigation.png') });
+    await testInfo.attach('same-page-recovery', { body: JSON.stringify({ missing, beforeRepair, reads, recovered: await page.locator('#top h1').innerText() }), contentType: 'application/json' });
+  });
+}
+
+test('successful unusable package reads keep a finite retry budget', async ({ page, request }, testInfo) => {
+  expect((await refresh(request)).status()).toBe(200);
+  let reads = 0;
+  await page.route('**/api/content/packages-list', route => {
+    reads++;
+    return route.fulfill({ status: 200, json: { ok: true, data: [] } });
+  });
+  await page.goto('/about');
+  await page.locator('footer a[href="/"]').first().click();
+  await expect(page.locator('#top h1')).toContainText('Tune Yours.');
+  await expect.poll(() => reads).toBeGreaterThanOrEqual(3);
+  await page.waitForTimeout(4000);
+  const exhaustedReads = reads;
+  expect(exhaustedReads).toBeLessThanOrEqual(4);
+  await page.waitForTimeout(2500);
+  expect(reads).toBe(exhaustedReads);
+  await testInfo.attach('finite-package-retries', { body: JSON.stringify({ exhaustedReads, finalReads: reads }), contentType: 'application/json' });
+});
 });

@@ -155,6 +155,13 @@ const keyed = (sourceItems = [], canonicalItems = []) =>
     _key: sourceItems?.[index]?._key || item._key || `copy-${index}`,
   }));
 
+const getHeroTunePrice = (packages) => {
+  const max = Array.isArray(packages) ? packages.find(pkg => isTopPackageTitle(pkg?.title)) : null;
+  if (!max || !['string', 'number'].includes(typeof max.price) || toMoney(max.price) <= 0) return '';
+  const price = getPackagePricePresentation(max.title, max.price).price;
+  return toMoney(price) > 0 ? price : '';
+};
+
 const resolveHeroCopy = (value, packages = []) => {
   const copy = Object.fromEntries(
     Object.entries(HOME_COPY.hero).map(([key, fallback]) => {
@@ -174,8 +181,7 @@ const resolveHeroCopy = (value, packages = []) => {
   if (!isVerifiedRamPrice(value?.ramPrice)) return copy;
   const ramPrice = value.ramPrice;
   const amount = formatRamPrice(ramPrice.priceCents);
-  const max = Array.isArray(packages) ? packages.find(pkg => isTopPackageTitle(pkg?.title)) : null;
-  const tunePrice = max && getPackagePricePresentation(max.title, max.price).price;
+  const tunePrice = getHeroTunePrice(packages);
   return {
     ...copy,
     ramPrice,
@@ -265,6 +271,7 @@ const applyHomePageCopyOverrides = (homeData = {}) => ({
 module.exports = {
   HOME_COPY,
   OVERWATCH_CREATOR_BENCHMARK,
+  getHeroTunePrice,
   resolveHeroCopy,
   applyHomePageCopyOverrides,
   applyHomeSectionCopyOverride,
