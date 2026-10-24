@@ -961,6 +961,7 @@ test("deletion recovery keeps real retry actions at phone and desktop widths", a
   await guardBrowserContext(page.context(), [baseURL, new URL(controlUrl(baseURL)).origin]);
   let blockDelete = false;
   let hideReceipt = false;
+  const remainingTools = page.getByRole("region", { name: "Tool list" }).getByRole("button").filter({ hasText: /^Fixture layout tool [1-4]$/ });
   await page.route("**/api/admin/content/**", async route => {
     const call = route.request();
     const path = new URL(call.url()).pathname;
@@ -993,7 +994,7 @@ test("deletion recovery keeps real retry actions at phone and desktop widths", a
         await page.getByRole("button", { name: "Delete", exact: true }).click();
         const deleted = page.getByRole("status").filter({ hasText: "Deleted. The live site" });
         await expect(page.getByRole("alert").or(deleted).first()).toBeVisible({ timeout: 15000 });
-        if (await deleted.isVisible()) await expect(page.getByRole("region", { name: "Tool list" }).getByRole("button").filter({ hasText: "Fixture layout tool 2" })).toBeVisible();
+        if (await deleted.isVisible()) await expect(remainingTools).toHaveText(["Fixture layout tool 2", "Fixture layout tool 3", "Fixture layout tool 4"]);
         const expected = state === "never-arrived" ? "Not deleted. Retry when you are ready; your changes are kept as a local draft."
           : state === "unconfirmed" ? "Could not confirm deletion. Your changes are kept as a local draft. Retry to check whether it was deleted before trying again."
           : "Deleted. The live site picks this up within a few minutes.";
@@ -1014,13 +1015,14 @@ test("deletion recovery keeps real retry actions at phone and desktop widths", a
             if (state === "never-arrived") page.once("dialog", dialog => dialog.accept());
             await retry.click();
             await expect(deleted).toBeVisible();
-            await expect(page.getByRole("region", { name: "Tool list" }).getByRole("button").filter({ hasText: "Fixture layout tool 2" })).toBeVisible();
+            await expect(remainingTools).toHaveText(["Fixture layout tool 2", "Fixture layout tool 3", "Fixture layout tool 4"]);
             await page.screenshot({ path: testInfo.outputPath(`${state}-recovered-${width}.png`), fullPage: true, animations: "disabled" });
           }
         }
         const after = await (await request.get(controlUrl(baseURL))).json();
         row.mutations = after.requests.slice(offset).filter(call => call.path.endsWith("/roo_apply_cms_publish_command")).length;
         row.deleted = await deleted.isVisible();
+        row.remainingTools = await remainingTools.allTextContents();
         expect.soft(row.deleted).toBe(true);
         expect.soft(await drafts()).toEqual([]);
         expect.soft(row.mutations).toBe(1);
