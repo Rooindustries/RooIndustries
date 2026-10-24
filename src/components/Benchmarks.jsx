@@ -38,11 +38,30 @@ export default function Benchmarks({ initialData = null, setIsModalOpen = () => 
   };
 
   useEffect(() => {
-    getPublicContent("benchmarks")
-      .then((rows) => {
-        if (Array.isArray(rows)) setBenchmarks(rows);
-      })
-      .catch(console.error);
+    let controller;
+    const load = () => {
+      const request = new AbortController();
+      controller = request;
+      getPublicContent("benchmarks", {}, { signal: request.signal })
+        .then((rows) => {
+          if (!request.signal.aborted && Array.isArray(rows)) setBenchmarks(rows);
+        })
+        .catch((error) => {
+          if (!request.signal.aborted && error?.name !== "AbortError") console.error(error);
+        });
+    };
+    const abort = () => controller?.abort();
+    const restore = (event) => {
+      if (event.persisted && controller?.signal.aborted) load();
+    };
+    window.addEventListener("pagehide", abort);
+    window.addEventListener("pageshow", restore);
+    load();
+    return () => {
+      window.removeEventListener("pagehide", abort);
+      window.removeEventListener("pageshow", restore);
+      abort();
+    };
   }, []);
 
   return (
