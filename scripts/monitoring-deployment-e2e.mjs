@@ -111,7 +111,6 @@ async function run(scratch, artifact, hostNetwork) {
   await cp(join(root, 'next.config.mjs'), join(work, 'next.base.mjs'));
   await writeFile(join(work, 'next.config.mjs'), `import config from './next.base.mjs';
 export * from './next.base.mjs';
-config.experimental = { ...config.experimental, cpus: 1 };
 export default config;
 `);
   await symlink(join(root, 'node_modules'), join(work, 'node_modules'), 'dir');
