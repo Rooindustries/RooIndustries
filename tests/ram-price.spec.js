@@ -225,3 +225,104 @@ test('an invalid stored date cannot authorize a replacement quote', async ({ req
   expect(after.reads).toBe(0);
   expect(after.publishes).toHaveLength(0);
 });
+
+test('a failed package read never substitutes a fixed tune price and recovers from the source', async ({ page, request }, testInfo) => {
+  const editing = await state(request);
+  const max = editing.packages.find(pkg => /max|xoc/i.test(pkg.title));
+  const published = await request.post('/api/admin/content/publish', {
+    headers: { 'x-admin-key': 'fixture-only-ram-price-admin' },
+    data: { operation: 'replace', type: 'package', documentId: max._id, expectedRevision: max._rev, document: { ...max, price: '$123.45' } },
+  });
+  expect(published.status(), await published.text()).toBe(200);
+  expect((await refresh(request)).status()).toBe(200);
+  let unavailable = true;
+  let failedReads = 0;
+  await page.route('**/api/content/packages-list', route => {
+    if (!unavailable) return route.continue();
+    failedReads++;
+    return route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic package source outage' } });
+  });
+  await page.goto('/about');
+  await page.locator('footer a[href="/"]').first().click();
+  await expect(page.locator('#top h1')).toContainText('Why Pay $500 For RAM?');
+  await expect.poll(() => failedReads).toBeGreaterThan(0);
+  await page.locator('#top').screenshot({ path: testInfo.outputPath('package-source-unavailable.png') });
+  await expect(page.locator('#top h1')).not.toContainText('$99.95');
+  await expect(page.locator('#top h1')).toContainText('Tune Yours.');
+  unavailable = false;
+  await expect(page.locator('#top h1')).toContainText('Tune Yours For $123.45.');
+  await page.locator('#top').screenshot({ path: testInfo.outputPath('package-source-recovered.png') });
+  await page.goto('/packages');
+  await expect(page.locator('main')).toContainText('$123.45');
+});
+
+test('missing package data keeps HTML and Markdown honest and the hydrated hero recovers', async ({ page, request }) => {
+  const url = `${fixture}/__content`;
+  try {
+    const editing = await state(request);
+    const max = editing.packages.find(pkg => /max|xoc/i.test(pkg.title));
+    const packagePublished = await request.post('/api/admin/content/publish', {
+      headers: { 'x-admin-key': 'fixture-only-ram-price-admin' },
+      data: { operation: 'replace', type: 'package', documentId: max._id, expectedRevision: max._rev, document: { ...max, price: '$123.45' } },
+    });
+    expect(packagePublished.status(), await packagePublished.text()).toBe(200);
+    expect((await refresh(request)).status()).toBe(200);
+    const before = await state(request);
+    expect((await request.post(url, { data: { missing: ['package'] } })).status()).toBe(200);
+    const published = await request.post('/api/admin/content/publish', {
+      headers: { 'x-admin-key': 'fixture-only-ram-price-admin' },
+      data: { operation: 'replace', type: 'hero', documentId: before.hero._id, expectedRevision: before.hero._rev, document: before.hero },
+    });
+    expect(published.status(), await published.text()).toBe(200);
+    const html = await (await request.get('/')).text();
+    expect(html).toContain('Why Pay $500 For RAM?');
+    expect(html).toContain('Tune Yours.');
+    expect(html).not.toContain('Tune Yours For $99.95.');
+    const markdown = await (await request.get('/markdown?path=/')).text();
+    expect(markdown).toContain('$500');
+    expect(markdown).not.toContain('$99');
+    let unavailable = true;
+    let failedReads = 0;
+    await page.route('**/api/content/packages-list', route => {
+      if (!unavailable) return route.continue();
+      failedReads++;
+      return route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic package source outage' } });
+    });
+    await page.goto('/');
+    await expect(page.locator('#top h1')).toContainText('Why Pay $500 For RAM?');
+    await expect(page.locator('#top h1')).toContainText('Tune Yours.');
+    await expect.poll(() => failedReads).toBeGreaterThan(0);
+    expect((await request.post(url, { data: { missing: [] } })).status()).toBe(200);
+    const current = await state(request);
+    const restored = await request.post('/api/admin/content/publish', {
+      headers: { 'x-admin-key': 'fixture-only-ram-price-admin' },
+      data: { operation: 'replace', type: 'hero', documentId: current.hero._id, expectedRevision: current.hero._rev, document: current.hero },
+    });
+    expect(restored.status(), await restored.text()).toBe(200);
+    unavailable = false;
+    await expect(page.locator('#top h1')).toContainText('Tune Yours For $123.45.');
+  } finally {
+    expect((await request.post(url, { data: { missing: [] } })).status()).toBe(200);
+  }
+});
+
+test('leaving the hero cancels pending package read retries', async ({ page, request }, testInfo) => {
+  expect((await refresh(request)).status()).toBe(200);
+  let reads = 0;
+  await page.route('**/api/content/packages-list', route => {
+    reads++;
+    return route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic package source outage' } });
+  });
+  await page.goto('/about');
+  await page.evaluate(() => { window.__ramPriceDocument = true; });
+  await page.locator('footer a[href="/"]').first().click();
+  await expect(page.locator('#top h1')).toContainText('Why Pay $500 For RAM?');
+  await expect.poll(() => reads).toBeGreaterThan(0);
+  await page.locator('footer a[href="/about"]').first().click();
+  await expect(page).toHaveURL(/\/about$/);
+  expect(await page.evaluate(() => window.__ramPriceDocument)).toBe(true);
+  const readsOnExit = reads;
+  await page.waitForTimeout(3500);
+  expect(reads).toBe(readsOnExit);
+  await testInfo.attach('cancelled-package-retries', { body: JSON.stringify({ readsOnExit, readsAfterExit: reads }), contentType: 'application/json' });
+});

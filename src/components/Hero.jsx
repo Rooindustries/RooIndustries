@@ -95,7 +95,8 @@ export default function Hero({ initialData = null, initialPackages = null, headi
   const Heading = headingTag;
   const [fetchedHero, setFetchedHero] = useState(null);
   const [fetchedPackages, setFetchedPackages] = useState(null);
-  const heroData = resolveHeroCopy(initialData || fetchedHero, initialPackages || fetchedPackages);
+  const hasInitialPackages = Array.isArray(initialPackages) && initialPackages.length > 0;
+  const heroData = resolveHeroCopy(initialData || fetchedHero, hasInitialPackages ? initialPackages : fetchedPackages);
   const handleHomeSectionLink = useHomeSectionLinkHandler();
 
   const handleHeroCta = (event, hash, cta) => {
@@ -104,20 +105,36 @@ export default function Hero({ initialData = null, initialPackages = null, headi
   };
 
   useEffect(() => {
-    if (initialData) return undefined;
+    if (initialData && hasInitialPackages) return undefined;
     let cancelled = false;
-    Promise.all([getPublicContent("hero"), getPublicContent("packages-list").catch(() => [])])
-      .then(([data, packages]) => {
-        if (!cancelled) {
-          setFetchedHero(data);
-          setFetchedPackages(packages);
-        }
-      })
-      .catch(() => {});
+    let packageRequest;
+    let packageTimeout;
+    let retryTimeout;
+    if (!initialData) {
+      getPublicContent("hero")
+        .then(data => { if (!cancelled) setFetchedHero(data); })
+        .catch(() => {});
+    }
+    const loadPackages = async (attempt = 0) => {
+      packageRequest = new AbortController();
+      packageTimeout = setTimeout(() => packageRequest.abort(), 5000);
+      try {
+        const packages = await getPublicContent("packages-list", {}, { signal: packageRequest.signal });
+        if (!cancelled) setFetchedPackages(packages);
+      } catch {
+        if (!cancelled && attempt < 2) retryTimeout = setTimeout(() => loadPackages(attempt + 1), (attempt + 1) * 1000);
+      } finally {
+        clearTimeout(packageTimeout);
+      }
+    };
+    if (!hasInitialPackages) loadPackages();
     return () => {
       cancelled = true;
+      clearTimeout(packageTimeout);
+      clearTimeout(retryTimeout);
+      packageRequest?.abort();
     };
-  }, [initialData]);
+  }, [initialData, hasInitialPackages]);
 
   const {
     headingLine1,

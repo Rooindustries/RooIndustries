@@ -30,7 +30,6 @@ const env = {
   PATH: process.env.PATH,
   HOME: process.env.HOME,
   CI: "true",
-  CIRCLE_NODE_TOTAL: "2",
   VERCEL_ENV: "preview",
   TZ: "UTC",
   TOURNEY_DATABASE_MODE: "memory",

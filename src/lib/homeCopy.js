@@ -181,7 +181,7 @@ const resolveHeroCopy = (value, packages = []) => {
     ramPrice,
     ramPriceSourceLabel: ramPriceSourceLabel(ramPrice),
     headingLine1: `Why Pay ${amount} For RAM?`,
-    headingLine2: toMoney(tunePrice) > 0 ? `Tune Yours For ${tunePrice}.` : HOME_COPY.hero.headingLine2,
+    headingLine2: toMoney(tunePrice) > 0 ? `Tune Yours For ${tunePrice}.` : 'Tune Yours.',
     description: `A 32GB DDR5-6000 kit costs ${amount} at v-color. We'll tune the RAM you have and the rest of your PC.`,
   };
 };

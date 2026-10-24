@@ -11,6 +11,12 @@ hero from main. Its $400 headline has no retailer label or checked date. A faile
 first read creates no quote and does not rewrite that approved copy. Once a
 verified quote exists, failed reads keep that amount and its actual checked date.
 
+The numeric tune heading also needs a valid package price. While that price is
+unavailable, a verified RAM quote stays visible and the heading says "Tune Yours."
+The browser retries the package read up to three times, with a five-second timeout
+per request and one- then two-second delays. A recovered read restores the actual
+package price; leaving the hero cancels pending requests and retries.
+
 ## Source
 
 The source is v-color's official Shopify Storefront API, version 2026-07, in
