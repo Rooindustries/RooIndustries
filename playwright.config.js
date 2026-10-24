@@ -61,9 +61,9 @@ module.exports = defineConfig({
     baseURL,
     headless: false,
     javaScriptEnabled: false,
-    trace: "retain-on-failure",
+    trace: "on-first-retry",
     screenshot: "only-on-failure",
-    video: "retain-on-failure",
+    video: "on-first-retry",
     timezoneId: process.env.PW_TIMEZONE || "UTC",
   },
 });
