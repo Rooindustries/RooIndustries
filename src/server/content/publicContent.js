@@ -4,14 +4,16 @@ import {
   PUBLIC_CONTENT_RESOURCES,
 } from "../../lib/publicContentQueries";
 import { createSupabaseDocumentClient } from "../supabase/documentClient.js";
+import { createSupabaseAdminClient } from "../supabase/adminClient.js";
+import { assertPublicContentShape } from "./publicContentShape.js";
 import { clearSupabaseAssetManifestCache, enrichSupabaseContentAssets } from "../supabase/assets.js";
 import policyContent from "../../lib/policyContent";
 import { UPGRADE_LINK_SLUG_PATTERN } from "../../lib/globalCmsContract.js";
+import { logSafeError } from "../safeErrorLog.js";
 
 const { applyPublicPolicyOverrides } = policyContent;
 
 const SUPABASE_CONTENT_CACHE_TTL_MS = 60 * 1000;
-const SUPABASE_CONTENT_STALE_TTL_MS = 10 * 60 * 1000;
 const SUPABASE_CONTENT_RETRY_TTL_MS = 5 * 1000;
 const supabaseContentCache = new Map();
 
@@ -40,11 +42,12 @@ const DOCUMENT_TYPES_BY_RESOURCE = Object.freeze({
 });
 const ASSET_DEREFERENCE_RESOURCES = new Set(["tools"]);
 
-const createPublicContentClient = ({ resource }) => {
+const createPublicContentClient = ({ resource, client }) => {
   const assetDocumentTypes = ASSET_DEREFERENCE_RESOURCES.has(resource)
     ? ["sanity.imageAsset", "sanity.fileAsset"]
     : [];
   return createSupabaseDocumentClient({
+    shadowClient: client,
     documentTypes: [
       ...(DOCUMENT_TYPES_BY_RESOURCE[resource] || []),
       ...assetDocumentTypes,
@@ -103,12 +106,24 @@ const validateAllowedParameters = (resource, searchParams) => {
   }
 };
 
-const loadSupabasePublicContent = async ({ resource, query, params, fresh = false }) => {
+export const loadSupabasePublicContent = async ({ resource, query, params, fresh = false, allowFallback = true }) => {
+  const fallbackAllowed = allowFallback && process.env.NEXT_PHASE !== "phase-production-build";
+  const load = async () => {
+    const client = createSupabaseAdminClient({
+      signal: AbortSignal.timeout(5000),
+      fetchImpl: (input, init) => fetch(input, { ...init, cache: "no-store" }),
+    });
+    const data = await createPublicContentClient({ resource, client }).fetch(query, params);
+    if (resource === "tools" && Array.isArray(data)) {
+      for (const tool of data) {
+        for (const field of ["downloadUrl", "officialSite"]) if (typeof tool?.[field] === "string") tool[field] = tool[field].trim();
+      }
+    }
+    assertPublicContentShape(resource, data, DOCUMENT_TYPES_BY_RESOURCE[resource][0]);
+    return enrichSupabaseContentAssets({ data, client });
+  };
   if (Object.keys(params).length > 0) {
-    const data = await createPublicContentClient({
-      resource,
-    }).fetch(query, params);
-    return enrichSupabaseContentAssets({ data });
+    return load();
   }
 
   const key = `${resource}:${JSON.stringify(params)}`;
@@ -117,30 +132,47 @@ const loadSupabasePublicContent = async ({ resource, query, params, fresh = fals
   if (!fresh && cached?.hasData && cached.expiresAt > now) return cached.data;
   if (!fresh && cached?.pending) return cached.pending;
 
-  const pending = createPublicContentClient({ resource })
-    .fetch(query, params)
-    .then((data) => enrichSupabaseContentAssets({ data }))
+  const pending = load()
     .then((data) => {
       if (supabaseContentCache.get(key)?.pending !== pending) return data;
       supabaseContentCache.set(key, {
         data,
         hasData: true,
         expiresAt: Date.now() + SUPABASE_CONTENT_CACHE_TTL_MS,
-        staleUntil: Date.now() + SUPABASE_CONTENT_STALE_TTL_MS,
       });
       return data;
     })
-    .catch((error) => {
-      if (supabaseContentCache.get(key)?.pending !== pending) throw error;
-      if (cached?.hasData && cached.staleUntil > Date.now()) {
-        supabaseContentCache.set(key, {
-          ...cached,
-          expiresAt: Date.now() + SUPABASE_CONTENT_RETRY_TTL_MS,
-          pending: null,
-        });
-        return cached.data;
+    .catch(async (error) => {
+      const current = supabaseContentCache.get(key);
+      const retained = current?.hasData ? current : cached;
+      if (fallbackAllowed && retained?.hasData) {
+        if (supabaseContentCache.get(key)?.pending === pending) {
+          supabaseContentCache.set(key, {
+            ...retained,
+            expiresAt: Date.now() + SUPABASE_CONTENT_RETRY_TTL_MS,
+            pending: null,
+          });
+        }
+        return retained.data;
       }
-      supabaseContentCache.delete(key);
+      if (fallbackAllowed && process.env.NODE_ENV === "production") {
+        try {
+          const { default: snapshot } = await import("../../generated/public-content.json", { with: { type: "json" } });
+          if (snapshot.version !== 1 || !snapshot.resources || !Object.hasOwn(snapshot.resources, resource)) throw new Error("The build content snapshot is invalid.");
+          const data = snapshot.resources[resource];
+          assertPublicContentShape(resource, data, DOCUMENT_TYPES_BY_RESOURCE[resource][0]);
+          const current = supabaseContentCache.get(key);
+          if (current?.hasData) return current.data;
+          if (supabaseContentCache.get(key)?.pending === pending) {
+            supabaseContentCache.set(key, { data, hasData: true, expiresAt: Date.now() + SUPABASE_CONTENT_RETRY_TTL_MS });
+          }
+          logSafeError("Public content read failed; using build content", error);
+          return data;
+        } catch (snapshotError) {
+          logSafeError("Public content build fallback failed", snapshotError);
+        }
+      }
+      if (supabaseContentCache.get(key)?.pending === pending) supabaseContentCache.delete(key);
       throw error;
     });
 
@@ -148,8 +180,13 @@ const loadSupabasePublicContent = async ({ resource, query, params, fresh = fals
   return pending;
 };
 
-export const clearSupabasePublicContentCache = () => {
-  supabaseContentCache.clear();
+export const clearSupabasePublicContentCache = ({ preserveStale = false } = {}) => {
+  if (preserveStale) {
+    for (const [key, cached] of supabaseContentCache) {
+      if (cached.hasData) supabaseContentCache.set(key, { ...cached, expiresAt: 0, pending: null });
+      else supabaseContentCache.delete(key);
+    }
+  } else supabaseContentCache.clear();
   clearSupabaseAssetManifestCache();
 };
 

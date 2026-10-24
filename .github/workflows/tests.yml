@@ -282,6 +282,33 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  cms-resilience:
+    name: Playwright CMS resilience
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ROO_TEST_HOST: 127.0.0.1
+      PW_PORT: "3271"
+      PW_SERVER_ID: cms-resilience
+      TOOLING_CONTENT_ARTIFACT: test-results/cms-resilience-requests.json
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:cms-resilience
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cms-resilience
+          path: test-results/
+          retention-days: 7
+
   revalidation:
     name: Playwright revalidation
     runs-on: ubuntu-24.04
