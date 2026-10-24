@@ -43,7 +43,12 @@ const env = {
   SUPABASE_SECRET_KEY: "fixture-only-tooling-server-secret-key",
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "fixture-only-tooling-browser-publishable-key",
   ALLOW_LIVE_PAYMENTS: "0",
-  SALES_PREVIEW_READ_ONLY: apiRoutes ? "0" : "1",
+  ...(process.env.TOOLING_RAM_PRICE === "1" ? {
+    HERO_RAM_PRICE_SOURCE_URL: `${contentURL}/storefront`,
+    CRON_SECRET: "fixture-only-ram-price-cron",
+    CMS_WRITES_PAUSED: "0",
+  } : {}),
+  SALES_PREVIEW_READ_ONLY: apiRoutes || process.env.TOOLING_RAM_PRICE === "1" ? "0" : "1",
   ...(apiRoutes ? {
     ...apiRouteSecrets,
     RESEND_API_KEY: "fixture-only-referral-email-key",

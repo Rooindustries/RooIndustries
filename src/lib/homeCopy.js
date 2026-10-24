@@ -1,3 +1,6 @@
+const { isVerifiedRamPrice, formatRamPrice, ramPriceSourceLabel } = require('./ramPrice');
+const { isTopPackageTitle, getPackagePricePresentation, toMoney } = require('./packagePricing');
+
 const HOME_COPY = {
   hero: {
     tagline: "",
@@ -152,8 +155,8 @@ const keyed = (sourceItems = [], canonicalItems = []) =>
     _key: sourceItems?.[index]?._key || item._key || `copy-${index}`,
   }));
 
-const resolveHeroCopy = (value) =>
-  Object.fromEntries(
+const resolveHeroCopy = (value, packages = []) => {
+  const copy = Object.fromEntries(
     Object.entries(HOME_COPY.hero).map(([key, fallback]) => {
       const candidate = value?.[key];
       if (Array.isArray(fallback)) {
@@ -168,6 +171,20 @@ const resolveHeroCopy = (value) =>
       ];
     })
   );
+  if (!isVerifiedRamPrice(value?.ramPrice)) return copy;
+  const ramPrice = value.ramPrice;
+  const amount = formatRamPrice(ramPrice.priceCents);
+  const max = Array.isArray(packages) ? packages.find(pkg => isTopPackageTitle(pkg?.title)) : null;
+  const tunePrice = max && getPackagePricePresentation(max.title, max.price).price;
+  return {
+    ...copy,
+    ramPrice,
+    ramPriceSourceLabel: ramPriceSourceLabel(ramPrice),
+    headingLine1: `Why Pay ${amount} For RAM?`,
+    headingLine2: toMoney(tunePrice) > 0 ? `Tune Yours For ${tunePrice}.` : HOME_COPY.hero.headingLine2,
+    description: `A 32GB DDR5-6000 kit costs ${amount} at v-color. We'll tune the RAM you have and the rest of your PC.`,
+  };
+};
 
 const applyHomeSectionCopyOverride = (key, value) => {
   if (key === "reviews") {

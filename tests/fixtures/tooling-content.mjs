@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { uiRepairsFixture } from './ui-repairs-server.mjs';
 import { localOrigin } from '../../scripts/lib/test-target-safety.mjs';
 import { referralEmail } from './api-routes.mjs';
+import { createRamPriceFixture } from './ram-price.mjs';
 
 export async function createToolingContentFixture({ origin, artifact, apiRoutes = false }) {
   const target = new URL(localOrigin(origin));
@@ -125,6 +126,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
   );
   const images = [...layoutImages, ...benchmarkImages];
   const initialDocuments = structuredClone(documents);
+  const ramPrice = process.env.TOOLING_RAM_PRICE === '1' ? createRamPriceFixture({ documents }) : null;
   const dispatches = new Map();
   const rateLimits = new Map();
   let delivery = 'completed';
@@ -164,6 +166,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       let raw = '';
       for await (const chunk of req) { raw += chunk; if (Buffer.byteLength(raw) > 131072) throw new Error('Fixture body is too large.'); }
       const body = raw ? JSON.parse(raw) : {};
+      if (ramPrice && await ramPrice({ url, body, res })) return;
       const call = { method: req.method, path: url.pathname, body, status: 503, rows: 0, receivedAt: Date.now(), delayMs: 0 };
       res.once('finish', () => { call.respondedAt = Date.now(); persist(); });
       evidence.requests.push(call);

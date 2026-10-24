@@ -1,6 +1,7 @@
 import { UPGRADE_LINK_SLUG_PATTERN } from "../globalCmsContract.js";
 import { isValidEmail } from "../emailValidation.js";
 import { isUnusedField, markFieldUsage, fieldUsageContext } from "./fieldUsage.js";
+import ramPrice from "../ramPrice.js";
 
 const definitions = [
   {
@@ -1058,6 +1059,21 @@ const definitions = [
     "group": "site",
     "singleton": true,
     "fields": [
+      {
+        "name": "ramPrice",
+        "title": "Verified RAM Price",
+        "type": "object",
+        "description": "Refreshed automatically from v-color. Keep the source and checked date with the price.",
+        "fields": [
+          { "name": "priceCents", "title": "Price in US cents", "type": "number", "required": true },
+          { "name": "currency", "title": "Currency", "type": "string", "required": true },
+          { "name": "checkedAt", "title": "Checked at", "type": "string", "required": true },
+          { "name": "source", "title": "Source", "type": "string", "required": true },
+          { "name": "sourceUrl", "title": "Source link", "type": "url", "required": true },
+          { "name": "sku", "title": "SKU", "type": "string", "required": true },
+          { "name": "variantId", "title": "Variant", "type": "string", "required": true }
+        ]
+      },
       {
         "name": "tagline",
         "title": "Tagline",
@@ -2662,6 +2678,7 @@ export const validateContentDocument = (typeName, document, { current } = {}) =>
   };
   object(schema.fields, document, current, "$", true);
   if (document._type !== undefined && document._type !== typeName) fail("$._type", "Document type does not match.");
+  if (typeName === "hero" && document.ramPrice !== undefined && !ramPrice.isVerifiedRamPrice(document.ramPrice)) fail("$.ramPrice", "A verified USD RAM price, source and checked date are required.");
   if (typeName === "package") {
     const price = typeof document.price === "string" ? document.price.trim().replace(/,/g, "").replace(/[$€£₹]/g, "").trim() : "";
     if (!/^[+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(price) || !Number.isFinite(Number(price)) || Number(Number(price).toFixed(2)) <= 0) fail("$.price", "Price must parse to a positive amount.");

@@ -91,10 +91,11 @@ function CtaNoteBalanced({ icon, text }) {
   );
 }
 
-export default function Hero({ initialData = null, headingTag = "h1" }) {
+export default function Hero({ initialData = null, initialPackages = null, headingTag = "h1" }) {
   const Heading = headingTag;
   const [fetchedHero, setFetchedHero] = useState(null);
-  const heroData = resolveHeroCopy(initialData || fetchedHero);
+  const [fetchedPackages, setFetchedPackages] = useState(null);
+  const heroData = resolveHeroCopy(initialData || fetchedHero, initialPackages || fetchedPackages);
   const handleHomeSectionLink = useHomeSectionLinkHandler();
 
   const handleHeroCta = (event, hash, cta) => {
@@ -105,9 +106,12 @@ export default function Hero({ initialData = null, headingTag = "h1" }) {
   useEffect(() => {
     if (initialData) return undefined;
     let cancelled = false;
-    getPublicContent("hero")
-      .then((data) => {
-        if (!cancelled) setFetchedHero(data);
+    Promise.all([getPublicContent("hero"), getPublicContent("packages-list").catch(() => [])])
+      .then(([data, packages]) => {
+        if (!cancelled) {
+          setFetchedHero(data);
+          setFetchedPackages(packages);
+        }
       })
       .catch(() => {});
     return () => {
@@ -123,6 +127,8 @@ export default function Hero({ initialData = null, headingTag = "h1" }) {
     ctaPrimaryText: primaryCtaText,
     ctaSecondaryText: secondaryCtaText,
     ctaNote,
+    ramPrice,
+    ramPriceSourceLabel,
   } = heroData;
 
   const headingLine2BaseClass = "text-gradient-display";
@@ -272,6 +278,15 @@ export default function Hero({ initialData = null, headingTag = "h1" }) {
             </p>
           )}
         </div>
+
+        {ramPrice && (
+          <p className="mt-2 text-sm text-ink-secondary">
+            <a data-ram-price-source href={ramPrice.sourceUrl} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">
+              {ramPriceSourceLabel}
+            </a>
+            {' · US price before tax and shipping.'}
+          </p>
+        )}
 
         <div className="min-h-[24px] sm:min-h-[36px]">
           {subtext && (
