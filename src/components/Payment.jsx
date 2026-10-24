@@ -463,8 +463,9 @@ export default function Payment({ hideFooter = false }) {
     };
     const query = new URLSearchParams(location.search);
     if (!nextReferral && dismissedCode) query.delete("ref");
-    const search = query.size ? `?${query}` : "";
-    pendingCodeLocationRef.current = search !== location.search ? { key: location.key } : null;
+    const serializedQuery = query.toString();
+    const search = serializedQuery ? `?${serializedQuery}` : "";
+    pendingCodeLocationRef.current = { key: location.key };
     writeStoredCheckout(nextCheckout);
     appliedCodeSelectionRef.current = codeSelectionKey(nextCheckout.referralCode, nextCheckout.couponCode, search);
     try {
@@ -569,7 +570,7 @@ export default function Payment({ hideFooter = false }) {
   useBookingDialogPending(!hydrated || !providersSettled || (Boolean(packageTitle) && !quoteSettled));
   const [showInternalPayments, setShowInternalPayments] = useState(false);
   const [paymentSession, setPaymentSession] = useState(null);
-  const unsavedPaymentSessionRef = useRef(null);
+  const unsavedPaymentSessionsRef = useRef(new Map());
   const [paymentStatusBusy, setPaymentStatusBusy] = useState(false);
   const [cancellingPayment, setCancellingPayment] = useState(false);
   const sessionStartRef = useRef(null);
@@ -649,6 +650,13 @@ export default function Payment({ hideFooter = false }) {
   );
 
   const paymentMountedRef = useRef(true);
+  const readCurrentPaymentSession = () => {
+    const stored = readStoredPaymentSession();
+    if (stored && paymentSessionMatchesCheckout(stored.fingerprint, checkoutFingerprint)) return stored;
+    return [...unsavedPaymentSessionsRef.current.values()].find(
+      session => paymentSessionMatchesCheckout(session.fingerprint, checkoutFingerprint)
+    ) || null;
+  };
   const paymentViewRef = useRef(null);
   if (paymentViewRef.current?.key !== location.key ||
       paymentViewRef.current?.fingerprint !== checkoutFingerprint) {
@@ -670,12 +678,12 @@ export default function Payment({ hideFooter = false }) {
   }, [paymentView, paymentSession?.paymentAccessToken]);
 
   const createPaymentOperation = (expectedToken) => {
-    const activeSession = readStoredPaymentSession() || paymentView.session;
+    const activeSession = readCurrentPaymentSession();
     const operation = {
       token: String(expectedToken ?? activeSession?.paymentAccessToken ?? "").trim(),
       current: () => {
         if (!paymentMountedRef.current || paymentViewRef.current !== paymentView) return false;
-        const session = readStoredPaymentSession() || unsavedPaymentSessionRef.current;
+        const session = readCurrentPaymentSession();
         return String(session?.paymentAccessToken || "").trim() === operation.token &&
           (!operation.token || paymentSessionMatchesCheckout(session?.fingerprint, paymentView.fingerprint));
       },
@@ -868,20 +876,30 @@ export default function Payment({ hideFooter = false }) {
         }
       };
 
-      if (referralCode) {
+      const restoreCouponFirst = !bookingData.referralCode && couponCode &&
+        couponCode.toLowerCase() !== referralCode.toLowerCase();
+      if (restoreCouponFirst) {
+        const result = await resolveCheckoutCode(couponCode, packageTitle);
+        if (!active || !codeApplicationAllowedRef.current) return;
+        applyResolved(result, "coupon");
+      }
+
+      if (referralCode && !(restoreCouponFirst && (nextReferral || nextCoupon?.canCombineWithReferral === false))) {
         const result = await resolveCheckoutCode(referralCode, packageTitle);
         if (!active || !codeApplicationAllowedRef.current) return;
         applyResolved(result, "referral");
+      } else if (restoreCouponFirst) {
+        nextReferralInput = nextReferral?.code || "";
       }
 
       if (
-        couponCode &&
+        !restoreCouponFirst && couponCode &&
         couponCode.toLowerCase() !== referralCode.toLowerCase()
       ) {
         const result = await resolveCheckoutCode(couponCode, packageTitle);
         if (!active || !codeApplicationAllowedRef.current) return;
         applyResolved(result, "coupon");
-      } else if (couponCode && nextReferral) {
+      } else if (!restoreCouponFirst && couponCode && nextReferral) {
         nextCouponInput = "";
       }
 
@@ -1016,7 +1034,7 @@ export default function Payment({ hideFooter = false }) {
 
   useEffect(() => {
     if (!hydrated || !packageTitle) return;
-    const stored = readStoredPaymentSession();
+    const stored = readCurrentPaymentSession();
     if (
       stored?.fingerprint &&
       paymentSessionMatchesCheckout(stored.fingerprint, checkoutFingerprint)
@@ -1036,7 +1054,7 @@ export default function Payment({ hideFooter = false }) {
       return;
     }
 
-    if (stored) {
+    if (readStoredPaymentSession()) {
       clearStoredPaymentSession();
     }
     setPaymentSession(null);
@@ -1044,13 +1062,14 @@ export default function Payment({ hideFooter = false }) {
   }, [checkoutFingerprint, couponInput, hydrated, packageTitle, referralInput]);
 
   const persistPaymentSession = (nextSession) => {
-    unsavedPaymentSessionRef.current = writeStoredPaymentSession(nextSession) ? null : nextSession;
+    if (writeStoredPaymentSession(nextSession)) unsavedPaymentSessionsRef.current.delete(nextSession.paymentAccessToken);
+    else unsavedPaymentSessionsRef.current.set(nextSession.paymentAccessToken, nextSession);
     paymentView.session = nextSession;
     setPaymentSession(nextSession);
   };
 
   const getActivePaymentSession = (provider) => {
-    const stored = readStoredPaymentSession();
+    const stored = readCurrentPaymentSession();
     if (
       stored?.provider === provider &&
       paymentSessionMatchesCheckout(stored?.fingerprint, checkoutFingerprint) &&
@@ -1093,13 +1112,13 @@ export default function Payment({ hideFooter = false }) {
 
   const clearPaymentSession = (terminalStatus = "", expectedToken = "") => {
     const storedSession = readStoredPaymentSession();
-    const activeSession = storedSession || unsavedPaymentSessionRef.current;
+    const activeSession = readCurrentPaymentSession();
     if (expectedToken && activeSession?.paymentAccessToken !== expectedToken) return true;
     sessionStartRef.current = null;
     setPaymentSession(null);
     paymentView.session = null;
-    unsavedPaymentSessionRef.current = null;
-    clearStoredPaymentSession();
+    if (activeSession) unsavedPaymentSessionsRef.current.delete(activeSession.paymentAccessToken);
+    if (storedSession?.paymentAccessToken === activeSession?.paymentAccessToken) clearStoredPaymentSession();
     if (activeSession?.provider !== "dodo" || isUpgrade ||
         !["failed", "abandoned", "refunded"].includes(terminalStatus) ||
         !paymentSessionOwnsCurrentHold(activeSession)) return false;
@@ -1590,14 +1609,17 @@ export default function Payment({ hideFooter = false }) {
   useEffect(() => {
     const query = new URLSearchParams(location.search);
     const session = readStoredPaymentSession();
-    if (!hydrated || preApplyingCodes || session?.provider !== "dodo" || !session.paymentAccessToken ||
-        (!query.has("dodo_return") && !query.has("dodo_cancel")) ||
-        dodoReturnHandled.current === session.paymentAccessToken) return;
-    dodoReturnHandled.current = session.paymentAccessToken;
+    if (!hydrated || preApplyingCodes || pendingCodeLocationRef.current || session?.provider !== "dodo" || !session.paymentAccessToken ||
+        paymentSession?.paymentAccessToken !== session.paymentAccessToken ||
+        !paymentSessionMatchesCheckout(session.fingerprint, checkoutFingerprint) ||
+        (!query.has("dodo_return") && !query.has("dodo_cancel"))) return;
+    const returnKey = JSON.stringify([session.paymentAccessToken, paymentView.key, paymentView.fingerprint, query.has("dodo_cancel")]);
+    if (dodoReturnHandled.current === returnKey) return;
+    dodoReturnHandled.current = returnKey;
     const action = query.has("dodo_cancel") ? handleChangePaymentMethod()
       : finalizeSessionCheckout({ paymentAccessToken: session.paymentAccessToken, providerData: {} });
     Promise.resolve(action).catch((error) => showBanner("error", error.message || "Payment confirmation is pending. Check again shortly."));
-  }, [hydrated, location.search, paymentSession, preApplyingCodes]);
+  }, [hydrated, location.search, paymentSession, paymentView, preApplyingCodes]);
 
   async function validateReferral(code) {
     if (creatingFree || validating || validatingCoupon) return;
@@ -1607,7 +1629,7 @@ export default function Payment({ hideFooter = false }) {
       setReferral(null);
       setReferralError("");
       writeStoredReferral("");
-      persistCheckoutCodes(null, coupon, referral?.code || "");
+      persistCheckoutCodes(null, coupon, referral?.code || undefined);
       return;
     }
     try {
@@ -1619,7 +1641,7 @@ export default function Payment({ hideFooter = false }) {
         if (!result.unavailable && (!referral || referral.code.toLowerCase() === normalizedCode.toLowerCase())) {
           setReferral(null);
           writeStoredReferral("");
-          persistCheckoutCodes(null, coupon, normalizedCode);
+          persistCheckoutCodes(null, coupon, referral?.code ? normalizedCode : undefined);
         }
         setReferralError(result.unavailable ? result.error : "Invalid or inactive referral code.");
         return;
@@ -1689,7 +1711,7 @@ export default function Payment({ hideFooter = false }) {
       if (!codeApplicationAllowedRef.current || !operation.current()) return;
       if (!result.ok) {
         setCouponError(result.error || "Invalid coupon code.");
-        if (!result.unavailable) {
+        if (!result.unavailable && (!coupon || coupon.code.toLowerCase() === normalizedCode.toLowerCase())) {
           setCoupon(null);
           persistCheckoutCodes(referral, null);
         }
@@ -1721,7 +1743,6 @@ export default function Payment({ hideFooter = false }) {
         return;
       }
       if (safeCoupon.canCombineWithReferral === false && referral) {
-        setCoupon(null);
         setCouponError(
           "This coupon can't be used together with a referral discount. Remove the referral or use a different coupon."
         );

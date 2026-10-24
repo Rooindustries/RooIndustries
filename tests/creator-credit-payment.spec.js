@@ -87,6 +87,9 @@ for (const [index, scenario] of [
   { name: "manual replacement in coupon field", expected: "fixturesecond", returnFirst: true },
   { name: "invalid manual replacement", expected: "fixturecreator", returnFirst: false },
   { name: "validation unavailable after applying", expected: "fixturecreator", returnFirst: true },
+  { name: "double blank after removal", expected: "", returnFirst: false },
+  { name: "invalid replacement after removal", expected: "", returnFirst: false },
+  { name: "invalid selected creator on return", expected: "fixturecreator", returnFirst: true },
 ].entries()) {
   test(`${scenario.name}: one paid booking credits only the chosen creator`, async ({ page, context, flow, native }, testInfo) => {
     test.setTimeout(180000);
@@ -165,6 +168,17 @@ for (const [index, scenario] of [
       await page.goto("/payment?ref=fixturesecond");
       await expect(page.locator("#payment-referral-code-error")).toBeVisible();
     }
+    if (["double blank after removal", "invalid replacement after removal"].includes(scenario.name)) {
+      const field = page.locator("#payment-referral-code");
+      const apply = field.locator("..").getByRole("button", { name: "Apply", exact: true });
+      await field.fill("");
+      await apply.click();
+      await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("checkout_booking_state"))?.checkoutCodes?.dismissedReferralCode)).toBe("fixturecreator");
+      if (scenario.name === "invalid replacement after removal") await field.fill("fixturecreatr");
+      await apply.click();
+      if (scenario.name === "invalid replacement after removal") await expect(page.locator("#payment-referral-code-error")).toBeVisible();
+      await page.goto("/payment?ref=fixturecreator");
+    }
     await expect(page.locator("#payment-referral-code")).toBeEnabled();
     await expect(page.locator("#payment-referral-code")).toHaveValue(scenario.expected);
     await page.getByRole("button", { name: "Pay your way", exact: true }).click();
@@ -177,6 +191,11 @@ for (const [index, scenario] of [
       await guide(page, "fixturesecond");
     }
     const paymentId = await native.pay(started.checkoutSessions.at(-1));
+    if (scenario.name === "invalid selected creator on return") {
+      await context.route("**/api/ref/validateReferral?code=fixturecreator", route => route.fulfill({
+        json: { ok: false, reason: "not_found", error: "Not found" },
+      }));
+    }
     const deliver = eventId => native.webhook({ paymentId, type: "payment.succeeded", eventId });
     if (scenario.name === "guide first") {
       const unconfirmed = await native.snapshot();
@@ -198,7 +217,7 @@ for (const [index, scenario] of [
     const after = await native.state();
     const selected = creators[scenario.expected];
     const booking = after.bookings.find(item => item.dodoPaymentId === paymentId);
-    expect(booking).toMatchObject({ status: "captured", referralCode: scenario.expected,
+    expect(booking).toMatchObject({ status: "captured", referralCode: scenario.expected, commissionCalculationVersion: 2,
       commissionAmount: selected?.commission || 0, netAmount: selected ? 52.2 : 54.95, paymentProvider: "dodo" });
     expect(booking.referral?._ref || "").toBe(selected?.id || "");
     expect(byId(after.bookings.filter(item => item.dodoPaymentId !== paymentId))).toEqual(byId(before.bookings));
