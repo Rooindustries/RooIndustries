@@ -96,6 +96,7 @@ jobs:
           BASE_URL: http://127.0.0.1:3211
           TOOLING_NETWORK_GUARD: "1"
       - run: npm run lint
+      - run: npm run test:repository-files
       - run: npm run test:lint-rules
       - run: npm run test:playwright-groups
       - run: npm run test:tested-tree
