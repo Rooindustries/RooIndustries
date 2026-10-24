@@ -22,7 +22,7 @@ const summaryWarnings = [];
 const originalWarn = console.warn;
 console.warn = (...values) => { summaryWarnings.push(values); originalWarn(...values); };
 restores.push(() => { console.warn = originalWarn; });
-for(const key of Object.keys(process.env))if(/^(SANITY|SUPABASE|PAYPAL|RAZORPAY|DODO|REACT_APP_|NEXT_PUBLIC_|ALLOW_LIVE_|RESEND|BOOKING_EMAIL|FROM_EMAIL|OWNER_EMAIL|DATA_|COMMERCE_|VERCEL_ENV|REF_SESSION|CRON_|RATE_LIMIT_|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|http_proxy|https_proxy|all_proxy|NODE_USE_ENV_PROXY)/.test(key))delete process.env[key];
+for(const key of Object.keys(process.env))if(/SENTRY.*DSN/i.test(key)||/^(SANITY|SUPABASE|PAYPAL|RAZORPAY|DODO|REACT_APP_|NEXT_PUBLIC_|ALLOW_LIVE_|RESEND|BOOKING_EMAIL|FROM_EMAIL|OWNER_EMAIL|DATA_|COMMERCE_|VERCEL_ENV|REF_SESSION|CRON_|RATE_LIMIT_|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|http_proxy|https_proxy|all_proxy|NODE_USE_ENV_PROXY)/.test(key))delete process.env[key];
 process.env.RESEND_API_KEY='re_fixture';
 if(a1Mode||process.argv.includes('--a2'))Object.assign(process.env,{FROM_EMAIL:'noreply@example.invalid',OWNER_EMAIL:'owner@example.invalid'});
 Object.assign(process.env,{NODE_ENV:'test',VERCEL_ENV:'development',DATA_PRIMARY_BACKEND:'supabase',COMMERCE_PRIMARY_BACKEND:'supabase',COMMERCE_FAILOVER_GENERATION:'0',PAYPAL_ENV:'sandbox',PAYPAL_CLIENT_ID:'fixture-client',PAYPAL_CLIENT_SECRET:'fixture-secret',PAYPAL_WEBHOOK_ID:'fixture-webhook',RAZORPAY_KEY_ID:'rzp_test_fixture',RAZORPAY_KEY_SECRET:'fixture-secret',RAZORPAY_WEBHOOK_SECRET:'fixture-webhook-secret',PAYMENT_SESSION_SECRET:'fixture-session-secret',REF_SESSION_SECRET:'fixture-ref-session-secret',CRON_SECRET:'fixture-cron',DODO_PAYMENTS_ENVIRONMENT:'test_mode',DODO_PAYMENTS_API_KEY:'fixture-dodo',DODO_PAYMENTS_WEBHOOK_KEY:`whsec_${Buffer.from('fixture-dodo-secret').toString('base64')}`,DODO_PAYMENTS_PRODUCT_ID:'pdt_fixture',DODO_PAYMENTS_RETURN_URL:'https://example.invalid/checkout'});
@@ -41,7 +41,9 @@ const only=process.argv.find(v=>v.startsWith('--scenario='))?.slice(11).split(',
 const a2Mode=process.argv.includes('--a2');
 const currencyMode=process.argv.includes('--currency-config');
 const recoveryMode = process.argv.includes('--recovery');
+const reportMode = process.argv.includes('--reconcile-report');
 const supportedScenario=name=>(!recoveryMode || name.startsWith('recovery-')) &&
+  (!reportMode || name.startsWith('reconcile-report-')) &&
   (!name.startsWith('a1-')||a1Mode)&&
   (!/^(a2-|fix-c-legacy-)/.test(name)||a2Mode)&&
   (!name.startsWith('currency-configured-')||currencyMode)&&
@@ -53,6 +55,7 @@ const evidence={checkedAt:new Date().toISOString(),productionRequests:0,scenario
 let fixture,server,origin,commerce,documents,flow,access,sql,providers,a1Ui;
 evidence.sourceEdition='current source';
 let razorpayRefunds=[];
+let dodoList=[];
 let dodoPayment,dodoRefund,paypalOrder,paypalCapture,razorpayPayment,verificationStatus,verificationDisconnect,providerHook;
 let providerRequests=[],blockedNetwork=0,authUnlinks=0,scenarioNumber=0,authUser,emailFailure=false;
 const recordId='paymentRecord.fixture',bookingId='booking.fixture';
@@ -89,17 +92,18 @@ const reset=async()=>{
   paypalOrder={id:'order-fixture',status:'COMPLETED',intent:'CAPTURE',purchase_units:[{amount:{value:'9.99',currency_code:'USD'},payments:{captures:[{id:'capture-fixture',status:'COMPLETED',amount:{value:'9.99',currency_code:'USD'}}]}}]};
   paypalCapture={id:'capture-fixture',status:'REFUNDED',amount:{value:'9.99',currency_code:'USD'},supplementary_data:{related_ids:{order_id:'order-fixture'}}};
   razorpayPayment={id:'payment-fixture',order_id:'order-fixture',status:'captured',captured:true,amount:999,currency:'USD',amount_refunded:0,refund_status:null};
-  dodoPayment={billing:{country:'US',city:'Fixture',state:'Fixture',street:'Synthetic address',zipcode:'00000'},brand_id:'brand-fixture',business_id:'business-fixture',created_at:'2026-01-01T00:00:00.000Z',digital_products_delivered:false,is_update_payment_method:false,payment_provider:'dodo',retry_attempt:0,settlement_amount:999,settlement_currency:'USD',payment_id:'payment-fixture',checkout_session_id:'order-fixture',metadata:{paymentRecordId:recordId},status:'succeeded',currency:'USD',total_amount:999,tax:0,product_cart:[{product_id:'pdt_fixture',quantity:1}],disputes:[],refunds:[],refund_status:null,customer:{customer_id:'customer-fixture',name:'Fixture',email:'customer@example.invalid'}};
+  dodoPayment={billing:{country:'US',city:'Fixture',state:'Fixture',street:'Synthetic address',zipcode:'00000'},brand_id:'brand-fixture',business_id:'business-fixture',created_at:'2026-01-01T00:00:00.000Z',updated_at:'2026-01-01T00:00:00.000Z',digital_products_delivered:false,is_update_payment_method:false,payment_provider:'dodo',retry_attempt:0,settlement_amount:999,settlement_currency:'USD',payment_id:'payment-fixture',checkout_session_id:'order-fixture',metadata:{paymentRecordId:recordId},status:'succeeded',currency:'USD',total_amount:999,tax:0,product_cart:[{product_id:'pdt_fixture',quantity:1}],disputes:[],refunds:[],refund_status:null,customer:{customer_id:'customer-fixture',name:'Fixture',email:'customer@example.invalid'}};
+  dodoList=[];
   dodoRefund={business_id:'business-fixture',created_at:'2026-01-01T00:00:00.000Z',customer:{customer_id:'customer-fixture',name:'Fixture',email:'customer@example.invalid'},metadata:{},refund_id:'refund-fixture',payment_id:'payment-fixture',amount:999,currency:'USD',status:'succeeded',is_partial:false};
 };
 const seed=async(provider='paypal',status='booked',changes={})=>{
-  await commerce.create({_id:bookingId,_type:'booking',status:'captured',netAmount:9.99,commissionAmount:1,packageTitle:'Vertex Essentials',email:'customer@example.invalid',paypalOrderId:provider==='paypal'?'order-fixture':'',razorpayOrderId:provider==='razorpay'?'order-fixture':'',razorpayPaymentId:provider==='razorpay'?'payment-fixture':'',backendOwner:legacyOwner?'sanity':'supabase',cutoverGeneration:0,...changes.booking});
+  if(changes.booking!==null)await commerce.create({_id:bookingId,_type:'booking',status:'captured',netAmount:9.99,commissionAmount:1,packageTitle:'Vertex Essentials',email:'customer@example.invalid',paypalOrderId:provider==='paypal'?'order-fixture':'',razorpayOrderId:provider==='razorpay'?'order-fixture':'',razorpayPaymentId:provider==='razorpay'?'payment-fixture':'',backendOwner:legacyOwner?'sanity':'supabase',cutoverGeneration:0,...changes.booking});
   return commerce.create({_id:recordId,_type:'paymentRecord',provider,backendOwner:legacyOwner?'sanity':'supabase',cutoverGeneration:0,status,providerOrderId:'order-fixture',providerPaymentId:provider==='paypal'?'capture-fixture':'payment-fixture',bookingId,sessionScope:'fixture-session',providerIdempotencyKey:'fixture-key',bookingPayload:{packageTitle:'Vertex Essentials',email:'customer@example.invalid',startTimeUTC:'2099-01-01T10:00:00.000Z'},pricingFingerprint:'fixture-pricing',pricingSnapshot:{netAmount:9.99},providerPublicData:{currency:'USD',productId:'pdt_fixture',environment:'test_mode',taxInclusive:false,totalAmount:999},sessionExpiresAt:'2099-01-01T10:00:00.000Z',emailDispatch:{allSent:true},...changes.record});
 };
 const tokenFor=r=>access.createPaymentAccessToken({paymentRecordId:r._id,provider:r.provider,pricingFingerprint:r.pricingFingerprint,backend:'supabase',cutoverGeneration:0,expirySeconds:600});
 const paypalReq=(type,resource,id=`event-fixture-${scenarioNumber}`)=>{const body={id,event_type:type,resource};return{body,rawBody:JSON.stringify(body),headers:{'paypal-transmission-id':'fixture-transmission','paypal-transmission-time':new Date().toISOString(),'paypal-transmission-sig':'fixture-signature','paypal-cert-url':'https://example.invalid/cert','paypal-auth-algo':'SHA256withRSA'}};};
 const razorReq=(type,payload)=>{const body={event:type,payload};const rawBody=JSON.stringify(body);return{body,rawBody,headers:{'x-razorpay-signature':crypto.createHmac('sha256',process.env.RAZORPAY_WEBHOOK_SECRET).update(rawBody).digest('hex')}};};
-const dodoReq=(payment=dodoPayment,type='payment.succeeded')=>{const body={business_id:'business-fixture',type,timestamp:'2026-01-01T00:00:00.000Z',data:payment};const rawBody=JSON.stringify(body),timestamp=String(Math.floor(Date.now()/1000)),id=`dodo-fixture-${scenarioNumber}`;const signature=crypto.createHmac('sha256',Buffer.from('fixture-dodo-secret')).update(`${id}.${timestamp}.${rawBody}`).digest('base64');return{body,rawBody,headers:{'webhook-id':id,'webhook-timestamp':timestamp,'webhook-signature':`v1,${signature}`}};};
+const dodoReq=(payment=dodoPayment,type='payment.succeeded',id=`dodo-fixture-${scenarioNumber}`)=>{const body={business_id:'business-fixture',type,timestamp:'2026-01-01T00:00:00.000Z',data:payment};const rawBody=JSON.stringify(body),timestamp=String(Math.floor(Date.now()/1000));const signature=crypto.createHmac('sha256',Buffer.from('fixture-dodo-secret')).update(`${id}.${timestamp}.${rawBody}`).digest('base64');return{body,rawBody,headers:{'webhook-id':id,'webhook-timestamp':timestamp,'webhook-signature':`v1,${signature}`}};};
 const requestFlow=async(action,input={})=>{const response=await fetch(`${origin}/flow/${action}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.timeout(30000)});return{status:response.status,body:await response.json()};};
 const assertRefund=async({reversed=false}={})=>{
   const r=await record(),b=(await row(bookingId)).payload;
@@ -203,6 +207,41 @@ try{
       if(action==='paypal')result=await flow.handlePayPalWebhook(args);else if(action==='razorpay')result=await flow.handleRazorpayWebhook(args);else if(action==='dodo')result=await flow.handleDodoWebhook(args);else if(action==='finalize')result=await flow.finalizePaymentSession(args);else if(action==='cancel')result=await flow.cancelPaymentSession(args);else if(action==='reconcile')result=await flow.reconcilePaymentSessions({client:commerce,req:{headers:{authorization:'Bearer fixture-cron'}}});else if(action==='start')result=await flow.startPaymentSession(args);else if(action==='status')result=await flow.getPaymentStatus(args);else throw new Error(`Unknown action ${action}`);res.writeHead(result.httpStatus,{'content-type':'application/json'});res.end(JSON.stringify(result.body));return;}
     if(req.url==='/booking'){const {default:handler}=await import('../src/server/api/ref/createBooking.js');const input=JSON.parse(raw),response={status(code){this.statusCode=code;return this;},json(body){res.writeHead(this.statusCode||200,{'content-type':'application/json'});res.end(JSON.stringify(body));return this;},setHeader(){}};await handler({method:'POST',headers:{},body:input.body,internalContext:input.internal?{documentClient:commerce,backendOwner:'supabase',cutoverGeneration:0,paymentFinalizeSource:'reconcile'}:undefined},response);return;}
     if(req.url==='/reconcile-route'){const {default:handler}=await import('../src/server/api/payment/reconcile.js');const response={status(code){this.statusCode=code;return this;},json(body){res.writeHead(this.statusCode||200,{'content-type':'application/json'});res.end(JSON.stringify(body));return this;},setHeader(){}};await handler({method:'POST',headers:{authorization:'Bearer fixture-cron'}},response);return;}
+    if (req.url === '/reconcile-report') {
+      const input = JSON.parse(raw || '{}');
+      const report = await import('../src/server/api/payment/reconcileReport.js');
+      if (input.route) {
+        if (input.nextRoute) {
+          const route = await import('../app/api/payment/[action]/route.js');
+          const method = input.method || 'GET';
+          const url = new URL(`${origin}/api/payment/report`);
+          for (const [name, value] of Object.entries(input.query || {})) {
+            for (const entry of Array.isArray(value) ? value : [value]) url.searchParams.append(name, entry);
+          }
+          const request = new Request(url, { method, headers: input.headers || {} });
+          const result = await route[method === 'POST' ? 'POST' : 'GET'](request, { params: Promise.resolve({ action: 'report' }) });
+          res.writeHead(result.status, Object.fromEntries(result.headers));
+          res.end(await result.text());
+          return;
+        }
+        const headers = { 'content-type': 'application/json' };
+        const response = {
+          status(code) { this.statusCode = code; return this; },
+          json(body) {
+            res.writeHead(this.statusCode || 200, headers);
+            res.end(JSON.stringify(body));
+            return this;
+          },
+          setHeader(name, value) { headers[name.toLowerCase()] = value; },
+        };
+        await report.default({ method: input.method || 'GET', headers: input.headers || {}, query: input.query || {} }, response);
+        return;
+      }
+      const body = await report.buildReconcileReport({ client: commerce, now: input.now, checks: input.checks });
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(body));
+      return;
+    }
     if(req.url==='/identities'){const {POST}=await import('../app/api/auth/identities/route.js');const result=await POST(new Request(`${origin}/identities`,{method:req.method,headers:req.headers,body:raw}));res.writeHead(result.status,Object.fromEntries(result.headers));res.end(await result.text());return;}
     const request={method:req.method,path:req.url,body:raw?(String(req.headers['content-type']||'').includes('application/json')?JSON.parse(raw):raw):null};providerRequests.push({method:req.method,path:req.url});
     if(providerHook){const result=await providerHook(request,req,res);if(result===true)return;}
@@ -210,7 +249,7 @@ try{
     if(req.url==='/v1/oauth2/token')body={access_token:'fixture-access',expires_in:3600};else if(req.url==='/v1/notifications/verify-webhook-signature'){if(verificationDisconnect){req.socket.destroy();return;}status=verificationStatus;body={verification_status:'SUCCESS'};}
     else if(req.url==='/emails'){status=emailFailure?503:200;body=emailFailure?{name:'application_error',message:'Synthetic delivery failure'}:{id:`email-fixture-${scenarioNumber}-${providerRequests.length}`};}else if(req.url==='/v2/checkout/orders/order-fixture')body=paypalOrder;else if(req.url==='/v2/payments/captures/capture-fixture')body=paypalCapture;
     else if(req.url.startsWith('/v1/payments/payment-fixture/refunds'))body={entity:'collection',count:razorpayRefunds.length,items:razorpayRefunds};else if(req.url==='/v1/payments/payment-fixture')body=razorpayPayment;else if(req.url==='/v1/orders/order-fixture/payments')body={items:[razorpayPayment]};else if(req.url==='/v1/orders/order-fixture')body={id:'order-fixture',status:'paid',amount_paid:999,currency:'USD'};
-    else if(req.url==='/payments/payment-fixture')body=dodoPayment;else if(req.url==='/refunds/refund-fixture')body=dodoRefund;else if(req.url==='/checkouts/order-fixture')body={id:'order-fixture',payment_id:'payment-fixture'};else throw new Error(`Unexpected local provider path ${req.url}`);
+    else if(req.url.startsWith('/payments?'))body={items:dodoList};else if(req.url==='/payments/payment-fixture')body=dodoPayment;else if(req.url==='/payments/payment-gone'){status=404;body={code:'NOT_FOUND',message:'Payment not found'};}else if(req.url==='/refunds/refund-fixture')body=dodoRefund;else if(req.url==='/checkouts/order-fixture')body={id:'order-fixture',payment_id:'payment-fixture'};else throw new Error(`Unexpected local provider path ${req.url}`);
     res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(body));
   }catch(error){if(!res.destroyed){res.writeHead(500,{'content-type':'application/json'});res.end(JSON.stringify({fixtureError:error.message}));}}});
   server.listen(0,host);await once(server,'listening');origin=`http://${host}:${server.address().port}`;
@@ -279,6 +318,3527 @@ try{
   await run('dodo-initial-bind-same-payment-id',async()=>{
     await seed('dodo','booked',{record:{providerOrderId:'',providerPaymentId:''}});const result=await requestFlow('dodo',{req:dodoReq()});assert.equal(result.status,200,JSON.stringify(result));assert.equal((await record()).providerOrderId,'order-fixture');const [typed]=await sql`select provider_order_id from commerce.payment_records where legacy_sanity_id=${recordId}`;assert.equal(typed.provider_order_id,'order-fixture');return{httpStatus:200,typed};
   });
+  const readReport = async (input, expectedAfter) => {
+    const before = await snapshot({ receipts: true });
+    const requestsAt = providerRequests.length;
+    const databaseRequestsAt = fixture.requestLog.length;
+    const response = await fetch(`${origin}/reconcile-report`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(30000),
+    });
+    const text = await response.text();
+    const body = text ? JSON.parse(text) : null;
+    const after = await snapshot({ receipts: true });
+    assert.deepEqual(after, expectedAfter ? expectedAfter() : before, 'Report changed business persistence');
+    assert.ok(providerRequests.slice(requestsAt).every((request) => request.method === 'GET'));
+    const checks = body?.checks || [];
+    for (const check of checks) {
+      assert.deepEqual(Object.keys(check).sort(), ['items', 'key', 'keys', ...(check.state === 'recovered' ? ['recovery'] : []), 'state']);
+      assert.ok(['recovered', 'unresolved', 'unknown'].includes(check.state));
+      assert.equal(new Set(check.keys).size, check.keys.length);
+      for (const key of [check.key, ...check.keys]) assert.match(key, /^(payment|booking|record|scan):[A-Za-z0-9_.:/-]{1,80}$/);
+    }
+    for (const item of [...(body?.items || []), ...checks.flatMap((check) => check.items)]) {
+      assert.deepEqual(Object.keys(item).sort(), ['amount', 'currency', 'id', 'key', 'reason', 'ref']);
+      assert.match(item.key, /^(payment|booking|record|scan):[A-Za-z0-9_.:/-]{1,80}$/);
+    }
+    for (const privateValue of [
+      'customer@example.invalid', 'fixture_handle', 'Synthetic address', 'customer-fixture',
+    ]) {
+      assert.equal(text.includes(privateValue), false, privateValue);
+    }
+    return {
+      status: response.status,
+      headers: Object.fromEntries(response.headers),
+      body,
+      before,
+      after,
+      providerRequests: providerRequests.slice(requestsAt),
+      databaseRequests: fixture.requestLog.slice(databaseRequestsAt),
+    };
+  };
+  const reconcileReport = async (now = Date.now() + 60 * 60 * 1000) => {
+    const result = await readReport({ now });
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    return result.body;
+  };
+  const reportRoute = async (headers = {}, method = 'GET', nextRoute = false, query = {}, expectedAfter) => {
+    return readReport({ route: true, headers, method, nextRoute, query }, expectedAfter);
+  };
+  const authorizedReport = async (method = 'GET', nextRoute = false, query = {}, expectedAfter) => {
+    const saved = process.env.RECONCILE_REPORT_TOKEN;
+    try {
+      process.env.RECONCILE_REPORT_TOKEN = 'report-fixture-token-that-is-at-least-32-characters';
+      return await reportRoute(
+        { authorization: `Bearer ${process.env.RECONCILE_REPORT_TOKEN}` },
+        method,
+        nextRoute,
+        query,
+        expectedAfter,
+      );
+    } finally {
+      if (saved === undefined) delete process.env.RECONCILE_REPORT_TOKEN;
+      else process.env.RECONCILE_REPORT_TOKEN = saved;
+    }
+  };
+  const dodoSummary = (payment = dodoPayment) => ({
+    payment_id: payment.payment_id,
+    status: payment.status,
+    total_amount: payment.total_amount,
+    currency: payment.currency,
+    metadata: payment.metadata,
+    created_at: payment.created_at,
+    customer: payment.customer,
+  });
+  const dodoBooking = (changes = {}, recordChanges = {}) => ({
+    booking: {
+      _createdAt: new Date(Date.now() - 3600000).toISOString(),
+      paymentProvider: 'dodo',
+      dodoPaymentId: 'payment-fixture',
+      dodoCheckoutSessionId: 'order-fixture',
+      paymentRecordId: recordId,
+      grossAmount: 9.99,
+      dodoTotalAmount: 9.99,
+      commissionPercent: 10,
+      commissionAmount: 1,
+      referralCode: 'creator-correct',
+      referral: { _type: 'reference', _ref: 'referral.correct' },
+      referralAccountingApplied: true,
+      ...(changes.refundStatus === 'full' ? {
+        refundAccountingAppliedAt: new Date(Date.now() - 3600000).toISOString(),
+        referralReversedAfterRefund: true,
+      } : {}),
+      ...changes,
+    },
+    record: {
+      ...(['full', 'partial'].includes(changes.refundStatus) ? {
+        refundState: changes.refundStatus,
+        refundProcessedAmountInSubunits: Math.round(changes.refundedAmount * 100),
+        refundCurrency: 'USD',
+        refundRequiresBookingSync: false,
+      } : {}),
+      ...recordChanges,
+      pricingSnapshot: {
+        currency: 'USD',
+        grossAmount: 9.99,
+        netAmount: 9.99,
+        discountAmount: 0,
+        discountPercent: 0,
+        referralDiscountAmount: 0,
+        referralDiscountPercent: 0,
+        commissionPercent: 10,
+        commissionAmount: 1,
+        couponDiscountPercent: 0,
+        couponDiscountAmount: 0,
+        couponDiscountType: '',
+        couponDiscountValue: 0,
+        canCombineWithReferral: false,
+        effectiveReferralCode: 'creator-correct',
+        effectiveReferralId: 'referral.correct',
+        ...recordChanges.pricingSnapshot,
+      },
+    },
+  });
+  const reportReasons = (report) => report.items.map((item) => item.reason);
+  const expectReport = async (reasons) => {
+    const result = await authorizedReport();
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    assert.deepEqual(reportReasons(result.body), reasons, JSON.stringify(result.body));
+    assert.equal(result.body.count, reasons.length, JSON.stringify(result.body));
+    return result;
+  };
+  const targetReport = (keys, expectedAfter) => authorizedReport('GET', true, { check: JSON.stringify(keys) }, expectedAfter);
+  const canonicalKeys = ['payment:payment-fixture', 'record:' + recordId, 'booking:' + bookingId];
+  const assertTarget = (result, keys, states, reasons) => {
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    assert.equal(result.body.mode, 'checks');
+    assert.deepEqual(result.body.complete, { payments: false, bookings: false, records: false, items: true });
+    assert.deepEqual(result.body.checks.map((check) => check.key), keys);
+    assert.deepEqual(result.body.checks.map((check) => check.state), states);
+    assert.deepEqual(reportReasons(result.body), reasons);
+    assert.equal(result.body.count, reasons.length);
+    assert.equal(result.providerRequests.some((request) => request.path.startsWith('/payments?')), false);
+    for (const check of result.body.checks) {
+      assert.ok(check.keys.includes(check.key));
+      if (check.state !== 'unresolved') assert.deepEqual(check.items, []);
+      else assert.ok(check.items.every((item) => check.keys.includes(item.key)));
+      if (check.state === 'recovered') {
+        assert.deepEqual(check.keys, [...new Set([check.key, ...canonicalKeys])]);
+      }
+    }
+  };
+  await run('reconcile-report-target-aged-out', async () => {
+    const old = new Date(Date.now() - 73 * 3600000).toISOString();
+    await seed('dodo', 'booked', dodoBooking({ _createdAt: old, netAmount: 19.99 }));
+    dodoPayment.created_at = old;
+    dodoList = [];
+    const window = await authorizedReport('GET', true);
+    assert.equal(window.status, 200);
+    assert.equal(window.body.count, 0, JSON.stringify(window.body));
+    const report = await targetReport(canonicalKeys);
+    await commerce.patch(bookingId).set({ netAmount: 9.99 }).commit();
+    const control = await targetReport(canonicalKeys);
+    const proof = { old, provider: dodoPayment, window, report, control };
+    assert.equal(report.body.checks?.[0]?.state, 'unresolved', JSON.stringify(proof));
+    assertTarget(report, canonicalKeys, ['unresolved', 'unresolved', 'unresolved'], ['amount_mismatch']);
+    assertTarget(control, canonicalKeys, ['recovered', 'recovered', 'recovered'], []);
+    assert.equal(window.body.mode, 'window');
+    assert.deepEqual(window.body.checks, []);
+    assert.deepEqual(window.body.complete, { payments: true, bookings: true, records: true, items: true });
+    for (const result of [report, control]) {
+      assert.equal(result.providerRequests.length, 1);
+      assert.equal(result.providerRequests[0].path, '/payments/payment-fixture');
+      assert.deepEqual(result.databaseRequests.map(request => request.rpc), [
+        'roo_fetch_shadow_documents_targeted', 'roo_fetch_shadow_documents_targeted',
+        ...(result === control ? ['roo_booking_referral_audit'] : []),
+      ]);
+    }
+    return proof;
+  });
+  await run('reconcile-report-frozen-commission', async () => {
+    await seed('dodo', 'booked', dodoBooking({ commissionAmount: 0.5 }));
+    dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+    dodoList = [dodoSummary()];
+    return expectReport(['commission_mismatch']);
+  });
+  await run('reconcile-report-subcent-aggregate', async () => {
+    await seed('dodo', 'booked', dodoBooking({ commissionAmount: 1.004 }));
+    const { _id, _rev, ...booking } = (await row(bookingId)).payload;
+    await commerce.create({ ...booking, _id: 'booking.subcent-extra', paymentRecordId: 'paymentRecord.subcent-extra',
+      dodoPaymentId: 'payment-subcent-extra', _createdAt: new Date(Date.now() - 96 * 3600000).toISOString() });
+    const earnings = await commerce.referralEarnings({ referralId: 'referral.correct', referralCode: 'creator-correct' });
+    assert.equal(earnings.total, 2.01);
+    dodoList = [dodoSummary()];
+    const window = await authorizedReport('GET', true);
+    const targeted = await targetReport(canonicalKeys);
+    assert.deepEqual(reportReasons(window.body), ['commission_mismatch'], JSON.stringify({ earnings, window }));
+    assertTarget(targeted, canonicalKeys, Array(3).fill('unresolved'), ['commission_mismatch']);
+    return { earnings, window, targeted };
+  });
+  for (const [source, field, base, reason] of [
+    ...['grossAmount', 'netAmount', 'commissionAmount'].map(field => ['pricing', field, field === 'commissionAmount' ? 1 : 9.99, 'frozen_pricing_unavailable']),
+    ...['grossAmount', 'netAmount', 'dodoTotalAmount'].map(field => ['booking', field, 9.99, 'amount_mismatch']),
+    ...['commissionAmount', 'dodoOriginalCommissionAmount'].map(field => ['booking', field, 1, 'commission_mismatch']),
+    ['booking', 'refundedAmount', 0, 'refund_not_applied'],
+  ]) for (const precision of ['subcent', 'ulp']) await run(`reconcile-report-money-precision-${source}-${field}-${precision}`, async () => {
+    const value = precision === 'subcent' ? Number((base + 0.004).toFixed(3)) : base + Number.EPSILON * Math.max(1, base) * 2;
+    await seed('dodo', 'booked', dodoBooking(
+      source === 'booking' ? { [field]: value } : {},
+      source === 'pricing' ? { pricingSnapshot: { [field]: value } } : {},
+    ));
+    dodoList = [dodoSummary()];
+    const window = await authorizedReport('GET', true);
+    assert.deepEqual(reportReasons(window.body), [reason], JSON.stringify({ source, field, value, window: window.body }));
+    const targeted = await targetReport(canonicalKeys);
+    assertTarget(targeted, canonicalKeys, Array(3).fill('unresolved'), [reason]);
+    return { source, field, value, window, targeted };
+  });
+  for (const commission of [0, 0.01, 0.29, 0.57, 1, 1.23]) await run('reconcile-report-exact-cents-' + commission, async () => {
+    const percent = commission === 0 ? 0 : 10;
+    const referral = commission === 0 ? { referralCode: '', referral: null } : {};
+    const quoteReferral = commission === 0 ? { effectiveReferralCode: '', effectiveReferralId: '' } : {};
+    await seed('dodo', 'booked', dodoBooking({ commissionAmount: commission, commissionPercent: percent, ...referral }, {
+      pricingSnapshot: { commissionAmount: commission, commissionPercent: percent, ...quoteReferral },
+    }));
+    dodoList = [dodoSummary()];
+    const window = await expectReport([]);
+    const targeted = await targetReport(canonicalKeys);
+    assertTarget(targeted, canonicalKeys, Array(3).fill('recovered'), []);
+    return { commission, window, targeted };
+  });
+  await run('reconcile-report-extra-booking', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    await commerce.patch(bookingId).set({ paymentRecordId: recordId }).commit();
+    const { _id, _rev, ...canonical } = (await row(bookingId)).payload;
+    await commerce.create({ ...canonical, _id: 'booking.extra', netAmount: 19.99 });
+    const native = await sql`select legacy_sanity_id,payment_record_id,booking_payload from commerce.bookings order by legacy_sanity_id`;
+    assert.equal(native.length, 2);
+    assert.ok(native.every((booking) => booking.payment_record_id === native[0].payment_record_id));
+    assert.ok(native[0].payment_record_id);
+    dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+    dodoList = [dodoSummary()];
+    const result = await expectReport(['payment_record_mismatch']);
+    assert.equal(result.body.items[0].ref, 'booking.extra');
+    assert.equal(providerRequests.filter((request) => request.path === '/payments/payment-fixture').length, 1);
+    return { native, ...result };
+  });
+  await run('reconcile-report-reverse-old-payment', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    dodoPayment.created_at = new Date(Date.now() - 73 * 3600000).toISOString();
+    dodoPayment.refund_status = 'full';
+    dodoPayment.refunds = [dodoRefund];
+    dodoList = [];
+    const result = await expectReport(['refund_not_applied']);
+    assert.equal(result.body.items[0].ref, bookingId);
+    assert.ok(providerRequests.some((request) => request.path === '/payments/payment-fixture'));
+    return { provider: dodoPayment, ...result };
+  });
+  await run('reconcile-report-referral-binding', async () => {
+    await seed('dodo', 'booked', dodoBooking({
+      referralCode: 'creator-wrong',
+      referral: { _type: 'reference', _ref: 'referral.wrong' },
+    }));
+    dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+    dodoList = [dodoSummary()];
+    return expectReport(['referral_binding_mismatch']);
+  });
+  for (const [name, booking, reason] of [
+    ['missing', { commissionAmount: undefined }, 'commission_mismatch'],
+    ['null', { commissionAmount: null }, 'commission_mismatch'],
+    ['empty', { commissionAmount: '' }, 'commission_mismatch'],
+    ['zero', { commissionAmount: 0 }, 'commission_mismatch'],
+    ['negative', { commissionAmount: -1 }, 'commission_mismatch'],
+    ['inflated-rate', { commissionPercent: 50, commissionAmount: 5 }, 'commission_exceeds_kept_share'],
+    ['changed-rate', { commissionPercent: 50 }, 'commission_mismatch'],
+    ['missing-rate', { commissionPercent: undefined }, 'commission_mismatch'],
+    ['original-mismatch', { dodoOriginalCommissionAmount: 0.5 }, 'commission_mismatch'],
+    ['original-null', { dodoOriginalCommissionAmount: null }, 'commission_mismatch'],
+  ]) {
+    await run(`reconcile-report-frozen-commission-${name}`, async () => {
+      await seed('dodo', 'booked', dodoBooking(booking));
+      dodoList = [dodoSummary()];
+      return expectReport([reason]);
+    });
+  }
+  await run('reconcile-report-frozen-commission-referral-base', async () => {
+    await seed('dodo', 'booked', dodoBooking(
+      { commissionAmount: 2 },
+      { pricingSnapshot: { commissionAmount: 2 } },
+    ));
+    dodoList = [dodoSummary()];
+    return expectReport([]);
+  });
+  await run('reconcile-report-booking-gross-mismatch', async () => {
+    await seed('dodo', 'booked', dodoBooking({ grossAmount: 19.99 }));
+    dodoList = [dodoSummary()];
+    return expectReport(['amount_mismatch']);
+  });
+  const frozenCases = [
+    ...['grossAmount', 'netAmount', 'commissionAmount', 'commissionPercent', 'effectiveReferralCode', 'effectiveReferralId']
+      .map((field) => [`missing-${field}`, { [field]: undefined }]),
+    ['null-gross', { grossAmount: null }],
+    ['empty-net', { netAmount: '' }],
+    ['numeric-string', { commissionAmount: '1' }],
+    ['negative-amount', { commissionAmount: -1 }],
+    ['invalid-percent', { commissionPercent: 101 }],
+    ['net-above-gross', { grossAmount: 1 }],
+    ['zero-rate-with-commission', { commissionPercent: 0 }],
+    ['invalid-code', { effectiveReferralCode: 123 }],
+    ['unpaired-recipient', { effectiveReferralId: '' }],
+    ['unpaired-code', { effectiveReferralCode: '' }],
+    ['no-recipient-with-commission', { effectiveReferralCode: '', effectiveReferralId: '' }],
+  ];
+  for (const [name, pricingSnapshot] of frozenCases) {
+    await run(`reconcile-report-frozen-pricing-${name}`, async () => {
+      await seed('dodo', 'booked', dodoBooking({}, { pricingSnapshot }));
+      dodoList = [dodoSummary()];
+      return expectReport(['frozen_pricing_unavailable']);
+    });
+  }
+  await run('reconcile-report-frozen-pricing-missing', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    await commerce.patch(recordId).unset(['pricingSnapshot']).commit();
+    dodoList = [dodoSummary()];
+    return expectReport(['frozen_pricing_unavailable']);
+  });
+  for (const wrongRecipient of [false, true]) {
+    await run(`reconcile-report-no-referral-${wrongRecipient ? 'wrong-recipient' : 'zero'}`, async () => {
+      await seed('dodo', 'booked', dodoBooking({
+        commissionAmount: 0,
+        commissionPercent: 0,
+        referralCode: wrongRecipient ? 'creator-wrong' : '',
+        referral: wrongRecipient ? { _type: 'reference', _ref: 'referral.wrong' } : null,
+      }, {
+        pricingSnapshot: {
+          commissionAmount: 0,
+          commissionPercent: 0,
+          effectiveReferralCode: '',
+          effectiveReferralId: '',
+        },
+      }));
+      dodoList = [dodoSummary()];
+      return expectReport(wrongRecipient ? ['referral_binding_mismatch'] : []);
+    });
+  }
+  await run('reconcile-report-referral-code-normalization', async () => {
+    await seed('dodo', 'booked', dodoBooking({
+      referralCode: ' CREATOR-CORRECT ',
+      referral: { _type: 'reference', _ref: ' referral.correct ' },
+    }));
+    dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+    dodoList = [dodoSummary()];
+    const booking = (await row(bookingId)).payload;
+    const report = await authorizedReport();
+    const earnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    await commerce.patch(bookingId).set({
+      referralCode: 'CREATOR-CORRECT',
+      referral: { _type: 'reference', _ref: 'referral.correct' },
+    }).commit();
+    const control = await authorizedReport();
+    const controlEarnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    const proof = { booking, report, earnings, control, controlEarnings };
+    assert.equal(report.status, 200);
+    assert.equal(earnings.total, 0, JSON.stringify(earnings));
+    assert.equal(control.status, 200);
+    assert.equal(control.body.count, 0, JSON.stringify(control.body));
+    assert.deepEqual(control.body.items, []);
+    assert.equal(controlEarnings.total, 1, JSON.stringify(controlEarnings));
+    assert.deepEqual(reportReasons(report.body), ['referral_binding_mismatch'], JSON.stringify(proof));
+    return proof;
+  });
+  for (const [name, changes] of [
+    ['code', { referralCode: ' CREATOR-CORRECT ' }],
+    ['id', { referral: { _type: 'reference', _ref: ' referral.correct ' } }],
+  ]) {
+    await run(`reconcile-report-referral-${name}-padding`, async () => {
+      await seed('dodo', 'booked', dodoBooking(changes));
+      dodoList = [dodoSummary()];
+      const report = await expectReport(['referral_binding_mismatch']);
+      const earnings = await commerce.referralEarnings({
+        referralId: 'referral.correct', referralCode: 'creator-correct',
+      });
+      assert.equal(earnings.total, 1, JSON.stringify(earnings));
+      return { report, earnings };
+    });
+  }
+  await run('reconcile-report-referral-id-case-mismatch', async () => {
+    await seed('dodo', 'booked', dodoBooking({
+      referral: { _type: 'reference', _ref: 'Referral.Correct' },
+    }));
+    dodoList = [dodoSummary()];
+    return expectReport(['referral_binding_mismatch']);
+  });
+  for (const [commissionAmount, reasons] of [
+    [0.67, []],
+    [0.66, ['commission_mismatch']],
+    [0.68, ['commission_exceeds_kept_share']],
+  ]) {
+    await run(`reconcile-report-rounded-partial-commission-${commissionAmount}`, async () => {
+      await seed('dodo', 'booked', dodoBooking({
+        refundedAmount: 3.33,
+        refundStatus: 'partial',
+        commissionAmount,
+        dodoOriginalCommissionAmount: 1,
+      }));
+      dodoPayment.refund_status = 'partial';
+      dodoPayment.refunds = [{ ...dodoRefund, amount: 333, is_partial: true }];
+      dodoList = [dodoSummary()];
+      return expectReport(reasons);
+    });
+  }
+  for (const booked of [true, false]) {
+    await run(`reconcile-report-processed-full-refund-${booked ? 'booked' : 'unbooked'}`, async () => {
+      const data = dodoBooking({}, booked ? {} : { bookingId: '' });
+      await seed('dodo', booked ? 'booked' : 'started', { ...data, booking: booked ? data.booking : null });
+      dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+      let before;
+      if (!booked) {
+        dodoList = [dodoSummary()];
+        before = { window: await authorizedReport('GET', true), targeted: await targetReport(canonicalKeys.slice(0, 2)) };
+        assert.deepEqual(reportReasons(before.window.body), ['payment_without_booking']);
+        assertTarget(before.targeted, canonicalKeys.slice(0, 2), ['unresolved', 'unresolved'], ['payment_without_booking']);
+      }
+      dodoPayment.refund_status = 'full';
+      dodoPayment.refunds = [dodoRefund];
+      dodoList = [dodoSummary()];
+      const refund = await requestFlow('dodo', { req: dodoReq(dodoRefund, 'refund.succeeded') });
+      assert.equal(refund.status, 200, JSON.stringify(refund));
+      const saved = await record();
+      assert.equal(saved.status, 'refunded');
+      assert.equal(saved.refundRequiresBookingSync, false);
+      assert.equal(saved.refundProcessedAmountInSubunits, 999);
+      let refundedBooking;
+      if (booked) {
+        refundedBooking = (await row(bookingId)).payload;
+        assert.equal(refundedBooking.commissionAmount, 0);
+        assert.equal(refundedBooking.commissionCalculationVersion, 2);
+        assert.ok(Number.isFinite(Date.parse(refundedBooking.refundAccountingAppliedAt)));
+        assert.equal(typeof refundedBooking.referralReversedAfterRefund, 'boolean');
+      } else {
+        assert.equal(saved.bookingId, '');
+        assert.equal(saved.refundBookingSync.releasedUnbookedPaymentResources, true);
+      }
+      const earnings = await commerce.referralEarnings({ referralId: 'referral.correct', referralCode: 'creator-correct' });
+      assert.equal(earnings.total, 0);
+      const window = await authorizedReport('GET', true);
+      const keys = booked ? canonicalKeys : canonicalKeys.slice(0, 2);
+      const targeted = await targetReport(keys);
+      assert.equal(window.status, 200, JSON.stringify(window.body));
+      assert.equal(window.body.count, 0, JSON.stringify(window.body));
+      assert.deepEqual(targeted.body.checks.map(check => check.state), keys.map(() => 'recovered'), JSON.stringify(targeted.body));
+      assert.ok(targeted.body.checks.every(check => check.recovery === (booked ? 'booking' : 'unbooked_full_refund')));
+      assert.equal(targeted.body.count, 0);
+      if (!booked) {
+        for (const check of targeted.body.checks) assert.deepEqual(new Set(check.keys), new Set(keys));
+        const missing = await targetReport([canonicalKeys[2]]);
+        assert.equal(missing.body.checks[0].state, 'unknown');
+      }
+      return { before, refund, saved, refundedBooking, earnings, window, targeted };
+    });
+  }
+  for (const full of [false, true]) for (const listed of [false, true]) {
+    await run(`reconcile-report-booked-refund-sync-${full ? 'full' : 'partial'}-${listed ? 'listed' : 'reverse'}`, async () => {
+      await seed('dodo', 'booked', dodoBooking());
+      dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+      Object.assign(dodoRefund, { amount: full ? 999 : 499, is_partial: !full });
+      dodoPayment.refund_status = full ? 'full' : 'partial';
+      dodoPayment.refunds = [dodoRefund];
+      dodoList = listed ? [dodoSummary()] : [];
+      await sql.unsafe(`create or replace function public.refund_sync_failure_fixture() returns trigger language plpgsql as $$
+        begin
+          if new.legacy_sanity_id = 'paymentRecord.fixture'
+            and old.payload->>'refundRequiresBookingSync' = 'true'
+            and new.payload->>'refundRequiresBookingSync' = 'false'
+          then raise exception 'Synthetic refund completion storage failure'; end if;
+          return new;
+        end $$;
+        create trigger refund_sync_failure_fixture before update on migration.source_documents
+        for each row execute function public.refund_sync_failure_fixture();`);
+      let refund, pending, window, targeted, booking;
+      try {
+        refund = await requestFlow('dodo', { req: dodoReq(dodoRefund, 'refund.succeeded') });
+        pending = await record();
+        booking = (await row(bookingId)).payload;
+        assert.equal(pending.refundRequiresBookingSync, true, JSON.stringify({ refund, pending }));
+        assert.equal(pending.refundProcessedAmountInSubunits, dodoRefund.amount);
+        assert.equal(booking.refundedAmount, dodoRefund.amount / 100);
+        assert.equal(booking.refundStatus, full ? 'full' : 'partial');
+        window = await authorizedReport('GET', true);
+        targeted = await targetReport(canonicalKeys);
+      } finally {
+        await sql.unsafe('drop trigger refund_sync_failure_fixture on migration.source_documents');
+      }
+      const earnings = await commerce.referralEarnings({ referralId: 'referral.correct', referralCode: 'creator-correct' });
+      const recovery = await requestFlow('reconcile');
+      const saved = await record();
+      const control = await authorizedReport('GET', true);
+      const controlTargets = await targetReport(canonicalKeys);
+      assert.equal(window.status, 200, JSON.stringify(window.body));
+      assert.deepEqual(reportReasons(window.body), ['refund_not_applied'], JSON.stringify({
+        refundStatus: refund.status, pendingSync: pending.refundRequiresBookingSync,
+        recordTotal: pending.refundProcessedAmountInSubunits, providerTotal: dodoRefund.amount,
+        bookingRefund: booking.refundedAmount, window: window.body, targeted: targeted.body,
+      }));
+      assertTarget(targeted, canonicalKeys, Array(3).fill('unresolved'), ['refund_not_applied']);
+      assert.equal(recovery.status, 200, JSON.stringify(recovery));
+      assert.equal(saved.refundRequiresBookingSync, false);
+      assert.equal(control.body.count, 0, JSON.stringify(control.body));
+      assertTarget(controlTargets, canonicalKeys, Array(3).fill('recovered'), []);
+      assert.deepEqual((await row(bookingId)).payload, booking);
+      assert.deepEqual(await commerce.referralEarnings({ referralId: 'referral.correct', referralCode: 'creator-correct' }), earnings);
+      return { refund, pending, booking, earnings, window, targeted, recovery, saved, control, controlTargets };
+    });
+  }
+  for (const full of [false, true]) for (const [name, field, value] of [
+    ['sync-pending', 'refundRequiresBookingSync', true],
+    ['sync-null', 'refundRequiresBookingSync', null],
+    ['sync-missing', 'refundRequiresBookingSync', undefined],
+    ['amount-wrong', 'refundProcessedAmountInSubunits', 1],
+    ['amount-null', 'refundProcessedAmountInSubunits', null],
+    ['amount-missing', 'refundProcessedAmountInSubunits', undefined],
+    ['amount-string', 'refundProcessedAmountInSubunits', String(full ? 999 : 499)],
+    ['currency-wrong', 'refundCurrency', 'EUR'],
+    ['currency-null', 'refundCurrency', null],
+    ['currency-missing', 'refundCurrency', undefined],
+    ['state-wrong', 'refundState', full ? 'partial' : 'full'],
+    ['state-null', 'refundState', null],
+    ['state-missing', 'refundState', undefined],
+    ['status-wrong', 'status', full ? 'booked' : 'refunded'],
+  ]) {
+    await run(`reconcile-report-booked-refund-${full ? 'full' : 'partial'}-${name}`, async () => {
+      await seed('dodo', 'booked', dodoBooking());
+      dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+      Object.assign(dodoRefund, { amount: full ? 999 : 499, is_partial: !full });
+      dodoPayment.refund_status = full ? 'full' : 'partial';
+      dodoPayment.refunds = [dodoRefund];
+      dodoList = [dodoSummary()];
+      const refund = await requestFlow('dodo', { req: dodoReq(dodoRefund, 'refund.succeeded') });
+      assert.equal(refund.status, 200, JSON.stringify(refund));
+      const original = await record();
+      if (value === undefined) await sql`update migration.source_documents set payload=payload-${field} where legacy_sanity_id=${recordId}`;
+      else await sql`update migration.source_documents set payload=jsonb_set(payload,ARRAY[${field}]::text[],coalesce(${sql.json(value)},'null'::jsonb)) where legacy_sanity_id=${recordId}`;
+      if (value === undefined) assert.equal(Object.hasOwn(await record(), field), false);
+      else assert.deepEqual((await record())[field], value);
+      const window = await expectReport(['refund_not_applied']);
+      const targeted = await targetReport(canonicalKeys);
+      assertTarget(targeted, canonicalKeys, Array(3).fill('unresolved'), ['refund_not_applied']);
+      await sql`update migration.source_documents set payload=jsonb_set(payload,ARRAY[${field}]::text[],${sql.json(original[field])}) where legacy_sanity_id=${recordId}`;
+      assert.deepEqual((await record())[field], original[field]);
+      const control = await expectReport([]);
+      const controlTargets = await targetReport(canonicalKeys);
+      assertTarget(controlTargets, canonicalKeys, Array(3).fill('recovered'), []);
+      return { refund, field, importedValue: value, original, window, targeted, control, controlTargets };
+    });
+  }
+  for (const status of ['pending', 'failed', 'review']) {
+    await run(`reconcile-report-booked-refund-unprocessed-${status}`, async () => {
+      await seed('dodo', 'booked', dodoBooking());
+      dodoRefund.status = status;
+      dodoPayment.refunds = [dodoRefund];
+      dodoList = [dodoSummary()];
+      const observed = await requestFlow('dodo', { req: dodoReq() });
+      assert.equal(observed.status, 200, JSON.stringify(observed));
+      const window = await expectReport([]);
+      const targeted = await targetReport(canonicalKeys);
+      assertTarget(targeted, canonicalKeys, Array(3).fill('recovered'), []);
+      return { observed, saved: await record(), window, targeted };
+    });
+  }
+  for (const [field, value] of [
+    ['refundState', 'full'], ['refundProcessedAmountInSubunits', 999], ['refundRequiresBookingSync', true],
+  ]) {
+    await run(`reconcile-report-booked-refund-provider-zero-${field}`, async () => {
+      await seed('dodo', 'booked', dodoBooking({}, { [field]: value }));
+      dodoList = [dodoSummary()];
+      const window = await expectReport(['refund_not_applied']);
+      const targeted = await targetReport(canonicalKeys);
+      assertTarget(targeted, canonicalKeys, Array(3).fill('unresolved'), ['refund_not_applied']);
+      return { field, value, window, targeted };
+    });
+  }
+  for (const full of [true, false]) await run(`reconcile-report-old-refund-transition-${full ? 'full' : 'partial'}`, async () => {
+    const old = new Date(Date.now() - 96 * 3600000).toISOString();
+    await seed('dodo', 'booked', dodoBooking({ _createdAt: old }));
+    dodoPayment.created_at = old;
+    dodoRefund.amount = full ? 999 : 499;
+    dodoRefund.is_partial = !full;
+    dodoPayment.refund_status = full ? 'full' : 'partial';
+    dodoPayment.refunds = [dodoRefund];
+    const refund = await requestFlow('dodo', { req: dodoReq(dodoRefund, 'refund.succeeded') });
+    assert.equal(refund.status, 200, JSON.stringify(refund));
+    const booking = (await row(bookingId)).payload;
+    assert.ok(Date.parse(booking.lastRefundAt) > Date.now() - 60000);
+    dodoPayment.refund_status = null;
+    dodoPayment.refunds = [];
+    dodoList = [];
+    const report = await authorizedReport('GET', true);
+    assert.equal(report.status, 200);
+    assert.deepEqual(reportReasons(report.body), ['refund_not_applied'], JSON.stringify(report.body));
+    assert.equal(report.providerRequests.filter(request => request.path === '/payments/payment-fixture').length, 1);
+    return { refund, booking, report };
+  });
+  const dodoDispute = (status) => ({
+    dispute_id: 'dispute-fixture',
+    payment_id: 'payment-fixture',
+    dispute_status: status,
+    dispute_stage: 'dispute',
+    amount: '999',
+    currency: 'USD',
+  });
+  for (const cancelled of [false, true]) for (const capped of [false, true]) await run(`reconcile-report-old-dispute-${cancelled ? 'cancelled' : 'pending'}-${capped ? 'capped' : 'empty'}`, async () => {
+    const observedAt = originalNow();
+    const old = new Date(observedAt - 96 * 3600000).toISOString();
+    await seed('dodo', 'booked', dodoBooking({ _createdAt: old }));
+    dodoPayment.created_at = old;
+    dodoPayment.updated_at = new Date(observedAt).toISOString();
+    dodoPayment.disputes = [{ ...dodoDispute('dispute_opened'), created_at: new Date(observedAt).toISOString() }];
+    const opened = await requestFlow('dodo', { req: dodoReq(dodoPayment.disputes[0], 'dispute.opened') });
+    assert.equal(opened.status, 200, JSON.stringify(opened));
+    if (cancelled) await commerce.patch(bookingId).set({ status: 'cancelled' }).commit();
+    const applied = (await row(bookingId)).payload;
+    assert.equal(applied.status, cancelled ? 'cancelled' : 'pending');
+    assert.equal(applied.dodoDisputeActive, true);
+    assert.ok(Date.parse(applied._updatedAt) >= observedAt);
+    if (capped) providerHook = async (request, _req, res) => {
+      if (request.path.startsWith('/payments?')) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ items: Array.from({ length: 100 }, (_, index) => ({ ...dodoSummary(), payment_id: 'payment-history-' + index })) }));
+        return true;
+      }
+      if (!request.path.startsWith('/payments/payment-history-')) return false;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ...dodoPayment, payment_id: request.path.split('/').at(-1), metadata: {}, product_cart: [{ product_id: 'foreign-product', quantity: 1 }] }));
+      return true;
+    };
+    await commerce.patch(bookingId).set({ dodoDisputeActive: false }).commit();
+    Date.now = () => observedAt + 1800000;
+    const mismatch = await authorizedReport('GET', true);
+    assert.ok(reportReasons(mismatch.body).includes('dispute_not_applied'), JSON.stringify(mismatch.body));
+    assert.equal(mismatch.body.items.filter(item => item.reason === 'dispute_not_applied').length, 1);
+    assert.equal(mismatch.providerRequests.filter(request => request.path === '/payments/payment-fixture').length, 1);
+    assert.equal(mismatch.body.complete.payments, !capped);
+    const targeted = await targetReport(canonicalKeys);
+    assertTarget(targeted, canonicalKeys, Array(3).fill('unresolved'), ['dispute_not_applied']);
+    const flagControls = [];
+    for (const flag of [undefined, null, 'true']) {
+      const patch = commerce.patch(bookingId);
+      await (flag === undefined ? patch.unset(['dodoDisputeActive']) : patch.set({ dodoDisputeActive: flag })).commit();
+      const report = await authorizedReport('GET', true);
+      assert.ok(reportReasons(report.body).includes('dispute_not_applied'), JSON.stringify(report.body));
+      flagControls.push({ flag: flag === undefined ? 'absent' : flag, report });
+    }
+    await commerce.patch(bookingId).set({ dodoDisputeActive: false }).commit();
+    const updatedAt = (await row(bookingId)).payload._updatedAt;
+    const dateControls = [];
+    for (const [name, value, included] of [
+      ['from', mismatch.body.from, true],
+      ['before', new Date(Date.parse(mismatch.body.from) - 1).toISOString(), false],
+      ['to', mismatch.body.at, true],
+      ['future', new Date(Date.parse(mismatch.body.at) + 1).toISOString(), false],
+      ['absent', undefined, false], ['null', null, false], ['invalid', 'invalid', false],
+    ]) {
+      if (value === undefined) await sql`update migration.source_documents set payload=payload-'_updatedAt' where legacy_sanity_id=${bookingId}`;
+      else await sql`update migration.source_documents set payload=jsonb_set(payload,'{_updatedAt}',coalesce(${sql.json(value)},'null'::jsonb)) where legacy_sanity_id=${bookingId}`;
+      const report = await authorizedReport('GET', true);
+      assert.equal(reportReasons(report.body).includes('dispute_not_applied'), included, JSON.stringify({ name, report: report.body }));
+      assert.equal(report.providerRequests.filter(request => request.path === '/payments/payment-fixture').length, included ? 1 : 0);
+      dateControls.push({ name, value, report });
+    }
+    await sql`update migration.source_documents set payload=jsonb_set(payload,'{_updatedAt}',${sql.json(updatedAt)}) where legacy_sanity_id=${bookingId}`;
+    await commerce.patch(bookingId).set({ dodoDisputeActive: true }).commit();
+    const correct = await authorizedReport('GET', true);
+    assert.deepEqual(reportReasons(correct.body), capped ? ['report_truncated'] : []);
+    const earnings = await commerce.referralEarnings({ referralId: 'referral.correct', referralCode: 'creator-correct' });
+    assert.equal(earnings.total, 0);
+    Date.now = originalNow;
+    dodoPayment.disputes[0].dispute_status = 'dispute_won';
+    dodoPayment.updated_at = new Date(originalNow()).toISOString();
+    const won = await requestFlow('dodo', { req: dodoReq(dodoPayment.disputes[0], 'dispute.won', 'dodo-won-' + scenarioNumber) });
+    assert.equal(won.status, 200, JSON.stringify(won));
+    const restored = (await row(bookingId)).payload;
+    assert.equal(restored.status, cancelled ? 'cancelled' : 'captured');
+    assert.equal(restored.dodoDisputeActive, false);
+    await commerce.patch(bookingId).set({ dodoDisputeActive: true }).commit();
+    Date.now = () => Date.parse(dodoPayment.updated_at) + 1800000;
+    const closedMismatch = await authorizedReport('GET', true);
+    assert.ok(reportReasons(closedMismatch.body).includes('dispute_not_applied'), JSON.stringify(closedMismatch.body));
+    await commerce.patch(bookingId).set({ dodoDisputeActive: false }).commit();
+    const closedCorrect = await authorizedReport('GET', true);
+    assert.deepEqual(reportReasons(closedCorrect.body), capped ? ['report_truncated'] : []);
+    const closedEarnings = await commerce.referralEarnings({ referralId: 'referral.correct', referralCode: 'creator-correct' });
+    assert.equal(closedEarnings.total, cancelled ? 0 : 1);
+    return { opened, applied, mismatch, targeted, flagControls, dateControls, correct, earnings, won, restored, closedMismatch, closedCorrect, closedEarnings };
+  });
+  for (const full of [true, false]) for (const resolvedStatus of ['dispute_won', 'dispute_cancelled']) for (const listed of [true, false]) {
+    await run(`reconcile-report-refund-during-dispute-${full ? 'full' : 'partial'}-${resolvedStatus}-${listed ? 'listed' : 'reverse'}`, async () => {
+      const observedAt = originalNow();
+      await seed('dodo', 'booked', dodoBooking({ _createdAt: new Date(observedAt - 96 * 3600000).toISOString() }));
+      dodoPayment.created_at = new Date(observedAt - 96 * 3600000).toISOString();
+      dodoPayment.updated_at = new Date(observedAt).toISOString();
+      dodoPayment.disputes = [dodoDispute('dispute_opened')];
+      const opened = await requestFlow('dodo', { req: dodoReq(dodoPayment.disputes[0], 'dispute.opened', 'dispute-open-' + scenarioNumber) });
+      assert.equal(opened.status, 200, JSON.stringify(opened));
+      assert.equal((await row(bookingId)).payload.dodoDisputeActive, true);
+      Object.assign(dodoRefund, { amount: full ? 999 : 499, is_partial: !full });
+      dodoPayment.refund_status = full ? 'full' : 'partial';
+      dodoPayment.refunds = [dodoRefund];
+      const refund = await requestFlow('dodo', { req: dodoReq(dodoRefund, 'refund.succeeded', 'dispute-refund-' + scenarioNumber) });
+      assert.equal(refund.status, 200, JSON.stringify(refund));
+      const refundedBooking = (await row(bookingId)).payload;
+      assert.equal(refundedBooking.status, full ? 'refunded' : 'pending');
+      assert.equal(refundedBooking.dodoDisputeActive, true);
+      dodoPayment.disputes = [dodoDispute(resolvedStatus)];
+      const resolutionReq = dodoReq(dodoPayment.disputes[0], 'dispute.' + resolvedStatus.slice(8), 'dispute-resolved-' + scenarioNumber);
+      let faulted = false;
+      fixture.setRequestHook(async (phase, request) => {
+        if (phase === 'before' && request.body?.p_mutations?.some(mutation => mutation.document?._id === recordId && mutation.document.dodoDisputeActive === false)) {
+          faulted = true;
+          throw new Error('Dispute resolution record transaction unavailable');
+        }
+      });
+      const failedResolution = await requestFlow('dodo', { req: resolutionReq });
+      fixture.setRequestHook(null);
+      assert.equal(faulted, true);
+      assert.equal(failedResolution.status, 503, JSON.stringify(failedResolution));
+      const pendingRecord = await record();
+      assert.equal(pendingRecord.dodoDisputeActive, true);
+      assert.equal(pendingRecord.verificationState, 'disputed');
+      assert.equal(pendingRecord.refundRequiresBookingSync, false);
+      assert.deepEqual((await row(bookingId)).payload, refundedBooking);
+      dodoList = listed ? [dodoSummary()] : [];
+      Date.now = () => observedAt + 1800000;
+      const pendingWindow = await authorizedReport('GET', true);
+      const pendingTargets = await targetReport(canonicalKeys);
+      assert.deepEqual(reportReasons(pendingWindow.body), ['dispute_not_applied'], JSON.stringify(pendingWindow.body));
+      assertTarget(pendingTargets, canonicalKeys, Array(3).fill('unresolved'), ['dispute_not_applied']);
+      Date.now = originalNow;
+      const resolved = await requestFlow('dodo', { req: resolutionReq });
+      assert.equal(resolved.status, 200, JSON.stringify(resolved));
+      const saved = await record();
+      const booking = (await row(bookingId)).payload;
+      assert.equal(saved.dodoDisputeActive, false);
+      assert.equal(saved.refundRequiresBookingSync, false);
+      assert.equal(saved.refundProcessedAmountInSubunits, dodoRefund.amount);
+      assert.equal(saved.refundState, full ? 'full' : 'partial');
+      assert.equal(booking.status, full ? 'refunded' : 'captured');
+      assert.equal(booking.dodoDisputeActive, full);
+      if (full) assert.deepEqual(booking, refundedBooking);
+      dodoList = listed ? [dodoSummary()] : [];
+      Date.now = () => observedAt + 1800000;
+      const window = await authorizedReport('GET', true);
+      const targeted = await targetReport(canonicalKeys);
+      assert.deepEqual(reportReasons(window.body), [], JSON.stringify(window.body));
+      assertTarget(targeted, canonicalKeys, Array(3).fill('recovered'), []);
+      const earnings = await commerce.referralEarnings({ referralId: 'referral.correct', referralCode: 'creator-correct' });
+      assert.equal(earnings.total, full ? 0 : 0.5);
+      const controls = [];
+      for (const [field, value] of [
+        ['dodoDisputeActive', true],
+        ['verificationState', 'disputed'],
+        ['dodoDisputeActive', 'false'],
+        ['verificationState', true],
+      ]) {
+        const original = saved[field];
+        await sql`update migration.source_documents set payload=jsonb_set(payload,ARRAY[${field}]::text[],${sql.json(value)}) where legacy_sanity_id=${recordId}`;
+        assert.deepEqual((await record())[field], value);
+        const report = await targetReport(canonicalKeys);
+        assertTarget(report, canonicalKeys, Array(3).fill('unresolved'), ['dispute_not_applied']);
+        controls.push({ id: recordId, field, report });
+        await sql`update migration.source_documents set payload=jsonb_set(payload,ARRAY[${field}]::text[],${sql.json(original)}) where legacy_sanity_id=${recordId}`;
+        assert.deepEqual((await record())[field], original);
+      }
+      dodoPayment.disputes[0].dispute_status = 'dispute_opened';
+      const unappliedOpenDispute = await targetReport(canonicalKeys);
+      assertTarget(unappliedOpenDispute, canonicalKeys, Array(3).fill('unresolved'), ['dispute_not_applied']);
+      dodoPayment.disputes[0].dispute_status = resolvedStatus;
+      for (const [id, field, value] of [
+        [recordId, 'refundRequiresBookingSync', true],
+        [bookingId, 'refundedAmount', (dodoRefund.amount - 1) / 100],
+        [recordId, 'refundCurrency', 'EUR'],
+      ]) {
+        const original = (await row(id)).payload[field];
+        await sql`update migration.source_documents set payload=jsonb_set(payload,ARRAY[${field}]::text[],${sql.json(value)}) where legacy_sanity_id=${id}`;
+        assert.deepEqual((await row(id)).payload[field], value);
+        const report = await targetReport(canonicalKeys);
+        assertTarget(report, canonicalKeys, Array(3).fill('unresolved'), ['refund_not_applied']);
+        controls.push({ id, field, report });
+        await sql`update migration.source_documents set payload=jsonb_set(payload,ARRAY[${field}]::text[],${sql.json(original)}) where legacy_sanity_id=${id}`;
+        assert.deepEqual((await row(id)).payload[field], original);
+      }
+      if (!full) {
+        await commerce.patch(bookingId).set({ dodoDisputeActive: true }).commit();
+        const report = await targetReport(canonicalKeys);
+        assertTarget(report, canonicalKeys, Array(3).fill('unresolved'), ['dispute_not_applied']);
+        controls.push({ id: bookingId, field: 'dodoDisputeActive', report });
+        await commerce.patch(bookingId).set({ dodoDisputeActive: false }).commit();
+      }
+      dodoRefund.currency = 'EUR';
+      const invalidProviderRefund = await targetReport(canonicalKeys);
+      assert.equal(invalidProviderRefund.status, 503, JSON.stringify(invalidProviderRefund.body));
+      dodoRefund.currency = 'USD';
+      const recovered = await targetReport(canonicalKeys);
+      assertTarget(recovered, canonicalKeys, Array(3).fill('recovered'), []);
+      return { opened, refund, refundedBooking, failedResolution, pendingRecord, pendingWindow, pendingTargets, resolved, saved, booking, window, targeted, earnings, controls, unappliedOpenDispute, invalidProviderRefund, recovered };
+    });
+  }
+  for (const status of ['dispute_lost', 'dispute_accepted', 'dispute_expired']) {
+    await run('reconcile-report-terminal-dispute-transaction-' + status, async () => {
+      const observedAt = originalNow();
+      await seed('dodo', 'booked', dodoBooking());
+      dodoPayment.updated_at = new Date(observedAt).toISOString();
+      dodoPayment.disputes = [dodoDispute('dispute_opened')];
+      assert.equal((await requestFlow('dodo', { req: dodoReq(dodoPayment.disputes[0], 'dispute.opened', 'opened-' + scenarioNumber) })).status, 200);
+      dodoPayment.refund_status = 'full';
+      dodoPayment.refunds = [dodoRefund];
+      assert.equal((await requestFlow('dodo', { req: dodoReq(dodoRefund, 'refund.succeeded', 'refund-' + scenarioNumber) })).status, 200);
+      const booking = (await row(bookingId)).payload;
+      dodoPayment.disputes = [dodoDispute(status)];
+      const req = dodoReq(dodoPayment.disputes[0], 'dispute.' + status.slice(8), 'terminal-' + scenarioNumber);
+      let faulted = false;
+      fixture.setRequestHook(async (phase, request) => {
+        if (phase === 'before' && request.body?.p_mutations?.some(mutation => mutation.document?._id === recordId && mutation.document.providerRecoveryTerminal === true)) {
+          faulted = true;
+          throw new Error('Terminal dispute record transaction unavailable');
+        }
+      });
+      const failed = await requestFlow('dodo', { req });
+      fixture.setRequestHook(null);
+      assert.equal(faulted, true);
+      assert.equal(failed.status, 503);
+      const pending = await record();
+      assert.equal(pending.dodoDisputeActive, true);
+      assert.equal(pending.verificationState, 'disputed');
+      assert.notEqual(pending.providerRecoveryTerminal, true);
+      assert.equal(pending.refundRequiresBookingSync, false);
+      dodoList = [];
+      Date.now = () => observedAt + 1800000;
+      const window = await authorizedReport('GET', true);
+      const targeted = await targetReport(canonicalKeys);
+      const reason = 'owner_review_dodo_' + status + '_owner_review';
+      assert.deepEqual(reportReasons(window.body), [reason]);
+      assertTarget(targeted, canonicalKeys, Array(3).fill('unresolved'), [reason]);
+      Date.now = originalNow;
+      const retry = await requestFlow('dodo', { req });
+      assert.equal(retry.status, 200);
+      assert.equal((await record()).providerRecoveryTerminal, true);
+      assert.deepEqual((await row(bookingId)).payload, booking);
+      Date.now = () => observedAt + 1800000;
+      const terminal = await targetReport(canonicalKeys);
+      assertTarget(terminal, canonicalKeys, Array(3).fill('unresolved'), [reason]);
+      return { failed, pending, window, targeted, retry, terminal, booking };
+    });
+  }
+  for (const commission of [0.29, 0.57]) await run(`reconcile-report-refund-half-cent-${commission}`, async () => {
+    await seed('dodo', 'booked', dodoBooking({ netAmount: 10, grossAmount: 10, commissionAmount: commission, commissionPercent: commission * 10 }, {
+      pricingSnapshot: { netAmount: 10, grossAmount: 10, commissionAmount: commission, commissionPercent: commission * 10 },
+      providerPublicData: { currency: 'USD', productId: 'pdt_fixture', environment: 'test_mode', taxInclusive: false, totalAmount: 1000 },
+    }));
+    dodoPayment.total_amount = 1000;
+    Object.assign(dodoRefund, { amount: 500, is_partial: true });
+    dodoPayment.refund_status = 'partial';
+    dodoPayment.refunds = [dodoRefund];
+    const refund = await requestFlow('dodo', { req: dodoReq(dodoRefund, 'refund.succeeded') });
+    assert.equal(refund.status, 200, JSON.stringify(refund));
+    const booking = (await row(bookingId)).payload;
+    const { calculateCreatorCommission } = await import('../src/server/referrals/commissionMoney.js');
+    assert.equal(booking.commissionAmount, calculateCreatorCommission({}, { originalAmount: commission, paidAmount: 10, refundedAmount: 5 }).amount);
+    assert.equal(booking.commissionCalculationVersion, 2);
+    dodoList = [dodoSummary()];
+    const report = await authorizedReport('GET', true);
+    assert.equal(report.status, 200);
+    assert.deepEqual(reportReasons(report.body), [], JSON.stringify({ booking, report: report.body }));
+    const targeted = await targetReport(canonicalKeys);
+    assertTarget(targeted, canonicalKeys, Array(3).fill('recovered'), []);
+    const controls = [];
+    for (const delta of [-0.01, 0.01]) {
+      await commerce.patch(bookingId).set({ commissionAmount: Number((booking.commissionAmount + delta).toFixed(2)) }).commit();
+      const wrong = await authorizedReport('GET', true);
+      assert.deepEqual(reportReasons(wrong.body), [delta > 0 ? 'commission_exceeds_kept_share' : 'commission_mismatch']);
+      controls.push(wrong);
+    }
+    await commerce.patch(bookingId).set({ commissionAmount: booking.commissionAmount }).commit();
+    for (const [field, value] of [['lastRefundAt', 'invalid'], ['dodoDisputeActive', 'false']]) {
+      await commerce.patch(bookingId).set({ [field]: value }).commit();
+      const wrong = await authorizedReport('GET', true);
+      assert.deepEqual(reportReasons(wrong.body), ['commission_mismatch']);
+      controls.push(wrong);
+      if (Object.hasOwn(booking, field)) await commerce.patch(bookingId).set({ [field]: booking[field] }).commit();
+      else await commerce.patch(bookingId).unset([field]).commit();
+    }
+    const earnings = await commerce.referralEarnings({ referralId: 'referral.correct', referralCode: 'creator-correct' });
+    assert.equal(earnings.total, booking.commissionAmount);
+    return { refund, booking, report, targeted, controls, earnings };
+  });
+  for (const full of [true, false]) for (const field of ['lastRefundAt', 'updatedAt']) for (const state of ['recent', 'edge', 'old', 'future', 'missing', 'null']) await run(`reconcile-report-refund-transition-${field}-${state}${full ? '' : '-partial'}`, async () => {
+    const old = new Date(Date.now() - 96 * 3600000).toISOString();
+    await seed('dodo', 'booked', dodoBooking({ _createdAt: old }));
+    dodoPayment.created_at = old;
+    dodoPayment.refund_status = full ? 'full' : 'partial';
+    dodoRefund.amount = full ? 999 : 499;
+    dodoRefund.is_partial = !full;
+    dodoPayment.refunds = [dodoRefund];
+    assert.equal((await requestFlow('dodo', { req: dodoReq(dodoRefund, 'refund.succeeded') })).status, 200);
+    const now = originalNow();
+    Date.now = () => now;
+    const transition = new Date(now + (state === 'recent' ? -3600000 : state === 'edge' ? -72 * 3600000 : state === 'old' ? -72 * 3600000 - 1 : 60000)).toISOString();
+    await commerce.patch(bookingId).set({ lastRefundAt: old, updatedAt: old, [field]: transition }).commit();
+    if (state === 'missing') await commerce.patch(bookingId).unset([field]).commit();
+    if (state === 'null') await commerce.patch(bookingId).set({ [field]: null }).commit();
+    dodoPayment.refund_status = null;
+    dodoPayment.refunds = [];
+    dodoList = [];
+    const report = await authorizedReport('GET', true);
+    assert.equal(report.status, 200);
+    const selected = state === 'recent' || state === 'edge';
+    assert.deepEqual(reportReasons(report.body), selected ? ['refund_not_applied'] : []);
+    assert.equal(report.providerRequests.filter(request => request.path === '/payments/payment-fixture').length, selected ? 1 : 0);
+    const targeted = await targetReport(canonicalKeys);
+    assertTarget(targeted, canonicalKeys, Array(3).fill('unresolved'), ['refund_not_applied']);
+    return { field, state, transition, report, targeted };
+  });
+  for (const oldBooking of [false, true]) for (const variant of [
+    { name: 'matched' },
+    { name: 'unapplied', payment: { refund_status: null, refunds: [] }, reason: 'refund_not_applied' },
+    { name: 'partial', payment: { refund_status: 'partial' }, refund: { amount: 333, is_partial: true }, reason: 'refund_not_applied' },
+    { name: 'currency', refund: { currency: 'EUR' }, unavailable: true },
+    { name: 'malformed', payment: { refunds: null }, unavailable: true },
+    { name: 'binding', payment: { checkout_session_id: 'checkout-other' }, reason: 'dodo_payment_binding_mismatch' },
+    { name: 'recipient', booking: { referralCode: 'creator-wrong' }, reason: 'referral_binding_mismatch' },
+    { name: 'missing', providerStatus: 404, reason: 'booking_without_payment' },
+    { name: 'unavailable', providerStatus: 503, unavailable: true },
+    { name: 'grace', fresh: true },
+    { name: 'aged-out', agedOut: true, payment: { refund_status: null, refunds: [] }, reason: 'refund_not_applied' },
+  ]) {
+    await run(`reconcile-report-reverse-refunded-${variant.name}${oldBooking ? '-old-booking' : ''}`, async () => {
+      await seed('dodo', 'booked', dodoBooking(oldBooking ? { _createdAt: new Date(Date.now() - 96 * 3600000).toISOString() } : {}));
+      dodoPayment.created_at = new Date(Date.now() - 73 * 3600000).toISOString();
+      dodoPayment.refund_status = 'full';
+      dodoPayment.refunds = [dodoRefund];
+      const refund = await requestFlow('dodo', { req: dodoReq(dodoRefund, 'refund.succeeded') });
+      assert.equal(refund.status, 200, JSON.stringify(refund));
+      assert.equal((await row(bookingId)).payload.status, 'refunded');
+      if (variant.booking) await commerce.patch(bookingId).set(variant.booking).commit();
+      if (variant.agedOut) await commerce.patch(bookingId).set({ _createdAt: dodoPayment.created_at, lastRefundAt: dodoPayment.created_at, updatedAt: dodoPayment.created_at }).commit();
+      if (variant.refund) Object.assign(dodoRefund, variant.refund);
+      Object.assign(dodoPayment, variant.payment);
+      if (variant.fresh) dodoPayment.updated_at = new Date().toISOString();
+      if (variant.providerStatus) providerHook = (request, req, res) => {
+        if (request.path !== '/payments/payment-fixture') return false;
+        res.writeHead(variant.providerStatus, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ code: 'fixture_payment_unavailable' }));
+        return true;
+      };
+      dodoList = [];
+      const window = await authorizedReport('GET', true);
+      const targeted = await targetReport(canonicalKeys);
+      if (variant.unavailable) {
+        for (const result of [window, targeted]) {
+          assert.equal(result.status, 503, JSON.stringify(result.body));
+          assert.equal(Object.hasOwn(result.body, 'items'), false);
+        }
+      } else {
+        assert.equal(window.status, 200, JSON.stringify(window.body));
+        assert.deepEqual(reportReasons(window.body), variant.reason && !variant.agedOut ? [variant.reason] : []);
+        assert.deepEqual(window.body.complete, { payments: true, bookings: true, records: true, items: true });
+        assert.equal(targeted.status, 200, JSON.stringify(targeted.body));
+        const state = variant.fresh ? 'unknown' : variant.reason ? 'unresolved' : 'recovered';
+        assert.deepEqual(targeted.body.checks.map(check => check.state), canonicalKeys.map(() => state));
+        assert.equal(window.providerRequests.filter(request => request.path === '/payments/payment-fixture').length, variant.agedOut ? 0 : 1);
+        assert.equal(targeted.providerRequests.filter(request => request.path === '/payments/payment-fixture').length, 1);
+      }
+      return { refund, provider: dodoPayment, window, targeted };
+    });
+  }
+  for (const variant of [
+    { name: 'dispute-active', record: { dodoDisputeActive: true, verificationState: 'disputed' } },
+    { name: 'dispute-verification-pending', record: { dodoDisputeActive: false, verificationState: 'disputed' } },
+    { name: 'dispute-flag-malformed', importedDisputeFlag: 'false' },
+    { name: 'sync-pending', record: { refundRequiresBookingSync: true } },
+    { name: 'sync-unknown', record: { refundRequiresBookingSync: null } },
+    { name: 'release-pending', record: { resourceReleasePending: true } },
+    { name: 'missing-release-proof', record: { refundBookingSync: {} } },
+    { name: 'contradictory-release-proof', record: { refundBookingSync: { bookingId, releasedUnbookedPaymentResources: true } } },
+    { name: 'recovery-pending', record: { recoveryReason: 'refund_requires_booking_sync' } },
+    { name: 'recovery-exhausted', record: { reconciliationRecoveryTerminal: true } },
+    { name: 'unfinished-status', record: { status: 'needs_recovery' } },
+    { name: 'partial-local-state', record: { refundState: 'partial' } },
+    { name: 'wrong-local-total', record: { refundProcessedAmountInSubunits: 998 } },
+    { name: 'wrong-local-currency', importedCurrency: 'EUR' },
+    { name: 'dangling-booking', record: { bookingId: 'booking-missing' } },
+    { name: 'owner-review', record: { status: 'needs_recovery', providerRecoveryTerminal: true, providerRecoveryTerminalReason: 'dodo_refund_mismatch' } },
+    { name: 'partial-provider', payment: { refund_status: 'partial' }, refund: { amount: 500, is_partial: true } },
+    { name: 'missing-provider-refunds', payment: { refunds: [] }, unavailable: true },
+    { name: 'wrong-provider-currency', refund: { currency: 'EUR' }, unavailable: true },
+    { name: 'unknown-dispute', payment: { disputes: [{ dispute_id: 'dispute-fixture', payment_id: 'payment-fixture', currency: 'USD', dispute_status: 'unknown', dispute_stage: 'dispute' }] }, unavailable: true },
+  ]) {
+    await run(`reconcile-report-unbooked-refund-${variant.name}`, async () => {
+      await seed('dodo', 'started', { ...dodoBooking({}, { bookingId: '' }), booking: null });
+      dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+      dodoPayment.refund_status = 'full';
+      dodoPayment.refunds = [dodoRefund];
+      const refund = await requestFlow('dodo', { req: dodoReq(dodoRefund, 'refund.succeeded') });
+      assert.equal(refund.status, 200, JSON.stringify(refund));
+      if (variant.record) await commerce.patch(recordId).set(variant.record).commit();
+      if (variant.importedCurrency) await sql`update migration.source_documents set payload=jsonb_set(payload,'{refundCurrency}',${sql.json(variant.importedCurrency)}) where legacy_sanity_id=${recordId}`;
+      if (variant.importedDisputeFlag) await sql`update migration.source_documents set payload=jsonb_set(payload,'{dodoDisputeActive}',${sql.json(variant.importedDisputeFlag)}) where legacy_sanity_id=${recordId}`;
+      if (variant.refund) Object.assign(dodoRefund, variant.refund);
+      Object.assign(dodoPayment, variant.payment);
+      dodoList = [dodoSummary()];
+      const window = await authorizedReport('GET', true);
+      const targeted = await targetReport(canonicalKeys.slice(0, 2));
+      for (const result of [window, targeted]) {
+        if (variant.unavailable) assert.equal(result.status, 503, JSON.stringify(result.body));
+        else {
+          assert.equal(result.status, 200, JSON.stringify(result.body));
+          assert.ok(result.body.count > 0, JSON.stringify(result.body));
+          assert.ok((result.body.checks || []).every(check => check.state === 'unresolved'));
+        }
+      }
+      return { refund, window, targeted };
+    });
+  }
+  await run('reconcile-report-full-refund-zero-commission', async () => {
+    await seed('dodo', 'refunded', dodoBooking({
+      status: 'refunded',
+      refundedAmount: 9.99,
+      refundStatus: 'full',
+      commissionAmount: 0,
+      dodoOriginalCommissionAmount: 1,
+    }));
+    dodoPayment.refund_status = 'full';
+    dodoPayment.refunds = [dodoRefund];
+    dodoList = [dodoSummary()];
+    return expectReport([]);
+  });
+  await run('reconcile-report-partial-zero-original-earnings', async () => {
+    await seed('dodo', 'booked', dodoBooking({
+      refundedAmount: 9.98,
+      refundStatus: 'partial',
+      commissionAmount: 0,
+    }));
+    dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+    dodoPayment.refund_status = 'partial';
+    dodoPayment.refunds = [{ ...dodoRefund, amount: 998, is_partial: true }];
+    dodoList = [dodoSummary()];
+    const booking = (await row(bookingId)).payload;
+    assert.equal(Object.hasOwn(booking, 'dodoOriginalCommissionAmount'), false);
+    const report = await authorizedReport();
+    const earnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    await commerce.patch(bookingId).set({ dodoOriginalCommissionAmount: 1 }).commit();
+    const control = await authorizedReport();
+    const controlEarnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    const proof = { booking, provider: dodoPayment, report, earnings, control, controlEarnings };
+    assert.equal(report.status, 200);
+    assert.equal(earnings.total, 1, JSON.stringify(earnings));
+    assert.equal(control.status, 200);
+    assert.equal(control.body.count, 0, JSON.stringify(control.body));
+    assert.deepEqual(control.body.items, []);
+    assert.equal(controlEarnings.total, 0, JSON.stringify(controlEarnings));
+    assert.deepEqual(reportReasons(report.body), ['commission_mismatch'], JSON.stringify(proof));
+    return proof;
+  });
+  await run('reconcile-report-partial-nonzero-original-earnings', async () => {
+    await seed('dodo', 'booked', dodoBooking({
+      refundedAmount: 3.33,
+      refundStatus: 'partial',
+      commissionAmount: 0.67,
+    }));
+    dodoPayment.refund_status = 'partial';
+    dodoPayment.refunds = [{ ...dodoRefund, amount: 333, is_partial: true }];
+    dodoList = [dodoSummary()];
+    const booking = (await row(bookingId)).payload;
+    assert.equal(Object.hasOwn(booking, 'dodoOriginalCommissionAmount'), false);
+    const report = await expectReport(['commission_mismatch']);
+    const earnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    await commerce.patch(bookingId).set({ dodoOriginalCommissionAmount: 1 }).commit();
+    const control = await expectReport([]);
+    const controlEarnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    assert.equal(earnings.total, 0.67, JSON.stringify(earnings));
+    assert.equal(controlEarnings.total, 0.67, JSON.stringify(controlEarnings));
+    return { booking, provider: dodoPayment, report, earnings, control, controlEarnings };
+  });
+  await run('reconcile-report-full-refund-no-original-earnings', async () => {
+    await seed('dodo', 'refunded', dodoBooking({
+      status: 'refunded',
+      refundedAmount: 9.99,
+      refundStatus: 'full',
+      commissionAmount: 0,
+    }));
+    dodoPayment.refund_status = 'full';
+    dodoPayment.refunds = [dodoRefund];
+    dodoList = [dodoSummary()];
+    const booking = (await row(bookingId)).payload;
+    assert.equal(Object.hasOwn(booking, 'dodoOriginalCommissionAmount'), false);
+    const report = await expectReport([]);
+    const earnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    assert.equal(earnings.total, 0, JSON.stringify(earnings));
+    return { booking, provider: dodoPayment, report, earnings };
+  });
+  const zeroCommissionFixture = async (bookingChanges = {}, percent = 0.04) => {
+    const { resolveBookingPricing } = await import('../src/server/api/ref/pricing.js');
+    const quote = await resolveBookingPricing({
+      packageTitle: 'Vertex Essentials',
+      paymentProvider: 'dodo',
+      client: commerce,
+      pricingInputs: {
+        packageDoc: { _id: 'package.zero-commission', title: 'Vertex Essentials', price: '$9.99' },
+        referralDoc: {
+          _id: 'referral.correct',
+          slug: { current: 'creator-correct' },
+          currentCommissionPercent: percent,
+          currentDiscountPercent: 0,
+        },
+        couponDoc: null,
+      },
+    });
+    assert.equal(quote.effectiveGrossAmount, 9.99);
+    assert.equal(quote.effectiveNetAmount, 9.99);
+    assert.equal(quote.effectiveCommissionPercent, percent);
+    assert.equal(quote.commissionAmount, 0);
+    assert.equal(quote.effectiveReferralId, 'referral.correct');
+    assert.equal(quote.effectiveReferralCode, 'creator-correct');
+    await seed('dodo', bookingChanges.status === 'refunded' ? 'refunded' : 'booked', dodoBooking({
+      grossAmount: quote.effectiveGrossAmount,
+      netAmount: quote.effectiveNetAmount,
+      commissionAmount: quote.commissionAmount,
+      commissionPercent: quote.effectiveCommissionPercent,
+      referralCode: quote.effectiveReferralCode,
+      referral: { _type: 'reference', _ref: quote.effectiveReferralId },
+      ...bookingChanges,
+    }, { pricingSnapshot: {
+      grossAmount: quote.effectiveGrossAmount,
+      netAmount: quote.effectiveNetAmount,
+      commissionAmount: quote.commissionAmount,
+      commissionPercent: quote.effectiveCommissionPercent,
+      effectiveReferralCode: quote.effectiveReferralCode,
+      effectiveReferralId: quote.effectiveReferralId,
+    } }));
+    dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+    dodoList = [dodoSummary()];
+    return quote;
+  };
+  await run('reconcile-report-unrefunded-zero-commission-consumer', async () => {
+    const quote = await zeroCommissionFixture();
+    const secondRecordId = 'paymentRecord.zero-two';
+    const secondBookingId = 'booking.zero-two';
+    const secondPaymentId = 'payment-zero-two';
+    const secondOrderId = 'order-zero-two';
+    const { _id: firstBookingId, _rev: bookingRevision, ...bookingCopy } = (await row(bookingId)).payload;
+    await commerce.create({
+      ...bookingCopy,
+      _id: secondBookingId,
+      paymentRecordId: secondRecordId,
+      dodoPaymentId: secondPaymentId,
+      dodoCheckoutSessionId: secondOrderId,
+    });
+    const { _id: firstRecordId, _rev: recordRevision, ...recordCopy } = await record();
+    await commerce.create({
+      ...recordCopy,
+      _id: secondRecordId,
+      bookingId: secondBookingId,
+      providerPaymentId: secondPaymentId,
+      providerOrderId: secondOrderId,
+      providerIdempotencyKey: 'zero-two-key',
+      sessionScope: 'zero-two-session',
+    });
+    await commerce.patch(bookingId).set({ paymentRecordId: recordId }).commit();
+    await commerce.patch(secondBookingId).set({ paymentRecordId: secondRecordId }).commit();
+    const secondPayment = {
+      ...dodoPayment,
+      payment_id: secondPaymentId,
+      checkout_session_id: secondOrderId,
+      metadata: { paymentRecordId: secondRecordId },
+    };
+    providerHook = (request, req, res) => {
+      if (request.path !== `/payments/${secondPaymentId}`) return;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(secondPayment));
+      return true;
+    };
+    dodoList = [dodoSummary(), dodoSummary(secondPayment)];
+    const nativeBookings = await sql`select legacy_sanity_id,payment_record_id,booking_payload from commerce.bookings order by legacy_sanity_id`;
+    const nativeRecords = await sql`select id,legacy_sanity_id from commerce.payment_records order by legacy_sanity_id`;
+    const recordIdentities = new Map(nativeRecords.map((payment) => [payment.id, payment.legacy_sanity_id]));
+    assert.equal(nativeBookings.length, 2);
+    assert.equal(nativeRecords.length, 2);
+    assert.equal(new Set(nativeBookings.map((booking) => booking.payment_record_id)).size, 2);
+    for (const booking of nativeBookings) {
+      assert.ok(booking.payment_record_id);
+      assert.equal(recordIdentities.get(booking.payment_record_id), booking.booking_payload.paymentRecordId);
+      assert.equal(booking.booking_payload.commissionAmount, 0);
+      assert.equal(Object.hasOwn(booking.booking_payload, 'dodoOriginalCommissionAmount'), false);
+    }
+    const frozenRecords = [await record(), (await row(secondRecordId)).payload];
+    const frozenCommissionsSum = frozenRecords.reduce((sum, payment) => sum + payment.pricingSnapshot.commissionAmount, 0);
+    assert.equal(frozenCommissionsSum, 0);
+    const report = await authorizedReport('GET', true);
+    const targets = [...canonicalKeys, 'payment:' + secondPaymentId, 'record:' + secondRecordId, 'booking:' + secondBookingId];
+    const targeted = await targetReport(targets);
+    const earnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    assert.equal(report.status, 200, JSON.stringify(report.body));
+    assert.equal(earnings.total, 0.01, JSON.stringify(earnings));
+    for (const id of [bookingId, secondBookingId]) {
+      await commerce.patch(id).set({ dodoOriginalCommissionAmount: 0 }).commit();
+    }
+    const control = await authorizedReport('GET', true);
+    const targetedControl = await targetReport(targets);
+    const controlEarnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    assert.equal(control.status, 200);
+    assert.equal(control.body.count, 0, JSON.stringify(control.body));
+    assert.deepEqual(control.body.items, []);
+    assert.equal(controlEarnings.total, 0, JSON.stringify(controlEarnings));
+    const proof = {
+      quote, frozenRecords, frozenCommissionsSum, nativeBookings, nativeRecords,
+      providerPayments: [dodoPayment, secondPayment], report, earnings, control, controlEarnings,
+      targeted, targetedControl,
+      engine: JSON.parse(sourceText('node_modules/next/package.json')).version,
+      pricingSha256: crypto.createHash('sha256').update(sourceText('src/server/api/ref/pricing.js')).digest('hex'),
+    };
+    assert.deepEqual(report.body.items, [
+      { key: 'payment:payment-fixture', id: 'payment-fixture', ref: bookingId, amount: '9.99', currency: 'USD', reason: 'commission_mismatch' },
+      { key: 'payment:' + secondPaymentId, id: secondPaymentId, ref: secondBookingId, amount: '9.99', currency: 'USD', reason: 'commission_mismatch' },
+    ], JSON.stringify(proof));
+    assert.equal(report.body.count, 2);
+    assert.equal(targeted.status, 200);
+    assert.equal(targeted.body.count, 2);
+    assert.deepEqual(targeted.body.checks.map((check) => check.state), Array(6).fill('unresolved'));
+    assert.ok(targeted.body.checks.every((check) => check.items[0].reason === 'commission_mismatch'));
+    assert.equal(targetedControl.status, 200);
+    assert.equal(targetedControl.body.count, 0);
+    assert.deepEqual(targetedControl.body.checks.map((check) => check.state), Array(6).fill('recovered'));
+    for (const result of [targeted, targetedControl]) {
+      assert.equal(result.providerRequests.length, 2);
+      assert.ok(result.providerRequests.every((request) => !request.path.startsWith('/payments?')));
+    }
+    return proof;
+  });
+  for (const [name, status, dispute] of [
+    ['single', 'captured', null],
+    ['completed', 'completed', null],
+    ['resolved-dispute', 'captured', 'dispute_won'],
+  ]) {
+    await run(`reconcile-report-${name}-zero-commission-consumer`, async () => {
+      const quote = await zeroCommissionFixture({ status });
+      if (dispute) dodoPayment.disputes = [dodoDispute(dispute)];
+      const report = await expectReport(['commission_mismatch']);
+      const earnings = await commerce.referralEarnings({
+        referralId: 'referral.correct', referralCode: 'creator-correct',
+      });
+      assert.equal(earnings.total, 0, JSON.stringify(earnings));
+      await commerce.patch(bookingId).set({ dodoOriginalCommissionAmount: 0 }).commit();
+      const control = await expectReport([]);
+      const controlEarnings = await commerce.referralEarnings({
+        referralId: 'referral.correct', referralCode: 'creator-correct',
+      });
+      assert.equal(controlEarnings.total, 0, JSON.stringify(controlEarnings));
+      return {
+        quote, report, earnings, control, controlEarnings,
+        nativeRoundingLimit: 'A single positive unrounded fallback rounds to zero; multiple rows can accumulate.',
+      };
+    });
+  }
+  await run('reconcile-report-zero-rate-creator-consumer', async () => {
+    const quote = await zeroCommissionFixture({}, 0);
+    const report = await expectReport([]);
+    const earnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    assert.equal(earnings.total, 0, JSON.stringify(earnings));
+    return { quote, report, earnings };
+  });
+  for (const state of ['active-dispute', 'full-refund']) {
+    await run(`reconcile-report-${state}-zero-commission-consumer`, async () => {
+      const refunded = state === 'full-refund';
+      const quote = await zeroCommissionFixture(refunded ? {
+        status: 'refunded', refundedAmount: 9.99, refundStatus: 'full',
+      } : { status: 'pending', dodoDisputeActive: true });
+      if (refunded) {
+        dodoPayment.refund_status = 'full';
+        dodoPayment.refunds = [dodoRefund];
+      } else {
+        dodoPayment.disputes = [dodoDispute('dispute_opened')];
+        await commerce.patch(recordId).set({ status: 'needs_recovery', dodoDisputeActive: true, verificationState: 'disputed' }).commit();
+      }
+      const booking = (await row(bookingId)).payload;
+      assert.equal(Object.hasOwn(booking, 'dodoOriginalCommissionAmount'), false);
+      const report = await expectReport([]);
+      const earnings = await commerce.referralEarnings({
+        referralId: 'referral.correct', referralCode: 'creator-correct',
+      });
+      assert.equal(earnings.total, 0, JSON.stringify(earnings));
+      return { quote, booking, report, earnings };
+    });
+  }
+  await run('reconcile-report-partial-disputed-original-earnings', async () => {
+    await seed('dodo', 'booked', dodoBooking({
+      status: 'pending',
+      dodoDisputeActive: true,
+      refundedAmount: 9.98,
+      refundStatus: 'partial',
+      commissionAmount: 0,
+    }, { status: 'needs_recovery', dodoDisputeActive: true, verificationState: 'disputed' }));
+    dodoPayment.refund_status = 'partial';
+    dodoPayment.refunds = [{ ...dodoRefund, amount: 998, is_partial: true }];
+    dodoPayment.disputes = [dodoDispute('dispute_opened')];
+    dodoList = [dodoSummary()];
+    const booking = (await row(bookingId)).payload;
+    assert.equal(Object.hasOwn(booking, 'dodoOriginalCommissionAmount'), false);
+    const report = await expectReport(['commission_mismatch']);
+    const earnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    await commerce.patch(bookingId).set({ dodoOriginalCommissionAmount: 1 }).commit();
+    const control = await expectReport([]);
+    const controlEarnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    assert.equal(earnings.total, 0, JSON.stringify(earnings));
+    assert.equal(controlEarnings.total, 0, JSON.stringify(controlEarnings));
+    return { booking, provider: dodoPayment, report, earnings, control, controlEarnings };
+  });
+  for (const status of ['dispute_opened', 'dispute_won', 'dispute_cancelled']) {
+    await run(`reconcile-report-commission-${status}`, async () => {
+      const active = status === 'dispute_opened';
+      await seed('dodo', 'booked', dodoBooking({
+        status: active ? 'pending' : 'captured',
+        dodoDisputeActive: active,
+        commissionAmount: active ? 0 : 1,
+        dodoOriginalCommissionAmount: 1,
+      }, { status: active ? 'needs_recovery' : 'booked', dodoDisputeActive: active, verificationState: active ? 'disputed' : 'server_verified' }));
+      dodoPayment.disputes = [dodoDispute(status)];
+      dodoList = [dodoSummary()];
+      return expectReport([]);
+    });
+  }
+  const reverseCases = [
+    { name: 'clean' },
+    {
+      name: 'partial-refund-applied', refund: 333,
+      booking: { refundedAmount: 3.33, refundStatus: 'partial', commissionAmount: 0.67, dodoOriginalCommissionAmount: 1 },
+    },
+    { name: 'partial-refund-unapplied', refund: 333, reason: 'refund_not_applied' },
+    { name: 'dispute-unapplied', dispute: 'dispute_opened', reason: 'dispute_not_applied' },
+    {
+      name: 'owner-review', reason: 'owner_review_dodo_currency_mismatch',
+      record: { providerRecoveryTerminal: true, providerRecoveryTerminalReason: 'dodo_currency_mismatch' },
+    },
+    { name: 'booking-binding', booking: { dodoCheckoutSessionId: 'checkout-other' }, reason: 'payment_record_mismatch' },
+    { name: 'record-binding', record: { providerOrderId: 'checkout-other' }, reason: 'dodo_payment_binding_mismatch' },
+    { name: 'record-missing', payment: { metadata: { paymentRecordId: 'paymentRecord.absent' } }, reason: 'payment_without_record' },
+    { name: 'other-product', payment: { product_cart: [{ product_id: 'pdt_other_brand', quantity: 1 }] }, reason: 'dodo_product_mismatch' },
+    { name: 'currency', payment: { currency: 'EUR' }, reason: 'dodo_currency_mismatch' },
+    { name: 'amount', payment: { total_amount: 1999 }, reason: 'dodo_amount_mismatch' },
+    { name: 'undercredit', booking: { commissionAmount: 0.5 }, reason: 'commission_mismatch' },
+    { name: 'recipient', booking: { referralCode: 'creator-wrong' }, reason: 'referral_binding_mismatch' },
+    { name: 'frozen-pricing', record: { pricingSnapshot: { commissionAmount: undefined } }, reason: 'frozen_pricing_unavailable' },
+  ];
+  for (const variant of reverseCases) {
+    await run(`reconcile-report-reverse-old-${variant.name}`, async () => {
+      await seed('dodo', variant.record?.providerRecoveryTerminal ? 'needs_recovery' : 'booked', dodoBooking(
+        variant.booking,
+        { ...variant.record, updatedAt: new Date().toISOString() },
+      ));
+      dodoPayment = {
+        ...dodoPayment,
+        ...variant.payment,
+        created_at: new Date(Date.now() - 73 * 3600000).toISOString(),
+      };
+      if (variant.refund) {
+        dodoPayment.refund_status = 'partial';
+        dodoPayment.refunds = [{ ...dodoRefund, amount: variant.refund, is_partial: true }];
+      }
+      if (variant.dispute) dodoPayment.disputes = [dodoDispute(variant.dispute)];
+      dodoList = [];
+      return expectReport(variant.reason ? [variant.reason] : []);
+    });
+  }
+  await run('reconcile-report-reverse-old-refund-unavailable', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    dodoPayment.created_at = new Date(Date.now() - 73 * 3600000).toISOString();
+    dodoPayment.refund_status = 'partial';
+    dodoPayment.refunds = [{ ...dodoRefund, amount: null, currency: null }];
+    providerHook = (request, req, res) => {
+      if (request.path !== '/refunds/refund-fixture') return;
+      res.writeHead(503, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ code: 'fixture_refund_unavailable' }));
+      return true;
+    };
+    const result = await authorizedReport();
+    assert.equal(result.status, 503, JSON.stringify(result.body));
+    assert.equal(Object.hasOwn(result.body, 'items'), false);
+    assert.ok(providerRequests.some((request) => request.path === '/refunds/refund-fixture'));
+    return result;
+  });
+  await run('reconcile-report-duplicate-canonical-payment', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    dodoList = [dodoSummary(), dodoSummary()];
+    const result = await expectReport([]);
+    assert.equal(providerRequests.filter((request) => request.path === '/payments/payment-fixture').length, 1);
+    return result;
+  });
+  await run('reconcile-report-bounded-payment-lookups', async () => {
+    dodoPayment.metadata = {};
+    const payments = Array.from({ length: 32 }, (_, index) => ({ ...structuredClone(dodoPayment), payment_id: `payment-parallel-${index}` }));
+    dodoList = payments.map(dodoSummary);
+    let active = 0, maximum = 0;
+    providerHook = async (_request, req, res) => {
+      const payment = payments.find(payment => req.url === `/payments/${payment.payment_id}`);
+      if (!payment) return false;
+      active++;
+      maximum = Math.max(maximum, active);
+      await new Promise(resolve => setTimeout(resolve, (32 - payments.indexOf(payment)) * 2));
+      active--;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(payment));
+      return true;
+    };
+    const result = await authorizedReport('GET', true);
+    assert.equal(result.status, 200);
+    assert.ok(maximum > 1 && maximum <= 8, `expected 2..8 concurrent lookups, observed ${maximum}`);
+    assert.deepEqual(result.body.items.map(item => item.id), payments.map(payment => payment.payment_id));
+    assert.ok(result.body.items.every(item => item.reason === 'payment_without_record'));
+    return { maximumConcurrency: maximum, payments: payments.length, report: result.body, readOnly: true };
+  });
+  await run('reconcile-report-distinct-booking-identities', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    await commerce.patch(bookingId).set({ paymentRecordId: recordId }).commit();
+    const { _id, _rev, ...canonical } = (await row(bookingId)).payload;
+    for (const id of ['booking.extra-one', 'booking.extra-two']) {
+      await commerce.create({ ...canonical, _id: id });
+    }
+    dodoList = [dodoSummary()];
+    const result = await expectReport(['payment_record_mismatch', 'payment_record_mismatch']);
+    assert.deepEqual(result.body.items.map((item) => item.ref).sort(), ['booking.extra-one', 'booking.extra-two']);
+    assert.equal(providerRequests.filter((request) => request.path === '/payments/payment-fixture').length, 1);
+    return result;
+  });
+  for (const foreignState of ['valid', 'malformed', 'unavailable']) {
+    await run(`reconcile-report-foreign-${foreignState}-with-site-mismatch`, async () => {
+      await seed('dodo', 'started', { ...dodoBooking({}, { bookingId: '' }), booking: null });
+      dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+      const foreign = { ...structuredClone(dodoPayment), payment_id: 'payment-foreign', metadata: {}, product_cart: [{ product_id: 'pdt_foreign', quantity: 1 }] };
+      if (foreignState === 'malformed') foreign.refunds = null;
+      dodoList = [dodoSummary(), dodoSummary(foreign)];
+      providerHook = (request, req, res) => {
+        if (request.path !== '/payments/payment-foreign') return false;
+        res.writeHead(foreignState === 'unavailable' ? 503 : 200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(foreignState === 'unavailable' ? { code: 'fixture_unavailable' } : foreign));
+        return true;
+      };
+      const result = await authorizedReport('GET', true);
+      if (foreignState === 'valid') {
+        assert.equal(result.status, 200);
+        assert.deepEqual(reportReasons(result.body), ['payment_without_booking']);
+        assert.equal(result.body.complete.payments, true);
+      } else {
+        assert.equal(result.status, 503);
+        assert.equal(result.body.ok, false);
+        assert.equal(Object.hasOwn(result.body, 'items'), false);
+      }
+      return { foreignState, result, refusesIncompleteAudit: foreignState !== 'valid' };
+    });
+  }
+  for (const marker of [false, null, 'missing']) {
+    await run('reconcile-report-review-group-referral-application-' + marker, async () => {
+      await seed('dodo', 'booked', dodoBooking({ referralAccountingApplied: marker }));
+      if (marker === 'missing') await commerce.patch(bookingId).unset(['referralAccountingApplied']).commit();
+      await documents.createOrReplace({ _id: 'referral.correct', _type: 'referral', slug: { _type: 'slug', current: 'creator-correct' }, registrationStatus: 'verified', successfulReferrals: 0 });
+      dodoList = [dodoSummary()];
+      const window = await authorizedReport('GET', true);
+      const targeted = await targetReport(canonicalKeys);
+      const ledger = await sql`select * from commerce.referral_ledger`;
+      assert.equal(ledger.length, 0);
+      assert.equal((await row('referral.correct')).payload.successfulReferrals, 0);
+      assert.deepEqual(reportReasons(window.body), ['referral_accounting_not_applied']);
+      assertTarget(targeted, canonicalKeys, Array(3).fill('unresolved'), ['referral_accounting_not_applied']);
+      return { window, targeted, ledger, marker };
+    });
+  }
+  for (const applied of [true, false]) await run('reconcile-report-review-group-referral-full-refund-' + applied, async () => {
+    await seed('dodo', 'booked', dodoBooking({ referralAccountingApplied: applied }));
+    await documents.createOrReplace({ _id: 'referral.correct', _type: 'referral', slug: { _type: 'slug', current: 'creator-correct' }, registrationStatus: 'verified', successfulReferrals: applied ? 1 : 0 });
+    dodoPayment.refund_status = 'full';
+    dodoPayment.refunds = [dodoRefund];
+    const refund = await requestFlow('dodo', { req: dodoReq(dodoRefund, 'refund.succeeded') });
+    assert.equal(refund.status, 200, JSON.stringify(refund));
+    const booking = (await row(bookingId)).payload;
+    assert.equal(booking.referralReversedAfterRefund, applied);
+    assert.equal((await row('referral.correct')).payload.successfulReferrals, 0);
+    dodoList = [dodoSummary()];
+    const window = await authorizedReport('GET', true);
+    const targeted = await targetReport(canonicalKeys);
+    assert.deepEqual(reportReasons(window.body), []);
+    assertTarget(targeted, canonicalKeys, Array(3).fill('recovered'), []);
+    const controls = [];
+    for (const field of ['refundAccountingAppliedAt', 'referralReversedAfterRefund']) {
+      await commerce.patch(bookingId).unset([field]).commit();
+      const missing = await authorizedReport('GET', true);
+      const checks = await targetReport(canonicalKeys);
+      assert.deepEqual(reportReasons(missing.body), ['referral_accounting_not_applied']);
+      assertTarget(checks, canonicalKeys, Array(3).fill('unresolved'), ['referral_accounting_not_applied']);
+      controls.push({ field, window: missing, targeted: checks });
+      await commerce.patch(bookingId).set({ [field]: booking[field] }).commit();
+    }
+    return { applied, refund, booking, window, targeted, controls };
+  });
+  await run('reconcile-report-review-group-referral-revision-transition', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    dodoList = [dodoSummary()];
+    let expected;
+    const race = () => {
+      expected = null;
+      fixture.setRequestHook(async (phase, request) => {
+        if (phase === 'before' && request.path === '/rest/v1/rpc/roo_booking_referral_audit' && !expected) {
+          await commerce.patch(bookingId).set({ customerName: 'Fixture rename ' + crypto.randomUUID() }).commit();
+          expected = await snapshot({ receipts: true });
+        }
+      });
+    };
+    race();
+    const window = await authorizedReport('GET', true, {}, () => expected);
+    assert.deepEqual(reportReasons(window.body), []);
+    assert.equal(window.body.complete.payments, true);
+    assert.equal(window.databaseRequests.filter(request => request.rpc === 'roo_booking_referral_audit').length, 2);
+    race();
+    const targeted = await targetReport(canonicalKeys, () => expected);
+    assertTarget(targeted, canonicalKeys, Array(3).fill('recovered'), []);
+    assert.equal(targeted.databaseRequests.filter(request => request.rpc === 'roo_booking_referral_audit').length, 2);
+    fixture.setRequestHook(null);
+    const stable = await targetReport(canonicalKeys);
+    assertTarget(stable, canonicalKeys, Array(3).fill('recovered'), []);
+    return { window, targeted, stable, noAuditWritesBeyondConcurrentFixtureMutation: true };
+  });
+  await run('reconcile-report-review-group-referral-proof-unavailable', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    dodoList = [dodoSummary()];
+    const grants = await sql`select
+      has_function_privilege('anon','public.roo_booking_referral_audit(text)','execute') as anon,
+      has_function_privilege('authenticated','public.roo_booking_referral_audit(text)','execute') as authenticated,
+      has_function_privilege('service_role','public.roo_booking_referral_audit(text)','execute') as service`;
+    assert.deepEqual({ ...grants[0] }, { anon: false, authenticated: false, service: true });
+    fixture.setRequestHook((phase, request) => {
+      if (phase === 'before' && request.path === '/rest/v1/rpc/roo_booking_referral_audit') throw new Error('Synthetic native credit proof unavailable');
+    });
+    const window = await authorizedReport('GET', true);
+    const targeted = await targetReport(canonicalKeys);
+    assert.equal(window.status, 503);
+    assert.equal(targeted.status, 503);
+    fixture.setRequestHook(null);
+    const recovered = await targetReport(canonicalKeys);
+    assertTarget(recovered, canonicalKeys, Array(3).fill('recovered'), []);
+    await sql.unsafe("drop function public.roo_booking_referral_audit(text); notify pgrst, 'reload schema';");
+    let removed;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      removed = await fixture.client.rpc('roo_booking_referral_audit', { p_booking_id: bookingId });
+      if (removed.error?.code === 'PGRST202') break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.equal(removed.error?.code, 'PGRST202');
+    const unavailable = await authorizedReport('GET', true);
+    assert.equal(unavailable.status, 503);
+    await fixture.apply('20261024010000_read_booking_referral_audit.sql');
+    let installed;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      installed = await fixture.client.rpc('roo_booking_referral_audit', { p_booking_id: bookingId });
+      if (!installed.error) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.equal(installed.error, null);
+    assert.equal(installed.data.projected, true);
+    const afterInstall = await targetReport(canonicalKeys);
+    assertTarget(afterInstall, canonicalKeys, Array(3).fill('recovered'), []);
+    return { grants, window, targeted, recovered, removed, unavailable, installed, afterInstall };
+  });
+  for (const corruption of ['missing', 'payload', 'revision']) {
+    await run('reconcile-report-review-group-referral-projection-' + corruption, async () => {
+      await seed('dodo', 'booked', dodoBooking({ referralAccountingApplied: true }));
+      dodoList = [dodoSummary()];
+      if (corruption === 'missing') await sql`delete from commerce.bookings where legacy_sanity_id=${bookingId}`;
+      if (corruption === 'payload') await sql`update commerce.bookings set booking_payload=jsonb_set(booking_payload,'{commissionAmount}','0'::jsonb) where legacy_sanity_id=${bookingId}`;
+      if (corruption === 'revision') await sql`update commerce.bookings set source_revision='stale-fixture-revision' where legacy_sanity_id=${bookingId}`;
+      const window = await authorizedReport('GET', true);
+      const targeted = await targetReport(canonicalKeys);
+      assert.deepEqual(reportReasons(window.body), ['referral_projection_mismatch']);
+      assertTarget(targeted, canonicalKeys, Array(3).fill('unresolved'), ['referral_projection_mismatch']);
+      assert.equal((await fixture.client.rpc('roo_refresh_operational_shadow')).error, null);
+      const repaired = await targetReport(canonicalKeys);
+      assertTarget(repaired, canonicalKeys, Array(3).fill('recovered'), []);
+      return { corruption, window, targeted, repaired };
+    });
+  }
+  await run('reconcile-report-review-group-referral-writer', async () => {
+    const input = dodoBooking();
+    await seed('dodo', 'captured_webhook', { ...input, booking: null });
+    await documents.createOrReplace({ _id: 'referral.correct', _type: 'referral', slug: { _type: 'slug', current: 'creator-correct' }, registrationStatus: 'verified', successfulReferrals: 0 });
+    const { commitBookingTransaction } = await import('../src/server/api/ref/bookingCommit.js');
+    const committed = await commitBookingTransaction({ client: documents, referralId: 'referral.correct', booking: {
+      _id: bookingId, _type: 'booking', status: 'captured', netAmount: 9.99, packageTitle: 'Vertex Essentials',
+      email: 'customer@example.invalid', backendOwner: 'supabase', cutoverGeneration: 0, ...input.booking,
+    } });
+    assert.equal(committed.booking.referralAccountingApplied, true);
+    assert.equal((await row('referral.correct')).payload.successfulReferrals, 1);
+    dodoList = [dodoSummary()];
+    const window = await authorizedReport('GET', true);
+    const targeted = await targetReport(canonicalKeys);
+    assert.deepEqual(reportReasons(window.body), []);
+    assertTarget(targeted, canonicalKeys, Array(3).fill('recovered'), []);
+    return { committed, window, targeted };
+  });
+  for (const timestamp of ['null', 'omitted']) for (const binding of ['product', 'record']) {
+    await run(`reconcile-report-review-group-unobserved-${timestamp}-${binding}`, async () => {
+      dodoPayment.created_at = new Date(originalNow() - 10 * 86400000).toISOString();
+      dodoPayment.updated_at = null;
+      if (timestamp === 'omitted') delete dodoPayment.updated_at;
+      if (binding === 'product') dodoPayment.metadata = {};
+      dodoList = [dodoSummary()];
+      const provider = structuredClone(dodoPayment);
+      const initial = await authorizedReport('GET', true);
+      Date.now = () => originalNow() + 4 * 86400000;
+      const afterFourDays = await authorizedReport('GET', true);
+      const targeted = await targetReport(['payment:payment-fixture']);
+      const reason = 'owner_review_dodo_settlement_time_unknown';
+      for (const report of [initial, afterFourDays]) {
+        assert.deepEqual(reportReasons(report.body), [reason]);
+        assert.equal(report.body.items[0].key, 'payment:payment-fixture');
+        assert.equal(report.body.complete.payments, false);
+      }
+      assertTarget(targeted, ['payment:payment-fixture'], ['unresolved'], [reason]);
+      return { provider, initial, afterFourDays, targeted };
+    });
+  }
+  await run('reconcile-report-review-group-unobserved-bounded', async () => {
+    dodoPayment.created_at = new Date(originalNow() - 10 * 86400000).toISOString();
+    dodoPayment.updated_at = null;
+    dodoPayment.metadata = {};
+    dodoList = Array.from({ length: 51 }, (_, index) => ({ ...dodoSummary(), payment_id: 'payment-undated-' + index }));
+    providerHook = (request, _req, res) => {
+      if (!request.path.startsWith('/payments/payment-undated-')) return false;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ...dodoPayment, payment_id: request.path.split('/').at(-1) }));
+      return true;
+    };
+    const window = await authorizedReport('GET', true);
+    assert.equal(window.body.count, 51);
+    assert.equal(window.body.items.length, 50);
+    assert.equal(window.body.complete.items, false);
+    assert.equal(window.body.complete.payments, false);
+    assert.ok(window.body.items.every(item => item.reason === 'owner_review_dodo_settlement_time_unknown'));
+    assert.equal(window.providerRequests.filter(request => request.path.startsWith('/payments/payment-undated-')).length, 51);
+    const omitted = dodoList.find(payment => !window.body.items.some(item => item.id === payment.payment_id));
+    const key = 'payment:' + omitted.payment_id;
+    const targeted = await targetReport([key]);
+    assertTarget(targeted, [key], ['unresolved'], ['owner_review_dodo_settlement_time_unknown']);
+    return { window, targeted, omitted: key };
+  });
+  for (const originalCommission of [0.29, 0.57]) await run('reconcile-report-review-group-legacy-half-refund-' + originalCommission, async () => {
+    const historicalCommission = Math.round(originalCommission * 0.5 * 100) / 100;
+    await seed('dodo', 'booked', dodoBooking({
+      netAmount: 10, grossAmount: 10, dodoTotalAmount: 10,
+      commissionAmount: historicalCommission, commissionPercent: originalCommission * 10,
+      dodoOriginalCommissionAmount: originalCommission, refundedAmount: 5, refundStatus: 'partial',
+      lastRefundAt: '2026-01-01T00:00:00.000Z',
+    }, {
+      pricingSnapshot: { netAmount: 10, grossAmount: 10, commissionAmount: originalCommission, commissionPercent: originalCommission * 10 },
+      providerPublicData: { currency: 'USD', productId: 'pdt_fixture', environment: 'test_mode', taxInclusive: false, totalAmount: 1000 },
+    }));
+    dodoPayment.total_amount = 1000;
+    dodoPayment.refund_status = 'partial';
+    dodoPayment.refunds = [{ ...dodoRefund, amount: 500, is_partial: true }];
+    dodoList = [dodoSummary()];
+    const window = await authorizedReport('GET', true);
+    const targeted = await targetReport(canonicalKeys);
+    assert.deepEqual(reportReasons(window.body), []);
+    assertTarget(targeted, canonicalKeys, Array(3).fill('recovered'), []);
+    const earnings = await commerce.referralEarnings({ referralId: 'referral.correct', referralCode: 'creator-correct' });
+    assert.equal(earnings.total, historicalCommission);
+    return { originalCommission, historicalCommission, window, targeted, earnings };
+  });
+  await run('reconcile-report-review-group-versioned-zero', async () => {
+    const { calculateCreatorCommission } = await import('../src/server/referrals/commissionMoney.js');
+    const terms = { grossAmount: 9.99, netAmount: 9.99, commissionPercent: 0.04 };
+    const calculated = calculateCreatorCommission(terms);
+    assert.equal(calculated.amount, 0);
+    await seed('dodo', 'booked', dodoBooking({ ...terms, commissionAmount: calculated.amount, commissionCalculationVersion: 2 }, {
+      pricingSnapshot: { ...terms, commissionAmount: calculated.amount, commissionCalculationVersion: 2 },
+    }));
+    dodoList = [dodoSummary()];
+    const window = await authorizedReport('GET', true);
+    const targeted = await targetReport(canonicalKeys);
+    const earnings = await commerce.referralEarnings({ referralId: 'referral.correct', referralCode: 'creator-correct' });
+    assert.deepEqual(reportReasons(window.body), []);
+    assertTarget(targeted, canonicalKeys, Array(3).fill('recovered'), []);
+    assert.equal(earnings.total, 0);
+    return { calculated, window, targeted, earnings };
+  });
+  await run('reconcile-report-review-group-signed-half-refund', async () => {
+    const terms = { grossAmount: 20.10, netAmount: 20.10, commissionAmount: 2.01, commissionPercent: 10 };
+    await seed('dodo', 'booked', dodoBooking({ ...terms, dodoTotalAmount: 20.10 }, {
+      pricingSnapshot: terms,
+      providerPublicData: { currency: 'USD', productId: 'pdt_fixture', environment: 'test_mode', taxInclusive: false, totalAmount: 2010 },
+    }));
+    dodoPayment.total_amount = 2010;
+    Object.assign(dodoRefund, { amount: 1005, is_partial: true });
+    dodoPayment.refund_status = 'partial';
+    dodoPayment.refunds = [dodoRefund];
+    const refund = await requestFlow('dodo', { req: dodoReq(dodoRefund, 'refund.succeeded') });
+    assert.equal(refund.status, 200, JSON.stringify(refund));
+    const booking = (await row(bookingId)).payload;
+    assert.equal(booking.commissionAmount, 1.01);
+    assert.equal(booking.commissionCalculationVersion, 2);
+    Date.now = () => originalNow() + 31 * 60000;
+    dodoList = [dodoSummary()];
+    const window = await authorizedReport('GET', true);
+    const targeted = await targetReport(canonicalKeys);
+    assert.deepEqual(reportReasons(window.body), []);
+    assertTarget(targeted, canonicalKeys, Array(3).fill('recovered'), []);
+    const controls = [];
+    for (const amount of [1, 1.02]) {
+      await commerce.patch(bookingId).set({ commissionAmount: amount }).commit();
+      const report = await authorizedReport('GET', true);
+      assert.deepEqual(reportReasons(report.body), [amount > 1.01 ? 'commission_exceeds_kept_share' : 'commission_mismatch']);
+      controls.push(report);
+    }
+    return { refund, booking, window, targeted, controls };
+  });
+  await run('reconcile-report-clean', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.equal(report.count, 0, JSON.stringify(report));
+    assert.deepEqual(report.items, []);
+    const booking = (await row(bookingId)).payload;
+    assert.equal(Object.hasOwn(booking, 'dodoOriginalCommissionAmount'), false);
+    const earnings = await commerce.referralEarnings({
+      referralId: 'referral.correct', referralCode: 'creator-correct',
+    });
+    assert.equal(earnings.total, 1, JSON.stringify(earnings));
+    return { count: report.count, from: report.from, to: report.to, booking, earnings };
+  });
+  await run('reconcile-report-payment-without-record', async () => {
+    dodoPayment.metadata = {};
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['payment_without_record']);
+    assert.equal(report.items[0].id, 'payment-fixture');
+    assert.equal(report.items[0].amount, '9.99');
+    return report.items;
+  });
+  await run('reconcile-report-other-product-ignored', async () => {
+    dodoPayment.metadata = {};
+    dodoPayment.product_cart = [{ product_id: 'pdt_other_brand', quantity: 1 }];
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.equal(report.count, 0, JSON.stringify(report));
+    return { count: report.count };
+  });
+  await run('reconcile-report-payment-without-booking', async () => {
+    await seed('dodo', 'captured_webhook', dodoBooking({}, { bookingId: 'booking-missing' }));
+    await commerce.delete(bookingId);
+    dodoList = [dodoSummary()];
+    const result = await authorizedReport('GET', true);
+    assert.equal(result.status, 200);
+    const report = result.body;
+    assert.deepEqual(reportReasons(report), ['payment_without_booking']);
+    assert.equal(report.items[0].ref, recordId);
+    return { report, readOnly: true, throughNextRoute: true };
+  });
+  for (const missing of ['booking', 'record']) {
+    await run(`reconcile-report-late-capture-without-${missing}`, async () => {
+      await seed('dodo', 'captured_webhook', dodoBooking({}, { bookingId: 'booking-missing' }));
+      await commerce.delete(bookingId);
+      if (missing === 'record') {
+        await commerce.delete(recordId);
+        dodoPayment.metadata = {};
+      }
+      dodoPayment.created_at = new Date(Date.now() - 10 * 86400000).toISOString();
+      dodoList = [dodoSummary()];
+      providerHook = async (_request, req, res) => {
+        if (!req.url.startsWith('/payments?')) return false;
+        const query = new URL(req.url, origin).searchParams;
+        const included = !query.has('created_at_gte') ||
+          Date.parse(query.get('created_at_gte')) <= Date.parse(dodoPayment.created_at);
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ items: included ? dodoList : [] }));
+        return true;
+      };
+      const result = await authorizedReport('GET', true);
+      assert.equal(result.status, 200);
+      assert.deepEqual(reportReasons(result.body), [`payment_without_${missing}`]);
+      assert.ok(result.providerRequests.some(request => {
+        if (!request.path.startsWith('/payments?')) return false;
+        const query = new URL(request.path, origin).searchParams;
+        return !query.has('created_at_gte') && query.get('status') === 'succeeded';
+      }));
+      return { report: result.body, readOnly: true, createdDaysBeforeSettlement: 10 };
+    });
+  }
+  for (const descending of [false, true]) await run(`reconcile-report-recent-payment-before-history-${descending ? 'descending' : 'ascending'}`, async () => {
+    const observedAt = originalNow();
+    Date.now = () => observedAt;
+    const old = new Date(observedAt - 96 * 3600000).toISOString();
+    await seed('dodo', 'booked', { ...dodoBooking(), booking: null });
+    dodoPayment.created_at = new Date(observedAt - 3600000).toISOString();
+    const history = Array.from({ length: 2000 }, (_, index) => ({ ...dodoSummary(), payment_id: 'payment-history-' + index, created_at: old }));
+    const listed = [...history, dodoSummary()];
+    if (descending) listed.reverse();
+    providerHook = async (request, _req, res) => {
+      const url = new URL(request.path, origin);
+      if (url.pathname === '/payments') {
+        const lower = url.searchParams.get('created_at_gte');
+        const upper = url.searchParams.get('created_at_lte');
+        const start = Number(url.searchParams.get('page_number')) * 100;
+        const items = listed.filter(payment => (!lower || Date.parse(payment.created_at) >= Date.parse(lower)) && Date.parse(payment.created_at) <= Date.parse(upper));
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ items: items.slice(start, start + 100) }));
+        return true;
+      }
+      if (!url.pathname.startsWith('/payments/payment-history-')) return false;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ...dodoPayment, payment_id: url.pathname.split('/').at(-1), created_at: old, metadata: {}, product_cart: [{ product_id: 'foreign-product', quantity: 1 }] }));
+      return true;
+    };
+    const report = await authorizedReport('GET', true);
+    assert.ok(reportReasons(report.body).includes('payment_without_booking'), JSON.stringify(report.body));
+    assert.equal(report.body.complete.payments, false);
+    assert.ok(reportReasons(report.body).includes('report_truncated'));
+    assert.ok(report.providerRequests.filter(request => request.path.startsWith('/payments?')).length <= 21);
+    assert.ok(report.providerRequests.filter(request => /^\/payments\/payment-/.test(request.path)).length <= 2000);
+    const recent = dodoSummary();
+    dodoPayment.created_at = report.body.from;
+    listed.splice(0, listed.length, dodoSummary());
+    const boundary = await authorizedReport('GET', true);
+    assert.deepEqual(reportReasons(boundary.body), ['payment_without_booking']);
+    assert.equal(boundary.body.complete.payments, true);
+    assert.equal(boundary.providerRequests.filter(request => request.path === '/payments/payment-fixture').length, 1);
+    return { descending, report, historyCount: 2000, recent, boundary };
+  });
+  for (const transition of ['settlement', 'public-link', 'refund', 'dispute-open', 'dispute-closed']) {
+    await run(`reconcile-report-transition-grace-${transition}`, async () => {
+      const observedAt = originalNow();
+      const changedAt = observedAt - 60000;
+      const old = new Date(observedAt - 10 * 86400000).toISOString();
+      const recent = new Date(changedAt).toISOString();
+      await seed('dodo', 'booked', dodoBooking({}, { updatedAt: old }));
+      dodoPayment.created_at = old;
+      dodoPayment.updated_at = recent;
+      let reason, keys = canonicalKeys;
+      if (['settlement', 'public-link'].includes(transition)) {
+        await commerce.delete(bookingId);
+        keys = canonicalKeys.slice(0, 2);
+        if (transition === 'public-link') {
+          await commerce.delete(recordId);
+          dodoPayment.metadata = {};
+          keys = canonicalKeys.slice(0, 1);
+        }
+        reason = transition === 'public-link' ? 'payment_without_record' : 'payment_without_booking';
+      } else if (transition === 'refund') {
+        dodoPayment.updated_at = null;
+        dodoPayment.refund_status = 'partial';
+        dodoPayment.refunds = [{ ...dodoRefund, amount: 250, is_partial: true, created_at: recent }];
+        reason = 'refund_not_applied';
+      } else {
+        const closed = transition === 'dispute-closed';
+        dodoPayment.disputes = [{ ...dodoDispute(closed ? 'dispute_won' : 'dispute_opened'), created_at: closed ? old : recent }];
+        if (closed) await commerce.patch(bookingId).set({ status: 'pending', dodoDisputeActive: true, dodoDisputeBookingStatus: 'captured', dodoOriginalCommissionAmount: 1, commissionAmount: 0 }).commit();
+        else delete dodoPayment.updated_at;
+        reason = 'dispute_not_applied';
+      }
+      dodoList = [dodoSummary()];
+      Date.now = () => observedAt;
+      const before = await authorizedReport('GET', true);
+      const targetedBefore = await targetReport(keys);
+      assert.equal(before.status, 200, JSON.stringify(before.body));
+      assert.equal(before.body.count, 0, JSON.stringify(before.body));
+      assertTarget(targetedBefore, keys, keys.map(() => 'unknown'), []);
+      dodoList = [];
+      const reverseBefore = await authorizedReport('GET', true);
+      assert.equal(reverseBefore.body.count, 0, JSON.stringify(reverseBefore.body));
+      dodoList = [dodoSummary()];
+      Date.now = () => changedAt + 1800000 - 1;
+      const boundaryBefore = await targetReport(keys);
+      assertTarget(boundaryBefore, keys, keys.map(() => 'unknown'), []);
+      Date.now = () => changedAt + 1800000;
+      const mature = await authorizedReport('GET', true);
+      const targetedMature = await targetReport(keys);
+      assert.equal(mature.status, 200, JSON.stringify(mature.body));
+      assert.deepEqual(reportReasons(mature.body), [reason]);
+      assertTarget(targetedMature, keys, keys.map(() => 'unresolved'), [reason]);
+      Date.now = originalNow;
+      let repair;
+      if (['refund', 'dispute-open', 'dispute-closed'].includes(transition)) {
+        const type = transition === 'refund' ? 'refund.succeeded' : transition === 'dispute-open' ? 'dispute.opened' : 'dispute.won';
+        const webhook = await requestFlow('dodo', { req: dodoReq(transition === 'refund' ? dodoPayment.refunds[0] : dodoPayment.disputes[0], type) });
+        assert.equal(webhook.status, 200, JSON.stringify(webhook));
+        const duringGrace = await targetReport(keys);
+        assertTarget(duringGrace, keys, keys.map(() => 'unknown'), []);
+        const recoveryTransitionAt = dodoPayment.updated_at == null ? Date.parse((await record()).updatedAt) : changedAt;
+        Date.now = () => recoveryTransitionAt + 1800000 - 1;
+        const repairBoundaryBefore = await targetReport(keys);
+        assertTarget(repairBoundaryBefore, keys, keys.map(() => 'unknown'), []);
+        Date.now = () => recoveryTransitionAt + 1800000;
+        const after = await authorizedReport('GET', true);
+        const targetedAfter = await targetReport(keys);
+        assert.equal(after.body.count, 0, JSON.stringify(after.body));
+        assertTarget(targetedAfter, keys, keys.map(() => 'recovered'), []);
+        const disputedTimingControls = [];
+        if (transition === 'dispute-open') {
+          assert.equal((await record()).verificationState, 'disputed');
+          for (const flag of [undefined, null, false, 'true']) {
+            const patch = commerce.patch(recordId);
+            await (flag === undefined ? patch.unset(['dodoDisputeActive']) : patch.set({ dodoDisputeActive: flag })).commit();
+            const targeted = await targetReport(keys);
+            assertTarget(targeted, keys, keys.map(() => 'unresolved'), ['owner_review_dodo_settlement_time_unknown']);
+            disputedTimingControls.push({ flag: flag === undefined ? 'absent' : flag, targeted });
+          }
+          await commerce.patch(recordId).set({ dodoDisputeActive: true }).commit();
+          assertTarget(await targetReport(keys), keys, keys.map(() => 'recovered'), []);
+        }
+        Date.now = originalNow;
+        repair = { webhook, duringGrace, recoveryTransitionAt, repairBoundaryBefore, after, targetedAfter, disputedTimingControls };
+      }
+      return { transition, provider: dodoPayment, before, targetedBefore, reverseBefore, boundaryBefore, mature, targetedMature, repair, createdDaysBeforeTransition: 10, graceMilliseconds: 1800000 };
+    });
+  }
+  for (const update of ['omitted', 'null']) await run('reconcile-report-unobserved-success-' + update, async () => {
+    dodoPayment.created_at = new Date(originalNow() - 10 * 86400000).toISOString();
+    dodoPayment.metadata = {};
+    if (update === 'null') dodoPayment.updated_at = null;
+    else delete dodoPayment.updated_at;
+    dodoList = [dodoSummary()];
+    const keys = ['payment:payment-fixture'];
+    const window = await authorizedReport('GET', true);
+    const targeted = await targetReport(keys);
+    assert.deepEqual(reportReasons(window.body), ['owner_review_dodo_settlement_time_unknown']);
+    assert.equal(window.body.complete.payments, false);
+    assertTarget(targeted, keys, ['unresolved'], ['owner_review_dodo_settlement_time_unknown']);
+    Date.now = () => originalNow() + 4 * 86400000;
+    const stillUnknown = await authorizedReport('GET', true);
+    assert.deepEqual(reportReasons(stillUnknown.body), ['owner_review_dodo_settlement_time_unknown']);
+    assert.equal(stillUnknown.body.complete.payments, false);
+    dodoPayment.updated_at = new Date(Date.now() - 1800000).toISOString();
+    const known = await authorizedReport('GET', true);
+    assert.deepEqual(reportReasons(known.body), ['payment_without_record']);
+    return { update, window, targeted, stillUnknown, known, provider: dodoPayment, noLocalRecord: true };
+  });
+  for (const state of ['started', 'finalizing', 'captured_webhook']) for (const timestamp of ['old', 'absent', 'null', 'invalid', 'future']) await run(`reconcile-report-local-capture-time-${state}-${timestamp}`, async () => {
+    const old = new Date(originalNow() - 3600000).toISOString();
+    await seed('dodo', state, { ...dodoBooking({}, { bookingId: '', updatedAt: old }), booking: null });
+    if (timestamp === 'absent') await commerce.patch(recordId).unset(['updatedAt']).commit();
+    else if (timestamp !== 'old') await commerce.patch(recordId).set({ updatedAt: timestamp === 'null' ? null : timestamp === 'invalid' ? 'invalid' : new Date(originalNow() + 86400000).toISOString() }).commit();
+    dodoPayment.created_at = new Date(originalNow() - 10 * 86400000).toISOString();
+    delete dodoPayment.updated_at;
+    dodoList = [dodoSummary()];
+    const window = await authorizedReport('GET', true);
+    const targeted = await targetReport(canonicalKeys.slice(0, 2));
+    if (state === 'captured_webhook' && ['invalid', 'future'].includes(timestamp)) {
+      assert.equal(window.status, 503);
+      assert.equal(targeted.status, 503);
+    } else if (state === 'captured_webhook' && timestamp === 'old') {
+      assert.deepEqual(reportReasons(window.body), ['payment_without_booking']);
+      assertTarget(targeted, canonicalKeys.slice(0, 2), ['unresolved', 'unresolved'], ['payment_without_booking']);
+    } else {
+      assert.equal(window.status, 200);
+      assert.deepEqual(reportReasons(window.body), ['owner_review_dodo_settlement_time_unknown']);
+      assert.equal(window.body.complete.payments, false);
+      assertTarget(targeted, canonicalKeys.slice(0, 2), ['unresolved', 'unresolved'], ['owner_review_dodo_settlement_time_unknown']);
+    }
+    return { state, timestamp, record: await record(), window, targeted };
+  });
+  for (const update of ['absent', null, 'old', 'invalid', 42, 'future']) {
+    await run(`reconcile-report-transition-timestamp-${String(update)}`, async () => {
+      await seed('dodo', 'booked', dodoBooking());
+      await commerce.delete(bookingId);
+      if (update === 'absent') delete dodoPayment.updated_at;
+      else dodoPayment.updated_at = update === 'old' ? dodoPayment.created_at
+        : update === 'future' ? new Date(originalNow() + 86400000).toISOString() : update;
+      dodoList = [dodoSummary()];
+      const report = await authorizedReport('GET', true);
+      const targeted = await targetReport(canonicalKeys.slice(0, 2));
+      if (['invalid', 42, 'future'].includes(update)) {
+        assert.equal(report.status, 503, JSON.stringify(report.body));
+        assert.equal(targeted.status, 503, JSON.stringify(targeted.body));
+      } else if (update === 'absent' || update === null) {
+        assert.equal(report.status, 200, JSON.stringify(report.body));
+        assert.deepEqual(reportReasons(report.body), ['owner_review_dodo_settlement_time_unknown']);
+        assert.equal(report.body.complete.payments, false);
+        assertTarget(targeted, canonicalKeys.slice(0, 2), ['unresolved', 'unresolved'], ['owner_review_dodo_settlement_time_unknown']);
+      } else {
+        assert.equal(report.status, 200, JSON.stringify(report.body));
+        assert.deepEqual(reportReasons(report.body), ['payment_without_booking']);
+        assertTarget(targeted, canonicalKeys.slice(0, 2), ['unresolved', 'unresolved'], ['payment_without_booking']);
+      }
+      return { update, report, targeted };
+    });
+  }
+  for (const field of ['created_at', 'refund', 'dispute']) {
+    await run(`reconcile-report-transition-malformed-${field}`, async () => {
+      await seed('dodo', 'booked', dodoBooking());
+      if (field === 'created_at') dodoPayment.created_at = 'invalid';
+      if (field === 'refund') dodoPayment.refunds = [{ ...dodoRefund, created_at: 'invalid' }];
+      if (field === 'dispute') dodoPayment.disputes = [{ ...dodoDispute('dispute_opened'), created_at: 42 }];
+      dodoList = [dodoSummary()];
+      const report = await authorizedReport('GET', true);
+      const targeted = await targetReport(canonicalKeys);
+      assert.equal(report.status, 503, JSON.stringify(report.body));
+      assert.equal(targeted.status, 503, JSON.stringify(targeted.body));
+      return { field, report, targeted };
+    });
+  }
+  await run('reconcile-report-transition-terminal-immediate', async () => {
+    await seed('dodo', 'needs_recovery', dodoBooking({}, {
+      reconciliationRecoveryTerminal: true, bookingId: '', updatedAt: new Date().toISOString(),
+    }));
+    await commerce.delete(bookingId);
+    dodoPayment.updated_at = new Date().toISOString();
+    dodoList = [dodoSummary()];
+    const report = await authorizedReport('GET', true);
+    const targeted = await targetReport(canonicalKeys.slice(0, 2));
+    assert.deepEqual(reportReasons(report.body), ['owner_review_unknown']);
+    assertTarget(targeted, canonicalKeys.slice(0, 2), ['unresolved', 'unresolved'], ['owner_review_unknown']);
+    assert.equal(targeted.body.items[0].key, 'record:' + recordId);
+    return { report, targeted };
+  });
+  await run('reconcile-report-transition-during-scan', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    await commerce.delete(bookingId);
+    const startedAt = originalNow();
+    Date.now = () => startedAt;
+    dodoList = [dodoSummary()];
+    providerHook = async (request) => {
+      if (request.path !== '/payments/payment-fixture') return;
+      dodoPayment.updated_at = new Date(startedAt + 90000).toISOString();
+      Date.now = () => startedAt + 120000;
+    };
+    const report = await authorizedReport('GET', true);
+    assert.equal(report.status, 200, JSON.stringify(report.body));
+    assert.equal(report.body.at, new Date(startedAt).toISOString());
+    assert.equal(report.body.count, 0);
+    return { report, startedAt, providerChangedAt: dodoPayment.updated_at, observedAt: Date.now() };
+  });
+  await run('reconcile-report-booking-amount-mismatch', async () => {
+    await seed('dodo', 'booked', dodoBooking({ netAmount: 19.99 }));
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['amount_mismatch']);
+    return report.items;
+  });
+  await run('reconcile-report-dodo-amount-mismatch', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    dodoPayment.total_amount = 1999;
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['dodo_amount_mismatch']);
+    return report.items;
+  });
+  await run('reconcile-report-refund-not-applied', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    dodoPayment.refund_status = 'full';
+    dodoPayment.refunds = [dodoRefund];
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['refund_not_applied']);
+    return report.items;
+  });
+  await run('reconcile-report-dispute-not-applied', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    dodoPayment.disputes = [
+      {
+        dispute_id: 'dispute-fixture',
+        payment_id: 'payment-fixture',
+        dispute_status: 'dispute_opened',
+        dispute_stage: 'dispute',
+        amount: '999',
+        currency: 'USD',
+      },
+    ];
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['dispute_not_applied']);
+    return report.items;
+  });
+  await run('reconcile-report-commission-over-kept-share', async () => {
+    await seed('dodo', 'booked', dodoBooking({ commissionAmount: 5 }));
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['commission_exceeds_kept_share']);
+    return report.items;
+  });
+  await run('reconcile-report-owner-review', async () => {
+    await seed('dodo', 'needs_recovery', dodoBooking({}, {
+      providerRecoveryTerminal: true,
+      providerRecoveryTerminalReason: 'dodo_currency_mismatch',
+      updatedAt: new Date().toISOString(),
+    }));
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['owner_review_dodo_currency_mismatch']);
+    return report.items;
+  });
+  await run('reconcile-report-owner-review-outside-payment-window', async () => {
+    await seed('dodo', 'needs_recovery', dodoBooking({}, {
+      providerRecoveryTerminal: true,
+      providerRecoveryTerminalReason: 'dodo_dispute_lost_owner_review',
+      updatedAt: new Date().toISOString(),
+    }));
+    dodoList = [];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['owner_review_dodo_dispute_lost_owner_review']);
+    return report.items;
+  });
+  for (const flag of ['providerRecoveryTerminal', 'reconciliationRecoveryTerminal']) await run('reconcile-report-review-old-terminal-' + flag, async () => {
+    const old = new Date(originalNow() - 96 * 3600000).toISOString();
+    await seed('dodo', 'needs_recovery', { ...dodoBooking({}, { bookingId: '', [flag]: true,
+      recoveryReason: 'payment_recovery_attempts_exhausted', updatedAt: old }), booking: null });
+    dodoPayment.status = 'failed';
+    dodoPayment.created_at = old;
+    dodoList = [];
+    const window = await authorizedReport('GET', true);
+    const targeted = await targetReport(['record:' + recordId]);
+    assert.deepEqual(reportReasons(window.body), ['owner_review_unknown'], JSON.stringify(window.body));
+    assert.equal(window.body.complete.records, true);
+    assert.deepEqual(window.body.items, targeted.body.items);
+    assert.equal(targeted.body.checks[0].state, 'unresolved');
+    return { flag, window, targeted, record: await record(), providerStatus: 'failed', priorOwnerIssue: false };
+  });
+  await run('reconcile-report-old-terminals-preserve-recent-booking', async () => {
+    await seed('dodo', 'booked', dodoBooking({ netAmount: 19.99 }));
+    const old = new Date(originalNow() - 96 * 3600000).toISOString();
+    const transaction = commerce.transaction();
+    for (let index = 0; index < 50; index++) transaction.create({
+      _id: 'paymentRecord.old-terminal-' + index, _type: 'paymentRecord', provider: 'dodo',
+      status: 'needs_recovery', providerRecoveryTerminal: true, updatedAt: old,
+      pricingSnapshot: { netAmount: 9.99 }, backendOwner: 'supabase', cutoverGeneration: 0,
+    });
+    await transaction.commit();
+    const report = await authorizedReport('GET', true);
+    assert.equal(report.body.count, 51);
+    assert.equal(report.body.items.length, 50);
+    assert.equal(report.body.complete.items, false);
+    assert.equal(report.body.items[0].ref, bookingId, JSON.stringify(report.body));
+    assert.equal(report.body.items[0].reason, 'amount_mismatch');
+    assert.ok(report.body.items.slice(1).every(item => item.key.startsWith('record:paymentRecord.old-terminal-')));
+    return { report, oldTerminalCount: 50, recentBookingRetained: true };
+  });
+  for (const variant of [
+    { name: 'reconciliation', flag: true, expected: 'owner_review_unknown' },
+    { name: 'both', flag: true, providerFlag: true, expected: 'owner_review_dodo_currency_mismatch' },
+    { name: 'false', flag: false },
+    { name: 'absent' },
+    { name: 'null', flag: null },
+    { name: 'string', flag: 'true' },
+    { name: 'booked', flag: true, status: 'booked' },
+    { name: 'other-provider', flag: true, provider: 'paypal' },
+    { name: 'old', flag: true, age: 96 * 3600000, expected: 'owner_review_unknown' },
+    { name: 'future', flag: true, age: -2 * 3600000, expected: 'owner_review_unknown' },
+  ]) await run(`reconcile-report-terminal-record-${variant.name}`, async () => {
+    const data = dodoBooking({}, {
+      bookingId: '', updatedAt: new Date(originalNow() - (variant.age || 0)).toISOString(),
+      ...(Object.hasOwn(variant, 'flag') ? { reconciliationRecoveryTerminal: variant.flag } : {}),
+      ...(variant.providerFlag ? { providerRecoveryTerminal: true, providerRecoveryTerminalReason: 'dodo_currency_mismatch' } : {}),
+    });
+    data.booking = null;
+    await seed(variant.provider || 'dodo', variant.status || 'needs_recovery', data);
+    const window = await authorizedReport('GET', true);
+    assert.equal(window.status, 200, JSON.stringify(window.body));
+    assert.deepEqual(reportReasons(window.body), variant.expected ? [variant.expected] : [], JSON.stringify(window.body));
+    assert.equal(window.body.complete.records, true);
+    let targeted;
+    if (variant.expected) {
+      assert.equal(window.body.items[0].key, `record:${recordId}`);
+      targeted = await targetReport([`record:${recordId}`, 'payment:payment-fixture']);
+      assert.equal(targeted.status, 200, JSON.stringify(targeted.body));
+      assert.deepEqual(targeted.body.checks.map(check => check.state), ['unresolved', 'unresolved']);
+      assert.ok(targeted.body.items.every(item => item.reason === variant.expected));
+    }
+    return { variant, window, targeted };
+  });
+  await run('reconcile-report-reconciliation-terminal-read-unavailable', async () => {
+    let failed = false;
+    fixture.setRequestHook((phase, request) => {
+      if (phase !== 'before' || !request.body?.p_filters?.some(filter => filter.path === 'reconciliationRecoveryTerminal')) return;
+      failed = true;
+      throw new Error('fixture_terminal_read_unavailable');
+    });
+    const report = await authorizedReport('GET', true);
+    assert.equal(failed, true);
+    assert.equal(report.status, 503);
+    assert.equal(report.body.code, 'reconcile_report_unavailable');
+    return report;
+  });
+  await run('reconcile-report-upgrade-credit-owner-review', async () => {
+    await seed('dodo', 'needs_recovery', dodoBooking({}, {
+      providerRecoveryTerminal: true,
+      providerRecoveryTerminalReason: 'upgrade_credit_changed_after_quote',
+      updatedAt: new Date().toISOString(),
+    }));
+    dodoList = [];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['owner_review_upgrade_credit_changed_after_quote']);
+    return report.items;
+  });
+  await run('reconcile-report-booking-without-payment', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    dodoPayment.status = 'failed';
+    dodoList = [];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['booking_without_payment']);
+    assert.equal(report.items[0].ref, bookingId);
+    return report.items;
+  });
+  await run('reconcile-report-booking-payment-not-found', async () => {
+    await seed('dodo', 'booked', dodoBooking({ dodoPaymentId: 'payment-gone' }));
+    dodoList = [];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['booking_without_payment']);
+    assert.equal(report.items[0].id, 'payment-gone');
+    assert.equal(report.items[0].ref, bookingId);
+    return report.items;
+  });
+  await run('reconcile-report-dodo-lookup-unavailable', async () => {
+    await seed(
+      'dodo',
+      'booked',
+      dodoBooking({
+        dodoPaymentId: 'payment-unreachable',
+        _createdAt: new Date(Date.now() - 3600000).toISOString(),
+      }),
+    );
+    dodoList = [];
+    const saved = process.env.RECONCILE_REPORT_TOKEN;
+    try {
+      process.env.RECONCILE_REPORT_TOKEN = 'z'.repeat(40);
+      const result = await reportRoute({
+        authorization: `Bearer ${'z'.repeat(40)}`,
+      });
+      assert.equal(result.status, 503);
+      assert.equal(result.body.ok, false);
+      assert.equal(JSON.stringify(result.body).includes('booking_without_payment'), false);
+      return result;
+    } finally {
+      if (saved === undefined) delete process.env.RECONCILE_REPORT_TOKEN;
+      else process.env.RECONCILE_REPORT_TOKEN = saved;
+    }
+  });
+  await run('reconcile-report-no-personal-data', async () => {
+    await seed(
+      'dodo',
+      'booked',
+      dodoBooking({
+        netAmount: 19.99,
+        email: 'customer@example.invalid',
+        discord: 'fixture_handle',
+      }),
+    );
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    const text = JSON.stringify(report);
+    for (const secret of [
+      'customer@example.invalid',
+      'fixture_handle',
+      'Synthetic address',
+      'Fixture',
+      'customer-fixture',
+    ])
+      assert.ok(!text.includes(secret), secret);
+    assert.deepEqual(Object.keys(report.items[0]).sort(), [
+      'amount',
+      'currency',
+      'id',
+      'key',
+      'reason',
+      'ref',
+    ]);
+    return { items: report.items };
+  });
+  await run('reconcile-report-route-auth', async () => {
+    const saved = process.env.RECONCILE_REPORT_TOKEN;
+    try {
+      delete process.env.RECONCILE_REPORT_TOKEN;
+      assert.equal((await reportRoute({ authorization: 'Bearer anything' })).status, 404);
+      process.env.RECONCILE_REPORT_TOKEN = 'x'.repeat(40);
+      assert.equal((await reportRoute({})).status, 403);
+      assert.equal((await reportRoute({ authorization: `Bearer ${'y'.repeat(40)}` })).status, 403);
+      await seed('dodo', 'booked', dodoBooking());
+      dodoList = [dodoSummary()];
+      const ok = await reportRoute({ authorization: `Bearer ${'x'.repeat(40)}` });
+      assert.equal(ok.status, 200, JSON.stringify(ok.body));
+      assert.equal(ok.body.ok, true);
+      assert.equal(ok.body.count, 0, JSON.stringify(ok.body));
+      return { missing: 404, wrong: 403, right: ok.status };
+    } finally {
+      if (saved === undefined) delete process.env.RECONCILE_REPORT_TOKEN;
+      else process.env.RECONCILE_REPORT_TOKEN = saved;
+    }
+  });
+  for (const [field, value] of [
+    ['paymentProvider', 'paypal'],
+    ['paymentRecordId', 'paymentRecord.other'],
+    ['dodoPaymentId', 'payment-other'],
+    ['dodoCheckoutSessionId', 'checkout-other'],
+  ])
+    await run(`reconcile-report-booking-binding-${field}`, async () => {
+      await seed('dodo', 'booked', dodoBooking({ [field]: value }));
+      dodoList = [dodoSummary()];
+      const report = await reconcileReport();
+      assert.ok(reportReasons(report).includes('payment_record_mismatch'), JSON.stringify(report));
+      return report.items;
+    });
+  await run('reconcile-report-booking-currency-mismatch', async () => {
+    await seed('dodo', 'booked', dodoBooking({ currency: 'EUR' }));
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['amount_mismatch']);
+    return report.items;
+  });
+  await run('reconcile-report-booking-total-mismatch', async () => {
+    await seed('dodo', 'booked', dodoBooking({ dodoTotalAmount: 19.99 }));
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['amount_mismatch']);
+    return report.items;
+  });
+  await run('reconcile-report-booking-status-mismatch', async () => {
+    await seed('dodo', 'booked', dodoBooking({ status: 'pending' }));
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['payment_record_mismatch']);
+    return report.items;
+  });
+  for (const amount of [1, 5])
+    await run(`reconcile-report-partial-refund-mismatch-${amount}`, async () => {
+      await seed(
+        'dodo',
+        'booked',
+        dodoBooking({
+          refundedAmount: amount,
+          refundStatus: 'partial',
+          commissionAmount: 0,
+        }),
+      );
+      dodoPayment.refund_status = 'partial';
+      dodoPayment.refunds = [{ ...dodoRefund, amount: 250, is_partial: true }];
+      dodoList = [dodoSummary()];
+      const report = await reconcileReport();
+      assert.deepEqual(reportReasons(report), ['refund_not_applied']);
+      return report.items;
+    });
+  await run('reconcile-report-full-refund-accounting-missing', async () => {
+    await seed(
+      'dodo',
+      'refunded',
+      dodoBooking({ status: 'refunded', commissionAmount: 0, refundedAmount: 0 }),
+    );
+    dodoPayment.refund_status = 'full';
+    dodoPayment.refunds = [dodoRefund];
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['refund_not_applied']);
+    return report.items;
+  });
+  await run('reconcile-report-refund-details-retrieved', async () => {
+    await seed(
+      'dodo',
+      'booked',
+      dodoBooking({
+        refundedAmount: 2.5,
+        refundStatus: 'partial',
+        commissionAmount: 0.75,
+        dodoOriginalCommissionAmount: 1,
+      }),
+    );
+    dodoRefund = { ...dodoRefund, amount: 250, is_partial: true };
+    dodoPayment.refund_status = 'partial';
+    dodoPayment.refunds = [{ ...dodoRefund, amount: null, currency: null }];
+    dodoList = [dodoSummary()];
+    const before = await snapshot({ receipts: true });
+    const report = await reconcileReport();
+    assert.equal(report.count, 0, JSON.stringify(report));
+    assert.ok(providerRequests.some((request) => request.path === '/refunds/refund-fixture'));
+    assert.deepEqual(await snapshot({ receipts: true }), before);
+    return { count: report.count, noMutation: true };
+  });
+  for (const status of ['pending', 'failed', 'review'])
+    await run(`reconcile-report-refund-${status}`, async () => {
+      await seed('dodo', 'booked', dodoBooking());
+      dodoPayment.refunds = [{ ...dodoRefund, status, amount: null, currency: null }];
+      dodoList = [dodoSummary()];
+      const report = await reconcileReport();
+      assert.equal(report.count, 0, JSON.stringify(report));
+      return { count: report.count };
+    });
+  await run('reconcile-report-refund-lookup-unavailable', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+    dodoPayment.refund_status = 'partial';
+    dodoPayment.refunds = [{ ...dodoRefund, amount: null, currency: null }];
+    dodoList = [dodoSummary()];
+    providerHook = (request, req, res) => {
+      if (request.path !== '/refunds/refund-fixture') return;
+      res.writeHead(503, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ code: 'fixture_refund_unavailable' }));
+      return true;
+    };
+    const result = await authorizedReport();
+    assert.equal(result.status, 503, JSON.stringify(result.body));
+    assert.equal(Object.hasOwn(result.body, 'items'), false);
+    return { status: result.status };
+  });
+  await run('reconcile-report-dispute-resolved-but-stored-active', async () => {
+    await seed(
+      'dodo',
+      'booked',
+      dodoBooking({
+        status: 'pending',
+        dodoDisputeActive: true,
+        commissionAmount: 0,
+      }),
+    );
+    dodoPayment.disputes = [
+      {
+        dispute_id: 'dispute-fixture',
+        payment_id: 'payment-fixture',
+        dispute_status: 'dispute_won',
+        dispute_stage: 'dispute',
+        amount: '999',
+        currency: 'USD',
+      },
+    ];
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['dispute_not_applied']);
+    return report.items;
+  });
+  for (const cancelBeforeOpen of [true, false]) {
+    for (const resolvedStatus of ['dispute_won', 'dispute_cancelled']) {
+      await run(`reconcile-report-admin-cancel-${cancelBeforeOpen ? 'before' : 'during'}-${resolvedStatus}`, async () => {
+        await seed('dodo', 'booked', dodoBooking({ status: cancelBeforeOpen ? 'cancelled' : 'captured' }));
+        dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+        dodoPayment.disputes = [dodoDispute('dispute_opened')];
+        dodoList = [dodoSummary()];
+        const opened = await requestFlow('dodo', { req: dodoReq(dodoPayment, 'dispute.opened') });
+        assert.equal(opened.status, 200, JSON.stringify(opened));
+        if (!cancelBeforeOpen) await commerce.patch(bookingId).set({ status: 'cancelled' }).commit();
+        const openWindow = await authorizedReport('GET', true);
+        const openTargets = await targetReport(canonicalKeys);
+        dodoPayment.disputes = [dodoDispute(resolvedStatus)];
+        const resolved = await requestFlow('dodo', { req: dodoReq(dodoPayment, 'dispute.' + resolvedStatus.slice(8), `dodo-resolved-${scenarioNumber}`) });
+        assert.equal(resolved.status, 200, JSON.stringify(resolved));
+        const booking = (await row(bookingId)).payload;
+        assert.equal(booking.status, 'cancelled');
+        assert.equal(booking.commissionAmount, 1);
+        const earnings = await commerce.referralEarnings({ referralId: 'referral.correct', referralCode: 'creator-correct' });
+        assert.equal(earnings.total, 0);
+        const closedWindow = await authorizedReport('GET', true);
+        const closedTargets = await targetReport(canonicalKeys);
+        for (const result of [openWindow, openTargets, closedWindow, closedTargets]) {
+          assert.equal(result.status, 200, JSON.stringify(result.body));
+          assert.equal(result.body.count, 0, JSON.stringify(result.body));
+          assert.ok(result.body.checks.every(check => check.state === 'recovered'));
+        }
+        await commerce.patch(bookingId).set({ dodoDisputeActive: true }).commit();
+        const unsynced = await targetReport(canonicalKeys);
+        assertTarget(unsynced, canonicalKeys, Array(3).fill('unresolved'), ['dispute_not_applied']);
+        return { opened, resolved, booking, earnings, openWindow, openTargets, closedWindow, closedTargets, unsynced };
+      });
+    }
+  }
+  await run('reconcile-report-disputed-pending-commission', async () => {
+    await seed('dodo', 'needs_recovery', dodoBooking({ status: 'pending', dodoDisputeActive: true }, { dodoDisputeActive: true, verificationState: 'disputed' }));
+    dodoPayment.disputes = [
+      {
+        dispute_id: 'dispute-fixture',
+        payment_id: 'payment-fixture',
+        dispute_status: 'dispute_opened',
+        dispute_stage: 'dispute',
+        amount: '999',
+        currency: 'USD',
+      },
+    ];
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['commission_exceeds_kept_share']);
+    return report.items;
+  });
+  await run('reconcile-report-refunded-commission', async () => {
+    await seed(
+      'dodo',
+      'refunded',
+      dodoBooking({
+        status: 'refunded',
+        refundedAmount: 9.99,
+        refundStatus: 'full',
+      }),
+    );
+    dodoPayment.refund_status = 'full';
+    dodoPayment.refunds = [dodoRefund];
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), []);
+    return report.items;
+  });
+  await run('reconcile-report-refunded-without-booking', async () => {
+    await seed('dodo', 'refunded', dodoBooking({}, { bookingId: 'booking-missing' }));
+    await commerce.delete(bookingId);
+    dodoPayment.refund_status = 'full';
+    dodoPayment.refunds = [dodoRefund];
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['payment_without_booking']);
+    return report.items;
+  });
+  await run('reconcile-report-provider-identity-mismatch', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+    dodoPayment.payment_id = 'payment-other';
+    dodoList = [{ ...dodoSummary(), payment_id: 'payment-fixture' }];
+    const result = await authorizedReport();
+    assert.equal(result.status, 503, JSON.stringify(result.body));
+    assert.equal(Object.hasOwn(result.body, 'items'), false);
+    return { status: result.status };
+  });
+  await run('reconcile-report-refund-identity-mismatch', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    dodoPayment.refund_status = 'partial';
+    dodoPayment.refunds = [
+      {
+        ...dodoRefund,
+        payment_id: 'payment-other',
+        amount: 250,
+        is_partial: true,
+      },
+    ];
+    dodoList = [dodoSummary()];
+    const result = await authorizedReport();
+    assert.equal(result.status, 503, JSON.stringify(result.body));
+    assert.equal(Object.hasOwn(result.body, 'items'), false);
+    return { status: result.status };
+  });
+  await run('reconcile-report-dispute-identity-mismatch', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    dodoPayment.disputes = [
+      {
+        dispute_id: 'dispute-fixture',
+        payment_id: 'payment-other',
+        dispute_status: 'dispute_opened',
+        dispute_stage: 'dispute',
+        amount: '999',
+        currency: 'USD',
+      },
+    ];
+    dodoList = [dodoSummary()];
+    const result = await authorizedReport();
+    assert.equal(result.status, 503, JSON.stringify(result.body));
+    assert.equal(Object.hasOwn(result.body, 'items'), false);
+    return { status: result.status };
+  });
+  await run('reconcile-report-database-unavailable', async () => {
+    let failed = false;
+    fixture.setRequestHook((phase, request) => {
+      if (phase === 'before' && request.path === '/rest/v1/rpc/roo_fetch_shadow_documents_targeted') {
+        failed = true;
+        throw new Error('fixture_database_unavailable');
+      }
+    });
+    const result = await authorizedReport();
+    assert.equal(failed, true);
+    assert.equal(result.status, 503);
+    assert.equal(Object.hasOwn(result.body, 'items'), false);
+    return { status: result.status };
+  });
+  await run('reconcile-report-zero-based-pagination', async () => {
+    const requests = [];
+    providerHook = (request, req, res) => {
+      if (!request.path.startsWith('/payments?')) return;
+      const query = new URL(request.path, origin).searchParams;
+      const page = Number(query.get('page_number'));
+      requests.push({ page, from: query.get('created_at_gte'), to: query.get('created_at_lte') });
+      assert.equal(query.get('page_size'), '100');
+      const items =
+        page === 0
+          ? Array.from({ length: 100 }, (_, index) => ({
+              ...dodoSummary(),
+              payment_id: `payment-failed-${index}`,
+              status: 'failed',
+            }))
+          : [dodoSummary()];
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ items }));
+      return true;
+    };
+    const report = await reconcileReport();
+    assert.deepEqual(requests, [
+      { page: 0, from: report.from, to: report.to },
+      { page: 1, from: report.from, to: report.to },
+      { page: 0, from: null, to: report.from },
+      { page: 1, from: null, to: report.from },
+    ]);
+    assert.deepEqual(reportReasons(report), ['payment_without_record']);
+    assert.equal(new Date(report.to) - new Date(report.from), (72 * 60 - 30) * 60000);
+    return { requests, items: report.items };
+  });
+  await run('reconcile-report-page-cap', async () => {
+    dodoList = Array.from({ length: 100 }, (_, index) => ({
+      ...dodoSummary(),
+      payment_id: `payment-failed-${index}`,
+      status: 'failed',
+    }));
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['report_truncated']);
+    assert.equal(report.items[0].key, 'scan:dodo-payments');
+    assert.deepEqual(report.complete, { payments: false, bookings: true, records: true, items: true });
+    const pages = providerRequests.filter((request) => request.path.startsWith('/payments?'));
+    assert.equal(pages.length, 20);
+    assert.equal(new URL(pages.at(-1).path, origin).searchParams.get('page_number'), '19');
+    return { pages: pages.length, items: report.items };
+  });
+  await run('reconcile-report-malformed-list', async () => {
+    providerHook = (request, req, res) => {
+      if (!request.path.startsWith('/payments?')) return;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'fixture_bad_response' }));
+      return true;
+    };
+    const result = await authorizedReport();
+    assert.equal(result.status, 503, JSON.stringify(result.body));
+    assert.equal(Object.hasOwn(result.body, 'items'), false);
+    return { status: result.status };
+  });
+  await run('reconcile-report-personal-data-in-metadata', async () => {
+    dodoPayment.metadata = { paymentRecordId: 'customer@example.invalid' };
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['payment_without_record']);
+    assert.equal(report.items[0].ref, '');
+    assert.equal(JSON.stringify(report).includes('customerexample.invalid'), false);
+    return report.items;
+  });
+  await run('reconcile-report-unconfigured-products', async () => {
+    const saved = process.env.DODO_PAYMENTS_PRODUCT_ID;
+    try {
+      delete process.env.DODO_PAYMENTS_PRODUCT_ID;
+      dodoPayment.metadata = {};
+      dodoList = [dodoSummary()];
+      const result = await authorizedReport();
+      assert.equal(result.status, 503, JSON.stringify(result.body));
+      return { status: result.status };
+    } finally {
+      if (saved === undefined) delete process.env.DODO_PAYMENTS_PRODUCT_ID;
+      else process.env.DODO_PAYMENTS_PRODUCT_ID = saved;
+    }
+  });
+  await run('reconcile-report-record-checkout-missing', async () => {
+    await seed('dodo', 'booked', dodoBooking({}, { providerOrderId: '' }));
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['dodo_payment_binding_mismatch']);
+    return report.items;
+  });
+  for (const field of ['total_amount', 'refunds'])
+    await run(`reconcile-report-incomplete-detail-${field}`, async () => {
+      await seed('dodo', 'booked', dodoBooking());
+      dodoList = [dodoSummary()];
+      delete dodoPayment[field];
+      const result = await authorizedReport();
+      assert.equal(result.status, 503, JSON.stringify(result.body));
+      assert.equal(Object.hasOwn(result.body, 'items'), false);
+      return { status: result.status };
+    });
+  await run('reconcile-report-refund-status-mismatch', async () => {
+    await seed(
+      'dodo',
+      'booked',
+      dodoBooking({ refundedAmount: 2.5, refundStatus: 'full', commissionAmount: 0.75 }),
+    );
+    dodoPayment.refund_status = 'partial';
+    dodoPayment.refunds = [{ ...dodoRefund, amount: 250, is_partial: true }];
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['refund_not_applied']);
+    return report.items;
+  });
+  await run('reconcile-report-personal-data-in-recovery-code', async () => {
+    await seed('dodo', 'needs_recovery', dodoBooking({}, {
+      providerRecoveryTerminal: true,
+      providerRecoveryTerminalReason: 'customer@example.invalid',
+      updatedAt: new Date().toISOString(),
+    }));
+    dodoList = [dodoSummary()];
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['owner_review_unknown']);
+    assert.equal(JSON.stringify(report).includes('customer'), false);
+    return report.items;
+  });
+  for (const status of ['captured', 'refunded']) await run(`reconcile-report-booking-lookup-cap${status === 'captured' ? '' : '-refunded'}`, async () => {
+    let transaction = commerce.transaction();
+    for (let index = 0; index < 201; index += 1) {
+      transaction.create({
+        _id: `booking.report-${index}`,
+        _type: 'booking',
+        paymentProvider: 'dodo',
+        dodoPaymentId: `payment-report-${index}`,
+        status,
+        netAmount: 9.99,
+        backendOwner: 'supabase',
+        cutoverGeneration: 0,
+      });
+      if ((index + 1) % 100 === 0) {
+        await transaction.commit();
+        transaction = commerce.transaction();
+      }
+    }
+    await transaction.commit();
+    providerHook = (request, req, res) => {
+      if (!request.path.startsWith('/payments/payment-report-')) return;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          ...dodoPayment,
+          payment_id: request.path.slice('/payments/'.length),
+        }),
+      );
+      return true;
+    };
+    const report = await reconcileReport();
+    assert.equal(report.count, 201);
+    assert.equal(report.items.length, 50);
+    assert.equal(report.items[0].reason, 'report_truncated');
+    assert.equal(report.items[0].key, 'scan:dodo-bookings');
+    assert.deepEqual(report.complete, { payments: true, bookings: false, records: true, items: false });
+    assert.ok(report.items.slice(1).every((item) => item.key.startsWith('booking:booking.report-')));
+    assert.ok(report.items.slice(1).every((item) => item.reason === 'payment_without_record'));
+    assert.equal(
+      providerRequests.filter((request) => request.path.startsWith('/payments/payment-report-'))
+        .length,
+      200,
+    );
+    return { count: report.count, items: report.items, lookups: 200 };
+  });
+  await run('reconcile-report-old-bookings-do-not-hide-current', async () => {
+    let transaction = commerce.transaction();
+    for (let index = 0; index < 500; index += 1) {
+      transaction.create({
+        _id: `booking.000-old-${String(index).padStart(3, '0')}`,
+        _type: 'booking',
+        _createdAt: '2026-01-01T00:00:00.000Z',
+        paymentProvider: 'dodo',
+        dodoPaymentId: `payment-old-${index}`,
+        status: 'captured',
+        netAmount: 9.99,
+        backendOwner: 'supabase',
+        cutoverGeneration: 0,
+      });
+      if ((index + 1) % 100 === 0 && index !== 499) {
+        await transaction.commit();
+        transaction = commerce.transaction();
+      }
+    }
+    await transaction.commit();
+    await seed('dodo', 'booked', dodoBooking({ dodoPaymentId: 'payment-gone' }));
+    const report = await reconcileReport();
+    assert.deepEqual(reportReasons(report), ['booking_without_payment']);
+    assert.equal(report.items[0].ref, bookingId);
+    return report.items;
+  });
+  await run('reconcile-report-auth-method-and-no-writes', async () => {
+    const saved = process.env.RECONCILE_REPORT_TOKEN;
+    const before = await snapshot({ receipts: true });
+    try {
+      process.env.RECONCILE_REPORT_TOKEN = 'short';
+      const short = await reportRoute({ authorization: 'Bearer short' });
+      assert.equal(short.status, 404);
+      process.env.RECONCILE_REPORT_TOKEN = 'x'.repeat(40);
+      assert.equal((await reportRoute({ authorization: 'Bearer too-short' })).status, 403);
+      const method = await reportRoute({ authorization: `Bearer ${'x'.repeat(40)}` }, 'POST');
+      assert.equal(method.status, 405);
+      assert.equal(method.headers.allow, 'GET');
+      assert.equal(method.headers['cache-control'], 'private, no-store');
+      assert.deepEqual(providerRequests, []);
+      const result = await authorizedReport();
+      assert.equal(result.status, 200, JSON.stringify(result.body));
+      assert.equal(result.body.count, 0);
+      assert.equal(result.headers['cache-control'], 'private, no-store');
+      assert.deepEqual(await snapshot({ receipts: true }), before);
+      assert.ok(providerRequests.every((request) => request.method === 'GET'));
+      return { short: short.status, method: method.status, noMutation: true };
+    } finally {
+      if (saved === undefined) delete process.env.RECONCILE_REPORT_TOKEN;
+      else process.env.RECONCILE_REPORT_TOKEN = saved;
+    }
+  });
+  await run('reconcile-report-next-route', async () => {
+    const before = await snapshot({ receipts: true });
+    const results = {};
+    for (const method of ['GET', 'HEAD', 'POST']) {
+      const result = await authorizedReport(method, true);
+      assert.equal(result.status, method === 'GET' ? 200 : 405, JSON.stringify(result));
+      assert.equal(result.headers['cache-control'], 'private, no-store');
+      if (method === 'GET') assert.deepEqual(result.body.items, []);
+      else assert.equal(result.headers.allow, 'GET');
+      results[method] = result.status;
+    }
+    assert.deepEqual(await snapshot({ receipts: true }), before);
+    return { results, noMutation: true };
+  });
+  await run('reconcile-report-target-extra-booking', async () => {
+    const old = new Date(Date.now() - 73 * 3600000).toISOString();
+    await seed('dodo', 'booked', dodoBooking({ _createdAt: old }));
+    const { _id, _rev, ...canonical } = (await row(bookingId)).payload;
+    await commerce.create({ ...canonical, _id: 'booking.extra', netAmount: 19.99 });
+    dodoPayment.created_at = old;
+    const keys = ['payment:payment-fixture', 'booking:booking.extra'];
+    const report = await targetReport(keys);
+    assertTarget(report, keys, ['recovered', 'unresolved'], ['payment_record_mismatch']);
+    assert.equal(report.body.items[0].key, 'booking:booking.extra');
+    assert.equal(report.providerRequests.length, 1);
+    await commerce.delete('booking.extra');
+    const control = await targetReport(keys);
+    assertTarget(control, keys, ['recovered', 'unknown'], []);
+    assert.deepEqual(control.body.checks[1].keys, ['booking:booking.extra']);
+    return { report, control };
+  });
+  for (const state of ['failed', 'null', 'missing']) {
+    await run('reconcile-report-target-payment-' + state, async () => {
+      const paymentId = state === 'missing' ? 'payment-gone' : 'payment-fixture';
+      await seed('dodo', 'booked', dodoBooking({ dodoPaymentId: paymentId }, { providerPaymentId: paymentId }));
+      dodoPayment.status = state === 'null' ? null : 'failed';
+      const keys = ['payment:' + paymentId, 'booking:' + bookingId, 'record:' + recordId];
+      const report = await targetReport(keys);
+      const reason = state === 'missing' ? 'payment_not_found' : 'payment_not_succeeded';
+      assertTarget(report, keys, Array(3).fill('unresolved'), [reason, 'booking_without_payment', reason]);
+      assert.deepEqual(report.body.items.map((item) => item.key), keys);
+      assert.equal(report.providerRequests.length, 1);
+      if (state === 'missing') {
+        assert.deepEqual(report.body.items[0], {
+          key: 'payment:payment-gone', id: 'payment-gone', ref: '', amount: '', currency: '', reason,
+        });
+      }
+      return { provider: dodoPayment, report };
+    });
+  }
+  await run('reconcile-report-target-unknown-and-fallback', async () => {
+    await seed('dodo', 'booked', dodoBooking({ paymentProvider: 'paypal' }, { provider: 'paypal' }));
+    const keys = ['booking:booking.missing', 'record:paymentRecord.missing', 'booking:' + bookingId, 'record:' + recordId];
+    const unknown = await targetReport(keys);
+    assertTarget(unknown, keys, Array(4).fill('unknown'), []);
+    assert.ok(unknown.body.checks.every((check) => check.keys.length === 1));
+    assert.deepEqual(unknown.providerRequests, []);
+    await commerce.patch(bookingId).set({ paymentProvider: 'dodo', dodoPaymentId: '' }).commit();
+    await commerce.patch(recordId).set({ provider: 'dodo', providerPaymentId: '' }).commit();
+    const missingId = await targetReport(['record:' + recordId, 'booking:' + bookingId]);
+    assertTarget(missingId, ['record:' + recordId, 'booking:' + bookingId], ['unknown', 'unresolved'], ['booking_without_payment']);
+    assert.deepEqual(missingId.providerRequests, []);
+    await commerce.patch(bookingId).set({ dodoPaymentId: ' payment-fixture ' }).commit();
+    const unsafeId = await targetReport(['record:' + recordId, 'booking:' + bookingId]);
+    assertTarget(unsafeId, ['record:' + recordId, 'booking:' + bookingId], ['unknown', 'unresolved'], ['booking_without_payment']);
+    assert.deepEqual(unsafeId.providerRequests, []);
+    await commerce.patch(bookingId).set({ dodoPaymentId: 'payment-fixture', paymentRecordId: 'paymentRecord.wrong' }).commit();
+    const wrongAssociation = await targetReport(['record:' + recordId]);
+    assertTarget(wrongAssociation, ['record:' + recordId], ['unknown'], []);
+    assert.deepEqual(wrongAssociation.providerRequests, []);
+    await commerce.patch(bookingId).set({ paymentRecordId: recordId }).commit();
+    const fallback = await targetReport(['record:' + recordId]);
+    assertTarget(fallback, ['record:' + recordId], ['recovered'], []);
+    assert.equal(fallback.providerRequests.length, 1);
+    await commerce.patch(recordId).set({ providerPaymentId: ' payment-fixture ' }).commit();
+    const invalidPrimary = await targetReport(['record:' + recordId]);
+    assertTarget(invalidPrimary, ['record:' + recordId], ['unknown'], []);
+    assert.deepEqual(invalidPrimary.providerRequests, []);
+    return { unknown, missingId, unsafeId, wrongAssociation, fallback, invalidPrimary };
+  });
+  await run('reconcile-report-target-record-binding', async () => {
+    await seed('dodo', 'booked', dodoBooking());
+    dodoPayment.metadata = { paymentRecordId: 'paymentRecord.somebody' };
+    const binding = await targetReport(['record:' + recordId]);
+    assertTarget(binding, ['record:' + recordId], ['unresolved'], ['payment_record_mismatch']);
+    assert.equal(binding.body.items[0].key, 'record:' + recordId);
+    assert.equal(binding.body.items[0].ref, recordId);
+    dodoPayment.metadata = {};
+    dodoPayment.product_cart = [{ product_id: 'pdt_unrelated', quantity: 1 }];
+    const unrelated = await targetReport(['payment:payment-fixture']);
+    assertTarget(unrelated, ['payment:payment-fixture'], ['unresolved'], ['payment_without_record']);
+    return { binding, unrelated };
+  });
+  for (const provider of ['missing', 'paypal']) {
+    await run('reconcile-report-target-extra-record-' + provider, async () => {
+      await seed('dodo', 'booked', dodoBooking());
+      const { _id, _rev, ...canonical } = (await row(bookingId)).payload;
+      await commerce.create({ ...canonical, _id: 'booking.extra' });
+      if (provider === 'missing') dodoPayment.metadata = {};
+      else await commerce.patch(recordId).set({ provider }).commit();
+      const keys = ['payment:payment-fixture', 'booking:' + bookingId, 'booking:booking.extra'];
+      const report = await targetReport(keys);
+      dodoList = [dodoSummary()];
+      const window = await authorizedReport('GET', true);
+      const proof = { report, window };
+      assert.deepEqual(report.body.items.map((item) => item.key), keys, JSON.stringify(proof));
+      assertTarget(report, keys, Array(3).fill('unresolved'), Array(3).fill('payment_without_record'));
+      assert.deepEqual(window.body.items.map((item) => item.key).sort(), [...keys].sort());
+      return proof;
+    });
+  }
+  await run('reconcile-report-target-owner-recovery', async () => {
+    const old = new Date(Date.now() - 73 * 3600000).toISOString();
+    await seed('dodo', 'needs_recovery', dodoBooking({ _createdAt: old, netAmount: 19.99 }, {
+      updatedAt: old,
+      providerRecoveryTerminal: true,
+      providerRecoveryTerminalReason: 'dodo_currency_mismatch',
+    }));
+    dodoPayment.created_at = old;
+    const window = await authorizedReport('GET', true);
+    assert.deepEqual(reportReasons(window.body), ['owner_review_dodo_currency_mismatch']);
+    const keys = ['record:' + recordId, 'payment:payment-fixture'];
+    const owner = await targetReport(keys);
+    assertTarget(owner, keys, ['unresolved', 'unresolved'], ['owner_review_dodo_currency_mismatch']);
+    assert.deepEqual(owner.body.items.map((item) => item.key), ['record:' + recordId]);
+    await commerce.patch(recordId).set({ providerRecoveryTerminal: false, status: 'booked' }).commit();
+    const stillBroken = await targetReport(keys);
+    assertTarget(stillBroken, keys, ['unresolved', 'unresolved'], ['amount_mismatch']);
+    assert.equal(stillBroken.body.items[0].key, 'payment:payment-fixture');
+    await commerce.patch(bookingId).set({ netAmount: 9.99 }).commit();
+    const repaired = await targetReport(keys);
+    assertTarget(repaired, keys, ['recovered', 'recovered'], []);
+    return { old, window, owner, stillBroken, repaired };
+  });
+  for (const variant of [
+    { name: 'partial', booking: { refundedAmount: 3.33, refundStatus: 'partial', commissionAmount: 0.67 }, repair: { dodoOriginalCommissionAmount: 1 }, reason: 'commission_mismatch' },
+    { name: 'full', booking: { refundedAmount: 3.33, refundStatus: 'partial', commissionAmount: 1 }, reason: 'refund_not_applied' },
+    { name: 'active', booking: { status: 'pending', dodoDisputeActive: false, commissionAmount: 0 }, repair: { dodoDisputeActive: true }, reason: 'dispute_not_applied' },
+    { name: 'resolved', booking: { dodoDisputeActive: true }, repair: { dodoDisputeActive: false }, reason: 'dispute_not_applied' },
+  ]) {
+    await run('reconcile-report-target-' + variant.name + '-recovery', async () => {
+      await seed('dodo', variant.name === 'full' ? 'refunded' : 'booked', dodoBooking(variant.booking,
+        variant.name === 'active' ? { status: 'needs_recovery', dodoDisputeActive: true, verificationState: 'disputed' }
+          : variant.name === 'full' ? { refundRequiresBookingSync: true } : {}));
+      if (variant.name === 'partial' || variant.name === 'full') {
+        dodoPayment.refund_status = variant.name;
+        dodoPayment.refunds = [{ ...dodoRefund, amount: variant.name === 'partial' ? 333 : 999, is_partial: variant.name === 'partial' }];
+      } else {
+        dodoPayment.disputes = [dodoDispute(variant.name === 'active' ? 'dispute_opened' : 'dispute_won')];
+      }
+      const report = await targetReport(canonicalKeys);
+      assertTarget(report, canonicalKeys, Array(3).fill('unresolved'), [variant.reason]);
+      if (variant.name !== 'full') await commerce.patch(bookingId).set(variant.repair).commit();
+      if (variant.name === 'full') {
+        const synchronized = await requestFlow('dodo', { req: dodoReq(dodoPayment.refunds[0], 'refund.succeeded') });
+        assert.equal(synchronized.status, 200, JSON.stringify(synchronized));
+        const refunded = (await row(bookingId)).payload;
+        assert.equal(refunded.status, 'refunded');
+        assert.ok(Number.isFinite(Date.parse(refunded.refundAccountingAppliedAt)));
+        assert.equal(typeof refunded.referralReversedAfterRefund, 'boolean');
+        assert.equal((await record()).refundRequiresBookingSync, false);
+      }
+      const control = await targetReport(canonicalKeys);
+      assertTarget(control, canonicalKeys, Array(3).fill('recovered'), []);
+      assert.equal(report.providerRequests.length, 1);
+      assert.equal(control.providerRequests.length, 1);
+      return { provider: dodoPayment, report, control };
+    });
+  }
+  await run('reconcile-report-refunded-record-without-checkpoint', async () => {
+    await seed('dodo', 'refunded', dodoBooking({ refundedAmount: 3.33, refundStatus: 'partial', commissionAmount: 1 }));
+    dodoPayment.refund_status = 'full';
+    dodoPayment.refunds = [dodoRefund];
+    const before = await targetReport(canonicalKeys);
+    assertTarget(before, canonicalKeys, Array(3).fill('unresolved'), ['refund_not_applied']);
+    assert.equal((await record()).refundRequiresBookingSync, false);
+    const booking = (await row(bookingId)).payload;
+    const webhook = await requestFlow('dodo', { req: dodoReq(dodoRefund, 'refund.succeeded') });
+    assert.equal(webhook.status, 200, JSON.stringify(webhook));
+    assert.deepEqual((await row(bookingId)).payload, booking);
+    const after = await targetReport(canonicalKeys);
+    assertTarget(after, canonicalKeys, Array(3).fill('unresolved'), ['refund_not_applied']);
+    return { booking, before, webhook, after };
+  });
+  for (const variant of [
+    { name: 'frozen', record: { pricingSnapshot: { netAmount: null } }, reason: 'frozen_pricing_unavailable' },
+    { name: 'commission', booking: { commissionAmount: 0.5 }, reason: 'commission_mismatch' },
+    { name: 'recipient', booking: { referralCode: ' creator-correct ' }, reason: 'referral_binding_mismatch' },
+    { name: 'original', booking: { dodoOriginalCommissionAmount: 0 }, reason: 'commission_mismatch' },
+    { name: 'currency', booking: { currency: 'EUR' }, reason: 'amount_mismatch' },
+    { name: 'product', productId: 'pdt_unrelated', reason: 'dodo_product_mismatch' },
+  ]) {
+    await run('reconcile-report-target-audit-' + variant.name, async () => {
+      await seed('dodo', 'booked', dodoBooking(variant.booking, variant.record));
+      if (variant.productId) dodoPayment.product_cart[0].product_id = variant.productId;
+      const report = await targetReport(canonicalKeys);
+      assertTarget(report, canonicalKeys, Array(3).fill('unresolved'), [variant.reason]);
+      return report;
+    });
+  }
+  await run('reconcile-report-target-refund-cache', async () => {
+    await seed('dodo', 'booked', dodoBooking({
+      refundedAmount: 2.5, refundStatus: 'partial', commissionAmount: 0.75, dodoOriginalCommissionAmount: 1,
+    }));
+    dodoPayment.refund_status = 'partial';
+    dodoRefund = { ...dodoRefund, amount: 250, is_partial: true };
+    dodoPayment.refunds = [{ ...dodoRefund, amount: null, currency: null }];
+    const report = await targetReport(canonicalKeys);
+    assertTarget(report, canonicalKeys, Array(3).fill('recovered'), []);
+    assert.deepEqual(report.providerRequests.map((request) => request.path), ['/payments/payment-fixture', '/refunds/refund-fixture']);
+    return { provider: dodoPayment, report };
+  });
+  await run('reconcile-report-target-query-validation', async () => {
+    const keys = Array.from({ length: 20 }, (_, index) => 'record:paymentRecord.missing-' + index);
+    const boundary = await authorizedReport('GET', true, { check: JSON.stringify(keys).padEnd(2048, ' ') });
+    assertTarget(boundary, keys, Array(20).fill('unknown'), []);
+    assert.deepEqual(boundary.providerRequests, []);
+    const two = await targetReport(keys.slice(0, 2));
+    assertTarget(two, keys.slice(0, 2), ['unknown', 'unknown'], []);
+    const strict = await targetReport(['record:' + 'x'.repeat(80), 'record:Case._:/-']);
+    assertTarget(strict, ['record:' + 'x'.repeat(80), 'record:Case._:/-'], ['unknown', 'unknown'], []);
+    const invalid = [];
+    for (const check of [
+      '', '{', 'null', '{}', '"payment:payment-fixture"', '1', '[]',
+      JSON.stringify([...keys, 'record:paymentRecord.too-many']),
+      JSON.stringify([keys[0], keys[0]]),
+      JSON.stringify([null]), JSON.stringify([1]), JSON.stringify([{}]),
+      JSON.stringify(['scan:dodo-payments']), JSON.stringify(['payment:']),
+      JSON.stringify(['paymentX']), JSON.stringify(['bookingX']), JSON.stringify(['recordX']), JSON.stringify([':x']),
+      JSON.stringify(['payment: payment-fixture']), JSON.stringify(['payment:payment-fixture ']),
+      JSON.stringify(['payment:customer@example.invalid']), JSON.stringify(['payment:' + 'x'.repeat(81)]),
+      JSON.stringify(keys).padEnd(2049, ' '),
+    ]) {
+      const result = await authorizedReport('GET', true, { check });
+      assert.equal(result.status, 400, JSON.stringify(result.body));
+      assert.equal(result.body.code, 'reconcile_report_checks_invalid');
+      assert.equal(result.headers['cache-control'], 'private, no-store');
+      assert.deepEqual(result.providerRequests, []);
+      assert.deepEqual(result.databaseRequests, []);
+      invalid.push({ check, ...result });
+    }
+    const directArray = await authorizedReport('GET', false, { check: [JSON.stringify(keys.slice(0, 2))] });
+    assert.equal(directArray.status, 400);
+    assert.equal(directArray.body.code, 'reconcile_report_checks_invalid');
+    assert.deepEqual(directArray.databaseRequests, []);
+    assert.deepEqual(directArray.providerRequests, []);
+    const repeated = await authorizedReport('GET', true, { check: ['["payment:payment-fixture"]', '["booking:booking.fixture"]'] });
+    assert.equal(repeated.status, 400);
+    assert.equal(repeated.body.code, 'duplicate_query');
+    assert.deepEqual(repeated.databaseRequests, []);
+    assert.deepEqual(repeated.providerRequests, []);
+    const internal = [];
+    for (const checks of [null, {}, 'payment:payment-fixture', [keys[0], keys[0]], [...keys, 'record:paymentRecord.too-many'], ['paymentX'], ['bookingX'], ['recordX'], [':x']]) {
+      const result = await readReport({ checks });
+      assert.equal(result.status, 500);
+      assert.equal(result.body.fixtureError, 'reconcile_report_checks_invalid');
+      assert.deepEqual(result.databaseRequests, []);
+      assert.deepEqual(result.providerRequests, []);
+      internal.push(result);
+    }
+    return { boundary, two, strict, invalid, directArray, repeated, internal };
+  });
+  await run('reconcile-report-target-key-separator', async () => {
+    const results = [];
+    for (const key of ['paymentX', 'bookingX', 'recordX', ':x']) {
+      const publicResult = await authorizedReport('GET', true, { check: JSON.stringify([key]) });
+      assert.equal(publicResult.status, 400, JSON.stringify({ key, publicResult }));
+      assert.equal(publicResult.body.code, 'reconcile_report_checks_invalid');
+      assert.deepEqual(publicResult.providerRequests, []);
+      assert.deepEqual(publicResult.databaseRequests, []);
+      const internalResult = await readReport({ checks: [key] });
+      assert.equal(internalResult.status, 500, JSON.stringify({ key, internalResult }));
+      assert.equal(internalResult.body.fixtureError, 'reconcile_report_checks_invalid');
+      assert.deepEqual(internalResult.providerRequests, []);
+      assert.deepEqual(internalResult.databaseRequests, []);
+      results.push({ key, publicResult, internalResult });
+    }
+    return results;
+  });
+  await run('reconcile-report-canonical-identity-boundary', async () => {
+    const longId = 'booking.' + 'x'.repeat(74);
+    const repairedId = 'booking.' + 'y'.repeat(72);
+    assert.equal(longId.length, 82);
+    assert.equal(repairedId.length, 80);
+    await seed('dodo', 'booked', dodoBooking());
+    const { _id, _rev, ...canonical } = (await row(bookingId)).payload;
+    await commerce.create({ ...canonical, _id: longId });
+    await commerce.patch(recordId).set({ bookingId: longId }).commit();
+    await commerce.delete(bookingId);
+    const sourceBooking = await row(longId);
+    const sourceRecord = await record();
+    const nativeBookings = await sql`select b.legacy_sanity_id,b.payment_record_id,b.booking_payload,s.tombstoned from commerce.bookings b join migration.source_documents s on s.legacy_sanity_id=b.legacy_sanity_id order by b.legacy_sanity_id`;
+    const nativeRecords = await sql`select id,legacy_sanity_id from commerce.payment_records order by legacy_sanity_id`;
+    assert.equal(sourceBooking.tombstoned, false);
+    assert.equal(sourceBooking.payload._id, longId);
+    assert.equal(sourceRecord.bookingId, longId);
+    assert.equal((await row(bookingId)).tombstoned, true);
+    const activeBookings = nativeBookings.filter((booking) => !booking.tombstoned);
+    assert.equal(activeBookings.length, 1);
+    assert.equal(nativeRecords.length, 1);
+    assert.equal(activeBookings[0].legacy_sanity_id, longId);
+    assert.equal(activeBookings[0].payment_record_id, nativeRecords[0].id);
+    assert.equal(nativeRecords[0].legacy_sanity_id, recordId);
+    assert.equal(activeBookings[0].booking_payload.paymentRecordId, recordId);
+    dodoPayment.created_at = new Date(Date.now() - 3600000).toISOString();
+    dodoList = [dodoSummary()];
+    const window = await authorizedReport('GET', true);
+    const target = await targetReport(['payment:payment-fixture']);
+    const { _id: unsafeId, _rev: unsafeRevision, ...unchangedBooking } = sourceBooking.payload;
+    await commerce.create({ ...unchangedBooking, _id: repairedId });
+    await commerce.patch(recordId).set({ bookingId: repairedId }).commit();
+    await commerce.delete(longId);
+    const repairedWindow = await authorizedReport('GET', true);
+    const repairedTarget = await targetReport(['payment:payment-fixture']);
+    const proof = {
+      nativeIdentityAccepted: true, longId, repairedId, sourceBooking, sourceRecord,
+      nativeBookings, activeBookings, nativeRecords, provider: dodoPayment, window, target, repairedWindow, repairedTarget,
+    };
+    assert.equal(window.body.count, 1, JSON.stringify(proof));
+    assert.equal(window.status, 200);
+    assert.deepEqual(window.body.items, [{
+      key: 'scan:identity-invalid', id: 'payment-fixture', ref: '',
+      amount: '9.99', currency: 'USD', reason: 'report_identity_invalid',
+    }]);
+    assert.deepEqual(window.body.complete, { payments: true, bookings: true, records: true, items: true });
+    assert.equal(target.status, 200);
+    assert.equal(target.body.count, 1);
+    assert.equal(target.body.checks[0].state, 'unresolved');
+    assert.deepEqual(target.body.checks[0].keys, ['payment:payment-fixture', 'scan:identity-invalid']);
+    assert.deepEqual(target.body.items, window.body.items);
+    assert.deepEqual(target.body.checks[0].items, window.body.items);
+    for (const result of [window, target]) {
+      assert.equal(JSON.stringify(result.body).includes(longId), false);
+      assert.equal(result.databaseRequests.some(request => request.rpc === 'roo_booking_referral_audit'), false);
+    }
+    assert.equal(repairedWindow.status, 200);
+    assert.equal(repairedWindow.body.count, 0);
+    assert.deepEqual(repairedWindow.body.items, []);
+    assert.equal(repairedTarget.status, 200);
+    assert.equal(repairedTarget.body.count, 0);
+    assert.deepEqual(repairedTarget.body.checks, [{
+      key: 'payment:payment-fixture', state: 'recovered', recovery: 'booking',
+      keys: ['payment:payment-fixture', 'record:' + recordId, 'booking:' + repairedId], items: [],
+    }]);
+    for (const result of [repairedWindow, repairedTarget])
+      assert.equal(result.databaseRequests.filter(request => request.rpc === 'roo_booking_referral_audit').length, 1);
+    await sql`update commerce.bookings set booking_payload=jsonb_set(booking_payload,'{commissionAmount}','0'::jsonb) where legacy_sanity_id=${repairedId}`;
+    const projectionWindow = await authorizedReport('GET', true);
+    const projectionTarget = await targetReport(['payment:payment-fixture']);
+    assert.deepEqual(reportReasons(projectionWindow.body), ['referral_projection_mismatch']);
+    assert.equal(projectionTarget.body.checks[0].state, 'unresolved');
+    assert.deepEqual(reportReasons(projectionTarget.body), ['referral_projection_mismatch']);
+    assert.equal((await fixture.client.rpc('roo_refresh_operational_shadow')).error, null);
+    const projectionRepaired = await targetReport(['payment:payment-fixture']);
+    assert.equal(projectionRepaired.body.checks[0].state, 'recovered');
+    assert.equal(projectionRepaired.body.count, 0);
+    proof.projectionBoundary = { projectionWindow, projectionTarget, projectionRepaired };
+    return proof;
+  });
+  await run('reconcile-report-target-auth-before-json', async () => {
+    const saved = process.env.RECONCILE_REPORT_TOKEN;
+    const results = {};
+    try {
+      delete process.env.RECONCILE_REPORT_TOKEN;
+      results.unset = await reportRoute({ authorization: 'Bearer wrong' }, 'GET', true, { check: '{' });
+      assert.equal(results.unset.status, 404);
+      process.env.RECONCILE_REPORT_TOKEN = 'x'.repeat(40);
+      results.wrong = await reportRoute({ authorization: 'Bearer wrong' }, 'GET', true, { check: '{' });
+      assert.equal(results.wrong.status, 403);
+      results.repeated = await reportRoute({ authorization: 'Bearer wrong' }, 'GET', true, { check: ['[]', '[]'] });
+      assert.equal(results.repeated.status, 400);
+      assert.equal(results.repeated.body.code, 'duplicate_query');
+      for (const method of ['POST', 'HEAD']) {
+        const result = await authorizedReport(method, true, { check: '{' });
+        assert.equal(result.status, 405);
+        assert.equal(result.headers.allow, 'GET');
+        results[method] = result;
+      }
+      for (const result of Object.values(results)) {
+        assert.deepEqual(result.providerRequests, []);
+        assert.deepEqual(result.databaseRequests, []);
+        assert.equal(result.headers['cache-control'], 'private, no-store');
+      }
+      return results;
+    } finally {
+      if (saved === undefined) delete process.env.RECONCILE_REPORT_TOKEN;
+      else process.env.RECONCILE_REPORT_TOKEN = saved;
+    }
+  });
+  for (const dependency of ['provider', 'database']) {
+    await run('reconcile-report-target-last-' + dependency + '-unavailable', async () => {
+      await seed('dodo', 'booked', dodoBooking());
+      let failed = false;
+      if (dependency === 'provider') {
+        providerHook = (request, req, res) => {
+          if (request.path !== '/payments/payment-unavailable') return;
+          failed = true;
+          res.writeHead(503, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ code: 'fixture_payment_unavailable' }));
+          return true;
+        };
+      } else {
+        fixture.setRequestHook((phase, request) => {
+          if (phase !== 'before' || !request.body?.p_ids?.includes('paymentRecord.unavailable')) return;
+          failed = true;
+          throw new Error('fixture_database_unavailable');
+        });
+      }
+      const report = await targetReport(['payment:payment-fixture', dependency === 'provider' ? 'payment:payment-unavailable' : 'record:paymentRecord.unavailable']);
+      assert.equal(failed, true);
+      assert.equal(report.status, 503, JSON.stringify(report.body));
+      assert.equal(report.body.code, 'reconcile_report_unavailable');
+      for (const field of ['checks', 'items', 'count']) assert.equal(Object.hasOwn(report.body, field), false);
+      assert.equal(report.providerRequests.filter((request) => request.path === '/payments/payment-fixture').length, 1);
+      assert.equal(report.providerRequests.some((request) => request.path.startsWith('/payments?')), false);
+      return report;
+    });
+  }
+  for (const count of [150, 201]) await run(`reconcile-report-booking-transition-union-${count}`, async () => {
+    const recent = new Date(Date.now() - 3600000).toISOString();
+    const old = new Date(Date.now() - 96 * 3600000).toISOString();
+    for (let offset = 0; offset < count; offset += 100) {
+      const tx = commerce.transaction();
+      for (let index = offset; index < Math.min(count, offset + 100); index++) {
+        const field = ['_createdAt', 'lastRefundAt', 'updatedAt'][index % 3];
+        tx.create({ _id: 'booking.transition-' + index, _type: 'booking', status: 'refunded',
+          paymentProvider: 'dodo', dodoPaymentId: 'payment-transition-' + index,
+          _createdAt: old, lastRefundAt: old, updatedAt: old,
+          ...(count === 150 ? { _createdAt: recent, lastRefundAt: recent, updatedAt: recent } : { [field]: recent }),
+          netAmount: 9.99, backendOwner: 'supabase', cutoverGeneration: 0 });
+      }
+      await tx.commit();
+    }
+    providerHook = (request, req, res) => {
+      if (!request.path.startsWith('/payments/payment-transition-')) return;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ...dodoPayment, payment_id: request.path.slice('/payments/'.length), metadata: {} }));
+      return true;
+    };
+    const report = await authorizedReport('GET', true);
+    assert.equal(report.status, 200);
+    const lookups = report.providerRequests.filter(request => request.path.startsWith('/payments/payment-transition-'));
+    assert.equal(lookups.length, Math.min(count, 200));
+    assert.equal(new Set(lookups.map(request => request.path)).size, lookups.length);
+    assert.equal(report.body.complete.bookings, count <= 200);
+    assert.equal(report.body.count, count === 150 ? 150 : 201);
+    if (count > 200) assert.equal(report.body.items[0].key, 'scan:dodo-bookings');
+    return { count, lookups: lookups.length, report };
+  });
+  for (const history of [49, 50, 51]) for (const listed of [false, true]) for (const variant of ['booking', 'pricing', 'currency', 'payment']) await run(`reconcile-report-recent-priority-${history}-${listed ? 'listed' : 'reverse'}${variant === 'booking' ? '' : '-' + variant}`, async () => {
+    await seed('dodo', 'booked', dodoBooking(
+      variant === 'booking' ? { referralCode: 'wrong-creator' } : variant === 'payment' ? { paymentRecordId: 'paymentRecord.other' } : {},
+      variant === 'pricing' ? { pricingSnapshot: { netAmount: null } } : {},
+    ));
+    if (['currency', 'payment'].includes(variant)) dodoPayment.currency = 'EUR';
+    const recentRef = variant === 'booking' ? bookingId : recordId;
+    const expectedReason = { booking: 'referral_binding_mismatch', pricing: 'frozen_pricing_unavailable', currency: 'dodo_currency_mismatch', payment: 'dodo_currency_mismatch' }[variant];
+    const owners = ['provider', 'reconciliation'].map((kind) => ({
+      _type: 'paymentRecord', _id: 'paymentRecord.recent-' + kind, provider: 'dodo',
+      status: 'needs_recovery', [kind + 'RecoveryTerminal']: true,
+      providerRecoveryTerminalReason: 'dodo_currency_mismatch',
+      providerPaymentId: 'payment-recent-' + kind, updatedAt: new Date().toISOString(),
+      pricingSnapshot: { netAmount: 9.99 }, backendOwner: 'supabase', cutoverGeneration: 0,
+    }));
+    for (const owner of owners) await commerce.create(owner);
+    dodoList = Array.from({ length: history }, (_, index) => ({ ...dodoSummary(), payment_id: 'payment-history-' + index }));
+    if (listed) dodoList.push(dodoSummary(), ...owners.map((owner) => ({ ...dodoSummary(), payment_id: owner.providerPaymentId })));
+    providerHook = (request, req, res) => {
+      if (!request.path.startsWith('/payments/payment-history-') && !request.path.startsWith('/payments/payment-recent-')) return;
+      const id = request.path.slice('/payments/'.length);
+      const owner = owners.find((entry) => entry.providerPaymentId === id);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ...dodoPayment, payment_id: id, metadata: owner ? { paymentRecordId: owner._id } : {} }));
+      return true;
+    };
+    const report = await authorizedReport('GET', true);
+    const recentRefs = [recentRef, ...owners.map((owner) => owner._id)];
+    assert.equal(report.status, 200);
+    assert.equal(report.body.count, history + 3);
+    assert.equal(report.body.items.length, 50);
+    assert.deepEqual(report.body.complete, { payments: true, bookings: true, records: true, items: false });
+    assert.deepEqual(report.body.items.slice(0, 3).map((item) => item.ref).sort(), [...recentRefs].sort(), JSON.stringify(report.body));
+    assert.equal(report.body.items.find((item) => item.ref === recentRef).reason, expectedReason);
+    assert.ok(report.body.items.filter((item) => owners.some(owner => owner._id === item.ref)).every((item) => item.reason === 'owner_review_dodo_currency_mismatch'));
+    for (const ref of recentRefs) assert.equal(report.body.items.filter((item) => item.ref === ref).length, 1);
+    const retry = await authorizedReport('GET', true);
+    assert.deepEqual(retry.body.items, report.body.items);
+    const omitted = 'payment:payment-history-' + (history - 1);
+    assert.equal(report.body.items.some((item) => item.key === omitted), false);
+    const target = await targetReport([omitted, ...recentRefs.map((id, index) => (index || variant !== 'booking' ? 'record:' : 'booking:') + id)]);
+    assert.equal(target.status, 200);
+    assert.ok(target.body.checks.every((entry) => entry.state === 'unresolved'));
+    assert.equal(target.body.items[0].reason, 'payment_without_record');
+    return { report: report.body, retry: retry.body, target: target.body, recentRefs };
+  });
+  for (const flag of ['providerRecoveryTerminal', 'reconciliationRecoveryTerminal']) await run(`reconcile-report-terminal-identity-${flag}`, async () => {
+    const data = dodoBooking({}, { bookingId: '', [flag]: true,
+      providerRecoveryTerminalReason: 'dodo_currency_mismatch', updatedAt: new Date().toISOString() });
+    data.booking = null;
+    await seed('dodo', 'needs_recovery', data);
+    const before = await authorizedReport('GET', true);
+    dodoList = [dodoSummary()];
+    const listed = await authorizedReport('GET', true);
+    dodoList = [];
+    const after = await authorizedReport('GET', true);
+    for (const result of [before, listed, after]) {
+      assert.equal(result.status, 200);
+      assert.equal(result.body.items.length, 1);
+      assert.equal(result.body.items[0].key, 'record:' + recordId, JSON.stringify(result.body));
+    }
+    assert.deepEqual(listed.body.items, before.body.items);
+    assert.deepEqual(after.body.items, before.body.items);
+    const targeted = await targetReport(['record:' + recordId, 'payment:payment-fixture']);
+    assert.equal(targeted.status, 200);
+    assert.equal(targeted.body.items.length, 1);
+    assert.deepEqual(targeted.body.items, before.body.items);
+    assert.ok(targeted.body.checks.every(entry => entry.state === 'unresolved' && entry.keys.includes('record:' + recordId)));
+    return { before: before.body, listed: listed.body, after: after.body, targeted: targeted.body };
+  });
+  await run('reconcile-report-budget-forward-details', async () => {
+    const data = dodoBooking({}, { bookingId: '', providerRecoveryTerminal: true,
+      providerRecoveryTerminalReason: 'dodo_currency_mismatch', updatedAt: new Date().toISOString() });
+    data.booking = null;
+    await seed('dodo', 'needs_recovery', data);
+    let elapsed = 0, details = 0;
+    const started = originalNow();
+    Date.now = () => originalNow() + elapsed;
+    providerHook = (request, req, res) => {
+      if (request.path.startsWith('/payments?')) {
+        const page = Number(new URL(request.path, origin).searchParams.get('page_number'));
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ items: Array.from({ length: 100 }, (_, index) => ({ ...dodoSummary(), payment_id: 'payment-budget-' + (page * 100 + index) })) }));
+        return true;
+      }
+      if (!request.path.startsWith('/payments/payment-budget-')) return;
+      if (details++ % 8 === 0) elapsed += 1300;
+      request.virtualElapsedMs = elapsed;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ...dodoPayment, payment_id: request.path.slice('/payments/'.length), metadata: {} }));
+      return true;
+    };
+    const report = await authorizedReport('GET', true);
+    assert.equal(report.status, 200);
+    assert.ok(elapsed < 300000, 'Virtual provider waves exceeded the route budget: ' + elapsed);
+    assert.ok(details > 8 && details < 2000, 'Scanned details: ' + details);
+    assert.deepEqual(report.body.complete, { payments: false, bookings: false, records: false, items: report.body.count <= 50 });
+    assert.ok(report.body.items.some(item => item.key === 'record:' + recordId));
+    assert.ok(report.body.items.some(item => item.key.startsWith('scan:')));
+    return { report: report.body, virtualElapsedMs: elapsed, details, realElapsedMs: originalNow() - started,
+      clockStandIn: '1.3 seconds per actual HTTP detail wave, isolated Date.now; provider and database requests are real local requests' };
+  });
+  for (const phase of ['pages', 'reverse', 'database', 'refund', 'target']) await run('reconcile-report-budget-' + phase, async () => {
+    let elapsed = 0, reads = 0;
+    const data = dodoBooking({}, { providerRecoveryTerminal: phase === 'pages',
+      providerRecoveryTerminalReason: 'dodo_currency_mismatch', updatedAt: new Date().toISOString() });
+    await seed('dodo', phase === 'pages' ? 'needs_recovery' : 'booked', data);
+    if (phase === 'refund') {
+      await commerce.patch(bookingId).set({ refundStatus: 'partial', refundedAmount: 2.5, commissionAmount: 0.75, dodoOriginalCommissionAmount: 1 }).commit();
+      await commerce.patch(recordId).set({ refundState: 'partial', refundProcessedAmountInSubunits: 250, refundCurrency: 'USD', refundRequiresBookingSync: false }).commit();
+      dodoPayment.refund_status = 'partial';
+      dodoPayment.refunds = [{ refund_id: 'refund-fixture', payment_id: 'payment-fixture', status: 'succeeded' }];
+      dodoRefund.amount = 250;
+    }
+    Date.now = () => originalNow() + elapsed;
+    if (phase === 'database') fixture.setRequestHook((stage, request) => {
+      if (stage === 'after' && request.path === '/rest/v1/rpc/roo_fetch_shadow_documents_targeted') { reads++; elapsed = 241000; }
+    });
+    providerHook = (request, req, res) => {
+      if (phase === 'pages' && request.path.startsWith('/payments?')) {
+        reads++; elapsed += 20000;
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ items: Array.from({ length: 100 }, (_, index) => ({ ...dodoSummary(), payment_id: 'payment-page-' + index })) }));
+        return true;
+      }
+      if ((['reverse', 'target'].includes(phase) && request.path === '/payments/payment-fixture') ||
+          (phase === 'refund' && request.path === '/refunds/refund-fixture')) { reads++; elapsed = 241000; }
+    };
+    const report = phase === 'target' ? await targetReport(canonicalKeys) : await authorizedReport('GET', true);
+    assert.equal(report.status, 200, JSON.stringify(report.body));
+    assert.ok(reads > 0);
+    assert.ok(elapsed < 300000);
+    assert.deepEqual(report.body.complete, { payments: false, bookings: false, records: false, items: true });
+    if (phase === 'target') {
+      assert.deepEqual(report.body.items, []);
+      assert.deepEqual(report.body.checks.map(entry => entry.state), ['unknown', 'unknown', 'unknown']);
+      assert.ok(report.body.checks.every(entry => entry.keys.length === 1 && entry.items.length === 0));
+      assert.equal(report.providerRequests.filter(request => request.path === '/payments/payment-fixture').length, 1);
+    } else {
+      assert.ok(report.body.items.some(item => item.key === 'scan:dodo-payments'));
+      if (phase === 'pages') {
+        assert.ok(reads < 20);
+        assert.ok(report.body.items.some(item => item.key === 'record:' + recordId));
+      }
+    }
+    return { phase, report: report.body, virtualElapsedMs: elapsed, reads,
+      clockStandIn: 'Isolated Date.now advances after actual local provider/database response; no wall-clock delay claimed' };
+  });
+  await run('reconcile-report-provider-body-timeout', async () => {
+    dodoList = [dodoSummary()];
+    let pending, timer;
+    providerHook = (request, req, res) => {
+      if (request.path !== '/payments/payment-fixture') return;
+      const body = JSON.stringify(dodoPayment);
+      pending = res;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.write(body.slice(0, 1));
+      timer = setTimeout(() => res.end(body.slice(1)), 9000);
+      return true;
+    };
+    const started = originalNow();
+    try {
+      const report = await authorizedReport('GET', true);
+      assert.equal(report.status, 503, JSON.stringify(report.body));
+      assert.equal(report.body.code, 'reconcile_report_unavailable');
+      assert.equal(Object.hasOwn(report.body, 'items'), false);
+      assert.ok(originalNow() - started < 8900);
+      return { status: report.status, elapsedMs: originalNow() - started, slowBodyMs: 9000 };
+    } finally {
+      clearTimeout(timer);
+      pending?.destroy();
+    }
+  });
+  await run('reconcile-report-item-cap-completeness', async () => {
+    dodoList = Array.from({ length: 51 }, (_, index) => ({ ...dodoSummary(), payment_id: 'payment-cap-' + index }));
+    providerHook = (request, req, res) => {
+      if (!request.path.startsWith('/payments/payment-cap-')) return;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ...dodoPayment, payment_id: request.path.slice('/payments/'.length), metadata: {} }));
+      return true;
+    };
+    const report = await authorizedReport('GET', true);
+    assert.equal(report.status, 200);
+    assert.equal(report.body.count, 51);
+    assert.equal(report.body.items.length, 50);
+    assert.deepEqual(report.body.complete, { payments: true, bookings: true, records: true, items: false });
+    assert.ok(report.body.items.every((item) => item.key === 'payment:' + item.id));
+    return report;
+  });
+  for (const flag of ['providerRecoveryTerminal', 'reconciliationRecoveryTerminal']) for (const variant of [
+    { name: 'missing-flags', field: flag }, { name: 'null-flag', field: flag, value: null },
+    { name: 'false-flag', field: flag, value: false }, { name: 'string-flag', field: flag, value: 'true' },
+    ...['provider', 'status'].flatMap(field => [
+      { name: 'missing-' + field, field }, { name: 'null-' + field, field, value: null },
+    ]),
+  ]) await run(`reconcile-report-terminal-${variant.name}-${flag}`, async () => {
+    await seed('dodo', 'needs_recovery', { booking: null, record: { bookingId: '', [flag]: true,
+      recoveryReason: 'create_booking_failed', updatedAt: new Date().toISOString() } });
+    let transaction = commerce.transaction();
+    for (let index = 0; index < 201; index++) {
+      transaction.create({ _id: 'paymentRecord.aa-retrying-' + String(index).padStart(3, '0'), _type: 'paymentRecord',
+        provider: 'dodo', status: 'needs_recovery', updatedAt: new Date().toISOString(),
+        ...(variant.field !== flag ? { [flag]: true } : {}),
+        pricingSnapshot: { netAmount: 9.99 }, backendOwner: 'supabase', cutoverGeneration: 0 });
+      if ((index + 1) % 100 === 0) { await transaction.commit(); transaction = commerce.transaction(); }
+    }
+    await transaction.commit();
+    if (variant.value === undefined) await sql`update migration.source_documents set payload=payload-${variant.field} where legacy_sanity_id like 'paymentRecord.aa-retrying-%'`;
+    else await sql`update migration.source_documents set payload=jsonb_set(payload,ARRAY[${variant.field}]::text[],coalesce(${sql.json(variant.value)}::jsonb,'null'::jsonb)) where legacy_sanity_id like 'paymentRecord.aa-retrying-%'`;
+    const report = await authorizedReport('GET', true);
+    assert.equal(report.status, 200);
+    assert.equal(report.body.complete.records, true, JSON.stringify(report.body));
+    assert.deepEqual(report.body.items.map(item => item.key), ['record:' + recordId], JSON.stringify(report.body));
+    const targeted = await targetReport(['record:' + recordId]);
+    assert.equal(targeted.body.checks[0].state, 'unresolved');
+    assert.deepEqual(targeted.body.items, report.body.items);
+    return { flag, variant, ordinaryRecords: 201, report, targeted,
+      standIn: 'Missing/null/corrupt selector fields imported into native source rows; actual database candidate filtering and report route execute' };
+  });
+  for (const mode of ['provider', 'reconciliation', 'both', 'mixed']) await run('reconcile-report-terminal-cap-completeness' + (mode === 'provider' ? '' : '-' + mode), async () => {
+    let transaction = commerce.transaction();
+    for (let index = 0; index < 201; index += 1) {
+      transaction.create({
+        _type: 'paymentRecord', _id: 'paymentRecord.cap-' + index, provider: 'dodo',
+        status: 'needs_recovery',
+        providerRecoveryTerminal: mode === 'provider' || mode === 'both' || (mode === 'mixed' && index % 2 === 0),
+        reconciliationRecoveryTerminal: mode === 'reconciliation' || mode === 'both' || (mode === 'mixed' && index % 2 !== 0),
+        recoveryReason: 'create_booking_failed',
+        ...(mode === 'reconciliation' ? {} : { providerRecoveryTerminalReason: 'dodo_currency_mismatch' }),
+        updatedAt: new Date().toISOString(), pricingSnapshot: { netAmount: 9.99 },
+        backendOwner: 'supabase', cutoverGeneration: 0,
+      });
+      if ((index + 1) % 100 === 0) {
+        await transaction.commit();
+        transaction = commerce.transaction();
+      }
+    }
+    await transaction.commit();
+    const report = await authorizedReport('GET', true);
+    assert.equal(report.status, 200);
+    assert.equal(report.body.count, 201);
+    assert.equal(report.body.items.length, 50);
+    assert.equal(report.body.items[0].key, 'scan:dodo-records');
+    assert.deepEqual(report.body.complete, { payments: true, bookings: true, records: false, items: false });
+    assert.ok(report.body.items.slice(1).every((item) => item.key === 'record:' + item.ref));
+    return report;
+  });
+  await run('reconcile-report-unsafe-identity-key', async () => {
+    dodoPayment.payment_id = 'payment unsafe';
+    dodoPayment.metadata = {};
+    dodoList = [dodoSummary()];
+    providerHook = (request, req, res) => {
+      if (decodeURIComponent(request.path) !== '/payments/payment unsafe') return;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(dodoPayment));
+      return true;
+    };
+    const report = await authorizedReport('GET', true);
+    assert.equal(report.status, 200);
+    assert.equal(report.body.count, 1);
+    assert.equal(report.body.items[0].key, 'scan:identity-invalid');
+    assert.equal(report.body.items[0].id, 'paymentunsafe');
+    assert.equal(report.body.items[0].reason, 'payment_without_record');
+    return report;
+  });
   for(const revisionState of ['absent','null'])await run(`missing-payment-authorizing-revision${revisionState==='null'?'-null':''}`,async()=>{
     await seed('paypal','started',{record:{bookingId:''}});await removeRevision(recordId,revisionState);let raced=false,reads=0,before;
     fixture.setRequestHook(async(phase,request)=>{if(phase!=='after'||raced||!request.response)return;const raw=JSON.stringify(request.response);if(!raw.includes(recordId)||!raw.includes('pricingSnapshot')||++reads!==2)return;raced=true;fixture.setRequestHook(null);const current=await record();await commerce.patch(recordId).set({status:'finalizing',finalizationLeaseId:'newer-owner',finalizationLeaseExpiresAt:new Date(originalNow()+120000).toISOString()}).commit();before=await snapshot({receipts:true});});
@@ -326,6 +3886,8 @@ try{
       const current=await documents.getDocument(referral._id);if(current)await documents.patch(referral._id).ifRevisionId(current._rev).set(referral).commit();else await documents.create(referral);
       input.bookingPayload.referralCode='FIXTURE';
     }
+    if (variant === 'blank-referral') input.bookingPayload.referralCode = ' \t ';
+    if (variant === 'unknown-referral') input.bookingPayload.referralCode = ' NOT-A-CREATOR ';
     if(variant==='coupon'||provider==='free'){
       const code=`A1${scenarioNumber}`,percent=provider==='free'?100:10;
       await commerce.create({_id:`coupon.a1.${scenarioNumber}`,_type:'coupon',code,isActive:true,discountType:'percent',discountPercent:percent,canCombineWithReferral:true,timesUsed:0,activeReservations:0,maxUses:0,backendOwner:'supabase',cutoverGeneration:0});input.bookingPayload.couponCode=code;
@@ -357,6 +3919,267 @@ try{
     return{input,quote,started,id:payment._id,proof};
   };
   const a1Hook=async provider=>requestFlow(provider,{req:provider==='paypal'?paypalReq('PAYMENT.CAPTURE.COMPLETED',{id:'capture-fixture',supplementary_data:{related_ids:{order_id:'order-fixture'}}}):provider==='razorpay'?razorReq('payment.captured',{payment:{entity:razorpayPayment}}):dodoReq()});
+  for (const update of ['omitted', 'null']) await run('reconcile-report-review-recent-success-' + update, async () => {
+    const checkout = await a1Start('dodo');
+    dodoPayment.created_at = new Date(originalNow() - 10 * 86400000).toISOString();
+    if (update === 'null') dodoPayment.updated_at = null;
+    else delete dodoPayment.updated_at;
+    await sql.unsafe(`create or replace function public.payment_capture_grace_fixture() returns trigger language plpgsql as $$
+      begin if new.document_type = 'booking' then raise exception 'Synthetic booking storage failure'; end if; return new; end $$;
+      create trigger payment_capture_grace_fixture before insert or update on migration.source_documents
+      for each row execute function public.payment_capture_grace_fixture();`);
+    let webhook;
+    try { webhook = await a1Hook('dodo'); }
+    finally { await sql.unsafe('drop trigger payment_capture_grace_fixture on migration.source_documents'); }
+    const saved = (await row(checkout.id)).payload;
+    assert.equal(saved.bookingId, '');
+    assert.equal(saved.verificationState, 'server_verified');
+    assert.ok(saved.events.some(event => event.reason === 'provider_capture_verified'));
+    assert.notEqual(saved.reconciliationRecoveryTerminal, true);
+    const changedAt = Date.parse(saved.updatedAt);
+    assert.ok(changedAt > originalNow() - 60000);
+    const keys = ['payment:payment-fixture', 'record:' + checkout.id];
+    dodoList = [dodoSummary()];
+    const window = await authorizedReport('GET', true);
+    const targeted = await targetReport(keys);
+    assert.equal(window.body.count, 0, JSON.stringify({ saved, window: window.body }));
+    assertTarget(targeted, keys, ['unknown', 'unknown'], []);
+    Date.now = () => changedAt + 1800000 - 1;
+    const boundary = await targetReport(keys);
+    assertTarget(boundary, keys, ['unknown', 'unknown'], []);
+    Date.now = () => changedAt + 1800000;
+    const mature = await authorizedReport('GET', true);
+    const matureTargets = await targetReport(keys);
+    assert.deepEqual(reportReasons(mature.body), ['payment_without_booking']);
+    assertTarget(matureTargets, keys, ['unresolved', 'unresolved'], ['payment_without_booking']);
+    return { update, webhook, record: saved, provider: dodoPayment, window, targeted, boundary, mature, matureTargets };
+  });
+  await run('recovery-report-exhausted-finalize-outside-provider-cap', async () => {
+    const checkout = await a1Start('dodo');
+    await sql.unsafe(`create or replace function public.payment_capture_failure_fixture() returns trigger language plpgsql as $$
+      begin
+        if new.document_type = 'booking' then raise exception 'Synthetic booking storage failure'; end if;
+        return new;
+      end $$;
+      create trigger payment_capture_failure_fixture before insert or update on migration.source_documents
+      for each row execute function public.payment_capture_failure_fixture();`);
+    const attempts = [];
+    let exhausted;
+    try {
+      await a1Hook('dodo');
+      for (let index = 0; index < 12; index += 1) {
+        const current = (await row(checkout.id)).payload;
+        attempts.push(current.recoveryFailureCount);
+        if (current.recoveryFailureCount === 12) { exhausted = current; break; }
+        const when = new originalDate(current.nextRecoveryAt).getTime() + 1;
+        globalThis.Date = class extends originalDate {
+          constructor(...args) { super(...(args.length ? args : [when])); }
+          static now() { return when; }
+        };
+        const retried = await requestFlow('reconcile');
+        assert.ok(retried.body.summary, JSON.stringify(retried));
+        assert.equal(retried.body.summary.scanned, 1, JSON.stringify(retried));
+        assert.equal(retried.body.summary.providerUnavailable, 0);
+        assert.equal(retried.status, retried.body.summary.failed ? 503 : 200, JSON.stringify(retried));
+      }
+    } finally {
+      await sql.unsafe('drop trigger payment_capture_failure_fixture on migration.source_documents');
+    }
+    assert.equal(attempts[0], 1);
+    assert.equal(attempts.at(-1), 12);
+    assert.ok(attempts.every((count, index) => index === 0 || count > attempts[index - 1]));
+    assert.equal(exhausted.status, 'needs_recovery');
+    assert.equal(exhausted.reconciliationRecoveryTerminal, true);
+    assert.notEqual(exhausted.providerRecoveryTerminal, true);
+    assert.equal(exhausted.bookingId, '');
+    const foreign = { ...dodoPayment, payment_id: 'payment-foreign-history', metadata: {},
+      product_cart: [{ product_id: 'pdt_other_site', quantity: 1 }] };
+    dodoList = Array.from({ length: 2000 }, () => dodoSummary(foreign));
+    providerHook = (request, req, res) => {
+      let body;
+      if (request.path.startsWith('/payments?')) {
+        const page = Number(new URL(request.path, origin).searchParams.get('page_number'));
+        body = { items: dodoList.slice(page * 100, (page + 1) * 100) };
+      } else if (request.path === '/payments/payment-foreign-history') body = foreign;
+      else return;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(body));
+      return true;
+    };
+    const window = await authorizedReport('GET', true);
+    assert.equal(window.status, 200, JSON.stringify(window.body));
+    assert.deepEqual(reportReasons(window.body), ['report_truncated', 'owner_review_unknown'], JSON.stringify(window.body));
+    assert.equal(window.body.items[1].key, `record:${checkout.id}`);
+    assert.equal(window.body.complete.payments, false);
+    assert.equal(window.body.complete.records, true);
+    const keys = [`record:${checkout.id}`, 'payment:payment-fixture'];
+    const targeted = await targetReport(keys);
+    assert.equal(targeted.status, 200, JSON.stringify(targeted.body));
+    assert.deepEqual(targeted.body.checks.map(check => check.state), ['unresolved', 'unresolved']);
+    assert.ok(targeted.body.items.every(item => item.reason === 'owner_review_unknown'));
+    assert.equal((await requestFlow('reconcile')).body.summary.scanned, 0);
+    await commerce.patch(checkout.id).set({ reconciliationRecoveryTerminal: false, nextRecoveryAt: '' }).commit();
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    const repaired = (await row(checkout.id)).payload;
+    assert.ok(repaired.bookingId, JSON.stringify(repaired));
+    const recovered = await targetReport(keys);
+    assert.equal(recovered.status, 200, JSON.stringify(recovered.body));
+    assert.deepEqual(recovered.body.checks.map(check => check.state), ['recovered', 'recovered']);
+    return { attempts, exhausted, window, targeted, repaired, recovered,
+      repairStandIn: 'Fixture operator clears terminal after the actual database failure is removed; cron commits the booking.' };
+  });
+  for (const variant of ['blank-referral', 'unknown-referral', 'referral']) for (const via of ['webhook', 'cron']) {
+    await run(`recovery-reschedule-${variant}-${via}`, async () => {
+      const checkout = await a1Start('dodo', variant);
+      const expectedCode = variant === 'blank-referral' ? '' : variant === 'referral' ? 'fixture' : 'not-a-creator';
+      const started = (await row(checkout.id)).payload;
+      assert.equal(started.bookingPayload.referralCode, String(checkout.input.bookingPayload.referralCode).trim());
+      assert.equal(started.pricingSnapshot.effectiveReferralCode, expectedCode);
+      assert.equal(started.pricingSnapshot.effectiveReferralId, variant === 'referral' ? 'referral.a1' : '');
+      await commerce.patch(checkout.id).ifRevisionId(started._rev).set({
+        status: 'abandoned', providerPaymentId: dodoPayment.payment_id,
+        lateCaptureWatchUntil: new Date(originalNow() + 3600000).toISOString(),
+        nextRecoveryAt: '',
+      }).commit();
+      const recovered = via === 'webhook' ? await a1Hook('dodo') : await requestFlow('reconcile');
+      assert.equal(recovered.status, 200, JSON.stringify(recovered));
+      const saved = (await row(checkout.id)).payload;
+      const booking = (await row(saved.bookingId)).payload;
+      assert.equal(saved.status, 'booked', JSON.stringify(saved));
+      assert.equal(booking.requiresReschedule, true);
+      assert.equal(booking.referralCode, expectedCode);
+      assert.equal(booking.referral?._ref || '', started.pricingSnapshot.effectiveReferralId);
+      assert.equal(booking.commissionAmount, started.pricingSnapshot.commissionAmount);
+      assert.equal(booking.commissionPercent, started.pricingSnapshot.commissionPercent);
+      assert.equal(saved.referralAccountingApplied, variant === 'referral');
+      dodoPayment.created_at = new Date(originalNow() - 3600000).toISOString();
+      dodoList = [dodoSummary()];
+      const window = await authorizedReport('GET', true);
+      const keys = ['payment:payment-fixture', `record:${saved._id}`, `booking:${booking._id}`];
+      const targeted = await targetReport(keys);
+      const reasons = variant === 'unknown-referral' ? ['frozen_pricing_unavailable'] : [];
+      assert.equal(window.status, 200, JSON.stringify(window.body));
+      assert.deepEqual(reportReasons(window.body), reasons, JSON.stringify(window.body));
+      assert.equal(targeted.status, 200, JSON.stringify(targeted.body));
+      assert.deepEqual(reportReasons(targeted.body), reasons);
+      assert.deepEqual(targeted.body.checks.map(check => check.state), keys.map(() => reasons.length ? 'unresolved' : 'recovered'));
+      const earnings = await commerce.referralEarnings({ referralId: 'referral.a1', referralCode: 'fixture' });
+      assert.equal(earnings.total, variant === 'referral' ? started.pricingSnapshot.commissionAmount : 0);
+      assert.equal((await a1Hook('dodo')).status, 200);
+      const afterHook = await snapshot({ receipts: true });
+      assert.equal((await requestFlow('reconcile')).status, 200);
+      assert.deepEqual(await snapshot({ receipts: true }), afterHook);
+      assert.deepEqual((await row(saved.bookingId)).payload, booking);
+      assert.equal((await sql`select count(*)::integer as count from commerce.bookings`)[0].count, 1);
+      assert.deepEqual(await commerce.referralEarnings({ referralId: 'referral.a1', referralCode: 'fixture' }), earnings);
+      return { variant, via, started, recovered, saved, booking, window, targeted, earnings,
+        afterHook, bookingAndCreditUnchangedOnRetry: true };
+    });
+  }
+  await run('reconcile-report-created-refund-rounding', async () => {
+    const data = dodoBooking({}, { bookingId: '', refundState: 'partial', refundProcessedAmountInSubunits: 29,
+      refundCurrency: 'USD', refundRequiresBookingSync: false,
+      refunds: [{ providerRefundId: 'refund-fixture', providerPaymentId: 'payment-fixture', status: 'processed', amountInSubunits: 29, amount: 0.29, currency: 'USD', reversed: false }],
+      pricingSnapshot: { netAmount: 0.58, grossAmount: 0.58, commissionAmount: 0.01, commissionPercent: 2,
+        effectiveReferralId: 'referral.rounding', effectiveReferralCode: 'rounding' },
+      providerPublicData: { currency: 'USD', productId: 'pdt_fixture', environment: 'test_mode', taxInclusive: false, totalAmount: 58 } });
+    data.booking = null;
+    const payment = await seed('dodo', 'captured_webhook', data);
+    const creator = { _id: 'referral.rounding', _type: 'referral', slug: { _type: 'slug', current: 'rounding' }, successfulReferrals: 0,
+      registrationStatus: 'verified', backendOwner: 'supabase', cutoverGeneration: 0 };
+    const existing = await documents.getDocument(creator._id);
+    if (existing) await documents.patch(creator._id).set(creator).commit();
+    else await documents.create(creator);
+    const { createRequiresRescheduleBooking } = await import('../src/server/api/ref/bookingCommit.js');
+    const created = await createRequiresRescheduleBooking({ client: commerce, paymentRecord: payment, notify: false,
+      paymentRecordMutation: { id: recordId, revision: payment._rev, set: { status: 'booked' } } });
+    const booking = (await row(created.bookingId)).payload;
+    assert.equal(booking.commissionAmount, 0.01);
+    assert.equal(booking.dodoOriginalCommissionAmount, 0.01);
+    assert.equal(booking.lastRefundAt, undefined);
+    dodoPayment.total_amount = 58;
+    dodoRefund.amount = 29;
+    dodoRefund.is_partial = true;
+    dodoPayment.refund_status = 'partial';
+    dodoPayment.refunds = [dodoRefund];
+    dodoList = [dodoSummary()];
+    const before = await authorizedReport('GET', true);
+    assert.equal(before.status, 200);
+    assert.deepEqual(reportReasons(before.body), []);
+    assert.equal((await commerce.referralEarnings({ referralId: creator._id, referralCode: 'rounding' })).total, 0.01);
+    const transitions = [];
+    for (const state of ['dispute_opened', 'dispute_won']) {
+      dodoPayment.disputes = [dodoDispute(state)];
+      const event = await requestFlow('dodo', { req: dodoReq(dodoPayment, 'payment.succeeded', 'rounding-' + state) });
+      assert.equal(event.status, 200, JSON.stringify(event));
+      const report = await authorizedReport('GET', true);
+      assert.equal(report.status, 200);
+      assert.deepEqual(reportReasons(report.body), []);
+      transitions.push({ state, event, booking: (await row(created.bookingId)).payload, report });
+    }
+    assert.equal(transitions[1].booking.commissionAmount, 0.01);
+    assert.equal(transitions[1].booking.dodoDisputeActive, false);
+    assert.equal((await commerce.referralEarnings({ referralId: creator._id, referralCode: 'rounding' })).total, 0.01);
+    await commerce.patch(created.bookingId).set({ commissionAmount: 0 }).commit();
+    const wrong = await authorizedReport('GET', true);
+    assert.deepEqual(reportReasons(wrong.body), ['commission_mismatch']);
+    return { created, booking, before, transitions, wrong,
+      priorRefundStandIn: 'A processed partial-refund payment record is seeded; the actual reschedule transaction and signed dispute handlers write the booking commissions' };
+  });
+  for (const via of ['webhook', 'cron']) for (const reconstruct of [true, false]) await run(`recovery-reschedule-historical-referral-${via}${reconstruct ? '' : '-already-preserved'}`, async () => {
+    const checkout = await a1Start('dodo', 'referral');
+    const started = (await row(checkout.id)).payload;
+    await documents.patch('referral.a1').set({ successfulReferrals: 1 }).commit();
+    await commerce.patch(checkout.id).set({ status: 'abandoned', providerPaymentId: dodoPayment.payment_id,
+      ...(reconstruct ? { historicalBookingReconstruction: true } : { historicalAccountingPreserved: true }),
+      referralAccountingApplied: true,
+      lateCaptureWatchUntil: new Date(originalNow() + 3600000).toISOString(), nextRecoveryAt: '' }).commit();
+    const recovery = via === 'webhook' ? await a1Hook('dodo') : await requestFlow('reconcile');
+    assert.equal(recovery.status, 200, JSON.stringify(recovery));
+    const saved = (await row(checkout.id)).payload;
+    const booking = (await row(saved.bookingId)).payload;
+    assert.equal(booking.requiresReschedule, true);
+    assert.equal(saved.historicalAccountingPreserved, true);
+    assert.equal(booking.referral, undefined);
+    assert.equal(booking.referralCode, started.pricingSnapshot.effectiveReferralCode);
+    assert.equal((await documents.getDocument('referral.a1')).successfulReferrals, 1);
+    const earnings = await commerce.referralEarnings({ referralId: 'referral.a1', referralCode: 'fixture' });
+    assert.equal(earnings.total, started.pricingSnapshot.commissionAmount);
+    dodoPayment.created_at = new Date(originalNow() - 3600000).toISOString();
+    dodoList = [dodoSummary()];
+    const report = await authorizedReport('GET', true);
+    const targets = await targetReport(['payment:payment-fixture', 'record:' + saved._id, 'booking:' + booking._id]);
+    assert.equal(report.status, 200);
+    assert.deepEqual(reportReasons(report.body), [], JSON.stringify({ saved, booking, report: report.body }));
+    assert.deepEqual(targets.body.checks.map(entry => entry.state), ['recovered', 'recovered', 'recovered']);
+    const controls = [];
+    for (const [type, field, value, original] of [
+      ['record', 'historicalAccountingPreserved', false, true],
+      ['record', 'historicalAccountingPreserved', 'true', true],
+      ['record', 'historicalBookingReconstruction', true, saved.historicalBookingReconstruction],
+      ['record', 'historicalBookingReconstruction', 'true', saved.historicalBookingReconstruction],
+      ['record', 'historicalBookingReconstruction', null, saved.historicalBookingReconstruction],
+      ['booking', 'requiresReschedule', false, true],
+      ['booking', 'referralAccountingApplied', true, undefined],
+      ['booking', 'referral', { _type: 'reference', _ref: 'referral.wrong' }, undefined],
+      ['booking', 'referralCode', 'wrong-creator', booking.referralCode],
+    ]) {
+      const id = type === 'record' ? saved._id : booking._id;
+      await commerce.patch(id).set({ [field]: value }).commit();
+      const wrong = await authorizedReport('GET', true);
+      assert.deepEqual(reportReasons(wrong.body), ['referral_binding_mismatch']);
+      controls.push({ type, field, value, report: wrong.body });
+      if (original === undefined) await commerce.patch(id).unset([field]).commit();
+      else await commerce.patch(id).set({ [field]: original }).commit();
+    }
+    assert.equal((await authorizedReport('GET', true)).body.count, 0);
+    assert.equal((await a1Hook('dodo')).status, 200);
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    assert.deepEqual(await commerce.referralEarnings({ referralId: 'referral.a1', referralCode: 'fixture' }), earnings);
+    assert.equal((await documents.getDocument('referral.a1')).successfulReferrals, 1);
+    return { started, recovery, saved, booking, earnings, report, targets, controls,
+      historicalSourceStandIn: 'Prior migration/accounted referral flags and counter are seeded locally; actual signed webhook/cron creates the recovery booking' };
+  });
   for (const mode of ['complete', 'partial', 'missing-details']) await run(`recovery-reschedule-created-${mode}`, async () => {
     const checkout = await a1Start();
     const missing = mode === 'missing-details';
@@ -1802,7 +5625,7 @@ try{
   });
   assert.ok(evidence.scenarios.length,'Unknown named scenario');if(only)assert.equal(evidence.scenarios.length,new Set(only).size,'Unknown selected payment scenario');assert.equal(blockedNetwork,0);
   evidence.modules=Object.fromEntries(['@supabase/supabase-js','@supabase/ssr','postgres','dodopayments'].map(name=>[name,JSON.parse(fs.readFileSync(path.join(process.cwd(),'node_modules',name,'package.json'),'utf8')).version]));
-  evidence.sourceHashes=Object.fromEntries(['src/server/api/payment/flow.js','src/server/api/payment/providerClients.js','src/server/api/payment/dodoProvider.js','src/server/api/ref/createBooking.js','src/server/api/ref/bookingCommit.js','src/server/api/payment/reconcile.js','src/server/api/ref/bookingEmails.js','src/components/Payment.jsx','src/server/api/ref/bookingRefunds.js','scripts/test-payment-persistence-sweep.mjs','scripts/lib/sweep-postgres-fixture.mjs','supabase/migrations/20261005000500_project_booking_payment_currency_subunits.sql'].map(name=>[name,crypto.createHash('sha256').update(sourceText(name)).digest('hex')]));
+  evidence.sourceHashes=Object.fromEntries(['src/server/api/payment/flow.js','src/server/api/payment/providerClients.js','src/server/api/payment/dodoProvider.js','src/server/api/payment/reconcileReport.js','src/server/api/ref/createBooking.js','src/server/api/ref/bookingCommit.js','src/server/api/payment/reconcile.js','src/server/api/ref/bookingEmails.js','src/components/Payment.jsx','src/server/api/ref/bookingRefunds.js','src/server/referrals/commissionMoney.js','scripts/test-payment-persistence-sweep.mjs','scripts/lib/sweep-postgres-fixture.mjs','supabase/migrations/20261005000500_project_booking_payment_currency_subunits.sql','supabase/migrations/20261024010000_read_booking_referral_audit.sql'].map(name=>[name,crypto.createHash('sha256').update(sourceText(name)).digest('hex')]));
   evidence.ok=evidence.scenarios.every(s=>s.passed);
 }catch(error){evidence.ok=false;evidence.failure={message:error.message,stack:error.stack};}
 finally{

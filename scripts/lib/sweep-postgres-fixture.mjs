@@ -179,6 +179,7 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
     await apply('20260910090000_add_dodo_full_projection.sql');
     await apply('20260910100000_filter_dodo_recovery_candidates.sql');
     await apply('20260910110000_recover_dodo_partial_refunds.sql');
+    await apply('20261024010000_read_booking_referral_audit.sql');
     if (commerceRepairMigration) await apply('20261005000000_terminalize_unknown_booking_email_delivery.sql');
     }
     await sql.unsafe("update migration.commerce_control set primary_backend='supabase',generation=0,starts_paused=false");

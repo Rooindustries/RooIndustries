@@ -81,9 +81,63 @@ jobs:
           TOOLING_NETWORK_GUARD: "1"
           NODE_OPTIONS: --import=${{ github.workspace }}/scripts/lib/test-target-safety.mjs
       - run: npm run test:tooling:dependencies
+      - run: npm run test:commerce-alerts:routes
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: commerce-alerts-routes
+          path: test-results/commerce-alerts/
+          if-no-files-found: ignore
       - run: npm run check:seo
       - run: npm run check:supabase:migrations
       - run: npm run test:deploy:rollback
+
+  reconcile-payments:
+    name: Daily payment reconciliation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:reconcile-payments
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: daily-payment-reconciliation
+          path: test-results/roo-498/daily-bridge/
+          if-no-files-found: ignore
+
+  commerce-alerts-preview:
+    name: Commerce alerts in local Next preview
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:commerce-alerts:preview
+      - run: npm run test:commerce-alerts:production
+        env:
+          ROO_COMMERCE_PREVIEW_ARTIFACT: test-results/commerce-alerts-production
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: commerce-alerts-preview
+          path: |
+            test-results/commerce-alerts-preview/
+            test-results/commerce-alerts-production/
+          if-no-files-found: ignore
 
   playwright:
     name: Playwright ${{ matrix.suite.name }}
@@ -267,7 +321,7 @@ jobs:
       - name: Run the remaining PostgreSQL 17 suites
         run: |
           failed=()
-          for suite in booking-hold upgrade-credit upgrade-credit:ownership emails:postgres17 payment-recovery:postgres17 referral:postgres17 creator-payouts:postgres17 referral-social:postgres17 backend-integrity:postgres17 referral-authority:postgres17 referral-email:postgres17 referral-integrity:postgres17 account-domain:postgres17 commerce-readiness:postgres17 referral-email:origins tooling:safety; do
+          for suite in booking-hold upgrade-credit upgrade-credit:ownership emails:postgres17 payment-recovery:postgres17 commerce-alerts referral:postgres17 creator-payouts:postgres17 referral-social:postgres17 backend-integrity:postgres17 referral-authority:postgres17 referral-email:postgres17 referral-integrity:postgres17 account-domain:postgres17 commerce-readiness:postgres17 referral-email:origins tooling:safety; do
             npm run "test:$suite" || failed+=("$suite")
           done
           if [ ${#failed[@]} -gt 0 ]; then

@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { homedir, networkInterfaces } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
+import { createHash, createHmac } from 'node:crypto';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const delay = ms => new Promise(done => setTimeout(done, ms));
@@ -22,7 +23,7 @@ if (process.argv[2] !== '--sandbox') {
   const scratchBase = process.env.TMPDIR || join(root, 'test-results');
   await mkdir(scratchBase, { recursive: true });
   const scratch = await mkdtemp(join(scratchBase, 'roo-monitoring-'));
-  const artifact = join(root, 'test-results/monitoring-deployments', new Date().toISOString().replace(/[:.]/g, '-'));
+  const artifact = resolve(process.env.ROO_MONITORING_ARTIFACT || join(root, 'test-results/monitoring-deployments', new Date().toISOString().replace(/[:.]/g, '-')));
   await mkdir(artifact, { recursive: true });
   await mkdir(join(scratch, 'home'));
   const hostNetwork = await readlink('/proc/self/ns/net');
@@ -59,6 +60,7 @@ async function run(scratch, artifact, hostNetwork) {
   const checks = [];
   const cases = [];
   const received = [];
+  const processes = [];
   const blockedBrowserRequests = [];
   const check = (name, actual, expected) => {
     const ok = JSON.stringify(actual) === JSON.stringify(expected);
@@ -113,6 +115,11 @@ config.experimental = { ...config.experimental, cpus: 1 };
 export default config;
 `);
   await symlink(join(root, 'node_modules'), join(work, 'node_modules'), 'dir');
+  const providerConfig = 'src/server/api/payment/providerConfig.js';
+  await cp(join(root, providerConfig), join(work, 'src/server/api/payment/providerConfig.fixture.cjs'));
+  await writeFile(join(work, providerConfig), `const config = require('./providerConfig.fixture.cjs');
+module.exports = { ...config, allowProviderModeInRuntime: mode => mode === 'test' };
+`);
   for (const [target, source] of [['app/monitoring-fixture/page.jsx', 'monitoring-page.jsx'],
     ['app/api/monitoring-fixture/route.js', 'monitoring-route.js']]) {
     await mkdir(dirname(join(work, target)), { recursive: true });
@@ -139,12 +146,16 @@ export function GET() { throw new Error('Fixture edge error'); }
     SUPABASE_CUTOVER_ENABLED: '1', COMMERCE_CUTOVER_ENABLED: '1',
     SUPABASE_URL: content, NEXT_PUBLIC_SUPABASE_URL: content, NEXT_PUBLIC_SUPABASE_ASSET_URL: content,
     SUPABASE_SECRET_KEY: 'fixture-only-server-key', NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'fixture-only-browser-key',
-    ALLOW_LIVE_PAYMENTS: '0', DODO_PAYMENTS_ENVIRONMENT: 'test_mode', ...apiRouteSecrets, ...overrides,
+    ALLOW_LIVE_PAYMENTS: '0', SALES_PREVIEW_READ_ONLY: '0', ENABLE_PREVIEW_PAYMENTS: '1',
+    DODO_PAYMENTS_ENVIRONMENT: 'test_mode', DODO_PAYMENTS_API_KEY: 'fixture-only-dodo',
+    DODO_PAYMENTS_WEBHOOK_KEY: 'whsec_' + Buffer.from('fixture-only-webhook').toString('base64'),
+    PAYMENT_SESSION_SECRET: 'fixture-only-payment-secret', ...apiRouteSecrets, ...overrides,
   });
   let active;
   let browser;
   const execute = async (name, args, env, timeout = 300000) => {
     active = spawn(process.execPath, args, { cwd: work, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    processes.push(active);
     const logs = [];
     active.stdout.on('data', chunk => logs.push(chunk));
     active.stderr.on('data', chunk => logs.push(chunk));
@@ -184,8 +195,8 @@ export function GET() { throw new Error('Fixture edge error'); }
       { name: 'production', env: { VERCEL: '1', VERCEL_ENV: 'production', NEXT_PUBLIC_ROO_SENTRY_ENABLED: '0' }, enabled: true },
       { name: 'production-artifact-local', env: {}, reuse: 'production' },
       { name: 'next-dev', env: { NODE_ENV: 'development', CI: '', VERCEL: '1', VERCEL_ENV: 'production' }, dev: true },
-    ].filter(mode => !process.env.ROO_MONITORING_CASE || mode.name === process.env.ROO_MONITORING_CASE ||
-      process.env.ROO_MONITORING_CASE === 'production-artifact-local' && mode.name === 'production');
+    ].filter(mode => !process.env.ROO_MONITORING_CASE || process.env.ROO_MONITORING_CASE.split(',').includes(mode.name) ||
+      process.env.ROO_MONITORING_CASE.split(',').includes('production-artifact-local') && mode.name === 'production');
     assert(modes.length, 'Unknown ROO_MONITORING_CASE.');
     for (const mode of modes) {
       const from = received.length;
@@ -196,6 +207,7 @@ export function GET() { throw new Error('Fixture edge error'); }
       if (!mode.dev && !mode.reuse) await execute(`${mode.name}-build`, [next, 'build'], env);
       active = spawn(process.execPath, [next, mode.dev ? 'dev' : 'start', '--hostname', '127.0.0.1', '--port', new URL(site).port],
         { cwd: work, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      processes.push(active);
       const logs = [];
       active.stdout.on('data', chunk => logs.push(chunk));
       active.stderr.on('data', chunk => logs.push(chunk));
@@ -216,7 +228,21 @@ export function GET() { throw new Error('Fixture edge error'); }
           body: JSON.stringify({ startTimeUTC: '2099-01-05T10:00:00.000Z', packageTitle: 'Performance Vertex' }) });
         check(`${mode.name}: actual booking failure response`, [booking.status, (await booking.json()).message],
           [500, 'Failed to reserve this slot. Please try again.']);
+        await fetch(`${content}/__fixture`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ failure: 'commerce_control' }) });
+        check(`${mode.name}: actual checkout failure response`, (await fetch(`${site}/api/payment/start`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+        })).status, 503);
         await fetch(`${content}/__fixture`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ failure: '' }) });
+        await fetch(`${content}/__content`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ outage: ['paymentRecord'] }) });
+        const webhookId = 'fixture-' + mode.name;
+        const webhookTime = String(Math.floor(Date.now() / 1000));
+        const webhookBody = JSON.stringify({ type: 'payment.succeeded', data: { payment_id: 'payment-fixture' } });
+        const webhookSignature = createHmac('sha256', 'fixture-only-webhook').update(`${webhookId}.${webhookTime}.${webhookBody}`).digest('base64');
+        check(`${mode.name}: signed test webhook failure response`, (await fetch(`${site}/api/payment/webhook/dodo`, {
+          method: 'POST', body: webhookBody, headers: { 'Content-Type': 'application/json',
+            'webhook-id': webhookId, 'webhook-timestamp': webhookTime, 'webhook-signature': `v1,${webhookSignature}` },
+        })).status, 500);
+        await fetch(`${content}/__content`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ outage: false }) });
         check(`${mode.name}: edge route still fails`, (await fetch(`${site}/api/monitoring-edge`)).status, 500);
         const context = await browser.newContext({ serviceWorkers: 'block' });
         const relayRequests = [];
@@ -258,9 +284,18 @@ export function GET() { throw new Error('Fixture edge error'); }
         if (!mode.enabled) await delay(2000);
         const rows = received.slice(from);
         if (mode.enabled) {
-          for (const message of ['Fixture server uncaught', 'Fixture server direct', 'Slot hold failed', 'Fixture edge error',
+          for (const message of ['Fixture server uncaught', 'Fixture server direct', 'Fixture edge error',
             'Fixture browser uncaught', 'Fixture browser rejection', 'Fixture browser reported', 'Fixture browser direct', 'Fixture browser boundary']) {
             check(`production: ${message} reaches the sink`, hasError(rows, message), true);
+          }
+          const routeEvents = events(rows).filter(event => event.tags?.commerce_route);
+          check('production: three commerce failures coalesce into exactly three events', routeEvents.length, 3);
+          for (const [route, surface] of [['/api/payment/start', 'checkout'], ['/api/payment/webhook/dodo', 'webhook'], ['/api/holdSlot', 'booking']]) {
+            check(`production: ${surface} reaches the sink once`, routeEvents.filter(event => event.tags.commerce_route === route).length, 1);
+            check(`production: ${surface} is sanitized`, routeEvents.filter(event => event.tags.commerce_route === route).every(event =>
+              event.tags.commerce_surface === surface && event.message === 'Commerce route failed' && event.environment === 'production' &&
+              !event.user && !event.request?.data && Object.keys(event.request?.cookies || {}).length === 0 &&
+              Object.keys(event.request?.headers || {}).length === 0 && !event.request?.query_string), true);
           }
         } else check(`${mode.name}: no envelope reaches the sink`, rows.length, 0);
         if (!mode.enabled) check(`${mode.name}: edge sends no event`, hasError(rows, 'Fixture edge error'), false);
@@ -300,8 +335,14 @@ export function GET() { throw new Error('Fixture edge error'); }
     requests.closeAllConnections();
     await new Promise(done => requests.close(done));
     restoreGuard();
-    const report = { ok: checks.length > 0 && checks.every(check => check.ok), selectedCase: process.env.ROO_MONITORING_CASE || 'all', checks, cases, blockedBrowserRequests,
-      fixture: 'Complete copied website, real Next builds and browser, local Sentry and Supabase stand-ins, no hosted credentials. Next dev registry version metadata is served in memory.' };
+    const sourceHashes = Object.fromEntries(await Promise.all(['next.config.mjs', 'instrumentation.js', 'src/lib/monitoring/deployment.mjs',
+      'src/lib/monitoring/server.js', 'src/lib/monitoring/browser.js', 'src/lib/monitoring/client.js', 'src/lib/monitoring/commerce.js',
+      'src/lib/monitoring/scrub.js', 'src/lib/nextApiAdapter.js', 'app/api/client-report/route.js', 'scripts/monitoring-deployment-e2e.mjs'].map(async file =>
+      [file, createHash('sha256').update(await readFile(join(root, file))).digest('hex')])));
+    const report = { ok: checks.length > 0 && checks.every(check => check.ok), selectedCase: process.env.ROO_MONITORING_CASE || 'all', checks, cases, blockedBrowserRequests, sourceHashes,
+      processes: processes.map(child => ({ pid: child.pid, stopped: child.exitCode !== null || child.signalCode !== null })),
+      servicesStopped: processes.every(child => child.exitCode !== null || child.signalCode !== null) && !browser?.isConnected() && fixture.evidence.stopped,
+      fixture: 'Complete copied website, real Next builds and one headless browser, local Sentry and Supabase stand-ins, no hosted credentials. Only the copied provider policy accepts test payments under production markers; actual signature verification, routes and monitoring execute. No financial outcome is asserted. Next dev registry version metadata is served in memory.' };
     await writeFile(join(artifact, 'report.json'), JSON.stringify(report, null, 2));
     process.exitCode = report.ok ? 0 : 1;
   }

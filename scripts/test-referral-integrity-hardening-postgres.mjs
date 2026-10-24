@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import postgres from "postgres";
+import { postgresFixturePort } from "./lib/postgres-fixture-port.mjs";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 const pgBin = String(process.env.PG_BIN || "").trim() || spawnSync(
@@ -24,7 +25,7 @@ const tempRoot = fs.mkdtempSync(
 );
 const dataDir = path.join(tempRoot, "pgdata");
 const postgresHost = process.env.ROO_TEST_POSTGRES_HOST || "127.0.0.1";
-const port = 57232 + Math.floor(Math.random() * 300);
+let port;
 
 const run = (command, args, options = {}) => {
   const result = spawnSync(command, args, {
@@ -501,6 +502,7 @@ try {
     "--no-locale",
   ]);
   fs.appendFileSync(path.join(dataDir, "pg_hba.conf"), "\nhost all all samehost trust\n");
+  port = await postgresFixturePort(postgresHost);
   run(
     path.join(pgBin, "pg_ctl"),
     ["-D", dataDir, "-o", `-p ${port} -h ${postgresHost} -k ''`, "-w", "start"],
