@@ -70,8 +70,12 @@ const openExpiredPayment = async ({ page, context, flow, native }, destination) 
   await flow.payment();
   await page.getByRole("button", { name: "Pay your way", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Fixture provider checkout", exact: true })).toBeVisible();
-  await page.goto("/__test/checkout-handoff");
+  await page.goBack();
+  await expect(page).toHaveURL(/\/payment$/);
   const stored = await readHold(page);
+  const originalToken = await page.evaluate(() => history.state?.usr?.bookingData?.slotHoldToken);
+  expect(originalToken).toBeTruthy();
+  expect(stored.holdToken).not.toBe(originalToken);
   const expired = await native.expireHold(stored.holdId);
   await page.evaluate(expiresAt => {
     const hold = JSON.parse(sessionStorage.getItem("my_slot_hold"));
@@ -84,7 +88,14 @@ const openExpiredPayment = async ({ page, context, flow, native }, destination) 
       ...history.state.usr, bookingData: { ...history.state.usr.bookingData, slotHoldExpiresAt: expiresAt },
     } }, "");
   }, expired.expiresAt);
-  await page.goto(destination);
+  if (destination === "/payment") {
+    await page.evaluate(() => {
+      const checkout = JSON.parse(sessionStorage.getItem("checkout_booking_state"));
+      checkout.slotHoldToken = history.state.usr.bookingData.slotHoldToken;
+      sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+    });
+    await page.reload();
+  } else await page.goto(destination);
   return expired;
 };
 
@@ -129,7 +140,7 @@ for (const width of [1280, 390]) {
   });
 
   for (const replay of [false, true]) {
-    test(`${width}px confirmed expired cancellation ${replay ? "replay" : "first response"} returns to slot selection`, async ({ page, context, flow, native }, testInfo) => {
+    test(`${width}px confirmed expired cancellation ${replay ? "replay" : "first response"} after reload returns to slot selection`, async ({ page, context, flow, native }, testInfo) => {
       await page.setViewportSize({ width, height: 900 });
       const expired = await openExpiredPayment({ page, context, flow, native }, "/payment");
       const before = await recoveryState(page);

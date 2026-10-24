@@ -261,30 +261,59 @@ export default function Payment({ hideFooter = false }) {
     [historyUsrState, location.state]
   );
 
-  const bookingData = useMemo(() => {
+  const { bookingData, canPersistCheckout } = useMemo(() => {
     try {
-      const parsed =
-        navState.bookingData ||
-        (hydrated ? readStoredCheckout() : null) ||
-        {};
+      const storedCheckout = hydrated ? readStoredCheckout() : null;
+      const parsed = navState.bookingData || storedCheckout || {};
       const pricedPackage = applyPackagePricing({
         title: parsed.packageTitle,
         price: parsed.packagePrice,
       });
-      return {
+      let booking = {
         ...parsed,
         packageTitle: pricedPackage?.title || parsed.packageTitle,
         packagePrice: pricedPackage?.price || parsed.packagePrice,
       };
+      let canPersist = true;
+      const session = hydrated ? readStoredPaymentSession() : null;
+      const paymentHold = session?.result?.refreshedHold || session?.result?.hold;
+      if (paymentHold?.slotHoldId && paymentHold?.slotHoldToken &&
+          paymentHold.slotHoldId === booking.slotHoldId &&
+          paymentSessionMatchesCheckout(session.fingerprint, JSON.stringify(booking))) {
+        let currentHold;
+        try {
+          currentHold = JSON.parse(sessionStorage.getItem("my_slot_hold") || "null");
+        } catch {
+          return { bookingData: booking, canPersistCheckout: false };
+        }
+        canPersist = (!currentHold || (currentHold.holdId === paymentHold.slotHoldId &&
+          currentHold.holdToken === paymentHold.slotHoldToken)) &&
+          (!storedCheckout || (storedCheckout.slotHoldId === booking.slotHoldId &&
+            [booking.slotHoldToken, paymentHold.slotHoldToken].includes(storedCheckout.slotHoldToken)));
+        if (canPersist) {
+          booking = {
+            ...booking,
+            slotHoldId: paymentHold.slotHoldId,
+            slotHoldToken: paymentHold.slotHoldToken,
+            slotHoldExpiresAt: currentHold?.expiresAt || paymentHold.slotHoldExpiresAt || paymentHold.expiresAt,
+          };
+        }
+      }
+      return { bookingData: booking, canPersistCheckout: canPersist };
     } catch {
-      return {};
+      return { bookingData: {}, canPersistCheckout: false };
     }
     // sessionStorage is intentionally a reload fallback, not a reactive source.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, location.search, navState.bookingData]);
   useEffect(() => {
-    if (navState.bookingData) {
-      writeStoredCheckout(navState.bookingData);
+    if (hydrated && navState.bookingData && canPersistCheckout) {
+      writeStoredCheckout({
+        ...navState.bookingData,
+        slotHoldId: bookingData.slotHoldId,
+        slotHoldToken: bookingData.slotHoldToken,
+        slotHoldExpiresAt: bookingData.slotHoldExpiresAt,
+      });
     }
 
     const params = new URLSearchParams(location.search);
@@ -301,7 +330,7 @@ export default function Payment({ hideFooter = false }) {
       },
       { replace: true, state: navState }
     );
-  }, [location.hash, location.pathname, location.search, navState, navigate]);
+  }, [bookingData, canPersistCheckout, hydrated, location.hash, location.pathname, location.search, navState, navigate]);
 
   const isUpgrade = !!bookingData.originalOrderId;
   const [sessionHold, setSessionHold] = useState(null);
@@ -1069,10 +1098,11 @@ export default function Payment({ hideFooter = false }) {
 
       const refreshedHold = data.refreshedHold || null;
       if (!isUpgrade && (!refreshedHold?.slotHoldId || !refreshedHold?.slotHoldToken)) {
+        const releasedHold = activeSession?.result?.refreshedHold || activeSession?.result?.hold || sessionHold;
         const nextCheckout = clearReleasedCheckoutHold({
           ...bookingData,
-          slotHoldId: sessionHold?.slotHoldId || bookingData.slotHoldId,
-          slotHoldToken: sessionHold?.slotHoldToken || bookingData.slotHoldToken,
+          slotHoldId: releasedHold?.slotHoldId || bookingData.slotHoldId,
+          slotHoldToken: releasedHold?.slotHoldToken || bookingData.slotHoldToken,
         }, operation.token);
         if (!nextCheckout) throw new Error("Your saved reservation changed or could not be updated. Please check it again.");
         setSessionHold(null);

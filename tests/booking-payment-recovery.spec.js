@@ -102,6 +102,45 @@ for (const width of [1280, 390]) {
     }
   }
 
+  for (const replacement of ["hold-token", "checkout-token"]) {
+    test(`${width}px payment reload preserves a newer ${replacement}`, async ({ page, flow }, testInfo) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.route("**/api/payment/start", async route => {
+        const hold = await page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold")));
+        await route.fulfill({ json: {
+          ok: true, status: "started", paymentAccessToken: "fixture-payment",
+          providerPayload: { checkoutUrl: new URL("/__test/checkout-handoff", process.env.BASE_URL).href },
+          sessionExpiresAt: hold.expiresAt,
+          refreshedHold: { slotHoldId: hold.holdId, slotHoldToken: "refreshed-payment-hold",
+            slotHoldExpiresAt: hold.expiresAt, phase: "payment_pending" },
+        } });
+      });
+      await flow.review();
+      await flow.payment();
+      await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Checkout handoff", exact: true })).toBeVisible();
+      await page.goBack();
+      await expect(page.getByRole("button", { name: "Change payment method", exact: true })).toBeEnabled();
+      await page.evaluate(replacement => {
+        const key = replacement === "hold-token" ? "my_slot_hold" : "checkout_booking_state";
+        const value = JSON.parse(sessionStorage.getItem(key));
+        value[replacement === "hold-token" ? "holdToken" : "slotHoldToken"] = "newer-reservation-token";
+        sessionStorage.setItem(key, JSON.stringify(value));
+      }, replacement);
+      const before = await recoverySnapshot(page);
+      await page.reload();
+      const button = page.getByRole("button", { name: "Change payment method", exact: true });
+      await expect(button).toBeEnabled();
+      expect(await recoverySnapshot(page)).toEqual(before);
+      await page.route("**/api/payment/cancel", route => route.fulfill({ json: { ok: true, cancelled: true, slotReleased: true } }));
+      await button.click();
+      await expect(page.getByText("Your saved reservation changed or could not be updated. Please check it again.", { exact: true })).toBeVisible();
+      const after = await recoverySnapshot(page);
+      expect(after).toEqual(before);
+      await testInfo.attach("reload-newer-reservation", { body: JSON.stringify({ replacement, before, after }), contentType: "application/json" });
+    });
+  }
+
   test(`${width}px Booking clears only the released checkout and retains its draft`, async ({ page, flow }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     await openSavedCheckout({ page, flow }, "/booking");

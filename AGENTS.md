@@ -99,12 +99,12 @@ Any PR that touches a money path, including a helper outside this list:
   - So creator A's code applied at review, then creator B's link in the same tab, still credits A, even on `/booking?ref=B`.
   - The restore also falls back to the last-used package's draft (`:1245-1247`).
   - Policy call pending (ROO-510): last click or first applied.
-- On `/payment` the code comes from `?ref`, then the booking's code, then the stored code, in that order. It is re-validated, and an invalid code is cleared from storage. (`src/components/Payment.jsx:697-700,769-773,791`)
+- On `/payment` the code comes from `?ref`, then the booking's code, then the stored code, in that order. It is re-validated, and an invalid code is cleared from storage. (`src/components/Payment.jsx`, referral pre-application effect: `applyResolved` and `writeStoredReferral`)
 - The server never trusts the client's discount or commission.
   - It resolves the code itself: lowercased slug, creators whose `registrationStatus` isn't `pending_email`.
   - It takes discount and commission from that creator's current percentages. (`src/server/api/ref/pricing.js:227-228,443-463,610-616`)
 - **NOT ENFORCED (unknown or unverified code):** when no creator matches, `effectiveReferralCode` keeps the raw code at 0% commission (`src/server/api/ref/pricing.js:456-457`). Earnings match bookings by referral id or by lowercased code (`src/server/api/ref/payoutUtils.js:69-87`).
-  - The normal checkout validates codes first and drops unknown ones (`src/server/api/ref/validateReferral.js:93-107`, `src/components/Payment.jsx:719-726`). A raw API request can still store one.
+  - The normal checkout validates codes first and drops unknown ones (`src/server/api/ref/validateReferral.js:93-107`, `src/components/Payment.jsx` `applyResolved`). A raw API request can still store one.
   - A creator who books before verifying their email gets no credit on those bookings (ROO-512).
 - **NOT ENFORCED (self-referral):** nothing compares the buyer with the creator, so a creator can book with their own code and earn commission. Policy call pending (ROO-511).
 - Commission is frozen on the booking when it's created. (`src/server/api/ref/createBooking.js:1293-1320,1615-1621`)
@@ -151,6 +151,7 @@ Any PR that touches a money path, including a helper outside this list:
   - A release from the reservation banner that lands after the deadline counts as an expiry and keeps the draft (`src/components/ReservationBanner.jsx` release handler).
   - An expired ordinary hold returns to `/booking`. A matching payment-pending hold stays on Payment so its saved session can be checked; without that session, Payment directs the visitor to Booking's Check again action (`src/components/Payment.jsx` expiry effect, `finalizeSessionCheckout`).
   - A confirmed cancellation without a refreshed hold returns an ordinary checkout to Booking's slot selection. Booking and Payment clear only the matching hold, checkout hold fields and payment session, mark expiry and retain the draft. A newer hold or payment session prevents that cleanup; upgrades keep their existing payment-method flow (`src/lib/checkoutStorage.js` `clearReleasedCheckoutHold`).
+  - A payment reload restores its own refreshed hold credentials from the saved server response only when the checkout intent matches and no current hold or checkout credentials contradict it. Older navigation state cannot overwrite a newer checkout’s hold credentials on that restore; confirmed cancellation clears only the payment’s hold generation (`src/components/Payment.jsx` booking restoration and `handleChangePaymentMethod`; native reload cancellation cases in `tests/booking-hold.spec.js`).
 
 ### Dodo payments and webhooks
 
