@@ -998,7 +998,7 @@ test("deletion recovery keeps real retry actions at phone and desktop widths", a
         const expected = state === "never-arrived" ? "Not deleted. Retry when you are ready; your changes are kept as a local draft."
           : state === "unconfirmed" ? "Could not confirm deletion. Your changes are kept as a local draft. Retry to check whether it was deleted before trying again."
           : "Deleted. The live site picks this up within a few minutes.";
-        expect.soft(page.locator('[role="alert"], [role="status"]').filter({ hasText: expected }).first()).toBeVisible({ timeout: 1000 });
+        await expect.soft(page.locator('[role="alert"], [role="status"]').filter({ hasText: expected }).first()).toBeVisible({ timeout: 1000 });
         const row = { state, width, text: await page.locator('[role="alert"], [role="status"]').allTextContents(), drafts: (await drafts()).length };
         await page.screenshot({ path: testInfo.outputPath(`${state}-${width}.png`), fullPage: true, animations: "disabled" });
         const beforeRetry = await (await request.get(controlUrl(baseURL))).json();
@@ -1007,7 +1007,7 @@ test("deletion recovery keeps real retry actions at phone and desktop widths", a
         if (state !== "confirmed") {
           expect.soft(row.drafts).toBe(1);
           const retry = page.getByRole("button", { name: "Retry", exact: true });
-          expect.soft(retry).toBeVisible({ timeout: 1000 });
+          await expect.soft(retry).toBeVisible({ timeout: 1000 });
           if (await retry.isVisible()) {
             blockDelete = false;
             hideReceipt = false;
