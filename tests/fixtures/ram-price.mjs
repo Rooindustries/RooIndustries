@@ -1,25 +1,28 @@
 import homeCopy from '../../src/lib/homeCopy.js';
+import { createHmac, randomUUID } from 'node:crypto';
 
-export function createRamPriceFixture({ documents }) {
+export function createRamPriceFixture({ documents, cronSecret = 'fixture-only-ram-price-cron' }) {
   let state;
   const receipts = new Map();
+  const bucket = createHmac('sha256', cronSecret).update('hero-ram-price').digest('hex');
   const hero = () => documents.find(document => document._type === 'hero');
   Object.assign(hero(), homeCopy.HOME_COPY.hero);
   const initialHero = structuredClone(hero());
-  const maxPackage = documents.find(document => document._type === 'package' && /max|xoc/i.test(document.title));
-  const initialPackagePrice = maxPackage?.price;
+  const maxPackageId = documents.find(document => document._type === 'package' && /max|xoc/i.test(document.title))?._id;
+  const maxPackage = () => documents.find(document => document._id === maxPackageId);
+  const initialPackagePrice = maxPackage()?.price;
   const quote = (priceCents, checkedAt = new Date(Date.now() - 7 * 3600000).toISOString()) => ({
     priceCents, checkedAt, currency: 'USD', source: 'v-color',
     sourceUrl: 'https://v-color.net/products/ddr5-manta-xfinity-rgb-gaming-memory-copy?variant=46736066052263',
     sku: 'TMXFL1660830KWK', variantId: 'gid://shopify/ProductVariant/46736066052263',
   });
   const reset = () => {
-    state = { mode: 'normal', price: '500.00', reads: 0, publishes: [], limits: new Set(), race: false, lostReceipt: false };
+    state = { mode: 'normal', price: '500.00', reads: 0, publishes: [], revisions: [], limits: new Set(), race: false, lostReceipt: false };
     receipts.clear();
     const currentHero = hero();
     for (const key of Object.keys(currentHero)) delete currentHero[key];
     Object.assign(currentHero, structuredClone(initialHero));
-    if (maxPackage) maxPackage.price = initialPackagePrice;
+    if (maxPackage()) maxPackage().price = initialPackagePrice;
   };
   reset();
   const json = (res, status, value, headers = {}) => {
@@ -31,7 +34,6 @@ export function createRamPriceFixture({ documents }) {
       if (body.reset) reset();
       for (const name of ['mode', 'price', 'race', 'lostReceipt']) if (body[name] !== undefined) state[name] = body[name];
       if (body.previousPrice !== undefined) hero().ramPrice = quote(body.previousPrice, body.checkedAt);
-      if (body.packagePrice !== undefined && maxPackage) maxPackage.price = body.packagePrice;
       json(res, 200, { ...state, limits: [...state.limits], hero: hero(), packages: documents.filter(document => document._type === 'package') });
       return true;
     }
@@ -76,7 +78,7 @@ export function createRamPriceFixture({ documents }) {
       json(res, 200, { data, ...(state.mode === 'graphql-error' ? { errors: [{ message: 'Synthetic access denied' }] } : {}) }, headers);
       return true;
     }
-    if (url.pathname === '/rest/v1/rpc/roo_consume_rate_limit') {
+    if (url.pathname === '/rest/v1/rpc/roo_consume_rate_limit' && body.p_bucket_key_hmac === bucket) {
       if (state.mode === 'limiter-down') { json(res, 503, { code: 'XX000', message: 'Synthetic limiter outage' }); return true; }
       const key = `${body.p_bucket_key_hmac}:${body.p_window_started_at}`;
       const allowed = !state.limits.has(key);
@@ -84,11 +86,32 @@ export function createRamPriceFixture({ documents }) {
       json(res, 200, { allowed });
       return true;
     }
+    if (url.pathname === '/rest/v1/rpc/roo_cms_document_revisions' && body.p_document_id === hero()._id) {
+      json(res, 200, state.revisions);
+      return true;
+    }
+    if (['/rest/v1/rpc/roo_cms_publish_command_result', '/rest/v1/rpc/roo_apply_cms_publish_command'].includes(url.pathname) && body.p_actor !== 'admin:cron-hero-ram-price') return false;
+    if (['/rest/v1/rpc/roo_cms_publish_command_result', '/rest/v1/rpc/roo_apply_cms_publish_command'].includes(url.pathname) &&
+        (!/^(sanity|admin):[A-Za-z0-9._@/-]{1,120}$/.test(body.p_actor || '') ||
+         !/^cms:[0-9a-f]{64}$/.test(body.p_command_id || '') || body.p_command_id.slice(4) !== body.p_request_hash)) {
+      json(res, 400, { code: '22023', message: 'Invalid CMS command identity.' });
+      return true;
+    }
     if (url.pathname === '/rest/v1/rpc/roo_cms_publish_command_result') {
-      json(res, 200, receipts.has(body.p_command_id) ? { ...receipts.get(body.p_command_id), replayed: true } : null);
+      const saved = receipts.get(body.p_command_id);
+      if (saved && (saved.actor !== body.p_actor || saved.hash !== body.p_request_hash)) {
+        json(res, 409, { code: '40001', message: 'CMS command identity conflict.' });
+        return true;
+      }
+      json(res, 200, saved ? { ...saved.receipt, replayed: true } : null);
       return true;
     }
     if (url.pathname === '/rest/v1/rpc/roo_apply_cms_publish_command') {
+      if (state.mode === 'publish-timeout') {
+        await new Promise(resolve => { const timer = setTimeout(resolve, 25000); res.once('close', () => { clearTimeout(timer); resolve(); }); });
+        res.destroy();
+        return true;
+      }
       if (state.mode === 'publish-failed') { json(res, 503, { code: 'XX000', message: 'Synthetic CMS outage' }); return true; }
       if (state.race) { hero().headingLine1 = 'Concurrent editor headline'; hero()._rev = 'concurrent-editor'; state.race = false; }
       const mutation = body.p_mutations?.[0];
@@ -96,12 +119,17 @@ export function createRamPriceFixture({ documents }) {
       if (mutation.expected_revision !== hero()._rev) { json(res, 409, { code: '40001', message: 'CMS_REVISION_CONFLICT' }); return true; }
       const changed = Object.keys(mutation.document).filter(key => !key.startsWith('_') && JSON.stringify(mutation.document[key]) !== JSON.stringify(hero()[key]));
       if (changed.length !== 1 || changed[0] !== 'ramPrice') throw new Error('Refresh changed a field other than ramPrice.');
+      state.revisions.push({ revisionId: randomUUID(), createdAt: new Date().toISOString(), actor: body.p_actor, operation: mutation.operation });
       Object.assign(hero(), mutation.document, { _rev: `ram-price-${state.publishes.length + 1}` });
       hero().ramPrice = Object.fromEntries(Object.entries(hero().ramPrice).sort(([left], [right]) => left.localeCompare(right)));
       state.publishes.push(structuredClone(mutation));
-      const receipt = { results: [{ _id: hero()._id, _rev: hero()._rev }] };
-      receipts.set(body.p_command_id, receipt);
+      const receipt = { command_id: body.p_command_id, operation: mutation.operation, document_ids: [hero()._id], replayed: false, results: [{ _id: hero()._id, _type: 'hero', _rev: hero()._rev }] };
+      receipts.set(body.p_command_id, { receipt, actor: body.p_actor, hash: body.p_request_hash });
       if (state.lostReceipt) { state.lostReceipt = false; json(res, 503, { code: 'XX000', message: 'Synthetic lost response' }); return true; }
+      if (state.mode === 'commit-timeout') {
+        await new Promise(resolve => { const timer = setTimeout(resolve, 25000); res.once('close', () => { clearTimeout(timer); resolve(); }); });
+        if (res.destroyed) return true;
+      }
       json(res, 200, receipt);
       return true;
     }

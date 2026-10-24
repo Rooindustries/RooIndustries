@@ -2,7 +2,9 @@ import crypto from 'node:crypto';
 import { isIP } from 'node:net';
 import ramPrice from '../../lib/ramPrice.js';
 import { fetchShadowDocuments } from '../supabase/shadowStore.js';
+import { createSupabaseAdminClient } from '../supabase/adminClient.js';
 import { executeGlobalCmsCommand } from '../cms/publishCommand.js';
+import { clearSupabasePublicContentCache } from './publicContent.js';
 import { getSafeErrorMetadata, logSafeWarn } from '../safeErrorLog.js';
 
 const { RAM_PRICE_SOURCE: source, RAM_PRICE_WINDOW_MS, isVerifiedRamPrice } = ramPrice;
@@ -102,14 +104,17 @@ export async function refreshRamPrice({ client, env = process.env, signal, now =
     if (current.ramPrice && Math.abs(quote.priceCents - current.ramPrice.priceCents) * 100 > current.ramPrice.priceCents * 30) throw failure('RAM_PRICE_OUTLIER');
     try {
       await executeGlobalCmsCommand({
-        supabaseClient: client, env, actor: 'cron:hero-ram-price',
+        supabaseClient: client, env, actor: 'admin:cron-hero-ram-price',
         body: { operation: 'replace', type: 'hero', documentId: current._id, expectedRevision: current._rev, document: { ...current, ramPrice: quote } },
       });
       return { state: 'updated', checkedAt: quote.checkedAt };
     } catch (error) {
-      const latest = await loadHero(client);
-      if (latest.ramPrice && Object.keys(quote).every(key => latest.ramPrice[key] === quote[key])) return { state: 'updated', checkedAt: quote.checkedAt };
-      if (error.code !== 'CMS_REVISION_CONFLICT' || attempt > 0) throw error;
+      const latest = await loadHero(createSupabaseAdminClient({ env, signal: AbortSignal.timeout(5000) }));
+      if (latest.ramPrice && Object.keys(quote).every(key => latest.ramPrice[key] === quote[key])) {
+        clearSupabasePublicContentCache({ preserveStale: true });
+        return { state: 'updated', checkedAt: quote.checkedAt };
+      }
+      if (signal?.aborted || error.code !== 'CMS_REVISION_CONFLICT' || attempt > 0) throw error;
       if (latest.ramPrice && !isVerifiedRamPrice(latest.ramPrice, now)) throw failure('RAM_PRICE_INVALID_HISTORY');
       if (latest.ramPrice && Date.parse(latest.ramPrice.checkedAt) >= windowStart) return { state: 'fresh', checkedAt: latest.ramPrice.checkedAt };
       current = latest;

@@ -6,6 +6,11 @@ the whole market. The source link names v-color and shows the UTC date checked.
 Tax and shipping are excluded. The tune price uses the same package record and
 price presentation as the packages page.
 
+Until a verified `hero.ramPrice` exists, the homepage keeps the approved static
+hero from main. Its $400 headline has no retailer label or checked date. A failed
+first read creates no quote and does not rewrite that approved copy. Once a
+verified quote exists, failed reads keep that amount and its actual checked date.
+
 ## Source
 
 The source is v-color's official Shopify Storefront API, version 2026-07, in
@@ -37,8 +42,30 @@ existing server reporting hook. No price or provider response is sent with it.
 Only `hero.ramPrice` is replaced through the existing CMS command. The command
 checks the loaded revision. One conflict retry reloads the editor's latest
 document; all their other fields survive. A lost publish response is read back
-before retrying. The cron revalidates the homepage, not a deployment. Existing
+with an independent five-second deadline. A confirmed commit invalidates the
+public content cache before revalidation. An aborted request cannot retry a
+write. The cron revalidates the homepage, not a deployment. Existing
 CMS history retains each successful quote for inspection and rollback.
+
+## Recovering a lasting price jump
+
+The 30% guard stays in place even when the previous quote is old. A warning needs
+investigation; the job never accepts a large jump just because it keeps seeing it.
+Keep the last verified quote and its date visible while checking the source.
+
+1. Read the pinned Storefront variant again in US/USD context. Check its SKU,
+   capacity, speed, stock status and single-kit quantity against the official
+   product listing. Save the response and the time it was checked.
+2. If the source, variant or response has changed incorrectly, repair that cause
+   and run the local cases before deploying. Do not change the stored price to
+   fit a broken response.
+3. If the new retail price is confirmed, use the existing CMS hero editor to
+   update only `ramPrice` with that fresh amount in cents and its actual
+   `checkedAt` timestamp. Keep the pinned source, link, currency, SKU and variant.
+   Publish through the normal revision-checked CMS command. Do not remove the
+   quote, delete the hero document or change a package price.
+4. Check the public amount, source and date. The next six-hour window compares
+   against this verified baseline; the same 30% guard still applies.
 
 ## Local proof
 
@@ -47,6 +74,10 @@ starts the site's existing isolated fixture server. Storefront and CMS responses
 are synthetic; the Next route and CMS command are real. The network guard refuses
 external traffic. Production refuses fixture source configuration and rejects a
 CI process. The fixture server uses no production credentials.
+
+`npm run test:ram-price:native` checks the publisher and deadline recovery against
+the full migration chain. Set `PG_BIN` and `POSTGREST_BIN` to local PostgreSQL 17
+and PostgREST binaries. It creates and removes its own synthetic database.
 
 After the reviewed deployment, call the cron with the existing credential once
 to seed the first quote, then check the homepage, its source link and Markdown.

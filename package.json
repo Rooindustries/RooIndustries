@@ -59,6 +59,7 @@
     "test:booking-flow": "playwright test tests/booking-flow.spec.js --project=chromium",
     "test:claims": "playwright test tests/backed-claims.spec.js --project=chromium",
     "test:ram-price": "cross-env TOOLING_RAM_PRICE=1 playwright test tests/ram-price.spec.js --project=chromium && node scripts/ram-price-alerts-e2e.mjs",
+    "test:ram-price:native": "node scripts/ram-price-native-e2e.mjs",
     "test:booking-initial-slot": "playwright test tests/booking-initial-slot.spec.js --project=chromium",
     "test:booking-hold": "node --test tests/booking-hold.test.mjs",
     "test:booking-hold:e2e": "playwright test tests/booking-hold.spec.js --project=chromium",

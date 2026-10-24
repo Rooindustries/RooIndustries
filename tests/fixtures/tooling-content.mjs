@@ -128,6 +128,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
   const initialDocuments = structuredClone(documents);
   const ramPrice = process.env.TOOLING_RAM_PRICE === '1' ? createRamPriceFixture({ documents }) : null;
   const dispatches = new Map();
+  const editorReceipts = new Map();
   const rateLimits = new Map();
   let delivery = 'completed';
   let session = 'valid';
@@ -363,6 +364,23 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         emails.push({ id, idempotencyKey, ...body, sentAt: Date.now() });
         call.status = 200;
         json(res, 200, { id });
+      } else if (ramPrice && req.method === 'POST' && ['/rest/v1/rpc/roo_cms_publish_command_result', '/rest/v1/rpc/roo_apply_cms_publish_command'].includes(url.pathname)) {
+        if (!/^(sanity|admin):[A-Za-z0-9._@/-]{1,120}$/.test(body.p_actor || '') || !/^cms:[0-9a-f]{64}$/.test(body.p_command_id || '') || body.p_command_id.slice(4) !== body.p_request_hash) {
+          throw Object.assign(new Error('Invalid CMS command identity.'), { status: 400, code: '22023' });
+        }
+        const saved = editorReceipts.get(body.p_command_id);
+        if (saved && (saved.actor !== body.p_actor || saved.hash !== body.p_request_hash)) throw Object.assign(new Error('CMS command identity conflict.'), { status: 409, code: '40001' });
+        call.status = 200;
+        if (url.pathname.endsWith('roo_cms_publish_command_result')) json(res, 200, saved ? { ...saved.receipt, replayed: true } : null);
+        else if (saved) json(res, 200, { ...saved.receipt, replayed: true });
+        else {
+          if (body.p_mutations?.length !== 1) throw new Error('One CMS mutation is required.');
+          const results = mutate(body.p_mutations);
+          const receipt = { command_id: body.p_command_id, operation: body.p_mutations[0].operation, document_ids: results.map(row => row._id), replayed: false, results };
+          editorReceipts.set(body.p_command_id, { actor: body.p_actor, hash: body.p_request_hash, receipt });
+          for (const row of results) changedContent.add(row._id);
+          json(res, 200, receipt);
+        }
       } else {
         json(res, 503, { code: 'FIXTURE_READ_ONLY', message: 'Synthetic content fixture refuses this operation.' });
       }

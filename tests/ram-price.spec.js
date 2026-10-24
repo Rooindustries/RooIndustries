@@ -12,18 +12,21 @@ const state = async (request, data) => {
 };
 const refresh = request => request.get('/api/content/ram-price/refresh', { headers });
 
-test.beforeEach(async ({ request, baseURL }) => {
+test.beforeEach(async ({ request, baseURL, context }) => {
   const origin = new URL(baseURL);
   origin.port = process.env.TOOLING_CONTENT_PORT || String(Number(origin.port) + 1);
   fixture = origin.origin;
+  const { guardBrowserContext } = await import('../scripts/lib/test-target-safety.mjs');
+  await guardBrowserContext(context, [baseURL, fixture]);
   await state(request, { reset: true });
 });
 
 test('source price reaches the rendered hero through the CMS command', async ({ page, request, baseURL }, testInfo) => {
-  const { guardBrowserContext } = await import('../scripts/lib/test-target-safety.mjs');
-  await guardBrowserContext(page.context(), [baseURL, fixture]);
   const before = await state(request);
   await page.goto('/');
+  await expect(page.locator('#top h1')).toContainText('Why Pay $400 For RAM?');
+  await expect(page.locator('#top h1')).toContainText('Tune Yours For $99.95.');
+  await expect(page.locator('#top a[data-ram-price-source]')).toHaveCount(0);
   await page.locator('#top').screenshot({ path: testInfo.outputPath('before-ram-price.png') });
   const result = await refresh(request);
   expect(result.status(), await result.text()).toBe(200);
@@ -60,13 +63,28 @@ test('source price reaches the rendered hero through the CMS command', async ({ 
   await secondTab.goto('/');
   await expect(secondTab.locator('#top a[data-ram-price-source]')).toContainText('v-color, checked');
   await secondTab.close();
-  await state(request, { reset: true, previousPrice: 50000, price: '515.00', packagePrice: '$123.45' });
+  const editing = await state(request, { reset: true, previousPrice: 50000, price: '515.00' });
+  const maxPackage = editing.packages.find(pkg => /max|xoc/i.test(pkg.title));
+  const published = await request.post('/api/admin/content/publish', {
+    headers: { 'x-admin-key': 'fixture-only-ram-price-admin' },
+    data: { operation: 'replace', type: 'package', documentId: maxPackage._id, expectedRevision: maxPackage._rev, document: { ...maxPackage, price: '$123.45' } },
+  });
+  expect(published.status(), await published.text()).toBe(200);
+  await page.goto('/packages');
+  await expect(page.locator('main')).toContainText('$123.45');
   expect((await refresh(request)).status()).toBe(200);
   await page.goto('/');
   await expect(page.locator('#top h1')).toContainText('Why Pay $515 For RAM?');
   await expect(page.locator('#top h1')).toContainText('Tune Yours For $123.45.');
   await page.goto('/packages');
   await expect(page.locator('main')).toContainText('$123.45');
+  await page.route(`${baseURL}/api/admin/content/**`, route => route.fallback({ headers: { ...route.request().headers(), 'x-admin-key': 'fixture-only-ram-price-admin' } }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/admin/content');
+  await page.getByRole('navigation', { name: 'Content types' }).getByRole('button', { name: 'Hero Section', exact: true }).click();
+  await page.getByRole('button', { name: 'History', exact: true }).click();
+  await expect(page.locator('aside[aria-label="Version history"]')).toContainText('Automatic RAM price refresh');
+  await page.screenshot({ path: testInfo.outputPath('ram-price-audit-history.png'), fullPage: true });
   await testInfo.attach('published-hero', { body: JSON.stringify(after, null, 2), contentType: 'application/json' });
 });
 
@@ -85,7 +103,7 @@ test('repeated and concurrent calls cannot repeat the source read or publish', a
   expect((await state(request)).reads).toBe(1);
 });
 
-for (const mode of ['failed', 'malformed', 'oversized', 'slow', 'graphql-error', 'missing', 'missing-price', 'unavailable', 'backorder', 'wrong-sku', 'wrong-variant', 'wrong-product', 'wrong-options', 'wrong-currency', 'wrong-market', 'bulk-only', 'bundle-only', 'subscription', 'stale', 'future', 'cached', 'limiter-down', 'publish-failed']) {
+for (const mode of ['failed', 'malformed', 'oversized', 'slow', 'graphql-error', 'missing', 'missing-price', 'unavailable', 'backorder', 'wrong-sku', 'wrong-variant', 'wrong-product', 'wrong-options', 'wrong-currency', 'wrong-market', 'bulk-only', 'bundle-only', 'subscription', 'stale', 'future', 'cached', 'limiter-down', 'publish-failed', 'publish-timeout']) {
   test(`${mode} keeps the last verified price and its original date`, async ({ request }) => {
     const before = await state(request, { mode, previousPrice: 49000 });
     expect((await refresh(request)).status()).toBe(503);
@@ -124,6 +142,25 @@ test('a lost publish receipt never causes a second write', async ({ request }) =
   expect((await state(request)).publishes).toHaveLength(1);
 });
 
+test('a committed write is recovered after its response exceeds the deadline', async ({ request }) => {
+  const before = await state(request, { mode: 'commit-timeout', previousPrice: 49000 });
+  const warmed = await request.post('/api/admin/content/publish', {
+    headers: { 'x-admin-key': 'fixture-only-ram-price-admin' },
+    data: { operation: 'replace', type: 'hero', documentId: before.hero._id, expectedRevision: before.hero._rev, document: before.hero },
+  });
+  expect(warmed.status(), await warmed.text()).toBe(200);
+  expect(await (await request.get('/')).text()).toContain('Why Pay $490 For RAM?');
+  const response = await refresh(request);
+  expect(response.status(), await response.text()).toBe(200);
+  expect((await response.json()).state).toBe('updated');
+  expect(await (await request.get('/')).text()).toContain('Why Pay $500 For RAM?');
+  await refresh(request);
+  const after = await state(request);
+  expect(after.hero.ramPrice.priceCents).toBe(50000);
+  expect(after.reads).toBe(1);
+  expect(after.publishes).toHaveLength(1);
+});
+
 test('a quote checked in this window is reused without reading the source', async ({ request }) => {
   const before = await state(request, { previousPrice: 49000, checkedAt: new Date().toISOString() });
   expect((await refresh(request)).status()).toBe(200);
@@ -133,13 +170,52 @@ test('a quote checked in this window is reused without reading the source', asyn
   expect(after.publishes).toHaveLength(0);
 });
 
-test('a first-read failure never invents a starting quote', async ({ request }) => {
-  await state(request, { mode: 'failed' });
+test('a first-read failure keeps the approved static hero without inventing a quote', async ({ page, request }) => {
+  const before = await state(request, { mode: 'failed' });
+  const published = await request.post('/api/admin/content/publish', {
+    headers: { 'x-admin-key': 'fixture-only-ram-price-admin' },
+    data: { operation: 'replace', type: 'hero', documentId: before.hero._id, expectedRevision: before.hero._rev, document: before.hero },
+  });
+  expect(published.status(), await published.text()).toBe(200);
   expect((await refresh(request)).status()).toBe(503);
   const after = await state(request);
   expect(after.hero.ramPrice).toBeUndefined();
   expect(after.publishes).toHaveLength(0);
+  await page.goto('/');
+  await expect(page.locator('#top h1')).toContainText('Why Pay $400 For RAM?');
+  await expect(page.locator('#top h1')).toContainText('Tune Yours For $99.95.');
+  await expect(page.locator('#top')).toContainText('A 32GB DDR5 kit that was around $100 in early 2025 costs $400 now.');
+  await expect(page.locator('#top a[data-ram-price-source]')).toHaveCount(0);
 });
+
+for (const scenario of [
+  { name: 'failed source', mode: 'failed', price: '500.00' },
+  { name: 'stale source', mode: 'stale', price: '500.00' },
+  { name: 'outlier source', mode: 'normal', price: '1400.00' },
+]) {
+  test(`${scenario.name} retains the rendered verified price and checked date`, async ({ page, request }) => {
+    const before = await state(request, { mode: scenario.mode, price: scenario.price, previousPrice: 49000, checkedAt: new Date(Date.now() - 7 * 3600000).toISOString() });
+    const published = await request.post('/api/admin/content/publish', {
+      headers: { 'x-admin-key': 'fixture-only-ram-price-admin' },
+      data: { operation: 'replace', type: 'hero', documentId: before.hero._id, expectedRevision: before.hero._rev, document: before.hero },
+    });
+    expect(published.status(), await published.text()).toBe(200);
+    await page.goto('/');
+    await expect(page.locator('#top h1')).toContainText('Why Pay $490 For RAM?');
+    const source = page.locator('#top a[data-ram-price-source]');
+    const originalLabel = await source.innerText();
+    const checked = new Date(before.hero.ramPrice.checkedAt);
+    expect(originalLabel).toContain(`${checked.getUTCDate()} ${checked.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' })} ${checked.getUTCFullYear()}`);
+    expect((await refresh(request)).status()).toBe(503);
+    const after = await state(request);
+    expect(after.hero.ramPrice).toEqual(before.hero.ramPrice);
+    expect(after.publishes).toHaveLength(0);
+    await page.reload();
+    await expect(page.locator('#top h1')).toContainText('Why Pay $490 For RAM?');
+    await expect(source).toHaveText(originalLabel);
+    await expect(source).toHaveAttribute('href', before.hero.ramPrice.sourceUrl);
+  });
+}
 
 test('an invalid stored date cannot authorize a replacement quote', async ({ request }) => {
   const before = await state(request, { previousPrice: 49000, checkedAt: 'invalid' });

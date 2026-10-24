@@ -24,7 +24,7 @@ registerHooks({ resolve(specifier, context, next) {
 const events = [];
 const host = '127.0.0.1';
 const documents = [{ _id: 'fixture-hero', _type: 'hero', _rev: 'fixture-revision', headingLine1: 'Fixture heading' }];
-const fixture = createRamPriceFixture({ documents });
+const fixture = createRamPriceFixture({ documents, cronSecret: 'fixture-only-cron' });
 const server = http.createServer(async (request, response) => {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
@@ -47,7 +47,6 @@ server.listen(0, host);
 await once(server, 'listening');
 const origin = `http://${host}:${server.address().port}`;
 installNetworkGuard([origin]);
-process.env.VERCEL_ENV = 'production';
 process.env.NEXT_PUBLIC_SENTRY_DSN = `http://fixture@${host}:${server.address().port}/26`;
 delete process.env.SENTRY_DSN;
 const { createSupabaseAdminClient } = await import('../src/server/supabase/adminClient.js');
@@ -55,11 +54,24 @@ const { refreshRamPrice, reportRamPriceFailure } = await import('../src/server/c
 const { startServerMonitoring } = await import('../src/lib/monitoring/server.js');
 const { flush, close } = await import('@sentry/nextjs');
 try {
-  startServerMonitoring(process.env.NEXT_PUBLIC_SENTRY_DSN);
-  await fetch(`${origin}/__ram-price`, { method: 'POST', body: JSON.stringify({ mode: 'failed', previousPrice: 49000 }) });
-  const before = structuredClone(documents[0]);
   const env = { SUPABASE_URL: origin, SUPABASE_SECRET_KEY: 'fixture-only-secret', VERCEL_ENV: 'preview', TOOLING_NETWORK_GUARD: '1', HERO_RAM_PRICE_SOURCE_URL: `${origin}/storefront`, CRON_SECRET: 'fixture-only-cron', CMS_WRITES_PAUSED: '0' };
   const client = createSupabaseAdminClient({ env });
+  for (const deployment of [
+    { NODE_ENV: 'production', VERCEL: '1', VERCEL_ENV: 'preview' },
+    { NODE_ENV: 'development', VERCEL: '', VERCEL_ENV: 'development' },
+    { NODE_ENV: 'production', VERCEL: '', VERCEL_ENV: 'production' },
+  ]) {
+    Object.assign(process.env, deployment);
+    startServerMonitoring(process.env.NEXT_PUBLIC_SENTRY_DSN);
+    await fetch(`${origin}/__ram-price`, { method: 'POST', body: JSON.stringify({ reset: true, mode: 'failed', previousPrice: 49000 }) });
+    await assert.rejects(refreshRamPrice({ client, env, signal: AbortSignal.timeout(5000) }), error => { reportRamPriceFailure(error); return true; });
+    await flush(1000);
+    assert.equal(events.length, 0);
+  }
+  Object.assign(process.env, { NODE_ENV: 'production', VERCEL: '1', VERCEL_ENV: 'production' });
+  startServerMonitoring(process.env.NEXT_PUBLIC_SENTRY_DSN);
+  await fetch(`${origin}/__ram-price`, { method: 'POST', body: JSON.stringify({ reset: true, mode: 'failed', previousPrice: 49000 }) });
+  const before = structuredClone(documents[0]);
   for (const [overrides, code] of [
     [{ VERCEL_ENV: 'production', CI: '1' }, 'RAM_PRICE_PRODUCTION_GUARD'],
     [{ VERCEL_ENV: 'production' }, 'RAM_PRICE_PRODUCTION_GUARD'],
@@ -83,8 +95,12 @@ try {
   assert.equal(events[0].tags.error_code, 'RAM_PRICE_SOURCE_UNAVAILABLE');
   assert.equal(events[0].exception.values[0].value, 'RAM price refresh failed; last verified price retained');
   assert.equal(events[0].user, undefined);
+  process.env.VERCEL_ENV = 'preview';
+  reportRamPriceFailure(Object.assign(new Error('Synthetic preview failure'), { code: 'RAM_PRICE_SOURCE_UNAVAILABLE' }));
+  await flush(1000);
+  assert.equal(events.length, 1);
   await mkdir('test-results/ram-price-alerts', { recursive: true });
-  await writeFile('test-results/ram-price-alerts/report.json', JSON.stringify({ passed: true, productionAndCiGuards: true, storedPriceUnchanged: true, alertCount: events.length, level: events[0].level, errorCode: events[0].tags.error_code, source: 'local fixture only' }, null, 2));
+  await writeFile('test-results/ram-price-alerts/report.json', JSON.stringify({ passed: true, productionAndCiGuards: true, previewAndLocalSilent: true, storedPriceUnchanged: true, alertCount: events.length, level: events[0].level, errorCode: events[0].tags.error_code, source: 'local fixture only' }, null, 2));
   console.log('RAM refresh failure retains its quote and reaches the local warning sink.');
 } finally {
   await close(1000);
