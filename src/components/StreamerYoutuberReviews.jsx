@@ -193,7 +193,7 @@ function ReviewCard({ review, groupIndex }) {
   const result = parseFpsResult(review.optimizationResult);
   const rating = Number.isInteger(review.rating) && review.rating >= 1 && review.rating <= 5
     ? review.rating
-    : null;
+    : 5;
 
   return (
     <article
@@ -242,15 +242,13 @@ function ReviewCard({ review, groupIndex }) {
             </span>
           </p>
         )}
-        {rating !== null && (
-          <p
-            className="ri-review-champagne-text text-xs font-bold tracking-[0.08em] flex-shrink-0"
-            aria-label={`${rating} out of 5 stars`}
-          >
-            <span aria-hidden="true">{"★".repeat(rating)}{"☆".repeat(5 - rating)}</span>
-            <span className="sr-only">{rating} out of 5 stars</span>
-          </p>
-        )}
+        <p
+          className="ri-review-champagne-text text-xs font-bold tracking-[0.08em] flex-shrink-0"
+          aria-label={`${rating} out of 5 stars`}
+        >
+          <span aria-hidden="true">{"★".repeat(rating)}{"☆".repeat(5 - rating)}</span>
+          <span className="sr-only">{rating} out of 5 stars</span>
+        </p>
       </div>
 
       <blockquote className="mt-2 flex-1">
