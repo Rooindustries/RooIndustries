@@ -993,17 +993,17 @@ test("deletion recovery keeps real retry actions at phone and desktop widths", a
         page.once("dialog", dialog => dialog.accept());
         await page.getByRole("button", { name: "Delete", exact: true }).click();
         const deleted = page.getByRole("status").filter({ hasText: "Deleted. The live site" });
-        await expect(page.getByRole("alert").or(deleted).first()).toBeVisible({ timeout: 15000 });
+        await expect(page.getByRole("alert").filter({ hasText: /\S/ }).or(deleted).first()).toBeVisible({ timeout: 15000 });
         if (await deleted.isVisible()) await expect(remainingTools).toHaveText(["Fixture layout tool 2", "Fixture layout tool 3", "Fixture layout tool 4"]);
         const expected = state === "never-arrived" ? "Not deleted. Retry when you are ready; your changes are kept as a local draft."
           : state === "unconfirmed" ? "Could not confirm deletion. Your changes are kept as a local draft. Retry to check whether it was deleted before trying again."
           : "Deleted. The live site picks this up within a few minutes.";
+        expect.soft(page.locator('[role="alert"], [role="status"]').filter({ hasText: expected }).first()).toBeVisible({ timeout: 1000 });
         const row = { state, width, text: await page.locator('[role="alert"], [role="status"]').allTextContents(), drafts: (await drafts()).length };
         await page.screenshot({ path: testInfo.outputPath(`${state}-${width}.png`), fullPage: true, animations: "disabled" });
         const beforeRetry = await (await request.get(controlUrl(baseURL))).json();
         row.beforeRetryMutations = beforeRetry.requests.slice(offset).filter(call => call.path.endsWith("/roo_apply_cms_publish_command")).length;
         expect.soft(row.beforeRetryMutations).toBe(state === "never-arrived" ? 0 : 1);
-        expect.soft(page.locator('[role="alert"], [role="status"]').filter({ hasText: expected }).first()).toBeVisible({ timeout: 1000 });
         if (state !== "confirmed") {
           expect.soft(row.drafts).toBe(1);
           const retry = page.getByRole("button", { name: "Retry", exact: true });
