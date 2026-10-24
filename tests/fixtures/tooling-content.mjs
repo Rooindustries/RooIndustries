@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { uiRepairsFixture } from './ui-repairs-server.mjs';
 import { localOrigin } from '../../scripts/lib/test-target-safety.mjs';
 import { referralEmail } from './api-routes.mjs';
+import { createRamPriceFixture } from './ram-price.mjs';
 
 export async function createToolingContentFixture({ origin, artifact, apiRoutes = false, clockFile }) {
   const target = new URL(localOrigin(origin));
@@ -125,7 +126,9 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
   );
   const images = [...layoutImages, ...benchmarkImages];
   const initialDocuments = structuredClone(documents);
+  const ramPrice = process.env.TOOLING_RAM_PRICE === '1' ? createRamPriceFixture({ documents }) : null;
   const dispatches = new Map();
+  const editorReceipts = new Map();
   const rateLimits = new Map();
   let clockNow = null;
   const setClock = value => {
@@ -171,6 +174,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       let raw = '';
       for await (const chunk of req) { raw += chunk; if (Buffer.byteLength(raw) > 131072) throw new Error('Fixture body is too large.'); }
       const body = raw ? JSON.parse(raw) : {};
+      if (ramPrice && await ramPrice({ url, body, res })) return;
       const call = { method: req.method, path: url.pathname, body, status: 503, rows: 0, receivedAt: Date.now(), delayMs: 0 };
       res.once('finish', () => { call.respondedAt = Date.now(); persist(); });
       evidence.requests.push(call);
@@ -369,6 +373,23 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         emails.push({ id, idempotencyKey, ...body, sentAt: Date.now() });
         call.status = 200;
         json(res, 200, { id });
+      } else if (ramPrice && req.method === 'POST' && ['/rest/v1/rpc/roo_cms_publish_command_result', '/rest/v1/rpc/roo_apply_cms_publish_command'].includes(url.pathname)) {
+        if (!/^(sanity|admin):[A-Za-z0-9._@/-]{1,120}$/.test(body.p_actor || '') || !/^cms:[0-9a-f]{64}$/.test(body.p_command_id || '') || body.p_command_id.slice(4) !== body.p_request_hash) {
+          throw Object.assign(new Error('Invalid CMS command identity.'), { status: 400, code: '22023' });
+        }
+        const saved = editorReceipts.get(body.p_command_id);
+        if (saved && (saved.actor !== body.p_actor || saved.hash !== body.p_request_hash)) throw Object.assign(new Error('CMS command identity conflict.'), { status: 409, code: '40001' });
+        call.status = 200;
+        if (url.pathname.endsWith('roo_cms_publish_command_result')) json(res, 200, saved ? { ...saved.receipt, replayed: true } : null);
+        else if (saved) json(res, 200, { ...saved.receipt, replayed: true });
+        else {
+          if (body.p_mutations?.length !== 1) throw new Error('One CMS mutation is required.');
+          const results = mutate(body.p_mutations);
+          const receipt = { command_id: body.p_command_id, operation: body.p_mutations[0].operation, document_ids: results.map(row => row._id), replayed: false, results };
+          editorReceipts.set(body.p_command_id, { actor: body.p_actor, hash: body.p_request_hash, receipt });
+          for (const row of results) changedContent.add(row._id);
+          json(res, 200, receipt);
+        }
       } else {
         json(res, 503, { code: 'FIXTURE_READ_ONLY', message: 'Synthetic content fixture refuses this operation.' });
       }

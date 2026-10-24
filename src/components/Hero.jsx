@@ -5,7 +5,7 @@ import homeCopy from "../lib/homeCopy";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import { trackEvent } from "../lib/analytics";
 
-const { resolveHeroCopy } = homeCopy;
+const { resolveHeroCopy, getHeroTunePrice } = homeCopy;
 
 const normalizeText = (s = "") =>
   String(s)
@@ -91,10 +91,12 @@ function CtaNoteBalanced({ icon, text }) {
   );
 }
 
-export default function Hero({ initialData = null, headingTag = "h1" }) {
+export default function Hero({ initialData = null, initialPackages = null, headingTag = "h1" }) {
   const Heading = headingTag;
   const [fetchedHero, setFetchedHero] = useState(null);
-  const heroData = resolveHeroCopy(initialData || fetchedHero);
+  const [fetchedPackages, setFetchedPackages] = useState(null);
+  const hasInitialPackagePrice = Boolean(getHeroTunePrice(initialPackages));
+  const heroData = resolveHeroCopy(initialData || fetchedHero, hasInitialPackagePrice ? initialPackages : fetchedPackages);
   const handleHomeSectionLink = useHomeSectionLinkHandler();
 
   const handleHeroCta = (event, hash, cta) => {
@@ -103,17 +105,37 @@ export default function Hero({ initialData = null, headingTag = "h1" }) {
   };
 
   useEffect(() => {
-    if (initialData) return undefined;
+    if (initialData && hasInitialPackagePrice) return undefined;
     let cancelled = false;
-    getPublicContent("hero")
-      .then((data) => {
-        if (!cancelled) setFetchedHero(data);
-      })
-      .catch(() => {});
+    let packageRequest;
+    let packageTimeout;
+    let retryTimeout;
+    if (!initialData) {
+      getPublicContent("hero")
+        .then(data => { if (!cancelled) setFetchedHero(data); })
+        .catch(() => {});
+    }
+    const loadPackages = async (attempt = 0) => {
+      packageRequest = new AbortController();
+      packageTimeout = setTimeout(() => packageRequest.abort(), 5000);
+      let retry = true;
+      try {
+        const packages = await getPublicContent("packages-list", {}, { signal: packageRequest.signal });
+        retry = !getHeroTunePrice(packages);
+        if (!cancelled) setFetchedPackages(packages);
+      } catch {} finally {
+        clearTimeout(packageTimeout);
+      }
+      if (retry && !cancelled && attempt < 2) retryTimeout = setTimeout(() => loadPackages(attempt + 1), (attempt + 1) * 1000);
+    };
+    if (!hasInitialPackagePrice) loadPackages();
     return () => {
       cancelled = true;
+      clearTimeout(packageTimeout);
+      clearTimeout(retryTimeout);
+      packageRequest?.abort();
     };
-  }, [initialData]);
+  }, [initialData, hasInitialPackagePrice]);
 
   const {
     headingLine1,
@@ -123,6 +145,8 @@ export default function Hero({ initialData = null, headingTag = "h1" }) {
     ctaPrimaryText: primaryCtaText,
     ctaSecondaryText: secondaryCtaText,
     ctaNote,
+    ramPrice,
+    ramPriceSourceLabel,
   } = heroData;
 
   const headingLine2BaseClass = "text-gradient-display";
@@ -272,6 +296,15 @@ export default function Hero({ initialData = null, headingTag = "h1" }) {
             </p>
           )}
         </div>
+
+        {ramPrice && (
+          <p className="mt-2 text-sm text-ink-secondary">
+            <a data-ram-price-source href={ramPrice.sourceUrl} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">
+              {ramPriceSourceLabel}
+            </a>
+            {' · US price before tax and shipping.'}
+          </p>
+        )}
 
         <div className="min-h-[24px] sm:min-h-[36px]">
           {subtext && (

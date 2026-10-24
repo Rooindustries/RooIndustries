@@ -105,7 +105,8 @@ async function fetchHomePageData({
   }
 
   return applyHomePageCopyOverrides({
-    hero: resolveHeroCopy(hero),
+    hero: resolveHeroCopy(hero, packagesList),
+    heroPackages: packagesList.map(({ title, price }) => ({ title, price })),
     reviews,
     about,
     services,
@@ -143,7 +144,8 @@ async function fetchFlowPageHomeData() {
 async function fetchHeroCopy() {
   try {
     const fetchContent = await createPublicContentFetcher();
-    return resolveHeroCopy(await fetchContent("hero"));
+    const [hero, packages] = await Promise.all([fetchContent("hero"), fetchContent("packages-list").catch(() => [])]);
+    return resolveHeroCopy(hero, packages);
   } catch {
     console.warn("[content] hero fetch failed");
     return resolveHeroCopy(null);
