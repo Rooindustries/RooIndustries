@@ -197,9 +197,21 @@ for (const mode of ["5xx", "timeout", "malformed", "invalid-json", "missing"]) {
         await control(request, baseURL, { outage: false, failure: "", missing: [] });
         const recovered = await request.post("/api/admin/content/publish/status", { headers: adminHeaders, data: command });
         expect(recovered.ok(), await recovered.text()).toBe(true);
-        const response = await request.get("/contact");
-        expect(response.status()).toBe(200);
-        expect(await response.text()).toContain(marker);
+        const recovery = [];
+        let recoveredHtml;
+        try {
+          await expect.poll(async () => {
+            const response = await request.get("/contact");
+            recoveredHtml = await response.text();
+            const observation = { status: response.status(), cache: response.headers()["x-nextjs-cache"], visible: recoveredHtml.includes(marker), meaningful: recoveredHtml.includes("Get In Touch") && !recoveredHtml.includes("Application error") };
+            recovery.push(observation);
+            return observation.status === 200 && observation.cache === "HIT" && observation.visible;
+          }, { timeout: 30000 }).toBe(true);
+        } finally {
+          await fs.writeFile(testInfo.outputPath("recovery-reads.json"), JSON.stringify({ marker, recovery }, null, 2));
+          if (recoveredHtml) await fs.writeFile(testInfo.outputPath("recovered-contact.html"), recoveredHtml);
+        }
+        expect(recovery.every(row => row.status === 200 && row.meaningful)).toBe(true);
         const state = await (await request.get(controlUrl(baseURL))).json();
         const mutations = state.requests.slice(offset).filter(call => call.path.endsWith("/roo_apply_cms_publish_command"));
         expect(mutations).toHaveLength(1);
@@ -941,6 +953,83 @@ test("replaying an old deletion preserves the cache and the restored document", 
     expect(after.requests.filter(call => call.path.endsWith("/roo_apply_cms_publish_command") && call.body.p_mutations?.[0]?.operation === "delete")).toEqual([]);
     await fs.writeFile(testInfo.outputPath("restored-tool.html"), html);
   } finally { await control(request, baseURL, { reset: true }); }
+});
+
+test("deletion recovery keeps real retry actions at phone and desktop widths", async ({ page, request, baseURL }, testInfo) => {
+  const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+  await guardBrowserContext(page.context(), [baseURL, new URL(controlUrl(baseURL)).origin]);
+  let blockDelete = false;
+  let hideReceipt = false;
+  await page.route("**/api/admin/content/**", async route => {
+    const call = route.request();
+    const path = new URL(call.url()).pathname;
+    if (path === "/api/admin/content/publish" && call.method() === "POST" && blockDelete) return route.abort("failed");
+    if (path === "/api/admin/content/publish/status" && hideReceipt) await control(request, baseURL, { receiptFailure: "outage" });
+    await route.continue({ headers: { ...call.headers(), ...adminHeaders } });
+  });
+  const outcomes = [];
+  try {
+    for (const width of [360, 390, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const state of ["never-arrived", "unconfirmed", "confirmed"]) {
+        await control(request, baseURL, { reset: true });
+        blockDelete = state === "never-arrived";
+        hideReceipt = state === "unconfirmed";
+        await control(request, baseURL, { publishResponseFailure: state === "never-arrived" ? "" : "5xx" });
+        await page.goto("/admin/content");
+        await page.evaluate(() => localStorage.clear());
+        await page.reload();
+        const navigation = page.getByRole("navigation", { name: "Content types", includeHidden: true });
+        if (!await navigation.isVisible()) await page.getByRole("button", { name: "Types", exact: true }).click();
+        await navigation.getByRole("button", { name: "Tool", exact: true }).click();
+        await page.getByRole("region", { name: "Tool list" }).getByRole("button").filter({ hasText: "Fixture layout tool 1" }).click();
+        await page.getByLabel(/^Tool Name/).fill("Keep this local draft until deletion is confirmed");
+        const drafts = () => page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-content-draft:")));
+        await expect.poll(drafts).toHaveLength(1);
+        const offset = (await (await request.get(controlUrl(baseURL))).json()).requests.length;
+        page.once("dialog", dialog => dialog.accept());
+        await page.getByRole("button", { name: "Delete", exact: true }).click();
+        const deleted = page.getByRole("status").filter({ hasText: "Deleted. The live site" });
+        await expect(page.getByRole("alert").or(deleted).first()).toBeVisible({ timeout: 15000 });
+        if (await deleted.isVisible()) await expect(page.getByRole("region", { name: "Tool list" }).getByRole("button").filter({ hasText: "Fixture layout tool 2" })).toBeVisible();
+        const expected = state === "never-arrived" ? "Not deleted. Retry when you are ready; your changes are kept as a local draft."
+          : state === "unconfirmed" ? "Could not confirm deletion. Your changes are kept as a local draft. Retry to check whether it was deleted before trying again."
+          : "Deleted. The live site picks this up within a few minutes.";
+        const row = { state, width, text: await page.locator('[role="alert"], [role="status"]').allTextContents(), drafts: (await drafts()).length };
+        await page.screenshot({ path: testInfo.outputPath(`${state}-${width}.png`), fullPage: true, animations: "disabled" });
+        const beforeRetry = await (await request.get(controlUrl(baseURL))).json();
+        row.beforeRetryMutations = beforeRetry.requests.slice(offset).filter(call => call.path.endsWith("/roo_apply_cms_publish_command")).length;
+        expect.soft(row.beforeRetryMutations).toBe(state === "never-arrived" ? 0 : 1);
+        expect.soft(page.locator('[role="alert"], [role="status"]').filter({ hasText: expected }).first()).toBeVisible({ timeout: 1000 });
+        if (state !== "confirmed") {
+          expect.soft(row.drafts).toBe(1);
+          const retry = page.getByRole("button", { name: "Retry", exact: true });
+          expect.soft(retry).toBeVisible({ timeout: 1000 });
+          if (await retry.isVisible()) {
+            blockDelete = false;
+            hideReceipt = false;
+            await control(request, baseURL, { publishResponseFailure: "", receiptFailure: "" });
+            if (state === "never-arrived") page.once("dialog", dialog => dialog.accept());
+            await retry.click();
+            await expect(deleted).toBeVisible();
+            await expect(page.getByRole("region", { name: "Tool list" }).getByRole("button").filter({ hasText: "Fixture layout tool 2" })).toBeVisible();
+            await page.screenshot({ path: testInfo.outputPath(`${state}-recovered-${width}.png`), fullPage: true, animations: "disabled" });
+          }
+        }
+        const after = await (await request.get(controlUrl(baseURL))).json();
+        row.mutations = after.requests.slice(offset).filter(call => call.path.endsWith("/roo_apply_cms_publish_command")).length;
+        row.deleted = await deleted.isVisible();
+        expect.soft(row.deleted).toBe(true);
+        expect.soft(await drafts()).toEqual([]);
+        expect.soft(row.mutations).toBe(1);
+        expect.soft((await request.get("/api/admin/content/documents/tooling-cls-tool-0", { headers: adminHeaders })).status()).toBe(404);
+        outcomes.push(row);
+      }
+    }
+  } finally {
+    await control(request, baseURL, { reset: true });
+    await fs.writeFile(testInfo.outputPath("deletion-visual-states.json"), JSON.stringify(outcomes, null, 2));
+  }
 });
 
 test("confirmed publications and empty tool lists survive an eleven-minute CMS outage", async ({ request, browser, baseURL }, testInfo) => {
