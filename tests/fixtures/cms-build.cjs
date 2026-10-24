@@ -9,7 +9,7 @@ module.exports = async function checkLegalBuilds({ request, baseURL, control, te
   contentURL.port = process.env.TOOLING_CONTENT_PORT || String(Number(contentURL.port) + 1);
   const env = {
     PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR,
-    CI: "true", CIRCLE_NODE_TOTAL: "2", NODE_ENV: "production", VERCEL_ENV: "development",
+    CI: "true", NODE_ENV: "production", VERCEL_ENV: "development",
     NEXT_TELEMETRY_DISABLED: "1", NEXT_DIST_DIR: dist,
     TOURNEY_DATABASE_MODE: "memory", DATA_PRIMARY_BACKEND: "supabase", COMMERCE_PRIMARY_BACKEND: "supabase",
     SUPABASE_CUTOVER_ENABLED: "1", COMMERCE_CUTOVER_ENABLED: "1",

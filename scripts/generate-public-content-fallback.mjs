@@ -21,8 +21,13 @@ try {
   for (const [name, query] of Object.entries(PUBLIC_CONTENT_QUERIES)) {
     if (["package", "upgrade-link"].includes(name)) continue;
     resource = name;
-    const data = await loadSupabasePublicContent({ resource, query, params: {}, fresh: true, allowFallback: false });
-    resources[resource] = data ?? null;
+    try {
+      const data = await loadSupabasePublicContent({ resource, query, params: {}, fresh: true, allowFallback: false });
+      resources[resource] = data ?? null;
+    } catch (error) {
+      if (["terms", "privacy-policy"].includes(resource)) throw error;
+      console.warn(`Public content snapshot omitted unavailable ${resource}.`);
+    }
   }
   const file = new URL("../src/generated/public-content.json", import.meta.url);
   fs.mkdirSync(path.dirname(fileURLToPath(file)), { recursive: true });

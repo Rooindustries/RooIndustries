@@ -301,6 +301,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - run: npm run test:cms-snapshot-build
       - run: npm run test:cms-resilience
       - uses: actions/upload-artifact@v4
         if: always()
