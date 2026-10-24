@@ -27,6 +27,7 @@ import {
   createPaymentAccessToken,
   isPaymentAccessTokenRecordMatch,
   isWithinPaymentAccessRecoveryWindow,
+  PAYMENT_ACCESS_TOKEN_HARD_CAP_SECONDS,
   verifyPaymentAccessToken,
 } from "./accessToken.js";
 import {
@@ -71,6 +72,7 @@ import {
 } from "./paymentRecord.js";
 import { selectPaymentAuthority, resolveWebhookBackend, createPaymentBackendClient } from "./backend.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
+import { isAutomaticBookingReview, prepareBookingReviewHold } from "./bookingReview.js";
 
 import { getBookingForEmailDispatch, isBookingEmailSuppressed, isEmailDeliveryUnknown } from "../ref/bookingEmails.js";
 
@@ -116,7 +118,8 @@ const buildRecoveryFailureState = (record) => {
     recoveryAttemptCount,
     recoveryFailureCount,
     reconciliationRecoveryTerminal: stopped,
-    nextRecoveryAt: stopped ? "9999-12-31T23:59:59.999Z" : getNextPaymentRecoveryAt(recoveryFailureCount),
+    nextRecoveryAt: stopped && !isAutomaticBookingReview({ ...record, reconciliationRecoveryTerminal: true })
+      ? "9999-12-31T23:59:59.999Z" : getNextPaymentRecoveryAt(recoveryFailureCount),
   };
 };
 
@@ -127,7 +130,8 @@ const buildRecoveryCompletionState = (record) => ({
 
 const logRecoveryExhaustion = (record, values) => {
   if (values.reconciliationRecoveryTerminal === true &&
-      values.recoveryFailureCount === 12 && record.reconciliationRecoveryTerminal !== true) {
+      values.recoveryFailureCount === 12 && record.reconciliationRecoveryTerminal !== true &&
+      !isAutomaticBookingReview({ ...record, ...values })) {
     logSafeError(`Payment recovery requires owner review: ${record._id}`, Object.assign(new Error(), {
       code: "payment_recovery_attempts_exhausted",
     }));
@@ -466,6 +470,9 @@ const isUpgradeCreditReview = (record = {}) =>
 
 const getPublicRecoveryMessage = (record = {}) => {
   const status = String(record.status || "").trim().toLowerCase();
+  if (isAutomaticBookingReview(record)) {
+    return "Your booking is pending review. Your time is reserved and your details are saved. It will confirm automatically when the review clears.";
+  }
   if (isUpgradeCreditReview(record) && record.recoveryReason === "upgrade_credit_changed_after_quote") {
     return "Your payment was received. Roo Industries will contact you about your upgrade.";
   }
@@ -549,6 +556,11 @@ const buildPublicStatusBody = (record = {}) => ({
   emailDispatch: buildPublicEmailDispatch(record.emailDispatch),
   emailDispatchToken: String(record.emailDispatchToken || "").trim(),
   analyticsReceipt: buildSalesReceipt(record),
+  ...(record.reviewStartedAt ? { reviewed: true } : {}),
+  ...(isAutomaticBookingReview(record) ? {
+    reviewPending: true,
+    refreshedHold: buildRefreshedHoldBody(record),
+  } : {}),
   ...(isUpgradeCreditReview(record) && record.recoveryReason === "upgrade_credit_changed_after_quote"
     ? { manualReviewRequired: true } : {}),
 });
@@ -937,7 +949,10 @@ const resolveRecordFromAccessToken = async ({
     const withinHardCap = isWithinPaymentAccessRecoveryWindow({ payload });
     const recoveryMutationAllowed =
       allowRecoveryExtension && status === PAYMENT_STATUS_NEEDS_RECOVERY;
-    if (!withinHardCap || (!allowStatusReadExtension && !recoveryMutationAllowed)) {
+    const reviewReadAllowed = allowStatusReadExtension && Number.isFinite(Date.parse(record.reviewStartedAt)) &&
+      (record.reviewPending === true ||
+        Date.parse(record.reviewResolvedAt) + PAYMENT_ACCESS_TOKEN_HARD_CAP_SECONDS * 1000 > Date.now());
+    if ((!withinHardCap && !reviewReadAllowed) || (!allowStatusReadExtension && !recoveryMutationAllowed)) {
       const error = new Error("Payment session expired.");
       error.status = 401;
       error.code = tokenResult.reason || "payment_access_token_expired";
@@ -1195,27 +1210,45 @@ const patchPaymentRecord = async ({
   const mergedEvents = event
     ? mergePaymentRecordEvents(existingEvents, event)
     : existingEvents;
-  const holdRelease = releaseExpiredHold
+  const next = { ...record, ...set };
+  const review = isAutomaticBookingReview(next)
+    ? await prepareBookingReviewHold({ client, record: next }) : null;
+  const holdRelease = releaseExpiredHold && !review
     ? await prepareExpiredRecoveryHold({ client, record })
     : null;
   const values = {
     ...set,
+    ...(review ? {
+      reviewPending: true,
+      reviewStartedAt: record.reviewStartedAt || nowIso(),
+      holdSnapshot: review.snapshot,
+      bookingPayload: review.bookingPayload,
+    } : {}),
+    ...(!review && (next.bookingId || [PAYMENT_STATUS_FAILED, PAYMENT_STATUS_ABANDONED, PAYMENT_STATUS_REFUNDED].includes(next.status))
+      ? { reviewPending: false,
+          ...(record.reviewStartedAt ? { reviewResolvedAt: record.reviewResolvedAt || nowIso() } : {}) } : {}),
     ...(holdRelease ? { holdSnapshot: holdRelease.snapshot } : {}),
     ...(event ? { events: mergedEvents } : {}),
     updatedAt: nowIso(),
   };
-  if (holdRelease?.holdDoc) {
+  if (holdRelease?.holdDoc || review?.changed) {
     if (typeof client?.transaction !== "function") {
       throw Object.assign(new Error("Atomic payment storage is unavailable."), {
         status: 503,
         code: "payment_transaction_unavailable",
       });
     }
-    await client.transaction()
-      .patch(record._id, (patch) => guardPaymentRevision(patch, record).set(values))
-      .patch(holdRelease.holdDoc._id, (patch) =>
-        guardPaymentRevision(patch, holdRelease.holdDoc).set(holdRelease.set))
-      .commit();
+    const transaction = client.transaction();
+    if (review?.changed) {
+      transaction.patch(review.hold._id, (patch) =>
+        guardPaymentRevision(patch, review.hold).set(review.set));
+    }
+    transaction.patch(record._id, (patch) => guardPaymentRevision(patch, record).set(values));
+    if (holdRelease?.holdDoc) {
+      transaction.patch(holdRelease.holdDoc._id, (patch) =>
+        guardPaymentRevision(patch, holdRelease.holdDoc).set(holdRelease.set));
+    }
+    await transaction.commit();
     logRecoveryExhaustion(record, values);
     return getPaymentRecordById(client, record._id);
   }
@@ -1912,6 +1945,10 @@ const markRetryableFinalizeFailure = async ({
       set: {
         status: PAYMENT_STATUS_NEEDS_RECOVERY,
         recoveryReason: reason,
+        ...(current.verificationState === "server_verified" && !current.bookingPayload?.originalOrderId &&
+            !current.dodoDisputeActive && !current.providerRecoveryTerminal &&
+            !current.providerRefundDetailsMissing && current.refundState !== "full"
+          ? { reviewPending: true } : {}),
         ...buildRecoveryFailureState(current),
         finalizationLeaseId: "",
         finalizationLeaseExpiresAt: "",
@@ -3390,6 +3427,15 @@ export const startPaymentSession = async ({
       ? ""
       : issuePaymentAccessTokenForRecord(refreshed);
     const refreshedStatus = String(refreshed.status || "").trim().toLowerCase();
+    if (isAutomaticBookingReview(refreshed)) {
+      return { httpStatus: 200, body: {
+        ...buildPublicStatusBody(refreshed),
+        providerPayload: {},
+        paymentAccessToken,
+        quote: buildQuotePayload(quote),
+        quoteFingerprint: currentQuoteFingerprint,
+      } };
+    }
     if (
       provider !== "free" &&
       [
@@ -3860,6 +3906,7 @@ const getPaymentCreatedAgeMinutes = (record = {}) => {
 };
 
 const isRecoveryAttemptDue = (record = {}) => {
+  if (record.reconciliationRecoveryTerminal === true && isAutomaticBookingReview(record)) return true;
   const next = new Date(record.nextRecoveryAt || "").getTime();
   return !Number.isFinite(next) || next <= Date.now();
 };
@@ -4396,7 +4443,17 @@ export const reconcilePaymentSessions = async ({
   const dodoEnabled = resolvePaymentProviders()?.dodo?.enabled === true;
   const fetchRecoveryRecords = () => client.fetch(
     `*[_type == $type
-      && coalesce(reconciliationRecoveryTerminal, false) == false
+      && (coalesce(reconciliationRecoveryTerminal, false) == false || (
+        lower(status) in $reviewStatuses
+        && coalesce(holdSnapshot.slotHoldId, "") != "" && coalesce(holdSnapshot.slotHoldToken, "") != ""
+        && coalesce(bookingPayload.startTimeUTC, "") != "" && coalesce(bookingPayload.packageTitle, "") != ""
+        && coalesce(bookingId, "") == "" && coalesce(bookingPayload.originalOrderId, "") == ""
+        && coalesce(resourceReleasePending, false) == false
+        && coalesce(dodoDisputeActive, false) == false
+        && coalesce(refundState, "") != "full"
+        && coalesce(providerRefundDetailsMissing, false) == false
+        && coalesce(providerRecoveryTerminal, false) == false
+      ))
       && !(coalesce(providerRecoveryTerminal, false) == true
         && providerRecoveryTerminalReason in $terminalCurrencyReasons)
       && (
@@ -4421,6 +4478,7 @@ export const reconcilePaymentSessions = async ({
         !defined(nextRecoveryAt)
         || nextRecoveryAt == ""
         || nextRecoveryAt <= $now
+        || coalesce(reconciliationRecoveryTerminal, false) == true
       )
     ] | order(updatedAt asc)[0...50]`,
     {
@@ -4442,6 +4500,8 @@ export const reconcilePaymentSessions = async ({
       emailPartialStatus: PAYMENT_STATUS_EMAIL_PARTIAL,
       bookedStatus: PAYMENT_STATUS_BOOKED,
       abandonedStatus: PAYMENT_STATUS_ABANDONED,
+      reviewStatuses: [PAYMENT_STATUS_STARTED, PAYMENT_STATUS_NEEDS_RECOVERY, PAYMENT_STATUS_FINALIZING,
+        PAYMENT_STATUS_CAPTURED_CLIENT, PAYMENT_STATUS_CAPTURED_WEBHOOK],
       now: nowIso(),
     }
   );
@@ -6168,6 +6228,24 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       ...buildPublicStatusBody(record), ok: webhook,
       code: "dodo_payment_disputed", error: getPublicRecoveryMessage(record),
     } };
+  }
+  if (![PAYMENT_STATUS_BOOKED, PAYMENT_STATUS_EMAIL_PARTIAL, PAYMENT_STATUS_REFUNDED,
+    PAYMENT_STATUS_FAILED, PAYMENT_STATUS_ABANDONED].includes(record.status) &&
+      !record.bookingPayload?.originalOrderId &&
+      (payment.status === "requires_merchant_action" || (record.reviewPending === true && payment.status !== "succeeded"))) {
+    if (record.status === PAYMENT_STATUS_FINALIZING && isFutureIso(record.finalizationLeaseExpiresAt)) {
+      return { httpStatus: 202, body: buildPublicStatusBody(record) };
+    }
+    record = await patchPaymentRecord({ client, record, set: {
+      status: PAYMENT_STATUS_NEEDS_RECOVERY,
+      reviewPending: true,
+      providerPaymentId: payment.payment_id,
+      providerPaymentState: payment.status,
+      reconciliationRecoveryTerminal: false,
+      recoveryReason: "provider_review_pending",
+      nextRecoveryAt: getNextPaymentRecoveryAt(0),
+    } });
+    return { httpStatus: 200, body: buildPublicStatusBody(record) };
   }
   if (payment.status === "succeeded") {
     if (deferFinalization) return { httpStatus: 200, body: buildPublicStatusBody(record) };

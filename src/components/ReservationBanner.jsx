@@ -111,6 +111,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
             packagePrice: parsed.packagePrice,
             packageTag: parsed.packageTag,
             phase: parsed.phase || "",
+            reviewPending: parsed.reviewPending === true,
             ...(parsed.paymentStartedElsewhere ? { paymentStartedElsewhere: true } : {}),
           };
           const utcDate = getUtcDateFromHold(normalizedHold);
@@ -145,6 +146,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
           packagePrice: detail.packagePrice,
           packageTag: detail.packageTag,
           phase: detail.phase || "",
+          reviewPending: detail.reviewPending === true,
           ...(detail.paymentStartedElsewhere ? { paymentStartedElsewhere: true } : {}),
         };
         const utcDate = getUtcDateFromHold(normalizedHold);
@@ -472,7 +474,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
                 : ""}
             </p>
             <p className={`text-info-text ${inline ? "" : "truncate"} drop-shadow-sm ${subtitleSizeClass}`}>
-              Expires in {formatCountdown(countdown)}
+              {hold.reviewPending ? "Reserved while your payment is reviewed" : `Expires in ${formatCountdown(countdown)}`}
             </p>
           </div>
           {releaseError && <p role="alert" className="text-danger-text text-xs">{releaseError}</p>}

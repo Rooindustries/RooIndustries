@@ -503,6 +503,7 @@ export default function Payment({ hideFooter = false }) {
   useBookingDialogPending(!hydrated || !providersSettled || (Boolean(packageTitle) && !quoteSettled));
   const [showInternalPayments, setShowInternalPayments] = useState(false);
   const [paymentSession, setPaymentSession] = useState(null);
+  const reviewPending = paymentSession?.result?.reviewPending === true;
   const [paymentStatusBusy, setPaymentStatusBusy] = useState(false);
   const [cancellingPayment, setCancellingPayment] = useState(false);
   const sessionStartRef = useRef(null);
@@ -519,7 +520,7 @@ export default function Payment({ hideFooter = false }) {
     ? paymentSession?.providerPayload?.taxInclusive === false
     : !lockedProvider && providerConfig.dodo?.enabled;
   const providerIsAvailableForSession = (provider) =>
-    !lockedProvider || lockedProvider === provider;
+    !reviewPending && (!lockedProvider || lockedProvider === provider);
   const paypalClientIdFromEnv = (
     process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
     process.env.REACT_APP_PAYPAL_CLIENT_ID ||
@@ -948,6 +949,30 @@ export default function Payment({ hideFooter = false }) {
     writeStoredPaymentSession(nextSession);
   };
 
+  const retainReviewedSession = (data, operation) => {
+    if (!operation.current()) return;
+    const session = readStoredPaymentSession() || paymentView.session;
+    if (!session) return;
+    persistPaymentSession({ ...session, result: { ...session.result, ...data } });
+    const refreshedHold = data.refreshedHold;
+    if (refreshedHold?.slotHoldId && refreshedHold?.slotHoldToken) {
+      setSessionHold(refreshedHold);
+      writeStoredCheckout({ ...bookingData, ...refreshedHold });
+      const hold = {
+        holdId: refreshedHold.slotHoldId,
+        holdToken: refreshedHold.slotHoldToken,
+        expiresAt: refreshedHold.slotHoldExpiresAt,
+        startTimeUTC: bookingData.startTimeUTC,
+        packageTitle,
+        phase: "payment_pending",
+        reviewPending: true,
+      };
+      writeBrowserStorage("sessionStorage", "my_slot_hold", JSON.stringify(hold));
+      window.dispatchEvent(new CustomEvent("hold-state", { detail: hold }));
+    }
+    showBanner("info", data.recoveryReason, { persistent: true });
+  };
+
   const getActivePaymentSession = (provider) => {
     const stored = readStoredPaymentSession();
     if (
@@ -998,7 +1023,7 @@ export default function Payment({ hideFooter = false }) {
     setPaymentSession(null);
     paymentView.session = null;
     clearStoredPaymentSession();
-    if (activeSession?.provider !== "dodo" || isUpgrade ||
+    if ((activeSession?.provider !== "dodo" && !activeSession?.result?.reviewPending) || isUpgrade ||
         !["failed", "abandoned", "refunded"].includes(terminalStatus) ||
         !paymentSessionOwnsCurrentHold(activeSession)) return false;
     const nextCheckout = {
@@ -1176,6 +1201,10 @@ export default function Payment({ hideFooter = false }) {
       }
 
       const nextStatus = String(data?.status || "").trim().toLowerCase();
+      if (data?.reviewPending === true) {
+        retainReviewedSession(data, operation);
+        return data;
+      }
       if (data?.manualReviewRequired === true) return data;
       if (
         nextStatus === "booked" ||
@@ -1222,6 +1251,10 @@ export default function Payment({ hideFooter = false }) {
       });
       if (!operation.current()) return { terminal: true, stale: true };
       const resumedStatus = String(data?.status || "").trim().toLowerCase();
+      if (response.ok && data?.reviewPending === true) {
+        retainReviewedSession(data, operation);
+        return { ...paymentSession, result: data, terminal: true };
+      }
       if (response.ok && data?.manualReviewRequired === true) {
         showBanner("info", data.recoveryReason, { persistent: true });
         return { ...paymentSession, result: data, terminal: true };
@@ -1349,6 +1382,10 @@ export default function Payment({ hideFooter = false }) {
       if (provider !== "free") {
         operation.token = nextSession.paymentAccessToken;
         persistPaymentSession(nextSession);
+        if (data.reviewPending === true) {
+          retainReviewedSession(data, operation);
+          return { ...nextSession, terminal: true };
+        }
       }
       return nextSession;
     })();
@@ -1386,6 +1423,10 @@ export default function Payment({ hideFooter = false }) {
 
       const status = String(data?.status || "").trim().toLowerCase();
       const isFinalizedStatus = status === "booked" || status === "email_partial";
+      if (response.ok && data?.reviewPending === true) {
+        retainReviewedSession(data, operation);
+        return data;
+      }
       if (response.ok && data?.manualReviewRequired === true) {
         showBanner("info", data.recoveryReason, { persistent: true });
         return data;
@@ -1409,6 +1450,7 @@ export default function Payment({ hideFooter = false }) {
         const settled = await pollPaymentUntilTerminal(paymentAccessToken, operation);
         if (!operation.current()) return null;
         const settledStatus = String(settled?.status || "").trim().toLowerCase();
+        if (settled?.reviewPending === true) return settled;
         if (settled?.manualReviewRequired === true) {
           showBanner("info", settled.recoveryReason, { persistent: true });
           return settled;
@@ -1484,6 +1526,40 @@ export default function Payment({ hideFooter = false }) {
       if (operation.current()) setPayingDodo(false);
     }
   };
+
+  useEffect(() => {
+    const token = paymentSession?.paymentAccessToken;
+    if (!hydrated || !token || isUpgrade) return;
+    const operation = createPaymentOperation(token);
+    let stopped = false;
+    let timer;
+    const refresh = async () => {
+      try {
+        const { response, data } = await fetchJson("/api/payment/status", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: "{}",
+        });
+        if (stopped || !operation.current()) return;
+        if (!reviewPending && !data?.reviewPending && !data?.reviewed) return;
+        if (response.ok && ["booked", "email_partial"].includes(data?.status)) {
+          await navigateToConfirmation("paid", data, operation);
+          return;
+        }
+        if (response.ok && ["failed", "abandoned", "refunded"].includes(data?.status)) {
+          clearPaymentSession(data.status, token);
+          return;
+        }
+        if (response.ok && data?.reviewPending) retainReviewedSession(data, operation);
+      } catch {}
+      if (!stopped && operation.current() &&
+          (reviewPending || paymentView.session?.result?.reviewPending)) {
+        timer = setTimeout(refresh, 5000);
+      }
+    };
+    refresh();
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [hydrated, paymentSession?.paymentAccessToken, isUpgrade, paymentView, reviewPending]);
 
   useEffect(() => {
     const query = new URLSearchParams(location.search);
@@ -2103,7 +2179,7 @@ export default function Payment({ hideFooter = false }) {
                 <button
                   type="button"
                   onClick={handleChangePaymentMethod}
-                  disabled={cancellingPayment || paymentStatusBusy}
+                  disabled={reviewPending || cancellingPayment || paymentStatusBusy}
                   className="shrink-0 rounded-md border border-line-input bg-surface-input px-3 py-2 text-xs font-semibold text-ink hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-border disabled:cursor-wait disabled:opacity-60"
                 >
                   {cancellingPayment ? "Checking payment..." : "Change payment method"}
