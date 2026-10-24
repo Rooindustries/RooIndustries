@@ -956,6 +956,7 @@ test("replaying an old deletion preserves the cache and the restored document", 
 });
 
 test("deletion recovery keeps real retry actions at phone and desktop widths", async ({ page, request, baseURL }, testInfo) => {
+  page.setDefaultTimeout(15000);
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
   await guardBrowserContext(page.context(), [baseURL, new URL(controlUrl(baseURL)).origin]);
   let blockDelete = false;
@@ -980,6 +981,7 @@ test("deletion recovery keeps real retry actions at phone and desktop widths", a
         await page.evaluate(() => localStorage.clear());
         await page.reload();
         const navigation = page.getByRole("navigation", { name: "Content types", includeHidden: true });
+        await expect(navigation).toBeAttached();
         if (!await navigation.isVisible()) await page.getByRole("button", { name: "Types", exact: true }).click();
         await navigation.getByRole("button", { name: "Tool", exact: true }).click();
         await page.getByRole("region", { name: "Tool list" }).getByRole("button").filter({ hasText: "Fixture layout tool 1" }).click();
