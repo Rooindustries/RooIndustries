@@ -1,4 +1,5 @@
 import { monitoringDsn } from "../../../src/lib/monitoring/scrub";
+import { isProductionDeployment } from "../../../src/lib/monitoring/deployment.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +33,7 @@ async function readEnvelope(request) {
 }
 
 export async function POST(request) {
+  if (!isProductionDeployment()) return empty(404);
   const dsn = monitoringDsn(process.env.NEXT_PUBLIC_SENTRY_DSN);
   if (!dsn) return empty(404);
   if (request.headers.get("origin") !== new URL(request.url).origin) return empty(403);

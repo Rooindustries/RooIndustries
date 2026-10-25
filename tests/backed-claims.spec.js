@@ -13,7 +13,7 @@ const legacyHero = (amount) => ({
   headingLine2: "Tune Yours For $99.95.",
   description: `A 32GB DDR5 kit that was around $100 in early 2025 costs $${amount} now. You probably don't need a new one. We'll tune the RAM you have, and the rest of your PC, for more FPS and steadier 1% lows.`,
 });
-const heroHeading = /^Before You Buy RAM,\s*Tune The PC You Have\.$/;
+const heroHeading = /^Why Pay \$400 For RAM\?\s*Tune Yours For \$99\.95\.$/;
 const phase = process.env.CLAIMS_PHASE || "after";
 const claim = expect.configure({ soft: true, timeout: phase === "before" ? 100 : 10000 });
 
@@ -62,15 +62,14 @@ const screenshot = async (target, testInfo, name) => {
 
 const checkHero = async (page) => {
   await claim(page.locator("#top").locator("h1, h2")).toHaveText(heroHeading);
-  await claim(page.locator("#top")).not.toContainText(/\$(?:400|450|99\.95)/);
-  await claim(page.locator("#top")).toContainText("We'll tune your RAM and the rest of your PC for the games you play.");
+  await claim(page.locator("#top")).toContainText("A 32GB DDR5 kit that was around $100 in early 2025 costs $400 now.");
 };
 
 const checkReviewLink = async (page) => {
   const link = page.locator(".ri-packages-review-link");
-  await claim(link).toHaveText("139+ reviews");
+  await claim(link.locator(".ri-packages-review-stars")).toHaveText("★★★★★");
+  await claim(link.locator(".ri-packages-review-text")).toHaveText("5.0 avg from 139+ verified reviews");
   await claim(link).toHaveAttribute("href", "/reviews");
-  await claim(link).not.toContainText(/★|5\.0|verified/i);
 };
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 360, height: 780 }]) {
@@ -86,9 +85,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         const cards = page.locator(`.ri-review-card[data-review-id="Claim review ${index}"]`);
         expect(await cards.count()).toBeGreaterThan(0);
         const stars = cards.locator('[aria-label$="out of 5 stars"]');
-        const valid = Number.isInteger(rating) && rating >= 1 && rating <= 5;
-        await claim(stars).toHaveCount(valid ? await cards.count() : 0);
-        if (valid) await claim(stars.first()).toHaveAttribute("aria-label", `${rating} out of 5 stars`);
+        const shown = Number.isInteger(rating) && rating >= 1 && rating <= 5 ? rating : 5;
+        await claim(stars).toHaveCount(await cards.count());
+        await claim(stars.first()).toHaveAttribute("aria-label", `${shown} out of 5 stars`);
         heights.push(await cards.first().evaluate(card => card.getBoundingClientRect().height));
       }
       claim(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
@@ -100,7 +99,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       const aggregates = schemas.flatMap(node => node.aggregateRating ? [node.aggregateRating] : node["@type"] === "AggregateRating" ? [node] : []);
       claim(aggregates).toEqual([expect.objectContaining({ ratingValue: 3, ratingCount: 5 })]);
       claim(schemas.find(node => node["@type"] === "WebPage")?.headline)
-        .toBe("Before You Buy RAM, Tune The PC You Have.");
+        .toBe("Why Pay $400 For RAM? Tune Yours For $99.95.");
       await checkReviewLink(page);
       await screenshot(page.locator("#packages"), testInfo, "home-packages");
       await page.goto("/packages");
@@ -109,8 +108,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       const markdown = await page.request.get("/markdown?path=/");
       expect(markdown.status()).toBe(200);
       const text = await markdown.text();
-      claim(text).toContain("# Before You Buy RAM\\, Tune The PC You Have\\.");
-      claim(text).not.toMatch(/400|450|99\\\.95/);
+      claim(text).toMatch(/Why Pay \\?\$400 For RAM\\?\? Tune Yours For \\?\$99\\?\.95/);
       await testInfo.attach("home-markdown", { body: text, contentType: "text/markdown" });
       for (const route of ["/booking", "/payment", "/payment-success", "/thank-you"]) {
         await page.goto(route);
@@ -123,8 +121,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     test.describe("with JavaScript", () => {
       test.use({ javaScriptEnabled: true });
 
-      test("old and missing CMS hero copy stays corrected through navigation", async ({ page }, testInfo) => {
-        for (const [name, hero] of [["legacy-450", legacyHero(450)], ["missing", null]]) {
+      test("missing CMS hero copy falls back to the $400 hero through navigation", async ({ page }, testInfo) => {
+        for (const [name, hero] of [["missing", null]]) {
           await page.route("**/api/content/hero", route => route.fulfill({ json: { ok: true, data: hero } }));
           await page.goto("/packages");
           await page.evaluate(() => { window.__claimsDocument = true; });

@@ -52,6 +52,7 @@
     "test": "jest",
     "test:deploy:rollback": "node --test tests/deploy-rollback.test.mjs",
     "test:monitoring": "node scripts/monitoring-e2e.mjs",
+    "test:monitoring:deployments": "node scripts/monitoring-deployment-e2e.mjs",
     "test:monitoring:startup": "node scripts/monitoring-next-startup-e2e.mjs",
     "test:smoke:production": "node --test tests/production-smoke.test.mjs",
     "test:contact:csp": "playwright test tests/contact-form-csp.spec.js --project=chromium",

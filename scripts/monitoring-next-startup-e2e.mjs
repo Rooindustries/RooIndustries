@@ -28,7 +28,7 @@ try {
   const fd = openSync(join(artifact, 'next.log'), 'a');
   child = spawn(process.execPath, ['scripts/test-tooling-sweep-server.mjs'], {
     detached: true,
-    env: { ...process.env, ROO_TEST_HOST: host, BASE_URL: origin, PW_PORT: String(port), TOOLING_CONTENT_PORT: String(port + 1), NEXT_DIST_DIR: dist, ROO_ADMIN_FIXTURE: '0', TOOLING_DEV_SERVER: '0', TOOLING_API_ROUTES: '0', NEXT_PUBLIC_SENTRY_DSN: 'false' },
+    env: { ...process.env, ROO_TEST_HOST: host, BASE_URL: origin, PW_PORT: String(port), TOOLING_CONTENT_PORT: String(port + 1), NEXT_DIST_DIR: dist, ROO_ADMIN_FIXTURE: '0', TOOLING_DEV_SERVER: '0', TOOLING_API_ROUTES: '0', TOOLING_MONITORING_STARTUP: '1', SENTRY_CLI_NO_TELEMETRY: '1', NEXT_PUBLIC_SENTRY_DSN: 'false' },
     stdio: ['ignore', fd, fd],
   });
   closeSync(fd);
@@ -72,8 +72,11 @@ try {
 }
 const manifest = await readFile(join(dist, 'tooling-build.json'), 'utf8').then(JSON.parse).catch(() => null);
 const buildId = await readFile(join(dist, 'BUILD_ID'), 'utf8').then(value => value.trim()).catch(() => null);
+const buildConfig = await readFile(join(dist, 'required-server-files.json'), 'utf8').then(JSON.parse).catch(() => null);
+const reportingEnabled = buildConfig?.config?.env?.NEXT_PUBLIC_ROO_SENTRY_ENABLED;
+checks.push({ name: 'malformed DSN is exercised inside the production reporting gate', ok: reportingEnabled === '1', actual: reportingEnabled, expected: '1' });
 checks.push({ name: 'production build has a source fingerprint and build identity', ok: Boolean(buildId && manifest?.version === 1 && manifest.sourceHash && manifest.baseURL === origin && manifest.contentURL === `http://${host}:${port + 1}`) });
-const ok = !error && checks.length === 4 && checks.every(check => check.ok);
+const ok = !error && checks.length === 5 && checks.every(check => check.ok);
 await writeFile(join(artifact, 'report.json'), JSON.stringify({ ok, error, checks, head: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), sourceHash: manifest?.sourceHash, buildId, config: 'malformed DSN false', origin }, null, 2));
 console.log(`report: ${join(artifact, 'report.json')}`);
 process.exitCode = ok ? 0 : 1;

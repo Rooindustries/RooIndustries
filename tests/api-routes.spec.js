@@ -159,22 +159,44 @@ test.describe("referral reset acknowledgement", () => {
     expect(delivered.requests.find(call => call.path.endsWith("/roo_complete_referral_email_dispatch")).body.p_success).toBe(true);
   });
 
-  test("rejects malformed emails and preserves the admission limit", async ({ baseURL }) => {
-    await apiFixture.configureApiFixture(baseURL, { reset: true });
-    for (const email of [undefined, "", "not-an-email", `${"a".repeat(250)}@fixture.invalid`]) {
-      const response = await apiFixture.requestRoute(baseURL, "/api/ref/forgot", { data: { email } });
-      expect(response.status).toBe(400);
-    }
-    const state = await apiFixture.readApiFixture(baseURL);
-    expect(state.requests.some(call => call.path.startsWith("/rest/"))).toBe(false);
-    for (let index = 0; index < 5; index += 1) {
-      const response = await apiFixture.requestRoute(baseURL, "/api/ref/forgot", { data: { email: "unknown@fixture.invalid" } });
-      expect(response.status).toBe(200);
-    }
-    const limited = await apiFixture.requestRoute(baseURL, "/api/ref/forgot", { data: { email: apiFixture.referralEmail } });
-    expect(limited.status).toBe(429);
-    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
-  });
+  for (const offset of [15 * 60 * 1000, 1]) {
+    test(`rejects malformed emails and preserves the admission limit ${offset}ms before reset`, async ({ baseURL }, testInfo) => {
+      const boundary = Date.UTC(2030, 0, 1, 1);
+      const samples = [];
+      await apiFixture.configureApiFixture(baseURL, { reset: true });
+      try {
+        for (const email of [undefined, "", "not-an-email", `${"a".repeat(250)}@fixture.invalid`]) {
+          const response = await apiFixture.requestRoute(baseURL, "/api/ref/forgot", { data: { email } });
+          expect(response.status).toBe(400);
+        }
+        const state = await apiFixture.readApiFixture(baseURL);
+        expect(state.requests.some(call => call.path.startsWith("/rest/"))).toBe(false);
+        for (const clockNow of [boundary - offset, boundary]) {
+          await apiFixture.configureApiFixture(baseURL, { clockNow });
+          for (let index = 0; index < 5; index += 1) {
+            const response = await apiFixture.requestRoute(baseURL, "/api/ref/forgot", { data: { email: "unknown@fixture.invalid" } });
+            samples.push({ clockNow, status: response.status });
+            expect(response.status).toBe(200);
+          }
+          const limited = await apiFixture.requestRoute(baseURL, "/api/ref/forgot", { data: { email: apiFixture.referralEmail } });
+          const retryAfter = Number(limited.headers.get("retry-after"));
+          samples.push({ clockNow, status: limited.status, retryAfter });
+          expect(limited.status).toBe(429);
+          expect(retryAfter).toBe(Math.ceil((clockNow === boundary ? 30 * 60 * 1000 : offset) / 1000));
+        }
+        const final = await apiFixture.readApiFixture(baseURL);
+        const buckets = final.documents.filter(row => row._type === "rateLimitBucket");
+        expect(buckets).toHaveLength(2);
+        expect(buckets.map(row => row.count)).toEqual([5, 5]);
+        expect(buckets.map(row => row.resetAt)).toEqual([new Date(boundary).toISOString(), new Date(boundary + 30 * 60 * 1000).toISOString()]);
+        expect(final.emails).toEqual([]);
+      } finally {
+        const state = await apiFixture.readApiFixture(baseURL);
+        await testInfo.attach("rate-limit-windows", { body: JSON.stringify({ samples, state }, null, 2), contentType: "application/json" });
+        await apiFixture.configureApiFixture(baseURL, { clockNow: null });
+      }
+    });
+  }
 
   test("keeps account-independent lookup failures visible", async ({ baseURL }) => {
     await apiFixture.configureApiFixture(baseURL, { reset: true, delivery: "lookup_failed" });

@@ -9,6 +9,7 @@ import {
 } from "./scrub";
 
 export function startBrowserMonitoring(value) {
+  if (process.env.NEXT_PUBLIC_ROO_SENTRY_ENABLED !== "1") return null;
   const dsn = monitoringDsn(value);
   if (!dsn) return null;
   const client = init({
