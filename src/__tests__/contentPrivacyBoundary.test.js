@@ -135,10 +135,10 @@ describe("public content privacy boundary", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("x-roo-content-backend")).toBe("supabase");
     expect(response.headers.get("cache-control")).toBe(
-      "public, max-age=60, stale-while-revalidate=300",
+      "no-store, max-age=0",
     );
     expect(response.headers.get("vercel-cdn-cache-control")).toBe(
-      "public, max-age=300, stale-while-revalidate=600, stale-if-error=86400",
+      "no-store",
     );
     expect(response.headers.get("set-cookie")).toBeNull();
     expect(response.headers.get("vary")).toBeNull();
