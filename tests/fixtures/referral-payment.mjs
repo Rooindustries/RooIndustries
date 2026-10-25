@@ -137,10 +137,10 @@ export async function createReferralPaymentFixture() {
     const { createSupabaseDocumentClient } = await import("../../src/server/supabase/documentClient.js");
     const commerce = createSupabaseDocumentClient({ shadowClient: database.client, commerceOnly: true, cutoverGeneration: 0 });
     const content = createSupabaseDocumentClient({ shadowClient: database.client });
-    const dates = Array.from({ length: 24 }, (_, index) => new Date(Date.UTC(2099, 0, index + 5)).toISOString().slice(0, 10));
+    const dateSlots = [];
     await content.create({ _id: "package.fixture.vertex", _type: "package", title: PACKAGE.title, price: `$${PACKAGE.price}` });
     await content.create({ _id: "6d8a3646-0ed2-44b5-ad45-c5c9d578126a", _type: "bookingSettings",
-      dateSlots: dates.map(date => ({ date, times: ["10:00", "11:00"] })), ownerEmail: "owner@example.invalid" });
+      dateSlots, ownerEmail: "owner@example.invalid" });
     for (const terms of referrals) {
       const referral = { _id: terms.id, _type: "referral", email: `${terms.code}@example.invalid`, name: terms.code,
         slug: { _type: "slug", current: terms.code }, registrationStatus: "active", verified: true,
@@ -236,7 +236,19 @@ export async function createReferralPaymentFixture() {
         emails: evidence.providerRequests.filter(request => request.method === "POST" && request.path === "/emails"),
       };
     };
-    const nextSlotDate = (() => { let next = 0; return () => dates[next++]; })();
+    let nextDate = 0;
+    let dateAllocation = Promise.resolve();
+    const nextSlotDate = () => {
+      const date = new Date(Date.UTC(2099, 0, nextDate++ + 5)).toISOString().slice(0, 10);
+      dateAllocation = dateAllocation.then(async () => {
+        const slot = { date, times: ["10:00", "11:00"] };
+        await content.patch("6d8a3646-0ed2-44b5-ad45-c5c9d578126a").set({ dateSlots: [...dateSlots, slot] }).commit();
+        dateSlots.push(slot);
+        evidence.allocatedDates = dateSlots.map(slot => slot.date);
+        return date;
+      });
+      return dateAllocation;
+    };
     return { baseURL, request, pay, webhook, state, snapshot, nextSlotDate, evidence, readEvidence, save, stop };
   } catch (error) { await stop(); throw error; }
 }
