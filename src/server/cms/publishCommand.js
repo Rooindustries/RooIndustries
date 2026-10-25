@@ -5,6 +5,7 @@ import { UNUSED_FIELD_NOTE } from "../../lib/cms/fieldUsage.js";
 import { CMS_SYSTEM_FIELDS as system, preserveContentDocument, removedProtectedRows } from "../../lib/cms/contentPreservation.js";
 import { clearSupabasePublicContentCache } from "../content/publicContent.js";
 import { assertPublicContentShape } from "../content/publicContentShape.js";
+import { isPublicContentType, persistPublicContentPublication } from "../content/publicationStore.js";
 import { contentType, documentId, loadDocument } from "./documents.js";
 import { cmsError, rpcData, validationError } from "./errors.js";
 import { assertGlobalCmsWritesAllowed } from "./writeControl.js";
@@ -74,15 +75,7 @@ const prepareCmsCommand = (body, actor) => {
   const lookup = { p_command_id: commandId, p_request_hash: requestHash, p_actor: actor };
   return { schema, creating, id, document, requestHash, lookup };
 };
-export const getCmsCommandStatus = async ({ body, supabaseClient, actor = "admin:key" } = {}) => {
-  const { schema, creating, id, document, requestHash, lookup } = prepareCmsCommand(body, actor);
-  if (creating) {
-    const validation = validateContentDocument(body.type, preserveContentDocument(document, null, schema.fields, (path, item) => hash({ seed: requestHash, path, item }).slice(0, 20)));
-    if (!validation.ok) throw cmsError("Content validation failed.", 400, "CMS_VALIDATION_FAILED", validation.errors);
-  }
-  const receipt = rpcData(await supabaseClient.rpc("roo_cms_publish_command_result", lookup), "Receipt lookup");
-  if (!receipt || receipt.replayed !== true) throw cmsError("Content command was not published.", 404, "CMS_NOT_FOUND");
-  const result = committed(receipt, { body, id, lookup }, true);
+const confirmCurrentPublication = async ({ body, supabaseClient, id, result }) => {
   const current = await loadDocument(supabaseClient, id);
   if (body.operation === "delete") {
     if (current) throw cmsError("The deleted document has been restored.", 404, "CMS_NOT_FOUND");
@@ -95,15 +88,37 @@ export const getCmsCommandStatus = async ({ body, supabaseClient, actor = "admin
     if (current._rev !== result.revision) throw cmsError("The published version has been replaced.", 404, "CMS_NOT_FOUND");
     if (["privacyPolicy", "terms"].includes(body.type)) assertPublicContentShape(body.type === "privacyPolicy" ? "privacy-policy" : "terms", current, body.type);
   }
+  if (isPublicContentType(body.type)) await persistPublicContentPublication(supabaseClient, body.type);
   clearSupabasePublicContentCache({ preserveStale: true });
+};
+export const getCmsCommandStatus = async ({ body, supabaseClient, actor = "admin:key" } = {}) => {
+  const { schema, creating, id, document, requestHash, lookup } = prepareCmsCommand(body, actor);
+  if (creating) {
+    const validation = validateContentDocument(body.type, preserveContentDocument(document, null, schema.fields, (path, item) => hash({ seed: requestHash, path, item }).slice(0, 20)));
+    if (!validation.ok) throw cmsError("Content validation failed.", 400, "CMS_VALIDATION_FAILED", validation.errors);
+  }
+  const receipt = rpcData(await supabaseClient.rpc("roo_cms_publish_command_result", lookup), "Receipt lookup");
+  if (!receipt || receipt.replayed !== true) throw cmsError("Content command was not published.", 404, "CMS_NOT_FOUND");
+  const result = committed(receipt, { body, id, lookup }, true);
+  await confirmCurrentPublication({ body, supabaseClient, id, result });
   return { committed: true, ...(creating ? { createIntentId: body.createIntentId.toLowerCase() } : {}), ...(result.deleted ? { deleted: true } : {}), type: body.type, documentId: id, revision: result.revision };
 };
 export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = process.env, actor = "admin:key" } = {}) => {
   assertGlobalCmsWritesAllowed(env);
   const { schema, creating, id, requestHash, lookup, document: inputDocument } = prepareCmsCommand(body, actor);
+  const finish = async result => {
+    if (result.replayed) {
+      try { await confirmCurrentPublication({ body, supabaseClient, id, result }); }
+      catch (error) { if (error.code !== "CMS_NOT_FOUND") throw error; }
+    } else {
+      if (isPublicContentType(body.type)) await persistPublicContentPublication(supabaseClient, body.type);
+      clearSupabasePublicContentCache({ preserveStale: true });
+    }
+    return result;
+  };
   let document = inputDocument;
   const receipt = rpcData(await supabaseClient.rpc("roo_cms_publish_command_result", lookup), "Receipt lookup");
-  if (receipt !== null) return committed(receipt, { body, id, lookup }, true);
+  if (receipt !== null) return finish(committed(receipt, { body, id, lookup }, true));
   const current = await loadDocument(supabaseClient, id);
   if (current && current._type !== body.type) throw cmsError("Document type conflicts with its stored identity.", 409, "CMS_TYPE_MISMATCH", { currentRevision: current._rev });
   if (document) {
@@ -121,6 +136,5 @@ export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = proc
   const mutation = { operation: body.operation, id, ...(document ? { document } : {}), ...(!creating ? { expected_revision: body.expectedRevision || "" } : {}) };
   const result = rpcData(await supabaseClient.rpc("roo_apply_cms_publish_command", { ...lookup, p_mutations: [mutation], p_assets: [], p_asset_links: [] }), "Content publish");
   const confirmed = committed(result, { body, id, lookup });
-  if (!confirmed.replayed) clearSupabasePublicContentCache({ preserveStale: true });
-  return confirmed;
+  return finish(confirmed);
 };

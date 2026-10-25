@@ -973,11 +973,13 @@ test("deletion recovery keeps real retry actions at phone and desktop widths", a
   try {
     for (const width of [360, 390, 1440]) {
       await page.setViewportSize({ width, height: 900 });
-      for (const state of ["never-arrived", "unconfirmed", "confirmed"]) {
+      for (const state of ["never-arrived", "unconfirmed", "confirmed", "publication-upload", "publication-ack"]) {
         await control(request, baseURL, { reset: true });
         blockDelete = state === "never-arrived";
         hideReceipt = state === "unconfirmed";
-        await control(request, baseURL, { publishResponseFailure: state === "never-arrived" ? "" : "5xx" });
+        const publicationFailure = state.startsWith("publication-") ? state.slice("publication-".length) : "";
+        const confirmsImmediately = ["confirmed", "publication-ack"].includes(state);
+        await control(request, baseURL, { publishResponseFailure: ["unconfirmed", "confirmed"].includes(state) ? "5xx" : "", publicationFailure });
         await page.goto("/admin/content");
         await page.evaluate(() => localStorage.clear());
         await page.reload();
@@ -996,7 +998,7 @@ test("deletion recovery keeps real retry actions at phone and desktop widths", a
         await expect(page.getByRole("alert").filter({ hasText: /\S/ }).or(deleted).first()).toBeVisible({ timeout: 15000 });
         if (await deleted.isVisible()) await expect(remainingTools).toHaveText(["Fixture layout tool 2", "Fixture layout tool 3", "Fixture layout tool 4"]);
         const expected = state === "never-arrived" ? "Not deleted. Retry when you are ready; your changes are kept as a local draft."
-          : state === "unconfirmed" ? "Could not confirm deletion. Your changes are kept as a local draft. Retry to check whether it was deleted before trying again."
+          : !confirmsImmediately ? "Could not confirm deletion. Your changes are kept as a local draft. Retry to check whether it was deleted before trying again."
           : "Deleted. The live site picks this up within a few minutes.";
         await expect.soft(page.locator('[role="alert"], [role="status"]').filter({ hasText: expected }).first()).toBeVisible({ timeout: 1000 });
         const row = { state, width, text: await page.locator('[role="alert"], [role="status"]').allTextContents(), drafts: (await drafts()).length };
@@ -1004,14 +1006,14 @@ test("deletion recovery keeps real retry actions at phone and desktop widths", a
         const beforeRetry = await (await request.get(controlUrl(baseURL))).json();
         row.beforeRetryMutations = beforeRetry.requests.slice(offset).filter(call => call.path.endsWith("/roo_apply_cms_publish_command")).length;
         expect.soft(row.beforeRetryMutations).toBe(state === "never-arrived" ? 0 : 1);
-        if (state !== "confirmed") {
+        if (!confirmsImmediately) {
           expect.soft(row.drafts).toBe(1);
           const retry = page.getByRole("button", { name: "Retry", exact: true });
           await expect.soft(retry).toBeVisible({ timeout: 1000 });
           if (await retry.isVisible()) {
             blockDelete = false;
             hideReceipt = false;
-            await control(request, baseURL, { publishResponseFailure: "", receiptFailure: "" });
+            await control(request, baseURL, { publishResponseFailure: "", receiptFailure: "", publicationFailure: "" });
             if (state === "never-arrived") page.once("dialog", dialog => dialog.accept());
             await retry.click();
             await expect(deleted).toBeVisible();

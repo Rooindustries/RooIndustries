@@ -10,6 +10,7 @@ import { clearSupabaseAssetManifestCache, enrichSupabaseContentAssets } from "..
 import policyContent from "../../lib/policyContent";
 import { UPGRADE_LINK_SLUG_PATTERN } from "../../lib/globalCmsContract.js";
 import { logSafeError } from "../safeErrorLog.js";
+import { contentGeneration, readPublicContentPublication } from "./publicationStore.js";
 
 const { applyPublicPolicyOverrides } = policyContent;
 
@@ -48,6 +49,7 @@ const createPublicContentClient = ({ resource, client }) => {
     : [];
   return createSupabaseDocumentClient({
     shadowClient: client,
+    allowLegacyFallback: false,
     documentTypes: [
       ...(DOCUMENT_TYPES_BY_RESOURCE[resource] || []),
       ...assetDocumentTypes,
@@ -106,14 +108,39 @@ const validateAllowedParameters = (resource, searchParams) => {
   }
 };
 
-export const loadSupabasePublicContent = async ({ resource, query, params, fresh = false, allowFallback = true }) => {
+export const loadSupabasePublicContent = async ({ resource, query, params, fresh = false, allowFallback = true, onPublication }) => {
   const fallbackAllowed = allowFallback && process.env.NEXT_PHASE !== "phase-production-build";
+  const shared = fallbackAllowed && process.env.NODE_ENV === "production" && Object.keys(params).length === 0;
+  const readClient = () => createSupabaseAdminClient({
+    signal: AbortSignal.timeout(5000),
+    fetchImpl: (input, init) => fetch(input, { ...init, cache: "no-store" }),
+  });
+  const client = readClient();
+  let publication = shared ? await readPublicContentPublication(client) : null;
+  let minimumGeneration = publication ? contentGeneration(publication.generation) : 0n;
+  if (publication) onPublication?.(minimumGeneration);
+  const refreshPublication = async () => {
+    const current = await readPublicContentPublication(readClient());
+    const currentGeneration = current ? contentGeneration(current.generation) : 0n;
+    if (currentGeneration < minimumGeneration) throw new Error("Public content publication moved backwards.");
+    publication = current;
+    minimumGeneration = currentGeneration;
+    if (publication) onPublication?.(minimumGeneration);
+  };
+  let generation = null;
   const load = async () => {
-    const client = createSupabaseAdminClient({
-      signal: AbortSignal.timeout(5000),
-      fetchImpl: (input, init) => fetch(input, { ...init, cache: "no-store" }),
-    });
-    const data = await createPublicContentClient({ resource, client }).fetch(query, params);
+    const source = shared ? {
+      rpc: async (name, body) => {
+        if (name !== "roo_fetch_shadow_documents_targeted") return client.rpc(name, body);
+        const result = await client.rpc("roo_fetch_public_documents_targeted", body);
+        if (result.error) return result;
+        const version = contentGeneration(result.data?.generation);
+        if (version < minimumGeneration || generation !== null && generation !== version) throw new Error("The public content source predates its confirmed publication.");
+        generation = version;
+        return { data: result.data.documents, error: null };
+      },
+    } : client;
+    const data = await createPublicContentClient({ resource, client: source }).fetch(query, params);
     if (resource === "tools" && Array.isArray(data)) {
       for (const tool of data) {
         for (const field of ["downloadUrl", "officialSite"]) if (typeof tool?.[field] === "string") tool[field] = tool[field].trim();
@@ -129,23 +156,34 @@ export const loadSupabasePublicContent = async ({ resource, query, params, fresh
   const key = `${resource}:${JSON.stringify(params)}`;
   const now = Date.now();
   const cached = supabaseContentCache.get(key);
-  if (!fresh && cached?.hasData && cached.expiresAt > now) return cached.data;
-  if (!fresh && cached?.pending) return cached.pending;
+  if (!fresh && cached?.hasData && (cached.generation || 0n) >= minimumGeneration && cached.expiresAt > now) return cached.data;
+  if (!fresh && cached?.pending && (cached.generation || 0n) >= minimumGeneration) return cached.pending;
 
   const pending = load()
-    .then((data) => {
-      if (supabaseContentCache.get(key)?.pending !== pending) return data;
+    .then(async (data) => {
+      if (shared) {
+        await refreshPublication();
+        if ((generation || 0n) < minimumGeneration) throw new Error("The public content read was replaced by a newer publication.");
+      }
+      if (supabaseContentCache.get(key)?.pending !== pending) {
+        const current = supabaseContentCache.get(key);
+        if (current?.pending) return current.pending;
+        if (current?.hasData && (current.generation || 0n) >= minimumGeneration) return current.data;
+        return data;
+      }
       supabaseContentCache.set(key, {
         data,
         hasData: true,
+        generation: generation || 0n,
         expiresAt: Date.now() + SUPABASE_CONTENT_CACHE_TTL_MS,
       });
       return data;
     })
     .catch(async (error) => {
+      if (shared) await refreshPublication();
       const current = supabaseContentCache.get(key);
       const retained = current?.hasData ? current : cached;
-      if (fallbackAllowed && retained?.hasData) {
+      if (fallbackAllowed && retained?.hasData && (retained.generation || 0n) >= minimumGeneration) {
         if (supabaseContentCache.get(key)?.pending === pending) {
           supabaseContentCache.set(key, {
             ...retained,
@@ -154,6 +192,17 @@ export const loadSupabasePublicContent = async ({ resource, query, params, fresh
           });
         }
         return retained.data;
+      }
+      if (publication) {
+        if (!Object.hasOwn(publication.resources, resource)) {
+          if (supabaseContentCache.get(key)?.pending === pending) supabaseContentCache.delete(key);
+          throw error;
+        }
+        const data = publication.resources[resource];
+        if (supabaseContentCache.get(key)?.pending === pending) supabaseContentCache.set(key, {
+          data, hasData: true, generation: minimumGeneration, expiresAt: Date.now() + SUPABASE_CONTENT_RETRY_TTL_MS,
+        });
+        return data;
       }
       if (fallbackAllowed && process.env.NODE_ENV === "production") {
         try {
@@ -194,6 +243,7 @@ export const fetchPublicContent = async ({
   resource,
   searchParams,
   fresh = false,
+  onPublication,
 }) => {
   const query = Object.hasOwn(PUBLIC_CONTENT_QUERIES, resource) ? PUBLIC_CONTENT_QUERIES[resource] : null;
   if (!query) {
@@ -209,6 +259,6 @@ export const fetchPublicContent = async ({
       : resource === "upgrade-link"
         ? { slug: parseSlug(searchParams) }
         : {};
-  const data = await loadSupabasePublicContent({ resource, query, params, fresh });
+  const data = await loadSupabasePublicContent({ resource, query, params, fresh, onPublication });
   return applyPublicPolicyOverrides(resource, resource === "tools" ? stableToolDownloadLinks(data) : data);
 };

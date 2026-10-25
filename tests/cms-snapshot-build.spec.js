@@ -17,6 +17,7 @@ test("release snapshots distinguish optional outages from empty content and reco
   const contentURL = localOrigin(`http://${host}:${Number(process.env.TOOLING_CONTENT_PORT || port + 1)}`);
   expect(contentURL).not.toBe(baseURL);
   const dist = validateDistDir(testInfo.config.metadata.toolingDistDir, { isolated: true });
+  const otherDist = `${dist}-other`;
   expect(await fs.stat(dist).catch(() => null), "fresh owned build directory").toBeNull();
   const snapshotFile = path.resolve("src/generated/public-content.json");
   const originalSnapshot = await fs.readFile(snapshotFile).catch(error => { if (error.code !== "ENOENT") throw error; return null; });
@@ -59,10 +60,10 @@ test("release snapshots distinguish optional outages from empty content and reco
     const timer = setTimeout(() => { try { process.kill(-child.pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; } }, 5000);
     try { await done; } finally { clearTimeout(timer); children.delete(child); }
   };
-  const launch = async (args, name) => {
+  const launch = async (args, name, executionEnv = env) => {
     const log = await fs.open(testInfo.outputPath(`${name}.log`), "w");
     try {
-      const child = spawn(process.execPath, args, { env, detached: true, stdio: ["ignore", log.fd, log.fd] });
+      const child = spawn(process.execPath, args, { env: executionEnv, detached: true, stdio: ["ignore", log.fd, log.fd] });
       children.add(child);
       outcomes.children.push({ name, pid: child.pid, args, stopped: false });
       child.once("exit", (code, signal) => Object.assign(outcomes.children.find(row => row.pid === child.pid), { code, signal, stopped: true }));
@@ -75,7 +76,7 @@ test("release snapshots distinguish optional outages from empty content and reco
   };
   const build = async (name, state, succeeds, failedResource) => {
     await stop(server); server = null;
-    await control(request, baseURL, { reset: true, ...state });
+    await control(request, baseURL, { reset: true, clearPublications: true, ...state });
     const before = fixture.evidence.requests.length;
     const started = Date.now();
     const child = await launch([next, "build"], `build-${name}`);
@@ -98,8 +99,8 @@ test("release snapshots distinguish optional outages from empty content and reco
     await fs.writeFile(testInfo.outputPath(`snapshot-${name}.json`), snapshot);
     return { resources: JSON.parse(snapshot).resources, reads, snapshot };
   };
-  const start = async name => {
-    server = await launch([next, "start", "--hostname", host, "--port", String(port)], `server-${name}`);
+  const start = async (name, buildDist = dist) => {
+    server = await launch([next, "start", "--hostname", host, "--port", String(port)], `server-${name}`, { ...env, NEXT_DIST_DIR: buildDist });
     await expect.poll(async () => {
       if (server.exitCode !== null || server.signalCode !== null) throw new Error(`Owned ${name} server exited.`);
       if (!(await fs.readFile(testInfo.outputPath(`server-${name}.log`), "utf8")).includes("Ready in")) return null;
@@ -119,6 +120,10 @@ test("release snapshots distinguish optional outages from empty content and reco
           expect(response.status()).toBe(200);
           if (route === "/reviews") await expect(page.getByAltText(text).first()).toBeVisible();
           else await expect(page.locator("body")).toContainText(text);
+          if (stage.includes("deletion")) {
+            await expect.soft(page.getByRole("heading", { name: "Fixture layout tool 1", exact: true }), `${stage}: the confirmed deletion stays absent on the page`).toHaveCount(0);
+            for (const index of [2, 3, 4]) await expect.soft(page.getByRole("heading", { name: `Fixture layout tool ${index}`, exact: true })).toBeVisible();
+          }
           await page.screenshot({ path: testInfo.outputPath(`${stage}-${route.slice(1)}-${width}.png`), fullPage: true, animations: "disabled" });
           expect(errors.splice(0), `${stage}: ${route} browser errors`).toEqual([]);
         }
@@ -181,6 +186,53 @@ test("release snapshots distinguish optional outages from empty content and reco
     const healthy = await build("healthy", {}, true);
     expect(healthy.resources.tools).toHaveLength(4);
     expect(healthy.resources["reviews-gallery"]).toHaveLength(2);
+    await fs.cp(dist, otherDist, { recursive: true, errorOnExist: true, force: false });
+    await start("before-deletion");
+    const initialTools = await request.get(`${baseURL}/api/content/tools`);
+    expect(initialTools.status()).toBe(200);
+    expect((await initialTools.json()).data).toHaveLength(4);
+    const headers = { "x-admin-key": env.REF_ADMIN_KEY };
+    const loaded = await request.get(`${baseURL}/api/admin/content/documents/tooling-cls-tool-0`, { headers });
+    expect(loaded.ok(), await loaded.text()).toBe(true);
+    const { data: deletedTool } = await loaded.json();
+    const deletionOffset = fixture.evidence.requests.length;
+    const deletion = await request.post(`${baseURL}/api/admin/content/publish`, { headers, data: {
+      operation: "delete", type: "tool", documentId: "tooling-cls-tool-0", expectedRevision: deletedTool.revision,
+    } });
+    expect(deletion.ok(), await deletion.text()).toBe(true);
+    expect((await deletion.json()).data).toMatchObject({ committed: true });
+    await control(request, baseURL, { outage: ["tool"] });
+    for (const [stage, buildDist] of [["warm-deletion", null], ["cold-deletion", dist], ["other-instance-deletion", otherDist]]) {
+      if (buildDist) { await stop(server); server = null; await start(stage, buildDist); }
+      if (stage === "other-instance-deletion") {
+        const seeded = await request.get(`${baseURL}/tools`);
+        expect(seeded.status()).toBe(200);
+        const html = await seeded.text();
+        await fs.writeFile(testInfo.outputPath("other-instance-initial-stale.html"), html);
+        expect(html).toContain("Fixture layout tool 1");
+        await capture(`${stage}-hydration`, { "/tools": "Tools" });
+      }
+      const response = await request.get(`${baseURL}/api/content/tools`);
+      const payload = await response.json();
+      outcomes.runtime.push({ stage, status: response.status(), payload });
+      expect.soft(response.status(), `${stage}: confirmed content stays available`).toBe(200);
+      expect.soft(payload.data?.map(tool => tool._id), `${stage}: first failed read cannot resurrect the confirmed deletion`).toEqual(["tooling-cls-tool-1", "tooling-cls-tool-2", "tooling-cls-tool-3"]);
+      const regeneration = [];
+      try {
+        await expect.poll(async () => {
+          const rendered = await request.get(`${baseURL}/tools`);
+          const html = await rendered.text();
+          const row = { at: Date.now(), status: rendered.status(), cache: rendered.headers()["x-nextjs-cache"], deletedAbsent: !html.includes("Fixture layout tool 1"), neighbors: [2, 3, 4].every(index => html.includes(`Fixture layout tool ${index}`)) };
+          regeneration.push(row);
+          expect(row.status).toBe(200);
+          return row.cache === "HIT" && row.deletedAbsent && row.neighbors;
+        }, { timeout: 30000 }).toBe(true);
+      } finally { await fs.writeFile(testInfo.outputPath(`${stage}-ssr.json`), JSON.stringify(regeneration, null, 2)); }
+      await capture(stage, { "/tools": "Tools" });
+    }
+    expect(fixture.evidence.requests.slice(deletionOffset).filter(call => call.path.endsWith("/roo_apply_cms_publish_command"))).toHaveLength(1);
+    await stop(server); server = null;
+    expect(testInfo.errors, "all deletion instances preserve the confirmed outcome").toEqual([]);
     const optional = await build("optional-outage", { outage: ["tool", "review", "proReviewsCarousel"] }, true);
     for (const resource of ["tools", "reviews-gallery", "reviews"]) expect(optional.resources).not.toHaveProperty(resource);
     for (const type of ["tool", "review", "proReviewsCarousel"]) expect(optional.reads.some(call => call.body.p_document_types.includes(type) && call.status === 503)).toBe(true);
@@ -210,6 +262,7 @@ test("release snapshots distinguish optional outages from empty content and reco
     if (originalSnapshot) await fs.writeFile(snapshotFile, originalSnapshot);
     else await fs.rm(snapshotFile, { force: true });
     await fs.rm(dist, { recursive: true, force: true });
+    await fs.rm(otherDist, { recursive: true, force: true });
     restoreGuard();
     await fs.writeFile(testInfo.outputPath("snapshot-results.json"), JSON.stringify({ ...outcomes, fixtureStopped: fixture?.evidence.stopped }, null, 2));
   }

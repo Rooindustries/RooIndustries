@@ -1,5 +1,10 @@
 import { executeGlobalCmsCommand, createIntentDocumentId } from "../server/cms/publishCommand";
 
+jest.mock("../server/content/publicationStore", () => ({
+  ...jest.requireActual("../server/content/publicationStore"),
+  persistPublicContentPublication: jest.fn(async () => undefined),
+}));
+
 const intent = "4ef1c604-dabe-434c-9b4a-6b5e74c6fbc5";
 const id = createIntentDocumentId(intent);
 const baseBody = { operation: "create", type: "benchmark", createIntentId: intent, document: { title: "Synthetic native content" } };
@@ -46,10 +51,11 @@ describe("D6/P4 native authoritative CMS command", () => {
     const client = createClient();
     client.rpc.mockImplementation(async (name, args) => {
       if (name === "roo_cms_publish_command_result") return { data: { command_id: args.p_command_id, operation: "create", document_ids: [id], replayed: true, results: [{ _id: id, _type: "benchmark", _rev: "original-revision" }] }, error: null };
+      if (name === "roo_fetch_shadow_documents_targeted") return { data: [{ _id: id, _type: "benchmark", _rev: "original-revision", title: "Original" }], error: null };
       throw new Error(`Unexpected RPC: ${name}`);
     });
     await expect(execute({ client })).resolves.toMatchObject({ committed: true, replayed: true, revision: "original-revision" });
-    expect(client.rpc).toHaveBeenCalledTimes(1);
+    expect(client.rpc.mock.calls.map(([name]) => name)).toEqual(["roo_cms_publish_command_result", "roo_fetch_shadow_documents_targeted"]);
   });
   test("delete uses the loaded authoritative revision", async () => {
     const client = createClient({ current: [{ _id: id, _type: "benchmark", _rev: "current" }] });

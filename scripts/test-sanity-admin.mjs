@@ -641,6 +641,172 @@ try {
       fixture.setRequestHook(null);
     }
   });
+  await scenario('publications-preserve-confirmed-deletions', async () => {
+    const { persistPublicContentPublication, readPublicContentPublication } = await import('../src/server/content/publicationStore.js');
+    const { clearSupabasePublicContentCache } = await import('../src/server/content/publicContent.js');
+    const priorNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    const originalFetch = globalThis.fetch;
+    let failReads = false;
+    let failUpload = false;
+    let holdUpload;
+    let held;
+    let release;
+    let holdRead;
+    let readReached;
+    let releaseRead;
+    let corruptDownload = false;
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input.url || input);
+      if (failReads && url.pathname.endsWith('/roo_fetch_public_documents_targeted')) return Response.json({ code: 'FIXTURE_CONTENT_OUTAGE' }, { status: 503 });
+      if (holdRead && url.pathname.endsWith('/roo_fetch_public_documents_targeted')) {
+        const wait = holdRead; holdRead = null;
+        const response = await originalFetch(input, init);
+        const text = await response.text();
+        readReached(); await wait;
+        return new Response(text, { status: response.status, headers: response.headers });
+      }
+      if ((init?.method || 'GET') === 'POST' && url.pathname.startsWith('/storage/v1/object/public-content-state/')) {
+        if (failUpload === true) return Response.json({ error: 'Synthetic storage failure', statusCode: '503' }, { status: 503 });
+        if (holdUpload) { const wait = holdUpload; holdUpload = null; held(); await wait; }
+        if (failUpload === 'ack' && url.pathname.includes('/heads/') || failUpload === 'snapshot-ack' && url.pathname.includes('/snapshots/')) {
+          const response = await originalFetch(input, init);
+          if (response.ok) return Response.json({ error: 'Synthetic lost acknowledgement', statusCode: '503' }, { status: 503 });
+          return response;
+        }
+      }
+      if (failUpload === 'binding-ack' && url.pathname.endsWith('/roo_bind_public_content_publication')) {
+        const response = await originalFetch(input, init);
+        if (response.ok) return Response.json({ message: 'Synthetic lost database binding acknowledgement' }, { status: 503 });
+        return response;
+      }
+      if (corruptDownload && (init?.method || 'GET') === 'GET' && url.pathname.includes('/public-content-state/snapshots/')) return Response.json({ version: 1, resources: {} });
+      return originalFetch(input, init);
+    };
+    const read = async () => {
+      const response = await publicRoute.GET(new Request(`${fixture.origin}/api/content/tools`), { params: Promise.resolve({ resource: 'tools' }) });
+      const payload = await response.json();
+      assert.equal(response.status, 200, JSON.stringify(payload));
+      assert.equal(payload.ok, true);
+      return payload.data;
+    };
+    const tool = title => ({ title, category: 'Benchmark', shortDescription: 'Synthetic publication consistency tool.', downloadMode: 'external', downloadUrl: 'https://fixture.invalid/tool' });
+    try {
+      const first = await create('tool', tool('Native publication first'));
+      const neighbor = await create('tool', tool('Native publication neighbor'));
+      assert.equal(first.ok, true, JSON.stringify(first));
+      assert.equal(neighbor.ok, true, JSON.stringify(neighbor));
+      const firstId = first.data.documentId;
+      const neighborId = neighbor.data.documentId;
+      assert.ok((await read()).some(row => row._id === firstId));
+      const preDelete = await readPublicContentPublication(fixture.client);
+      const pendingUpload = new Promise(resolve => { release = resolve; });
+      const uploadReached = new Promise(resolve => { held = resolve; });
+      holdUpload = pendingUpload;
+      const oldExport = persistPublicContentPublication(fixture.client);
+      await uploadReached;
+      const oldReadReleased = new Promise(resolve => { releaseRead = resolve; });
+      const oldReadReached = new Promise(resolve => { readReached = resolve; });
+      holdRead = oldReadReleased;
+      clearSupabasePublicContentCache();
+      const oldRead = read();
+      await oldReadReached;
+      const command = { operation: 'delete', type: 'tool', documentId: firstId, expectedRevision: first.data.revision };
+      const deleted = await publish(command);
+      assert.equal(deleted.ok, true, JSON.stringify(deleted));
+      const confirmed = await readPublicContentPublication(fixture.client);
+      assert.ok(BigInt(confirmed.generation) > BigInt(preDelete.generation));
+      releaseRead();
+      assert.equal((await oldRead).some(row => row._id === firstId), false, 'An older in-flight read cannot undo a confirmed deletion');
+      failReads = true;
+      for (const cold of [false, true]) {
+        if (cold) clearSupabasePublicContentCache();
+        const rows = await read();
+        assert.equal(rows.some(row => row._id === firstId), false);
+        assert.equal(rows.some(row => row._id === neighborId), true);
+        observed(`native first failed read ${cold ? 'without process cache' : 'with warm cache'}`, { generation: confirmed.generation, toolIds: rows.map(row => row._id) });
+      }
+      release();
+      await oldExport;
+      assert.equal((await readPublicContentPublication(fixture.client)).generation, confirmed.generation, 'Late older export cannot replace the confirmed deletion');
+      const binding = await fixture.sql`select generation::text,sha256,object_path from cms.public_content_publications order by generation desc limit 1`;
+      const object = await fixture.client.storage.from('public-content-state').download(binding[0].object_path);
+      assert.equal(object.error, null);
+      assert.equal(crypto.createHash('sha256').update(await object.data.text()).digest('hex'), binding[0].sha256);
+      observed('native immutable publication identity', { ...binding[0], downloadedHashVerified: true, olderSourceResponseRejected: true });
+      const conflictingHash = '0'.repeat(64);
+      const conflicting = await fixture.client.rpc('roo_bind_public_content_publication', { p_generation: confirmed.generation, p_sha256: conflictingHash, p_object_path: `snapshots/${confirmed.generation.padStart(20,'0')}-${conflictingHash}.json` });
+      assert.equal(conflicting.error?.code, '40001');
+      failReads = false;
+      const beforeReceipts = Number((await fixture.sql`select count(*) n from migration.cms_publish_commands`)[0].n);
+      const checked = await call('publish/status', command);
+      assert.equal(checked.ok, true);
+      assert.equal(checked.data.deleted, true);
+      assert.equal(Number((await fixture.sql`select count(*) n from migration.cms_publish_commands`)[0].n), beforeReceipts);
+      const restored = await fixture.client.rpc('roo_apply_document_mutations', { p_mutations: [{ operation: 'create', document: { ...tool('Native restored publication'), _id: firstId, _type: 'tool' } }] });
+      assert.equal(restored.error, null);
+      const detailRestored = await detail(firstId);
+      const restore = await publish({ operation: 'replace', type: 'tool', documentId: firstId, expectedRevision: detailRestored.data.revision, document: detailRestored.data.document });
+      assert.equal(restore.ok, true, JSON.stringify(restore));
+      const restoredGeneration = (await readPublicContentPublication(fixture.client)).generation;
+      const stale = await publish(command, { revalidate: false });
+      assert.equal(stale.ok, true);
+      assert.equal(stale.data.replayed, true);
+      assert.equal((await readPublicContentPublication(fixture.client)).generation, restoredGeneration);
+      failReads = true;
+      clearSupabasePublicContentCache();
+      assert.equal((await read()).find(row => row._id === firstId)?.title, 'Native restored publication');
+      failReads = false;
+      const secondCommand = { operation: 'delete', type: 'tool', documentId: neighborId, expectedRevision: neighbor.data.revision };
+      failUpload = true;
+      assertError(await publish(secondCommand), 503, 'CMS_PUBLICATION_UNAVAILABLE');
+      assert.equal((await fixture.sql`select count(*)::int n from migration.source_documents where legacy_sanity_id=${neighborId} and not tombstoned`)[0].n, 0);
+      failUpload = false;
+      const mutationsBeforeRetry = Number((await fixture.sql`select count(*) n from migration.cms_publish_commands`)[0].n);
+      const recovered = await call('publish/status', secondCommand);
+      assert.equal(recovered.ok, true, JSON.stringify(recovered));
+      assert.equal(recovered.data.deleted, true);
+      assert.equal(Number((await fixture.sql`select count(*) n from migration.cms_publish_commands`)[0].n), mutationsBeforeRetry);
+      failReads = true;
+      clearSupabasePublicContentCache();
+      assert.equal((await read()).some(row => row._id === neighborId), false);
+      failReads = false;
+      for (const mode of ['ack', 'snapshot-ack', 'binding-ack', 'hash']) {
+        const extra = await create('tool', tool(`Native ${mode} recovery`));
+        assert.equal(extra.ok, true, JSON.stringify(extra));
+        const command = { operation: 'delete', type: 'tool', documentId: extra.data.documentId, expectedRevision: extra.data.revision };
+        failUpload = mode === 'hash' ? false : mode;
+        corruptDownload = mode === 'hash';
+        assertError(await publish(command), 503, mode === 'hash' ? 'CMS_PUBLICATION_INVALID' : 'CMS_PUBLICATION_UNAVAILABLE');
+        failUpload = false; corruptDownload = false;
+        const beforeRetry = Number((await fixture.sql`select count(*) n from migration.cms_publish_commands`)[0].n);
+        let checked;
+        if (mode === 'ack') {
+          const { executeGlobalCmsCommand } = await import('../src/server/cms/publishCommand.js');
+          const replay = await executeGlobalCmsCommand({ body: command, supabaseClient: fixture.client });
+          assert.equal(replay.replayed, true);
+          checked = { ok: true, data: replay };
+        } else checked = await call('publish/status', command);
+        assert.equal(checked.ok, true, JSON.stringify(checked));
+        assert.equal(checked.data.deleted, true);
+        assert.equal(Number((await fixture.sql`select count(*) n from migration.cms_publish_commands`)[0].n), beforeRetry);
+        failReads = true; clearSupabasePublicContentCache();
+        assert.equal((await read()).some(row => row._id === extra.data.documentId), false);
+        failReads = false;
+        observed(`native ${mode} interruption`, { confirmedByReadOnlyStatus: true, repeatedMutations: 0 });
+      }
+      const anonymous = await fixture.sql`select has_function_privilege('anon','public.roo_capture_public_content_publication()','execute') capture,has_function_privilege('authenticated','public.roo_fetch_public_documents_targeted(text[],text[],jsonb,integer)','execute') read`;
+      assert.deepEqual(anonymous[0], { capture: false, read: false });
+      const invalidScope = await fixture.client.rpc('roo_fetch_public_documents_targeted', { p_document_types: ['booking'], p_ids: null, p_filters: [], p_limit: 1 });
+      assert.equal(invalidScope.error?.code, '22023');
+      observed('native publication boundaries', { lateOlderExportIgnored: true, restoredVersionPreserved: true, staleDeleteReplayWrites: 0, failedExportRecoveredWithoutMutation: true, privateSourceScopeRefused: true, browserCache: 'no-store', storedGeneration: (await readPublicContentPublication(fixture.client)).generation });
+    } finally {
+      release?.();
+      releaseRead?.();
+      globalThis.fetch = originalFetch;
+      if (priorNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = priorNodeEnv;
+    }
+  });
   if(!artifact.scenarios.length)throw new Error(`Unknown scenario ${selected}`);
   artifact.requests=fixture.requestLog.map(({method,path,rpc})=>({method,path,rpc}));
   artifact.sanityRequests=artifact.requests.filter(row=>/sanity\.io|sanity\.studio/.test(row.path));assert.equal(artifact.sanityRequests.length,0);
