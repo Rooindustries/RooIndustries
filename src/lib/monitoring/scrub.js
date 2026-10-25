@@ -1,3 +1,5 @@
+import { isProductionDeployment } from "./deployment.mjs";
+
 const CARD = /(^|[^\p{Nd}])(\p{Nd}(?:[\s\p{Pd}\u2212\u00B7\u30FB\uFF0E._+]{0,3}\p{Nd}){12,})/gu;
 const UTF8 = new TextDecoder();
 const QUERY = /\?[^\s#"'<>]+/g;
@@ -181,6 +183,12 @@ export function monitoringDsn(value) {
   } catch {
     return undefined;
   }
+}
+
+export function serverMonitoringDsn(value) {
+  const dsn = monitoringDsn(value);
+  if (!dsn) return undefined;
+  return isProductionDeployment() ? dsn : undefined;
 }
 
 export function envelopeHeaderScrubber(publicKey, environment) {

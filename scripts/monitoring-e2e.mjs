@@ -227,14 +227,32 @@ try {
     return event;
   });
   check('adverse environment is replaced before SDK initialization', sdk.getClient().getOptions().environment, 'unknown');
-  const { monitoringDsn } = await import('../src/lib/monitoring/scrub.js');
-  check('external HTTP is refused while external HTTPS and loopback HTTP remain valid', [monitoringDsn('http://fixturekey@public.invalid/42') ?? null, monitoringDsn('https://fixturekey@public.invalid/42'), monitoringDsn(dsn)], [null, 'https://fixturekey@public.invalid/42', dsn]);
+  const { monitoringDsn, serverMonitoringDsn } = await import('../src/lib/monitoring/scrub.js');
+  check('external HTTP is refused while HTTPS and loopback HTTP remain valid', [monitoringDsn('http://fixturekey@public.invalid/42') ?? null, monitoringDsn('https://fixturekey@public.invalid/42'), monitoringDsn(dsn)], [null, 'https://fixturekey@public.invalid/42', dsn]);
+  const previousEnvironment = process.env.NEXT_PUBLIC_VERCEL_ENV;
   const envelope = (target, message) => `${JSON.stringify({ dsn: target })}\n{"type":"event"}\n${JSON.stringify({ message })}\n`;
   const post = (body, headers = {}) => fetch(`${origin}/api/client-report`, {
     method: 'POST',
     body,
     headers: { origin, 'content-type': 'text/plain', ...headers },
   });
+  const previousHosted = process.env.NEXT_PUBLIC_SENTRY_HOSTED;
+  process.env.NEXT_PUBLIC_VERCEL_ENV = 'preview';
+  delete process.env.NEXT_PUBLIC_SENTRY_HOSTED;
+  delete process.env.VERCEL;
+  delete process.env.VERCEL_ENV;
+  check('local production start keeps the HTTP relay disabled', (await post(envelope(dsn, 'fixture-local-external'))).status, 404);
+  process.env.NEXT_PUBLIC_SENTRY_HOSTED = '1';
+  process.env.VERCEL = '1';
+  process.env.VERCEL_ENV = 'preview';
+  check('hosted preview disables reporting with a valid loopback DSN', serverMonitoringDsn(process.env.NEXT_PUBLIC_SENTRY_DSN) ?? null, null);
+  check('hosted preview relay stays disabled with a valid loopback DSN', (await post(envelope(dsn, 'fixture-hosted-wrong-project'))).status, 404);
+  process.env.NEXT_PUBLIC_SENTRY_DSN = dsn;
+  process.env.VERCEL = '1';
+  process.env.VERCEL_ENV = 'production';
+  process.env.NEXT_PUBLIC_VERCEL_ENV = previousEnvironment;
+  if (previousHosted === undefined) delete process.env.NEXT_PUBLIC_SENTRY_HOSTED;
+  else process.env.NEXT_PUBLIC_SENTRY_HOSTED = previousHosted;
   check('same-origin envelope is accepted', (await post(envelope(dsn, 'fixture-relay'), { cookie: 'fixture-private-cookie', authorization: 'Bearer fixture-private-auth', 'x-forwarded-for': '203.0.113.42' })).status, 200);
   const relayed = received.find(item => item.body.includes('fixture-relay'));
   check('relay targets this DSN project', relayed?.path, '/api/42/envelope/');

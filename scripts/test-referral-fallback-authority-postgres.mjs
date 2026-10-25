@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import postgres from "postgres";
+import { postgresFixturePort } from "./lib/postgres-fixture-port.mjs";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 const pgBin = String(process.env.PG_BIN || "").trim() || spawnSync(
@@ -14,8 +15,9 @@ const pgBin = String(process.env.PG_BIN || "").trim() || spawnSync(
 ).stdout.trim();
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "roo-ref-authority-"));
 const dataDir = path.join(tempRoot, "pgdata");
+const postgresLog = path.join(tempRoot, "postgres.log");
 const postgresHost = process.env.ROO_TEST_POSTGRES_HOST || "127.0.0.1";
-const port = 56832 + Math.floor(Math.random() * 500);
+let port;
 
 const run = (command, args, options = {}) => {
   const result = spawnSync(command, args, {
@@ -26,7 +28,8 @@ const run = (command, args, options = {}) => {
   });
   if (result.status !== 0) {
     throw new Error(
-      [`${command} ${args.join(" ")} failed`, result.stdout, result.stderr]
+      [`${command} ${args.join(" ")} failed`, result.stdout, result.stderr,
+        args.includes("start") && fs.existsSync(postgresLog) ? fs.readFileSync(postgresLog, "utf8") : ""]
         .filter(Boolean)
         .join("\n")
     );
@@ -202,14 +205,17 @@ let sql = null;
 try {
   run(path.join(pgBin, "initdb"), ["-D", dataDir, "--auth=trust", "--no-locale"]);
   fs.appendFileSync(path.join(dataDir, "pg_hba.conf"), "\nhost all all samehost trust\n");
+  port = await postgresFixturePort(postgresHost);
   run(path.join(pgBin, "pg_ctl"), [
     "-D",
     dataDir,
+    "-l",
+    postgresLog,
     "-o",
     `-p ${port} -h ${postgresHost} -k ''`,
     "-w",
     "start",
-  ], { stdio: "ignore" });
+  ]);
   started = true;
   run(path.join(pgBin, "psql"), [
     "-h",
@@ -583,11 +589,12 @@ try {
 } finally {
   if (sql) await sql.end({ timeout: 1 });
   if (started) {
-    spawnSync(
+    run(
       path.join(pgBin, "pg_ctl"),
-      ["-D", dataDir, "-m", "fast", "-w", "stop"],
-      { encoding: "utf8" }
+      ["-D", dataDir, "-m", "fast", "-w", "stop"]
     );
   }
+  fs.mkdirSync(path.join(root, "test-results"), { recursive: true });
+  if (fs.existsSync(postgresLog)) fs.copyFileSync(postgresLog, path.join(root, "test-results/referral-authority-postgres.log"));
   fs.rmSync(tempRoot, { recursive: true, force: true });
 }

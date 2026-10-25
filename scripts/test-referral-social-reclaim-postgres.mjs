@@ -8,6 +8,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 import postgres from "postgres";
+import { postgresFixturePort } from "./lib/postgres-fixture-port.mjs";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 const pgConfig = spawnSync(process.env.PG_CONFIG || "pg_config", ["--bindir"], {
@@ -17,8 +18,9 @@ const pgBin = String(process.env.PG_BIN || "").trim() ||
   (pgConfig.status === 0 ? pgConfig.stdout.trim() : "/opt/homebrew/bin");
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "roo-referral-reclaim-"));
 const dataDir = path.join(tempRoot, "pgdata");
+const postgresLog = path.join(tempRoot, "postgres.log");
 const postgresHost = process.env.ROO_TEST_POSTGRES_HOST || "127.0.0.1";
-const port = 56332 + Math.floor(Math.random() * 600);
+let port;
 const migration = path.join(
   root,
   "supabase/migrations/20260717231518_harden_referral_social_orphan_reclaim.sql"
@@ -36,6 +38,7 @@ const run = (command, args, options = {}) => {
       `${command} ${args.join(" ")} failed`,
       result.stdout,
       result.stderr,
+      args.includes("start") && fs.existsSync(postgresLog) ? fs.readFileSync(postgresLog, "utf8") : "",
     ].filter(Boolean).join("\n"));
   }
   return result.stdout;
@@ -342,9 +345,10 @@ try {
   assert.match(version, /PostgreSQL\) 17\./, "PostgreSQL 17 is required");
   run(path.join(pgBin, "initdb"), ["-D", dataDir, "--auth=trust", "--no-locale"]);
   fs.appendFileSync(path.join(dataDir, "pg_hba.conf"), "\nhost all all samehost trust\n");
+  port = await postgresFixturePort(postgresHost);
   run(path.join(pgBin, "pg_ctl"), [
-    "-D", dataDir, "-o", `-p ${port} -h ${postgresHost} -k ''`, "-w", "start",
-  ], { stdio: "ignore" });
+    "-D", dataDir, "-l", postgresLog, "-o", `-p ${port} -h ${postgresHost} -k ''`, "-w", "start",
+  ]);
   started = true;
   run(path.join(pgBin, "createdb"), [
     "-h", postgresHost, "-p", String(port), "referral_reclaim_fixture",
@@ -408,9 +412,11 @@ try {
 } finally {
   await sql?.end({ timeout: 1 }).catch(() => {});
   if (started) {
-    spawnSync(path.join(pgBin, "pg_ctl"), [
+    run(path.join(pgBin, "pg_ctl"), [
       "-D", dataDir, "-m", "fast", "-w", "stop",
-    ], { encoding: "utf8" });
+    ]);
   }
+  fs.mkdirSync(path.join(root, "test-results"), { recursive: true });
+  if (fs.existsSync(postgresLog)) fs.copyFileSync(postgresLog, path.join(root, "test-results/referral-social-postgres.log"));
   fs.rmSync(tempRoot, { recursive: true, force: true });
 }

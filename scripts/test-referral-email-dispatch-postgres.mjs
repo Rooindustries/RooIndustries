@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import postgres from "postgres";
+import { postgresFixturePort } from "./lib/postgres-fixture-port.mjs";
 import {
   buildReferralEmailIdempotencyKey,
   deliverReferralEmailDispatch,
@@ -21,7 +22,7 @@ const pgBin = String(process.env.PG_BIN || "").trim() || spawnSync(
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "roo-referral-email-"));
 const dataDir = path.join(tempRoot, "pgdata");
 const postgresHost = process.env.ROO_TEST_POSTGRES_HOST || "127.0.0.1";
-const port = 56832 + Math.floor(Math.random() * 400);
+let port;
 
 const run = (command, args, options = {}) => {
   const result = spawnSync(command, args, {
@@ -126,6 +127,7 @@ let sql = null;
 try {
   run(path.join(pgBin, "initdb"), ["-D", dataDir, "--auth=trust", "--no-locale"]);
   fs.appendFileSync(path.join(dataDir, "pg_hba.conf"), "\nhost all all samehost trust\n");
+  port = await postgresFixturePort(postgresHost);
   run(
     path.join(pgBin, "pg_ctl"),
     ["-D", dataDir, "-o", `-p ${port} -h ${postgresHost} -k ''`, "-w", "start"],
