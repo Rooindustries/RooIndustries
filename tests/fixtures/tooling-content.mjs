@@ -6,7 +6,7 @@ import { uiRepairsFixture } from './ui-repairs-server.mjs';
 import { localOrigin } from '../../scripts/lib/test-target-safety.mjs';
 import { referralEmail } from './api-routes.mjs';
 
-export async function createToolingContentFixture({ origin, artifact, apiRoutes = false }) {
+export async function createToolingContentFixture({ origin, artifact, apiRoutes = false, clockFile }) {
   const target = new URL(localOrigin(origin));
   const reused = uiRepairsFixture({ base: origin });
   const content = resource => reused.content(resource, target);
@@ -127,6 +127,13 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
   const initialDocuments = structuredClone(documents);
   const dispatches = new Map();
   const rateLimits = new Map();
+  let clockNow = null;
+  const setClock = value => {
+    if (!clockFile || value !== null && (!Number.isSafeInteger(value) || value < 0)) throw new Error('Invalid fixture clock.');
+    fs.writeFileSync(`${clockFile}.next`, JSON.stringify(value));
+    fs.renameSync(`${clockFile}.next`, clockFile);
+    clockNow = value;
+  };
   let delivery = 'completed';
   let session = 'valid';
   let failure = '';
@@ -198,6 +205,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       } else if (apiRoutes && url.pathname === '/__fixture' && ['GET', 'POST'].includes(req.method)) {
         if (req.method === 'POST') {
           if (body.reset === true) {
+            if (clockFile) setClock(null);
             documents.splice(0, documents.length, ...structuredClone(initialDocuments));
             dispatches.clear();
             rateLimits.clear();
@@ -209,6 +217,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
             emailDelayMs = 0;
             emails.length = 0;
           }
+          if (body.clockNow !== undefined) setClock(body.clockNow);
           if (body.delivery !== undefined) {
             if (!['completed', 'pending', 'queued', 'failed', 'dead_letter', 'source_conflict', 'token_conflict', 'enqueue_failed', 'lookup_failed', 'requeue_failed', 'captured'].includes(body.delivery)) throw new Error('Invalid fixture delivery state.');
             delivery = body.delivery;
@@ -237,7 +246,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           }
         }
         call.status = 200;
-        json(res, 200, { delivery, session, documents, requests: evidence.requests, emails });
+        json(res, 200, { delivery, session, documents, requests: evidence.requests, emails, clockNow });
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_fetch_shadow_documents_targeted') {
         if (contentOutage === true || (Array.isArray(contentOutage) && body.p_document_types?.some(type => contentOutage.includes(type)))) throw Object.assign(new Error('Synthetic content outage.'), { status: 503, code: 'FIXTURE_CONTENT_OUTAGE' });
         const scopedIds = apiRoutes && body.p_document_types === null && Array.isArray(body.p_ids) && body.p_ids.length > 0;

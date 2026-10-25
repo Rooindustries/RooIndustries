@@ -27,6 +27,8 @@ const monitoringStartup = process.env.TOOLING_MONITORING_STARTUP === "1";
 if (monitoringStartup && (process.env.NEXT_PUBLIC_SENTRY_DSN !== "false" || process.env.TOOLING_DEV_SERVER === "1")) {
   throw new Error("Production monitoring startup requires the malformed DSN fixture and next start.");
 }
+const clockFile = apiRoutes ? path.resolve(`${dist}-clock.json`) : undefined;
+if (clockFile) fs.writeFileSync(clockFile, "null");
 const env = localMonitoringEnv({
   PATH: process.env.PATH,
   HOME: process.env.HOME,
@@ -58,7 +60,8 @@ const env = localMonitoringEnv({
   ROO_TEST_HOST: testHost,
   NEXT_DIST_DIR: dist,
   TOOLING_NETWORK_GUARD: "1",
-  NODE_OPTIONS: `--import=${fileURLToPath(new URL("./lib/test-target-safety.mjs", import.meta.url))}`,
+  ...(clockFile ? { TOOLING_CLOCK_FILE: clockFile } : {}),
+  NODE_OPTIONS: `--import=${fileURLToPath(new URL("./lib/test-target-safety.mjs", import.meta.url))}${apiRoutes ? ` --import=${fileURLToPath(new URL("../tests/fixtures/server-clock.mjs", import.meta.url))}` : ""}`,
 }, process.env.NEXT_PUBLIC_SENTRY_DSN);
 if (monitoringStartup) Object.assign(env, { NODE_ENV: "production", VERCEL: "1", VERCEL_ENV: "production", NEXT_PUBLIC_SENTRY_DSN: "false" });
 const next = path.resolve("node_modules/next/dist/bin/next");
@@ -95,7 +98,7 @@ if (development) {
 } else {
   if (fs.existsSync(dist)) throw new Error("Incomplete isolated build exists; choose a fresh NEXT_DIST_DIR.");
 }
-const fixture = await createToolingContentFixture({ origin: contentURL, artifact: process.env.TOOLING_CONTENT_ARTIFACT, apiRoutes });
+const fixture = await createToolingContentFixture({ origin: contentURL, artifact: process.env.TOOLING_CONTENT_ARTIFACT, apiRoutes, clockFile });
 try {
   await execute(["scripts/generate-sitemap.js"]);
   await execute(["scripts/generate-robots.js"], { ...env, VERCEL_ENV: "production" });
@@ -115,6 +118,9 @@ try {
   }
 } catch (error) {
   if (!stopping) throw error;
-} finally { await fixture.close(); }
+} finally {
+  await fixture.close();
+  if (clockFile) fs.rmSync(clockFile, { force: true });
+}
 
 }
