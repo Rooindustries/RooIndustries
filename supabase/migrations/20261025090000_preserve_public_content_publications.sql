@@ -88,7 +88,9 @@ begin
     raise exception 'Public content scope is required' using errcode = '22023';
   end if;
   select generation into strict v_generation from cms.public_content_generation where singleton for share;
-  return jsonb_build_object('generation',v_generation::text,'documents',
+  return jsonb_build_object('generation',v_generation::text,
+    'publicationGeneration',(select max(generation)::text from cms.public_content_publications),
+    'documents',
     public.roo_fetch_shadow_documents_targeted(p_document_types,p_ids,p_filters,p_limit));
 end;
 $$;

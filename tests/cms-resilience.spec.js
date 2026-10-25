@@ -1038,6 +1038,88 @@ test("deletion recovery keeps real retry actions at phone and desktop widths", a
   }
 });
 
+test("a Storage outage reads current database content without restoring confirmed deletions", async ({ request, browser, baseURL }, testInfo) => {
+  const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+  const timeline = [];
+  const readTools = async stage => {
+    const response = await request.get("/api/content/tools");
+    const payload = await response.json();
+    timeline.push({ stage, status: response.status(), payload });
+    return { status: response.status(), payload };
+  };
+  try {
+    await control(request, baseURL, { reset: true });
+    await renew(request);
+    const original = await readTools("before deletion");
+    expect(original.status).toBe(200);
+    expect(original.payload.data).toHaveLength(4);
+    await expect.poll(async () => (await request.get("/tools")).headers()["x-nextjs-cache"], { timeout: 30000 }).toBe("HIT");
+    const removed = original.payload.data[0];
+    const neighborIds = original.payload.data.slice(1).map(row => row._id);
+    const saved = (await (await request.get(`/api/admin/content/documents/${removed._id}`, { headers: adminHeaders })).json()).data;
+    const command = { operation: "delete", type: "tool", documentId: removed._id, expectedRevision: saved.revision };
+    expect((await publish(request, command)).status()).toBe(200);
+    await control(request, baseURL, { publicationFailure: "read" });
+    const failedStorage = await readTools("first post-delete read with Storage unavailable");
+    expect.soft(failedStorage.status).toBe(200);
+    expect.soft(failedStorage.payload.data?.map(row => row._id)).toEqual(neighborIds);
+    for (const width of [360, 390, 1440]) {
+      const context = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce", serviceWorkers: "block" });
+      await guardBrowserContext(context, [baseURL, new URL(controlUrl(baseURL)).origin]);
+      try {
+        const page = await context.newPage();
+        await page.goto("/tools", { waitUntil: "domcontentloaded" });
+        await expect.soft(page.getByText(removed.title, { exact: true })).toHaveCount(0);
+        for (const title of original.payload.data.slice(1).map(row => row.title)) await expect(page.getByText(title, { exact: true })).toBeVisible();
+        await page.screenshot({ path: testInfo.outputPath(`storage-outage-tools-${width}.png`), fullPage: true, animations: "disabled" });
+      } finally { await context.close(); }
+    }
+    await expect.poll(async () => {
+      const response = await request.get("/tools");
+      const html = await response.text();
+      const result = { stage: "Storage outage SSR", at: Date.now(), status: response.status(), cache: response.headers()["x-nextjs-cache"], deletedAbsent: !html.includes(removed.title), neighbors: original.payload.data.slice(1).every(row => html.includes(row.title)) };
+      timeline.push(result);
+      expect.soft(result.status).toBe(200);
+      return result.cache === "HIT" && result.deletedAbsent && result.neighbors;
+    }, { timeout: 30000 }).toBe(true);
+    for (const route of ["/terms", "/privacy"]) {
+      const response = await request.get(route);
+      expect(response.status(), `${route} current legal page before combined outage`).toBe(200);
+      expect(await response.text()).toContain("Synthetic local information");
+    }
+    await control(request, baseURL, { outage: true });
+    expect((await readTools("both authorities unavailable")).status).toBe(503);
+    for (const route of ["/tools", "/terms", "/privacy"]) {
+      const response = await request.get(route);
+      const html = await response.text();
+      timeline.push({ stage: "both authorities unavailable HTML", route, status: response.status(), cache: response.headers()["x-nextjs-cache"] });
+      expect(response.status(), `${route} retained server HTML`).toBe(200);
+      expect(html).not.toContain("Application error");
+      if (route === "/tools") expect(html).not.toContain(removed.title);
+      else expect(html).toContain("Synthetic local information");
+    }
+    for (const resource of ["terms", "privacy-policy"]) expect((await request.get(`/api/content/${resource}`)).status()).toBe(503);
+    await control(request, baseURL, { outage: false });
+    const recovered = await readTools("database repaired, Storage still unavailable");
+    expect(recovered.status).toBe(200);
+    expect(recovered.payload.data.map(row => row._id)).toEqual(neighborIds);
+    await control(request, baseURL, { publicationFailure: "" });
+    for (const id of neighborIds) {
+      const row = (await (await request.get(`/api/admin/content/documents/${id}`, { headers: adminHeaders })).json()).data;
+      expect((await publish(request, { operation: "delete", type: "tool", documentId: id, expectedRevision: row.revision })).status()).toBe(200);
+    }
+    await control(request, baseURL, { publicationFailure: "read" });
+    expect(await readTools("genuine empty with Storage unavailable")).toEqual({ status: 200, payload: { ok: true, data: [] } });
+    const evidence = await (await request.get(controlUrl(baseURL))).json();
+    expect(evidence.requests.filter(row => row.path.endsWith("/roo_apply_cms_publish_command") && row.body?.p_mutations?.[0]?.operation === "delete")).toHaveLength(4);
+  } finally {
+    await fs.writeFile(testInfo.outputPath("storage-outage-recovery.json"), JSON.stringify(timeline, null, 2));
+    await fs.writeFile(testInfo.outputPath("cms-requests.json"), JSON.stringify(await (await request.get(controlUrl(baseURL))).json(), null, 2));
+    await control(request, baseURL, { reset: true });
+    await renew(request);
+  }
+});
+
 test("confirmed publications and empty tool lists survive an eleven-minute CMS outage", async ({ request, browser, baseURL }, testInfo) => {
   const fixtureUrl = new URL("/__fixture", controlUrl(baseURL)).href;
   const marker = "Most recently confirmed headline through a prolonged outage";

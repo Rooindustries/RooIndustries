@@ -211,7 +211,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         }
         if (body.clearPublications === true) { publications.clear(); publicationBindings.clear(); }
         if (body.publicationFailure !== undefined) {
-          if (!['', 'upload', 'ack'].includes(body.publicationFailure)) throw new Error('Invalid fixture publication failure.');
+          if (!['', 'upload', 'ack', 'read'].includes(body.publicationFailure)) throw new Error('Invalid fixture publication failure.');
           publicationFailure = body.publicationFailure;
         }
         if (body.publishResponseFailure !== undefined) {
@@ -248,6 +248,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         call.status = 200;
         json(res, 200, { ...evidence, publicationState: { generation: String(generation), failure: publicationFailure, bindings: [...publicationBindings.values()], objects: [...publications.keys()].sort() } });
       } else if (req.method === 'POST' && url.pathname === '/storage/v1/object/list/public-content-state') {
+        if (publicationFailure === 'read') throw Object.assign(new Error('Synthetic publication read failure.'), { status: 503 });
         call.status = 200;
         const prefix = body.prefix ? `${body.prefix.replace(/\/$/, '')}/` : '';
         json(res, 200, [...publications.keys()].filter(name => name.startsWith(prefix)).sort().reverse().slice(0, 1).map(name => ({ name: name.slice(prefix.length) })));
@@ -261,6 +262,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           call.status = 200; json(res, 200, { Key: `public-content-state/${name}` });
         }
       } else if (req.method === 'GET' && /^\/storage\/v1\/object\/(?:authenticated\/)?public-content-state\/(?:snapshots|heads)\/[0-9]{20}-[a-f0-9]{64}\.json$/.test(url.pathname)) {
+        if (publicationFailure === 'read') throw Object.assign(new Error('Synthetic publication read failure.'), { status: 503 });
         const value = publications.get(url.pathname.split('/public-content-state/')[1]);
         call.status = value === undefined ? 404 : 200;
         res.writeHead(call.status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -396,7 +398,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           rows = rows.filter(row => { const value = filter.path.split('.').reduce((item, key) => item?.[key], row); return filter.op === 'in' ? Array.isArray(filter.value) && filter.value.includes(value) : filter.op === 'ieq' ? String(value).toLowerCase() === String(filter.value).toLowerCase() : value === filter.value; });
         }
         if (contentFailure === 'malformed') rows = rows.map(row => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, key.startsWith('_') ? value : { broken: true }])));
-        rows = rows.sort((a, b) => a._id < b._id ? -1 : a._id > b._id ? 1 : 0).slice(0, body.p_limit); call.status = 200; call.rows = rows.length; json(res, 200, url.pathname.endsWith('/roo_fetch_public_documents_targeted') ? { generation: String(generation), documents: rows } : rows);
+        rows = rows.sort((a, b) => a._id < b._id ? -1 : a._id > b._id ? 1 : 0).slice(0, body.p_limit); call.status = 200; call.rows = rows.length; json(res, 200, url.pathname.endsWith('/roo_fetch_public_documents_targeted') ? { generation: String(generation), publicationGeneration: [...publicationBindings.keys()].sort((a, b) => Number(b) - Number(a))[0] || null, documents: rows } : rows);
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_asset_manifest_for_refs') {
         const assets = images.filter(image => body.p_asset_ids?.includes(image.id)).map(image => ({
           legacy_sanity_asset_id: image.id,

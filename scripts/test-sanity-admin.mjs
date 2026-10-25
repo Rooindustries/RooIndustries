@@ -641,6 +641,110 @@ try {
       fixture.setRequestHook(null);
     }
   });
+  await scenario('publication-read-recovery', async () => {
+    const { clearSupabasePublicContentCache } = await import('../src/server/content/publicContent.js');
+    const priorNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    const originalFetch = globalThis.fetch;
+    let failReads = false;
+    let failHeadsAfter = Infinity;
+    let headReads = 0;
+    let storageReadFailure = '';
+    let heldSource;
+    let sourceReached;
+    let releaseSource;
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input.url || input);
+      if (heldSource && url.pathname.endsWith('/roo_fetch_public_documents_targeted')) {
+        const wait = heldSource;
+        heldSource = null;
+        const response = await originalFetch(input, init);
+        const bytes = await response.text();
+        sourceReached();
+        await wait;
+        return new Response(bytes, { status: response.status, headers: response.headers });
+      }
+      if (storageReadFailure && (url.pathname === '/storage/v1/object/list/public-content-state' || (init?.method || 'GET') === 'GET' && url.pathname.includes('/public-content-state/'))) {
+        if (storageReadFailure === 'timeout') {
+          const signal = init?.signal || input.signal;
+          await new Promise((resolve, reject) => {
+            const aborted = () => reject(Object.assign(new Error('Synthetic storage read timeout'), { name: 'AbortError' }));
+            if (signal?.aborted) aborted();
+            else signal?.addEventListener('abort', aborted, { once: true });
+          });
+        }
+        return storageReadFailure === 'malformed' ? Response.json([{ name: 'invalid-publication-identity' }]) : Response.json({ error: 'Synthetic storage read outage', statusCode: '503' }, { status: 503 });
+      }
+      if (url.pathname === '/storage/v1/object/list/public-content-state' && ++headReads > failHeadsAfter) return Response.json({ error: 'Synthetic head read failure', statusCode: '503' }, { status: 503 });
+      if (failReads && url.pathname.endsWith('/roo_fetch_public_documents_targeted')) return Response.json({ code: 'FIXTURE_CONTENT_OUTAGE' }, { status: 503 });
+      return originalFetch(input, init);
+    };
+    const read = async () => {
+      const response = await publicRoute.GET(new Request(`${fixture.origin}/api/content/tools`), { params: Promise.resolve({ resource: 'tools' }) });
+      return { status: response.status, payload: await response.json() };
+    };
+    try {
+      const retained = await create('tool', { title: 'Native prior scenario neighbor', category: 'Benchmark', shortDescription: 'Synthetic retained prior content.', downloadMode: 'external', downloadUrl: 'https://fixture.invalid/retained' });
+      assert.equal(retained.ok, true, JSON.stringify(retained));
+      const created = await create('tool', { title: 'Native recovered publication read', category: 'Benchmark', shortDescription: 'Synthetic source recovery.', downloadMode: 'external', downloadUrl: 'https://fixture.invalid/tool' });
+      assert.equal(created.ok, true, JSON.stringify(created));
+      const initial = await read();
+      assert.equal(initial.status, 200);
+      const baselineIds = initial.payload.data.filter(row => row._id !== created.data.documentId).map(row => row._id).sort();
+      clearSupabasePublicContentCache({ preserveStale: true });
+      failReads = true;
+      headReads = 0;
+      failHeadsAfter = 1;
+      const failed = await read();
+      assert.equal(failed.status, 503, JSON.stringify(failed));
+      failReads = false;
+      failHeadsAfter = Infinity;
+      const recovered = await read();
+      observed('publication reader recovery after dual outage', { failed, recovered, headReads });
+      assert.equal(recovered.status, 200, 'A repaired source and head must recover without a fresh flag or process restart');
+      assert.ok(recovered.payload.data.some(row => row._id === created.data.documentId));
+      const neighbor = await create('tool', { title: 'Native storage outage neighbor', category: 'Benchmark', shortDescription: 'Synthetic source neighbor.', downloadMode: 'external', downloadUrl: 'https://fixture.invalid/neighbor' });
+      assert.equal(neighbor.ok, true, JSON.stringify(neighbor));
+      const removed = await publish({ operation: 'delete', type: 'tool', documentId: created.data.documentId, expectedRevision: created.data.revision });
+      assert.equal(removed.ok, true, JSON.stringify(removed));
+      const beforeMutations = Number((await fixture.sql`select count(*) n from migration.cms_publish_commands`)[0].n);
+      const storageOutcomes = [];
+      for (const mode of ['5xx', 'timeout', 'malformed']) {
+        storageReadFailure = mode;
+        for (const cold of [false, true]) {
+          if (cold) clearSupabasePublicContentCache();
+          const result = await read();
+          storageOutcomes.push({ mode, cold, ...result });
+        }
+      }
+      storageReadFailure = '';
+      observed('storage outage current database authority', storageOutcomes);
+      for (const result of storageOutcomes) {
+        assert.equal(result.status, 200, `Current source remains readable during ${result.mode}, cold=${result.cold}`);
+        assert.equal(result.payload.data.some(row => row._id === created.data.documentId), false);
+        assert.equal(result.payload.data.some(row => row._id === neighbor.data.documentId), true);
+        for (const id of baselineIds) assert.ok(result.payload.data.some(row => row._id === id), 'Every existing public neighbor remains present');
+      }
+      assert.equal(Number((await fixture.sql`select count(*) n from migration.cms_publish_commands`)[0].n), beforeMutations);
+      clearSupabasePublicContentCache();
+      const reached = new Promise(resolve => { sourceReached = resolve; });
+      heldSource = new Promise(resolve => { releaseSource = resolve; });
+      const earlier = read();
+      await reached;
+      assert.equal((await publish({ operation: 'delete', type: 'tool', documentId: neighbor.data.documentId, expectedRevision: neighbor.data.revision })).ok, true);
+      storageReadFailure = '5xx';
+      releaseSource();
+      const raced = await earlier;
+      observed('publication read overtaken by confirmed deletion during storage outage', raced);
+      assert.equal(raced.status, 200);
+      assert.deepEqual(raced.payload.data.map(row => row._id).sort(), baselineIds);
+    } finally {
+      releaseSource?.();
+      globalThis.fetch = originalFetch;
+      clearSupabasePublicContentCache();
+      if (priorNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = priorNodeEnv;
+    }
+  });
   await scenario('publications-preserve-confirmed-deletions', async () => {
     const { persistPublicContentPublication, readPublicContentPublication } = await import('../src/server/content/publicationStore.js');
     const { clearSupabasePublicContentCache } = await import('../src/server/content/publicContent.js');

@@ -115,20 +115,40 @@ export const loadSupabasePublicContent = async ({ resource, query, params, fresh
     signal: AbortSignal.timeout(5000),
     fetchImpl: (input, init) => fetch(input, { ...init, cache: "no-store" }),
   });
-  const client = readClient();
-  let publication = shared ? await readPublicContentPublication(client) : null;
-  let minimumGeneration = publication ? contentGeneration(publication.generation) : 0n;
-  if (publication) onPublication?.(minimumGeneration);
+  let publication = null;
+  let minimumGeneration = 0n;
+  let storageGeneration = 0n;
+  let sourceAuthority = false;
   const refreshPublication = async () => {
-    const current = await readPublicContentPublication(readClient());
+    let current;
+    if (!sourceAuthority) {
+      try { current = await readPublicContentPublication(readClient()); }
+      catch { sourceAuthority = true; }
+    }
+    if (sourceAuthority) {
+      const result = await readClient().rpc("roo_fetch_public_documents_targeted", {
+        p_document_types: DOCUMENT_TYPES_BY_RESOURCE[resource], p_ids: null, p_filters: [], p_limit: 1,
+      });
+      if (result.error) throw new Error("The current public content generation is unavailable.");
+      const currentGeneration = contentGeneration(result.data?.generation);
+      const publishedGeneration = result.data?.publicationGeneration === null ? 0n : contentGeneration(result.data?.publicationGeneration);
+      if (currentGeneration < minimumGeneration || publishedGeneration > currentGeneration) throw new Error("The public content generation moved backwards.");
+      publication = null;
+      minimumGeneration = currentGeneration;
+      if (publishedGeneration) onPublication?.(publishedGeneration);
+      return;
+    }
     const currentGeneration = current ? contentGeneration(current.generation) : 0n;
-    if (currentGeneration < minimumGeneration) throw new Error("Public content publication moved backwards.");
-    publication = current;
-    minimumGeneration = currentGeneration;
-    if (publication) onPublication?.(minimumGeneration);
+    if (currentGeneration < storageGeneration) throw new Error("Public content publication moved backwards.");
+    storageGeneration = currentGeneration;
+    publication = currentGeneration >= minimumGeneration ? current : null;
+    if (currentGeneration > minimumGeneration) minimumGeneration = currentGeneration;
+    if (current) onPublication?.(currentGeneration);
   };
+  if (shared) await refreshPublication();
   let generation = null;
   const load = async () => {
+    const client = readClient();
     const source = shared ? {
       rpc: async (name, body) => {
         if (name !== "roo_fetch_shadow_documents_targeted") return client.rpc(name, body);
@@ -163,6 +183,11 @@ export const loadSupabasePublicContent = async ({ resource, query, params, fresh
     .then(async (data) => {
       if (shared) {
         await refreshPublication();
+        if (sourceAuthority && (generation || 0n) < minimumGeneration) {
+          generation = null;
+          data = await load();
+          await refreshPublication();
+        }
         if ((generation || 0n) < minimumGeneration) throw new Error("The public content read was replaced by a newer publication.");
       }
       if (supabaseContentCache.get(key)?.pending !== pending) {
@@ -204,7 +229,7 @@ export const loadSupabasePublicContent = async ({ resource, query, params, fresh
         });
         return data;
       }
-      if (fallbackAllowed && process.env.NODE_ENV === "production") {
+      if (fallbackAllowed && minimumGeneration === 0n && process.env.NODE_ENV === "production") {
         try {
           const { default: snapshot } = await import("../../generated/public-content.json", { with: { type: "json" } });
           if (snapshot.version !== 1 || !snapshot.resources || !Object.hasOwn(snapshot.resources, resource)) throw new Error("The build content snapshot is invalid.");
@@ -223,6 +248,13 @@ export const loadSupabasePublicContent = async ({ resource, query, params, fresh
       }
       if (supabaseContentCache.get(key)?.pending === pending) supabaseContentCache.delete(key);
       throw error;
+    })
+    .finally(() => {
+      const current = supabaseContentCache.get(key);
+      if (current?.pending === pending) {
+        if (current.hasData) supabaseContentCache.set(key, { ...current, pending: null });
+        else supabaseContentCache.delete(key);
+      }
     });
 
   supabaseContentCache.set(key, { ...cached, pending });
