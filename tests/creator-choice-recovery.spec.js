@@ -7,7 +7,9 @@ const input = (page, kind) => page.locator(`#payment-${kind}-code`);
 const apply = (page, kind) => input(page, kind).locator("..").getByRole("button", { name: "Apply", exact: true });
 const ready = async (page, flow, code = "friend") => {
   await page.goto(code ? `/?ref=${code}` : "/packages");
+  if (code) await expect.poll(() => page.evaluate(() => sessionStorage.getItem("referral_session"))).toBe(code);
   await flow.review();
+  if (code) await expect(page.getByRole("button", { name: `Remove referral code ${code}`, exact: true })).toBeVisible();
   await flow.payment();
   await expect(input(page, "referral")).toBeEnabled();
 };

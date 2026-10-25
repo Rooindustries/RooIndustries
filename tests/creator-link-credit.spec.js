@@ -14,6 +14,12 @@ test.use({
 const storedCode = page => page.evaluate(() => sessionStorage.getItem("referral_session"));
 const appliedCode = (page, code) => page.getByRole("button", { name: `Remove referral code ${code}`, exact: true });
 const packagesLink = page => page.getByRole("link", { name: "PC optimization packages", exact: true });
+const reviewWithCreator = async (page, flow, code = "friend") => {
+  await page.goto(`/?ref=${encodeURIComponent(code)}`);
+  await expect.poll(() => storedCode(page)).toBe(code);
+  await flow.review();
+  await expect(appliedCode(page, code)).toBeVisible();
+};
 const resumeReview = async page => {
   const heading = page.getByRole("heading", { name: "Review your booking", exact: true });
   const button = page.getByRole("button", { name: "Review before payment", exact: true });
@@ -32,8 +38,7 @@ test.beforeEach(async ({ context, flow }) => {
 });
 
 test("a referral removed at review stays removed on payment links", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await appliedCode(page, "friend").click();
   await flow.payment();
   await page.goto("/payment?ref=friend");
@@ -42,8 +47,7 @@ test("a referral removed at review stays removed on payment links", async ({ pag
 });
 
 test("adding a coupon does not restore a removed creator", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await page.goto("/payment?ref=friend");
   await page.locator("#payment-referral-code").fill("");
@@ -60,8 +64,7 @@ test("adding a coupon does not restore a removed creator", async ({ page, flow }
 });
 
 test("removing a payment coupon survives reload and booking review", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
   await page.locator("#payment-coupon-code").fill("save20");
@@ -80,8 +83,7 @@ test("removing a payment coupon survives reload and booking review", async ({ pa
 });
 
 test("an applied creator that becomes invalid is cleared on retry", async ({ page, context, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await page.reload();
   await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
@@ -95,8 +97,7 @@ test("an applied creator that becomes invalid is cleared on retry", async ({ pag
 });
 
 test("an invalidated selected creator does not hand credit to a later link", async ({ page, context, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
   await context.route("**/api/ref/validateReferral?code=friend", route => route.fulfill({
@@ -112,8 +113,7 @@ test("an invalidated selected creator does not hand credit to a later link", asy
 });
 
 test("removing the selected creator does not apply an earlier incidental link", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await page.goto("/payment?ref=second");
   await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
@@ -127,8 +127,7 @@ test("removing the selected creator does not apply an earlier incidental link", 
 });
 
 test("a restored incompatible coupon keeps its rejection and the applied creator", async ({ page, context, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
   await context.route("**/api/ref/validateCoupon?*", async route => {
@@ -152,8 +151,7 @@ test("a restored incompatible coupon keeps its rejection and the applied creator
 });
 
 test("an unavailable coupon lookup preserves the applied coupon for retry", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await page.locator("#payment-coupon-code").fill("save20");
   await page.locator("#payment-coupon-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
@@ -173,8 +171,7 @@ test("an unavailable coupon lookup preserves the applied coupon for retry", asyn
 });
 
 test("history restoration keeps the restored booking's codes during an outage", async ({ page, context, flow }, testInfo) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await page.locator("#payment-coupon-code").fill("save20");
   await page.locator("#payment-coupon-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
@@ -215,8 +212,7 @@ test("history restoration keeps the restored booking's codes during an outage", 
 });
 
 test("a checkout whose session cannot be stored stays available for recovery", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
   await page.evaluate(() => {
@@ -312,8 +308,7 @@ test("latest guide link wins before a code is applied", async ({ page, flow }) =
 });
 
 test("a later guide link keeps the code applied to this booking", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await expect(appliedCode(page, "friend")).toBeVisible();
   await page.goto("/BIOSGuide?ref=second");
   await packagesLink(page).click();
@@ -325,8 +320,7 @@ test("a later guide link keeps the code applied to this booking", async ({ page,
 });
 
 test("a later payment link cannot replace an applied booking code", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await expect(appliedCode(page, "friend")).toBeVisible();
   await flow.payment();
   await page.goto("/payment?ref=second");
@@ -336,8 +330,7 @@ test("a later payment link cannot replace an applied booking code", async ({ pag
 });
 
 test("deliberately replacing a payment code survives reload", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
   await page.locator("#payment-referral-code").fill("second");
@@ -348,8 +341,7 @@ test("deliberately replacing a payment code survives reload", async ({ page, flo
 });
 
 test("a deliberate review replacement beats later creator links", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.codeInput("second");
   await expect(appliedCode(page, "second")).toBeVisible();
   await page.goto("/booking?ref=friend");
@@ -413,8 +405,7 @@ for (const query of ["", "?ref=", "?ref=%20%20"]) {
 }
 
 test("a removed payment code stays removed at review and after reload", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
   await page.locator("#payment-referral-code").fill("");
@@ -430,8 +421,7 @@ test("a removed payment code stays removed at review and after reload", async ({
 });
 
 test("Back and Forward keep a deliberate replacement over an older payment entry", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await page.goto("/BIOSGuide?ref=friend");
   await page.goto("/payment");
@@ -462,8 +452,7 @@ test("guide packages link fits phones and desktop", async ({ page }, testInfo) =
 });
 
 test("an invalid later creator link does not evict an applied code", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await expect(appliedCode(page, "friend")).toBeVisible();
   await flow.payment();
   await page.goto("/payment?ref=unknown");
@@ -471,8 +460,7 @@ test("an invalid later creator link does not evict an applied code", async ({ pa
 });
 
 test("an invalid manual replacement cannot apply the incidental creator link", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await page.goto("/payment?ref=second");
   await page.locator("#payment-referral-code").fill("unknown");
@@ -484,8 +472,7 @@ test("an invalid manual replacement cannot apply the incidental creator link", a
 });
 
 test("unavailable validation retains the chosen code for retry", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await expect(appliedCode(page, "friend")).toBeVisible();
   await flow.payment();
   flow.state.failures["/api/ref/validateReferral"] = 503;
@@ -500,8 +487,7 @@ test("unavailable validation retains the chosen code for retry", async ({ page, 
 });
 
 test("a creator deliberately entered in the coupon field replaces the applied creator", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await page.locator("#payment-coupon-code").fill("second");
   await page.locator("#payment-coupon-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
@@ -523,8 +509,7 @@ test("applying only a coupon leaves the next creator link available", async ({ p
 });
 
 test("an older payment view does not change a different visitor's booking draft", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await page.evaluate(() => {
     const draft = JSON.parse(sessionStorage.getItem("booking_draft"));
@@ -539,8 +524,7 @@ test("an older payment view does not change a different visitor's booking draft"
 });
 
 test("an older payment view does not change a later slot's draft for the same visitor", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
   await page.evaluate(() => {
@@ -557,8 +541,7 @@ test("an older payment view does not change a later slot's draft for the same vi
 });
 
 test("a legacy draft still saves a replacement for its current held slot", async ({ page, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
   await page.evaluate(() => {
@@ -575,8 +558,7 @@ test("a legacy draft still saves a replacement for its current held slot", async
 });
 
 test("a delayed code response cannot reopen or rewrite a closed checkout", async ({ page, context, flow }) => {
-  await page.goto("/?ref=friend");
-  await flow.review();
+  await reviewWithCreator(page, flow);
   await flow.payment();
   await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
   let release;
