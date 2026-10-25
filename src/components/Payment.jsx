@@ -292,6 +292,20 @@ export default function Payment({ hideFooter = false }) {
     // sessionStorage is intentionally a reload fallback, not a reactive source.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, location.search, navState.bookingData]);
+  const unsavedPaymentSessionsRef = useRef(new Map());
+  const bookingFingerprint = JSON.stringify({
+    packageTitle: bookingData.packageTitle || "",
+    originalOrderId: bookingData.originalOrderId || "",
+    startTimeUTC: bookingData.startTimeUTC || "",
+    email: bookingData.email || "",
+  });
+  const readCurrentPaymentSession = () => {
+    const stored = readStoredPaymentSession();
+    if (stored && paymentSessionMatchesCheckout(stored.fingerprint, bookingFingerprint)) return stored;
+    return [...unsavedPaymentSessionsRef.current.values()].find(
+      session => paymentSessionMatchesCheckout(session.fingerprint, bookingFingerprint)
+    ) || null;
+  };
   useEffect(() => {
     if (navState.bookingData) {
       writeStoredCheckout(bookingData);
@@ -356,7 +370,7 @@ export default function Payment({ hideFooter = false }) {
   const dodoRedirect = new URLSearchParams(location.search);
   const dodoReturnHandled = useRef("");
   const storedDodoReturn = dodoRedirect.has("dodo_return") || dodoRedirect.has("dodo_cancel")
-    ? readStoredPaymentSession() : null;
+    ? readCurrentPaymentSession() : null;
   const processingDodoReturn = (dodoRedirect.has("dodo_return") || dodoRedirect.has("dodo_cancel")) &&
     ((storedDodoReturn?.provider === "dodo" && !!storedDodoReturn.paymentAccessToken) || !!dodoReturnHandled.current);
   const hasSlotHold =
@@ -570,7 +584,6 @@ export default function Payment({ hideFooter = false }) {
   useBookingDialogPending(!hydrated || !providersSettled || (Boolean(packageTitle) && !quoteSettled));
   const [showInternalPayments, setShowInternalPayments] = useState(false);
   const [paymentSession, setPaymentSession] = useState(null);
-  const unsavedPaymentSessionsRef = useRef(new Map());
   const [paymentStatusBusy, setPaymentStatusBusy] = useState(false);
   const [cancellingPayment, setCancellingPayment] = useState(false);
   const sessionStartRef = useRef(null);
@@ -650,13 +663,6 @@ export default function Payment({ hideFooter = false }) {
   );
 
   const paymentMountedRef = useRef(true);
-  const readCurrentPaymentSession = () => {
-    const stored = readStoredPaymentSession();
-    if (stored && paymentSessionMatchesCheckout(stored.fingerprint, checkoutFingerprint)) return stored;
-    return [...unsavedPaymentSessionsRef.current.values()].find(
-      session => paymentSessionMatchesCheckout(session.fingerprint, checkoutFingerprint)
-    ) || null;
-  };
   const paymentViewRef = useRef(null);
   if (paymentViewRef.current?.key !== location.key ||
       paymentViewRef.current?.fingerprint !== checkoutFingerprint) {
@@ -1054,9 +1060,6 @@ export default function Payment({ hideFooter = false }) {
       return;
     }
 
-    if (readStoredPaymentSession()) {
-      clearStoredPaymentSession();
-    }
     setPaymentSession(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkoutFingerprint, couponInput, hydrated, packageTitle, referralInput]);
@@ -1147,7 +1150,7 @@ export default function Payment({ hideFooter = false }) {
   };
 
   const handleChangePaymentMethod = async () => {
-    const activeSession = readStoredPaymentSession() || paymentSession;
+    const activeSession = readCurrentPaymentSession();
     const paymentAccessToken = String(activeSession?.paymentAccessToken || "").trim();
     if (!paymentAccessToken || cancellingPayment) return;
     const operation = createPaymentOperation(paymentAccessToken);
@@ -1608,7 +1611,7 @@ export default function Payment({ hideFooter = false }) {
 
   useEffect(() => {
     const query = new URLSearchParams(location.search);
-    const session = readStoredPaymentSession();
+    const session = readCurrentPaymentSession();
     if (!hydrated || preApplyingCodes || pendingCodeLocationRef.current || session?.provider !== "dodo" || !session.paymentAccessToken ||
         paymentSession?.paymentAccessToken !== session.paymentAccessToken ||
         !paymentSessionMatchesCheckout(session.fingerprint, checkoutFingerprint) ||
