@@ -4,6 +4,7 @@ import { assertPublicContentShape } from "./publicContentShape.js";
 import { enrichSupabaseContentAssets } from "../supabase/assets.js";
 import { cmsError } from "../cms/errors.js";
 import { createHash } from "node:crypto";
+import { stableCmsJson } from "../../lib/globalCmsContract.js";
 
 const bucket = "public-content-state";
 const storedPublications = new Map();
@@ -92,7 +93,7 @@ export const persistPublicContentPublication = async (client, requiredType) => {
     resources[resource] = await enrichSupabaseContentAssets({ data: projected, client: projectionClient });
   }
   const publication = { version: 1, generation: captured.generation, resources };
-  const serialized = JSON.stringify(publication);
+  const serialized = stableCmsJson(publication);
   const digest = sha256(serialized);
   const name = `${captured.generation.padStart(20, "0")}-${digest}.json`;
   const objectPath = `snapshots/${name}`;
@@ -103,7 +104,7 @@ export const persistPublicContentPublication = async (client, requiredType) => {
       binding.path !== `snapshots/${binding.generation.padStart(20, "0")}-${binding.sha256}.json`) throw new Error("Public content database binding is invalid.");
   const boundBytes = requireData(await client.storage.from(bucket).download(binding.path));
   if (sha256(await boundBytes.text()) !== binding.sha256) throw new Error("Public content database binding hash is invalid.");
-  await uploadImmutable(client, `heads/${binding.path.slice("snapshots/".length)}`, JSON.stringify(binding));
+  await uploadImmutable(client, `heads/${binding.path.slice("snapshots/".length)}`, stableCmsJson(binding));
   const current = await readPublicContentPublication(client);
   if (!current || contentGeneration(current.generation) < contentGeneration(captured.generation)) throw cmsError("The public content publication has not become readable.", 503, "CMS_PUBLICATION_UNAVAILABLE");
   return current;

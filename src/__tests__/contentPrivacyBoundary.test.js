@@ -123,7 +123,7 @@ describe("public content privacy boundary", () => {
     });
   });
 
-  test("caches a complete Supabase content rollout at the edge", async () => {
+  test("keeps Supabase content out of stale browser and edge caches", async () => {
     process.env.DATA_PRIMARY_BACKEND = "sanity";
     process.env.SUPABASE_CONTENT_CANARY_PERCENT = "100";
     const route = require("../../app/api/content/[resource]/route");

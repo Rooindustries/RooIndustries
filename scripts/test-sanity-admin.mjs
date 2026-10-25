@@ -656,6 +656,7 @@ try {
     let readReached;
     let releaseRead;
     let corruptDownload = false;
+    let reverseBinding = false;
     globalThis.fetch = async (input, init) => {
       const url = new URL(typeof input === 'string' ? input : input.url || input);
       if (failReads && url.pathname.endsWith('/roo_fetch_public_documents_targeted')) return Response.json({ code: 'FIXTURE_CONTENT_OUTAGE' }, { status: 503 });
@@ -679,6 +680,11 @@ try {
         const response = await originalFetch(input, init);
         if (response.ok) return Response.json({ message: 'Synthetic lost database binding acknowledgement' }, { status: 503 });
         return response;
+      }
+      if (reverseBinding && url.pathname.endsWith('/roo_bind_public_content_publication')) {
+        const response = await originalFetch(input, init);
+        const payload = await response.json();
+        return Response.json(Object.fromEntries(Object.entries(payload).reverse()), { status: response.status });
       }
       if (corruptDownload && (init?.method || 'GET') === 'GET' && url.pathname.includes('/public-content-state/snapshots/')) return Response.json({ version: 1, resources: {} });
       return originalFetch(input, init);
@@ -743,6 +749,11 @@ try {
       assert.equal(checked.ok, true);
       assert.equal(checked.data.deleted, true);
       assert.equal(Number((await fixture.sql`select count(*) n from migration.cms_publish_commands`)[0].n), beforeReceipts);
+      reverseBinding = true;
+      const reordered = await call('publish/status', command);
+      assert.equal(reordered.ok, true, JSON.stringify(reordered));
+      reverseBinding = false;
+      observed('native reordered binding response', { sameSemanticIdentityAccepted: true, repeatedMutations: 0 });
       const restored = await fixture.client.rpc('roo_apply_document_mutations', { p_mutations: [{ operation: 'create', document: { ...tool('Native restored publication'), _id: firstId, _type: 'tool' } }] });
       assert.equal(restored.error, null);
       const detailRestored = await detail(firstId);
