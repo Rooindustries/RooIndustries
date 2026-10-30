@@ -50,7 +50,7 @@ try {
   const authFixture = await seedContentAdmin(fixture);
   const sessionRoute = await import("../app/api/admin/content/session/route.js");
   const modules = {};
-  for (const name of ['documents','documents/[id]','documents/[id]/revisions','documents/[id]/revisions/[revisionId]','publish','assets/upload','assets/finalize']) modules[name] = await import(`../app/api/admin/content/${name}/route.js`);
+  for (const name of ['documents','documents/[id]','documents/[id]/revisions','documents/[id]/revisions/[revisionId]','publish','publish/status','assets/upload','assets/finalize']) modules[name] = await import(`../app/api/admin/content/${name}/route.js`);
   const tools = await import('../app/api/tools/[id]/download/route.js');
   const publicRoute = await import('../app/api/content/[resource]/route.js');
   const call = async (name, body, params = {}, key = 'synthetic-admin-key', address = '127.0.0.1') => {
@@ -63,10 +63,10 @@ try {
     observed(name, { status: response.status, result: sanitize(result) });
     return { status: response.status, ...result };
   };
-  const publish = async body => {
+  const publish = async (body, { revalidate = true } = {}) => {
     const revalidated = [];
     const result = await globalThis.rooRevalidations.run(revalidated, () => call('publish', body));
-    assert.deepEqual(revalidated, [['/', 'layout']], 'Every publish revalidates the root layout');
+    assert.deepEqual(revalidated, result.ok && revalidate ? [['/', 'layout']] : [], 'Only a confirmed current publish revalidates the root layout');
     return result;
   };
   const create = (type, document, createIntentId = crypto.randomUUID()) => publish({ operation: 'create', type, document, createIntentId });
@@ -255,8 +255,18 @@ try {
     const history = await call('documents/[id]/revisions', undefined, { id }); assert.equal(history.data.revisions.length, 1);
     const old = await call('documents/[id]/revisions/[revisionId]', undefined, { id, revisionId: history.data.revisions[0].revisionId }); assert.equal(old.data.document.title, 'Initial synthetic'); assert.deepEqual(old.data.assets, {});
     assertError(await call('documents/[id]/revisions/[revisionId]', undefined, { id: 'other', revisionId: history.data.revisions[0].revisionId }), 404, 'CMS_NOT_FOUND');
-    const deleted = await publish({ operation: 'delete', type: 'benchmark', documentId: id, expectedRevision: changed.data.revision }); assert.equal(deleted.ok, true);
-    assert.equal((await publish(body)).data.replayed, true, 'Lost original create response still replays after deletion');
+    const deleteCommand = { operation: 'delete', type: 'benchmark', documentId: id, expectedRevision: changed.data.revision };
+    const deleted = await publish(deleteCommand); assert.equal(deleted.ok, true); assert.equal(deleted.data.deleted, true);
+    const beforeStatus = (await fixture.sql`select count(*)::int n from migration.cms_publish_commands`)[0].n;
+    const statusInvalidations = [];
+    process.env.CMS_WRITES_PAUSED = '1';
+    try {
+      const status = await globalThis.rooRevalidations.run(statusInvalidations, () => call('publish/status', deleteCommand));
+      assert.deepEqual(status.data, { committed: true, deleted: true, type: 'benchmark', documentId: id, revision: changed.data.revision });
+      assert.deepEqual(statusInvalidations, [['/', 'layout']]);
+      assert.equal((await fixture.sql`select count(*)::int n from migration.cms_publish_commands`)[0].n, beforeStatus);
+    } finally { process.env.CMS_WRITES_PAUSED = '0'; }
+    assert.equal((await publish(body, { revalidate: false })).data.replayed, true, 'Lost original create response still replays after deletion without invalidating pages');
     assert.equal((await fixture.sql`select count(*)::int n from migration.cms_publish_commands where status='committed' and result->'document_ids' ? ${id}`)[0].n, 3);
   });
   await scenario('singletons-references-booking-identity', async () => {
@@ -629,6 +639,287 @@ try {
       observed('public-content-join-limit public API', { status: response.status, result });
     } finally {
       fixture.setRequestHook(null);
+    }
+  });
+  await scenario('publication-read-recovery', async () => {
+    const { clearSupabasePublicContentCache } = await import('../src/server/content/publicContent.js');
+    const priorNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    const originalFetch = globalThis.fetch;
+    let failReads = false;
+    let failHeadsAfter = Infinity;
+    let headReads = 0;
+    let storageReadFailure = '';
+    let heldSource;
+    let sourceReached;
+    let releaseSource;
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input.url || input);
+      if (heldSource && url.pathname.endsWith('/roo_fetch_public_documents_targeted')) {
+        const wait = heldSource;
+        heldSource = null;
+        const response = await originalFetch(input, init);
+        const bytes = await response.text();
+        sourceReached();
+        await wait;
+        return new Response(bytes, { status: response.status, headers: response.headers });
+      }
+      if (storageReadFailure && (url.pathname === '/storage/v1/object/list/public-content-state' || (init?.method || 'GET') === 'GET' && url.pathname.includes('/public-content-state/'))) {
+        if (storageReadFailure === 'timeout') {
+          const signal = init?.signal || input.signal;
+          await new Promise((resolve, reject) => {
+            const aborted = () => reject(Object.assign(new Error('Synthetic storage read timeout'), { name: 'AbortError' }));
+            if (signal?.aborted) aborted();
+            else signal?.addEventListener('abort', aborted, { once: true });
+          });
+        }
+        return storageReadFailure === 'malformed' ? Response.json([{ name: 'invalid-publication-identity' }]) : Response.json({ error: 'Synthetic storage read outage', statusCode: '503' }, { status: 503 });
+      }
+      if (url.pathname === '/storage/v1/object/list/public-content-state' && ++headReads > failHeadsAfter) return Response.json({ error: 'Synthetic head read failure', statusCode: '503' }, { status: 503 });
+      if (failReads && url.pathname.endsWith('/roo_fetch_public_documents_targeted')) return Response.json({ code: 'FIXTURE_CONTENT_OUTAGE' }, { status: 503 });
+      return originalFetch(input, init);
+    };
+    const read = async () => {
+      const response = await publicRoute.GET(new Request(`${fixture.origin}/api/content/tools`), { params: Promise.resolve({ resource: 'tools' }) });
+      return { status: response.status, payload: await response.json() };
+    };
+    try {
+      const retained = await create('tool', { title: 'Native prior scenario neighbor', category: 'Benchmark', shortDescription: 'Synthetic retained prior content.', downloadMode: 'external', downloadUrl: 'https://fixture.invalid/retained' });
+      assert.equal(retained.ok, true, JSON.stringify(retained));
+      const created = await create('tool', { title: 'Native recovered publication read', category: 'Benchmark', shortDescription: 'Synthetic source recovery.', downloadMode: 'external', downloadUrl: 'https://fixture.invalid/tool' });
+      assert.equal(created.ok, true, JSON.stringify(created));
+      const initial = await read();
+      assert.equal(initial.status, 200);
+      const baselineIds = initial.payload.data.filter(row => row._id !== created.data.documentId).map(row => row._id).sort();
+      clearSupabasePublicContentCache({ preserveStale: true });
+      failReads = true;
+      headReads = 0;
+      failHeadsAfter = 1;
+      const failed = await read();
+      assert.equal(failed.status, 503, JSON.stringify(failed));
+      failReads = false;
+      failHeadsAfter = Infinity;
+      const recovered = await read();
+      observed('publication reader recovery after dual outage', { failed, recovered, headReads });
+      assert.equal(recovered.status, 200, 'A repaired source and head must recover without a fresh flag or process restart');
+      assert.ok(recovered.payload.data.some(row => row._id === created.data.documentId));
+      const neighbor = await create('tool', { title: 'Native storage outage neighbor', category: 'Benchmark', shortDescription: 'Synthetic source neighbor.', downloadMode: 'external', downloadUrl: 'https://fixture.invalid/neighbor' });
+      assert.equal(neighbor.ok, true, JSON.stringify(neighbor));
+      const removed = await publish({ operation: 'delete', type: 'tool', documentId: created.data.documentId, expectedRevision: created.data.revision });
+      assert.equal(removed.ok, true, JSON.stringify(removed));
+      const beforeMutations = Number((await fixture.sql`select count(*) n from migration.cms_publish_commands`)[0].n);
+      const storageOutcomes = [];
+      for (const mode of ['5xx', 'timeout', 'malformed']) {
+        storageReadFailure = mode;
+        for (const cold of [false, true]) {
+          if (cold) clearSupabasePublicContentCache();
+          const result = await read();
+          storageOutcomes.push({ mode, cold, ...result });
+        }
+      }
+      storageReadFailure = '';
+      observed('storage outage current database authority', storageOutcomes);
+      for (const result of storageOutcomes) {
+        assert.equal(result.status, 200, `Current source remains readable during ${result.mode}, cold=${result.cold}`);
+        assert.equal(result.payload.data.some(row => row._id === created.data.documentId), false);
+        assert.equal(result.payload.data.some(row => row._id === neighbor.data.documentId), true);
+        for (const id of baselineIds) assert.ok(result.payload.data.some(row => row._id === id), 'Every existing public neighbor remains present');
+      }
+      assert.equal(Number((await fixture.sql`select count(*) n from migration.cms_publish_commands`)[0].n), beforeMutations);
+      clearSupabasePublicContentCache();
+      const reached = new Promise(resolve => { sourceReached = resolve; });
+      heldSource = new Promise(resolve => { releaseSource = resolve; });
+      const earlier = read();
+      await reached;
+      assert.equal((await publish({ operation: 'delete', type: 'tool', documentId: neighbor.data.documentId, expectedRevision: neighbor.data.revision })).ok, true);
+      storageReadFailure = '5xx';
+      releaseSource();
+      const raced = await earlier;
+      observed('publication read overtaken by confirmed deletion during storage outage', raced);
+      assert.equal(raced.status, 200);
+      assert.deepEqual(raced.payload.data.map(row => row._id).sort(), baselineIds);
+    } finally {
+      releaseSource?.();
+      globalThis.fetch = originalFetch;
+      clearSupabasePublicContentCache();
+      if (priorNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = priorNodeEnv;
+    }
+  });
+  await scenario('publications-preserve-confirmed-deletions', async () => {
+    const { persistPublicContentPublication, readPublicContentPublication } = await import('../src/server/content/publicationStore.js');
+    const { clearSupabasePublicContentCache } = await import('../src/server/content/publicContent.js');
+    const priorNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    const originalFetch = globalThis.fetch;
+    let failReads = false;
+    let failUpload = false;
+    let holdUpload;
+    let held;
+    let release;
+    let holdRead;
+    let readReached;
+    let releaseRead;
+    let corruptDownload = false;
+    let reverseBinding = false;
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input.url || input);
+      if (failReads && url.pathname.endsWith('/roo_fetch_public_documents_targeted')) return Response.json({ code: 'FIXTURE_CONTENT_OUTAGE' }, { status: 503 });
+      if (holdRead && url.pathname.endsWith('/roo_fetch_public_documents_targeted')) {
+        const wait = holdRead; holdRead = null;
+        const response = await originalFetch(input, init);
+        const text = await response.text();
+        readReached(); await wait;
+        return new Response(text, { status: response.status, headers: response.headers });
+      }
+      if ((init?.method || 'GET') === 'POST' && url.pathname.startsWith('/storage/v1/object/public-content-state/')) {
+        if (failUpload === true) return Response.json({ error: 'Synthetic storage failure', statusCode: '503' }, { status: 503 });
+        if (holdUpload) { const wait = holdUpload; holdUpload = null; held(); await wait; }
+        if (failUpload === 'ack' && url.pathname.includes('/heads/') || failUpload === 'snapshot-ack' && url.pathname.includes('/snapshots/')) {
+          const response = await originalFetch(input, init);
+          if (response.ok) return Response.json({ error: 'Synthetic lost acknowledgement', statusCode: '503' }, { status: 503 });
+          return response;
+        }
+      }
+      if (failUpload === 'binding-ack' && url.pathname.endsWith('/roo_bind_public_content_publication')) {
+        const response = await originalFetch(input, init);
+        if (response.ok) return Response.json({ message: 'Synthetic lost database binding acknowledgement' }, { status: 503 });
+        return response;
+      }
+      if (reverseBinding && url.pathname.endsWith('/roo_bind_public_content_publication')) {
+        const response = await originalFetch(input, init);
+        const payload = await response.json();
+        return Response.json(Object.fromEntries(Object.entries(payload).reverse()), { status: response.status });
+      }
+      if (corruptDownload && (init?.method || 'GET') === 'GET' && url.pathname.includes('/public-content-state/snapshots/')) return Response.json({ version: 1, resources: {} });
+      return originalFetch(input, init);
+    };
+    const read = async () => {
+      const response = await publicRoute.GET(new Request(`${fixture.origin}/api/content/tools`), { params: Promise.resolve({ resource: 'tools' }) });
+      const payload = await response.json();
+      assert.equal(response.status, 200, JSON.stringify(payload));
+      assert.equal(payload.ok, true);
+      return payload.data;
+    };
+    const tool = title => ({ title, category: 'Benchmark', shortDescription: 'Synthetic publication consistency tool.', downloadMode: 'external', downloadUrl: 'https://fixture.invalid/tool' });
+    try {
+      const first = await create('tool', tool('Native publication first'));
+      const neighbor = await create('tool', tool('Native publication neighbor'));
+      assert.equal(first.ok, true, JSON.stringify(first));
+      assert.equal(neighbor.ok, true, JSON.stringify(neighbor));
+      const firstId = first.data.documentId;
+      const neighborId = neighbor.data.documentId;
+      assert.ok((await read()).some(row => row._id === firstId));
+      const preDelete = await readPublicContentPublication(fixture.client);
+      const pendingUpload = new Promise(resolve => { release = resolve; });
+      const uploadReached = new Promise(resolve => { held = resolve; });
+      holdUpload = pendingUpload;
+      const oldExport = persistPublicContentPublication(fixture.client);
+      await uploadReached;
+      const oldReadReleased = new Promise(resolve => { releaseRead = resolve; });
+      const oldReadReached = new Promise(resolve => { readReached = resolve; });
+      holdRead = oldReadReleased;
+      clearSupabasePublicContentCache();
+      const oldRead = read();
+      await oldReadReached;
+      const command = { operation: 'delete', type: 'tool', documentId: firstId, expectedRevision: first.data.revision };
+      const deleted = await publish(command);
+      assert.equal(deleted.ok, true, JSON.stringify(deleted));
+      const confirmed = await readPublicContentPublication(fixture.client);
+      assert.ok(BigInt(confirmed.generation) > BigInt(preDelete.generation));
+      releaseRead();
+      assert.equal((await oldRead).some(row => row._id === firstId), false, 'An older in-flight read cannot undo a confirmed deletion');
+      failReads = true;
+      for (const cold of [false, true]) {
+        if (cold) clearSupabasePublicContentCache();
+        const rows = await read();
+        assert.equal(rows.some(row => row._id === firstId), false);
+        assert.equal(rows.some(row => row._id === neighborId), true);
+        observed(`native first failed read ${cold ? 'without process cache' : 'with warm cache'}`, { generation: confirmed.generation, toolIds: rows.map(row => row._id) });
+      }
+      release();
+      await oldExport;
+      assert.equal((await readPublicContentPublication(fixture.client)).generation, confirmed.generation, 'Late older export cannot replace the confirmed deletion');
+      const binding = await fixture.sql`select generation::text,sha256,object_path from cms.public_content_publications order by generation desc limit 1`;
+      const object = await fixture.client.storage.from('public-content-state').download(binding[0].object_path);
+      assert.equal(object.error, null);
+      assert.equal(crypto.createHash('sha256').update(await object.data.text()).digest('hex'), binding[0].sha256);
+      observed('native immutable publication identity', { ...binding[0], downloadedHashVerified: true, olderSourceResponseRejected: true });
+      const conflictingHash = '0'.repeat(64);
+      const conflicting = await fixture.client.rpc('roo_bind_public_content_publication', { p_generation: confirmed.generation, p_sha256: conflictingHash, p_object_path: `snapshots/${confirmed.generation.padStart(20,'0')}-${conflictingHash}.json` });
+      assert.equal(conflicting.error?.code, '40001');
+      failReads = false;
+      const beforeReceipts = Number((await fixture.sql`select count(*) n from migration.cms_publish_commands`)[0].n);
+      const checked = await call('publish/status', command);
+      assert.equal(checked.ok, true);
+      assert.equal(checked.data.deleted, true);
+      assert.equal(Number((await fixture.sql`select count(*) n from migration.cms_publish_commands`)[0].n), beforeReceipts);
+      reverseBinding = true;
+      const reordered = await call('publish/status', command);
+      assert.equal(reordered.ok, true, JSON.stringify(reordered));
+      reverseBinding = false;
+      observed('native reordered binding response', { sameSemanticIdentityAccepted: true, repeatedMutations: 0 });
+      const restored = await fixture.client.rpc('roo_apply_document_mutations', { p_mutations: [{ operation: 'create', document: { ...tool('Native restored publication'), _id: firstId, _type: 'tool' } }] });
+      assert.equal(restored.error, null);
+      const detailRestored = await detail(firstId);
+      const restore = await publish({ operation: 'replace', type: 'tool', documentId: firstId, expectedRevision: detailRestored.data.revision, document: detailRestored.data.document });
+      assert.equal(restore.ok, true, JSON.stringify(restore));
+      const restoredGeneration = (await readPublicContentPublication(fixture.client)).generation;
+      const stale = await publish(command, { revalidate: false });
+      assert.equal(stale.ok, true);
+      assert.equal(stale.data.replayed, true);
+      assert.equal((await readPublicContentPublication(fixture.client)).generation, restoredGeneration);
+      failReads = true;
+      clearSupabasePublicContentCache();
+      assert.equal((await read()).find(row => row._id === firstId)?.title, 'Native restored publication');
+      failReads = false;
+      const secondCommand = { operation: 'delete', type: 'tool', documentId: neighborId, expectedRevision: neighbor.data.revision };
+      failUpload = true;
+      assertError(await publish(secondCommand), 503, 'CMS_PUBLICATION_UNAVAILABLE');
+      assert.equal((await fixture.sql`select count(*)::int n from migration.source_documents where legacy_sanity_id=${neighborId} and not tombstoned`)[0].n, 0);
+      failUpload = false;
+      const mutationsBeforeRetry = Number((await fixture.sql`select count(*) n from migration.cms_publish_commands`)[0].n);
+      const recovered = await call('publish/status', secondCommand);
+      assert.equal(recovered.ok, true, JSON.stringify(recovered));
+      assert.equal(recovered.data.deleted, true);
+      assert.equal(Number((await fixture.sql`select count(*) n from migration.cms_publish_commands`)[0].n), mutationsBeforeRetry);
+      failReads = true;
+      clearSupabasePublicContentCache();
+      assert.equal((await read()).some(row => row._id === neighborId), false);
+      failReads = false;
+      for (const mode of ['ack', 'snapshot-ack', 'binding-ack', 'hash']) {
+        const extra = await create('tool', tool(`Native ${mode} recovery`));
+        assert.equal(extra.ok, true, JSON.stringify(extra));
+        const command = { operation: 'delete', type: 'tool', documentId: extra.data.documentId, expectedRevision: extra.data.revision };
+        failUpload = mode === 'hash' ? false : mode;
+        corruptDownload = mode === 'hash';
+        assertError(await publish(command), 503, mode === 'hash' ? 'CMS_PUBLICATION_INVALID' : 'CMS_PUBLICATION_UNAVAILABLE');
+        failUpload = false; corruptDownload = false;
+        const beforeRetry = Number((await fixture.sql`select count(*) n from migration.cms_publish_commands`)[0].n);
+        let checked;
+        if (mode === 'ack') {
+          const { executeGlobalCmsCommand } = await import('../src/server/cms/publishCommand.js');
+          const replay = await executeGlobalCmsCommand({ body: command, supabaseClient: fixture.client });
+          assert.equal(replay.replayed, true);
+          checked = { ok: true, data: replay };
+        } else checked = await call('publish/status', command);
+        assert.equal(checked.ok, true, JSON.stringify(checked));
+        assert.equal(checked.data.deleted, true);
+        assert.equal(Number((await fixture.sql`select count(*) n from migration.cms_publish_commands`)[0].n), beforeRetry);
+        failReads = true; clearSupabasePublicContentCache();
+        assert.equal((await read()).some(row => row._id === extra.data.documentId), false);
+        failReads = false;
+        observed(`native ${mode} interruption`, { confirmedByReadOnlyStatus: true, repeatedMutations: 0 });
+      }
+      const anonymous = await fixture.sql`select has_function_privilege('anon','public.roo_capture_public_content_publication()','execute') capture,has_function_privilege('authenticated','public.roo_fetch_public_documents_targeted(text[],text[],jsonb,integer)','execute') read`;
+      assert.deepEqual(anonymous[0], { capture: false, read: false });
+      const invalidScope = await fixture.client.rpc('roo_fetch_public_documents_targeted', { p_document_types: ['booking'], p_ids: null, p_filters: [], p_limit: 1 });
+      assert.equal(invalidScope.error?.code, '22023');
+      observed('native publication boundaries', { lateOlderExportIgnored: true, restoredVersionPreserved: true, staleDeleteReplayWrites: 0, failedExportRecoveredWithoutMutation: true, privateSourceScopeRefused: true, browserCache: 'no-store', storedGeneration: (await readPublicContentPublication(fixture.client)).generation });
+    } finally {
+      release?.();
+      releaseRead?.();
+      globalThis.fetch = originalFetch;
+      if (priorNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = priorNodeEnv;
     }
   });
   if(!artifact.scenarios.length)throw new Error(`Unknown scenario ${selected}`);

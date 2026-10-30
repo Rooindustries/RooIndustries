@@ -135,12 +135,17 @@ test("/contact, /privacy, /terms and /meet-the-team keep their last content when
       for (const [route, resource, heading] of [["/privacy", "privacy-policy", "Privacy Policy"], ["/terms", "terms", "Terms of Service"]]) {
         const refetch = page.waitForResponse(response => new URL(response.url()).pathname === `/api/content/${resource}`);
         await page.goto(route);
-        const body = await (await refetch).json();
+        const response = await refetch;
+        const body = await response.json();
         timeline.push({ route, step: "browser refetch without a document", refetch: body });
-        expect(body.data, route).toBeNull();
+        expect(response.status(), route).toBe(200);
+        expect(body.ok, route).toBe(true);
+        expect(body.data.title, route).toBe(heading);
+        expect(body.data.sections, route).toEqual(expect.arrayContaining([expect.objectContaining({ heading: expected[route] })]));
         await page.waitForTimeout(500);
         await expect(page.locator("main").getByRole("heading", { name: heading, exact: true }), route).toBeVisible();
         await expect(page.locator("main"), route).toContainText(expected[route]);
+        await page.screenshot({ path: testInfo.outputPath(`${resource}-retained.png`), fullPage: true });
       }
     } finally {
       await context.close();

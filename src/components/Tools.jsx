@@ -40,22 +40,24 @@ export default function Tools({ initialData = null }) {
   const closeTimerRef = useRef(null);
 
   useEffect(() => {
-    if (Array.isArray(initialData)) return undefined;
+    const hasInitialData = Array.isArray(initialData);
     let cancelled = false;
+    const controller = new AbortController();
 
     async function fetchTools() {
-      setLoading(true);
+      if (!hasInitialData) setLoading(true);
       setLoadError(false);
       try {
-        const data = await getPublicContent("tools");
+        const data = await getPublicContent("tools", {}, { signal: controller.signal });
+        if (!Array.isArray(data)) throw new Error("The tool list could not be verified.");
         if (!cancelled) {
-          setTools(normalizeTools(data || []));
+          setTools(normalizeTools(data));
           setLoading(false);
         }
       } catch (err) {
         console.error("Error fetching tools:", err);
         if (!cancelled) {
-          setLoadError(true);
+          setLoadError(!hasInitialData);
           setLoading(false);
         }
       }
@@ -64,8 +66,9 @@ export default function Tools({ initialData = null }) {
     fetchTools();
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [reloadKey]);
+  }, [reloadKey, initialData]);
 
   useEffect(() => {
     const body = document.body;

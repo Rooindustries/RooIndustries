@@ -1678,7 +1678,7 @@ test("create receipts bind a read-only lookup to the original validated request"
     expect(await response.json()).toMatchObject({ code: "CMS_VALIDATION_FAILED", details: [{ message: "JSON content exceeds 1 MiB." }] });
   }
   const replacement = await request.post(path, { headers: { "x-admin-key": ADMIN_KEY }, data: { operation: "replace", type: command.type, documentId: receipt.documentId, expectedRevision: receipt.revision, document: { title: "Must not write" } } });
-  expect(replacement.status()).toBe(400);
+  expect(replacement.status()).toBe(404);
   expect((await request.get(`/api/admin/content/publish?type=${command.type}&createIntentId=${command.createIntentId}`, { headers: { "x-admin-key": ADMIN_KEY } })).status()).toBe(405);
   expect((await request.post(path, { data: command })).status()).toBe(401);
   await login(page);
@@ -1691,6 +1691,79 @@ test("create receipts bind a read-only lookup to the original validated request"
   expect(afterLookup).toEqual(beforeLookup);
   expect((await cms(request, `/api/admin/content/documents/${receipt.documentId}`)).document.title).toBe(command.document.title);
   await evidence(page, testInfo, { status, missingRequests: missing.length, invalidRequests: invalid.length, otherActor, beforeLookup, afterLookup, legacyGetStatus: 405 });
+});
+
+test("replacement receipts confirm only the original command without writing again", async ({ page, request, baseURL }, testInfo) => {
+  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  const path = "/api/admin/content/publish/status";
+  const original = await cms(request, `/api/admin/content/documents/${HERO_ID}`);
+  const command = { operation: "replace", type: "hero", documentId: HERO_ID, expectedRevision: original.revision, document: { ...original.document, headingLine1: "Bound replacement receipt café 日本語" } };
+  const published = await cms(request, "/api/admin/content/publish", command);
+  const beforeLookup = await contentCounts(request, control);
+  const status = await cms(request, path, command);
+  expect(status).toEqual({ committed: true, type: command.type, documentId: HERO_ID, revision: published.revision });
+  expect(await cms(request, path, command)).toEqual(status);
+  for (const body of [
+    { ...command, expectedRevision: published.revision },
+    { ...command, document: { ...command.document, headingLine1: "Different command" } },
+  ]) {
+    const response = await request.post(path, { headers: { "x-admin-key": ADMIN_KEY }, data: body });
+    expect(response.status()).toBe(404);
+    expect(await response.json()).toMatchObject({ ok: false, code: "CMS_NOT_FOUND" });
+  }
+  const deletion = await request.post(path, { headers: { "x-admin-key": ADMIN_KEY }, data: { operation: "delete", type: "hero", documentId: HERO_ID, expectedRevision: published.revision } });
+  expect(deletion.status()).toBe(404);
+  await login(page); await hero(page);
+  const otherActor = await page.evaluate(async ({ path, command }) => {
+    const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(command) });
+    return { status: response.status, body: await response.json() };
+  }, { path, command });
+  expect(otherActor).toMatchObject({ status: 404, body: { ok: false, code: "CMS_NOT_FOUND" } });
+  const afterLookup = await contentCounts(request, control);
+  expect(afterLookup).toEqual(beforeLookup);
+  expect((await cms(request, `/api/admin/content/documents/${HERO_ID}`)).revision).toBe(published.revision);
+  await evidence(page, testInfo, { status, otherActor, beforeLookup, afterLookup });
+});
+
+test("deletion receipts recover a lost reply and bind read-only confirmation to the original actor and revision", async ({ page, request, baseURL }, testInfo) => {
+  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  const created = await cms(request, "/api/admin/content/publish", { operation: "create", type: "benchmark", createIntentId: randomUUID(), document: { title: "Native deletion recovery café 日本語" } });
+  await login(page); await choose(page, "Benchmark");
+  await page.getByRole("region", { name: "Benchmark list" }).getByRole("button").filter({ hasText: "Native deletion recovery café 日本語" }).click();
+  await page.getByLabel("Benchmark Name", { exact: true }).fill("Unpublished changes before native deletion");
+  await page.clock.install();
+  const pending = await hold(page, "**/api/admin/content/publish", { method: "POST" });
+  const commands = [];
+  page.on("request", request => { if (new URL(request.url()).pathname === "/api/admin/content/publish" && request.method() === "POST") commands.push(request.postDataJSON()); });
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  const response = await pending.arrived;
+  const receipt = (await response.json()).data;
+  const outcomes = [];
+  try {
+    await page.clock.fastForward(31000);
+    await expect.soft(page.getByRole("status").filter({ hasText: "Deleted. The live site" })).toBeVisible();
+    expect(commands).toHaveLength(1);
+    expect.soft(receipt).toMatchObject({ committed: true, deleted: true, documentId: created.documentId, revision: created.revision });
+    expect((await request.get(`/api/admin/content/documents/${created.documentId}`, { headers: { "x-admin-key": ADMIN_KEY } })).status()).toBe(404);
+    const beforeLookup = await contentCounts(request, control);
+    for (const command of [commands[0], { ...commands[0], expectedRevision: "another-revision" }, { ...commands[0], type: "tool" }]) {
+      const result = await page.evaluate(async command => {
+        const response = await fetch("/api/admin/content/publish/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(command) });
+        return { status: response.status, body: await response.json() };
+      }, command);
+      outcomes.push(result);
+    }
+    expect.soft(outcomes[0]).toEqual({ status: 200, body: { ok: true, data: { committed: true, deleted: true, type: "benchmark", documentId: created.documentId, revision: created.revision } } });
+    expect.soft(outcomes.slice(1).map(result => result.status)).toEqual([404, 404]);
+    const otherActor = await request.post("/api/admin/content/publish/status", { headers: { "x-admin-key": ADMIN_KEY }, data: commands[0] });
+    expect.soft(otherActor.status()).toBe(404);
+    const afterLookup = await contentCounts(request, control);
+    expect(afterLookup).toEqual(beforeLookup);
+    expect(commands).toHaveLength(1);
+    expect.soft(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-content-draft:")))).toEqual([]);
+    await evidence(page, testInfo, { commands, receipt, outcomes, otherActorStatus: otherActor.status(), beforeLookup, afterLookup });
+  } finally { await pending.release(); }
 });
 
 test("#10 a concurrent subtitle prevents reconciling a missing deletion", async ({ page, request }, testInfo) => {
@@ -1864,6 +1937,32 @@ test("content fixture reset removes created documents and preserves referrals", 
   expect(await creators(request)).toEqual(referralSnapshot);
   await login(page); await choose(page, "Benchmark");
   await evidence(page, testInfo, { createdId: receipt.documentId, restoredId: deletedId, benchmarkIds: reset.documents.map(document => document._id), referralCount: referralSnapshot.length });
+});
+
+test("blank legal create and replace commands preserve stored content", async ({ page, request, baseURL }, testInfo) => {
+  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  const outcomes = [];
+  for (const type of ["privacyPolicy", "terms"]) {
+    const rows = await cms(request, `/api/admin/content/documents?type=${type}`);
+    const original = await cms(request, `/api/admin/content/documents/${rows.documents[0]._id}`);
+    const document = structuredClone(Object.fromEntries(Object.entries(original.document).filter(([key]) => !key.startsWith("_"))));
+    for (const section of document.sections) for (const block of section.content) for (const span of block.children) span.text = " \n\t ";
+    for (const operation of ["create", "replace"]) {
+      const before = await contentCounts(request, control);
+      const command = { operation, type, document, ...(operation === "create" ? { createIntentId: randomUUID() } : { documentId: original.document._id, expectedRevision: original.revision }) };
+      const response = await request.post("/api/admin/content/publish", { headers: { "x-admin-key": ADMIN_KEY }, data: command });
+      const body = await response.json();
+      const after = await contentCounts(request, control);
+      outcomes.push({ type, operation, status: response.status(), body, before, after });
+      expect.soft(response.status()).toBe(400);
+      expect.soft(body).toMatchObject({ ok: false, code: "CMS_VALIDATION_FAILED" });
+      expect.soft(after, "No document or command receipt is written").toEqual(before);
+      expect.soft((await cms(request, `/api/admin/content/documents/${original.document._id}`)).document).toEqual(original.document);
+    }
+  }
+  await login(page);
+  await choose(page, "Privacy Policy Page");
+  await evidence(page, testInfo, { outcomes });
 });
 
 test("empty Portable Text exposes validation on its accessible field", async ({ page }, testInfo) => {
