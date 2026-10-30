@@ -42,7 +42,8 @@ export default async function handler(req, res) {
         contactTelegram,
         contactPhone,
         xocPayments,
-        vertexPayments
+        vertexPayments, registrationStatus, emptyCodeReviewXoc, emptyCodeReviewVertex,
+        emptyCodeProtectedPaidXoc, emptyCodeProtectedPaidVertex
       }`,
       {id: referralId}
     );
@@ -90,10 +91,11 @@ export default async function handler(req, res) {
     const paidXoc = sumPayments(referral?.xocPayments || []);
     const paidVertex = sumPayments(referral?.vertexPayments || []);
 
-    const {payments, remaining, owed, overpaid} = buildBalance(
+    const {payments, remaining, owed, overpaid, underReview} = buildBalance(
       earnings,
       paidXoc,
-      paidVertex
+      paidVertex,
+      referral
     );
 
     await writeClient
@@ -109,6 +111,7 @@ export default async function handler(req, res) {
         owedXoc: owed.xoc,
         owedVertex: owed.vertex,
         owedTotal: owed.total,
+        underReviewTotal: underReview.total,
       })
       .commit();
 
@@ -129,6 +132,7 @@ export default async function handler(req, res) {
       remaining,
       owed,
       overpaid,
+      underReview,
       logs: {
         xoc: referral?.xocPayments || [],
         vertex: referral?.vertexPayments || [],

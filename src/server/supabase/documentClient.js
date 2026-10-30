@@ -6,6 +6,7 @@ import {
   fetchCommerceAvailability,
   fetchCommerceDerivedCount,
   fetchReferralEarningsSummary,
+  fetchPendingCouponAlerts,
   fetchRecoveryPaymentDocuments,
   fetchShadowDocuments,
   fetchUpgradeBookingChain,
@@ -488,6 +489,10 @@ export class SupabaseDocumentClient {
       referralId,
       referralCode,
     });
+  }
+
+  pendingCouponAlerts(options = {}) {
+    return fetchPendingCouponAlerts({...options, client: this.shadowClient});
   }
 
   upgradeBookingChain({ rootId } = {}) {

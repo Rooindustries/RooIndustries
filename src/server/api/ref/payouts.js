@@ -28,7 +28,8 @@ export default async function handler(req, res) {
         contactTelegram,
         contactPhone,
         xocPayments,
-        vertexPayments
+        vertexPayments, registrationStatus, emptyCodeReviewXoc, emptyCodeReviewVertex,
+        emptyCodeProtectedPaidXoc, emptyCodeProtectedPaidVertex
       }`,
       {id}
     );
@@ -79,10 +80,11 @@ export default async function handler(req, res) {
     const paidXoc = sumPayments(xocPayments);
     const paidVertex = sumPayments(vertexPayments);
 
-    const {payments, remaining, owed, overpaid} = buildBalance(
+    const {payments, remaining, owed, overpaid, underReview} = buildBalance(
       earnings,
       paidXoc,
-      paidVertex
+      paidVertex,
+      referral
     );
 
     return res.status(200).json({
@@ -102,6 +104,7 @@ export default async function handler(req, res) {
       remaining,
       owed,
       overpaid,
+      underReview,
       logs: {
         xoc: xocPayments,
         vertex: vertexPayments,

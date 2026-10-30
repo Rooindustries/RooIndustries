@@ -18,13 +18,23 @@ const sources = [
   'src/server/api/ref/bookingRefunds.js',
   'src/server/api/ref/bookingCommit.js',
   'src/server/api/payment/flow.js',
+  'src/server/api/payment/reconcile.js',
   'src/server/api/ref/pricing.js',
   'src/server/api/ref/createBooking.js',
   'src/server/api/ref/updatePayments.js',
+  'src/server/api/ref/validateReferral.js',
+  'src/server/api/ref/cronSyncAll.js',
+  'src/server/api/ref/syncPayouts.js',
+  'src/server/api/ref/payouts.js',
+  'src/server/api/ref/couponReservations.js',
+  'src/server/supabase/documentClient.js',
+  'src/server/supabase/shadowStore.js',
+  'src/server/commerce/store.js',
 ];
 for (const source of [
   'src/server/referrals/commissionMoney.js',
   'src/server/referrals/disputeAccounting.js',
+  'src/server/api/ref/couponAlerts.js',
 ]) {
   try {
     if (baseline) {
@@ -60,6 +70,14 @@ if (baseline) {
   } catch (error) {
     if (!/does not exist|exists on disk, but not in/.test(String(error.stderr)))
       throw error;
+  }
+}
+let baselineRulesMigration;
+if (baseline) {
+  try {
+    baselineRulesMigration = execFileSync('git', ['show', baseline + ':supabase/migrations/20261024000000_creator_money_rules.sql'], {encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']});
+  } catch (error) {
+    if (!/does not exist|exists on disk, but not in/.test(String(error.stderr))) throw error;
   }
 }
 for (const key of Object.keys(process.env)) {
@@ -157,6 +175,9 @@ if (!baseline)
   for (const file of [
     'src/server/referrals/commissionMoney.js',
     'supabase/migrations/20261023090000_preserve_frozen_creator_commissions.sql',
+    'supabase/migrations/20261024000000_creator_money_rules.sql',
+    'src/server/referrals/bookingCommission.js',
+    'src/server/api/ref/couponAlerts.js',
   ])
     evidence.source.files[file] = crypto
       .createHash('sha256')
@@ -172,6 +193,12 @@ let current,
   sequence = 0,
   eventSequence = 0;
 const responses = [];
+const emailRequests = [];
+let failCouponAlert = false;
+let failCouponAlertKey = '';
+let pauseCouponAlerts = false;
+let abortedCouponAlerts = 0;
+const pausedCouponAlerts = new Set();
 const states = [];
 const refundsById = new Map();
 const inFlight = new Set();
@@ -447,6 +474,42 @@ const dispute = (status) => ({
   dispute_status: status,
   dispute_stage: 'dispute',
 });
+const startCheckout = async (state, email = 'customer@example.invalid') => {
+  await commerce.delete(state.record._id);
+  current.record = {...state.record, providerOrderId: `checkout-${state.key}`};
+  current.payment.checkout_session_id = current.record.providerOrderId;
+  current.payment.payment_id = `captured-${state.key}`;
+  const startTimeUTC = state.record.bookingPayload.startTimeUTC;
+  await documents.createOrReplace({
+    _id: '6d8a3646-0ed2-44b5-ad45-c5c9d578126a', _type: 'bookingSettings',
+    dateSlots: [{date: startTimeUTC.slice(0, 10), times: ['15:30']}],
+  });
+  const expiresAt = new Date(Date.now() + 1200000).toISOString();
+  const hold = await commerce.create({
+    _id: `slotHold.${state.key}`, _type: 'slotHold', backendOwner: 'supabase',
+    cutoverGeneration: 0, phase: 'holding', holdNonce: state.key, expiresAt,
+    startTimeUTC, packageTitle: state.packageDoc.title,
+  });
+  const {issueHoldToken} = await import('../src/server/booking/holdToken.js');
+  const bookingPayload = {...state.record.bookingPayload, email,
+    slotHoldId: hold._id, slotHoldToken: issueHoldToken({
+      holdId: hold._id, startTimeUTC, expiresAt, holdNonce: state.key,
+      backend: 'supabase', cutoverGeneration: 0,
+    }),
+  };
+  const quote = await post('/api/payment/quote', {bookingPayload});
+  assert.equal(quote.status, 200, JSON.stringify(quote));
+  const started = await post('/api/payment/start', {
+    provider: 'dodo', bookingPayload, quoteFingerprint: quote.body.quoteFingerprint,
+  });
+  assert.equal(started.status, 200, JSON.stringify(started));
+  current.record = await commerce.fetch('*[_type == "paymentRecord" && providerOrderId == $id][0]', {id: current.record.providerOrderId});
+  assert.ok(current.record?._id);
+  current.payment.metadata.paymentRecordId = current.record._id;
+  current.payment.total_amount = current.record.providerPublicData.totalAmount || Math.round(current.record.pricingSnapshot.netAmount * 100);
+  return current.record;
+};
+
 const countIs = async (expected) => {
   assert.equal(
     (await documents.getDocument(current.creator._id)).successfulReferrals,
@@ -456,7 +519,7 @@ const countIs = async (expected) => {
 const run = async (name, fn, {expectedFailure = false} = {}) => {
   if (
     process.env.ROO_PAYOUT_CASE &&
-    !name.includes(process.env.ROO_PAYOUT_CASE)
+    !process.env.ROO_PAYOUT_CASE.split(',').some(value => name.includes(value))
   )
     return;
   const start = Date.now();
@@ -508,7 +571,7 @@ try {
   fixture = await createSweepPostgresFixture({
     fullMigrationChain: true,
     excludedMigrations: baseline
-      ? ['20261023090000_preserve_frozen_creator_commissions.sql']
+      ? ['20261023090000_preserve_frozen_creator_commissions.sql', '20261024000000_creator_money_rules.sql']
       : [],
   });
   sql = fixture.sql;
@@ -553,6 +616,7 @@ try {
       await connection.unsafe(
         baselineMigration || fs.readFileSync(migrationPath, 'utf8')
       );
+      if (!baseline) await connection.unsafe(fs.readFileSync('supabase/migrations/20261024000000_creator_money_rules.sql', 'utf8'));
       return traceProjections
         ? {
             calls:
@@ -578,6 +642,18 @@ try {
     }
   };
   if (baselineMigration) await applyCommissionMigration();
+  if (baselineRulesMigration) {
+    const connection = await sql.reserve();
+    try {
+      await connection.unsafe(baselineRulesMigration);
+      await connection.unsafe("notify pgrst, 'reload schema'");
+    } finally { connection.release(); }
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const probe = await fixture.client.rpc('roo_pending_coupon_alerts', {p_limit: 1});
+      if (!probe.error || probe.error.code !== 'PGRST202') break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  }
   Object.assign(process.env, {
     SUPABASE_URL: fixture.origin,
     SUPABASE_SERVICE_ROLE_KEY: fixture.token,
@@ -598,7 +674,7 @@ try {
           });
           let response;
           if (req.url.startsWith('/api/ref/')) {
-            const action = req.url.split('/').at(-1);
+            const action = new URL(req.url, origin).pathname.split('/').at(-1);
             const route = await import('../app/api/ref/[action]/route.js');
             response = await route[req.method](request, {
               params: Promise.resolve({action}),
@@ -640,7 +716,29 @@ try {
           ].includes(id)
         );
         let result;
-        if (req.url === '/emails') result = {id: `email-${++eventSequence}`};
+        if (req.url === '/emails') {
+          const requestBody = JSON.parse(body);
+          emailRequests.push({body: requestBody, headers: req.headers});
+          if (pauseCouponAlerts && requestBody.subject === 'Paid checkout exceeded a coupon limit') {
+            await new Promise(resolve => {
+              const resume = () => { pausedCouponAlerts.delete(resume); resolve(); };
+              pausedCouponAlerts.add(resume);
+              res.once('close', () => { if (!res.writableEnded) abortedCouponAlerts++; resume(); });
+            });
+            if (res.destroyed) return;
+          }
+          if (requestBody.subject === 'Paid checkout exceeded a coupon limit' && requestBody.from === 'unverified@example.invalid') {
+            res.writeHead(403, {'content-type': 'application/json'});
+            res.end(JSON.stringify({name: 'validation_error', statusCode: 403, message: 'Synthetic unverified sending domain'}));
+            return;
+          }
+          if ((failCouponAlert || (failCouponAlertKey && req.headers['idempotency-key'] === failCouponAlertKey)) && requestBody.subject === 'Paid checkout exceeded a coupon limit') {
+            res.writeHead(503, {'content-type': 'application/json'});
+            res.end(JSON.stringify({name: 'application_error', message: 'Synthetic alert outage'}));
+            return;
+          }
+          result = {id: 'email-' + ++eventSequence};
+        }
         else if (req.url === '/v1/oauth2/token')
           result = {access_token: 'fixture', expires_in: 3600};
         else if (req.url === '/v1/notifications/verify-webhook-signature')
@@ -685,8 +783,8 @@ try {
           result = refundsById.get(id);
         else if (req.url.startsWith('/checkouts/'))
           result = {
-            session_id: state?.record.providerOrderId,
-            payment_id: state?.record.providerPaymentId,
+            id: state?.record.providerOrderId,
+            payment_id: state?.payment.payment_id,
           };
         else if (req.url === '/products/pdt_fixture')
           result = {
@@ -2898,7 +2996,7 @@ try {
     };
   });
 
-  await run('empty-code-forward-only-history', async () => {
+  await run('empty-code-review-history', async () => {
     const {functionDefinition} = await import(
       './lib/sweep-postgres-fixture.mjs'
     );
@@ -3000,7 +3098,7 @@ try {
         client: commerce,
         ...args,
       });
-      assert.equal(native.total, 11);
+      assert.equal(native.total, 5.5);
       for (const result of [null, undefined]) {
         const fallback = await earnings.fetchReferralEarnings({
           client: {
@@ -3015,7 +3113,7 @@ try {
     }
     const postSync = await cron();
     const after = await snapshot();
-    assert.deepEqual(after, before);
+    assert.notDeepEqual(after, before);
     const rebuilt = {};
     for (const rpc of [
       'roo_project_operational_shadow',
@@ -3024,7 +3122,7 @@ try {
       assert.equal((await fixture.client.rpc(rpc)).error, null);
       await cron();
       rebuilt[rpc] = await snapshot();
-      assert.deepEqual(rebuilt[rpc], before);
+      assert.deepEqual(rebuilt[rpc], after);
     }
 
     const idOnly = await seed('dodo');
@@ -3037,7 +3135,7 @@ try {
       .commit();
     const idControl = await summary(
       {...historical[0].creator, slug: {current: ''}},
-      16.5
+      11
     );
     await commerce
       .patch(idOnly.record.bookingId)
@@ -3052,7 +3150,7 @@ try {
       .commit();
     const codeControl = await summary(idOnly.creator, 5.5);
     await cron();
-    assert.deepEqual(await snapshot(), before);
+    assert.deepEqual(await snapshot(), after);
     const creatorAfter = await documents.getDocument(creatorId);
     current = historical[0];
     return {
@@ -3068,8 +3166,343 @@ try {
       rebuilt,
       idControl,
       codeControl,
-      historicalCorrectionDeferredTo: 'ROO-729',
+      historicalCorrection: 'ROO-729 unpaid review hold; paid logs preserved',
     };
+  });
+
+  await run('money-rules-511-self-booking-and-recovery', async () => {
+    const saved = [];
+    for (const buyer of ['C.Reator+games@GMAIL.COM', 'creator@gmail.com', 'c.rea.tor+play@googlemail.com']) {
+      const state = await seed('dodo', {booking: false, discount: 10});
+      await documents.patch(state.creator._id).set({creatorEmail: 'creator@gmail.com'}).commit();
+      current.record = await commerce.patch(state.record._id).set({
+        bookingPayload: {...state.record.bookingPayload, email: buyer},
+      }).commit();
+      if (buyer === 'creator@gmail.com') await startCheckout(state, buyer);
+      const result = await webhook();
+      assert.equal(result.status, 200, JSON.stringify(result));
+      const booking = await read((await read(current.record._id)).bookingId);
+      if (buyer === 'creator@gmail.com') assert.equal(booking.requiresReschedule, undefined);
+      assert.equal(booking.commissionAmount, 0);
+      assert.equal(booking.commissionPercent, 0);
+      assert.equal(booking.netAmount, state.quote.effectiveNetAmount);
+      assert.equal((await webhook()).status, 200);
+      current.payment.refund_status = 'partial';
+      current.payment.refunds = [{refund_id: 'self-refund-' + state.key,
+        payment_id: current.payment.payment_id, amount: 100, currency: 'USD', status: 'succeeded'}];
+      assert.equal((await webhook('refund.succeeded')).status, 200);
+      const refunded = await read(booking._id);
+      assert.equal(refunded.commissionAmount, 0);
+      assert.equal(refunded.dodoOriginalCommissionAmount, 0);
+      saved.push({booking, refunded});
+    }
+    return {saved};
+  });
+
+  await run('money-rules-512-pending-creator-and-code-reuse', async () => {
+    const state = await seed('dodo', {booking: false, count: 0});
+    await documents.patch(state.creator._id).set({registrationStatus: 'pending_email', creatorEmail: 'creator@example.invalid'}).commit();
+    const validResponse = await fetch(`${origin}/api/ref/validateReferral?code=${state.key}`);
+    const valid = {status: validResponse.status, body: await validResponse.json()};
+    assert.equal(valid.body.ok, true, JSON.stringify(valid));
+    const quoted = await post('/api/payment/quote', {bookingPayload: state.record.bookingPayload});
+    assert.equal(quoted.status, 200, JSON.stringify(quoted));
+    assert.equal(quoted.body.quote.commissionPercent, 10);
+    const {resolvePaymentQuote} = await import('../src/server/api/ref/pricing.js');
+    const quote = await resolvePaymentQuote({...state.record.bookingPayload, client: commerce});
+    assert.equal(quote.effectiveReferralId, state.creator._id);
+    assert.equal(quote.commissionAmount, 5.5);
+    current.record = await commerce.patch(state.record._id).set({pricingSnapshot: {
+      ...state.record.pricingSnapshot, ...quote, commissionPercent: quote.effectiveCommissionPercent,
+    }}).commit();
+    assert.equal((await webhook()).status, 200);
+    const booking = await read((await read(state.record._id)).bookingId);
+    assert.equal(booking.referral._ref, state.creator._id);
+    assert.equal(booking.commissionAmount, 5.5);
+    const sync = () => post('/api/ref/syncPayouts', {referralId: state.creator._id}, {'x-admin-key': 'fixture-admin'});
+    const pending = await sync();
+    assert.equal(pending.body.owed.total, 0, JSON.stringify(pending));
+    assert.equal(pending.body.underReview.total, 5.5);
+    const payout = await post('/api/ref/updatePayments', {referralId: state.creator._id, packageType: 'vertex', amount: 1, payoutId: 'pending-fixture-transfer'}, {'x-admin-key': 'fixture-admin'});
+    assert.equal(payout.status, 409);
+    await documents.patch(state.creator._id).set({registrationStatus: 'active', currentCommissionPercent: 30, slug: {current: ''}}).commit();
+    const verified = await sync();
+    assert.equal(verified.body.owed.total, 5.5);
+    const replacement = await documents.create({_id: `referral.reused-${state.key}`, _type: 'referral', registrationStatus: 'active', slug: {current: state.key}, currentCommissionPercent: 50});
+    const replacementEarnings = await summary(replacement, 0);
+    const expired = await seed('dodo', {booking: false, count: 0});
+    await documents.patch(expired.creator._id).set({registrationStatus: 'pending_email'}).commit();
+    await documents.delete(expired.creator._id);
+    const reused = await documents.create({_id: 'referral.reclaimed-' + expired.key, _type: 'referral', registrationStatus: 'active', slug: {current: expired.key}});
+    assert.equal((await webhook()).status, 200);
+    const expiredBooking = await read((await read(expired.record._id)).bookingId);
+    assert.equal(expiredBooking.referral._ref, expired.creator._id);
+    assert.equal(expiredBooking.commissionAmount, 5.5);
+    await summary(reused, 0);
+
+    return {booking, pending: pending.body, verified: verified.body, payout, replacementEarnings};
+  });
+
+  await run('money-rules-543-late-coupon-alert', async () => {
+    const state = await seed('dodo', {booking: false, count: 0, coupon: 20});
+    await startCheckout(state);
+    const {releaseCouponReservation} = await import('../src/server/api/ref/couponReservations.js');
+    const redemptionSource = await read(current.record.couponReservationId);
+    const reserved = {redemption: redemptionSource, coupon: await read(redemptionSource.coupon._ref)};
+    await releaseCouponReservation({client: commerce, redemptionId: reserved.redemption._id});
+    await documents.patch(reserved.coupon._id).set({maxUses: 1, timesUsed: 1, isActive: false}).commit();
+    const before = emailRequests.length;
+    failCouponAlert = true;
+    const result = await webhook();
+    assert.equal(result.status, 200, JSON.stringify(result));
+    const record = await read(current.record._id), booking = await read(record.bookingId);
+    assert.equal(booking.requiresReschedule, undefined);
+    assert.equal(booking.netAmount, state.quote.effectiveNetAmount);
+    const pendingAlert = await read(reserved.redemption._id);
+    assert.equal(pendingAlert.ownerAlertRequired, true);
+    assert.equal(pendingAlert.ownerAlertSentAt, undefined);
+    const failedRetry = await post('/api/payment/reconcile', {}, {authorization: 'Bearer fixture'});
+    assert.equal(failedRetry.status, 200, JSON.stringify(failedRetry));
+    assert.equal((await read(reserved.redemption._id)).ownerAlertSentAt, undefined);
+    failCouponAlert = false;
+    const retry = await post('/api/payment/reconcile', {}, {authorization: 'Bearer fixture'});
+    assert.equal(retry.status, 200, JSON.stringify(retry));
+    const redemption = await read(reserved.redemption._id);
+    assert.equal(redemption.capacityExceededAtRecovery, true);
+    assert.ok(redemption.ownerAlertSentAt, JSON.stringify(redemption));
+    const alerts = emailRequests.slice(before).filter(row => row.body?.subject === 'Paid checkout exceeded a coupon limit');
+    assert.equal(alerts.length, 2);
+    assert.equal(alerts[0].headers['idempotency-key'], alerts[1].headers['idempotency-key']);
+    assert.equal(alerts[0].body.to, 'owner@example.invalid');
+    assert.equal((await webhook()).status, 200);
+    assert.equal(emailRequests.filter(row => row.body?.subject === 'Paid checkout exceeded a coupon limit').length, 2);
+    return {booking, redemption, alerts};
+  });
+
+  await run('money-rules-543-alert-backlog', async () => {
+    const state = await seed('dodo', {coupon: 20});
+    const couponId = 'coupon.' + state.key;
+    const history = Array.from({length: 1001}, (_, index) => ({
+      _id: 'couponRedemption.000' + String(index).padStart(4, '0'),
+      _rev: 'seed', _type: 'couponRedemption', status: 'consumed',
+      coupon: {_ref: couponId}, ownerId: 'old-' + index,
+      ownerAlertRequired: false,
+    }));
+    const pending = Array.from({length: 201}, (_, index) => ({
+      _id: 'couponRedemption.zzz' + String(index).padStart(4, '0'),
+      _type: 'couponRedemption', status: 'consumed',
+      coupon: {_ref: couponId}, ownerId: 'pending-' + index,
+      bookingId: state.record.bookingId, ownerAlertRequired: true,
+      capacityExceededAtRecovery: true,
+    }));
+    for (const document of history) await sql`
+      insert into migration.source_documents(legacy_sanity_id, document_type, source_revision, source_hash, payload)
+      values(${document._id}, 'couponRedemption', 'seed', ${'0'.repeat(64)}, ${sql.json(document)})`;
+    for (let index = 0; index < pending.length; index += 50) {
+      const transaction = commerce.transaction();
+      for (const document of pending.slice(index, index + 50)) transaction.create(document);
+      await transaction.commit();
+    }
+    try {
+      const {dispatchCouponAlerts} = await import('../src/server/api/ref/couponAlerts.js');
+      if (!baseline) {
+        const [permissions] = await sql`select
+          has_function_privilege('anon', 'public.roo_pending_coupon_alerts(integer)', 'execute') as anon,
+          has_function_privilege('authenticated', 'public.roo_pending_coupon_alerts(integer)', 'execute') as authenticated,
+          has_function_privilege('service_role', 'public.roo_pending_coupon_alerts(integer)', 'execute') as service`;
+        assert.deepEqual(permissions, {anon: false, authenticated: false, service: true});
+      }
+      failCouponAlert = true;
+      await dispatchCouponAlerts({client: commerce, redemptionId: pending.at(-1)._id});
+      assert.equal((await read(pending.at(-1)._id)).ownerAlertSentAt, undefined);
+      failCouponAlert = false;
+      failCouponAlertKey = 'coupon-capacity/' + crypto.createHash('sha256').update(pending[0]._id).digest('hex');
+      for (let batch = 0; batch < Math.ceil(pending.length / 25); batch++) {
+        const beforeBatch = emailRequests.length;
+        const retry = await post('/api/payment/reconcile', {}, {authorization: 'Bearer fixture'});
+        assert.equal(retry.status, 200, JSON.stringify(retry));
+        const count = emailRequests.slice(beforeBatch).filter(row => row.body.subject === 'Paid checkout exceeded a coupon limit').length;
+        assert.ok(count <= 25, 'Reconciliation attempted ' + count + ' alerts in one invocation');
+      }
+      assert.equal((await read(pending[0]._id)).ownerAlertSentAt, undefined);
+      assert.ok((await read(pending.at(-1)._id)).ownerAlertSentAt);
+      failCouponAlertKey = '';
+      assert.equal((await post('/api/payment/reconcile', {}, {authorization: 'Bearer fixture'})).status, 200);
+      const sent = [];
+      for (const document of pending) {
+        const row = await read(document._id);
+        assert.ok(row.ownerAlertSentAt, document._id + ' was not delivered');
+        assert.equal(row.ownerAlertRequired, false);
+        sent.push(row._id);
+      }
+      return {historicalRows: history.length, deliveredPendingRows: sent.length,
+        first: sent[0], last: sent.at(-1), firstAttemptFailed: true};
+    } finally {
+      failCouponAlert = false;
+      failCouponAlertKey = '';
+      for (const document of pending) await commerce.delete(document._id);
+      await sql`delete from migration.source_documents where legacy_sanity_id=any(${history.map(row => row._id)})`;
+    }
+  });
+
+  await run('money-rules-543-slow-alert-payment-recovery', async () => {
+    const payments = [];
+    for (let index = 0; index < 3; index++) {
+      const payment = await seed('dodo', {booking: false, count: 0, coupon: 20});
+      await startCheckout(payment);
+      payment.record = await commerce.patch(payment.record._id).set({lastAttemptAt: new Date(Date.now() - 120000).toISOString()}).commit();
+      const {releaseCouponReservation} = await import('../src/server/api/ref/couponReservations.js');
+      await releaseCouponReservation({client: commerce, redemptionId: payment.record.couponReservationId});
+      await documents.patch(`coupon.${payment.key}`).set({maxUses: 1, timesUsed: 1, isActive: false}).commit();
+      payments.push(payment);
+    }
+    await documents.patch('6d8a3646-0ed2-44b5-ad45-c5c9d578126a').set({
+      dateSlots: payments.map(payment => ({date: payment.record.bookingPayload.startTimeUTC.slice(0, 10), times: ['15:30']})),
+    }).commit();
+    const pending = ['first', 'second'].map(label => ({
+      _id: `couponRedemption.slow-${current.key}-${label}`, _type: 'couponRedemption',
+      status: 'consumed', coupon: {_ref: 'coupon.slow-fixture'},
+      ownerId: label, bookingId: `booking.alert-${label}`, ownerAlertRequired: true,
+    }));
+    for (const row of pending) await commerce.create(row);
+    const before = emailRequests.length;
+    const abortedBefore = abortedCouponAlerts;
+    let reconciliation;
+    try {
+      pauseCouponAlerts = true;
+      const started = Date.now();
+      reconciliation = post('/api/payment/reconcile', {}, {authorization: 'Bearer fixture'});
+      const deadline = Date.now() + 15000;
+      while (!pausedCouponAlerts.size && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+      assert.equal(pausedCouponAlerts.size, 1, 'The local email provider must hold the alert response open.');
+      const recovered = [];
+      for (const payment of payments) {
+        const record = await read(payment.record._id);
+        assert.ok(record.bookingId, 'Every paid booking must be committed before the stalled alert response is released.');
+        const booking = await read(record.bookingId);
+        assert.equal(booking.status, 'captured');
+        assert.equal(booking.requiresReschedule, undefined);
+        assert.equal(booking.netAmount, payment.quote.effectiveNetAmount);
+        recovered.push({record, booking});
+      }
+      const paymentRecoveryObservedMs = Date.now() - started;
+      assert.ok(paymentRecoveryObservedMs < 20000);
+      const result = await reconciliation;
+      const elapsedMs = Date.now() - started;
+      assert.equal(result.status, 200, JSON.stringify(result));
+      assert.ok(elapsedMs < 20000, `Email delivery blocked reconciliation for ${elapsedMs}ms.`);
+      assert.equal(abortedCouponAlerts - abortedBefore, 1, 'The HTTP email attempt must be cancelled, not left running.');
+      const alertIds = [...pending.map(row => row._id), ...payments.map(payment => payment.record.couponReservationId)];
+      const held = await Promise.all(alertIds.map(read));
+      assert.ok(held.every(row => row.ownerAlertRequired && !row.ownerAlertSentAt));
+      assert.equal(emailRequests.slice(before).filter(row => row.body.subject === 'Paid checkout exceeded a coupon limit').length, 1,
+        'A timed-out batch must not start another send after its total budget is spent.');
+      const attempted = held.find(row => row.ownerAlertLastAttemptAt);
+      assert.ok(attempted?.ownerAlertFrom);
+      assert.equal(attempted.ownerAlertGeneration, undefined);
+      pauseCouponAlerts = false;
+      const retried = await post('/api/payment/reconcile', {}, {authorization: 'Bearer fixture'});
+      assert.equal(retried.status, 200, JSON.stringify(retried));
+      const delivered = await Promise.all(alertIds.map(read));
+      assert.ok(delivered.every(row => row.ownerAlertSentAt));
+      const attempts = emailRequests.slice(before).filter(row => row.body.subject === 'Paid checkout exceeded a coupon limit');
+      const duplicate = attempts.filter(row => row.headers['idempotency-key'] === attempts[0].headers['idempotency-key']);
+      assert.equal(duplicate.length, 2);
+      assert.deepEqual(duplicate[0].body, duplicate[1].body);
+      return {recovered, paymentRecoveryObservedMs, elapsedMs, held, delivered, attempts, cancelledRequests: abortedCouponAlerts - abortedBefore};
+    } finally {
+      pauseCouponAlerts = false;
+      for (const resume of [...pausedCouponAlerts]) resume();
+      if (reconciliation) await reconciliation;
+      for (const row of pending) await commerce.delete(row._id);
+    }
+  });
+
+  await run('money-rules-543-rejected-sender-recovery', async () => {
+    const state = await seed('dodo', {coupon: 20});
+    const {dispatchCouponAlerts} = await import('../src/server/api/ref/couponAlerts.js');
+    const id = 'couponRedemption.sender-' + state.key;
+    await commerce.create({_id: id, _type: 'couponRedemption', status: 'consumed',
+      coupon: {_ref: 'coupon.' + state.key}, ownerId: id,
+      bookingId: state.record.bookingId, ownerAlertRequired: true});
+    const originalFrom = process.env.FROM_EMAIL;
+    const before = emailRequests.length;
+    try {
+      process.env.FROM_EMAIL = 'unverified@example.invalid';
+      await dispatchCouponAlerts({client: commerce, redemptionId: id});
+      const rejected = await read(id);
+      assert.equal(rejected.ownerAlertRequired, true);
+      assert.equal(rejected.ownerAlertFrom, undefined);
+      assert.equal(rejected.ownerAlertGeneration, 1);
+      process.env.FROM_EMAIL = originalFrom;
+      await dispatchCouponAlerts({client: commerce, redemptionId: id});
+      const delivered = await read(id);
+      assert.ok(delivered.ownerAlertSentAt);
+      const attempts = emailRequests.slice(before);
+      assert.equal(attempts.length, 2);
+      assert.notEqual(attempts[0].headers['idempotency-key'], attempts[1].headers['idempotency-key']);
+      const uncertainId = id + '-uncertain';
+      await commerce.create({_id: uncertainId, _type: 'couponRedemption', status: 'consumed',
+        coupon: {_ref: 'coupon.' + state.key}, ownerId: uncertainId,
+        bookingId: state.record.bookingId, ownerAlertRequired: true});
+      failCouponAlert = true;
+      await dispatchCouponAlerts({client: commerce, redemptionId: uncertainId});
+      const uncertain = await read(uncertainId);
+      assert.equal(uncertain.ownerAlertFrom, originalFrom);
+      process.env.FROM_EMAIL = 'changed@example.invalid';
+      failCouponAlert = false;
+      await dispatchCouponAlerts({client: commerce, redemptionId: uncertainId});
+      const retried = emailRequests.slice(before + 2);
+      assert.equal(retried[0].headers['idempotency-key'], retried[1].headers['idempotency-key']);
+      assert.equal(retried[0].body.from, retried[1].body.from);
+      return {rejected, delivered, uncertain, attempts, uncertainRetry: retried};
+    } finally {
+      process.env.FROM_EMAIL = originalFrom;
+      failCouponAlert = false;
+    }
+  });
+
+  await run('money-rules-729-seeded-balance-report', async () => {
+    const rows = [];
+    for (const paid of [0, 2, 8, 15]) {
+      const own = await seed('dodo'), foreign = await seed('dodo');
+      await commerce.patch(own.record.bookingId).unset(['commissionCalculationVersion']).set({referralCode: ''}).commit();
+      await commerce.patch(foreign.record.bookingId).unset(['commissionCalculationVersion']).set({referralCode: ''}).commit();
+      const payments = [{_key: `paid-${own.key}`, amount: paid, paidOn: '2026-01-01T00:00:00.000Z'}];
+      await documents.patch(own.creator._id).set({slug: {current: ''}, vertexPayments: payments, earnedVertex: 11, earnedXoc: 0, earnedTotal: 11, paidTotal: paid, owedTotal: Math.max(0, 11 - paid)}).commit();
+      rows.push({creatorId: own.creator._id, before: {earned: 11, paid, owed: Math.max(0, 11 - paid)}, payments});
+    }
+    const migrationConnection = await sql.reserve();
+    try { if (!baseline) await migrationConnection.unsafe(fs.readFileSync('supabase/migrations/20261024000000_creator_money_rules.sql', 'utf8')); } finally { migrationConnection.release(); }
+    for (const row of rows) {
+      const result = await post('/api/ref/syncPayouts', {referralId: row.creatorId}, {'x-admin-key': 'fixture-admin'});
+      assert.equal(result.status, 200, JSON.stringify(result));
+      assert.equal(result.body.earnings.total, 5.5);
+      assert.equal(result.body.payments.total, row.before.paid);
+      assert.equal(result.body.owed.total, Math.max(0, 5.5 - row.before.paid));
+      assert.equal(result.body.underReview.total, Math.min(5.5, Math.max(0, 11 - row.before.paid)));
+      assert.deepEqual((await documents.getDocument(row.creatorId)).vertexPayments, row.payments);
+      row.after = {earned: result.body.earnings.total, paid: result.body.payments.total, owed: result.body.owed.total, underReview: result.body.underReview.total};
+    }
+    for (const rpc of ['roo_project_operational_shadow', 'roo_refresh_operational_shadow']) {
+      assert.equal((await fixture.client.rpc(rpc)).error, null);
+      const res = await fetch(`${origin}/api/ref/cronSyncAll`, {headers: {authorization: 'Bearer fixture'}});
+      assert.equal(res.status, 200);
+      for (const row of rows) {
+        const creator = await documents.getDocument(row.creatorId);
+        assert.equal(creator.paidTotal, row.before.paid);
+        assert.equal(creator.owedTotal, row.after.owed);
+        assert.equal(creator.underReviewTotal, row.after.underReview);
+      }
+    }
+    const paidCreator = rows.find(row => row.before.paid === 8);
+    await commerce.create({_id: 'booking.future-valid-' + paidCreator.creatorId, _type: 'booking',
+      status: 'captured', packageTitle: 'Vertex future', commissionCalculationVersion: 2,
+      commissionAmount: 1, referral: {_ref: paidCreator.creatorId}, referralCode: ''});
+    const future = await post('/api/ref/syncPayouts', {referralId: paidCreator.creatorId}, {'x-admin-key': 'fixture-admin'});
+    assert.equal(future.body.owed.total, 1);
+    assert.equal(future.body.payments.total, 8);
+    return {report: rows, futureValidEarnings: future.body, source: 'Synthetic local PostgreSQL 17 schema copy; no production data'};
   });
 
   await run('all-payouts-projection-rebuilds', async () => {
@@ -3108,6 +3541,7 @@ try {
     await fixture.stop();
   }
   evidence.providerResponses = responses;
+  evidence.ownerAlertRequests = emailRequests.filter(row => row.body?.subject === 'Paid checkout exceeded a coupon limit');
   if (!evidence.fatal && evidence.scenarios.length === 0) {
     evidence.fatal = 'No payout scenarios selected';
     process.exitCode = 1;

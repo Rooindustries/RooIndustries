@@ -6,7 +6,7 @@ let restoreGuard;
 
 test.skip(process.env.TOOLING_CREATOR_PORTAL !== '1', 'Select the creator fixture with npm run test:creator:portal.');
 
-test.use({ javaScriptEnabled: true, trace: 'retain-on-failure', video: 'off' });
+test.use({ javaScriptEnabled: true, trace: 'retain-on-failure', video: process.env.ROO_MONEY_VIDEO === '1' ? 'on' : 'off' });
 test.beforeAll(async ({ baseURL }) => {
   fixture = await import('./fixtures/api-routes.mjs');
   const { installNetworkGuard, refuseEnvFiles } = await import('../scripts/lib/test-target-safety.mjs');
@@ -1905,4 +1905,41 @@ test.describe('payment timestamps in western time zones', () => {
     await expect(row).toContainText('Oct 10, 2026');
     await expect(page.getByText('UTC timestamp payout', { exact: true }).locator('../..')).toContainText('Oct 9, 2026');
   });
+});
+
+test.describe('creator balance under review', () => {
+  for (const width of [360, 390, 1280]) {
+    test(`keeps reviewed earnings separate from owed at ${width}px`, async ({page, context, baseURL}, testInfo) => {
+      await page.setViewportSize({width, height: 900});
+      await signIn(context, baseURL);
+      await page.goto('/referrals/dashboard');
+      await expect(page.getByText('Remaining owed', {exact: true})).toBeVisible();
+      await record(page, testInfo, `review-before-${width}`);
+      await configure(baseURL, {documents: [{
+        _id: 'tooling-referral', emptyCodeReviewVertex: 8, emptyCodeReviewXoc: 0,
+        emptyCodeProtectedPaidXoc: 0, emptyCodeProtectedPaidVertex: 0,
+      }]});
+      const reply = page.waitForResponse(response => response.url().endsWith('/api/ref/payouts'));
+      await page.reload();
+      const data = await (await reply).json();
+      expect(data.underReview.total).toBe(8);
+      expect(data.owed.total).toBe(6.25);
+      await expect(page.getByText('Under review', {exact: true})).toBeVisible();
+      await expect(page.getByText('Under review', {exact: true}).locator('..')).toContainText('$8.00');
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await record(page, testInfo, `review-after-${width}`, {payout: data});
+      await page.getByRole('link', {name: 'FAQ', exact: true}).last().click();
+      await expect(page).toHaveURL(/\/faq$/);
+      await page.goBack();
+      await expect(page.getByText('Under review', {exact: true})).toBeVisible();
+      await page.goForward();
+      await expect(page).toHaveURL(/\/faq$/);
+      await page.goBack();
+      await expect(page.getByText('Under review', {exact: true})).toBeVisible();
+      const secondTab = await context.newPage();
+      await secondTab.goto(`${baseURL}/referrals/dashboard`);
+      await expect(secondTab.getByText('Under review', {exact: true})).toBeVisible();
+      await secondTab.close();
+    });
+  }
 });
