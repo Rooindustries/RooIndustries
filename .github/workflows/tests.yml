@@ -84,6 +84,7 @@ jobs:
       - run: npm run check:seo
       - run: npm run check:supabase:migrations
       - run: npm run test:deploy:rollback
+      - run: npm run test:pr-auto-merge
 
   playwright:
     name: Playwright ${{ matrix.suite.name }}
