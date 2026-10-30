@@ -54,7 +54,7 @@ const createAuthUser = async (sql, { social = "" } = {}) => {
       values (${id}, ${social}, ${crypto.randomBytes(9).toString("hex")}, ${email},
         ${sql.json({ email, email_verified: true, full_name: "Fixture" })}, now() - interval '2 days')`;
   }
-  return { id, email };
+  return { id, email, social };
 };
 
 const principalOf = async (sql, userId) => {
@@ -62,8 +62,8 @@ const principalOf = async (sql, userId) => {
   return principalId;
 };
 
-const linkOf = async (sql, userId, provider) => {
-  const [link] = await sql`select * from accounts.identity_links where user_id = ${userId} and provider = ${provider}`;
+const linkOf = async (sql, account, provider = account.social) => {
+  const [link] = await sql`select * from accounts.identity_links where user_id = ${account.id} and provider = ${provider}`;
   return link;
 };
 
@@ -78,6 +78,7 @@ try {
   fixture = await createSweepPostgresFixture({ fullMigrationChain: true, ports: { postgres: port, rest: port + 1, proxy: port + 2 } });
   const { sql } = fixture;
   const accounts = [];
+  const byProvider = social => accounts.filter(account => account.social === social);
 
   await scenario("sign-in creates each account's links and profile", async () => {
     for (let index = 0; index < accountCount; index += 1) {
@@ -89,7 +90,7 @@ try {
       (select count(*)::int from accounts.identity_links) links,
       (select count(*)::int from accounts.identity_links where email_verified) verified,
       (select count(*)::int from public.profiles where primary_email is not null) profiles`;
-    const socialAccounts = accounts.filter((_, index) => index % 3 !== 0).length;
+    const socialAccounts = accounts.filter(account => account.social).length;
     assert.equal(links, accountCount + socialAccounts);
     assert.equal(verified, accountCount + socialAccounts);
     assert.equal(profiles, accountCount);
@@ -110,7 +111,7 @@ try {
   });
 
   await scenario("signing in again without changes leaves the account's links untouched", async () => {
-    const account = accounts[1];
+    const [account] = byProvider("google");
     const before = await rowVersions(sql);
     await bootstrapSupabaseNativeAccount({ userId: account.id, adminClient: fixture.client });
     const changed = changedRows(before, await rowVersions(sql)).filter(key => key.startsWith("identity_links:"));
@@ -118,26 +119,31 @@ try {
   });
 
   await scenario("the account check repairs each kind of drift and nothing else", async () => {
-    const [providerEmail, unlinked, lastSeen, metadata, relinked, backendOwner, userId, emailDrift, signedIn, ownedElsewhere, emailVerified, emailOwner] =
-      [1, 2, 4, 5, 6, 7, 8, 9, 11, 12, 13, 15].map(index => accounts[index]);
-    const secondary = await mergeSecondaryLogin(sql, userId);
+    const [staleEmail, staleSignIn, foreignOwner, unverified] = byProvider("google");
+    const [unlinked, staleMetadata, movedOwner, signedIn, renumbered] = byProvider("discord");
+    const [relinked, clearedProfile, ownedElsewhere, emailOwner] = byProvider("");
+    const secondary = await mergeSecondaryLogin(sql, movedOwner);
+    await sql`update auth.identities set identity_data = identity_data || '{"rank": 1.0}'::jsonb
+      where user_id = ${renumbered.id} and provider = 'discord'`;
     assert.equal((await runAccountCheck()).failed, 0);
 
-    const unlinkedLink = await linkOf(sql, unlinked.id, "discord");
-    const strandedLink = await linkOf(sql, userId.id, "discord");
+    const unlinkedLink = await linkOf(sql, unlinked);
+    const movedLink = await linkOf(sql, movedOwner);
     const signedInAt = new Date(Date.now() - 60_000).toISOString();
-    await sql`update accounts.identity_links set provider_email = ${`stale.${providerEmail.email}`}
-      where user_id = ${providerEmail.id} and provider = 'google'`;
+    await sql`update accounts.identity_links set provider_email = ${`stale.${staleEmail.email}`}
+      where user_id = ${staleEmail.id} and provider = 'google'`;
     await sql`update accounts.identity_links set last_seen_at = '2020-01-01T00:00:00Z'
-      where user_id = ${lastSeen.id} and provider = 'google'`;
+      where user_id = ${staleSignIn.id} and provider = 'google'`;
     await sql`update accounts.identity_links set metadata = metadata || '{"stale": true}'::jsonb
-      where user_id = ${metadata.id} and provider = 'discord'`;
+      where user_id = ${staleMetadata.id} and provider = 'discord'`;
+    await sql`update accounts.identity_links set metadata = jsonb_set(metadata, '{rank}', '1.00'::jsonb)
+      where user_id = ${renumbered.id} and provider = 'discord'`;
     await sql`update accounts.identity_links set backend_owner = 'referral_link'
-      where user_id = ${backendOwner.id} and provider = 'google'`;
+      where user_id = ${foreignOwner.id} and provider = 'google'`;
     await sql`update accounts.identity_links set user_id = ${secondary.id}
-      where user_id = ${userId.id} and provider = 'discord'`;
+      where user_id = ${movedOwner.id} and provider = 'discord'`;
     await sql`update accounts.identity_links set email_verified = false
-      where user_id = ${emailVerified.id} and provider = 'google'`;
+      where user_id = ${unverified.id} and provider = 'google'`;
     await sql`update auth.identities set last_sign_in_at = ${signedInAt},
         identity_data = identity_data || '{"avatar_url": "https://cdn.example.test/avatar.png"}'::jsonb
       where user_id = ${signedIn.id} and provider = 'discord'`;
@@ -145,7 +151,7 @@ try {
     const subject = crypto.randomBytes(9).toString("hex");
     await sql`insert into auth.identities (user_id, provider, provider_id, email, identity_data, last_sign_in_at)
       values (${relinked.id}, 'google', ${subject}, ${relinked.email}, ${sql.json({ email: relinked.email, email_verified: true })}, now())`;
-    await sql`update public.profiles set primary_email = null where user_id in (${emailDrift.id}, ${ownedElsewhere.id})`;
+    await sql`update public.profiles set primary_email = null where user_id in (${clearedProfile.id}, ${ownedElsewhere.id})`;
     await sql`update auth.users set email_confirmed_at = null where id = ${emailOwner.id}`;
     await sql`update public.profiles set primary_email = ${ownedElsewhere.email} where user_id = ${emailOwner.id}`;
 
@@ -155,49 +161,52 @@ try {
     const changed = changedRows(before, await rowVersions(sql));
 
     const repaired = {
-      providerEmail: await linkOf(sql, providerEmail.id, "google"),
-      lastSeen: await linkOf(sql, lastSeen.id, "google"),
-      metadata: await linkOf(sql, metadata.id, "discord"),
-      backendOwner: await linkOf(sql, backendOwner.id, "google"),
-      userId: await linkOf(sql, userId.id, "discord"),
-      emailVerified: await linkOf(sql, emailVerified.id, "google"),
-      signedIn: await linkOf(sql, signedIn.id, "discord"),
-      relinked: await linkOf(sql, relinked.id, "google"),
-      emailOwner: await linkOf(sql, emailOwner.id, "email"),
+      staleEmail: await linkOf(sql, staleEmail),
+      staleSignIn: await linkOf(sql, staleSignIn),
+      staleMetadata: await linkOf(sql, staleMetadata),
+      renumbered: await linkOf(sql, renumbered),
+      foreignOwner: await linkOf(sql, foreignOwner),
+      movedOwner: await linkOf(sql, movedOwner),
+      unverified: await linkOf(sql, unverified),
+      signedIn: await linkOf(sql, signedIn),
+      relinked: await linkOf(sql, relinked, "google"),
+      emailOwner: await linkOf(sql, emailOwner, "email"),
     };
-    assert.equal(repaired.providerEmail.provider_email, providerEmail.email);
+    assert.equal(repaired.staleEmail.provider_email, staleEmail.email);
     const [{ last_sign_in_at: lastSignIn }] = await sql`select last_sign_in_at from auth.identities
-      where user_id = ${lastSeen.id} and provider = 'google'`;
-    assert.equal(repaired.lastSeen.last_seen_at.toISOString(), lastSignIn.toISOString());
-    assert.equal(repaired.metadata.metadata.stale, undefined);
-    assert.equal(repaired.backendOwner.backend_owner, "supabase");
-    assert.notEqual(repaired.userId.id, strandedLink.id);
-    assert.equal(repaired.emailVerified.email_verified, true);
-    assert.equal(new Date(repaired.signedIn.last_seen_at).toISOString(), signedInAt);
+      where user_id = ${staleSignIn.id} and provider = 'google'`;
+    assert.equal(repaired.staleSignIn.last_seen_at.toISOString(), lastSignIn.toISOString());
+    assert.equal(repaired.staleMetadata.metadata.stale, undefined);
+    const [{ rank }] = await sql`select metadata->>'rank' as rank from accounts.identity_links where id = ${repaired.renumbered.id}`;
+    assert.equal(rank, "1.0");
+    assert.equal(repaired.foreignOwner.backend_owner, "supabase");
+    assert.notEqual(repaired.movedOwner.id, movedLink.id);
+    assert.equal(repaired.unverified.email_verified, true);
+    assert.equal(repaired.signedIn.last_seen_at.toISOString(), signedInAt);
     assert.equal(repaired.signedIn.metadata.avatar_url, "https://cdn.example.test/avatar.png");
     assert.equal(repaired.relinked.provider_subject, subject);
     assert.equal(repaired.emailOwner.email_verified, false);
-    assert.equal(await linkOf(sql, unlinked.id, "discord"), undefined);
+    assert.equal(await linkOf(sql, unlinked), undefined);
     const profiles = await sql`select user_id, primary_email from public.profiles
-      where user_id in (${emailDrift.id}, ${ownedElsewhere.id}, ${emailOwner.id})`;
+      where user_id in (${clearedProfile.id}, ${ownedElsewhere.id}, ${emailOwner.id})`;
     assert.deepEqual(
       Object.fromEntries(profiles.map(row => [row.user_id, row.primary_email])),
-      { [emailDrift.id]: emailDrift.email, [ownedElsewhere.id]: null, [emailOwner.id]: ownedElsewhere.email }
+      { [clearedProfile.id]: clearedProfile.email, [ownedElsewhere.id]: null, [emailOwner.id]: ownedElsewhere.email }
     );
 
     assert.deepEqual(changed, [
       ...Object.values(repaired).map(link => `identity_links:${link.id}`),
       `identity_links:${unlinkedLink.id}`,
-      `identity_links:${strandedLink.id}`,
+      `identity_links:${movedLink.id}`,
       `principals:${await principalOf(sql, relinked.id)}`,
-      `principals:${await principalOf(sql, userId.id)}`,
-      `profiles:${emailDrift.id}`,
+      `principals:${await principalOf(sql, movedOwner.id)}`,
+      `profiles:${clearedProfile.id}`,
     ].sort());
     return { changed: changed.length };
   });
 
   await scenario("a merged secondary login keeps no primary email of its own", async () => {
-    const primary = accounts[10];
+    const primary = byProvider("google").at(-1);
     const secondary = await mergeSecondaryLogin(sql, primary);
     const principalId = await principalOf(sql, primary.id);
     await sql`insert into public.profiles (user_id, principal_id, primary_email, display_name)
