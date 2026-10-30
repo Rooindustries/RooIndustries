@@ -142,7 +142,7 @@ export default function Home({ initialData = null, heroHeadingTag = "h1" }) {
 
   return (
     <>
-      <Hero initialData={initialData?.hero || null} headingTag={heroHeadingTag} />
+      <Hero initialData={initialData?.hero || null} initialPackages={initialData?.heroPackages || null} headingTag={heroHeadingTag} />
       <DeferredSection
         fallbackClassName="min-h-[510px]"
         rootMargin="160px 0px"

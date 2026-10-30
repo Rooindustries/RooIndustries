@@ -32,6 +32,7 @@ function buildPageMarkdown(pathname, privacy = null, hero = HOME_COPY.hero) {
       return [
         `# ${escapeMarkdown(hero.headingLine1)} ${escapeMarkdown(hero.headingLine2)}`,
         escapeMarkdown(hero.description),
+        ...(hero.ramPrice ? [`[${escapeMarkdown(hero.ramPriceSourceLabel)}](${hero.ramPrice.sourceUrl}) · US price before tax and shipping.`] : []),
         escapeMarkdown(hero.subtext),
         `## ${services.heading}`,
         services.subheading,
