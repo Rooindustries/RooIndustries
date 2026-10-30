@@ -57,6 +57,7 @@
     "test:smoke:production": "node --test tests/production-smoke.test.mjs",
     "test:contact:csp": "playwright test tests/contact-form-csp.spec.js --project=chromium",
     "test:booking-flow": "playwright test tests/booking-flow.spec.js --project=chromium",
+    "test:creator-credit": "cross-env ROO_CREATOR_CREDIT_NATIVE=1 playwright test tests/creator-credit-payment.spec.js --project=chromium",
     "test:claims": "playwright test tests/backed-claims.spec.js --project=chromium",
     "test:booking-initial-slot": "playwright test tests/booking-initial-slot.spec.js --project=chromium",
     "test:booking-hold": "node --test tests/booking-hold.test.mjs",

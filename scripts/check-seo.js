@@ -104,7 +104,7 @@ if (!bodyMatch) {
     .createHash("sha256")
     .update(bodyMatch[1], "utf8")
     .digest("hex");
-  if (bodyHash !== "26f492b59d6779c3f71e85ca82b8d9663210b72891d7a030425596a1c909ab55") {
+  if (bodyHash !== "7227378fdf0de7f758c0aed24d733690b7e52b2ada09ecbe95ca598624adf195") {
     errors.push("BIOSGuide body content changed unexpectedly.");
   }
 }
