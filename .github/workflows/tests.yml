@@ -83,7 +83,6 @@ jobs:
       - run: npm run test:tooling:dependencies
       - run: npm run check:seo
       - run: npm run check:supabase:migrations
-      - run: npm run test:deploy:rollback
 
   playwright:
     name: Playwright ${{ matrix.suite.name }}
@@ -147,6 +146,7 @@ jobs:
             TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:traffic-recovery
             TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:tourney-retirement:phases
             npm run test:remote-browser-guard
+            npm run test:deploy:rollback
             npm run test:smoke:production
           fi
           xvfb-run -a npx playwright test --pass-with-no-tests ${PW_SHARD:+--shard="$PW_SHARD"} "$PW_FILES"
