@@ -328,7 +328,7 @@ function HoldBanner({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs font-medium text-ink sm:text-sm">
           Slot <strong>{localTimeLabel || "-"}</strong> is reserved.{" "}
-          <span className="text-info-text">
+          <span className="text-info-text tabular-nums">
             Expires in {formatCountdown(countdownMs)}.
           </span>
         </p>

@@ -406,7 +406,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
     }
     return isMobileWidth
       ? "w-auto max-w-[90vw] sm:max-w-[30rem]"
-      : "w-auto max-w-[46rem]";
+      : "w-auto max-w-[47rem]";
   })();
 
   const paddingClass = isPaymentScreen
@@ -471,7 +471,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
                 ? ` · ${getPublicPackageTitle(hold.packageTitle)}`
                 : ""}
             </p>
-            <p className={`text-info-text ${inline ? "" : "truncate"} drop-shadow-sm ${subtitleSizeClass}`}>
+            <p className={`text-info-text tabular-nums ${inline ? "" : "truncate"} drop-shadow-sm ${subtitleSizeClass}`}>
               Expires in {formatCountdown(countdown)}
             </p>
           </div>

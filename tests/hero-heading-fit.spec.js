@@ -64,6 +64,9 @@ for (const route of ["/payment-success", "/thank-you"]) {
       for (const viewport of viewports) {
         await page.setViewportSize(viewport);
         const returned = await measureHeading(page);
+        const screenshot = testInfo.outputPath(`returned-home-${viewport.width}.png`);
+        await page.screenshot({ path: screenshot, timeout: 10000 });
+        await testInfo.attach(`Returned Home at ${viewport.width}`, { path: screenshot, contentType: "image/png" });
         const freshContext = await browser.newContext({ javaScriptEnabled: true, viewport, serviceWorkers: "block" });
         try {
           await guardBrowserContext(freshContext, [baseURL, manifest.contentURL]);
@@ -72,9 +75,6 @@ for (const route of ["/payment-success", "/thank-you"]) {
           await expect(freshPage.locator("#top h1 .ri-hero-heading-line")).toHaveCount(2);
           const fresh = await measureHeading(freshPage);
           comparisons.push({ viewport, returned, fresh });
-          const screenshot = testInfo.outputPath(`returned-home-${viewport.width}.png`);
-          await page.screenshot({ path: screenshot, timeout: 10000 });
-          await testInfo.attach(`Returned Home at ${viewport.width}`, { path: screenshot, contentType: "image/png" });
         } finally {
           await freshContext.close();
         }

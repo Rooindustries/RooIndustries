@@ -601,7 +601,9 @@ for (const matchingSelector of [false, true]) {
     await second.addCookies(await context.cookies());
     const tabB = await second.newPage();
     try {
+      await page.bringToFront();
       await page.getByRole("button", { name: "Publish", exact: true }).click(); await pending.arrived;
+      await tabB.bringToFront();
       await tabB.goto("/admin/content"); await choose(tabB, "FAQ"); await expandEditor(tabB);
       await tabB.getByLabel("Answer", { exact: true }).fill("B's concurrent ordinary answer 日本語");
       await tabB.getByRole("button", { name: "Publish", exact: true }).click();
@@ -615,6 +617,7 @@ for (const matchingSelector of [false, true]) {
       const stored = await cms(request, `/api/admin/content/documents/${id}`);
       expect(stored.document.questions[0].answer).toBe("B's concurrent ordinary answer 日本語");
       expect(stored.document.questions[0].question).toBe(matchingSelector ? selector : "Fixture ordinary question?");
+      await page.bringToFront();
       await page.clock.fastForward(31000);
       await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
       await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
@@ -1820,11 +1823,13 @@ test("referral drafts in two tabs preserve both terms versions", async ({ page, 
   const prefix = `roo-referral-draft:v1:${encodeURIComponent(creator.creator_id)}:`;
   const oldKey = `${prefix}${creator.terms_version}`;
   const newKey = `${prefix}${newer.terms_version}`;
+  await page.bringToFront();
   await page.evaluate(prefix => localStorage.setItem(`${prefix}corrupt`, "{broken"), prefix);
   await page.getByLabel("Reason for change").fill("Older tab saves last");
   const stored = await page.evaluate(prefix => Object.keys(localStorage).filter(key => key.startsWith(prefix)).sort(), prefix);
   expect(stored).toEqual([oldKey, newKey].sort());
   other.on("dialog", dialog => dialog.accept());
+  await other.bringToFront();
   await other.reload();
   await other.getByLabel("Admin key").fill(ADMIN_KEY);
   await other.getByRole("button", { name: "Open editor", exact: true }).click();
@@ -1838,6 +1843,7 @@ test("referral drafts in two tabs preserve both terms versions", async ({ page, 
   await expect(other.getByRole("status")).toContainText("Saved in Supabase");
   expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).draft.reason, oldKey)).toBe("Older tab saves last");
   expect(await page.evaluate(key => localStorage.getItem(key), newKey)).toBeNull();
+  await page.bringToFront();
   await page.getByRole("button", { name: "Discard draft", exact: true }).click();
   expect(await page.evaluate(prefix => Object.keys(localStorage).filter(key => key.startsWith(prefix)), prefix)).toEqual([]);
   await evidence(other, testInfo, { creatorId: creator.creator_id, oldVersion: creator.terms_version, newVersion: newer.terms_version, stored });
