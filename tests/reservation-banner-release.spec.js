@@ -118,29 +118,32 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     });
 
     test("the banner buttons stay put while the countdown ticks", async ({ page, flow }) => {
-      flow.state.holdMs = 10 * 60 * 1000 + 30000;
+      await page.clock.install();
       await flow.reserve();
       await flow.details();
       await closeBooking(page);
-      const samples = await banner(page).evaluate(surface => new Promise(resolve => {
-        const seen = { countdown: new Set(), boxes: new Set(), clipped: new Set() };
-        const start = performance.now();
-        const sample = () => {
-          const [, minutes, seconds] = surface.textContent.match(/Expires in (\d+):(\d{2})/);
-          seen.countdown.add(Number(minutes) * 60 + Number(seconds));
-          for (const text of surface.querySelectorAll("p")) if (text.scrollWidth > text.clientWidth) seen.clipped.add(text.textContent);
-          seen.boxes.add(JSON.stringify([...surface.querySelectorAll("button")].map(button => {
+      const { hold } = await savedReservation(page);
+      await page.clock.pauseAt(new Date(Date.parse(hold.expiresAt) - 602500));
+      const read = () => banner(page).evaluate(surface => {
+        const [, minutes, seconds] = surface.textContent.match(/Expires in (\d+):(\d{2})/);
+        return {
+          remaining: Number(minutes) * 60 + Number(seconds),
+          clipped: [...surface.querySelectorAll("p")].filter(text => text.scrollWidth > text.clientWidth).map(text => text.textContent),
+          boxes: JSON.stringify([...surface.querySelectorAll("button")].map(button => {
             const { x, y, width, height } = button.getBoundingClientRect();
             return [button.textContent.trim(), x, y, width, height];
-          })));
-          if (!seen.countdown.has(598) && performance.now() - start < 60000) requestAnimationFrame(sample);
-          else resolve({ countdown: [...seen.countdown], boxes: [...seen.boxes], clipped: [...seen.clipped] });
+          })),
         };
-        requestAnimationFrame(sample);
-      }));
-      expect(samples.countdown).toEqual(expect.arrayContaining([600, 599]));
-      expect(samples.boxes).toHaveLength(1);
-      expect(samples.clipped).toEqual([]);
+      });
+      await expect.poll(async () => (await read()).remaining).toBe(602);
+      const samples = [await read()];
+      for (const remaining of [601, 600, 599, 598]) {
+        await page.clock.runFor(1000);
+        await expect.poll(async () => (await read()).remaining).toBe(remaining);
+        samples.push(await read());
+      }
+      expect(new Set(samples.map(sample => sample.boxes)).size).toBe(1);
+      expect(samples.flatMap(sample => sample.clipped)).toEqual([]);
     });
 
     test("continue booking is unavailable while a release is pending", async ({ page, flow }) => {
