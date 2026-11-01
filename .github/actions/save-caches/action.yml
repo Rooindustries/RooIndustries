@@ -1,0 +1,14 @@
+name: Save the Next build caches
+description: Saves the Next build caches from main's full runs so pull requests can restore them.
+inputs:
+  build-dirs:
+    description: Newline-separated Next build cache folders, matching the setup action.
+    required: true
+runs:
+  using: composite
+  steps:
+    - if: (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.head_ref == 'servi/ci-depot-runners')
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ inputs.build-dirs }}
+        key: next-build-${{ github.job }}-${{ hashFiles('package-lock.json', 'next.config.mjs') }}-${{ github.sha }}

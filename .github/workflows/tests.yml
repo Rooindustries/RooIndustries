@@ -15,7 +15,7 @@ concurrency:
 jobs:
   monitoring:
     name: Production-only monitoring
-    runs-on: ubuntu-24.04
+    runs-on: depot-ubuntu-24.04
     timeout-minutes: 30
     env:
       SENTRY_CLI_NO_TELEMETRY: "1"
@@ -23,14 +23,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install chromium
-      - name: Allow isolated monitoring on GitHub-hosted runners
-        if: ${{ runner.environment == 'github-hosted' }}
+          browsers: chromium
+          browser-deps: "false"
+      - name: Allow isolated monitoring
         run: |
           if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] &&
              [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = 1 ]; then
@@ -64,17 +62,15 @@ jobs:
 
   jest:
     name: Jest
-    runs-on: ubuntu-24.04
+    runs-on: depot-ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
       - run: npm test -- --maxWorkers=2
         env:
           BASE_URL: http://127.0.0.1:3211
@@ -87,7 +83,7 @@ jobs:
 
   playwright:
     name: Playwright ${{ matrix.suite.name }}
-    runs-on: ubuntu-24.04
+    runs-on: depot-ubuntu-24.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -123,12 +119,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium webkit
+          browsers: chromium webkit
+          build-dirs: .next-e2e-ci/cache
       - name: Run browser and agent-readiness tests
         run: |
           node scripts/test-tooling-sweep-server.mjs &
@@ -149,7 +144,19 @@ jobs:
             npm run test:remote-browser-guard
             npm run test:smoke:production
           fi
-          xvfb-run -a npx playwright test --pass-with-no-tests ${PW_SHARD:+--shard="$PW_SHARD"} "$PW_FILES"
+          xvfb-run -a npx playwright test --pass-with-no-tests --reporter=dot,json ${PW_SHARD:+--shard="$PW_SHARD"} "$PW_FILES"
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-timings/${{ matrix.suite.name }}.json
+      - uses: ./.github/actions/save-caches
+        with:
+          build-dirs: .next-e2e-ci/cache
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-timings-${{ matrix.suite.name }}
+          path: test-timings/
+          if-no-files-found: ignore
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -160,7 +167,7 @@ jobs:
 
   routes:
     name: Playwright creator portal and API routes
-    runs-on: ubuntu-24.04
+    runs-on: depot-ubuntu-24.04
     timeout-minutes: 30
     env:
       ROO_TEST_HOST: 127.0.0.1
@@ -168,12 +175,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
+          browsers: chromium
+          build-dirs: |
+            .next-e2e-routes-api/cache
+            .next-e2e-routes-portal/cache
       - name: Run API route suite
         id: api-routes
         env:
@@ -186,6 +194,11 @@ jobs:
           PW_PORT: "3241"
           PW_SERVER_ID: routes-portal
         run: xvfb-run -a npm run test:creator:portal -- --output=test-results/creator-portal
+      - uses: ./.github/actions/save-caches
+        with:
+          build-dirs: |
+            .next-e2e-routes-api/cache
+            .next-e2e-routes-portal/cache
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -196,7 +209,7 @@ jobs:
 
   native:
     name: Native PostgreSQL 17 suites
-    runs-on: ubuntu-24.04
+    runs-on: depot-ubuntu-24.04
     timeout-minutes: 60
     env:
       ROO_TEST_HOST: 127.0.0.1
@@ -214,12 +227,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
+          browsers: chromium
+          build-dirs: |
+            .next-e2e-native-admin/cache
+            .next-e2e-native-booking/cache
       - name: Install PostgreSQL 17 and PostgREST 16.4
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
@@ -274,6 +288,11 @@ jobs:
             echo "Failed suites: ${failed[*]}"
             exit 1
           fi
+      - uses: ./.github/actions/save-caches
+        with:
+          build-dirs: |
+            .next-e2e-native-admin/cache
+            .next-e2e-native-booking/cache
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -284,7 +303,7 @@ jobs:
 
   revalidation:
     name: Playwright revalidation
-    runs-on: ubuntu-24.04
+    runs-on: depot-ubuntu-24.04
     timeout-minutes: 30
     env:
       ROO_TEST_HOST: 127.0.0.1
@@ -292,12 +311,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
+          browsers: chromium
+          build-dirs: |
+            .next-e2e-revalidation-benchmarks/cache
+            .next-e2e-revalidation-static/cache
       - name: Run benchmarks revalidation suite
         id: benchmarks-revalidation
         env:
@@ -310,6 +330,11 @@ jobs:
           PW_PORT: "3261"
           PW_SERVER_ID: revalidation-static
         run: xvfb-run -a npm run test:static:revalidation -- --output=test-results/static-revalidation
+      - uses: ./.github/actions/save-caches
+        with:
+          build-dirs: |
+            .next-e2e-revalidation-benchmarks/cache
+            .next-e2e-revalidation-static/cache
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

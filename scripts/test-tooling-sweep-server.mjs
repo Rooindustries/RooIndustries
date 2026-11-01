@@ -96,7 +96,7 @@ if (development) {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   if (manifest.version !== 1 || manifest.sourceHash !== sourceHash || manifest.baseURL !== baseURL || manifest.contentURL !== contentURL) throw new Error("Isolated build ownership or source fingerprint differs; choose a fresh NEXT_DIST_DIR.");
 } else {
-  if (fs.existsSync(dist)) throw new Error("Incomplete isolated build exists; choose a fresh NEXT_DIST_DIR.");
+  if (fs.existsSync(dist) && fs.readdirSync(dist).some(entry => entry !== "cache")) throw new Error("Incomplete isolated build exists; choose a fresh NEXT_DIST_DIR.");
 }
 const fixture = await createToolingContentFixture({ origin: contentURL, artifact: process.env.TOOLING_CONTENT_ARTIFACT, apiRoutes, clockFile });
 try {

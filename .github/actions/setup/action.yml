@@ -1,0 +1,68 @@
+name: Set up the test toolchain
+description: Node, cached node_modules, cached Playwright browsers and restored Next build caches.
+inputs:
+  node-version:
+    required: true
+  browsers:
+    description: Space-separated Playwright browsers to install.
+    default: ""
+  browser-deps:
+    description: Install the browsers' system packages too.
+    default: "true"
+  build-dirs:
+    description: Newline-separated Next build cache folders to restore.
+    default: ""
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+    - id: modules
+      uses: actions/cache/restore@v4
+      with:
+        path: node_modules
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node${{ inputs.node-version }}-${{ hashFiles('package-lock.json') }}
+    - if: steps.modules.outputs.cache-hit != 'true'
+      shell: bash
+      run: npm ci
+    - if: steps.modules.outputs.cache-hit != 'true' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.head_ref == 'servi/ci-depot-runners')
+      uses: actions/cache/save@v4
+      with:
+        path: node_modules
+        key: ${{ steps.modules.outputs.cache-primary-key }}
+    - id: playwright
+      if: inputs.browsers != ''
+      shell: bash
+      run: |
+        echo "version=$(node -p "require('playwright-core/package.json').version")" >> "$GITHUB_OUTPUT"
+        echo "browsers=$(tr ' ' '-' <<< "$BROWSERS")" >> "$GITHUB_OUTPUT"
+      env:
+        BROWSERS: ${{ inputs.browsers }}
+    - id: browsers
+      if: inputs.browsers != ''
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-${{ steps.playwright.outputs.browsers }}
+    - if: inputs.browsers != '' && steps.browsers.outputs.cache-hit != 'true'
+      shell: bash
+      run: npx playwright install ${{ inputs.browser-deps == 'true' && '--with-deps' || '' }} $BROWSERS
+      env:
+        BROWSERS: ${{ inputs.browsers }}
+    - if: inputs.browsers != '' && steps.browsers.outputs.cache-hit == 'true' && inputs.browser-deps == 'true'
+      shell: bash
+      run: npx playwright install-deps $BROWSERS
+      env:
+        BROWSERS: ${{ inputs.browsers }}
+    - if: inputs.browsers != '' && steps.browsers.outputs.cache-hit != 'true' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.head_ref == 'servi/ci-depot-runners')
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ steps.browsers.outputs.cache-primary-key }}
+    - if: inputs.build-dirs != ''
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ inputs.build-dirs }}
+        key: next-build-${{ github.job }}-${{ hashFiles('package-lock.json', 'next.config.mjs') }}-${{ github.sha }}
+        restore-keys: next-build-${{ github.job }}-${{ hashFiles('package-lock.json', 'next.config.mjs') }}-
