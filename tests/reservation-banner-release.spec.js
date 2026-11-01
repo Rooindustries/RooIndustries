@@ -118,6 +118,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     });
 
     test("the banner buttons stay put while the countdown ticks", async ({ page, flow }) => {
+      flow.state.holdMs = 10 * 60 * 1000 + 12000;
       await flow.reserve();
       await flow.details();
       await closeBooking(page);
@@ -125,18 +126,19 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         const seen = { countdown: new Set(), boxes: new Set(), clipped: new Set() };
         const start = performance.now();
         const sample = () => {
-          seen.countdown.add(surface.textContent.match(/Expires in (\d+:\d{2})/)[1]);
+          const [, minutes, seconds] = surface.textContent.match(/Expires in (\d+):(\d{2})/);
+          seen.countdown.add(Number(minutes) * 60 + Number(seconds));
           for (const text of surface.querySelectorAll("p")) if (text.scrollWidth > text.clientWidth) seen.clipped.add(text.textContent);
           seen.boxes.add(JSON.stringify([...surface.querySelectorAll("button")].map(button => {
             const { x, y, width, height } = button.getBoundingClientRect();
             return [button.textContent.trim(), x, y, width, height];
           })));
-          if (performance.now() - start < 3500) requestAnimationFrame(sample);
+          if (!seen.countdown.has(598) && performance.now() - start < 30000) requestAnimationFrame(sample);
           else resolve({ countdown: [...seen.countdown], boxes: [...seen.boxes], clipped: [...seen.clipped] });
         };
         requestAnimationFrame(sample);
       }));
-      expect(samples.countdown.length).toBeGreaterThanOrEqual(3);
+      expect(samples.countdown).toEqual(expect.arrayContaining([600, 599]));
       expect(samples.boxes).toHaveLength(1);
       expect(samples.clipped).toEqual([]);
     });

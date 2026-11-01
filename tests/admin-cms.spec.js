@@ -1846,6 +1846,7 @@ test("referral drafts in two tabs preserve both terms versions", async ({ page, 
   await page.bringToFront();
   await page.getByRole("button", { name: "Discard draft", exact: true }).click();
   expect(await page.evaluate(prefix => Object.keys(localStorage).filter(key => key.startsWith(prefix)), prefix)).toEqual([]);
+  await other.bringToFront();
   await evidence(other, testInfo, { creatorId: creator.creator_id, oldVersion: creator.terms_version, newVersion: newer.terms_version, stored });
   await other.close();
 });
