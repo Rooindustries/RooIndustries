@@ -1281,7 +1281,7 @@ describe("booking calendar UI", () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText(/^expires in 0:00\.$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^expires in 00:00\.$/i)).toBeInTheDocument();
     expect(screen.getByText(PAYMENT_PENDING_EXPIRY_ERROR)).toHaveClass(
       "text-danger-text"
     );
