@@ -14,7 +14,7 @@ import {
   unwrapDodoWebhook,
 } from "./dodoProvider.js";
 import {
-  providerStateChange,
+  observedProviderState,
   recordProviderPaymentState,
   refreshOwnerReviewDodoStates,
   unconfirmedProviderState,
@@ -132,7 +132,6 @@ const buildRecoveryFailureState = (record) => {
     recoveryFailureCount,
     reconciliationRecoveryTerminal: stopped,
     nextRecoveryAt: stopped ? "9999-12-31T23:59:59.999Z" : getNextPaymentRecoveryAt(recoveryFailureCount),
-    ...(stopped ? unconfirmedProviderState(record) : {}),
   };
 };
 
@@ -1212,6 +1211,7 @@ const patchPaymentRecord = async ({
     : existingEvents;
   const values = {
     ...set,
+    ...unconfirmedProviderState(record, set),
     ...(event ? { events: mergedEvents } : {}),
     updatedAt: nowIso(),
   };
@@ -4482,7 +4482,7 @@ export const reconcilePaymentSessions = async ({
             providerRecoveryTerminal: true,
             providerRecoveryTerminalReason: dodoInspection.reason,
             nextRecoveryAt: "",
-            ...providerStateChange(record.providerPaymentState, dodoInspection.providerPaymentState),
+            ...observedProviderState(record, dodoInspection.providerPaymentState),
           } });
           summary.recovery += 1;
           continue;

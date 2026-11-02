@@ -26,23 +26,30 @@ const isConflictError = (error) =>
 
 const hasBooking = (record) => Boolean(String(record?.bookingId || "").trim());
 
-export const providerStateChange = (current, next) => {
+const providerStateChange = (current, next) => {
   const state = String(next || "").trim();
   if (!state || state === current || stageOf(state) < stageOf(current)) return {};
   return { providerPaymentState: state, providerStateCheckedAt: new Date().toISOString() };
 };
 
-export const unconfirmedProviderState = (record) => {
-  const recorded = String(record?.providerPaymentState || "").trim();
-  if (record?.provider !== "dodo" || hasBooking(record) || recorded) return {};
+const stopsReconcile = (values) =>
+  values.providerRecoveryTerminal === true || values.reconciliationRecoveryTerminal === true;
+
+export const observedProviderState = (record, observed) =>
+  hasBooking(record) ? {} : providerStateChange(record?.providerPaymentState, observed);
+
+export const unconfirmedProviderState = (record, values) => {
+  const next = { ...record, ...values };
+  const recorded = String(next.providerPaymentState || "").trim();
+  if (!stopsReconcile(values) || next.provider !== "dodo" || hasBooking(next) || recorded) return {};
   return { providerPaymentState: UNCONFIRMED_PROVIDER_STATE, providerStateCheckedAt: new Date().toISOString() };
 };
 
 export const recordProviderPaymentState = async ({ client, record, providerPaymentState, patchRecord }) => {
   let current = record;
   for (let attempt = 0; attempt < 3 && current?._id; attempt += 1) {
-    const change = providerStateChange(current.providerPaymentState, providerPaymentState);
-    if (!change.providerPaymentState || hasBooking(current)) return;
+    const change = observedProviderState(current, providerPaymentState);
+    if (!change.providerPaymentState) return;
     try {
       await patchRecord({ client, record: current, set: change });
       return;
