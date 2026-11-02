@@ -321,3 +321,38 @@ test('a payment that failed our checks while processing keeps its slot once Dodo
   assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
 });
+
+test('a payment that failed our checks and was then fully refunded frees its slot a day after the hold ran out', async () => {
+  fixture.setPaymentAmountOverrides({ total_amount: 1 });
+  const checkout = await startCheckoutBeforeExpiry();
+  await holdRunsOut(checkout);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'succeeded');
+  const paymentId = `payment_${checkout.record.providerOrderId}`;
+  const refunded = await fixture.refundPayment(paymentId, [{ refund_id: `window_refund_${checkout.record._id.slice(-12)}`,
+    payment_id: paymentId, amount: Math.round(checkout.record.pricingSnapshot.netAmount * 100), currency: 'USD',
+    status: 'succeeded' }], `window_refund_${checkout.record._id}`);
+  assert.equal(refunded.status, 409, JSON.stringify(refunded));
+  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'refunded');
+  await holdRunsOut(checkout, 25 * 60 * 60_000);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await holdFor(checkout.payload)).phase, 'expired');
+  assert.equal(await isOffered(checkout.payload), true);
+  assert.equal((await secondVisitor(checkout.payload)).status, 200);
+});
+
+test('a customer back from a payment that failed our checks records Dodo success and keeps the slot', async () => {
+  fixture.setPaymentAmountOverrides({ status: 'processing', total_amount: 1 });
+  const checkout = await startCheckoutBeforeExpiry();
+  await holdRunsOut(checkout);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'processing');
+  fixture.setPaymentAmountOverrides({ status: 'succeeded', total_amount: 1 });
+  const returned = await fixture.post('/api/payment/finalize', {}, checkout.started.body.paymentAccessToken);
+  assert.equal(returned.status, 409, JSON.stringify(returned));
+  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'succeeded');
+  await holdRunsOut(checkout, 25 * 60 * 60_000);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
+  assert.equal((await secondVisitor(checkout.payload)).status, 409);
+});

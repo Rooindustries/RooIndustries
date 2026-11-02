@@ -3,7 +3,7 @@ import envValue from "../../supabase/envValue.cjs";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
 import { isTerminalDisputeStatus, resolveDisputeReferralAccounting } from "../../referrals/disputeAccounting.js";
 const { resolveStoreBackend } = envValue;
-import { createDodoCheckout, inspectDodoCheckout, retrieveDodoPayment, retrieveDodoRefund, validateDodoPayment, verifyDodoCapture, unwrapDodoWebhook } from "./dodoProvider.js";
+import { createDodoCheckout, inspectDodoCheckout, retrieveDodoPayment, retrieveDodoRefund, settledDodoPaymentState, validateDodoPayment, verifyDodoCapture, unwrapDodoWebhook } from "./dodoProvider.js";
 import crypto from "crypto";
 import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
 import { validateBookingContact } from "../../../lib/bookingContactValidation.js";
@@ -4466,7 +4466,7 @@ export const reconcilePaymentSessions = async ({
             providerRecoveryTerminal: true,
             providerRecoveryTerminalReason: dodoInspection.reason,
             nextRecoveryAt: "",
-            ...(dodoInspection.providerPaymentState
+            ...(advancesProviderPaymentState(record.providerPaymentState, String(dodoInspection.providerPaymentState || "").trim())
               ? { providerPaymentState: String(dodoInspection.providerPaymentState).trim() }
               : {}),
           } });
@@ -5846,6 +5846,22 @@ export const handlePayPalWebhook = async ({
   return result;
 };
 
+const PROVIDER_STATE_STAGE = { succeeded: 1, refunded: 2, disputed: 2 };
+
+const advancesProviderPaymentState = (current, next) =>
+  !!next && current !== next &&
+  (PROVIDER_STATE_STAGE[next] || 0) >= (PROVIDER_STATE_STAGE[String(current || "").trim()] || 0);
+
+const recordProviderPaymentState = async ({ client, record, providerPaymentState }) => {
+  const state = String(providerPaymentState || "").trim();
+  if (!advancesProviderPaymentState(record.providerPaymentState, state) || String(record.bookingId || "").trim()) return;
+  try {
+    await patchPaymentRecord({ client, record, set: { providerPaymentState: state } });
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+  }
+};
+
 export const refreshDodoPayment = async ({ client, record, payment = null, source = "reconcile", applyBookingRefund = null, deferFinalization = false }) => {
   const inspection = payment ? { payment } : await inspectDodoCheckout({ record });
   payment = inspection.payment;
@@ -5854,6 +5870,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       return { httpStatus: 409, body: { ok: false, code: "dodo_configuration_unavailable", error: "Dodo Payments is not available in this environment." } };
     }
     if (inspection.retryable === false) {
+      await recordProviderPaymentState({ client, record, providerPaymentState: inspection.providerPaymentState });
       return { httpStatus: 409, body: { ok: false, code: inspection.reason, error: "The payment does not match this checkout." } };
     }
     if (inspection.state === "unpaid" && !isFutureIso(record.sessionExpiresAt)) {
@@ -5865,14 +5882,8 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
   }
   const validation = validateDodoPayment({ record, payment });
   if (!validation.ok) {
-    const providerPaymentState = String(payment.status || "").trim();
-    if (validation.reason !== "dodo_payment_binding_mismatch" && providerPaymentState &&
-        record.providerPaymentState !== providerPaymentState) {
-      try {
-        await patchPaymentRecord({ client, record, set: { providerPaymentState } });
-      } catch (error) {
-        if (!isConflictError(error)) throw error;
-      }
+    if (validation.reason !== "dodo_payment_binding_mismatch") {
+      await recordProviderPaymentState({ client, record, providerPaymentState: settledDodoPaymentState(payment) });
     }
     return { httpStatus: 409, body: { ok: false, code: validation.reason, error: "The payment does not match this checkout." } };
   }

@@ -22,7 +22,7 @@ EmptyHold == [phase |-> "none", nonce |-> NoNonce, exp |-> 0, rec |-> NoNonce]
 EmptyTab == [slot |-> NoSlot, nonce |-> NoNonce, exp |-> 0, details |-> FALSE, paying |-> NoNonce]
 EmptyRec == [status |-> "none", slot |-> NoSlot, tokenExp |-> 0, created |-> 0,
              pay |-> "open", paidInTime |-> FALSE, details |-> FALSE, knownCaptured |-> FALSE, terminal |-> FALSE,
-             outlived |-> FALSE]
+             outlived |-> FALSE, valid |-> TRUE]
 
 TypeOK ==
   /\ now \in 0..MaxTime
@@ -36,7 +36,7 @@ TypeOK ==
                          slot : Slots \cup {NoSlot}, tokenExp : Times, created : Times,
                          pay : {"open", "processing", "captured", "closed"},
                          paidInTime : BOOLEAN, details : BOOLEAN, knownCaptured : BOOLEAN, terminal : BOOLEAN,
-                         outlived : BOOLEAN]]
+                         outlived : BOOLEAN, valid : BOOLEAN]]
 
 Init ==
   /\ now = 0
@@ -155,7 +155,7 @@ SubmitPayment(n) ==
 
 PaymentSucceeds(n) ==
   /\ rec[n].pay = "processing"
-  /\ rec' = [rec EXCEPT ![n].pay = "captured"]
+  /\ \E valid \in BOOLEAN : rec' = [rec EXCEPT ![n].pay = "captured", ![n].valid = valid]
   /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
 
 PaymentFails(n) ==
@@ -222,6 +222,7 @@ MarkNeedsRecovery(n) ==
 
 FinalizeCapture(n) ==
   /\ rec[n].pay = "captured"
+  /\ rec[n].valid
   /\ rec[n].status \in {"started", "needs_recovery", "abandoned"}
   /\ IF rec[n].status = "abandoned"
        THEN RecordReschedule(n)
@@ -235,6 +236,7 @@ FinalizeCapture(n) ==
 
 ReconcileRecovery(n) ==
   /\ rec[n].pay = "captured"
+  /\ rec[n].valid
   /\ ~rec[n].terminal
   /\ rec[n].status = "needs_recovery"
   /\ IF CanCommit(n) THEN CommitBooking(n) ELSE RecordReschedule(n)
@@ -271,11 +273,26 @@ RecoveryGivesUp(n) ==
                             ![n].knownCaptured = observed /\ rec[n].pay = "captured"]
   /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
 
+ReconcileRejectsCapture(n) ==
+  /\ rec[n].pay = "captured"
+  /\ ~rec[n].valid
+  /\ ~rec[n].terminal
+  /\ rec[n].status \in {"started", "needs_recovery", "abandoned"}
+  /\ rec' = [rec EXCEPT ![n].status = "needs_recovery", ![n].terminal = TRUE, ![n].knownCaptured = TRUE]
+  /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
+
 WebhookRecordsCapture(n) ==
   /\ rec[n].terminal
   /\ rec[n].pay = "captured"
   /\ ~rec[n].knownCaptured
   /\ rec' = [rec EXCEPT ![n].knownCaptured = TRUE]
+  /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
+
+OwnerRefundsUnbookedCapture(n) ==
+  /\ rec[n].terminal
+  /\ rec[n].pay = "captured"
+  /\ BookingFor(n) = {}
+  /\ rec' = [rec EXCEPT ![n].pay = "closed", ![n].knownCaptured = FALSE]
   /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
 
 AdminRestoresBooking(s) ==
@@ -313,9 +330,10 @@ Next ==
   \/ \E n \in Nonces : \/ SubmitPayment(n) \/ PaymentSucceeds(n) \/ PaymentFails(n) \/ CheckoutExpires(n)
                        \/ FinalizeCapture(n) \/ ReconcileRecovery(n) \/ ReconcilePending(n)
                        \/ ReconcileUnpaid(n) \/ RecoveryGivesUp(n) \/ WebhookRecordsCapture(n)
+                       \/ OwnerRefundsUnbookedCapture(n) \/ ReconcileRejectsCapture(n)
 
 Server(n) == FinalizeCapture(n) \/ ReconcileRecovery(n) \/ ReconcilePending(n)
-             \/ ReconcileUnpaid(n) \/ WebhookRecordsCapture(n)
+             \/ ReconcileUnpaid(n) \/ WebhookRecordsCapture(n) \/ ReconcileRejectsCapture(n)
 
 Spec == Init /\ [][Next]_vars /\ WF_vars(Tick) /\ \A n \in Nonces : WF_vars(Server(n)) /\ SF_vars(CheckoutExpires(n))
           /\ \A s \in Slots : WF_vars(UnconfirmedPaymentHoldExpires(s))

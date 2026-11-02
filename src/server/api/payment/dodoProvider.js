@@ -113,6 +113,14 @@ export const validateDodoPayment = ({ record, payment }) => {
 export const retrieveDodoPayment = (paymentId) => createDodoClient().payments.retrieve(paymentId);
 export const retrieveDodoRefund = (refundId) => createDodoClient().refunds.retrieve(refundId);
 
+export const settledDodoPaymentState = (payment) => {
+  if (payment?.refund_status === "full") return "refunded";
+  if ((payment?.disputes || []).some((dispute) => ["dispute_lost", "dispute_accepted"].includes(dispute.dispute_status))) {
+    return "disputed";
+  }
+  return String(payment?.status || "").trim();
+};
+
 export const inspectDodoCheckout = async ({ record }) => {
   try {
     const client = createDodoClient();
@@ -127,7 +135,7 @@ export const inspectDodoCheckout = async ({ record }) => {
     if (!validation.ok) {
       return validation.reason === "dodo_payment_binding_mismatch"
         ? { state: "unavailable", ...validation }
-        : { state: "unavailable", ...validation, providerPaymentState: payment.status };
+        : { state: "unavailable", ...validation, providerPaymentState: settledDodoPaymentState(payment) };
     }
     const state = payment.status === "succeeded" ? "captured"
       : ["failed", "cancelled", "requires_payment_method"].includes(payment.status) ? "unpaid" : "pending";
