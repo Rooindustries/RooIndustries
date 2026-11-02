@@ -179,3 +179,24 @@ test("fails when a manifest points to an unavailable chunk", () => {
   expect(result.status).toBe(1);
   expect(result.output).toMatch(/missing\.js/);
 });
+
+test("a lazy import over 250 KB fails even when its budget allows more", () => {
+  const big = chunk("big-lazy", 300 * 1024);
+  build({ "/page": [] }, { "App -> Heavy": { files: [big] } });
+  budgets({ "/": roomy }, { "App -> Heavy": { js: 400 * 1024, css: 0 } });
+  const result = run();
+  expect(result.status).toBe(1);
+  expect(result.output).toMatch(/Lazy App -> Heavy JS is \d+ gzip bytes, over the 256000 cap for any lazy import/);
+});
+
+test("update keeps the existing budgets when the build fails a check", () => {
+  const page = chunk("page");
+  build({ "/page": [page] });
+  write(".next/server/app/index.html", `<script src="/_next/static/chunks/uncounted.js" async></script>`);
+  chunk("uncounted");
+  budgets({ "/": roomy });
+  const before = fs.readFileSync(path.join(directory, "route-budgets.json"), "utf8");
+  const result = run("--update");
+  expect(result.status).toBe(1);
+  expect(fs.readFileSync(path.join(directory, "route-budgets.json"), "utf8")).toBe(before);
+});

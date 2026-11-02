@@ -6,6 +6,7 @@ const { gzipSync } = require("zlib");
 // Compressed modern JS per initial route or lazy import, with each shared file
 // counted once per group. Legacy nomodule polyfills are excluded. These are
 // build-byte budgets, not measured page-load timings.
+const maxLazyJsGzipBytes = 250 * 1024;
 const maxMediaBytes = 25 * 1024 * 1024;
 const budgetMarginBytes = 1024;
 const budgetStep = 1024;
@@ -16,6 +17,7 @@ const budgetsFile = path.resolve(
   process.env.ROUTE_BUDGETS_FILE || path.join(__dirname, "route-budgets.json")
 );
 const updateBudgets = process.argv.includes("--update");
+let measuredBudgets = null;
 const fileSizes = new Map();
 
 const measure = (files, extension) => {
@@ -51,6 +53,9 @@ const checkGroup = ({ kind, name, label, files, budgets, measured }) => {
   console.log(
     `${label}: ${js.gzipBytes} gzip bytes of JS in ${js.fileCount} files, ${css.gzipBytes} gzip bytes of CSS in ${css.fileCount} files.`
   );
+  if (kind === "lazy" && js.gzipBytes > maxLazyJsGzipBytes) {
+    errors.push(`${label} JS is ${js.gzipBytes} gzip bytes, over the ${maxLazyJsGzipBytes} cap for any lazy import.`);
+  }
   if (updateBudgets) return;
   const budget = budgets[kind][name];
   if (!budget) {
@@ -128,16 +133,7 @@ try {
       }
     }
   }
-  if (updateBudgets) {
-    const sorted = (group) => Object.fromEntries(Object.entries(group).sort(([a], [b]) => a.localeCompare(b)));
-    fs.writeFileSync(
-      budgetsFile,
-      `${JSON.stringify({ routes: sorted(measured.routes), lazy: sorted(measured.lazy) }, null, 2)}\n`
-    );
-    console.log(
-      `Wrote budgets for ${Object.keys(measured.routes).length} routes and ${Object.keys(measured.lazy).length} lazy imports.`
-    );
-  }
+  measuredBudgets = measured;
 } catch (error) {
   errors.push(`Cannot verify production build size: ${error.message}`);
 }
@@ -164,6 +160,17 @@ const walk = (dir) => {
 
 if (fs.existsSync(publicDir)) {
   walk(publicDir);
+}
+
+if (updateBudgets && measuredBudgets && !errors.length) {
+  const sorted = (group) => Object.fromEntries(Object.entries(group).sort(([a], [b]) => a.localeCompare(b)));
+  fs.writeFileSync(
+    budgetsFile,
+    `${JSON.stringify({ routes: sorted(measuredBudgets.routes), lazy: sorted(measuredBudgets.lazy) }, null, 2)}\n`
+  );
+  console.log(
+    `Wrote budgets for ${Object.keys(measuredBudgets.routes).length} routes and ${Object.keys(measuredBudgets.lazy).length} lazy imports.`
+  );
 }
 
 if (errors.length) {
