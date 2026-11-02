@@ -52,6 +52,20 @@ describe("referral registration confirmation client", () => {
     expect(window.location.hash).toBe("");
   });
 
+  test("a confirmation whose response body times out asks to try again instead of rejecting the link", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.reject(new DOMException("Request timed out.", "TimeoutError")),
+    });
+    renderVerification();
+
+    expect(
+      await screen.findByText("Confirmation is temporarily unavailable. Please try again.")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/invalid or expired/i)).not.toBeInTheDocument();
+  });
+
   test("removes a definitively rejected token from session storage", async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: false,

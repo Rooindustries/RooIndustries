@@ -59,3 +59,25 @@ export const calleeName = (call) => {
   }
   return "";
 };
+
+export const declaredValue = (context, identifier) => {
+  let variable = null;
+  for (let scope = context.sourceCode.getScope(identifier); scope && !variable; scope = scope.upper) {
+    variable = scope.set.get(identifier.name) || null;
+  }
+  const definition = variable?.defs?.[0];
+  if (!definition || definition.type !== "Variable" || definition.node.id.type !== "Identifier") return null;
+  return definition.node.init || null;
+};
+
+export const isFetchCall = (call) => {
+  const callee = call.callee;
+  if (callee.type === "Identifier") return callee.name === "fetch";
+  return (
+    callee.type === "MemberExpression" &&
+    !callee.computed &&
+    callee.property.name === "fetch" &&
+    callee.object.type === "Identifier" &&
+    ["window", "globalThis", "self"].includes(callee.object.name)
+  );
+};

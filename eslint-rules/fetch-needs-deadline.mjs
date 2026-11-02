@@ -1,10 +1,25 @@
-const isFetch = (callee) =>
-  (callee.type === "Identifier" && callee.name === "fetch") ||
-  (callee.type === "MemberExpression" &&
-    !callee.computed &&
-    callee.property.name === "fetch" &&
-    callee.object.type === "Identifier" &&
-    ["window", "globalThis", "self"].includes(callee.object.name));
+import { declaredValue, isFetchCall } from "./util.mjs";
+
+const isSignalKey = (property) =>
+  property.type === "Property" &&
+  !property.computed &&
+  ((property.key.type === "Identifier" && property.key.name === "signal") ||
+    (property.key.type === "Literal" && property.key.value === "signal"));
+
+const carriesSignal = (context, node, seen = new Set()) => {
+  if (!node || seen.has(node)) return true;
+  seen.add(node);
+  if (node.type === "Identifier") {
+    const value = declaredValue(context, node);
+    return value ? carriesSignal(context, value, seen) : true;
+  }
+  if (node.type !== "ObjectExpression") return true;
+  return node.properties.some(
+    (property) =>
+      isSignalKey(property) ||
+      (property.type === "SpreadElement" && carriesSignal(context, property.argument, seen)),
+  );
+};
 
 export default {
   meta: {
@@ -20,19 +35,9 @@ export default {
   create(context) {
     return {
       CallExpression(node) {
-        if (!isFetch(node.callee)) return;
+        if (!isFetchCall(node)) return;
         const options = node.arguments[1];
-        if (!options) return context.report({ node, messageId: "missing" });
-        if (options.type !== "ObjectExpression") return;
-        const hasSignal = options.properties.some(
-          (property) =>
-            property.type === "SpreadElement" ||
-            (property.type === "Property" &&
-              !property.computed &&
-              ((property.key.type === "Identifier" && property.key.name === "signal") ||
-                (property.key.type === "Literal" && property.key.value === "signal"))),
-        );
-        if (!hasSignal) context.report({ node, messageId: "missing" });
+        if (!options || !carriesSignal(context, options)) context.report({ node, messageId: "missing" });
       },
     };
   },

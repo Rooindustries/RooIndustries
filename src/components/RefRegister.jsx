@@ -28,6 +28,7 @@ export default function RefRegister() {
   const [toast, setToast] = useState(null);
   const [formError, setFormError] = useState("");
   const [socialIdentity, setSocialIdentity] = useState(null);
+  const [identityCheckFailed, setIdentityCheckFailed] = useState(false);
   const [verificationPending, setVerificationPending] = useState(false);
   const availabilityVersion = useRef(0);
   const submittingRef = useRef(false);
@@ -48,6 +49,23 @@ export default function RefRegister() {
     setToast(next);
     setTimeout(() => setToast((current) => (current === next ? null : current)), 2800);
   }
+  const loadSocialIdentity = () => {
+    setIdentityCheckFailed(false);
+    fetch("/api/auth/identities?flow=referral", { cache: "no-store", signal: requestDeadline() })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data?.authenticated && data?.emailVerified && data.email) {
+          setEmail(data.email);
+          setPassword("");
+          setConfirm("");
+          setSocialIdentity(data);
+        }
+      })
+      .catch(() => {
+        if (mountedRef.current) setIdentityCheckFailed(true);
+      });
+  };
+
   useEffect(() => {
     try {
       const draft = JSON.parse(sessionStorage.getItem(REFERRAL_SIGNUP_DRAFT) || "null");
@@ -60,17 +78,7 @@ export default function RefRegister() {
     } catch {
       removeBrowserStorage("sessionStorage", REFERRAL_SIGNUP_DRAFT);
     }
-    fetch("/api/auth/identities?flow=referral", { cache: "no-store", signal: requestDeadline() })
-      .then((response) => response.json())
-      .then((data) => {
-        if (data?.authenticated && data?.emailVerified && data.email) {
-          setEmail(data.email);
-          setPassword("");
-          setConfirm("");
-          setSocialIdentity(data);
-        }
-      })
-      .catch(() => {});
+    loadSocialIdentity();
   }, []);
 
   const saveDraft = () => {
@@ -314,6 +322,17 @@ export default function RefRegister() {
         {socialIdentity ? (
           <p className="rounded-xl border border-success-border bg-success-soft px-4 py-3 text-sm text-success-text">
             Verified as {socialIdentity.email}. You can use Google or Discord to sign in.
+          </p>
+        ) : null}
+        {identityCheckFailed && !socialIdentity ? (
+          <p
+            role="alert"
+            className="rounded-xl border border-line-input bg-surface-input px-4 py-3 text-sm text-ink-secondary"
+          >
+            We couldn't check your Google or Discord sign-in.{" "}
+            <button type="button" onClick={loadSocialIdentity} className="font-semibold text-accent underline">
+              Try again
+            </button>
           </p>
         ) : null}
 

@@ -1,4 +1,18 @@
-const unwrap = (expression) => {
+import { isFetchCall, isFunction } from "./util.mjs";
+
+const usesResponse = (context, handler) => {
+  if (!handler) return false;
+  if (!isFunction(handler)) return true;
+  const [response] = handler.params;
+  if (!response) return false;
+  if (response.type !== "Identifier") return true;
+  const variable = context.sourceCode
+    .getDeclaredVariables(handler)
+    .find((item) => item.name === response.name);
+  return Boolean(variable?.references.length);
+};
+
+const unwrap = (context, expression) => {
   let current = expression;
   for (;;) {
     if (current.type === "AwaitExpression") current = current.argument;
@@ -6,8 +20,10 @@ const unwrap = (expression) => {
       current.type === "CallExpression" &&
       current.callee.type === "MemberExpression" &&
       !current.callee.computed &&
-      ["catch", "finally"].includes(current.callee.property.name)
+      ["catch", "finally", "then"].includes(current.callee.property.name)
     ) {
+      if (current.callee.property.name === "then" && usesResponse(context, current.arguments[0]))
+        return current;
       current = current.callee.object;
     } else return current;
   }
@@ -39,13 +55,8 @@ export default {
   create(context) {
     return {
       ExpressionStatement(node) {
-        const call = unwrap(node.expression);
-        if (
-          call.type !== "CallExpression" ||
-          call.callee.type !== "Identifier" ||
-          call.callee.name !== "fetch"
-        )
-          return;
+        const call = unwrap(context, node.expression);
+        if (call.type !== "CallExpression" || !isFetchCall(call)) return;
         const method = writeMethod(call);
         if (method) context.report({ node, messageId: "ignored", data: { method } });
       },

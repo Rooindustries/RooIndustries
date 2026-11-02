@@ -8,6 +8,10 @@ const PASSWORD_PENDING_MESSAGE =
   "Your password change is saving. It will finish in a moment.";
 const PASSWORD_UPDATED_MESSAGE =
   "Password updated. Log in with your new password.";
+const PASSWORD_UNCERTAIN_MESSAGE =
+  "We couldn't tell if your password changed. " +
+  "Try signing in with the new one, and change it again if that doesn't work.";
+const PASSWORD_FAILED_MESSAGE = "Password update could not be completed. Please try again.";
 
 export default function RefChangePassword() {
   const nav = useNavigate();
@@ -60,6 +64,7 @@ export default function RefChangePassword() {
     const version = editVersionRef.current;
     setLoading(true);
     setOutcome(null);
+    let passwordUpdateSent = false;
 
     try {
       const reauthResponse = await fetch("/api/auth/reauth", {
@@ -90,6 +95,7 @@ export default function RefChangePassword() {
         }
         return;
       }
+      passwordUpdateSent = true;
       const res = await fetch("/api/ref/hashPassword", {
         method: "POST",
         signal: requestDeadline(15000),
@@ -139,7 +145,7 @@ export default function RefChangePassword() {
       setOutcome({
         type: "error",
         kind: "service",
-        message: "Password update could not be completed. Please try again.",
+        message: passwordUpdateSent ? PASSWORD_UNCERTAIN_MESSAGE : PASSWORD_FAILED_MESSAGE,
       });
     } finally {
       setLoading(false);

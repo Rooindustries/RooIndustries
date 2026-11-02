@@ -1,4 +1,4 @@
-import { calleeName, enclosingComponent, isFunction } from "./util.mjs";
+import { calleeName, declaredValue, enclosingComponent, isFunction } from "./util.mjs";
 
 const ROUTER_OBJECTS = new Set(["router", "history", "location"]);
 const ROUTER_HOOKS = new Set(["useRouter", "useHistory"]);
@@ -17,16 +17,6 @@ const UNKNOWN_SOURCES = new Set([
   "ConditionalExpression",
   "LogicalExpression",
 ]);
-
-const declaredValue = (context, identifier) => {
-  let variable = null;
-  for (let scope = context.sourceCode.getScope(identifier); scope && !variable; scope = scope.upper) {
-    variable = scope.set.get(identifier.name) || null;
-  }
-  const definition = variable?.defs?.[0];
-  if (!definition || definition.type !== "Variable" || definition.node.id.type !== "Identifier") return null;
-  return definition.node.init || null;
-};
 
 const propertyValue = (object, name) => {
   let value = null;

@@ -81,7 +81,10 @@ export default function RefVerifyRegistration() {
         .then(async (response) => ({
           ok: response.ok,
           status: response.status,
-          data: await response.json().catch(() => ({})),
+          data: await response.json().catch((error) => {
+            if (error?.name === "TimeoutError" || error?.name === "AbortError") throw error;
+            return {};
+          }),
         }))
         .then(({ ok, status, data }) => {
           if (!ok || data.ok !== true) {

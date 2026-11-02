@@ -472,6 +472,37 @@ test.describe('portal requests that stall', () => {
     } finally { await held.release(); }
   });
 
+  test('a stalled password change reports an unknown outcome', async ({ page }, testInfo) => {
+    await page.route('**/api/auth/reauth', route => route.fulfill({ json: { ok: true } }));
+    const held = await stall(page, '/api/ref/hashPassword', 'POST');
+    try {
+      await page.goto('/referrals/change-password');
+      await page.getByLabel('Current Password', { exact: true }).fill('Synthetic-password1!');
+      await page.getByLabel('New Password', { exact: true }).fill('Fresh-password-22!');
+      await page.getByLabel('Confirm Password', { exact: true }).fill('Fresh-password-22!');
+      await page.getByRole('button', { name: 'Save Password', exact: true }).click();
+      await held.arrived;
+      const message = page.getByRole('alert').filter({ hasText: "We couldn't tell if your password changed." });
+      await expect(message).toBeVisible({ timeout: 20000 });
+      expect(held.count()).toBe(1);
+      await record(page, testInfo, 'stalled-password-change', { timedOut: true, requests: held.count() });
+    } finally { await held.release(); }
+  });
+
+  test('a stalled sign-in check on signup can be tried again', async ({ page }, testInfo) => {
+    const held = await stall(page, '/api/auth/identities?flow=referral', 'GET');
+    try {
+      await page.goto('/referrals/register');
+      await held.arrived;
+      const notice = page.getByRole('alert').filter({ hasText: "We couldn't check your Google or Discord sign-in." });
+      await expect(notice).toBeVisible({ timeout: 15000 });
+      await record(page, testInfo, 'stalled-signup-identity', { timedOut: true });
+      await held.release();
+      await notice.getByRole('button', { name: 'Try again', exact: true }).click();
+      await expect(notice).toHaveCount(0);
+    } finally { await held.release(); }
+  });
+
   test('stalled unlink reports an unknown outcome', async ({ page }, testInfo) => {
     await page.route('**/api/auth/reauth', route => route.fulfill({ json: { ok: true } }));
     const held = await stall(page, '/api/auth/identities', 'POST');
@@ -1686,7 +1717,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       for (const code of [400, 409, 503, 0]) {
         hashCase = { status: code, json: { ok: false, error: `Synthetic ${code} password failure.` } };
         await save.click();
-        await expect(alert).toContainText(code ? `Synthetic ${code} password failure.` : 'Password update could not be completed. Please try again.');
+        await expect(alert).toContainText(code ? `Synthetic ${code} password failure.` : "We couldn't tell if your password changed.");
         await retained();
         outcomes.push({ route: 'hashPassword', status: code, message: await alert.innerText() });
       }
