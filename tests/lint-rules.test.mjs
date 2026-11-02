@@ -72,6 +72,7 @@ run("no-unguarded-timer-navigation", {
     `function Queue() {
       setTimeout(() => items.push(next), 100); setTimeout(() => text.replace("a", "b")); return null; }`,
     `function Log() { const history = []; setTimeout(() => history.push("step"), 100); return null; }`,
+    `function Steps() { const data = { history: [] }; setTimeout(() => data.history.push("step")); return null; }`,
   ],
   invalid: [
     {

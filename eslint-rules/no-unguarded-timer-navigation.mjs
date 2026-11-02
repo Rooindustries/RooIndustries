@@ -11,28 +11,47 @@ const receiverName = (callee) => {
   return "";
 };
 
-const UNKNOWN_SOURCES = new Set(["MemberExpression", "ChainExpression", "AwaitExpression", "ConditionalExpression"]);
+const UNKNOWN_SOURCES = new Set([
+  "ChainExpression",
+  "AwaitExpression",
+  "ConditionalExpression",
+  "LogicalExpression",
+]);
 
-const declaredRouter = (context, identifier, seen = new Set()) => {
-  if (seen.has(identifier.name)) return null;
-  seen.add(identifier.name);
+const declaredValue = (context, identifier) => {
   let variable = null;
   for (let scope = context.sourceCode.getScope(identifier); scope && !variable; scope = scope.upper) {
     variable = scope.set.get(identifier.name) || null;
   }
   const definition = variable?.defs?.[0];
-  if (!definition || definition.type !== "Variable") return null;
-  const init = definition.node.init;
-  if (!init || UNKNOWN_SOURCES.has(init.type)) return null;
-  if (init.type === "Identifier") return declaredRouter(context, init, seen);
-  return init.type === "CallExpression" && ROUTER_HOOKS.has(calleeName(init));
+  if (!definition || definition.type !== "Variable" || definition.node.id.type !== "Identifier") return null;
+  return definition.node.init || null;
+};
+
+const propertyValue = (object, name) => {
+  const property = object.properties.find(
+    (item) => item.type === "Property" && !item.computed && (item.key.name || item.key.value) === name,
+  );
+  return property ? property.value : null;
+};
+
+const routerValue = (context, node, seen = new Set()) => {
+  if (!node || seen.has(node)) return null;
+  seen.add(node);
+  if (node.type === "Identifier") return routerValue(context, declaredValue(context, node), seen);
+  if (node.type === "MemberExpression") {
+    if (node.computed || node.property.type !== "Identifier") return null;
+    const owner = node.object.type === "Identifier" ? declaredValue(context, node.object) : null;
+    if (owner?.type !== "ObjectExpression") return null;
+    return routerValue(context, propertyValue(owner, node.property.name), seen);
+  }
+  if (UNKNOWN_SOURCES.has(node.type)) return null;
+  return node.type === "CallExpression" && ROUTER_HOOKS.has(calleeName(node));
 };
 
 const isRouterReceiver = (context, callee) => {
-  if (callee.object.type === "Identifier") {
-    const declared = declaredRouter(context, callee.object);
-    if (declared !== null) return declared;
-  }
+  const known = routerValue(context, callee.object);
+  if (known !== null) return known;
   return ROUTER_OBJECTS.has(receiverName(callee));
 };
 
