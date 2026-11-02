@@ -181,7 +181,15 @@ await run("playwright-command-safety", () => {
   const runner = child(path.join(root, "scripts/test-tooling-sweep-server.mjs"), { NEXT_DIST_DIR: "../other-run", BASE_URL: fixture.baseUrl, PW_PORT: "45991" });
   assert.notEqual(runner.status, 0);
   assert.match(runner.stderr, /test-target/);
-  return { unsafeDirectoriesRefused: 5, symlinkRefused: true, danglingSymlinkRefused: true, badPortsRefused: 3, actualRunnerRefusedTraversal: true, externalStartsServer: false, command: config.webServer.command };
+  const partial = fs.mkdtempSync(path.join(root, ".next-e2e-safety-partial-"));
+  fs.mkdirSync(path.join(partial, "cache"), { recursive: true });
+  fs.writeFileSync(path.join(partial, "routes-manifest.json"), "{}");
+  try {
+    const partialRunner = child(path.join(root, "scripts/test-tooling-sweep-server.mjs"), { NEXT_DIST_DIR: path.basename(partial), BASE_URL: fixture.baseUrl, PW_PORT: "45991" });
+    assert.notEqual(partialRunner.status, 0);
+    assert.match(partialRunner.stderr, /Incomplete isolated build exists/);
+  } finally { fs.rmSync(partial, { recursive: true, force: true }); }
+  return { unsafeDirectoriesRefused: 5, symlinkRefused: true, danglingSymlinkRefused: true, badPortsRefused: 3, actualRunnerRefusedTraversal: true, partialBuildRefused: true, externalStartsServer: false, command: config.webServer.command };
 });
 await run("browser-cleanup-exact-ownership", () => {
   const source = fs.readFileSync(path.join(root, "scripts/phase1-browser-hygiene.js"), "utf8");

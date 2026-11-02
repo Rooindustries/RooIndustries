@@ -23,12 +23,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install chromium
+          browsers: chromium
+          browser-deps: "false"
       - name: Allow isolated monitoring on GitHub-hosted runners
         if: ${{ runner.environment == 'github-hosted' }}
         run: |
@@ -70,11 +69,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
       - run: npm test -- --maxWorkers=2
         env:
           BASE_URL: http://127.0.0.1:3211
@@ -94,25 +91,20 @@ jobs:
       matrix:
         suite:
           - name: navigation
-            files: 'section-nav\.spec\.js'
+            files: '/section-nav\.spec\.js$'
           - name: booking
-            files: 'booking-flow\.spec\.js'
+            files: '/booking-flow\.spec\.js$'
           - name: rest-1
-            files: '^(?!.*(section-nav|booking-flow)\.spec\.js$).*'
-            shard: 1/4
+            files: '/(benchmarks-rendering|bios-guide-fonts|booking-code-check|booking-dialog-sizing|content-layout-shift|dodo-session-new-hold|free-booking-confirmation|missing-page|nonjs-seo|privacy-markdown|referral-link-capture|terms-rendering|upgrade-form-keyboard|ux-quick-fixes)\.spec\.js$'
           - name: rest-2
-            files: '^(?!.*(section-nav|booking-flow)\.spec\.js$).*'
-            shard: 2/4
+            files: '/(api-preview|booking-initial-slot|confirmation-summary|guide-package-links|home-hero-cms|home-performance|home-video-posters|package-guarantee|payment-code-check|payment-confirmation-receipt|payment-methods|routes-smoke|transactional-emails)\.spec\.js$'
           - name: rest-3
-            files: '^(?!.*(section-nav|booking-flow)\.spec\.js$).*'
-            shard: 3/4
+            files: '/(a11y-regressions|backed-claims|booking-details-required|booking-modal-layout|contact-form-csp|faq-answers|home-cta-links|nav-chaos|public-route-sweep|route-background|route-entries|static-pages|structured-data|team-rendering)\.spec\.js$'
           - name: rest-4
-            files: '^(?!.*(section-nav|booking-flow)\.spec\.js$).*'
-            shard: 4/4
+            files: '^(?!.*/(section-nav|booking-flow|benchmarks-rendering|bios-guide-fonts|booking-code-check|booking-dialog-sizing|content-layout-shift|dodo-session-new-hold|free-booking-confirmation|missing-page|nonjs-seo|privacy-markdown|referral-link-capture|terms-rendering|upgrade-form-keyboard|ux-quick-fixes|api-preview|booking-initial-slot|confirmation-summary|guide-package-links|home-hero-cms|home-performance|home-video-posters|package-guarantee|payment-code-check|payment-confirmation-receipt|payment-methods|routes-smoke|transactional-emails|a11y-regressions|backed-claims|booking-details-required|booking-modal-layout|contact-form-csp|faq-answers|home-cta-links|nav-chaos|public-route-sweep|route-background|route-entries|static-pages|structured-data|team-rendering)\.spec\.js$).*'
     env:
       PW_FILES: ${{ matrix.suite.files }}
       PW_SUITE: ${{ matrix.suite.name }}
-      PW_SHARD: ${{ matrix.suite.shard }}
       ROO_TEST_HOST: 127.0.0.1
       BASE_URL: http://127.0.0.1:3211
       PW_PORT: "3211"
@@ -123,12 +115,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium webkit
+          browsers: chromium webkit
+          build-dirs: .next-e2e-ci/cache/webpack
       - name: Run browser and agent-readiness tests
         run: |
           node scripts/test-tooling-sweep-server.mjs &
@@ -149,7 +140,19 @@ jobs:
             npm run test:remote-browser-guard
             npm run test:smoke:production
           fi
-          xvfb-run -a npx playwright test --pass-with-no-tests ${PW_SHARD:+--shard="$PW_SHARD"} "$PW_FILES"
+          xvfb-run -a npx playwright test --pass-with-no-tests --reporter=dot,json "$PW_FILES"
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-timings/${{ matrix.suite.name }}.json
+      - uses: ./.github/actions/save-caches
+        with:
+          build-dirs: .next-e2e-ci/cache/webpack
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-timings-${{ matrix.suite.name }}
+          path: test-timings/
+          if-no-files-found: ignore
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -168,12 +171,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
+          browsers: chromium
+          build-dirs: |
+            .next-e2e-routes-api/cache/webpack
+            .next-e2e-routes-portal/cache/webpack
       - name: Run API route suite
         id: api-routes
         env:
@@ -186,6 +190,11 @@ jobs:
           PW_PORT: "3241"
           PW_SERVER_ID: routes-portal
         run: xvfb-run -a npm run test:creator:portal -- --output=test-results/creator-portal
+      - uses: ./.github/actions/save-caches
+        with:
+          build-dirs: |
+            .next-e2e-routes-api/cache/webpack
+            .next-e2e-routes-portal/cache/webpack
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -214,12 +223,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
+          browsers: chromium
+          build-dirs: |
+            .next-e2e-native-admin/cache/webpack
+            .next-e2e-native-booking/cache/webpack
       - name: Install PostgreSQL 17 and PostgREST 16.4
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
@@ -274,6 +284,11 @@ jobs:
             echo "Failed suites: ${failed[*]}"
             exit 1
           fi
+      - uses: ./.github/actions/save-caches
+        with:
+          build-dirs: |
+            .next-e2e-native-admin/cache/webpack
+            .next-e2e-native-booking/cache/webpack
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -292,12 +307,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
+          browsers: chromium
+          build-dirs: |
+            .next-e2e-revalidation-benchmarks/cache/webpack
+            .next-e2e-revalidation-static/cache/webpack
       - name: Run benchmarks revalidation suite
         id: benchmarks-revalidation
         env:
@@ -310,6 +326,11 @@ jobs:
           PW_PORT: "3261"
           PW_SERVER_ID: revalidation-static
         run: xvfb-run -a npm run test:static:revalidation -- --output=test-results/static-revalidation
+      - uses: ./.github/actions/save-caches
+        with:
+          build-dirs: |
+            .next-e2e-revalidation-benchmarks/cache/webpack
+            .next-e2e-revalidation-static/cache/webpack
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
