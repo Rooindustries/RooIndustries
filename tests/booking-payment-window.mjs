@@ -379,7 +379,16 @@ test('the cron learns about a refund on a payment in owner review even when the 
   const checkout = await startCheckoutBeforeExpiry();
   await holdRunsOut(checkout);
   assert.equal((await cron()).status, 200);
-  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'succeeded');
+  const closed = await fixture.commerce.getDocument(checkout.record._id);
+  assert.equal(closed.providerPaymentState, 'succeeded');
+  const { _id, _rev, _createdAt, _updatedAt, ...fields } = closed;
+  for (let index = 0; index < 80; index += 1) {
+    await fixture.commerce.create({ ...fields, _id: `${_id}.filler.${index}`, status: 'abandoned',
+      providerPaymentState: '', providerRecoveryTerminal: false, providerOrderId: `${fields.providerOrderId}_filler_${index}`,
+      providerIdempotencyKey: `${fields.providerIdempotencyKey}_filler_${index}`, sessionScope: `${fields.sessionScope}:filler:${index}`,
+      startClaimId: `${fields.startClaimId}.filler.${index}`, couponReservationId: '', bookingId: '',
+      lateCaptureWatchUntil: '', reconciliationRecoveryTerminal: true, nextRecoveryAt: '9999-12-31T23:59:59.999Z' });
+  }
   fixture.setPaymentAmountOverrides({ total_amount: 1, refund_status: 'full' });
   clockShiftMs += 2 * 60 * 60_000;
   assert.equal((await cron()).status, 200);
