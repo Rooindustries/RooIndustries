@@ -6,6 +6,7 @@ const PROVIDER_STATE_STAGE = { succeeded: 1, refunded: 2, disputed: 2 };
 const OWNER_REVIEW_STATE_CHECK_MS = 60 * 60 * 1000;
 const OWNER_REVIEW_BATCH_SIZE = 20;
 const CLEANUP_DELAY_MS = 24 * 60 * 60 * 1000;
+const MONEY_ARRIVED_CHECK_MS = 24 * 60 * 60 * 1000;
 const NEVER_AGAIN = "9999-12-31T23:59:59.999Z";
 const REVERSED_PROVIDER_STATES = new Set(["refunded", "disputed"]);
 const MONEY_ARRIVED_STATUSES = new Set([
@@ -17,9 +18,8 @@ const MONEY_ARRIVED_STATUSES = new Set([
   "email_partial",
 ]);
 const UNCONFIRMED_PROVIDER_STATE = "unknown";
-const UNSETTLED_PROVIDER_STATES = [
+const UNCONFIRMED_PROVIDER_STATES = [
   UNCONFIRMED_PROVIDER_STATE,
-  "succeeded",
   "processing",
   "requires_payment_method",
   "requires_customer_action",
@@ -84,8 +84,13 @@ const withinCleanupWindow = (record) => {
   return Number.isFinite(expiresAt) && Date.now() <= expiresAt + CLEANUP_DELAY_MS + OWNER_REVIEW_STATE_CHECK_MS;
 };
 
-const stillNeedsRecheck = (record) =>
-  !hasBooking(record) && (moneyArrived(record) || withinCleanupWindow(record));
+const nextCheckAt = (record) => {
+  if (hasBooking(record)) return NEVER_AGAIN;
+  if (moneyArrived(record)) {
+    return new Date(Date.now() + MONEY_ARRIVED_CHECK_MS - OWNER_REVIEW_STATE_CHECK_MS).toISOString();
+  }
+  return withinCleanupWindow(record) ? new Date().toISOString() : NEVER_AGAIN;
+};
 
 const currentSettledState = async (record) => {
   if (hasBooking(record)) return "";
@@ -95,25 +100,32 @@ const currentSettledState = async (record) => {
     : inspection.providerPaymentState;
 };
 
-export const refreshOwnerReviewDodoStates = async ({ client, patchRecord }) => {
+const dueRecords = async (client, states, limit) => {
+  if (limit <= 0) return [];
   const records = await client.fetch(
     `*[_type == $type && provider == $provider && providerPaymentState in $states
-      && providerStateCheckedAt <= $due][0...${OWNER_REVIEW_BATCH_SIZE}]`,
+      && providerStateCheckedAt <= $due][0...${limit}]`,
     {
       type: PAYMENT_RECORD_TYPE,
       provider: "dodo",
-      states: UNSETTLED_PROVIDER_STATES,
+      states,
       due: new Date(Date.now() - OWNER_REVIEW_STATE_CHECK_MS).toISOString(),
     }
   );
+  return Array.isArray(records) ? records : [];
+};
+
+export const refreshOwnerReviewDodoStates = async ({ client, patchRecord }) => {
+  const unconfirmed = await dueRecords(client, UNCONFIRMED_PROVIDER_STATES, OWNER_REVIEW_BATCH_SIZE);
+  const succeeded = await dueRecords(client, ["succeeded"], OWNER_REVIEW_BATCH_SIZE - unconfirmed.length);
   let checked = 0;
-  for (const record of Array.isArray(records) ? records : []) {
+  for (const record of [...unconfirmed, ...succeeded]) {
     try {
       const change = providerStateChange(record.providerPaymentState, await currentSettledState(record));
       const next = { ...record, ...change };
       await patchRecord({ client, record, set: {
         ...change,
-        providerStateCheckedAt: stillNeedsRecheck(next) ? new Date().toISOString() : NEVER_AGAIN,
+        providerStateCheckedAt: nextCheckAt(next),
       } });
       checked += 1;
     } catch (error) {

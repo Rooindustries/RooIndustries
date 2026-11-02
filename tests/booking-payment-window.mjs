@@ -223,21 +223,21 @@ test('an unpaid checkout in a provider outage keeps its slot after recovery give
   assert.equal((await secondVisitor(checkout.payload)).status, 200);
 });
 
-const addStaleRecheckRecords = async (checkout, count) => {
+const addStaleRecheckRecords = async (checkout, count, { label = 'stale', state = 'unknown' } = {}) => {
   const { _id, _rev, _createdAt, _updatedAt, ...fields } = await fixture.commerce.getDocument(checkout.record._id);
   const longAgo = '2000-01-01T00:00:00.000Z';
   for (let index = 0; index < count; index += 1) {
     await fixture.commerce.create({
       ...fields,
-      _id: `paymentRecord.session.0-stale-${index}`,
+      _id: `paymentRecord.session.0-${label}-${index}`,
       status: 'needs_recovery',
-      providerPaymentState: 'unknown',
+      providerPaymentState: state,
       providerStateCheckedAt: longAgo,
       holdSnapshot: { ...fields.holdSnapshot, slotHoldId: '', slotHoldExpiresAt: longAgo },
-      providerOrderId: `${fields.providerOrderId}_stale_${index}`,
-      providerIdempotencyKey: `${fields.providerIdempotencyKey}_stale_${index}`,
-      sessionScope: `${fields.sessionScope}:stale:${index}`,
-      startClaimId: `${fields.startClaimId}.stale.${index}`,
+      providerOrderId: `${fields.providerOrderId}_${label}_${index}`,
+      providerIdempotencyKey: `${fields.providerIdempotencyKey}_${label}_${index}`,
+      sessionScope: `${fields.sessionScope}:${label}:${index}`,
+      startClaimId: `${fields.startClaimId}.${label}.${index}`,
       couponReservationId: '',
       providerPaymentId: '',
       paymentProofClaimId: '',
@@ -261,6 +261,7 @@ test('a payment still going through when recovery gives up keeps its slot once D
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
   assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'unknown');
   await addStaleRecheckRecords(checkout, 260);
+  await addStaleRecheckRecords(checkout, 260, { label: 'review', state: 'succeeded' });
   fixture.setProviderLookupFailure(false);
   fixture.setPaymentAmountOverrides({ status: 'succeeded' });
   for (let hour = 0; hour < 2; hour += 1) {
