@@ -81,6 +81,12 @@ run("no-unguarded-timer-navigation", {
       errors: [{ messageId: "timer" }],
     },
     {
+      name: "router prop alias push from a timer",
+      code: `function Pay({ providedRouter }) {
+        const router = providedRouter; setTimeout(() => router.push("/payment"), 300); return null; }`,
+      errors: [{ messageId: "timer" }],
+    },
+    {
       name: "router prop push from a timer",
       code: `function Pay({ router }) { setTimeout(() => router.push("/payment"), 300); return null; }`,
       errors: [{ messageId: "timer" }],

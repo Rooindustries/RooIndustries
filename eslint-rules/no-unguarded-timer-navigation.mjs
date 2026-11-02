@@ -11,16 +11,21 @@ const receiverName = (callee) => {
   return "";
 };
 
-const declaredRouter = (context, identifier) => {
+const UNKNOWN_SOURCES = new Set(["MemberExpression", "ChainExpression", "AwaitExpression", "ConditionalExpression"]);
+
+const declaredRouter = (context, identifier, seen = new Set()) => {
+  if (seen.has(identifier.name)) return null;
+  seen.add(identifier.name);
   let variable = null;
   for (let scope = context.sourceCode.getScope(identifier); scope && !variable; scope = scope.upper) {
     variable = scope.set.get(identifier.name) || null;
   }
   const definition = variable?.defs?.[0];
   if (!definition || definition.type !== "Variable") return null;
-  const declaration = definition.node;
-  const init = declaration.init;
-  return init?.type === "CallExpression" && ROUTER_HOOKS.has(calleeName(init));
+  const init = definition.node.init;
+  if (!init || UNKNOWN_SOURCES.has(init.type)) return null;
+  if (init.type === "Identifier") return declaredRouter(context, init, seen);
+  return init.type === "CallExpression" && ROUTER_HOOKS.has(calleeName(init));
 };
 
 const isRouterReceiver = (context, callee) => {
