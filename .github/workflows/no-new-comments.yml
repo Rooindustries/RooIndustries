@@ -1,0 +1,39 @@
+name: No new comments
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: no-new-comments-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  no-new-comments:
+    name: no-new-comments
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          filter: blob:none
+      - name: The check still catches its own cases
+        run: bash .github/no-new-comments-e2e.sh
+      - name: No new comments or authorship credits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          checker=.github/no-new-comments.sh
+          if git cat-file -e "$BASE_SHA:$checker" 2>/dev/null; then
+            git show "$BASE_SHA:$checker" >"$RUNNER_TEMP/no-new-comments.sh"
+            checker=$RUNNER_TEMP/no-new-comments.sh
+          fi
+          bash "$checker"
