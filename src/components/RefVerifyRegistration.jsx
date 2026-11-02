@@ -74,7 +74,7 @@ export default function RefVerifyRegistration() {
       const entry = { outcome: null };
       entry.promise = fetch("/api/ref/verifyRegistration", {
         method: "POST",
-        signal: requestDeadline(15000),
+        signal: requestDeadline(30000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token }),
       })
