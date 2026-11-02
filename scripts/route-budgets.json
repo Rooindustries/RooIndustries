@@ -1,126 +1,258 @@
 {
-  "/": {
-    "js": 221184,
-    "css": 26624
+  "routes": {
+    "/": {
+      "js": 223232,
+      "css": 26624
+    },
+    "/_not-found": {
+      "js": 117760,
+      "css": 26624
+    },
+    "/about": {
+      "js": 164864,
+      "css": 26624
+    },
+    "/admin/content": {
+      "js": 157696,
+      "css": 30720
+    },
+    "/admin/referrals": {
+      "js": 123904,
+      "css": 28672
+    },
+    "/benchmarks": {
+      "js": 166912,
+      "css": 26624
+    },
+    "/booking": {
+      "js": 244736,
+      "css": 26624
+    },
+    "/contact": {
+      "js": 174080,
+      "css": 26624
+    },
+    "/discord": {
+      "js": 117760,
+      "css": 26624
+    },
+    "/downloads/[slug]": {
+      "js": 162816,
+      "css": 26624
+    },
+    "/faq": {
+      "js": 203776,
+      "css": 26624
+    },
+    "/meet-the-team": {
+      "js": 168960,
+      "css": 26624
+    },
+    "/not-found": {
+      "js": 117760,
+      "css": 26624
+    },
+    "/packages": {
+      "js": 167936,
+      "css": 26624
+    },
+    "/payment": {
+      "js": 242688,
+      "css": 26624
+    },
+    "/payment-success": {
+      "js": 228352,
+      "css": 26624
+    },
+    "/privacy": {
+      "js": 166912,
+      "css": 26624
+    },
+    "/referrals/change-password": {
+      "js": 165888,
+      "css": 26624
+    },
+    "/referrals/dashboard": {
+      "js": 240640,
+      "css": 26624
+    },
+    "/referrals/forgot": {
+      "js": 164864,
+      "css": 26624
+    },
+    "/referrals/login": {
+      "js": 161792,
+      "css": 26624
+    },
+    "/referrals/register": {
+      "js": 234496,
+      "css": 26624
+    },
+    "/referrals/reset": {
+      "js": 233472,
+      "css": 26624
+    },
+    "/referrals/verify": {
+      "js": 164864,
+      "css": 26624
+    },
+    "/reviews": {
+      "js": 166912,
+      "css": 26624
+    },
+    "/terms": {
+      "js": 166912,
+      "css": 26624
+    },
+    "/thank-you": {
+      "js": 228352,
+      "css": 26624
+    },
+    "/tools": {
+      "js": 166912,
+      "css": 26624
+    },
+    "/tourney": {
+      "js": 121856,
+      "css": 27648
+    },
+    "/upgrade-xoc": {
+      "js": 165888,
+      "css": 26624
+    },
+    "/upgrade/[slug]": {
+      "js": 166912,
+      "css": 26624
+    }
   },
-  "/_not-found": {
-    "js": 115712,
-    "css": 26624
-  },
-  "/about": {
-    "js": 162816,
-    "css": 26624
-  },
-  "/admin/content": {
-    "js": 155648,
-    "css": 30720
-  },
-  "/admin/referrals": {
-    "js": 121856,
-    "css": 28672
-  },
-  "/benchmarks": {
-    "js": 164864,
-    "css": 26624
-  },
-  "/booking": {
-    "js": 243712,
-    "css": 26624
-  },
-  "/contact": {
-    "js": 172032,
-    "css": 26624
-  },
-  "/discord": {
-    "js": 115712,
-    "css": 26624
-  },
-  "/downloads/[slug]": {
-    "js": 161792,
-    "css": 26624
-  },
-  "/faq": {
-    "js": 202752,
-    "css": 26624
-  },
-  "/meet-the-team": {
-    "js": 166912,
-    "css": 26624
-  },
-  "/not-found": {
-    "js": 116736,
-    "css": 26624
-  },
-  "/packages": {
-    "js": 165888,
-    "css": 26624
-  },
-  "/payment": {
-    "js": 240640,
-    "css": 26624
-  },
-  "/payment-success": {
-    "js": 227328,
-    "css": 26624
-  },
-  "/privacy": {
-    "js": 164864,
-    "css": 26624
-  },
-  "/referrals/change-password": {
-    "js": 163840,
-    "css": 26624
-  },
-  "/referrals/dashboard": {
-    "js": 238592,
-    "css": 26624
-  },
-  "/referrals/forgot": {
-    "js": 162816,
-    "css": 26624
-  },
-  "/referrals/login": {
-    "js": 159744,
-    "css": 26624
-  },
-  "/referrals/register": {
-    "js": 232448,
-    "css": 26624
-  },
-  "/referrals/reset": {
-    "js": 231424,
-    "css": 26624
-  },
-  "/referrals/verify": {
-    "js": 162816,
-    "css": 26624
-  },
-  "/reviews": {
-    "js": 164864,
-    "css": 26624
-  },
-  "/terms": {
-    "js": 164864,
-    "css": 26624
-  },
-  "/thank-you": {
-    "js": 227328,
-    "css": 26624
-  },
-  "/tools": {
-    "js": 164864,
-    "css": 26624
-  },
-  "/tourney": {
-    "js": 119808,
-    "css": 27648
-  },
-  "/upgrade-xoc": {
-    "js": 163840,
-    "css": 26624
-  },
-  "/upgrade/[slug]": {
-    "js": 164864,
-    "css": 26624
+  "lazy": {
+    "src/App.jsx -> ./components/BookingModal": {
+      "js": 43008,
+      "css": 1024
+    },
+    "src/App.jsx -> ./components/PerfDebugOverlay": {
+      "js": 3072,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/About": {
+      "js": 5120,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/Benchmarks": {
+      "js": 7168,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/Book": {
+      "js": 61440,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/Contact": {
+      "js": 14336,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/Download": {
+      "js": 3072,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/Faq": {
+      "js": 44032,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/Home": {
+      "js": 63488,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/MeetTheTeam": {
+      "js": 9216,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/NotFound": {
+      "js": 4096,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/Packages": {
+      "js": 8192,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/Payment": {
+      "js": 61440,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/PrivacyPolicy": {
+      "js": 7168,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/RefChangePassword": {
+      "js": 6144,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/RefDashboard": {
+      "js": 79872,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/RefForgot": {
+      "js": 5120,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/RefLogin": {
+      "js": 114688,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/RefRegister": {
+      "js": 74752,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/RefReset": {
+      "js": 73728,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/RefVerifyRegistration": {
+      "js": 5120,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/Reviews": {
+      "js": 7168,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/Terms": {
+      "js": 7168,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/Tools": {
+      "js": 6144,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/Upgrade": {
+      "js": 7168,
+      "css": 1024
+    },
+    "src/App.jsx -> ./legacyPages/UpgradeXoc": {
+      "js": 6144,
+      "css": 1024
+    },
+    "src/components/Packages.jsx -> ./PackageDetailsModal": {
+      "js": 41984,
+      "css": 1024
+    },
+    "src/legacyPages/Book.jsx -> ../components/Footer": {
+      "js": 4096,
+      "css": 1024
+    },
+    "src/lib/confirmationPages.js -> ../legacyPages/PaymentSuccess": {
+      "js": 6144,
+      "css": 1024
+    },
+    "src/lib/confirmationPages.js -> ../legacyPages/Thankyou": {
+      "js": 6144,
+      "css": 1024
+    },
+    "src/lib/monitoring/client.js -> ./browser": {
+      "js": 147456,
+      "css": 1024
+    },
+    "src/next/NotFoundEntry.jsx -> ./LegacyRoutePage": {
+      "js": 46080,
+      "css": 1024
+    }
   }
 }

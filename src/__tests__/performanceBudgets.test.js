@@ -33,7 +33,7 @@ const build = (pages, lazy = {}) => {
   write(".next/app-build-manifest.json", { pages });
   write(".next/react-loadable-manifest.json", lazy);
 };
-const budgets = (value) => write("route-budgets.json", value);
+const budgets = (routes, lazy = {}) => write("route-budgets.json", { routes, lazy });
 const roomy = { js: 400 * 1024, css: 100 * 1024 };
 const run = (...args) => {
   const result = spawnSync(process.execPath, [script, ...args], {
@@ -63,7 +63,7 @@ test("counts shared route and layout JavaScript instead of only main-app", () =>
   budgets({ "/": { js: 200 * 1024, css: 0 } });
   const result = run();
   expect(result.status).toBe(1);
-  expect(result.output).toMatch(/^- \/ first-load JS is \d+ gzip bytes, \d+ over its budget of 204800/m);
+  expect(result.output).toMatch(/^- First load \/ JS is \d+ gzip bytes, \d+ over its budget of 204800/m);
 });
 
 test.each(["/error", "/tools/error"])("counts ancestor error boundary JavaScript from %s", (entry) => {
@@ -73,7 +73,7 @@ test.each(["/error", "/tools/error"])("counts ancestor error boundary JavaScript
   budgets({ "/tools": { js: 200 * 1024, css: 0 } });
   const result = run();
   expect(result.status).toBe(1);
-  expect(result.output).toMatch(/\/tools first-load JS .* over its budget/);
+  expect(result.output).toMatch(/First load \/tools JS .* over its budget/);
 });
 
 test("deduplicates shared chunks and includes only ancestor layouts and errors", () => {
@@ -99,7 +99,7 @@ test("fails when a route's first-load CSS grows past its budget", () => {
   budgets({ "/": { js: roomy.js, css: 24 * 1024 } });
   const result = run();
   expect(result.status).toBe(1);
-  expect(result.output).toMatch(/^- \/ first-load CSS is \d+ gzip bytes, \d+ over its budget of 24576/m);
+  expect(result.output).toMatch(/^- First load \/ CSS is \d+ gzip bytes, \d+ over its budget of 24576/m);
 });
 
 test("fails when a new route has no budget", () => {
@@ -107,7 +107,7 @@ test("fails when a new route has no budget", () => {
   budgets({ "/": roomy });
   const result = run();
   expect(result.status).toBe(1);
-  expect(result.output).toMatch(/\/pricing has no first-load budget/);
+  expect(result.output).toMatch(/First load \/pricing has no budget/);
 });
 
 test("fails when a budget names a route that is gone", () => {
@@ -115,7 +115,7 @@ test("fails when a budget names a route that is gone", () => {
   budgets({ "/": roomy, "/old": roomy });
   const result = run();
   expect(result.status).toBe(1);
-  expect(result.output).toMatch(/\/old has a first-load budget but is no longer in the build/);
+  expect(result.output).toMatch(/\/old has a budget but is no longer in the build/);
 });
 
 test("update writes budgets from the build with a small margin that then pass", () => {
@@ -123,7 +123,7 @@ test("update writes budgets from the build with a small margin that then pass", 
   const css = stylesheet("page", 10 * 1024);
   build({ "/page": [page, css], "/not-found": [] });
   expect(run("--update").status).toBe(0);
-  const written = JSON.parse(fs.readFileSync(path.join(directory, "route-budgets.json"), "utf8"));
+  const written = JSON.parse(fs.readFileSync(path.join(directory, "route-budgets.json"), "utf8")).routes;
   expect(Object.keys(written)).toEqual(["/", "/not-found"]);
   const measured = Number(run().output.match(/First load \/: (\d+) gzip bytes of JS/)[1]);
   expect(written["/"].js).toBeGreaterThanOrEqual(measured);
@@ -134,13 +134,42 @@ test("update writes budgets from the build with a small margin that then pass", 
 });
 
 test("checks all files needed by a lazy import, including shared chunks", () => {
-  const first = chunk("lazy-shared", 150 * 1024);
-  const second = chunk("lazy-page", 150 * 1024);
+  const first = chunk("lazy-shared", 40 * 1024);
+  const second = chunk("lazy-page", 40 * 1024);
   build({ "/page": [] }, { "App -> DeferredPage": { files: [first, second, first] } });
+  budgets({ "/": roomy }, { "App -> DeferredPage": { js: 60 * 1024, css: 0 } });
+  const result = run();
+  expect(result.status).toBe(1);
+  expect(result.output).toMatch(/^- Lazy App -> DeferredPage JS is \d+ gzip bytes, \d+ over its budget of 61440/m);
+});
+
+test("fails when a new lazy import has no budget", () => {
+  build({ "/page": [] }, { "App -> NewDialog": { files: [chunk("dialog")] } });
   budgets({ "/": roomy });
   const result = run();
   expect(result.status).toBe(1);
-  expect(result.output).toMatch(/lazy.*DeferredPage.*gzip.*budget/i);
+  expect(result.output).toMatch(/Lazy App -> NewDialog has no budget/);
+});
+
+test("counts the root not-found and global-error boundaries every page ships", () => {
+  const notFound = chunk("not-found", 120 * 1024);
+  const globalError = chunk("global-error", 120 * 1024);
+  build({ "/not-found": [notFound], "/global-error": [globalError], "/tools/page": [chunk("tools")] });
+  budgets({ "/tools": { js: 200 * 1024, css: 0 }, "/not-found": roomy });
+  const result = run();
+  expect(result.status).toBe(1);
+  expect(result.output).toMatch(/First load \/tools JS .* over its budget/);
+});
+
+test("fails when a prerendered page loads a file the budget does not count", () => {
+  const page = chunk("page");
+  build({ "/page": [page] });
+  write(".next/server/app/index.html", `<script src="/_next/${page}" async></script><script src="/_next/static/chunks/extra.js" async></script>`);
+  chunk("extra");
+  budgets({ "/": roomy });
+  const result = run();
+  expect(result.status).toBe(1);
+  expect(result.output).toMatch(/\/ loads static\/chunks\/extra\.js before first paint but the budget does not count it/);
 });
 
 test("fails when a manifest points to an unavailable chunk", () => {
