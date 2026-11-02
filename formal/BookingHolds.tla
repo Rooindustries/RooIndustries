@@ -6,6 +6,7 @@ CONSTANTS Tabs, Slots, HoldMinutes, MaxTime, MaxNonce
 NoSlot == "no_slot"
 NoNonce == 0
 DeadNonce == MaxNonce + 1
+RestoredId == MaxNonce + 2
 Nonces == 1..MaxNonce
 Times == 0..(MaxTime + HoldMinutes)
 LivePhases == {"active", "holding", "payment_pending"}
@@ -27,7 +28,7 @@ TypeOK ==
   /\ nextNonce \in 1..(MaxNonce + 1)
   /\ hold \in [Slots -> [phase : {"none", "released", "consumed", "expired"} \cup LivePhases,
                          nonce : 0..DeadNonce, exp : Times, rec : 0..MaxNonce]]
-  /\ lock \in [Slots -> 0..MaxNonce]
+  /\ lock \in [Slots -> 0..RestoredId]
   /\ tab \in [Tabs -> [slot : Slots \cup {NoSlot}, nonce : 0..MaxNonce, exp : Times,
                        details : BOOLEAN, paying : 0..MaxNonce]]
   /\ rec \in [Nonces -> [status : {"none", "started", "needs_recovery", "booked", "rescheduled", "abandoned"},
@@ -162,10 +163,10 @@ PaymentFails(n) ==
 
 CheckoutExpires(n) ==
   LET s == rec[n].slot
-  IN /\ rec[n].status \in {"started", "abandoned"}
+  IN /\ rec[n].status \in {"started", "needs_recovery", "abandoned"}
      /\ rec[n].pay = "open"
      /\ rec' = [rec EXCEPT ![n].pay = "closed", ![n].status = "abandoned"]
-     /\ hold' = IF rec[n].status = "started" /\ hold[s].rec = n
+     /\ hold' = IF rec[n].status \in {"started", "needs_recovery"} /\ hold[s].rec = n
                   THEN [hold EXCEPT ![s] = PaymentReleasedHold(hold[s])]
                   ELSE hold
      /\ UNCHANGED <<now, nextNonce, lock, tab, bookings>>
@@ -248,7 +249,7 @@ ReconcileUnpaid(n) ==
   IN /\ rec[n].status \in {"started", "needs_recovery"}
      /\ ~rec[n].terminal
      /\ rec[n].pay \in {"open", "closed"}
-     /\ now >= rec[n].created + HoldMinutes
+     /\ (now >= rec[n].created + HoldMinutes \/ now = MaxTime)
      /\ rec' = [rec EXCEPT ![n].status = "abandoned"]
      /\ hold' = IF hold[s].rec = n THEN [hold EXCEPT ![s] = PaymentReleasedHold(hold[s])] ELSE hold
      /\ UNCHANGED <<now, nextNonce, lock, tab, bookings>>
@@ -270,6 +271,26 @@ RecoveryGivesUp(n) ==
                   ELSE hold
      /\ UNCHANGED <<now, nextNonce, lock, tab, bookings>>
 
+AdminRestoresBooking(s) ==
+  /\ lock[s] = 0
+  /\ SlotBookings(s) = {}
+  /\ ~HoldOwnsSlot(hold[s])
+  /\ bookings' = bookings \cup {[id |-> RestoredId, slot |-> s, kind |-> "restored", hold |-> [phase |-> hold[s].phase, nonce |-> hold[s].nonce, rec |-> hold[s].rec,
+                                             live |-> hold[s].exp > now],
+                                    paidInTime |-> FALSE]}
+  /\ lock' = [lock EXCEPT ![s] = RestoredId]
+  /\ hold' = [hold EXCEPT ![s] = ConsumedHold(hold[s])]
+  /\ UNCHANGED <<now, nextNonce, tab, rec>>
+
+UnconfirmedPaymentHoldExpires(s) ==
+  /\ hold[s].phase = "payment_pending"
+  /\ hold[s].exp <= now
+  /\ now = MaxTime
+  /\ ~rec[hold[s].rec].seen
+  /\ rec[hold[s].rec].pay \in {"open", "closed"}
+  /\ hold' = [hold EXCEPT ![s].phase = "expired", ![s].nonce = DeadNonce]
+  /\ UNCHANGED <<now, nextNonce, lock, tab, rec, bookings>>
+
 Tick ==
   /\ now < MaxTime
   /\ now' = now + 1
@@ -278,6 +299,7 @@ Tick ==
 Next ==
   \/ Tick
   \/ \E s \in Slots : CleanupExpiredHold(s)
+  \/ \E s \in Slots : AdminRestoresBooking(s) \/ UnconfirmedPaymentHoldExpires(s)
   \/ \E t \in Tabs : \/ ReleaseHold(t) \/ TypeDetails(t) \/ StartPayment(t) \/ CancelPayment(t)
                      \/ \E s \in Slots : HoldSlot(t, s)
                      \/ \E u \in Tabs : DuplicateTab(t, u)
@@ -285,9 +307,10 @@ Next ==
                        \/ FinalizeCapture(n) \/ ReconcileRecovery(n) \/ ReconcilePending(n)
                        \/ ReconcileUnpaid(n) \/ RecoveryGivesUp(n)
 
-Server(n) == FinalizeCapture(n) \/ ReconcileRecovery(n) \/ ReconcilePending(n) \/ PaymentSucceeds(n)
+Server(n) == FinalizeCapture(n) \/ ReconcileRecovery(n) \/ ReconcilePending(n) \/ PaymentSucceeds(n) \/ PaymentFails(n)
+             \/ ReconcileUnpaid(n)
 
-Spec == Init /\ [][Next]_vars /\ \A n \in Nonces : WF_vars(Server(n))
+Spec == Init /\ [][Next]_vars /\ WF_vars(Tick) /\ \A n \in Nonces : WF_vars(Server(n)) /\ SF_vars(CheckoutExpires(n))
 
 OneHoldPerSlotStart ==
   \A s \in Slots :
@@ -329,6 +352,11 @@ OneBookingPerPayment ==
 
 PaidBookingNeverLost ==
   \A n \in Nonces : (rec[n].pay = "captured") ~> (BookingFor(n) # {} \/ rec[n].terminal)
+
+PaymentHoldsResolve ==
+  \A s \in Slots :
+    (hold[s].phase = "payment_pending")
+      ~> (hold[s].phase # "payment_pending" \/ rec[hold[s].rec].terminal)
 
 PaymentHoldHasReachableOwner ==
   \A s \in Slots :

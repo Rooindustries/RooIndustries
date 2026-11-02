@@ -54,9 +54,9 @@ const startCheckoutBeforeExpiry = async () => {
   return { payload, started, record };
 };
 
-const holdRunsOut = async ({ payload }) => {
+const holdRunsOut = async ({ payload }, expiredForMs = 1000) => {
   minutesLater(21);
-  const expiresAt = new RealDate(RealDate.now() - 1000).toISOString();
+  const expiresAt = new RealDate(RealDate.now() - expiredForMs).toISOString();
   await fixture.database.sql.begin(async sql => {
     await sql`set local session_replication_role = replica`;
     await sql`update migration.source_documents
@@ -121,9 +121,15 @@ test('a customer back from a slow payment after the hold ran out gets the slot t
   assert.equal(returned.body.bookingId, booking._id);
 });
 
-test('a payment that cleared in time books its slot when the webhook arrives late and twice', async () => {
+test('a payment that cleared in time books its slot when the webhook arrives after a cleanup run, late and twice', async () => {
   const checkout = await startCheckoutBeforeExpiry();
   await holdRunsOut(checkout);
+  await fixture.commerce.patch(checkout.record._id)
+    .set({ nextRecoveryAt: new Date(Date.now() + 60 * 60_000).toISOString() }).commit();
+  assert.equal((await cron()).status, 200);
+  const held = await holdFor(checkout.payload);
+  assert.equal(held.phase, 'payment_pending');
+  assert.equal(held.paymentRecordId, checkout.record._id);
   const event = `window_late_${checkout.record._id}`;
   const first = await fixture.dodoWebhook(`payment_${checkout.record.providerOrderId}`, 'payment.succeeded', event);
   const duplicate = await fixture.dodoWebhook(`payment_${checkout.record.providerOrderId}`, 'payment.succeeded', event);
@@ -133,10 +139,14 @@ test('a payment that cleared in time books its slot when the webhook arrives lat
   await assertBookedOnHeldSlot(checkout);
 });
 
-test('an unpaid checkout frees its slot for the next visitor once the hold runs out', async () => {
+test('an unpaid checkout keeps its slot until the cron confirms nobody paid, then frees it', async () => {
   fixture.setCheckoutPaymentStarted(false);
   const checkout = await startCheckoutBeforeExpiry();
   await holdRunsOut(checkout);
+  assert.equal(await isOffered(checkout.payload), false);
+  const early = await secondVisitor(checkout.payload);
+  assert.equal(early.status, 409, JSON.stringify(early));
+  assert.equal(early.body.message, paymentInProgress);
   assert.equal((await cron()).status, 200);
   const record = await fixture.commerce.getDocument(checkout.record._id);
   assert.equal(record.status, 'abandoned');
@@ -202,6 +212,60 @@ test('a payment already seen going through keeps its slot when recovery gives up
   const hold = await holdFor(checkout.payload);
   assert.equal(hold.phase, 'payment_pending');
   assert.equal(hold.paymentRecordId, checkout.record._id);
+  assert.equal(await isOffered(checkout.payload), false);
+  assert.equal((await secondVisitor(checkout.payload)).status, 409);
+});
+
+const adminStatus = (bookingId, status) => fixture.post('/api/ref/updateBookingStatus', { bookingId, status }, '',
+  { 'x-admin-key': 'fixture-only-admin' });
+
+test('an admin restoring an old booking cannot take a slot whose payment is still clearing', async () => {
+  fixture.setPaymentAmountOverrides({ status: 'processing' });
+  const checkout = await startCheckoutBeforeExpiry();
+  const cancelled = `booking.fixture.cancelled.${checkout.record._id.slice(-12)}`;
+  await fixture.commerce.create({ _id: cancelled, _type: 'booking', backendOwner: 'supabase', cutoverGeneration: 0,
+    status: 'cancelled', startTimeUTC: checkout.payload.startTimeUTC, packageTitle: checkout.payload.packageTitle,
+    email: 'earlier@example.invalid' });
+  await holdRunsOut(checkout);
+  assert.equal((await cron()).status, 200);
+  const restored = await adminStatus(cancelled, 'captured');
+  assert.equal(restored.status, 409, JSON.stringify(restored));
+  assert.equal((await fixture.commerce.getDocument(cancelled)).status, 'cancelled');
+  fixture.setPaymentAmountOverrides({});
+  const paid = await fixture.dodoWebhook(`payment_${checkout.record.providerOrderId}`,
+    'payment.succeeded', `window_admin_${checkout.record._id}`);
+  assert.equal(paid.status, 200, JSON.stringify(paid));
+  const booking = (await bookingsAt(checkout.payload.startTimeUTC)).find(entry => entry.paymentRecordId === checkout.record._id);
+  assert.equal(booking.startTimeUTC, checkout.payload.startTimeUTC);
+  assert.notEqual(booking.requiresReschedule, true);
+});
+
+const stopRecovery = async (checkout, values = {}) => fixture.commerce.patch(checkout.record._id).set({
+  reconciliationRecoveryTerminal: true, nextRecoveryAt: '9999-12-31T23:59:59.999Z', ...values,
+}).commit();
+
+test('a checkout the cron can no longer reach frees its slot a day after the hold ran out when no payment was seen', async () => {
+  fixture.setCheckoutPaymentStarted(false);
+  const checkout = await startCheckoutBeforeExpiry();
+  await stopRecovery(checkout);
+  await holdRunsOut(checkout, 60 * 60_000);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
+  assert.equal((await secondVisitor(checkout.payload)).status, 409);
+  await holdRunsOut(checkout, 25 * 60 * 60_000);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await holdFor(checkout.payload)).phase, 'expired');
+  assert.equal(await isOffered(checkout.payload), true);
+  assert.equal((await secondVisitor(checkout.payload)).status, 200);
+});
+
+test('a checkout the cron can no longer reach keeps its slot when a payment was seen', async () => {
+  fixture.setPaymentAmountOverrides({ status: 'processing' });
+  const checkout = await startCheckoutBeforeExpiry();
+  await stopRecovery(checkout, { providerPaymentId: `payment_${checkout.record.providerOrderId}` });
+  await holdRunsOut(checkout, 25 * 60 * 60_000);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
   assert.equal(await isOffered(checkout.payload), false);
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
 });

@@ -24,7 +24,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     DODO_PAYMENTS_WEBHOOK_KEY: 'whsec_Zml4dHVyZS1vbmx5',
     DODO_PAYMENTS_PRODUCT_ID: 'pdt_fixture', DODO_PAYMENTS_RETURN_URL: `${base}/handoff`,
     PAYMENT_SESSION_SECRET: 'fixture-only-payment-session', HOLD_TOKEN_SECRET: 'fixture-only-hold',
-    CRON_SECRET: 'fixture-only-cron',
+    CRON_SECRET: 'fixture-only-cron', REF_ADMIN_KEY: 'fixture-only-admin',
     REF_SESSION_SECRET: 'fixture-only-ref-session', RESEND_API_KEY: 're_fixture',
     FROM_EMAIL: 'noreply@example.invalid', OWNER_EMAIL: 'owner@example.invalid',
   });
@@ -160,6 +160,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       '/api/payment/reconcile': '../../src/server/api/payment/reconcile.js',
       '/api/payment/webhook/dodo': '../../src/server/api/payment/webhookDodo.js',
       '/api/ref/getUpgradeInfo': '../../src/server/api/ref/getUpgradeInfo.js',
+      '/api/ref/updateBookingStatus': '../../src/server/api/ref/updateBookingStatus.js',
       '/api/ref/createBooking': '../../src/server/api/ref/createBooking.js',
       '/api/ref/sendBookingEmails': '../../src/server/api/ref/sendBookingEmails.js',
     })) handlers.set(route, (await import(module)).default);

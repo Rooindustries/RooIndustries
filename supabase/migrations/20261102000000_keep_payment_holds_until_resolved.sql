@@ -48,18 +48,31 @@ do $edit$
 declare
   v text;
   v_phase_pattern constant text :=
-    $re$and hold\.phase in \('active', 'payment'\)(\s+and hold\.expires_at <= v_now)$re$;
-  v_payload_pattern constant text :=
-    $re$in \('active', 'holding', 'payment', 'payment_pending'\)$re$;
+    $re$and hold\.phase in \('active', 'payment'\)\s+and hold\.expires_at <= v_now$re$;
+  v_phase_replacement constant text := $re$and (
+        (hold.phase = 'active' and hold.expires_at <= v_now)
+        or (
+          hold.phase = 'payment'
+          and hold.expires_at <= v_now - interval '24 hours'
+          and not exists (
+            select 1
+            from commerce.payment_records payment
+            where payment.id = hold.payment_record_id
+              and (
+                payment.provider_payment_id is not null
+                or payment.status in ('captured_client', 'captured_webhook', 'finalizing',
+                  'verified_server', 'booked', 'email_partial')
+              )
+          )
+        )
+      )$re$;
 begin
   select pg_get_functiondef(p.oid) into strict v
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and p.proname = 'roo_cleanup_expired_supabase_holds';
-  if pg_catalog.regexp_count(v, v_phase_pattern) <> 1
-     or pg_catalog.regexp_count(v, v_payload_pattern) <> 1 then
+  if pg_catalog.regexp_count(v, v_phase_pattern) <> 1 then
     raise exception 'unexpected contract: public.roo_cleanup_expired_supabase_holds';
   end if;
-  v := pg_catalog.regexp_replace(v, v_phase_pattern, $re$and hold.phase = 'active'\1$re$);
-  execute pg_catalog.regexp_replace(v, v_payload_pattern, $re$in ('active', 'holding')$re$);
+  execute pg_catalog.regexp_replace(v, v_phase_pattern, v_phase_replacement);
 end;
 $edit$;
