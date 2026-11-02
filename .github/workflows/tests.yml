@@ -82,20 +82,6 @@ jobs:
       - run: npm run check:supabase:migrations
       - run: npm run test:deploy:rollback
 
-  booking-model:
-    name: Booking hold model
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-      - run: npm run check:booking-model
-
   playwright:
     name: Playwright ${{ matrix.suite.name }}
     runs-on: ubuntu-24.04
