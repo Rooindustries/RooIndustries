@@ -426,7 +426,7 @@ export default function RefLogin() {
         </p>
         <div className="mt-6 flex flex-col gap-3">
           <button
-            className="w-full rounded-xl bg-accent-strong px-5 py-3 text-sm font-semibold text-white shadow-glow-soft transition hover:bg-accent"
+            className="w-full rounded-xl bg-accent-strong px-5 py-3 text-sm font-semibold text-accent-contrast shadow-glow-soft transition hover:bg-accent"
             data-autofocus
             onClick={() => {
               savePendingDiscordChoice("link", linkProvider);

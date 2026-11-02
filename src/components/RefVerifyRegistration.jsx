@@ -129,14 +129,14 @@ export default function RefVerifyRegistration() {
         </p>
         {state.status === "success" && state.requiresLogin ? (
           <Link
-            className="mt-6 block w-full rounded-xl bg-accent-strong py-3 font-semibold text-white"
+            className="mt-6 block w-full rounded-xl bg-accent-strong py-3 font-semibold text-accent-contrast"
             to="/referrals/login?notice=email-confirmed"
           >
             Sign in
           </Link>
         ) : state.status === "success" ? (
           <button
-            className="mt-6 w-full rounded-xl bg-accent-strong py-3 font-semibold text-white"
+            className="mt-6 w-full rounded-xl bg-accent-strong py-3 font-semibold text-accent-contrast"
             onClick={() => navigate("/referrals/dashboard")}
             type="button"
           >

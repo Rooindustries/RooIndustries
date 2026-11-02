@@ -119,7 +119,8 @@ export default function Navbar({ routeShell = "browser" }) {
     location.pathname === "/faq" ||
     (location.pathname === "/" && faqHashes.includes(activeHomeHash));
   const isProofActive = isActive("/benchmarks") || isActive("/reviews");
-  const isReferralsActive = location.pathname.startsWith("/referrals");
+  const isReferralsActive =
+    location.pathname === "/referrals" || location.pathname.startsWith("/referrals/");
   const isTeamActive = isActive("/meet-the-team");
   const navMenuOpen = open || proofOpen || referralsOpen;
 

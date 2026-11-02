@@ -77,6 +77,8 @@ jobs:
           BASE_URL: http://127.0.0.1:3211
           TOOLING_NETWORK_GUARD: "1"
           NODE_OPTIONS: --import=${{ github.workspace }}/scripts/lib/test-target-safety.mjs
+      - run: npm run lint
+      - run: npm run test:lint-rules
       - run: npm run test:tooling:dependencies
       - run: npm run check:seo
       - run: npm run check:supabase:migrations

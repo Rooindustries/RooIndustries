@@ -114,7 +114,7 @@ export default function ConnectedAccounts({
           {state.error}
         </p>
         <button
-          className={"mt-3 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"}
+          className={"mt-3 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast"}
           onClick={load}
           type="button"
         >
@@ -339,32 +339,37 @@ export default function ConnectedAccounts({
           managedProviders.some(
             (provider) => linked.has(provider) && unlinkable.has(provider)
           ))) ? (
-        <div className={"mt-4 flex flex-col gap-2 sm:flex-row"}>
-          <input
-            aria-label="Current password"
-            autoComplete="current-password"
-            className={"min-h-[44px] flex-1 rounded-xl border border-line-input bg-surface-input px-3 text-sm text-ink"}
-            onChange={(event) => {
-              passwordEdit.current += 1;
-              setPassword(event.target.value);
-              const stale = passwordError.current;
-              if (stale) {
-                passwordError.current = "";
-                setMessage((current) => (current === stale ? "" : current));
-              }
-            }}
-            placeholder="Current password"
-            type="password"
-            value={password}
-          />
-          <button
-            className={"rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"}
-            disabled={busy || !password}
-            onClick={confirmPassword}
-            type="button"
-          >
-            Confirm identity
-          </button>
+        <div className="mt-4">
+          <label htmlFor="connected-accounts-password" className="block text-accent text-sm font-semibold">
+            Current password
+          </label>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+            <input
+              id="connected-accounts-password"
+              autoComplete="current-password"
+              className={"min-h-[44px] flex-1 rounded-xl border border-line-input bg-surface-input px-3 text-sm text-ink"}
+              onChange={(event) => {
+                passwordEdit.current += 1;
+                setPassword(event.target.value);
+                const stale = passwordError.current;
+                if (stale) {
+                  passwordError.current = "";
+                  setMessage((current) => (current === stale ? "" : current));
+                }
+              }}
+              placeholder="Current password"
+              type="password"
+              value={password}
+            />
+            <button
+              className={"rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast"}
+              disabled={busy || !password}
+              onClick={confirmPassword}
+              type="button"
+            >
+              Confirm identity
+            </button>
+          </div>
         </div>
       ) : null}
       {missing.length > 0 && !linked.has("email") && connectedSocial.length > 0 ? (

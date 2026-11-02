@@ -159,6 +159,7 @@ function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria
         const protectedRow = isObject && (rowRemovalProtected(prior, itemType.fields, stored.context) ||
           !item?._key && !prior && stored.value?.some(row => !row?._key && rowRemovalProtected(row, itemType.fields, stored.context)));
         const removalHelp = helpId([...itemPath, "_remove"]);
+        const bodyId = helpId([...itemPath, "_body"]);
         return (
           <div key={key} className={styles.arrayItem}>
             <div className={styles.arrayItemHeader}>
@@ -167,6 +168,7 @@ function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria
                   type="button"
                   className={styles.disclosure}
                   aria-expanded={open}
+                  aria-controls={bodyId}
                   onClick={() =>
                     setOpenKeys((keys) => {
                       const next = new Set(keys);
@@ -214,8 +216,8 @@ function ArrayInput({ field, path, value, onChange, readOnly, inputId, inputAria
               ) : null}
             </div>
             {protectedRow ? <p id={removalHelp} className={styles.fieldHelp}>{UNUSED_FIELD_NOTE}</p> : null}
-            {isObject && open ? (
-              <div className={styles.arrayItemBody}>
+            {isObject ? (
+              <div id={bodyId} className={styles.arrayItemBody} hidden={!open}>
                 <ObjectFields
                   fields={itemType.fields || []}
                   path={itemPath}
