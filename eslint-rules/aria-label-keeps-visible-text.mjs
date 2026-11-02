@@ -6,22 +6,22 @@ const normalize = (text) =>
     .trim()
     .toLowerCase();
 
+const isAriaHidden = (opening) => {
+  const hidden = attribute(opening, "aria-hidden");
+  if (!hidden) return false;
+  const value = literalValue(hidden);
+  return hidden.value === null || value === "true" || value === true;
+};
+
 const visibleText = (element) => {
   const parts = [];
   for (const child of element.children || []) {
     if (child.type === "JSXText") parts.push(child.value);
     if (child.type !== "JSXElement") continue;
     const opening = child.openingElement;
-    if (
-      literalValue(attribute(opening, "aria-hidden")) === "true" ||
-      attribute(opening, "aria-hidden")?.value === null
-    )
-      continue;
+    if (isAriaHidden(opening)) continue;
     if (/\bsr-only\b/.test(String(literalValue(attribute(opening, "className")) || ""))) continue;
-    if (jsxName(opening.name) === "img" || jsxName(opening.name) === "Image") {
-      parts.push(String(literalValue(attribute(opening, "alt")) || ""));
-      continue;
-    }
+    if (jsxName(opening.name) === "img" || jsxName(opening.name) === "Image") continue;
     parts.push(visibleText(child));
   }
   return parts.join(" ");

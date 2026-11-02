@@ -32,8 +32,15 @@ export default function RefRegister() {
   const submittingRef = useRef(false);
   const editVersionRef = useRef(0);
   const redirectTimerRef = useRef(null);
+  const mountedRef = useRef(false);
 
-  useEffect(() => () => clearTimeout(redirectTimerRef.current), []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearTimeout(redirectTimerRef.current);
+    };
+  }, []);
 
   function showToast(type, message) {
     const next = { type, message };
@@ -213,6 +220,7 @@ export default function RefRegister() {
         return;
       }
 
+      if (!mountedRef.current) return;
       redirecting = true;
       showToast("success", "Registered! Redirecting to dashboard...");
       removeBrowserStorage("sessionStorage", REFERRAL_SIGNUP_DRAFT);

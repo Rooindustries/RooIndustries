@@ -12,8 +12,8 @@ export default {
     docs: { description: 'startsWith("/booking") also matches /bookings-help and similar routes.' },
     messages: {
       prefix:
-        'startsWith("{{prefix}}") also matches other routes that share the prefix. Compare the exact path ' +
-        'or use "{{prefix}}/".',
+        'startsWith("{{prefix}}") also matches other routes that share the prefix. Check the exact path ' +
+        'and its subpaths instead: path === "{{prefix}}" || path.startsWith("{{prefix}}/").',
     },
     schema: [],
   },

@@ -20,6 +20,8 @@ run("aria-label-keeps-visible-text", {
   valid: [
     `<a aria-label="Roo Industries home" href="/">Roo Industries</a>`,
     `<button aria-label="Close dialog">×</button>`,
+    `<button aria-label="Open menu"><span aria-hidden={true}>×</span>Open menu</button>`,
+    `<a aria-label="Home" href="/"><img src="/logo.png" alt="Company logo" />Home</a>`,
   ],
   invalid: [
     {
@@ -67,9 +69,17 @@ run("no-unguarded-timer-navigation", {
       clearTimeout(id); }, []); return null; }`,
     `function Toast() { setTimeout(() => setToast((current) => (current === next ? null : current)), 2800); return null;
       }`,
-    `function Queue() { setTimeout(() => items.push(next), 100); setTimeout(() => text.replace("a", "b")); return null; }`,
+    `function Queue() {
+      setTimeout(() => items.push(next), 100); setTimeout(() => text.replace("a", "b")); return null; }`,
+    `function Log() { const history = []; setTimeout(() => history.push("step"), 100); return null; }`,
   ],
   invalid: [
+    {
+      name: "aliased router push from a timer",
+      code: `function Pay() {
+        const pageRouter = useRouter(); setTimeout(() => pageRouter.push("/payment"), 300); return null; }`,
+      errors: [{ messageId: "timer" }],
+    },
     {
       name: "router push from a timer",
       code: `function Checkout() { setTimeout(() => router.push("/payment"), 300); return null; }`,
