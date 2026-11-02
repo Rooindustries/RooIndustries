@@ -1,0 +1,126 @@
+{
+  "/": {
+    "js": 221184,
+    "css": 26624
+  },
+  "/_not-found": {
+    "js": 115712,
+    "css": 26624
+  },
+  "/about": {
+    "js": 162816,
+    "css": 26624
+  },
+  "/admin/content": {
+    "js": 155648,
+    "css": 30720
+  },
+  "/admin/referrals": {
+    "js": 121856,
+    "css": 28672
+  },
+  "/benchmarks": {
+    "js": 164864,
+    "css": 26624
+  },
+  "/booking": {
+    "js": 243712,
+    "css": 26624
+  },
+  "/contact": {
+    "js": 172032,
+    "css": 26624
+  },
+  "/discord": {
+    "js": 115712,
+    "css": 26624
+  },
+  "/downloads/[slug]": {
+    "js": 161792,
+    "css": 26624
+  },
+  "/faq": {
+    "js": 202752,
+    "css": 26624
+  },
+  "/meet-the-team": {
+    "js": 166912,
+    "css": 26624
+  },
+  "/not-found": {
+    "js": 116736,
+    "css": 26624
+  },
+  "/packages": {
+    "js": 165888,
+    "css": 26624
+  },
+  "/payment": {
+    "js": 240640,
+    "css": 26624
+  },
+  "/payment-success": {
+    "js": 227328,
+    "css": 26624
+  },
+  "/privacy": {
+    "js": 164864,
+    "css": 26624
+  },
+  "/referrals/change-password": {
+    "js": 163840,
+    "css": 26624
+  },
+  "/referrals/dashboard": {
+    "js": 238592,
+    "css": 26624
+  },
+  "/referrals/forgot": {
+    "js": 162816,
+    "css": 26624
+  },
+  "/referrals/login": {
+    "js": 159744,
+    "css": 26624
+  },
+  "/referrals/register": {
+    "js": 232448,
+    "css": 26624
+  },
+  "/referrals/reset": {
+    "js": 231424,
+    "css": 26624
+  },
+  "/referrals/verify": {
+    "js": 162816,
+    "css": 26624
+  },
+  "/reviews": {
+    "js": 164864,
+    "css": 26624
+  },
+  "/terms": {
+    "js": 164864,
+    "css": 26624
+  },
+  "/thank-you": {
+    "js": 227328,
+    "css": 26624
+  },
+  "/tools": {
+    "js": 164864,
+    "css": 26624
+  },
+  "/tourney": {
+    "js": 119808,
+    "css": 27648
+  },
+  "/upgrade-xoc": {
+    "js": 163840,
+    "css": 26624
+  },
+  "/upgrade/[slug]": {
+    "js": 164864,
+    "css": 26624
+  }
+}
