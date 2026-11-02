@@ -6,20 +6,30 @@ const isSignalKey = (property) =>
   ((property.key.type === "Identifier" && property.key.name === "signal") ||
     (property.key.type === "Literal" && property.key.value === "signal"));
 
-const carriesSignal = (context, node, seen = new Set()) => {
-  if (!node || seen.has(node)) return true;
+const clearsSignal = (value) =>
+  (value.type === "Literal" && value.value === null) ||
+  (value.type === "Identifier" && value.name === "undefined");
+
+const signalState = (context, node, seen = new Set()) => {
+  if (!node || seen.has(node)) return "unknown";
   seen.add(node);
   if (node.type === "Identifier") {
     const value = declaredValue(context, node);
-    return value ? carriesSignal(context, value, seen) : true;
+    return value ? signalState(context, value, seen) : "unknown";
   }
-  if (node.type !== "ObjectExpression") return true;
-  return node.properties.some(
-    (property) =>
-      isSignalKey(property) ||
-      (property.type === "SpreadElement" && carriesSignal(context, property.argument, seen)),
-  );
+  if (node.type !== "ObjectExpression") return "unknown";
+  let state = "none";
+  for (const property of node.properties) {
+    if (isSignalKey(property)) state = clearsSignal(property.value) ? "cleared" : "set";
+    else if (property.type === "SpreadElement") {
+      const spread = signalState(context, property.argument, seen);
+      if (spread !== "none") state = spread;
+    }
+  }
+  return state;
 };
+
+const carriesSignal = (context, node) => ["set", "unknown"].includes(signalState(context, node));
 
 export default {
   meta: {

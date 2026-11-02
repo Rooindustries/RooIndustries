@@ -52,7 +52,10 @@ export default function RefRegister() {
   const loadSocialIdentity = () => {
     setIdentityCheckFailed(false);
     fetch("/api/auth/identities?flow=referral", { cache: "no-store", signal: requestDeadline() })
-      .then((response) => response.json())
+      .then((response) => {
+        if (!response.ok) throw new Error("identity_check_failed");
+        return response.json();
+      })
       .then((data) => {
         if (data?.authenticated && data?.emailVerified && data.email) {
           setEmail(data.email);

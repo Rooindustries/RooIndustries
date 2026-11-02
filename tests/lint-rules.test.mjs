@@ -171,6 +171,16 @@ run("fetch-needs-deadline", {
   ],
   invalid: [
     {
+      name: "signal cleared with null",
+      code: `fetch(url, { signal: null });`,
+      errors: [{ messageId: "missing" }],
+    },
+    {
+      name: "deadline replaced by a later spread",
+      code: `const reset = { signal: undefined }; fetch(url, { signal: requestDeadline(), ...reset });`,
+      errors: [{ messageId: "missing" }],
+    },
+    {
       name: "named options without a signal",
       code: `const options = { method: "POST" }; fetch(url, options);`,
       errors: [{ messageId: "missing" }],
@@ -203,6 +213,11 @@ run("no-ignored-write-request", {
     {
       name: "success shown without reading the response",
       code: `fetch("/api/ref/register", { method: "POST" }).then(() => navigate("/referrals/dashboard"));`,
+      errors: [{ messageId: "ignored" }],
+    },
+    {
+      name: "named write options left unchecked",
+      code: `const options = { method: "POST", signal }; fetch("/api/releaseHold", options);`,
       errors: [{ messageId: "ignored" }],
     },
     {

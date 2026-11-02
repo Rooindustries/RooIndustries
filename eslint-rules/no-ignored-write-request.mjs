@@ -1,4 +1,4 @@
-import { isFetchCall, isFunction } from "./util.mjs";
+import { declaredValue, isFetchCall, isFunction } from "./util.mjs";
 
 const usesResponse = (context, handler) => {
   if (!handler) return false;
@@ -29,8 +29,9 @@ const unwrap = (context, expression) => {
   }
 };
 
-const writeMethod = (call) => {
-  const options = call.arguments[1];
+const writeMethod = (context, call) => {
+  let options = call.arguments[1];
+  if (options?.type === "Identifier") options = declaredValue(context, options);
   if (options?.type !== "ObjectExpression") return null;
   const method = options.properties.find(
     (property) =>
@@ -57,7 +58,7 @@ export default {
       ExpressionStatement(node) {
         const call = unwrap(context, node.expression);
         if (call.type !== "CallExpression" || !isFetchCall(call)) return;
-        const method = writeMethod(call);
+        const method = writeMethod(context, call);
         if (method) context.report({ node, messageId: "ignored", data: { method } });
       },
     };

@@ -489,6 +489,19 @@ test.describe('portal requests that stall', () => {
     } finally { await held.release(); }
   });
 
+  test('an unreadable reply to a sent password change reports an unknown outcome', async ({ page }) => {
+    await page.route('**/api/auth/reauth', route => route.fulfill({ json: { ok: true } }));
+    const unreadable = { status: 200, contentType: 'text/html', body: '<html>' };
+    await page.route('**/api/ref/hashPassword', route => route.fulfill(unreadable));
+    await page.goto('/referrals/change-password');
+    await page.getByLabel('Current Password', { exact: true }).fill('Synthetic-password1!');
+    await page.getByLabel('New Password', { exact: true }).fill('Fresh-password-22!');
+    await page.getByLabel('Confirm Password', { exact: true }).fill('Fresh-password-22!');
+    await page.getByRole('button', { name: 'Save Password', exact: true }).click();
+    const message = page.getByRole('alert').filter({ hasText: "We couldn't tell if your password changed." });
+    await expect(message).toBeVisible();
+  });
+
   test('a stalled reset request asks to check the inbox before retrying', async ({ page }) => {
     const held = await stall(page, '/api/ref/forgot', 'POST');
     try {
@@ -500,6 +513,19 @@ test.describe('portal requests that stall', () => {
       await expect(message).toBeVisible({ timeout: 20000 });
       expect(held.count()).toBe(1);
     } finally { await held.release(); }
+  });
+
+  test('a failed sign-in check on signup can be tried again', async ({ page }) => {
+    let failing = true;
+    await page.route('**/api/auth/identities?flow=referral', route => (failing
+      ? route.fulfill({ status: 503, json: { ok: false, error: 'Temporarily unavailable.' } })
+      : route.fallback()));
+    await page.goto('/referrals/register');
+    const notice = page.getByRole('alert').filter({ hasText: "We couldn't check your Google or Discord sign-in." });
+    await expect(notice).toBeVisible();
+    failing = false;
+    await notice.getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect(notice).toHaveCount(0);
   });
 
   test('a stalled sign-in check on signup can be tried again', async ({ page }, testInfo) => {

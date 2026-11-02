@@ -103,7 +103,10 @@ export default function RefChangePassword() {
         body: JSON.stringify({ password: pass1 }),
       });
 
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json().catch((error) => {
+        if (res.ok) throw error;
+        return {};
+      });
 
       if (res.status === 202 || data.status === "pending") {
         setOutcome({
