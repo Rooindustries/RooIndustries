@@ -8,7 +8,7 @@ const ruleSet = (names) => Object.fromEntries(names.map((name) => [`roo/${name}`
 export default [
   { ignores: ["src/**/__tests__/**"] },
   {
-    files: ["src/**/*.{js,jsx,mjs}", "app/**/*.{js,jsx,mjs}", "middleware.js"],
+    files: ["src/**/*.{js,jsx,mjs,cjs}", "app/**/*.{js,jsx,mjs,cjs}", "middleware.js"],
     linterOptions: { reportUnusedDisableDirectives: "off" },
     languageOptions: {
       ecmaVersion: "latest",
@@ -18,6 +18,10 @@ export default [
     },
     plugins: { roo, "react-hooks": reactHooks },
     rules: ruleSet(Object.keys(rules).filter((name) => !emailTextRules.has(name))),
+  },
+  {
+    files: ["**/*.cjs"],
+    languageOptions: { sourceType: "commonjs" },
   },
   {
     files: ["src/server/email/**/*.{js,mjs}", "src/server/api/ref/*[Ee]mail*.js"],
