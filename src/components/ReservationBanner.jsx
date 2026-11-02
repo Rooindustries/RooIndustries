@@ -60,11 +60,11 @@ const formatLocalTime = (utcDate) => {
 };
 
 const formatCountdown = (ms) => {
-  if (!ms || ms <= 0) return "0:00";
+  if (!ms || ms <= 0) return "00:00";
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 };
 
 const broadcastHold = (payload) => {
@@ -406,7 +406,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
     }
     return isMobileWidth
       ? "w-auto max-w-[90vw] sm:max-w-[30rem]"
-      : "w-auto max-w-[46rem]";
+      : "w-auto max-w-[47rem]";
   })();
 
   const paddingClass = isPaymentScreen
@@ -471,7 +471,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
                 ? ` · ${getPublicPackageTitle(hold.packageTitle)}`
                 : ""}
             </p>
-            <p className={`text-info-text ${inline ? "" : "truncate"} drop-shadow-sm ${subtitleSizeClass}`}>
+            <p className={`text-info-text tabular-nums ${inline ? "" : "truncate"} drop-shadow-sm ${subtitleSizeClass}`}>
               Expires in {formatCountdown(countdown)}
             </p>
           </div>
