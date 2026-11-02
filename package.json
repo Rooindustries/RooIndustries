@@ -169,7 +169,7 @@
     "@playwright/test": "^1.55.0",
     "autoprefixer": "^10.4.21",
     "cross-env": "^7.0.3",
-    "eslint": "10.13.0",
+    "eslint": "9.39.5",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.13.0",
     "jest": "30.3.0",
@@ -180,9 +180,6 @@
   },
   "overrides": {
     "brace-expansion": "1.1.21",
-    "eslint": {
-      "brace-expansion": "5.0.12"
-    },
     "cookie": "0.7.2",
     "follow-redirects": "1.16.0",
     "postcss": "$postcss",
