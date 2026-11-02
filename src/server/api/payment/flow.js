@@ -5864,7 +5864,18 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       body: { ...buildPublicStatusBody(record), ...(inspection.state === "unavailable" ? { ok: false, error: "Dodo payment status is temporarily unavailable." } : {}) } };
   }
   const validation = validateDodoPayment({ record, payment });
-  if (!validation.ok) return { httpStatus: 409, body: { ok: false, code: validation.reason, error: "The payment does not match this checkout." } };
+  if (!validation.ok) {
+    const providerPaymentState = String(payment.status || "").trim();
+    if (validation.reason !== "dodo_payment_binding_mismatch" && providerPaymentState &&
+        record.providerPaymentState !== providerPaymentState) {
+      try {
+        await patchPaymentRecord({ client, record, set: { providerPaymentState } });
+      } catch (error) {
+        if (!isConflictError(error)) throw error;
+      }
+    }
+    return { httpStatus: 409, body: { ok: false, code: validation.reason, error: "The payment does not match this checkout." } };
+  }
   requirePaymentRevision(record);
   const disputes = Array.isArray(payment.disputes) ? payment.disputes : [];
   for (const dispute of disputes) {

@@ -302,3 +302,22 @@ test('a payment that went through but fails our checks keeps its slot for owner 
   assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
 });
+
+test('a payment that failed our checks while processing keeps its slot once Dodo says it succeeded', async () => {
+  fixture.setPaymentAmountOverrides({ status: 'processing', total_amount: 1 });
+  const checkout = await startCheckoutBeforeExpiry();
+  await holdRunsOut(checkout);
+  assert.equal((await cron()).status, 200);
+  const closed = await fixture.commerce.getDocument(checkout.record._id);
+  assert.equal(closed.providerRecoveryTerminal, true);
+  assert.equal(closed.providerPaymentState, 'processing');
+  fixture.setPaymentAmountOverrides({ status: 'succeeded', total_amount: 1 });
+  const paid = await fixture.dodoWebhook(`payment_${checkout.record.providerOrderId}`,
+    'payment.succeeded', `window_mismatch_${checkout.record._id}`);
+  assert.equal(paid.status, 409, JSON.stringify(paid));
+  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'succeeded');
+  await holdRunsOut(checkout, 25 * 60 * 60_000);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
+  assert.equal((await secondVisitor(checkout.payload)).status, 409);
+});

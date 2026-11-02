@@ -216,7 +216,8 @@ RecordReschedule(n) ==
      /\ UNCHANGED lock
 
 MarkNeedsRecovery(n) ==
-  /\ rec' = [rec EXCEPT ![n].status = "needs_recovery"]
+  /\ rec' = [rec EXCEPT ![n].status = "needs_recovery",
+                          ![n].knownCaptured = rec[n].knownCaptured \/ rec[n].pay = "captured"]
   /\ UNCHANGED <<hold, lock, bookings>>
 
 FinalizeCapture(n) ==
@@ -270,6 +271,13 @@ RecoveryGivesUp(n) ==
                             ![n].knownCaptured = observed /\ rec[n].pay = "captured"]
   /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
 
+WebhookRecordsCapture(n) ==
+  /\ rec[n].terminal
+  /\ rec[n].pay = "captured"
+  /\ ~rec[n].knownCaptured
+  /\ rec' = [rec EXCEPT ![n].knownCaptured = TRUE]
+  /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
+
 AdminRestoresBooking(s) ==
   /\ lock[s] = 0
   /\ SlotBookings(s) = {}
@@ -283,7 +291,6 @@ AdminRestoresBooking(s) ==
 
 UnconfirmedPaymentHoldExpires(s) ==
   /\ hold[s].phase = "payment_pending"
-  /\ hold[s].exp <= now
   /\ now = MaxTime
   /\ ~rec[hold[s].rec].knownCaptured
   /\ hold' = [hold EXCEPT ![s].phase = "expired", ![s].nonce = DeadNonce]
@@ -305,10 +312,10 @@ Next ==
                      \/ \E u \in Tabs : DuplicateTab(t, u)
   \/ \E n \in Nonces : \/ SubmitPayment(n) \/ PaymentSucceeds(n) \/ PaymentFails(n) \/ CheckoutExpires(n)
                        \/ FinalizeCapture(n) \/ ReconcileRecovery(n) \/ ReconcilePending(n)
-                       \/ ReconcileUnpaid(n) \/ RecoveryGivesUp(n)
+                       \/ ReconcileUnpaid(n) \/ RecoveryGivesUp(n) \/ WebhookRecordsCapture(n)
 
-Server(n) == FinalizeCapture(n) \/ ReconcileRecovery(n) \/ ReconcilePending(n) \/ PaymentSucceeds(n) \/ PaymentFails(n)
-             \/ ReconcileUnpaid(n)
+Server(n) == FinalizeCapture(n) \/ ReconcileRecovery(n) \/ ReconcilePending(n)
+             \/ ReconcileUnpaid(n) \/ WebhookRecordsCapture(n)
 
 Spec == Init /\ [][Next]_vars /\ WF_vars(Tick) /\ \A n \in Nonces : WF_vars(Server(n)) /\ SF_vars(CheckoutExpires(n))
           /\ \A s \in Slots : WF_vars(UnconfirmedPaymentHoldExpires(s))
