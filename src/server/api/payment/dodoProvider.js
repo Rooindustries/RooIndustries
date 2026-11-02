@@ -116,7 +116,8 @@ export const retrieveDodoRefund = (refundId) => createDodoClient().refunds.retri
 
 export const settledDodoPaymentState = (payment) => {
   if (payment?.refund_status === "full") return "refunded";
-  if ((payment?.disputes || []).some((dispute) => isTerminalDisputeStatus(dispute.dispute_status))) {
+  const disputes = Array.isArray(payment?.disputes) ? payment.disputes : [];
+  if (disputes.some((dispute) => isTerminalDisputeStatus(dispute?.dispute_status))) {
     return "disputed";
   }
   return String(payment?.status || "").trim();

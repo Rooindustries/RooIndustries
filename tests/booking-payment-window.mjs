@@ -399,22 +399,27 @@ test('a payment stuck waiting on the customer frees its slot a day after the hol
   assert.equal((await secondVisitor(checkout.payload)).status, 200);
 });
 
-test('a payment that went through but fails our checks keeps its slot for owner review', async () => {
-  fixture.setPaymentAmountOverrides({ total_amount: 1 });
-  const checkout = await startCheckoutBeforeExpiry();
-  await holdRunsOut(checkout);
-  assert.equal((await cron()).status, 200);
-  const record = await fixture.commerce.getDocument(checkout.record._id);
-  assert.equal(record.providerRecoveryTerminal, true);
-  assert.equal(record.providerPaymentState, 'succeeded');
-  const held = await holdFor(checkout.payload);
-  assert.equal(held.phase, 'payment_pending');
-  assert.equal(held.paymentRecordId, checkout.record._id);
-  await holdRunsOut(checkout, 25 * 60 * 60_000);
-  assert.equal((await cron()).status, 200);
-  assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
-  assert.equal((await secondVisitor(checkout.payload)).status, 409);
-});
+for (const [problem, overrides] of [
+  ['a wrong amount', { total_amount: 1 }],
+  ['malformed disputes', { disputes: {} }],
+]) {
+  test(`a payment that went through with ${problem} keeps its slot for owner review`, async () => {
+    fixture.setPaymentAmountOverrides(overrides);
+    const checkout = await startCheckoutBeforeExpiry();
+    await holdRunsOut(checkout);
+    assert.equal((await cron()).status, 200);
+    const record = await fixture.commerce.getDocument(checkout.record._id);
+    assert.equal(record.providerRecoveryTerminal, true);
+    assert.equal(record.providerPaymentState, 'succeeded');
+    const held = await holdFor(checkout.payload);
+    assert.equal(held.phase, 'payment_pending');
+    assert.equal(held.paymentRecordId, checkout.record._id);
+    await holdRunsOut(checkout, 25 * 60 * 60_000);
+    assert.equal((await cron()).status, 200);
+    assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
+    assert.equal((await secondVisitor(checkout.payload)).status, 409);
+  });
+}
 
 test('a payment that failed our checks while processing keeps its slot once Dodo says it succeeded', async () => {
   fixture.setPaymentAmountOverrides({ status: 'processing', total_amount: 1 });
