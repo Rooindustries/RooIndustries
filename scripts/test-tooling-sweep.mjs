@@ -181,7 +181,7 @@ await run("playwright-command-safety", () => {
   const runner = child(path.join(root, "scripts/test-tooling-sweep-server.mjs"), { NEXT_DIST_DIR: "../other-run", BASE_URL: fixture.baseUrl, PW_PORT: "45991" });
   assert.notEqual(runner.status, 0);
   assert.match(runner.stderr, /test-target/);
-  const partial = path.join(root, ".next-e2e-safety-partial");
+  const partial = fs.mkdtempSync(path.join(root, ".next-e2e-safety-partial-"));
   fs.mkdirSync(path.join(partial, "cache"), { recursive: true });
   fs.writeFileSync(path.join(partial, "routes-manifest.json"), "{}");
   try {
