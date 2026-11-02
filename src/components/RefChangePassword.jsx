@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../lib/passwordPolicy";
 import { useReferralAccount } from "../lib/useReferralAccount";
+import { requestDeadline } from "../lib/clientRequest";
 
 const PASSWORD_PENDING_MESSAGE =
   "Your password change is saving. It will finish in a moment.";
@@ -63,6 +64,7 @@ export default function RefChangePassword() {
     try {
       const reauthResponse = await fetch("/api/auth/reauth", {
         method: "POST",
+        signal: requestDeadline(15000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           flow: "referral",
@@ -90,6 +92,7 @@ export default function RefChangePassword() {
       }
       const res = await fetch("/api/ref/hashPassword", {
         method: "POST",
+        signal: requestDeadline(15000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: pass1 }),
       });

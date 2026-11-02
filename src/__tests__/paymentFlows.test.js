@@ -128,7 +128,7 @@ describe("payment session UI", () => {
 
     renderPayment(bookingFixture());
     await waitFor(() =>
-      expect(global.fetch).toHaveBeenCalledWith("/api/payment/providers")
+      expect(global.fetch).toHaveBeenCalledWith("/api/payment/providers", { signal: expect.anything() })
     );
     expect(
       document.querySelector(

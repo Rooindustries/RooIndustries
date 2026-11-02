@@ -1,0 +1,54 @@
+const unwrap = (expression) => {
+  let current = expression;
+  for (;;) {
+    if (current.type === "AwaitExpression") current = current.argument;
+    else if (
+      current.type === "CallExpression" &&
+      current.callee.type === "MemberExpression" &&
+      !current.callee.computed &&
+      ["catch", "finally"].includes(current.callee.property.name)
+    ) {
+      current = current.callee.object;
+    } else return current;
+  }
+};
+
+const writeMethod = (call) => {
+  const options = call.arguments[1];
+  if (options?.type !== "ObjectExpression") return null;
+  const method = options.properties.find(
+    (property) =>
+      property.type === "Property" &&
+      !property.computed &&
+      property.key.type === "Identifier" &&
+      property.key.name === "method",
+  );
+  const value = method?.value.type === "Literal" ? String(method.value.value).toUpperCase() : null;
+  return value && value !== "GET" && value !== "HEAD" ? value : null;
+};
+
+export default {
+  meta: {
+    type: "problem",
+    docs: { description: "A write request whose result is ignored lets the UI move on as if it worked." },
+    messages: {
+      ignored: "The result of this {{method}} request is ignored. Check the response before updating the UI.",
+    },
+    schema: [],
+  },
+  create(context) {
+    return {
+      ExpressionStatement(node) {
+        const call = unwrap(node.expression);
+        if (
+          call.type !== "CallExpression" ||
+          call.callee.type !== "Identifier" ||
+          call.callee.name !== "fetch"
+        )
+          return;
+        const method = writeMethod(call);
+        if (method) context.report({ node, messageId: "ignored", data: { method } });
+      },
+    };
+  },
+};

@@ -1,6 +1,7 @@
 import { readBrowserStorage, removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { requestDeadline } from "../lib/clientRequest";
 
 const TOKEN_KEY = "referral_registration_verification";
 
@@ -73,6 +74,7 @@ export default function RefVerifyRegistration() {
       const entry = { outcome: null };
       entry.promise = fetch("/api/ref/verifyRegistration", {
         method: "POST",
+        signal: requestDeadline(15000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token }),
       })

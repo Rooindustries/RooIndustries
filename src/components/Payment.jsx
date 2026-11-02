@@ -19,6 +19,7 @@ import {
   sanitizeReferralForCheckout,
   toMoney,
 } from "../lib/checkoutCodes";
+import { requestDeadline } from "../lib/clientRequest";
 
 const { applyPackagePricing } = packagePricing;
 const PAYMENT_FETCH_TIMEOUT_MS = 15_000;
@@ -843,7 +844,7 @@ export default function Payment({ hideFooter = false }) {
   useEffect(() => {
     let active = true;
 
-    fetch("/api/payment/providers")
+    fetch("/api/payment/providers", { signal: requestDeadline() })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("bad_status"))))
       .then((data) => {
         if (!active || !data?.ok || !data?.providers) return;

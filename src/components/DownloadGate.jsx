@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { requestDeadline } from "../lib/clientRequest";
 
 const titleFromSlug = (slug) =>
   String(slug || "")
@@ -43,6 +44,7 @@ export default function DownloadGate() {
     try {
       const response = await fetch("/api/downloads/validate", {
         method: "POST",
+        signal: requestDeadline(15000),
         headers: {
           "Content-Type": "application/json",
         },

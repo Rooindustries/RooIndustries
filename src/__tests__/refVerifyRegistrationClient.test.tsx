@@ -39,6 +39,7 @@ describe("referral registration confirmation client", () => {
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith("/api/ref/verifyRegistration", {
+        signal: expect.anything(),
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: verificationToken }),

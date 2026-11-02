@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { requestDeadline } from "../lib/clientRequest";
 
 export default function RefForgot() {
   const nav = useNavigate();
@@ -36,6 +37,7 @@ export default function RefForgot() {
     try {
       const res = await fetch("/api/ref/forgot", {
         method: "POST",
+        signal: requestDeadline(15000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: submittedEmail }),
       });

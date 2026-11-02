@@ -160,3 +160,42 @@ run("no-hand-built-dollars", {
     },
   ],
 });
+
+run("fetch-needs-deadline", {
+  valid: [
+    `fetch("/api/ref/payouts", { signal: requestDeadline() });`,
+    `fetch(url, { ...options });`,
+    `fetch(url, options);`,
+  ],
+  invalid: [
+    {
+      name: "RefDashboard payouts request before #216",
+      code: `async function load() { const res = await fetch("/api/ref/payouts"); }`,
+      errors: [{ messageId: "missing" }],
+    },
+    {
+      name: "Razorpay lookup before #148",
+      code: "fetch(`https://api.razorpay.com/v1/orders/${id}/payments`, { headers: { Authorization: auth } });",
+      errors: [{ messageId: "missing" }],
+    },
+  ],
+});
+
+run("no-ignored-write-request", {
+  valid: [
+    `const res = await fetch("/api/releaseHold", { method: "POST" }); if (!res.ok) throw new Error();`,
+    `fetch("/api/payment/quote", { method: "POST" }).then((response) => response.json());`,
+  ],
+  invalid: [
+    {
+      name: "ReservationBanner release before #209",
+      code: `fetch("/api/releaseHold", { method: "POST", body }).catch(() => console.error("release failed"));`,
+      errors: [{ messageId: "ignored" }],
+    },
+    {
+      name: "BookingForm release before #158",
+      code: `async function release() { await fetch("/api/releaseHold", { method: "POST", body }); }`,
+      errors: [{ messageId: "ignored" }],
+    },
+  ],
+});

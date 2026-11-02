@@ -541,3 +541,18 @@ test.describe("daylight saving time", () => {
     expect(booking.displayTime).toBe("1:30 AM EST");
   });
 });
+
+for (const [path, open] of [
+  ["/api/payment/providers", async ({ flow }) => { await flow.review(); await flow.payment(); }],
+  ["/api/bookingAvailability", async ({ page }) => { await page.goto("/packages"); }],
+]) {
+  test(`a stalled ${path} request is given up instead of hanging`, async ({ page, flow }) => {
+    flow.state.failures[path] = "timeout";
+    const abandoned = page.waitForEvent("requestfailed", {
+      predicate: request => new URL(request.url()).pathname === path,
+      timeout: 15000,
+    });
+    await open({ page, flow });
+    expect((await abandoned).failure()?.errorText).toBeTruthy();
+  });
+}

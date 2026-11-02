@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import SupabaseSocialLogin from "./SupabaseSocialLogin";
 import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../lib/passwordPolicy";
+import { requestDeadline } from "../lib/clientRequest";
 
 const REFERRAL_SIGNUP_DRAFT = "referral_signup_draft";
 
@@ -59,7 +60,7 @@ export default function RefRegister() {
     } catch {
       removeBrowserStorage("sessionStorage", REFERRAL_SIGNUP_DRAFT);
     }
-    fetch("/api/auth/identities?flow=referral", { cache: "no-store" })
+    fetch("/api/auth/identities?flow=referral", { cache: "no-store", signal: requestDeadline() })
       .then((response) => response.json())
       .then((data) => {
         if (data?.authenticated && data?.emailVerified && data.email) {
@@ -163,7 +164,8 @@ export default function RefRegister() {
           const resCheck = await fetch(
             `/api/ref/validateReferral?code=${encodeURIComponent(
               trimmedSlug
-            )}&purpose=registration`
+            )}&purpose=registration`,
+            { signal: requestDeadline() }
           );
           const dataCheck = await resCheck.json();
           const availability = resolveReferralCodeAvailability(
@@ -189,6 +191,7 @@ export default function RefRegister() {
       }
       const res = await fetch("/api/ref/register", {
         method: "POST",
+        signal: requestDeadline(15000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: trimmedDiscordUsername,
