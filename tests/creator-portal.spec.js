@@ -502,6 +502,24 @@ test.describe('portal requests that stall', () => {
     await expect(message).toBeVisible();
   });
 
+  test('a stalled signup asks to check the email before retrying', async ({ page }) => {
+    const held = await stall(page, '/api/ref/register', 'POST');
+    try {
+      await page.goto('/referrals/register');
+      await page.getByLabel('Discord Username', { exact: true }).fill('synthetic_creator');
+      await page.getByLabel('Login Email', { exact: true }).fill('new-creator@example.invalid');
+      await page.getByLabel('PayPal Email (for payouts)', { exact: true }).fill('payouts@example.invalid');
+      await page.getByLabel('Referral Code', { exact: true }).fill('freshcreator');
+      await page.getByLabel('Password', { exact: true }).fill('Fresh-password-22!');
+      await page.getByLabel('Confirm Password', { exact: true }).fill('Fresh-password-22!');
+      await page.getByRole('button', { name: 'Register', exact: true }).click();
+      await held.arrived;
+      const message = page.getByText("We couldn't tell if your account was created.", { exact: false });
+      await expect(message).toBeVisible({ timeout: 20000 });
+      expect(held.count()).toBe(1);
+    } finally { await held.release(); }
+  });
+
   test('a stalled reset request asks to check the inbox before retrying', async ({ page }) => {
     const held = await stall(page, '/api/ref/forgot', 'POST');
     try {

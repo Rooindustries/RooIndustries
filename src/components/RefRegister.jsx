@@ -6,6 +6,8 @@ import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../lib/passwordPol
 import { requestDeadline } from "../lib/clientRequest";
 
 const REFERRAL_SIGNUP_DRAFT = "referral_signup_draft";
+const REGISTRATION_UNCERTAIN_MESSAGE =
+  "We couldn't tell if your account was created. Check your email for a confirmation link before trying again.";
 
 export const resolveReferralCodeAvailability = (response, data) => {
   if (!response?.ok) return null;
@@ -169,6 +171,7 @@ export default function RefRegister() {
     submittingRef.current = true;
     setLoading(true);
     let redirecting = false;
+    let registrationSent = false;
     try {
       if (slugAvailable === null) {
         try {
@@ -200,6 +203,7 @@ export default function RefRegister() {
           return;
         }
       }
+      registrationSent = true;
       const res = await fetch("/api/ref/register", {
         method: "POST",
         signal: requestDeadline(15000),
@@ -241,7 +245,9 @@ export default function RefRegister() {
       redirectTimerRef.current = setTimeout(() => nav("/referrals/dashboard"), 900);
     } catch {
       console.error("Referral registration failed");
-      if (editVersionRef.current === version) setFormError("Server error.");
+      if (editVersionRef.current === version) {
+        setFormError(registrationSent ? REGISTRATION_UNCERTAIN_MESSAGE : "Server error.");
+      }
     } finally {
       if (!redirecting) {
         submittingRef.current = false;
