@@ -356,3 +356,52 @@ test('a customer back from a payment that failed our checks records Dodo success
   assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
 });
+
+test('a payment that failed our checks and then lost its dispute by expiry frees its slot a day after the hold ran out', async () => {
+  fixture.setPaymentAmountOverrides({ total_amount: 1 });
+  const checkout = await startCheckoutBeforeExpiry();
+  await holdRunsOut(checkout);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'succeeded');
+  fixture.setPaymentAmountOverrides({ total_amount: 1, disputes: [{ dispute_id: 'window_dispute', dispute_status: 'dispute_expired' }] });
+  const disputed = await fixture.dodoWebhook(`payment_${checkout.record.providerOrderId}`,
+    'dispute.expired', `window_dispute_${checkout.record._id}`);
+  assert.equal(disputed.status, 409, JSON.stringify(disputed));
+  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'disputed');
+  await holdRunsOut(checkout, 25 * 60 * 60_000);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await holdFor(checkout.payload)).phase, 'expired');
+  assert.equal((await secondVisitor(checkout.payload)).status, 200);
+});
+
+test('the cron learns about a refund on a payment in owner review even when the refund webhook never arrives', async () => {
+  fixture.setPaymentAmountOverrides({ total_amount: 1 });
+  const checkout = await startCheckoutBeforeExpiry();
+  await holdRunsOut(checkout);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'succeeded');
+  fixture.setPaymentAmountOverrides({ total_amount: 1, refund_status: 'full' });
+  clockShiftMs += 2 * 60 * 60_000;
+  assert.equal((await cron()).status, 200);
+  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'refunded');
+  await holdRunsOut(checkout, 25 * 60 * 60_000);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await holdFor(checkout.payload)).phase, 'expired');
+  assert.equal((await secondVisitor(checkout.payload)).status, 200);
+});
+
+test('a late processing webhook cannot undo a recorded success on a payment that failed our checks', async () => {
+  fixture.setPaymentAmountOverrides({ status: 'processing', total_amount: 1 });
+  const checkout = await startCheckoutBeforeExpiry();
+  await holdRunsOut(checkout);
+  assert.equal((await cron()).status, 200);
+  const paymentId = `payment_${checkout.record.providerOrderId}`;
+  fixture.setPaymentAmountOverrides({ status: 'succeeded', total_amount: 1 });
+  assert.equal((await fixture.dodoWebhook(paymentId, 'payment.succeeded', `window_order_ok_${checkout.record._id}`)).status, 409);
+  fixture.setPaymentAmountOverrides({ status: 'processing', total_amount: 1 });
+  assert.equal((await fixture.dodoWebhook(paymentId, 'payment.processing', `window_order_late_${checkout.record._id}`)).status, 409);
+  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'succeeded');
+  await holdRunsOut(checkout, 25 * 60 * 60_000);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
+});

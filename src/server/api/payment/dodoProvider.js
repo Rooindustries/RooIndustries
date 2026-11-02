@@ -1,5 +1,6 @@
 import DodoPayments from "dodopayments";
 import providerConfig from "./providerConfig.js";
+import { isTerminalDisputeStatus } from "../../referrals/disputeAccounting.js";
 
 export const DODO_CURRENCY = "USD";
 const read = (key) => String(process.env[key] || "").trim();
@@ -115,7 +116,7 @@ export const retrieveDodoRefund = (refundId) => createDodoClient().refunds.retri
 
 export const settledDodoPaymentState = (payment) => {
   if (payment?.refund_status === "full") return "refunded";
-  if ((payment?.disputes || []).some((dispute) => ["dispute_lost", "dispute_accepted"].includes(dispute.dispute_status))) {
+  if ((payment?.disputes || []).some((dispute) => isTerminalDisputeStatus(dispute.dispute_status))) {
     return "disputed";
   }
   return String(payment?.status || "").trim();

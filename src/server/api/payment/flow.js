@@ -4972,6 +4972,14 @@ export const reconcilePaymentSessions = async ({
     }
   }
 
+  if (dodoEnabled) {
+    try {
+      summary.ownerReviewStatesChecked = await refreshOwnerReviewDodoStates({ client });
+    } catch (error) {
+      logSafeError("Owner review payment state check failed", error);
+    }
+  }
+
   return {
     httpStatus: summary.failed ? 503 : 200,
     body: {
@@ -5852,13 +5860,46 @@ const advancesProviderPaymentState = (current, next) =>
   !!next && current !== next &&
   (PROVIDER_STATE_STAGE[next] || 0) >= (PROVIDER_STATE_STAGE[String(current || "").trim()] || 0);
 
+const OWNER_REVIEW_STATE_CHECK_MS = 60 * 60 * 1000;
+
+const refreshOwnerReviewDodoStates = async ({ client }) => {
+  const records = await client.fetch(
+    `*[_type == $type && provider == "dodo" && providerRecoveryTerminal == true
+      && !(providerPaymentState in ["refunded", "disputed"]) && (!defined(bookingId) || bookingId == "")
+      && (!defined(providerStateCheckedAt) || providerStateCheckedAt == "" || providerStateCheckedAt <= $due)
+    ] | order(updatedAt asc)[0...20]`,
+    { type: PAYMENT_RECORD_TYPE, due: new Date(Date.now() - OWNER_REVIEW_STATE_CHECK_MS).toISOString() }
+  );
+  let checked = 0;
+  for (const record of Array.isArray(records) ? records : []) {
+    const inspection = await inspectDodoCheckout({ record });
+    if (inspection.state === "unavailable" && inspection.retryable !== false) continue;
+    const state = String((inspection.payment ? settledDodoPaymentState(inspection.payment) : inspection.providerPaymentState) || "").trim();
+    try {
+      await patchPaymentRecord({ client, record, set: {
+        providerStateCheckedAt: nowIso(),
+        ...(advancesProviderPaymentState(record.providerPaymentState, state) ? { providerPaymentState: state } : {}),
+      } });
+      checked += 1;
+    } catch (error) {
+      if (!isConflictError(error)) throw error;
+    }
+  }
+  return checked;
+};
+
 const recordProviderPaymentState = async ({ client, record, providerPaymentState }) => {
   const state = String(providerPaymentState || "").trim();
-  if (!advancesProviderPaymentState(record.providerPaymentState, state) || String(record.bookingId || "").trim()) return;
-  try {
-    await patchPaymentRecord({ client, record, set: { providerPaymentState: state } });
-  } catch (error) {
-    if (!isConflictError(error)) throw error;
+  let current = record;
+  for (let attempt = 0; attempt < 3 && current?._id; attempt += 1) {
+    if (!advancesProviderPaymentState(current.providerPaymentState, state) || String(current.bookingId || "").trim()) return;
+    try {
+      await patchPaymentRecord({ client, record: current, set: { providerPaymentState: state } });
+      return;
+    } catch (error) {
+      if (!isConflictError(error)) throw error;
+      current = await getPaymentRecordById(client, current._id);
+    }
   }
 };
 
