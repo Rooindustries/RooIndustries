@@ -87,6 +87,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     let paymentAmountOverrides = {};
     let emailFailure = false;
     let checkoutPaymentStarted = true;
+    let providerLookupFailure = false;
     database.setProviderHandler(async request => {
       if (request.path === '/emails') {
         request.bookings = await database.sql`select legacy_sanity_id as id, payload->>'status' as status
@@ -103,6 +104,10 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
         const id = `session_fixture_${sessions.size + 1}`;
         sessions.set(id, request.body);
         return { body: { session_id: id, checkout_url: `https://test.checkout.dodopayments.com/session/${id}` } };
+      }
+      if (providerLookupFailure && request.method === 'GET' &&
+          (request.path.startsWith('/checkouts/') || request.path.startsWith('/payments/'))) {
+        return { status: 503, body: { message: 'Synthetic provider outage' } };
       }
       if (request.path.startsWith('/checkouts/')) {
         const id = request.path.split('/').at(-1);
@@ -291,6 +296,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       setPaymentTax, setPaymentTaxInclusive, setPaymentAmountOverrides, refundPayment, dodoWebhook,
       setEmailFailure(value) { emailFailure = value; },
       setCheckoutPaymentStarted(value) { checkoutPaymentStarted = value; },
+      setProviderLookupFailure(value) { providerLookupFailure = value; },
       availability: async () => {
         const response = await fetch(`${base}/api/bookingAvailability`, { headers: { origin: base } });
         return { status: response.status, body: await response.json() };

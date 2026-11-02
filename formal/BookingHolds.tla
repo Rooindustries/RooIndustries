@@ -1,5 +1,5 @@
 ---------------------------- MODULE BookingHolds ----------------------------
-EXTENDS Naturals, FiniteSets
+EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Tabs, Slots, HoldMinutes, MaxTime, MaxNonce
 
@@ -15,10 +15,12 @@ VARIABLES now, nextNonce, hold, lock, tab, rec, bookings
 
 vars == <<now, nextNonce, hold, lock, tab, rec, bookings>>
 
+TabPermutations == Permutations(Tabs)
+
 EmptyHold == [phase |-> "none", nonce |-> NoNonce, exp |-> 0, rec |-> NoNonce]
 EmptyTab == [slot |-> NoSlot, nonce |-> NoNonce, exp |-> 0, details |-> FALSE, paying |-> NoNonce]
 EmptyRec == [status |-> "none", slot |-> NoSlot, tokenExp |-> 0, created |-> 0,
-             pay |-> "open", paidInTime |-> FALSE, details |-> FALSE]
+             pay |-> "open", paidInTime |-> FALSE, details |-> FALSE, seen |-> FALSE, terminal |-> FALSE]
 
 TypeOK ==
   /\ now \in 0..MaxTime
@@ -31,7 +33,7 @@ TypeOK ==
   /\ rec \in [Nonces -> [status : {"none", "started", "needs_recovery", "booked", "rescheduled", "abandoned"},
                          slot : Slots \cup {NoSlot}, tokenExp : Times, created : Times,
                          pay : {"open", "processing", "captured", "closed"},
-                         paidInTime : BOOLEAN, details : BOOLEAN]]
+                         paidInTime : BOOLEAN, details : BOOLEAN, seen : BOOLEAN, terminal : BOOLEAN]]
 
 Init ==
   /\ now = 0
@@ -229,6 +231,7 @@ FinalizeCapture(n) ==
 
 ReconcileRecovery(n) ==
   /\ rec[n].pay = "captured"
+  /\ ~rec[n].terminal
   /\ rec[n].status = "needs_recovery"
   /\ IF CanCommit(n) THEN CommitBooking(n) ELSE RecordReschedule(n)
   /\ UNCHANGED <<now, nextNonce, tab>>
@@ -236,12 +239,14 @@ ReconcileRecovery(n) ==
 ReconcilePending(n) ==
   /\ rec[n].pay = "processing"
   /\ rec[n].status \in {"started", "needs_recovery"}
-  /\ MarkNeedsRecovery(n)
-  /\ UNCHANGED <<now, nextNonce, tab>>
+  /\ ~rec[n].terminal
+  /\ rec' = [rec EXCEPT ![n].status = "needs_recovery", ![n].seen = TRUE]
+  /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
 
 ReconcileUnpaid(n) ==
   LET s == rec[n].slot
   IN /\ rec[n].status \in {"started", "needs_recovery"}
+     /\ ~rec[n].terminal
      /\ rec[n].pay \in {"open", "closed"}
      /\ now >= rec[n].created + HoldMinutes
      /\ rec' = [rec EXCEPT ![n].status = "abandoned"]
@@ -253,6 +258,17 @@ CleanupExpiredHold(s) ==
   /\ hold[s].exp <= now
   /\ hold' = [hold EXCEPT ![s].phase = "expired", ![s].nonce = DeadNonce]
   /\ UNCHANGED <<now, nextNonce, lock, tab, rec, bookings>>
+
+RecoveryGivesUp(n) ==
+  LET s == rec[n].slot
+  IN /\ rec[n].status \in {"started", "needs_recovery"}
+     /\ ~rec[n].terminal
+     /\ (rec[n].pay \in {"open", "closed"} \/ rec[n].seen)
+     /\ rec' = [rec EXCEPT ![n].terminal = TRUE]
+     /\ hold' = IF ~rec[n].seen /\ hold[s].phase = "payment_pending" /\ hold[s].rec = n
+                  THEN [hold EXCEPT ![s] = PaymentReleasedHold(hold[s])]
+                  ELSE hold
+     /\ UNCHANGED <<now, nextNonce, lock, tab, bookings>>
 
 Tick ==
   /\ now < MaxTime
@@ -267,7 +283,7 @@ Next ==
                      \/ \E u \in Tabs : DuplicateTab(t, u)
   \/ \E n \in Nonces : \/ SubmitPayment(n) \/ PaymentSucceeds(n) \/ PaymentFails(n) \/ CheckoutExpires(n)
                        \/ FinalizeCapture(n) \/ ReconcileRecovery(n) \/ ReconcilePending(n)
-                       \/ ReconcileUnpaid(n)
+                       \/ ReconcileUnpaid(n) \/ RecoveryGivesUp(n)
 
 Server(n) == FinalizeCapture(n) \/ ReconcileRecovery(n) \/ ReconcilePending(n) \/ PaymentSucceeds(n)
 
@@ -312,6 +328,12 @@ OneBookingPerPayment ==
   /\ \A s \in Slots : lock[s] # 0 => \E b \in SlotBookings(s) : b.id = lock[s]
 
 PaidBookingNeverLost ==
-  \A n \in Nonces : (rec[n].pay = "captured") ~> (BookingFor(n) # {})
+  \A n \in Nonces : (rec[n].pay = "captured") ~> (BookingFor(n) # {} \/ rec[n].terminal)
+
+PaymentHoldHasReachableOwner ==
+  \A s \in Slots :
+    hold[s].phase = "payment_pending" =>
+      /\ rec[hold[s].rec].status \in {"started", "needs_recovery"}
+      /\ (~rec[hold[s].rec].terminal \/ rec[hold[s].rec].seen)
 
 =============================================================================

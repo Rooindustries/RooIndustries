@@ -68,6 +68,7 @@ import {
   PAYMENT_STATUS_NEEDS_RECOVERY,
   PAYMENT_STATUS_REFUNDED,
   PAYMENT_STATUS_STARTED,
+  PAYMENT_STATUS_VERIFIED_SERVER,
 } from "./paymentRecord.js";
 import { selectPaymentAuthority, resolveWebhookBackend, createPaymentBackendClient } from "./backend.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
@@ -124,6 +125,24 @@ const buildRecoveryCompletionState = (record) => ({
   recoveryFailureCount: 0,
   reconciliationRecoveryTerminal: record.providerRefundDetailsMissing === true,
 });
+
+const PAYMENT_EVIDENCE_STATUSES = [
+  PAYMENT_STATUS_CAPTURED_CLIENT,
+  PAYMENT_STATUS_CAPTURED_WEBHOOK,
+  PAYMENT_STATUS_FINALIZING,
+  PAYMENT_STATUS_VERIFIED_SERVER,
+  PAYMENT_STATUS_BOOKED,
+  PAYMENT_STATUS_EMAIL_PARTIAL,
+];
+
+const hasPaymentEvidence = (record = {}) =>
+  !!String(record.providerPaymentId || "").trim() ||
+  PAYMENT_EVIDENCE_STATUSES.includes(String(record.status || "").trim().toLowerCase()) ||
+  String(record.verificationState || "").trim() === "server_verified";
+
+const stopsRecovery = (record, values) =>
+  (values.reconciliationRecoveryTerminal === true && record.reconciliationRecoveryTerminal !== true) ||
+  (values.providerRecoveryTerminal === true && record.providerRecoveryTerminal !== true);
 
 const logRecoveryExhaustion = (record, values) => {
   if (values.reconciliationRecoveryTerminal === true &&
@@ -1199,6 +1218,27 @@ const patchPaymentRecord = async ({
     ...(event ? { events: mergedEvents } : {}),
     updatedAt: nowIso(),
   };
+  const holdRelease = stopsRecovery(record, values) && !hasPaymentEvidence({ ...record, ...values })
+    ? await prepareUnreachableRecoveryHold({ client, record })
+    : null;
+  if (holdRelease) {
+    if (typeof client?.transaction !== "function") {
+      throw Object.assign(new Error("Atomic payment storage is unavailable."), {
+        status: 503,
+        code: "payment_transaction_unavailable",
+      });
+    }
+    await client.transaction()
+      .patch(record._id, (patch) => guardPaymentRevision(patch, record).set({
+        ...values,
+        holdSnapshot: holdRelease.snapshot,
+      }))
+      .patch(holdRelease.holdDoc._id, (patch) =>
+        guardPaymentRevision(patch, holdRelease.holdDoc).set(holdRelease.set))
+      .commit();
+    logRecoveryExhaustion(record, values);
+    return getPaymentRecordById(client, record._id);
+  }
   const patch = guardPaymentRevision(client.patch(record._id), record).set(values);
   const committed = await patch.commit();
   logRecoveryExhaustion(record, values);
@@ -1696,6 +1736,33 @@ const releasePendingHold = async ({ client, record }) => {
   } catch (error) {
     if (!isConflictError(error)) throw error;
   }
+};
+
+const prepareUnreachableRecoveryHold = async ({ client, record }) => {
+  const holdSnapshot = normalizeObject(record?.holdSnapshot);
+  const holdId = String(holdSnapshot.slotHoldId || "").trim();
+  if (!holdId) return null;
+  const holdDoc = await getHoldById(client, holdId);
+  if (
+    !holdDoc?._id ||
+    String(holdDoc.phase || "").trim().toLowerCase() !== HOLD_PHASE_PAYMENT_PENDING ||
+    String(holdDoc.paymentRecordId || "").trim() !== String(record?._id || "").trim()
+  ) {
+    return null;
+  }
+  requirePaymentRevision(holdDoc);
+  const releasedAt = nowIso();
+  return {
+    holdDoc,
+    set: {
+      phase: "released",
+      expiresAt: releasedAt,
+      paymentRecordId: "",
+      paymentProvider: "",
+      releaseReason: "payment_recovery_stopped",
+    },
+    snapshot: { ...holdSnapshot, phase: "released", slotHoldExpiresAt: releasedAt },
+  };
 };
 
 const releaseCouponForPaymentRecord = async ({
@@ -3815,6 +3882,7 @@ const scheduleProviderRecoveryCheck = async ({
   record,
   reason,
   failed = false,
+  providerPaymentId = "",
 }) => {
   const operation = await currentPaymentOperation({ client, record });
   if (!operation.owned) return operation.record;
@@ -3827,6 +3895,9 @@ const scheduleProviderRecoveryCheck = async ({
       set: {
         recoveryReason: String(reason || "provider_status_pending").trim(),
         recoveryAttemptCount,
+        ...(String(providerPaymentId || "").trim() && !String(record.providerPaymentId || "").trim()
+          ? { providerPaymentId: String(providerPaymentId).trim() }
+          : {}),
         lastAttemptAt: nowIso(),
         nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
         ...(failed ? buildRecoveryFailureState(record) : {
@@ -4847,6 +4918,7 @@ export const reconcilePaymentSessions = async ({
             client,
             record,
             reason: "provider_payment_pending",
+            providerPaymentId: inspection.providerPaymentId,
           });
           summary.pending += 1;
           continue;

@@ -22,6 +22,7 @@ beforeEach(() => {
   minutesLater(0);
   fixture.setPaymentAmountOverrides({});
   fixture.setCheckoutPaymentStarted(true);
+  fixture.setProviderLookupFailure(false);
 });
 after(async () => {
   minutesLater(0);
@@ -161,4 +162,46 @@ test('a payment that fails after the hold runs out frees the slot', async () => 
   assert.equal(await isOffered(checkout.payload), true);
   assert.equal((await secondVisitor(checkout.payload)).status, 200);
   assert.deepEqual(await bookingsAt(checkout.payload.startTimeUTC), []);
+});
+
+const cronUntilRecoveryStops = async checkout => {
+  for (let run = 0; run < 15; run += 1) {
+    const record = await fixture.commerce.getDocument(checkout.record._id);
+    if (record.reconciliationRecoveryTerminal === true || record.providerRecoveryTerminal === true) return record;
+    await fixture.commerce.patch(record._id).set({ nextRecoveryAt: '' }).commit();
+    clockShiftMs += 2 * 60_000;
+    assert.ok([200, 503].includes((await cron()).status));
+  }
+  assert.fail('Recovery never stopped');
+};
+
+test('an unpaid checkout stops blocking its slot when recovery gives up during a provider outage', async () => {
+  fixture.setCheckoutPaymentStarted(false);
+  const checkout = await startCheckoutBeforeExpiry();
+  await holdRunsOut(checkout);
+  fixture.setProviderLookupFailure(true);
+  assert.ok([200, 503].includes((await cron()).status));
+  assert.equal((await secondVisitor(checkout.payload)).status, 409);
+  const stopped = await cronUntilRecoveryStops(checkout);
+  assert.equal(String(stopped.providerPaymentId || ''), '');
+  const hold = await holdFor(checkout.payload);
+  assert.equal(hold.phase, 'released');
+  assert.equal(hold.releaseReason, 'payment_recovery_stopped');
+  assert.equal(await isOffered(checkout.payload), true);
+  assert.equal((await secondVisitor(checkout.payload)).status, 200);
+});
+
+test('a payment already seen going through keeps its slot when recovery gives up', async () => {
+  fixture.setPaymentAmountOverrides({ status: 'processing' });
+  const checkout = await startCheckoutBeforeExpiry();
+  await holdRunsOut(checkout);
+  assert.equal((await cron()).status, 200);
+  assert.ok((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentId);
+  fixture.setProviderLookupFailure(true);
+  await cronUntilRecoveryStops(checkout);
+  const hold = await holdFor(checkout.payload);
+  assert.equal(hold.phase, 'payment_pending');
+  assert.equal(hold.paymentRecordId, checkout.record._id);
+  assert.equal(await isOffered(checkout.payload), false);
+  assert.equal((await secondVisitor(checkout.payload)).status, 409);
 });

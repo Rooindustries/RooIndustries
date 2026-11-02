@@ -18,7 +18,7 @@ fi
 states="$(mktemp -d)"
 trap 'rm -rf -- "$states"' EXIT
 cd "$(dirname "$0")/../formal"
-for config in BookingHolds BookingHoldsMove; do
+for config in BookingHolds BookingHoldsLiveness BookingHoldsMove; do
   java -XX:+UseParallelGC -jar "$jar" -deadlock -workers auto \
     -metadir "$states/$config" -config "$config.cfg" BookingHolds.tla
 done
