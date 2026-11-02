@@ -5861,15 +5861,20 @@ const advancesProviderPaymentState = (current, next) =>
   (PROVIDER_STATE_STAGE[next] || 0) >= (PROVIDER_STATE_STAGE[String(current || "").trim()] || 0);
 
 const OWNER_REVIEW_STATE_CHECK_MS = 60 * 60 * 1000;
+const UNSETTLED_PROVIDER_STATES = [
+  "succeeded", "processing", "requires_payment_method", "requires_customer_action",
+  "requires_merchant_action", "requires_confirmation", "requires_capture",
+  "partially_captured", "partially_captured_and_capturable",
+];
 
 const refreshOwnerReviewDodoStates = async ({ client }) => {
   const records = await client.fetch(
-    `*[_type == $type && provider == $provider && providerPaymentState == $state
+    `*[_type == $type && provider == $provider && providerPaymentState in $states
       && providerStateCheckedAt <= $due][0...20]`,
     {
       type: PAYMENT_RECORD_TYPE,
       provider: "dodo",
-      state: "succeeded",
+      states: UNSETTLED_PROVIDER_STATES,
       due: new Date(Date.now() - OWNER_REVIEW_STATE_CHECK_MS).toISOString(),
     }
   );

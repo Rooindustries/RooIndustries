@@ -322,6 +322,22 @@ test('a payment that failed our checks while processing keeps its slot once Dodo
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
 });
 
+test('the cron learns a payment that failed our checks while processing went through even when the success webhook never arrives', async () => {
+  fixture.setPaymentAmountOverrides({ status: 'processing', total_amount: 1 });
+  const checkout = await startCheckoutBeforeExpiry();
+  await holdRunsOut(checkout);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'processing');
+  fixture.setPaymentAmountOverrides({ status: 'succeeded', total_amount: 1 });
+  clockShiftMs += 2 * 60 * 60_000;
+  assert.equal((await cron()).status, 200);
+  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'succeeded');
+  await holdRunsOut(checkout, 25 * 60 * 60_000);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
+  assert.equal((await secondVisitor(checkout.payload)).status, 409);
+});
+
 test('a payment that failed our checks and was then fully refunded frees its slot a day after the hold ran out', async () => {
   fixture.setPaymentAmountOverrides({ total_amount: 1 });
   const checkout = await startCheckoutBeforeExpiry();
