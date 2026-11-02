@@ -223,6 +223,30 @@ test('an unpaid checkout in a provider outage keeps its slot after recovery give
   assert.equal((await secondVisitor(checkout.payload)).status, 200);
 });
 
+const addStaleRecheckRecords = async (checkout, count) => {
+  const { _id, _rev, _createdAt, _updatedAt, ...fields } = await fixture.commerce.getDocument(checkout.record._id);
+  const longAgo = '2000-01-01T00:00:00.000Z';
+  for (let index = 0; index < count; index += 1) {
+    await fixture.commerce.create({
+      ...fields,
+      _id: `paymentRecord.session.0-stale-${index}`,
+      status: 'needs_recovery',
+      providerPaymentState: 'unknown',
+      providerStateCheckedAt: longAgo,
+      holdSnapshot: { ...fields.holdSnapshot, slotHoldId: '', slotHoldExpiresAt: longAgo },
+      providerOrderId: `${fields.providerOrderId}_stale_${index}`,
+      providerIdempotencyKey: `${fields.providerIdempotencyKey}_stale_${index}`,
+      sessionScope: `${fields.sessionScope}:stale:${index}`,
+      startClaimId: `${fields.startClaimId}.stale.${index}`,
+      couponReservationId: '',
+      providerPaymentId: '',
+      paymentProofClaimId: '',
+      bookingId: '',
+      lateCaptureWatchUntil: '',
+    });
+  }
+};
+
 test('a payment still going through when recovery gives up keeps its slot once Dodo says it succeeded', async () => {
   fixture.setPaymentAmountOverrides({ status: 'processing' });
   const checkout = await startCheckoutBeforeExpiry();
@@ -236,10 +260,13 @@ test('a payment still going through when recovery gives up keeps its slot once D
   assert.equal(await isOffered(checkout.payload), false);
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
   assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'unknown');
+  await addStaleRecheckRecords(checkout, 260);
   fixture.setProviderLookupFailure(false);
   fixture.setPaymentAmountOverrides({ status: 'succeeded' });
-  clockShiftMs += 2 * 60 * 60_000;
-  assert.equal((await cron()).status, 200);
+  for (let hour = 0; hour < 2; hour += 1) {
+    clockShiftMs += 60 * 60_000;
+    for (let run = 0; run < 12; run += 1) assert.ok([200, 503].includes((await cron()).status));
+  }
   assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'succeeded');
   await holdRunsOut(checkout, 25 * 60 * 60_000);
   assert.equal((await cron()).status, 200);
@@ -319,6 +346,24 @@ test('a checkout the cron can no longer reach keeps its slot when Dodo says the 
   assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
   assert.equal(await isOffered(checkout.payload), false);
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
+});
+
+test('a verified payment refunded before booking frees its slot a day after the hold ran out', async () => {
+  const checkout = await startCheckoutBeforeExpiry();
+  await stopRecovery(checkout, {
+    status: 'needs_recovery',
+    verificationState: 'server_verified',
+    providerPaymentState: 'succeeded',
+    providerStateCheckedAt: '2000-01-01T00:00:00.000Z',
+  });
+  fixture.setPaymentAmountOverrides({ refund_status: 'full' });
+  clockShiftMs += 2 * 60 * 60_000;
+  assert.equal((await cron()).status, 200);
+  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'refunded');
+  await holdRunsOut(checkout, 25 * 60 * 60_000);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await holdFor(checkout.payload)).phase, 'expired');
+  assert.equal((await secondVisitor(checkout.payload)).status, 200);
 });
 
 test('an unreachable checkout keeps its slot when the payment was verified before a dispute cleared', async () => {

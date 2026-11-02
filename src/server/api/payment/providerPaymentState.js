@@ -5,6 +5,17 @@ import { getPaymentRecordById, PAYMENT_RECORD_TYPE } from "./paymentRecord.js";
 const PROVIDER_STATE_STAGE = { succeeded: 1, refunded: 2, disputed: 2 };
 const OWNER_REVIEW_STATE_CHECK_MS = 60 * 60 * 1000;
 const OWNER_REVIEW_BATCH_SIZE = 20;
+const CLEANUP_DELAY_MS = 24 * 60 * 60 * 1000;
+const NEVER_AGAIN = "9999-12-31T23:59:59.999Z";
+const REVERSED_PROVIDER_STATES = new Set(["refunded", "disputed"]);
+const MONEY_ARRIVED_STATUSES = new Set([
+  "captured_client",
+  "captured_webhook",
+  "verified_server",
+  "finalizing",
+  "booked",
+  "email_partial",
+]);
 const UNCONFIRMED_PROVIDER_STATE = "unknown";
 const UNSETTLED_PROVIDER_STATES = [
   UNCONFIRMED_PROVIDER_STATE,
@@ -60,6 +71,22 @@ export const recordProviderPaymentState = async ({ client, record, providerPayme
   }
 };
 
+const moneyArrived = (record) => {
+  const state = String(record.providerPaymentState || "").trim();
+  if (REVERSED_PROVIDER_STATES.has(state)) return false;
+  return state === "succeeded" ||
+    record.verificationState === "server_verified" ||
+    MONEY_ARRIVED_STATUSES.has(String(record.status || "").trim().toLowerCase());
+};
+
+const withinCleanupWindow = (record) => {
+  const expiresAt = Date.parse(record.holdSnapshot?.slotHoldExpiresAt || record.sessionExpiresAt || "");
+  return Number.isFinite(expiresAt) && Date.now() <= expiresAt + CLEANUP_DELAY_MS + OWNER_REVIEW_STATE_CHECK_MS;
+};
+
+const stillNeedsRecheck = (record) =>
+  !hasBooking(record) && (moneyArrived(record) || withinCleanupWindow(record));
+
 const currentSettledState = async (record) => {
   if (hasBooking(record)) return "";
   const inspection = await inspectDodoCheckout({ record });
@@ -82,10 +109,11 @@ export const refreshOwnerReviewDodoStates = async ({ client, patchRecord }) => {
   let checked = 0;
   for (const record of Array.isArray(records) ? records : []) {
     try {
-      const state = await currentSettledState(record);
+      const change = providerStateChange(record.providerPaymentState, await currentSettledState(record));
+      const next = { ...record, ...change };
       await patchRecord({ client, record, set: {
-        providerStateCheckedAt: new Date().toISOString(),
-        ...providerStateChange(record.providerPaymentState, state),
+        ...change,
+        providerStateCheckedAt: stillNeedsRecheck(next) ? new Date().toISOString() : NEVER_AGAIN,
       } });
       checked += 1;
     } catch (error) {

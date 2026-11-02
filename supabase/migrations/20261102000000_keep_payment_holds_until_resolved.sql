@@ -62,6 +62,7 @@ declare
               and payment_source.document_type = 'paymentRecord'
               and not payment_source.tombstoned
             where payment.id = hold.payment_record_id
+              and coalesce(payment_source.payload->>'providerPaymentState', '') not in ('refunded', 'disputed')
               and (
                 payment.status in ('captured', 'finalizing', 'booked', 'email_partial')
                 or payment_source.payload->>'providerPaymentState' = 'succeeded'
