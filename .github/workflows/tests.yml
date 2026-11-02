@@ -91,9 +91,9 @@ jobs:
       matrix:
         suite:
           - name: navigation
-            files: 'section-nav\.spec\.js'
+            files: '/section-nav\.spec\.js$'
           - name: booking
-            files: 'booking-flow\.spec\.js'
+            files: '/booking-flow\.spec\.js$'
           - name: rest-1
             files: '/(benchmarks-rendering|bios-guide-fonts|booking-code-check|booking-dialog-sizing|content-layout-shift|dodo-session-new-hold|free-booking-confirmation|missing-page|nonjs-seo|privacy-markdown|referral-link-capture|terms-rendering|upgrade-form-keyboard|ux-quick-fixes)\.spec\.js$'
           - name: rest-2
@@ -119,7 +119,7 @@ jobs:
         with:
           node-version: 22
           browsers: chromium webkit
-          build-dirs: .next-e2e-ci/cache
+          build-dirs: .next-e2e-ci/cache/webpack
       - name: Run browser and agent-readiness tests
         run: |
           node scripts/test-tooling-sweep-server.mjs &
@@ -145,7 +145,7 @@ jobs:
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-timings/${{ matrix.suite.name }}.json
       - uses: ./.github/actions/save-caches
         with:
-          build-dirs: .next-e2e-ci/cache
+          build-dirs: .next-e2e-ci/cache/webpack
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -176,8 +176,8 @@ jobs:
           node-version: 22
           browsers: chromium
           build-dirs: |
-            .next-e2e-routes-api/cache
-            .next-e2e-routes-portal/cache
+            .next-e2e-routes-api/cache/webpack
+            .next-e2e-routes-portal/cache/webpack
       - name: Run API route suite
         id: api-routes
         env:
@@ -193,8 +193,8 @@ jobs:
       - uses: ./.github/actions/save-caches
         with:
           build-dirs: |
-            .next-e2e-routes-api/cache
-            .next-e2e-routes-portal/cache
+            .next-e2e-routes-api/cache/webpack
+            .next-e2e-routes-portal/cache/webpack
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -228,8 +228,8 @@ jobs:
           node-version: 24
           browsers: chromium
           build-dirs: |
-            .next-e2e-native-admin/cache
-            .next-e2e-native-booking/cache
+            .next-e2e-native-admin/cache/webpack
+            .next-e2e-native-booking/cache/webpack
       - name: Install PostgreSQL 17 and PostgREST 16.4
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
@@ -287,8 +287,8 @@ jobs:
       - uses: ./.github/actions/save-caches
         with:
           build-dirs: |
-            .next-e2e-native-admin/cache
-            .next-e2e-native-booking/cache
+            .next-e2e-native-admin/cache/webpack
+            .next-e2e-native-booking/cache/webpack
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -312,8 +312,8 @@ jobs:
           node-version: 22
           browsers: chromium
           build-dirs: |
-            .next-e2e-revalidation-benchmarks/cache
-            .next-e2e-revalidation-static/cache
+            .next-e2e-revalidation-benchmarks/cache/webpack
+            .next-e2e-revalidation-static/cache/webpack
       - name: Run benchmarks revalidation suite
         id: benchmarks-revalidation
         env:
@@ -329,8 +329,8 @@ jobs:
       - uses: ./.github/actions/save-caches
         with:
           build-dirs: |
-            .next-e2e-revalidation-benchmarks/cache
-            .next-e2e-revalidation-static/cache
+            .next-e2e-revalidation-benchmarks/cache/webpack
+            .next-e2e-revalidation-static/cache/webpack
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

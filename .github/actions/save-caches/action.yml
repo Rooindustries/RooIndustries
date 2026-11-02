@@ -2,7 +2,7 @@ name: Save the Next build caches
 description: Saves the Next build caches from main's full runs so pull requests can restore them.
 inputs:
   build-dirs:
-    description: Newline-separated Next build cache folders, matching the setup action.
+    description: Newline-separated Next compiler cache folders, matching the setup action.
     required: true
 runs:
   using: composite

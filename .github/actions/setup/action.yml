@@ -10,7 +10,7 @@ inputs:
     description: Install the browsers' system packages too.
     default: "true"
   build-dirs:
-    description: Newline-separated Next build cache folders to restore.
+    description: Newline-separated Next compiler cache folders to restore.
     default: ""
 runs:
   using: composite
@@ -22,7 +22,7 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: node_modules
-        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node${{ inputs.node-version }}-${{ hashFiles('package-lock.json') }}
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node${{ inputs.node-version }}-${{ hashFiles('package.json', 'package-lock.json', '.npmrc') }}
     - if: steps.modules.outputs.cache-hit != 'true'
       shell: bash
       run: npm ci
