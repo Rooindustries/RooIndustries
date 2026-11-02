@@ -4,6 +4,7 @@ import http from "node:http";
 import { once } from "node:events";
 import { registerHooks } from "node:module";
 import { fileURLToPath } from "node:url";
+import { cancelWithReleaseFailure } from "./payment-cancel-race.mjs";
 import { installNetworkGuard, refuseEnvFiles } from "../../scripts/lib/test-target-safety.mjs";
 
 export async function createBookingHoldFixture() {
@@ -140,7 +141,25 @@ export async function createBookingHoldFixture() {
       assert.equal(quote.status, 200, JSON.stringify(quote));
       return post("/api/payment/start", { provider: "dodo", bookingPayload, quoteFingerprint: quote.body.quoteFingerprint });
     };
-    return { baseURL, post, hold, start, nextSlotDate, commerce, details, evidence, save, stop };
+    const expireHold = async id => {
+      const expiresAt = new Date(Date.now() - 60000).toISOString();
+      await database.sql.begin(async sql => {
+        await sql`update migration.source_documents set payload = payload || ${sql.json({ expiresAt })}
+          where legacy_sanity_id = ${id}`;
+        await sql`update commerce.slot_holds set expires_at = ${expiresAt}::timestamptz,
+          payload = payload || ${sql.json({ expiresAt })} where legacy_sanity_id = ${id}`;
+        await sql`select migration.reconcile_slot_claims_for_times(array(
+          select start_time_utc from commerce.slot_holds where legacy_sanity_id = ${id}
+        ))`;
+      });
+      return commerce.getDocument(id);
+    };
+    const cancelRace = async (holdId, authorization) => {
+      const held = await commerce.getDocument(holdId);
+      return cancelWithReleaseFailure({ database, paymentId: held.paymentRecordId,
+        cancel: () => post("/api/payment/cancel", {}, authorization) });
+    };
+    return { baseURL, post, hold, start, nextSlotDate, commerce, sql: database.sql, expireHold, cancelRace, details, evidence, save, stop };
   } catch (error) { await stop(); throw error; }
 }
 
@@ -156,6 +175,8 @@ if (process.argv.includes("--worker")) {
       if (method === "post") value = await fixture.post(...args);
       else if (method === "nextSlotDate") value = fixture.nextSlotDate();
       else if (method === "getHold") value = await fixture.commerce.getDocument(...args);
+      else if (method === "expireHold") value = await fixture.expireHold(...args);
+      else if (method === "cancelRace") value = await fixture.cancelRace(...args);
       else if (method === "evidence") value = fixture.evidence;
       else if (method === "verifyHold") {
         const stored = await fixture.commerce.getDocument(args[0].holdId);

@@ -2643,6 +2643,10 @@ const finalizePaymentRecordInternal = async ({
   });
 };
 
+const paymentAbandonmentComplete = (record) =>
+  String(record?.status || "").trim().toLowerCase() === PAYMENT_STATUS_ABANDONED &&
+  record.resourceReleasePending !== true;
+
 const abandonStartedPaymentRecord = async ({
   client,
   record,
@@ -2659,7 +2663,7 @@ const abandonStartedPaymentRecord = async ({
 
   if (!canStageAbandonment) {
     return {
-      ok: currentStatus === PAYMENT_STATUS_ABANDONED,
+      ok: paymentAbandonmentComplete(current),
       httpStatus: isPaymentTerminalStatus(currentStatus) ? 200 : 202,
       paymentRecord: current,
       response: buildPublicStatusBody(current),
@@ -2694,11 +2698,10 @@ const abandonStartedPaymentRecord = async ({
     } catch (error) {
       if (!isConflictError(error)) throw error;
       const fresh = (await getPaymentRecordById(client, current._id)) || current;
+      const complete = paymentAbandonmentComplete(fresh);
       return {
-        ok:
-          String(fresh.status || "").trim().toLowerCase() ===
-          PAYMENT_STATUS_ABANDONED,
-        httpStatus: 202,
+        ok: complete,
+        httpStatus: complete ? 200 : 202,
         paymentRecord: fresh,
         response: buildPublicStatusBody(fresh),
       };
@@ -2778,10 +2781,8 @@ const abandonStartedPaymentRecord = async ({
   }
 
   return {
-    ok:
-      String(nextRecord.status || "").trim().toLowerCase() ===
-      PAYMENT_STATUS_ABANDONED,
-    httpStatus: 200,
+    ok: paymentAbandonmentComplete(nextRecord),
+    httpStatus: nextRecord.resourceReleasePending === true ? 202 : 200,
     paymentRecord: nextRecord,
     response: buildPublicStatusBody(nextRecord),
   };
@@ -3573,14 +3574,41 @@ export const cancelPaymentSession = async ({
   }
 
   let record = resolved.record;
-  const status = String(record.status || "").trim().toLowerCase();
+  let status = String(record.status || "").trim().toLowerCase();
+  let releaseRetry;
+  if (status === PAYMENT_STATUS_ABANDONED && record.resourceReleasePending === true) {
+    releaseRetry = await abandonStartedPaymentRecord({
+      client,
+      record,
+      reason: "customer_retried_payment_release",
+      releaseCouponReservation,
+    });
+    record = releaseRetry.paymentRecord;
+    status = String(record.status || "").trim().toLowerCase();
+  }
   if (status === PAYMENT_STATUS_ABANDONED) {
+    if (!paymentAbandonmentComplete(record)) {
+      const message = "Your payment is still being released. Please try again.";
+      return {
+        httpStatus: 202,
+        body: {
+          ...await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record) }),
+          ok: false,
+          cancelled: false,
+          recoveryReason: message,
+          error: message,
+        },
+      };
+    }
     return {
       httpStatus: 200,
       body: {
         ...await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record) }),
         ok: true,
         cancelled: true,
+        ...(releaseRetry && !normalizeObject(record.cancelledHoldSnapshot).slotHoldId
+          ? { slotReleased: true }
+          : {}),
         refreshedHold: normalizeObject(record.cancelledHoldSnapshot),
       },
     };
@@ -3722,7 +3750,7 @@ export const cancelPaymentSession = async ({
           ...abandoned.response,
           ok: abandoned.ok,
           cancelled: abandoned.ok,
-          slotReleased: true,
+          slotReleased: abandoned.ok,
         },
       };
     }

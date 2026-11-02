@@ -7,6 +7,7 @@ import https from 'node:https';
 import { once } from 'node:events';
 import { registerHooks, syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { cancelWithReleaseFailure } from '../tests/fixtures/payment-cancel-race.mjs';
 
 const host=process.env.ROO_TEST_HOST||'127.0.0.1';
 const originalFetch=globalThis.fetch;
@@ -1779,6 +1780,199 @@ try{
     }
     assert.deepEqual(responses, JSON.parse(sourceText('tests/fixtures/payment-cancel.json')));
     return { responses, unchanged };
+  });
+
+  const prepareExpiredCancellation = async () => {
+    const checkout = await a1Start('dodo');
+    const payment = (await row(checkout.id)).payload;
+    const holdId = payment.holdSnapshot.slotHoldId;
+    const expiresAt = new Date(originalNow() - 60000).toISOString();
+    await sql.begin(async tx => {
+      await tx`update migration.source_documents set payload = payload || ${tx.json({ expiresAt })}
+        where legacy_sanity_id = ${holdId}`;
+      await tx`update commerce.slot_holds set expires_at = ${expiresAt}::timestamptz,
+        payload = payload || ${tx.json({ expiresAt })} where legacy_sanity_id = ${holdId}`;
+      await tx`select migration.reconcile_slot_claims_for_times(array(
+        select start_time_utc from commerce.slot_holds where legacy_sanity_id = ${holdId}
+      ))`;
+    });
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/checkouts/order-fixture') return false;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ id: 'order-fixture', payment_id: null }));
+      return true;
+    };
+    return { checkout, payment, holdId };
+  };
+
+  await run('recovery-cancel-staging-race', async () => {
+    const { checkout, payment } = await prepareExpiredCancellation();
+    const proof = await cancelWithReleaseFailure({ database: fixture, paymentId: checkout.id,
+      cancel: () => requestFlow('cancel', { paymentAccessToken: tokenFor(payment) }) });
+    fs.writeFileSync(`${artifact}.cancel-staging-race.json`, JSON.stringify(proof, null, 2));
+    assert.equal(proof.stages, 2);
+    assert.equal(proof.whileReleasePending.resourceReleasePending, true);
+    assert.equal(proof.finalPayment.resourceReleasePending, true);
+    assert.equal(proof.hold.phase, 'payment_pending');
+    for (const response of [proof.first, ...proof.responses]) {
+      assert.equal(response.status, 202, JSON.stringify(response));
+      assert.equal(response.body.cancelled, false, JSON.stringify(response));
+      assert.equal(response.body.ok, false);
+      assert.notEqual(response.body.slotReleased, true);
+    }
+    const retry = await requestFlow('cancel', { paymentAccessToken: tokenFor(payment) });
+    const completed = (await row(checkout.id)).payload;
+    const releasedHold = (await row(payment.holdSnapshot.slotHoldId)).payload;
+    assert.equal(retry.status, 200, JSON.stringify(retry));
+    assert.equal(retry.body.cancelled, true);
+    assert.equal(retry.body.slotReleased, true);
+    assert.equal(completed.resourceReleasePending, false);
+    assert.equal(releasedHold.phase, 'released');
+    const beforeReplay = await snapshot();
+    const replay = await requestFlow('cancel', { paymentAccessToken: tokenFor(payment) });
+    assert.equal(replay.status, 200);
+    assert.equal(replay.body.cancelled, true);
+    assert.deepEqual(await snapshot(), beforeReplay);
+    proof.retry = { retry, completed, releasedHold, replay, unchangedOnReplay: true };
+    fs.writeFileSync(`${artifact}.cancel-staging-race.json`, JSON.stringify(proof, null, 2));
+    return proof;
+  });
+
+  await run('recovery-cancel-completed-staging-conflict', async () => {
+    const { checkout, payment, holdId } = await prepareExpiredCancellation();
+    const bothStaged = deferred();
+    const finishWinner = deferred();
+    let stages = 0;
+    fixture.setRequestHook(async (phase, request) => {
+      if (phase !== 'before' || !request.body?.p_mutations?.some(item =>
+        item.document?._id === checkout.id && item.document.status === 'abandoned' &&
+        item.document.resourceReleasePending === true)) return;
+      if (++stages === 1) await bothStaged.promise;
+      else {
+        bothStaged.resolve();
+        await finishWinner.promise;
+      }
+    });
+    const attempts = [requestFlow('cancel', { paymentAccessToken: tokenFor(payment) }),
+      requestFlow('cancel', { paymentAccessToken: tokenFor(payment) })];
+    try {
+      const first = await Promise.race(attempts);
+      const completed = (await row(checkout.id)).payload;
+      const hold = (await row(holdId)).payload;
+      const beforeLoser = await snapshot();
+      finishWinner.resolve();
+      const responses = await Promise.all(attempts);
+      const afterLoser = await snapshot();
+      const proof = { stages, first, completed, hold, responses, beforeLoser, afterLoser };
+      fs.writeFileSync(`${artifact}.cancel-completed-staging-conflict.json`, JSON.stringify(proof, null, 2));
+      assert.equal(stages, 2);
+      assert.equal(completed.resourceReleasePending, false);
+      assert.equal(hold.phase, 'released');
+      for (const response of responses) {
+        assert.equal(response.status, 200, JSON.stringify(response));
+        assert.equal(response.body.ok, true);
+        assert.equal(response.body.cancelled, true);
+      }
+      assert.deepEqual(afterLoser, beforeLoser);
+      return proof;
+    } finally {
+      bothStaged.resolve();
+      finishWinner.resolve();
+      await Promise.allSettled(attempts);
+      fixture.setRequestHook(null);
+    }
+  });
+
+  await run('recovery-cancel-final-write-conflict', async () => {
+    const { checkout, payment, holdId } = await prepareExpiredCancellation();
+    let conflicted = false;
+    fixture.setRequestHook(async (phase, request) => {
+      if (phase !== 'before' || conflicted || !request.body?.p_mutations?.some(item =>
+        item.document?._id === checkout.id && item.document.status === 'abandoned' &&
+        item.document.resourceReleasePending === false)) return;
+      conflicted = true;
+      fixture.setRequestHook(null);
+      const current = (await row(checkout.id)).payload;
+      await commerce.patch(checkout.id).ifRevisionId(current._rev)
+        .set({ recoveryReason: 'resource_release_pending' }).commit();
+    });
+    const first = await requestFlow('cancel', { paymentAccessToken: tokenFor(payment) });
+    const saved = (await row(checkout.id)).payload;
+    const hold = (await row(holdId)).payload;
+    const beforeReplay = await snapshot();
+    const replay = await requestFlow('cancel', { paymentAccessToken: tokenFor(payment) });
+    const afterReplay = await snapshot();
+    const proof = { conflicted, first, saved, hold, replay, beforeReplay, afterReplay };
+    fs.writeFileSync(`${artifact}.cancel-final-write-conflict.json`, JSON.stringify(proof, null, 2));
+    assert.equal(conflicted, true);
+    assert.equal(saved.resourceReleasePending, true);
+    assert.equal(hold.phase, 'released');
+    assert.equal(first.status, 202, JSON.stringify(first));
+    assert.equal(first.body.cancelled, false);
+    assert.equal(first.body.ok, false);
+    assert.notEqual(first.body.slotReleased, true);
+    assert.equal(replay.status, 200, JSON.stringify(replay));
+    assert.equal(replay.body.cancelled, true);
+    assert.equal(replay.body.slotReleased, true);
+    assert.equal((await row(checkout.id)).payload.resourceReleasePending, false);
+    assert.equal((await row(holdId)).payload.phase, 'released');
+    const settledReplay = await requestFlow('cancel', { paymentAccessToken: tokenFor(payment) });
+    assert.equal(settledReplay.body.cancelled, true);
+    assert.deepEqual(await snapshot(), afterReplay);
+    proof.settledReplay = settledReplay;
+    proof.completed = (await row(checkout.id)).payload;
+    fs.writeFileSync(`${artifact}.cancel-final-write-conflict.json`, JSON.stringify(proof, null, 2));
+    return proof;
+  });
+
+  await run('recovery-expired-cancel-completes', async () => {
+    const { checkout, payment, holdId } = await prepareExpiredCancellation();
+    const first = await requestFlow('cancel', { paymentAccessToken: tokenFor(payment) });
+    const beforeReplay = await snapshot();
+    const replay = await requestFlow('cancel', { paymentAccessToken: tokenFor(payment) });
+    const afterReplay = await snapshot();
+    const saved = (await row(checkout.id)).payload;
+    const hold = (await row(holdId)).payload;
+    assert.equal(first.status, 200);
+    assert.equal(first.body.cancelled, true);
+    assert.equal(first.body.slotReleased, true);
+    assert.equal(replay.status, 200);
+    assert.equal(replay.body.cancelled, true);
+    assert.equal(saved.resourceReleasePending, false);
+    assert.equal(hold.phase, 'released');
+    assert.deepEqual(afterReplay, beforeReplay);
+    return { first, replay, saved, hold, beforeReplay, afterReplay };
+  });
+
+  for (const pending of [true, false]) await run(`recovery-cancel-release-${pending ? 'pending' : 'complete'}`, async () => {
+    const holdId = 'slotHold.pending-cancel';
+    const expiresAt = pending ? '2099-01-01T10:00:00.000Z' : '2020-01-01T10:00:00.000Z';
+    const payment = await seed('paypal', 'abandoned', { record: {
+      bookingId: '',
+      resourceReleasePending: pending,
+      holdSnapshot: { slotHoldId: holdId, slotHoldToken: 'fixture-hold-token', slotHoldExpiresAt: expiresAt },
+    } });
+    await commerce.create({
+      _id: holdId, _type: 'slotHold', startTimeUTC: '2099-01-01T10:00:00.000Z',
+      packageTitle: 'Vertex Essentials', holdNonce: 'fixture-hold-owner', paymentProvider: 'paypal',
+      expiresAt, phase: pending ? 'holding' : 'released',
+      paymentRecordId: pending ? payment._id : '', backendOwner: 'supabase', cutoverGeneration: 0,
+    });
+    if (pending) await commerce.patch(holdId).set({ phase: 'payment_pending' }).commit();
+    const before = await snapshot();
+    const response = await requestFlow('cancel', { paymentAccessToken: tokenFor(payment) });
+    const after = await snapshot();
+    const proof = { pending, response, before, after };
+    fs.writeFileSync(`${artifact}.cancel-release-${pending ? 'pending' : 'complete'}.json`, JSON.stringify(proof, null, 2));
+    assert.equal(response.status, 200, JSON.stringify(response));
+    assert.equal(response.body.cancelled, true);
+    assert.equal(response.body.ok, true);
+    if (pending) {
+      assert.equal(response.body.slotReleased, true);
+      assert.equal((await record()).resourceReleasePending, false);
+      assert.equal((await row(holdId)).payload.phase, 'released');
+    } else assert.deepEqual(after, before);
+    return proof;
   });
 
   await run('confirmation-summary-captured-cancel', async () => {

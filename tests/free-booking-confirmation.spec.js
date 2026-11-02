@@ -194,11 +194,15 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await expect(page).toHaveURL(url => url.pathname === "/payment");
         expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold")))).toMatchObject(hold);
         pending.release();
-        await expect(page).toHaveURL(url => url.pathname === "/");
-        await expect(page.getByRole("dialog")).toHaveCount(0);
-        await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("flow_background_location"))?.pathname)).toBe("/");
+        await expect(page).toHaveURL(url => url.pathname === "/booking");
+        await expect(page.getByRole("dialog").getByRole("alert").filter({ hasText: "The reservation expired. Please choose a slot again." })).toBeVisible();
+        await expect(page.getByRole("dialog").getByRole("button", { name: "10:00 AM", exact: true })).toBeVisible();
         expect(await page.evaluate(() => sessionStorage.getItem("my_slot_hold"))).toBeNull();
         expect(await page.evaluate(() => sessionStorage.getItem("booking_confirmation_state"))).toBeNull();
+        expect(page.freeConfirmationPaths).not.toContain("/");
+        await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+        await expect(page.getByRole("dialog")).toHaveCount(0);
+        await expect(page).toHaveURL(url => url.pathname === "/");
       } finally {
         pending.release();
         await page.unrouteAll({ behavior: "wait" });

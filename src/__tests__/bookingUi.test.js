@@ -1238,6 +1238,113 @@ describe("booking calendar UI", () => {
     expectActiveStep("Review & pay", "Step 3 of 3");
   });
 
+  test("shows the expiry reason after reload when only the expired marker remains", async () => {
+    window.sessionStorage.setItem(
+      "booking_draft",
+      JSON.stringify({
+        lastTitle: OVERHAUL_PACKAGE.title,
+        packages: {
+          [OVERHAUL_PACKAGE.title]: {
+            selectedPackage: OVERHAUL_PACKAGE,
+            form: VALID_FORM,
+          },
+        },
+      })
+    );
+    window.sessionStorage.setItem("booking_hold_expired", "1");
+    installDefaultFetch();
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    expect(
+      await screen.findByText("The reservation expired. Please choose a slot again.")
+    ).toBeInTheDocument();
+    expect(
+      JSON.parse(window.sessionStorage.getItem("booking_draft")).packages[
+        OVERHAUL_PACKAGE.title
+      ].form.email
+    ).toBe(CLIENT_EMAIL);
+  });
+
+  test("keeps the expiry reason when a release finishes after the deadline", async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2099-01-05T05:59:55.000Z"));
+    seedBookingSession({
+      expiresAt: "2099-01-05T06:00:00.000Z",
+      step: 2,
+    });
+    installDefaultFetch();
+    const defaultFetch = global.fetch.getMockImplementation();
+    let finishRelease;
+    global.fetch.mockImplementation((url, options) => {
+      if (url === "/api/releaseHold") {
+        return new Promise((resolve) => {
+          finishRelease = () =>
+            resolve({ ok: true, status: 200, json: async () => ({ ok: true }) });
+        });
+      }
+      return defaultFetch(url, options);
+    });
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    const release = await screen.findByRole("button", { name: "Release Slot" });
+    await act(async () => {
+      release.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      jest.setSystemTime(new Date("2099-01-05T06:00:01.000Z"));
+      finishRelease();
+      for (let tick = 0; tick < 8; tick += 1) await Promise.resolve();
+    });
+    jest.useRealTimers();
+
+    expect(window.sessionStorage.getItem("booking_hold_expired")).toBe("1");
+    expect(window.sessionStorage.getItem("my_slot_hold")).toBeNull();
+    expect(
+      await screen.findByText("The reservation expired. Please choose a slot again.")
+    ).toBeInTheDocument();
+    expect(
+      JSON.parse(window.sessionStorage.getItem("booking_draft")).packages[
+        OVERHAUL_PACKAGE.title
+      ].form.email
+    ).toBe(CLIENT_EMAIL);
+  });
+
+  test("a release that finishes before the deadline does not record an expiry", async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2099-01-05T05:59:55.000Z"));
+    seedBookingSession({
+      expiresAt: "2099-01-05T06:00:00.000Z",
+      step: 2,
+    });
+    installDefaultFetch();
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    const release = await screen.findByRole("button", { name: "Release Slot" });
+    await act(async () => {
+      release.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(window.sessionStorage.getItem("booking_hold_expired")).toBeNull();
+    expect(window.sessionStorage.getItem("my_slot_hold")).toBeNull();
+    expect(
+      screen.queryByText("The reservation expired. Please choose a slot again.")
+    ).not.toBeInTheDocument();
+    expect(
+      JSON.parse(window.sessionStorage.getItem("booking_draft")).packages[
+        OVERHAUL_PACKAGE.title
+      ].form
+    ).toBeUndefined();
+  });
+
   test("releases an ordinary step-3 hold when its countdown expires", async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date("2099-01-05T05:59:55.000Z"));
