@@ -85,9 +85,20 @@ export async function createBookingHoldFixture() {
         const id = request.path.split("/").pop().replace(/^payment_/, "");
         const session = sessions.get(id);
         assert.ok(session && paymentStatus, "Unknown fixture payment");
-        return { body: { payment_id: `payment_${id}`, checkout_session_id: id, metadata: session.metadata,
-          status: paymentStatus, total_amount: session.product_cart[0].amount, tax: 0, currency: "USD",
-          product_cart: session.product_cart, refunds: [], disputes: [], refund_status: null, customer: session.customer } };
+        return { body: {
+          payment_id: `payment_${id}`,
+          checkout_session_id: id,
+          metadata: session.metadata,
+          status: paymentStatus,
+          total_amount: session.product_cart[0].amount,
+          tax: 0,
+          currency: "USD",
+          product_cart: session.product_cart,
+          refunds: [],
+          disputes: [],
+          refund_status: null,
+          customer: session.customer,
+        } };
       }
       throw new Error(`Unhandled fixture provider request ${request.path}`);
     });
@@ -139,8 +150,16 @@ export async function createBookingHoldFixture() {
     await once(server, "listening");
     const post = async (route, body, authorization = "", headers = {}) => {
       globalThis.__rooRateLimitBuckets?.clear();
-      const response = await fetch(`${baseURL}${route}`, { method: "POST",
-        headers: { "content-type": "application/json", origin: baseURL, ...(authorization ? { authorization } : {}), ...headers }, body: JSON.stringify(body) });
+      const response = await fetch(`${baseURL}${route}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: baseURL,
+          ...(authorization ? { authorization } : {}),
+          ...headers,
+        },
+        body: JSON.stringify(body),
+      });
       return { status: response.status, body: await response.json() };
     };
     const get = async route => {
@@ -171,7 +190,8 @@ export async function createBookingHoldFixture() {
     };
     const reconcile = () => post("/api/payment/reconcile", {}, "Bearer fixture-only-cron");
     const paymentSucceeded = async holdId => {
-      const record = await commerce.fetch('*[_type == "paymentRecord" && bookingPayload.slotHoldId == $id][0]', { id: holdId });
+      const record = await commerce.fetch(
+        '*[_type == "paymentRecord" && bookingPayload.slotHoldId == $id][0]', { id: holdId });
       const body = { business_id: "business_fixture", type: "payment.succeeded",
         timestamp: new Date().toISOString(), data: { payment_id: `payment_${record.providerOrderId}` } };
       const eventId = `fixture_paid_${record._id}`;
@@ -209,11 +229,12 @@ if (process.argv.includes("--worker")) {
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);
   process.once("disconnect", () => { fixture.stop(); });
+  const forwardedMethods = ["get", "setPaymentStatus", "holdRunsOut", "restoreClock", "reconcile", "paymentSucceeded"];
   process.on("message", async ({ id, method, args = [] }) => {
     try {
       let value;
       if (method === "post") value = await fixture.post(...args);
-      else if (["get", "setPaymentStatus", "holdRunsOut", "restoreClock", "reconcile", "paymentSucceeded"].includes(method)) {
+      else if (forwardedMethods.includes(method)) {
         value = (await fixture[method](...args)) ?? null;
       }
       else if (method === "nextSlotDate") value = fixture.nextSlotDate();

@@ -276,7 +276,8 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       paymentTaxInclusive = value;
     };
     const setPaymentAmountOverrides = values => {
-      assert.ok(Object.keys(values).every(key => ['tax', 'total_amount', 'status', 'disputes', 'refund_status'].includes(key)));
+      const knownKeys = ['tax', 'total_amount', 'status', 'disputes', 'refund_status'];
+      assert.ok(Object.keys(values).every(key => knownKeys.includes(key)));
       paymentAmountOverrides = { ...values };
     };
     const dodoWebhook = async (paymentId, type, eventId) => {

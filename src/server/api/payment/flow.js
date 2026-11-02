@@ -3,7 +3,21 @@ import envValue from "../../supabase/envValue.cjs";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
 import { isTerminalDisputeStatus, resolveDisputeReferralAccounting } from "../../referrals/disputeAccounting.js";
 const { resolveStoreBackend } = envValue;
-import { createDodoCheckout, inspectDodoCheckout, retrieveDodoPayment, retrieveDodoRefund, settledDodoPaymentState, validateDodoPayment, verifyDodoCapture, unwrapDodoWebhook } from "./dodoProvider.js";
+import {
+  createDodoCheckout,
+  inspectDodoCheckout,
+  retrieveDodoPayment,
+  retrieveDodoRefund,
+  settledDodoPaymentState,
+  validateDodoPayment,
+  verifyDodoCapture,
+  unwrapDodoWebhook,
+} from "./dodoProvider.js";
+import {
+  providerStateChange,
+  recordProviderPaymentState,
+  refreshOwnerReviewDodoStates,
+} from "./providerPaymentState.js";
 import crypto from "crypto";
 import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
 import { validateBookingContact } from "../../../lib/bookingContactValidation.js";
@@ -4466,9 +4480,7 @@ export const reconcilePaymentSessions = async ({
             providerRecoveryTerminal: true,
             providerRecoveryTerminalReason: dodoInspection.reason,
             nextRecoveryAt: "",
-            ...(advancesProviderPaymentState(record.providerPaymentState, String(dodoInspection.providerPaymentState || "").trim())
-              ? { providerPaymentState: String(dodoInspection.providerPaymentState).trim(), providerStateCheckedAt: nowIso() }
-              : {}),
+            ...providerStateChange(record.providerPaymentState, dodoInspection.providerPaymentState),
           } });
           summary.recovery += 1;
           continue;
@@ -4974,7 +4986,10 @@ export const reconcilePaymentSessions = async ({
 
   if (dodoEnabled) {
     try {
-      summary.ownerReviewStatesChecked = await refreshOwnerReviewDodoStates({ client });
+      summary.ownerReviewStatesChecked = await refreshOwnerReviewDodoStates({
+        client,
+        patchRecord: patchPaymentRecord,
+      });
     } catch (error) {
       logSafeError("Owner review payment state check failed", error);
     }
@@ -5854,65 +5869,6 @@ export const handlePayPalWebhook = async ({
   return result;
 };
 
-const PROVIDER_STATE_STAGE = { succeeded: 1, refunded: 2, disputed: 2 };
-
-const advancesProviderPaymentState = (current, next) =>
-  !!next && current !== next &&
-  (PROVIDER_STATE_STAGE[next] || 0) >= (PROVIDER_STATE_STAGE[String(current || "").trim()] || 0);
-
-const OWNER_REVIEW_STATE_CHECK_MS = 60 * 60 * 1000;
-const UNSETTLED_PROVIDER_STATES = [
-  "succeeded", "processing", "requires_payment_method", "requires_customer_action",
-  "requires_merchant_action", "requires_confirmation", "requires_capture",
-  "partially_captured", "partially_captured_and_capturable",
-];
-
-const refreshOwnerReviewDodoStates = async ({ client }) => {
-  const records = await client.fetch(
-    `*[_type == $type && provider == $provider && providerPaymentState in $states
-      && providerStateCheckedAt <= $due][0...20]`,
-    {
-      type: PAYMENT_RECORD_TYPE,
-      provider: "dodo",
-      states: UNSETTLED_PROVIDER_STATES,
-      due: new Date(Date.now() - OWNER_REVIEW_STATE_CHECK_MS).toISOString(),
-    }
-  );
-  let checked = 0;
-  for (const record of Array.isArray(records) ? records : []) {
-    try {
-      let state = "";
-      if (!String(record.bookingId || "").trim()) {
-        const inspection = await inspectDodoCheckout({ record });
-        state = String((inspection.payment ? settledDodoPaymentState(inspection.payment) : inspection.providerPaymentState) || "").trim();
-      }
-      await patchPaymentRecord({ client, record, set: {
-        providerStateCheckedAt: nowIso(),
-        ...(advancesProviderPaymentState(record.providerPaymentState, state) ? { providerPaymentState: state } : {}),
-      } });
-      checked += 1;
-    } catch (error) {
-      logSafeError("Owner review payment state check failed", error);
-    }
-  }
-  return checked;
-};
-
-const recordProviderPaymentState = async ({ client, record, providerPaymentState }) => {
-  const state = String(providerPaymentState || "").trim();
-  let current = record;
-  for (let attempt = 0; attempt < 3 && current?._id; attempt += 1) {
-    if (!advancesProviderPaymentState(current.providerPaymentState, state) || String(current.bookingId || "").trim()) return;
-    try {
-      await patchPaymentRecord({ client, record: current, set: { providerPaymentState: state, providerStateCheckedAt: nowIso() } });
-      return;
-    } catch (error) {
-      if (!isConflictError(error)) throw error;
-      current = await getPaymentRecordById(client, current._id);
-    }
-  }
-};
-
 export const refreshDodoPayment = async ({ client, record, payment = null, source = "reconcile", applyBookingRefund = null, deferFinalization = false }) => {
   const inspection = payment ? { payment } : await inspectDodoCheckout({ record });
   payment = inspection.payment;
@@ -5921,7 +5877,8 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       return { httpStatus: 409, body: { ok: false, code: "dodo_configuration_unavailable", error: "Dodo Payments is not available in this environment." } };
     }
     if (inspection.retryable === false) {
-      await recordProviderPaymentState({ client, record, providerPaymentState: inspection.providerPaymentState });
+      await recordProviderPaymentState({ client, record, patchRecord: patchPaymentRecord,
+        providerPaymentState: inspection.providerPaymentState });
       return { httpStatus: 409, body: { ok: false, code: inspection.reason, error: "The payment does not match this checkout." } };
     }
     if (inspection.state === "unpaid" && !isFutureIso(record.sessionExpiresAt)) {
@@ -5934,9 +5891,13 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
   const validation = validateDodoPayment({ record, payment });
   if (!validation.ok) {
     if (validation.reason !== "dodo_payment_binding_mismatch") {
-      await recordProviderPaymentState({ client, record, providerPaymentState: settledDodoPaymentState(payment) });
+      await recordProviderPaymentState({ client, record, patchRecord: patchPaymentRecord,
+        providerPaymentState: settledDodoPaymentState(payment) });
     }
-    return { httpStatus: 409, body: { ok: false, code: validation.reason, error: "The payment does not match this checkout." } };
+    return {
+      httpStatus: 409,
+      body: { ok: false, code: validation.reason, error: "The payment does not match this checkout." },
+    };
   }
   requirePaymentRevision(record);
   const disputes = Array.isArray(payment.disputes) ? payment.disputes : [];
