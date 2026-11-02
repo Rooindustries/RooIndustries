@@ -1,14 +1,15 @@
 ---------------------------- MODULE BookingHolds ----------------------------
 EXTENDS Naturals, FiniteSets, TLC
 
-CONSTANTS Tabs, Slots, HoldMinutes, MaxTime, MaxNonce
+CONSTANTS Tabs, Slots, HoldMinutes, Backstop, MaxTime, MaxNonce
 
 NoSlot == "no_slot"
 NoNonce == 0
 DeadNonce == MaxNonce + 1
 RestoredId == MaxNonce + 2
 Nonces == 1..MaxNonce
-Times == 0..(MaxTime + HoldMinutes)
+Horizon == MaxTime + HoldMinutes + Backstop
+Times == 0..Horizon
 LivePhases == {"active", "holding", "payment_pending"}
 CommitPhases == {"active", "payment_pending"}
 
@@ -25,7 +26,7 @@ EmptyRec == [status |-> "none", slot |-> NoSlot, tokenExp |-> 0, created |-> 0,
              outlived |-> FALSE, valid |-> TRUE]
 
 TypeOK ==
-  /\ now \in 0..MaxTime
+  /\ now \in Times
   /\ nextNonce \in 1..(MaxNonce + 1)
   /\ hold \in [Slots -> [phase : {"none", "released", "consumed", "expired"} \cup LivePhases,
                          nonce : 0..DeadNonce, exp : Times, rec : 0..MaxNonce]]
@@ -46,6 +47,8 @@ Init ==
   /\ tab = [t \in Tabs |-> EmptyTab]
   /\ rec = [n \in Nonces |-> EmptyRec]
   /\ bookings = {}
+
+VisitorsActive == now <= MaxTime
 
 HoldIsActive(h) == h.phase \in LivePhases /\ h.exp > now
 
@@ -72,7 +75,8 @@ HoldSlot(t, s) ==
       releasePrevious ==
         prev \notin {NoSlot, s} /\ TokenOwns(tk, prev) /\ hold[prev].phase # "payment_pending"
       granted == [phase |-> "active", nonce |-> nextNonce, exp |-> now + HoldMinutes, rec |-> NoNonce]
-  IN /\ nextNonce <= MaxNonce
+  IN /\ VisitorsActive
+     /\ nextNonce <= MaxNonce
      /\ ~movingFromPendingPayment
      /\ lock[s] = 0
      /\ HoldOwnsSlot(h) => (h.phase # "payment_pending" /\ TokenOwns(tk, s))
@@ -86,7 +90,8 @@ HoldSlot(t, s) ==
 
 ReleaseHold(t) ==
   LET s == tab[t].slot
-  IN /\ s # NoSlot
+  IN /\ VisitorsActive
+     /\ s # NoSlot
      /\ TokenOwns(tab[t], s)
      /\ hold[s].phase # "payment_pending"
      /\ hold' = [hold EXCEPT ![s] = ReleasedHold(hold[s])]
@@ -94,12 +99,14 @@ ReleaseHold(t) ==
      /\ UNCHANGED <<now, nextNonce, lock, rec, bookings>>
 
 TypeDetails(t) ==
+  /\ VisitorsActive
   /\ tab[t].slot # NoSlot
   /\ ~tab[t].details
   /\ tab' = [tab EXCEPT ![t].details = TRUE]
   /\ UNCHANGED <<now, nextNonce, hold, lock, rec, bookings>>
 
 DuplicateTab(from, to) ==
+  /\ VisitorsActive
   /\ from # to
   /\ tab[to] = EmptyTab
   /\ tab[from].slot # NoSlot
@@ -110,7 +117,8 @@ StartPayment(t) ==
   LET tk == tab[t]
       s == tk.slot
       n == tk.nonce
-  IN /\ s # NoSlot
+  IN /\ VisitorsActive
+     /\ s # NoSlot
      /\ hold[s].phase # "none"
      /\ ~(hold[s].exp <= now /\ hold[s].phase # "payment_pending")
      /\ TokenOwns(tk, s)
@@ -129,7 +137,8 @@ StartPayment(t) ==
 CancelPayment(t) ==
   LET n == tab[t].paying
       s == rec[n].slot
-  IN /\ n # NoNonce
+  IN /\ VisitorsActive
+     /\ n # NoNonce
      /\ rec[n].status = "started"
      /\ rec[n].pay = "open"
      /\ hold[s].rec = n
@@ -146,7 +155,8 @@ CancelPayment(t) ==
 
 SubmitPayment(n) ==
   LET s == rec[n].slot
-  IN /\ rec[n].status # "none"
+  IN /\ VisitorsActive
+     /\ rec[n].status # "none"
      /\ rec[n].pay = "open"
      /\ rec' = [rec EXCEPT ![n].pay = "processing",
                            ![n].paidInTime = (hold[s].phase = "payment_pending" /\ hold[s].rec = n
@@ -254,7 +264,7 @@ ReconcileUnpaid(n) ==
   IN /\ rec[n].status \in {"started", "needs_recovery"}
      /\ ~rec[n].terminal
      /\ rec[n].pay \in {"open", "closed"}
-     /\ (now >= rec[n].created + HoldMinutes \/ now = MaxTime)
+     /\ now >= rec[n].created + HoldMinutes
      /\ rec' = [rec EXCEPT ![n].status = "abandoned"]
      /\ hold' = IF hold[s].rec = n THEN [hold EXCEPT ![s] = PaymentReleasedHold(hold[s])] ELSE hold
      /\ UNCHANGED <<now, nextNonce, lock, tab, bookings>>
@@ -309,7 +319,7 @@ AdminRestoresBooking(s) ==
 
 UnconfirmedPaymentHoldExpires(s) ==
   /\ hold[s].phase = "payment_pending"
-  /\ now = MaxTime
+  /\ hold[s].exp + Backstop <= now
   /\ ~rec[hold[s].rec].knownCaptured
   /\ hold' = [hold EXCEPT ![s].phase = "expired", ![s].nonce = DeadNonce]
   /\ rec' = [rec EXCEPT ![hold[s].rec].outlived =
@@ -317,7 +327,7 @@ UnconfirmedPaymentHoldExpires(s) ==
   /\ UNCHANGED <<now, nextNonce, lock, tab, bookings>>
 
 Tick ==
-  /\ now < MaxTime
+  /\ now < Horizon
   /\ now' = now + 1
   /\ UNCHANGED <<nextNonce, hold, lock, tab, rec, bookings>>
 
@@ -347,7 +357,12 @@ OneHoldPerSlotStart ==
 NoSecondHoldOverLiveHold ==
   [][\A s \in Slots :
        (hold'[s].nonce # hold[s].nonce /\ hold'[s].phase = "active" /\ HoldOwnsSlot(hold[s]))
-         => hold[s].phase # "payment_pending"]_vars
+         => /\ hold[s].phase # "payment_pending"
+            /\ \E u \in Tabs : TokenOwns(tab[u], s) /\ tab'[u].slot = s /\ tab'[u].nonce = hold'[s].nonce]_vars
+
+PaymentHoldKeptThroughBackstop ==
+  [][\A s \in Slots :
+       (hold[s].phase = "payment_pending" /\ hold'[s].phase = "expired") => hold[s].exp + Backstop <= now]_vars
 
 HeldSlotNeverTaken ==
   \A s \in Slots : HoldOwnsSlot(hold[s]) => lock[s] = 0
