@@ -16,8 +16,9 @@ const declaredRouter = (context, identifier) => {
   for (let scope = context.sourceCode.getScope(identifier); scope && !variable; scope = scope.upper) {
     variable = scope.set.get(identifier.name) || null;
   }
-  const declaration = variable?.defs?.[0]?.node;
-  if (!declaration) return null;
+  const definition = variable?.defs?.[0];
+  if (!definition || definition.type !== "Variable") return null;
+  const declaration = definition.node;
   const init = declaration.init;
   return init?.type === "CallExpression" && ROUTER_HOOKS.has(calleeName(init));
 };

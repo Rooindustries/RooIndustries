@@ -220,10 +220,10 @@ export default function RefRegister() {
         return;
       }
 
+      removeBrowserStorage("sessionStorage", REFERRAL_SIGNUP_DRAFT);
       if (!mountedRef.current) return;
       redirecting = true;
       showToast("success", "Registered! Redirecting to dashboard...");
-      removeBrowserStorage("sessionStorage", REFERRAL_SIGNUP_DRAFT);
       redirectTimerRef.current = setTimeout(() => nav("/referrals/dashboard"), 900);
     } catch {
       console.error("Referral registration failed");
