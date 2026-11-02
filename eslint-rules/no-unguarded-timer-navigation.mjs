@@ -1,8 +1,20 @@
 import { calleeName, enclosingComponent, isFunction } from "./util.mjs";
 
-const navigates = (call) =>
-  ["nav", "navigate", "push", "replace"].includes(calleeName(call)) &&
-  (call.callee.type === "Identifier" || calleeName(call) === "push" || calleeName(call) === "replace");
+const ROUTER_OBJECTS = new Set(["router", "history", "location"]);
+
+const receiverName = (callee) => {
+  if (callee.type !== "MemberExpression" || callee.computed) return "";
+  const receiver = callee.object;
+  if (receiver.type === "Identifier") return receiver.name;
+  if (receiver.type === "MemberExpression" && !receiver.computed) return receiver.property.name;
+  return "";
+};
+
+const navigates = (call) => {
+  const name = calleeName(call);
+  if (call.callee.type === "Identifier") return name === "nav" || name === "navigate";
+  return (name === "push" || name === "replace") && ROUTER_OBJECTS.has(receiverName(call.callee));
+};
 
 const resetsState = (call) =>
   call.callee.type === "Identifier" &&

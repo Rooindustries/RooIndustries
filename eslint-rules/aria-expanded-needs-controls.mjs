@@ -4,8 +4,7 @@ export default {
   meta: {
     type: "problem",
     docs: {
-      description:
-        "A disclosure toggle must point at the content it shows, and that content must stay in the page.",
+      description: "A disclosure toggle must point at the content it shows.",
     },
     messages: { controls: "aria-expanded needs aria-controls pointing at the content it shows or hides." },
     schema: [],

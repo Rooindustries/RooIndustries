@@ -340,7 +340,7 @@ export default function ConnectedAccounts({
             (provider) => linked.has(provider) && unlinkable.has(provider)
           ))) ? (
         <div className="mt-4">
-          <label htmlFor="connected-accounts-password" className="block text-sm font-semibold text-ink">
+          <label htmlFor="connected-accounts-password" className="block text-accent text-sm font-semibold">
             Current password
           </label>
           <div className="mt-2 flex flex-col gap-2 sm:flex-row">

@@ -67,8 +67,14 @@ run("no-unguarded-timer-navigation", {
       clearTimeout(id); }, []); return null; }`,
     `function Toast() { setTimeout(() => setToast((current) => (current === next ? null : current)), 2800); return null;
       }`,
+    `function Queue() { setTimeout(() => items.push(next), 100); setTimeout(() => text.replace("a", "b")); return null; }`,
   ],
   invalid: [
+    {
+      name: "router push from a timer",
+      code: `function Checkout() { setTimeout(() => router.push("/payment"), 300); return null; }`,
+      errors: [{ messageId: "timer" }],
+    },
     {
       name: "RefLogin redirect before #211",
       code: `function RefLogin() {
