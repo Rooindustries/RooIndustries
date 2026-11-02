@@ -15,7 +15,7 @@ concurrency:
 jobs:
   monitoring:
     name: Production-only monitoring
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       SENTRY_CLI_NO_TELEMETRY: "1"
@@ -28,7 +28,8 @@ jobs:
           node-version: 24
           browsers: chromium
           browser-deps: "false"
-      - name: Allow isolated monitoring
+      - name: Allow isolated monitoring on GitHub-hosted runners
+        if: ${{ runner.environment == 'github-hosted' }}
         run: |
           if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] &&
              [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = 1 ]; then
@@ -62,7 +63,7 @@ jobs:
 
   jest:
     name: Jest
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -83,7 +84,7 @@ jobs:
 
   playwright:
     name: Playwright ${{ matrix.suite.name }}
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -94,21 +95,16 @@ jobs:
           - name: booking
             files: 'booking-flow\.spec\.js'
           - name: rest-1
-            files: '^(?!.*(section-nav|booking-flow)\.spec\.js$).*'
-            shard: 1/4
+            files: '/(benchmarks-rendering|bios-guide-fonts|booking-code-check|booking-dialog-sizing|content-layout-shift|dodo-session-new-hold|free-booking-confirmation|missing-page|nonjs-seo|privacy-markdown|referral-link-capture|terms-rendering|upgrade-form-keyboard|ux-quick-fixes)\.spec\.js$'
           - name: rest-2
-            files: '^(?!.*(section-nav|booking-flow)\.spec\.js$).*'
-            shard: 2/4
+            files: '/(api-preview|booking-initial-slot|confirmation-summary|guide-package-links|home-hero-cms|home-performance|home-video-posters|package-guarantee|payment-code-check|payment-confirmation-receipt|payment-methods|routes-smoke|transactional-emails)\.spec\.js$'
           - name: rest-3
-            files: '^(?!.*(section-nav|booking-flow)\.spec\.js$).*'
-            shard: 3/4
+            files: '/(a11y-regressions|backed-claims|booking-details-required|booking-modal-layout|contact-form-csp|faq-answers|home-cta-links|nav-chaos|public-route-sweep|route-background|route-entries|static-pages|structured-data|team-rendering)\.spec\.js$'
           - name: rest-4
-            files: '^(?!.*(section-nav|booking-flow)\.spec\.js$).*'
-            shard: 4/4
+            files: '^(?!.*/(section-nav|booking-flow|benchmarks-rendering|bios-guide-fonts|booking-code-check|booking-dialog-sizing|content-layout-shift|dodo-session-new-hold|free-booking-confirmation|missing-page|nonjs-seo|privacy-markdown|referral-link-capture|terms-rendering|upgrade-form-keyboard|ux-quick-fixes|api-preview|booking-initial-slot|confirmation-summary|guide-package-links|home-hero-cms|home-performance|home-video-posters|package-guarantee|payment-code-check|payment-confirmation-receipt|payment-methods|routes-smoke|transactional-emails|a11y-regressions|backed-claims|booking-details-required|booking-modal-layout|contact-form-csp|faq-answers|home-cta-links|nav-chaos|public-route-sweep|route-background|route-entries|static-pages|structured-data|team-rendering)\.spec\.js$).*'
     env:
       PW_FILES: ${{ matrix.suite.files }}
       PW_SUITE: ${{ matrix.suite.name }}
-      PW_SHARD: ${{ matrix.suite.shard }}
       ROO_TEST_HOST: 127.0.0.1
       BASE_URL: http://127.0.0.1:3211
       PW_PORT: "3211"
@@ -144,7 +140,7 @@ jobs:
             npm run test:remote-browser-guard
             npm run test:smoke:production
           fi
-          xvfb-run -a npx playwright test --pass-with-no-tests --reporter=dot,json ${PW_SHARD:+--shard="$PW_SHARD"} "$PW_FILES"
+          xvfb-run -a npx playwright test --pass-with-no-tests --reporter=dot,json "$PW_FILES"
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-timings/${{ matrix.suite.name }}.json
       - uses: ./.github/actions/save-caches
@@ -167,7 +163,7 @@ jobs:
 
   routes:
     name: Playwright creator portal and API routes
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       ROO_TEST_HOST: 127.0.0.1
@@ -209,7 +205,7 @@ jobs:
 
   native:
     name: Native PostgreSQL 17 suites
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       ROO_TEST_HOST: 127.0.0.1
@@ -303,7 +299,7 @@ jobs:
 
   revalidation:
     name: Playwright revalidation
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       ROO_TEST_HOST: 127.0.0.1
