@@ -31,6 +31,9 @@ export default function RefRegister() {
   const availabilityVersion = useRef(0);
   const submittingRef = useRef(false);
   const editVersionRef = useRef(0);
+  const redirectTimerRef = useRef(null);
+
+  useEffect(() => () => clearTimeout(redirectTimerRef.current), []);
 
   function showToast(type, message) {
     const next = { type, message };
@@ -213,7 +216,7 @@ export default function RefRegister() {
       redirecting = true;
       showToast("success", "Registered! Redirecting to dashboard...");
       removeBrowserStorage("sessionStorage", REFERRAL_SIGNUP_DRAFT);
-      setTimeout(() => nav("/referrals/dashboard"), 900);
+      redirectTimerRef.current = setTimeout(() => nav("/referrals/dashboard"), 900);
     } catch {
       console.error("Referral registration failed");
       if (editVersionRef.current === version) setFormError("Server error.");

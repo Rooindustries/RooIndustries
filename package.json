@@ -36,9 +36,9 @@
     "react-router": "7.18.3",
     "react-router-dom": "7.18.3",
     "resend": "6.17.2",
+    "sharp": "0.35.5",
     "uuid": "11.1.1",
-    "web-vitals": "^2.1.4",
-    "sharp": "0.35.5"
+    "web-vitals": "^2.1.4"
   },
   "scripts": {
     "predev": "node scripts/generate-sitemap.js && node scripts/generate-robots.js --development",
@@ -142,7 +142,9 @@
     "audit:lighthouse": "lhci autorun --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/ --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/reviews --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/tools",
     "audit:lighthouse:mobile": "lhci autorun --config=lighthouserc.mobile.json --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/",
     "test:e2e:admin": "playwright test --config=playwright.admin.config.js",
-    "test:sourcemaps": "node scripts/sourcemaps-e2e.mjs"
+    "test:sourcemaps": "node scripts/sourcemaps-e2e.mjs",
+    "lint": "eslint src app middleware.js",
+    "test:lint-rules": "node --test tests/lint-rules.test.mjs"
   },
   "eslintConfig": {
     "extends": [
@@ -167,6 +169,9 @@
     "@playwright/test": "^1.55.0",
     "autoprefixer": "^10.4.21",
     "cross-env": "^7.0.3",
+    "eslint": "10.13.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.13.0",
     "jest": "30.3.0",
     "jest-environment-jsdom": "30.3.0",
     "postcss": "8.5.23",
@@ -175,6 +180,9 @@
   },
   "overrides": {
     "brace-expansion": "1.1.21",
+    "eslint": {
+      "brace-expansion": "5.0.12"
+    },
     "cookie": "0.7.2",
     "follow-redirects": "1.16.0",
     "postcss": "$postcss",
