@@ -88,6 +88,18 @@ run("no-unguarded-timer-navigation", {
       errors: [{ messageId: "timer" }],
     },
     {
+      name: "router spread over a placeholder",
+      code: `function Pay(props) {
+        const data = { router: null, ...props }; setTimeout(() => data.router.push("/payment")); return null; }`,
+      errors: [{ messageId: "timer" }],
+    },
+    {
+      name: "router from a factory call",
+      code: `function Pay() {
+        const data = { router: getRouter() }; setTimeout(() => data.router.push("/payment")); return null; }`,
+      errors: [{ messageId: "timer" }],
+    },
+    {
       name: "router prop push from a timer",
       code: `function Pay({ router }) { setTimeout(() => router.push("/payment"), 300); return null; }`,
       errors: [{ messageId: "timer" }],

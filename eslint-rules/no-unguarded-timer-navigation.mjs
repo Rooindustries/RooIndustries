@@ -29,10 +29,12 @@ const declaredValue = (context, identifier) => {
 };
 
 const propertyValue = (object, name) => {
-  const property = object.properties.find(
-    (item) => item.type === "Property" && !item.computed && (item.key.name || item.key.value) === name,
-  );
-  return property ? property.value : null;
+  let value = null;
+  for (const item of object.properties) {
+    if (item.type !== "Property" || item.computed) value = null;
+    else if ((item.key.name || item.key.value) === name) value = item.value;
+  }
+  return value;
 };
 
 const routerValue = (context, node, seen = new Set()) => {
@@ -46,7 +48,8 @@ const routerValue = (context, node, seen = new Set()) => {
     return routerValue(context, propertyValue(owner, node.property.name), seen);
   }
   if (UNKNOWN_SOURCES.has(node.type)) return null;
-  return node.type === "CallExpression" && ROUTER_HOOKS.has(calleeName(node));
+  if (node.type === "CallExpression") return ROUTER_HOOKS.has(calleeName(node)) ? true : null;
+  return false;
 };
 
 const isRouterReceiver = (context, callee) => {
