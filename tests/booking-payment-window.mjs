@@ -271,6 +271,16 @@ test('a checkout the cron can no longer reach keeps its slot when Dodo says the 
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
 });
 
+test('a checkout the cron can no longer reach keeps its slot when the payment was verified before a dispute cleared', async () => {
+  const checkout = await startCheckoutBeforeExpiry();
+  await stopRecovery(checkout, { status: 'needs_recovery', verificationState: 'server_verified', dodoDisputeActive: false });
+  await holdRunsOut(checkout, 25 * 60 * 60_000);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
+  assert.equal(await isOffered(checkout.payload), false);
+  assert.equal((await secondVisitor(checkout.payload)).status, 409);
+});
+
 test('a payment stuck waiting on the customer frees its slot a day after the hold ran out', async () => {
   fixture.setPaymentAmountOverrides({ status: 'requires_customer_action' });
   const checkout = await startCheckoutBeforeExpiry();
