@@ -35,6 +35,7 @@ const isExpiredHold = (hold, now = Date.now()) => {
 
 const isActiveHold = (hold, now) => {
   const phase = String(hold?.phase || "active").trim().toLowerCase();
+  if (phase === "payment_pending") return true;
   return phase !== "released" && phase !== "consumed" && !isExpiredHold(hold, now);
 };
 

@@ -964,14 +964,14 @@ try{
     };
     const response=await requestFlow('reconcile'),current=await record();assert.equal(response.status,200,JSON.stringify(response));assert.equal(current.providerOrderId,'order-fixture');assert.equal(current.providerPublicData.currency,currency);assert.equal(current.pricingSnapshot.currency,currency);if(provider==='paypal')assert.equal(requestCurrency,currency);const [typed]=await sql`select currency,amount_subunits from commerce.payment_records where legacy_sanity_id=${recordId}`;assert.equal(typed.currency,currency);assert.equal(Number(typed.amount_subunits),expected);return{response,current,typed,currentConfiguredCurrency:'USD',frozenCurrency:currency,actualProviderRecovery:true};
   });
-  for(const pathName of ['failure','schedule'])for(const label of ['preflight','release','commit','current-owner','release-captured-b'])await run(`recovery-hold-authority-${pathName}-${label}`,async()=>{
-    const capturedB=label==='release-captured-b',boundary=capturedB?'release':label;
+  for(const pathName of ['failure','schedule'])for(const label of ['preflight','current-owner','captured-b'])await run(`recovery-hold-authority-${pathName}-${label}`,async()=>{
+    const capturedB=label==='captured-b',boundary=capturedB?'preflight':label;
     const input=await startInput();paypalOrder.status=pathName==='schedule'?'APPROVED':'CREATED';paypalOrder.purchase_units[0].payments={captures:[]};
     providerHook=async(request,req,res)=>{if(request.path!=='/v2/checkout/orders'||request.method!=='POST')return false;res.writeHead(201,{'content-type':'application/json'});res.end(JSON.stringify({id:'order-fixture',status:'CREATED'}));return true;};
     const started=await requestFlow('start',{body:input});assert.equal(started.status,200,JSON.stringify(started));
     const initial=(await commerce.fetch('*[_type == "paymentRecord"]'))[0],id=initial._id;
     const holdBefore=(await row('slotHold.fixture')).payload,holdExpiry=new Date(holdBefore.expiresAt).getTime();
-    const beforeOffset=holdExpiry-originalNow()+(boundary==='current-owner'||boundary==='commit'?1000:-30000);
+    const beforeOffset=holdExpiry-originalNow()+(boundary==='current-owner'?1000:-30000);
     Date.now=()=>originalNow()+beforeOffset;
     const token=tokenFor(initial),aGate=deferred(),paused=deferred(),bGate=deferred(),bStarted=deferred();
     let reads=0,providerResponded=false,barrierResponse=null,operationRead=false,requests=0,b=null,ownerA='',ownerB='',expected=null,after=null;
@@ -984,8 +984,7 @@ try{
       if(phase==='after'&&response.includes(id)&&response.includes('pricingSnapshot')&&!response.includes('slotHold.fixture\",\"_type\":\"slotHold'))operationRead=true;
       const read=phase==='after'&&Array.isArray(request.response)&&request.response.some(d=>d._id==='slotHold.fixture');
       if(read)reads++;
-      const mutation=phase==='before'&&request.body?.p_mutations?.some(m=>m.document?._type==='slotHold'&&m.document.releaseReason==='payment_recovery_hold_expired');
-      if((boundary==='preflight'&&read&&reads===1)||(boundary==='release'&&read&&reads===2)||(boundary==='commit'&&mutation)){
+      if(boundary==='preflight'&&read&&reads===1){
         fixture.setRequestHook(null);barrierResponse=read?request.response:request.body;paused.resolve();await aGate.promise;
       }
     });
@@ -995,11 +994,11 @@ try{
       if(boundary==='current-owner'){
         aResult=await a;assert.ok(aResult.status<400,JSON.stringify(aResult));
         const current=(await row(id)).payload,hold=(await row('slotHold.fixture')).payload;
-        assert.equal(hold.phase,'released');assert.equal(hold.paymentRecordId,'');assert.equal(hold.releaseReason,'payment_recovery_hold_expired');assert.equal(current.holdSnapshot.phase,'released');assert.equal(current.holdSnapshot.slotHoldExpiresAt,hold.expiresAt);assert.equal(String(current.finalizationLeaseId||''),'');
+        assert.equal(hold.phase,'payment_pending');assert.equal(hold.paymentRecordId,id);assert.equal(current.holdSnapshot.phase,'payment_pending');assert.equal(current.holdSnapshot.slotHoldExpiresAt,hold.expiresAt);assert.equal(String(current.finalizationLeaseId||''),'');
         assert.equal(current.status,pathName==='failure'?'needs_recovery':'started');
         const [typed]=await sql`select phase,payment_record_id,source_revision from commerce.slot_holds where legacy_sanity_id='slotHold.fixture'`;
-        assert.equal(typed.phase,'released');assert.equal(typed.payment_record_id,null);assert.equal(typed.source_revision,hold._rev);
-        return{httpStatus:aResult.status,actualStart:true,currentOwnerExpiredCleanup:true,typed,sourcePayment:current,sourceHold:hold};
+        assert.equal(typed.phase,'payment');assert.notEqual(typed.payment_record_id,null);assert.equal(typed.source_revision,hold._rev);
+        return{httpStatus:aResult.status,actualStart:true,currentOwnerKeepsExpiredPaymentHold:true,typed,sourcePayment:current,sourceHold:hold};
       }
       await Promise.race([paused.promise,a.then(r=>{throw new Error(`A did not pause at ${boundary}: ${JSON.stringify(r)}`);})]);
       ownerA=(await row(id)).payload.finalizationLeaseId||'';if(pathName==='failure')assert.ok(ownerA);

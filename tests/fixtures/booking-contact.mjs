@@ -86,6 +86,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     let paymentTaxInclusive = false;
     let paymentAmountOverrides = {};
     let emailFailure = false;
+    let checkoutPaymentStarted = true;
     database.setProviderHandler(async request => {
       if (request.path === '/emails') {
         request.bookings = await database.sql`select legacy_sanity_id as id, payload->>'status' as status
@@ -105,7 +106,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       }
       if (request.path.startsWith('/checkouts/')) {
         const id = request.path.split('/').at(-1);
-        return { body: { id, payment_id: `payment_${id}` } };
+        return { body: { id, payment_id: checkoutPaymentStarted ? `payment_${id}` : null } };
       }
       if (request.path.startsWith('/payments/')) {
         const paymentId = request.path.split('/').at(-1);
@@ -145,6 +146,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     const handlers = new Map();
     for (const [route, module] of Object.entries({
       '/api/holdSlot': '../../src/server/booking/holdSlot.js',
+      '/api/bookingAvailability': '../../src/server/booking/availability.js',
       '/api/payment/start': '../../src/server/api/payment/start.js',
       '/api/payment/quote': '../../src/server/api/payment/quote.js',
       '/api/payment/finalize': '../../src/server/api/payment/finalize.js',
@@ -288,6 +290,11 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     return { post, start, hold, snapshot, recordFor, seedUpgrade, commerce, database, details, evidence, save, stop,
       setPaymentTax, setPaymentTaxInclusive, setPaymentAmountOverrides, refundPayment, dodoWebhook,
       setEmailFailure(value) { emailFailure = value; },
+      setCheckoutPaymentStarted(value) { checkoutPaymentStarted = value; },
+      availability: async () => {
+        const response = await fetch(`${base}/api/bookingAvailability`, { headers: { origin: base } });
+        return { status: response.status, body: await response.json() };
+      },
       setRequestHook: database.setRequestHook };
   } catch (error) {
     await stop();

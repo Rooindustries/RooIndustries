@@ -1189,36 +1189,16 @@ const patchPaymentRecord = async ({
   record,
   set = {},
   event = null,
-  releaseExpiredHold = false,
 }) => {
   const existingEvents = Array.isArray(record?.events) ? record.events : [];
   const mergedEvents = event
     ? mergePaymentRecordEvents(existingEvents, event)
     : existingEvents;
-  const holdRelease = releaseExpiredHold
-    ? await prepareExpiredRecoveryHold({ client, record })
-    : null;
   const values = {
     ...set,
-    ...(holdRelease ? { holdSnapshot: holdRelease.snapshot } : {}),
     ...(event ? { events: mergedEvents } : {}),
     updatedAt: nowIso(),
   };
-  if (holdRelease?.holdDoc) {
-    if (typeof client?.transaction !== "function") {
-      throw Object.assign(new Error("Atomic payment storage is unavailable."), {
-        status: 503,
-        code: "payment_transaction_unavailable",
-      });
-    }
-    await client.transaction()
-      .patch(record._id, (patch) => guardPaymentRevision(patch, record).set(values))
-      .patch(holdRelease.holdDoc._id, (patch) =>
-        guardPaymentRevision(patch, holdRelease.holdDoc).set(holdRelease.set))
-      .commit();
-    logRecoveryExhaustion(record, values);
-    return getPaymentRecordById(client, record._id);
-  }
   const patch = guardPaymentRevision(client.patch(record._id), record).set(values);
   const committed = await patch.commit();
   logRecoveryExhaustion(record, values);
@@ -1718,39 +1698,6 @@ const releasePendingHold = async ({ client, record }) => {
   }
 };
 
-const prepareExpiredRecoveryHold = async ({ client, record }) => {
-  const holdSnapshot = normalizeObject(record?.holdSnapshot);
-  const holdId = String(holdSnapshot.slotHoldId || "").trim();
-  if (!holdId) return null;
-  const holdDoc = await getHoldById(client, holdId);
-  const expiry = new Date(
-    holdDoc?.expiresAt || holdSnapshot.slotHoldExpiresAt || ""
-  ).getTime();
-  if (Number.isFinite(expiry) && expiry > Date.now()) return null;
-
-  const releasedAt = nowIso();
-  const ownsHold =
-    holdDoc?._id &&
-    String(holdDoc.paymentRecordId || "").trim() === String(record?._id || "").trim();
-  if (ownsHold) requirePaymentRevision(holdDoc);
-
-  return {
-    holdDoc: ownsHold ? holdDoc : null,
-    set: {
-      phase: "released",
-      expiresAt: releasedAt,
-      paymentRecordId: "",
-      paymentProvider: "",
-      releaseReason: "payment_recovery_hold_expired",
-    },
-    snapshot: {
-      ...holdSnapshot,
-      phase: "released",
-      slotHoldExpiresAt: releasedAt,
-    },
-  };
-};
-
 const releaseCouponForPaymentRecord = async ({
   client,
   record,
@@ -1908,7 +1855,6 @@ const markRetryableFinalizeFailure = async ({
     nextRecord = await patchPaymentRecord({
       client,
       record: current,
-      releaseExpiredHold: true,
       set: {
         status: PAYMENT_STATUS_NEEDS_RECOVERY,
         recoveryReason: reason,
@@ -3878,7 +3824,6 @@ const scheduleProviderRecoveryCheck = async ({
     return await patchPaymentRecord({
       client,
       record,
-      releaseExpiredHold: true,
       set: {
         recoveryReason: String(reason || "provider_status_pending").trim(),
         recoveryAttemptCount,

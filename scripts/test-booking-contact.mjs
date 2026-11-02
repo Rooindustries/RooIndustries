@@ -8,7 +8,9 @@ for (const key of [
   if (process.env[key] !== undefined) env[key] = process.env[key];
 }
 
-const testFile = process.argv.includes('--upgrade-credit-ownership')
+const testFile = process.argv.includes('--payment-window')
+  ? 'tests/booking-payment-window.mjs'
+  : process.argv.includes('--upgrade-credit-ownership')
   ? 'tests/upgrade-credit-ownership.mjs'
   : process.argv.includes('--upgrade-credit')
   ? 'tests/upgrade-credit.mjs'

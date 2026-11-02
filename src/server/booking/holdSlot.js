@@ -29,10 +29,11 @@ const isHoldActive = (hold, now = Date.now()) => {
   const phase = String(hold?.phase || "active").trim().toLowerCase();
   const expiresAt = new Date(hold?.expiresAt || "").getTime();
   return (
-    phase !== "released" &&
-    phase !== "consumed" &&
-    Number.isFinite(expiresAt) &&
-    expiresAt > now
+    phase === "payment_pending" ||
+    (phase !== "released" &&
+      phase !== "consumed" &&
+      Number.isFinite(expiresAt) &&
+      expiresAt > now)
   );
 };
 
