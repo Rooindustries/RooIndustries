@@ -2,6 +2,7 @@ import { createCommerceWriteClient } from "../api/ref/documentStore.js";
 import crypto from "crypto";
 import { issueHoldToken, verifyHoldToken } from "./holdToken.js";
 import { selectHoldAuthority } from "./holdAuthority.js";
+import { holdOwnsSlot } from "./holdOwnership.js";
 import {
   buildBookingSlotId,
   buildSlotHoldId,
@@ -24,17 +25,6 @@ export const HOLD_DURATION_MS = 20 * 60 * 1000;
 
 const isConflict = (error) =>
   Number(error?.statusCode || error?.status || 0) === 409;
-
-const isHoldActive = (hold, now = Date.now()) => {
-  const phase = String(hold?.phase || "active").trim().toLowerCase();
-  const expiresAt = new Date(hold?.expiresAt || "").getTime();
-  return (
-    phase !== "released" &&
-    phase !== "consumed" &&
-    Number.isFinite(expiresAt) &&
-    expiresAt > now
-  );
-};
 
 const normalizeBookingList = (bookings) =>
   Array.isArray(bookings) ? bookings : bookings ? [bookings] : [];
@@ -343,7 +333,7 @@ export default async function handler(req, res) {
     }
     const expiresAt = new Date(now + HOLD_DURATION_MS).toISOString();
 
-    if (isHoldActive(existingHold, now)) {
+    if (holdOwnsSlot(existingHold, now)) {
       const mayRefresh =
         previousHoldId === holdId &&
         verifyHoldToken({

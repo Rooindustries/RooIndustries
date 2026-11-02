@@ -10,6 +10,7 @@ import { appendCouponRefund } from "./couponReservations.js";
 import { toSubunits } from "../payment/providerClients.js";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
 import { resolveDisputeReferralAccounting } from "../../referrals/disputeAccounting.js";
+import { holdOwnsSlot } from "../../booking/holdOwnership.js";
 
 export const resolvePaymentCurrency = (paymentRecord = {}, { booking = {}, refund = {}, fallback = "USD" } = {}) => {
   const values = [paymentRecord.pricingSnapshot?.currency, paymentRecord.bookingPayload?.currency,
@@ -422,14 +423,7 @@ export const applyBookingStatusTransition = async ({
         })
       : null,
   ]);
-  const holdExpiry = new Date(activeHold?.expiresAt || "").getTime();
-  const holdBlocks =
-    activeHold?._id &&
-    !["released", "consumed"].includes(
-      String(activeHold.phase || "active").trim().toLowerCase()
-    ) &&
-    Number.isFinite(holdExpiry) &&
-    holdExpiry > Date.now();
+  const holdBlocks = Boolean(activeHold?._id) && holdOwnsSlot(activeHold);
   if (becomesBlocking && holdBlocks) {
     throw Object.assign(new Error("This booking slot has an active checkout hold."), {
       status: 409,

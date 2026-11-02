@@ -24,7 +24,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     DODO_PAYMENTS_WEBHOOK_KEY: 'whsec_Zml4dHVyZS1vbmx5',
     DODO_PAYMENTS_PRODUCT_ID: 'pdt_fixture', DODO_PAYMENTS_RETURN_URL: `${base}/handoff`,
     PAYMENT_SESSION_SECRET: 'fixture-only-payment-session', HOLD_TOKEN_SECRET: 'fixture-only-hold',
-    CRON_SECRET: 'fixture-only-cron',
+    CRON_SECRET: 'fixture-only-cron', REF_ADMIN_KEY: 'fixture-only-admin',
     REF_SESSION_SECRET: 'fixture-only-ref-session', RESEND_API_KEY: 're_fixture',
     FROM_EMAIL: 'noreply@example.invalid', OWNER_EMAIL: 'owner@example.invalid',
   });
@@ -86,6 +86,8 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     let paymentTaxInclusive = false;
     let paymentAmountOverrides = {};
     let emailFailure = false;
+    let checkoutPaymentStarted = true;
+    let providerLookupFailure = false;
     database.setProviderHandler(async request => {
       if (request.path === '/emails') {
         request.bookings = await database.sql`select legacy_sanity_id as id, payload->>'status' as status
@@ -103,9 +105,13 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
         sessions.set(id, request.body);
         return { body: { session_id: id, checkout_url: `https://test.checkout.dodopayments.com/session/${id}` } };
       }
+      if (providerLookupFailure && request.method === 'GET' &&
+          (request.path.startsWith('/checkouts/') || request.path.startsWith('/payments/'))) {
+        return { status: 503, body: { message: 'Synthetic provider outage' } };
+      }
       if (request.path.startsWith('/checkouts/')) {
         const id = request.path.split('/').at(-1);
-        return { body: { id, payment_id: `payment_${id}` } };
+        return { body: { id, payment_id: checkoutPaymentStarted ? `payment_${id}` : null } };
       }
       if (request.path.startsWith('/payments/')) {
         const paymentId = request.path.split('/').at(-1);
@@ -145,6 +151,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     const handlers = new Map();
     for (const [route, module] of Object.entries({
       '/api/holdSlot': '../../src/server/booking/holdSlot.js',
+      '/api/bookingAvailability': '../../src/server/booking/availability.js',
       '/api/payment/start': '../../src/server/api/payment/start.js',
       '/api/payment/quote': '../../src/server/api/payment/quote.js',
       '/api/payment/finalize': '../../src/server/api/payment/finalize.js',
@@ -153,6 +160,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       '/api/payment/reconcile': '../../src/server/api/payment/reconcile.js',
       '/api/payment/webhook/dodo': '../../src/server/api/payment/webhookDodo.js',
       '/api/ref/getUpgradeInfo': '../../src/server/api/ref/getUpgradeInfo.js',
+      '/api/ref/updateBookingStatus': '../../src/server/api/ref/updateBookingStatus.js',
       '/api/ref/createBooking': '../../src/server/api/ref/createBooking.js',
       '/api/ref/sendBookingEmails': '../../src/server/api/ref/sendBookingEmails.js',
     })) handlers.set(route, (await import(module)).default);
@@ -268,7 +276,8 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       paymentTaxInclusive = value;
     };
     const setPaymentAmountOverrides = values => {
-      assert.ok(Object.keys(values).every(key => ['tax', 'total_amount', 'status', 'disputes'].includes(key)));
+      const knownKeys = ['tax', 'total_amount', 'status', 'disputes', 'refund_status'];
+      assert.ok(Object.keys(values).every(key => knownKeys.includes(key)));
       paymentAmountOverrides = { ...values };
     };
     const dodoWebhook = async (paymentId, type, eventId) => {
@@ -288,6 +297,12 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     return { post, start, hold, snapshot, recordFor, seedUpgrade, commerce, database, details, evidence, save, stop,
       setPaymentTax, setPaymentTaxInclusive, setPaymentAmountOverrides, refundPayment, dodoWebhook,
       setEmailFailure(value) { emailFailure = value; },
+      setCheckoutPaymentStarted(value) { checkoutPaymentStarted = value; },
+      setProviderLookupFailure(value) { providerLookupFailure = value; },
+      availability: async () => {
+        const response = await fetch(`${base}/api/bookingAvailability`, { headers: { origin: base } });
+        return { status: response.status, body: await response.json() };
+      },
       setRequestHook: database.setRequestHook };
   } catch (error) {
     await stop();

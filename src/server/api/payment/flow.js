@@ -3,7 +3,22 @@ import envValue from "../../supabase/envValue.cjs";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
 import { isTerminalDisputeStatus, resolveDisputeReferralAccounting } from "../../referrals/disputeAccounting.js";
 const { resolveStoreBackend } = envValue;
-import { createDodoCheckout, inspectDodoCheckout, retrieveDodoPayment, retrieveDodoRefund, validateDodoPayment, verifyDodoCapture, unwrapDodoWebhook } from "./dodoProvider.js";
+import {
+  createDodoCheckout,
+  inspectDodoCheckout,
+  retrieveDodoPayment,
+  retrieveDodoRefund,
+  settledDodoPaymentState,
+  validateDodoPayment,
+  verifyDodoCapture,
+  unwrapDodoWebhook,
+} from "./dodoProvider.js";
+import {
+  observedProviderState,
+  recordProviderPaymentState,
+  refreshOwnerReviewDodoStates,
+  unconfirmedProviderState,
+} from "./providerPaymentState.js";
 import crypto from "crypto";
 import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
 import { validateBookingContact } from "../../../lib/bookingContactValidation.js";
@@ -1189,36 +1204,17 @@ const patchPaymentRecord = async ({
   record,
   set = {},
   event = null,
-  releaseExpiredHold = false,
 }) => {
   const existingEvents = Array.isArray(record?.events) ? record.events : [];
   const mergedEvents = event
     ? mergePaymentRecordEvents(existingEvents, event)
     : existingEvents;
-  const holdRelease = releaseExpiredHold
-    ? await prepareExpiredRecoveryHold({ client, record })
-    : null;
   const values = {
     ...set,
-    ...(holdRelease ? { holdSnapshot: holdRelease.snapshot } : {}),
+    ...unconfirmedProviderState(record, set),
     ...(event ? { events: mergedEvents } : {}),
     updatedAt: nowIso(),
   };
-  if (holdRelease?.holdDoc) {
-    if (typeof client?.transaction !== "function") {
-      throw Object.assign(new Error("Atomic payment storage is unavailable."), {
-        status: 503,
-        code: "payment_transaction_unavailable",
-      });
-    }
-    await client.transaction()
-      .patch(record._id, (patch) => guardPaymentRevision(patch, record).set(values))
-      .patch(holdRelease.holdDoc._id, (patch) =>
-        guardPaymentRevision(patch, holdRelease.holdDoc).set(holdRelease.set))
-      .commit();
-    logRecoveryExhaustion(record, values);
-    return getPaymentRecordById(client, record._id);
-  }
   const patch = guardPaymentRevision(client.patch(record._id), record).set(values);
   const committed = await patch.commit();
   logRecoveryExhaustion(record, values);
@@ -1718,39 +1714,6 @@ const releasePendingHold = async ({ client, record }) => {
   }
 };
 
-const prepareExpiredRecoveryHold = async ({ client, record }) => {
-  const holdSnapshot = normalizeObject(record?.holdSnapshot);
-  const holdId = String(holdSnapshot.slotHoldId || "").trim();
-  if (!holdId) return null;
-  const holdDoc = await getHoldById(client, holdId);
-  const expiry = new Date(
-    holdDoc?.expiresAt || holdSnapshot.slotHoldExpiresAt || ""
-  ).getTime();
-  if (Number.isFinite(expiry) && expiry > Date.now()) return null;
-
-  const releasedAt = nowIso();
-  const ownsHold =
-    holdDoc?._id &&
-    String(holdDoc.paymentRecordId || "").trim() === String(record?._id || "").trim();
-  if (ownsHold) requirePaymentRevision(holdDoc);
-
-  return {
-    holdDoc: ownsHold ? holdDoc : null,
-    set: {
-      phase: "released",
-      expiresAt: releasedAt,
-      paymentRecordId: "",
-      paymentProvider: "",
-      releaseReason: "payment_recovery_hold_expired",
-    },
-    snapshot: {
-      ...holdSnapshot,
-      phase: "released",
-      slotHoldExpiresAt: releasedAt,
-    },
-  };
-};
-
 const releaseCouponForPaymentRecord = async ({
   client,
   record,
@@ -1908,7 +1871,6 @@ const markRetryableFinalizeFailure = async ({
     nextRecord = await patchPaymentRecord({
       client,
       record: current,
-      releaseExpiredHold: true,
       set: {
         status: PAYMENT_STATUS_NEEDS_RECOVERY,
         recoveryReason: reason,
@@ -3878,7 +3840,6 @@ const scheduleProviderRecoveryCheck = async ({
     return await patchPaymentRecord({
       client,
       record,
-      releaseExpiredHold: true,
       set: {
         recoveryReason: String(reason || "provider_status_pending").trim(),
         recoveryAttemptCount,
@@ -4521,6 +4482,7 @@ export const reconcilePaymentSessions = async ({
             providerRecoveryTerminal: true,
             providerRecoveryTerminalReason: dodoInspection.reason,
             nextRecoveryAt: "",
+            ...observedProviderState(record, dodoInspection.providerPaymentState),
           } });
           summary.recovery += 1;
           continue;
@@ -5021,6 +4983,17 @@ export const reconcilePaymentSessions = async ({
           break;
         }
       }
+    }
+  }
+
+  if (dodoEnabled) {
+    try {
+      summary.ownerReviewStatesChecked = await refreshOwnerReviewDodoStates({
+        client,
+        patchRecord: patchPaymentRecord,
+      });
+    } catch (error) {
+      logSafeError("Owner review payment state check failed", error);
     }
   }
 
@@ -5906,6 +5879,8 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       return { httpStatus: 409, body: { ok: false, code: "dodo_configuration_unavailable", error: "Dodo Payments is not available in this environment." } };
     }
     if (inspection.retryable === false) {
+      await recordProviderPaymentState({ client, record, patchRecord: patchPaymentRecord,
+        providerPaymentState: inspection.providerPaymentState });
       return { httpStatus: 409, body: { ok: false, code: inspection.reason, error: "The payment does not match this checkout." } };
     }
     if (inspection.state === "unpaid" && !isFutureIso(record.sessionExpiresAt)) {
@@ -5916,7 +5891,16 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       body: { ...buildPublicStatusBody(record), ...(inspection.state === "unavailable" ? { ok: false, error: "Dodo payment status is temporarily unavailable." } : {}) } };
   }
   const validation = validateDodoPayment({ record, payment });
-  if (!validation.ok) return { httpStatus: 409, body: { ok: false, code: validation.reason, error: "The payment does not match this checkout." } };
+  if (!validation.ok) {
+    if (validation.reason !== "dodo_payment_binding_mismatch") {
+      await recordProviderPaymentState({ client, record, patchRecord: patchPaymentRecord,
+        providerPaymentState: settledDodoPaymentState(payment) });
+    }
+    return {
+      httpStatus: 409,
+      body: { ok: false, code: validation.reason, error: "The payment does not match this checkout." },
+    };
+  }
   requirePaymentRevision(record);
   const disputes = Array.isArray(payment.disputes) ? payment.disputes : [];
   for (const dispute of disputes) {

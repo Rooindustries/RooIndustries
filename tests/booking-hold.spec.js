@@ -31,8 +31,19 @@ const test = base.extend({
     });
     try {
       await ready;
-      await use({ post: (...args) => call("post", ...args), nextSlotDate: () => call("nextSlotDate"),
-        getHold: id => call("getHold", id), verifyHold: hold => call("verifyHold", hold), evidence: () => call("evidence") });
+      await use({
+        post: (...args) => call("post", ...args),
+        nextSlotDate: () => call("nextSlotDate"),
+        getHold: id => call("getHold", id),
+        verifyHold: hold => call("verifyHold", hold),
+        evidence: () => call("evidence"),
+        get: route => call("get", route),
+        setPaymentStatus: status => call("setPaymentStatus", status),
+        holdRunsOut: id => call("holdRunsOut", id),
+        restoreClock: () => call("restoreClock"),
+        reconcile: () => call("reconcile"),
+        paymentSucceeded: id => call("paymentSucceeded", id),
+      });
     } finally {
       if (child.exitCode === null) {
         const exited = once(child, "exit");
@@ -48,10 +59,91 @@ const nativeBinaries = [process.env.PG_BIN && path.join(process.env.PG_BIN, "pos
 test.skip(!nativeBinaries.every(file => file && fs.existsSync(file)), "Needs PG_BIN and POSTGREST_BIN for the native PostgreSQL 17 fixture.");
 const readHold = page => page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold")));
 const specifications = "Ryzen 7700 / RTX 4070 · 東京 🦊";
+const routeToNative = async (context, native, date) => {
+  const fulfillJson = (route, response, body) =>
+    route.fulfill({ status: response.status, contentType: "application/json", body: JSON.stringify(body) });
+  const nativeRoutes = /\/api\/(holdSlot|releaseHold|payment\/quote|payment\/start|payment\/cancel)(?:\?|$)/;
+  await context.route(nativeRoutes, async route => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    const response = await native.post(pathname, request.postDataJSON(), request.headers().authorization);
+    return fulfillJson(route, response, response.body);
+  });
+  await context.route(/\/api\/bookingAvailability(?:\?|$)/, async route => {
+    const response = await native.get("/api/bookingAvailability");
+    const dateSlots = [{ date, times: ["10:00", "11:00"] }];
+    const settings = {
+      ...response.body.settings,
+      dateSlots,
+      xocDateSlots: dateSlots,
+      vertexEssentialsDateSlots: dateSlots,
+      packageDateSlots: [],
+    };
+    return fulfillJson(route, response, { ...response.body, settings });
+  });
+  await context.route("https://test.checkout.dodopayments.com/session/**", route => route.fulfill({
+    contentType: "text/html", body: "<h1>Fixture provider checkout</h1>",
+  }));
+};
+const expectOnlyElevenOffered = async page => {
+  const earliest = page.getByRole("button", { name: /^Earliest available:/ });
+  await expect(earliest).toHaveText(/at 11:00 AM$/);
+  await earliest.click();
+  await expect(page.getByRole("button", { name: "11:00 AM", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toBeDisabled();
+};
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test.describe(`${viewport.width}px`, () => {
     test.use({ viewport });
+    const title = "a slot whose payment is still going through when its hold runs out stays taken for everyone else";
+    test(title, async ({ page, context, flow, native }, testInfo) => {
+      const date = await native.nextSlotDate();
+      await routeToNative(context, native, date);
+      await native.setPaymentStatus("processing");
+      try {
+        await flow.reserve();
+        await flow.details();
+        await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+        await flow.payment();
+        await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+        await expect(page.getByRole("heading", { name: "Fixture provider checkout", exact: true })).toBeVisible();
+        const holdCall = (await native.evidence()).http.findLast(entry => entry.path === "/api/holdSlot");
+        const held = await native.getHold(holdCall.response.holdId);
+        expect(held.phase).toBe("payment_pending");
+        await native.holdRunsOut(held._id);
+        expect((await native.reconcile()).status).toBe(200);
+        expect((await native.getHold(held._id)).phase).toBe("payment_pending");
+
+        const other = await context.newPage();
+        await other.goto("/booking");
+        await expectOnlyElevenOffered(other);
+        await other.goto("/packages");
+        await other.getByRole("link", { name: "Book Now" }).first().click();
+        await expect(other).toHaveURL(/\/booking$/);
+        await expectOnlyElevenOffered(other);
+        await other.goBack();
+        await expect(other).toHaveURL(/\/packages$/);
+        await other.goForward();
+        await expect(other).toHaveURL(/\/booking$/);
+        await expectOnlyElevenOffered(other);
+
+        await native.setPaymentStatus("succeeded");
+        expect((await native.paymentSucceeded(held._id)).status).toBe(200);
+        const consumed = await native.getHold(held._id);
+        expect(consumed.phase).toBe("consumed");
+        expect(consumed.bookingId).toBeTruthy();
+        await other.reload();
+        await expectOnlyElevenOffered(other);
+        const screenshot = await other.screenshot({ fullPage: true });
+        await testInfo.attach("payment-window-other-visitor", { body: screenshot, contentType: "image/png" });
+        await other.close();
+      } finally {
+        await native.restoreClock();
+        await native.setPaymentStatus(null);
+      }
+    });
+
     for (const canResume of [true, false]) {
       test(`another tab starts payment; revalidation keeps credentials and ${canResume ? "resumes checkout" : "protects the draft without checkout data"}`, async ({ page, context, flow, native }, testInfo) => {
         flow.state.slots = [{ date: await native.nextSlotDate(), times: ["10:00", "11:00"] }];

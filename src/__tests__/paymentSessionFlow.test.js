@@ -2094,7 +2094,7 @@ describe("payment session flow", () => {
     });
   });
 
-  test("reconcile moves retryable verification failures into needs_recovery", async () => {
+  test("reconcile moves retryable verification failures into needs_recovery and keeps the paid slot", async () => {
     const hold = createHold();
     const bookingPayload = baseBookingPayload();
     bookingPayload.slotHoldToken = issueTokenForHold(hold);
@@ -2130,12 +2130,11 @@ describe("payment session flow", () => {
     expect(getOnlyPaymentRecord()).toMatchObject({
       status: paymentRecordConstants.PAYMENT_STATUS_NEEDS_RECOVERY,
       recoveryReason: "paypal_lookup_exception",
-      holdSnapshot: { phase: "released" },
+      holdSnapshot: { phase: "payment_pending" },
     });
     expect(hold).toMatchObject({
-      phase: "released",
-      paymentRecordId: "",
-      releaseReason: "payment_recovery_hold_expired",
+      phase: "payment_pending",
+      paymentRecordId: record._id,
     });
   });
 
@@ -2417,7 +2416,7 @@ describe("payment session flow", () => {
     });
   });
 
-  test("provider-pending recovery releases an expired hold without guessing payment state", async () => {
+  test("provider-pending recovery keeps an expired hold with its payment until the provider settles", async () => {
     const hold = createHold();
     const bookingPayload = baseBookingPayload({
       slotHoldToken: issueTokenForHold(hold),
@@ -2445,12 +2444,11 @@ describe("payment session flow", () => {
     expect(getOnlyPaymentRecord()).toMatchObject({
       status: paymentRecordConstants.PAYMENT_STATUS_STARTED,
       recoveryReason: "provider_payment_pending",
-      holdSnapshot: { phase: "released" },
+      holdSnapshot: { phase: "payment_pending" },
     });
     expect(hold).toMatchObject({
-      phase: "released",
-      paymentRecordId: "",
-      releaseReason: "payment_recovery_hold_expired",
+      phase: "payment_pending",
+      paymentRecordId: record._id,
     });
   });
 

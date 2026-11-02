@@ -3,6 +3,7 @@ import {
   filterActiveBookings,
   getBookingSettings,
 } from "./slotPolicy.js";
+import { holdOwnsSlot } from "./holdOwnership.js";
 
 const BOOKINGS_QUERY = `*[_type == "booking"]{
   _id,
@@ -28,15 +29,6 @@ const HOLD_STATES = Object.freeze({
   ACTIVE: "active",
 });
 
-const isExpiredHold = (hold, now = Date.now()) => {
-  const expiresAtMs = new Date(hold?.expiresAt || "").getTime();
-  return !Number.isFinite(expiresAtMs) || expiresAtMs <= now;
-};
-
-const isActiveHold = (hold, now) => {
-  const phase = String(hold?.phase || "active").trim().toLowerCase();
-  return phase !== "released" && phase !== "consumed" && !isExpiredHold(hold, now);
-};
 
 const fetchBackendAvailability = async (readClient) => {
   if (typeof readClient.fetchAvailability === "function") {
@@ -77,7 +69,7 @@ export async function getBookingAvailability({ client } = {}) {
     }
   });
   holds
-    .filter((hold) => isActiveHold(hold, now))
+    .filter((hold) => holdOwnsSlot(hold, now))
     .forEach((hold) => {
       const startTimeUTC = String(hold?.startTimeUTC || "").trim();
       const holdId = String(hold?._id || "").trim();

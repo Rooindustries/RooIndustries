@@ -1,5 +1,6 @@
 import DodoPayments from "dodopayments";
 import providerConfig from "./providerConfig.js";
+import { isTerminalDisputeStatus } from "../../referrals/disputeAccounting.js";
 
 export const DODO_CURRENCY = "USD";
 const read = (key) => String(process.env[key] || "").trim();
@@ -113,6 +114,15 @@ export const validateDodoPayment = ({ record, payment }) => {
 export const retrieveDodoPayment = (paymentId) => createDodoClient().payments.retrieve(paymentId);
 export const retrieveDodoRefund = (refundId) => createDodoClient().refunds.retrieve(refundId);
 
+export const settledDodoPaymentState = (payment) => {
+  if (payment?.refund_status === "full") return "refunded";
+  const disputes = Array.isArray(payment?.disputes) ? payment.disputes : [];
+  if (disputes.some((dispute) => isTerminalDisputeStatus(dispute?.dispute_status))) {
+    return "disputed";
+  }
+  return String(payment?.status || "").trim();
+};
+
 export const inspectDodoCheckout = async ({ record }) => {
   try {
     const client = createDodoClient();
@@ -124,7 +134,11 @@ export const inspectDodoCheckout = async ({ record }) => {
       return { state: "unavailable", retryable: false, reason: "dodo_payment_binding_mismatch" };
     }
     const validation = validateDodoPayment({ record, payment });
-    if (!validation.ok) return { state: "unavailable", ...validation };
+    if (!validation.ok) {
+      return validation.reason === "dodo_payment_binding_mismatch"
+        ? { state: "unavailable", ...validation }
+        : { state: "unavailable", ...validation, providerPaymentState: settledDodoPaymentState(payment) };
+    }
     const state = payment.status === "succeeded" ? "captured"
       : ["failed", "cancelled", "requires_payment_method"].includes(payment.status) ? "unpaid" : "pending";
     return { state, payment, providerPaymentId: payment.payment_id };
