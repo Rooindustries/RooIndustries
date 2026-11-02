@@ -17,6 +17,7 @@ import {
   providerStateChange,
   recordProviderPaymentState,
   refreshOwnerReviewDodoStates,
+  unconfirmedProviderState,
 } from "./providerPaymentState.js";
 import crypto from "crypto";
 import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
@@ -131,6 +132,7 @@ const buildRecoveryFailureState = (record) => {
     recoveryFailureCount,
     reconciliationRecoveryTerminal: stopped,
     nextRecoveryAt: stopped ? "9999-12-31T23:59:59.999Z" : getNextPaymentRecoveryAt(recoveryFailureCount),
+    ...(stopped ? unconfirmedProviderState(record) : {}),
   };
 };
 

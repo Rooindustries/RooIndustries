@@ -5,7 +5,9 @@ import { getPaymentRecordById, PAYMENT_RECORD_TYPE } from "./paymentRecord.js";
 const PROVIDER_STATE_STAGE = { succeeded: 1, refunded: 2, disputed: 2 };
 const OWNER_REVIEW_STATE_CHECK_MS = 60 * 60 * 1000;
 const OWNER_REVIEW_BATCH_SIZE = 20;
+const UNCONFIRMED_PROVIDER_STATE = "unknown";
 const UNSETTLED_PROVIDER_STATES = [
+  UNCONFIRMED_PROVIDER_STATE,
   "succeeded",
   "processing",
   "requires_payment_method",
@@ -28,6 +30,12 @@ export const providerStateChange = (current, next) => {
   const state = String(next || "").trim();
   if (!state || state === current || stageOf(state) < stageOf(current)) return {};
   return { providerPaymentState: state, providerStateCheckedAt: new Date().toISOString() };
+};
+
+export const unconfirmedProviderState = (record) => {
+  const recorded = String(record?.providerPaymentState || "").trim();
+  if (record?.provider !== "dodo" || hasBooking(record) || recorded) return {};
+  return { providerPaymentState: UNCONFIRMED_PROVIDER_STATE, providerStateCheckedAt: new Date().toISOString() };
 };
 
 export const recordProviderPaymentState = async ({ client, record, providerPaymentState, patchRecord }) => {
