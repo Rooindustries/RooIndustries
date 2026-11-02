@@ -62,6 +62,7 @@ async function fetchHomePageData({
   const safeFetch = async (resource, fallback) => {
     try {
       const data = await fetchContent(resource);
+      if (data == null && (resource === "hero" || requiredResources.includes(resource))) failed.add(resource);
       return data ?? fallback;
     } catch {
       failed.add(resource);
@@ -93,7 +94,7 @@ async function fetchHomePageData({
     safeFetch("faq-settings", null),
     safeFetch("faq-questions", []),
   ]);
-  if (requireContent && requiredResources.length === 0 && failed.has("hero") && failed.has("packages-list")) {
+  if (requireContent && requiredResources.length === 0 && failed.size > 0) {
     await refuseHomeFallback(Object.assign(new Error("Home content is unavailable."), { code: "HOME_CONTENT_UNAVAILABLE" }));
   }
   const missingResources = requiredResources.filter((resource) => failed.has(resource));

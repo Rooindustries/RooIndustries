@@ -106,10 +106,11 @@ async function run(scratch, artifact, hostNetwork) {
     'jsconfig.json', 'postcss.config.js', 'tailwind.config.js', 'package.json']) {
     await cp(join(root, name), join(work, name), { recursive: true });
   }
+  await mkdir(join(work, 'scripts'), { recursive: true });
+  await cp(join(root, 'scripts/generate-public-content-fallback.mjs'), join(work, 'scripts/generate-public-content-fallback.mjs'));
   await cp(join(root, 'next.config.mjs'), join(work, 'next.base.mjs'));
   await writeFile(join(work, 'next.config.mjs'), `import config from './next.base.mjs';
 export * from './next.base.mjs';
-config.experimental = { ...config.experimental, cpus: 1 };
 export default config;
 `);
   await symlink(join(root, 'node_modules'), join(work, 'node_modules'), 'dir');

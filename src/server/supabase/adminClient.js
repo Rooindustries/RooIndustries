@@ -78,10 +78,10 @@ export const createSupabaseAdminFetch = ({
   };
 };
 
-export const createSupabaseAdminClient = ({ env = process.env, signal, storageTransferTimeoutMs = 30000 } = {}) => {
+export const createSupabaseAdminClient = ({ env = process.env, signal, storageTransferTimeoutMs = 30000, fetchImpl = fetch } = {}) => {
   const { url, secretKey } = resolveSupabaseAdminEnv(env);
   if (
-    !signal && storageTransferTimeoutMs === 30000 &&
+    !signal && fetchImpl === fetch && storageTransferTimeoutMs === 30000 &&
     env === process.env &&
     cachedClient &&
     cachedUrl === url &&
@@ -99,11 +99,11 @@ export const createSupabaseAdminClient = ({ env = process.env, signal, storageTr
     db: { schema: "public" },
     global: {
       headers: { "X-Client-Info": "roo-industries-server" },
-      fetch: createSupabaseAdminFetch({ signal, storageTransferTimeoutMs }),
+      fetch: createSupabaseAdminFetch({ signal, storageTransferTimeoutMs, fetchImpl }),
     },
   });
 
-  if (!signal && storageTransferTimeoutMs === 30000 && env === process.env) {
+  if (!signal && fetchImpl === fetch && storageTransferTimeoutMs === 30000 && env === process.env) {
     cachedClient = client;
     cachedUrl = url;
     cachedSecretKey = secretKey;

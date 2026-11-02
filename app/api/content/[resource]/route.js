@@ -1,13 +1,14 @@
 import { fetchPublicContent } from "@/src/server/content/publicContent";
+import { revalidatePath } from "next/cache";
 
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const PUBLIC_BROWSER_CACHE = "public, max-age=60, stale-while-revalidate=300";
-const PUBLIC_VERCEL_CACHE =
-  "public, max-age=300, stale-while-revalidate=600, stale-if-error=86400";
+const PUBLIC_BROWSER_CACHE = "no-store, max-age=0";
+const PUBLIC_VERCEL_CACHE = "no-store";
 const ERROR_CACHE = "no-store, max-age=0";
+let lastPublication = 0n;
 
 export async function GET(request, context) {
   try {
@@ -16,6 +17,12 @@ export async function GET(request, context) {
     const data = await fetchPublicContent({
       resource,
       searchParams: new URL(request.url).searchParams,
+      onPublication: generation => {
+        if (generation > lastPublication) {
+          revalidatePath("/", "layout");
+          lastPublication = generation;
+        }
+      },
     });
     const response = Response.json(
       { ok: true, data },

@@ -18,6 +18,10 @@ jest.mock("../server/supabase/documentClient", () => ({
     mockCreateSupabaseDocumentClient(...args),
 }));
 
+jest.mock("../server/supabase/adminClient", () => ({
+  createSupabaseAdminClient: jest.fn(() => ({})),
+}));
+
 jest.mock("../server/supabase/assets", () => ({
   clearSupabaseAssetManifestCache: jest.fn(),
   enrichSupabaseContentAssets: (...args) =>
@@ -119,7 +123,7 @@ describe("public content privacy boundary", () => {
     });
   });
 
-  test("caches a complete Supabase content rollout at the edge", async () => {
+  test("keeps Supabase content out of stale browser and edge caches", async () => {
     process.env.DATA_PRIMARY_BACKEND = "sanity";
     process.env.SUPABASE_CONTENT_CANARY_PERCENT = "100";
     const route = require("../../app/api/content/[resource]/route");
@@ -131,10 +135,10 @@ describe("public content privacy boundary", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("x-roo-content-backend")).toBe("supabase");
     expect(response.headers.get("cache-control")).toBe(
-      "public, max-age=60, stale-while-revalidate=300",
+      "no-store, max-age=0",
     );
     expect(response.headers.get("vercel-cdn-cache-control")).toBe(
-      "public, max-age=300, stale-while-revalidate=600, stale-if-error=86400",
+      "no-store",
     );
     expect(response.headers.get("set-cookie")).toBeNull();
     expect(response.headers.get("vary")).toBeNull();
@@ -156,9 +160,9 @@ describe("public content privacy boundary", () => {
     await expect(request()).resolves.toEqual([{ _id: "benchmark-one" }]);
     expect(mockSupabaseFetch).toHaveBeenCalledTimes(1);
     expect(mockEnrichSupabaseContentAssets).toHaveBeenCalledTimes(1);
-    expect(mockCreateSupabaseDocumentClient).toHaveBeenCalledWith({
+    expect(mockCreateSupabaseDocumentClient).toHaveBeenCalledWith(expect.objectContaining({
       documentTypes: ["benchmark"],
-    });
+    }));
   });
 
   test("serves recent content when a Supabase refresh fails", async () => {

@@ -6,7 +6,7 @@ import { uiRepairsFixture } from './ui-repairs-server.mjs';
 import { localOrigin } from '../../scripts/lib/test-target-safety.mjs';
 import { referralEmail } from './api-routes.mjs';
 
-export async function createToolingContentFixture({ origin, artifact, apiRoutes = false, clockFile }) {
+export async function createToolingContentFixture({ origin, artifact, apiRoutes = false, cms = false, clockFile }) {
   const target = new URL(localOrigin(origin));
   const reused = uiRepairsFixture({ base: origin });
   const content = resource => reused.content(resource, target);
@@ -91,7 +91,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       shortDescription: 'Synthetic tool content for layout stability checks.',
       category: 'Benchmark',
       downloadMode: 'external',
-      downloadUrl: '/favicon-96x96.png',
+      downloadUrl: new URL('/favicon-96x96.png', process.env.BASE_URL || origin).href,
       sortOrder: index,
     }, `tooling-cls-tool-${index}`)),
   );
@@ -141,7 +141,15 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
   let enqueueDelayMs = 0;
   let emailDelayMs = 0;
   let contentOutage = false;
-  let contentMissing = [];
+  let contentMissing = (process.env.TOOLING_CONTENT_MISSING || '').split(',').filter(Boolean);
+  let contentFailure = process.env.TOOLING_CONTENT_FAILURE || '';
+  let publishResponseFailure = '';
+  let receiptFailure = '';
+  let publicationFailure = '';
+  const cmsReceipts = new Map();
+  const publications = new Map();
+  const publicationBindings = new Map();
+  let generation = 1;
   const changedContent = new Set();
   const emails = [];
   const mutate = mutations => {
@@ -149,6 +157,13 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
     const next = structuredClone(documents);
     const results = [];
     for (const mutation of mutations) {
+      if (mutation.operation === 'delete') {
+        const index = next.findIndex(row => row._id === mutation.id);
+        if (index < 0 || next[index]._rev !== mutation.expected_revision) throw Object.assign(new Error('Synthetic revision conflict.'), { status: 409, code: '40001' });
+        const [removed] = next.splice(index, 1);
+        results.push({ _id: removed._id, _rev: removed._rev, deleted: true });
+        continue;
+      }
       const value = mutation.document;
       if (!value?._id || !value?._type || !['create', 'replace'].includes(mutation.operation)) throw new Error('Unsupported fixture mutation.');
       const index = next.findIndex(row => row._id === value._id);
@@ -160,6 +175,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       results.push(saved);
     }
     documents.splice(0, documents.length, ...next);
+    generation++;
     return results;
   };
   const evidence = { origin, pid: process.pid, contentSha256: createHash('sha256').update(JSON.stringify(documents)).digest('hex'), documentTypes: [...new Set(documents.map(row => row._type))], requests: [], stopped: false, standIn: `Synthetic ${apiRoutes ? 'in-memory' : 'read-only'} HTTP responses shaped as the current PostgREST RPC contract. Actual Supabase SDK and GROQ evaluator execute. No PostgreSQL, hosted PostgREST, Sanity, GoTrue, provider or persistence equivalence is claimed.` };
@@ -180,10 +196,31 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
             const index = documents.findIndex(value => value._id === id);
             const initial = initialDocuments.find(value => value._id === id);
             if (index >= 0 && initial) documents[index] = structuredClone(initial);
+            else if (index < 0 && initial) documents.push(structuredClone(initial));
+            else if (index >= 0) documents.splice(index, 1);
           }
           changedContent.clear();
           contentOutage = false;
           contentMissing = [];
+          contentFailure = '';
+          publishResponseFailure = '';
+          receiptFailure = '';
+          publicationFailure = '';
+          cmsReceipts.clear();
+          generation++;
+        }
+        if (body.clearPublications === true) { publications.clear(); publicationBindings.clear(); }
+        if (body.publicationFailure !== undefined) {
+          if (!['', 'upload', 'ack', 'read'].includes(body.publicationFailure)) throw new Error('Invalid fixture publication failure.');
+          publicationFailure = body.publicationFailure;
+        }
+        if (body.publishResponseFailure !== undefined) {
+          if (!['', '5xx', 'timeout', 'invalid-receipt', 'wrong-id'].includes(body.publishResponseFailure)) throw new Error('Invalid fixture publish response failure.');
+          publishResponseFailure = body.publishResponseFailure;
+        }
+        if (body.receiptFailure !== undefined) {
+          if (!['', 'missing', 'outage', 'command', 'operation', 'document-id', 'type', 'revision', 'replayed', 'deleted', 'revision-mismatch'].includes(body.receiptFailure)) throw new Error('Invalid fixture receipt failure.');
+          receiptFailure = body.receiptFailure;
         }
         if (body.outage !== undefined) {
           const documentTypes = Array.isArray(body.outage) && body.outage.length > 0 && body.outage.every(type => typeof type === 'string' && type);
@@ -194,14 +231,90 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           if (!Array.isArray(body.missing) || !body.missing.every(type => typeof type === 'string' && type)) throw new Error('Invalid fixture missing content.');
           contentMissing = body.missing;
         }
+        if (body.failure !== undefined) {
+          if (!['', 'timeout', 'malformed', 'invalid-json'].includes(body.failure)) throw new Error('Invalid fixture content failure.');
+          contentFailure = body.failure;
+        }
         if (body.patch !== undefined) {
           const index = documents.findIndex(value => value._id === body.patch?._id);
           if (index < 0 || Object.keys(body.patch).some(key => key.startsWith('_') && key !== '_id')) throw new Error('Invalid fixture content patch.');
           documents[index] = { ...documents[index], ...body.patch, _rev: `tooling-fixture-${++revision}` };
           changedContent.add(body.patch._id);
+          generation++;
         }
         call.status = 200;
-        json(res, 200, { outage: contentOutage, missing: contentMissing, changed: [...changedContent] });
+        json(res, 200, { outage: contentOutage, missing: contentMissing, failure: contentFailure, changed: [...changedContent] });
+      } else if (url.pathname === '/__content' && req.method === 'GET') {
+        call.status = 200;
+        json(res, 200, { ...evidence, publicationState: { generation: String(generation), failure: publicationFailure, bindings: [...publicationBindings.values()], objects: [...publications.keys()].sort() } });
+      } else if (req.method === 'POST' && url.pathname === '/storage/v1/object/list/public-content-state') {
+        if (publicationFailure === 'read') throw Object.assign(new Error('Synthetic publication read failure.'), { status: 503 });
+        call.status = 200;
+        const prefix = body.prefix ? `${body.prefix.replace(/\/$/, '')}/` : '';
+        json(res, 200, [...publications.keys()].filter(name => name.startsWith(prefix)).sort().reverse().slice(0, 1).map(name => ({ name: name.slice(prefix.length) })));
+      } else if (req.method === 'POST' && /^\/storage\/v1\/object\/public-content-state\/(?:snapshots|heads)\/[0-9]{20}-[a-f0-9]{64}\.json$/.test(url.pathname)) {
+        const name = url.pathname.split('/public-content-state/')[1];
+        if (publicationFailure === 'upload') throw Object.assign(new Error('Synthetic publication upload failure.'), { status: 503 });
+        if (publications.has(name)) { call.status = 409; json(res, 409, { statusCode: '409', error: 'Duplicate', message: 'The resource already exists' }); }
+        else {
+          publications.set(name, raw);
+          if (publicationFailure === 'ack' && name.startsWith('heads/')) throw Object.assign(new Error('Synthetic publication acknowledgement lost.'), { status: 503 });
+          call.status = 200; json(res, 200, { Key: `public-content-state/${name}` });
+        }
+      } else if (req.method === 'GET' && /^\/storage\/v1\/object\/(?:authenticated\/)?public-content-state\/(?:snapshots|heads)\/[0-9]{20}-[a-f0-9]{64}\.json$/.test(url.pathname)) {
+        if (publicationFailure === 'read') throw Object.assign(new Error('Synthetic publication read failure.'), { status: 503 });
+        const value = publications.get(url.pathname.split('/public-content-state/')[1]);
+        call.status = value === undefined ? 404 : 200;
+        res.writeHead(call.status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(value ?? '{}');
+      } else if (cms && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_bind_public_content_publication') {
+        if (!/^[1-9][0-9]*$/.test(body.p_generation) || Number(body.p_generation) > generation || !/^[a-f0-9]{64}$/.test(body.p_sha256) || body.p_object_path !== `snapshots/${body.p_generation.padStart(20, '0')}-${body.p_sha256}.json`) throw new Error('Invalid fixture publication identity.');
+        const binding = { generation: body.p_generation, sha256: body.p_sha256, path: body.p_object_path };
+        const existing = publicationBindings.get(body.p_generation);
+        if (existing && JSON.stringify(existing) !== JSON.stringify(binding)) throw Object.assign(new Error('Publication identity conflict.'), { status: 409, code: '40001' });
+        publicationBindings.set(body.p_generation, binding);
+        const latest = [...publicationBindings.values()].sort((a, b) => Number(b.generation) - Number(a.generation))[0];
+        call.status = 200; json(res, 200, latest);
+      } else if (cms && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_capture_public_content_publication') {
+        call.status = 200;
+        json(res, 200, { generation: String(generation), documents, assets: images.map(image => ({
+          legacy_sanity_asset_id: image.id, storage_bucket: 'site-content-public', storage_path: image.storagePath,
+          migration_status: 'verified', sha256: createHash('sha256').update(image.body).digest('hex'), width: image.width, height: image.height,
+        })) });
+      } else if (cms && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_cms_publish_command_result') {
+        if (contentOutage === true || receiptFailure === 'outage') throw Object.assign(new Error('Synthetic receipt outage.'), { status: 503 });
+        const saved = cmsReceipts.get(body.p_command_id);
+        if (saved && (saved.requestHash !== body.p_request_hash || saved.actor !== body.p_actor)) throw Object.assign(new Error('Synthetic receipt identity conflict.'), { status: 409, code: '40001' });
+        const receipt = receiptFailure === 'missing' ? null : structuredClone(saved?.receipt || null);
+        if (receipt) {
+          if (receiptFailure === 'command') receipt.command_id = 'cms:' + '0'.repeat(64);
+          if (receiptFailure === 'operation') receipt.operation = receipt.operation === 'delete' ? 'replace' : 'delete';
+          if (receiptFailure === 'document-id') receipt.document_ids = ['unrelated-document'];
+          if (receiptFailure === 'type') receipt.results[0]._type = 'unrelated-type';
+          if (receiptFailure === 'revision') receipt.results[0]._rev = '';
+          if (receiptFailure === 'replayed') receipt.replayed = false;
+          if (receiptFailure === 'deleted') receipt.results[0].deleted = false;
+          if (receiptFailure === 'revision-mismatch') receipt.results[0]._rev = 'unrelated-revision';
+        }
+        call.status = 200;
+        json(res, 200, receipt);
+      } else if (cms && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_apply_cms_publish_command') {
+        const results = mutate(body.p_mutations);
+        const receipt = { command_id: body.p_command_id, operation: body.p_mutations[0].operation, document_ids: results.map(row => row._id), assets: 0, replayed: true, results };
+        cmsReceipts.set(body.p_command_id, { receipt, requestHash: body.p_request_hash, actor: body.p_actor });
+        for (const row of results) changedContent.add(row._id);
+        call.committed = true;
+        if (publishResponseFailure === '5xx') throw Object.assign(new Error('Synthetic response lost after commit.'), { status: 503 });
+        if (publishResponseFailure === 'timeout') {
+          call.delayMs = 35000;
+          await new Promise(resolve => {
+            const timer = setTimeout(resolve, call.delayMs);
+            res.once('close', () => { clearTimeout(timer); resolve(); });
+          });
+          if (res.destroyed) return;
+        }
+        call.status = 200;
+        json(res, 200, { ...receipt, replayed: false, ...(publishResponseFailure === 'invalid-receipt' ? { results: [] } : {}), ...(publishResponseFailure === 'wrong-id' ? { results: results.map(row => ({ ...row, _id: 'unrelated-document' })) } : {}) });
       } else if (apiRoutes && url.pathname === '/__fixture' && ['GET', 'POST'].includes(req.method)) {
         if (req.method === 'POST') {
           if (body.reset === true) {
@@ -247,8 +360,22 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         }
         call.status = 200;
         json(res, 200, { delivery, session, documents, requests: evidence.requests, emails, clockNow });
-      } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_fetch_shadow_documents_targeted') {
+      } else if (req.method === 'POST' && ['/rest/v1/rpc/roo_fetch_shadow_documents_targeted', '/rest/v1/rpc/roo_fetch_public_documents_targeted'].includes(url.pathname)) {
         if (contentOutage === true || (Array.isArray(contentOutage) && body.p_document_types?.some(type => contentOutage.includes(type)))) throw Object.assign(new Error('Synthetic content outage.'), { status: 503, code: 'FIXTURE_CONTENT_OUTAGE' });
+        if (contentFailure === 'timeout') {
+          call.delayMs = 35000;
+          await new Promise(resolve => {
+            const timer = setTimeout(resolve, call.delayMs);
+            res.once('close', () => { clearTimeout(timer); resolve(); });
+          });
+          if (res.destroyed) return;
+        }
+        if (contentFailure === 'invalid-json') {
+          call.status = 200;
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end('{broken');
+          return;
+        }
         const scopedIds = apiRoutes && body.p_document_types === null && Array.isArray(body.p_ids) && body.p_ids.length > 0;
         if ((!scopedIds && (!Array.isArray(body.p_document_types) || !body.p_document_types.length)) || !Array.isArray(body.p_filters) || !Number.isInteger(body.p_limit) || body.p_limit < 1 || body.p_limit > 1000 || body.p_ids !== null && !Array.isArray(body.p_ids)) throw new Error('Invalid fixture read scope.');
         if (apiRoutes && delivery === 'lookup_failed' && body.p_document_types?.includes('referral')) throw Object.assign(new Error('Synthetic referral lookup outage.'), { status: 503, code: 'FIXTURE_LOOKUP_UNAVAILABLE' });
@@ -270,7 +397,8 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           if (!['eq', 'ieq', 'in'].includes(filter.op) || typeof filter.path !== 'string') throw new Error('Unsupported fixture filter.');
           rows = rows.filter(row => { const value = filter.path.split('.').reduce((item, key) => item?.[key], row); return filter.op === 'in' ? Array.isArray(filter.value) && filter.value.includes(value) : filter.op === 'ieq' ? String(value).toLowerCase() === String(filter.value).toLowerCase() : value === filter.value; });
         }
-        rows = rows.sort((a, b) => a._id < b._id ? -1 : a._id > b._id ? 1 : 0).slice(0, body.p_limit); call.status = 200; call.rows = rows.length; json(res, 200, rows);
+        if (contentFailure === 'malformed') rows = rows.map(row => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, key.startsWith('_') ? value : { broken: true }])));
+        rows = rows.sort((a, b) => a._id < b._id ? -1 : a._id > b._id ? 1 : 0).slice(0, body.p_limit); call.status = 200; call.rows = rows.length; json(res, 200, url.pathname.endsWith('/roo_fetch_public_documents_targeted') ? { generation: String(generation), publicationGeneration: [...publicationBindings.keys()].sort((a, b) => Number(b) - Number(a))[0] || null, documents: rows } : rows);
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_asset_manifest_for_refs') {
         const assets = images.filter(image => body.p_asset_ids?.includes(image.id)).map(image => ({
           legacy_sanity_asset_id: image.id,
