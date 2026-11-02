@@ -221,6 +221,11 @@ run("no-ignored-write-request", {
       errors: [{ messageId: "ignored" }],
     },
     {
+      name: "write method from a spread left unchecked",
+      code: `const base = { method: "POST" }; fetch("/api/releaseHold", { ...base, signal });`,
+      errors: [{ messageId: "ignored" }],
+    },
+    {
       name: "window.fetch write left unchecked",
       code: `window.fetch("/api/releaseHold", { method: "POST" });`,
       errors: [{ messageId: "ignored" }],

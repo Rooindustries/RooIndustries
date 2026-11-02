@@ -245,9 +245,8 @@ export default function RefRegister() {
       redirectTimerRef.current = setTimeout(() => nav("/referrals/dashboard"), 900);
     } catch {
       console.error("Referral registration failed");
-      if (editVersionRef.current === version) {
-        setFormError(registrationSent ? REGISTRATION_UNCERTAIN_MESSAGE : "Server error.");
-      }
+      if (registrationSent) setFormError(REGISTRATION_UNCERTAIN_MESSAGE);
+      else if (editVersionRef.current === version) setFormError("Server error.");
     } finally {
       if (!redirecting) {
         submittingRef.current = false;

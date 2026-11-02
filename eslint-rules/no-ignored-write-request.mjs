@@ -29,18 +29,23 @@ const unwrap = (context, expression) => {
   }
 };
 
+const methodValue = (context, node, seen = new Set()) => {
+  if (!node || seen.has(node)) return null;
+  seen.add(node);
+  if (node.type === "Identifier") return methodValue(context, declaredValue(context, node), seen);
+  if (node.type !== "ObjectExpression") return null;
+  let value = null;
+  for (const property of node.properties) {
+    if (property.type === "SpreadElement") value = methodValue(context, property.argument, seen) ?? value;
+    else if (!property.computed && property.key.type === "Identifier" && property.key.name === "method") {
+      value = property.value.type === "Literal" ? String(property.value.value).toUpperCase() : null;
+    }
+  }
+  return value;
+};
+
 const writeMethod = (context, call) => {
-  let options = call.arguments[1];
-  if (options?.type === "Identifier") options = declaredValue(context, options);
-  if (options?.type !== "ObjectExpression") return null;
-  const method = options.properties.find(
-    (property) =>
-      property.type === "Property" &&
-      !property.computed &&
-      property.key.type === "Identifier" &&
-      property.key.name === "method",
-  );
-  const value = method?.value.type === "Literal" ? String(method.value.value).toUpperCase() : null;
+  const value = methodValue(context, call.arguments[1]);
   return value && value !== "GET" && value !== "HEAD" ? value : null;
 };
 

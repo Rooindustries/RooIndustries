@@ -542,7 +542,9 @@ test.describe('portal requests that stall', () => {
     const notice = page.getByRole('alert').filter({ hasText: "We couldn't check your Google or Discord sign-in." });
     await expect(notice).toBeVisible();
     failing = false;
+    const retried = page.waitForResponse(response => response.url().includes('/api/auth/identities?flow=referral'));
     await notice.getByRole('button', { name: 'Try again', exact: true }).click();
+    expect((await retried).status()).toBe(200);
     await expect(notice).toHaveCount(0);
   });
 
@@ -555,7 +557,9 @@ test.describe('portal requests that stall', () => {
       await expect(notice).toBeVisible({ timeout: 15000 });
       await record(page, testInfo, 'stalled-signup-identity', { timedOut: true });
       await held.release();
+      const retried = page.waitForResponse(response => response.url().includes('/api/auth/identities?flow=referral'));
       await notice.getByRole('button', { name: 'Try again', exact: true }).click();
+      expect((await retried).status()).toBe(200);
       await expect(notice).toHaveCount(0);
     } finally { await held.release(); }
   });
@@ -1874,13 +1878,16 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.route('**/api/ref/validateReferral?*', route => route.fulfill({ status: 200, json: { ok: false, reason: 'available', error: 'Not found' } }));
       await page.getByLabel('Referral Code', { exact: true }).fill('retry-creator');
       await expect(page.getByText('Referral code is available.', { exact: true })).toBeVisible();
+      const registrationUnclear =
+        "We couldn't tell if your account was created. Check your email for a confirmation link before trying again.";
       for (const status of [400, 409, 429, 503, 0]) {
         await page.route('**/api/ref/register', route => status ? route.fulfill({ status, json: { ok: false, error: `Synthetic ${status} registration failure.` } }) : route.abort('failed'));
         await submitRegistration(page);
-        await expect(page.getByText(status ? `Synthetic ${status} registration failure.` : 'Server error.', { exact: true })).toBeVisible();
+        const expected = status ? `Synthetic ${status} registration failure.` : registrationUnclear;
+        await expect(page.getByText(expected, { exact: true })).toBeVisible();
         await expect(page.getByRole('button', { name: 'Register', exact: true })).toBeEnabled();
         await expectRegistrationFields(page, 'new@fixture.invalid', 'new-creator');
-        const message = page.getByText(status ? `Synthetic ${status} registration failure.` : 'Server error.', { exact: true });
+        const message = page.getByText(expected, { exact: true });
         expect(await message.evaluate(element => Boolean(element.closest('[aria-live],[role=alert],[role=status]')))).toBe(true);
         outcomes.push({ route: 'register', status, registrationPosts, fieldsRetained: true, message: await message.innerText() });
         await page.unroute('**/api/ref/register');
