@@ -489,6 +489,19 @@ test.describe('portal requests that stall', () => {
     } finally { await held.release(); }
   });
 
+  test('a stalled reset request asks to check the inbox before retrying', async ({ page }) => {
+    const held = await stall(page, '/api/ref/forgot', 'POST');
+    try {
+      await page.goto('/referrals/forgot');
+      await page.getByRole('textbox').first().fill('creator@example.invalid');
+      await page.getByRole('button', { name: 'Send Reset Link', exact: true }).click();
+      await held.arrived;
+      const message = page.getByText("We couldn't confirm the link went out.", { exact: false });
+      await expect(message).toBeVisible({ timeout: 20000 });
+      expect(held.count()).toBe(1);
+    } finally { await held.release(); }
+  });
+
   test('a stalled sign-in check on signup can be tried again', async ({ page }, testInfo) => {
     const held = await stall(page, '/api/auth/identities?flow=referral', 'GET');
     try {

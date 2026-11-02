@@ -1,7 +1,7 @@
 import { readBrowserStorage, removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { requestDeadline } from "../lib/clientRequest";
+import { isRequestTimeout, requestDeadline } from "../lib/clientRequest";
 
 const TOKEN_KEY = "referral_registration_verification";
 
@@ -82,7 +82,7 @@ export default function RefVerifyRegistration() {
           ok: response.ok,
           status: response.status,
           data: await response.json().catch((error) => {
-            if (error?.name === "TimeoutError" || error?.name === "AbortError") throw error;
+            if (isRequestTimeout(error)) throw error;
             return {};
           }),
         }))
@@ -103,7 +103,13 @@ export default function RefVerifyRegistration() {
               : "Email confirmed. Your creator account is ready.",
           };
         })
-        .catch(() => ({ status: "error", message: "Confirmation is temporarily unavailable. Please try again." }))
+        .catch((error) => ({
+          status: "error",
+          message: isRequestTimeout(error)
+            ? "We couldn't tell if your email was confirmed. Try signing in, and if that doesn't work, " +
+              "open the newest confirmation email."
+            : "Confirmation is temporarily unavailable. Please try again.",
+        }))
         .then((outcome) => {
           entry.outcome = outcome;
           return outcome;

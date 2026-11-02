@@ -52,7 +52,7 @@ describe("referral registration confirmation client", () => {
     expect(window.location.hash).toBe("");
   });
 
-  test("a confirmation whose response body times out asks to try again instead of rejecting the link", async () => {
+  test("a confirmation that times out says the outcome is unknown instead of rejecting the link", async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -60,9 +60,7 @@ describe("referral registration confirmation client", () => {
     });
     renderVerification();
 
-    expect(
-      await screen.findByText("Confirmation is temporarily unavailable. Please try again.")
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/We couldn't tell if your email was confirmed\./)).toBeInTheDocument();
     expect(screen.queryByText(/invalid or expired/i)).not.toBeInTheDocument();
   });
 
