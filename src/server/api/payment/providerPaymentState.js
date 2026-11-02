@@ -5,6 +5,8 @@ import { getPaymentRecordById, PAYMENT_RECORD_TYPE } from "./paymentRecord.js";
 const PROVIDER_STATE_STAGE = { succeeded: 1, refunded: 2, disputed: 2 };
 const OWNER_REVIEW_STATE_CHECK_MS = 60 * 60 * 1000;
 const OWNER_REVIEW_BATCH_SIZE = 20;
+const SUCCEEDED_RESERVED_SLOTS = 4;
+const DUE_AGE_TIERS_MS = [16, 8, 4, 2, 1].map((hours) => hours * 60 * 60 * 1000);
 const CLEANUP_DELAY_MS = 24 * 60 * 60 * 1000;
 const MONEY_ARRIVED_CHECK_MS = 24 * 60 * 60 * 1000;
 const NEVER_AGAIN = "9999-12-31T23:59:59.999Z";
@@ -100,23 +102,30 @@ const currentSettledState = async (record) => {
     : inspection.providerPaymentState;
 };
 
-const dueRecords = async (client, states, limit) => {
-  if (limit <= 0) return [];
+const recordsCheckedBetween = async (client, states, limit, { before, after }) => {
   const records = await client.fetch(
     `*[_type == $type && provider == $provider && providerPaymentState in $states
-      && providerStateCheckedAt <= $due][0...${limit}]`,
-    {
-      type: PAYMENT_RECORD_TYPE,
-      provider: "dodo",
-      states,
-      due: new Date(Date.now() - OWNER_REVIEW_STATE_CHECK_MS).toISOString(),
-    }
+      && providerStateCheckedAt <= $before${after ? " && providerStateCheckedAt > $after" : ""}][0...${limit}]`,
+    { type: PAYMENT_RECORD_TYPE, provider: "dodo", states, before, ...(after ? { after } : {}) }
   );
   return Array.isArray(records) ? records : [];
 };
 
+const dueRecords = async (client, states, limit) => {
+  const picked = [];
+  let after = "";
+  for (const age of DUE_AGE_TIERS_MS) {
+    if (picked.length >= limit) break;
+    const before = new Date(Date.now() - age).toISOString();
+    picked.push(...(await recordsCheckedBetween(client, states, limit - picked.length, { before, after })));
+    after = before;
+  }
+  return picked;
+};
+
 export const refreshOwnerReviewDodoStates = async ({ client, patchRecord }) => {
-  const unconfirmed = await dueRecords(client, UNCONFIRMED_PROVIDER_STATES, OWNER_REVIEW_BATCH_SIZE);
+  const unconfirmedLimit = OWNER_REVIEW_BATCH_SIZE - SUCCEEDED_RESERVED_SLOTS;
+  const unconfirmed = await dueRecords(client, UNCONFIRMED_PROVIDER_STATES, unconfirmedLimit);
   const succeeded = await dueRecords(client, ["succeeded"], OWNER_REVIEW_BATCH_SIZE - unconfirmed.length);
   let checked = 0;
   for (const record of [...unconfirmed, ...succeeded]) {

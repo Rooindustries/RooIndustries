@@ -223,7 +223,7 @@ test('an unpaid checkout in a provider outage keeps its slot after recovery give
   assert.equal((await secondVisitor(checkout.payload)).status, 200);
 });
 
-const addStaleRecheckRecords = async (checkout, count, { label = 'stale', state = 'unknown' } = {}) => {
+const addStaleRecheckRecords = async (checkout, count, { label = 'stale', state = 'unknown', expiresAt } = {}) => {
   const { _id, _rev, _createdAt, _updatedAt, ...fields } = await fixture.commerce.getDocument(checkout.record._id);
   const longAgo = '2000-01-01T00:00:00.000Z';
   for (let index = 0; index < count; index += 1) {
@@ -233,7 +233,7 @@ const addStaleRecheckRecords = async (checkout, count, { label = 'stale', state 
       status: 'needs_recovery',
       providerPaymentState: state,
       providerStateCheckedAt: longAgo,
-      holdSnapshot: { ...fields.holdSnapshot, slotHoldId: '', slotHoldExpiresAt: longAgo },
+      holdSnapshot: { ...fields.holdSnapshot, slotHoldId: '', slotHoldExpiresAt: expiresAt || longAgo },
       providerOrderId: `${fields.providerOrderId}_${label}_${index}`,
       providerIdempotencyKey: `${fields.providerIdempotencyKey}_${label}_${index}`,
       sessionScope: `${fields.sessionScope}:${label}:${index}`,
@@ -262,9 +262,10 @@ test('a payment still going through when recovery gives up keeps its slot once D
   assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'unknown');
   await addStaleRecheckRecords(checkout, 260);
   await addStaleRecheckRecords(checkout, 260, { label: 'review', state: 'succeeded' });
+  await addStaleRecheckRecords(checkout, 300, { label: 'waiting', expiresAt: new Date().toISOString() });
   fixture.setProviderLookupFailure(false);
   fixture.setPaymentAmountOverrides({ status: 'succeeded' });
-  for (let hour = 0; hour < 2; hour += 1) {
+  for (let hour = 0; hour < 4; hour += 1) {
     clockShiftMs += 60 * 60_000;
     for (let run = 0; run < 12; run += 1) assert.ok([200, 503].includes((await cron()).status));
   }
