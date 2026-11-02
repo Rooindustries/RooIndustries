@@ -21,7 +21,8 @@ TabPermutations == Permutations(Tabs)
 EmptyHold == [phase |-> "none", nonce |-> NoNonce, exp |-> 0, rec |-> NoNonce]
 EmptyTab == [slot |-> NoSlot, nonce |-> NoNonce, exp |-> 0, details |-> FALSE, paying |-> NoNonce]
 EmptyRec == [status |-> "none", slot |-> NoSlot, tokenExp |-> 0, created |-> 0,
-             pay |-> "open", paidInTime |-> FALSE, details |-> FALSE, seen |-> FALSE, terminal |-> FALSE]
+             pay |-> "open", paidInTime |-> FALSE, details |-> FALSE, knownCaptured |-> FALSE, terminal |-> FALSE,
+             outlived |-> FALSE]
 
 TypeOK ==
   /\ now \in 0..MaxTime
@@ -34,7 +35,8 @@ TypeOK ==
   /\ rec \in [Nonces -> [status : {"none", "started", "needs_recovery", "booked", "rescheduled", "abandoned"},
                          slot : Slots \cup {NoSlot}, tokenExp : Times, created : Times,
                          pay : {"open", "processing", "captured", "closed"},
-                         paidInTime : BOOLEAN, details : BOOLEAN, seen : BOOLEAN, terminal : BOOLEAN]]
+                         paidInTime : BOOLEAN, details : BOOLEAN, knownCaptured : BOOLEAN, terminal : BOOLEAN,
+                         outlived : BOOLEAN]]
 
 Init ==
   /\ now = 0
@@ -241,7 +243,7 @@ ReconcilePending(n) ==
   /\ rec[n].pay = "processing"
   /\ rec[n].status \in {"started", "needs_recovery"}
   /\ ~rec[n].terminal
-  /\ rec' = [rec EXCEPT ![n].status = "needs_recovery", ![n].seen = TRUE]
+  /\ rec' = [rec EXCEPT ![n].status = "needs_recovery"]
   /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
 
 ReconcileUnpaid(n) ==
@@ -261,15 +263,12 @@ CleanupExpiredHold(s) ==
   /\ UNCHANGED <<now, nextNonce, lock, tab, rec, bookings>>
 
 RecoveryGivesUp(n) ==
-  LET s == rec[n].slot
-  IN /\ rec[n].status \in {"started", "needs_recovery"}
-     /\ ~rec[n].terminal
-     /\ (rec[n].pay \in {"open", "closed"} \/ rec[n].seen)
-     /\ rec' = [rec EXCEPT ![n].terminal = TRUE]
-     /\ hold' = IF ~rec[n].seen /\ hold[s].phase = "payment_pending" /\ hold[s].rec = n
-                  THEN [hold EXCEPT ![s] = PaymentReleasedHold(hold[s])]
-                  ELSE hold
-     /\ UNCHANGED <<now, nextNonce, lock, tab, bookings>>
+  /\ rec[n].status \in {"started", "needs_recovery"}
+  /\ ~rec[n].terminal
+  /\ \E observed \in BOOLEAN :
+       rec' = [rec EXCEPT ![n].terminal = TRUE,
+                            ![n].knownCaptured = observed /\ rec[n].pay = "captured"]
+  /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
 
 AdminRestoresBooking(s) ==
   /\ lock[s] = 0
@@ -286,10 +285,11 @@ UnconfirmedPaymentHoldExpires(s) ==
   /\ hold[s].phase = "payment_pending"
   /\ hold[s].exp <= now
   /\ now = MaxTime
-  /\ ~rec[hold[s].rec].seen
-  /\ rec[hold[s].rec].pay \in {"open", "closed"}
+  /\ ~rec[hold[s].rec].knownCaptured
   /\ hold' = [hold EXCEPT ![s].phase = "expired", ![s].nonce = DeadNonce]
-  /\ UNCHANGED <<now, nextNonce, lock, tab, rec, bookings>>
+  /\ rec' = [rec EXCEPT ![hold[s].rec].outlived =
+                rec[hold[s].rec].pay \in {"processing", "captured"} /\ ~rec[hold[s].rec].knownCaptured]
+  /\ UNCHANGED <<now, nextNonce, lock, tab, bookings>>
 
 Tick ==
   /\ now < MaxTime
@@ -311,6 +311,7 @@ Server(n) == FinalizeCapture(n) \/ ReconcileRecovery(n) \/ ReconcilePending(n) \
              \/ ReconcileUnpaid(n)
 
 Spec == Init /\ [][Next]_vars /\ WF_vars(Tick) /\ \A n \in Nonces : WF_vars(Server(n)) /\ SF_vars(CheckoutExpires(n))
+          /\ \A s \in Slots : WF_vars(UnconfirmedPaymentHoldExpires(s))
 
 OneHoldPerSlotStart ==
   \A s \in Slots :
@@ -327,12 +328,12 @@ HeldSlotNeverTaken ==
 
 PaidInTimeKeepsSlot ==
   \A b \in bookings :
-    b.paidInTime => /\ b.kind = "slot"
+    (b.paidInTime /\ ~rec[b.id].outlived) => /\ b.kind = "slot"
                     /\ \A other \in SlotBookings(b.slot) : other.id = b.id
 
 PaidInTimeNeverDisplaced ==
   \A n \in Nonces :
-    (rec[n].paidInTime /\ rec[n].pay = "captured")
+    (rec[n].paidInTime /\ rec[n].pay = "captured" /\ ~rec[n].outlived)
       => \A b \in SlotBookings(rec[n].slot) : b.id = n
 
 TypedDetailsKept ==
@@ -356,12 +357,10 @@ PaidBookingNeverLost ==
 PaymentHoldsResolve ==
   \A s \in Slots :
     (hold[s].phase = "payment_pending")
-      ~> (hold[s].phase # "payment_pending" \/ rec[hold[s].rec].terminal)
+      ~> (hold[s].phase # "payment_pending" \/ rec[hold[s].rec].knownCaptured)
 
-PaymentHoldHasReachableOwner ==
+PaymentHoldHasOwner ==
   \A s \in Slots :
-    hold[s].phase = "payment_pending" =>
-      /\ rec[hold[s].rec].status \in {"started", "needs_recovery"}
-      /\ (~rec[hold[s].rec].terminal \/ rec[hold[s].rec].seen)
+    hold[s].phase = "payment_pending" => rec[hold[s].rec].status \in {"started", "needs_recovery"}
 
 =============================================================================

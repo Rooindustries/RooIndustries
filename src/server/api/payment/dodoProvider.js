@@ -124,7 +124,11 @@ export const inspectDodoCheckout = async ({ record }) => {
       return { state: "unavailable", retryable: false, reason: "dodo_payment_binding_mismatch" };
     }
     const validation = validateDodoPayment({ record, payment });
-    if (!validation.ok) return { state: "unavailable", ...validation };
+    if (!validation.ok) {
+      return validation.reason === "dodo_payment_binding_mismatch"
+        ? { state: "unavailable", ...validation }
+        : { state: "unavailable", ...validation, providerPaymentState: payment.status };
+    }
     const state = payment.status === "succeeded" ? "captured"
       : ["failed", "cancelled", "requires_payment_method"].includes(payment.status) ? "unpaid" : "pending";
     return { state, payment, providerPaymentId: payment.payment_id };

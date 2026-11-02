@@ -57,11 +57,15 @@ declare
           and not exists (
             select 1
             from commerce.payment_records payment
+            left join migration.source_documents payment_source
+              on payment_source.legacy_sanity_id = payment.legacy_sanity_id
+              and payment_source.document_type = 'paymentRecord'
+              and not payment_source.tombstoned
             where payment.id = hold.payment_record_id
               and (
-                payment.provider_payment_id is not null
-                or payment.status in ('captured_client', 'captured_webhook', 'finalizing',
-                  'verified_server', 'booked', 'email_partial')
+                payment.status in ('captured', 'finalizing', 'booked', 'email_partial')
+                or payment_source.payload->>'providerPaymentState' = 'succeeded'
+                or payment_source.payload->>'verificationState' = 'server_verified'
               )
           )
         )
