@@ -249,6 +249,8 @@ run("no-aria-label-on-generic", {
     `<nav aria-label="Footer" />`,
     `<div role={scoreRole} aria-label="Grand final">4–1</div>`,
     `<span {...badgeProps} aria-label="Verified creator">✓</span>`,
+    `<span role="generic" {...badgeProps} aria-label="Verified creator">✓</span>`,
+    `<div role="group generic" aria-label="Score">4–1</div>`,
   ],
   invalid: [
     {
@@ -268,6 +270,12 @@ run("no-aria-label-on-generic", {
         { messageId: "generic" },
         { messageId: "generic" },
       ],
+    },
+    {
+      name: "explicit role after a spread, and a role list led by a generic role",
+      code: `<><span {...badgeProps} role="generic" aria-label="Verified">✓</span>
+        <div role="presentation group" aria-label="Score">4–1</div></>`,
+      errors: [{ messageId: "generic" }, { messageId: "generic" }],
     },
     {
       name: "Grand final score before the role fix",

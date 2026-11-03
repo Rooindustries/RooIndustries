@@ -16,12 +16,26 @@ const unnamedRoles = new Set([
   "superscript",
 ]);
 
+const UNKNOWN = Symbol("unknown role");
+
+const effectiveRole = (node) => {
+  let role = null;
+  for (const item of node.attributes) {
+    if (item.type === "JSXSpreadAttribute") role = UNKNOWN;
+    else if (item.name.type === "JSXIdentifier" && item.name.name === "role") {
+      const value = literalValue(item);
+      role = typeof value === "string" ? value : UNKNOWN;
+    }
+  }
+  return role;
+};
+
 const hasNameableRole = (node) => {
-  if (node.attributes.some((item) => item.type === "JSXSpreadAttribute")) return true;
-  const role = attribute(node, "role");
-  if (!role) return false;
-  const value = literalValue(role);
-  return typeof value !== "string" || !unnamedRoles.has(value.trim().toLowerCase());
+  const role = effectiveRole(node);
+  if (role === UNKNOWN) return true;
+  if (role === null) return false;
+  const firstToken = role.trim().toLowerCase().split(/\s+/)[0];
+  return !unnamedRoles.has(firstToken);
 };
 
 export default {
