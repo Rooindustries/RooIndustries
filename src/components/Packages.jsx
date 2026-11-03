@@ -13,6 +13,7 @@ import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import { persistBookingPackageSelection } from "../lib/checkoutStorage";
 import { trackEvent } from "../lib/analytics";
 import { getSessionAvailability } from "../lib/sessionAvailability";
+import { requestDeadline } from "../lib/clientRequest";
 
 const loadPackageDetails = () => import("./PackageDetailsModal");
 const PackageDetailsModal = lazy(loadPackageDetails);
@@ -150,6 +151,7 @@ export default function Packages({
       try {
         const response = await fetch("/api/bookingAvailability", {
           cache: "no-store",
+          signal: requestDeadline(),
         });
         const data = await response.json();
         if (!response.ok || data?.ok === false) throw new Error();

@@ -3,8 +3,11 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import SupabaseSocialLogin from "./SupabaseSocialLogin";
 import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../lib/passwordPolicy";
+import { requestDeadline } from "../lib/clientRequest";
 
 const REFERRAL_SIGNUP_DRAFT = "referral_signup_draft";
+const REGISTRATION_UNCERTAIN_MESSAGE =
+  "We couldn't tell if your account was created. Check your email for a confirmation link before trying again.";
 
 export const resolveReferralCodeAvailability = (response, data) => {
   if (!response?.ok) return null;
@@ -27,6 +30,7 @@ export default function RefRegister() {
   const [toast, setToast] = useState(null);
   const [formError, setFormError] = useState("");
   const [socialIdentity, setSocialIdentity] = useState(null);
+  const [identityCheckFailed, setIdentityCheckFailed] = useState(false);
   const [verificationPending, setVerificationPending] = useState(false);
   const availabilityVersion = useRef(0);
   const submittingRef = useRef(false);
@@ -47,6 +51,26 @@ export default function RefRegister() {
     setToast(next);
     setTimeout(() => setToast((current) => (current === next ? null : current)), 2800);
   }
+  const loadSocialIdentity = () => {
+    setIdentityCheckFailed(false);
+    fetch("/api/auth/identities?flow=referral", { cache: "no-store", signal: requestDeadline() })
+      .then((response) => {
+        if (!response.ok) throw new Error("identity_check_failed");
+        return response.json();
+      })
+      .then((data) => {
+        if (data?.authenticated && data?.emailVerified && data.email) {
+          setEmail(data.email);
+          setPassword("");
+          setConfirm("");
+          setSocialIdentity(data);
+        }
+      })
+      .catch(() => {
+        if (mountedRef.current) setIdentityCheckFailed(true);
+      });
+  };
+
   useEffect(() => {
     try {
       const draft = JSON.parse(sessionStorage.getItem(REFERRAL_SIGNUP_DRAFT) || "null");
@@ -59,17 +83,7 @@ export default function RefRegister() {
     } catch {
       removeBrowserStorage("sessionStorage", REFERRAL_SIGNUP_DRAFT);
     }
-    fetch("/api/auth/identities?flow=referral", { cache: "no-store" })
-      .then((response) => response.json())
-      .then((data) => {
-        if (data?.authenticated && data?.emailVerified && data.email) {
-          setEmail(data.email);
-          setPassword("");
-          setConfirm("");
-          setSocialIdentity(data);
-        }
-      })
-      .catch(() => {});
+    loadSocialIdentity();
   }, []);
 
   const saveDraft = () => {
@@ -157,13 +171,15 @@ export default function RefRegister() {
     submittingRef.current = true;
     setLoading(true);
     let redirecting = false;
+    let registrationSent = false;
     try {
       if (slugAvailable === null) {
         try {
           const resCheck = await fetch(
             `/api/ref/validateReferral?code=${encodeURIComponent(
               trimmedSlug
-            )}&purpose=registration`
+            )}&purpose=registration`,
+            { signal: requestDeadline() }
           );
           const dataCheck = await resCheck.json();
           const availability = resolveReferralCodeAvailability(
@@ -187,8 +203,10 @@ export default function RefRegister() {
           return;
         }
       }
+      registrationSent = true;
       const res = await fetch("/api/ref/register", {
         method: "POST",
+        signal: requestDeadline(15000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: trimmedDiscordUsername,
@@ -227,7 +245,8 @@ export default function RefRegister() {
       redirectTimerRef.current = setTimeout(() => nav("/referrals/dashboard"), 900);
     } catch {
       console.error("Referral registration failed");
-      if (editVersionRef.current === version) setFormError("Server error.");
+      if (registrationSent) setFormError(REGISTRATION_UNCERTAIN_MESSAGE);
+      else if (editVersionRef.current === version) setFormError("Server error.");
     } finally {
       if (!redirecting) {
         submittingRef.current = false;
@@ -311,6 +330,17 @@ export default function RefRegister() {
         {socialIdentity ? (
           <p className="rounded-xl border border-success-border bg-success-soft px-4 py-3 text-sm text-success-text">
             Verified as {socialIdentity.email}. You can use Google or Discord to sign in.
+          </p>
+        ) : null}
+        {identityCheckFailed && !socialIdentity ? (
+          <p
+            role="alert"
+            className="rounded-xl border border-line-input bg-surface-input px-4 py-3 text-sm text-ink-secondary"
+          >
+            We couldn't check your Google or Discord sign-in.{" "}
+            <button type="button" onClick={loadSocialIdentity} className="font-semibold text-accent underline">
+              Try again
+            </button>
           </p>
         ) : null}
 

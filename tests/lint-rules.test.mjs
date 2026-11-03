@@ -160,3 +160,85 @@ run("no-hand-built-dollars", {
     },
   ],
 });
+
+run("fetch-needs-deadline", {
+  valid: [
+    `fetch("/api/ref/payouts", { signal: requestDeadline() });`,
+    `function load(url, options) { return fetch(url, { ...options }); }`,
+    `function load(url, options) { return fetch(url, options); }`,
+    `const options = { signal: requestDeadline() }; fetch(url, options);`,
+    `const base = { signal: requestDeadline() }; fetch(url, { ...base, method: "POST" });`,
+  ],
+  invalid: [
+    {
+      name: "signal cleared with null",
+      code: `fetch(url, { signal: null });`,
+      errors: [{ messageId: "missing" }],
+    },
+    {
+      name: "deadline replaced by a later spread",
+      code: `const reset = { signal: undefined }; fetch(url, { signal: requestDeadline(), ...reset });`,
+      errors: [{ messageId: "missing" }],
+    },
+    {
+      name: "named options without a signal",
+      code: `const options = { method: "POST" }; fetch(url, options);`,
+      errors: [{ messageId: "missing" }],
+    },
+    {
+      name: "spread options without a signal",
+      code: `const base = { headers }; fetch(url, { ...base, method: "POST" });`,
+      errors: [{ messageId: "missing" }],
+    },
+    {
+      name: "RefDashboard payouts request before #216",
+      code: `async function load() { const res = await fetch("/api/ref/payouts"); }`,
+      errors: [{ messageId: "missing" }],
+    },
+    {
+      name: "Razorpay lookup before #148",
+      code: "fetch(`https://api.razorpay.com/v1/orders/${id}/payments`, { headers: { Authorization: auth } });",
+      errors: [{ messageId: "missing" }],
+    },
+  ],
+});
+
+run("no-ignored-write-request", {
+  valid: [
+    `const res = await fetch("/api/releaseHold", { method: "POST" }); if (!res.ok) throw new Error();`,
+    `fetch("/api/payment/quote", { method: "POST" }).then((response) => response.json());`,
+    `fetch("/api/ref/updateSplit", { method: "POST" }).then(handleResponse);`,
+  ],
+  invalid: [
+    {
+      name: "success shown without reading the response",
+      code: `fetch("/api/ref/register", { method: "POST" }).then(() => navigate("/referrals/dashboard"));`,
+      errors: [{ messageId: "ignored" }],
+    },
+    {
+      name: "named write options left unchecked",
+      code: `const options = { method: "POST", signal }; fetch("/api/releaseHold", options);`,
+      errors: [{ messageId: "ignored" }],
+    },
+    {
+      name: "write method from a spread left unchecked",
+      code: `const base = { method: "POST" }; fetch("/api/releaseHold", { ...base, signal });`,
+      errors: [{ messageId: "ignored" }],
+    },
+    {
+      name: "window.fetch write left unchecked",
+      code: `window.fetch("/api/releaseHold", { method: "POST" });`,
+      errors: [{ messageId: "ignored" }],
+    },
+    {
+      name: "ReservationBanner release before #209",
+      code: `fetch("/api/releaseHold", { method: "POST", body }).catch(() => console.error("release failed"));`,
+      errors: [{ messageId: "ignored" }],
+    },
+    {
+      name: "BookingForm release before #158",
+      code: `async function release() { await fetch("/api/releaseHold", { method: "POST", body }); }`,
+      errors: [{ messageId: "ignored" }],
+    },
+  ],
+});

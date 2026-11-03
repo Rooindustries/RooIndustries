@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import SupabaseSocialLogin from "./SupabaseSocialLogin";
 import SiteDialog from "./SiteDialog";
+import { requestDeadline } from "../lib/clientRequest";
 
 const PENDING_DISCORD_CHOICE_KEY = "refPendingDiscordChoice";
 const PENDING_DISCORD_CHOICE_MAX_AGE_MS = 15 * 60 * 1000;
@@ -147,7 +148,7 @@ export default function RefLogin() {
     const checkSession = async () => {
       if (pendingChoice.state || emailConfirmed) return;
       try {
-        const sessionRes = await fetch("/api/ref/sessionStatus");
+        const sessionRes = await fetch("/api/ref/sessionStatus", { signal: requestDeadline() });
         if (sessionRes.ok) {
           const session = await sessionRes.json();
           if (!session?.authenticated || !mountedRef.current) return;
@@ -184,6 +185,7 @@ export default function RefLogin() {
       );
       const res = await fetch("/api/ref/login", {
         method: "POST",
+        signal: requestDeadline(15000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           code,

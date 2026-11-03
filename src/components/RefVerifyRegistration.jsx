@@ -1,6 +1,7 @@
 import { readBrowserStorage, removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { isRequestTimeout, requestDeadline } from "../lib/clientRequest";
 
 const TOKEN_KEY = "referral_registration_verification";
 
@@ -73,13 +74,17 @@ export default function RefVerifyRegistration() {
       const entry = { outcome: null };
       entry.promise = fetch("/api/ref/verifyRegistration", {
         method: "POST",
+        signal: requestDeadline(30000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token }),
       })
         .then(async (response) => ({
           ok: response.ok,
           status: response.status,
-          data: await response.json().catch(() => ({})),
+          data: await response.json().catch((error) => {
+            if (isRequestTimeout(error)) throw error;
+            return {};
+          }),
         }))
         .then(({ ok, status, data }) => {
           if (!ok || data.ok !== true) {
@@ -98,7 +103,13 @@ export default function RefVerifyRegistration() {
               : "Email confirmed. Your creator account is ready.",
           };
         })
-        .catch(() => ({ status: "error", message: "Confirmation is temporarily unavailable. Please try again." }))
+        .catch((error) => ({
+          status: "error",
+          message: isRequestTimeout(error)
+            ? "We couldn't tell if your email was confirmed. Try signing in, and if that doesn't work, " +
+              "open the newest confirmation email."
+            : "Confirmation is temporarily unavailable. Please try again.",
+        }))
         .then((outcome) => {
           entry.outcome = outcome;
           return outcome;

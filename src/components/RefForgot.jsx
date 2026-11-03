@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { isRequestTimeout, requestDeadline } from "../lib/clientRequest";
 
 export default function RefForgot() {
   const nav = useNavigate();
@@ -36,6 +37,7 @@ export default function RefForgot() {
     try {
       const res = await fetch("/api/ref/forgot", {
         method: "POST",
+        signal: requestDeadline(15000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: submittedEmail }),
       });
@@ -47,9 +49,15 @@ export default function RefForgot() {
       } else {
         if (submittedEmailRef.current === submittedEmail) setFormError(data.error || "Failed to send link");
       }
-    } catch {
+    } catch (error) {
       console.error("Referral reset request failed");
-      if (submittedEmailRef.current === submittedEmail) setFormError("Server error.");
+      if (submittedEmailRef.current === submittedEmail) {
+        setFormError(
+          isRequestTimeout(error)
+            ? "We couldn't confirm the link went out. Check your inbox in a minute before asking again."
+            : "Server error.",
+        );
+      }
     }
 
     setLoading(false);

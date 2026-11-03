@@ -70,6 +70,7 @@ describe("Supabase social login", () => {
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith("/api/auth/intent", {
+        signal: expect.anything(),
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
