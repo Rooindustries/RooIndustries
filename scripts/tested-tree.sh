@@ -9,11 +9,14 @@ say() {
 
 tested=false
 tree="$(git rev-parse 'HEAD^{tree}')"
+before="${PUSH_BEFORE:-}"
 
-if ! git rev-parse --verify --quiet 'HEAD^' >/dev/null; then
-  say "No parent commit to compare against; running the full suite."
-elif ! git diff --quiet 'HEAD^' HEAD -- "${cache_inputs[@]}"; then
-  say "This merge changed ${cache_inputs[*]}; running the full suite so main refreshes its caches."
+if [ -z "$before" ] || [ "$before" = 0000000000000000000000000000000000000000 ]; then
+  say "No earlier main commit to compare this push against; running the full suite."
+elif ! git cat-file -e "$before^{commit}" 2>/dev/null && ! git fetch --quiet --no-tags --depth=1 origin "$before"; then
+  say "Couldn't fetch the earlier main commit $before; running the full suite."
+elif ! git diff --quiet "$before" HEAD -- "${cache_inputs[@]}"; then
+  say "This push changed ${cache_inputs[*]}; running the full suite so main refreshes its caches."
 elif ! runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tested-tree-$tree&per_page=100" \
   --jq '.artifacts[] | select(.expired | not) | .workflow_run.id')"; then
   say "Couldn't look up which runs tested tree $tree; running the full suite."

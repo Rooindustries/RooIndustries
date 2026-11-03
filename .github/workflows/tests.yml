@@ -26,11 +26,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
           persist-credentials: false
       - id: check
         env:
           GH_TOKEN: ${{ github.token }}
+          PUSH_BEFORE: ${{ github.event.before }}
         run: bash scripts/tested-tree.sh
 
   monitoring:

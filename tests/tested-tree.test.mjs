@@ -10,7 +10,7 @@ const repository = "Rooindustries/RooIndustries";
 
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 
-const workspace = ({ touchLockfile = false } = {}) => {
+const workspace = ({ touchLockfile = false, earlierLockfileCommit = false } = {}) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tested-tree-"));
   git(dir, "init", "--quiet");
   git(dir, "config", "user.email", "ci@example.invalid");
@@ -19,6 +19,10 @@ const workspace = ({ touchLockfile = false } = {}) => {
   fs.writeFileSync(path.join(dir, "page.js"), "export default 1;\n");
   git(dir, "add", ".");
   git(dir, "commit", "--quiet", "-m", "base");
+  if (earlierLockfileCommit) {
+    fs.writeFileSync(path.join(dir, "package-lock.json"), "{\"changed\":true}\n");
+    git(dir, "commit", "--quiet", "-am", "lockfile");
+  }
   fs.writeFileSync(path.join(dir, "page.js"), "export default 2;\n");
   if (touchLockfile) fs.writeFileSync(path.join(dir, "package-lock.json"), "{\"changed\":true}\n");
   git(dir, "commit", "--quiet", "-am", "merge");
@@ -37,7 +41,10 @@ set -euo pipefail
 endpoint="$2"
 filter="$4"
 echo "$endpoint" >> "${dir}/calls"
-jq -e --arg endpoint "$endpoint" '.[$endpoint]' "${dir}/responses.json" > /dev/null || { echo "unexpected call $endpoint" >&2; exit 3; }
+if ! jq -e --arg endpoint "$endpoint" '.[$endpoint]' "${dir}/responses.json" > /dev/null; then
+  echo "unexpected call $endpoint" >&2
+  exit 3
+fi
 jq --arg endpoint "$endpoint" '.[$endpoint]' "${dir}/responses.json" | jq -r "$filter"
 `,
   );
@@ -45,16 +52,24 @@ jq --arg endpoint "$endpoint" '.[$endpoint]' "${dir}/responses.json" | jq -r "$f
   return bin;
 };
 
-const check = (dir, bin) => {
+const check = (dir, bin, before = git(dir, "rev-list", "--max-parents=0", "HEAD")) => {
   const output = path.join(dir, "github-output");
   fs.writeFileSync(output, "");
   const log = execFileSync("bash", [script], {
     cwd: dir,
     encoding: "utf8",
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GITHUB_OUTPUT: output, GITHUB_REPOSITORY: repository },
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      GITHUB_OUTPUT: output,
+      GITHUB_REPOSITORY: repository,
+      PUSH_BEFORE: before,
+    },
   });
   return { tested: fs.readFileSync(output, "utf8").trim(), log };
 };
+
+const recordsEndpoint = (tree) => `repos/${repository}/actions/artifacts?name=tested-tree-${tree}&per_page=100`;
 
 const runResponse = (overrides = {}) => ({
   conclusion: "success",
@@ -66,7 +81,7 @@ const runResponse = (overrides = {}) => ({
 });
 
 const responsesFor = (tree, run, { expired = false } = {}) => ({
-  [`repos/${repository}/actions/artifacts?name=tested-tree-${tree}&per_page=100`]: {
+  [recordsEndpoint(tree)]: {
     artifacts: [{ expired, workflow_run: { id: 77 } }],
   },
   [`repos/${repository}/actions/runs/77`]: run,
@@ -80,7 +95,8 @@ test("a tree a passed pull request run recorded skips main's suite", () => {
 
 test("a failed pull request run doesn't count", () => {
   const { dir, tree } = workspace();
-  assert.equal(check(dir, stubGh(dir, responsesFor(tree, runResponse({ conclusion: "failure" })))).tested, "tested=false");
+  const failed = runResponse({ conclusion: "failure" });
+  assert.equal(check(dir, stubGh(dir, responsesFor(tree, failed))).tested, "tested=false");
 });
 
 test("a run from a fork doesn't count", () => {
@@ -96,8 +112,7 @@ test("an expired record doesn't count", () => {
 
 test("an untested tree runs the suite", () => {
   const { dir, tree } = workspace();
-  const responses = { [`repos/${repository}/actions/artifacts?name=tested-tree-${tree}&per_page=100`]: { artifacts: [] } };
-  assert.equal(check(dir, stubGh(dir, responses)).tested, "tested=false");
+  assert.equal(check(dir, stubGh(dir, { [recordsEndpoint(tree)]: { artifacts: [] } })).tested, "tested=false");
 });
 
 test("a merge that changes the lockfile runs the suite without asking GitHub", () => {
@@ -116,11 +131,24 @@ test("a failed record lookup runs the suite instead of failing the job", () => {
 test("a run that can't be looked up doesn't count, but another passed run still skips", () => {
   const { dir, tree } = workspace();
   const responses = responsesFor(tree, runResponse());
-  responses[`repos/${repository}/actions/artifacts?name=tested-tree-${tree}&per_page=100`].artifacts.unshift({
+  responses[recordsEndpoint(tree)].artifacts.unshift({
     expired: false,
     workflow_run: { id: 66 },
   });
   const result = check(dir, stubGh(dir, responses));
   assert.equal(result.tested, "tested=true", result.log);
   assert.match(result.log, /Couldn't look up run 66/);
+});
+
+test("a push whose earlier commit changed the lockfile runs the suite", () => {
+  const { dir, tree } = workspace({ earlierLockfileCommit: true });
+  const result = check(dir, stubGh(dir, responsesFor(tree, runResponse())));
+  assert.equal(result.tested, "tested=false", result.log);
+  assert.equal(fs.existsSync(path.join(dir, "calls")), false);
+});
+
+test("a push with no earlier main commit runs the suite", () => {
+  const { dir, tree } = workspace();
+  const result = check(dir, stubGh(dir, responsesFor(tree, runResponse())), "0".repeat(40));
+  assert.equal(result.tested, "tested=false", result.log);
 });
