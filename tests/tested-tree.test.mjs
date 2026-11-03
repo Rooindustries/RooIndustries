@@ -10,13 +10,15 @@ const repository = "Rooindustries/RooIndustries";
 
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 
-const workspace = ({ touchLockfile = false, earlierLockfileCommit = false } = {}) => {
+const workspace = ({ touchLockfile = false, earlierLockfileCommit = false, touchPostgresAction = false } = {}) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tested-tree-"));
   git(dir, "init", "--quiet");
   git(dir, "config", "user.email", "ci@example.invalid");
   git(dir, "config", "user.name", "CI");
   fs.writeFileSync(path.join(dir, "package-lock.json"), "{}\n");
   fs.writeFileSync(path.join(dir, "page.js"), "export default 1;\n");
+  fs.mkdirSync(path.join(dir, ".github/actions/postgres"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".github/actions/postgres/action.yml"), "name: postgres\n");
   git(dir, "add", ".");
   git(dir, "commit", "--quiet", "-m", "base");
   if (earlierLockfileCommit) {
@@ -25,6 +27,7 @@ const workspace = ({ touchLockfile = false, earlierLockfileCommit = false } = {}
   }
   fs.writeFileSync(path.join(dir, "page.js"), "export default 2;\n");
   if (touchLockfile) fs.writeFileSync(path.join(dir, "package-lock.json"), "{\"changed\":true}\n");
+  if (touchPostgresAction) fs.writeFileSync(path.join(dir, ".github/actions/postgres/action.yml"), "name: postgres 2\n");
   git(dir, "commit", "--quiet", "-am", "merge");
   return { dir, tree: git(dir, "rev-parse", "HEAD^{tree}") };
 };
@@ -158,4 +161,11 @@ test("a push whose earlier main commit can't be fetched runs the suite", () => {
   const result = check(dir, stubGh(dir, responsesFor(tree, runResponse())), "1".repeat(40));
   assert.equal(result.tested, "tested=false", result.log);
   assert.match(result.log, /Couldn't fetch the earlier main commit/);
+});
+
+test("a push that changes the PostgreSQL setup runs the suite so main saves its cache", () => {
+  const { dir, tree } = workspace({ touchPostgresAction: true });
+  const result = check(dir, stubGh(dir, responsesFor(tree, runResponse())));
+  assert.equal(result.tested, "tested=false", result.log);
+  assert.equal(fs.existsSync(path.join(dir, "calls")), false);
 });

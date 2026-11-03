@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cache_inputs=(package.json package-lock.json .npmrc next.config.mjs)
+cache_inputs=(package.json package-lock.json .npmrc next.config.mjs .github/actions/postgres/action.yml)
 
 say() {
   printf '%s\n' "$1"
