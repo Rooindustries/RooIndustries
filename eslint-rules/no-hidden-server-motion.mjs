@@ -2,12 +2,12 @@ import { ancestors, attribute, declaredValue, jsxName, propertyName } from "./ut
 
 const finalValue = (context, node, key, seen = new Set()) => {
   if (!node || seen.has(node)) return null;
-  seen.add(node);
-  if (node.type === "Identifier") return finalValue(context, declaredValue(context, node), key, seen);
+  const path = new Set(seen).add(node);
+  if (node.type === "Identifier") return finalValue(context, declaredValue(context, node), key, path);
   if (node.type !== "ObjectExpression") return null;
   let value = null;
   for (const property of node.properties) {
-    if (property.type === "SpreadElement") value = finalValue(context, property.argument, key, seen) ?? value;
+    if (property.type === "SpreadElement") value = finalValue(context, property.argument, key, path) ?? value;
     else if (propertyName(property) === key) value = property.value;
   }
   return value;

@@ -8,17 +8,17 @@ const clearsSignal = (value) =>
 
 const signalState = (context, node, seen = new Set()) => {
   if (!node || seen.has(node)) return "unknown";
-  seen.add(node);
+  const path = new Set(seen).add(node);
   if (node.type === "Identifier") {
     const value = declaredValue(context, node);
-    return value ? signalState(context, value, seen) : "unknown";
+    return value ? signalState(context, value, path) : "unknown";
   }
   if (node.type !== "ObjectExpression") return "unknown";
   let state = "none";
   for (const property of node.properties) {
     if (isSignalKey(property)) state = clearsSignal(property.value) ? "cleared" : "set";
     else if (property.type === "SpreadElement") {
-      const spread = signalState(context, property.argument, seen);
+      const spread = signalState(context, property.argument, path);
       if (spread !== "none") state = spread;
     }
   }

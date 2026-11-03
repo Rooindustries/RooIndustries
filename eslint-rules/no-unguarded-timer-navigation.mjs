@@ -29,13 +29,13 @@ const propertyValue = (object, name) => {
 
 const routerValue = (context, node, seen = new Set()) => {
   if (!node || seen.has(node)) return null;
-  seen.add(node);
-  if (node.type === "Identifier") return routerValue(context, declaredValue(context, node), seen);
+  const path = new Set(seen).add(node);
+  if (node.type === "Identifier") return routerValue(context, declaredValue(context, node), path);
   if (node.type === "MemberExpression") {
     if (node.computed || node.property.type !== "Identifier") return null;
     const owner = node.object.type === "Identifier" ? declaredValue(context, node.object) : null;
     if (owner?.type !== "ObjectExpression") return null;
-    return routerValue(context, propertyValue(owner, node.property.name), seen);
+    return routerValue(context, propertyValue(owner, node.property.name), path);
   }
   if (UNKNOWN_SOURCES.has(node.type)) return null;
   if (node.type === "CallExpression") return ROUTER_HOOKS.has(calleeName(node)) ? true : null;

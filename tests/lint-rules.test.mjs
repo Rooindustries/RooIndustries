@@ -180,6 +180,7 @@ run("fetch-needs-deadline", {
     `const options = { signal: requestDeadline() }; fetch(url, options);`,
     `const base = { signal: requestDeadline() }; fetch(url, { ...base, method: "POST" });`,
     `fetch(url, { ["signal"]: requestDeadline() });`,
+    `const base = { signal: requestDeadline() }; const cleared = { signal: null }; fetch(url, { ...base, ...cleared, ...base });`,
   ],
   invalid: [
     {
@@ -220,6 +221,7 @@ run("no-ignored-write-request", {
     `const res = await fetch("/api/releaseHold", { method: "POST" }); if (!res.ok) throw new Error();`,
     `fetch("/api/payment/quote", { method: "POST" }).then((response) => response.json());`,
     `fetch("/api/ref/updateSplit", { method: "POST" }).then(handleResponse);`,
+    `const read = { method: "GET" }; const write = { method: "POST" }; fetch("/api/ref/split", { ...read, ...write, ...read });`,
   ],
   invalid: [
     {
@@ -434,6 +436,8 @@ run("no-hidden-server-motion", {
     `function Dialog({ open }) { return <AnimatePresence>{open && <motion.div initial={{ opacity: 0 }} animate={{
       opacity: 1 }} />}</AnimatePresence>; }`,
     `function Fade() { return <motion.div initial={{ ["opacity"]: 0, opacity: 1 }} animate={{ opacity: 1 }} />; }`,
+    `function Fade() { const shown = { opacity: 1 }; const hidden = { opacity: 0 }; return <motion.div
+      initial={{ ...shown, ...hidden, ...shown }} animate={{ opacity: 1 }} />; }`,
     `function Fade() { return <motion.div initial={{ ["opacity"]: 0, ...{ opacity: 1 } }} animate={{ opacity: 1 }} />; }`,
     `function Pay() { const variants = { ["hidden"]: { opacity: 0 }, hidden: { opacity: 1 } }; return <motion.section
       variants={variants} initial="hidden" animate="hidden" />; }`,

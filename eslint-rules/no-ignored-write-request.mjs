@@ -31,12 +31,12 @@ const unwrap = (context, expression) => {
 
 const methodValue = (context, node, seen = new Set()) => {
   if (!node || seen.has(node)) return null;
-  seen.add(node);
-  if (node.type === "Identifier") return methodValue(context, declaredValue(context, node), seen);
+  const path = new Set(seen).add(node);
+  if (node.type === "Identifier") return methodValue(context, declaredValue(context, node), path);
   if (node.type !== "ObjectExpression") return null;
   let value = null;
   for (const property of node.properties) {
-    if (property.type === "SpreadElement") value = methodValue(context, property.argument, seen) ?? value;
+    if (property.type === "SpreadElement") value = methodValue(context, property.argument, path) ?? value;
     else if (propertyName(property) === "method") {
       value = property.value.type === "Literal" ? String(property.value.value).toUpperCase() : null;
     }
