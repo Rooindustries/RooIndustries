@@ -4,11 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import net from 'node:net';
 import { once } from 'node:events';
 import { spawn, spawnSync } from 'node:child_process';
 import postgres from 'postgres';
 import { createClient } from '@supabase/supabase-js';
+import { freeTcpPort } from './free-tcp-port.mjs';
 
 export const root = path.resolve(new URL('../..', import.meta.url).pathname);
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';
@@ -62,15 +62,7 @@ export const functionDefinition = (name, qualifiedName) => {
   return match[0];
 };
 
-const freePort = async (requested = 0) => {
-  assert.ok(Number.isInteger(requested) && (requested === 0 || (requested >= 1024 && requested <= 65535)), 'Invalid fixture port');
-  const server = net.createServer();
-  server.listen(requested, host);
-  await once(server, 'listening');
-  const port = server.address().port;
-  await new Promise((resolve) => server.close(resolve));
-  return port;
-};
+const freePort = (requested = 0) => freeTcpPort(host, requested);
 
 export const createSweepPostgresFixture = async ({ commerceRepairMigration = true, fullMigrationChain = false, excludedMigrations = [], beforeMigrations, pgBin: requestedPgBin, postgrestBin: requestedPostgrestBin, libraryPath, ports = {} } = {}) => {
   assert.equal(process.env.ROO_TEST_POSTGRES_HOST || host, host);

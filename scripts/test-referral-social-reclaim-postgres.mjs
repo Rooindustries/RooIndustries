@@ -8,6 +8,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 import postgres from "postgres";
+import { freeTcpPort } from "./lib/free-tcp-port.mjs";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 const pgConfig = spawnSync(process.env.PG_CONFIG || "pg_config", ["--bindir"], {
@@ -18,7 +19,7 @@ const pgBin = String(process.env.PG_BIN || "").trim() ||
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "roo-referral-reclaim-"));
 const dataDir = path.join(tempRoot, "pgdata");
 const postgresHost = process.env.ROO_TEST_POSTGRES_HOST || "127.0.0.1";
-const port = 56332 + Math.floor(Math.random() * 600);
+const port = await freeTcpPort(postgresHost);
 const migration = path.join(
   root,
   "supabase/migrations/20260717231518_harden_referral_social_orphan_reclaim.sql"
