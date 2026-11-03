@@ -36,6 +36,7 @@ module.exports = defineConfig({
   testDir: "./tests",
   testMatch: "**/*.spec.js",
   metadata: { toolingDistDir: internalDistDir, ownsToolingServer: !shouldUseExternalServer },
+  globalSetup: require.resolve("./tests/fixtures/fixture-ports-setup.cjs"),
   timeout: 120000,
   expect: {
     timeout: 10000,

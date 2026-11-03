@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { fixturePort } = require("./fixtures/fixture-ports.cjs");
 
 test.skip(process.env.TOOLING_STATIC_REVALIDATION !== "1", "Needs its own server with a cold content cache: npm run test:static:revalidation.");
 
@@ -6,7 +7,7 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const contentControl = (request, baseURL) => async data => {
   const contentURL = new URL(baseURL);
-  contentURL.port = process.env.TOOLING_CONTENT_PORT || String(Number(contentURL.port) + 1);
+  contentURL.port = String(fixturePort("TOOLING_CONTENT_PORT"));
   const response = await request.post(new URL("/__content", contentURL).href, { data });
   expect(response.status()).toBe(200);
 };

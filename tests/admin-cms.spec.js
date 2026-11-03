@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { fixturePort } = require("./fixtures/fixture-ports.cjs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { createHash, randomUUID } = require("node:crypto");
@@ -97,7 +98,7 @@ test.beforeEach(async ({ context, page, request, baseURL }) => {
   page.setDefaultTimeout(10000);
   const { guardBrowserContext, localOrigin } = await import("../scripts/lib/test-target-safety.mjs");
   const origin = localOrigin(baseURL);
-  const control = localOrigin(`http://127.0.0.1:${Number(new URL(origin).port) + 6}`);
+  const control = localOrigin(`http://127.0.0.1:${fixturePort("TOOLING_ADMIN_CONTROL_PORT")}`);
   const markerResponse = await request.get(`${control}/fixture`);
   expect(markerResponse.ok(), "The native fixture must attest before admin I/O").toBe(true);
   const marker = await markerResponse.json();
@@ -197,7 +198,7 @@ for (const route of PREBUILT_ROUTES) {
 }
 
 const prepareFieldFixture = async (request, baseURL, document) => {
-  const response = await request.post(`http://127.0.0.1:${Number(new URL(baseURL).port) + 6}/cms-field-fixture`, { data: document });
+  const response = await request.post(`http://127.0.0.1:${fixturePort("TOOLING_ADMIN_CONTROL_PORT")}/cms-field-fixture`, { data: document });
   expect(response.ok(), await response.text()).toBe(true);
 };
 
@@ -233,7 +234,7 @@ const publishDraft = async (page, schema, original, document, beforePublish) => 
 
 test.describe("CMS field contract", () => {
 test.afterEach(async ({ request, baseURL }) => {
-  expect((await request.post(`http://127.0.0.1:${Number(new URL(baseURL).port) + 6}/reset-content`)).ok()).toBe(true);
+  expect((await request.post(`http://127.0.0.1:${fixturePort("TOOLING_ADMIN_CONTROL_PORT")}/reset-content`)).ok()).toBe(true);
 });
 test("ROO-66 every schema field has an explicit rendered, internal or unused contract", async ({ page }, testInfo) => {
   const classified = [];
@@ -278,7 +279,7 @@ test("ROO-66 publishing the owner recipient changes real booking notifications",
     await page.getByRole("button", { name: "Publish", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
     expect((await cms(request, `/api/admin/content/documents/${id}`)).document.ownerEmail).toBe(email);
-    const notification = await request.post(`http://127.0.0.1:${Number(new URL(baseURL).port) + 6}/owner-notification`);
+    const notification = await request.post(`http://127.0.0.1:${fixturePort("TOOLING_ADMIN_CONTROL_PORT")}/owner-notification`);
     expect(notification.ok(), await notification.text()).toBe(true);
     const result = await notification.json();
     expect(result.result.body.emailDispatch.owner.sent).toBe(true);
@@ -371,7 +372,7 @@ for (const schema of CONTENT_TYPES.filter(type => !["footer", "siteSettings"].in
           await expect(page.getByRole("region", { name: `${schema.title} list`, exact: true }).getByRole("button").filter({ hasText: item.value })).toBeVisible();
           expect((await cms(request, `/api/admin/content/documents?type=${schema.name}`)).documents.find(row => row._id === entry._id).preview.title).toBe(item.value);
         } else if (consumer.kind === "ownerNotification") {
-          const notification = await request.post(`http://127.0.0.1:${Number(new URL(baseURL).port) + 6}/owner-notification`);
+          const notification = await request.post(`http://127.0.0.1:${fixturePort("TOOLING_ADMIN_CONTROL_PORT")}/owner-notification`);
           expect(notification.ok(), await notification.text()).toBe(true);
           const result = await notification.json();
           expect(result.result.body.emailDispatch.owner.sent).toBe(true);
@@ -596,7 +597,7 @@ for (const matchingSelector of [false, true]) {
     const pending = await hold(page, "**/api/admin/content/publish", { forward: false });
     const second = await browser.newContext({ baseURL, javaScriptEnabled: true });
     const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
-    const marker = await (await request.get(`http://127.0.0.1:${Number(new URL(baseURL).port) + 6}/fixture`)).json();
+    const marker = await (await request.get(`http://127.0.0.1:${fixturePort("TOOLING_ADMIN_CONTROL_PORT")}/fixture`)).json();
     await guardBrowserContext(second, marker.origins);
     await second.addCookies(await context.cookies());
     const tabB = await second.newPage();
@@ -645,7 +646,7 @@ for (const operation of ["delete canonical", "create extra"]) {
       await login(page); await choose(page, "FAQ");
       await evidence(page, testInfo, { operation, status: response.status(), original, legacy });
     } finally {
-      if (operation === "delete canonical" && response.ok()) expect((await request.post(`http://127.0.0.1:${Number(new URL(baseURL).port) + 6}/faq-create-fixture/legacy`)).ok()).toBe(true);
+      if (operation === "delete canonical" && response.ok()) expect((await request.post(`http://127.0.0.1:${fixturePort("TOOLING_ADMIN_CONTROL_PORT")}/faq-create-fixture/legacy`)).ok()).toBe(true);
     }
   });
 }
@@ -909,7 +910,7 @@ test("ROO-66 FAQ only opens the canonical document and offers no extra creation"
 });
 
 test("ROO-66 a missing canonical FAQ starts a canonical document without touching extras", async ({ page, request, baseURL }, testInfo) => {
-  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  const control = `http://127.0.0.1:${fixturePort("TOOLING_ADMIN_CONTROL_PORT")}`;
   const legacy = await cms(request, "/api/admin/content/documents/fixture-faq-legacy");
   expect((await request.post(`${control}/faq-create-fixture/legacy`)).ok()).toBe(true);
   try {
@@ -1514,7 +1515,7 @@ for (const committed of [true, false]) {
 }
 
 test("create receipts keep a failed singleton draft after another create commits", async ({ page, request, baseURL }, testInfo) => {
-  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  const control = `http://127.0.0.1:${fixturePort("TOOLING_ADMIN_CONTROL_PORT")}`;
   expect((await request.post(`${control}/booking-create-fixture/legacy`)).ok()).toBe(true);
   await page.route("**/api/admin/content/documents?type=bookingSettings", route => route.fulfill({ json: { ok: true, data: { documents: [] } } }));
   await login(page); await choose(page, "Booking Settings");
@@ -1554,7 +1555,7 @@ test("create receipts keep a failed singleton draft after another create commits
 });
 
 test("create receipts reconcile a committed fixed-ID singleton after its response is lost", async ({ page, request, baseURL }, testInfo) => {
-  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  const control = `http://127.0.0.1:${fixturePort("TOOLING_ADMIN_CONTROL_PORT")}`;
   expect((await request.post(`${control}/booking-create-fixture/empty`)).ok()).toBe(true);
   await login(page); await choose(page, "Booking Settings");
   await page.getByRole("group", { name: "Date-Based Time Slots (Vertex / Default)", exact: true }).getByRole("button", { name: "Add item", exact: true }).click();
@@ -1615,7 +1616,7 @@ test("create reconciliation refuses a status response without a committed receip
 });
 
 test("create receipts keep a draft while its receipt is processing", async ({ page, request, baseURL }, testInfo) => {
-  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  const control = `http://127.0.0.1:${fixturePort("TOOLING_ADMIN_CONTROL_PORT")}`;
   await login(page); await choose(page, "Benchmark");
   await page.getByRole("region", { name: "Benchmark list" }).getByRole("button", { name: "New", exact: true }).click();
   const title = "Processing receipt café 日本語";
@@ -1642,7 +1643,7 @@ test("create receipts keep a draft while its receipt is processing", async ({ pa
 });
 
 test("create receipts bind a read-only lookup to the original validated request", async ({ page, request, baseURL }, testInfo) => {
-  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  const control = `http://127.0.0.1:${fixturePort("TOOLING_ADMIN_CONTROL_PORT")}`;
   const path = "/api/admin/content/publish/status";
   const command = { operation: "create", type: "benchmark", createIntentId: require("node:crypto").randomUUID(), document: { title: "Read-only receipt café 日本語" } };
   const receipt = await cms(request, "/api/admin/content/publish", command);
@@ -1852,7 +1853,7 @@ test("referral drafts in two tabs preserve both terms versions", async ({ page, 
 });
 
 test("content fixture reset removes created documents and preserves referrals", async ({ page, request, baseURL }, testInfo) => {
-  const control = `http://127.0.0.1:${Number(new URL(baseURL).port) + 6}`;
+  const control = `http://127.0.0.1:${fixturePort("TOOLING_ADMIN_CONTROL_PORT")}`;
   expect((await request.post(`${control}/reset-content`)).ok()).toBe(true);
   const original = await cms(request, `/api/admin/content/documents/${HERO_ID}`);
   const baseline = await cms(request, "/api/admin/content/documents?type=benchmark");

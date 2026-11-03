@@ -8,8 +8,9 @@ import { fileURLToPath } from "node:url";
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
 import { createToolingContentFixture } from "../tests/fixtures/tooling-content.mjs";
 import { apiRouteSecrets } from "../tests/fixtures/api-routes.mjs";
-import { adoptHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
+import { adoptHeldTcpPorts, portFromEnv, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
 import { childTreeEnv } from "./lib/start-on-port.mjs";
+import fixturePorts from "../tests/fixtures/fixture-ports.cjs";
 
 await adoptHeldTcpPorts();
 if (process.env.ROO_ADMIN_FIXTURE === "1") {
@@ -20,8 +21,16 @@ const dist = validateDistDir(process.env.NEXT_DIST_DIR, { isolated: true });
 const baseURL = localOrigin(process.env.BASE_URL);
 const target = new URL(baseURL);
 if (target.hostname !== testHost || target.port !== process.env.PW_PORT) throw new Error("Invalid Tailscale test server target.");
-const contentPort = Number(process.env.TOOLING_CONTENT_PORT || Number(target.port) + 1);
-if (!Number.isInteger(contentPort) || contentPort < 1024 || contentPort > 65535 || contentPort === Number(target.port)) throw new Error("Invalid local content fixture port.");
+const manifestPath = path.join(dist, "tooling-build.json");
+const builtContentPort = fs.existsSync(path.join(dist, "BUILD_ID")) && fs.existsSync(manifestPath) ? Number(new URL(JSON.parse(fs.readFileSync(manifestPath, "utf8")).contentURL).port) : 0;
+const requestedContentPort = portFromEnv("TOOLING_CONTENT_PORT");
+const reserveContentPort = port => reserveTcpPorts(testHost, [Number(target.port), port]);
+const [, contentPort] = requestedContentPort || !builtContentPort
+  ? await reserveContentPort(requestedContentPort)
+  : await reserveContentPort(builtContentPort).catch(error => {
+    if (error.code !== "EADDRINUSE") throw error;
+    return reserveContentPort(0);
+  });
 const contentURL = localOrigin(`http://${testHost}:${contentPort}`);
 installNetworkGuard([baseURL, contentURL]);
 const apiRoutes = process.env.TOOLING_API_ROUTES === "1";
@@ -82,7 +91,6 @@ fingerprint.update(fs.readFileSync(fileURLToPath(new URL("./lib/test-target-safe
 fingerprint.update(env.NEXT_PUBLIC_SENTRY_DSN);
 fingerprint.update(String(monitoringStartup));
 const sourceHash = fingerprint.digest("hex");
-const manifestPath = path.join(dist, "tooling-build.json");
 let active;
 let stopping = false;
 const execute = (args, executionEnv = env) => new Promise((resolve, reject) => {
@@ -102,8 +110,8 @@ if (development) {
 } else {
   if (fs.existsSync(dist) && fs.readdirSync(dist).some(entry => entry !== "cache")) throw new Error("Incomplete isolated build exists; choose a fresh NEXT_DIST_DIR.");
 }
-await reserveTcpPorts(testHost, [Number(target.port), contentPort]);
 const fixture = await createToolingContentFixture({ origin: contentURL, artifact: process.env.TOOLING_CONTENT_ARTIFACT, apiRoutes, clockFile });
+fixturePorts.writeFixturePorts(dist, baseURL, { TOOLING_CONTENT_PORT: contentPort });
 try {
   await execute(["scripts/generate-sitemap.js"]);
   await execute(["scripts/generate-robots.js"], { ...env, VERCEL_ENV: "production" });
@@ -126,6 +134,7 @@ try {
 } catch (error) {
   if (!stopping) throw error;
 } finally {
+  fixturePorts.removeFixturePorts(dist);
   await fixture.close();
   if (clockFile) fs.rmSync(clockFile, { force: true });
 }

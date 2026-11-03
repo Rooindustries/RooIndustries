@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { fixturePort } = require("./fixtures/fixture-ports.cjs");
 const fs = require("node:fs/promises");
 
 test.use({ javaScriptEnabled: true, viewport: { width: 1440, height: 900 }, serviceWorkers: "block", trace: "off", video: "off" });
@@ -6,7 +7,7 @@ test.use({ javaScriptEnabled: true, viewport: { width: 1440, height: 900 }, serv
 test.beforeEach(async ({ context, baseURL }) => {
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
   const contentURL = new URL(baseURL);
-  contentURL.port = process.env.TOOLING_CONTENT_PORT || String(Number(contentURL.port) + 1);
+  contentURL.port = String(fixturePort("TOOLING_CONTENT_PORT"));
   await guardBrowserContext(context, [baseURL, contentURL.origin]);
 });
 

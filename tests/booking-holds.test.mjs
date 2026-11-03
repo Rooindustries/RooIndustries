@@ -6,10 +6,13 @@ import { createLegacyApiFixture } from './fixtures/legacy-api.mjs';
 import { createToolingContentFixture } from './fixtures/tooling-content.mjs';
 import { apiFixtureOrigin, apiRouteSecrets, configureApiFixture, readApiFixture, requestRoute } from './fixtures/api-routes.mjs';
 import { installNetworkGuard, localOrigin, refuseEnvFiles } from '../scripts/lib/test-target-safety.mjs';
+import { portFromEnv, reserveTcpPorts } from '../scripts/lib/free-tcp-port.mjs';
 
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';
 const baseURL = localOrigin(`http://${host}:${process.env.BOOKING_ROUTE_PORT || process.env.PW_PORT || 4173}`);
 const routeOrigin = baseURL;
+const [contentPort] = await reserveTcpPorts(host, [portFromEnv('TOOLING_CONTENT_PORT')]);
+process.env.TOOLING_CONTENT_PORT = String(contentPort);
 const contentOrigin = apiFixtureOrigin(baseURL);
 const artifact = process.env.BOOKING_HOLDS_ARTIFACT || 'test-results/api-routes/booking-holds.jsonl';
 const startTimeUTC = '2099-01-05T04:30:00.000Z';

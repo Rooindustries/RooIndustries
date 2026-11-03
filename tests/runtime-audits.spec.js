@@ -1,7 +1,7 @@
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs/promises");
 const { spawn } = require("node:child_process");
-let proxyFixture;
+let proxy;
 let restoreGuard;
 
 test.skip(process.env.TOOLING_API_ROUTES !== "0", "Select the read-only fixture with npm run test:audit:runtime.");
@@ -9,11 +9,14 @@ test.skip(process.env.TOOLING_API_ROUTES !== "0", "Select the read-only fixture 
 test.beforeAll(async ({ baseURL }) => {
   const { installNetworkGuard, refuseEnvFiles } = await import("../scripts/lib/test-target-safety.mjs");
   refuseEnvFiles();
-  proxyFixture = await import("./fixtures/audit-provider-proxy.mjs");
-  restoreGuard = installNetworkGuard([baseURL, proxyFixture.auditProviderProxyOrigin(baseURL)]);
+  proxy = await (await import("./fixtures/audit-provider-proxy.mjs")).startAuditProviderProxy(baseURL);
+  restoreGuard = installNetworkGuard([baseURL, proxy.origin]);
 });
 
-test.afterAll(() => restoreGuard?.());
+test.afterAll(async () => {
+  restoreGuard?.();
+  await proxy?.close();
+});
 
 const runAudit = (baseURL, args, mode = "0", preload) => new Promise((resolve, reject) => {
   const child = spawn(process.execPath, [
@@ -49,7 +52,7 @@ test("runtime business checks accept the declared read-only provider contract", 
 });
 
 test("runtime business checks reject a missing booking heading", async ({ baseURL }, testInfo) => {
-  const proxy = await proxyFixture.startAuditProviderProxy(baseURL, {
+  proxy.respond({
     status: 503,
     body: { ok: false, error: "This preview does not create bookings or accept payments." },
     bookingHtml: "<!doctype html><html><body><main>Booking is unavailable.</main></body></html>",
@@ -61,7 +64,7 @@ test("runtime business checks reject a missing booking heading", async ({ baseUR
     expect(result.code, result.output).toBe(1);
     expect(report).toContain("booking_renders_schedule_title: FAIL");
   } finally {
-    await proxy.close();
+    proxy.respond(null);
   }
 });
 
@@ -73,7 +76,7 @@ test("runtime business checks do not infer target mode from a 503 response", asy
 });
 
 test("runtime business checks reject a provider name leaked in read-only mode", async ({ baseURL }, testInfo) => {
-  const proxy = await proxyFixture.startAuditProviderProxy(baseURL, {
+  proxy.respond({
     status: 503,
     body: { ok: false, error: "This preview does not create bookings or accept payments.", providerName: "paypal" },
   });
@@ -86,7 +89,7 @@ test("runtime business checks reject a provider name leaked in read-only mode", 
     await testInfo.attach("business-smoke", { body: report, contentType: "text/markdown" });
     expect(report).toContain("payment_provider_details_withheld: FAIL");
   } finally {
-    await proxy.close();
+    proxy.respond(null);
   }
 });
 

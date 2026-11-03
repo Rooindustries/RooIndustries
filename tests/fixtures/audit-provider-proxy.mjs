@@ -1,32 +1,25 @@
 import http from "node:http";
 import { localOrigin, refuseEnvFiles } from "../../scripts/lib/test-target-safety.mjs";
+import { listenOnPort } from "../../scripts/lib/free-tcp-port.mjs";
 
-export function auditProviderProxyOrigin(baseURL) {
-  const target = new URL(localOrigin(baseURL));
-  const port = Number(target.port) + 4;
-  if (port > 65535) throw new Error("Invalid audit proxy port.");
-  target.port = String(port);
-  return localOrigin(target.origin);
-}
-
-export async function startAuditProviderProxy(baseURL, { status, body, bookingHtml }) {
+export async function startAuditProviderProxy(baseURL) {
   refuseEnvFiles();
   const upstream = localOrigin(baseURL);
-  const origin = auditProviderProxyOrigin(upstream);
+  let reply = null;
   const server = http.createServer((request, response) => {
     const target = new URL(request.url, upstream);
     if (target.origin !== upstream) {
       response.writeHead(400).end();
       return;
     }
-    if (target.pathname === "/booking" && typeof bookingHtml === "string") {
+    if (target.pathname === "/booking" && typeof reply?.bookingHtml === "string") {
       response.writeHead(200, { "Content-Type": "text/html" });
-      response.end(bookingHtml);
+      response.end(reply.bookingHtml);
       return;
     }
-    if (target.pathname === "/api/payment/providers") {
-      response.writeHead(status, { "Content-Type": "application/json" });
-      response.end(JSON.stringify(body));
+    if (target.pathname === "/api/payment/providers" && reply) {
+      response.writeHead(reply.status, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(reply.body));
       return;
     }
     const forwarded = http.request(target, {
@@ -39,13 +32,12 @@ export async function startAuditProviderProxy(baseURL, { status, body, bookingHt
     forwarded.on("error", () => response.writeHead(502).end());
     request.pipe(forwarded);
   });
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    const target = new URL(origin);
-    server.listen(Number(target.port), target.hostname, resolve);
-  });
+  await listenOnPort(server, new URL(upstream).hostname, 0);
+  const origin = new URL(upstream);
+  origin.port = String(server.address().port);
   return {
-    origin,
+    origin: localOrigin(origin.origin),
+    respond: next => { reply = next; },
     close: () => new Promise((resolve, reject) => {
       server.close(error => error ? reject(error) : resolve());
       server.closeAllConnections();

@@ -6,7 +6,8 @@ import { registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
-import { releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
+import { listenOnPort, portFromEnv, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
+import fixturePorts from "../tests/fixtures/fixture-ports.cjs";
 
 refuseEnvFiles();
 const root = process.cwd();
@@ -14,8 +15,7 @@ const baseURL = localOrigin(process.env.BASE_URL);
 const target = new URL(baseURL);
 const dist = validateDistDir(process.env.NEXT_DIST_DIR, { isolated: true });
 const port = Number(target.port);
-if (port !== Number(process.env.PW_PORT) || target.hostname !== process.env.ROO_TEST_HOST || port > 65528) throw new Error("Invalid admin fixture target.");
-const controlOrigin = `http://127.0.0.1:${port + 6}`;
+if (port !== Number(process.env.PW_PORT) || target.hostname !== process.env.ROO_TEST_HOST) throw new Error("Invalid admin fixture target.");
 registerHooks({ resolve(specifier, context, next) {
   if (specifier.startsWith("@/")) specifier = pathToFileURL(path.join(root, specifier.slice(2))).href;
   try { return next(specifier, context); } catch (error) {
@@ -25,7 +25,9 @@ registerHooks({ resolve(specifier, context, next) {
 }});
 await reserveTcpPorts("127.0.0.1", [port]);
 const control = http.createServer();
-await new Promise((resolve, reject) => { control.once("error", reject); control.listen(port + 6, "127.0.0.1", resolve); });
+await listenOnPort(control, "127.0.0.1", portFromEnv("TOOLING_ADMIN_CONTROL_PORT"));
+const controlPort = control.address().port;
+const controlOrigin = `http://127.0.0.1:${controlPort}`;
 process.env.ROO_TEST_HOST = "127.0.0.1";
 const { start } = await import("./lib/storage-fixture.mjs");
 const fixture = await start({
@@ -43,6 +45,7 @@ let stopped = false;
 const stop = async () => {
   if (stopped) return;
   stopped = true;
+  fixturePorts.removeFixturePorts(dist);
   if (active && active.exitCode === null && active.signalCode === null) {
     const child = active;
     await new Promise(resolve => {
@@ -234,6 +237,7 @@ try {
     }
     response.writeHead(404); response.end();
   });
+  fixturePorts.writeFixturePorts(dist, baseURL, { TOOLING_ADMIN_CONTROL_PORT: controlPort });
   const env = {
     PATH: process.env.PATH, HOME: process.env.HOME, CI: "true", TZ: "UTC", TOURNEY_DATABASE_MODE: "memory",
     DATA_PRIMARY_BACKEND: "supabase", COMMERCE_PRIMARY_BACKEND: "supabase", COMMERCE_FAILOVER_GENERATION: "0", SUPABASE_CUTOVER_ENABLED: "1", COMMERCE_CUTOVER_ENABLED: "1",

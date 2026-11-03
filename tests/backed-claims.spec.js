@@ -1,4 +1,5 @@
 const { test, expect } = require("./fixtures/booking-flow.cjs");
+const { fixturePort } = require("./fixtures/fixture-ports.cjs");
 
 const ratings = [undefined, null, "", "5", true, false, 0, 6, -1, 4.5, "invalid", {}, 1, 2, 3, 4, 5];
 const reviews = ratings.map((rating, index) => ({
@@ -22,7 +23,7 @@ test.fail(phase === "before", "The unchanged site fails the regression assertion
 
 const control = async (request, baseURL, data) => {
   const origin = new URL(baseURL);
-  origin.port = process.env.TOOLING_CONTENT_PORT || String(Number(origin.port) + 1);
+  origin.port = String(fixturePort("TOOLING_CONTENT_PORT"));
   const response = await request.post(new URL("/__content", origin).href, { data });
   expect(response.status()).toBe(200);
 };
@@ -50,7 +51,7 @@ test.afterAll(async ({ request, baseURL }) => {
 test.beforeEach(async ({ context, baseURL }) => {
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
   const content = new URL(baseURL);
-  content.port = process.env.TOOLING_CONTENT_PORT || String(Number(content.port) + 1);
+  content.port = String(fixturePort("TOOLING_CONTENT_PORT"));
   await guardBrowserContext(context, [baseURL, content.origin]);
 });
 

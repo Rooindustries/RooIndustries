@@ -408,7 +408,6 @@ test.describe('portal requests that stall', () => {
 
   test('a settings save with a stalled response body reports an unknown outcome', async ({ page, context, baseURL }, testInfo) => {
     const target = new URL(baseURL);
-    target.port = String(Number(target.port) + 2);
     let requests = 0;
     const server = http.createServer((request, response) => {
       if (request.method !== 'POST' || request.url !== '/api/ref/updateSplit') {
@@ -424,10 +423,9 @@ test.describe('portal requests that stall', () => {
       });
       response.write('{"ok":');
     });
-    await new Promise((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(Number(target.port), '0.0.0.0', resolve);
-    });
+    const { listenOnPort } = await import('../scripts/lib/free-tcp-port.mjs');
+    await listenOnPort(server, '0.0.0.0', 0);
+    target.port = String(server.address().port);
     const forward = route => route.continue({ url: `${target.origin}/api/ref/updateSplit` });
     try {
       const { guardBrowserContext } = await import('../scripts/lib/test-target-safety.mjs');
