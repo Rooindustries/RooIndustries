@@ -244,6 +244,7 @@ function ReviewCard({ review, groupIndex }) {
         )}
         <p
           className="ri-review-champagne-text text-xs font-bold tracking-[0.08em] flex-shrink-0"
+          role="img"
           aria-label={`${rating} out of 5 stars`}
         >
           <span aria-hidden="true">{"★".repeat(rating)}{"☆".repeat(5 - rating)}</span>

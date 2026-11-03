@@ -242,3 +242,62 @@ run("no-ignored-write-request", {
     },
   ],
 });
+
+run("no-aria-label-on-generic", {
+  valid: [
+    `<p role="img" aria-label="5 out of 5 stars">★★★★★</p>`,
+    `<nav aria-label="Footer" />`,
+    `<div role={scoreRole} aria-label="Grand final">4–1</div>`,
+    `<span {...badgeProps} aria-label="Verified creator">✓</span>`,
+    `<span role="generic" {...badgeProps} aria-label="Verified creator">✓</span>`,
+    `<div role="group generic" aria-label="Score">4–1</div>`,
+    `<div role="switchy img" aria-label="Rating">★★★</div>`,
+    `<div role="sectionheader" aria-label="Packages">Packages</div>`,
+    `<div role="doc-abstract" aria-label="Summary">…</div>`,
+    `<div role="graphics-document" aria-label="Bracket">…</div>`,
+  ],
+  invalid: [
+    {
+      name: "PriceDisplay before #161",
+      code: `<div className="price" aria-label={oldPrice ? "Sale price" : "Price"}>$54.95</div>`,
+      errors: [{ messageId: "generic" }],
+    },
+    {
+      name: "Empty and name-prohibiting roles",
+      code: `<><div role="" aria-label="Price">$54.95</div><span role="presentation" aria-label="Sale">-20%</span>
+        <p role=" Generic " aria-label="Rating">5</p><span role="code" aria-label="Order">A1</span>
+        <span role="emphasis" aria-label="Note">!</span></>`,
+      errors: [
+        { messageId: "generic" },
+        { messageId: "generic" },
+        { messageId: "generic" },
+        { messageId: "generic" },
+        { messageId: "generic" },
+      ],
+    },
+    {
+      name: "absent and unrecognized roles",
+      code: `<><span role={null} aria-label="Sale">-20%</span><span role={false} aria-label="New">!</span>
+        <div role="grop" aria-label="Score">4–1</div><div role="grop generic" aria-label="Score">4–1</div>
+        <div role="graphics-dooc" aria-label="Bracket">…</div></>`,
+      errors: [
+        { messageId: "generic" },
+        { messageId: "generic" },
+        { messageId: "generic" },
+        { messageId: "generic" },
+        { messageId: "generic" },
+      ],
+    },
+    {
+      name: "explicit role after a spread, and a role list led by a generic role",
+      code: `<><span {...badgeProps} role="generic" aria-label="Verified">✓</span>
+        <div role="presentation group" aria-label="Score">4–1</div></>`,
+      errors: [{ messageId: "generic" }, { messageId: "generic" }],
+    },
+    {
+      name: "Grand final score before the role fix",
+      code: `<div className="tourney-final-score" aria-label={\`Grand final: \${champion}\`}><span>Grand final</span></div>`,
+      errors: [{ messageId: "generic" }],
+    },
+  ],
+});
