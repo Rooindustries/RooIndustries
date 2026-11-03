@@ -307,3 +307,42 @@ run("inputs-need-form", {
     },
   ],
 });
+
+run("no-client-only-public-content", {
+  valid: [
+    `export default function Terms({ initialData }) { const [data, setData] = useState(initialData); useEffect(() =>
+      { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Upgrade({ slug }) { useEffect(() => { getPublicContent("upgrade", { slug }); },
+      [slug]); return null; }`,
+  ],
+  invalid: [
+    {
+      name: "Terms before #195",
+      code: `export default function Terms() { const [data, setData] = useState(null); useEffect(() => {
+        getPublicContent("terms").then((d) => setData(d)); }, []); return <p>{data}</p>; }`,
+      errors: [{ messageId: "clientOnly" }],
+    },
+  ],
+});
+
+run("no-hidden-server-motion", {
+  valid: [
+    `function About() { return <motion.div initial={false} animate={{ opacity: 1 }}>Hi</motion.div>; }`,
+    `function Dialog({ open }) { return <AnimatePresence>{open && <motion.div initial={{ opacity: 0 }} animate={{
+      opacity: 1 }} />}</AnimatePresence>; }`,
+  ],
+  invalid: [
+    {
+      name: "About section before #229",
+      code: `function About() { return <motion.div initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0
+        }}>Proof</motion.div>; }`,
+      errors: [{ messageId: "hidden" }],
+    },
+    {
+      name: "variant that starts hidden",
+      code: `function Pay() { const containerVariants = { hidden: { opacity: 0 }, visible: { opacity: 1 } };
+        return <motion.section variants={containerVariants} initial="hidden" animate="visible" />; }`,
+      errors: [{ messageId: "hidden" }],
+    },
+  ],
+});

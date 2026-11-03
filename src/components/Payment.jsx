@@ -1823,7 +1823,7 @@ export default function Payment({ hideFooter = false }) {
     <motion.section
       className="booking-payment relative z-10 max-w-3xl mx-auto text-ink"
       variants={containerVariants}
-      initial="hidden"
+      initial={false}
       animate="visible"
     >
       <motion.div variants={itemVariants}>
