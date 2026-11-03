@@ -237,6 +237,11 @@ run("no-ignored-write-request", {
       errors: [{ messageId: "ignored" }],
     },
     {
+      name: "quoted method key left unchecked",
+      code: `fetch("/api/releaseHold", { "method": "POST" });`,
+      errors: [{ messageId: "ignored" }],
+    },
+    {
       name: "window.fetch write left unchecked",
       code: `window.fetch("/api/releaseHold", { method: "POST" });`,
       errors: [{ messageId: "ignored" }],
@@ -319,6 +324,8 @@ run("inputs-need-form", {
       type="submit">Check</button></form>; }`,
     `function Share() { return <div><input value={link} readOnly /><button onClick={save}>Save</button></div>; }`,
     `function Fields() { return <div><input /><button onClick={() => move(1)}>Down</button></div>; }`,
+    `function Docs() { return <div><input type="search" /><button onClick={() => { if (confirmDiscard())
+      startNewDocument(type.name); }}>New</button></div>; }`,
   ],
   invalid: [
     {
@@ -333,6 +340,13 @@ run("inputs-need-form", {
         onClick={handleSubmit}>Find</button></div>; }`,
       errors: [{ messageId: "form" }, { messageId: "form" }],
     },
+    {
+      name: "block-bodied and async submit handlers",
+      code: `function Redeem() { return <div><input type="email" /><button onClick={async () => { await
+        handleSubmit(); }}>Redeem</button><input /><button onClick={() => { if (!validateCode())
+        return; form.submit(); }}>Send</button><input type="tel" /><button onClick={function () { void props.saveCode(); }}>Keep</button></div>; }`,
+      errors: [{ messageId: "form" }, { messageId: "form" }, { messageId: "form" }],
+    },
   ],
 });
 
@@ -342,6 +356,10 @@ run("no-client-only-public-content", {
       { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
     `export default function Terms({ initialData }) { const [data, setData] = useState(initialData); useEffect(() =>
       { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Terms(props) { const { initialData: seed = null } = props; const [data, setData] =
+      useState(seed); useEffect(() => { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Faq(props) { const [data, setData] = useState(props["initialFaq"]); useEffect(() =>
+      { getPublicContent("faq").then(setData); }, []); return <p>{data}</p>; }`,
     `export default function Upgrade({ slug }) { useEffect(() => { getPublicContent("upgrade", { slug }); },
       [slug]); return null; }`,
   ],

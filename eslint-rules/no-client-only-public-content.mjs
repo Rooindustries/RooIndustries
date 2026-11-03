@@ -1,25 +1,21 @@
-import { ancestors, calleeName, containsNode, enclosingComponent } from "./util.mjs";
+import { ancestors, calleeName, containsNode, enclosingComponent, memberName, propertyName } from "./util.mjs";
+
+const isInitial = (name) => /^initial/.test(name);
+
+const takesInitial = (pattern) =>
+  pattern?.type === "ObjectPattern" && pattern.properties.some((property) => isInitial(propertyName(property)));
+
+const isProps = (node, props) => node?.type === "Identifier" && node.name === props.name;
 
 const receivesInitialData = (component) => {
   const props = component.params[0];
-  if (!props) return false;
-  if (props.type === "ObjectPattern") {
-    return props.properties.some(
-      (property) =>
-        property.type === "Property" &&
-        property.key.type === "Identifier" &&
-        /^initial/.test(property.key.name),
-    );
-  }
-  if (props.type !== "Identifier") return false;
+  if (takesInitial(props)) return true;
+  if (props?.type !== "Identifier") return false;
   return containsNode(
     component.body,
     (node) =>
-      node.type === "MemberExpression" &&
-      !node.computed &&
-      node.object.type === "Identifier" &&
-      node.object.name === props.name &&
-      /^initial/.test(node.property.name),
+      (node.type === "MemberExpression" && isProps(node.object, props) && isInitial(memberName(node))) ||
+      (node.type === "VariableDeclarator" && isProps(node.init, props) && takesInitial(node.id)),
   );
 };
 

@@ -51,14 +51,25 @@ export const enclosingComponent = (context, node) =>
     .reverse()
     .find((item) => isFunction(item) && isCapitalized(functionName(item)));
 
-export const calleeName = (call) => {
-  const callee = call.callee;
-  if (callee.type === "Identifier") return callee.name;
-  if (callee.type === "MemberExpression" && !callee.computed && callee.property.type === "Identifier") {
-    return callee.property.name;
+export const propertyName = (property) => {
+  if (property?.type !== "Property" || property.computed) return "";
+  if (property.key.type === "Identifier") return property.key.name;
+  if (property.key.type === "Literal") return String(property.key.value);
+  return "";
+};
+
+export const memberName = (member) => {
+  if (member?.type !== "MemberExpression") return "";
+  if (!member.computed && member.property.type === "Identifier") return member.property.name;
+  if (member.computed && member.property.type === "Literal" && typeof member.property.value === "string") {
+    return member.property.value;
   }
   return "";
 };
+
+export const referenceName = (node) => (node?.type === "Identifier" ? node.name : memberName(node));
+
+export const calleeName = (call) => referenceName(call.callee);
 
 export const declaredValue = (context, identifier) => {
   let variable = null;

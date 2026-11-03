@@ -1,10 +1,6 @@
-import { declaredValue, isFetchCall } from "./util.mjs";
+import { declaredValue, isFetchCall, propertyName } from "./util.mjs";
 
-const isSignalKey = (property) =>
-  property.type === "Property" &&
-  !property.computed &&
-  ((property.key.type === "Identifier" && property.key.name === "signal") ||
-    (property.key.type === "Literal" && property.key.value === "signal"));
+const isSignalKey = (property) => propertyName(property) === "signal";
 
 const clearsSignal = (value) =>
   (value.type === "Literal" && value.value === null) ||

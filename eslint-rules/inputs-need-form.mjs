@@ -1,31 +1,41 @@
 import {
   ancestors,
   attribute,
+  calleeName,
+  containsNode,
   functionName,
   isCapitalized,
   isFunction,
   jsxName,
   literalValue,
+  referenceName,
 } from "./util.mjs";
 
 const textTypes = new Set(["text", "email", "password", "tel", "url", "number", "search"]);
 const submitVerb =
-  /^(handle)?(submit|save|update|check|apply|validate|login|register|confirm|send|verify|review|start)/i;
+  /^(handle)?(submit|save|update|check|apply|validate|login|register|confirm|send|verify|review)/i;
 
-const submitHandlerName = (attr) => {
-  const expression = attr?.value?.type === "JSXExpressionContainer" ? attr.value.expression : null;
-  if (!expression) return "";
-  if (expression.type === "Identifier") return expression.name;
-  if (expression.type === "ArrowFunctionExpression") {
-    const body =
-      expression.body.type === "BlockStatement" &&
-      expression.body.body.length === 1 &&
-      expression.body.body[0].type === "ExpressionStatement"
-        ? expression.body.body[0].expression
-        : expression.body;
-    if (body.type === "CallExpression" && body.callee.type === "Identifier") return body.callee.name;
+const branchTests = new Set(["IfStatement", "ConditionalExpression", "WhileStatement", "DoWhileStatement"]);
+
+const isGuard = (call) => {
+  for (let current = call; current.parent && !isFunction(current); current = current.parent) {
+    const parent = current.parent;
+    if (branchTests.has(parent.type) && parent.test === current) return true;
+    if (parent.type === "LogicalExpression" && parent.left === current) return true;
   }
-  return "";
+  return false;
+};
+
+const isSubmitCall = (node) =>
+  node.type === "CallExpression" && submitVerb.test(calleeName(node)) && !isGuard(node);
+
+const submitsOnClick = (attr) => {
+  const expression = attr?.value?.type === "JSXExpressionContainer" ? attr.value.expression : null;
+  if (!expression) return false;
+  if (expression.type === "Identifier" || expression.type === "MemberExpression") {
+    return submitVerb.test(referenceName(expression));
+  }
+  return isSubmitCall(expression) || containsNode(expression, isSubmitCall);
 };
 
 const insideForm = (context, node) =>
@@ -70,7 +80,7 @@ export default {
           return;
         }
         if (
-          submitVerb.test(submitHandlerName(attribute(node, "onClick"))) &&
+          submitsOnClick(attribute(node, "onClick")) &&
           literalValue(attribute(node, "type")) !== "submit"
         ) {
           entry(component).clickButtons += 1;
