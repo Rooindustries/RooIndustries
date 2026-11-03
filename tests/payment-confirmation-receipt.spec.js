@@ -495,7 +495,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect.poll(() => page.evaluate(() => {
         const dialog = document.querySelector('[role="dialog"].ri-booking').getBoundingClientRect();
         const content = document.querySelector("[data-booking-scaler] > div").getBoundingClientRect();
-        return Math.abs(dialog.width - content.width) < 1 && Math.abs(dialog.height - content.height) < 1;
+        return Math.abs(dialog.width - content.width) < 1 && Math.abs(dialog.bottom - content.bottom) < 1 &&
+          Math.abs(content.top - dialog.top - 48) < 1;
       })).toBe(true);
       const switchedAt = await page.evaluate(() => window.__confirmationMetrics.receiptDecisionAt);
       expect(switchedAt).not.toBeNull();
