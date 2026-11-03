@@ -106,3 +106,21 @@ test("a merge that changes the lockfile runs the suite without asking GitHub", (
   assert.equal(result.tested, "tested=false");
   assert.equal(fs.existsSync(path.join(dir, "calls")), false);
 });
+
+test("a failed record lookup runs the suite instead of failing the job", () => {
+  const { dir } = workspace();
+  const result = check(dir, stubGh(dir, {}));
+  assert.equal(result.tested, "tested=false", result.log);
+});
+
+test("a run that can't be looked up doesn't count, but another passed run still skips", () => {
+  const { dir, tree } = workspace();
+  const responses = responsesFor(tree, runResponse());
+  responses[`repos/${repository}/actions/artifacts?name=tested-tree-${tree}&per_page=100`].artifacts.unshift({
+    expired: false,
+    workflow_run: { id: 66 },
+  });
+  const result = check(dir, stubGh(dir, responses));
+  assert.equal(result.tested, "tested=true", result.log);
+  assert.match(result.log, /Couldn't look up run 66/);
+});

@@ -14,13 +14,17 @@ if ! git rev-parse --verify --quiet 'HEAD^' >/dev/null; then
   say "No parent commit to compare against; running the full suite."
 elif ! git diff --quiet 'HEAD^' HEAD -- "${cache_inputs[@]}"; then
   say "This merge changed ${cache_inputs[*]}; running the full suite so main refreshes its caches."
+elif ! runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tested-tree-$tree&per_page=100" \
+  --jq '.artifacts[] | select(.expired | not) | .workflow_run.id')"; then
+  say "Couldn't look up which runs tested tree $tree; running the full suite."
 else
-  runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tested-tree-$tree&per_page=100" \
-    --jq '.artifacts[] | select(.expired | not) | .workflow_run.id')"
   for run in $runs; do
-    passed="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq \
+    if ! passed="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq \
       'select(.conclusion == "success" and .event == "pull_request" and .path == ".github/workflows/tests.yml"
-        and .head_repository.full_name == env.GITHUB_REPOSITORY) | .id')"
+        and .head_repository.full_name == env.GITHUB_REPOSITORY) | .id')"; then
+      say "Couldn't look up run $run; not counting it."
+      continue
+    fi
     if [ -n "$passed" ]; then
       say "Pull request run $passed already passed on tree $tree; skipping the suite."
       tested=true
