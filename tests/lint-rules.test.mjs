@@ -244,12 +244,22 @@ run("no-ignored-write-request", {
 });
 
 run("no-aria-label-on-generic", {
-  valid: [`<p role="img" aria-label="5 out of 5 stars">★★★★★</p>`, `<nav aria-label="Footer" />`],
+  valid: [
+    `<p role="img" aria-label="5 out of 5 stars">★★★★★</p>`,
+    `<nav aria-label="Footer" />`,
+    `<div role={scoreRole} aria-label="Grand final">4–1</div>`,
+  ],
   invalid: [
     {
       name: "PriceDisplay before #161",
       code: `<div className="price" aria-label={oldPrice ? "Sale price" : "Price"}>$54.95</div>`,
       errors: [{ messageId: "generic" }],
+    },
+    {
+      name: "Empty and name-prohibiting roles",
+      code: `<><div role="" aria-label="Price">$54.95</div><span role="presentation" aria-label="Sale">-20%</span>
+        <p role=" Generic " aria-label="Rating">5</p></>`,
+      errors: [{ messageId: "generic" }, { messageId: "generic" }, { messageId: "generic" }],
     },
     {
       name: "Grand final score before the role fix",

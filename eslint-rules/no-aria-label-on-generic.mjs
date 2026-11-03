@@ -1,4 +1,13 @@
-import { attribute, jsxName } from "./util.mjs";
+import { attribute, jsxName, literalValue } from "./util.mjs";
+
+const unnamedRoles = new Set(["", "generic", "none", "presentation", "paragraph"]);
+
+const hasNameableRole = (node) => {
+  const role = attribute(node, "role");
+  if (!role) return false;
+  const value = literalValue(role);
+  return typeof value !== "string" || !unnamedRoles.has(value.trim().toLowerCase());
+};
 
 export default {
   meta: {
@@ -15,7 +24,7 @@ export default {
       JSXOpeningElement(node) {
         const name = jsxName(node.name);
         if (!["div", "span", "p"].includes(name)) return;
-        if (attribute(node, "aria-label") && !attribute(node, "role")) {
+        if (attribute(node, "aria-label") && !hasNameableRole(node)) {
           context.report({ node, messageId: "generic", data: { name } });
         }
       },
