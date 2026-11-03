@@ -1,0 +1,21 @@
+name: Run npm test suites
+description: Runs every listed test:<suite> script, then fails if any of them failed.
+inputs:
+  suites:
+    description: Space-separated suite names, each run as npm run test:<suite>.
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SUITES: ${{ inputs.suites }}
+      run: |
+        failed=()
+        for suite in $SUITES; do
+          npm run "test:$suite" || failed+=("$suite")
+        done
+        if [ ${#failed[@]} -gt 0 ]; then
+          echo "Failed suites: ${failed[*]}"
+          exit 1
+        fi

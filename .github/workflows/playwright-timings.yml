@@ -1,0 +1,42 @@
+name: Refresh Playwright timings
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  refresh:
+    name: Refresh per-file Playwright timings
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Collect timings from the latest passing test runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          reports="$RUNNER_TEMP/timing-reports"
+          mkdir -p "$reports" .playwright-timings
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow tests.yml --status success --limit 10 \
+            --json databaseId --jq '.[].databaseId' > "$RUNNER_TEMP/runs.txt"
+          while read -r run; do
+            if ! gh run download "$run" --repo "$GITHUB_REPOSITORY" --pattern 'test-timings-*' --dir "$reports/$run"; then
+              echo "Run $run kept no timing artifacts"
+            fi
+          done < "$RUNNER_TEMP/runs.txt"
+          node scripts/playwright-timings.mjs "$reports" > .playwright-timings/timings.json
+          node -e 'const t = require("./.playwright-timings/timings.json"); console.log(`${Object.keys(t).length} spec files timed`)'
+      - uses: actions/cache/save@v4
+        with:
+          path: .playwright-timings
+          key: playwright-timings-${{ github.run_id }}

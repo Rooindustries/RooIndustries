@@ -145,7 +145,8 @@
     "test:e2e:admin": "playwright test --config=playwright.admin.config.js",
     "test:sourcemaps": "node scripts/sourcemaps-e2e.mjs",
     "lint": "eslint src app middleware.js",
-    "test:lint-rules": "node --test tests/lint-rules.test.mjs"
+    "test:lint-rules": "node --test tests/lint-rules.test.mjs",
+    "test:playwright-groups": "node --test tests/playwright-groups.test.mjs"
   },
   "eslintConfig": {
     "extends": [
