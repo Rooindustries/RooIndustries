@@ -7,7 +7,8 @@ const ariaRoles = new Set([
   "gridcell", "group", "heading", "image", "img", "insertion", "link", "list", "listbox", "listitem", "log",
   "main", "mark", "marquee", "math", "menu", "menubar", "menuitem", "menuitemcheckbox", "menuitemradio",
   "meter", "navigation", "none", "note", "option", "paragraph", "presentation", "progressbar", "radio",
-  "radiogroup", "region", "row", "rowgroup", "rowheader", "scrollbar", "search", "searchbox", "sectionfooter", "sectionheader", "separator",
+  "radiogroup", "region", "row", "rowgroup", "rowheader", "scrollbar", "search", "searchbox",
+  "sectionfooter", "sectionheader", "separator",
   "slider", "spinbutton", "status", "strong", "subscript", "suggestion", "superscript", "switch", "tab",
   "table", "tablist", "tabpanel", "term", "textbox", "time", "timer", "toolbar", "tooltip", "tree",
   "treegrid", "treeitem",
@@ -28,7 +29,17 @@ const unnamedRoles = new Set([
   "superscript",
 ]);
 
-const isAriaRole = (token) => ariaRoles.has(token) || /^(doc|graphics)-[a-z]+$/.test(token);
+const moduleRoles = new Set([
+  "doc-abstract", "doc-acknowledgments", "doc-afterword", "doc-appendix", "doc-backlink", "doc-biblioentry",
+  "doc-bibliography", "doc-biblioref", "doc-chapter", "doc-colophon", "doc-conclusion", "doc-cover",
+  "doc-credit", "doc-credits", "doc-dedication", "doc-endnote", "doc-endnotes", "doc-epigraph",
+  "doc-epilogue", "doc-errata", "doc-example", "doc-footnote", "doc-foreword", "doc-glossary", "doc-glossref",
+  "doc-index", "doc-introduction", "doc-noteref", "doc-notice", "doc-pagebreak", "doc-pagefooter",
+  "doc-pageheader", "doc-pagelist", "doc-part", "doc-preface", "doc-prologue", "doc-pullquote", "doc-qna",
+  "doc-subtitle", "doc-tip", "doc-toc", "graphics-document", "graphics-object", "graphics-symbol",
+]);
+
+const isAriaRole = (token) => ariaRoles.has(token) || moduleRoles.has(token);
 
 const UNKNOWN = Symbol("unknown role");
 

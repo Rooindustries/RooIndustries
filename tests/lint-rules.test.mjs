@@ -278,8 +278,15 @@ run("no-aria-label-on-generic", {
     {
       name: "absent and unrecognized roles",
       code: `<><span role={null} aria-label="Sale">-20%</span><span role={false} aria-label="New">!</span>
-        <div role="grop" aria-label="Score">4–1</div><div role="grop generic" aria-label="Score">4–1</div></>`,
-      errors: [{ messageId: "generic" }, { messageId: "generic" }, { messageId: "generic" }, { messageId: "generic" }],
+        <div role="grop" aria-label="Score">4–1</div><div role="grop generic" aria-label="Score">4–1</div>
+        <div role="graphics-dooc" aria-label="Bracket">…</div></>`,
+      errors: [
+        { messageId: "generic" },
+        { messageId: "generic" },
+        { messageId: "generic" },
+        { messageId: "generic" },
+        { messageId: "generic" },
+      ],
     },
     {
       name: "explicit role after a spread, and a role list led by a generic role",
