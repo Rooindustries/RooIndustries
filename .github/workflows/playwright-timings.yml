@@ -27,7 +27,7 @@ jobs:
         run: |
           reports="$RUNNER_TEMP/timing-reports"
           mkdir -p "$reports" .playwright-timings
-          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/tests.yml/runs?status=success&per_page=100" \
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows/tests.yml/runs?status=success&per_page=100" \
             --jq '.workflow_runs[] | select(.head_repository.full_name == env.GITHUB_REPOSITORY) | .id' \
             > "$RUNNER_TEMP/runs.txt"
           collected=0
