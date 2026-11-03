@@ -81,3 +81,22 @@ export const isFetchCall = (call) => {
     ["window", "globalThis", "self"].includes(callee.object.name)
   );
 };
+
+export const containsNode = (root, test) => {
+  const stack = [root];
+  while (stack.length) {
+    const node = stack.pop();
+    if (!node || typeof node.type !== "string") continue;
+    if (node !== root && test(node)) return true;
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "parent") continue;
+      if (Array.isArray(value)) stack.push(...value);
+      else if (value && typeof value.type === "string") stack.push(value);
+    }
+  }
+  return false;
+};
+
+const isJsx = (node) => node?.type === "JSXElement" || node?.type === "JSXFragment";
+
+export const returnsJsx = (fn) => isJsx(fn.body) || containsNode(fn.body, isJsx);

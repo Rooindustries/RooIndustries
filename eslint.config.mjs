@@ -27,4 +27,8 @@ export default [
     files: ["src/server/email/**/*.{js,mjs}", "src/server/api/ref/*[Ee]mail*.js"],
     rules: ruleSet([...emailTextRules]),
   },
+  {
+    files: ["src/components/BookingForm.jsx"],
+    rules: { "roo/no-client-only-public-content": "off" },
+  },
 ];

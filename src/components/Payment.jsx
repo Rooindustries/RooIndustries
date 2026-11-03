@@ -1823,7 +1823,7 @@ export default function Payment({ hideFooter = false }) {
     <motion.section
       className="booking-payment relative z-10 max-w-3xl mx-auto text-ink"
       variants={containerVariants}
-      initial="hidden"
+      initial={false}
       animate="visible"
     >
       <motion.div variants={itemVariants}>
@@ -1985,7 +1985,13 @@ export default function Payment({ hideFooter = false }) {
               >
                 Referral Code (optional)
               </label>
-              <div className="flex flex-wrap gap-2 items-center">
+              <form
+                className="flex flex-wrap gap-2 items-center"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  validateReferral(referralInput);
+                }}
+              >
                 <input
                   id="payment-referral-code"
                   value={referralInput}
@@ -2003,7 +2009,7 @@ export default function Payment({ hideFooter = false }) {
                 />
 
                 <button
-                  onClick={() => validateReferral(referralInput)}
+                  type="submit"
                   disabled={creatingFree || preApplyingCodes || checkingCode || !!lockedProvider}
                   className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
                 >
@@ -2013,7 +2019,7 @@ export default function Payment({ hideFooter = false }) {
                   <span className="glow-line glow-line-bottom" />
                   <span className="glow-line glow-line-left" />
                 </button>
-              </div>
+              </form>
               {referralError && !validating && (
                 <p
                   id="payment-referral-code-error"
@@ -2033,7 +2039,13 @@ export default function Payment({ hideFooter = false }) {
               >
                 Coupon Code (optional)
               </label>
-              <div className="flex flex-wrap gap-2 items-center">
+              <form
+                className="flex flex-wrap gap-2 items-center"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  validateCoupon(couponInput);
+                }}
+              >
                 <input
                   id="payment-coupon-code"
                   value={couponInput}
@@ -2051,7 +2063,7 @@ export default function Payment({ hideFooter = false }) {
                 />
 
                 <button
-                  onClick={() => validateCoupon(couponInput)}
+                  type="submit"
                   disabled={
                     creatingFree || preApplyingCodes || checkingCode || !!lockedProvider
                   }
@@ -2066,6 +2078,7 @@ export default function Payment({ hideFooter = false }) {
 
                 {coupon && (
                   <button
+                    type="button"
                     onClick={() => {
                       if (creatingFree || validating || validatingCoupon) return;
                       setCoupon(null);
@@ -2078,7 +2091,7 @@ export default function Payment({ hideFooter = false }) {
                     Remove coupon
                   </button>
                 )}
-              </div>
+              </form>
               {couponError && !validatingCoupon && (
                 <p
                   id="payment-coupon-code-error"

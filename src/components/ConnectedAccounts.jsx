@@ -339,7 +339,13 @@ export default function ConnectedAccounts({
           managedProviders.some(
             (provider) => linked.has(provider) && unlinkable.has(provider)
           ))) ? (
-        <div className="mt-4">
+        <form
+          className="mt-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            confirmPassword();
+          }}
+        >
           <label htmlFor="connected-accounts-password" className="block text-accent text-sm font-semibold">
             Current password
           </label>
@@ -364,13 +370,12 @@ export default function ConnectedAccounts({
             <button
               className={"rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast"}
               disabled={busy || !password}
-              onClick={confirmPassword}
-              type="button"
+              type="submit"
             >
               Confirm identity
             </button>
           </div>
-        </div>
+        </form>
       ) : null}
       {missing.length > 0 && !linked.has("email") && connectedSocial.length > 0 ? (
         <SupabaseSocialLogin

@@ -47,6 +47,7 @@ jest.mock("../lib/cmsImageUrl", () => ({
 
 jest.mock("../components/BackButton", () => () => null);
 jest.mock("../components/DiscordGuideBanner", () => () => null);
+jest.mock("../lib/contentServer", () => ({ fetchDiscordBanner: async () => null }));
 
 const image = (name) => ({
   dimensions: { height: 720, width: 1280 },
@@ -302,8 +303,8 @@ describe("UI accessibility regressions", () => {
     outsideButton.remove();
   });
 
-  test("renders a global skip link with a focusable main target", () => {
-    const layout = RootLayout({ children: <div>Example page</div> });
+  test("renders a global skip link with a focusable main target", async () => {
+    const layout = await RootLayout({ children: <div>Example page</div> });
     const body = React.Children.toArray(layout.props.children).find(
       (child) => child.type === "body"
     );

@@ -135,3 +135,26 @@ test("a code error stays with the code that was checked", async ({ page, flow },
     await held.finish();
   }
 });
+
+test("Enter in a code field checks it the way Apply does", async ({ page, flow }) => {
+  await flow.review();
+  await flow.payment();
+  const ui = fields(page);
+  await expect(ui.coupon).toBeEnabled();
+  const couponCheck = page.waitForResponse("**/api/ref/validateCoupon?*");
+  await ui.coupon.fill("save20");
+  await ui.coupon.press("Enter");
+  await (await couponCheck).finished();
+  await expect(page.getByRole("status").filter({ hasText: "Coupon applied" })).toBeVisible();
+  const referralCheck = page.waitForResponse("**/api/ref/validateReferral?*");
+  await ui.referral.fill("friend");
+  await ui.referral.press("Enter");
+  await (await referralCheck).finished();
+  await expect.poll(() => lastQuote(flow)).toMatchObject({ referralCode: "friend", couponCode: "save20" });
+  const checks = [];
+  page.on("request", request => { if (/\/api\/ref\/validate/.test(request.url())) checks.push(request.url()); });
+  await page.getByRole("button", { name: "Remove coupon", exact: true }).click();
+  await expect(ui.coupon).toHaveValue("");
+  expect(checks).toEqual([]);
+  await expect(page).toHaveURL(/\/payment/);
+});

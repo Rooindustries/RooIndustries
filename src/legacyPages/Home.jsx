@@ -227,7 +227,7 @@ export default function Home({ initialData = null, heroHeadingTag = "h1" }) {
         eager={eagerAll}
       >
         <div className="deferred-section-content" style={sectionContentStyle}>
-          <ReferralBox />
+          <ReferralBox initialData={initialData?.referralBox || null} />
         </div>
       </DeferredSection>
       <Footer />
