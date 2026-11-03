@@ -242,3 +242,19 @@ run("no-ignored-write-request", {
     },
   ],
 });
+
+run("no-aria-label-on-generic", {
+  valid: [`<p role="img" aria-label="5 out of 5 stars">★★★★★</p>`, `<nav aria-label="Footer" />`],
+  invalid: [
+    {
+      name: "PriceDisplay before #161",
+      code: `<div className="price" aria-label={oldPrice ? "Sale price" : "Price"}>$54.95</div>`,
+      errors: [{ messageId: "generic" }],
+    },
+    {
+      name: "Grand final score before the role fix",
+      code: `<div className="tourney-final-score" aria-label={\`Grand final: \${champion}\`}><span>Grand final</span></div>`,
+      errors: [{ messageId: "generic" }],
+    },
+  ],
+});

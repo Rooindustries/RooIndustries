@@ -288,7 +288,6 @@ export default function Packages({
                     {warranty && (
                       <div
                         className={`ri-package-warranty-callout ${warranty.className}`}
-                        aria-label={warranty.ariaLabel}
                       >
                         <span className="ri-package-warranty-icon" aria-hidden="true">
                           <WarrantyIcon size={18} strokeWidth={2.4} />

@@ -51,7 +51,7 @@ export default function TourneyResultsPage() {
             <PodiumFinish place={2} label="Runners-up" team={results.runnerUp} medal="silver" />
             <PodiumFinish place={3} label="Third place" team={results.third} medal="bronze" />
           </ol>
-          <div className="tourney-final-score" aria-label={`Grand final: ${results.champion} ${results.finalScore[0]}, ${results.runnerUp} ${results.finalScore[1]}`}>
+          <div className="tourney-final-score" role="group" aria-label={`Grand final: ${results.champion} ${results.finalScore[0]}, ${results.runnerUp} ${results.finalScore[1]}`}>
             <span className="tourney-final-label">Grand final</span>
             <div className="tourney-final-match">
               <span>{results.champion}</span>
