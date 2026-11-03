@@ -13,9 +13,16 @@ const median = (values) => {
   return sorted[Math.floor(sorted.length / 2)];
 };
 
+export const listSpecFiles = (dir) =>
+  fs
+    .readdirSync(dir, { recursive: true })
+    .map((file) => file.split(path.sep).join("/"))
+    .filter((file) => file.endsWith(".spec.js"))
+    .sort();
+
 export const assignRestGroups = (specFiles, timings) => {
   const fixed = new Set(Object.values(FIXED_GROUPS).flat());
-  const rest = specFiles.filter((file) => !fixed.has(file)).sort();
+  const rest = specFiles.filter((file) => !fixed.has(path.posix.basename(file))).sort();
   const fallback = median(Object.values(timings));
   const weight = (file) => (Number.isFinite(timings[file]) ? timings[file] : fallback);
   const groups = REST_GROUPS.map((name, index) => ({
@@ -44,7 +51,7 @@ const readTimings = (candidates) => {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [group, timingsFile] = process.argv.slice(2);
   if (!REST_GROUPS.includes(group)) throw new Error(`Unknown rest group "${group}"`);
-  const specFiles = fs.readdirSync("tests").filter((file) => file.endsWith(".spec.js"));
+  const specFiles = listSpecFiles("tests");
   const timings = readTimings([timingsFile, path.join(".github", "playwright-timings.json")]);
   const assigned = assignRestGroups(specFiles, timings)[group];
   if (!assigned.files.length) throw new Error(`Rest group ${group} has no spec files`);

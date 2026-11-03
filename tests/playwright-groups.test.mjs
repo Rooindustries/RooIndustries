@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";
-import { assignRestGroups, groupPattern, REST_1_EXTRA_SECONDS, REST_GROUPS } from "../scripts/playwright-groups.mjs";
+import os from "node:os";
+import path from "node:path";
+import {
+  assignRestGroups,
+  groupPattern,
+  listSpecFiles,
+  REST_1_EXTRA_SECONDS,
+  REST_GROUPS,
+} from "../scripts/playwright-groups.mjs";
 import { mergeTimings } from "../scripts/playwright-timings.mjs";
 
-const specFiles = fs.readdirSync("tests").filter((file) => file.endsWith(".spec.js"));
+const specFiles = listSpecFiles("tests");
 const timings = JSON.parse(fs.readFileSync(".github/playwright-timings.json", "utf8"));
 
 test("every spec file runs in exactly one browser group", () => {
@@ -42,4 +50,22 @@ test("merged timings use each file's median across runs", () => {
     suites: [{ file: "a.spec.js", specs: [{ tests: [{ results: [{ duration: seconds * 1000 }] }] }], suites: [] }],
   });
   assert.deepEqual(mergeTimings([report(10), report(40), report(20)]), { "a.spec.js": 20 });
+});
+
+test("a spec file in a subfolder is found and runs in exactly one group", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "playwright-groups-"));
+  fs.mkdirSync(path.join(dir, "admin"));
+  for (const file of ["section-nav.spec.js", "booking-flow.spec.js", "home.spec.js", "admin/publish.spec.js", "admin/helper.js"]) {
+    fs.writeFileSync(path.join(dir, file), "");
+  }
+  const files = listSpecFiles(dir);
+  assert.deepEqual(files, ["admin/publish.spec.js", "booking-flow.spec.js", "home.spec.js", "section-nav.spec.js"]);
+  const patterns = [
+    "/section-nav\\.spec\\.js$",
+    "/booking-flow\\.spec\\.js$",
+    ...Object.values(assignRestGroups(files, {})).filter(({ files: group }) => group.length).map(({ files: group }) => groupPattern(group)),
+  ].map((pattern) => new RegExp(pattern));
+  for (const file of files) {
+    assert.equal(patterns.filter((pattern) => pattern.test(`/repo/tests/${file}`)).length, 1, file);
+  }
 });
