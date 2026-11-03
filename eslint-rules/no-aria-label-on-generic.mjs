@@ -1,8 +1,23 @@
 import { attribute, jsxName, literalValue } from "./util.mjs";
 
-const unnamedRoles = new Set(["", "generic", "none", "presentation", "paragraph"]);
+const unnamedRoles = new Set([
+  "",
+  "caption",
+  "code",
+  "deletion",
+  "emphasis",
+  "generic",
+  "insertion",
+  "none",
+  "paragraph",
+  "presentation",
+  "strong",
+  "subscript",
+  "superscript",
+]);
 
 const hasNameableRole = (node) => {
+  if (node.attributes.some((item) => item.type === "JSXSpreadAttribute")) return true;
   const role = attribute(node, "role");
   if (!role) return false;
   const value = literalValue(role);

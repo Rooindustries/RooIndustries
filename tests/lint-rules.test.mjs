@@ -248,6 +248,7 @@ run("no-aria-label-on-generic", {
     `<p role="img" aria-label="5 out of 5 stars">★★★★★</p>`,
     `<nav aria-label="Footer" />`,
     `<div role={scoreRole} aria-label="Grand final">4–1</div>`,
+    `<span {...badgeProps} aria-label="Verified creator">✓</span>`,
   ],
   invalid: [
     {
@@ -258,8 +259,15 @@ run("no-aria-label-on-generic", {
     {
       name: "Empty and name-prohibiting roles",
       code: `<><div role="" aria-label="Price">$54.95</div><span role="presentation" aria-label="Sale">-20%</span>
-        <p role=" Generic " aria-label="Rating">5</p></>`,
-      errors: [{ messageId: "generic" }, { messageId: "generic" }, { messageId: "generic" }],
+        <p role=" Generic " aria-label="Rating">5</p><span role="code" aria-label="Order">A1</span>
+        <span role="emphasis" aria-label="Note">!</span></>`,
+      errors: [
+        { messageId: "generic" },
+        { messageId: "generic" },
+        { messageId: "generic" },
+        { messageId: "generic" },
+        { messageId: "generic" },
+      ],
     },
     {
       name: "Grand final score before the role fix",
