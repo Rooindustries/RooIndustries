@@ -1,14 +1,14 @@
 import { spawn } from "node:child_process";
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
+import { freeTcpPorts } from "./lib/free-tcp-port.mjs";
 
 refuseEnvFiles();
 const host = process.env.ROO_TEST_HOST || "127.0.0.1";
 const target = new URL(localOrigin(process.env.BASE_URL || `http://${host}:${process.env.PW_PORT || 3001}`));
 if (target.hostname !== host) throw new Error("API audit host must match ROO_TEST_HOST.");
-const port = Number(target.port) + 2;
-if (port > 65534) throw new Error("API audit requires two available fixture ports.");
+const [port, contentPort] = await freeTcpPorts(host, [0, 0]);
 const baseURL = localOrigin(`http://${host}:${port}`);
-const contentURL = localOrigin(`http://${host}:${port + 1}`);
+const contentURL = localOrigin(`http://${host}:${contentPort}`);
 const dist = validateDistDir(`${process.env.NEXT_DIST_DIR || `.next-e2e-${process.env.PW_SERVER_ID || process.pid}`}-api`, { isolated: true });
 installNetworkGuard([baseURL, contentURL]);
 
@@ -19,7 +19,7 @@ const env = {
   PW_PORT: String(port),
   NEXT_DIST_DIR: dist,
   TOOLING_API_ROUTES: "1",
-  TOOLING_CONTENT_PORT: String(port + 1),
+  TOOLING_CONTENT_PORT: String(contentPort),
   TOOLING_CONTENT_ARTIFACT: "audit/phase1-api-fixture.json",
   ALLOW_LIVE_PAYMENTS: "0",
 };

@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { bootstrapSupabaseNativeAccount } from "../src/server/supabase/accounts.js";
+import { fixturePorts } from "./lib/free-tcp-port.mjs";
 import { createSweepPostgresFixture } from "./lib/sweep-postgres-fixture.mjs";
 import { installNetworkGuard, localOrigin, refuseEnvFiles } from "./lib/test-target-safety.mjs";
 
 refuseEnvFiles();
 const host = process.env.ROO_TEST_HOST || "127.0.0.1";
-const port = Number(process.env.ACCOUNT_CHECK_TEST_PORT || 4682);
-const restoreNetwork = installNetworkGuard([port + 1, port + 2].map(value => localOrigin(`http://${host}:${value}`)));
+const [port, restPort, proxyPort] = await fixturePorts(host, process.env.ACCOUNT_CHECK_TEST_PORT, 3);
+const restoreNetwork = installNetworkGuard([restPort, proxyPort].map(value => localOrigin(`http://${host}:${value}`)));
 const accountCount = 40;
 const results = [];
 let fixture;
@@ -75,7 +76,7 @@ const mergeSecondaryLogin = async (sql, primary) => {
 };
 
 try {
-  fixture = await createSweepPostgresFixture({ fullMigrationChain: true, ports: { postgres: port, rest: port + 1, proxy: port + 2 } });
+  fixture = await createSweepPostgresFixture({ fullMigrationChain: true, ports: { postgres: port, rest: restPort, proxy: proxyPort } });
   const { sql } = fixture;
   const accounts = [];
   const byProvider = social => accounts.filter(account => account.social === social);

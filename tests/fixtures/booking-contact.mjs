@@ -6,15 +6,16 @@ import { registerHooks } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createHmac } from 'node:crypto';
+import { fixturePorts } from '../../scripts/lib/free-tcp-port.mjs';
 import { installNetworkGuard, refuseEnvFiles } from '../../scripts/lib/test-target-safety.mjs';
 
 export async function createBookingContactFixture({ artifactName = 'booking-contact' } = {}) {
   refuseEnvFiles();
   const host = process.env.ROO_TEST_HOST || '127.0.0.1';
-  const port = Number(process.env.BOOKING_CONTACT_PORT || 4173);
-  assert.ok(Number.isInteger(port) && port >= 1024 && port <= 65532, 'Invalid fixture port');
+  const ports = await fixturePorts(host, process.env.BOOKING_CONTACT_PORT, 4);
+  const [port, proxyPort, postgresPort, restPort] = ports;
   const base = `http://${host}:${port}`;
-  const origins = Array.from({ length: 4 }, (_, index) => `http://${host}:${port + index}`);
+  const origins = ports.map(value => `http://${host}:${value}`);
   installNetworkGuard(origins);
   Object.assign(process.env, {
     NODE_ENV: 'test', VERCEL_ENV: 'development', ALLOW_LIVE_PAYMENTS: '0',
@@ -67,7 +68,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     database = await createSweepPostgresFixture({
       fullMigrationChain: true,
       excludedMigrations: (process.env.ROO_TEST_EXCLUDED_MIGRATIONS || '').split(',').filter(Boolean),
-      ports: { postgres: port + 2, rest: port + 3, proxy: port + 1 },
+      ports: { postgres: postgresPort, rest: restPort, proxy: proxyPort },
       pgBin: process.env.PG_BIN || execFileSync('pg_config', ['--bindir'], { encoding: 'utf8' }).trim(),
       postgrestBin: process.env.POSTGREST_BIN || 'postgrest',
     });

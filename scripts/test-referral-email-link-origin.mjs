@@ -8,13 +8,14 @@ import {
   requeueReferralEmailDispatch,
   sendReferralEmailDirect,
 } from "../src/server/api/ref/referralEmailDispatches.js";
+import { fixturePorts } from "./lib/free-tcp-port.mjs";
 import { createSweepPostgresFixture } from "./lib/sweep-postgres-fixture.mjs";
 import { installNetworkGuard, localOrigin, refuseEnvFiles } from "./lib/test-target-safety.mjs";
 
 refuseEnvFiles();
 const host = process.env.ROO_TEST_HOST || "127.0.0.1";
-const port = Number(process.env.EMAIL_TEST_PORT || 4582);
-const origins = [port + 1, port + 2].map(value => localOrigin(`http://${host}:${value}`));
+const [port, restPort, proxyPort] = await fixturePorts(host, process.env.EMAIL_TEST_PORT, 3);
+const origins = [restPort, proxyPort].map(value => localOrigin(`http://${host}:${value}`));
 const restoreNetwork = installNetworkGuard(origins);
 const originalError = console.error;
 const alerts = [];
@@ -32,7 +33,7 @@ const bad = [
   "https://accounts.rooindustries.com", " https://www.rooindustries.com ", "not-a-url",
 ];
 try {
-  fixture = await createSweepPostgresFixture({ ports: { postgres: port, rest: port + 1, proxy: port + 2 } });
+  fixture = await createSweepPostgresFixture({ ports: { postgres: port, rest: restPort, proxy: proxyPort } });
   await fixture.apply("20260715110000_add_referral_email_dispatch_ledger.sql");
   const resolutionMigration = "20260717211139_fix_backbone_parity_and_referral_alerts.sql";
   const resolutionSql = await fs.readFile(`supabase/migrations/${resolutionMigration}`, "utf8");

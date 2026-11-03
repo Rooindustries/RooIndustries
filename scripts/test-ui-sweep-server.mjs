@@ -6,12 +6,11 @@ import { spawn } from 'node:child_process';
 import { uiRepairsFixture } from '../tests/fixtures/ui-repairs-server.mjs';
 import { uiFinishFixture } from '../tests/fixtures/ui-finish-server.mjs';
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from './lib/test-target-safety.mjs';
+import { freeTcpPorts } from './lib/free-tcp-port.mjs';
 
 refuseEnvFiles();
 const host = testHost;
-const port = Number(process.env.UI_PORT || 45981);
-const nextPort = Number(process.env.UI_NEXT_PORT || 45980);
-if (![port, nextPort].every(value => Number.isInteger(value) && value > 1024 && value < 65536) || port === nextPort) throw new Error('Invalid fixture ports.');
+const [port, nextPort] = await freeTcpPorts(host, [Number(process.env.UI_PORT || 0), Number(process.env.UI_NEXT_PORT || 0)]);
 const base = localOrigin(`http://${host}:${port}`);
 const upstream = localOrigin(`http://${host}:${nextPort}`);
 installNetworkGuard([base, upstream]);

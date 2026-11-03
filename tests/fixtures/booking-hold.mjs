@@ -5,15 +5,16 @@ import { once } from "node:events";
 import { createHmac } from "node:crypto";
 import { registerHooks } from "node:module";
 import { fileURLToPath } from "node:url";
+import { fixturePorts } from "../../scripts/lib/free-tcp-port.mjs";
 import { installNetworkGuard, refuseEnvFiles } from "../../scripts/lib/test-target-safety.mjs";
 
 export async function createBookingHoldFixture() {
   refuseEnvFiles();
   const host = process.env.ROO_TEST_HOST || "127.0.0.1";
-  const port = Number(process.env.BOOKING_HOLD_PORT || Number(process.env.PW_PORT || 4173) + 2);
-  assert.ok(Number.isInteger(port) && port >= 1024 && port <= 65532, "Invalid booking fixture port");
+  const ports = await fixturePorts(host, process.env.BOOKING_HOLD_PORT, 4);
+  const [port, postgresPort, restPort, proxyPort] = ports;
   const baseURL = `http://${host}:${port}`;
-  const origins = Array.from({ length: 4 }, (_, index) => `http://${host}:${port + index}`);
+  const origins = ports.map(value => `http://${host}:${value}`);
   installNetworkGuard(origins);
   Object.assign(process.env, {
     NODE_ENV: "test", VERCEL_ENV: "development", ALLOW_LIVE_PAYMENTS: "0",
@@ -60,7 +61,7 @@ export async function createBookingHoldFixture() {
     database = await createSweepPostgresFixture({ fullMigrationChain: true,
       pgBin: process.env.PG_BIN, postgrestBin: process.env.POSTGREST_BIN,
       libraryPath: process.env.LD_LIBRARY_PATH,
-      ports: { postgres: port + 1, rest: port + 2, proxy: port + 3 } });
+      ports: { postgres: postgresPort, rest: restPort, proxy: proxyPort } });
     evidence.database = { version: database.postgresVersion, postgrest: database.postgrestVersion, migrations: database.manifest.length };
     Object.assign(process.env, { SUPABASE_URL: database.origin, SUPABASE_SERVICE_ROLE_KEY: database.token,
       NEXT_PUBLIC_SUPABASE_URL: database.origin, NEXT_PUBLIC_SUPABASE_ANON_KEY: database.token });

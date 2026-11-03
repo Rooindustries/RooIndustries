@@ -26,7 +26,6 @@ process.env.ROO_TEST_HOST = "127.0.0.1";
 const { start } = await import("./lib/storage-fixture.mjs");
 const fixture = await start({
   fullMigrationChain: true,
-  ports: { storage: port + 1, gateway: port + 2, postgres: port + 3, postgrest: port + 4, proxy: port + 5 },
   additionalOrigins: [baseURL, controlOrigin],
   ...(process.env.STORAGE_SOURCE ? { storageSource: process.env.STORAGE_SOURCE } : {}),
   ...(process.env.PG_BIN ? { pgBin: process.env.PG_BIN } : {}),

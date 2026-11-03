@@ -26,3 +26,6 @@ export const freeTcpPorts = async (host, requested) => {
 };
 
 export const freeTcpPort = async (host, requested = 0) => (await freeTcpPorts(host, [requested]))[0];
+
+export const fixturePorts = (host, first, count) =>
+  freeTcpPorts(host, Array.from({ length: count }, (_, index) => (first ? Number(first) + index : 0)));

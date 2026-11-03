@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import net from "node:net";
+import os from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { test } from "node:test";
-import { freeTcpPort, freeTcpPorts } from "../scripts/lib/free-tcp-port.mjs";
+import { fixturePorts, freeTcpPort, freeTcpPorts } from "../scripts/lib/free-tcp-port.mjs";
 
 const host = "127.0.0.1";
 
@@ -45,4 +49,71 @@ test("a requested port that is taken fails and releases the others", async () =>
 
 test("an invalid port is refused", async () => {
   await assert.rejects(freeTcpPorts(host, [80]), /Invalid fixture port/);
+  await assert.rejects(fixturePorts(host, "not-a-port", 2), /Invalid fixture port/);
+});
+
+const hold = async (port) => {
+  const server = net.createServer();
+  server.listen(port, host);
+  const [event] = await Promise.race([once(server, "listening").then(() => ["listening"]), once(server, "error")]);
+  return event === "listening" ? server : null;
+};
+const release = (servers) => Promise.all(servers.filter(Boolean).map((server) => new Promise((resolve) => server.close(resolve))));
+
+test("fixture ports follow an explicit first port and are free otherwise", async () => {
+  const [first] = await freeTcpPorts(host, [0]);
+  assert.deepEqual(await fixturePorts(host, String(first), 1), [first]);
+  const holder = await hold(first);
+  try {
+    await assert.rejects(fixturePorts(host, String(first), 3), { code: "EADDRINUSE" });
+    const picked = await fixturePorts(host, undefined, 3);
+    assert.equal(new Set([...picked, first]).size, 4, picked.join(", "));
+  } finally {
+    await release([holder]);
+  }
+});
+
+const startUiSweep = (env) => new Promise((resolve) => {
+  const dist = `.next-e2e-free-ports-${process.pid}-${Date.now()}`;
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "roo-free-ports-"));
+  const child = spawn(process.execPath, ["scripts/test-ui-sweep-server.mjs"], {
+    detached: true, stdio: ["ignore", "pipe", "pipe"],
+    env: { PATH: process.env.PATH, HOME: scratch, ROO_TEST_HOST: host, NEXT_DIST_DIR: dist, UI_ARTIFACT: path.join(scratch, "ui-sweep.json"), ...env },
+  });
+  let stdout = "", stderr = "";
+  const finish = (result) => {
+    try { process.kill(-child.pid, "SIGKILL"); } catch {}
+    fs.rmSync(dist, { recursive: true, force: true });
+    fs.rmSync(scratch, { recursive: true, force: true });
+    resolve({ ...result, stderr });
+  };
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+    const line = stdout.split("\n").find((value) => value.startsWith("{"));
+    if (line) finish({ started: JSON.parse(line) });
+  });
+  child.once("exit", (code) => finish({ code }));
+});
+
+test("the UI sweep server starts while its old fixed ports are taken", async () => {
+  const holders = await Promise.all([45980, 45981].map(hold));
+  try {
+    const result = await startUiSweep({});
+    assert.ok(result.started, result.stderr);
+    assert.notEqual(new URL(result.started.url).port, "45981");
+  } finally {
+    await release(holders);
+  }
+});
+
+test("the UI sweep server still binds an explicit port", async () => {
+  const holder = await hold(0);
+  try {
+    const result = await startUiSweep({ UI_PORT: String(holder.address().port) });
+    assert.equal(result.started, undefined);
+    assert.match(result.stderr, /EADDRINUSE/);
+  } finally {
+    await release([holder]);
+  }
 });

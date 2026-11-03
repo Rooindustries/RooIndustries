@@ -3,32 +3,26 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { openSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { once } from 'node:events';
-import { createServer } from 'node:net';
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from './lib/test-target-safety.mjs';
+import { fixturePorts } from './lib/free-tcp-port.mjs';
 
 refuseEnvFiles();
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';
-const port = Number(process.env.PW_PORT || 3459);
-if (!Number.isInteger(port) || port < 1024 || port >= 65535) throw new Error('Startup check requires an unprivileged fixture port pair.');
+const [port, contentPort] = await fixturePorts(host, process.env.PW_PORT, 2);
 const origin = localOrigin(process.env.BASE_URL || `http://${host}:${port}`);
 if (new URL(origin).hostname !== host || new URL(origin).port !== String(port)) throw new Error('Startup check requires its own local fixture origin.');
 const dist = validateDistDir(process.env.NEXT_DIST_DIR || '.next-e2e-monitoring-startup', { isolated: true });
 const artifact = join('test-results', 'monitoring-startup', new Date().toISOString().replace(/[:.]/g, '-'));
 await mkdir(artifact, { recursive: true });
-const restoreGuard = installNetworkGuard([origin, `http://${host}:${port + 1}`]);
+const restoreGuard = installNetworkGuard([origin, `http://${host}:${contentPort}`]);
 const checks = [];
 let child;
 let error;
 try {
-  for (const targetPort of [port, port + 1]) {
-    const reservation = createServer();
-    await new Promise((resolve, reject) => { reservation.once('error', reject); reservation.listen(targetPort, host, resolve); });
-    await new Promise((resolve, reject) => reservation.close(cause => cause ? reject(cause) : resolve()));
-  }
   const fd = openSync(join(artifact, 'next.log'), 'a');
   child = spawn(process.execPath, ['scripts/test-tooling-sweep-server.mjs'], {
     detached: true,
-    env: { ...process.env, ROO_TEST_HOST: host, BASE_URL: origin, PW_PORT: String(port), TOOLING_CONTENT_PORT: String(port + 1), NEXT_DIST_DIR: dist, ROO_ADMIN_FIXTURE: '0', TOOLING_DEV_SERVER: '0', TOOLING_API_ROUTES: '0', TOOLING_MONITORING_STARTUP: '1', SENTRY_CLI_NO_TELEMETRY: '1', NEXT_PUBLIC_SENTRY_DSN: 'false' },
+    env: { ...process.env, ROO_TEST_HOST: host, BASE_URL: origin, PW_PORT: String(port), TOOLING_CONTENT_PORT: String(contentPort), NEXT_DIST_DIR: dist, ROO_ADMIN_FIXTURE: '0', TOOLING_DEV_SERVER: '0', TOOLING_API_ROUTES: '0', TOOLING_MONITORING_STARTUP: '1', SENTRY_CLI_NO_TELEMETRY: '1', NEXT_PUBLIC_SENTRY_DSN: 'false' },
     stdio: ['ignore', fd, fd],
   });
   closeSync(fd);
@@ -75,7 +69,7 @@ const buildId = await readFile(join(dist, 'BUILD_ID'), 'utf8').then(value => val
 const buildConfig = await readFile(join(dist, 'required-server-files.json'), 'utf8').then(JSON.parse).catch(() => null);
 const reportingEnabled = buildConfig?.config?.env?.NEXT_PUBLIC_ROO_SENTRY_ENABLED;
 checks.push({ name: 'malformed DSN is exercised inside the production reporting gate', ok: reportingEnabled === '1', actual: reportingEnabled, expected: '1' });
-checks.push({ name: 'production build has a source fingerprint and build identity', ok: Boolean(buildId && manifest?.version === 1 && manifest.sourceHash && manifest.baseURL === origin && manifest.contentURL === `http://${host}:${port + 1}`) });
+checks.push({ name: 'production build has a source fingerprint and build identity', ok: Boolean(buildId && manifest?.version === 1 && manifest.sourceHash && manifest.baseURL === origin && manifest.contentURL === `http://${host}:${contentPort}`) });
 const ok = !error && checks.length === 5 && checks.every(check => check.ok);
 await writeFile(join(artifact, 'report.json'), JSON.stringify({ ok, error, checks, head: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), sourceHash: manifest?.sourceHash, buildId, config: 'malformed DSN false', origin }, null, 2));
 console.log(`report: ${join(artifact, 'report.json')}`);
