@@ -39,7 +39,10 @@ export const assignRestGroups = (specFiles, timings) => {
   return Object.fromEntries(groups.map((group) => [group.name, { files: group.files.sort(), load: group.load }]));
 };
 
-export const groupPattern = (files) => `/(${files.map((file) => escape(file.replace(/\.spec\.js$/, ""))).join("|")})\\.spec\\.js$`;
+export const groupPattern = (files) => {
+  const names = files.map((file) => escape(file.replace(/\.spec\.js$/, "")));
+  return `/tests/(${names.join("|")})\\.spec\\.js$`;
+};
 
 const readTimings = (candidates) => {
   for (const candidate of candidates) {

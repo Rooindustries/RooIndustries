@@ -55,15 +55,31 @@ test("merged timings use each file's median across runs", () => {
 test("a spec file in a subfolder is found and runs in exactly one group", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "playwright-groups-"));
   fs.mkdirSync(path.join(dir, "admin"));
-  for (const file of ["section-nav.spec.js", "booking-flow.spec.js", "home.spec.js", "admin/publish.spec.js", "admin/helper.js"]) {
+  const created = [
+    "section-nav.spec.js",
+    "booking-flow.spec.js",
+    "home.spec.js",
+    "admin/home.spec.js",
+    "admin/publish.spec.js",
+    "admin/helper.js",
+  ];
+  for (const file of created) {
     fs.writeFileSync(path.join(dir, file), "");
   }
   const files = listSpecFiles(dir);
-  assert.deepEqual(files, ["admin/publish.spec.js", "booking-flow.spec.js", "home.spec.js", "section-nav.spec.js"]);
+  assert.deepEqual(files, [
+    "admin/home.spec.js",
+    "admin/publish.spec.js",
+    "booking-flow.spec.js",
+    "home.spec.js",
+    "section-nav.spec.js",
+  ]);
   const patterns = [
     "/section-nav\\.spec\\.js$",
     "/booking-flow\\.spec\\.js$",
-    ...Object.values(assignRestGroups(files, {})).filter(({ files: group }) => group.length).map(({ files: group }) => groupPattern(group)),
+    ...Object.values(assignRestGroups(files, {}))
+      .filter(({ files: group }) => group.length)
+      .map(({ files: group }) => groupPattern(group)),
   ].map((pattern) => new RegExp(pattern));
   for (const file of files) {
     assert.equal(patterns.filter((pattern) => pattern.test(`/repo/tests/${file}`)).length, 1, file);
