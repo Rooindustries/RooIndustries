@@ -331,6 +331,10 @@ run("inputs-need-form", {
       startNewDocument(type.name); }}>New</button></div>; }`,
     `function Gate() { return <div><input /><button onClick={() => { switch (validateCode()) { case true:
       openNext(); } }}>Next</button></div>; }`,
+    `function Help() { return <div><input /><button onClick={() => { switch (mode) { case checkMode(): openHelp(); }
+      }}>Help</button></div>; }`,
+    `function Rows() { return <div><input /><button onClick={() => { for (const row of checkedRows()) mark(row); }}>
+      Mark</button></div>; }`,
     `function Retry() { return <div><input /><button onClick={() => { for (; checkReady(); ) wait(); }}>
       Wait</button></div>; }`,
   ],

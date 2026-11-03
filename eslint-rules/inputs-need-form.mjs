@@ -21,7 +21,10 @@ const guardKeys = {
   WhileStatement: "test",
   DoWhileStatement: "test",
   ForStatement: "test",
+  ForInStatement: "right",
+  ForOfStatement: "right",
   SwitchStatement: "discriminant",
+  SwitchCase: "test",
 };
 
 const isGuard = (call) => {
