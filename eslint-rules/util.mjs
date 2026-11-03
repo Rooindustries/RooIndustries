@@ -51,8 +51,15 @@ export const enclosingComponent = (context, node) =>
     .reverse()
     .find((item) => isFunction(item) && isCapitalized(functionName(item)));
 
+const staticString = (node) => {
+  if (node?.type === "Literal" && typeof node.value === "string") return node.value;
+  if (node?.type === "TemplateLiteral" && node.expressions.length === 0) return node.quasis[0].value.cooked;
+  return "";
+};
+
 export const propertyName = (property) => {
-  if (property?.type !== "Property" || property.computed) return "";
+  if (property?.type !== "Property") return "";
+  if (property.computed) return staticString(property.key);
   if (property.key.type === "Identifier") return property.key.name;
   if (property.key.type === "Literal") return String(property.key.value);
   return "";
@@ -61,10 +68,7 @@ export const propertyName = (property) => {
 export const memberName = (member) => {
   if (member?.type !== "MemberExpression") return "";
   if (!member.computed && member.property.type === "Identifier") return member.property.name;
-  if (member.computed && member.property.type === "Literal" && typeof member.property.value === "string") {
-    return member.property.value;
-  }
-  return "";
+  return member.computed ? staticString(member.property) : "";
 };
 
 export const referenceName = (node) => (node?.type === "Identifier" ? node.name : memberName(node));

@@ -179,6 +179,7 @@ run("fetch-needs-deadline", {
     `function load(url, options) { return fetch(url, options); }`,
     `const options = { signal: requestDeadline() }; fetch(url, options);`,
     `const base = { signal: requestDeadline() }; fetch(url, { ...base, method: "POST" });`,
+    `fetch(url, { ["signal"]: requestDeadline() });`,
   ],
   invalid: [
     {
@@ -381,6 +382,10 @@ run("no-client-only-public-content", {
       { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
     `export default function Terms(props = {}) { const [data, setData] = useState(props.initialData); useEffect(() =>
       { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Terms(props) { const { ["initialData"]: seed } = props; const [data, setData] =
+      useState(seed); useEffect(() => { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Faq(props) { const [data, setData] = useState(props[\`initialFaq\`]); useEffect(() =>
+      { getPublicContent("faq").then(setData); }, []); return <p>{data}</p>; }`,
     `export default function Upgrade({ slug }) { useEffect(() => { getPublicContent("upgrade", { slug }); },
       [slug]); return null; }`,
   ],
