@@ -15,29 +15,35 @@ const textTypes = new Set(["text", "email", "password", "tel", "url", "number", 
 const submitVerb =
   /^(handle)?(submit|save|update|check|apply|validate|login|register|confirm|send|verify|review)/i;
 
-const guardKeys = {
-  IfStatement: "test",
-  ConditionalExpression: "test",
-  WhileStatement: "test",
-  DoWhileStatement: "test",
-  ForStatement: "test",
-  ForInStatement: "right",
-  ForOfStatement: "right",
-  SwitchStatement: "discriminant",
-  SwitchCase: "test",
-};
+const settles = (node, parent) =>
+  parent.type === "MemberExpression" &&
+  parent.object === node &&
+  parent.parent?.type === "CallExpression" &&
+  parent.parent.callee === parent &&
+  ["then", "catch", "finally"].includes(referenceName(parent));
 
-const isGuard = (call) => {
-  for (let current = call; current.parent && !isFunction(current); current = current.parent) {
-    const parent = current.parent;
-    if (Object.hasOwn(guardKeys, parent.type) && parent[guardKeys[parent.type]] === current) return true;
-    if (parent.type === "LogicalExpression" && parent.left === current) return true;
+const passesResult = (node, parent) =>
+  parent.type === "AwaitExpression" ||
+  parent.type === "ChainExpression" ||
+  parent.type === "SequenceExpression" ||
+  (parent.type === "UnaryExpression" && parent.operator === "void") ||
+  (parent.type === "LogicalExpression" && parent.right === node) ||
+  (parent.type === "ConditionalExpression" && parent.test !== node);
+
+const discardsResult = (call) => {
+  for (let node = call; node.parent; ) {
+    const parent = node.parent;
+    if (parent.type === "ExpressionStatement" || parent.type === "ReturnStatement") return true;
+    if (parent.type === "ArrowFunctionExpression") return parent.body === node;
+    if (settles(node, parent)) node = parent.parent;
+    else if (passesResult(node, parent)) node = parent;
+    else return false;
   }
   return false;
 };
 
 const isSubmitCall = (node) =>
-  node.type === "CallExpression" && submitVerb.test(calleeName(node)) && !isGuard(node);
+  node.type === "CallExpression" && submitVerb.test(calleeName(node)) && discardsResult(node);
 
 const submitsOnClick = (attr) => {
   const expression = attr?.value?.type === "JSXExpressionContainer" ? attr.value.expression : null;
@@ -45,7 +51,7 @@ const submitsOnClick = (attr) => {
   if (expression.type === "Identifier" || expression.type === "MemberExpression") {
     return submitVerb.test(referenceName(expression));
   }
-  return isSubmitCall(expression) || containsNode(expression, isSubmitCall, { skip: isFunction });
+  return containsNode(expression, isSubmitCall, { skip: isFunction });
 };
 
 const insideForm = (context, node) =>

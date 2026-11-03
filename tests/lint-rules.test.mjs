@@ -335,6 +335,8 @@ run("inputs-need-form", {
       }}>Help</button></div>; }`,
     `function Rows() { return <div><input /><button onClick={() => { for (const row of checkedRows()) mark(row); }}>
       Mark</button></div>; }`,
+    `function Ready() { return <div><input /><button onClick={() => { const ready = checkReady(); if (ready) openHelp();
+      }}>Help</button></div>; }`,
     `function Retry() { return <div><input /><button onClick={() => { for (; checkReady(); ) wait(); }}>
       Wait</button></div>; }`,
   ],
@@ -361,6 +363,16 @@ run("inputs-need-form", {
       name: "submit after an early return",
       code: `function Send() { return <div><input /><button onClick={() => { if (!validateCode()) return;
         form.submit(); }}>Send</button></div>; }`,
+      errors: [{ messageId: "form" }],
+    },
+    {
+      name: "submit settled with then",
+      code: `function Code() { return <div><input /><button onClick={() => saveCode().then(close)}>Save</button></div>; }`,
+      errors: [{ messageId: "form" }],
+    },
+    {
+      name: "submit behind a logical guard",
+      code: `function Send() { return <div><input /><button onClick={() => ready && handleSubmit()}>Send</button></div>; }`,
       errors: [{ messageId: "form" }],
     },
     {
@@ -422,10 +434,17 @@ run("no-hidden-server-motion", {
     `function Dialog({ open }) { return <AnimatePresence>{open && <motion.div initial={{ opacity: 0 }} animate={{
       opacity: 1 }} />}</AnimatePresence>; }`,
     `function Fade() { return <motion.div initial={{ ["opacity"]: 0, opacity: 1 }} animate={{ opacity: 1 }} />; }`,
+    `function Fade() { return <motion.div initial={{ ["opacity"]: 0, ...{ opacity: 1 } }} animate={{ opacity: 1 }} />; }`,
     `function Pay() { const variants = { ["hidden"]: { opacity: 0 }, hidden: { opacity: 1 } }; return <motion.section
       variants={variants} initial="hidden" animate="hidden" />; }`,
   ],
   invalid: [
+    {
+      name: "spread that hides last",
+      code: `function Fade() { const start = { opacity: 0 }; return <motion.div initial={{ opacity: 1, ...start }}
+        animate={{ opacity: 1 }} />; }`,
+      errors: [{ messageId: "hidden" }],
+    },
     {
       name: "computed opacity key that wins",
       code: `function Fade() { return <motion.div initial={{ opacity: 1, ["opacity"]: 0 }} animate={{ opacity: 1 }} />; }`,
