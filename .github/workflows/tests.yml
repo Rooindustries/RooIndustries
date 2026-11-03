@@ -428,10 +428,15 @@ jobs:
   record-tested-tree:
     name: Record the tested tree
     if: >-
-      ${{ !cancelled() && github.event_name == 'pull_request'
-      && !contains(needs.*.result, 'failure')
-      && !contains(needs.*.result, 'cancelled')
-      && !contains(needs.*.result, 'skipped') }}
+      !cancelled() && github.event_name == 'pull_request'
+      && needs.monitoring.result == 'success'
+      && needs.jest.result == 'success'
+      && needs.booking-model.result == 'success'
+      && needs.playwright.result == 'success'
+      && needs.routes.result == 'success'
+      && needs.native.result == 'success'
+      && needs.native-payouts.result == 'success'
+      && needs.revalidation.result == 'success'
     needs: [monitoring, jest, booking-model, playwright, routes, native, native-payouts, revalidation]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
