@@ -476,7 +476,6 @@ export default function Payment({ hideFooter = false }) {
   }, [holdExpiresAt, processingDodoReturn, creatingFree, navigate, navState, location]);
 
   const {
-    referralPercent,
     couponDiscountAmount,
     canStackCouponWithReferral,
     referralDiscountAmount,
@@ -485,6 +484,7 @@ export default function Payment({ hideFooter = false }) {
     finalAmount,
     effectiveDiscountAmount,
     discountPercentCombined,
+    displayBaseAmount,
   } = calculateCheckoutDiscounts({
     baseAmount,
     referral,
@@ -632,6 +632,7 @@ export default function Payment({ hideFooter = false }) {
       ? setTimeout(() => controller.abort(), PAYMENT_FETCH_TIMEOUT_MS)
       : null;
     let active = true;
+    setServerQuote(null);
     setQuoteLoading(true);
 
     fetchCheckoutQuote(
@@ -1932,7 +1933,7 @@ export default function Payment({ hideFooter = false }) {
                 <dd className="sm:text-right">
                   {(referralDiscountAmount > 0 || couponDiscountAmount > 0) && (
                     <span className="mr-2 text-sm text-ink-secondary line-through">
-                      ${baseAmount.toFixed(2)}
+                      ${displayBaseAmount.toFixed(2)}
                     </span>
                   )}
                   <span className="text-2xl font-extrabold text-accent">
