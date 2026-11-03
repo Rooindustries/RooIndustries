@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { once } from "node:events";
+import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { DOMAIN, TOKEN, startVercel } from "./fixtures/fake-vercel.mjs";
+import { withLockTools, withRecovery } from "./fixtures/production-recovery.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const script = path.join(root, "scripts/deploy-rollback.mjs");
@@ -30,6 +33,74 @@ const withVercel = async (options, body) => {
 };
 
 const mutations = requests => requests.filter(request => request.method !== "GET");
+const withAutomatic = (options, body) => withRecovery({ site: { status: { "/payment": 500 } }, vercel: options },
+  async ({ vercel, exec }) => body(vercel, () => exec()));
+const automaticMutations = requests => mutations(requests).filter(request => !request.path.startsWith("/repos/"));
+
+test("without flock, manual rollback and undo keep their one-command behavior", () => withLockTools(["perl"], toolPath => withVercel({}, async (vercel, exec) => {
+  const rollback = await exec([], { PATH: toolPath });
+  assert.equal(rollback.code, 0, rollback.output);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
+  const undo = await exec(["--undo"], { PATH: toolPath });
+  assert.equal(undo.code, 0, undo.output);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
+  assert.equal(vercel.state.project.autoAssignCustomDomains, true);
+  assert.equal(mutations(vercel.requests).length, 2);
+})));
+
+for (const holderUsesPerl of [false, true]) {
+  test(`without flock, ${holderUsesPerl ? "Perl" : "standard"} locking excludes the other interface until its owner crashes`, () => withLockTools(["perl"], strippedPath => withVercel({}, async (vercel, exec) => {
+    const moduleUrl = pathToFileURL(path.join(root, "scripts/lib/production-recovery-lock.mjs")).href;
+    const holder = spawn(process.execPath, ["--input-type=module", "-e", `
+      import { withRecoveryLock } from ${JSON.stringify(moduleUrl)};
+      await withRecoveryLock(${JSON.stringify(DOMAIN)}, async () => {
+        process.stdout.write("locked\\n");
+        process.stdin.resume();
+        await new Promise(resolve => process.stdin.once("end", resolve));
+      });
+    `], { env: { PATH: holderUsesPerl ? strippedPath : process.env.PATH, VERCEL_API_URL: vercel.origin }, stdio: ["pipe", "pipe", "pipe"] });
+    const closed = once(holder, "close");
+    let holderError = "";
+    holder.stderr.on("data", chunk => { holderError += chunk; });
+    let pending;
+    try {
+      await Promise.race([
+        once(holder.stdout, "data", { signal: AbortSignal.timeout(5000) }).then(([chunk]) => assert.match(String(chunk), /locked/)),
+        closed.then(() => { throw new Error(`Lock owner exited before acquiring its lock: ${holderError}`); }),
+      ]);
+      let finished = false;
+      pending = exec([], { PATH: holderUsesPerl ? process.env.PATH : strippedPath }).then(result => { finished = true; return result; });
+      await new Promise(resolve => setTimeout(resolve, 250));
+      assert.equal(finished, false, "The other interface must wait for the existing lock.");
+      assert.deepEqual(vercel.requests, []);
+      holder.kill("SIGKILL");
+      await closed;
+      const result = await pending;
+      assert.equal(result.code, 0, result.output);
+      assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
+      assert.equal(mutations(vercel.requests).length, 1);
+    } finally {
+      if (holder.exitCode === null && holder.signalCode === null) holder.kill("SIGKILL");
+      await closed;
+      if (pending) await pending;
+    }
+  })));
+}
+
+test("without flock or Perl, recovery names its prerequisite and never accesses the provider", () => withLockTools([], toolPath => withVercel({}, async (vercel, exec) => {
+  const result = await exec([], { PATH: toolPath });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /flock or Perl with native flock support/);
+  assert.deepEqual(vercel.requests, []);
+})));
+
+test("an explicit flock refusal never tries a different lock interface", () => withLockTools(["perl"], toolPath => withVercel({}, async (vercel, exec) => {
+  fs.writeFileSync(path.join(toolPath, "flock"), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
+  const result = await exec([], { PATH: toolPath });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /Could not acquire the production recovery lock/);
+  assert.deepEqual(vercel.requests, []);
+})));
 
 test("dry run shows the live and previous production deployments and changes nothing", () => withVercel({}, async (vercel, exec) => {
   const result = await exec(["--dry-run"]);
@@ -145,22 +216,24 @@ test("a 5xx answer to the rollback leaves production's state unknown even when n
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
 }));
 
-test("a newer deployment that goes live right before the rollback is reported, not silently replaced", () => withVercel({
-  swapLiveBeforeMutation: true,
+test("automatic rollback preserves a newer deployment promoted after the last alias response", () => withAutomatic({
+  swapLiveAfterAliasRead: 3,
 }, async (vercel, exec) => {
-  const result = await exec(["--if-live", LIVE_URL]);
-  assert.equal(result.code, 2, result.output);
-  assert.match(result.output, /moved it away from dpl_newer, not dpl_live/);
-  assert.match(result.output, /--undo/);
+  const result = await exec();
+  assert.equal(result.code, 1, result.output);
+  assert.deepEqual(mutations(vercel.requests), []);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_newer");
+  assert.equal(vercel.state.project.autoAssignCustomDomains, true);
 }));
 
-test("a rollback Vercel records without its source deployment is unconfirmed, even when a newer deploy slipped in", () => withVercel({
-  swapLiveBeforeMutation: true,
+test("automatic rollback refuses even when the provider would omit the replaced deployment", () => withAutomatic({
+  swapLiveAfterAliasRead: 3,
   omitFromDeployment: true,
 }, async (vercel, exec) => {
-  const result = await exec(["--if-live", LIVE_URL]);
-  assert.equal(result.code, 2, result.output);
-  assert.match(result.output, /didn't record which deployment it replaced/);
+  const result = await exec();
+  assert.equal(result.code, 1, result.output);
+  assert.deepEqual(mutations(vercel.requests), []);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_newer");
 }));
 
 test("rollback returns to the deployment that served production before the live one, not to a newer bad one", () => withVercel({
@@ -295,13 +368,13 @@ test("refuses while a rolling release is moving traffic", () => withVercel({
   assert.deepEqual(mutations(vercel.requests), []);
 }));
 
-test("automatic rollback leaves production alone when a newer deployment goes live before the request", () => withVercel({
+test("automatic rollback leaves production alone when a newer deployment goes live before the request", () => withAutomatic({
   swapLiveOnAliasRead: 2,
   swapLiveTo: "dpl_newer",
 }, async (vercel, exec) => {
-  const result = await exec(["--if-live", LIVE_URL]);
+  const result = await exec();
   assert.notEqual(result.code, 0, result.output);
-  assert.match(result.output, /no longer live/);
+  assert.match(result.output, /not live|no longer live|not the newest/);
   assert.deepEqual(mutations(vercel.requests), []);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_newer");
 }));
@@ -328,16 +401,29 @@ test("rollback fails when the alias job fails even if the domain already moved",
   assert.doesNotMatch(result.output, /now serves/);
 }));
 
-test("automatic rollback acts when the failing deployment is live and the newest", () => withVercel({}, async (vercel, exec) => {
-  const result = await exec(["--if-live", LIVE_URL, "--reason", "money-path smoke failed"]);
-  assert.equal(result.code, 0, result.output);
-  assert.equal(mutations(vercel.requests).length, 1);
+test("automatic rollback serializes and verifies the expected live source", () => withAutomatic({}, async (vercel, exec) => {
+  const result = await exec();
+  assert.equal(result.code, 1, result.output);
+  assert.equal(automaticMutations(vercel.requests).length, 1);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
+  assert.equal(vercel.state.project.lastAliasRequest.fromDeploymentId, "dpl_live");
 }));
+
+for (const [name, options] of Object.entries({
+  "the replaced deployment is missing": { omitFromDeployment: true },
+  "the response is lost": { dropMutationResponse: true },
+})) {
+  test(`automatic recovery reports ambiguous state when ${name}`, () => withAutomatic(options, async (vercel, exec) => {
+    const result = await exec();
+    assert.equal(result.code, 1, result.output);
+    assert.equal(automaticMutations(vercel.requests).length, 1);
+    assert.doesNotMatch(result.output, /now serves dpl_previous\.$/m);
+  }));
+}
 
 const autoRefusals = {
   "a different deployment is live": { arg: "https://rooindustries-previous-roo-industries.vercel.app" },
-  "the failing deployment is not the newest production deployment": {
+  "the requested older source has no passed-gate proof": {
     arg: "https://rooindustries-previous-roo-industries.vercel.app",
     tweak: state => { state.aliases[DOMAIN].deploymentId = "dpl_previous"; },
   },

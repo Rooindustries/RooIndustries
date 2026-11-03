@@ -5,11 +5,10 @@ on:
 
 permissions:
   contents: read
+  deployments: write
 
-# Every queued smoke waits its turn in order (queue: max), so an older event can't push out the newest
-# deployment's smoke. Keying on environment and state keeps Preview and unfinished events in their own queues.
 concurrency:
-  group: production-smoke-${{ github.event.deployment.environment }}-${{ github.event.deployment_status.state }}
+  group: production-smoke
   queue: max
   cancel-in-progress: false
 
@@ -17,7 +16,7 @@ jobs:
   smoke:
     name: Money-path smoke
     if: github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, roo-production-smoke]
     timeout-minutes: 30
     env:
       DEPLOYMENT_URL: ${{ github.event.deployment_status.environment_url }}
@@ -25,14 +24,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - name: Smoke the money path and roll back a failing deploy
+      - run: npx playwright install chromium
+      - name: Smoke the money path and recover a failing deployment
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PRODUCTION_RECOVERY_EPOCH: ${{ vars.PRODUCTION_RECOVERY_EPOCH }}
         run: npm run --silent deploy:gate
