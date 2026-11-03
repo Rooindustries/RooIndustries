@@ -13,6 +13,7 @@ import { useBookingDialogPending } from "../lib/bookingDialogHold";
 import { beginCheckoutConfirmation } from "../lib/checkoutConfirmation";
 import {
   calculateCheckoutDiscounts,
+  fetchCheckoutQuote,
   formatCouponValue,
   resolveCheckoutCode,
   sanitizeCouponForCheckout,
@@ -633,10 +634,8 @@ export default function Payment({ hideFooter = false }) {
     let active = true;
     setQuoteLoading(true);
 
-    fetch("/api/payment/quote", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    fetchCheckoutQuote(
+      {
         packageTitle,
         originalOrderId: bookingData.originalOrderId || "",
         startTimeUTC: bookingData.startTimeUTC || "",
@@ -644,14 +643,10 @@ export default function Payment({ hideFooter = false }) {
         referralCode: referral?.code || "",
         couponCode: coupon?.code || "",
         upgradeIntentToken: bookingData.upgradeIntentToken || "",
-      }),
-      signal: controller?.signal,
-    })
-      .then(async (response) => {
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok || !data?.ok) {
-          throw new Error(data?.error || "Unable to confirm checkout price.");
-        }
+      },
+      { signal: controller?.signal }
+    )
+      .then((data) => {
         if (!active) return;
         setServerQuote(data.quote || null);
         setQuoteFingerprint(
@@ -1916,7 +1911,7 @@ export default function Payment({ hideFooter = false }) {
                   ) : null}
                 </dd>
               </div>
-              {referralPercent > 0 && (
+              {referralDiscountAmount > 0 && referral && (
                 <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
                   <dt className="text-ink-muted">Referral</dt>
                   <dd className="font-semibold text-ink sm:text-right">
@@ -1935,7 +1930,7 @@ export default function Payment({ hideFooter = false }) {
               <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr] sm:items-baseline">
                 <dt className="font-semibold text-ink">{dodoTaxExclusive ? "Subtotal" : "Total"}</dt>
                 <dd className="sm:text-right">
-                  {(referralPercent > 0 || couponDiscountAmount > 0) && (
+                  {(referralDiscountAmount > 0 || couponDiscountAmount > 0) && (
                     <span className="mr-2 text-sm text-ink-secondary line-through">
                       ${baseAmount.toFixed(2)}
                     </span>

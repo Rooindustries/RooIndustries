@@ -181,13 +181,41 @@ const calculateFinalDiscounts = ({ baseAmount, client, serverQuote }) => {
       ? clamp(toMoney((effectiveDiscountAmount / baseAmount) * 100), 0, 100)
       : 0;
 
+  const quotedMoney = (name) => {
+    if (!hasQuotedNetAmount && !quotedIsFree) return null;
+    const value = parseMoneyValue(serverQuote?.[name]);
+    return value === null ? null : clamp(value, 0, baseAmount);
+  };
+  const quotedCoupon = quotedMoney("couponDiscountAmount");
+  const quotedReferral = quotedMoney("referralDiscountAmount");
+  const quotedReferralPercent = parseMoneyValue(serverQuote?.referralDiscountPercent);
+
   return {
     isFree,
     preventedFreeReduction,
     finalAmount,
     effectiveDiscountAmount,
     discountPercentCombined,
+    ...(quotedCoupon === null ? {} : { couponDiscountAmount: quotedCoupon }),
+    ...(quotedReferral === null ? {} : { referralDiscountAmount: quotedReferral }),
+    ...(quotedReferral === null || quotedReferralPercent === null
+      ? {}
+      : { referralPercent: clampPercent(quotedReferralPercent) }),
   };
+};
+
+export const fetchCheckoutQuote = async (body, { signal }) => {
+  const response = await fetch("/api/payment/quote", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.error || "Unable to confirm checkout price.");
+  }
+  return data;
 };
 
 export const calculateCheckoutDiscounts = ({
