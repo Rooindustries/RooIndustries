@@ -16,7 +16,7 @@ const routes = [
 ];
 
 test.describe("Non-JS crawlability", () => {
-  test("/payment shows its content without waiting for JavaScript", async ({ page }) => {
+  test("/payment's own section doesn't start hidden on the server", async ({ page }) => {
     await page.goto("/payment", { waitUntil: "domcontentloaded" });
     const section = page.locator("section.booking-payment");
     await expect(section).toHaveCount(1);

@@ -37,7 +37,6 @@ const variantObject = (context, node, variantsAttr, key) => {
 const mountedConditionally = (context, node) =>
   ancestors(context, node).some(
     (item) =>
-      (item.type === "JSXElement" && jsxName(item.openingElement.name) === "AnimatePresence") ||
       (item.type === "LogicalExpression" && item.operator === "&&") ||
       item.type === "ConditionalExpression",
   );

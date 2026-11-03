@@ -338,6 +338,8 @@ run("inputs-need-form", {
 
 run("no-client-only-public-content", {
   valid: [
+    `export default function Terms(props) { const [data, setData] = useState(props.initialData); useEffect(() =>
+      { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
     `export default function Terms({ initialData }) { const [data, setData] = useState(initialData); useEffect(() =>
       { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
     `export default function Upgrade({ slug }) { useEffect(() => { getPublicContent("upgrade", { slug }); },
@@ -348,6 +350,12 @@ run("no-client-only-public-content", {
       name: "Terms before #195",
       code: `export default function Terms() { const [data, setData] = useState(null); useEffect(() => {
         getPublicContent("terms").then((d) => setData(d)); }, []); return <p>{data}</p>; }`,
+      errors: [{ messageId: "clientOnly" }],
+    },
+    {
+      name: "a bare props parameter with no initial data",
+      code: `export default function Terms(props) { const [data, setData] = useState(null); useEffect(() => {
+        getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
       errors: [{ messageId: "clientOnly" }],
     },
   ],
@@ -370,6 +378,12 @@ run("no-hidden-server-motion", {
       name: "variant that starts hidden",
       code: `function Pay() { const containerVariants = { hidden: { opacity: 0 }, visible: { opacity: 1 } };
         return <motion.section variants={containerVariants} initial="hidden" animate="visible" />; }`,
+      errors: [{ messageId: "hidden" }],
+    },
+    {
+      name: "always-mounted child inside AnimatePresence",
+      code: `function Hero() { return <AnimatePresence><motion.div initial={{ opacity: 0 }} animate={{ opacity: 1
+        }}>Hero</motion.div></AnimatePresence>; }`,
       errors: [{ messageId: "hidden" }],
     },
   ],

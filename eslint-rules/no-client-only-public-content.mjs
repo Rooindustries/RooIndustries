@@ -1,4 +1,4 @@
-import { ancestors, calleeName, enclosingComponent } from "./util.mjs";
+import { ancestors, calleeName, containsNode, enclosingComponent } from "./util.mjs";
 
 const receivesInitialData = (component) => {
   const props = component.params[0];
@@ -11,7 +11,16 @@ const receivesInitialData = (component) => {
         /^initial/.test(property.key.name),
     );
   }
-  return props.type === "Identifier";
+  if (props.type !== "Identifier") return false;
+  return containsNode(
+    component.body,
+    (node) =>
+      node.type === "MemberExpression" &&
+      !node.computed &&
+      node.object.type === "Identifier" &&
+      node.object.name === props.name &&
+      /^initial/.test(node.property.name),
+  );
 };
 
 export default {
