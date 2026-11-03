@@ -1,7 +1,6 @@
 import { clearBookingConfirmation, createBookingConfirmation } from "../lib/confirmationReceipt";
 import React, {
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -9,12 +8,12 @@ import React, {
 } from "react";
 import { createPortal } from "react-dom";
 import { useDialogFocus } from "../lib/useDialogFocus";
-import { BookingDialogActionsContext, useBookingDialogPending } from "../lib/bookingDialogHold";
+import { useBookingDialogPending } from "../lib/bookingDialogHold";
 import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { getPublicContent } from "../lib/publicContentClient";
 import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
 import { useLocation, useNavigate, Link } from "react-router-dom";
-import { motion, AnimatePresence, useIsPresent } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
@@ -298,7 +297,7 @@ function BookingStepTracker({ step }) {
         </div>
         <span
           aria-hidden="true"
-          className="absolute top-2 whitespace-nowrap text-sm font-medium text-accent transition-all duration-300"
+          className="absolute top-2 whitespace-nowrap text-[11px] font-medium text-accent transition-all duration-300"
           style={{
             left: STEP_PROGRESS_WIDTHS[step],
             transform: step === 3 ? "translateX(-100%)" : "translateX(-50%)",
@@ -465,14 +464,6 @@ const getUtcDateFromHold = (hold) => {
   return Number.isNaN(fromStart.getTime()) ? null : fromStart;
 };
 
-function BookingStepActions({ children, className }) {
-  const host = useContext(BookingDialogActionsContext);
-  const present = useIsPresent();
-  if (!present) return null;
-  const content = <div className={`booking-step-actions w-full ${className}`}>{children}</div>;
-  return host ? createPortal(content, host) : content;
-}
-
 export default function BookingForm() {
   useEffect(() => { clearBookingConfirmation(); }, []);
   const formRootRef = useRef(null);
@@ -496,7 +487,7 @@ export default function BookingForm() {
 
   const [step, setStep] = useState(1);
   useEffect(() => {
-    const body = formRootRef.current?.closest(".booking-dialog-body");
+    const body = formRootRef.current?.closest(".booking-dialog-stage");
     if (body) body.scrollTop = 0;
   }, [step]);
   const [settings, setSettings] = useState(null);
@@ -2563,7 +2554,7 @@ export default function BookingForm() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3, ease: "easeInOut" }}
-                  className="booking-step-panel max-w-3xl mx-auto bg-surface-card rounded-2xl text-center shadow-[0_0_25px_rgba(14,165,233,0.15)]"
+                  className="max-w-3xl mx-auto bg-surface-card border border-line-input rounded-2xl p-8 text-center shadow-[0_0_25px_rgba(14,165,233,0.15)]"
                 >
                   <BookingStepTracker step={1} />
                   <h3 className="text-accent text-lg font-semibold mb-2">
@@ -2852,7 +2843,7 @@ export default function BookingForm() {
                     </>
                   )}
 
-                  <BookingStepActions className="mt-10 max-w-3xl mx-auto">
+                  <div className="mt-10">
                     <div className="booking-slot-actions">
                       <button
                         type="button"
@@ -2894,7 +2885,7 @@ export default function BookingForm() {
                     {errorStep1 && (
                       <p role="alert" className="text-danger-text mt-3 text-sm">{errorStep1}</p>
                     )}
-                  </BookingStepActions>
+                  </div>
                 </motion.div>
               )}
 
@@ -2905,7 +2896,7 @@ export default function BookingForm() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3, ease: "easeInOut" }}
-                  className="booking-step-panel max-w-4xl mx-auto bg-surface-card rounded-2xl shadow-[0_0_25px_rgba(14,165,233,0.15)]"
+                  className="max-w-4xl mx-auto bg-surface-card border border-line-input rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)]"
                 >
                   <BookingStepTracker step={2} />
                   <HoldBanner
@@ -2935,14 +2926,14 @@ export default function BookingForm() {
 
                   <form
                     id="booking-details-form"
-                    className="space-y-4"
+                    className="flex flex-col gap-4"
                     noValidate
                     onSubmit={(event) => {
                       event.preventDefault();
                       handleReviewBeforePayment();
                     }}
                   >
-                    <label htmlFor="booking-discord" className="block text-left text-sm font-semibold text-ink">Discord username</label>
+                    <label htmlFor="booking-discord" className="sr-only">Discord username</label>
                     <input
                       id="booking-discord"
                       name="discord"
@@ -2954,7 +2945,7 @@ export default function BookingForm() {
                       value={form.discord}
                       className={detailFieldClass("discord")}
                     />
-                    <label htmlFor="booking-email" className="block text-left text-sm font-semibold text-ink">Booking email</label>
+                    <label htmlFor="booking-email" className="sr-only">Booking email</label>
                     <input
                       id="booking-email"
                       name="email"
@@ -2975,7 +2966,7 @@ export default function BookingForm() {
                         {emailError}
                       </p>
                     )}
-                    <label htmlFor="booking-specs" className="block text-left text-sm font-semibold text-ink">PC specifications</label>
+                    <label htmlFor="booking-specs" className="sr-only">PC specifications</label>
                     <input
                       id="booking-specs"
                       name="specs"
@@ -2987,7 +2978,7 @@ export default function BookingForm() {
                       value={form.specs}
                       className={detailFieldClass("specs")}
                     />
-                    <label htmlFor="booking-mainGame" className="block text-left text-sm font-semibold text-ink">Main game or application</label>
+                    <label htmlFor="booking-mainGame" className="sr-only">Main game or application</label>
                     <input
                       id="booking-mainGame"
                       name="mainGame"
@@ -2999,7 +2990,7 @@ export default function BookingForm() {
                       value={form.mainGame}
                       className={detailFieldClass("mainGame")}
                     />
-                    <label htmlFor="booking-notes" className="block text-left text-sm font-semibold text-ink">Extra booking requirements (optional)</label>
+                    <label htmlFor="booking-notes" className="sr-only">Extra booking requirements (optional)</label>
                     <textarea
                       id="booking-notes"
                       name="notes"
@@ -3019,7 +3010,7 @@ export default function BookingForm() {
                     Read the FAQ <span className="sr-only">(opens in a new tab)</span>
                   </a>
 
-                  <BookingStepActions className="mt-6 max-w-4xl mx-auto">
+                  <div className="mt-6">
                     <div className="booking-actions-grid grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <button
                         type="button"
@@ -3045,7 +3036,7 @@ export default function BookingForm() {
                     {errorStep2 && (
                       <p id="booking-details-error" role="alert" className="mt-3 text-sm text-danger-text">{errorStep2}</p>
                     )}
-                  </BookingStepActions>
+                  </div>
                 </motion.div>
               )}
 
@@ -3056,7 +3047,7 @@ export default function BookingForm() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3, ease: "easeInOut" }}
-                  className="booking-step-panel max-w-3xl mx-auto bg-surface-card rounded-2xl shadow-[0_0_25px_rgba(14,165,233,0.15)]"
+                  className="max-w-3xl mx-auto bg-surface-card border border-line-input rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)]"
                 >
                   <BookingStepTracker step={3} />
                   <HoldBanner
@@ -3272,7 +3263,7 @@ export default function BookingForm() {
                     </dl>
                   </div>
 
-                  <BookingStepActions className="mt-6 max-w-3xl mx-auto">
+                  <div className="mt-6">
                     <div className="booking-actions-grid grid grid-cols-1 gap-4 sm:grid-cols-2">
                       {isPaymentPendingHold ? (
                         paymentInOtherTab ? (
@@ -3362,7 +3353,7 @@ export default function BookingForm() {
                     {errorStep2 && (
                       <p role="alert" className="mt-3 text-sm text-danger-text">{errorStep2}</p>
                     )}
-                  </BookingStepActions>
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>

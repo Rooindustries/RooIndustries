@@ -1821,7 +1821,7 @@ export default function Payment({ hideFooter = false }) {
 
   return (
     <motion.section
-      className="booking-payment relative z-10 max-w-3xl mx-auto text-ink"
+      className="relative z-10 py-4 px-6 max-w-3xl mx-auto text-ink"
       variants={containerVariants}
       initial={false}
       animate="visible"
