@@ -13,6 +13,7 @@ const DESKTOP_PADDING_Y = 16;
 const DESKTOP_SCALE_BOOST = 1.03;
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 1.2;
+const CLOSE_ROW_HEIGHT = 48;
 const CONTENT_REVEAL_FALLBACK_MS = 300;
 const CONTENT_READY_MAX_WAIT_MS = 1500;
 
@@ -28,12 +29,16 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     renderWidth: DESKTOP_BASE_WIDTH,
     wrapperWidth: 0,
     wrapperHeight: 0,
+    viewportWidth: 0,
+    viewportHeight: 0,
+    viewportTop: 0,
   });
   const lowPerformanceMode = useLowPerformanceMode();
   const [dynamicScale, setDynamicScale] = useState(1);
   const [isMobile, setIsMobile] = useState(false);
   const [renderWidth, setRenderWidth] = useState(DESKTOP_BASE_WIDTH);
   const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
+  const [viewport, setViewport] = useState(null);
   const [contentSwitch, setContentSwitch] = useState({ contentKey, revealPending: false });
   const restoreFocusRef = useRef(true);
   const lastFocusedInDialogRef = useRef(null);
@@ -51,17 +56,23 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     const stage = stageRef.current;
     if (!stage?.contains(target) || target === stage) return;
     const view = stage.getBoundingClientRect();
-    if (!view.height) return;
+    const visual = window.visualViewport;
+    const top = Math.max(view.top, visual ? visual.offsetTop : view.top);
+    const bottom = Math.min(view.bottom, visual ? visual.offsetTop + visual.height : view.bottom);
+    if (bottom <= top) return;
     const control = target.getBoundingClientRect();
     const descriptions = (target.getAttribute("aria-describedby") || "").split(/\s+/)
       .map(id => document.getElementById(id))
       .filter(node => node && stage.contains(node))
       .map(node => node.getBoundingClientRect());
     const controlBottom = Math.max(control.bottom, ...descriptions.map(rect => rect.bottom));
-    if (control.top < view.top + 8) {
-      stage.scrollTop -= view.top + 8 - control.top;
-    } else if (controlBottom > view.bottom - 8) {
-      stage.scrollTop += controlBottom - view.bottom + 8;
+    const available = bottom - top;
+    const span = controlBottom - control.top;
+    const margin = Math.max(0, Math.min(8, (available - span) / 2));
+    if (control.top < top + margin || span > available) {
+      stage.scrollTop -= top + margin - control.top;
+    } else if (controlBottom > bottom - margin) {
+      stage.scrollTop += controlBottom - bottom + margin;
     }
   }, []);
 
@@ -94,8 +105,10 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     if (!open) return undefined;
 
     const calculateLayout = () => {
+      const visual = window.visualViewport;
       const width = document.documentElement.clientWidth || window.innerWidth;
-      const height = window.innerHeight;
+      const height = visual?.height || window.innerHeight;
+      const top = visual?.offsetTop || 0;
       const currentIsMobile = isMobile || width < MOBILE_BREAKPOINT;
       const contentHeight = contentRef.current?.offsetHeight || 0;
 
@@ -107,7 +120,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
         scale = Math.min(width / baseWidth, 1);
       } else {
         const widthScale = ((width * 0.95) / baseWidth) * DESKTOP_SCALE_BOOST;
-        const heightScale = contentHeight ? (height - DESKTOP_PADDING_Y) / contentHeight : MAX_SCALE;
+        const heightScale = contentHeight ? (height - DESKTOP_PADDING_Y - CLOSE_ROW_HEIGHT) / contentHeight : MAX_SCALE;
         scale = Math.min(widthScale, heightScale);
       }
 
@@ -117,14 +130,20 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
         scale,
         renderWidth: baseWidth,
         wrapperWidth: contentRef.current ? baseWidth * scale : 0,
-        wrapperHeight: contentHeight * scale,
+        wrapperHeight: contentHeight ? CLOSE_ROW_HEIGHT + contentHeight * scale : 0,
+        viewportWidth: width,
+        viewportHeight: height,
+        viewportTop: top,
       };
       const prevLayout = lastLayoutRef.current;
       const changed =
         Math.abs(prevLayout.scale - nextLayout.scale) > 0.005 ||
         Math.abs(prevLayout.renderWidth - nextLayout.renderWidth) >= 1 ||
         Math.abs(prevLayout.wrapperWidth - nextLayout.wrapperWidth) >= 1 ||
-        Math.abs(prevLayout.wrapperHeight - nextLayout.wrapperHeight) >= 1;
+        Math.abs(prevLayout.wrapperHeight - nextLayout.wrapperHeight) >= 1 ||
+        prevLayout.viewportWidth !== nextLayout.viewportWidth ||
+        prevLayout.viewportHeight !== nextLayout.viewportHeight ||
+        prevLayout.viewportTop !== nextLayout.viewportTop;
 
       if (!changed) return;
 
@@ -132,6 +151,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       setDynamicScale(nextLayout.scale);
       setRenderWidth(nextLayout.renderWidth);
       setWrapperSize({ width: nextLayout.wrapperWidth, height: nextLayout.wrapperHeight });
+      setViewport({ top, left: 0, width, height });
     };
 
     const scheduleLayout = () => {
@@ -141,16 +161,24 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
 
     calculateLayout();
     window.addEventListener("resize", scheduleLayout);
+    window.visualViewport?.addEventListener("resize", scheduleLayout);
+    window.visualViewport?.addEventListener("scroll", scheduleLayout);
     const observer = new ResizeObserver(scheduleLayout);
     if (contentRef.current) observer.observe(contentRef.current);
 
     return () => {
       window.removeEventListener("resize", scheduleLayout);
+      window.visualViewport?.removeEventListener("resize", scheduleLayout);
+      window.visualViewport?.removeEventListener("scroll", scheduleLayout);
       window.cancelAnimationFrame(layoutFrameRef.current);
       layoutFrameRef.current = 0;
       observer.disconnect();
     };
   }, [isMobile, children, open, contentKey]);
+
+  useLayoutEffect(() => {
+    if (open && viewport) revealFocusedControl(document.activeElement);
+  }, [open, viewport, revealFocusedControl]);
 
   useLayoutEffect(() => {
     const stage = stageRef.current;
@@ -242,7 +270,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
         Math.abs(wrapper.width - wrapperWidth) < 1 &&
         Math.abs(wrapper.height - wrapperHeight) < 1 &&
         Math.abs(content.width - wrapperWidth) < 1 &&
-        Math.abs(content.height - wrapperHeight) < 1;
+        Math.abs(content.height + CLOSE_ROW_HEIGHT - wrapperHeight) < 1;
       if (layoutApplied) {
         reveal();
         return;
@@ -323,13 +351,15 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
   };
 
   const paddingBlockValue = (isMobile ? MOBILE_PADDING_Y : DESKTOP_PADDING_Y) / 2;
+  const paddingTopValue = Math.max(0, paddingBlockValue - (isMobile ? CLOSE_ROW_HEIGHT : 0));
 
   return (
     <AnimatePresence>
       {open && (
         <motion.div
           ref={stageRef}
-          className="booking-dialog-stage fixed inset-0 z-[70] overflow-y-auto overflow-x-hidden"
+          className="booking-dialog-stage fixed z-[70] overflow-y-auto overflow-x-hidden"
+          style={viewport || { inset: 0 }}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -344,7 +374,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
 
           <div
             className="min-h-full w-full flex flex-col cursor-pointer"
-            style={{ paddingTop: paddingBlockValue, paddingBottom: paddingBlockValue }}
+            style={{ paddingTop: paddingTopValue, paddingBottom: paddingBlockValue }}
           >
             <motion.div
               key={contentKey}
@@ -374,7 +404,8 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
 
               <motion.div
                 data-booking-scaler="true"
-                className="shadow-none outline-none overflow-visible absolute top-0 left-0 origin-top-left cursor-default"
+                className="shadow-none outline-none overflow-visible absolute left-0 origin-top-left cursor-default"
+                style={{ top: CLOSE_ROW_HEIGHT }}
                 initial={lowPerformanceMode ? { scale: dynamicScale, opacity: 0 } : { scale: dynamicScale * 0.95 }}
                 animate={lowPerformanceMode ? { scale: dynamicScale, opacity: 1 } : { scale: dynamicScale }}
                 exit={lowPerformanceMode ? { scale: dynamicScale, opacity: 0 } : { scale: dynamicScale * 0.95 }}

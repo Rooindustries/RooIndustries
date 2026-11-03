@@ -236,3 +236,165 @@ test.describe("details labels and reservation", () => {
     expect(close).toEqual({ width: 44, height: 44, inScaler: false });
   });
 });
+
+const hitSteps = [
+  ["slot", flow => withAllDaySlots(flow, flow.booking)],
+  ["details", flow => withAllDaySlots(flow, flow.reserve)],
+  ["review", flow => withAllDaySlots(flow, flow.review)],
+  ["payment", async flow => {
+    await withAllDaySlots(flow, flow.review);
+    await flow.payment();
+  }],
+];
+
+async function coveredControls(page) {
+  const count = await page.locator(dialogSelector).first().evaluate(dialog => {
+    const controls = [...dialog.querySelectorAll("button, a[href], input, textarea, select, [role='button']")]
+      .filter(node => node.checkVisibility({ visibilityProperty: true, opacityProperty: true }))
+      .filter(node => {
+        const rect = node.getBoundingClientRect();
+        return rect.width > 1 && rect.height > 1;
+      });
+    controls.forEach((node, index) => node.setAttribute("data-hit-index", String(index)));
+    return controls.length;
+  });
+  const covered = [];
+  for (let index = 0; index < count; index += 1) {
+    const result = await page.locator(`[data-hit-index="${index}"]`).evaluate(node => {
+      node.scrollIntoView({ block: "center", inline: "nearest" });
+      const rect = node.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      const label = element => element ? `${element.tagName.toLowerCase()}#${element.id} ${(element.getAttribute("aria-label") || element.textContent || element.placeholder || "").trim().slice(0, 40)}` : "nothing";
+      return node === hit || node.contains(hit) ? null : { control: label(node), hit: label(hit), x, y };
+    });
+    if (result) covered.push(result);
+  }
+  return { count, covered };
+}
+
+for (const viewport of [{ width: 360, height: 740 }, { width: 390, height: 844 }, { width: 1280, height: 720 }, { width: 1440, height: 900 }]) {
+  test.describe(`${viewport.width}x${viewport.height} control hit targets`, () => {
+    test.use({ viewport, hasTouch: viewport.width < 780 });
+
+    for (const [name, open] of hitSteps) {
+      test(`every visible ${name} control receives a tap at its centre`, async ({ page, flow }, testInfo) => {
+        await open(flow);
+        await ready(page);
+        const result = await coveredControls(page);
+        await save(page, testInfo, `${name}-hit-targets`, result);
+        expect(result.count).toBeGreaterThan(0);
+        expect(result.covered).toEqual([]);
+      });
+    }
+  });
+}
+
+test.describe("payment step inside the dialog", () => {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }]) {
+    test.describe(`${viewport.width}x${viewport.height}`, () => {
+      test.use({ viewport });
+
+      test("the payment step fits the screen without scrolling", async ({ page, flow }, testInfo) => {
+        await withAllDaySlots(flow, flow.review);
+        await flow.payment();
+        await ready(page);
+        const pay = page.locator(dialogSelector).getByRole("button", { name: "Pay your way", exact: true });
+        await expect(pay).toBeVisible();
+        const primaryName = "Pay your way";
+        const metrics = await measure(page, primaryName);
+        await save(page, testInfo, "payment-fit", metrics);
+        expectFits(metrics, "payment");
+        expect.soft(metrics.primary.left).toBeGreaterThanOrEqual(0);
+        expect.soft(metrics.primary.right).toBeLessThanOrEqual(metrics.viewport.width);
+      });
+    });
+  }
+});
+
+test.describe("details fields above the on-screen keyboard", () => {
+  test.use({ viewport: { width: 360, height: 740 }, hasTouch: true });
+
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      const height = Object.getOwnPropertyDescriptor(VisualViewport.prototype, "height");
+      Object.defineProperty(VisualViewport.prototype, "height", {
+        configurable: true,
+        get() {
+          return height.get.call(this) - (window.__keyboardHeight || 0);
+        },
+      });
+    });
+  });
+
+  const placement = (locator) => locator.evaluate(node => {
+    const box = element => {
+      const rect = element.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom };
+    };
+    const descriptions = (node.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean)
+      .map(id => document.getElementById(id)).filter(Boolean);
+    const visual = window.visualViewport;
+    return {
+      focused: document.activeElement === node,
+      field: box(node),
+      descriptions: descriptions.map(element => ({ id: element.id, ...box(element) })),
+      visible: { top: visual.offsetTop, bottom: visual.offsetTop + visual.height },
+    };
+  });
+
+  const expectInView = (result, label) => {
+    expect.soft(result.focused, `${label} focused`).toBe(true);
+    for (const rect of [result.field, ...result.descriptions]) {
+      expect.soft(rect.top, `${label} ${rect.id || "field"} top`).toBeGreaterThanOrEqual(result.visible.top);
+      expect.soft(rect.bottom, `${label} ${rect.id || "field"} bottom`).toBeLessThanOrEqual(result.visible.bottom);
+    }
+  };
+
+  const keyboards = {
+    window: async (page, open) => page.setViewportSize({ width: 360, height: open ? 400 : 740 }),
+    visual: async (page, open) => page.evaluate(open => {
+      window.__keyboardHeight = open ? 340 : 0;
+      window.visualViewport.dispatchEvent(new Event("resize"));
+    }, open),
+  };
+
+  for (const [mode, keyboard] of Object.entries(keyboards)) {
+    test(`each details field and its error stay visible when a ${mode} keyboard opens`, async ({ page, flow }, testInfo) => {
+      await flow.reserve();
+      await ready(page);
+      await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+      await expect(page.locator("#booking-details-error")).toBeVisible();
+      const results = {};
+      for (const [name, text] of fields) {
+        await keyboard(page, false);
+        await page.waitForTimeout(300);
+        const field = page.getByRole("textbox", { name: text, exact: true });
+        await field.focus();
+        await page.waitForTimeout(300);
+        await keyboard(page, true);
+        await page.waitForTimeout(450);
+        results[name] = await placement(field);
+        expectInView(results[name], name);
+      }
+      await save(page, testInfo, `${mode}-keyboard-fields`, results);
+    });
+
+    test(`an invalid email and its error stay visible when a ${mode} keyboard opens`, async ({ page, flow }, testInfo) => {
+      await flow.reserve();
+      await ready(page);
+      await flow.details("visitor@invalid");
+      await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+      const email = page.getByRole("textbox", { name: "Booking email", exact: true });
+      await expect(page.locator("#booking-email-error")).toBeVisible();
+      await expect(email).toBeFocused();
+      await keyboard(page, true);
+      await page.waitForTimeout(450);
+      const result = await placement(email);
+      await save(page, testInfo, `${mode}-keyboard-email`, result);
+      expect(result.descriptions.map(item => item.id)).toEqual(["booking-email-error"]);
+      expectInView(result, "email");
+    });
+  }
+});
