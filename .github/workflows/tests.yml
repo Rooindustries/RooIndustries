@@ -105,6 +105,7 @@ jobs:
       - run: npm run test:lint-rules
       - run: npm run test:playwright-groups
       - run: npm run test:tested-tree
+      - run: npm run test:free-ports
       - run: npm run test:tooling:dependencies
       - run: npm run check:seo
       - run: npm run check:supabase:migrations
