@@ -1,5 +1,7 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 export const FIXED_GROUPS = { navigation: ["section-nav.spec.js"], booking: ["booking-flow.spec.js"] };
 export const REST_GROUPS = ["rest-1", "rest-2", "rest-3", "rest-4"];
@@ -13,12 +15,25 @@ const median = (values) => {
   return sorted[Math.floor(sorted.length / 2)];
 };
 
-export const listSpecFiles = (dir) =>
-  fs
-    .readdirSync(dir, { recursive: true })
-    .map((file) => file.split(path.sep).join("/"))
-    .filter((file) => file.endsWith(".spec.js"))
-    .sort();
+export const reportSpecFiles = (report) => {
+  const files = new Set();
+  const walk = (suite) => {
+    if (suite.file && suite.specs?.length) files.add(suite.file);
+    for (const child of suite.suites || []) walk(child);
+  };
+  for (const suite of report.suites || []) walk(suite);
+  return [...files].sort();
+};
+
+export const listSpecFiles = ({ filter, config } = {}) => {
+  const env = { ...process.env };
+  delete env.PLAYWRIGHT_JSON_OUTPUT_NAME;
+  const args = ["playwright", "test", "--list", "--reporter=json"];
+  if (config) args.push("--config", config);
+  if (filter) args.push(filter);
+  const output = execFileSync("npx", args, { encoding: "utf8", env, maxBuffer: 64 * 1024 * 1024 });
+  return reportSpecFiles(JSON.parse(output));
+};
 
 export const assignRestGroups = (specFiles, timings) => {
   const fixed = new Set(Object.values(FIXED_GROUPS).flat());
@@ -51,10 +66,10 @@ const readTimings = (candidates) => {
   throw new Error(`No Playwright timings file found in ${candidates.filter(Boolean).join(", ")}`);
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [group, timingsFile] = process.argv.slice(2);
   if (!REST_GROUPS.includes(group)) throw new Error(`Unknown rest group "${group}"`);
-  const specFiles = listSpecFiles("tests");
+  const specFiles = listSpecFiles();
   const timings = readTimings([timingsFile, path.join(".github", "playwright-timings.json")]);
   const assigned = assignRestGroups(specFiles, timings)[group];
   if (!assigned.files.length) throw new Error(`Rest group ${group} has no spec files`);

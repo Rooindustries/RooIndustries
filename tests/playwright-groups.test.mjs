@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";
-import os from "node:os";
 import path from "node:path";
 import {
   assignRestGroups,
@@ -12,19 +11,30 @@ import {
 } from "../scripts/playwright-groups.mjs";
 import { mergeTimings } from "../scripts/playwright-timings.mjs";
 
-const specFiles = listSpecFiles("tests");
+const specFiles = listSpecFiles();
 const timings = JSON.parse(fs.readFileSync(".github/playwright-timings.json", "utf8"));
 
-test("every spec file runs in exactly one browser group", () => {
-  const patterns = [
-    "/section-nav\\.spec\\.js$",
-    "/booking-flow\\.spec\\.js$",
-    ...Object.values(assignRestGroups(specFiles, timings)).map(({ files }) => groupPattern(files)),
-  ].map((pattern) => new RegExp(pattern));
-  for (const file of specFiles) {
-    const matches = patterns.filter((pattern) => pattern.test(`/repo/tests/${file}`));
-    assert.equal(matches.length, 1, `${file} matched ${matches.length} groups`);
+const fixedPatterns = ["/section-nav\\.spec\\.js$", "/booking-flow\\.spec\\.js$"];
+
+const groupPatterns = (files, fileTimings) => [
+  ...fixedPatterns,
+  ...Object.values(assignRestGroups(files, fileTimings))
+    .filter(({ files: group }) => group.length)
+    .map(({ files: group }) => groupPattern(group)),
+];
+
+const assertEachFileInOneGroup = (files, listGroup, fileTimings) => {
+  const owners = Object.fromEntries(files.map((file) => [file, 0]));
+  for (const pattern of groupPatterns(files, fileTimings)) {
+    for (const file of listGroup(pattern)) owners[file] = (owners[file] ?? 0) + 1;
   }
+  for (const [file, count] of Object.entries(owners)) assert.equal(count, 1, `${file} ran in ${count} groups`);
+};
+
+test("Playwright runs every spec file in exactly one browser group", () => {
+  assert.ok(specFiles.length > 0);
+  assert.ok(!specFiles.includes("admin-cms.spec.js"));
+  assertEachFileInOneGroup(specFiles, (filter) => listSpecFiles({ filter }), timings);
 });
 
 test("rest groups stay within one file of each other, counting rest-1's extra checks", () => {
@@ -53,35 +63,27 @@ test("merged timings use each file's median across runs", () => {
 });
 
 test("a spec file in a subfolder is found and runs in exactly one group", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "playwright-groups-"));
-  fs.mkdirSync(path.join(dir, "admin"));
-  const created = [
-    "section-nav.spec.js",
-    "booking-flow.spec.js",
-    "home.spec.js",
-    "admin/home.spec.js",
-    "admin/publish.spec.js",
-    "admin/helper.js",
-  ];
-  for (const file of created) {
-    fs.writeFileSync(path.join(dir, file), "");
+  fs.mkdirSync("test-results", { recursive: true });
+  const dir = fs.mkdtempSync(path.resolve("test-results", "playwright-groups-"));
+  const config = path.join(dir, "playwright.config.mjs");
+  fs.writeFileSync(config, 'export default { testDir: "./tests", testMatch: "**/*.spec.js" };\n');
+  fs.mkdirSync(path.join(dir, "tests", "admin"), { recursive: true });
+  const spec = 'import { test } from "@playwright/test";\ntest("loads", () => {});\n';
+  for (const file of ["section-nav", "booking-flow", "home", "admin/home", "admin/publish"]) {
+    fs.writeFileSync(path.join(dir, "tests", `${file}.spec.js`), spec);
   }
-  const files = listSpecFiles(dir);
-  assert.deepEqual(files, [
-    "admin/home.spec.js",
-    "admin/publish.spec.js",
-    "booking-flow.spec.js",
-    "home.spec.js",
-    "section-nav.spec.js",
-  ]);
-  const patterns = [
-    "/section-nav\\.spec\\.js$",
-    "/booking-flow\\.spec\\.js$",
-    ...Object.values(assignRestGroups(files, {}))
-      .filter(({ files: group }) => group.length)
-      .map(({ files: group }) => groupPattern(group)),
-  ].map((pattern) => new RegExp(pattern));
-  for (const file of files) {
-    assert.equal(patterns.filter((pattern) => pattern.test(`/repo/tests/${file}`)).length, 1, file);
+  fs.writeFileSync(path.join(dir, "tests", "admin", "helper.js"), "");
+  try {
+    const files = listSpecFiles({ config });
+    assert.deepEqual(files, [
+      "admin/home.spec.js",
+      "admin/publish.spec.js",
+      "booking-flow.spec.js",
+      "home.spec.js",
+      "section-nav.spec.js",
+    ]);
+    assertEachFileInOneGroup(files, (filter) => listSpecFiles({ config, filter }), {});
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
