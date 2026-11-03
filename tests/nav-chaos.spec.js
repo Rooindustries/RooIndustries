@@ -153,20 +153,40 @@ test("back/forward behavior stays idempotent after hash jumps", async ({ page })
   if (hasHostDrift(page.url())) {
     await recordFailure(page, "history:land", "host_drift");
   }
+  const historyLength = await page.evaluate(() => window.history.length);
 
   await page.goBack();
-  const pathAfterBack = new URL(page.url()).pathname;
-  if (pathAfterBack !== "/reviews") {
+  const backLanded = await page
+    .waitForFunction(
+      () =>
+        window.location.pathname === "/reviews" &&
+        !window.location.hash &&
+        Boolean(document.querySelector('main [data-route-key="/reviews"]')),
+      null,
+      { timeout: 3000 }
+    )
+    .then(() => true, () => false);
+  if (!backLanded) {
+    const pathAfterBack = new URL(page.url()).pathname;
     await recordFailure(page, "history:back", `expected_/reviews_got_${pathAfterBack}`);
   }
 
   await page.goForward();
-  const hashAfterForward = new URL(page.url()).hash;
-  if (hashAfterForward !== "#faq") {
+  const forwardLanded = await verifyHashAndTarget(page, "#faq", 3000);
+  if (!forwardLanded) {
+    const hashAfterForward = new URL(page.url()).hash;
     await recordFailure(
       page,
       "history:forward",
       `expected_#faq_got_${hashAfterForward || "none"}`
+    );
+  }
+  const historyLengthAfter = await page.evaluate(() => window.history.length);
+  if (historyLengthAfter !== historyLength) {
+    await recordFailure(
+      page,
+      "history:entries",
+      `expected_${historyLength}_entries_got_${historyLengthAfter}`
     );
   }
 });
