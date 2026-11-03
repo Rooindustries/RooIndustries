@@ -5,6 +5,7 @@ import { BookingDialogHoldContext, BookingDialogReadyContext } from "../lib/book
 import { useLowPerformanceMode } from "../lib/performanceMode";
 import { isTopDialog, useDialogFocus } from "../lib/useDialogFocus";
 import { setVisibleTimeout } from "../lib/visibleTimeout";
+import { useHydrating } from "../lib/useHydrating";
 
 const MOBILE_BREAKPOINT = 780;
 const MOBILE_BASE_WIDTH = 550;
@@ -37,6 +38,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     viewportTop: 0,
   });
   const lowPerformanceMode = useLowPerformanceMode();
+  const hydrating = useHydrating();
   const [dynamicScale, setDynamicScale] = useState(1);
   const [isMobile, setIsMobile] = useState(false);
   const [renderWidth, setRenderWidth] = useState(DESKTOP_BASE_WIDTH);
@@ -375,7 +377,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
           ref={stageRef}
           className="booking-dialog-stage fixed z-[70] overflow-y-auto overflow-x-hidden"
           style={viewport || { inset: 0 }}
-          initial={{ opacity: 0 }}
+          initial={hydrating ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={fadeTransition}
@@ -397,9 +399,9 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
               role="dialog"
               aria-modal="true"
               aria-label="Schedule your session"
-              className={`ri-booking m-auto relative${contentRevealed ? "" : " invisible"}`}
-              initial={{ width: wrapperSize.width, height: wrapperSize.height }}
-              animate={{ width: wrapperSize.width, height: wrapperSize.height }}
+              className={`ri-booking m-auto relative${contentRevealed ? "" : " [@media(scripting:enabled)]:invisible"}`}
+              initial={hydrating ? false : { width: wrapperSize.width, height: wrapperSize.height }}
+              animate={wrapperSize.height ? { width: wrapperSize.width, height: wrapperSize.height } : undefined}
               layout={!lowPerformanceMode}
               transition={sizeTransition}
             >
@@ -421,7 +423,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
                 data-booking-scaler="true"
                 className="shadow-none outline-none overflow-visible absolute left-0 origin-top-left cursor-default"
                 style={{ top: CLOSE_ROW_HEIGHT }}
-                initial={lowPerformanceMode ? { scale: dynamicScale, opacity: 0 } : { scale: dynamicScale * 0.95 }}
+                initial={hydrating ? false : lowPerformanceMode ? { scale: dynamicScale, opacity: 0 } : { scale: dynamicScale * 0.95 }}
                 animate={lowPerformanceMode ? { scale: dynamicScale, opacity: 1 } : { scale: dynamicScale }}
                 exit={lowPerformanceMode ? { scale: dynamicScale, opacity: 0 } : { scale: dynamicScale * 0.95 }}
                 transition={{ ...scalerTransition, scale: sizeTransition }}

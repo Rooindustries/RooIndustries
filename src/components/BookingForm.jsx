@@ -9,6 +9,7 @@ import React, {
 import { createPortal } from "react-dom";
 import { useDialogFocus } from "../lib/useDialogFocus";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
+import { useHydrating } from "../lib/useHydrating";
 import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { getPublicContent } from "../lib/publicContentClient";
 import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
@@ -560,7 +561,9 @@ export default function BookingForm() {
   const [planPackage, setPlanPackage] = useState(null);
   const [modalPackage, setModalPackage] = useState(null);
   const [modalMode, setModalMode] = useState("switch");
-  const [pageFadeIn, setPageFadeIn] = useState(false);
+  const hydrating = useHydrating();
+  const [pageFadeIn, setPageFadeIn] = useState(hydrating);
+  const fadedLocationKeyRef = useRef(hydrating ? location.key : null);
   const scrollLockRef = useRef(null);
   const [persistedPackage, setPersistedPackage] = useState(null);
   const [preventHoldAutoload, setPreventHoldAutoload] = useState(false);
@@ -1196,8 +1199,12 @@ export default function BookingForm() {
   }, [step, reloadAvailability]);
 
   useEffect(() => {
+    if (fadedLocationKeyRef.current === location.key) return undefined;
     setPageFadeIn(false);
-    const t = setTimeout(() => setPageFadeIn(true), 50);
+    const t = setTimeout(() => {
+      fadedLocationKeyRef.current = location.key;
+      setPageFadeIn(true);
+    }, 50);
     return () => clearTimeout(t);
   }, [location.key]);
 
@@ -2580,7 +2587,7 @@ export default function BookingForm() {
               </div>
             )}
 
-            <AnimatePresence mode="wait">
+            <AnimatePresence mode="wait" initial={!hydrating}>
               {step === 1 && (
                 <motion.div
                   key="step1"

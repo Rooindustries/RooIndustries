@@ -3066,6 +3066,16 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
   container-name: booking-frame;
 }
 
+@media (scripting: none) {
+  .booking-dialog-stage [data-booking-scaler] {
+    position: relative;
+  }
+
+  .booking-dialog-stage .booking-dialog-content {
+    max-width: 100%;
+  }
+}
+
 .booking-dialog-content :is(button, a[href], input, textarea, select):focus-visible,
 .booking-plan-dialog :is(button, a[href], input, textarea, select):focus-visible {
   outline: 2px solid var(--color-focus-ring);
