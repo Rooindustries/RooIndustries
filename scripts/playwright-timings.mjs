@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const reportFiles = (dir) =>
   fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -45,7 +46,7 @@ export const mergeTimings = (reports) => {
   );
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [dir] = process.argv.slice(2);
   if (!dir) throw new Error("Usage: node scripts/playwright-timings.mjs <directory of Playwright JSON reports>");
   const reports = reportFiles(dir).map((file) => JSON.parse(fs.readFileSync(file, "utf8")));
