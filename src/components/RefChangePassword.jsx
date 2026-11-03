@@ -161,10 +161,15 @@ export default function RefChangePassword() {
         Change Password
       </h1>
 
-      <div
+      <form
         className="mt-10 w-full max-w-md bg-surface-card backdrop-blur-xl
                       border border-line-input shadow-[var(--shadow-card-glow)]
                       rounded-2xl p-8 space-y-6"
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          update();
+        }}
       >
         <div>
           <label
@@ -256,7 +261,7 @@ export default function RefChangePassword() {
         ) : null}
 
         <button
-          onClick={update}
+          type="submit"
           disabled={loading}
           className={`w-full py-4 rounded-xl font-bold text-lg transition-all
             ${
@@ -276,7 +281,7 @@ export default function RefChangePassword() {
         >
           Back to Dashboard
         </button>
-      </div>
+      </form>
 
     </section>
   );

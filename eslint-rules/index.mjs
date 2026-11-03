@@ -2,6 +2,7 @@ import ariaExpandedNeedsControls from "./aria-expanded-needs-controls.mjs";
 import ariaLabelKeepsVisibleText from "./aria-label-keeps-visible-text.mjs";
 import fetchNeedsDeadline from "./fetch-needs-deadline.mjs";
 import inputNeedsLabel from "./input-needs-label.mjs";
+import inputsNeedForm from "./inputs-need-form.mjs";
 import noAriaLabelOnGeneric from "./no-aria-label-on-generic.mjs";
 import noBareRoutePrefix from "./no-bare-route-prefix.mjs";
 import noHandBuiltDollars from "./no-hand-built-dollars.mjs";
@@ -14,6 +15,7 @@ export const rules = {
   "aria-label-keeps-visible-text": ariaLabelKeepsVisibleText,
   "fetch-needs-deadline": fetchNeedsDeadline,
   "input-needs-label": inputNeedsLabel,
+  "inputs-need-form": inputsNeedForm,
   "no-aria-label-on-generic": noAriaLabelOnGeneric,
   "no-bare-route-prefix": noBareRoutePrefix,
   "no-hand-built-dollars": noHandBuiltDollars,

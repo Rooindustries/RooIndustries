@@ -2933,7 +2933,15 @@ export default function BookingForm() {
                     </p>
                   </div>
 
-                  <div className="space-y-4">
+                  <form
+                    id="booking-details-form"
+                    className="space-y-4"
+                    noValidate
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      handleReviewBeforePayment();
+                    }}
+                  >
                     <label htmlFor="booking-discord" className="block text-left text-sm font-semibold text-ink">Discord username</label>
                     <input
                       id="booking-discord"
@@ -3000,7 +3008,7 @@ export default function BookingForm() {
                       value={form.notes}
                       className="w-full bg-surface-input border border-line-input rounded-lg p-3 h-24 focus:outline-none focus:border-info-border transition"
                     />
-                  </div>
+                  </form>
 
                   <a
                     href="/#faq"
@@ -3021,8 +3029,8 @@ export default function BookingForm() {
                         Back
                       </button>
                       <button
-                        type="button"
-                        onClick={handleReviewBeforePayment}
+                        type="submit"
+                        form="booking-details-form"
                         className={`ri-booking-primary glow-button w-full min-w-0 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2 ${
                           !isStep2Complete ? "opacity-60 cursor-not-allowed" : ""
                         }`}

@@ -284,3 +284,20 @@ run("no-aria-label-on-generic", {
     },
   ],
 });
+
+run("inputs-need-form", {
+  valid: [
+    `function Upgrade() { return <form onSubmit={handleCheckOrder}><input type="email" /><button
+      type="submit">Check</button></form>; }`,
+    `function Share() { return <div><input value={link} readOnly /><button onClick={save}>Save</button></div>; }`,
+    `function Fields() { return <div><input /><button onClick={() => move(1)}>Down</button></div>; }`,
+  ],
+  invalid: [
+    {
+      name: "UpgradeLink check before #236",
+      code: `function UpgradeLink() { return <div><input type="email" /><input placeholder="Order ID" /><button
+        onClick={handleCheckOrder}>Check eligibility</button></div>; }`,
+      errors: [{ messageId: "form" }, { messageId: "form" }],
+    },
+  ],
+});

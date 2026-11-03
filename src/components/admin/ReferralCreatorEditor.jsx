@@ -475,79 +475,86 @@ export default function ReferralCreatorEditor() {
                 </span>
               </div>
 
-              <div className={styles.fields}>
-                <label>
-                  <span>Total percentage allowed</span>
+              <form
+                className={styles.editorForm}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  save();
+                }}
+              >
+                <div className={styles.fields}>
+                  <label>
+                    <span>Total percentage allowed</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      disabled={Boolean(draftConflict)}
+                      value={draft.totalPercent}
+                      onChange={(event) => updateDraft("totalPercent", event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>Customer discount percentage</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      disabled={Boolean(draftConflict)}
+                      value={draft.discountPercent}
+                      onChange={(event) => updateDraft("discountPercent", event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>Creator commission percentage</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      disabled={Boolean(draftConflict)}
+                      value={draft.commissionPercent}
+                      onChange={(event) => updateDraft("commissionPercent", event.target.value)}
+                    />
+                  </label>
+                </div>
+
+                <label className={styles.toggleRow}>
+                  <span>
+                    <strong>Bypass five-referral requirement</strong>
+                    <small>Allow this creator to change their split before five successful referrals.</small>
+                  </span>
                   <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="0.01"
+                    type="checkbox"
                     disabled={Boolean(draftConflict)}
-                    value={draft.totalPercent}
-                    onChange={(event) => updateDraft("totalPercent", event.target.value)}
+                    checked={draft.bypassUnlock}
+                    onChange={(event) => updateDraft("bypassUnlock", event.target.checked)}
                   />
                 </label>
-                <label>
-                  <span>Customer discount percentage</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="0.01"
+
+                <label className={styles.reasonField}>
+                  <span>Reason for change</span>
+                  <textarea
+                    rows="3"
                     disabled={Boolean(draftConflict)}
-                    value={draft.discountPercent}
-                    onChange={(event) => updateDraft("discountPercent", event.target.value)}
+                    maxLength="500"
+                    value={draft.reason}
+                    onChange={(event) => updateDraft("reason", event.target.value)}
+                    placeholder="Example: Contracted creator rate approved"
                   />
                 </label>
-                <label>
-                  <span>Creator commission percentage</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="0.01"
-                    disabled={Boolean(draftConflict)}
-                    value={draft.commissionPercent}
-                    onChange={(event) => updateDraft("commissionPercent", event.target.value)}
-                  />
-                </label>
-              </div>
 
-              <label className={styles.toggleRow}>
-                <span>
-                  <strong>Bypass five-referral requirement</strong>
-                  <small>Allow this creator to change their split before five successful referrals.</small>
-                </span>
-                <input
-                  type="checkbox"
-                  disabled={Boolean(draftConflict)}
-                  checked={draft.bypassUnlock}
-                  onChange={(event) => updateDraft("bypassUnlock", event.target.checked)}
-                />
-              </label>
-
-              <label className={styles.reasonField}>
-                <span>Reason for change</span>
-                <textarea
-                  rows="3"
-                  disabled={Boolean(draftConflict)}
-                  maxLength="500"
-                  value={draft.reason}
-                  onChange={(event) => updateDraft("reason", event.target.value)}
-                  placeholder="Example: Contracted creator rate approved"
-                />
-              </label>
-
-              <div className={styles.saveRow}>
-                <p>Version {selected.terms_version}</p>
-                <button className={styles.secondaryButton} onClick={discardDraft} disabled={saving || (!draftDirtyRef.current && !draftConflict)}>Discard draft</button>
-                <button onClick={save} disabled={saving || Boolean(draftConflict) || draft.reason.trim().length < 3}>
-                  {saving ? "Saving…" : "Save creator settings"}
-                </button>
-              </div>
-
-              <div className={styles.history}>
+                <div className={styles.saveRow}>
+                  <p>Version {selected.terms_version}</p>
+                  <button type="button" className={styles.secondaryButton} onClick={discardDraft} disabled={saving || (!draftDirtyRef.current && !draftConflict)}>Discard draft</button>
+                  <button type="submit" disabled={saving || Boolean(draftConflict) || draft.reason.trim().length < 3}>
+                    {saving ? "Saving…" : "Save creator settings"}
+                  </button>
+                </div>
+              </form>
+  <div className={styles.history}>
                 <div className={styles.historyHeader}>
                   <h3>Audit history</h3>
                   <span>{history.length} changes</span>

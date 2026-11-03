@@ -72,7 +72,14 @@ export default function ReferralBox() {
         </p>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto md:flex-initial sm:items-stretch">
+      <form
+        className="flex flex-col sm:flex-row gap-3 w-full md:w-auto md:flex-initial sm:items-stretch"
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          handleStart();
+        }}
+      >
         <label htmlFor="referral-email" className="sr-only">Email</label>
         <input
           id="referral-email"
@@ -84,7 +91,7 @@ export default function ReferralBox() {
         />
 
         <button
-          onClick={handleStart}
+          type="submit"
           disabled={!isValid}
           className="
             glow-button
@@ -116,6 +123,7 @@ export default function ReferralBox() {
         </button>
 
         <button
+          type="button"
           onClick={handleLogin}
           className="
             ri-referral-login
@@ -136,7 +144,7 @@ export default function ReferralBox() {
         >
           {content.loginButtonText}
         </button>
-      </div>
+      </form>
     </div>
   );
 }
