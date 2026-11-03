@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
+import { freeTcpPorts } from './lib/free-tcp-port.mjs';
 import { inheritTestProcessGuard, installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from './lib/test-target-safety.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -107,15 +108,9 @@ if (process.argv[2] === '--build') {
       join(root, 'scripts/fixtures/sourcemaps-network-probe.c'), '-ldl']);
     await mkdir(join(fixture, 'home'));
     await writeFile(join(fixture, 'empty-sentry.ini'), '');
-    const reservation = createServer();
-    const reserve = async () => {
-      await new Promise(done => reservation.listen(0, '127.0.0.1', done));
-      const origin = localOrigin(`http://127.0.0.1:${reservation.address().port}`);
-      await new Promise(done => reservation.close(done));
-      return origin;
-    };
-    const siteOrigin = await reserve();
-    const contentOrigin = await reserve();
+    const [sitePort, contentPort] = await freeTcpPorts('127.0.0.1', [0, 0]);
+    const siteOrigin = localOrigin(`http://127.0.0.1:${sitePort}`);
+    const contentOrigin = localOrigin(`http://127.0.0.1:${contentPort}`);
     productionDist = validateDistDir(`.next-e2e-sourcemaps-${stamp}`, { isolated: true });
     server = createServer(async (request, response) => {
       const chunks = [];

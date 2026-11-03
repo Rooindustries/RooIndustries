@@ -6,11 +6,14 @@ import { freeTcpPort, freeTcpPorts } from "../scripts/lib/free-tcp-port.mjs";
 
 const host = "127.0.0.1";
 
-test("ports reserved together are always distinct", async () => {
-  for (let round = 0; round < 200; round += 1) {
-    const ports = await freeTcpPorts(host, [0, 0, 0, 0]);
-    assert.equal(new Set(ports).size, ports.length, `round ${round}: ${ports.join(", ")}`);
-  }
+test("each port stays held until the whole set is reserved", async () => {
+  const [port] = await freeTcpPorts(host, [0]);
+  await assert.rejects(freeTcpPorts(host, [port, port]), { code: "EADDRINUSE" });
+});
+
+test("ports reserved together are distinct", async () => {
+  const ports = await freeTcpPorts(host, [0, 0, 0, 0]);
+  assert.equal(new Set(ports).size, ports.length, ports.join(", "));
 });
 
 test("reserved ports are released for the fixture to bind", async () => {
