@@ -15,14 +15,14 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          - name: storage-throttled
-            args: tests/payment-confirmation-receipt.spec.js -g "browser storage is unavailable|stored booking ID" --repeat-each=15
-            cpu: "4"
-          - name: after-payment-methods
-            args: tests/payment-methods.spec.js tests/payment-confirmation-receipt.spec.js
+          - name: busy-suite-a
+            args: tests/payment-code-check.spec.js tests/payment-confirmation-receipt.spec.js tests/payment-error-banner.spec.js tests/payment-methods.spec.js tests/payment-start-lock.spec.js
             cpu: "1"
-          - name: workers-4
-            args: tests/payment-confirmation-receipt.spec.js -g "unavailable|stored booking ID|direct visit" --workers=4 --repeat-each=6
+          - name: busy-suite-b
+            args: tests/payment-code-check.spec.js tests/payment-confirmation-receipt.spec.js tests/payment-error-banner.spec.js tests/payment-methods.spec.js tests/payment-start-lock.spec.js
+            cpu: "1"
+          - name: busy-receipt
+            args: tests/payment-confirmation-receipt.spec.js --repeat-each=3
             cpu: "1"
     env:
       ROO_TEST_HOST: 127.0.0.1
@@ -51,6 +51,7 @@ jobs:
             kill -0 "$server_pid"
             sleep 1
           done
+          for _ in $(seq $(($(nproc) * 2))); do timeout 3000 nice -n 5 bash -c "while :; do :; done" & done
           xvfb-run -a npx playwright test --project=chromium --reporter=line ${{ matrix.variant.args }}
       - uses: actions/upload-artifact@v4
         if: failure()
