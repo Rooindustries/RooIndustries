@@ -299,5 +299,11 @@ run("inputs-need-form", {
         onClick={handleCheckOrder}>Check eligibility</button></div>; }`,
       errors: [{ messageId: "form" }, { messageId: "form" }],
     },
+    {
+      name: "search and explicitly editable fields",
+      code: `function Finder() { return <div><input type="search" /><input readOnly={false} /><button
+        onClick={handleSubmit}>Find</button></div>; }`,
+      errors: [{ messageId: "form" }, { messageId: "form" }],
+    },
   ],
 });

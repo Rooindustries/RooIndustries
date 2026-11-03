@@ -477,6 +477,7 @@ export default function ReferralCreatorEditor() {
 
               <form
                 className={styles.editorForm}
+                noValidate
                 onSubmit={(event) => {
                   event.preventDefault();
                   save();
@@ -554,7 +555,8 @@ export default function ReferralCreatorEditor() {
                   </button>
                 </div>
               </form>
-  <div className={styles.history}>
+
+              <div className={styles.history}>
                 <div className={styles.historyHeader}>
                   <h3>Audit history</h3>
                   <span>{history.length} changes</span>

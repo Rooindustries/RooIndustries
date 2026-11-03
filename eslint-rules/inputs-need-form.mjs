@@ -8,7 +8,7 @@ import {
   literalValue,
 } from "./util.mjs";
 
-const textTypes = new Set(["text", "email", "password", "tel", "url", "number"]);
+const textTypes = new Set(["text", "email", "password", "tel", "url", "number", "search"]);
 const submitVerb =
   /^(handle)?(submit|save|update|check|apply|validate|login|register|confirm|send|verify|review|start)/i;
 
@@ -62,7 +62,8 @@ export default {
         const component = outermostComponent(context, node);
         if (!component || insideForm(context, node)) return;
         if (name === "input") {
-          if (attribute(node, "readOnly")) return;
+          const readOnly = attribute(node, "readOnly");
+          if (readOnly && literalValue(readOnly) !== false) return;
           const typeAttr = attribute(node, "type");
           const type = typeAttr ? literalValue(typeAttr) : "text";
           if (typeof type === "string" && textTypes.has(type)) entry(component).inputs.push(node);
