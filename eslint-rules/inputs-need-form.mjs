@@ -35,7 +35,7 @@ const submitsOnClick = (attr) => {
   if (expression.type === "Identifier" || expression.type === "MemberExpression") {
     return submitVerb.test(referenceName(expression));
   }
-  return isSubmitCall(expression) || containsNode(expression, isSubmitCall);
+  return isSubmitCall(expression) || containsNode(expression, isSubmitCall, { skip: isFunction });
 };
 
 const insideForm = (context, node) =>

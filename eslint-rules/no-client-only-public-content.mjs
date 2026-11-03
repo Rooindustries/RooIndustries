@@ -5,17 +5,26 @@ const isInitial = (name) => /^initial/.test(name);
 const takesInitial = (pattern) =>
   pattern?.type === "ObjectPattern" && pattern.properties.some((property) => isInitial(propertyName(property)));
 
-const isProps = (node, props) => node?.type === "Identifier" && node.name === props.name;
+const bindsTo = (context, identifier, component) => {
+  if (identifier?.type !== "Identifier") return false;
+  for (let scope = context.sourceCode.getScope(identifier); scope; scope = scope.upper) {
+    const variable = scope.set.get(identifier.name);
+    if (variable) return variable.defs.some((def) => def.type === "Parameter" && def.node === component);
+  }
+  return false;
+};
 
-const receivesInitialData = (component) => {
+const receivesInitialData = (context, component) => {
   const props = component.params[0];
   if (takesInitial(props)) return true;
   if (props?.type !== "Identifier") return false;
+  const isProps = (node) =>
+    node?.type === "Identifier" && node.name === props.name && bindsTo(context, node, component);
   return containsNode(
     component.body,
     (node) =>
-      (node.type === "MemberExpression" && isProps(node.object, props) && isInitial(memberName(node))) ||
-      (node.type === "VariableDeclarator" && isProps(node.init, props) && takesInitial(node.id)),
+      (node.type === "MemberExpression" && isProps(node.object) && isInitial(memberName(node))) ||
+      (node.type === "VariableDeclarator" && isProps(node.init) && takesInitial(node.id)),
   );
 };
 
@@ -45,7 +54,7 @@ export default {
         const deps = effect.arguments[1];
         if (!deps || deps.type !== "ArrayExpression" || deps.elements.length > 0) return;
         const component = enclosingComponent(context, node);
-        if (component && receivesInitialData(component)) return;
+        if (component && receivesInitialData(context, component)) return;
         context.report({ node, messageId: "clientOnly" });
       },
     };

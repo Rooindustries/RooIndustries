@@ -320,6 +320,8 @@ run("no-aria-label-on-generic", {
 
 run("inputs-need-form", {
   valid: [
+    `function Help() { return <div><input /><button onClick={() => { const later = () => saveDraft();
+      openHelp(later); }}>Help</button></div>; }`,
     `function Upgrade() { return <form onSubmit={handleCheckOrder}><input type="email" /><button
       type="submit">Check</button></form>; }`,
     `function Share() { return <div><input value={link} readOnly /><button onClick={save}>Save</button></div>; }`,
@@ -341,11 +343,22 @@ run("inputs-need-form", {
       errors: [{ messageId: "form" }, { messageId: "form" }],
     },
     {
-      name: "block-bodied and async submit handlers",
+      name: "async block-bodied submit handler",
       code: `function Redeem() { return <div><input type="email" /><button onClick={async () => { await
-        handleSubmit(); }}>Redeem</button><input /><button onClick={() => { if (!validateCode())
-        return; form.submit(); }}>Send</button><input type="tel" /><button onClick={function () { void props.saveCode(); }}>Keep</button></div>; }`,
-      errors: [{ messageId: "form" }, { messageId: "form" }, { messageId: "form" }],
+        handleSubmit(); }}>Redeem</button></div>; }`,
+      errors: [{ messageId: "form" }],
+    },
+    {
+      name: "submit after an early return",
+      code: `function Send() { return <div><input /><button onClick={() => { if (!validateCode()) return;
+        form.submit(); }}>Send</button></div>; }`,
+      errors: [{ messageId: "form" }],
+    },
+    {
+      name: "function handler calling a member save",
+      code: `function Keep() { return <div><input type="tel" /><button onClick={function () {
+        void props.saveCode(); }}>Keep</button></div>; }`,
+      errors: [{ messageId: "form" }],
     },
   ],
 });
@@ -368,6 +381,13 @@ run("no-client-only-public-content", {
       name: "Terms before #195",
       code: `export default function Terms() { const [data, setData] = useState(null); useEffect(() => {
         getPublicContent("terms").then((d) => setData(d)); }, []); return <p>{data}</p>; }`,
+      errors: [{ messageId: "clientOnly" }],
+    },
+    {
+      name: "an inner callback's own props parameter",
+      code: `export default function List(props) { const rows = props.items.map((props) => { const { initialData }
+        = props; return initialData; }); const [data, setData] = useState(null); useEffect(() => {
+        getPublicContent("list").then(setData); }, []); return <p>{data}{rows}</p>; }`,
       errors: [{ messageId: "clientOnly" }],
     },
     {

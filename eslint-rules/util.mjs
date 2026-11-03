@@ -93,11 +93,12 @@ export const isFetchCall = (call) => {
   );
 };
 
-export const containsNode = (root, test) => {
+export const containsNode = (root, test, { skip } = {}) => {
   const stack = [root];
   while (stack.length) {
     const node = stack.pop();
     if (!node || typeof node.type !== "string") continue;
+    if (node !== root && skip?.(node)) continue;
     if (node !== root && test(node)) return true;
     for (const [key, value] of Object.entries(node)) {
       if (key === "parent") continue;
