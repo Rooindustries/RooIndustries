@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
-import { RuleTester } from "eslint";
+import assert from "node:assert/strict";
+import { Linter, RuleTester } from "eslint";
 import { rules } from "../eslint-rules/index.mjs";
 
 RuleTester.describe = describe;
@@ -436,6 +437,7 @@ run("no-hidden-server-motion", {
     `function Dialog({ open }) { return <AnimatePresence>{open && <motion.div initial={{ opacity: 0 }} animate={{
       opacity: 1 }} />}</AnimatePresence>; }`,
     `function Fade() { return <motion.div initial={{ ["opacity"]: 0, opacity: 1 }} animate={{ opacity: 1 }} />; }`,
+    `function Fade() { const start = { opacity: 0 }; start.opacity = 1; return <motion.div initial={start} />; }`,
     `function Fade() { const shown = { opacity: 1 }; const hidden = { opacity: 0 }; return <motion.div
       initial={{ ...shown, ...hidden, ...shown }} animate={{ opacity: 1 }} />; }`,
     `function Fade() { return <motion.div initial={{ ["opacity"]: 0, ...{ opacity: 1 } }} animate={{ opacity: 1 }} />; }`,
@@ -495,4 +497,26 @@ run("no-nested-components", {
       errors: [{ messageId: "nested" }],
     },
   ],
+});
+
+describe("spread resolution", () => {
+  const layers = Array.from({ length: 24 }, (_, index) => `const s${index + 1} = { ...s${index}, ...s${index} };`);
+  const nested = `const s0 = { method: "POST", signal: requestDeadline(), opacity: 1 }; ${layers.join(" ")}`;
+  const cases = {
+    "fetch-needs-deadline": `${nested} fetch(url, s24);`,
+    "no-ignored-write-request": `${nested} fetch(url, s24);`,
+    "no-hidden-server-motion": `${nested} function Fade() { return <motion.div initial={s24} />; }`,
+  };
+  for (const [name, code] of Object.entries(cases)) {
+    it(`${name} resolves deeply repeated spreads in linear time`, () => {
+      const linter = new Linter({ configType: "flat" });
+      const started = performance.now();
+      linter.verify(code, {
+        languageOptions: { ecmaVersion: "latest", sourceType: "module", parserOptions: { ecmaFeatures: { jsx: true } } },
+        plugins: { local: { rules } },
+        rules: { [`local/${name}`]: "error" },
+      });
+      assert.ok(performance.now() - started < 1000);
+    });
+  }
 });

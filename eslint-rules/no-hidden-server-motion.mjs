@@ -1,17 +1,18 @@
-import { ancestors, attribute, declaredValue, jsxName, propertyName } from "./util.mjs";
+import { ancestors, attribute, declaredValue, jsxName, propertyName, resolveOnce } from "./util.mjs";
 
-const finalValue = (context, node, key, seen = new Set()) => {
-  if (!node || seen.has(node)) return null;
-  const path = new Set(seen).add(node);
-  if (node.type === "Identifier") return finalValue(context, declaredValue(context, node), key, path);
-  if (node.type !== "ObjectExpression") return null;
-  let value = null;
-  for (const property of node.properties) {
-    if (property.type === "SpreadElement") value = finalValue(context, property.argument, key, path) ?? value;
-    else if (propertyName(property) === key) value = property.value;
-  }
-  return value;
-};
+const keyValue = (key) =>
+  resolveOnce(null, (context, node, next) => {
+    if (node.type === "Identifier") return next(declaredValue(context, node));
+    if (node.type !== "ObjectExpression") return null;
+    let value = null;
+    for (const property of node.properties) {
+      if (property.type === "SpreadElement") value = next(property.argument) ?? value;
+      else if (propertyName(property) === key) value = property.value;
+    }
+    return value;
+  });
+
+const finalValue = (context, node, key) => keyValue(key)(context, node);
 
 const hidesOpacity = (context, node) => {
   const opacity = finalValue(context, node, "opacity");

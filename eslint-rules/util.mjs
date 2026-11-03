@@ -75,6 +75,31 @@ export const referenceName = (node) => (node?.type === "Identifier" ? node.name 
 
 export const calleeName = (call) => referenceName(call.callee);
 
+const writesThrough = (identifier) => {
+  let target = identifier;
+  while (target.parent?.type === "MemberExpression" && target.parent.object === target) target = target.parent;
+  if (target === identifier) return false;
+  const parent = target.parent;
+  return (
+    (parent?.type === "AssignmentExpression" && parent.left === target) ||
+    parent?.type === "UpdateExpression" ||
+    (parent?.type === "UnaryExpression" && parent.operator === "delete")
+  );
+};
+
+const mergedInto = (identifier) => {
+  const call = identifier.parent;
+  return (
+    call?.type === "CallExpression" &&
+    call.arguments[0] === identifier &&
+    call.callee.type === "MemberExpression" &&
+    !call.callee.computed &&
+    call.callee.object.type === "Identifier" &&
+    call.callee.object.name === "Object" &&
+    call.callee.property.name === "assign"
+  );
+};
+
 export const declaredValue = (context, identifier) => {
   let variable = null;
   for (let scope = context.sourceCode.getScope(identifier); scope && !variable; scope = scope.upper) {
@@ -82,7 +107,25 @@ export const declaredValue = (context, identifier) => {
   }
   const definition = variable?.defs?.[0];
   if (!definition || definition.type !== "Variable" || definition.node.id.type !== "Identifier") return null;
-  return definition.node.init || null;
+  const changed = variable.references.some(
+    (reference) =>
+      (reference.isWrite() && !reference.init) ||
+      writesThrough(reference.identifier) ||
+      mergedInto(reference.identifier),
+  );
+  return changed ? null : definition.node.init || null;
+};
+
+export const resolveOnce = (fallback, resolve) => {
+  const run = (context, node, path = new Set(), memo = new Map()) => {
+    if (!node || path.has(node)) return fallback;
+    if (!memo.has(node)) {
+      const inner = new Set(path).add(node);
+      memo.set(node, resolve(context, node, (next) => run(context, next, inner, memo)));
+    }
+    return memo.get(node);
+  };
+  return run;
 };
 
 export const isFetchCall = (call) => {
