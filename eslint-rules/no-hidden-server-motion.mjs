@@ -1,13 +1,14 @@
 import { ancestors, attribute, jsxName, propertyName } from "./util.mjs";
 
-const hidesOpacity = (object) =>
-  object?.type === "ObjectExpression" &&
-  object.properties.some(
-    (property) =>
-      propertyName(property) === "opacity" &&
-      property.value.type === "Literal" &&
-      property.value.value === 0,
-  );
+const finalValue = (object, key) =>
+  object?.type === "ObjectExpression"
+    ? (object.properties.findLast((property) => propertyName(property) === key)?.value ?? null)
+    : null;
+
+const hidesOpacity = (object) => {
+  const opacity = finalValue(object, "opacity");
+  return opacity?.type === "Literal" && opacity.value === 0;
+};
 
 const variantObject = (context, node, variantsAttr, key) => {
   const expression =
@@ -20,9 +21,7 @@ const variantObject = (context, node, variantsAttr, key) => {
       if (definition?.type === "VariableDeclarator") object = definition.init;
     }
   }
-  if (object?.type !== "ObjectExpression") return null;
-  const entry = object.properties.find((property) => propertyName(property) === key);
-  return entry?.value || null;
+  return finalValue(object, key);
 };
 
 const mountedConditionally = (context, node) =>

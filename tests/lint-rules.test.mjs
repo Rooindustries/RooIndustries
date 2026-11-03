@@ -417,8 +417,16 @@ run("no-hidden-server-motion", {
     `function About() { return <motion.div initial={false} animate={{ opacity: 1 }}>Hi</motion.div>; }`,
     `function Dialog({ open }) { return <AnimatePresence>{open && <motion.div initial={{ opacity: 0 }} animate={{
       opacity: 1 }} />}</AnimatePresence>; }`,
+    `function Fade() { return <motion.div initial={{ ["opacity"]: 0, opacity: 1 }} animate={{ opacity: 1 }} />; }`,
+    `function Pay() { const variants = { ["hidden"]: { opacity: 0 }, hidden: { opacity: 1 } }; return <motion.section
+      variants={variants} initial="hidden" animate="hidden" />; }`,
   ],
   invalid: [
+    {
+      name: "computed opacity key that wins",
+      code: `function Fade() { return <motion.div initial={{ opacity: 1, ["opacity"]: 0 }} animate={{ opacity: 1 }} />; }`,
+      errors: [{ messageId: "hidden" }],
+    },
     {
       name: "About section before #229",
       code: `function About() { return <motion.div initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0
