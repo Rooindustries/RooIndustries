@@ -2,11 +2,14 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 
 export const FIXED_GROUPS = { navigation: ["section-nav.spec.js"], booking: ["booking-flow.spec.js"] };
 export const REST_GROUPS = ["rest-1", "rest-2", "rest-3", "rest-4"];
 export const REST_1_EXTRA_SECONDS = 250;
+
+const playwrightCli = createRequire(import.meta.url).resolve("@playwright/test/cli");
 
 const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -29,12 +32,19 @@ export const reportSpecFiles = (report) => {
 export const listSpecFiles = ({ filter, config } = {}) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "playwright-list-"));
   const reportFile = path.join(dir, "list.json");
-  const args = ["playwright", "test", "--list", "--reporter=json"];
+  const args = [playwrightCli, "test", "--list", "--reporter=json"];
   if (config) args.push("--config", config);
   if (filter) args.push(filter);
+  const readReport = () => JSON.parse(fs.readFileSync(reportFile, "utf8"));
   try {
-    execFileSync("npx", args, { stdio: "ignore", env: { ...process.env, PLAYWRIGHT_JSON_OUTPUT_FILE: reportFile } });
-    return reportSpecFiles(JSON.parse(fs.readFileSync(reportFile, "utf8")));
+    execFileSync(process.execPath, args, {
+      stdio: ["ignore", "ignore", "inherit"],
+      env: { ...process.env, PLAYWRIGHT_JSON_OUTPUT_FILE: reportFile },
+    });
+    return reportSpecFiles(readReport());
+  } catch (error) {
+    const errors = fs.existsSync(reportFile) ? (readReport().errors || []).map(({ message }) => message) : [];
+    throw new Error(["Playwright couldn't list the spec files", ...errors].join("\n"), { cause: error });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

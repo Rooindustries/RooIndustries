@@ -101,6 +101,20 @@ test("a spec file in a subfolder is found and runs in exactly one group", () => 
   }
 });
 
+test("a spec Playwright can't load fails the listing with its error", () => {
+  fs.mkdirSync("test-results", { recursive: true });
+  const dir = fs.mkdtempSync(path.resolve("test-results", "playwright-groups-"));
+  const config = path.join(dir, "playwright.config.mjs");
+  fs.writeFileSync(config, 'export default { testDir: "./tests" };\n');
+  fs.mkdirSync(path.join(dir, "tests"));
+  fs.writeFileSync(path.join(dir, "tests", "broken.spec.js"), 'throw new Error("broken spec file");\n');
+  try {
+    assert.throws(() => listSpecFiles({ config }), /broken spec file/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("both scripts can be imported without a script path", () => {
   for (const script of ["playwright-groups", "playwright-timings"]) {
     execFileSync(process.execPath, ["--input-type=module", "-e", `await import("./scripts/${script}.mjs");`]);
