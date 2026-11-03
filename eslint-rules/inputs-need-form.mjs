@@ -15,12 +15,19 @@ const textTypes = new Set(["text", "email", "password", "tel", "url", "number", 
 const submitVerb =
   /^(handle)?(submit|save|update|check|apply|validate|login|register|confirm|send|verify|review)/i;
 
-const branchTests = new Set(["IfStatement", "ConditionalExpression", "WhileStatement", "DoWhileStatement"]);
+const guardKeys = {
+  IfStatement: "test",
+  ConditionalExpression: "test",
+  WhileStatement: "test",
+  DoWhileStatement: "test",
+  ForStatement: "test",
+  SwitchStatement: "discriminant",
+};
 
 const isGuard = (call) => {
   for (let current = call; current.parent && !isFunction(current); current = current.parent) {
     const parent = current.parent;
-    if (branchTests.has(parent.type) && parent.test === current) return true;
+    if (Object.hasOwn(guardKeys, parent.type) && parent[guardKeys[parent.type]] === current) return true;
     if (parent.type === "LogicalExpression" && parent.left === current) return true;
   }
   return false;

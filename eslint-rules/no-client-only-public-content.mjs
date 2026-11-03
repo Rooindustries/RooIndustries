@@ -15,7 +15,8 @@ const bindsTo = (context, identifier, component) => {
 };
 
 const receivesInitialData = (context, component) => {
-  const props = component.params[0];
+  const param = component.params[0];
+  const props = param?.type === "AssignmentPattern" ? param.left : param;
   if (takesInitial(props)) return true;
   if (props?.type !== "Identifier") return false;
   const isProps = (node) =>

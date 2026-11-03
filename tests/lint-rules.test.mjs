@@ -328,6 +328,10 @@ run("inputs-need-form", {
     `function Fields() { return <div><input /><button onClick={() => move(1)}>Down</button></div>; }`,
     `function Docs() { return <div><input type="search" /><button onClick={() => { if (confirmDiscard())
       startNewDocument(type.name); }}>New</button></div>; }`,
+    `function Gate() { return <div><input /><button onClick={() => { switch (validateCode()) { case true:
+      openNext(); } }}>Next</button></div>; }`,
+    `function Retry() { return <div><input /><button onClick={() => { for (; checkReady(); ) wait(); }}>
+      Wait</button></div>; }`,
   ],
   invalid: [
     {
@@ -373,6 +377,10 @@ run("no-client-only-public-content", {
       useState(seed); useEffect(() => { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
     `export default function Faq(props) { const [data, setData] = useState(props["initialFaq"]); useEffect(() =>
       { getPublicContent("faq").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Terms({ initialData } = {}) { const [data, setData] = useState(initialData); useEffect(() =>
+      { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Terms(props = {}) { const [data, setData] = useState(props.initialData); useEffect(() =>
+      { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
     `export default function Upgrade({ slug }) { useEffect(() => { getPublicContent("upgrade", { slug }); },
       [slug]); return null; }`,
   ],
