@@ -100,32 +100,51 @@ const mergedInto = (identifier) => {
   );
 };
 
-export const declaredValue = (context, identifier) => {
+export const UNKNOWN = Symbol("unknown");
+
+const declaration = (context, identifier) => {
   let variable = null;
   for (let scope = context.sourceCode.getScope(identifier); scope && !variable; scope = scope.upper) {
     variable = scope.set.get(identifier.name) || null;
   }
   const definition = variable?.defs?.[0];
   if (!definition || definition.type !== "Variable" || definition.node.id.type !== "Identifier") return null;
-  const changed = variable.references.some(
+  return { variable, init: definition.node.init || null };
+};
+
+export const declaredValue = (context, identifier) => declaration(context, identifier)?.init || null;
+
+export const unchangedValue = (context, identifier) => {
+  const found = declaration(context, identifier);
+  if (!found) return null;
+  const changed = found.variable.references.some(
     (reference) =>
       (reference.isWrite() && !reference.init) ||
       writesThrough(reference.identifier) ||
       mergedInto(reference.identifier),
   );
-  return changed ? null : definition.node.init || null;
+  return changed ? null : found.init;
 };
 
-export const resolveOnce = (fallback, resolve) => {
-  const run = (context, node, path = new Set(), memo = new Map()) => {
-    if (!node || path.has(node)) return fallback;
-    if (!memo.has(node)) {
-      const inner = new Set(path).add(node);
-      memo.set(node, resolve(context, node, (next) => run(context, next, inner, memo)));
+export const resolveOnce = (fallback, resolve) => (context, root) => {
+  const memo = new Map();
+  const active = new Set();
+  let cycles = 0;
+  const run = (node) => {
+    if (!node) return fallback;
+    if (active.has(node)) {
+      cycles += 1;
+      return fallback;
     }
-    return memo.get(node);
+    if (memo.has(node)) return memo.get(node);
+    const before = cycles;
+    active.add(node);
+    const value = resolve(context, node, run);
+    active.delete(node);
+    if (cycles === before) memo.set(node, value);
+    return value;
   };
-  return run;
+  return run(root);
 };
 
 export const isFetchCall = (call) => {

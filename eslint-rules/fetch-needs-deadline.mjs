@@ -1,4 +1,4 @@
-import { declaredValue, isFetchCall, propertyName, resolveOnce } from "./util.mjs";
+import { isFetchCall, propertyName, resolveOnce, unchangedValue } from "./util.mjs";
 
 const isSignalKey = (property) => propertyName(property) === "signal";
 
@@ -8,7 +8,7 @@ const clearsSignal = (value) =>
 
 const signalState = resolveOnce("unknown", (context, node, next) => {
   if (node.type === "Identifier") {
-    const value = declaredValue(context, node);
+    const value = unchangedValue(context, node);
     return value ? next(value) : "unknown";
   }
   if (node.type !== "ObjectExpression") return "unknown";

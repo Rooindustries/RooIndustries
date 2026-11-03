@@ -77,6 +77,7 @@ run("aria-expanded-needs-controls", {
 
 run("no-unguarded-timer-navigation", {
   valid: [
+    `function Steps() { const history = []; history[0] = "/"; setTimeout(() => history.push("/next"), 100); return null; }`,
     `function RefLogin() { useEffect(() => { const id = setTimeout(() => nav("/x"), 500); return () =>
       clearTimeout(id); }, []); return null; }`,
     `function Toast() { setTimeout(() => setToast((current) => (current === next ? null : current)), 2800); return null;
@@ -223,6 +224,7 @@ run("no-ignored-write-request", {
     `fetch("/api/payment/quote", { method: "POST" }).then((response) => response.json());`,
     `fetch("/api/ref/updateSplit", { method: "POST" }).then(handleResponse);`,
     `const read = { method: "GET" }; const write = { method: "POST" }; fetch("/api/ref/split", { ...read, ...write, ...read });`,
+    `var a = { ...b, method: "GET" }; var b = { method: "POST", ...a }; fetch("/api/ref/split", { ...a, ...b });`,
   ],
   invalid: [
     {
@@ -438,6 +440,8 @@ run("no-hidden-server-motion", {
       opacity: 1 }} />}</AnimatePresence>; }`,
     `function Fade() { return <motion.div initial={{ ["opacity"]: 0, opacity: 1 }} animate={{ opacity: 1 }} />; }`,
     `function Fade() { const start = { opacity: 0 }; start.opacity = 1; return <motion.div initial={start} />; }`,
+    `function Fade() { const hidden = { opacity: 0 }; const shown = { opacity: 0 }; shown.opacity = 1; return <motion.div
+      initial={{ ...hidden, ...shown }} />; }`,
     `function Fade() { const shown = { opacity: 1 }; const hidden = { opacity: 0 }; return <motion.div
       initial={{ ...shown, ...hidden, ...shown }} animate={{ opacity: 1 }} />; }`,
     `function Fade() { return <motion.div initial={{ ["opacity"]: 0, ...{ opacity: 1 } }} animate={{ opacity: 1 }} />; }`,

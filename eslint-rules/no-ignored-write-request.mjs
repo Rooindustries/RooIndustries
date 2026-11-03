@@ -1,4 +1,4 @@
-import { declaredValue, isFetchCall, isFunction, propertyName, resolveOnce } from "./util.mjs";
+import { isFetchCall, isFunction, propertyName, resolveOnce, UNKNOWN, unchangedValue } from "./util.mjs";
 
 const usesResponse = (context, handler) => {
   if (!handler) return false;
@@ -29,14 +29,16 @@ const unwrap = (context, expression) => {
   }
 };
 
-const methodValue = resolveOnce(null, (context, node, next) => {
-  if (node.type === "Identifier") return next(declaredValue(context, node));
-  if (node.type !== "ObjectExpression") return null;
-  let value = null;
+const methodValue = resolveOnce(UNKNOWN, (context, node, next) => {
+  if (node.type === "Identifier") return next(unchangedValue(context, node));
+  if (node.type !== "ObjectExpression") return UNKNOWN;
+  let value;
   for (const property of node.properties) {
-    if (property.type === "SpreadElement") value = next(property.argument) ?? value;
-    else if (propertyName(property) === "method") {
-      value = property.value.type === "Literal" ? String(property.value.value).toUpperCase() : null;
+    if (property.type === "SpreadElement") {
+      const spread = next(property.argument);
+      if (spread !== undefined) value = spread;
+    } else if (propertyName(property) === "method") {
+      value = property.value.type === "Literal" ? String(property.value.value).toUpperCase() : UNKNOWN;
     }
   }
   return value;
@@ -44,7 +46,7 @@ const methodValue = resolveOnce(null, (context, node, next) => {
 
 const writeMethod = (context, call) => {
   const value = methodValue(context, call.arguments[1]);
-  return value && value !== "GET" && value !== "HEAD" ? value : null;
+  return typeof value === "string" && value !== "GET" && value !== "HEAD" ? value : null;
 };
 
 export default {
