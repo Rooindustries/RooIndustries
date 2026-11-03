@@ -297,7 +297,7 @@ jobs:
             booking-hold upgrade-credit upgrade-credit:ownership emails:postgres17 referral:postgres17
             referral-social:postgres17 backend-integrity:postgres17 referral-authority:postgres17
             referral-email:postgres17 referral-integrity:postgres17 account-domain:postgres17
-            account-check:postgres17 commerce-readiness:postgres17 referral-email:origins
+            account-check:postgres17 commerce-readiness:postgres17 referral-email:origins tooling:safety
       - uses: ./.github/actions/save-caches
         with:
           build-dirs: |
@@ -337,7 +337,7 @@ jobs:
       - name: Run the payout and recovery suites
         uses: ./.github/actions/npm-suites
         with:
-          suites: creator-payouts:postgres17 booking-payment-window payment-recovery:postgres17 tooling:safety
+          suites: creator-payouts:postgres17 booking-payment-window payment-recovery:postgres17
       - uses: actions/upload-artifact@v4
         if: always()
         with:
