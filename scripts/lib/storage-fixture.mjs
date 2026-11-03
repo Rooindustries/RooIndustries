@@ -7,7 +7,7 @@ import path from 'node:path';
 import { once } from 'node:events';
 import { spawn, spawnSync } from 'node:child_process';
 import { createClient } from '@supabase/supabase-js';
-import { freeTcpPorts } from './free-tcp-port.mjs';
+import { releaseTcpPorts, reserveTcpPorts } from './free-tcp-port.mjs';
 import { createSweepPostgresFixture, root } from './sweep-postgres-fixture.mjs';
 import { installNetworkGuard } from './test-target-safety.mjs';
 
@@ -43,13 +43,14 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
   assert.equal(revision.stdout.trim(), storageRelease.commit, 'Storage source does not match pinned official release');
   assert.ok(fs.existsSync(path.join(storageSource, 'dist/start/server.js')), 'Build the pinned Storage checkout first (see roo-sanity-env.md)');
   assert.ok(fs.existsSync(path.join(storageSource, 'migrations/tenant/0073-revoke-grants-to-unused-operations.sql')), 'Pinned Storage migrations are unavailable');
-  const [storagePort, gatewayPort, postgresPort, restPort, proxyPort] = await freeTcpPorts(host, [
+  const reserved = await reserveTcpPorts(host, [
     ports.storage ?? 0,
     ports.gateway ?? 0,
     ports.postgres ?? 0,
     ports.rest ?? ports.postgrest ?? 0,
     ports.proxy ?? 0,
   ]);
+  const [storagePort, gatewayPort, postgresPort, restPort, proxyPort] = reserved;
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'roo-storage-fixture-'));
   const storageUrl = `http://${host}:${storagePort}`;
   const supabaseUrl = `http://${host}:${gatewayPort}`;
@@ -60,6 +61,7 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
   const cleanup = { storagePid: null, postgresPid: null, postgrestPid: null, databaseScratch: null, storageScratch: scratch, stopped: false };
   let stopping;
   const stop = () => stopping ||= (async () => {
+    await releaseTcpPorts(host, reserved);
     if (gateway) { gateway.closeAllConnections(); await new Promise(resolve => gateway.close(resolve)); gateway = null; }
     await terminate(storageProcess);
     if (database) await database.stop();
@@ -97,6 +99,7 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
         STORAGE_PUBLIC_URL: supabaseUrl, REQUEST_ALLOW_X_FORWARDED_PATH: 'true',
         VERSION: storageRelease.tag,
       };
+      await releaseTcpPorts(host, [storagePort]);
       storageProcess = spawn(process.execPath, [path.join(storageSource, 'dist/start/server.js')], { cwd: scratch, env: childEnv, stdio: ['ignore', logFd, logFd] });
       fs.closeSync(logFd);
       cleanup.storagePid = storageProcess.pid;
@@ -143,6 +146,7 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
       response.on('close', () => { if (!response.writableFinished) upstream.destroy(); });
       request.pipe(upstream);
     });
+    await releaseTcpPorts(host, [gatewayPort]);
     gateway.listen(gatewayPort, host);
     await once(gateway, 'listening');
     const client = createClient(supabaseUrl, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } });

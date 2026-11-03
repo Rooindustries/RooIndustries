@@ -4,6 +4,7 @@ import http from 'node:http';
 import { createHash } from 'node:crypto';
 import { uiRepairsFixture } from './ui-repairs-server.mjs';
 import { localOrigin } from '../../scripts/lib/test-target-safety.mjs';
+import { releaseTcpPorts } from '../../scripts/lib/free-tcp-port.mjs';
 import { referralEmail } from './api-routes.mjs';
 
 export async function createToolingContentFixture({ origin, artifact, apiRoutes = false, clockFile }) {
@@ -375,6 +376,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       persist();
     } catch (error) { json(res, error.status || 400, { code: error.code || 'FIXTURE_INPUT_INVALID', message: error.message }); persist(); }
   });
+  await releaseTcpPorts(target.hostname, [Number(target.port)]);
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(Number(target.port), target.hostname, resolve); });
   persist();
   return { evidence, close: () => new Promise(resolve => { server.close(() => { evidence.stopped = true; persist(); resolve(); }); server.closeAllConnections(); }) };

@@ -1,18 +1,23 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
-import { once } from "node:events";
 import { createHmac } from "node:crypto";
 import { registerHooks } from "node:module";
 import { fileURLToPath } from "node:url";
-import { fixturePorts } from "../../scripts/lib/free-tcp-port.mjs";
+import { fixturePorts, releaseTcpPorts } from "../../scripts/lib/free-tcp-port.mjs";
 import { installNetworkGuard, refuseEnvFiles } from "../../scripts/lib/test-target-safety.mjs";
 
 export async function createBookingHoldFixture() {
   refuseEnvFiles();
   const host = process.env.ROO_TEST_HOST || "127.0.0.1";
-  const ports = await fixturePorts(host, process.env.BOOKING_HOLD_PORT, 4);
-  const [port, postgresPort, restPort, proxyPort] = ports;
+  const requested = process.env.BOOKING_HOLD_PORT;
+  const databasePorts = await fixturePorts(host, requested && Number(requested) + 1, 3);
+  const [postgresPort, restPort, proxyPort] = databasePorts;
+  const server = http.createServer();
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(Number(requested || 0), host, resolve); })
+    .catch(async error => { await releaseTcpPorts(host, databasePorts); throw error; });
+  const port = server.address().port;
+  const ports = [port, ...databasePorts];
   const baseURL = `http://${host}:${port}`;
   const origins = ports.map(value => `http://${host}:${value}`);
   installNetworkGuard(origins);
@@ -47,9 +52,9 @@ export async function createBookingHoldFixture() {
   };
   const originalFetch = globalThis.fetch;
   const originalDate = globalThis.Date;
-  let database, server;
+  let database;
   const stop = async () => {
-    if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); server = null; }
+    if (server.listening) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
     if (database) { await database.stop(); database = null; }
     globalThis.fetch = originalFetch;
     globalThis.Date = originalDate;
@@ -129,7 +134,7 @@ export async function createBookingHoldFixture() {
       "/api/payment/reconcile": "../../src/server/api/payment/reconcile.js",
       "/api/payment/webhook/dodo": "../../src/server/api/payment/webhookDodo.js",
     })) handlers.set(route, (await import(module)).default);
-    server = http.createServer(async (req, res) => {
+    server.on("request", async (req, res) => {
       try {
         const chunks = [];
         for await (const chunk of req) chunks.push(chunk);
@@ -147,8 +152,6 @@ export async function createBookingHoldFixture() {
         res.end(body);
       } catch (error) { res.writeHead(500, { "content-type": "application/json" }); res.end(JSON.stringify({ error: error.message })); }
     });
-    server.listen(port, host);
-    await once(server, "listening");
     const post = async (route, body, authorization = "", headers = {}) => {
       globalThis.__rooRateLimitBuckets?.clear();
       const response = await fetch(`${baseURL}${route}`, {

@@ -6,6 +6,7 @@ import { registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
+import { releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
 
 refuseEnvFiles();
 const root = process.cwd();
@@ -22,10 +23,12 @@ registerHooks({ resolve(specifier, context, next) {
     throw error;
   }
 }});
+const [, controlPort, storagePort, gatewayPort, postgresPort, postgrestPort, proxyPort] = await reserveTcpPorts("127.0.0.1", [port, port + 6, 0, 0, 0, 0, 0]);
 process.env.ROO_TEST_HOST = "127.0.0.1";
 const { start } = await import("./lib/storage-fixture.mjs");
 const fixture = await start({
   fullMigrationChain: true,
+  ports: { storage: storagePort, gateway: gatewayPort, postgres: postgresPort, postgrest: postgrestPort, proxy: proxyPort },
   additionalOrigins: [baseURL, controlOrigin],
   ...(process.env.STORAGE_SOURCE ? { storageSource: process.env.STORAGE_SOURCE } : {}),
   ...(process.env.PG_BIN ? { pgBin: process.env.PG_BIN } : {}),
@@ -80,7 +83,10 @@ try {
     });
     if (!response.ok) throw new Error("Content fixture seed failed.");
     documents = await response.json();
-  } finally { await seed.close(); }
+  } finally {
+    await seed.close();
+    await reserveTcpPorts("127.0.0.1", [controlPort]);
+  }
   const unusedFields = {
     hero: { tagline: "Legacy tagline café 日本語", ctaNoteIcon: "☀️", bullets: ["Legacy bullet café 日本語", ""] },
     packagesSettings: { heading: "Legacy packages heading" },
@@ -230,7 +236,8 @@ try {
     }
     response.writeHead(404); response.end();
   });
-  await new Promise((resolve, reject) => { control.once("error", reject); control.listen(port + 6, "127.0.0.1", resolve); });
+  await releaseTcpPorts("127.0.0.1", [controlPort]);
+  await new Promise((resolve, reject) => { control.once("error", reject); control.listen(controlPort, "127.0.0.1", resolve); });
   const env = {
     PATH: process.env.PATH, HOME: process.env.HOME, CI: "true", TZ: "UTC", TOURNEY_DATABASE_MODE: "memory",
     DATA_PRIMARY_BACKEND: "supabase", COMMERCE_PRIMARY_BACKEND: "supabase", COMMERCE_FAILOVER_GENERATION: "0", SUPABASE_CUTOVER_ENABLED: "1", COMMERCE_CUTOVER_ENABLED: "1",
@@ -250,10 +257,13 @@ try {
   console.log(`Guarded native CMS fixture: ${baseURL}`);
   await execute(["scripts/generate-sitemap.js"]);
   await execute(["scripts/generate-robots.js"]);
-  if (process.env.ROO_TEST_DEV === "1") await execute([next, "dev", "--hostname", target.hostname, "--port", target.port]);
-  else {
+  if (process.env.ROO_TEST_DEV === "1") {
+    await releaseTcpPorts("127.0.0.1", [port]);
+    await execute([next, "dev", "--hostname", target.hostname, "--port", target.port]);
+  } else {
     await execute(["scripts/validate-runtime-env.js"]);
     await execute([next, "build"]);
+    await releaseTcpPorts("127.0.0.1", [port]);
     await execute([next, "start", "--hostname", target.hostname, "--port", target.port]);
   }
 } finally { await stop(); }

@@ -4,14 +4,16 @@ import { openSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from './lib/test-target-safety.mjs';
-import { fixturePorts } from './lib/free-tcp-port.mjs';
+import { passHeldTcpPorts, releaseTcpPorts } from './lib/free-tcp-port.mjs';
+import { reserveToolingBuildPorts } from './lib/tooling-build-ports.mjs';
 
 refuseEnvFiles();
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';
-const [port, contentPort] = await fixturePorts(host, process.env.PW_PORT, 2);
+const dist = validateDistDir(process.env.NEXT_DIST_DIR || '.next-e2e-monitoring-startup', { isolated: true });
+const requestedOrigin = process.env.BASE_URL && new URL(localOrigin(process.env.BASE_URL));
+const [port, contentPort] = await reserveToolingBuildPorts(host, dist, process.env.PW_PORT || requestedOrigin?.port);
 const origin = localOrigin(process.env.BASE_URL || `http://${host}:${port}`);
 if (new URL(origin).hostname !== host || new URL(origin).port !== String(port)) throw new Error('Startup check requires its own local fixture origin.');
-const dist = validateDistDir(process.env.NEXT_DIST_DIR || '.next-e2e-monitoring-startup', { isolated: true });
 const artifact = join('test-results', 'monitoring-startup', new Date().toISOString().replace(/[:.]/g, '-'));
 await mkdir(artifact, { recursive: true });
 const restoreGuard = installNetworkGuard([origin, `http://${host}:${contentPort}`]);
@@ -20,12 +22,14 @@ let child;
 let error;
 try {
   const fd = openSync(join(artifact, 'next.log'), 'a');
+  const held = passHeldTcpPorts(host, [port, contentPort]);
   child = spawn(process.execPath, ['scripts/test-tooling-sweep-server.mjs'], {
     detached: true,
-    env: { ...process.env, ROO_TEST_HOST: host, BASE_URL: origin, PW_PORT: String(port), TOOLING_CONTENT_PORT: String(contentPort), NEXT_DIST_DIR: dist, ROO_ADMIN_FIXTURE: '0', TOOLING_DEV_SERVER: '0', TOOLING_API_ROUTES: '0', TOOLING_MONITORING_STARTUP: '1', SENTRY_CLI_NO_TELEMETRY: '1', NEXT_PUBLIC_SENTRY_DSN: 'false' },
-    stdio: ['ignore', fd, fd],
+    env: { ...process.env, ROO_TEST_HOST: host, BASE_URL: origin, PW_PORT: String(port), TOOLING_CONTENT_PORT: String(contentPort), NEXT_DIST_DIR: dist, ROO_ADMIN_FIXTURE: '0', TOOLING_DEV_SERVER: '0', TOOLING_API_ROUTES: '0', TOOLING_MONITORING_STARTUP: '1', SENTRY_CLI_NO_TELEMETRY: '1', NEXT_PUBLIC_SENTRY_DSN: 'false', ...held.env },
+    stdio: ['ignore', fd, fd, ...held.stdio],
   });
   closeSync(fd);
+  await releaseTcpPorts(host, [port, contentPort]);
   let spawnError;
   child.once('error', cause => { spawnError = cause; });
   const deadline = Date.now() + 300000;
