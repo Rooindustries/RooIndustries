@@ -13,8 +13,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  tested-tree:
+    name: Check for an already tested tree
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      tested: ${{ steps.check.outputs.tested }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/tested-tree.sh
+
   monitoring:
     name: Production-only monitoring
+    needs: tested-tree
+    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -63,6 +85,8 @@ jobs:
 
   jest:
     name: Jest
+    needs: tested-tree
+    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -80,6 +104,7 @@ jobs:
       - run: npm run lint
       - run: npm run test:lint-rules
       - run: npm run test:playwright-groups
+      - run: npm run test:tested-tree
       - run: npm run test:tooling:dependencies
       - run: npm run check:seo
       - run: npm run check:supabase:migrations
@@ -87,6 +112,8 @@ jobs:
 
   booking-model:
     name: Booking hold model
+    needs: tested-tree
+    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -101,6 +128,8 @@ jobs:
 
   playwright:
     name: Playwright ${{ matrix.suite.name }}
+    needs: tested-tree
+    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
@@ -194,6 +223,8 @@ jobs:
 
   routes:
     name: Playwright creator portal and API routes
+    needs: tested-tree
+    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -236,6 +267,8 @@ jobs:
 
   native:
     name: Native PostgreSQL 17 suites
+    needs: tested-tree
+    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -313,6 +346,8 @@ jobs:
 
   native-payouts:
     name: Native PostgreSQL 17 payout and recovery suites
+    needs: tested-tree
+    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -348,6 +383,8 @@ jobs:
 
   revalidation:
     name: Playwright revalidation
+    needs: tested-tree
+    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -387,3 +424,25 @@ jobs:
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  record-tested-tree:
+    name: Record the tested tree
+    if: github.event_name == 'pull_request'
+    needs: [monitoring, jest, booking-model, playwright, routes, native, native-payouts, revalidation]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: tree
+        run: |
+          tree="$(git rev-parse 'HEAD^{tree}')"
+          mkdir -p tested-tree
+          echo "$tree" > tested-tree/tree
+          echo "tree=$tree" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tested-tree-${{ steps.tree.outputs.tree }}
+          path: tested-tree/
+          retention-days: 30
