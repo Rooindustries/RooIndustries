@@ -8,15 +8,19 @@ const validPort = (requested) =>
 export const freeTcpPorts = async (host, requested) => {
   assert.ok(requested.every(validPort), "Invalid fixture port");
   const servers = requested.map(() => net.createServer());
+  const explicitFirst = (a, b) => Number(requested[a] === 0) - Number(requested[b] === 0);
+  const bindOrder = requested.map((port, index) => index).sort(explicitFirst);
   try {
-    for (const [index, server] of servers.entries()) {
-      server.listen(requested[index], host);
-      await once(server, "listening");
+    for (const index of bindOrder) {
+      servers[index].listen(requested[index], host);
+      await once(servers[index], "listening");
     }
     return servers.map((server) => server.address().port);
   } finally {
     await Promise.all(
-      servers.filter((server) => server.listening).map((server) => new Promise((resolve) => server.close(resolve))),
+      servers
+        .filter((server) => server.listening)
+        .map((server) => new Promise((resolve) => server.close(resolve))),
     );
   }
 };
