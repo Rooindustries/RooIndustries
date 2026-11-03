@@ -505,18 +505,26 @@ test.afterAll(async () => {
       2
     )
   );
-
-  expect(navFailures, "navigation reliability failures").toEqual([]);
-  expect(crashLog.length, "client crash/hydration errors captured").toBe(0);
-  expect(hydrationErrors.length, "hydration mismatch errors captured").toBe(0);
 });
 
+let navFailuresAtStart = 0;
+let crashLogAtStart = 0;
 
 test.beforeEach(async ({ context, page, baseURL }) => {
+  navFailuresAtStart = navFailures.length;
+  crashLogAtStart = crashLog.length;
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
   await guardBrowserContext(context, [baseURL]);
   if (CPU_THROTTLE_RATE > 1) {
     const session = await context.newCDPSession(page);
     await session.send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE_RATE });
   }
+});
+
+test.afterEach(async () => {
+  expect(navFailures.slice(navFailuresAtStart), "navigation reliability failures").toEqual([]);
+  expect(
+    crashLog.slice(crashLogAtStart).map(({ type, viewport, url, message }) => ({ type, viewport, url, message })),
+    "client crash/hydration errors captured"
+  ).toEqual([]);
 });

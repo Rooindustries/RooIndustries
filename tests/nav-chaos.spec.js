@@ -28,6 +28,10 @@ const auditDir = path.join(process.cwd(), "audit");
 const chaosReportPath = path.join(auditDir, "phase1-nav-chaos.md");
 const failures = [];
 const notes = [];
+const CPU_THROTTLE_RATE = Number(process.env.NAV_CPU_THROTTLE_RATE || 1);
+if (!Number.isFinite(CPU_THROTTLE_RATE) || CPU_THROTTLE_RATE < 1 || CPU_THROTTLE_RATE > 4) {
+  throw new Error("NAV_CPU_THROTTLE_RATE must be between 1 and 4.");
+}
 
 const ORIGINS = ["/benchmarks", "/reviews", "/meet-the-team"];
 const ACTIONS = [
@@ -276,11 +280,20 @@ test.afterAll(async () => {
   }
 
   fs.writeFileSync(chaosReportPath, lines.join("\n"));
-  expect(failures, "chaos navigation failures").toEqual([]);
 });
 
+let failuresAtStart = 0;
 
-test.beforeEach(async ({ context, baseURL }) => {
+test.beforeEach(async ({ context, page, baseURL }) => {
+  failuresAtStart = failures.length;
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
   await guardBrowserContext(context, [baseURL]);
+  if (CPU_THROTTLE_RATE > 1) {
+    const session = await context.newCDPSession(page);
+    await session.send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE_RATE });
+  }
+});
+
+test.afterEach(async () => {
+  expect(failures.slice(failuresAtStart), "chaos navigation failures").toEqual([]);
 });
