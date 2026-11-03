@@ -252,6 +252,9 @@ run("no-aria-label-on-generic", {
     `<span role="generic" {...badgeProps} aria-label="Verified creator">✓</span>`,
     `<div role="group generic" aria-label="Score">4–1</div>`,
     `<div role="switchy img" aria-label="Rating">★★★</div>`,
+    `<div role="sectionheader" aria-label="Packages">Packages</div>`,
+    `<div role="doc-abstract" aria-label="Summary">…</div>`,
+    `<div role="graphics-document" aria-label="Bracket">…</div>`,
   ],
   invalid: [
     {

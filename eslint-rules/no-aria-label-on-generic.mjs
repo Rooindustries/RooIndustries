@@ -7,7 +7,7 @@ const ariaRoles = new Set([
   "gridcell", "group", "heading", "image", "img", "insertion", "link", "list", "listbox", "listitem", "log",
   "main", "mark", "marquee", "math", "menu", "menubar", "menuitem", "menuitemcheckbox", "menuitemradio",
   "meter", "navigation", "none", "note", "option", "paragraph", "presentation", "progressbar", "radio",
-  "radiogroup", "region", "row", "rowgroup", "rowheader", "scrollbar", "search", "searchbox", "separator",
+  "radiogroup", "region", "row", "rowgroup", "rowheader", "scrollbar", "search", "searchbox", "sectionfooter", "sectionheader", "separator",
   "slider", "spinbutton", "status", "strong", "subscript", "suggestion", "superscript", "switch", "tab",
   "table", "tablist", "tabpanel", "term", "textbox", "time", "timer", "toolbar", "tooltip", "tree",
   "treegrid", "treeitem",
@@ -27,6 +27,8 @@ const unnamedRoles = new Set([
   "subscript",
   "superscript",
 ]);
+
+const isAriaRole = (token) => ariaRoles.has(token) || /^(doc|graphics)-[a-z]+$/.test(token);
 
 const UNKNOWN = Symbol("unknown role");
 
@@ -53,7 +55,7 @@ const hasNameableRole = (node) => {
   const role = effectiveRole(node);
   if (role === UNKNOWN) return true;
   if (role === null) return false;
-  const recognized = role.trim().toLowerCase().split(/\s+/).find((token) => ariaRoles.has(token));
+  const recognized = role.trim().toLowerCase().split(/\s+/).find(isAriaRole);
   return Boolean(recognized) && !unnamedRoles.has(recognized);
 };
 
