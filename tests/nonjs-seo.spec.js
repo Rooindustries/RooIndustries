@@ -28,6 +28,8 @@ test.describe("Non-JS crawlability", () => {
         await page.goto(route, { waitUntil: "domcontentloaded" });
         const content = page.locator(selector);
         await expect(content).toHaveCount(1);
+        await expect(page.locator('[hidden][id^="S:"]')).toHaveCount(0);
+        expect(await content.evaluate(element => Boolean(element.closest("[hidden]")))).toBe(false);
         const hidden = await content.evaluate(element => {
           const ancestors = [];
           for (let node = element; node; node = node.parentElement) ancestors.push(node);
@@ -221,6 +223,7 @@ test.describe("Non-JS crawlability", () => {
   for (const route of routes) {
     test(`renders meaningful HTML for ${route}`, async ({ page }) => {
       await page.goto(route, { waitUntil: "domcontentloaded" });
+      await expect(page.locator('[hidden][id^="S:"]')).toHaveCount(0);
 
       const heading = page.locator("h1, h2, h3");
       await expect(heading.first()).toBeVisible();

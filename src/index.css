@@ -3067,12 +3067,17 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
 }
 
 @media (scripting: none) {
+  .booking-dialog-stage [role="dialog"] {
+    width: 100%;
+  }
+
   .booking-dialog-stage [data-booking-scaler] {
     position: relative;
   }
 
   .booking-dialog-stage .booking-dialog-content {
     max-width: 100%;
+    margin-inline: auto;
   }
 }
 
