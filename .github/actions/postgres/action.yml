@@ -1,0 +1,21 @@
+name: Install PostgreSQL 17 and PostgREST 16.4
+description: Installs the database and REST server the native suites run against, and exports PG_BIN and POSTGREST_BIN.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        sudo install -d /usr/share/postgresql-common/pgdg
+        sudo curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+        . /etc/os-release
+        echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+        sudo apt-get update
+        sudo apt-get install --yes --no-install-recommends postgresql-17
+        mkdir -p "$RUNNER_TEMP/postgrest"
+        curl --fail --silent --show-error --location https://github.com/PostgREST/postgrest/releases/download/v16.4/postgrest-v16.4-linux-static-x86-64.tar.xz -o "$RUNNER_TEMP/postgrest.tar.xz"
+        echo "b47ecc82fce1dcebbbc4183d839e52f07f7630c9d7ad0f54db753d1939299354  $RUNNER_TEMP/postgrest.tar.xz" | sha256sum --check
+        tar -xJf "$RUNNER_TEMP/postgrest.tar.xz" -C "$RUNNER_TEMP/postgrest"
+        /usr/lib/postgresql/17/bin/postgres --version
+        test "$("$RUNNER_TEMP/postgrest/postgrest" --version)" = "PostgREST 16.4"
+        echo "PG_BIN=/usr/lib/postgresql/17/bin" >> "$GITHUB_ENV"
+        echo "POSTGREST_BIN=$RUNNER_TEMP/postgrest/postgrest" >> "$GITHUB_ENV"

@@ -79,6 +79,7 @@ jobs:
           NODE_OPTIONS: --import=${{ github.workspace }}/scripts/lib/test-target-safety.mjs
       - run: npm run lint
       - run: npm run test:lint-rules
+      - run: npm run test:playwright-groups
       - run: npm run test:tooling:dependencies
       - run: npm run check:seo
       - run: npm run check:supabase:migrations
@@ -107,19 +108,12 @@ jobs:
       matrix:
         suite:
           - name: navigation
-            files: '/section-nav\.spec\.js$'
           - name: booking
-            files: '/booking-flow\.spec\.js$'
           - name: rest-1
-            files: '/(benchmarks-rendering|bios-guide-fonts|booking-code-check|booking-dialog-sizing|content-layout-shift|dodo-session-new-hold|free-booking-confirmation|missing-page|nonjs-seo|privacy-markdown|referral-link-capture|terms-rendering|upgrade-form-keyboard|ux-quick-fixes)\.spec\.js$'
           - name: rest-2
-            files: '/(api-preview|booking-initial-slot|confirmation-summary|guide-package-links|home-hero-cms|home-performance|home-video-posters|package-guarantee|payment-code-check|payment-confirmation-receipt|payment-methods|routes-smoke|transactional-emails)\.spec\.js$'
           - name: rest-3
-            files: '/(a11y-regressions|backed-claims|booking-details-required|booking-modal-layout|contact-form-csp|faq-answers|home-cta-links|nav-chaos|public-route-sweep|route-background|route-entries|static-pages|structured-data|team-rendering)\.spec\.js$'
           - name: rest-4
-            files: '^(?!.*/(section-nav|booking-flow|benchmarks-rendering|bios-guide-fonts|booking-code-check|booking-dialog-sizing|content-layout-shift|dodo-session-new-hold|free-booking-confirmation|missing-page|nonjs-seo|privacy-markdown|referral-link-capture|terms-rendering|upgrade-form-keyboard|ux-quick-fixes|api-preview|booking-initial-slot|confirmation-summary|guide-package-links|home-hero-cms|home-performance|home-video-posters|package-guarantee|payment-code-check|payment-confirmation-receipt|payment-methods|routes-smoke|transactional-emails|a11y-regressions|backed-claims|booking-details-required|booking-modal-layout|contact-form-csp|faq-answers|home-cta-links|nav-chaos|public-route-sweep|route-background|route-entries|static-pages|structured-data|team-rendering)\.spec\.js$).*'
     env:
-      PW_FILES: ${{ matrix.suite.files }}
       PW_SUITE: ${{ matrix.suite.name }}
       ROO_TEST_HOST: 127.0.0.1
       BASE_URL: http://127.0.0.1:3211
@@ -136,6 +130,26 @@ jobs:
           node-version: 22
           browsers: chromium webkit
           build-dirs: .next-e2e-ci/cache/webpack
+      - name: Pick a fixed group's spec file
+        if: ${{ !startsWith(matrix.suite.name, 'rest-') }}
+        run: |
+          case "$PW_SUITE" in
+            navigation) echo 'PW_FILES=/section-nav\.spec\.js$' >> "$GITHUB_ENV" ;;
+            booking) echo 'PW_FILES=/booking-flow\.spec\.js$' >> "$GITHUB_ENV" ;;
+            *) echo "Unknown browser group $PW_SUITE" >&2; exit 1 ;;
+          esac
+      - name: Restore the latest per-file test timings
+        if: startsWith(matrix.suite.name, 'rest-')
+        uses: actions/cache/restore@v4
+        with:
+          path: .playwright-timings
+          key: playwright-timings-latest
+          restore-keys: playwright-timings-
+      - name: Pick this group's spec files
+        if: startsWith(matrix.suite.name, 'rest-')
+        run: |
+          files="$(node scripts/playwright-groups.mjs "$PW_SUITE" .playwright-timings/timings.json)"
+          echo "PW_FILES=$files" >> "$GITHUB_ENV"
       - name: Run browser and agent-readiness tests
         run: |
           node scripts/test-tooling-sweep-server.mjs &
@@ -247,22 +261,7 @@ jobs:
           build-dirs: |
             .next-e2e-native-admin/cache/webpack
             .next-e2e-native-booking/cache/webpack
-      - name: Install PostgreSQL 17 and PostgREST 16.4
-        run: |
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
-          . /etc/os-release
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends postgresql-17
-          mkdir -p "$RUNNER_TEMP/postgrest"
-          curl --fail --silent --show-error --location https://github.com/PostgREST/postgrest/releases/download/v16.4/postgrest-v16.4-linux-static-x86-64.tar.xz -o "$RUNNER_TEMP/postgrest.tar.xz"
-          echo "b47ecc82fce1dcebbbc4183d839e52f07f7630c9d7ad0f54db753d1939299354  $RUNNER_TEMP/postgrest.tar.xz" | sha256sum --check
-          tar -xJf "$RUNNER_TEMP/postgrest.tar.xz" -C "$RUNNER_TEMP/postgrest"
-          /usr/lib/postgresql/17/bin/postgres --version
-          test "$("$RUNNER_TEMP/postgrest/postgrest" --version)" = "PostgREST 16.4"
-          echo "PG_BIN=/usr/lib/postgresql/17/bin" >> "$GITHUB_ENV"
-          echo "POSTGREST_BIN=$RUNNER_TEMP/postgrest/postgrest" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/postgres
       - name: Build the pinned native Storage fixture
         run: |
           git clone --depth 1 --branch v1.79.33 https://github.com/supabase/storage.git "$STORAGE_SOURCE"
@@ -292,15 +291,13 @@ jobs:
       - name: Run payment persistence sweep on the full migration chain
         run: node scripts/test-payment-persistence-sweep.mjs --full-chain
       - name: Run the remaining PostgreSQL 17 suites
-        run: |
-          failed=()
-          for suite in booking-hold booking-payment-window upgrade-credit upgrade-credit:ownership emails:postgres17 payment-recovery:postgres17 referral:postgres17 creator-payouts:postgres17 referral-social:postgres17 backend-integrity:postgres17 referral-authority:postgres17 referral-email:postgres17 referral-integrity:postgres17 account-domain:postgres17 account-check:postgres17 commerce-readiness:postgres17 referral-email:origins tooling:safety; do
-            npm run "test:$suite" || failed+=("$suite")
-          done
-          if [ ${#failed[@]} -gt 0 ]; then
-            echo "Failed suites: ${failed[*]}"
-            exit 1
-          fi
+        uses: ./.github/actions/npm-suites
+        with:
+          suites: >-
+            booking-hold upgrade-credit upgrade-credit:ownership emails:postgres17 referral:postgres17
+            referral-social:postgres17 backend-integrity:postgres17 referral-authority:postgres17
+            referral-email:postgres17 referral-integrity:postgres17 account-domain:postgres17
+            account-check:postgres17 commerce-readiness:postgres17 referral-email:origins
       - uses: ./.github/actions/save-caches
         with:
           build-dirs: |
@@ -312,6 +309,41 @@ jobs:
           name: test-results-native
           path: test-results/
           if-no-files-found: error
+          retention-days: 7
+
+  native-payouts:
+    name: Native PostgreSQL 17 payout and recovery suites
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ROO_TEST_HOST: 127.0.0.1
+      PW_PORT: "3211"
+      PW_SERVER_ID: native
+      NEXT_DIST_DIR: .next-e2e-native-admin
+      BOOKING_CONTACT_PORT: "3220"
+      BOOKING_ROUTE_PORT: "3225"
+      AT_SPI_BUS_ADDRESS: unix:path=/dev/null
+    steps:
+      - name: Use the runner temp directory
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: 24
+          browsers: chromium
+      - uses: ./.github/actions/postgres
+      - name: Run the payout and recovery suites
+        uses: ./.github/actions/npm-suites
+        with:
+          suites: creator-payouts:postgres17 booking-payment-window payment-recovery:postgres17 tooling:safety
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-native-payouts
+          path: test-results/
+          if-no-files-found: ignore
           retention-days: 7
 
   revalidation:
