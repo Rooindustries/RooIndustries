@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { homedir, networkInterfaces } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
+import { freeTcpPorts } from './lib/free-tcp-port.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const delay = ms => new Promise(done => setTimeout(done, ms));
@@ -75,17 +76,11 @@ async function run(scratch, artifact, hostNetwork) {
     received.push({ path: request.url, body });
     response.writeHead(200, { 'Content-Type': 'application/json' }).end('{}');
   });
-  const reserve = async () => {
-    const server = createServer();
-    await new Promise(done => server.listen(0, '127.0.0.1', done));
-    const port = server.address().port;
-    await new Promise(done => server.close(done));
-    return `http://127.0.0.1:${port}`;
-  };
   await new Promise(done => requests.listen(0, '127.0.0.1', done));
   const sink = `http://127.0.0.1:${requests.address().port}`;
-  const site = (await reserve()).replace('127.0.0.1', 'localhost');
-  const content = await reserve();
+  const [sitePort, contentPort] = await freeTcpPorts('127.0.0.1', [0, 0]);
+  const site = `http://localhost:${sitePort}`;
+  const content = `http://127.0.0.1:${contentPort}`;
   const dsn = sink.replace('http://', 'http://fixturekey@') + '/42';
   const restoreGuard = installNetworkGuard([site, sink, content]);
   inheritTestProcessGuard(pathToFileURL(join(root, 'scripts/fixtures/sourcemaps-network-guard.mjs')));

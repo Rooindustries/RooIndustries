@@ -147,7 +147,8 @@
     "lint": "eslint src app middleware.js",
     "test:lint-rules": "node --test tests/lint-rules.test.mjs",
     "test:playwright-groups": "node --test tests/playwright-groups.test.mjs",
-    "test:tested-tree": "node --test tests/tested-tree.test.mjs"
+    "test:tested-tree": "node --test tests/tested-tree.test.mjs",
+    "test:free-ports": "node --test tests/free-tcp-port.test.mjs"
   },
   "eslintConfig": {
     "extends": [

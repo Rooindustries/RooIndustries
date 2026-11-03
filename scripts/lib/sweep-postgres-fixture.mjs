@@ -8,7 +8,7 @@ import { once } from 'node:events';
 import { spawn, spawnSync } from 'node:child_process';
 import postgres from 'postgres';
 import { createClient } from '@supabase/supabase-js';
-import { freeTcpPort } from './free-tcp-port.mjs';
+import { freeTcpPorts } from './free-tcp-port.mjs';
 
 export const root = path.resolve(new URL('../..', import.meta.url).pathname);
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';
@@ -62,8 +62,6 @@ export const functionDefinition = (name, qualifiedName) => {
   return match[0];
 };
 
-const freePort = (requested = 0) => freeTcpPort(host, requested);
-
 export const createSweepPostgresFixture = async ({ commerceRepairMigration = true, fullMigrationChain = false, excludedMigrations = [], beforeMigrations, pgBin: requestedPgBin, postgrestBin: requestedPostgrestBin, libraryPath, ports = {} } = {}) => {
   assert.equal(process.env.ROO_TEST_POSTGRES_HOST || host, host);
   const pgBin = requestedPgBin || process.env.PG_BIN || '/tmp/roo-request-pg17/runtime/usr/lib/postgresql/17/bin';
@@ -71,8 +69,11 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
   const env = {...process.env, LC_ALL: 'C', LD_LIBRARY_PATH: libraryPath || process.env.LD_LIBRARY_PATH || '/tmp/roo-request-pg17/runtime/usr/lib/x86_64-linux-gnu'};
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'roo-persistence-sweep-'));
   const dataDir = path.join(scratch, 'data');
-  const pgPort = await freePort(ports.postgres);
-  const restPort = await freePort(ports.rest ?? ports.postgrest);
+  const [pgPort, restPort] = await freeTcpPorts(host, [
+    ports.postgres ?? 0,
+    ports.rest ?? ports.postgrest ?? 0,
+    ...(ports.proxy ? [ports.proxy] : []),
+  ]);
   assert.notEqual(pgPort, restPort, 'Fixture ports must differ');
   const run = (binary, args) => {
     const result = spawnSync(binary, args, {env, encoding:'utf8',timeout:60000,maxBuffer:16*1024*1024});
