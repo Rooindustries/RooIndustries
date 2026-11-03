@@ -18,8 +18,10 @@ for(const name of ["@sanity/client","@sanity/image-url"])assert.equal(lock.packa
 assert.ok(manifest.dependencies["groq-js"]);assert.ok(manifest.dependencies["@portabletext/react"]);assert.equal(fs.existsSync("rooindustries"),false);
 evidence.push({check:"native-direct-sharp-and-vendor-retirement",sharp:"0.35.5"});
 const expansion=require("brace-expansion");assert.deepEqual(expansion("a{b,c}d"),["abd","acd"]);
-const started=performance.now(),bounded=expansion("{a}"+"}".repeat(128000)+",z}");assert.ok(Array.isArray(bounded));const elapsedMs=performance.now()-started;assert.ok(elapsedMs<5000);
-evidence.push({check:"brace-expansion-documented-boundary",literalClosingBraces:128000,elapsedMs,outputs:bounded.length});
+const braces=length=>"{a}"+"}".repeat(length)+",z}",bounded=expansion(braces(128000));assert.ok(Array.isArray(bounded));
+const braceCpuMs=(length,calls)=>{const input=braces(length),before=process.cpuUsage();for(let call=0;call<calls;call++)assert.ok(Array.isArray(expansion(input)));const used=process.cpuUsage(before);return (used.user+used.system)/1000;};
+const braceRounds=Array.from({length:5},()=>[braceCpuMs(128000,1),braceCpuMs(8000,16)]),cpuMs=Math.min(...braceRounds.map(([long])=>long)),sameBytesShortCpuMs=Math.min(...braceRounds.map(([,short])=>short));assert.ok(cpuMs<4*sameBytesShortCpuMs);
+evidence.push({check:"brace-expansion-documented-boundary",literalClosingBraces:128000,cpuMs,sameBytesShortCpuMs,outputs:bounded.length});
 const postcss=require("postcss");assert.match(postcss([]).process("a { color: red }",{from:undefined,map:false}).css,/color: red/);assert.ok(require("browserslist")(["last 1 chrome version"]).length>0);
 evidence.push({check:"retained-native-build-parser-apis",packages:["postcss","browserslist"]});
 const artifact="test-results/tooling-dependencies.json";fs.mkdirSync("test-results",{recursive:true});fs.writeFileSync(artifact,JSON.stringify({passed:true,evidence},null,2)+"\n");console.log(JSON.stringify({passed:true,checks:evidence.length,artifact}));

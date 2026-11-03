@@ -402,7 +402,33 @@ try {
   check('valid numeric trace identifiers retain their links', reported?.event.contexts?.trace, { trace_id: '0123456789abcdef0123456789abcdef', span_id: '1234567890123456', parent_span_id: '2345678901234567' });
   check('customer data named span_id still scrubs cards', reported?.event.extra?.span_id, '[card]');
   check('16KiB tokens remain usable diagnostic data', reported?.event.extra?.diagnostic_values?.map?.(value => value.length), Array(8).fill(16000));
-  check('16KiB tokens stay below 250ms of SDK CPU', sdkCpuMs < 250, true);
+  const scalingShapes = [
+    [length => 'a'.repeat(length), value => value],
+    [length => '1+'.repeat(length / 2), () => '[card]+'],
+    [length => '1' + ' -'.repeat(length / 2 - 1) + '2', value => value],
+    [length => '%41'.repeat(length / 4) + '%3F'.repeat(length / 12), () => '[query]'],
+    [length => 'a@b.'.repeat(length / 4), () => '[email]'],
+    [length => '//' + 'u'.repeat(length - 3) + '@', () => '//'],
+    [length => `file:///app/${'@scope/'.repeat(length / 8)}index.js`, value => value],
+  ];
+  const scalingValues = length => scalingShapes.flatMap(([shape]) => Array.from({ length: 32768 / length }, () => shape(length)));
+  const scalingExpected = length => scalingShapes.flatMap(([shape, scrubbed]) => Array(32768 / length).fill(scrubbed(shape(length))));
+  const scalingCost = async (length, round) => {
+    const values = scalingValues(length);
+    const before = process.cpuUsage();
+    sdk.captureEvent({ message: `Fixture scrub scaling ${length} ${round}`, extra: { scaling_values: values } });
+    await sdk.flush(5000);
+    const used = process.cpuUsage(before);
+    return (used.user + used.system) / 1000;
+  };
+  const scalingCpuMs = { 1024: [], 16384: [] };
+  for (let round = 0; round < 7; round++) for (const length of round % 2 ? [1024, 16384] : [16384, 1024]) scalingCpuMs[length].push(await scalingCost(length, round));
+  const scalingItems = events().filter(item => item.event.message?.startsWith('Fixture scrub scaling '));
+  received.splice(0, received.length, ...received.filter(item => !scalingItems.some(scaling => scaling.raw === item.body)));
+  const [shortCpuMs, longCpuMs] = [Math.min(...scalingCpuMs[1024]), Math.min(...scalingCpuMs[16384])];
+  timing.push({ name: 'SDK events scrubbing the same bytes as 1KiB or 16KiB tokens', shortCpuMs, longCpuMs, ratio: longCpuMs / shortCpuMs });
+  check('1KiB and 16KiB scaling values reach ingest fully scrubbed', scalingItems.map(item => isDeepStrictEqual(item.event.extra?.scaling_values, scalingExpected(Number(item.event.message.split(' ')[3])))), Array(14).fill(true));
+  check('16KiB tokens cost under four times the SDK CPU of the same bytes as 1KiB tokens', longCpuMs < 4 * shortCpuMs, true);
   check('stack frames remain available', Boolean(reported?.event.exception?.values?.[0]?.stacktrace?.frames?.length), true);
   check('SDK release identity survives without exempting customer metadata', [reported?.event.release, reported?.event.extra?.release], ['rooindustries@0.2.0', '[email]']);
   check('semantic release handling still scrubs private and card-shaped root values', events().filter(item => item.event.message === 'Fixture private release' || item.event.message === 'Fixture card release').map(item => item.event.release), ['[email]', '[email]']);

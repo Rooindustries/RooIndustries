@@ -12,8 +12,16 @@ test.each(["user@exämple.de", "first.last+tag@sub.domain.com", " visitor@exampl
 test("rejects a 10,000-character input without expensive matching", () => {
   const value = "a@" + "b.".repeat(4998) + "bc";
   expect(value).toHaveLength(10000);
-  const started = performance.now();
-  const valid = isValidEmail(value);
-  expect(performance.now() - started).toBeLessThan(100);
-  expect(valid).toBe(false);
+  const shortValue = "a@" + "b.".repeat(310) + "bc";
+  expect(shortValue).toHaveLength(624);
+  const cost = (input, calls) => {
+    let accepted = 0;
+    const started = performance.now();
+    for (let call = 0; call < calls; call++) accepted += isValidEmail(input);
+    const elapsed = performance.now() - started;
+    expect(accepted).toBe(0);
+    return elapsed;
+  };
+  const rounds = Array.from({ length: 7 }, () => [cost(value, 100), cost(shortValue, 1600)]);
+  expect(Math.min(...rounds.map(([long]) => long))).toBeLessThan(4 * Math.min(...rounds.map(([, short]) => short)));
 });
