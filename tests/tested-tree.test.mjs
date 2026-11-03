@@ -152,3 +152,10 @@ test("a push with no earlier main commit runs the suite", () => {
   const result = check(dir, stubGh(dir, responsesFor(tree, runResponse())), "0".repeat(40));
   assert.equal(result.tested, "tested=false", result.log);
 });
+
+test("a push whose earlier main commit can't be fetched runs the suite", () => {
+  const { dir, tree } = workspace();
+  const result = check(dir, stubGh(dir, responsesFor(tree, runResponse())), "1".repeat(40));
+  assert.equal(result.tested, "tested=false", result.log);
+  assert.match(result.log, /Couldn't fetch the earlier main commit/);
+});
