@@ -69,7 +69,11 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
   const env = {...process.env, LC_ALL: 'C', LD_LIBRARY_PATH: libraryPath || process.env.LD_LIBRARY_PATH || '/tmp/roo-request-pg17/runtime/usr/lib/x86_64-linux-gnu'};
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'roo-persistence-sweep-'));
   const dataDir = path.join(scratch, 'data');
-  const [pgPort, restPort] = await freeTcpPorts(host, [ports.postgres ?? 0, ports.rest ?? ports.postgrest ?? 0]);
+  const [pgPort, restPort] = await freeTcpPorts(host, [
+    ports.postgres ?? 0,
+    ports.rest ?? ports.postgrest ?? 0,
+    ...(ports.proxy ? [ports.proxy] : []),
+  ]);
   assert.notEqual(pgPort, restPort, 'Fixture ports must differ');
   const run = (binary, args) => {
     const result = spawnSync(binary, args, {env, encoding:'utf8',timeout:60000,maxBuffer:16*1024*1024});
