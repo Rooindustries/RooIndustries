@@ -37,8 +37,14 @@ run("no-low-contrast-text", {
   valid: [
     `<button className="bg-accent-strong hover:bg-accent text-accent-contrast" />`,
     `<div className="bg-danger text-black" />`,
+    "<span className={`bg-accent ${active ? \"text-accent-contrast\" : \"text-ink\"}`} />",
   ],
   invalid: [
+    {
+      name: "white text in one branch of a conditional class",
+      code: "<span className={`bg-accent ${active ? \"text-white\" : \"text-black\"}`} />",
+      errors: [{ messageId: "contrast" }],
+    },
     {
       name: "RefLogin button before #161",
       code: `<button className="px-5 py-2 rounded-xl bg-accent-strong hover:bg-accent text-white" />`,
@@ -47,6 +53,11 @@ run("no-low-contrast-text", {
     {
       name: "Benchmarks badge before #203",
       code: "<div className={`bg-danger text-white text-xs ${extra}`} />",
+      errors: [{ messageId: "contrast" }],
+    },
+    {
+      name: "creator portal toast before the contrast fix",
+      code: "<div className={`rounded-xl text-white ${ok ? \"bg-success\" : \"bg-danger\"}`} />",
       errors: [{ messageId: "contrast" }],
     },
   ],
@@ -298,6 +309,104 @@ run("no-aria-label-on-generic", {
       name: "Grand final score before the role fix",
       code: `<div className="tourney-final-score" aria-label={\`Grand final: \${champion}\`}><span>Grand final</span></div>`,
       errors: [{ messageId: "generic" }],
+    },
+  ],
+});
+
+run("inputs-need-form", {
+  valid: [
+    `function Upgrade() { return <form onSubmit={handleCheckOrder}><input type="email" /><button
+      type="submit">Check</button></form>; }`,
+    `function Share() { return <div><input value={link} readOnly /><button onClick={save}>Save</button></div>; }`,
+    `function Fields() { return <div><input /><button onClick={() => move(1)}>Down</button></div>; }`,
+  ],
+  invalid: [
+    {
+      name: "UpgradeLink check before #236",
+      code: `function UpgradeLink() { return <div><input type="email" /><input placeholder="Order ID" /><button
+        onClick={handleCheckOrder}>Check eligibility</button></div>; }`,
+      errors: [{ messageId: "form" }, { messageId: "form" }],
+    },
+    {
+      name: "search and explicitly editable fields",
+      code: `function Finder() { return <div><input type="search" /><input readOnly={false} /><button
+        onClick={handleSubmit}>Find</button></div>; }`,
+      errors: [{ messageId: "form" }, { messageId: "form" }],
+    },
+  ],
+});
+
+run("no-client-only-public-content", {
+  valid: [
+    `export default function Terms(props) { const [data, setData] = useState(props.initialData); useEffect(() =>
+      { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Terms({ initialData }) { const [data, setData] = useState(initialData); useEffect(() =>
+      { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Upgrade({ slug }) { useEffect(() => { getPublicContent("upgrade", { slug }); },
+      [slug]); return null; }`,
+  ],
+  invalid: [
+    {
+      name: "Terms before #195",
+      code: `export default function Terms() { const [data, setData] = useState(null); useEffect(() => {
+        getPublicContent("terms").then((d) => setData(d)); }, []); return <p>{data}</p>; }`,
+      errors: [{ messageId: "clientOnly" }],
+    },
+    {
+      name: "a bare props parameter with no initial data",
+      code: `export default function Terms(props) { const [data, setData] = useState(null); useEffect(() => {
+        getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
+      errors: [{ messageId: "clientOnly" }],
+    },
+  ],
+});
+
+run("no-hidden-server-motion", {
+  valid: [
+    `function About() { return <motion.div initial={false} animate={{ opacity: 1 }}>Hi</motion.div>; }`,
+    `function Dialog({ open }) { return <AnimatePresence>{open && <motion.div initial={{ opacity: 0 }} animate={{
+      opacity: 1 }} />}</AnimatePresence>; }`,
+  ],
+  invalid: [
+    {
+      name: "About section before #229",
+      code: `function About() { return <motion.div initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0
+        }}>Proof</motion.div>; }`,
+      errors: [{ messageId: "hidden" }],
+    },
+    {
+      name: "variant that starts hidden",
+      code: `function Pay() { const containerVariants = { hidden: { opacity: 0 }, visible: { opacity: 1 } };
+        return <motion.section variants={containerVariants} initial="hidden" animate="visible" />; }`,
+      errors: [{ messageId: "hidden" }],
+    },
+    {
+      name: "always-mounted child inside AnimatePresence",
+      code: `function Hero() { return <AnimatePresence><motion.div initial={{ opacity: 0 }} animate={{ opacity: 1
+        }}>Hero</motion.div></AnimatePresence>; }`,
+      errors: [{ messageId: "hidden" }],
+    },
+  ],
+});
+
+run("no-nested-components", {
+  valid: [
+    `const VideoBadge = ({ name }) => <span>{name}</span>; export default function HowItWorks() { return <VideoBadge
+      name="a" />; }`,
+    `export default function List({ items }) { return items.map((item) => <li key={item}>{item}</li>); }`,
+  ],
+  invalid: [
+    {
+      name: "HowItWorks VideoBadge before #250",
+      code: `export default function HowItWorks() {
+        const VideoBadge = ({ name, pauseVideos }) => { return <span>{name}</span>; };
+        return <VideoBadge name="a" />; }`,
+      errors: [{ messageId: "nested" }],
+    },
+    {
+      name: "expression-bodied component with no children",
+      code: `export default function Card() { const Divider = () => <hr />; return <Divider />; }`,
+      errors: [{ messageId: "nested" }],
     },
   ],
 });

@@ -16,6 +16,16 @@ const routes = [
 ];
 
 test.describe("Non-JS crawlability", () => {
+  test("/payment's own section doesn't start hidden on the server", async ({ page }) => {
+    await page.goto("/payment", { waitUntil: "domcontentloaded" });
+    const section = page.locator("section.booking-payment");
+    await expect(section).toHaveCount(1);
+    const opacities = await section.evaluate(element => [element, ...element.querySelectorAll("*")]
+      .map(node => getComputedStyle(node).opacity)
+      .filter(opacity => opacity === "0"));
+    expect(opacities).toEqual([]);
+  });
+
   test("/packages keeps its h1 inside main without JavaScript", async ({ page }, testInfo) => {
     await page.goto("/packages", { waitUntil: "domcontentloaded" });
     await testInfo.attach("packages-headings", {

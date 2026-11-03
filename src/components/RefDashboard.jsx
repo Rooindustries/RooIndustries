@@ -55,6 +55,75 @@ const resolveAuthNotice = (search) => {
   return null;
 };
 
+const cardClass =
+  "bg-surface-input border border-line-input rounded-xl p-4 h-full flex flex-col justify-between";
+
+const toMoneyNumber = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const formatCurrency = (value) => `$${toMoneyNumber(value).toFixed(2)}`;
+
+const StatCard = ({
+  label,
+  value,
+  accent = "text-accent",
+  className = "",
+}) => (
+  <div className={`${cardClass} ${className}`}>
+    <p className="text-[14px] uppercase text-ink-muted tracking-wide">
+      {label}
+    </p>
+    <p className={`text-[30px] font-extrabold ${accent}`}>
+      {formatCurrency(value)}
+    </p>
+  </div>
+);
+
+const BalanceCard = ({ label, earned, paid, owed, overpaid }) => (
+  <div className={cardClass}>
+    <div>
+      <p className="text-[14px] uppercase text-ink-muted tracking-wide">
+        {label}
+      </p>
+      <p className="text-lg font-bold text-ink">Balance</p>
+    </div>
+    <div className="mt-4 space-y-2 text-sm">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-ink-muted">Earned</span>
+        <span className="font-semibold text-info-text">
+          {formatCurrency(earned)}
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-ink-muted">Paid</span>
+        <span className="font-semibold text-success-text">
+          {formatCurrency(paid)}
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-ink-muted">Owed</span>
+        <span
+          className={`font-semibold ${
+            toMoneyNumber(owed) > 0 ? "text-warning-text" : "text-success-text"
+          }`}
+        >
+          {formatCurrency(owed)}
+        </span>
+      </div>
+      {toMoneyNumber(overpaid) > 0 && (
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-ink-muted">Overpaid</span>
+          <span className="font-semibold text-fuchsia-300">
+            {formatCurrency(overpaid)}
+          </span>
+        </div>
+      )}
+    </div>
+  </div>
+);
+
 export default function RefDashboard() {
   const nav = useNavigate();
   const location = useLocation();
@@ -130,13 +199,6 @@ export default function RefDashboard() {
     setTimeout(() => setToast((current) => (current === next ? null : current)), 2500);
   }
 
-  const toMoneyNumber = (value) => {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : 0;
-  };
-
-  const formatCurrency = (value) => `$${toMoneyNumber(value).toFixed(2)}`;
-
   const formatDate = (value) => {
     if (!value) return "-";
     const calendarDate = typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -149,65 +211,6 @@ export default function RefDashboard() {
       day: "numeric",
     });
   };
-
-  const StatCard = ({
-    label,
-    value,
-    accent = "text-accent",
-    className = "",
-  }) => (
-    <div className={`${cardClass} ${className}`}>
-      <p className="text-[14px] uppercase text-ink-muted tracking-wide">
-        {label}
-      </p>
-      <p className={`text-[30px] font-extrabold ${accent}`}>
-        {formatCurrency(value)}
-      </p>
-    </div>
-  );
-
-  const BalanceCard = ({ label, earned, paid, owed, overpaid }) => (
-    <div className={cardClass}>
-      <div>
-        <p className="text-[14px] uppercase text-ink-muted tracking-wide">
-          {label}
-        </p>
-        <p className="text-lg font-bold text-ink">Balance</p>
-      </div>
-      <div className="mt-4 space-y-2 text-sm">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-ink-muted">Earned</span>
-          <span className="font-semibold text-info-text">
-            {formatCurrency(earned)}
-          </span>
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-ink-muted">Paid</span>
-          <span className="font-semibold text-success-text">
-            {formatCurrency(paid)}
-          </span>
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-ink-muted">Owed</span>
-          <span
-            className={`font-semibold ${
-              toMoneyNumber(owed) > 0 ? "text-warning-text" : "text-success-text"
-            }`}
-          >
-            {formatCurrency(owed)}
-          </span>
-        </div>
-        {toMoneyNumber(overpaid) > 0 && (
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-ink-muted">Overpaid</span>
-            <span className="font-semibold text-fuchsia-300">
-              {formatCurrency(overpaid)}
-            </span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
 
   useEffect(() => {
     if (!showLogsModal) return undefined;
@@ -271,8 +274,6 @@ export default function RefDashboard() {
   const invalid = total > max;
   const panelClass =
     "bg-panel p-6 rounded-2xl border border-line-input shadow-glow-soft backdrop-blur-md";
-  const cardClass =
-    "bg-surface-input border border-line-input rounded-xl p-4 h-full flex flex-col justify-between";
 
   function adjustCommission(delta) {
     setFormError("");
@@ -734,7 +735,7 @@ export default function RefDashboard() {
         <div
           role={toast.type === "error" ? "alert" : "status"}
           aria-atomic="true"
-          className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl text-white text-sm font-semibold shadow-lg transition-all ${
+          className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl text-black text-sm font-semibold shadow-lg transition-all ${
             toast.type === "success"
               ? "bg-success shadow-success-soft"
               : "bg-danger shadow-danger-soft"

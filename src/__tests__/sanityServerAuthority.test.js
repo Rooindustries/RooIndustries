@@ -51,6 +51,7 @@ describe("server-rendered public content authority", () => {
         "services",
         "packages-list",
         "packages-settings",
+        "referral-box",
         "how-it-works",
         "supported-games",
         "faq-settings",

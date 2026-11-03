@@ -5,11 +5,16 @@ import { getPublicContent } from "../lib/publicContentClient";
 const normalizeReferralLoginPath = (path) =>
   !path || path === "/login" ? "/referrals/login" : path;
 
-export default function ReferralBox() {
+const presentEntries = (data) =>
+  Object.fromEntries(
+    Object.entries(data || {}).filter(([, value]) => value !== undefined && value !== null)
+  );
+
+export default function ReferralBox({ initialData = null }) {
   const nav = useNavigate();
   const [email, setEmail] = useState("");
 
-  const [content, setContent] = useState({
+  const [content, setContent] = useState(() => ({
     heading: "Join the Referral Program",
     description:
       "Are you a creator? Enter your email to get started with registration.",
@@ -18,9 +23,11 @@ export default function ReferralBox() {
     loginButtonText: "Login",
     loginPath: "/referrals/login",
     registerPath: "/referrals/register",
-  });
+    ...presentEntries(initialData),
+  }));
 
   useEffect(() => {
+    if (initialData) return undefined;
     let cancelled = false;
 
     async function fetchContent() {
@@ -28,14 +35,7 @@ export default function ReferralBox() {
         const data = await getPublicContent("referral-box");
 
         if (!cancelled && data) {
-          setContent((prev) => ({
-            ...prev,
-            ...Object.fromEntries(
-              Object.entries(data).filter(
-                ([, v]) => v !== undefined && v !== null
-              )
-            ),
-          }));
+          setContent((prev) => ({ ...prev, ...presentEntries(data) }));
         }
       } catch {
         // keep fallbacks
@@ -46,7 +46,7 @@ export default function ReferralBox() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialData]);
 
   function handleStart() {
     if (!email || !email.includes("@")) return;
@@ -72,7 +72,14 @@ export default function ReferralBox() {
         </p>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto md:flex-initial sm:items-stretch">
+      <form
+        className="flex flex-col sm:flex-row gap-3 w-full md:w-auto md:flex-initial sm:items-stretch"
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          handleStart();
+        }}
+      >
         <label htmlFor="referral-email" className="sr-only">Email</label>
         <input
           id="referral-email"
@@ -84,7 +91,7 @@ export default function ReferralBox() {
         />
 
         <button
-          onClick={handleStart}
+          type="submit"
           disabled={!isValid}
           className="
             glow-button
@@ -116,6 +123,7 @@ export default function ReferralBox() {
         </button>
 
         <button
+          type="button"
           onClick={handleLogin}
           className="
             ri-referral-login
@@ -136,7 +144,7 @@ export default function ReferralBox() {
         >
           {content.loginButtonText}
         </button>
-      </div>
+      </form>
     </div>
   );
 }
