@@ -1,0 +1,61 @@
+name: Receipt repro
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: Receipt repro ${{ matrix.variant.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - name: storage-throttled
+            args: tests/payment-confirmation-receipt.spec.js -g "browser storage is unavailable|stored booking ID" --repeat-each=15
+            cpu: "4"
+          - name: after-payment-methods
+            args: tests/payment-methods.spec.js tests/payment-confirmation-receipt.spec.js
+            cpu: "1"
+          - name: workers-4
+            args: tests/payment-confirmation-receipt.spec.js -g "unavailable|stored booking ID|direct visit" --workers=4 --repeat-each=6
+            cpu: "1"
+    env:
+      ROO_TEST_HOST: 127.0.0.1
+      BASE_URL: http://127.0.0.1:3211
+      PW_PORT: "3211"
+      PW_SERVER_ID: ci
+      NEXT_DIST_DIR: .next-e2e-ci
+      TOOLING_API_ROUTES: "0"
+      ROO_CONFIRMATION_CPU_RATE: ${{ matrix.variant.cpu }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: 22
+          browsers: chromium
+          build-dirs: .next-e2e-ci/cache/webpack
+      - name: Run
+        run: |
+          node scripts/test-tooling-sweep-server.mjs &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" || true' EXIT
+          for _ in {1..180}; do
+            if curl --fail --silent "$BASE_URL" > /dev/null; then break; fi
+            kill -0 "$server_pid"
+            sleep 1
+          done
+          xvfb-run -a npx playwright test --project=chromium --reporter=line ${{ matrix.variant.args }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: repro-${{ matrix.variant.name }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 3
