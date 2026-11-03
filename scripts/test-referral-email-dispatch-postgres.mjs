@@ -11,6 +11,7 @@ import {
   deliverReferralEmailDispatch,
   enqueueReferralEmailMutation,
 } from "../src/server/api/ref/referralEmailDispatches.js";
+import { freeTcpPort } from "./lib/free-tcp-port.mjs";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 const pgBin = String(process.env.PG_BIN || "").trim() || spawnSync(
@@ -21,7 +22,7 @@ const pgBin = String(process.env.PG_BIN || "").trim() || spawnSync(
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "roo-referral-email-"));
 const dataDir = path.join(tempRoot, "pgdata");
 const postgresHost = process.env.ROO_TEST_POSTGRES_HOST || "127.0.0.1";
-const port = 56832 + Math.floor(Math.random() * 400);
+const port = await freeTcpPort(postgresHost);
 
 const run = (command, args, options = {}) => {
   const result = spawnSync(command, args, {

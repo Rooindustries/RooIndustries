@@ -18,6 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import postgres from "postgres";
+import { freeTcpPort } from "./lib/free-tcp-port.mjs";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 const pgBin = String(process.env.PG_BIN || "").trim() || spawnSync(
@@ -33,7 +34,7 @@ const temporaryBase = process.env.ROO_JOB_DIR
 const tempRoot = fs.mkdtempSync(path.join(temporaryBase, "roo-account-domain-"));
 const dataDir = path.join(tempRoot, "pgdata");
 const postgresHost = process.env.ROO_TEST_POSTGRES_HOST || "127.0.0.1";
-const port = 57832 + Math.floor(Math.random() * 300);
+const port = await freeTcpPort(postgresHost);
 
 // LC_ALL is pinned because a macOS shell inheriting an unset/UTF-8-only locale
 // makes the postmaster abort at startup with "postmaster became multithreaded
