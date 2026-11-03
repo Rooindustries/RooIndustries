@@ -477,6 +477,12 @@ html[data-theme="dark"] {
   contain-intrinsic-size: auto 500px;
 }
 
+@media (scripting: none) {
+  .deferred-section-content {
+    content-visibility: visible;
+  }
+}
+
 html {
   background-color: var(--color-canvas-deep);
   font-family: "Manrope Variable", system-ui, sans-serif;
