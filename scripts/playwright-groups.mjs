@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -26,13 +27,17 @@ export const reportSpecFiles = (report) => {
 };
 
 export const listSpecFiles = ({ filter, config } = {}) => {
-  const env = { ...process.env };
-  delete env.PLAYWRIGHT_JSON_OUTPUT_NAME;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "playwright-list-"));
+  const reportFile = path.join(dir, "list.json");
   const args = ["playwright", "test", "--list", "--reporter=json"];
   if (config) args.push("--config", config);
   if (filter) args.push(filter);
-  const output = execFileSync("npx", args, { encoding: "utf8", env, maxBuffer: 64 * 1024 * 1024 });
-  return reportSpecFiles(JSON.parse(output));
+  try {
+    execFileSync("npx", args, { stdio: "ignore", env: { ...process.env, PLAYWRIGHT_JSON_OUTPUT_FILE: reportFile } });
+    return reportSpecFiles(JSON.parse(fs.readFileSync(reportFile, "utf8")));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 };
 
 export const assignRestGroups = (specFiles, timings) => {
@@ -66,7 +71,7 @@ const readTimings = (candidates) => {
   throw new Error(`No Playwright timings file found in ${candidates.filter(Boolean).join(", ")}`);
 };
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [group, timingsFile] = process.argv.slice(2);
   if (!REST_GROUPS.includes(group)) throw new Error(`Unknown rest group "${group}"`);
   const specFiles = listSpecFiles();

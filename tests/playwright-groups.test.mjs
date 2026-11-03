@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import {
   assignRestGroups,
@@ -83,7 +84,25 @@ test("a spec file in a subfolder is found and runs in exactly one group", () => 
       "section-nav.spec.js",
     ]);
     assertEachFileInOneGroup(files, (filter) => listSpecFiles({ config, filter }), {});
+    const before = { ...process.env };
+    process.env.PLAYWRIGHT_JSON_OUTPUT_NAME = "elsewhere.json";
+    process.env.PLAYWRIGHT_JSON_OUTPUT_DIR = dir;
+    process.env.PLAYWRIGHT_JSON_OUTPUT_FILE = path.join(dir, "elsewhere.json");
+    try {
+      assert.deepEqual(listSpecFiles({ config }), files);
+    } finally {
+      for (const name of ["PLAYWRIGHT_JSON_OUTPUT_NAME", "PLAYWRIGHT_JSON_OUTPUT_DIR", "PLAYWRIGHT_JSON_OUTPUT_FILE"]) {
+        if (name in before) process.env[name] = before[name];
+        else delete process.env[name];
+      }
+    }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("both scripts can be imported without a script path", () => {
+  for (const script of ["playwright-groups", "playwright-timings"]) {
+    execFileSync(process.execPath, ["--input-type=module", "-e", `await import("./scripts/${script}.mjs");`]);
   }
 });
