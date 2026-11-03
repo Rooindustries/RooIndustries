@@ -69,7 +69,11 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
   const env = {...process.env, LC_ALL: 'C', LD_LIBRARY_PATH: libraryPath || process.env.LD_LIBRARY_PATH || '/tmp/roo-request-pg17/runtime/usr/lib/x86_64-linux-gnu'};
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'roo-persistence-sweep-'));
   const dataDir = path.join(scratch, 'data');
-  const [pgPort, restPort] = await freeTcpPorts(host, [ports.postgres ?? 0, ports.rest ?? ports.postgrest ?? 0]);
+  const [pgPort, restPort, proxyPort] = await freeTcpPorts(host, [
+    ports.postgres ?? 0,
+    ports.rest ?? ports.postgrest ?? 0,
+    ports.proxy ?? 0,
+  ]);
   assert.notEqual(pgPort, restPort, 'Fixture ports must differ');
   const run = (binary, args) => {
     const result = spawnSync(binary, args, {env, encoding:'utf8',timeout:60000,maxBuffer:16*1024*1024});
@@ -208,7 +212,7 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
         res.writeHead(response.status,{'content-type':response.headers.get('content-type')||'application/json'});res.end(responseBody);
       }catch(error){res.writeHead(500,{'content-type':'application/json'});res.end(JSON.stringify({code:'FIXTURE_PROXY_ERROR',message:error.message}));}
     });
-    proxy.listen(ports.proxy ?? 0,host);await once(proxy,'listening');
+    proxy.listen(proxyPort,host);await once(proxy,'listening');
     const origin=`http://${host}:${proxy.address().port}`;
     const header=Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url');
     const payload=Buffer.from(JSON.stringify({role:'service_role',iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+3600})).toString('base64url');

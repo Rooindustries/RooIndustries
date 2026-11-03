@@ -43,11 +43,12 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
   assert.equal(revision.stdout.trim(), storageRelease.commit, 'Storage source does not match pinned official release');
   assert.ok(fs.existsSync(path.join(storageSource, 'dist/start/server.js')), 'Build the pinned Storage checkout first (see roo-sanity-env.md)');
   assert.ok(fs.existsSync(path.join(storageSource, 'migrations/tenant/0073-revoke-grants-to-unused-operations.sql')), 'Pinned Storage migrations are unavailable');
-  const [storagePort, gatewayPort, postgresPort, restPort] = await freeTcpPorts(host, [
+  const [storagePort, gatewayPort, postgresPort, restPort, proxyPort] = await freeTcpPorts(host, [
     ports.storage ?? 0,
     ports.gateway ?? 0,
     ports.postgres ?? 0,
     ports.rest ?? ports.postgrest ?? 0,
+    ports.proxy ?? 0,
   ]);
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'roo-storage-fixture-'));
   const storageUrl = `http://${host}:${storagePort}`;
@@ -71,7 +72,7 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
   try {
     fs.mkdirSync(filePath);
     fs.symlinkSync(path.join(storageSource, 'migrations'), path.join(scratch, 'migrations'));
-    database = await createSweepPostgresFixture({ pgBin, postgrestBin, libraryPath, commerceRepairMigration, fullMigrationChain, ports: { ...ports, postgres: postgresPort, rest: restPort }, beforeMigrations: async context => {
+    database = await createSweepPostgresFixture({ pgBin, postgrestBin, libraryPath, commerceRepairMigration, fullMigrationChain, ports: { ...ports, postgres: postgresPort, rest: restPort, proxy: proxyPort }, beforeMigrations: async context => {
       cleanup.postgresPid = Number(fs.readFileSync(path.join(context.scratch, 'data/postmaster.pid'), 'utf8').split('\n')[0]);
       cleanup.databaseScratch = context.scratch;
       serviceRoleKey = jwt(context.jwtSecret, 'service_role');
