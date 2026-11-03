@@ -353,9 +353,9 @@ test.describe("details fields above the on-screen keyboard", () => {
   };
 
   const keyboards = {
-    window: async (page, open) => page.setViewportSize({ width: 360, height: open ? 400 : 740 }),
+    window: async (page, open) => page.setViewportSize({ width: 360, height: open ? 340 : 740 }),
     visual: async (page, open) => page.evaluate(open => {
-      window.__keyboardHeight = open ? 340 : 0;
+      window.__keyboardHeight = open ? 400 : 0;
       window.visualViewport.dispatchEvent(new Event("resize"));
     }, open),
   };

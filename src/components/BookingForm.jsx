@@ -2933,6 +2933,9 @@ export default function BookingForm() {
                       handleReviewBeforePayment();
                     }}
                   >
+                    {errorStep2 && (
+                      <p id="booking-details-error" role="alert" className="text-sm text-danger-text">{errorStep2}</p>
+                    )}
                     <label htmlFor="booking-discord" className="sr-only">Discord username</label>
                     <input
                       id="booking-discord"
@@ -3033,9 +3036,6 @@ export default function BookingForm() {
                         <span className="glow-line glow-line-left" />
                       </button>
                     </div>
-                    {errorStep2 && (
-                      <p id="booking-details-error" role="alert" className="mt-3 text-sm text-danger-text">{errorStep2}</p>
-                    )}
                   </div>
                 </motion.div>
               )}
