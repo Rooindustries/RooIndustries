@@ -1,13 +1,10 @@
-import { ancestors, attribute, jsxName } from "./util.mjs";
+import { ancestors, attribute, jsxName, propertyName } from "./util.mjs";
 
 const hidesOpacity = (object) =>
   object?.type === "ObjectExpression" &&
   object.properties.some(
     (property) =>
-      property.type === "Property" &&
-      !property.computed &&
-      ((property.key.type === "Identifier" && property.key.name === "opacity") ||
-        (property.key.type === "Literal" && property.key.value === "opacity")) &&
+      propertyName(property) === "opacity" &&
       property.value.type === "Literal" &&
       property.value.value === 0,
   );
@@ -24,13 +21,7 @@ const variantObject = (context, node, variantsAttr, key) => {
     }
   }
   if (object?.type !== "ObjectExpression") return null;
-  const entry = object.properties.find(
-    (property) =>
-      property.type === "Property" &&
-      !property.computed &&
-      ((property.key.type === "Identifier" && property.key.name === key) ||
-        (property.key.type === "Literal" && property.key.value === key)),
-  );
+  const entry = object.properties.find((property) => propertyName(property) === key);
   return entry?.value || null;
 };
 

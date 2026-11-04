@@ -472,38 +472,31 @@ html[data-theme="dark"] {
   --shadow-back-button-hover: 0 0 14px rgba(255, 215, 110, 0.28);
 }
 
-.deferred-section-content {
+html.js .deferred-section-content {
   content-visibility: auto;
   contain-intrinsic-size: auto 500px;
-}
-
-@media (scripting: none) {
-  .deferred-section-content {
-    content-visibility: visible;
-  }
 }
 
 html {
   background-color: var(--color-canvas-deep);
   font-family: "Manrope Variable", system-ui, sans-serif;
-  scroll-behavior: smooth;
   -webkit-font-smoothing: antialiased;
 }
 
-.ri-hero-heading-line {
-  white-space: nowrap;
+html.js {
+  scroll-behavior: smooth;
 }
 
-@media (scripting: none) {
-  html {
-    scroll-behavior: auto;
-  }
+.ri-hero-heading-line,
+.ri-hero-cta-note p {
+  white-space: normal;
+  text-wrap: balance;
+}
 
-  .ri-hero-heading-line,
-  .ri-hero-cta-note p {
-    white-space: normal;
-    text-wrap: balance;
-  }
+html.js .ri-hero-heading-line,
+html.js .ri-hero-cta-note p {
+  text-wrap: wrap;
+  white-space: nowrap;
 }
 
 html,

@@ -1,4 +1,4 @@
-import { declaredValue, isFetchCall, isFunction } from "./util.mjs";
+import { declaredValue, isFetchCall, isFunction, propertyName } from "./util.mjs";
 
 const usesResponse = (context, handler) => {
   if (!handler) return false;
@@ -37,7 +37,7 @@ const methodValue = (context, node, seen = new Set()) => {
   let value = null;
   for (const property of node.properties) {
     if (property.type === "SpreadElement") value = methodValue(context, property.argument, seen) ?? value;
-    else if (!property.computed && property.key.type === "Identifier" && property.key.name === "method") {
+    else if (propertyName(property) === "method") {
       value = property.value.type === "Literal" ? String(property.value.value).toUpperCase() : null;
     }
   }

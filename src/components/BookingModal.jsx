@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useLayoutEffect } from "react";
+import { flushSync } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { BookingDialogHoldContext, BookingDialogReadyContext } from "../lib/bookingDialogHold";
 import { useLowPerformanceMode } from "../lib/performanceMode";
@@ -23,9 +24,11 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
   const closeButtonRef = useRef(null);
   const stageRef = useRef(null);
   const layoutFrameRef = useRef(0);
+  const laidOutRef = useRef(false);
   const sizeTransitionEnabledRef = useRef(!skipInitialSizeAnimation);
   const lastLayoutRef = useRef({
     scale: 1,
+    mobile: false,
     renderWidth: DESKTOP_BASE_WIDTH,
     wrapperWidth: 0,
     wrapperHeight: 0,
@@ -39,6 +42,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
   const [renderWidth, setRenderWidth] = useState(DESKTOP_BASE_WIDTH);
   const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
   const [viewport, setViewport] = useState(null);
+  const [layoutInstant, setLayoutInstant] = useState(false);
   const [contentSwitch, setContentSwitch] = useState({ contentKey, revealPending: false });
   const restoreFocusRef = useRef(true);
   const lastFocusedInDialogRef = useRef(null);
@@ -94,29 +98,27 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
   }, []);
 
   useLayoutEffect(() => {
-    const mediaQuery = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`);
-    setIsMobile(mediaQuery.matches);
-    const handler = (event) => setIsMobile(event.matches);
-    mediaQuery.addEventListener("change", handler);
-    return () => mediaQuery.removeEventListener("change", handler);
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!open) return undefined;
+    if (!open) {
+      laidOutRef.current = false;
+      return undefined;
+    }
+    const mobileQuery = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`);
 
     const calculateLayout = () => {
       const visual = window.visualViewport;
       const width = document.documentElement.clientWidth || window.innerWidth;
       const height = visual?.height || window.innerHeight;
       const top = visual?.offsetTop || 0;
-      const currentIsMobile = isMobile || width < MOBILE_BREAKPOINT;
+      const currentIsMobile = mobileQuery.matches || width < MOBILE_BREAKPOINT;
+      const baseWidth = currentIsMobile ? Math.max(width, MOBILE_BASE_WIDTH) : DESKTOP_BASE_WIDTH;
+      if (contentRef.current && contentRef.current.offsetWidth !== baseWidth) {
+        contentRef.current.style.width = `${baseWidth}px`;
+      }
       const contentHeight = contentRef.current?.offsetHeight || 0;
 
       let scale = 1;
-      let baseWidth = DESKTOP_BASE_WIDTH;
 
       if (currentIsMobile) {
-        baseWidth = Math.max(width, MOBILE_BASE_WIDTH);
         scale = Math.min(width / baseWidth, 1);
       } else {
         const widthScale = ((width * 0.95) / baseWidth) * DESKTOP_SCALE_BOOST;
@@ -128,6 +130,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
 
       const nextLayout = {
         scale,
+        mobile: currentIsMobile,
         renderWidth: baseWidth,
         wrapperWidth: contentRef.current ? baseWidth * scale : 0,
         wrapperHeight: contentHeight ? CLOSE_ROW_HEIGHT + contentHeight * scale : 0,
@@ -136,18 +139,24 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
         viewportTop: top,
       };
       const prevLayout = lastLayoutRef.current;
-      const changed =
-        Math.abs(prevLayout.scale - nextLayout.scale) > 0.005 ||
+      const viewportChanged = laidOutRef.current && (
+        prevLayout.mobile !== nextLayout.mobile ||
         Math.abs(prevLayout.renderWidth - nextLayout.renderWidth) >= 1 ||
-        Math.abs(prevLayout.wrapperWidth - nextLayout.wrapperWidth) >= 1 ||
-        Math.abs(prevLayout.wrapperHeight - nextLayout.wrapperHeight) >= 1 ||
         prevLayout.viewportWidth !== nextLayout.viewportWidth ||
         prevLayout.viewportHeight !== nextLayout.viewportHeight ||
-        prevLayout.viewportTop !== nextLayout.viewportTop;
+        prevLayout.viewportTop !== nextLayout.viewportTop);
+      const changed =
+        viewportChanged ||
+        Math.abs(prevLayout.scale - nextLayout.scale) > 0.005 ||
+        Math.abs(prevLayout.wrapperWidth - nextLayout.wrapperWidth) >= 1 ||
+        Math.abs(prevLayout.wrapperHeight - nextLayout.wrapperHeight) >= 1;
 
       if (!changed) return;
 
       lastLayoutRef.current = nextLayout;
+      laidOutRef.current = nextLayout.wrapperWidth > 0 && nextLayout.wrapperHeight > 0;
+      setLayoutInstant(viewportChanged);
+      setIsMobile(currentIsMobile);
       setDynamicScale(nextLayout.scale);
       setRenderWidth(nextLayout.renderWidth);
       setWrapperSize({ width: nextLayout.wrapperWidth, height: nextLayout.wrapperHeight });
@@ -159,22 +168,27 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       layoutFrameRef.current = window.requestAnimationFrame(calculateLayout);
     };
 
+    const applyViewport = () => {
+      window.cancelAnimationFrame(layoutFrameRef.current);
+      flushSync(calculateLayout);
+    };
+
     calculateLayout();
-    window.addEventListener("resize", scheduleLayout);
-    window.visualViewport?.addEventListener("resize", scheduleLayout);
-    window.visualViewport?.addEventListener("scroll", scheduleLayout);
+    window.addEventListener("resize", applyViewport);
+    window.visualViewport?.addEventListener("resize", applyViewport);
+    window.visualViewport?.addEventListener("scroll", applyViewport);
     const observer = new ResizeObserver(scheduleLayout);
     if (contentRef.current) observer.observe(contentRef.current);
 
     return () => {
-      window.removeEventListener("resize", scheduleLayout);
-      window.visualViewport?.removeEventListener("resize", scheduleLayout);
-      window.visualViewport?.removeEventListener("scroll", scheduleLayout);
+      window.removeEventListener("resize", applyViewport);
+      window.visualViewport?.removeEventListener("resize", applyViewport);
+      window.visualViewport?.removeEventListener("scroll", applyViewport);
       window.cancelAnimationFrame(layoutFrameRef.current);
       layoutFrameRef.current = 0;
       observer.disconnect();
     };
-  }, [isMobile, children, open, contentKey]);
+  }, [children, open, contentKey]);
 
   useLayoutEffect(() => {
     if (open && viewport) revealFocusedControl(document.activeElement);
@@ -340,6 +354,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
   };
 
   const scalerTransition = lowPerformanceMode ? fadeTransition : springTransition;
+  const sizeTransition = contentRevealed && sizeTransitionEnabledRef.current && !layoutInstant ? springTransition : { duration: 0 };
 
   const handleGlobalClick = (e) => {
     if (!contentRevealed || !isTopDialog(wrapperRef)) return;
@@ -386,7 +401,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
               initial={{ width: wrapperSize.width, height: wrapperSize.height }}
               animate={{ width: wrapperSize.width, height: wrapperSize.height }}
               layout={!lowPerformanceMode}
-              transition={contentRevealed && sizeTransitionEnabledRef.current ? springTransition : { duration: 0 }}
+              transition={sizeTransition}
             >
               <button
                 id="booking-modal-close"
@@ -409,7 +424,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
                 initial={lowPerformanceMode ? { scale: dynamicScale, opacity: 0 } : { scale: dynamicScale * 0.95 }}
                 animate={lowPerformanceMode ? { scale: dynamicScale, opacity: 1 } : { scale: dynamicScale }}
                 exit={lowPerformanceMode ? { scale: dynamicScale, opacity: 0 } : { scale: dynamicScale * 0.95 }}
-                transition={contentRevealed ? scalerTransition : { ...scalerTransition, scale: { duration: 0 } }}
+                transition={{ ...scalerTransition, scale: sizeTransition }}
               >
                 <div
                   ref={contentRef}
