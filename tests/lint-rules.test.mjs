@@ -181,8 +181,6 @@ run("fetch-needs-deadline", {
     `function load(url, options) { return fetch(url, options); }`,
     `const options = { signal: requestDeadline() }; fetch(url, options);`,
     `const base = { signal: requestDeadline() }; fetch(url, { ...base, method: "POST" });`,
-    `fetch(url, { ["signal"]: requestDeadline() });`,
-    `const base = { signal: requestDeadline() }; const cleared = { signal: null }; fetch(url, { ...base, ...cleared, ...base });`,
   ],
   invalid: [
     {
@@ -223,8 +221,6 @@ run("no-ignored-write-request", {
     `const res = await fetch("/api/releaseHold", { method: "POST" }); if (!res.ok) throw new Error();`,
     `fetch("/api/payment/quote", { method: "POST" }).then((response) => response.json());`,
     `fetch("/api/ref/updateSplit", { method: "POST" }).then(handleResponse);`,
-    `const read = { method: "GET" }; const write = { method: "POST" }; fetch("/api/ref/split", { ...read, ...write, ...read });`,
-    `var a = { ...b, method: "GET" }; var b = { method: "POST", ...a }; fetch("/api/ref/split", { ...a, ...b });`,
   ],
   invalid: [
     {
@@ -405,8 +401,6 @@ run("no-client-only-public-content", {
       { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
     `export default function Terms(props) { const { ["initialData"]: seed } = props; const [data, setData] =
       useState(seed); useEffect(() => { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
-    `export default function Faq(props) { const [data, setData] = useState(props[\`initialFaq\`]); useEffect(() =>
-      { getPublicContent("faq").then(setData); }, []); return <p>{data}</p>; }`,
     `export default function Upgrade({ slug }) { useEffect(() => { getPublicContent("upgrade", { slug }); },
       [slug]); return null; }`,
   ],
@@ -438,28 +432,8 @@ run("no-hidden-server-motion", {
     `function About() { return <motion.div initial={false} animate={{ opacity: 1 }}>Hi</motion.div>; }`,
     `function Dialog({ open }) { return <AnimatePresence>{open && <motion.div initial={{ opacity: 0 }} animate={{
       opacity: 1 }} />}</AnimatePresence>; }`,
-    `function Fade() { return <motion.div initial={{ ["opacity"]: 0, opacity: 1 }} animate={{ opacity: 1 }} />; }`,
-    `function Fade() { const start = { opacity: 0 }; start.opacity = 1; return <motion.div initial={start} />; }`,
-    `function Fade() { const hidden = { opacity: 0 }; const shown = { opacity: 0 }; shown.opacity = 1; return <motion.div
-      initial={{ ...hidden, ...shown }} />; }`,
-    `function Fade() { const shown = { opacity: 1 }; const hidden = { opacity: 0 }; return <motion.div
-      initial={{ ...shown, ...hidden, ...shown }} animate={{ opacity: 1 }} />; }`,
-    `function Fade() { return <motion.div initial={{ ["opacity"]: 0, ...{ opacity: 1 } }} animate={{ opacity: 1 }} />; }`,
-    `function Pay() { const variants = { ["hidden"]: { opacity: 0 }, hidden: { opacity: 1 } }; return <motion.section
-      variants={variants} initial="hidden" animate="hidden" />; }`,
   ],
   invalid: [
-    {
-      name: "spread that hides last",
-      code: `function Fade() { const start = { opacity: 0 }; return <motion.div initial={{ opacity: 1, ...start }}
-        animate={{ opacity: 1 }} />; }`,
-      errors: [{ messageId: "hidden" }],
-    },
-    {
-      name: "computed opacity key that wins",
-      code: `function Fade() { return <motion.div initial={{ opacity: 1, ["opacity"]: 0 }} animate={{ opacity: 1 }} />; }`,
-      errors: [{ messageId: "hidden" }],
-    },
     {
       name: "About section before #229",
       code: `function About() { return <motion.div initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0

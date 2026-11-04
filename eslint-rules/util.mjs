@@ -51,15 +51,8 @@ export const enclosingComponent = (context, node) =>
     .reverse()
     .find((item) => isFunction(item) && isCapitalized(functionName(item)));
 
-const staticString = (node) => {
-  if (node?.type === "Literal" && typeof node.value === "string") return node.value;
-  if (node?.type === "TemplateLiteral" && node.expressions.length === 0) return node.quasis[0].value.cooked;
-  return "";
-};
-
 export const propertyName = (property) => {
-  if (property?.type !== "Property") return "";
-  if (property.computed) return staticString(property.key);
+  if (property?.type !== "Property" || property.computed) return "";
   if (property.key.type === "Identifier") return property.key.name;
   if (property.key.type === "Literal") return String(property.key.value);
   return "";
@@ -68,83 +61,24 @@ export const propertyName = (property) => {
 export const memberName = (member) => {
   if (member?.type !== "MemberExpression") return "";
   if (!member.computed && member.property.type === "Identifier") return member.property.name;
-  return member.computed ? staticString(member.property) : "";
+  if (member.computed && member.property.type === "Literal" && typeof member.property.value === "string") {
+    return member.property.value;
+  }
+  return "";
 };
 
 export const referenceName = (node) => (node?.type === "Identifier" ? node.name : memberName(node));
 
 export const calleeName = (call) => referenceName(call.callee);
 
-const writesThrough = (identifier) => {
-  let target = identifier;
-  while (target.parent?.type === "MemberExpression" && target.parent.object === target) target = target.parent;
-  if (target === identifier) return false;
-  const parent = target.parent;
-  return (
-    (parent?.type === "AssignmentExpression" && parent.left === target) ||
-    parent?.type === "UpdateExpression" ||
-    (parent?.type === "UnaryExpression" && parent.operator === "delete")
-  );
-};
-
-const mergedInto = (identifier) => {
-  const call = identifier.parent;
-  return (
-    call?.type === "CallExpression" &&
-    call.arguments[0] === identifier &&
-    call.callee.type === "MemberExpression" &&
-    !call.callee.computed &&
-    call.callee.object.type === "Identifier" &&
-    call.callee.object.name === "Object" &&
-    call.callee.property.name === "assign"
-  );
-};
-
-export const UNKNOWN = Symbol("unknown");
-
-const declaration = (context, identifier) => {
+export const declaredValue = (context, identifier) => {
   let variable = null;
   for (let scope = context.sourceCode.getScope(identifier); scope && !variable; scope = scope.upper) {
     variable = scope.set.get(identifier.name) || null;
   }
   const definition = variable?.defs?.[0];
   if (!definition || definition.type !== "Variable" || definition.node.id.type !== "Identifier") return null;
-  return { variable, init: definition.node.init || null };
-};
-
-export const declaredValue = (context, identifier) => declaration(context, identifier)?.init || null;
-
-export const unchangedValue = (context, identifier) => {
-  const found = declaration(context, identifier);
-  if (!found) return null;
-  const changed = found.variable.references.some(
-    (reference) =>
-      (reference.isWrite() && !reference.init) ||
-      writesThrough(reference.identifier) ||
-      mergedInto(reference.identifier),
-  );
-  return changed ? null : found.init;
-};
-
-export const resolveOnce = (fallback, resolve) => (context, root) => {
-  const memo = new Map();
-  const active = new Set();
-  let cycles = 0;
-  const run = (node) => {
-    if (!node) return fallback;
-    if (active.has(node)) {
-      cycles += 1;
-      return fallback;
-    }
-    if (memo.has(node)) return memo.get(node);
-    const before = cycles;
-    active.add(node);
-    const value = resolve(context, node, run);
-    active.delete(node);
-    if (cycles === before) memo.set(node, value);
-    return value;
-  };
-  return run(root);
+  return definition.node.init || null;
 };
 
 export const isFetchCall = (call) => {

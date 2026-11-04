@@ -1,4 +1,4 @@
-import { isFetchCall, propertyName, resolveOnce, unchangedValue } from "./util.mjs";
+import { declaredValue, isFetchCall, propertyName } from "./util.mjs";
 
 const isSignalKey = (property) => propertyName(property) === "signal";
 
@@ -6,22 +6,24 @@ const clearsSignal = (value) =>
   (value.type === "Literal" && value.value === null) ||
   (value.type === "Identifier" && value.name === "undefined");
 
-const signalState = resolveOnce("unknown", (context, node, next) => {
+const signalState = (context, node, seen = new Set()) => {
+  if (!node || seen.has(node)) return "unknown";
+  seen.add(node);
   if (node.type === "Identifier") {
-    const value = unchangedValue(context, node);
-    return value ? next(value) : "unknown";
+    const value = declaredValue(context, node);
+    return value ? signalState(context, value, seen) : "unknown";
   }
   if (node.type !== "ObjectExpression") return "unknown";
   let state = "none";
   for (const property of node.properties) {
     if (isSignalKey(property)) state = clearsSignal(property.value) ? "cleared" : "set";
     else if (property.type === "SpreadElement") {
-      const spread = next(property.argument);
+      const spread = signalState(context, property.argument, seen);
       if (spread !== "none") state = spread;
     }
   }
   return state;
-});
+};
 
 const carriesSignal = (context, node) => ["set", "unknown"].includes(signalState(context, node));
 

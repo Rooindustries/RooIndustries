@@ -1,4 +1,4 @@
-import { calleeName, declaredValue, enclosingComponent, isFunction, resolveOnce } from "./util.mjs";
+import { calleeName, declaredValue, enclosingComponent, isFunction } from "./util.mjs";
 
 const ROUTER_OBJECTS = new Set(["router", "history", "location"]);
 const ROUTER_HOOKS = new Set(["useRouter", "useHistory"]);
@@ -27,18 +27,20 @@ const propertyValue = (object, name) => {
   return value;
 };
 
-const routerValue = resolveOnce(null, (context, node, next) => {
-  if (node.type === "Identifier") return next(declaredValue(context, node));
+const routerValue = (context, node, seen = new Set()) => {
+  if (!node || seen.has(node)) return null;
+  seen.add(node);
+  if (node.type === "Identifier") return routerValue(context, declaredValue(context, node), seen);
   if (node.type === "MemberExpression") {
     if (node.computed || node.property.type !== "Identifier") return null;
     const owner = node.object.type === "Identifier" ? declaredValue(context, node.object) : null;
     if (owner?.type !== "ObjectExpression") return null;
-    return next(propertyValue(owner, node.property.name));
+    return routerValue(context, propertyValue(owner, node.property.name), seen);
   }
   if (UNKNOWN_SOURCES.has(node.type)) return null;
   if (node.type === "CallExpression") return ROUTER_HOOKS.has(calleeName(node)) ? true : null;
   return false;
-});
+};
 
 const isRouterReceiver = (context, callee) => {
   const known = routerValue(context, callee.object);

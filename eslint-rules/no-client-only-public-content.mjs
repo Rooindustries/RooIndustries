@@ -2,8 +2,13 @@ import { ancestors, calleeName, containsNode, enclosingComponent, memberName, pr
 
 const isInitial = (name) => /^initial/.test(name);
 
+const patternKey = (property) =>
+  property?.computed && property.key.type === "Literal" && typeof property.key.value === "string"
+    ? property.key.value
+    : propertyName(property);
+
 const takesInitial = (pattern) =>
-  pattern?.type === "ObjectPattern" && pattern.properties.some((property) => isInitial(propertyName(property)));
+  pattern?.type === "ObjectPattern" && pattern.properties.some((property) => isInitial(patternKey(property)));
 
 const bindsTo = (context, identifier, component) => {
   if (identifier?.type !== "Identifier") return false;

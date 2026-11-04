@@ -1,33 +1,29 @@
-import { ancestors, attribute, jsxName, propertyName, resolveOnce, UNKNOWN, unchangedValue } from "./util.mjs";
+import { ancestors, attribute, jsxName, propertyName } from "./util.mjs";
 
-const keyValue = (key) =>
-  resolveOnce(UNKNOWN, (context, node, next) => {
-    if (node.type === "Identifier") return next(unchangedValue(context, node));
-    if (node.type !== "ObjectExpression") return UNKNOWN;
-    let value;
-    for (const property of node.properties) {
-      if (property.type === "SpreadElement") {
-        const spread = next(property.argument);
-        if (spread !== undefined) value = spread;
-      } else if (propertyName(property) === key) value = property.value;
+const hidesOpacity = (object) =>
+  object?.type === "ObjectExpression" &&
+  object.properties.some(
+    (property) =>
+      propertyName(property) === "opacity" &&
+      property.value.type === "Literal" &&
+      property.value.value === 0,
+  );
+
+const variantObject = (context, node, variantsAttr, key) => {
+  const expression =
+    variantsAttr?.value?.type === "JSXExpressionContainer" ? variantsAttr.value.expression : null;
+  let object = expression;
+  if (expression?.type === "Identifier") {
+    object = null;
+    for (let scope = context.sourceCode.getScope(node); scope && !object; scope = scope.upper) {
+      const definition = scope.set.get(expression.name)?.defs[0]?.node;
+      if (definition?.type === "VariableDeclarator") object = definition.init;
     }
-    return value;
-  });
-
-const finalValue = (context, node, key) => {
-  const value = keyValue(key)(context, node);
-  return value === UNKNOWN ? null : (value ?? null);
+  }
+  if (object?.type !== "ObjectExpression") return null;
+  const entry = object.properties.find((property) => propertyName(property) === key);
+  return entry?.value || null;
 };
-
-const hidesOpacity = (context, node) => {
-  const opacity = finalValue(context, node, "opacity");
-  return opacity?.type === "Literal" && opacity.value === 0;
-};
-
-const variantObject = (context, variantsAttr, key) =>
-  variantsAttr?.value?.type === "JSXExpressionContainer"
-    ? finalValue(context, variantsAttr.value.expression, key)
-    : null;
 
 const mountedConditionally = (context, node) =>
   ancestors(context, node).some(
@@ -57,9 +53,11 @@ export default {
         if (!initial?.value) return;
         let hidden = false;
         if (initial.value.type === "JSXExpressionContainer") {
-          hidden = hidesOpacity(context, initial.value.expression);
+          hidden = hidesOpacity(initial.value.expression);
         } else if (initial.value.type === "Literal" && typeof initial.value.value === "string") {
-          hidden = hidesOpacity(context, variantObject(context, attribute(node, "variants"), initial.value.value));
+          hidden = hidesOpacity(
+            variantObject(context, node, attribute(node, "variants"), initial.value.value),
+          );
         }
         if (hidden && !mountedConditionally(context, node.parent))
           context.report({ node, messageId: "hidden" });
