@@ -16,7 +16,9 @@ const buildPublicContentUrl = (resource, params = {}) => {
 let pendingRequests = 0;
 export const getPublicContentPendingCount = () => pendingRequests;
 
-export const getPublicContent = async (resource, params = {}, options = {}) => {
+const readRevision = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : null);
+
+export const getPublicContentEntry = async (resource, params = {}, options = {}) => {
   pendingRequests += 1;
   try {
     const response = await fetch(buildPublicContentUrl(resource, params), {
@@ -24,13 +26,17 @@ export const getPublicContent = async (resource, params = {}, options = {}) => {
       credentials: "same-origin",
       headers: { Accept: "application/json" },
       ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.cache ? { cache: options.cache } : {}),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok || body?.ok !== true) {
       throw new Error(body?.error || "Public content could not be loaded.");
     }
-    return body.data ?? null;
+    return { data: body.data ?? null, revision: readRevision(body.revision) };
   } finally {
     pendingRequests -= 1;
   }
 };
+
+export const getPublicContent = async (resource, params = {}, options = {}) =>
+  (await getPublicContentEntry(resource, params, options)).data;

@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { getPublicContent } from "../lib/publicContentClient";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useContent } from "../lib/contentCache";
 import { Link } from "react-router-dom";
 
 const FOCUSABLE_SELECTOR = [
@@ -25,10 +25,9 @@ const normalizeTools = (tools) => tools.map((tool) => ({
 }));
 
 export default function Tools({ initialData = null }) {
-  const [tools, setTools] = useState(() => Array.isArray(initialData) ? normalizeTools(initialData) : []);
-  const [loading, setLoading] = useState(() => !Array.isArray(initialData));
-  const [loadError, setLoadError] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
+  const { data, loaded, failed: loadError, retry } = useContent("tools", initialData);
+  const tools = useMemo(() => normalizeTools(Array.isArray(data) ? data : []), [data]);
+  const loading = !Array.isArray(data) && !loaded && !loadError;
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [pendingDownload, setPendingDownload] = useState(null);
   const [downloadFadeOut, setDownloadFadeOut] = useState(false);
@@ -38,34 +37,6 @@ export default function Tools({ initialData = null }) {
   const previousFocusRef = useRef(null);
   const openTimerRef = useRef(null);
   const closeTimerRef = useRef(null);
-
-  useEffect(() => {
-    if (Array.isArray(initialData)) return undefined;
-    let cancelled = false;
-
-    async function fetchTools() {
-      setLoading(true);
-      setLoadError(false);
-      try {
-        const data = await getPublicContent("tools");
-        if (!cancelled) {
-          setTools(normalizeTools(data || []));
-          setLoading(false);
-        }
-      } catch (err) {
-        console.error("Error fetching tools:", err);
-        if (!cancelled) {
-          setLoadError(true);
-          setLoading(false);
-        }
-      }
-    }
-
-    fetchTools();
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadKey]);
 
   useEffect(() => {
     const body = document.body;
@@ -221,7 +192,7 @@ export default function Tools({ initialData = null }) {
           <p>Couldn't load the tools.</p>
           <button
             type="button"
-            onClick={() => setReloadKey((key) => key + 1)}
+            onClick={retry}
             className="mt-4 min-h-11 rounded-lg border border-info-border bg-info-soft px-4 py-2 font-semibold text-info-text hover:bg-surface-hover-accent"
           >
             Retry

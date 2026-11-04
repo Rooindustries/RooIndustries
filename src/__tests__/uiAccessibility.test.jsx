@@ -29,9 +29,13 @@ jest.mock("@formspree/react", () => ({
   ],
 }));
 
-jest.mock("../lib/publicContentClient", () => ({
-  getPublicContent: jest.fn(),
-}));
+jest.mock("../lib/publicContentClient", () => {
+  const getPublicContent = jest.fn();
+  return {
+    getPublicContent,
+    getPublicContentEntry: jest.fn(async (...args) => ({ data: await getPublicContent(...args), revision: null })),
+  };
+});
 
 jest.mock("../lib/cmsImageUrl", () => ({
   urlFor: jest.fn((image) => {

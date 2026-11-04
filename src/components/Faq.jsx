@@ -4,7 +4,8 @@ import { ChevronDown } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import homeCopy from "../lib/homeCopy";
 import packageContent from "../lib/packageContent";
-import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
+import { HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
+import { useContent } from "../lib/contentCache";
 import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinator";
 
 
@@ -98,29 +99,18 @@ export default function FaqSection({
   const [activeHash, setActiveHash] = useState(() =>
     (location.hash || "").replace(/^#/, "")
   );
-  const [faqCopy, setFaqCopy] = useState(() => initialFaqCopy);
+  const { data: faqCopy } = useContent(HOME_SECTION_DATA_KEYS.faqSettings, initialFaqCopy);
   const [openQuestions, setOpenQuestions] = useState({});
-  const [questions, setQuestions] = useState(() =>
-    initialQuestions !== null
-      ? Array.isArray(initialQuestions)
-        ? normalizeFaqQuestions(initialQuestions)
-        : []
-      : null
-  );
-
-  useEffect(() => {
-    if (initialFaqCopy !== null) {
-      setFaqCopy(initialFaqCopy);
-    }
-
-    if (initialQuestions !== null) {
-      setQuestions(
-        Array.isArray(initialQuestions)
-          ? normalizeFaqQuestions(initialQuestions)
+  const { data: questionRows } = useContent(HOME_SECTION_DATA_KEYS.faqQuestions, initialQuestions);
+  const questions = useMemo(
+    () =>
+      questionRows !== null
+        ? Array.isArray(questionRows)
+          ? normalizeFaqQuestions(questionRows)
           : []
-      );
-    }
-  }, [initialFaqCopy, initialQuestions]);
+        : null,
+    [questionRows]
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -176,22 +166,6 @@ export default function FaqSection({
       [questionId]: !prev[questionId],
     }));
   };
-
-  useEffect(() => {
-    if (faqCopy !== null) return;
-    fetchHomeSectionData(HOME_SECTION_DATA_KEYS.faqSettings)
-      .then(setFaqCopy)
-      .catch(console.error);
-  }, [faqCopy]);
-
-  useEffect(() => {
-    if (questions !== null) return;
-    fetchHomeSectionData(HOME_SECTION_DATA_KEYS.faqQuestions)
-      .then((res) =>
-        setQuestions(normalizeFaqQuestions(Array.isArray(res) ? res : []))
-      )
-      .catch(console.error);
-  }, [questions]);
 
   const flatQuestions = useMemo(
     () =>

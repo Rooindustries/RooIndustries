@@ -1,12 +1,9 @@
-import React, { useState, useEffect, lazy, Suspense, startTransition } from "react";
+import React, { useState, useEffect, useMemo, lazy, Suspense, startTransition } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { getWarrantyCallout } from "../lib/packageWarranty";
 import PriceDisplay from "./PriceDisplay";
-import {
-  fetchHomeSectionData,
-  HOME_SECTION_DATA_KEYS,
-  readHomeSectionData,
-} from "../lib/homeSectionData";
+import { HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
+import { useContent } from "../lib/contentCache";
 import homeCopy from "../lib/homeCopy";
 import packageContent from "../lib/packageContent";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
@@ -30,23 +27,13 @@ export default function Packages({
   initialSectionCopy = null,
 }) {
   const handleHomeSectionLink = useHomeSectionLinkHandler();
-  const [packages, setPackages] = useState(() =>
-    initialPackages !== null
-      ? buildPackageOffers(initialPackages)
-      : []
+  const { data: packageRows } = useContent(HOME_SECTION_DATA_KEYS.packagesList, initialPackages);
+  const packages = useMemo(
+    () => (packageRows !== null ? buildPackageOffers(packageRows) : []),
+    [packageRows]
   );
-  const [sectionCopy, setSectionCopy] = useState(() => initialSectionCopy);
+  const { data: sectionCopy } = useContent(HOME_SECTION_DATA_KEYS.packagesSettings, initialSectionCopy);
   const [sessionAvailability, setSessionAvailability] = useState(null);
-
-  useEffect(() => {
-    if (initialPackages !== null) {
-      setPackages(buildPackageOffers(initialPackages));
-    }
-
-    if (initialSectionCopy !== null) {
-      setSectionCopy(initialSectionCopy);
-    }
-  }, [initialPackages, initialSectionCopy]);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsLoaded, setDetailsLoaded] = useState(false);
   const [detailsPkg, setDetailsPkg] = useState(null);
@@ -116,33 +103,7 @@ export default function Packages({
         console.error("Failed to store referral from link:", e);
       }
     }
-
-    if (packages.length === 0) {
-      const cachedPackages = readHomeSectionData(HOME_SECTION_DATA_KEYS.packagesList);
-      if (Array.isArray(cachedPackages)) {
-        setPackages(buildPackageOffers(cachedPackages));
-      } else {
-        fetchHomeSectionData(HOME_SECTION_DATA_KEYS.packagesList)
-          .then((pkgs) => {
-            setPackages(buildPackageOffers(pkgs));
-          })
-          .catch(console.error);
-      }
-    }
-
-    if (sectionCopy === null) {
-      const cachedSectionCopy = readHomeSectionData(
-        HOME_SECTION_DATA_KEYS.packagesSettings
-      );
-      if (cachedSectionCopy !== null) {
-        setSectionCopy(cachedSectionCopy);
-      } else {
-        fetchHomeSectionData(HOME_SECTION_DATA_KEYS.packagesSettings)
-          .then(setSectionCopy)
-          .catch(console.error);
-      }
-    }
-  }, [packages.length, sectionCopy]);
+  }, []);
 
   useEffect(() => {
     let active = true;

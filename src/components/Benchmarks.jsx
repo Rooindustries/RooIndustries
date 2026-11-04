@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
-import { getPublicContent } from "../lib/publicContentClient";
+import { useContent } from "../lib/contentCache";
 import { Link } from "react-router-dom";
 import ImageZoomModal from "../components/ImageZoomModal";
 
@@ -8,7 +8,8 @@ const BENCHMARK_IMAGE_WIDTHS = [480, 768, 960, 1280];
 const REVIEW_IMAGE_WIDTHS = [480, 768, 960];
 
 export default function Benchmarks({ initialData = null, setIsModalOpen = () => {} }) {
-  const [benchmarks, setBenchmarks] = useState(() => (Array.isArray(initialData) ? initialData : []));
+  const { data } = useContent("benchmarks", initialData, { refreshSnapshot: true });
+  const benchmarks = Array.isArray(data) ? data : [];
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedAlt, setSelectedAlt] = useState("");
 
@@ -36,14 +37,6 @@ export default function Benchmarks({ initialData = null, setIsModalOpen = () => 
     if (new Set(sources.map(({ url }) => url)).size < 2) return undefined;
     return sources.map(({ url, width }) => `${url} ${width}w`).join(", ");
   };
-
-  useEffect(() => {
-    getPublicContent("benchmarks")
-      .then((rows) => {
-        if (Array.isArray(rows)) setBenchmarks(rows);
-      })
-      .catch(console.error);
-  }, []);
 
   return (
     <section className="relative py-28 px-4 max-w-7xl mx-auto text-ink">

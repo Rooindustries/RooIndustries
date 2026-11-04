@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
-import { getPublicContent } from "../lib/publicContentClient";
+import { useContent } from "../lib/contentCache";
 import ImageZoomModal from "./ImageZoomModal";
 
 const localDiscordReviews = [];
@@ -21,17 +21,8 @@ const buildReviewImageSrcSet = (image) => {
 export default function Reviews({ initialData = null }) {
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedAlt, setSelectedAlt] = useState("");
-  const [reviews, setReviews] = useState(() => Array.isArray(initialData) ? initialData : null);
-
-  useEffect(() => {
-    if (Array.isArray(initialData)) return;
-    getPublicContent("reviews-gallery")
-      .then((data) => setReviews(Array.isArray(data) ? data : []))
-      .catch((error) => {
-        console.error(error);
-        setReviews([]);
-      });
-  }, []);
+  const { data, loaded, failed } = useContent("reviews-gallery", initialData);
+  const reviews = Array.isArray(data) ? data : loaded || failed ? [] : null;
 
   const isLoading = reviews === null;
   const placeholderCount = 18;

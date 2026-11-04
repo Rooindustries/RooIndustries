@@ -4,6 +4,17 @@ import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import Services from "../components/Services";
+import ReferralBox from "../components/ReferralBox";
+import { getPublicContent } from "../lib/publicContentClient";
+import { loadContent } from "../lib/contentCache";
+
+jest.mock("../lib/publicContentClient", () => {
+  const getPublicContent = jest.fn();
+  return {
+    getPublicContent,
+    getPublicContentEntry: jest.fn(async (...args) => ({ data: await getPublicContent(...args), revision: null })),
+  };
+});
 
 jest.mock("../lib/cmsImageUrl", () => ({
   urlFor: jest.fn(() => ({
@@ -40,7 +51,6 @@ describe("home section hydration", () => {
       unobserve() {}
       disconnect() {}
     };
-    window.sessionStorage.clear();
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -51,7 +61,6 @@ describe("home section hydration", () => {
       root = null;
     }
     container.remove();
-    window.sessionStorage.clear();
     global.IntersectionObserver = originalIntersectionObserver;
     jest.restoreAllMocks();
   });
@@ -60,15 +69,11 @@ describe("home section hydration", () => {
     const page = <MemoryRouter><Services initialData={null} /></MemoryRouter>;
     container.innerHTML = renderToString(page);
     expect(container.querySelector(".ri-services-skeleton").closest("[data-section-placeholder]")).not.toBeNull();
-    window.sessionStorage.setItem(
-      "roo-home-data:services",
-      JSON.stringify(CACHED_SERVICES)
+    getPublicContent.mockImplementation(async (resource) =>
+      resource === "services" ? CACHED_SERVICES : CACHED_ABOUT
     );
-    window.sessionStorage.setItem(
-      "roo-home-data:about",
-      JSON.stringify(CACHED_ABOUT)
-    );
-    window.sessionStorage.setItem("roo-home-data:__ts", String(Date.now()));
+    await loadContent("services");
+    await loadContent("about");
     const errorSpy = jest.spyOn(console, "error");
 
     try {
@@ -94,5 +99,38 @@ describe("home section hydration", () => {
       )
     );
     expect(hydrationErrors).toEqual([]);
+  });
+
+  test("hydrates the server copy first even when a newer copy is already cached", async () => {
+    const page = (
+      <MemoryRouter>
+        <ReferralBox initialData={{ heading: "Server referral heading" }} />
+      </MemoryRouter>
+    );
+    container.innerHTML = renderToString(page);
+    getPublicContent.mockImplementation(async () => ({ heading: "Cached referral heading" }));
+    await loadContent("referral-box");
+    const errorSpy = jest.spyOn(console, "error");
+    const recoverableErrors = [];
+
+    try {
+      await act(async () => {
+        root = hydrateRoot(container, page, {
+          onRecoverableError: (error) => recoverableErrors.push(String(error?.message || error)),
+        });
+        await Promise.resolve();
+      });
+    } catch (error) {
+      throw error?.errors?.[0] || error;
+    }
+
+    const hydrationErrors = errorSpy.mock.calls.filter((args) =>
+      args.some((value) =>
+        /hydration failed|did not match|minified react error #418/i.test(String(value))
+      )
+    );
+    expect(hydrationErrors).toEqual([]);
+    expect(recoverableErrors).toEqual([]);
+    expect(container.querySelector(".ri-referral-heading")).toHaveTextContent("Cached referral heading");
   });
 });

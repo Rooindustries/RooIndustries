@@ -112,6 +112,7 @@ for (const [route, resource, heading] of [
 
   if (process.env.TOOLING_CLS_CONTENT === "1") {
     test(`${route} refreshes content when revisited after its server snapshot`, async ({ page }, testInfo) => {
+      await page.clock.install();
       await page.goto(route);
       await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
       const initial = await page.evaluate(async (resource) => (await fetch(`/api/content/${resource}`)).json(), resource);
@@ -120,12 +121,13 @@ for (const [route, resource, heading] of [
       await page.locator("footer").getByRole("link", { name: "About", exact: true }).click();
       await expect(page).toHaveURL(/\/about$/);
       await expect(page.getByRole("heading", { name: "About Roo Industries", exact: true })).toBeVisible();
+      await page.clock.fastForward("01:01");
       const refreshedLabel = `Refreshed ${resource}`;
       const refreshed = { ...initial.data[0], [route === "/tools" ? "title" : "alt"]: refreshedLabel };
       const requests = [];
       await page.route(`**/api/content/${resource}`, async (entry) => {
         requests.push(entry.request().url());
-        await entry.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: [refreshed] }) });
+        await entry.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: [refreshed], revision: initial.revision }) });
       });
       if (route === "/tools") {
         await page.locator("footer").getByRole("link", { name: "Tools", exact: true }).click();

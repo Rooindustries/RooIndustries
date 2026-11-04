@@ -73,8 +73,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
   });
 }
 
-test("/meet-the-team fetches the team again when revisited inside the app", async ({ page }, testInfo) => {
+test("/meet-the-team fetches the team again when revisited inside the app after the refresh window", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.clock.install();
   const teamRequests = [];
   page.on("request", request => {
     if (new URL(request.url()).pathname === "/api/content/team") teamRequests.push(request.url());
@@ -83,6 +84,7 @@ test("/meet-the-team fetches the team again when revisited inside the app", asyn
   expect(teamRequests).toEqual([]);
   await page.getByRole("link", { name: "Roo Industries Precision Performance Engineering", exact: true }).filter({ visible: true }).click();
   await expect(page).toHaveURL(/\/$/);
+  await page.clock.fastForward("01:01");
   await page.getByRole("button", { name: "Open menu" }).click();
   const revisit = page.waitForResponse(response => new URL(response.url()).pathname === "/api/content/team", { timeout: 15000 });
   await page.getByRole("link", { name: "Meet the Team", exact: true }).filter({ visible: true }).click();

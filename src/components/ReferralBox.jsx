@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getPublicContent } from "../lib/publicContentClient";
+import { useContent } from "../lib/contentCache";
 
 const normalizeReferralLoginPath = (path) =>
   !path || path === "/login" ? "/referrals/login" : path;
@@ -10,43 +10,22 @@ const presentEntries = (data) =>
     Object.entries(data || {}).filter(([, value]) => value !== undefined && value !== null)
   );
 
+const DEFAULT_CONTENT = Object.freeze({
+  heading: "Join the Referral Program",
+  description:
+    "Are you a creator? Enter your email to get started with registration.",
+  emailPlaceholder: "Enter your email...",
+  startButtonText: "Get Started",
+  loginButtonText: "Login",
+  loginPath: "/referrals/login",
+  registerPath: "/referrals/register",
+});
+
 export default function ReferralBox({ initialData = null }) {
   const nav = useNavigate();
   const [email, setEmail] = useState("");
-
-  const [content, setContent] = useState(() => ({
-    heading: "Join the Referral Program",
-    description:
-      "Are you a creator? Enter your email to get started with registration.",
-    emailPlaceholder: "Enter your email...",
-    startButtonText: "Get Started",
-    loginButtonText: "Login",
-    loginPath: "/referrals/login",
-    registerPath: "/referrals/register",
-    ...presentEntries(initialData),
-  }));
-
-  useEffect(() => {
-    if (initialData) return undefined;
-    let cancelled = false;
-
-    async function fetchContent() {
-      try {
-        const data = await getPublicContent("referral-box");
-
-        if (!cancelled && data) {
-          setContent((prev) => ({ ...prev, ...presentEntries(data) }));
-        }
-      } catch {
-        // keep fallbacks
-      }
-    }
-
-    fetchContent();
-    return () => {
-      cancelled = true;
-    };
-  }, [initialData]);
+  const { data } = useContent("referral-box", initialData);
+  const content = { ...DEFAULT_CONTENT, ...presentEntries(data) };
 
   function handleStart() {
     if (!email || !email.includes("@")) return;

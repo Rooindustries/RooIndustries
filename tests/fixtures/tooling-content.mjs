@@ -68,6 +68,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
     document('contact', { title: 'Get In Touch', subtitle: 'Synthetic local contact information.', formId: '' }),
     document('about', { recordTitle: 'Synthetic local results', recordSubtitle: 'Local fixture content', recordDetails: [] }),
     document('services', { heading: 'Synthetic benefits', cards: [] }),
+    document('referralBox', { heading: 'Join the Referral Program', description: 'Are you a creator? Enter your email to get started with registration.' }),
     document('howItWorks', { title: 'How It Works', steps: [] }),
     document('packagesSettings', {}),
     document('meetTheTeam', { heroTitle: 'Meet the Team', heroSubtitle: 'Synthetic local team', showFounder: true, founder: { name: 'Fixture Founder', title: 'Synthetic founder', bio: 'Synthetic founder bio for the local team page.' }, sections: [{ _key: 'tooling-team-crew', title: 'Synthetic Crew', variant: 'standard', cards: [{ _key: 'tooling-team-alpha', name: 'Fixture Member Alpha', title: 'Synthetic tuner', bio: 'Synthetic bio for the first team card.' }, { _key: 'tooling-team-beta', name: 'Fixture Member Beta', title: 'Synthetic support', bio: 'Synthetic bio for the second team card.' }] }] }),
@@ -144,6 +145,13 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
   let contentOutage = false;
   let contentMissing = [];
   const changedContent = new Set();
+  let publishAfterRead = null;
+  const patchContent = (patch) => {
+    const index = documents.findIndex(value => value._id === patch?._id);
+    if (index < 0 || Object.keys(patch).some(key => key.startsWith('_') && key !== '_id')) throw new Error('Invalid fixture content patch.');
+    documents[index] = { ...documents[index], ...patch, _rev: `tooling-fixture-${++revision}` };
+    changedContent.add(patch._id);
+  };
   const emails = [];
   const mutate = mutations => {
     if (!Array.isArray(mutations) || !mutations.length) throw new Error('Missing fixture mutations.');
@@ -176,9 +184,16 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       const call = { method: req.method, path: url.pathname, body, status: 503, rows: 0, receivedAt: Date.now(), delayMs: 0 };
       res.once('finish', () => { call.respondedAt = Date.now(); persist(); });
       evidence.requests.push(call);
-      if (url.pathname === '/__content' && req.method === 'POST') {
+      if (url.pathname === '/__content' && req.method === 'POST' && body.publishAfterRead !== undefined) {
+        if (!documents.some(value => value._id === body.publishAfterRead?._id)) throw new Error('Invalid fixture content patch.');
+        contentRevision += 1;
+        publishAfterRead = body.publishAfterRead;
+        call.status = 200;
+        json(res, 200, { armed: publishAfterRead._id });
+      } else if (url.pathname === '/__content' && req.method === 'POST') {
         contentRevision += 1;
         if (body.reset === true) {
+          publishAfterRead = null;
           for (const id of changedContent) {
             const index = documents.findIndex(value => value._id === id);
             const initial = initialDocuments.find(value => value._id === id);
@@ -197,12 +212,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           if (!Array.isArray(body.missing) || !body.missing.every(type => typeof type === 'string' && type)) throw new Error('Invalid fixture missing content.');
           contentMissing = body.missing;
         }
-        if (body.patch !== undefined) {
-          const index = documents.findIndex(value => value._id === body.patch?._id);
-          if (index < 0 || Object.keys(body.patch).some(key => key.startsWith('_') && key !== '_id')) throw new Error('Invalid fixture content patch.');
-          documents[index] = { ...documents[index], ...body.patch, _rev: `tooling-fixture-${++revision}` };
-          changedContent.add(body.patch._id);
-        }
+        if (body.patch !== undefined) patchContent(body.patch);
         call.status = 200;
         json(res, 200, { outage: contentOutage, missing: contentMissing, changed: [...changedContent] });
       } else if (apiRoutes && url.pathname === '/__fixture' && ['GET', 'POST'].includes(req.method)) {
@@ -277,6 +287,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           rows = rows.filter(row => { const value = filter.path.split('.').reduce((item, key) => item?.[key], row); return filter.op === 'in' ? Array.isArray(filter.value) && filter.value.includes(value) : filter.op === 'ieq' ? String(value).toLowerCase() === String(filter.value).toLowerCase() : value === filter.value; });
         }
         rows = rows.sort((a, b) => a._id < b._id ? -1 : a._id > b._id ? 1 : 0).slice(0, body.p_limit); call.status = 200; call.rows = rows.length; json(res, 200, url.pathname.endsWith('/roo_fetch_public_content_documents') ? { revision: contentRevision, documents: rows } : rows);
+        if (publishAfterRead) { patchContent(publishAfterRead); contentRevision += 1; publishAfterRead = null; }
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_asset_manifest_for_refs') {
         const assets = images.filter(image => body.p_asset_ids?.includes(image.id)).map(image => ({
           legacy_sanity_asset_id: image.id,
