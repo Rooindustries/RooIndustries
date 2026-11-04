@@ -158,3 +158,85 @@ test("Enter in a code field checks it the way Apply does", async ({ page, flow }
   expect(checks).toEqual([]);
   await expect(page).toHaveURL(/\/payment/);
 });
+
+const quoteProviders = {
+  dodo: { enabled: true, mode: "test" },
+  razorpay: { enabled: false, mode: "test", disabledReason: "fixture" },
+  paypal: { enabled: false, mode: "test", clientId: "" },
+};
+
+const serverQuote = (page, quoteFor) => page.route("**/api/payment/quote", async route => {
+  const quote = await quoteFor(route.request().postDataJSON() || {});
+  await route.fulfill({ json: { ok: true, quoteFingerprint: "fixture-quoted-discounts", quote, providers: quoteProviders } });
+});
+
+const quotedDiscounts = body => {
+  const coupon = body.couponCode === "save20" ? 5.5 : 0;
+  const referral = body.referralCode === "friend" ? 3.25 : 0;
+  return { grossAmount: 54.95, netAmount: Math.round((54.95 - coupon - referral) * 100) / 100, isFree: false,
+    couponDiscountAmount: coupon, referralDiscountAmount: referral, referralDiscountPercent: referral ? 10 : 0 };
+};
+
+const line = (page, label) => page.locator("dt").filter({ hasText: new RegExp(`^(${label})$`) }).locator("..").locator("dd");
+
+test("the payment page shows the discounts the server quoted", async ({ page, flow }) => {
+  await serverQuote(page, quotedDiscounts);
+  await flow.review();
+  await flow.payment();
+  const ui = fields(page);
+  await ui.coupon.fill("save20");
+  await ui.couponApply.click();
+  await expect(line(page, "Coupon")).toHaveText("save20 · −$5.50");
+  await expect(line(page, "Total|Subtotal")).toHaveText("$54.95$49.45 USD");
+  await ui.referral.fill("friend");
+  await ui.referralApply.click();
+  await expect(line(page, "Referral")).toHaveText("friend · −$3.25");
+  await expect(line(page, "Total|Subtotal")).toHaveText("$54.95$46.20 USD");
+});
+
+test("the review step shows the discounts the server quoted", async ({ page, flow }) => {
+  await serverQuote(page, quotedDiscounts);
+  await flow.reserve();
+  await flow.details();
+  await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+  await flow.codeInput("save20");
+  await expect(line(page, "Coupon")).toContainText("save20 · −$5.50");
+  await expect(line(page, "Total|Subtotal")).toContainText("$49.45");
+});
+
+test("removing a coupon never shows the old quoted total", async ({ page, flow }) => {
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  await serverQuote(page, async body => {
+    if (!body.couponCode && release.armed) await held;
+    return quotedDiscounts(body);
+  });
+  await flow.review();
+  await flow.payment();
+  const ui = fields(page);
+  await ui.coupon.fill("save20");
+  await ui.couponApply.click();
+  await expect(line(page, "Total|Subtotal")).toHaveText("$54.95$49.45 USD");
+  release.armed = true;
+  await page.getByRole("button", { name: "Remove coupon", exact: true }).click();
+  await expect(line(page, "Coupon")).toHaveCount(0);
+  await expect(line(page, "Total|Subtotal")).toHaveText("$54.95 USD");
+  release();
+  await expect(page.getByText("Price confirmed for this session.", { exact: true })).toBeVisible();
+  await expect(line(page, "Total|Subtotal")).toHaveText("$54.95 USD");
+});
+
+test("a quote without line amounts never shows browser-estimated discounts", async ({ page, flow }) => {
+  await serverQuote(page, body => body.couponCode === "save20"
+    ? { grossAmount: 54.95, netAmount: 0, isFree: true }
+    : quotedDiscounts(body));
+  await flow.review();
+  await flow.payment();
+  const ui = fields(page);
+  await ui.coupon.fill("save20");
+  await ui.couponApply.click();
+  await expect(line(page, "Total|Subtotal")).toHaveText("$0.00 USD");
+  await expect(page.getByText("−$10.99")).toHaveCount(0);
+  await expect(line(page, "Coupon")).toHaveCount(0);
+});
