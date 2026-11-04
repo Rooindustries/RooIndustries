@@ -117,6 +117,7 @@
     "check:booking-model": "bash scripts/check-booking-model.sh",
     "check:budgets": "node scripts/check-budgets.js",
     "check:budgets:update": "node scripts/check-budgets.js --update",
+    "check:no-scripting-media": "node scripts/check-no-scripting-media.mjs",
     "test:seo:nonjs": "playwright test tests/nonjs-seo.spec.js",
     "test:smoke:routes": "playwright test tests/routes-smoke.spec.js",
     "test:sweep": "playwright test tests/public-route-sweep.spec.js --project=chromium",
@@ -145,7 +146,7 @@
     "test:e2e:admin": "playwright test --config=playwright.admin.config.js",
     "test:sourcemaps": "node scripts/sourcemaps-e2e.mjs",
     "lint": "eslint src app middleware.js",
-    "test:lint-rules": "node --test tests/lint-rules.test.mjs",
+    "test:lint-rules": "node --test tests/lint-rules.test.mjs tests/no-scripting-media.test.mjs",
     "test:playwright-groups": "node --test tests/playwright-groups.test.mjs",
     "test:tested-tree": "node --test tests/tested-tree.test.mjs",
     "test:free-ports": "node --test tests/free-tcp-port.test.mjs"
