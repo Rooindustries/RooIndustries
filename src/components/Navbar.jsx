@@ -9,7 +9,6 @@ import {
   buildHomeSectionHref,
   clearPendingSectionTarget,
   clearRouteTransitionIntent,
-  consumePendingSectionTarget,
   isHomeSectionHash,
   normalizeSectionHash,
   readPendingSectionTarget,
@@ -19,6 +18,8 @@ import {
 import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinator";
 import { useScrollRuntime } from "../lib/scrollRuntime";
 import { HOME_SECTION_PREFETCH_BY_HASH, prefetchHomeSectionData, readHomeSectionData } from "../lib/homeSectionData";
+
+const NAVBAR_SECTION_SOURCE = "navbar";
 
 const canAnimateLogo = () => {
   if (typeof window === "undefined") return false;
@@ -95,7 +96,8 @@ export default function Navbar({ routeShell = "browser" }) {
   const navRowRef = useRef(null);
   const activeScrollCleanupRef = useRef(null);
   const pendingSectionNavigationTimeoutRef = useRef(null);
-  const sectionTransitionInFlightRef = useRef(false);
+  const homeNavigationRef = useRef(null);
+  const sectionIntentRef = useRef("");
   const { scrollY } = useScrollRuntime();
 
   const scrolled = scrollY > 12;
@@ -155,7 +157,8 @@ export default function Navbar({ routeShell = "browser" }) {
       clearTimeout(pendingSectionNavigationTimeoutRef.current);
       pendingSectionNavigationTimeoutRef.current = null;
     }
-    sectionTransitionInFlightRef.current = false;
+    homeNavigationRef.current = null;
+    sectionIntentRef.current = "";
     clearPendingSectionTarget();
     clearRouteTransitionIntent();
     if (typeof document !== "undefined") {
@@ -222,7 +225,8 @@ export default function Navbar({ routeShell = "browser" }) {
           event.preventDefault();
         }
 
-        writePendingSectionTarget(normalizedHash);
+        sectionIntentRef.current = normalizedHash;
+        writePendingSectionTarget(normalizedHash, NAVBAR_SECTION_SOURCE);
         writeRouteTransitionIntent({
           kind: "section",
           hash: normalizedHash,
@@ -237,14 +241,31 @@ export default function Navbar({ routeShell = "browser" }) {
           prefetchHomeSectionData(missingKeys).catch(() => {});
         }
 
-        sectionTransitionInFlightRef.current = true;
+        const nextHref = buildHomeSectionHref(normalizedHash);
+        if (homeNavigationRef.current === "memory") {
+          if (window.history?.replaceState) {
+            window.history.replaceState(window.history.state, "", nextHref);
+          } else {
+            window.location.hash = normalizedHash.slice(1);
+          }
+          return;
+        }
+        if (homeNavigationRef.current === "router") {
+          navigate(nextHref, { replace: true });
+          return;
+        }
+        if (homeNavigationRef.current === "document") {
+          window.location.assign(nextHref);
+          return;
+        }
+
         if (pendingSectionNavigationTimeoutRef.current) {
           clearTimeout(pendingSectionNavigationTimeoutRef.current);
         }
         pendingSectionNavigationTimeoutRef.current = window.setTimeout(() => {
           pendingSectionNavigationTimeoutRef.current = null;
-          const nextHref = buildHomeSectionHref(normalizedHash);
           if (routeShell === "memory") {
+            homeNavigationRef.current = "memory";
             if (window.history?.pushState) {
               window.history.pushState(window.history.state, "", nextHref);
             } else {
@@ -254,9 +275,11 @@ export default function Navbar({ routeShell = "browser" }) {
             return;
           }
           if (browserPath !== location.pathname) {
+            homeNavigationRef.current = "document";
             window.location.assign(nextHref);
             return;
           }
+          homeNavigationRef.current = "router";
           navigate(nextHref);
         }, 20);
         return;
@@ -265,6 +288,9 @@ export default function Navbar({ routeShell = "browser" }) {
       if (event?.preventDefault) {
         event.preventDefault();
       }
+
+      sectionIntentRef.current = "";
+      clearPendingSectionTarget();
 
       // Keep browser URL hash in sync even with MemoryRouter.
       const nextUrl = `${window.location.pathname}${window.location.search}${normalizedHash}`;
@@ -377,20 +403,33 @@ export default function Navbar({ routeShell = "browser" }) {
   }, [updateHeaderOffset]);
 
   useEffect(() => {
+    const ownSectionArrival = location.pathname === "/" && homeNavigationRef.current !== null;
+    if (location.pathname === "/") {
+      homeNavigationRef.current = null;
+      if (pendingSectionNavigationTimeoutRef.current) {
+        clearTimeout(pendingSectionNavigationTimeoutRef.current);
+        pendingSectionNavigationTimeoutRef.current = null;
+      }
+    }
+    if (ownSectionArrival) return;
     setOpen(false);
     setProofOpen(false);
     setReferralsOpen(false);
   }, [location.pathname, location.hash]);
 
   useEffect(() => {
-    if (location.pathname === "/") {
-      sectionTransitionInFlightRef.current = false;
+    if (typeof window === "undefined") return undefined;
+    const handleOtherSectionIntent = (event) => {
+      if (event?.detail?.source === NAVBAR_SECTION_SOURCE) return;
       if (pendingSectionNavigationTimeoutRef.current) {
         clearTimeout(pendingSectionNavigationTimeoutRef.current);
         pendingSectionNavigationTimeoutRef.current = null;
       }
-    }
-  }, [location.pathname]);
+      sectionIntentRef.current = "";
+    };
+    window.addEventListener("roo:pending-section-target", handleOtherSectionIntent);
+    return () => window.removeEventListener("roo:pending-section-target", handleOtherSectionIntent);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -453,19 +492,23 @@ export default function Navbar({ routeShell = "browser" }) {
   useEffect(() => {
     if (location.pathname !== "/") return;
 
+    const intentHash = sectionIntentRef.current;
+    sectionIntentRef.current = "";
     const urlHash = normalizeSectionHash(activeHomeHash);
     const pendingHash = readPendingSectionTarget();
-    const targetHash = isHomeSectionHash(urlHash)
+    const targetHash = isHomeSectionHash(intentHash)
+      ? intentHash
+      : isHomeSectionHash(urlHash)
       ? urlHash
       : isHomeSectionHash(pendingHash)
-      ? consumePendingSectionTarget()
+      ? pendingHash
       : "";
 
-    if (!isHomeSectionHash(targetHash)) return;
+    if (!targetHash) return;
 
-    const fromPending = Boolean(pendingHash && pendingHash === targetHash);
-    if (fromPending && pendingHash === targetHash) {
-      consumePendingSectionTarget();
+    const fromPending = targetHash === intentHash || targetHash === pendingHash;
+    if (fromPending) {
+      clearPendingSectionTarget();
     }
 
     if (typeof window !== "undefined") {

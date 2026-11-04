@@ -36,7 +36,7 @@ export const isHomeSectionHash = (hash = "") => {
   return SECTION_IDS.includes(normalized.slice(1));
 };
 
-export const writePendingSectionTarget = (hash = "") => {
+export const writePendingSectionTarget = (hash = "", source = "") => {
   if (typeof window === "undefined") return;
   const normalized = normalizeSectionHash(hash);
   if (!normalized) return;
@@ -45,7 +45,7 @@ export const writePendingSectionTarget = (hash = "") => {
   } catch {}
   window.dispatchEvent(
     new CustomEvent("roo:pending-section-target", {
-      detail: { hash: normalized },
+      detail: { hash: normalized, source },
     })
   );
 };
