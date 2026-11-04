@@ -16,6 +16,7 @@ const unescapeCss = (text) =>
 export const usesScriptingMedia = (mediaText) =>
   scriptingFeature.test(unescapeCss(mediaText.replace(ignoredTokens, " ")));
 
+const importUrl = /^\s*url\(\s*\)/i;
 const importLayer = /^\s*layer(?:\(\s*[^()]*\))?/i;
 const importSupports = /^\s*supports\(/i;
 
@@ -29,7 +30,7 @@ const afterParens = (text, open) => {
 };
 
 const importMedia = (params) => {
-  let rest = params.replace(ignoredTokens, " ").replace(importLayer, "");
+  let rest = params.replace(ignoredTokens, " ").replace(importUrl, "").replace(importLayer, "");
   const supports = rest.match(importSupports);
   if (supports) rest = afterParens(rest, supports.index + supports[0].length - 1);
   return rest;

@@ -69,13 +69,14 @@ describe("check-no-scripting-media", () => {
         "@layer base { @media (scripting: none) {} }",
         "@import url(a.css) layer(base) supports(display: grid) (scripting: none);",
         "@MEDIA (scripting) {}",
+        '@import url("a.css") supports(display: grid) (scripting: none);',
       ].join("\n"),
     );
     const { status, hits } = check([file]);
     assert.equal(status, 1);
     assert.deepEqual(
       hits.map((hit) => Number(hit.split(":")[1].split(" ")[0])),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
     );
   });
 
@@ -96,6 +97,7 @@ describe("check-no-scripting-media", () => {
         "@supports selector(.\\(scripting\\)) { .a { color: red; } }",
         "@layer scripting { .a { color: red; } }",
         '@import "a.css" supports((scripting: none)) screen;',
+        '@import url("editor.css") supports(selector(:state(scripting))) screen;',
       ].join("\n"),
     );
     const { status, output } = check([file]);
