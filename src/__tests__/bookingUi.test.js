@@ -2,6 +2,7 @@ import React from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import BookingForm from "../components/BookingForm";
+import { SectionNavigationProvider } from "../lib/sectionNavigator";
 import { calculateCheckoutDiscounts } from "../lib/checkoutCodes";
 
 let mockLocation = {
@@ -322,7 +323,7 @@ describe("booking calendar UI", () => {
       return defaultFetch(url, options);
     });
     setBookingLocation();
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     const halfHourDate = new Date(halfHourUtc);
     for (const offsetMinutes of [-30, 0, 15]) {
@@ -351,7 +352,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch();
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await screen.findByTestId("booking-step-tracker");
     expect(getAvailabilityFetchCalls()).toHaveLength(1);
@@ -382,7 +383,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch();
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await screen.findByRole("button", { name: /^review before payment$/i });
     expectActiveStep("PC details", "Step 2 of 3");
@@ -413,7 +414,7 @@ describe("booking calendar UI", () => {
     });
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     const availableDay = await screen.findByRole("button", {
       name: /fully available$/i,
@@ -496,7 +497,7 @@ describe("booking calendar UI", () => {
       },
     });
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     const userTimeZone = "America/Los_Angeles";
     const utcStart = getUtcFromHostLocal(2099, 0, 5, 10);
@@ -551,7 +552,7 @@ describe("booking calendar UI", () => {
     });
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     const slotTime = formatLocalTime(
       getUtcFromHostLocal(2099, 0, 5, 10),
@@ -626,7 +627,7 @@ describe("booking calendar UI", () => {
     });
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await userEvent.click(
       await screen.findByRole("button", { name: /^back$/i })
@@ -672,7 +673,7 @@ describe("booking calendar UI", () => {
       settings: { dateSlots: [{ date: "2099-01-05", times: ["10:00", "11:00"] }] },
     });
     setBookingLocation();
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
     await userEvent.click(await screen.findByRole("button", {
       name: formatLocalTime(new Date(FUTURE_SLOT), "America/Los_Angeles"),
     }));
@@ -715,7 +716,7 @@ describe("booking calendar UI", () => {
       };
     });
     setBookingLocation();
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
     await userEvent.click(await screen.findByRole("button", { name: /^back$/i }));
     await userEvent.click(await screen.findByRole("button", { name: /^next$/i }));
 
@@ -746,7 +747,7 @@ describe("booking calendar UI", () => {
       return { ok: false, status: 403, json: async () => ({ ok: false, message: "Invalid hold token" }) };
     });
     setBookingLocation();
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
     await userEvent.click(await screen.findByRole("button", { name: /^back$/i }));
     await userEvent.click(await screen.findByRole("button", { name: /^next$/i }));
 
@@ -789,7 +790,7 @@ describe("booking calendar UI", () => {
       };
     });
     setBookingLocation();
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
     await userEvent.click(await screen.findByRole("button", { name: /^release slot$/i }));
     if (keep) {
       expect(await screen.findByText(/could not release.*try again/i)).toBeInTheDocument();
@@ -809,7 +810,7 @@ describe("booking calendar UI", () => {
       ? { ok: false, status: 409, json: async () => ({ ok: false, message: "This slot is currently reserved by someone else." }) }
       : defaultFetch(url, options));
     setBookingLocation();
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
     await userEvent.click(await screen.findByRole("button", { name: /^back$/i }));
     await userEvent.click(await screen.findByRole("button", { name: /^next$/i }));
     expect(await screen.findByText("This slot is currently reserved by someone else.")).toBeInTheDocument();
@@ -828,7 +829,7 @@ describe("booking calendar UI", () => {
       ? { ok: false, status: 409, json: async () => ({ ok: false, message }) }
       : defaultFetch(url, options));
     setBookingLocation();
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
     await userEvent.click(await screen.findByRole("button", { name: /^release slot$/i }));
     expect(await screen.findByText(message)).toBeInTheDocument();
     expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toEqual(original);
@@ -859,7 +860,7 @@ describe("booking calendar UI", () => {
       return defaultFetch(url, options);
     });
     setBookingLocation();
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
     await userEvent.click(await screen.findByRole("button", { name: /^back$/i }));
     await userEvent.click(await screen.findByRole("button", {
       name: formatLocalTime(getUtcFromHostLocal(2099, 0, 5, 11), "America/Los_Angeles"),
@@ -920,7 +921,7 @@ describe("booking calendar UI", () => {
       return defaultFetch(url, options);
     });
     setBookingLocation();
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
     await userEvent.click(await screen.findByRole("button", { name: /^back$/i }));
     await userEvent.click(await screen.findByRole("button", {
       name: formatLocalTime(getUtcFromHostLocal(2099, 0, 5, 11), "America/Los_Angeles"),
@@ -1005,7 +1006,7 @@ describe("booking calendar UI", () => {
     });
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await userEvent.click(
       await screen.findByRole("button", { name: /^release payment$/i })
@@ -1132,7 +1133,7 @@ describe("booking calendar UI", () => {
         },
       },
     });
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await waitFor(() =>
       expectActiveStep("Review & pay", "Step 3 of 3")
@@ -1225,7 +1226,7 @@ describe("booking calendar UI", () => {
     });
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await userEvent.click(
       await screen.findByRole("button", { name: /^release payment$/i })
@@ -1248,7 +1249,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch();
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await screen.findByText(/^expires in \d+:\d{2}\.$/i);
     await act(async () => {
@@ -1273,7 +1274,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch();
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await screen.findByText(/^expires in \d+:\d{2}\.$/i);
     await act(async () => {
@@ -1342,7 +1343,7 @@ describe("booking calendar UI", () => {
       state: null,
     });
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     expect(await screen.findByText("Vertex Essentials")).toBeInTheDocument();
     expect(
@@ -1388,7 +1389,7 @@ describe("booking calendar UI", () => {
     });
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await screen.findByRole("button", {
       name: formatLocalTime(utcStart, "America/Los_Angeles"),
@@ -1453,7 +1454,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch();
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await userEvent.click(
       await screen.findByRole("button", { name: /^review before payment$/i })
@@ -1517,7 +1518,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch({ coupons: { save10: FIXED_COUPON } });
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await userEvent.click(
       await screen.findByRole("button", {
@@ -1568,7 +1569,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch();
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await userEvent.click(
       await screen.findByRole("button", {
@@ -1597,7 +1598,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch({ coupons: { save10: FIXED_COUPON } });
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await userEvent.click(
       await screen.findByRole("button", {
@@ -1629,7 +1630,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch({ referrals: { creator: CREATOR_REFERRAL } });
     setBookingLocation(OVERHAUL_PACKAGE, "?ref=creator");
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     expect(await screen.findByText("Referral")).toBeInTheDocument();
     expect(screen.getByText("creator · −$5.50")).toBeInTheDocument();
@@ -1642,7 +1643,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch();
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Invalid referral or coupon code."
@@ -1669,7 +1670,7 @@ describe("booking calendar UI", () => {
     });
     setBookingLocation(OVERHAUL_PACKAGE, "?ref=creator");
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await screen.findByText("creator · −$5.50");
     await userEvent.click(
@@ -1729,7 +1730,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch({ coupons: { save10: FIXED_COUPON } });
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     expect(await screen.findByText("SAVE10 · −$10.00")).toBeInTheDocument();
     await waitFor(() =>
@@ -1765,7 +1766,7 @@ describe("booking calendar UI", () => {
       ? { ok: false, status: 503, json: async () => ({ error: "Temporarily unavailable." }) }
       : defaultFetch(url, options));
     setBookingLocation();
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
     expect(await screen.findByRole("alert")).toHaveTextContent(/validation.*unavailable/i);
     expect(JSON.parse(sessionStorage.getItem("booking_draft")).packages[OVERHAUL_PACKAGE.title].checkoutCodes).toEqual(checkoutCodes);
     if (type === "referral") expect(sessionStorage.getItem("referral_session")).toBe("creator");
@@ -1787,7 +1788,7 @@ describe("booking calendar UI", () => {
       ? { ok: false, status: 503, json: async () => ({ error: "Temporarily unavailable." }) }
       : defaultFetch(url, options));
     setBookingLocation();
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
     expect(await screen.findByRole("alert")).toHaveTextContent(/validation.*unavailable/i);
     expect(sessionStorage.getItem("referral_session")).toBe("creator");
   });
@@ -1804,7 +1805,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch();
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Invalid referral or coupon code."
@@ -1853,7 +1854,7 @@ describe("booking calendar UI", () => {
     });
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
     await userEvent.click(
       await screen.findByRole("button", {
         name: /have a referral or coupon code/i,
@@ -1903,7 +1904,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch();
     setBookingLocation(missingPricePackage);
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     expect(
       await screen.findByRole("button", { name: /^continue to payment$/i })
@@ -1919,7 +1920,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch();
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await userEvent.click(
       await screen.findByRole("button", {
@@ -1961,7 +1962,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch();
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await userEvent.click(
       await screen.findByRole("button", { name: /^back$/i })
@@ -2023,7 +2024,7 @@ describe("booking calendar UI", () => {
     });
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     const expectedDate = new Intl.DateTimeFormat(undefined, {
       timeZone: "America/Los_Angeles",
@@ -2059,7 +2060,7 @@ describe("booking calendar UI", () => {
       installDefaultFetch();
       setBookingLocation(bookingPackage);
 
-      render(<BookingForm />);
+      render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
       expect(await screen.findByText(expectedWarranty)).toBeInTheDocument();
       expect(screen.queryByText(excludedWarranty)).not.toBeInTheDocument();
@@ -2072,7 +2073,7 @@ describe("booking calendar UI", () => {
     });
     setBookingLocation(ESSENTIALS_PACKAGE);
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await userEvent.click(
       await screen.findByRole("button", { name: /^view my plan$/i })
@@ -2106,7 +2107,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch();
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     expect(await screen.findByLabelText("Discord username")).toHaveValue(
       VALID_FORM.discord
@@ -2130,7 +2131,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch();
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await waitFor(() =>
       expectActiveStep("Review & pay", "Step 3 of 3")
@@ -2146,7 +2147,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch();
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await waitFor(() =>
       expectActiveStep("Review & pay", "Step 3 of 3")
@@ -2170,7 +2171,7 @@ describe("booking calendar UI", () => {
     installDefaultFetch();
     setBookingLocation();
 
-    render(<BookingForm />);
+    render(<BookingForm />, { wrapper: SectionNavigationProvider });
 
     await waitFor(() =>
       expect(within(screen.getByText("Total").closest("div")).getByText("$54.95")).toBeInTheDocument()
