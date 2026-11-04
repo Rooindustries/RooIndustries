@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useLayoutEffect } from "react";
 import { flushSync } from "react-dom";
-import { motion, AnimatePresence, useMotionValue, useTransform } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { BookingDialogHoldContext, BookingDialogReadyContext } from "../lib/bookingDialogHold";
 import { useLowPerformanceMode } from "../lib/performanceMode";
 import { isTopDialog, useDialogFocus } from "../lib/useDialogFocus";
@@ -37,9 +37,11 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     viewportTop: 0,
   });
   const lowPerformanceMode = useLowPerformanceMode();
-  const frameWidth = useMotionValue(0);
-  const contentWidth = useMotionValue(DESKTOP_BASE_WIDTH);
-  const contentScale = useTransform([frameWidth, contentWidth], ([frame, content]) => (content ? frame / content : 0));
+  const scalerRef = useRef(null);
+  const baseWidthRef = useRef(DESKTOP_BASE_WIDTH);
+  const scaleToFrame = useCallback((frameWidth) => {
+    if (scalerRef.current) scalerRef.current.style.transform = `scale(${frameWidth / baseWidthRef.current})`;
+  }, []);
   const [isMobile, setIsMobile] = useState(false);
   const [renderWidth, setRenderWidth] = useState(DESKTOP_BASE_WIDTH);
   const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
@@ -116,7 +118,8 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       if (contentRef.current && contentRef.current.offsetWidth !== baseWidth) {
         contentRef.current.style.width = `${baseWidth}px`;
       }
-      contentWidth.set(baseWidth);
+      baseWidthRef.current = baseWidth;
+      scaleToFrame(parseFloat(wrapperRef.current?.style.width) || 0);
       const contentHeight = contentRef.current?.offsetHeight || 0;
 
       let scale = 1;
@@ -190,7 +193,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       layoutFrameRef.current = 0;
       observer.disconnect();
     };
-  }, [children, open, contentKey, contentWidth]);
+  }, [children, open, contentKey, scaleToFrame]);
 
   useLayoutEffect(() => {
     if (open && viewport) revealFocusedControl(document.activeElement);
@@ -399,11 +402,11 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
               aria-modal="true"
               aria-label="Schedule your session"
               className={`ri-booking m-auto relative${contentRevealed ? "" : " invisible"}`}
-              style={{ width: frameWidth }}
               initial={{ width: wrapperSize.width, height: wrapperSize.height }}
               animate={{ width: wrapperSize.width, height: wrapperSize.height }}
               layout={!lowPerformanceMode}
               transition={sizeTransition}
+              onUpdate={(latest) => scaleToFrame(latest.width)}
             >
               <button
                 id="booking-modal-close"
@@ -420,9 +423,10 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
               </button>
 
               <motion.div
+                ref={scalerRef}
                 data-booking-scaler="true"
                 className="shadow-none outline-none overflow-visible absolute left-0 origin-top-left cursor-default"
-                style={{ top: CLOSE_ROW_HEIGHT, scale: contentScale }}
+                style={{ top: CLOSE_ROW_HEIGHT }}
                 initial={lowPerformanceMode ? { opacity: 0 } : false}
                 animate={lowPerformanceMode ? { opacity: 1 } : undefined}
                 exit={lowPerformanceMode ? { opacity: 0 } : undefined}
