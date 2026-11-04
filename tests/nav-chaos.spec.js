@@ -2,6 +2,7 @@ const testHost = process.env.ROO_TEST_HOST || '127.0.0.1';
 const fs = require("fs");
 const path = require("path");
 const { test, expect } = require("@playwright/test");
+const { launchUnemulatedChromium } = require("./fixtures/unemulated-chromium.cjs");
 
 const BASE_URL = process.env.BASE_URL;
 if (!BASE_URL) {
@@ -36,7 +37,6 @@ const earlierRun = (() => {
   }
 })();
 const failures = earlierRun?.failures || [];
-const notes = earlierRun?.notes || [];
 const CPU_THROTTLE_RATE = Number(process.env.NAV_CPU_THROTTLE_RATE || 1);
 if (!Number.isFinite(CPU_THROTTLE_RATE) || CPU_THROTTLE_RATE < 1 || CPU_THROTTLE_RATE > 4) {
   throw new Error("NAV_CPU_THROTTLE_RATE must be between 1 and 4.");
@@ -251,33 +251,61 @@ test("latest rapid navbar click wins across section and route transitions", asyn
   }
 });
 
-test("visibility transition does not break section navigation", async ({ page, browserName }) => {
-  await page.setViewportSize({ width: 1536, height: 960 });
-  await page.goto("/benchmarks", { waitUntil: "domcontentloaded" });
-
-  if (browserName !== "chromium") {
-    notes.push("Visibility transition test skipped for non-chromium browser.");
-    return;
-  }
-
+test("visibility transition does not break section navigation", async ({ baseURL }, testInfo) => {
+  const browser = await launchUnemulatedChromium({
+    baseURL,
+    userDataDir: testInfo.outputPath("unemulated-chromium"),
+    width: 1536,
+    height: 960,
+  });
   try {
-    const cdp = await page.context().newCDPSession(page);
-    await cdp.send("Emulation.setPageVisibilityState", {
-      visibilityState: "hidden",
+    const tab = await browser.openTab(`${baseURL}/benchmarks`);
+    await tab.evaluate(() => {
+      window.__visibilityStates = [document.visibilityState];
+      document.addEventListener("visibilitychange", () => {
+        window.__visibilityStates.push(document.visibilityState);
+      });
     });
-    await cdp.send("Emulation.setPageVisibilityState", {
-      visibilityState: "visible",
+    const hydrated = await tab.waitFor(() => {
+      const link = document.querySelector('[data-nav-surface="desktop"][data-nav-target="benefits"]');
+      return Boolean(link && Object.keys(link).some((key) => key.startsWith("__reactProps$")));
     });
-  } catch (err) {
-    notes.push(`Visibility transition API unavailable: ${String(err.message || err)}`);
-  }
+    expect(hydrated, "benefits link hydrated").toBe(true);
 
-  await clickDesktopTarget(page, "benefits");
-  const ok = await verifyHashAndTarget(page, "#services", 3500);
-  if (!ok) {
-    await recordFailure(page, "visibility:benefits", "failed_after_visibility_transition");
-  } else if (hasHostDrift(page.url())) {
-    await recordFailure(page, "visibility:benefits", "host_drift");
+    const otherTab = await browser.openTab("about:blank");
+    expect(await tab.waitFor(() => document.visibilityState === "hidden"), "page hidden behind another tab").toBe(true);
+    await tab.activate();
+    expect(await tab.waitFor(() => document.visibilityState === "visible"), "page visible again").toBe(true);
+    await otherTab.close();
+
+    const states = await tab.evaluate(() => window.__visibilityStates);
+    testInfo.annotations.push({ type: "visibility states", description: states.join(" -> ") });
+    expect(states).toEqual(["visible", "hidden", "visible"]);
+
+    await tab.click('[data-nav-surface="desktop"][data-nav-target="benefits"]');
+    const landed = await tab.waitFor(() => {
+      const target = document.querySelector("#services");
+      return (
+        window.location.pathname === "/" &&
+        window.location.hash === "#services" &&
+        Boolean(target) &&
+        Math.abs(Math.round(target.getBoundingClientRect().top)) <= 160
+      );
+    }, null, 3500);
+    if (!landed) {
+      fs.mkdirSync(auditDir, { recursive: true });
+      const screenshot = path.join(auditDir, `chaos-failure-${Date.now()}-visibility_benefits.png`);
+      await tab.screenshot(screenshot);
+      failures.push({
+        context: "visibility:benefits",
+        reason: "failed_after_visibility_transition",
+        url: await tab.evaluate(() => window.location.href),
+        screenshot,
+      });
+    }
+    expect(browser.blockedRequests, "nonlocal browser requests").toEqual([]);
+  } finally {
+    await browser.close();
   }
 });
 
@@ -291,12 +319,6 @@ test.afterAll(async () => {
     "",
   ];
 
-  if (notes.length) {
-    lines.push("## Notes", "");
-    notes.forEach((note) => lines.push(`- ${note}`));
-    lines.push("");
-  }
-
   if (failures.length) {
     lines.push("## Failures", "");
     failures.forEach((f, idx) => {
@@ -309,7 +331,7 @@ test.afterAll(async () => {
   }
 
   fs.writeFileSync(chaosReportPath, lines.join("\n"));
-  fs.writeFileSync(chaosStatePath, JSON.stringify({ runId, failures, notes }, null, 2));
+  fs.writeFileSync(chaosStatePath, JSON.stringify({ runId, failures }, null, 2));
 });
 
 let failuresAtStart = 0;
