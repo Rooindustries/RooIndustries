@@ -9,7 +9,6 @@ import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } fro
 import { createToolingContentFixture } from "../tests/fixtures/tooling-content.mjs";
 import { apiRouteSecrets } from "../tests/fixtures/api-routes.mjs";
 import { adoptHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
-import { childTreeEnv } from "./lib/start-on-port.mjs";
 
 await adoptHeldTcpPorts();
 if (process.env.ROO_ADMIN_FIXTURE === "1") {
@@ -32,7 +31,6 @@ if (monitoringStartup && (process.env.NEXT_PUBLIC_SENTRY_DSN !== "false" || proc
 const clockFile = apiRoutes ? path.resolve(`${dist}-clock.json`) : undefined;
 if (clockFile) fs.writeFileSync(clockFile, "null");
 const env = {
-  ...childTreeEnv(),
   PATH: process.env.PATH,
   HOME: process.env.HOME,
   CI: "true",

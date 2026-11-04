@@ -31,9 +31,9 @@ const configure = ([port, contentPort]) => {
 const children = new Map();
 let stopping = false;
 
-const launch = (args, stdio = "inherit", extraEnv = {}) => {
+const launch = (args, stdio = "inherit", start = spawn) => {
   if (stopping) throw new Error("API audit was stopped.");
-  const child = spawn(process.execPath, args, { env: { ...env, ...extraEnv }, stdio, detached: process.platform !== "win32" });
+  const child = start(process.execPath, args, { env, stdio, detached: process.platform !== "win32" });
   const closed = new Promise(resolve => {
     child.once("error", error => resolve({ error }));
     child.once("close", (code, signal) => resolve({ code, signal }));
@@ -82,7 +82,7 @@ try {
     spawnChild: (ports, held) => {
       output.length = 0;
       configure(ports);
-      server = launch(["scripts/test-tooling-sweep-server.mjs"], ["ignore", "pipe", "pipe", ...held.stdio], held.env);
+      server = launch(["scripts/test-tooling-sweep-server.mjs"], ["ignore", "pipe", "pipe"], held.spawn);
       server.child.stdout.on("data", chunk => { output.push(String(chunk)); process.stdout.write(chunk); });
       server.child.stderr.on("data", chunk => { output.push(String(chunk)); process.stderr.write(chunk); });
       return server.child;

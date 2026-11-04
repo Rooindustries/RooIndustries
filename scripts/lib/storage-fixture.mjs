@@ -4,11 +4,10 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { once } from 'node:events';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { createClient } from '@supabase/supabase-js';
 import { listenOnPort, releaseTcpPorts, reserveTcpPorts } from './free-tcp-port.mjs';
-import { startChildOnPorts } from './start-on-port.mjs';
+import { startChildOnPorts, stopChild } from './start-on-port.mjs';
 import { createSweepPostgresFixture, root } from './sweep-postgres-fixture.mjs';
 import { installNetworkGuard } from './test-target-safety.mjs';
 
@@ -22,17 +21,6 @@ const jwt = (secret, role) => {
   const unsigned = `${header}.${payload}`;
   return `${unsigned}.${crypto.createHmac('sha256', secret).update(unsigned).digest('base64url')}`;
 };
-const terminate = async child => {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  const exited = once(child, 'exit');
-  child.kill('SIGTERM');
-  let timer;
-  try {
-    await Promise.race([exited, new Promise(resolve => { timer = setTimeout(resolve, 5000); })]);
-    if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await exited; }
-  } finally { clearTimeout(timer); }
-};
-
 export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storage-api-v1.79.33'), pgBin = '/tmp/roo-request-pg17/runtime/usr/lib/postgresql/17/bin', postgrestBin = '/tmp/roo-request-postgrest/postgrest', libraryPath = process.env.LD_LIBRARY_PATH || '/tmp/roo-request-pg17/runtime/usr/lib/x86_64-linux-gnu', signedUploadExpirationSeconds = 120, commerceRepairMigration = true, fullMigrationChain = false, afterMigrations, ports = {}, additionalOrigins = [] } = {}) {
   assert.equal(process.env.ROO_TEST_HOST || host, host, 'Storage fixture is an internal loopback-only stack');
   assert.equal(process.env.ROO_TEST_POSTGRES_HOST || host, host);
@@ -56,7 +44,7 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
   const stop = () => stopping ||= (async () => {
     await releaseTcpPorts(host, explicitPorts);
     if (gateway) { gateway.closeAllConnections(); await new Promise(resolve => gateway.close(resolve)); gateway = null; }
-    await terminate(storageProcess);
+    if (storageProcess) await stopChild(storageProcess);
     if (database) await database.stop();
     restoreGuard?.();
     const databaseScratch = database?.scratch || failedDatabaseScratch;
@@ -110,9 +98,8 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
             TUS_URL_PATH: '/upload/resumable', TUS_LOCK_TYPE: 'postgres',
             STORAGE_PUBLIC_URL: supabaseUrl, REQUEST_ALLOW_X_FORWARDED_PATH: 'true',
             VERSION: storageRelease.tag,
-            ...launch.env,
           };
-          const child = spawn(process.execPath, [path.join(storageSource, 'dist/start/server.js')], { cwd: scratch, env: childEnv, stdio: ['ignore', logFd, logFd], detached: true });
+          const child = launch.spawn(process.execPath, [path.join(storageSource, 'dist/start/server.js')], { cwd: scratch, env: childEnv, stdio: ['ignore', logFd, logFd] });
           fs.closeSync(logFd);
           cleanup.storagePid = child.pid;
           return child;

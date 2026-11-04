@@ -2,12 +2,11 @@ const testHost = process.env.ROO_TEST_HOST || '127.0.0.1';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 import { uiRepairsFixture } from '../tests/fixtures/ui-repairs-server.mjs';
 import { uiFinishFixture } from '../tests/fixtures/ui-finish-server.mjs';
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from './lib/test-target-safety.mjs';
 import { portFromEnv, reserveTcpPorts } from './lib/free-tcp-port.mjs';
-import { startChildOnPorts } from './lib/start-on-port.mjs';
+import { startChildOnPorts, stopChild } from './lib/start-on-port.mjs';
 
 refuseEnvFiles();
 const host = testHost;
@@ -113,7 +112,7 @@ const { ports: [startedPort], child } = await startChildOnPorts({
   timeout: 60000,
   output: () => output.join(''),
   spawnChild: ([candidate], launch) => {
-    const next = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--hostname', host, '--port', String(candidate)], { env: { ...env, ...launch.env }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    const next = launch.spawn(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--hostname', host, '--port', String(candidate)], { env, stdio: ['ignore', 'pipe', 'pipe'] });
     next.stdout.on('data', chunk => { output.push(String(chunk)); process.stdout.write(chunk); });
     next.stderr.on('data', chunk => { output.push(String(chunk)); process.stderr.write(chunk); });
     return next;
@@ -123,5 +122,5 @@ nextPort = startedPort;
 upstream = localOrigin(`http://${host}:${nextPort}`);
 installNetworkGuard([base, upstream]);
 child.on('exit', code => { server.close(); process.exitCode = code || 0; });
-for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => { child.kill(signal); server.close(); });
+for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => { stopChild(child); server.close(); });
 console.log(JSON.stringify({ pid: process.pid, nextPid: child.pid, url: base, runner: `${base}/__ui`, artifact, isolatedHttpFixtures: true, browserCsp: csp }));
