@@ -161,8 +161,34 @@ beforeAll(() => {
   ({ getReferralSession } = require("../../src/server/api/ref/auth"));
 });
 
+const creatorSignIn = () => ({
+  ok: true,
+  account: {
+    creator_legacy_sanity_id: "ref_creator_1",
+    display_name: "Creator",
+    legacy_sanity_id: "ref_creator_1",
+    principal_id: principalId,
+    referral_code: "creator-code",
+    session_version: 7,
+  },
+  user: { id: "30000000-0000-4000-8000-000000000003" },
+  session: { access_token: "creator-access", refresh_token: "creator-refresh" },
+});
+
 beforeEach(() => {
   jest.clearAllMocks();
+  [
+    mockAuthenticateSupabaseAccount,
+    mockClearLegacySupabaseSession,
+    mockGetLegacySupabaseUser,
+    mockInstallLegacySupabaseSession,
+    mockAppendPendingDiscordLinkCookie,
+    mockLinkPendingDiscordIdentity,
+    mockResolvePendingDiscordUser,
+    mockResolvePendingSocialLink,
+    mockFetch,
+    mockPatchCommit,
+  ].forEach((mock) => mock.mockReset());
   globalThis.__rooRateLimitBuckets?.clear?.();
   process.env.DATA_PRIMARY_BACKEND = "sanity";
   process.env.SANITY_PRIVATE_PROJECT_ID = "private-project";
@@ -473,6 +499,7 @@ describe("referral login API", () => {
     mockFetch.mockImplementation((query, params = {}) =>
       Promise.resolve(findReferralByIdentifier(referral, query, params.identifier))
     );
+    mockAuthenticateSupabaseAccount.mockResolvedValue(creatorSignIn());
 
     const req = createReq({
       code: " CREATOR-CODE ",
@@ -491,8 +518,13 @@ describe("referral login API", () => {
       code: "creator-code",
     });
     expect(mockFetch).not.toHaveBeenCalled();
-    expect(mockFetch).not.toHaveBeenCalled();
-    expect(mockAuthenticateSupabaseAccount).toHaveBeenCalled();
+    expect(mockAuthenticateSupabaseAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        identifier: "creator-code",
+        password,
+        requiredRoles: ["creator"],
+      })
+    );
     expect(res.headers["Set-Cookie"]).toContain("ref_session=");
   });
 
@@ -501,6 +533,7 @@ describe("referral login API", () => {
     mockFetch.mockImplementation((query, params = {}) =>
       Promise.resolve(findReferralByIdentifier(referral, query, params.identifier))
     );
+    mockAuthenticateSupabaseAccount.mockResolvedValue(creatorSignIn());
 
     const req = createReq({
       code: " CREATOR@EXAMPLE.COM ",
@@ -514,6 +547,12 @@ describe("referral login API", () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.code).toBe("creator-code");
     expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockAuthenticateSupabaseAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        identifier: "creator@example.com",
+        requiredRoles: ["creator"],
+      })
+    );
 
     const session = getReferralSession({
       headers: {

@@ -1,11 +1,12 @@
 const mockFetchPublicContent = jest.fn();
+const mockResolveSupabaseRuntimePolicy = jest.fn();
 
 jest.mock("../server/content/publicContent.js", () => ({
   fetchPublicContent: (...args) => mockFetchPublicContent(...args),
 }));
 
 jest.mock("../server/supabase/runtime.js", () => ({
-  resolveSupabaseRuntimePolicy: () => ({ primaryBackend: "supabase" }),
+  resolveSupabaseRuntimePolicy: (...args) => mockResolveSupabaseRuntimePolicy(...args),
 }));
 
 const { fetchFaqQuestions, fetchHomePageData, fetchPrivacyPolicy } = require("../lib/contentServer.js");
@@ -13,6 +14,9 @@ const { fetchFaqQuestions, fetchHomePageData, fetchPrivacyPolicy } = require("..
 describe("server-rendered public content authority", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockResolveSupabaseRuntimePolicy.mockReset();
+    mockResolveSupabaseRuntimePolicy.mockReturnValue({ primaryBackend: "supabase" });
+    mockFetchPublicContent.mockReset();
     mockFetchPublicContent.mockImplementation(({ resource }) => {
       if (resource === "packages-list") return [];
       if (resource === "faq-questions") {
@@ -85,17 +89,14 @@ describe("server-rendered public content authority", () => {
   });
 
   test("returns the home fallbacks when backend initialization fails", async () => {
-    jest.resetModules();
-    jest.doMock("../server/supabase/runtime.js", () => ({
-      resolveSupabaseRuntimePolicy: () => {
-        throw new Error("backend unavailable");
-      },
-    }));
-    const isolated = require("../lib/contentServer.js");
+    mockResolveSupabaseRuntimePolicy.mockImplementation(() => {
+      throw new Error("backend unavailable");
+    });
 
-    await expect(isolated.fetchHomePageData()).resolves.toMatchObject({
+    await expect(fetchHomePageData()).resolves.toMatchObject({
       packagesList: [],
     });
-    await expect(isolated.fetchPrivacyPolicy()).resolves.toBeNull();
+    await expect(fetchPrivacyPolicy()).resolves.toBeNull();
+    expect(mockFetchPublicContent).not.toHaveBeenCalled();
   });
 });
