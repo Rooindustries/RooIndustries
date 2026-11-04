@@ -1,39 +1,12 @@
 import fs from "node:fs";
 import net from "node:net";
-import { execFileSync } from "node:child_process";
+import { once } from "node:events";
+import { execFileSync, spawn } from "node:child_process";
 import { freeTcpPorts, passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "./free-tcp-port.mjs";
 
 export const addressInUse = (output) => /EADDRINUSE|Address already in use|\(Address in use\)/.test(output);
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const pauseSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-
-const processTable = () => {
-  const table = new Map();
-  for (const name of fs.readdirSync("/proc").filter((entry) => /^\d+$/.test(entry))) {
-    try {
-      const stat = fs.readFileSync(`/proc/${name}/stat`, "utf8");
-      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-      table.set(Number(name), { state: fields[0], parent: Number(fields[1]), startTime: fields[19] });
-    } catch {}
-  }
-  return table;
-};
-
-const processTree = (root) => {
-  const table = processTable();
-  const tree = new Set([root]);
-  for (let grew = true; grew;) {
-    grew = false;
-    for (const [pid, { parent }] of table) {
-      if (!tree.has(pid) && tree.has(parent)) {
-        tree.add(pid);
-        grew = true;
-      }
-    }
-  }
-  return tree;
-};
 
 const littleEndianWords = (bytes) => {
   const words = [];
@@ -88,9 +61,18 @@ const listeningSockets = (host, port) => {
   return sockets;
 };
 
-export const ownsPorts = (pid, host, ports) => {
+const groupMembers = (group) => fs.readdirSync("/proc").filter((entry) => /^\d+$/.test(entry)).filter((pid) => {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2]) === group;
+  } catch {
+    return false;
+  }
+});
+
+export const ownsPorts = (group, host, ports) => {
   const open = new Set();
-  for (const member of processTree(pid)) {
+  for (const member of groupMembers(group)) {
     try {
       for (const fd of fs.readdirSync(`/proc/${member}/fd`)) {
         try { open.add(fs.readlinkSync(`/proc/${member}/fd/${fd}`)); } catch {}
@@ -100,130 +82,41 @@ export const ownsPorts = (pid, host, ports) => {
   return ports.every((port) => [...listeningSockets(host, port)].some((socket) => open.has(socket)));
 };
 
-const running = new Map();
-const markerName = "ROO_CHILD_TREE";
-let markers = 0;
-let shuttingDown = false;
-let installed = false;
-
-const carriesMarker = (pid, marker) => {
-  try {
-    return fs.readFileSync(`/proc/${pid}/environ`, "utf8").split("\0").includes(`${markerName}=${marker}`);
-  } catch {
-    return false;
-  }
-};
-
 const exited = (child) => child.exitCode !== null || child.signalCode !== null;
 
-export const childTreeEnv = () => (process.env[markerName] ? { [markerName]: process.env[markerName] } : {});
-
-const startTimeOf = (pid) => {
+const signalGroup = (child, signal) => {
+  if (!child.pid || exited(child)) return;
   try {
-    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
-    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
-  } catch {
-    return null;
+    process.kill(-child.pid, signal);
+  } catch (error) {
+    if (error.code !== "ESRCH") throw error;
   }
 };
 
-export const signalIfUnchanged = (pid, startTime, signal) => {
-  if (startTimeOf(pid) !== startTime) return false;
-  try {
-    process.kill(pid, signal);
-    return true;
-  } catch {
-    return false;
-  }
+export const stopChild = async (child, grace = 5000) => {
+  if (!child.pid || exited(child)) return;
+  const ended = once(child, "exit");
+  signalGroup(child, "SIGTERM");
+  let timer;
+  await Promise.race([ended, new Promise((resolve) => { timer = setTimeout(resolve, grace); })]);
+  clearTimeout(timer);
+  if (exited(child)) return;
+  signalGroup(child, "SIGKILL");
+  await ended;
 };
 
-const known = new WeakMap();
+const launched = new WeakSet();
 
-const family = (children) => {
-  const table = processTable();
-  const members = new Map();
-  for (const child of children) {
-    const marker = running.get(child);
-    const found = new Set([...(known.get(child) || [])].filter(([pid, startTime]) => table.get(pid)?.startTime === startTime).map(([pid]) => pid));
-    if (child.pid && !exited(child)) found.add(child.pid);
-    if (marker) for (const pid of table.keys()) if (carriesMarker(pid, marker)) found.add(pid);
-    for (let grew = true; grew;) {
-      grew = false;
-      for (const [pid, { parent }] of table) {
-        if (!found.has(pid) && found.has(parent)) {
-          found.add(pid);
-          grew = true;
-        }
-      }
-    }
-    found.delete(process.pid);
-    const live = new Map([...found].filter((pid) => table.get(pid) && table.get(pid).state !== "Z").map((pid) => [pid, table.get(pid).startTime]));
-    known.set(child, live);
-    for (const [pid, startTime] of live) members.set(pid, startTime);
-  }
-  return members;
-};
-
-const signalEach = (pids, signal) => {
-  for (const [pid, startTime] of pids) signalIfUnchanged(pid, startTime, signal);
-};
-
-const terminateNow = (children) => {
-  const graceful = Date.now() + 2000;
-  const forced = graceful + 2000;
-  for (let pids = family(children); pids.size && Date.now() < forced; pids = family(children)) {
-    signalEach(pids, Date.now() < graceful ? "SIGTERM" : "SIGKILL");
-    pauseSync(25);
-  }
-};
-
-const onExit = () => {
-  shuttingDown = true;
-  terminateNow([...running.keys()]);
-  running.clear();
-};
-
-const signalHandlers = new Map(["SIGINT", "SIGTERM", "SIGHUP"].map((signal) => [signal, () => {
-  const othersListening = process.listenerCount(signal) > 1;
-  onExit();
-  uninstall();
-  if (!othersListening) process.kill(process.pid, signal);
-}]));
-
-let watcher;
-
-const install = () => {
-  if (installed) return;
-  installed = true;
-  watcher = setInterval(() => {
-    for (const child of [...running.keys()]) if (exited(child) && !family([child]).size) forget(child);
-  }, 250).unref();
-  process.on("exit", onExit);
-  for (const [signal, handler] of signalHandlers) process.prependListener(signal, handler);
-};
-
-function uninstall() {
-  if (!installed) return;
-  installed = false;
-  clearInterval(watcher);
-  process.removeListener("exit", onExit);
-  for (const [signal, handler] of signalHandlers) process.removeListener(signal, handler);
-}
-
-const forget = (child) => {
-  running.delete(child);
-  if (!running.size) uninstall();
-};
-
-export const stopChild = async (child) => {
-  const graceful = Date.now() + 5000;
-  const forced = graceful + 2000;
-  for (let pids = family([child]); pids.size && Date.now() < forced; pids = family([child])) {
-    signalEach(pids, Date.now() < graceful ? "SIGTERM" : "SIGKILL");
-    await pause(50);
-  }
-  if (child.pid && !exited(child)) await new Promise((resolve) => child.once("exit", resolve));
-  forget(child);
+const launcher = (held) => (command, args, options = {}) => {
+  const stdio = typeof options.stdio === "string" ? Array(3).fill(options.stdio) : [...(options.stdio || ["ignore", "ignore", "ignore"])];
+  const child = spawn(command, args, {
+    ...options,
+    detached: true,
+    env: { ...(options.env || process.env), ...held.env },
+    stdio: [...stdio.slice(0, 3), ...held.stdio],
+  });
+  launched.add(child);
+  return child;
 };
 
 const waitUntilReady = async ({ child, host, ports, isReady, output, timeout, failure }) => {
@@ -237,37 +130,36 @@ const waitUntilReady = async ({ child, host, ports, isReady, output, timeout, fa
   throw new Error(`Child was not ready within ${timeout} ms:\n${output()}`);
 };
 
-export const startChildOnPorts = async ({ host, requested, spawnChild, output, isReady = () => true, passHeld = false, attempts = 5, timeout = 30000 }) => {
+const choosePorts = async (host, wanted, passHeld, probe = false) => {
+  if (passHeld) return reserveTcpPorts(host, wanted);
+  const picks = await freeTcpPorts(host, probe ? wanted : wanted.filter((port) => !port));
+  const ports = probe ? picks : wanted.map((port) => port || picks.shift());
+  await releaseTcpPorts(host, ports);
+  return ports;
+};
+
+export const startChildOnPorts = async ({ host, requested, preferred, spawnChild, output, isReady = () => true, passHeld = false, attempts = 5, timeout = 30000 }) => {
   const automatic = requested.every((port) => !port);
   for (let attempt = 1; ; attempt += 1) {
-    if (shuttingDown) throw new Error("This process is shutting down; no new child starts.");
-    let ports;
-    if (passHeld) {
-      ports = await reserveTcpPorts(host, requested);
-    } else {
-      const picks = await freeTcpPorts(host, requested.filter((port) => !port));
-      ports = requested.map((port) => port || picks.shift());
-      await releaseTcpPorts(host, ports);
-    }
-    const marker = `${process.pid}-${(markers += 1)}`;
+    const ports = automatic && preferred && attempt === 1
+      ? await choosePorts(host, preferred, passHeld, true).catch((error) => {
+        if (error.code !== "EADDRINUSE") throw error;
+        return choosePorts(host, requested, passHeld);
+      })
+      : await choosePorts(host, requested, passHeld);
     let child;
     let spawnError;
     try {
-      if (shuttingDown) throw new Error("This process is shutting down; no new child starts.");
       const held = passHeld ? passHeldTcpPorts(host, ports) : { stdio: [], env: {} };
-      child = spawnChild(ports, { stdio: held.stdio, env: { ...held.env, [markerName]: marker } });
+      child = spawnChild(ports, { spawn: launcher(held) });
+      if (!launched.has(child)) throw new Error("spawnChild must start its child with launch.spawn.");
       child.once("error", (error) => { spawnError = error; });
-      if (child.pid) {
-        running.set(child, marker);
-        install();
-        child.once("exit", () => { if (!family([child]).size) forget(child); });
-      }
       if (passHeld) await releaseTcpPorts(host, ports);
       await waitUntilReady({ child, host, ports, isReady, output, timeout, failure: () => spawnError || (!child.pid && new Error("Child did not start.")) });
       return { ports, child };
     } catch (error) {
       if (passHeld) await releaseTcpPorts(host, ports);
-      if (child) await stopChild(child);
+      if (child && launched.has(child)) await stopChild(child);
       if (!automatic || attempt === attempts || !addressInUse(output())) throw error;
     }
   }

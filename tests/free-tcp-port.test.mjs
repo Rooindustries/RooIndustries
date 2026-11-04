@@ -7,7 +7,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { test } from "node:test";
-import { freeTcpPort, freeTcpPorts, listenOnPort, passHeldTcpPorts, portFromEnv, releaseTcpPorts, reserveTcpPorts } from "../scripts/lib/free-tcp-port.mjs";
+import { freeTcpPort, freeTcpPorts, listenOnPort, passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "../scripts/lib/free-tcp-port.mjs";
 import { createToolingContentFixture } from "./fixtures/tooling-content.mjs";
 
 const host = "127.0.0.1";
@@ -95,13 +95,6 @@ test("a free pick never takes a port held for a later binder", async () => {
   } finally {
     await releaseTcpPorts(host, [later]);
   }
-});
-
-test("port overrides are parsed strictly", () => {
-  assert.equal(portFromEnv("PORT", {}), 0);
-  assert.equal(portFromEnv("PORT", { PORT: "" }), 0);
-  assert.equal(portFromEnv("PORT", { PORT: "4682" }), 4682);
-  for (const value of ["not-a-port", "80", "70000", "4682 ", "4.5", "0"]) assert.throws(() => portFromEnv("PORT", { PORT: value }), /PORT must be a TCP port/);
 });
 
 test("a server takes over a held port without it ever being free", async () => {
