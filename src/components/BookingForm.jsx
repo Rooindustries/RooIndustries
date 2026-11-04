@@ -1200,12 +1200,13 @@ export default function BookingForm() {
 
   useEffect(() => {
     if (fadedLocationKeyRef.current === location.key) return undefined;
+    fadedLocationKeyRef.current = location.key;
     setPageFadeIn(false);
-    const t = setTimeout(() => {
-      fadedLocationKeyRef.current = location.key;
+    const t = setTimeout(() => setPageFadeIn(true), 50);
+    return () => {
+      clearTimeout(t);
       setPageFadeIn(true);
-    }, 50);
-    return () => clearTimeout(t);
+    };
   }, [location.key]);
 
   // Prefill form if coming from XOC switch

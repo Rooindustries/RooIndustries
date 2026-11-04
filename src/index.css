@@ -3069,19 +3069,17 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
   container-name: booking-frame;
 }
 
-@media (scripting: none) {
-  .booking-dialog-stage [role="dialog"] {
-    width: 100%;
-  }
+html:not(.js) .booking-dialog-stage [role="dialog"] {
+  width: 100%;
+}
 
-  .booking-dialog-stage [data-booking-scaler] {
-    position: relative;
-  }
+html:not(.js) .booking-dialog-stage [data-booking-scaler] {
+  position: relative;
+}
 
-  .booking-dialog-stage .booking-dialog-content {
-    max-width: 100%;
-    margin-inline: auto;
-  }
+html:not(.js) .booking-dialog-stage .booking-dialog-content {
+  max-width: 100%;
+  margin-inline: auto;
 }
 
 .booking-dialog-content :is(button, a[href], input, textarea, select):focus-visible,

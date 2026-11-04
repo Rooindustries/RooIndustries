@@ -430,3 +430,37 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     });
   });
 }
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  for (const route of ["/booking", "/payment", "/payment-success", "/thank-you"]) {
+    test(`direct load of ${route} never shows the overlay without its dialog at ${viewport.width}px`, async ({ page, flow }, testInfo) => {
+      const errors = watchErrors(page);
+      await page.setViewportSize(viewport);
+      await page.addInitScript(() => {
+        const frames = window.__stageFrames = [];
+        const visible = { checkOpacity: true, checkVisibilityCSS: true };
+        const sample = () => {
+          const stage = document.querySelector(".booking-dialog-stage");
+          if (stage) {
+            frames.push({
+              time: performance.now(),
+              overlay: Boolean(stage.querySelector(".booking-modal-overlay")?.checkVisibility(visible)),
+              dialog: Boolean(stage.querySelector('[role="dialog"]')?.checkVisibility(visible)),
+            });
+          }
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      });
+      await page.goto(route);
+      await expect(page.locator('[role="dialog"].ri-booking')).toBeVisible();
+      await page.waitForTimeout(1000);
+      const frames = await page.evaluate(() => window.__stageFrames);
+      await testInfo.attach("stage-frames", { body: JSON.stringify(frames), contentType: "application/json" });
+      expect(frames.length).toBeGreaterThan(0);
+      expect(frames.filter(frame => frame.overlay && !frame.dialog)).toEqual([]);
+      expect(frames.at(-1)).toMatchObject({ overlay: true, dialog: true });
+      expect(errors).toEqual([]);
+    });
+  }
+}
