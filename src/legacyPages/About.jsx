@@ -19,7 +19,7 @@ const ABOUT_LINKS = [
 export default function AboutPage() {
   return (
     <>
-      <article className="mx-auto max-w-6xl px-5 pb-24 pt-14 text-ink sm:px-6 sm:pt-20">
+      <article className="page-top mx-auto max-w-6xl px-5 pb-24 text-ink sm:px-6">
         <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-16">
           <div className="max-w-2xl">
             <h1 className="section-title">About Roo Industries</h1>

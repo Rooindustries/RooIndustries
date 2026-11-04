@@ -260,7 +260,7 @@ export default function FaqSection({
   const eyebrowText = faqCopy?.eyebrow || HOME_COPY.faqSettings.eyebrow;
   const headingText = faqCopy?.title || HOME_COPY.faqSettings.title;
   const subtitleText = faqCopy?.subtitle || HOME_COPY.faqSettings.subtitle;
-  const sectionPaddingClass = compact ? "pt-20 pb-10" : "pt-20 pb-24";
+  const sectionPaddingClass = compact ? "pt-20 pb-10" : "page-top pb-24";
   const sectionId = compact ? undefined : "faq";
 
   return (

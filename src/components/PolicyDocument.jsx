@@ -59,7 +59,7 @@ export default function PolicyDocument({ data }) {
   const sections = data.sections || [];
 
   return (
-    <article className="mx-auto max-w-6xl px-5 pb-24 pt-14 text-ink sm:px-6 sm:pt-20">
+    <article className="page-top mx-auto max-w-6xl px-5 pb-24 text-ink sm:px-6">
       <div className="mx-auto max-w-[68ch]">
         <header>
           {data.title && <h1 className="section-title">{data.title}</h1>}

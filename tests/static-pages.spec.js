@@ -256,3 +256,35 @@ test("/faq hydrates the prebuilt page without warnings", async ({ page }, testIn
   await testInfo.attach("faq-query-console", { body: JSON.stringify(messages, null, 2), contentType: "application/json" });
   expect(hydrationWarnings(messages)).toEqual([]);
 });
+
+const PAGE_TOP_ROUTES = ["/about", "/benchmarks", "/contact", "/faq", "/meet-the-team", "/reviews", "/tools", "/privacy", "/terms"];
+
+for (const [width, expected] of [[390, 24], [1440, 80]]) {
+  test(`standalone pages share one page top at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const tops = [];
+    for (const route of PAGE_TOP_ROUTES) {
+      await page.goto(route);
+      await hydrated(page);
+      const top = page.locator("main .page-top").first();
+      await expect(top, route).toBeVisible();
+      tops.push({
+        route,
+        ...(await top.evaluate((node) => {
+          const main = node.closest("main");
+          const mainTop = main.getBoundingClientRect().top + parseFloat(getComputedStyle(main).paddingTop);
+          const content = [...node.querySelectorAll("*")].find((element) =>
+            [...element.childNodes].some((child) => child.nodeType === Node.TEXT_NODE && child.textContent.trim()));
+          return {
+            fromMain: Math.round(node.getBoundingClientRect().top - mainTop),
+            contentOffset: Math.round(content.getBoundingClientRect().top - mainTop),
+          };
+        })),
+      });
+    }
+    for (const { route, fromMain, contentOffset } of tops) {
+      expect(fromMain, route).toBe(0);
+      expect(contentOffset, route).toBe(expected);
+    }
+  });
+}

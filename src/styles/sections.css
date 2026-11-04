@@ -30,3 +30,13 @@
     font-size: 1.0625rem;
   }
 }
+
+.page-top {
+  padding-top: 1.5rem;
+}
+
+@media (min-width: 640px) {
+  .page-top {
+    padding-top: 5rem;
+  }
+}
