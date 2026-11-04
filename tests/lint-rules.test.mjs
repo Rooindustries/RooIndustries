@@ -510,6 +510,8 @@ run("no-hand-built-node-options", {
     `const inherited = process.env.NODE_OPTIONS; env.NODE_OPTIONS = quiet ? inherited || "--no-warnings" : inherited;`,
     `const { NODE_OPTIONS } = process.env; const env = { NODE_OPTIONS };`,
     `const { NODE_OPTIONS: inherited = "" } = env; child.env.NODE_OPTIONS = inherited;`,
+    `const { env: { NODE_OPTIONS: inherited = "" } } = options; child.env.NODE_OPTIONS = inherited;`,
+    `const { env: { NODE_OPTIONS } = {} } = options; child.env.NODE_OPTIONS = NODE_OPTIONS;`,
     `const key = "NODE_OPTIONS"; env[key] = process.env.NODE_OPTIONS;`,
     `const label = \`--import=\${guard}\`;`,
     `const env = { NODE_OPTIONS: '--no-warnings --title="my --import=./guard.mjs"' };`,
@@ -671,6 +673,11 @@ run("no-hand-built-node-options", {
     {
       name: "destructured default that builds a preload",
       code: 'const { NODE_OPTIONS: options = "--import=" + guard } = env; child.env.NODE_OPTIONS = options;',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "nested destructured default that builds a preload",
+      code: 'const { env: { NODE_OPTIONS: options = "--import=" + guard } } = settings; child.env.NODE_OPTIONS = options;',
       errors: [{ messageId: "handBuilt" }],
     },
     {

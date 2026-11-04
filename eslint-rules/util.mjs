@@ -98,8 +98,14 @@ export const destructuredConst = (context, identifier) => {
   const binding = definition.name.parent;
   const fallback = binding.type === "AssignmentPattern" && binding.left === definition.name ? binding.right : null;
   const property = fallback ? binding.parent : binding;
-  if (property.type !== "Property" || property.parent !== definition.node.id) return null;
-  if (property.value !== (fallback ? binding : definition.name) || !definition.node.init) return null;
+  if (property.type !== "Property" || property.value !== (fallback ? binding : definition.name)) return null;
+  if (!definition.node.init) return null;
+  for (let pattern = property.parent; pattern !== definition.node.id; ) {
+    const holder = pattern?.parent?.type === "AssignmentPattern" && pattern.parent.left === pattern ? pattern.parent : pattern;
+    const outer = holder?.parent;
+    if (pattern?.type !== "ObjectPattern" || outer?.type !== "Property" || outer.value !== holder) return null;
+    pattern = outer.parent;
+  }
   return { property, source: definition.node.init, fallback };
 };
 
