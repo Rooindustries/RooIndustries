@@ -53,6 +53,10 @@ assert.ok(manifest.dependencies["groq-js"]);assert.ok(manifest.dependencies["@po
 evidence.push({check:"native-direct-sharp-and-vendor-retirement",sharp:"0.35.5"});
 const expansion=require("brace-expansion");assert.deepEqual(expansion("a{b,c}d"),["abd","acd"]);
 const artifact = "test-results/tooling-dependencies.json";
+const writeReport = passed => {
+  fs.mkdirSync("test-results", { recursive: true });
+  fs.writeFileSync(artifact, JSON.stringify({ passed, evidence }, null, 2) + "\n");
+};
 const braces = total => "{a}" + "}".repeat(total - 6) + ",z}";
 const braceOutputs = {};
 const braceCpuMs = async (total, calls) => {
@@ -92,12 +96,10 @@ evidence.push({
 });
 const slowBraceSteps = braceSteps.filter(step => step.slow);
 if (slowBraceSteps.length > 0) {
-  fs.mkdirSync("test-results", { recursive: true });
-  fs.writeFileSync(artifact, JSON.stringify({ passed: false, evidence }, null, 2) + "\n");
+  writeReport(false);
 }
 assert.deepEqual(slowBraceSteps, [], `brace expansion cost grew faster than its input: ${JSON.stringify(braceRatios)}`);
 const postcss=require("postcss");assert.match(postcss([]).process("a { color: red }",{from:undefined,map:false}).css,/color: red/);assert.ok(require("browserslist")(["last 1 chrome version"]).length>0);
 evidence.push({check:"retained-native-build-parser-apis",packages:["postcss","browserslist"]});
-fs.mkdirSync("test-results", { recursive: true });
-fs.writeFileSync(artifact, JSON.stringify({ passed: true, evidence }, null, 2) + "\n");
+writeReport(true);
 console.log(JSON.stringify({ passed: true, checks: evidence.length, artifact }));

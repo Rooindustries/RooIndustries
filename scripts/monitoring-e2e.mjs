@@ -499,6 +499,7 @@ try {
       });
       scrubberOutputs.push({
         shape: shape.name,
+        path: 'scrubber',
         length: values[0].length,
         exact: isDeepStrictEqual(result.extra?.scaling_values, values.map(shape.scrubbed)),
       });
@@ -516,7 +517,8 @@ try {
     measure: (side, round) => {
       const length = side === 'long' ? scalingSteps[step] : scalingShort;
       const values = scalingValues(shape, length, scalingSteps[step]);
-      return scalingPaths[path](shape, values, `Fixture scrub scaling ${shape.name}|${length}|${round}`);
+      const message = `Fixture scrub scaling ${shape.name}|${length}|${scalingSteps[step]}|${round}`;
+      return scalingPaths[path](shape, values, message);
     },
   }))));
   const scaling = await compareUntilSlow(scalingPlans, { rounds: 7, limit: scalingRatioLimit });
@@ -535,39 +537,35 @@ try {
     return [shortBytes, longBytes];
   }));
   const expectedBytes = scalingSteps.flatMap(total => Array(scalingShapes.length).fill([total, total]));
-  const scrubbedAsExpected = scalingItems.map(item => {
-    const [name, length] = item.event.message.slice('Fixture scrub scaling '.length).split('|');
+  const sdkOutputs = scalingItems.map(item => {
+    const [name, length, total] = item.event.message.slice('Fixture scrub scaling '.length).split('|');
     const shape = scalingShapes.find(candidate => candidate.name === name);
-    const expected = scalingValues(shape, Number(length), scalingSteps[0]).map(shape.scrubbed);
-    return isDeepStrictEqual(item.event.extra?.scaling_values, expected);
+    const expected = scalingValues(shape, Number(length), Number(total)).map(shape.scrubbed);
+    return {
+      shape: name,
+      path: 'sdk',
+      length: Number(length),
+      exact: isDeepStrictEqual(item.event.extra?.scaling_values, expected),
+    };
   });
-  const measurementsOn = path => scaling
-    .filter(item => item.path === path)
-    .reduce((sum, item) => sum + item.measurements, 0);
-  const sdkScalingEvents = measurementsOn('sdk');
-  const scrubberMeasurements = measurementsOn('scrubber');
-  const scalingComparisons = scalingPlans.length;
-  const inexactScrubberOutputs = scrubberOutputs
+  const scalingOutputs = [...scrubberOutputs, ...sdkOutputs];
+  const inexactOutputs = scalingOutputs
     .filter(output => !output.exact)
-    .map(({ shape, length }) => ({ shape, length }));
+    .map(({ shape, path, length }) => ({ shape, path, length }));
+  const scalingMeasurements = scaling.reduce((sum, item) => sum + item.measurements, 0);
   const slowScaling = scaling
-    .filter(item => item.ratio >= scalingRatioLimit)
+    .filter(item => item.slow)
     .map(({ shape, path, bytes, ratio }) => ({ shape, path, bytes, ratio: Number(ratio.toFixed(2)) }));
   check('short and long scaling values carry the same raw bytes', scalingBytes, expectedBytes);
   check(
-    '1KiB and 32KiB scaling values reach ingest fully scrubbed',
-    scrubbedAsExpected,
-    Array(sdkScalingEvents).fill(true),
-  );
-  check(
-    '1KiB, 32KiB and 1MiB scaling values leave the scrubber fully scrubbed',
-    { measured: scrubberOutputs.length, inexact: inexactScrubberOutputs },
-    { measured: scrubberMeasurements, inexact: [] },
+    'scaling values leave the scrubber and reach ingest exactly scrubbed at every size',
+    { measured: scalingOutputs.length, inexact: inexactOutputs },
+    { measured: scalingMeasurements, inexact: [] },
   );
   check(
     '32KiB and 1MiB tokens of every shape cost under four times the CPU of the same bytes as 1KiB tokens',
     { comparisons: scaling.length, slow: slowScaling },
-    { comparisons: scalingComparisons, slow: [] },
+    { comparisons: scalingPlans.length, slow: [] },
   );
   check('stack frames remain available', Boolean(reported?.event.exception?.values?.[0]?.stacktrace?.frames?.length), true);
   check('SDK release identity survives without exempting customer metadata', [reported?.event.release, reported?.event.extra?.release], ['rooindustries@0.2.0', '[email]']);
