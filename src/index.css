@@ -2269,17 +2269,6 @@ html[data-theme="dark"] .ri-supported-games-toggle .glow-line {
   display: none;
 }
 
-html[data-theme="dark"] .ri-faq-eyebrow {
-  border-color: rgba(255, 255, 255, 0.2);
-  background-color: rgba(255, 255, 255, 0.045);
-  color: #d9d9d4;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055);
-}
-
-html[data-theme="dark"] :is(.ri-faq-number, .ri-faq-chevron) {
-  color: #bdbdb8;
-}
-
 html[data-theme="dark"] .ri-referral-card {
   border-color: rgba(255, 255, 255, 0.18);
   box-shadow:
