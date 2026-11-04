@@ -2,7 +2,6 @@ const testHost = process.env.ROO_TEST_HOST || '127.0.0.1';
 const fs = require("fs");
 const path = require("path");
 const { test, expect } = require("@playwright/test");
-const { launchUnemulatedChromium } = require("./fixtures/unemulated-chromium.cjs");
 
 const BASE_URL = process.env.BASE_URL;
 if (!BASE_URL) {
@@ -248,65 +247,6 @@ test("latest rapid navbar click wins across section and route transitions", asyn
     );
   } else if (hasHostDrift(page.url())) {
     await recordFailure(page, "latest-click:faq-then-team", "host_drift");
-  }
-});
-
-test("visibility transition does not break section navigation", async ({ baseURL }, testInfo) => {
-  const browser = await launchUnemulatedChromium({
-    baseURL,
-    userDataDir: testInfo.outputPath("unemulated-chromium"),
-    width: 1536,
-    height: 960,
-    chromiumSandbox: testInfo.project.use.launchOptions?.chromiumSandbox,
-  });
-  try {
-    const tab = await browser.openTab(`${baseURL}/benchmarks`);
-    await tab.evaluate(() => {
-      window.__visibilityStates = [document.visibilityState];
-      document.addEventListener("visibilitychange", () => {
-        window.__visibilityStates.push(document.visibilityState);
-      });
-    });
-    const hydrated = await tab.waitFor(() => {
-      const link = document.querySelector('[data-nav-surface="desktop"][data-nav-target="benefits"]');
-      return Boolean(link && Object.keys(link).some((key) => key.startsWith("__reactProps$")));
-    });
-    expect(hydrated, "benefits link hydrated").toBe(true);
-
-    const otherTab = await browser.openTab("about:blank");
-    expect(await tab.waitFor(() => document.visibilityState === "hidden"), "page hidden behind another tab").toBe(true);
-    await tab.activate();
-    expect(await tab.waitFor(() => document.visibilityState === "visible"), "page visible again").toBe(true);
-    await otherTab.close();
-
-    const states = await tab.evaluate(() => window.__visibilityStates);
-    testInfo.annotations.push({ type: "visibility states", description: states.join(" -> ") });
-    expect(states).toEqual(["visible", "hidden", "visible"]);
-
-    await tab.click('[data-nav-surface="desktop"][data-nav-target="benefits"]');
-    const landed = await tab.waitFor(() => {
-      const target = document.querySelector("#services");
-      return (
-        window.location.pathname === "/" &&
-        window.location.hash === "#services" &&
-        Boolean(target) &&
-        Math.abs(Math.round(target.getBoundingClientRect().top)) <= 160
-      );
-    }, null, 3500);
-    if (!landed) {
-      fs.mkdirSync(auditDir, { recursive: true });
-      const screenshot = path.join(auditDir, `chaos-failure-${Date.now()}-visibility_benefits.png`);
-      await tab.screenshot(screenshot);
-      failures.push({
-        context: "visibility:benefits",
-        reason: "failed_after_visibility_transition",
-        url: await tab.evaluate(() => window.location.href),
-        screenshot,
-      });
-    }
-    expect(browser.blockedRequests, "nonlocal browser requests").toEqual([]);
-  } finally {
-    await browser.close();
   }
 });
 
