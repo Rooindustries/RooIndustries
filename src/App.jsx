@@ -32,6 +32,7 @@ import { getPublicContentPendingCount } from "./lib/publicContentClient";
 import { ContentRevisionContext, loadContent } from "./lib/contentCache";
 import { useBookingDialogPending } from "./lib/bookingDialogHold";
 import { setVisibleTimeout } from "./lib/visibleTimeout";
+import { SectionNavigationProvider } from "./lib/sectionNavigator";
 
 const Home = lazy(() => import("./legacyPages/Home"));
 const AboutPage = lazy(() => import("./legacyPages/About"));
@@ -682,6 +683,7 @@ export function AppContent({
 
   return (
     <ContentRevisionContext.Provider value={contentRevisions}>
+    <SectionNavigationProvider routeShell={routeShell}>
       {routeJsonLd && location.pathname === initialRoutePath ? <JsonLd data={routeJsonLd} /> : null}
       <DeferredTelemetry />
       <SalesTelemetry />
@@ -703,7 +705,7 @@ export function AppContent({
         <div className="app-bg-grid-layer absolute inset-0"></div>
         <div className="app-bg-radial-layer absolute inset-0"></div>
 
-        <Navbar routeShell={routeShell} />
+        <Navbar />
         <ReservationBanner hidden={isFlowRoute && !isPaymentRoute} inline={isPaymentRoute} inlineContainer={paymentHoldContainer} />
 
         <main
@@ -757,6 +759,7 @@ export function AppContent({
         </Suspense>
       )}
       <PerfDebugRuntime />
+    </SectionNavigationProvider>
     </ContentRevisionContext.Provider>
   );
 }
