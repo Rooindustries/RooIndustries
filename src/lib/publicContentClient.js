@@ -16,20 +16,37 @@ const buildPublicContentUrl = (resource, params = {}) => {
 let pendingRequests = 0;
 export const getPublicContentPendingCount = () => pendingRequests;
 
+const fetchFailureMessages = new Set([
+  "Failed to fetch",
+  "NetworkError when attempting to fetch resource.",
+  "Load failed",
+]);
+
 export const getPublicContent = async (resource, params = {}, options = {}) => {
   pendingRequests += 1;
+  let pageLeft = false;
+  const markPageLeft = () => {
+    pageLeft = true;
+  };
+  window.addEventListener("pagehide", markPageLeft);
+  const markCancelled = (error) => {
+    const aborted = options.signal?.aborted || pageLeft;
+    const abortError =
+      error?.name === "AbortError" || (error instanceof TypeError && fetchFailureMessages.has(error.message));
+    if (aborted && abortError) error.requestCancelled = true;
+    return error;
+  };
   try {
     const response = await fetch(buildPublicContentUrl(resource, params), {
       method: "GET",
       credentials: "same-origin",
       headers: { Accept: "application/json" },
       ...(options.signal ? { signal: options.signal } : {}),
+    }).catch((error) => {
+      throw markCancelled(error);
     });
     const body = await response.json().catch((error) => {
-      if (response.ok && (error?.name === "AbortError" || error instanceof TypeError)) {
-        error.responseStatus = response.status;
-        throw error;
-      }
+      if (response.ok && markCancelled(error).requestCancelled) throw error;
       return {};
     });
     if (!response.ok || body?.ok !== true) {
@@ -37,6 +54,7 @@ export const getPublicContent = async (resource, params = {}, options = {}) => {
     }
     return body.data ?? null;
   } finally {
+    window.removeEventListener("pagehide", markPageLeft);
     pendingRequests -= 1;
   }
 };

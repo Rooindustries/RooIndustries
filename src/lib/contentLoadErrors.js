@@ -1,27 +1,4 @@
-let pageLeft = false;
-
-if (typeof window !== "undefined") {
-  window.addEventListener("pagehide", () => {
-    pageLeft = true;
-  });
-  window.addEventListener("pageshow", () => {
-    pageLeft = false;
-  });
-}
-
-const fetchFailureMessages = new Set([
-  "Failed to fetch",
-  "NetworkError when attempting to fetch resource.",
-  "Load failed",
-]);
-
-const isCancelledRequest = (detail) =>
-  detail?.name === "AbortError" ||
-  (pageLeft &&
-    detail instanceof TypeError &&
-    (detail.responseStatus === undefined ? fetchFailureMessages.has(detail.message) : detail.responseStatus < 400));
-
 export const reportContentLoadError = (...details) => {
-  if (details.some(isCancelledRequest)) return;
+  if (details.some((detail) => detail?.requestCancelled === true)) return;
   console.error(...details);
 };

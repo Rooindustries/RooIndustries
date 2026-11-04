@@ -1,5 +1,6 @@
 const { test, expect } = require("@playwright/test");
 const http = require("node:http");
+const zlib = require("node:zlib");
 
 test.use({ javaScriptEnabled: true, viewport: { width: 1440, height: 900 } });
 
@@ -116,6 +117,28 @@ test("a malformed successful response is reported while the visitor stays", asyn
     await page.goto("/terms");
 
     await expect.poll(() => errors.some((text) => text.includes("Public content could not be loaded."))).toBe(true);
+  } finally {
+    await server.close();
+  }
+});
+
+test("a corrupt compressed body is reported even when the visitor leaves right after", async ({ page }) => {
+  const compressed = zlib.gzipSync(Buffer.from(JSON.stringify({ ok: true, data: { title: "Terms" } })));
+  const server = await startTermsServer((response) => {
+    response.writeHead(200, { "content-type": "application/json", "content-encoding": "gzip" });
+    response.write(compressed.subarray(0, 12));
+    setTimeout(() => response.end(Buffer.from("this is not gzip data")), 300);
+  });
+  try {
+    await page.route("**/api/content/terms", (request) => request.continue({ url: server.url }));
+    const errors = collectConsoleErrors(page);
+    const appReports = () => errors.filter((text) => !text.startsWith("Failed to load resource"));
+    await page.goto("/terms");
+    await expect.poll(() => appReports().length).toBe(1);
+    await page.goto("/contact");
+    await expect(page.locator("main h1").first()).toBeVisible();
+
+    expect(appReports()).toHaveLength(1);
   } finally {
     await server.close();
   }
