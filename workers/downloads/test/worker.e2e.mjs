@@ -26,7 +26,8 @@ const movedKey = "builds/1111111111111111111111111111111111111111.zip";
 const shortKey = "builds/2222222222222222222222222222222222222222.zip";
 const loopKey = "builds/3333333333333333333333333333333333333333.zip";
 const truncatedKey = "builds/4444444444444444444444444444444444444444.zip";
-const overflowKey = "builds/5555555555555555555555555555555555555555.zip";
+const chunkedKey = "builds/5555555555555555555555555555555555555555.zip";
+const rangeBlindKey = "builds/6666666666666666666666666666666666666666.zip";
 const signedPath = (key) => `/storage/v1/object/sign/optimization-builds-private/${key}?token=fixture`;
 
 const writeFixture = (name, bytes) => {
@@ -62,11 +63,36 @@ const sourceBytes = {
   ...files,
   [movedKey]: randomBytes(200),
   [shortKey]: randomBytes(100),
-  [truncatedKey]: randomBytes(100),
-  [overflowKey]: randomBytes(16384),
+  [truncatedKey]: randomBytes(64 * 1024),
+  [chunkedKey]: randomBytes(16384),
+  [rangeBlindKey]: randomBytes(4096),
 };
-const streamedWithoutRanges = new Set([exeKey, truncatedKey]);
 const workerOrigins = {};
+
+const sendSourceFile = (req, res, key) => {
+  const bytes = sourceBytes[key];
+  const range = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range ?? "");
+  if (!range || key === rangeBlindKey) {
+    res.writeHead(200, { "Content-Length": bytes.length }).end(bytes);
+    return;
+  }
+  const [first, last] = [Number(range[1]), Math.min(Number(range[2]), bytes.length - 1)];
+  const part = bytes.subarray(first, last + 1);
+  const contentRange = `bytes ${first}-${last}/${bytes.length}`;
+  if (key === chunkedKey) {
+    res.writeHead(206, { "Content-Range": contentRange });
+    res.write(part);
+    setTimeout(() => res.end(randomBytes(5)), 75);
+    return;
+  }
+  res.writeHead(206, { "Content-Length": part.length, "Content-Range": contentRange });
+  if (key !== truncatedKey) {
+    res.end(part);
+    return;
+  }
+  res.write(part.subarray(0, part.length / 2));
+  setTimeout(() => res.destroy(), 50);
+};
 
 const source = createHttpServer((req, res) => {
   const { pathname } = new URL(req.url, "http://source");
@@ -80,34 +106,8 @@ const source = createHttpServer((req, res) => {
     return;
   }
   const key = Object.keys(sourceBytes).find((candidate) => pathname.endsWith(`/${candidate}`));
-  if (!key) {
-    res.writeHead(404).end();
-    return;
-  }
-  const bytes = sourceBytes[key];
-  if (key === overflowKey) {
-    const range = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range ?? "");
-    const [first, last] = range ? [Number(range[1]), Number(range[2])] : [0, bytes.length - 1];
-    res.writeHead(range ? 206 : 200, range ? { "Content-Range": `bytes ${first}-${last}/${bytes.length}` } : {});
-    res.write(bytes.subarray(first, last + 1));
-    setTimeout(() => res.end(randomBytes(5)), 75);
-    return;
-  }
-  if (streamedWithoutRanges.has(key)) {
-    res.writeHead(200);
-    res.write(bytes.subarray(0, 1000));
-    res.end(bytes.subarray(1000));
-    return;
-  }
-  const range = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range ?? "");
-  if (!range) {
-    res.writeHead(200, { "Content-Length": bytes.length }).end(bytes);
-    return;
-  }
-  const [first, last] = [Number(range[1]), Math.min(Number(range[2]), bytes.length - 1)];
-  res
-    .writeHead(206, { "Content-Length": last - first + 1, "Content-Range": `bytes ${first}-${last}/${bytes.length}` })
-    .end(bytes.subarray(first, last + 1));
+  if (key) sendSourceFile(req, res, key);
+  else res.writeHead(404).end();
 });
 
 const originConfig = (sourceOrigin) => {
@@ -128,8 +128,9 @@ const originConfig = (sourceOrigin) => {
         [movedKey]: entry(sourceBytes[movedKey], "/api/tools/moved/download"),
         [shortKey]: entry(sourceBytes[shortKey], `/${shortKey}`, 200),
         [loopKey]: entry(sourceBytes[movedKey], "/api/tools/loop/download"),
-        [truncatedKey]: entry(sourceBytes[truncatedKey], `/${truncatedKey}`, 200),
-        [overflowKey]: entry(sourceBytes[overflowKey], `/${overflowKey}`),
+        [truncatedKey]: entry(sourceBytes[truncatedKey], `/${truncatedKey}`),
+        [chunkedKey]: entry(sourceBytes[chunkedKey], `/${chunkedKey}`),
+        [rangeBlindKey]: entry(sourceBytes[rangeBlindKey], `/${rangeBlindKey}`),
       },
     },
   };
@@ -331,29 +332,19 @@ for (const mode of ["r2", "origin"]) {
   });
 }
 
-test("origin storage refuses a source that moved, came up short or points back at the Worker", async () => {
-  for (const key of [movedKey, shortKey, loopKey]) {
-    const response = await fetch(`${workerOrigins.origin}/${key}`);
-    assert.equal(response.status, 503, key);
-    assert.deepEqual(await response.json(), { error: "file_unavailable" });
+test("origin storage refuses a source that doesn't send exactly the requested bytes", async () => {
+  for (const key of [movedKey, shortKey, loopKey, chunkedKey, rangeBlindKey]) {
+    for (const headers of [{}, { Range: "bytes=0-99" }]) {
+      const response = await fetch(`${workerOrigins.origin}/${key}`, { headers });
+      assert.equal(response.status, 503, `${key} ${JSON.stringify(headers)}`);
+      assert.deepEqual(await response.json(), { error: "file_unavailable" });
+    }
   }
 });
 
-test("origin storage serves ranges from a source that ignores them and aborts a short stream", async () => {
-  const exe = files[exeKey];
-  const part = await fetch(`${workerOrigins.origin}/${exeKey}`, { headers: { Range: "bytes=900-1999" } });
-  assert.equal(part.status, 206);
-  assert.ok(Buffer.from(await part.arrayBuffer()).equals(exe.subarray(900, 2000)));
-
-  const truncated = await fetch(`${workerOrigins.origin}/${truncatedKey}`);
-  assert.equal(truncated.headers.get("Content-Length"), "200");
-  await assert.rejects(truncated.arrayBuffer());
-});
-
-test("origin storage aborts a source that sends extra bytes after the expected end", async () => {
-  for (const headers of [{}, { Range: "bytes=0-99" }]) {
-    const response = await fetch(`${workerOrigins.origin}/${overflowKey}`, { headers });
-    assert.equal(response.status, headers.Range ? 206 : 200);
-    await assert.rejects(response.arrayBuffer(), JSON.stringify(headers));
-  }
+test("origin storage aborts a download when the source drops mid-stream", async () => {
+  const response = await fetch(`${workerOrigins.origin}/${truncatedKey}`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Content-Length"), String(sourceBytes[truncatedKey].length));
+  await assert.rejects(response.arrayBuffer());
 });

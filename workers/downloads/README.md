@@ -23,8 +23,11 @@ The Worker runs in one of two modes, with the same HTTP behavior in both.
 source URL, size, SHA-256 and date. The Worker streams the file from its current home: the Suite installer from
 Vercel Blob, the Tools page installers through the site's `/api/tools/<id>/download`, which redirects to a fresh
 signed Supabase URL. A redirect is followed only to a URL whose path ends with the key and that isn't the Worker
-itself. The ETag is the pinned SHA-256, and a body that comes back shorter or longer than the pinned size aborts
-instead of finishing. When a source ignores the Range header, the Worker cuts the range out of the stream.
+itself. The Worker always asks the source for an exact byte range (the whole file for a full download), skipping
+Cloudflare's cache, and passes the body through untouched only when the source answers 206 with exactly that
+`Content-Range` and `Content-Length`; anything else answers 503, and a source that drops mid-stream aborts the
+download. No code touches the bytes, which keeps every download inside the free plan's 10 ms of CPU. The ETag is the
+pinned SHA-256.
 To add or replace a file, add its entry to `ORIGIN_FILES` and deploy.
 
 **R2 (next).** `npm run deploy:r2` publishes the same Worker with the `roo-downloads` R2 bucket bound as `DOWNLOADS`

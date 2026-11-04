@@ -23,64 +23,20 @@ const isFileUrl = (url, key, workerOrigin) =>
 const fetchSource = async (source, key, workerOrigin, headers) => {
   const sourceUrl = new URL(source);
   if (sourceUrl.origin === workerOrigin) return null;
-  const first = await fetch(sourceUrl, { headers, redirect: "manual" });
+  const init = { headers, cache: "no-store", redirect: "manual" };
+  const first = await fetch(sourceUrl, init);
   const redirected = REDIRECTS.has(first.status);
   if (!redirected && isFileUrl(sourceUrl, key, workerOrigin)) return first;
   await first.body?.cancel();
   if (!redirected) return null;
   const target = new URL(first.headers.get("Location") ?? "", sourceUrl);
-  return isFileUrl(target, key, workerOrigin) ? fetch(target, { headers, redirect: "manual" }) : null;
+  return isFileUrl(target, key, workerOrigin) ? fetch(target, init) : null;
 };
 
-const sliceStream = ({ offset, length }) => {
-  let position = 0;
-  return new TransformStream({
-    transform(chunk, controller) {
-      const start = Math.max(offset - position, 0);
-      const end = Math.min(offset + length - position, chunk.byteLength);
-      position += chunk.byteLength;
-      if (start < end) controller.enqueue(chunk.subarray(start, end));
-      if (position >= offset + length) controller.terminate();
-    },
-  });
-};
-
-const exactLength = (expected) => {
-  let received = 0;
-  let lastByte;
-  return new TransformStream({
-    transform(chunk, controller) {
-      if (!chunk.byteLength) return;
-      received += chunk.byteLength;
-      if (received > expected) throw new RangeError("The source sent more bytes than expected.");
-      if (received < expected) {
-        controller.enqueue(chunk);
-        return;
-      }
-      controller.enqueue(chunk.subarray(0, -1));
-      lastByte = chunk.subarray(-1);
-    },
-    flush(controller) {
-      if (received !== expected) throw new RangeError("The source ended early.");
-      controller.enqueue(lastByte);
-    },
-  });
-};
-
-const checkedBody = (body, length) => body.pipeThrough(exactLength(length)).pipeThrough(new FixedLengthStream(length));
-
-const fileBody = (response, file, range) => {
-  const contentLength = response.headers.get("Content-Length");
-  if (range && response.status === 206) {
-    const expected = `bytes ${range.offset}-${lastByte(range)}/${file.size}`;
-    return response.headers.get("Content-Range") === expected
-      ? checkedBody(response.body, range.length)
-      : null;
-  }
-  if (response.status !== 200 || (contentLength !== null && contentLength !== String(file.size))) return null;
-  if (!range) return checkedBody(response.body, file.size);
-  return response.body.pipeThrough(sliceStream(range)).pipeThrough(new FixedLengthStream(range.length));
-};
+const isExactPart = (response, file, part) =>
+  response.status === 206 &&
+  response.headers.get("Content-Range") === `bytes ${part.offset}-${lastByte(part)}/${file.size}` &&
+  response.headers.get("Content-Length") === String(part.length);
 
 export const originStorage = (files, workerOrigin) => ({
   kind: "origin",
@@ -90,10 +46,11 @@ export const originStorage = (files, workerOrigin) => ({
     return entry ? { size: entry.size, etag: `"${entry.sha256}"`, uploaded: new Date(entry.lastModified) } : null;
   },
   body: async (key, file, range) => {
-    const headers = range ? { Range: `bytes=${range.offset}-${lastByte(range)}` } : {};
+    const part = range ?? { offset: 0, length: file.size };
+    const headers = { Range: `bytes=${part.offset}-${lastByte(part)}` };
     const response = await fetchSource(files[key].source, key, workerOrigin, headers);
-    const body = response && fileBody(response, file, range);
-    if (!body) await response?.body?.cancel();
-    return body;
+    if (response && isExactPart(response, file, part)) return response.body;
+    await response?.body?.cancel();
+    return null;
   },
 });
