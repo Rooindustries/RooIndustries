@@ -188,6 +188,15 @@ test("conditional requests answer 304 and 412", async () => {
   assert.equal(await status({ "If-Unmodified-Since": "0" }), 200);
   assert.equal(await status({ "If-Modified-Since": "9999" }), 200);
   assert.equal(await status({ "If-Modified-Since": lastModified.replace("GMT", "UTC") }), 200);
+  assert.equal(await status({ "If-Modified-Since": "Sun, 31 Feb 2099 00:00:00 GMT" }), 200);
+
+  const modified = new Date(lastModified);
+  const [weekday, day, month, year, time] = lastModified.split(/,? /);
+  const longWeekday = modified.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+  assert.equal(await status({ "If-Modified-Since": `${longWeekday}, ${day}-${month}-${year.slice(2)} ${time} GMT` }), 304);
+  assert.equal(await status({ "If-Modified-Since": `${weekday} ${month} ${day.replace(/^0/, " ")} ${time} ${year}` }), 304);
+  const earlier = new Date(modified.getTime() - 86_400_000).toUTCString().split(/,? /);
+  assert.equal(await status({ "If-Unmodified-Since": `${earlier[0]} ${earlier[2]} ${earlier[1]} ${earlier[4]} ${earlier[3]}` }), 412);
 });
 
 test("unknown, unsafe and unsupported requests are refused", async () => {

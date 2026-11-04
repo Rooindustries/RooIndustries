@@ -38,12 +38,38 @@ const keyFromPath = (pathname) => {
 
 const toSeconds = (date) => Math.floor(date.getTime() / 1000);
 
-const HTTP_DATE = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const TIME = "(?<hour>\\d{2}):(?<minute>\\d{2}):(?<second>\\d{2})";
+const HTTP_DATE_FORMATS = [
+  new RegExp(`^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), (?<day>\\d{2}) (?<month>\\w{3}) (?<year>\\d{4}) ${TIME} GMT$`),
+  new RegExp(
+    `^(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day, (?<day>\\d{2})-(?<month>\\w{3})-(?<shortYear>\\d{2}) ${TIME} GMT$`,
+  ),
+  new RegExp(`^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?<month>\\w{3}) (?<day>[ \\d]\\d) ${TIME} (?<year>\\d{4})$`),
+];
+
+const fullYear = (shortYear) => {
+  const thisYear = new Date().getUTCFullYear();
+  const year = thisYear - (thisYear % 100) + Number(shortYear);
+  return year > thisYear + 50 ? year - 100 : year;
+};
 
 const parseHttpDate = (value) => {
-  if (!HTTP_DATE.test(value ?? "")) return null;
-  const time = Date.parse(value);
-  return Number.isNaN(time) ? null : Math.floor(time / 1000);
+  const fields = HTTP_DATE_FORMATS.map((format) => format.exec(value ?? "")).find(Boolean)?.groups;
+  if (!fields) return null;
+  const year = fields.year ? Number(fields.year) : fullYear(fields.shortYear);
+  const month = MONTHS.indexOf(fields.month);
+  const [day, hour, minute, second] = [fields.day, fields.hour, fields.minute, fields.second].map(Number);
+  const date = new Date(Date.UTC(year, month, day, hour, minute, second));
+  const valid =
+    month >= 0 &&
+    hour < 24 &&
+    minute < 60 &&
+    second < 60 &&
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month &&
+    date.getUTCDate() === day;
+  return valid ? date.getTime() / 1000 : null;
 };
 
 const entityTags = (header) => header.split(",").map((tag) => tag.trim());
