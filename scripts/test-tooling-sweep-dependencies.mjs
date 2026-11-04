@@ -18,11 +18,12 @@ for(const name of ["@sanity/client","@sanity/image-url"])assert.equal(lock.packa
 assert.ok(manifest.dependencies["groq-js"]);assert.ok(manifest.dependencies["@portabletext/react"]);assert.equal(fs.existsSync("rooindustries"),false);
 evidence.push({check:"native-direct-sharp-and-vendor-retirement",sharp:"0.35.5"});
 const expansion=require("brace-expansion");assert.deepEqual(expansion("a{b,c}d"),["abd","acd"]);
-const braces = length => "{a}" + "}".repeat(length) + ",z}";
-const bounded = expansion(braces(128000));
+const bounded = expansion("{a}" + "}".repeat(128000) + ",z}");
 assert.ok(Array.isArray(bounded));
-const braceCpuMs = (length, calls) => {
-  const input = braces(length);
+const braces = total => "{a}" + "}".repeat(total - 6) + ",z}";
+const braceCpuMs = (total, calls) => {
+  const input = braces(total);
+  assert.equal(input.length, total);
   const before = process.cpuUsage();
   for (let call = 0; call < calls; call++) {
     assert.ok(Array.isArray(expansion(input)));
@@ -30,16 +31,32 @@ const braceCpuMs = (length, calls) => {
   const used = process.cpuUsage(before);
   return (used.user + used.system) / 1000;
 };
-const braceRounds = Array.from({ length: 5 }, () => [braceCpuMs(128000, 1), braceCpuMs(8000, 16)]);
-const cpuMs = Math.min(...braceRounds.map(([long]) => long));
-const sameBytesShortCpuMs = Math.min(...braceRounds.map(([, short]) => short));
-assert.ok(cpuMs < 4 * sameBytesShortCpuMs);
+const braceShort = 8000;
+const braceStep = longTotal => {
+  const rounds = Array.from({ length: 5 }, () => [
+    braceCpuMs(longTotal, 1),
+    braceCpuMs(braceShort, longTotal / braceShort),
+  ]);
+  return {
+    totalCharacters: longTotal,
+    cpuMs: Math.min(...rounds.map(([long]) => long)),
+    sameBytesShortCpuMs: Math.min(...rounds.map(([, short]) => short)),
+  };
+};
+const braceSteps = [];
+for (const longTotal of [128000, 1024000]) {
+  const step = braceStep(longTotal);
+  braceSteps.push(step);
+  if (step.cpuMs >= 8 * step.sameBytesShortCpuMs) {
+    break;
+  }
+}
+assert.ok(braceSteps.every(step => step.cpuMs < 4 * step.sameBytesShortCpuMs));
 evidence.push({
   check: "brace-expansion-documented-boundary",
   literalClosingBraces: 128000,
-  cpuMs,
-  sameBytesShortCpuMs,
   outputs: bounded.length,
+  steps: braceSteps,
 });
 const postcss=require("postcss");assert.match(postcss([]).process("a { color: red }",{from:undefined,map:false}).css,/color: red/);assert.ok(require("browserslist")(["last 1 chrome version"]).length>0);
 evidence.push({check:"retained-native-build-parser-apis",packages:["postcss","browserslist"]});
