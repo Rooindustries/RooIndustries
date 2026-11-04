@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { test } from "node:test";
 import { freeTcpPort, reserveTcpPorts } from "../scripts/lib/free-tcp-port.mjs";
-import { addressInUse, startChildOnPorts } from "../scripts/lib/start-on-port.mjs";
+import { addressInUse, startChildOnPorts, stopChild } from "../scripts/lib/start-on-port.mjs";
 
 const host = "127.0.0.1";
 const library = (name) => JSON.stringify(new URL(`../scripts/lib/${name}`, import.meta.url).href);
@@ -26,7 +26,10 @@ test("every retried program's real bind failure is recognised", () => {
 
 const competitor = async (port) => {
   const server = http.createServer((request, response) => response.end("competitor"));
-  await new Promise((resolve) => server.listen(port, host, resolve));
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, host, resolve);
+  });
   return server;
 };
 const close = (server) => new Promise((resolve) => server.close(resolve));
@@ -46,25 +49,31 @@ const answers = async ([port]) => {
 test("a stolen automatic port is retried and a competitor's answer never counts as ready", async () => {
   const output = [];
   let stolen;
-  const { ports: [port], child } = await startChildOnPorts({
-    host,
-    requested: [0],
-    output: () => output.join(""),
-    isReady: answers,
-    spawnChild: ([candidate]) => {
-      output.length = 0;
-      if (!stolen) stolen = competitor(candidate);
-      return httpChild(candidate, output);
-    },
-  });
-  const thief = await stolen;
+  let started;
   try {
-    assert.notEqual(port, thief.address().port);
-    assert.equal(await (await fetch(`http://${host}:${port}/`)).text(), "child");
-    assert.equal(child.exitCode, null);
+    started = await startChildOnPorts({
+      host,
+      requested: [0],
+      output: () => output.join(""),
+      isReady: answers,
+      spawnChild: ([candidate]) => {
+        output.length = 0;
+        const child = spawn(process.execPath, ["-e", `process.stdin.once("data", () => require("http").createServer((q, s) => s.end("child")).listen(${candidate}, "127.0.0.1"))`], { stdio: ["pipe", "ignore", "pipe"] });
+        child.stderr.on("data", (chunk) => output.push(String(chunk)));
+        const release = () => child.stdin.end("go\n");
+        if (stolen) release();
+        else stolen = competitor(candidate).finally(release);
+        return child;
+      },
+    });
+    const thief = await stolen;
+    assert.notEqual(started.ports[0], thief.address().port);
+    assert.equal(await (await fetch(`http://${host}:${started.ports[0]}/`)).text(), "child");
+    assert.equal(started.child.exitCode, null);
   } finally {
-    child.kill();
-    await close(thief);
+    if (started) await stopChild(started.child);
+    const thief = await stolen?.catch(() => null);
+    if (thief) await close(thief);
   }
 });
 
@@ -263,4 +272,90 @@ test("a child that dies during the readiness probe is not accepted", async () =>
       return child;
     },
   }), /exited before it was ready/);
+});
+
+test("an orphan left by a child that exits early is still stopped", async () => {
+  let orphan;
+  await assert.rejects(startChildOnPorts({
+    host,
+    requested: [0],
+    timeout: 3000,
+    output: () => "",
+    spawnChild: (ports, launch) => {
+      const child = spawn(process.execPath, ["-e", `const { spawn } = require("node:child_process");
+const orphan = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: "ignore", detached: true });
+orphan.unref();
+console.log(orphan.pid);`], { stdio: ["ignore", "pipe", "ignore"], env: { ...process.env, ...launch.env }, detached: true });
+      child.stdout.once("data", (chunk) => { orphan = Number(chunk); });
+      return child;
+    },
+  }), /exited before it was ready/);
+  assert.ok(orphan);
+  assert.deepEqual(await waitUntilGone([orphan]), []);
+});
+
+const moduleSetup = `const { startChildOnPorts } = await import(${library("start-on-port.mjs")});
+const start = () => startChildOnPorts({ host: "127.0.0.1", requested: [0], output: () => "", spawnChild: ([port], launch) => spawn(process.execPath, ["-e", "require('http').createServer().listen(" + port + ", '127.0.0.1')"], { stdio: "ignore", env: { ...process.env, ...launch.env }, detached: true }) });`;
+const parentScript = (body, withModule = true, before = "") => spawn(process.execPath, ["--input-type=module", "-e", `const { spawn } = await import("node:child_process");
+${before}
+${withModule ? moduleSetup : ""}
+${body}
+setInterval(() => {}, 1000);`], { stdio: ["ignore", "pipe", "inherit"] });
+const lines = (child) => {
+  const seen = [];
+  child.stdout.on("data", (chunk) => seen.push(...String(chunk).trim().split("\n")));
+  return seen;
+};
+const waitForLine = async (seen, match) => {
+  const deadline = Date.now() + 10000;
+  while (!seen.some((line) => match.test(line))) {
+    assert.ok(Date.now() < deadline, `timed out waiting for ${match}`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return seen.find((line) => match.test(line));
+};
+
+test("no child starts once shutdown has begun", async () => {
+  const parent = parentScript(`const first = await start();
+process.on("SIGTERM", async () => {
+  const outcome = await start().then((late) => \`started \${late.child.pid}\`, (error) => \`refused: \${error.message}\`);
+  console.log(outcome);
+  process.exit(0);
+});
+console.log(\`first \${first.child.pid}\`);`);
+  const seen = lines(parent);
+  const first = Number((await waitForLine(seen, /^first /)).split(" ")[1]);
+  parent.kill("SIGTERM");
+  const [code] = await once(parent, "exit");
+  assert.equal(code, 0);
+  assert.match(await waitForLine(seen, /^(started|refused)/), /^refused: This process is shutting down/);
+  assert.deepEqual(await waitUntilGone([first]), []);
+});
+
+for (const [label, prelude, withModule] of [["without the module", "", false], ["with the module imported", "", true], ["with a child running", "await start();", true]]) {
+  test(`a script's own one-shot SIGTERM handler keeps its async cleanup and exit code ${label}`, async () => {
+    const parent = parentScript(`${prelude}
+console.log("ready");`, withModule, `process.once("SIGTERM", async () => {
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  console.log("cleaned up");
+  process.exit(0);
+});`);
+    const seen = lines(parent);
+    await waitForLine(seen, /^ready$/);
+    parent.kill("SIGTERM");
+    const [code, signal] = await once(parent, "exit");
+    assert.equal(signal, null);
+    assert.equal(code, 0);
+    assert.ok(seen.includes("cleaned up"));
+  });
+}
+
+test("a script with no handler of its own still dies by SIGTERM and takes its children with it", async () => {
+  const parent = parentScript('const started = await start();\nconsole.log(`child ${started.child.pid}`);');
+  const seen = lines(parent);
+  const child = Number((await waitForLine(seen, /^child /)).split(" ")[1]);
+  parent.kill("SIGTERM");
+  const [, signal] = await once(parent, "exit");
+  assert.equal(signal, "SIGTERM");
+  assert.deepEqual(await waitUntilGone([child]), []);
 });

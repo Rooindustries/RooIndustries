@@ -83,49 +83,96 @@ export const ownsPorts = (pid, host, ports) => {
   return ports.every((port) => [...listeningSockets(host, port)].some((socket) => open.has(socket)));
 };
 
-const running = new Set();
+const running = new Map();
+const markerName = "ROO_CHILD_TREE";
+let markers = 0;
+let shuttingDown = false;
+let installed = false;
 
-const signalAll = (pids, group, signal) => {
-  try { process.kill(-group, signal); } catch {}
+const carriesMarker = (pid, marker) => {
+  try {
+    return fs.readFileSync(`/proc/${pid}/environ`, "utf8").split("\0").includes(`${markerName}=${marker}`);
+  } catch {
+    return false;
+  }
+};
+
+const exited = (child) => child.exitCode !== null || child.signalCode !== null;
+
+const family = (children) => {
+  const table = processTable();
+  const wanted = new Set(children.map((child) => running.get(child)).filter(Boolean));
+  const found = new Set(children.filter((child) => child.pid && !exited(child)).map((child) => child.pid));
+  for (const pid of table.keys()) if (wanted.size && [...wanted].some((marker) => carriesMarker(pid, marker))) found.add(pid);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [pid, { parent }] of table) {
+      if (!found.has(pid) && found.has(parent)) {
+        found.add(pid);
+        grew = true;
+      }
+    }
+  }
+  found.delete(process.pid);
+  return new Set([...found].filter((pid) => table.get(pid)?.state !== "Z"));
+};
+
+const signalEach = (pids, signal) => {
   for (const pid of pids) {
     try { process.kill(pid, signal); } catch {}
   }
 };
 
-const anyAlive = (pids, group) => [...processTable()].some(([pid, entry]) => entry.state !== "Z" && (pids.has(pid) || entry.group === group));
-const exited = (child) => child.exitCode !== null || child.signalCode !== null;
-const members = (child) => (exited(child) ? new Set() : processTree(child.pid));
+const terminateNow = (children) => {
+  const graceful = Date.now() + 2000;
+  const forced = graceful + 2000;
+  for (let pids = family(children); pids.size && Date.now() < forced; pids = family(children)) {
+    signalEach(pids, Date.now() < graceful ? "SIGTERM" : "SIGKILL");
+    pauseSync(25);
+  }
+};
 
-const stopAllNow = () => {
-  const targets = [...running].map((child) => ({ child, pids: members(child) }));
-  for (const { child, pids } of targets) signalAll(pids, child.pid, "SIGTERM");
-  const deadline = Date.now() + 2000;
-  while (Date.now() < deadline && targets.some(({ child, pids }) => anyAlive(pids, child.pid))) pauseSync(25);
-  for (const { child, pids } of targets) signalAll(pids, child.pid, "SIGKILL");
+const onExit = () => {
+  shuttingDown = true;
+  terminateNow([...running.keys()]);
   running.clear();
 };
 
-process.on("exit", stopAllNow);
-for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
-  const onSignal = () => {
-    stopAllNow();
-    if (process.listenerCount(signal) === 1) {
-      process.removeListener(signal, onSignal);
-      process.kill(process.pid, signal);
-    }
-  };
-  process.on(signal, onSignal);
+const signalHandlers = new Map(["SIGINT", "SIGTERM", "SIGHUP"].map((signal) => [signal, () => {
+  const othersListening = process.listenerCount(signal) > 1;
+  onExit();
+  uninstall();
+  if (!othersListening) process.kill(process.pid, signal);
+}]));
+
+const install = () => {
+  if (installed) return;
+  installed = true;
+  process.on("exit", onExit);
+  for (const [signal, handler] of signalHandlers) process.prependListener(signal, handler);
+};
+
+function uninstall() {
+  if (!installed) return;
+  installed = false;
+  process.removeListener("exit", onExit);
+  for (const [signal, handler] of signalHandlers) process.removeListener(signal, handler);
 }
 
-export const stopChild = async (child) => {
-  if (!child.pid) return;
-  const pids = members(child);
-  signalAll(pids, child.pid, "SIGTERM");
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline && anyAlive(pids, child.pid)) await pause(50);
-  signalAll(pids, child.pid, "SIGKILL");
-  if (!exited(child)) await new Promise((resolve) => child.once("exit", resolve));
+const forget = (child) => {
   running.delete(child);
+  if (!running.size) uninstall();
+};
+
+export const stopChild = async (child) => {
+  const graceful = Date.now() + 5000;
+  const forced = graceful + 2000;
+  for (let pids = family([child]); pids.size && Date.now() < forced; pids = family([child])) {
+    signalEach(pids, Date.now() < graceful ? "SIGTERM" : "SIGKILL");
+    await pause(50);
+  }
+  if (child.pid && !exited(child)) await new Promise((resolve) => child.once("exit", resolve));
+  forget(child);
 };
 
 const waitUntilReady = async ({ child, host, ports, isReady, output, timeout, failure }) => {
@@ -142,6 +189,7 @@ const waitUntilReady = async ({ child, host, ports, isReady, output, timeout, fa
 export const startChildOnPorts = async ({ host, requested, spawnChild, output, isReady = () => true, passHeld = false, attempts = 5, timeout = 30000 }) => {
   const automatic = requested.every((port) => !port);
   for (let attempt = 1; ; attempt += 1) {
+    if (shuttingDown) throw new Error("This process is shutting down; no new child starts.");
     let ports;
     if (passHeld) {
       ports = await reserveTcpPorts(host, requested);
@@ -150,14 +198,18 @@ export const startChildOnPorts = async ({ host, requested, spawnChild, output, i
       ports = requested.map((port) => port || picks.shift());
       await releaseTcpPorts(host, ports);
     }
+    const marker = `${process.pid}-${(markers += 1)}`;
     let child;
     let spawnError;
     try {
-      child = spawnChild(ports, passHeld ? passHeldTcpPorts(host, ports) : null);
+      if (shuttingDown) throw new Error("This process is shutting down; no new child starts.");
+      const held = passHeld ? passHeldTcpPorts(host, ports) : { stdio: [], env: {} };
+      child = spawnChild(ports, { stdio: held.stdio, env: { ...held.env, [markerName]: marker } });
       child.once("error", (error) => { spawnError = error; });
       if (child.pid) {
-        running.add(child);
-        child.once("exit", () => { if (!anyAlive(new Set(), child.pid)) running.delete(child); });
+        running.set(child, marker);
+        install();
+        child.once("exit", () => { if (!family([child]).size) forget(child); });
       }
       if (passHeld) await releaseTcpPorts(host, ports);
       await waitUntilReady({ child, host, ports, isReady, output, timeout, failure: () => spawnError || (!child.pid && new Error("Child did not start.")) });

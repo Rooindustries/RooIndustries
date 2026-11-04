@@ -112,8 +112,8 @@ const { ports: [startedPort], child } = await startChildOnPorts({
   requested: [requestedNextPort],
   timeout: 60000,
   output: () => output.join(''),
-  spawnChild: ([candidate]) => {
-    const next = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--hostname', host, '--port', String(candidate)], { env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  spawnChild: ([candidate], launch) => {
+    const next = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--hostname', host, '--port', String(candidate)], { env: { ...env, ...launch.env }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     next.stdout.on('data', chunk => { output.push(String(chunk)); process.stdout.write(chunk); });
     next.stderr.on('data', chunk => { output.push(String(chunk)); process.stderr.write(chunk); });
     return next;

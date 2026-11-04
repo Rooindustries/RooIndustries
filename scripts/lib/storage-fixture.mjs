@@ -89,7 +89,7 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
             return false;
           }
         },
-        spawnChild: ([port]) => {
+        spawnChild: ([port], launch) => {
           storageUrl = `http://${host}:${port}`;
           const logFd = fs.openSync(storageLog, 'w', 0o600);
           const childEnv = {
@@ -110,6 +110,7 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
             TUS_URL_PATH: '/upload/resumable', TUS_LOCK_TYPE: 'postgres',
             STORAGE_PUBLIC_URL: supabaseUrl, REQUEST_ALLOW_X_FORWARDED_PATH: 'true',
             VERSION: storageRelease.tag,
+            ...launch.env,
           };
           const child = spawn(process.execPath, [path.join(storageSource, 'dist/start/server.js')], { cwd: scratch, env: childEnv, stdio: ['ignore', logFd, logFd], detached: true });
           fs.closeSync(logFd);

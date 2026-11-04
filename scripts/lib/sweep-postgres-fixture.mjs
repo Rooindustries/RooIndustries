@@ -109,9 +109,9 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
       requested: [ports.postgres ?? 0],
       output: () => fs.readFileSync(postgresLog, 'utf8'),
       isReady: postmasterReady,
-      spawnChild: ([port]) => {
+      spawnChild: ([port], launch) => {
         const log = fs.openSync(postgresLog, 'w');
-        postgresProcess = spawn(path.join(pgBin, 'postgres'), ['-D', dataDir, '-p', String(port), '-h', host, '-k', scratch], { env, stdio: ['ignore', log, log], detached: true });
+        postgresProcess = spawn(path.join(pgBin, 'postgres'), ['-D', dataDir, '-p', String(port), '-h', host, '-k', scratch], { env: { ...env, ...launch.env }, stdio: ['ignore', log, log], detached: true });
         fs.closeSync(log);
         return postgresProcess;
       },
@@ -201,9 +201,9 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
           return false;
         }
       },
-      spawnChild: ([port]) => {
+      spawnChild: ([port], launch) => {
         const log = fs.openSync(restLogPath, 'w');
-        const child = spawn(postgrestBin, [], { env: { ...env, PGRST_DB_URI: `postgres://${os.userInfo().username}@${host}:${pgPort}/postgres`, PGRST_DB_SCHEMAS: 'public', PGRST_DB_ANON_ROLE: 'anon', PGRST_JWT_SECRET: jwtSecret, PGRST_SERVER_HOST: host, PGRST_SERVER_PORT: String(port) }, stdio: ['ignore', log, log], detached: true });
+        const child = spawn(postgrestBin, [], { env: { ...env, ...launch.env, PGRST_DB_URI: `postgres://${os.userInfo().username}@${host}:${pgPort}/postgres`, PGRST_DB_SCHEMAS: 'public', PGRST_DB_ANON_ROLE: 'anon', PGRST_JWT_SECRET: jwtSecret, PGRST_SERVER_HOST: host, PGRST_SERVER_PORT: String(port) }, stdio: ['ignore', log, log], detached: true });
         fs.closeSync(log);
         return child;
       },
