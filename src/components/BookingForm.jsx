@@ -563,7 +563,7 @@ export default function BookingForm() {
   const [modalMode, setModalMode] = useState("switch");
   const hydrating = useHydrating();
   const [pageFadeIn, setPageFadeIn] = useState(hydrating);
-  const fadedLocationKeyRef = useRef(hydrating ? location.key : null);
+  const hydratedLocationKeyRef = useRef(hydrating ? location.key : null);
   const scrollLockRef = useRef(null);
   const [persistedPackage, setPersistedPackage] = useState(null);
   const [preventHoldAutoload, setPreventHoldAutoload] = useState(false);
@@ -1199,14 +1199,11 @@ export default function BookingForm() {
   }, [step, reloadAvailability]);
 
   useEffect(() => {
-    if (fadedLocationKeyRef.current === location.key) return undefined;
-    fadedLocationKeyRef.current = location.key;
+    if (location.key === hydratedLocationKeyRef.current) return undefined;
+    hydratedLocationKeyRef.current = null;
     setPageFadeIn(false);
     const t = setTimeout(() => setPageFadeIn(true), 50);
-    return () => {
-      clearTimeout(t);
-      setPageFadeIn(true);
-    };
+    return () => clearTimeout(t);
   }, [location.key]);
 
   // Prefill form if coming from XOC switch
