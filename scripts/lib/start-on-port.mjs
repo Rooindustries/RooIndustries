@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import net from "node:net";
-import { once } from "node:events";
 import { execFileSync, spawn } from "node:child_process";
 import { freeTcpPorts, passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "./free-tcp-port.mjs";
 
@@ -64,7 +63,8 @@ const listeningSockets = (host, port) => {
 const groupMembers = (group) => fs.readdirSync("/proc").filter((entry) => /^\d+$/.test(entry)).filter((pid) => {
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
-    return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2]) === group;
+    const [state, , processGroup, session] = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    return state !== "Z" && Number(processGroup) === group && Number(session) === group;
   } catch {
     return false;
   }
@@ -84,31 +84,85 @@ export const ownsPorts = (group, host, ports) => {
 
 const exited = (child) => child.exitCode !== null || child.signalCode !== null;
 
-const signalGroup = (child, signal) => {
-  if (!child.pid || exited(child)) return;
+const signalGroup = (group, signal) => {
+  if (!groupMembers(group).length) return false;
   try {
-    process.kill(-child.pid, signal);
+    process.kill(-group, signal);
+    return true;
   } catch (error) {
     if (error.code !== "ESRCH") throw error;
+    return false;
   }
 };
 
-export const stopChild = async (child, grace = 5000) => {
-  if (!child.pid || exited(child)) return;
-  const ended = once(child, "exit");
-  signalGroup(child, "SIGTERM");
-  let timer;
-  await Promise.race([ended, new Promise((resolve) => { timer = setTimeout(resolve, grace); })]);
-  clearTimeout(timer);
-  if (exited(child)) return;
-  signalGroup(child, "SIGKILL");
-  await ended;
+const launched = new WeakSet();
+const stops = new WeakMap();
+const closes = new WeakMap();
+const captures = new WeakMap();
+
+const stopGroup = (child, grace) => {
+  if (!stops.has(child)) {
+    const group = launched.has(child) || (!exited(child) && groupMembers(child.pid).includes(String(child.pid))) ? child.pid : null;
+    const remaining = () => !exited(child) || (group !== null && groupMembers(group).length > 0);
+    const ended = new Promise((resolve) => (exited(child) ? resolve() : child.once("exit", resolve)));
+    const settle = async (wait) => {
+      const until = Date.now() + wait;
+      let timer;
+      await Promise.race([ended, new Promise((resolve) => { timer = setTimeout(resolve, wait); })]);
+      clearTimeout(timer);
+      while (remaining() && Date.now() < until) await pause(50);
+    };
+    const signal = (name) => {
+      if (group !== null && signalGroup(group, name)) return;
+      if (!exited(child)) child.kill(name);
+    };
+    stops.set(child, (async () => {
+      if (!remaining()) return;
+      signal("SIGTERM");
+      await settle(grace);
+      if (!remaining()) return;
+      signal("SIGKILL");
+      await ended;
+      while (remaining()) await pause(50);
+    })());
+  }
+  return stops.get(child);
 };
 
-const launched = new WeakSet();
+export const stopChild = async (child, grace = 5000) => {
+  if (!child.pid) return;
+  await stopGroup(child, grace);
+};
+
+const logFiles = (stdio) => [...new Set(stdio.slice(1, 3).filter(Number.isInteger).flatMap((fd) => {
+  try {
+    return [fs.readlinkSync(`/proc/self/fd/${fd}`)];
+  } catch {
+    return [];
+  }
+}))].flatMap((file) => {
+  try {
+    return [{ file, offset: fs.statSync(file).size }];
+  } catch {
+    return [];
+  }
+});
+
+const captureOutput = (child, stdio, logs) => {
+  const chunks = [];
+  for (const [stream, entry] of [[child.stdout, stdio[1]], [child.stderr, stdio[2]]]) if (entry === "pipe" && stream) stream.on("data", (chunk) => chunks.push(String(chunk)));
+  return () => chunks.join("") + logs.map(({ file, offset }) => {
+    try {
+      return fs.readFileSync(file).subarray(offset).toString();
+    } catch {
+      return "";
+    }
+  }).join("");
+};
 
 const launcher = (held) => (command, args, options = {}) => {
   const stdio = typeof options.stdio === "string" ? Array(3).fill(options.stdio) : [...(options.stdio || ["ignore", "ignore", "ignore"])];
+  const logs = logFiles(stdio);
   const child = spawn(command, args, {
     ...options,
     detached: true,
@@ -116,6 +170,9 @@ const launcher = (held) => (command, args, options = {}) => {
     stdio: [...stdio.slice(0, 3), ...held.stdio],
   });
   launched.add(child);
+  captures.set(child, captureOutput(child, stdio, logs));
+  closes.set(child, new Promise((resolve) => child.once("close", resolve)));
+  child.once("exit", () => stopGroup(child, 5000).catch(() => {}));
   return child;
 };
 
@@ -123,7 +180,7 @@ const waitUntilReady = async ({ child, host, ports, isReady, output, timeout, fa
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     if (failure()) throw failure();
-    if (exited(child)) throw new Error(`Child exited before it was ready:\n${output()}`);
+    if (exited(child)) throw new Error(`Child exited before it was ready (exit ${child.exitCode ?? child.signalCode}):\n${output()}`);
     if (ownsPorts(child.pid, host, ports) && await isReady(ports) && !exited(child) && ownsPorts(child.pid, host, ports)) return;
     await pause(100);
   }
@@ -159,8 +216,11 @@ export const startChildOnPorts = async ({ host, requested, preferred, spawnChild
       return { ports, child };
     } catch (error) {
       if (passHeld) await releaseTcpPorts(host, ports);
-      if (child && launched.has(child)) await stopChild(child);
-      if (!automatic || attempt === attempts || !addressInUse(output())) throw error;
+      if (child && launched.has(child)) {
+        await stopChild(child);
+        await Promise.race([closes.get(child), pause(1000)]);
+      }
+      if (!automatic || attempt === attempts || !addressInUse(captures.get(child)?.() ?? "")) throw error;
     }
   }
 };

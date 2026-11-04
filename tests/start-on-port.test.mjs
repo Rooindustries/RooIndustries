@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import http from "node:http";
 import { once } from "node:events";
 import { test } from "node:test";
@@ -210,7 +212,7 @@ test("a child that never becomes ready is stopped", async () => {
   assert.ok(child.exitCode !== null || child.signalCode !== null);
 });
 
-test("a failed start kills the child's whole process group, even members that ignore SIGTERM", async () => {
+test("a failed start kills the child's whole process group, even members that ignore SIGTERM after the leader exits", async () => {
   const pids = [];
   await assert.rejects(startChildOnPorts({
     host,
@@ -218,8 +220,7 @@ test("a failed start kills the child's whole process group, even members that ig
     timeout: 1000,
     output: () => "",
     spawnChild: (ports, launch) => {
-      const child = launch.spawn(process.execPath, ["-e", `process.on("SIGTERM", () => {});
-const grandchild = require("node:child_process").spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: "ignore" });
+      const child = launch.spawn(process.execPath, ["-e", `const grandchild = require("node:child_process").spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: "ignore" });
 console.log(grandchild.pid);
 setInterval(() => {}, 1000);`], { stdio: ["ignore", "pipe", "ignore"] });
       pids.push(child.pid);
@@ -229,6 +230,73 @@ setInterval(() => {}, 1000);`], { stdio: ["ignore", "pipe", "ignore"] });
   }), /not ready/);
   assert.equal(pids.length, 2);
   assert.deepEqual(await waitUntilGone(pids), []);
+});
+
+test("a leader that exits on its own still takes its whole process group down", async () => {
+  let reported;
+  const { child } = await startChildOnPorts({
+    host,
+    requested: [0],
+    isReady: answers,
+    output: () => "",
+    spawnChild: ([candidate], launch) => {
+      const child = launch.spawn(process.execPath, ["-e", `const grandchild = require("node:child_process").spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: "ignore" });
+console.log(grandchild.pid);
+const server = require("http").createServer((q, s) => s.end("child")).listen(${candidate}, "127.0.0.1");
+process.stdin.once("data", () => { server.close(); process.exit(0); });`], { stdio: ["pipe", "pipe", "ignore"] });
+      reported = once(child.stdout, "data").then(([chunk]) => String(chunk));
+      return child;
+    },
+  });
+  const grandchild = Number(await reported);
+  assert.ok(alive(grandchild));
+  child.stdin.end("exit\n");
+  await once(child, "exit");
+  assert.equal(child.exitCode, 0);
+  assert.deepEqual(await waitUntilGone([grandchild], 9000), []);
+});
+
+test("each attempt is judged on its own output, so a later unrelated failure is reported and not retried", async () => {
+  const output = [];
+  let attempts = 0;
+  await assert.rejects(startChildOnPorts({
+    host,
+    requested: [0],
+    output: () => output.join(""),
+    spawnChild: ([candidate], launch) => {
+      attempts += 1;
+      const failure = attempts === 1 ? `console.error("listen EADDRINUSE: address already in use 127.0.0.1:${candidate}"); process.exit(1);` : `console.error("migration failed"); process.exit(42);`;
+      const child = launch.spawn(process.execPath, ["-e", failure], { stdio: ["ignore", "ignore", "pipe"] });
+      child.stderr.on("data", (chunk) => output.push(String(chunk)));
+      return child;
+    },
+  }), /exited before it was ready \(exit 42\)/);
+  assert.equal(attempts, 2);
+});
+
+test("a retry judges a log file only by what the failed attempt appended", async () => {
+  const log = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "start-on-port-")), "child.log");
+  let attempts = 0;
+  try {
+    await assert.rejects(startChildOnPorts({
+      host,
+      requested: [0],
+      output: () => fs.readFileSync(log, "utf8"),
+      spawnChild: ([candidate], launch) => {
+        attempts += 1;
+        const failure = attempts === 1 ? `console.error("listen EADDRINUSE: address already in use 127.0.0.1:${candidate}"); process.exit(1);` : `console.error("migration failed"); process.exit(42);`;
+        const fd = fs.openSync(log, "a");
+        try {
+          return launch.spawn(process.execPath, ["-e", failure], { stdio: ["ignore", fd, fd] });
+        } finally {
+          fs.closeSync(fd);
+        }
+      },
+    }), /exited before it was ready \(exit 42\)/);
+    assert.equal(attempts, 2);
+  } finally {
+    fs.rmSync(path.dirname(log), { recursive: true, force: true });
+  }
 });
 
 test("held ports reach the child without ever being free", async () => {

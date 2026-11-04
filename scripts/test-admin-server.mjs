@@ -23,7 +23,7 @@ registerHooks({ resolve(specifier, context, next) {
     throw error;
   }
 }});
-await reserveTcpPorts("127.0.0.1", [port]);
+await reserveTcpPorts(target.hostname, [port]);
 const control = http.createServer();
 await new Promise((resolve, reject) => { control.once("error", reject); control.listen(port + 6, "127.0.0.1", resolve); });
 process.env.ROO_TEST_HOST = "127.0.0.1";
@@ -254,12 +254,12 @@ try {
   await execute(["scripts/generate-sitemap.js"]);
   await execute(["scripts/generate-robots.js"]);
   if (process.env.ROO_TEST_DEV === "1") {
-    await releaseTcpPorts("127.0.0.1", [port]);
+    await releaseTcpPorts(target.hostname, [port]);
     await execute([next, "dev", "--hostname", target.hostname, "--port", target.port]);
   } else {
     await execute(["scripts/validate-runtime-env.js"]);
     await execute([next, "build"]);
-    await releaseTcpPorts("127.0.0.1", [port]);
+    await releaseTcpPorts(target.hostname, [port]);
     await execute([next, "start", "--hostname", target.hostname, "--port", target.port]);
   }
 } finally { await stop(); }
