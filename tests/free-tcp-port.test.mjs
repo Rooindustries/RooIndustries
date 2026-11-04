@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { test } from "node:test";
-import { fixturePorts, freeTcpPort, freeTcpPorts, passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "../scripts/lib/free-tcp-port.mjs";
-import { reserveToolingBuildPorts } from "../scripts/lib/tooling-build-ports.mjs";
+import { addressInUse, freeTcpPort, freeTcpPorts, passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts, startOnFreePort } from "../scripts/lib/free-tcp-port.mjs";
+import { createToolingContentFixture } from "./fixtures/tooling-content.mjs";
 
 const host = "127.0.0.1";
 
@@ -50,7 +51,7 @@ test("a requested port that is taken fails and releases the others", async () =>
 
 test("an invalid port is refused", async () => {
   await assert.rejects(freeTcpPorts(host, [80]), /Invalid fixture port/);
-  await assert.rejects(fixturePorts(host, "not-a-port", 2), /Invalid fixture port/);
+  await assert.rejects(reserveTcpPorts(host, [Number("not-a-port")]), /Invalid fixture port/);
 });
 
 const hold = (port) => new Promise((resolve) => {
@@ -96,19 +97,26 @@ test("a free pick never takes a port held for a later binder", async () => {
   }
 });
 
-test("fixture ports follow an explicit first port and are free otherwise", async () => {
-  const [first] = await freeTcpPorts(host, [0]);
-  assert.deepEqual(await fixturePorts(host, String(first), 1), [first]);
-  await releaseTcpPorts(host, [first]);
-  const holder = await hold(first);
-  try {
-    await assert.rejects(fixturePorts(host, String(first), 3), { code: "EADDRINUSE" });
-    const picked = await fixturePorts(host, undefined, 3);
-    await releaseTcpPorts(host, picked);
-    assert.equal(new Set([...picked, first]).size, 4, picked.join(", "));
-  } finally {
-    await release([holder]);
-  }
+test("an external program that loses its port starts again on a fresh one", async () => {
+  const taken = [];
+  const port = await startOnFreePort(host, 0, async (candidate) => {
+    if (taken.length < 2) {
+      taken.push(candidate);
+      throw addressInUse(new Error("bind failed"), "listen EADDRINUSE: address already in use");
+    }
+    return candidate;
+  });
+  assert.equal(taken.length, 2);
+  assert.ok(!taken.includes(port));
+});
+
+test("an explicit port is never swapped for another", async () => {
+  let attempts = 0;
+  await assert.rejects(startOnFreePort(host, 45678, async () => {
+    attempts += 1;
+    throw addressInUse(new Error("bind failed"), "Address already in use");
+  }), { code: "EADDRINUSE" });
+  assert.equal(attempts, 1);
 });
 
 test("a held port passes to a child process without ever being free", async () => {
@@ -134,31 +142,20 @@ process.stdout.write("released\\n");`;
   assert.equal(await bindable(port), true);
 });
 
-test("a tooling build is reused on its own ports and rebuilt when they are taken", async () => {
-  const dist = fs.mkdtempSync(path.join(os.tmpdir(), "roo-build-ports-"));
+test("the content fixture can share a server that keeps its port", async () => {
+  const shared = http.createServer();
+  await new Promise((resolve) => shared.listen(0, host, resolve));
+  const origin = `http://${host}:${shared.address().port}`;
   try {
-    const [base, content] = await freeTcpPorts(host, [0, 0]);
-    const write = () => {
-      fs.mkdirSync(path.join(dist, "cache"), { recursive: true });
-      fs.writeFileSync(path.join(dist, "BUILD_ID"), "fixture");
-      fs.writeFileSync(path.join(dist, "tooling-build.json"), JSON.stringify({ version: 1, baseURL: `http://${host}:${base}`, contentURL: `http://${host}:${content}` }));
-    };
-    write();
-    const reused = await reserveToolingBuildPorts(host, dist);
-    await releaseTcpPorts(host, reused);
-    assert.deepEqual(reused, [base, content]);
-    assert.ok(fs.existsSync(path.join(dist, "BUILD_ID")));
-    const holder = await hold(base);
-    try {
-      const rebuilt = await reserveToolingBuildPorts(host, dist);
-      await releaseTcpPorts(host, rebuilt);
-      assert.ok(!rebuilt.includes(base));
-      assert.deepEqual(fs.readdirSync(dist), ["cache"]);
-    } finally {
-      await release([holder]);
-    }
+    const fixture = await createToolingContentFixture({ origin, server: shared });
+    const response = await fetch(`${origin}/rest/v1/rpc/roo_fetch_shadow_documents_targeted`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ p_document_types: ["faq"], p_filters: [], p_limit: 10, p_ids: null }) });
+    assert.equal(response.status, 200);
+    await fixture.close();
+    assert.equal(shared.listening, true);
+    assert.equal(await bindable(shared.address().port), false);
   } finally {
-    fs.rmSync(dist, { recursive: true, force: true });
+    shared.closeAllConnections();
+    await new Promise((resolve) => shared.close(resolve));
   }
 });
 

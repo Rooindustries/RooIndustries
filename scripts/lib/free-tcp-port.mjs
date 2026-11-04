@@ -66,8 +66,22 @@ export const reserveTcpPorts = async (host, requested) => {
   }
 };
 
-export const fixturePorts = (host, first, count) =>
-  reserveTcpPorts(host, Array.from({ length: count }, (_, index) => (first ? Number(first) + index : 0)));
+export const addressInUse = (error, log = "") => {
+  if (/EADDRINUSE|Address already in use/.test(log)) error.code = "EADDRINUSE";
+  return error;
+};
+
+export const startOnFreePort = async (host, requested, start, attempts = 5) => {
+  for (let attempt = 1; ; attempt += 1) {
+    const port = requested || await freeTcpPort(host);
+    try {
+      await releaseTcpPorts(host, [port]);
+      return await start(port);
+    } catch (error) {
+      if (requested || error.code !== "EADDRINUSE" || attempt === attempts) throw error;
+    }
+  }
+};
 
 export const passHeldTcpPorts = (host, ports, firstFd = 3) => {
   const fds = ports.map((port) => {

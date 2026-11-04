@@ -1,16 +1,15 @@
 import { spawn } from "node:child_process";
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
-import { passHeldTcpPorts, releaseTcpPorts } from "./lib/free-tcp-port.mjs";
-import { reserveToolingBuildPorts } from "./lib/tooling-build-ports.mjs";
+import { passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
 
 refuseEnvFiles();
 const host = process.env.ROO_TEST_HOST || "127.0.0.1";
 const target = new URL(localOrigin(process.env.BASE_URL || `http://${host}:${process.env.PW_PORT || 3001}`));
 if (target.hostname !== host) throw new Error("API audit host must match ROO_TEST_HOST.");
-const dist = validateDistDir(`${process.env.NEXT_DIST_DIR || `.next-e2e-${process.env.PW_SERVER_ID || process.pid}`}-api`, { isolated: true });
-const [port, contentPort] = await reserveToolingBuildPorts(host, dist);
+const [port, contentPort] = await reserveTcpPorts(host, [Number(target.port) + 2, Number(target.port) + 3]);
 const baseURL = localOrigin(`http://${host}:${port}`);
 const contentURL = localOrigin(`http://${host}:${contentPort}`);
+const dist = validateDistDir(`${process.env.NEXT_DIST_DIR || `.next-e2e-${process.env.PW_SERVER_ID || process.pid}`}-api`, { isolated: true });
 installNetworkGuard([baseURL, contentURL]);
 
 const env = {

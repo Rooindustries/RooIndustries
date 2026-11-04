@@ -8,15 +8,12 @@ import {
   requeueReferralEmailDispatch,
   sendReferralEmailDirect,
 } from "../src/server/api/ref/referralEmailDispatches.js";
-import { fixturePorts } from "./lib/free-tcp-port.mjs";
 import { createSweepPostgresFixture } from "./lib/sweep-postgres-fixture.mjs";
 import { installNetworkGuard, localOrigin, refuseEnvFiles } from "./lib/test-target-safety.mjs";
 
 refuseEnvFiles();
-const host = process.env.ROO_TEST_HOST || "127.0.0.1";
-const [port, restPort, proxyPort] = await fixturePorts(host, process.env.EMAIL_TEST_PORT, 3);
-const origins = [restPort, proxyPort].map(value => localOrigin(`http://${host}:${value}`));
-const restoreNetwork = installNetworkGuard(origins);
+const requested = Number(process.env.EMAIL_TEST_PORT || 0);
+let restoreNetwork;
 const originalError = console.error;
 const alerts = [];
 console.error = (...args) => { alerts.push(args); originalError(...args); };
@@ -33,7 +30,8 @@ const bad = [
   "https://accounts.rooindustries.com", " https://www.rooindustries.com ", "not-a-url",
 ];
 try {
-  fixture = await createSweepPostgresFixture({ ports: { postgres: port, rest: restPort, proxy: proxyPort } });
+  fixture = await createSweepPostgresFixture({ ports: requested ? { postgres: requested, rest: requested + 1, proxy: requested + 2 } : {} });
+  restoreNetwork = installNetworkGuard([fixture.postgrestUrl, fixture.origin].map(localOrigin));
   await fixture.apply("20260715110000_add_referral_email_dispatch_ledger.sql");
   const resolutionMigration = "20260717211139_fix_backbone_parity_and_referral_alerts.sql";
   const resolutionSql = await fs.readFile(`supabase/migrations/${resolutionMigration}`, "utf8");
@@ -160,5 +158,5 @@ try {
 } finally {
   console.error = originalError;
   await fixture?.stop();
-  restoreNetwork();
+  restoreNetwork?.();
 }

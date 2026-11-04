@@ -23,19 +23,20 @@ registerHooks({ resolve(specifier, context, next) {
     throw error;
   }
 }});
-const [, controlPort, storagePort, gatewayPort, postgresPort, postgrestPort, proxyPort] = await reserveTcpPorts("127.0.0.1", [port, port + 6, 0, 0, 0, 0, 0]);
+await reserveTcpPorts("127.0.0.1", [port]);
+const control = http.createServer();
+await new Promise((resolve, reject) => { control.once("error", reject); control.listen(port + 6, "127.0.0.1", resolve); });
 process.env.ROO_TEST_HOST = "127.0.0.1";
 const { start } = await import("./lib/storage-fixture.mjs");
 const fixture = await start({
   fullMigrationChain: true,
-  ports: { storage: storagePort, gateway: gatewayPort, postgres: postgresPort, postgrest: postgrestPort, proxy: proxyPort },
   additionalOrigins: [baseURL, controlOrigin],
   ...(process.env.STORAGE_SOURCE ? { storageSource: process.env.STORAGE_SOURCE } : {}),
   ...(process.env.PG_BIN ? { pgBin: process.env.PG_BIN } : {}),
   ...(process.env.POSTGREST_BIN ? { postgrestBin: process.env.POSTGREST_BIN } : {}),
   ...(process.env.LD_LIBRARY_PATH ? { libraryPath: process.env.LD_LIBRARY_PATH } : {}),
 });
-let active, control, restoreEmailFetch;
+let active, restoreEmailFetch;
 const emails = [];
 let notificationSequence = 0;
 let stopped = false;
@@ -50,7 +51,7 @@ const stop = async () => {
       child.kill("SIGTERM");
     });
   }
-  if (control) { control.closeAllConnections(); await new Promise(resolve => control.close(resolve)); }
+  if (control.listening) { control.closeAllConnections(); await new Promise(resolve => control.close(resolve)); }
   restoreEmailFetch?.();
   const cleanup = await fixture.stop();
   fs.mkdirSync("test-results/admin", { recursive: true });
@@ -74,7 +75,7 @@ try {
   restoreEmailFetch = () => { globalThis.fetch = originalFetch; };
   const { CONTENT_TYPES, createContentDefaults } = await import("../src/lib/cms/contentSchema.js");
   const { createToolingContentFixture } = await import("../tests/fixtures/tooling-content.mjs");
-  const seed = await createToolingContentFixture({ origin: controlOrigin });
+  const seed = await createToolingContentFixture({ origin: controlOrigin, server: control });
   let documents;
   try {
     const response = await fetch(`${controlOrigin}/rest/v1/rpc/roo_fetch_shadow_documents_targeted`, {
@@ -83,10 +84,7 @@ try {
     });
     if (!response.ok) throw new Error("Content fixture seed failed.");
     documents = await response.json();
-  } finally {
-    await seed.close();
-    await reserveTcpPorts("127.0.0.1", [controlPort]);
-  }
+  } finally { await seed.close(); }
   const unusedFields = {
     hero: { tagline: "Legacy tagline café 日本語", ctaNoteIcon: "☀️", bullets: ["Legacy bullet café 日本語", ""] },
     packagesSettings: { heading: "Legacy packages heading" },
@@ -135,7 +133,7 @@ try {
     await fixture.sql`update accounts.creator_profiles set commission_basis_points=1000,discount_basis_points=500,total_basis_points=1500,successful_referrals=${index} where user_id=${user.id}`;
   }
   const marker = { version: 1, isolated: true, baseURL, origins: [baseURL, fixture.origin], versions: fixture.versions };
-  control = http.createServer(async (request, response) => {
+  control.on("request", async (request, response) => {
     if (request.method === "GET" && request.url === "/fixture") {
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(marker)); return;
     }
@@ -236,8 +234,6 @@ try {
     }
     response.writeHead(404); response.end();
   });
-  await releaseTcpPorts("127.0.0.1", [controlPort]);
-  await new Promise((resolve, reject) => { control.once("error", reject); control.listen(controlPort, "127.0.0.1", resolve); });
   const env = {
     PATH: process.env.PATH, HOME: process.env.HOME, CI: "true", TZ: "UTC", TOURNEY_DATABASE_MODE: "memory",
     DATA_PRIMARY_BACKEND: "supabase", COMMERCE_PRIMARY_BACKEND: "supabase", COMMERCE_FAILOVER_GENERATION: "0", SUPABASE_CUTOVER_ENABLED: "1", COMMERCE_CUTOVER_ENABLED: "1",

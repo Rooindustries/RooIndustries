@@ -7,7 +7,7 @@ import path from 'node:path';
 import { once } from 'node:events';
 import { spawn, spawnSync } from 'node:child_process';
 import { createClient } from '@supabase/supabase-js';
-import { releaseTcpPorts, reserveTcpPorts } from './free-tcp-port.mjs';
+import { addressInUse, releaseTcpPorts, startOnFreePort } from './free-tcp-port.mjs';
 import { createSweepPostgresFixture, root } from './sweep-postgres-fixture.mjs';
 import { installNetworkGuard } from './test-target-safety.mjs';
 
@@ -43,25 +43,15 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
   assert.equal(revision.stdout.trim(), storageRelease.commit, 'Storage source does not match pinned official release');
   assert.ok(fs.existsSync(path.join(storageSource, 'dist/start/server.js')), 'Build the pinned Storage checkout first (see roo-sanity-env.md)');
   assert.ok(fs.existsSync(path.join(storageSource, 'migrations/tenant/0073-revoke-grants-to-unused-operations.sql')), 'Pinned Storage migrations are unavailable');
-  const reserved = await reserveTcpPorts(host, [
-    ports.storage ?? 0,
-    ports.gateway ?? 0,
-    ports.postgres ?? 0,
-    ports.rest ?? ports.postgrest ?? 0,
-    ports.proxy ?? 0,
-  ]);
-  const [storagePort, gatewayPort, postgresPort, restPort, proxyPort] = reserved;
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'roo-storage-fixture-'));
-  const storageUrl = `http://${host}:${storagePort}`;
-  const supabaseUrl = `http://${host}:${gatewayPort}`;
   const filePath = path.join(scratch, 'files');
   const storageLog = path.join(scratch, 'storage.log');
   let database, storageProcess, gateway, restoreGuard, failedDatabaseScratch;
+  let storagePort, storageUrl, gatewayPort, supabaseUrl;
   let serviceRoleKey, anonKey;
   const cleanup = { storagePid: null, postgresPid: null, postgrestPid: null, databaseScratch: null, storageScratch: scratch, stopped: false };
   let stopping;
   const stop = () => stopping ||= (async () => {
-    await releaseTcpPorts(host, reserved);
     if (gateway) { gateway.closeAllConnections(); await new Promise(resolve => gateway.close(resolve)); gateway = null; }
     await terminate(storageProcess);
     if (database) await database.stop();
@@ -72,46 +62,57 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
     return { ...cleanup, stopped: true, storageExited: !cleanup.storagePid || !isAlive(cleanup.storagePid), postgresExited: !cleanup.postgresPid || !isAlive(cleanup.postgresPid), postgrestExited: !cleanup.postgrestPid || !isAlive(cleanup.postgrestPid), storageScratchRemoved: !fs.existsSync(scratch), databaseScratchRemoved: !databaseScratch || !fs.existsSync(databaseScratch) };
   })();
   try {
+    gateway = http.createServer();
+    if (ports.gateway) await releaseTcpPorts(host, [ports.gateway]);
+    gateway.listen(ports.gateway ?? 0, host);
+    await once(gateway, 'listening');
+    gatewayPort = gateway.address().port;
+    supabaseUrl = `http://${host}:${gatewayPort}`;
     fs.mkdirSync(filePath);
     fs.symlinkSync(path.join(storageSource, 'migrations'), path.join(scratch, 'migrations'));
-    database = await createSweepPostgresFixture({ pgBin, postgrestBin, libraryPath, commerceRepairMigration, fullMigrationChain, ports: { ...ports, postgres: postgresPort, rest: restPort, proxy: proxyPort }, beforeMigrations: async context => {
+    database = await createSweepPostgresFixture({ pgBin, postgrestBin, libraryPath, commerceRepairMigration, fullMigrationChain, ports: { postgres: ports.postgres, rest: ports.rest ?? ports.postgrest, proxy: ports.proxy }, beforeMigrations: async context => {
       cleanup.postgresPid = Number(fs.readFileSync(path.join(context.scratch, 'data/postmaster.pid'), 'utf8').split('\n')[0]);
       cleanup.databaseScratch = context.scratch;
       serviceRoleKey = jwt(context.jwtSecret, 'service_role');
       anonKey = jwt(context.jwtSecret, 'anon');
-      const logFd = fs.openSync(storageLog, 'a', 0o600);
-      const childEnv = {
-        PATH: process.env.PATH, HOME: scratch, TMPDIR: scratch, NODE_ENV: 'test',
-        ROO_TEST_NETWORK_ORIGINS: JSON.stringify([storageUrl, supabaseUrl, `http://${host}:${context.restPort}`]),
-        DATABASE_URL: context.databaseUrl, DATABASE_POOL_URL: context.databaseUrl,
-        AUTH_JWT_SECRET: context.jwtSecret, PGRST_JWT_SECRET: context.jwtSecret,
-        AUTH_JWT_ALGORITHM: 'HS256', SERVICE_KEY: serviceRoleKey, ANON_KEY: anonKey,
-        AUTH_ENCRYPTION_KEY: crypto.randomBytes(32).toString('hex'),
-        SERVER_HOST: host, SERVER_PORT: String(storagePort), TENANT_ID: 'roo-storage-fixture',
-        STORAGE_BACKEND: 'file', FILE_STORAGE_BACKEND_PATH: filePath, STORAGE_S3_BUCKET: 'roo-local-files',
-        FILE_SIZE_LIMIT: '2147483648', FILE_SIZE_LIMIT_STANDARD_UPLOAD: '2147483648',
-        UPLOAD_SIGNED_URL_EXPIRATION_TIME: String(signedUploadExpirationSeconds),
-        DB_INSTALL_ROLES: 'true', DB_SUPER_USER: os.userInfo().username,
-        PG_QUEUE_ENABLE: 'false', S3_PROTOCOL_ENABLED: 'false', MULTI_TENANT: 'false',
-        EXPOSE_DOCS: 'false', LOGFLARE_ENABLED: 'false', TRACING_ENABLED: 'false',
-        VECTOR_ENABLED: 'false', VECTOR_STORE_MIGRATIONS_ENABLED: 'false',
-        TUS_URL_PATH: '/upload/resumable', TUS_LOCK_TYPE: 'postgres',
-        STORAGE_PUBLIC_URL: supabaseUrl, REQUEST_ALLOW_X_FORWARDED_PATH: 'true',
-        VERSION: storageRelease.tag,
-      };
-      await releaseTcpPorts(host, [storagePort]);
-      storageProcess = spawn(process.execPath, [path.join(storageSource, 'dist/start/server.js')], { cwd: scratch, env: childEnv, stdio: ['ignore', logFd, logFd] });
-      fs.closeSync(logFd);
-      cleanup.storagePid = storageProcess.pid;
-      for (let attempt = 0; attempt < 300; attempt++) {
-        assert.equal(storageProcess.exitCode, null, fs.readFileSync(storageLog, 'utf8').replace(/eyJ[A-Za-z0-9_.-]+/g, '[redacted-jwt]'));
-        try {
-          const response = await fetch(`${storageUrl}/status`, { signal: AbortSignal.timeout(500) });
-          if (response.status === 200) return;
-        } catch {}
-        if (attempt === 299) throw new Error('Official Storage readiness deadline exceeded');
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
+      storagePort = await startOnFreePort(host, ports.storage, async (port) => {
+        storageUrl = `http://${host}:${port}`;
+        const logFd = fs.openSync(storageLog, 'w', 0o600);
+        const childEnv = {
+          PATH: process.env.PATH, HOME: scratch, TMPDIR: scratch, NODE_ENV: 'test',
+          ROO_TEST_NETWORK_ORIGINS: JSON.stringify([storageUrl, supabaseUrl]),
+          DATABASE_URL: context.databaseUrl, DATABASE_POOL_URL: context.databaseUrl,
+          AUTH_JWT_SECRET: context.jwtSecret, PGRST_JWT_SECRET: context.jwtSecret,
+          AUTH_JWT_ALGORITHM: 'HS256', SERVICE_KEY: serviceRoleKey, ANON_KEY: anonKey,
+          AUTH_ENCRYPTION_KEY: crypto.randomBytes(32).toString('hex'),
+          SERVER_HOST: host, SERVER_PORT: String(port), TENANT_ID: 'roo-storage-fixture',
+          STORAGE_BACKEND: 'file', FILE_STORAGE_BACKEND_PATH: filePath, STORAGE_S3_BUCKET: 'roo-local-files',
+          FILE_SIZE_LIMIT: '2147483648', FILE_SIZE_LIMIT_STANDARD_UPLOAD: '2147483648',
+          UPLOAD_SIGNED_URL_EXPIRATION_TIME: String(signedUploadExpirationSeconds),
+          DB_INSTALL_ROLES: 'true', DB_SUPER_USER: os.userInfo().username,
+          PG_QUEUE_ENABLE: 'false', S3_PROTOCOL_ENABLED: 'false', MULTI_TENANT: 'false',
+          EXPOSE_DOCS: 'false', LOGFLARE_ENABLED: 'false', TRACING_ENABLED: 'false',
+          VECTOR_ENABLED: 'false', VECTOR_STORE_MIGRATIONS_ENABLED: 'false',
+          TUS_URL_PATH: '/upload/resumable', TUS_LOCK_TYPE: 'postgres',
+          STORAGE_PUBLIC_URL: supabaseUrl, REQUEST_ALLOW_X_FORWARDED_PATH: 'true',
+          VERSION: storageRelease.tag,
+        };
+        storageProcess = spawn(process.execPath, [path.join(storageSource, 'dist/start/server.js')], { cwd: scratch, env: childEnv, stdio: ['ignore', logFd, logFd] });
+        fs.closeSync(logFd);
+        cleanup.storagePid = storageProcess.pid;
+        for (let attempt = 0; attempt < 300; attempt++) {
+          if (storageProcess.exitCode !== null) {
+            const log = fs.readFileSync(storageLog, 'utf8').replace(/eyJ[A-Za-z0-9_.-]+/g, '[redacted-jwt]');
+            throw addressInUse(new Error(log), log);
+          }
+          try {
+            const response = await fetch(`${storageUrl}/status`, { signal: AbortSignal.timeout(500) });
+            if (response.status === 200) return port;
+          } catch {}
+          if (attempt === 299) throw new Error('Official Storage readiness deadline exceeded');
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      });
     }});
     cleanup.databaseScratch = database.scratch;
     cleanup.postgrestPid = database.postgrestPid;
@@ -120,7 +121,7 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
     if (afterMigrations) await afterMigrations(database);
     const storageMigrations = await database.sql`select id,name,hash from storage.migrations order by id`;
     assert.equal(storageMigrations.at(-1).id, 73, 'Pinned official Storage schema is incomplete');
-    gateway = http.createServer((request, response) => {
+    gateway.on('request', (request, response) => {
       const storage = request.url.startsWith('/storage/v1/');
       const rest = request.url.startsWith('/rest/v1/');
       const auth = request.url.startsWith('/auth/v1/');
@@ -146,9 +147,6 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
       response.on('close', () => { if (!response.writableFinished) upstream.destroy(); });
       request.pipe(upstream);
     });
-    await releaseTcpPorts(host, [gatewayPort]);
-    gateway.listen(gatewayPort, host);
-    await once(gateway, 'listening');
     const client = createClient(supabaseUrl, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } });
     return { ...database, start, stop, client, origin: supabaseUrl, token: serviceRoleKey, supabaseUrl, baseUrl: supabaseUrl, postgrestUrl: database.postgrestUrl, storageUrl, serviceRoleKey, anonKey, scratch, databaseScratch: database.scratch, storageMigrations, versions: { postgres: database.postgresVersion, postgrest: database.postgrestVersion, storage: storageRelease, node: process.version, supabaseJs: JSON.parse(fs.readFileSync(path.join(root, 'node_modules/@supabase/supabase-js/package.json'), 'utf8')).version }, ports: { postgres: database.pgPort, postgrest: database.restPort, storage: storagePort, gateway: gatewayPort } };
   } catch (error) {

@@ -7,7 +7,7 @@ import { localOrigin } from '../../scripts/lib/test-target-safety.mjs';
 import { releaseTcpPorts } from '../../scripts/lib/free-tcp-port.mjs';
 import { referralEmail } from './api-routes.mjs';
 
-export async function createToolingContentFixture({ origin, artifact, apiRoutes = false, clockFile }) {
+export async function createToolingContentFixture({ origin, artifact, apiRoutes = false, clockFile, server: shared }) {
   const target = new URL(localOrigin(origin));
   const reused = uiRepairsFixture({ base: origin });
   const content = resource => reused.content(resource, target);
@@ -166,7 +166,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
   const evidence = { origin, pid: process.pid, contentSha256: createHash('sha256').update(JSON.stringify(documents)).digest('hex'), documentTypes: [...new Set(documents.map(row => row._type))], requests: [], stopped: false, standIn: `Synthetic ${apiRoutes ? 'in-memory' : 'read-only'} HTTP responses shaped as the current PostgREST RPC contract. Actual Supabase SDK and GROQ evaluator execute. No PostgreSQL, hosted PostgREST, Sanity, GoTrue, provider or persistence equivalence is claimed.` };
   const persist = () => { if (artifact) { fs.mkdirSync(path.dirname(artifact), { recursive: true }); fs.writeFileSync(artifact, JSON.stringify(evidence, null, 2) + '\n'); } };
   const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
-  const server = http.createServer(async (req, res) => {
+  const handle = async (req, res) => {
     try {
       const url = new URL(req.url, origin);
       let raw = '';
@@ -375,9 +375,16 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       }
       persist();
     } catch (error) { json(res, error.status || 400, { code: error.code || 'FIXTURE_INPUT_INVALID', message: error.message }); persist(); }
-  });
+  };
+  const stopped = () => { evidence.stopped = true; persist(); };
+  if (shared) {
+    shared.on('request', handle);
+    persist();
+    return { evidence, close: async () => { shared.off('request', handle); stopped(); } };
+  }
+  const server = http.createServer(handle);
   await releaseTcpPorts(target.hostname, [Number(target.port)]);
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(Number(target.port), target.hostname, resolve); });
   persist();
-  return { evidence, close: () => new Promise(resolve => { server.close(() => { evidence.stopped = true; persist(); resolve(); }); server.closeAllConnections(); }) };
+  return { evidence, close: () => new Promise(resolve => { server.close(() => { stopped(); resolve(); }); server.closeAllConnections(); }) };
 }

@@ -10,10 +10,10 @@ import { releaseTcpPorts, reserveTcpPorts } from './lib/free-tcp-port.mjs';
 
 refuseEnvFiles();
 const host = testHost;
+const [nextPort] = await reserveTcpPorts(host, [Number(process.env.UI_NEXT_PORT || 0)]);
 const server = http.createServer();
 await new Promise((resolve, reject) => { server.once('error', reject); server.listen(Number(process.env.UI_PORT || 0), host, resolve); });
 const port = server.address().port;
-const [nextPort] = await reserveTcpPorts(host, [Number(process.env.UI_NEXT_PORT || 0)]);
 const base = localOrigin(`http://${host}:${port}`);
 const upstream = localOrigin(`http://${host}:${nextPort}`);
 installNetworkGuard([base, upstream]);
