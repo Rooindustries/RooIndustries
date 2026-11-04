@@ -71,12 +71,16 @@ export const referenceName = (node) => (node?.type === "Identifier" ? node.name 
 
 export const calleeName = (call) => referenceName(call.callee);
 
-const variableDefinition = (context, identifier) => {
+export const bindingDefinition = (context, identifier) => {
   let variable = null;
   for (let scope = context.sourceCode.getScope(identifier); scope && !variable; scope = scope.upper) {
     variable = scope.set.get(identifier.name) || null;
   }
-  const definition = variable?.defs?.[0];
+  return variable?.defs?.[0] || null;
+};
+
+const variableDefinition = (context, identifier) => {
+  const definition = bindingDefinition(context, identifier);
   if (!definition || definition.type !== "Variable" || definition.node.id.type !== "Identifier") return null;
   return definition;
 };
@@ -86,6 +90,17 @@ export const declaredValue = (context, identifier) => variableDefinition(context
 export const constValue = (context, identifier) => {
   const definition = variableDefinition(context, identifier);
   return definition?.parent.kind === "const" ? definition.node.init || null : null;
+};
+
+export const destructuredConst = (context, identifier) => {
+  const definition = bindingDefinition(context, identifier);
+  if (definition?.type !== "Variable" || definition.parent.kind !== "const" || definition.node.id.type !== "ObjectPattern") return null;
+  const binding = definition.name.parent;
+  const fallback = binding.type === "AssignmentPattern" && binding.left === definition.name ? binding.right : null;
+  const property = fallback ? binding.parent : binding;
+  if (property.type !== "Property" || property.parent !== definition.node.id) return null;
+  if (property.value !== (fallback ? binding : definition.name) || !definition.node.init) return null;
+  return { property, source: definition.node.init, fallback };
 };
 
 export const isFetchCall = (call) => {
