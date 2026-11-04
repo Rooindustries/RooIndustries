@@ -1,10 +1,6 @@
 import { asBookingSummary } from "./bookingSummary";
-import { useSyncExternalStore } from "react";
+import { useHydrating } from "./useHydrating";
 import { useLocation } from "react-router-dom";
-
-const subscribe = () => () => {};
-const clientSnapshot = () => true;
-const serverSnapshot = () => false;
 
 export const asConfirmationReceipt = (value) =>
   typeof value?.bookingId === "string" && value.bookingId.trim()
@@ -27,8 +23,7 @@ const readConfirmationReceipt = (state, hydrated) => {
 
 export const useConfirmationReceipt = () => {
   const location = useLocation();
-  const hydrated = useSyncExternalStore(subscribe, clientSnapshot, serverSnapshot);
-  return readConfirmationReceipt(location.state, hydrated);
+  return readConfirmationReceipt(location.state, !useHydrating());
 };
 
 const summaryPrefix = "booking_confirmation_summary:";
