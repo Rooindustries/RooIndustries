@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
+import { lockBuildDirectory, signalTracked } from "./lib/build-lock.mjs";
 import { createToolingContentFixture } from "../tests/fixtures/tooling-content.mjs";
 import { apiRouteSecrets } from "../tests/fixtures/api-routes.mjs";
 
@@ -14,6 +15,7 @@ if (process.env.ROO_ADMIN_FIXTURE === "1") {
 } else {
 refuseEnvFiles();
 const dist = validateDistDir(process.env.NEXT_DIST_DIR, { isolated: true });
+const lock = await lockBuildDirectory(dist);
 const baseURL = localOrigin(process.env.BASE_URL);
 const target = new URL(baseURL);
 if (target.hostname !== testHost || target.port !== process.env.PW_PORT) throw new Error("Invalid Tailscale test server target.");
@@ -82,13 +84,14 @@ const manifestPath = path.join(dist, "tooling-build.json");
 let active;
 let stopping = false;
 const execute = (args, executionEnv = env) => new Promise((resolve, reject) => {
-  active = spawn(process.execPath, args, { env: executionEnv, stdio: "inherit" });
+  active = spawn(process.execPath, args, { env: executionEnv, stdio: "inherit", detached: true });
+  lock.track(active);
   active.once("error", reject);
   active.once("exit", (code, signal) => code === 0 ? resolve() : reject(new Error(`Test server exited ${signal || code}.`)));
 });
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => {
   stopping = true;
-  active?.kill(signal);
+  if (active) signalTracked(active, signal);
 });
 if (development) {
   if (fs.existsSync(path.join(dist, "BUILD_ID"))) throw new Error("Development server cannot reuse a production build.");
