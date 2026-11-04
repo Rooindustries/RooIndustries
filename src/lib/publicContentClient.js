@@ -25,7 +25,13 @@ export const getPublicContent = async (resource, params = {}, options = {}) => {
       headers: { Accept: "application/json" },
       ...(options.signal ? { signal: options.signal } : {}),
     });
-    const body = await response.json().catch(() => ({}));
+    const body = await response.json().catch((error) => {
+      if (response.ok && (error?.name === "AbortError" || error instanceof TypeError)) {
+        error.responseStatus = response.status;
+        throw error;
+      }
+      return {};
+    });
     if (!response.ok || body?.ok !== true) {
       throw new Error(body?.error || "Public content could not be loaded.");
     }

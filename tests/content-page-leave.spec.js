@@ -45,40 +45,78 @@ test("a content failure while the visitor stays on the page is still reported", 
   await expect.poll(() => errors.some((text) => text.startsWith("TypeError: Failed to fetch"))).toBe(true);
 });
 
-test("an error response cut off by leaving the page is still reported", async ({ page }) => {
+const startTermsServer = async (respond) => {
   const sockets = new Set();
-  let answered;
-  const answeredPromise = new Promise((resolve) => {
-    answered = resolve;
-  });
-  const server = http.createServer((request, response) => {
-    response.writeHead(503, { "content-type": "application/json" });
-    response.write('{"ok":false,');
-    answered();
-  });
+  const server = http.createServer((request, response) => respond(response));
   server.on("connection", (socket) => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  try {
-    const stalledURL = `http://127.0.0.1:${server.address().port}/api/content/terms`;
-    await page.route("**/api/content/terms", (request) => request.continue({ url: stalledURL }));
-    const errors = [];
-    page.on("console", (message) => {
-      if (message.type() === "error") errors.push(message.text());
-    });
+  return {
+    url: `http://127.0.0.1:${server.address().port}/api/content/terms`,
+    close: async () => {
+      sockets.forEach((socket) => socket.destroy());
+      await new Promise((resolve) => server.close(resolve));
+    },
+  };
+};
 
+const collectConsoleErrors = (page) => {
+  const errors = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  return errors;
+};
+
+const leaveTermsMidBody = async (page, respond) => {
+  const server = await startTermsServer(respond);
+  try {
+    await page.route("**/api/content/terms", (request) => request.continue({ url: server.url }));
+    const errors = collectConsoleErrors(page);
+    const headersReceived = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/content/terms");
     await page.goto("/terms");
-    await answeredPromise;
+    await headersReceived;
     await page.goto("/contact");
     await expect(page.locator("main h1").first()).toBeVisible();
-
-    await expect
-      .poll(() => errors.some((text) => text.includes("Public content could not be loaded.")))
-      .toBe(true);
+    return errors;
   } finally {
-    sockets.forEach((socket) => socket.destroy());
-    await new Promise((resolve) => server.close(resolve));
+    await server.close();
+  }
+};
+
+test("an error response cut off by leaving the page is still reported", async ({ page }) => {
+  const errors = await leaveTermsMidBody(page, (response) => {
+    response.writeHead(503, { "content-type": "application/json" });
+    response.write('{"ok":false,');
+  });
+
+  await expect.poll(() => errors.some((text) => text.includes("Public content could not be loaded."))).toBe(true);
+});
+
+test("a successful response cut off by leaving the page reports no error", async ({ page }) => {
+  const errors = await leaveTermsMidBody(page, (response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.write('{"ok":true,"data":');
+  });
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)));
+
+  expect(errors).toEqual([]);
+});
+
+test("a malformed successful response is reported while the visitor stays", async ({ page }) => {
+  const server = await startTermsServer((response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end('{"ok":true,"data":');
+  });
+  try {
+    await page.route("**/api/content/terms", (request) => request.continue({ url: server.url }));
+    const errors = collectConsoleErrors(page);
+    await page.goto("/terms");
+
+    await expect.poll(() => errors.some((text) => text.includes("Public content could not be loaded."))).toBe(true);
+  } finally {
+    await server.close();
   }
 });

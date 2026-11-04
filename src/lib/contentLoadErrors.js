@@ -17,7 +17,9 @@ const fetchFailureMessages = new Set([
 
 const isCancelledRequest = (detail) =>
   detail?.name === "AbortError" ||
-  (pageLeft && detail instanceof TypeError && fetchFailureMessages.has(detail.message));
+  (pageLeft &&
+    detail instanceof TypeError &&
+    (detail.responseStatus === undefined ? fetchFailureMessages.has(detail.message) : detail.responseStatus < 400));
 
 export const reportContentLoadError = (...details) => {
   if (details.some(isCancelledRequest)) return;
