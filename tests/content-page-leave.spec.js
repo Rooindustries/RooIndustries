@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const http = require("node:http");
 
 test.use({ javaScriptEnabled: true, viewport: { width: 1440, height: 900 } });
 
@@ -42,4 +43,42 @@ test("a content failure while the visitor stays on the page is still reported", 
   await page.goto("/terms");
 
   await expect.poll(() => errors.some((text) => text.startsWith("TypeError: Failed to fetch"))).toBe(true);
+});
+
+test("an error response cut off by leaving the page is still reported", async ({ page }) => {
+  const sockets = new Set();
+  let answered;
+  const answeredPromise = new Promise((resolve) => {
+    answered = resolve;
+  });
+  const server = http.createServer((request, response) => {
+    response.writeHead(503, { "content-type": "application/json" });
+    response.write('{"ok":false,');
+    answered();
+  });
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const stalledURL = `http://127.0.0.1:${server.address().port}/api/content/terms`;
+    await page.route("**/api/content/terms", (request) => request.continue({ url: stalledURL }));
+    const errors = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+
+    await page.goto("/terms");
+    await answeredPromise;
+    await page.goto("/contact");
+    await expect(page.locator("main h1").first()).toBeVisible();
+
+    await expect
+      .poll(() => errors.some((text) => text.includes("Public content could not be loaded.")))
+      .toBe(true);
+  } finally {
+    sockets.forEach((socket) => socket.destroy());
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
