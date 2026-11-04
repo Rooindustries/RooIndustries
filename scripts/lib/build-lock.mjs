@@ -1,45 +1,62 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
 
+const { flock, recordOf, withGate } = createRequire(import.meta.url)("./build-lock-gate.cjs");
 const inUse = 75;
 const holder = fileURLToPath(new URL("./build-lock-holder.cjs", import.meta.url));
+const nodeOptionValue = (value) => `"${value.replace(/[\\"]/g, "\\$&")}"`;
 
-const flock = (fd, options) => {
-  const result = spawnSync("flock", [...options, "3"], { stdio: ["ignore", "ignore", "pipe", fd], encoding: "utf8" });
-  if (result.error?.code === "ENOENT") throw new Error("Build directory locks need util-linux flock on PATH.");
-  if (result.error) throw result.error;
-  return result;
+const record = (candidate, token) => {
+  const target = recordOf(candidate);
+  const pending = `${target}.${process.pid}.${token}`;
+  try {
+    fs.writeFileSync(pending, token);
+    fs.renameSync(pending, target);
+  } finally {
+    fs.rmSync(pending, { force: true });
+  }
 };
 
 const lockSlot = (candidate) => {
   fs.mkdirSync(candidate, { recursive: true });
-  const gate = fs.openSync(path.dirname(path.resolve(candidate)), "r");
-  try {
-    if (flock(gate, ["--exclusive", "--wait", "30"]).status !== 0) throw new Error(`Could not take the lock gate for ${candidate}.`);
+  return withGate(candidate, () => {
     const fd = fs.openSync(candidate, "r");
-    const probe = flock(fd, ["--exclusive", "--nonblock", "--conflict-exit-code", String(inUse)]);
-    if (probe.status === 0 && flock(fd, ["--shared", "--nonblock"]).status === 0) return fd;
+    try {
+      const probe = flock(fd, ["--exclusive", "--nonblock", "--conflict-exit-code", String(inUse)]);
+      if (probe.status === 0 && flock(fd, ["--shared", "--nonblock"]).status === 0) {
+        const token = randomUUID();
+        record(candidate, token);
+        return { fd, token };
+      }
+      if (probe.status !== inUse) throw new Error(`flock could not lock ${candidate}: ${probe.stderr}`);
+    } catch (error) {
+      fs.closeSync(fd);
+      throw error;
+    }
     fs.closeSync(fd);
-    if (probe.status !== inUse) throw new Error(`flock could not lock ${candidate}: ${probe.stderr}`);
     return null;
-  } finally {
-    fs.closeSync(gate);
-  }
+  });
 };
 
 export const lockBuildDirectory = (dir, { slots = 1 } = {}) => {
   if (process.platform !== "linux") throw new Error("Build directory locks need Linux flock(2).");
   for (let slot = 1; slot <= slots; slot += 1) {
     const candidate = slot === 1 ? dir : `${dir}-${slot}`;
-    const fd = lockSlot(candidate);
-    if (fd === null) continue;
-    const resolved = path.resolve(candidate);
+    const slotLock = lockSlot(candidate);
+    if (slotLock === null) continue;
+    const { fd, token } = slotLock;
     return {
       dir: candidate,
       fd,
-      childEnv: (env) => ({ ...env, ROO_BUILD_LOCK: resolved, NODE_OPTIONS: `${env.NODE_OPTIONS || ""} --require=${holder}`.trim() }),
+      childEnv: (env) => ({
+        ...env,
+        ROO_BUILD_LOCK: path.resolve(candidate),
+        ROO_BUILD_LOCK_TOKEN: token,
+        NODE_OPTIONS: [env.NODE_OPTIONS, `--require ${nodeOptionValue(holder)}`].filter(Boolean).join(" "),
+      }),
       release: () => fs.closeSync(fd),
     };
   }
