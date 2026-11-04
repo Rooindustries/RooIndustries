@@ -1,85 +1,56 @@
 import { calleeName, propertyName } from "./util.mjs";
 
 const SCROLL_CALLS = new Set(["scroll", "scrollTo", "scrollBy", "scrollIntoView"]);
-const MOTION_CHECKS = new Set(["prefersReducedMotion"]);
+const POSITIONAL_CALLS = new Set(["scroll", "scrollTo", "scrollBy"]);
+const SAFE_BEHAVIORS = new Set(["auto", "instant"]);
+const HELPER_MODULE = "/src/lib/scrollCoordinator.js";
 
-const findVariable = (context, identifier) => {
-  for (let scope = context.sourceCode.getScope(identifier); scope; scope = scope.upper) {
-    const variable = scope.set.get(identifier.name);
-    if (variable) return variable;
-  }
+const staticString = (node) => {
+  if (node?.type === "Literal" && typeof node.value === "string") return node.value;
+  if (node?.type === "TemplateLiteral" && node.expressions.length === 0) return node.quasis[0].value.cooked;
   return null;
 };
 
-const boundValues = (context, identifier) => {
-  const definition = findVariable(context, identifier)?.defs?.[0];
-  if (!definition) return [];
-  if (definition.type === "Variable" && definition.node.id.type === "Identifier") {
-    return definition.node.init ? [definition.node.init] : [];
-  }
-  if (definition.type === "Parameter" && definition.name.parent?.type === "AssignmentPattern") {
-    return [definition.name.parent.right];
-  }
-  return [];
+const isSafeOptions = (node) => {
+  if (node.type !== "ObjectExpression") return false;
+  if (node.properties.some((item) => item.type !== "Property" || item.computed)) return false;
+  const behavior = node.properties.findLast((item) => propertyName(item) === "behavior");
+  return !behavior || (behavior.kind === "init" && SAFE_BEHAVIORS.has(staticString(behavior.value)));
 };
 
-const isMotionCheck = (node) => node?.type === "CallExpression" && MOTION_CHECKS.has(calleeName(node));
-
-const mightBeSmooth = (context, node, seen = new Set()) => {
-  if (!node || seen.has(node)) return false;
-  seen.add(node);
-  if (node.type === "Literal") return node.value === "smooth";
-  if (node.type === "TemplateLiteral") {
-    return node.expressions.length === 0 && node.quasis[0].value.cooked === "smooth";
-  }
-  if (node.type === "ConditionalExpression") {
-    if (isMotionCheck(node.test)) return mightBeSmooth(context, node.consequent, seen);
-    return mightBeSmooth(context, node.consequent, seen) || mightBeSmooth(context, node.alternate, seen);
-  }
-  if (node.type === "LogicalExpression") {
-    return mightBeSmooth(context, node.left, seen) || mightBeSmooth(context, node.right, seen);
-  }
-  if (node.type === "Identifier") {
-    return boundValues(context, node).some((value) => mightBeSmooth(context, value, seen));
-  }
-  return false;
+const isSafeArgument = (name, node) => {
+  if (node.type === "Literal" && typeof node.value === "number") return true;
+  if (name === "scrollIntoView" && node.type === "Literal" && typeof node.value === "boolean") return true;
+  return isSafeOptions(node);
 };
 
-const optionObjects = (context, node, seen = new Set()) => {
-  if (!node || seen.has(node)) return [];
-  seen.add(node);
-  if (node.type === "ObjectExpression") return [node];
-  if (node.type === "Identifier") {
-    return boundValues(context, node).flatMap((value) => optionObjects(context, value, seen));
-  }
-  return [];
+const isSafeCall = (name, args) => {
+  if (args.some((item) => item.type === "SpreadElement")) return false;
+  if (args.length === 0) return true;
+  if (POSITIONAL_CALLS.has(name) && args.length >= 2) return true;
+  return isSafeArgument(name, args[0]);
 };
 
 export default {
   meta: {
     type: "problem",
     docs: {
-      description: "A smooth scroll animates for visitors who asked their system for reduced motion.",
+      description: "A scroll whose behavior can't be read from the call may animate for visitors who asked for reduced motion.",
     },
     messages: {
-      smooth:
-        "This scroll animates even when the visitor asked for reduced motion. Use scrollWindowTo from " +
-        "src/lib/scrollCoordinator, or pick the behavior with prefersReducedMotion() first.",
+      unchecked:
+        "This scroll may animate even when the visitor asked for reduced motion. Use scrollWindowTo from " +
+        'src/lib/scrollCoordinator, or pass a plain object literal whose behavior is "auto" or "instant".',
     },
     schema: [],
   },
   create(context) {
+    if (context.filename.replaceAll("\\", "/").endsWith(HELPER_MODULE)) return {};
     return {
       CallExpression(node) {
-        if (!SCROLL_CALLS.has(calleeName(node))) return;
-        for (const argument of node.arguments) {
-          for (const options of optionObjects(context, argument)) {
-            const behavior = options.properties.find((item) => propertyName(item) === "behavior");
-            if (behavior && mightBeSmooth(context, behavior.value)) {
-              context.report({ node: behavior, messageId: "smooth" });
-            }
-          }
-        }
+        const name = calleeName(node);
+        if (!SCROLL_CALLS.has(name) || isSafeCall(name, node.arguments)) return;
+        context.report({ node, messageId: "unchecked" });
       },
     };
   },
