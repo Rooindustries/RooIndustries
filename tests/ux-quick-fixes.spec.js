@@ -123,12 +123,14 @@ test("booking review continues to payment without implying a charge", async ({ p
   await page.route("**/api/ref/validateCoupon?*", route => route.fulfill({ json: {
     ok: true, coupon: { code: "full", discountType: "percent", discountPercent: 100, canCombineWithReferral: true },
   } }));
+  await page.route("**/api/payment/quote", route => route.request().postDataJSON()?.couponCode === "full"
+    ? route.fulfill({ json: {
+      ok: true, quoteFingerprint: "fixture-free-quote", quote: { grossAmount: 84.99, netAmount: 0, isFree: true },
+    } })
+    : route.fallback());
   await flow.codeInput("full");
   await expect(page.getByText("$0.00", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue to payment", exact: true })).toBeEnabled();
-  await page.route("**/api/payment/quote", route => route.fulfill({ json: {
-    ok: true, quoteFingerprint: "fixture-free-quote", quote: { grossAmount: 84.99, netAmount: 0, isFree: true },
-  } }));
   await flow.payment();
   await expect(page.getByRole("button", { name: "Confirm Free Booking", exact: true })).toBeVisible();
 });
