@@ -1,53 +1,56 @@
-const comment = String.raw`(?:\/\*[\s\S]*?\*\/\s*)*`;
-const scriptingFeature = new RegExp(String.raw`\(\s*${comment}scripting\s*${comment}[:)]`, "gi");
+import { scriptingAtRules, scriptingMessage, usesScriptingMedia } from "../scripts/lib/scripting-media.mjs";
+import { calleeName, declaredValue, jsxName } from "./util.mjs";
 
-export const cssAsText = {
-  meta: { name: "css-as-text" },
-  preprocess: (text) => [{ text: "`" + text.replace(/[`$\\]/g, " ") + "`;", filename: "stylesheet.js" }],
-  postprocess: (messages) =>
-    messages.flat().map((message) => ({
-      ...message,
-      column: message.line === 1 ? Math.max(1, message.column - 1) : message.column,
-      endColumn: message.endLine === 1 && message.endColumn ? Math.max(1, message.endColumn - 1) : message.endColumn,
-    })),
-  supportsAutofix: false,
+const staticText = (context, node, depth = 0) => {
+  if (!node || depth > 4) return null;
+  if (node.type === "Literal") return typeof node.value === "string" ? node.value : null;
+  if (node.type === "TemplateLiteral") return node.quasis.map((quasi) => quasi.value.cooked ?? "").join("x");
+  if (node.type === "JSXText") return node.value;
+  if (node.type === "JSXExpressionContainer") return staticText(context, node.expression, depth);
+  if (node.type === "Identifier") return staticText(context, declaredValue(context, node), depth + 1);
+  if (node.type === "BinaryExpression" && node.operator === "+") {
+    const left = staticText(context, node.left, depth);
+    const right = staticText(context, node.right, depth);
+    return left === null || right === null ? null : left + right;
+  }
+  return null;
+};
+
+const inlineCssUsesScripting = (css) => {
+  try {
+    return scriptingAtRules(css).length > 0;
+  } catch {
+    return false;
+  }
 };
 
 export default {
   meta: {
     type: "problem",
     docs: {
-      description: "Styles must not depend on the scripting media feature, which Safari before 17 ignores.",
+      description: "Media queries in scripts and markup must not use the scripting feature, which Safari before 17 ignores.",
     },
-    messages: {
-      scripting:
-        "Safari before 17 ignores the scripting media feature, so styles behind it never apply there. " +
-        "Make the no-JavaScript styles the default and put JavaScript-only styles under html.js.",
-    },
+    messages: { scripting: scriptingMessage },
     schema: [],
   },
   create(context) {
-    const { sourceCode } = context;
-    const check = (node) => {
-      const text = sourceCode.getText(node);
-      for (const match of text.matchAll(scriptingFeature)) {
-        const start = node.range[0] + match.index;
-        context.report({
-          node,
-          loc: {
-            start: sourceCode.getLocFromIndex(start),
-            end: sourceCode.getLocFromIndex(start + match[0].length),
-          },
-          messageId: "scripting",
-        });
-      }
-    };
+    const report = (node) => context.report({ node, messageId: "scripting" });
     return {
-      Literal(node) {
-        if (typeof node.value === "string") check(node);
+      CallExpression(node) {
+        if (calleeName(node) !== "matchMedia") return;
+        const media = staticText(context, node.arguments[0]);
+        if (media !== null && usesScriptingMedia(media)) report(node.arguments[0]);
       },
-      TemplateElement: check,
-      JSXText: check,
+      JSXAttribute(node) {
+        if (jsxName(node.name) !== "media" || !/^[a-z]/.test(jsxName(node.parent.name))) return;
+        const media = staticText(context, node.value);
+        if (media !== null && usesScriptingMedia(media)) report(node);
+      },
+      JSXElement(node) {
+        if (jsxName(node.openingElement.name) !== "style") return;
+        const css = node.children.map((child) => staticText(context, child) ?? "").join("");
+        if (inlineCssUsesScripting(css)) report(node.openingElement);
+      },
     };
   },
 };

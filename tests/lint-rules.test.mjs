@@ -1,7 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import { ESLint, Linter, RuleTester } from "eslint";
+import { Linter, RuleTester } from "eslint";
 import { rules } from "../eslint-rules/index.mjs";
 
 RuleTester.describe = describe;
@@ -507,82 +506,43 @@ describe("spread resolution", () => {
 run("no-scripting-media-query", {
   valid: [
     `matchMedia("(prefers-reduced-motion: reduce)");`,
-    "const css = `html.js .deferred-section-content { content-visibility: auto; }`;",
     `<link rel="stylesheet" media="(min-width: 768px)" href="/a.css" />`,
-    `function describe(scripting) { return scripting; }`,
+    `<p>Pages still read without (scripting) turned on.</p>`,
+    `const label = "(scripting: none)"; render(label);`,
+    `<Video media="(scripting: none)" />`,
+    "<style>{`/* @media (scripting: none) */ .a::before { content: \"(scripting)\"; }`}</style>",
+    `<style>{css}</style>`,
   ],
   invalid: [
     {
       name: "matchMedia on the scripting feature",
-      code: `matchMedia("(scripting: none)");`,
+      code: `window.matchMedia("(scripting: none)");`,
+      errors: [{ messageId: "scripting", line: 1, column: 19 }],
+    },
+    {
+      name: "matchMedia with an escaped feature name in a template",
+      code: "matchMedia(`not (\\\\73 cripting)`);",
       errors: [{ messageId: "scripting" }],
     },
     {
-      name: "CSS-in-JS template with a negated scripting query",
-      code: "const css = `@media not (scripting) { .x { display: none; } }`;",
+      name: "matchMedia on a query built from a constant",
+      code: `const noJs = "(SCRIPTING: " + "none)"; globalThis["matchMedia"](noJs);`,
       errors: [{ messageId: "scripting" }],
     },
     {
       name: "link media attribute",
-      code: `<link rel="stylesheet" media="( SCRIPTING : initial-only )" href="/a.css" />`,
+      code: `<link rel="stylesheet" media="screen and ( scripting : initial-only )" href="/a.css" />`,
       errors: [{ messageId: "scripting" }],
     },
     {
-      name: "inline style element text",
-      code: `<style>@media (scripting: enabled) and (min-width: 1px)</style>`,
+      name: "style media attribute in an expression",
+      code: "<style media={`(scr\\\\ipting: enabled)`}>{`.a { color: red; }`}</style>",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "inline style element with a scripting block",
+      code: "const css = `@media (scripting: none) { .x { display: block; } }`; <style>{css}</style>;",
       errors: [{ messageId: "scripting" }],
     },
   ],
-});
-
-describe("no-scripting-media-query on stylesheets", () => {
-  const eslint = new ESLint();
-  const lintCss = async (code, filePath) => {
-    const [result] = await eslint.lintText(code, { filePath });
-    return result.messages.map(({ ruleId, line, column }) => ({ ruleId, line, column }));
-  };
-
-  it("fails on the scripting blocks src/index.css had before #317", async () => {
-    const before = [
-      ".deferred-section-content {",
-      "  content-visibility: auto;",
-      "}",
-      "",
-      "@media (scripting: none) {",
-      "  .deferred-section-content {",
-      "    content-visibility: visible;",
-      "  }",
-      "}",
-      "",
-      "@media (scripting: none) {",
-      "  html {",
-      "    scroll-behavior: auto;",
-      "  }",
-      "}",
-    ].join("\n");
-    assert.deepEqual(await lintCss(before, "src/index.css"), [
-      { ruleId: "roo/no-scripting-media-query", line: 5, column: 8 },
-      { ruleId: "roo/no-scripting-media-query", line: 11, column: 8 },
-    ]);
-  });
-
-  it("catches every form in CSS modules and app stylesheets", async () => {
-    const forms = [
-      "@media (scripting) {}",
-      "@media not (scripting) {}",
-      "@media (scripting: enabled) {}",
-      "@media (scripting:initial-only) {}",
-      "@import url(no-js.css) (/* x */ Scripting /* y */ : none);",
-      "@custom-media --no-js (scripting: none);",
-    ];
-    for (const filePath of ["src/components/Card.module.css", "app/tourney/results.css"]) {
-      const messages = await lintCss(forms.join("\n"), filePath);
-      assert.deepEqual(messages.map(({ line }) => line), [1, 2, 3, 4, 5, 6], filePath);
-    }
-  });
-
-  it("passes on the current src/index.css and ignores CSS text with backticks and escapes", async () => {
-    assert.deepEqual(await lintCss(fs.readFileSync("src/index.css", "utf8"), "src/index.css"), []);
-    assert.deepEqual(await lintCss('.a::before { content: "`${x}\\\\"; }', "src/a.css"), []);
-  });
 });

@@ -11,7 +11,7 @@ import noHiddenServerMotion from "./no-hidden-server-motion.mjs";
 import noIgnoredWriteRequest from "./no-ignored-write-request.mjs";
 import noLowContrastText from "./no-low-contrast-text.mjs";
 import noNestedComponents from "./no-nested-components.mjs";
-import noScriptingMediaQuery, { cssAsText } from "./no-scripting-media-query.mjs";
+import noScriptingMediaQuery from "./no-scripting-media-query.mjs";
 import noUnguardedTimerNavigation from "./no-unguarded-timer-navigation.mjs";
 
 export const rules = {
@@ -32,4 +32,4 @@ export const rules = {
   "no-unguarded-timer-navigation": noUnguardedTimerNavigation,
 };
 
-export default { meta: { name: "roo" }, rules, processors: { "css-as-text": cssAsText } };
+export default { meta: { name: "roo" }, rules };

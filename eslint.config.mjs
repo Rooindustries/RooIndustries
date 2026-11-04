@@ -9,7 +9,6 @@ export default [
   { ignores: ["src/**/__tests__/**"] },
   {
     files: ["src/**/*.{js,jsx,mjs,cjs}", "app/**/*.{js,jsx,mjs,cjs}", "middleware.js"],
-    ignores: ["**/*.css/**"],
     linterOptions: { reportUnusedDisableDirectives: "off" },
     languageOptions: {
       ecmaVersion: "latest",
@@ -31,15 +30,5 @@ export default [
   {
     files: ["src/components/BookingForm.jsx"],
     rules: { "roo/no-client-only-public-content": "off" },
-  },
-  {
-    files: ["src/**/*.css", "app/**/*.css"],
-    plugins: { roo },
-    processor: "roo/css-as-text",
-  },
-  {
-    files: ["**/*.css/*.js"],
-    plugins: { roo },
-    rules: ruleSet(["no-scripting-media-query"]),
   },
 ];
