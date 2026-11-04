@@ -82,37 +82,63 @@ const procOf = (child) => `self/fd/${handles.get(child)}`;
 const unreaped = (child) => handles.has(child) && fs.existsSync(`/proc/${procOf(child)}/stat`);
 const running = (child) => handles.has(child) && live(procOf(child));
 
+const namespaceMembers = (namespace) => namespace
+  ? fs.readdirSync("/proc").filter((entry) => /^\d+$/.test(entry) && namespaceOf(entry, "pid") === namespace && live(entry))
+  : [];
+
+const pins = new WeakMap();
+const drains = new WeakMap();
+
+const pinNamespace = (child) => {
+  if (pins.has(child)) return true;
+  if (!running(child)) return false;
+  let fd;
+  try {
+    fd = fs.openSync(`/proc/${procOf(child)}/ns/pid_for_children`, "r");
+  } catch {
+    return false;
+  }
+  let namespace = null;
+  try {
+    namespace = fs.readlinkSync(`/proc/self/fd/${fd}`);
+  } catch {}
+  if (!namespace || namespace === namespaceOf("self", "pid")) {
+    fs.closeSync(fd);
+    return false;
+  }
+  pins.set(child, { fd, namespace });
+  return true;
+};
+
+const drain = (child) => {
+  if (!drains.has(child)) {
+    drains.set(child, (async () => {
+      const pinned = pins.get(child);
+      if (!pinned) return;
+      try {
+        while (namespaceMembers(pinned.namespace).length) await pause(50);
+      } finally {
+        pins.delete(child);
+        fs.closeSync(pinned.fd);
+      }
+    })());
+  }
+  return drains.get(child);
+};
+
 const track = (child) => {
   const fd = fs.openSync(`/proc/${child.pid}`, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
   handles.set(child, fd);
   child.once("exit", () => {
     handles.delete(child);
     fs.closeSync(fd);
+    drain(child);
   });
-};
-
-const childNamespace = (child) => {
-  const namespace = unreaped(child) ? namespaceOf(procOf(child), "pid_for_children") : null;
-  return namespace === namespaceOf("self", "pid") ? null : namespace;
-};
-
-const namespaceMembers = (namespace) => namespace
-  ? fs.readdirSync("/proc").filter((entry) => /^\d+$/.test(entry) && namespaceOf(entry, "pid") === namespace && live(entry))
-  : [];
-
-const pinNamespace = (child) => {
-  if (!childNamespace(child)) return null;
-  try {
-    const fd = fs.openSync(`/proc/${procOf(child)}/ns/pid_for_children`, "r");
-    return { fd, namespace: fs.readlinkSync(`/proc/self/fd/${fd}`) };
-  } catch {
-    return null;
-  }
 };
 
 export const ownsPorts = (child, host, ports) => {
   const open = new Set();
-  for (const member of namespaceMembers(childNamespace(child))) {
+  for (const member of namespaceMembers(pins.get(child)?.namespace)) {
     try {
       for (const fd of fs.readdirSync(`/proc/${member}/fd`)) {
         try { open.add(fs.readlinkSync(`/proc/${member}/fd/${fd}`)); } catch {}
@@ -144,23 +170,19 @@ export const stopChild = (child, grace = 5000) => {
   if (!child.pid) return Promise.resolve();
   if (!stops.has(child)) {
     stops.set(child, (async () => {
-      const pinned = pinNamespace(child);
-      try {
+      pinNamespace(child);
+      if (!exited(child)) {
+        const ended = new Promise((resolve) => child.once("exit", resolve));
+        signalGroup(child, "SIGTERM");
+        let timer;
+        await Promise.race([ended, new Promise((resolve) => { timer = setTimeout(resolve, grace); })]);
+        clearTimeout(timer);
         if (!exited(child)) {
-          const ended = new Promise((resolve) => child.once("exit", resolve));
-          signalGroup(child, "SIGTERM");
-          let timer;
-          await Promise.race([ended, new Promise((resolve) => { timer = setTimeout(resolve, grace); })]);
-          clearTimeout(timer);
-          if (!exited(child)) {
-            signalGroup(child, "SIGKILL");
-            await ended;
-          }
+          signalGroup(child, "SIGKILL");
+          await ended;
         }
-        while (pinned && namespaceMembers(pinned.namespace).length) await pause(50);
-      } finally {
-        if (pinned) fs.closeSync(pinned.fd);
       }
+      await drain(child);
     })());
   }
   return stops.get(child);
@@ -223,7 +245,7 @@ const launcher = (held) => (command, args, options = {}) => {
   const lifeline = child.stdio[3];
   lifeline?.on("error", () => {});
   lifeline?.once("data", () => {
-    if (running(child)) lifeline.end("\n", () => lifeline.destroy());
+    if (!stops.has(child) && pinNamespace(child)) lifeline.end("\n", () => lifeline.destroy());
     else lifeline.destroy();
   });
   launched.add(child);

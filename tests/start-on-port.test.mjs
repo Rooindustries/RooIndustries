@@ -223,7 +223,7 @@ setInterval(() => {}, 1000);`], { stdio: ["ignore", "pipe", "ignore"] });
   await within(closed, 3000);
 });
 
-test("a leader that exits on its own still takes its descendants down", async () => {
+test("a leader that exits on its own takes its descendants down and its group is never signalled again", async (t) => {
   let closed;
   const { child } = await startChildOnPorts({
     host,
@@ -242,6 +242,10 @@ process.stdin.once("data", () => { server.close(); process.exit(0); });`], { std
   child.stdin.end("exit\n");
   await once(child, "exit");
   assert.equal(child.exitCode, 0);
+  const kill = t.mock.method(process, "kill");
+  await stopChild(child, 500);
+  assert.deepEqual(kill.mock.calls.filter(({ arguments: [pid] }) => pid === -child.pid || pid === child.pid), []);
+  kill.mock.restore();
   await within(closed, 3000);
 });
 
@@ -529,6 +533,52 @@ process.exit(0);`;
   const result = JSON.parse(run.stdout.trim().split("\n").at(-1));
   assert.equal(result.reused, true, "the second fixture's PID was not reused, so the race never happened");
   assert.equal(result.victimAlive, true, "stopping the second fixture signalled the unrelated process that took its PID");
+});
+
+test("stopChild waits for a namespace that outlives its reaped wrapper before the port is reused", async () => {
+  const syscalls = { x64: 101, arm64: 117 };
+  assert.ok(syscalls[process.arch], `no ptrace syscall number for ${process.arch}`);
+  const marker = `held-at-exit-${process.pid}`;
+  const { ports: [port], child } = await startChildOnPorts({
+    host,
+    requested: [0],
+    isReady: answers,
+    output: () => "",
+    spawnChild: ([candidate], launch) => launch.spawn(process.execPath, ["-e", server(candidate, false), marker]),
+  });
+  const owner = fs.readdirSync("/proc").find((entry) => {
+    try {
+      const args = fs.readFileSync(`/proc/${entry}/cmdline`, "utf8").split("\0");
+      return args[0] === process.execPath && args.includes(marker);
+    } catch {
+      return false;
+    }
+  });
+  assert.ok(owner, "the port owner was not found");
+  const tracer = spawn("perl", ["-e", "syscall($ARGV[0] + 0, 0x4206, $ARGV[1] + 0, 0, 0x40) == 0 or die \"seize: $!\\n\"; $| = 1; print \"seized\\n\"; sleep 60", String(syscalls[process.arch]), owner], { stdio: ["ignore", "pipe", "inherit"] });
+  try {
+    await once(tracer.stdout, "data");
+    await dismiss(port);
+    const state = () => { try { return fs.readFileSync(`/proc/${owner}/stat`, "utf8").split(") ")[1][0]; } catch { return null; } };
+    const deadline = Date.now() + 5000;
+    while (state() !== "t") {
+      assert.ok(Date.now() < deadline, "the port owner never stopped at exit");
+      await pause(20);
+    }
+    process.kill(child.pid, "SIGKILL");
+    await once(child, "exit");
+    let stopped = false;
+    const stopping = stopChild(child, 200).then(() => { stopped = true; });
+    await pause(1500);
+    assert.equal(stopped, false, "stopChild returned while the namespace still held the port");
+    await assert.rejects(competitor(port), { code: "EADDRINUSE" });
+    tracer.kill("SIGKILL");
+    await within(stopping, 5000);
+    await close(await competitor(port));
+  } finally {
+    tracer.kill("SIGKILL");
+    await stopChild(child);
+  }
 });
 
 test("a fixture started while its parent dies never runs", async () => {
