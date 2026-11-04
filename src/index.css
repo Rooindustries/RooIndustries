@@ -487,14 +487,12 @@ html.js {
   scroll-behavior: smooth;
 }
 
-.ri-hero-heading-line,
-.ri-hero-cta-note p {
+.ri-hero-heading-line {
   white-space: normal;
   text-wrap: balance;
 }
 
-html.js .ri-hero-heading-line,
-html.js .ri-hero-cta-note p {
+html.js .ri-hero-heading-line {
   text-wrap: wrap;
   white-space: nowrap;
 }
@@ -2178,15 +2176,6 @@ html[data-theme="dark"] .ri-discord-guide-link {
 
 html[data-theme="dark"] .hero-subtext-accent {
   color: #e6e6e2;
-}
-
-html[data-theme="dark"] .ri-hero-cta-note .gold-flair-text {
-  background: none;
-  -webkit-background-clip: border-box;
-  background-clip: border-box;
-  -webkit-text-fill-color: #deded9;
-  color: #deded9;
-  text-shadow: none;
 }
 
 html[data-theme="dark"] .ri-review-card-standard {
