@@ -7,6 +7,7 @@ import childProcess from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
 import { promisify } from "node:util";
 import { getGlobalDispatcher, setGlobalDispatcher } from "undici";
+import { appendNodeOption } from "./node-options.mjs";
 
 const connect = net.createConnection;
 const isPrivateTestHost = value => {
@@ -74,24 +75,7 @@ const nonNodeBinaries = new Set(["postgres", "postgrest", "pg_ctl", "initdb", "p
 
 const originalInheritedOrigins = process.env.ROO_TEST_NETWORK_ORIGINS;
 const serializeChildOrigins = () => JSON.stringify(childGuardOrigins.reduce((origins, allowed) => origins.filter(origin => allowed.includes(origin))));
-const appendChildGuardOptions = value => {
-  let nodeOptions = String(value ?? "");
-  const tokens = [];
-  let token = "", quoted = false;
-  for (let index = 0; index < nodeOptions.length; index++) {
-    const character = nodeOptions[index];
-    if (character === "\\" && quoted && index + 1 < nodeOptions.length) token += nodeOptions[++index];
-    else if (character === '"') quoted = !quoted;
-    else if (!quoted && /\s/.test(character)) { if (token) tokens.push(token); token = ""; }
-    else token += character;
-  }
-  if (token) tokens.push(token);
-  for (const preload of childGuardImports) {
-    const option = `--import=${JSON.stringify(preload)}`;
-    if (!tokens.some((token, index) => token === `--import=${preload}` || token === "--import" && tokens[index + 1] === preload)) nodeOptions += `${nodeOptions ? " " : ""}${option}`;
-  }
-  return nodeOptions;
-};
+const appendChildGuardOptions = value => [...childGuardImports].reduce((nodeOptions, preload) => appendNodeOption(nodeOptions, "--import", preload), String(value ?? ""));
 const refreshInheritedGuardEnvironment = () => {
   process.env.NODE_OPTIONS = appendChildGuardOptions(process.env.NODE_OPTIONS);
   if (childGuardOrigins.length) process.env.ROO_TEST_NETWORK_ORIGINS = serializeChildOrigins();

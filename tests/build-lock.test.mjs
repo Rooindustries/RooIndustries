@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { after, test } from "node:test";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { lockBuildDirectory } from "../scripts/lib/build-lock.mjs";
 
 const library = new URL("../scripts/lib/build-lock.mjs", import.meta.url).href;
@@ -266,6 +266,34 @@ test("a checkout path with spaces still locks every Node process of the build", 
   const checkout = path.join(scratchRoot("roo build lock "), "checkout with \"quotes\" and spaces");
   fs.cpSync(new URL("../scripts/lib", import.meta.url), path.join(checkout, "scripts", "lib"), { recursive: true });
   await outlivingWorker(pathToFileURL(path.join(checkout, "scripts", "lib", "build-lock.mjs")).href);
+});
+
+test("a server started from a checkout path with spaces and quotes loads its network guard and build lock in every child", async () => {
+  const repo = new URL("../", import.meta.url);
+  const checkout = path.join(scratchRoot("roo node options "), "checkout with \"quotes\" and spaces");
+  fs.cpSync(new URL("scripts/lib", repo), path.join(checkout, "scripts", "lib"), { recursive: true });
+  fs.copyFileSync(new URL("next.config.mjs", repo), path.join(checkout, "next.config.mjs"));
+  for (const name of ["src", "node_modules"]) fs.symlinkSync(fileURLToPath(new URL(name, repo)), path.join(checkout, name));
+  const lib = (name) => import(pathToFileURL(path.join(checkout, "scripts", "lib", name)).href);
+  const [{ withNodeOption }, checkoutLock] = await Promise.all([lib("node-options.mjs"), lib("build-lock.mjs")]);
+  const guard = path.join(checkout, "scripts", "lib", "test-target-safety.mjs");
+  const dir = scratchDir();
+  const lock = checkoutLock.lockBuildDirectory(dir);
+  try {
+    const serverEnv = withNodeOption({ PATH: process.env.PATH, HOME: process.env.HOME, TOOLING_NETWORK_GUARD: "1", BASE_URL: "http://127.0.0.1:9", NODE_OPTIONS: "--no-warnings" }, "--import", guard);
+    assert.equal(withNodeOption(serverEnv, "--import", guard).NODE_OPTIONS, serverEnv.NODE_OPTIONS);
+    const outside = `fetch("http://outside.fixture.invalid/").then(() => "reached", (error) => String(error.cause?.message ?? error.message))`;
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", `import { execFileSync } from "node:child_process";
+const grandchild = execFileSync(process.execPath, ["-e", ${JSON.stringify(`${outside}.then(console.log)`)}], { encoding: "utf8" }).trim();
+console.log(JSON.stringify({ lock: process.env.ROO_BUILD_LOCK, child: await ${outside}, grandchild }));`], { cwd: checkout, env: lock.childEnv(serverEnv), encoding: "utf8", timeout: 30000 });
+    assert.equal(child.status, 0, child.stderr);
+    const proof = JSON.parse(child.stdout);
+    assert.equal(proof.lock, path.resolve(dir));
+    assert.match(proof.child, /\[test-target\]/);
+    assert.match(proof.grandchild, /\[test-target\]/);
+  } finally {
+    lock.release();
+  }
 });
 
 test("a worker paused before its preload never joins a run that started after its own run ended", async () => {

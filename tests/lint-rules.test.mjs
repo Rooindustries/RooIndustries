@@ -477,6 +477,53 @@ run("no-nested-components", {
   ],
 });
 
+run("no-hand-built-node-options", {
+  valid: [
+    `const env = withNodeOption({ PATH: process.env.PATH }, "--import", guard);`,
+    `spawn(node, [], { env: { NODE_OPTIONS: process.env.NODE_OPTIONS } });`,
+    `const env = { NODE_OPTIONS: "--no-warnings" };`,
+    `process.env.NODE_OPTIONS = appendNodeOption(process.env.NODE_OPTIONS, "--import", guard);`,
+    `const label = \`--import=\${guard}\`;`,
+  ],
+  invalid: [
+    {
+      name: "UI sweep server before this change",
+      code: "const env = { TOOLING_NETWORK_GUARD: '1', NODE_OPTIONS: `--import=${path.resolve('scripts/lib/test-target-safety.mjs')}` };",
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "build lock before this change",
+      code: 'const childEnv = (env) => ({ ...env, NODE_OPTIONS: [env.NODE_OPTIONS, `--require ${quote(holder)}`].filter(Boolean).join(" ") });',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "tooling sweep before this change",
+      code: "const env = { NODE_OPTIONS: imports.map(file => `--import=${file}`).join(' ') };",
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "remote browser guard test before this change",
+      code: 'const env = { NODE_OPTIONS: "--import=" + pathToFileURL(guard) };',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "optional preload picked in a conditional",
+      code: "const env = { NODE_OPTIONS: clock ? `--import=${clock}` : undefined };",
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "appended to an existing value",
+      code: 'env["NODE_OPTIONS"] += ` --require ${holder}`;',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "assigned on process.env",
+      code: "process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS} --import=${guard}`;",
+      errors: [{ messageId: "handBuilt" }],
+    },
+  ],
+});
+
 describe("spread resolution", () => {
   const layers = Array.from({ length: 24 }, (_, index) => `const s${index + 1} = { ...s${index}, ...s${index} };`);
   const nested = `const s0 = { method: "POST", signal: requestDeadline(), opacity: 1 }; ${layers.join(" ")}`;
