@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { reportContentLoadError } from "../lib/contentLoadErrors";
 import { urlFor } from "../lib/cmsImageUrl";
 import { getPublicContent } from "../lib/publicContentClient";
 import { Link } from "react-router-dom";
@@ -42,7 +43,7 @@ export default function Benchmarks({ initialData = null, setIsModalOpen = () => 
       .then((rows) => {
         if (Array.isArray(rows)) setBenchmarks(rows);
       })
-      .catch(console.error);
+      .catch(reportContentLoadError);
   }, []);
 
   return (

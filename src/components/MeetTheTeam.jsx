@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { reportContentLoadError } from "../lib/contentLoadErrors";
 import { urlFor } from "../lib/cmsImageUrl";
 import { getPublicContent } from "../lib/publicContentClient";
 
@@ -299,7 +300,7 @@ export default function MeetTheTeam({ onSeoData, initialData = null }) {
     if (initialData) return;
     getPublicContent("team")
       .then(setRawData)
-      .catch(console.error);
+      .catch(reportContentLoadError);
   }, []);
 
   const resolved = useMemo(() => {

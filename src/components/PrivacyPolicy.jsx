@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { reportContentLoadError } from "../lib/contentLoadErrors";
 import { normalizePolicyLink } from "../lib/policyLinks";
 import { PortableText } from "@portabletext/react";
 import { getPublicContent } from "../lib/publicContentClient";
@@ -38,7 +39,7 @@ export default function PrivacyPolicy({ initialData = null }) {
       .then((next) => {
         if (next) setData(next);
       })
-      .catch(console.error);
+      .catch(reportContentLoadError);
   }, []);
 
   if (!data) return null;

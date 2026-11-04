@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { reportContentLoadError } from "../lib/contentLoadErrors";
 import { getPublicContent } from "../lib/publicContentClient";
 import { Link } from "react-router-dom";
 
@@ -53,7 +54,7 @@ export default function Tools({ initialData = null }) {
           setLoading(false);
         }
       } catch (err) {
-        console.error("Error fetching tools:", err);
+        reportContentLoadError("Error fetching tools:", err);
         if (!cancelled) {
           setLoadError(true);
           setLoading(false);

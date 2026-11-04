@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { reportContentLoadError } from "../lib/contentLoadErrors";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 
 /* Record card design tokens — all theme accents derive from the active palette. */
@@ -46,7 +47,7 @@ export default function About({ initialData = null, compact = false }) {
     if (aboutData !== null) return;
     fetchHomeSectionData(HOME_SECTION_DATA_KEYS.about)
       .then(setAboutData)
-      .catch(console.error);
+      .catch(reportContentLoadError);
   }, [aboutData]);
 
   if (!aboutData) {
