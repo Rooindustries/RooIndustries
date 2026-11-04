@@ -128,6 +128,7 @@ await new Promise((resolve) => process.stdin.once("data", resolve));
 await releaseTcpPorts(${JSON.stringify(host)}, [${port}]);
 process.stdout.write("released\\n");`;
   const child = spawn(process.execPath, ["--input-type=module", "-e", program], { env: { PATH: process.env.PATH, ...passed.env }, stdio: ["pipe", "pipe", "inherit", ...passed.stdio] });
+  await passed.handOver(child);
   await releaseTcpPorts(host, [port]);
   const lines = [];
   const next = () => new Promise((resolve) => child.stdout.once("data", (chunk) => { lines.push(String(chunk).trim()); resolve(); }));

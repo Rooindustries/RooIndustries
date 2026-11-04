@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import net from "node:net";
 import { once } from "node:events";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { freeTcpPorts, passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "./free-tcp-port.mjs";
 
 export const addressInUse = (output) => /EADDRINUSE|Address already in use|\(Address in use\)/.test(output);
@@ -61,18 +61,23 @@ const listeningSockets = (host, port) => {
   return sockets;
 };
 
-const groupMembers = (group) => fs.readdirSync("/proc").filter((entry) => /^\d+$/.test(entry)).filter((pid) => {
+const namespaceOf = (pid, kind) => {
   try {
-    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
-    return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2]) === group;
+    return fs.readlinkSync(`/proc/${pid}/ns/${kind}`);
   } catch {
-    return false;
+    return null;
   }
-});
+};
 
-export const ownsPorts = (group, host, ports) => {
+const namespaceMembers = (wrapper) => {
+  const namespace = namespaceOf(wrapper, "pid_for_children");
+  if (!namespace || namespace === namespaceOf("self", "pid")) return [];
+  return fs.readdirSync("/proc").filter((entry) => /^\d+$/.test(entry) && namespaceOf(entry, "pid") === namespace);
+};
+
+export const ownsPorts = (wrapper, host, ports) => {
   const open = new Set();
-  for (const member of groupMembers(group)) {
+  for (const member of namespaceMembers(wrapper)) {
     try {
       for (const fd of fs.readdirSync(`/proc/${member}/fd`)) {
         try { open.add(fs.readlinkSync(`/proc/${member}/fd/${fd}`)); } catch {}
@@ -106,10 +111,23 @@ export const stopChild = async (child, grace = 5000) => {
 };
 
 const launched = new WeakSet();
+const containment = ["--pdeathsig", "KILL", "--", "unshare", "--user", "--map-current-user", "--pid", "--fork", "--kill-child", "--mount-proc", "--", "/bin/sh", "-c", "exec 9<&0; \"$@\" <&9 9<&- & wait $!", "sh"];
+let contained = false;
+
+const requireContainment = () => {
+  if (contained) return;
+  const probe = spawnSync("setpriv", [...containment, "true"], { encoding: "utf8" });
+  if (probe.status !== 0) {
+    const reason = (probe.error?.message || probe.stderr || `exit ${probe.status}`).trim();
+    throw new Error(`Fixture children run in their own PID namespace, and this machine refused to create one: ${reason}. Allow unprivileged user namespaces for unshare (on Ubuntu 24.04, the AppArmor profile in .github/actions/setup/action.yml).`);
+  }
+  contained = true;
+};
 
 const launcher = (held) => (command, args, options = {}) => {
+  requireContainment();
   const stdio = typeof options.stdio === "string" ? Array(3).fill(options.stdio) : [...(options.stdio || ["ignore", "ignore", "ignore"])];
-  const child = spawn(command, args, {
+  const child = spawn("setpriv", [...containment, command, ...args], {
     ...options,
     detached: true,
     env: { ...(options.env || process.env), ...held.env },
@@ -128,6 +146,15 @@ const waitUntilReady = async ({ child, host, ports, isReady, output, timeout, fa
     await pause(100);
   }
   throw new Error(`Child was not ready within ${timeout} ms:\n${output()}`);
+};
+
+const within = async (promise, timeout, message, output) => {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((resolve, reject) => { timer = setTimeout(() => reject(new Error(`${message}\n${output()}`)), timeout); })]);
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 const choosePorts = async (host, wanted, passHeld, probe = false) => {
@@ -154,7 +181,10 @@ export const startChildOnPorts = async ({ host, requested, preferred, spawnChild
       child = spawnChild(ports, { spawn: launcher(held) });
       if (!launched.has(child)) throw new Error("spawnChild must start its child with launch.spawn.");
       child.once("error", (error) => { spawnError = error; });
-      if (passHeld) await releaseTcpPorts(host, ports);
+      if (passHeld) {
+        await within(held.handOver(child), timeout, `Child did not take its held ports within ${timeout} ms:`, output);
+        await releaseTcpPorts(host, ports);
+      }
       await waitUntilReady({ child, host, ports, isReady, output, timeout, failure: () => spawnError || (!child.pid && new Error("Child did not start.")) });
       return { ports, child };
     } catch (error) {
