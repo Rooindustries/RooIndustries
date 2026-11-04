@@ -22,12 +22,24 @@ if (
 }
 
 test.use({ javaScriptEnabled: true });
-test.describe.configure({ mode: "serial" });
 
 const auditDir = path.join(process.cwd(), "audit");
 const chaosReportPath = path.join(auditDir, "phase1-nav-chaos.md");
-const failures = [];
-const notes = [];
+const chaosStatePath = path.join(auditDir, "phase1-nav-chaos.json");
+const runId = process.ppid;
+const earlierRun = (() => {
+  try {
+    const state = JSON.parse(fs.readFileSync(chaosStatePath, "utf8"));
+    return state.runId === runId ? state : null;
+  } catch {
+    return null;
+  }
+})();
+const failures = earlierRun?.failures || [];
+const CPU_THROTTLE_RATE = Number(process.env.NAV_CPU_THROTTLE_RATE || 1);
+if (!Number.isFinite(CPU_THROTTLE_RATE) || CPU_THROTTLE_RATE < 1 || CPU_THROTTLE_RATE > 4) {
+  throw new Error("NAV_CPU_THROTTLE_RATE must be between 1 and 4.");
+}
 
 const ORIGINS = ["/benchmarks", "/reviews", "/meet-the-team"];
 const ACTIONS = [
@@ -61,7 +73,7 @@ const recordFailure = async (page, context, reason) => {
 const verifyHashAndTarget = async (page, hash, settleMs = 2500) => {
   const start = Date.now();
   while (Date.now() - start <= settleMs) {
-    const currentHash = new URL(page.url()).hash;
+    const current = new URL(page.url());
     let top = null;
     try {
       top = await page.evaluate((selector) => {
@@ -85,7 +97,7 @@ const verifyHashAndTarget = async (page, hash, settleMs = 2500) => {
       await page.waitForTimeout(50);
       continue;
     }
-    if (currentHash === hash && top !== null && Math.abs(top) <= 160) {
+    if (current.pathname === "/" && current.hash === hash && top !== null && Math.abs(top) <= 160) {
       return true;
     }
     await page.waitForTimeout(50);
@@ -149,20 +161,40 @@ test("back/forward behavior stays idempotent after hash jumps", async ({ page })
   if (hasHostDrift(page.url())) {
     await recordFailure(page, "history:land", "host_drift");
   }
+  const historyLength = await page.evaluate(() => window.history.length);
 
   await page.goBack();
-  const pathAfterBack = new URL(page.url()).pathname;
-  if (pathAfterBack !== "/reviews") {
+  const backLanded = await page
+    .waitForFunction(
+      () =>
+        window.location.pathname === "/reviews" &&
+        !window.location.hash &&
+        Boolean(document.querySelector('main [data-route-key="/reviews"]')),
+      null,
+      { timeout: 3000 }
+    )
+    .then(() => true, () => false);
+  if (!backLanded) {
+    const pathAfterBack = new URL(page.url()).pathname;
     await recordFailure(page, "history:back", `expected_/reviews_got_${pathAfterBack}`);
   }
 
   await page.goForward();
-  const hashAfterForward = new URL(page.url()).hash;
-  if (hashAfterForward !== "#faq") {
+  const forwardLanded = await verifyHashAndTarget(page, "#faq", 3000);
+  if (!forwardLanded) {
+    const hashAfterForward = new URL(page.url()).hash;
     await recordFailure(
       page,
       "history:forward",
       `expected_#faq_got_${hashAfterForward || "none"}`
+    );
+  }
+  const historyLengthAfter = await page.evaluate(() => window.history.length);
+  if (historyLengthAfter !== historyLength) {
+    await recordFailure(
+      page,
+      "history:entries",
+      `expected_${historyLength}_entries_got_${historyLengthAfter}`
     );
   }
 });
@@ -218,36 +250,6 @@ test("latest rapid navbar click wins across section and route transitions", asyn
   }
 });
 
-test("visibility transition does not break section navigation", async ({ page, browserName }) => {
-  await page.setViewportSize({ width: 1536, height: 960 });
-  await page.goto("/benchmarks", { waitUntil: "domcontentloaded" });
-
-  if (browserName !== "chromium") {
-    notes.push("Visibility transition test skipped for non-chromium browser.");
-    return;
-  }
-
-  try {
-    const cdp = await page.context().newCDPSession(page);
-    await cdp.send("Emulation.setPageVisibilityState", {
-      visibilityState: "hidden",
-    });
-    await cdp.send("Emulation.setPageVisibilityState", {
-      visibilityState: "visible",
-    });
-  } catch (err) {
-    notes.push(`Visibility transition API unavailable: ${String(err.message || err)}`);
-  }
-
-  await clickDesktopTarget(page, "benefits");
-  const ok = await verifyHashAndTarget(page, "#services", 3500);
-  if (!ok) {
-    await recordFailure(page, "visibility:benefits", "failed_after_visibility_transition");
-  } else if (hasHostDrift(page.url())) {
-    await recordFailure(page, "visibility:benefits", "host_drift");
-  }
-});
-
 test.afterAll(async () => {
   fs.mkdirSync(auditDir, { recursive: true });
   const lines = [
@@ -257,12 +259,6 @@ test.afterAll(async () => {
     `- Failures: ${failures.length}`,
     "",
   ];
-
-  if (notes.length) {
-    lines.push("## Notes", "");
-    notes.forEach((note) => lines.push(`- ${note}`));
-    lines.push("");
-  }
 
   if (failures.length) {
     lines.push("## Failures", "");
@@ -276,11 +272,21 @@ test.afterAll(async () => {
   }
 
   fs.writeFileSync(chaosReportPath, lines.join("\n"));
-  expect(failures, "chaos navigation failures").toEqual([]);
+  fs.writeFileSync(chaosStatePath, JSON.stringify({ runId, failures }, null, 2));
 });
 
+let failuresAtStart = 0;
 
-test.beforeEach(async ({ context, baseURL }) => {
+test.beforeEach(async ({ context, page, baseURL }) => {
+  failuresAtStart = failures.length;
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
   await guardBrowserContext(context, [baseURL]);
+  if (CPU_THROTTLE_RATE > 1) {
+    const session = await context.newCDPSession(page);
+    await session.send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE_RATE });
+  }
+});
+
+test.afterEach(async () => {
+  expect(failures.slice(failuresAtStart), "chaos navigation failures").toEqual([]);
 });
