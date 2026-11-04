@@ -163,10 +163,6 @@ export default function PerfDebugOverlay() {
         label: "Pause reviews autoplay",
       },
       {
-        key: PERF_TOGGLE_KEYS.PAUSE_HOWITWORKS_VIDEOS,
-        label: "Pause how-it-works videos",
-      },
-      {
         key: PERF_TOGGLE_KEYS.NO_GLOW_ANIMATIONS,
         label: "Disable glow/shimmer animations",
       },

@@ -23,7 +23,7 @@ import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
 const DEFERRED_HEIGHTS = {
   packages: "[--deferred-height:2800px] xl:[--deferred-height:1370px]",
-  howItWorks: "[--deferred-height:1970px] sm:[--deferred-height:1140px] lg:[--deferred-height:690px]",
+  howItWorks: "[--deferred-height:1200px] sm:[--deferred-height:785px] lg:[--deferred-height:560px]",
   supportedGames: "[--deferred-height:420px]",
   faq: "[--deferred-height:1180px]",
   referral: "[--deferred-height:300px] sm:[--deferred-height:175px] lg:[--deferred-height:128px]",
