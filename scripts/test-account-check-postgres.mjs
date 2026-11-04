@@ -4,9 +4,10 @@ import fs from "node:fs/promises";
 import { bootstrapSupabaseNativeAccount } from "../src/server/supabase/accounts.js";
 import { createSweepPostgresFixture } from "./lib/sweep-postgres-fixture.mjs";
 import { installNetworkGuard, localOrigin, refuseEnvFiles } from "./lib/test-target-safety.mjs";
+import { portFromEnv } from "./lib/free-tcp-port.mjs";
 
 refuseEnvFiles();
-const requested = Number(process.env.ACCOUNT_CHECK_TEST_PORT || 0);
+const requested = portFromEnv("ACCOUNT_CHECK_TEST_PORT");
 let restoreNetwork;
 const accountCount = 40;
 const results = [];

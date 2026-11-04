@@ -7,7 +7,8 @@ import path from 'node:path';
 import { once } from 'node:events';
 import { spawn, spawnSync } from 'node:child_process';
 import { createClient } from '@supabase/supabase-js';
-import { addressInUse, releaseTcpPorts, startOnFreePort } from './free-tcp-port.mjs';
+import { listenOnPort, releaseTcpPorts, reserveTcpPorts } from './free-tcp-port.mjs';
+import { startChildOnPorts } from './start-on-port.mjs';
 import { createSweepPostgresFixture, root } from './sweep-postgres-fixture.mjs';
 import { installNetworkGuard } from './test-target-safety.mjs';
 
@@ -48,10 +49,12 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
   const storageLog = path.join(scratch, 'storage.log');
   let database, storageProcess, gateway, restoreGuard, failedDatabaseScratch;
   let storagePort, storageUrl, gatewayPort, supabaseUrl;
+  const explicitPorts = [ports.storage, ports.gateway, ports.postgres, ports.rest ?? ports.postgrest, ports.proxy].filter(Boolean);
   let serviceRoleKey, anonKey;
   const cleanup = { storagePid: null, postgresPid: null, postgrestPid: null, databaseScratch: null, storageScratch: scratch, stopped: false };
   let stopping;
   const stop = () => stopping ||= (async () => {
+    await releaseTcpPorts(host, explicitPorts);
     if (gateway) { gateway.closeAllConnections(); await new Promise(resolve => gateway.close(resolve)); gateway = null; }
     await terminate(storageProcess);
     if (database) await database.stop();
@@ -62,10 +65,9 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
     return { ...cleanup, stopped: true, storageExited: !cleanup.storagePid || !isAlive(cleanup.storagePid), postgresExited: !cleanup.postgresPid || !isAlive(cleanup.postgresPid), postgrestExited: !cleanup.postgrestPid || !isAlive(cleanup.postgrestPid), storageScratchRemoved: !fs.existsSync(scratch), databaseScratchRemoved: !databaseScratch || !fs.existsSync(databaseScratch) };
   })();
   try {
+    await reserveTcpPorts(host, explicitPorts);
     gateway = http.createServer();
-    if (ports.gateway) await releaseTcpPorts(host, [ports.gateway]);
-    gateway.listen(ports.gateway ?? 0, host);
-    await once(gateway, 'listening');
+    await listenOnPort(gateway, host, ports.gateway ?? 0);
     gatewayPort = gateway.address().port;
     supabaseUrl = `http://${host}:${gatewayPort}`;
     fs.mkdirSync(filePath);
@@ -75,44 +77,46 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
       cleanup.databaseScratch = context.scratch;
       serviceRoleKey = jwt(context.jwtSecret, 'service_role');
       anonKey = jwt(context.jwtSecret, 'anon');
-      storagePort = await startOnFreePort(host, ports.storage, async (port) => {
-        storageUrl = `http://${host}:${port}`;
-        const logFd = fs.openSync(storageLog, 'w', 0o600);
-        const childEnv = {
-          PATH: process.env.PATH, HOME: scratch, TMPDIR: scratch, NODE_ENV: 'test',
-          ROO_TEST_NETWORK_ORIGINS: JSON.stringify([storageUrl, supabaseUrl]),
-          DATABASE_URL: context.databaseUrl, DATABASE_POOL_URL: context.databaseUrl,
-          AUTH_JWT_SECRET: context.jwtSecret, PGRST_JWT_SECRET: context.jwtSecret,
-          AUTH_JWT_ALGORITHM: 'HS256', SERVICE_KEY: serviceRoleKey, ANON_KEY: anonKey,
-          AUTH_ENCRYPTION_KEY: crypto.randomBytes(32).toString('hex'),
-          SERVER_HOST: host, SERVER_PORT: String(port), TENANT_ID: 'roo-storage-fixture',
-          STORAGE_BACKEND: 'file', FILE_STORAGE_BACKEND_PATH: filePath, STORAGE_S3_BUCKET: 'roo-local-files',
-          FILE_SIZE_LIMIT: '2147483648', FILE_SIZE_LIMIT_STANDARD_UPLOAD: '2147483648',
-          UPLOAD_SIGNED_URL_EXPIRATION_TIME: String(signedUploadExpirationSeconds),
-          DB_INSTALL_ROLES: 'true', DB_SUPER_USER: os.userInfo().username,
-          PG_QUEUE_ENABLE: 'false', S3_PROTOCOL_ENABLED: 'false', MULTI_TENANT: 'false',
-          EXPOSE_DOCS: 'false', LOGFLARE_ENABLED: 'false', TRACING_ENABLED: 'false',
-          VECTOR_ENABLED: 'false', VECTOR_STORE_MIGRATIONS_ENABLED: 'false',
-          TUS_URL_PATH: '/upload/resumable', TUS_LOCK_TYPE: 'postgres',
-          STORAGE_PUBLIC_URL: supabaseUrl, REQUEST_ALLOW_X_FORWARDED_PATH: 'true',
-          VERSION: storageRelease.tag,
-        };
-        storageProcess = spawn(process.execPath, [path.join(storageSource, 'dist/start/server.js')], { cwd: scratch, env: childEnv, stdio: ['ignore', logFd, logFd] });
-        fs.closeSync(logFd);
-        cleanup.storagePid = storageProcess.pid;
-        for (let attempt = 0; attempt < 300; attempt++) {
-          if (storageProcess.exitCode !== null) {
-            const log = fs.readFileSync(storageLog, 'utf8').replace(/eyJ[A-Za-z0-9_.-]+/g, '[redacted-jwt]');
-            throw addressInUse(new Error(log), log);
-          }
+      const storageOutput = () => fs.readFileSync(storageLog, 'utf8').replace(/eyJ[A-Za-z0-9_.-]+/g, '[redacted-jwt]');
+      ({ ports: [storagePort], child: storageProcess } = await startChildOnPorts({
+        host,
+        requested: [ports.storage ?? 0],
+        output: storageOutput,
+        isReady: async () => {
           try {
-            const response = await fetch(`${storageUrl}/status`, { signal: AbortSignal.timeout(500) });
-            if (response.status === 200) return port;
-          } catch {}
-          if (attempt === 299) throw new Error('Official Storage readiness deadline exceeded');
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-      });
+            return (await fetch(`${storageUrl}/status`, { signal: AbortSignal.timeout(500) })).status === 200;
+          } catch {
+            return false;
+          }
+        },
+        spawnChild: ([port]) => {
+          storageUrl = `http://${host}:${port}`;
+          const logFd = fs.openSync(storageLog, 'w', 0o600);
+          const childEnv = {
+            PATH: process.env.PATH, HOME: scratch, TMPDIR: scratch, NODE_ENV: 'test',
+            ROO_TEST_NETWORK_ORIGINS: JSON.stringify([storageUrl, supabaseUrl]),
+            DATABASE_URL: context.databaseUrl, DATABASE_POOL_URL: context.databaseUrl,
+            AUTH_JWT_SECRET: context.jwtSecret, PGRST_JWT_SECRET: context.jwtSecret,
+            AUTH_JWT_ALGORITHM: 'HS256', SERVICE_KEY: serviceRoleKey, ANON_KEY: anonKey,
+            AUTH_ENCRYPTION_KEY: crypto.randomBytes(32).toString('hex'),
+            SERVER_HOST: host, SERVER_PORT: String(port), TENANT_ID: 'roo-storage-fixture',
+            STORAGE_BACKEND: 'file', FILE_STORAGE_BACKEND_PATH: filePath, STORAGE_S3_BUCKET: 'roo-local-files',
+            FILE_SIZE_LIMIT: '2147483648', FILE_SIZE_LIMIT_STANDARD_UPLOAD: '2147483648',
+            UPLOAD_SIGNED_URL_EXPIRATION_TIME: String(signedUploadExpirationSeconds),
+            DB_INSTALL_ROLES: 'true', DB_SUPER_USER: os.userInfo().username,
+            PG_QUEUE_ENABLE: 'false', S3_PROTOCOL_ENABLED: 'false', MULTI_TENANT: 'false',
+            EXPOSE_DOCS: 'false', LOGFLARE_ENABLED: 'false', TRACING_ENABLED: 'false',
+            VECTOR_ENABLED: 'false', VECTOR_STORE_MIGRATIONS_ENABLED: 'false',
+            TUS_URL_PATH: '/upload/resumable', TUS_LOCK_TYPE: 'postgres',
+            STORAGE_PUBLIC_URL: supabaseUrl, REQUEST_ALLOW_X_FORWARDED_PATH: 'true',
+            VERSION: storageRelease.tag,
+          };
+          const child = spawn(process.execPath, [path.join(storageSource, 'dist/start/server.js')], { cwd: scratch, env: childEnv, stdio: ['ignore', logFd, logFd] });
+          fs.closeSync(logFd);
+          cleanup.storagePid = child.pid;
+          return child;
+        },
+      }));
     }});
     cleanup.databaseScratch = database.scratch;
     cleanup.postgrestPid = database.postgrestPid;

@@ -5,11 +5,12 @@ import { createHmac } from "node:crypto";
 import { registerHooks } from "node:module";
 import { fileURLToPath } from "node:url";
 import { installNetworkGuard, refuseEnvFiles } from "../../scripts/lib/test-target-safety.mjs";
+import { portFromEnv } from "../../scripts/lib/free-tcp-port.mjs";
 
 export async function createBookingHoldFixture() {
   refuseEnvFiles();
   const host = process.env.ROO_TEST_HOST || "127.0.0.1";
-  const requested = Number(process.env.BOOKING_HOLD_PORT || 0);
+  const requested = portFromEnv("BOOKING_HOLD_PORT");
   const server = http.createServer();
   let baseURL, origins;
   Object.assign(process.env, {

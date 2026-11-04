@@ -6,11 +6,12 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import { installNetworkGuard, refuseEnvFiles } from '../../scripts/lib/test-target-safety.mjs';
+import { portFromEnv } from '../../scripts/lib/free-tcp-port.mjs';
 
 export async function createBookingContactFixture({ artifactName = 'booking-contact' } = {}) {
   refuseEnvFiles();
   const host = process.env.ROO_TEST_HOST || '127.0.0.1';
-  const requested = Number(process.env.BOOKING_CONTACT_PORT || 0);
+  const requested = portFromEnv('BOOKING_CONTACT_PORT');
   const server = http.createServer();
   let base, origins;
   Object.assign(process.env, {

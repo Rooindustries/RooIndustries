@@ -4,12 +4,12 @@ import { openSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from './lib/test-target-safety.mjs';
-import { passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from './lib/free-tcp-port.mjs';
+import { passHeldTcpPorts, portFromEnv, releaseTcpPorts, reserveTcpPorts } from './lib/free-tcp-port.mjs';
 
 refuseEnvFiles();
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';
 const requestedOrigin = process.env.BASE_URL && new URL(localOrigin(process.env.BASE_URL));
-const requestedPort = Number(process.env.PW_PORT || requestedOrigin?.port || 0);
+const requestedPort = portFromEnv('PW_PORT') || Number(requestedOrigin?.port || 0);
 const reservePair = async (port) => (await reserveTcpPorts(host, [port, port + 1]))[0];
 let port = requestedPort && await reservePair(requestedPort);
 for (let candidate = 3459; !port; candidate += 2) {

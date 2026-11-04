@@ -4,7 +4,7 @@ import http from 'node:http';
 import { createHash } from 'node:crypto';
 import { uiRepairsFixture } from './ui-repairs-server.mjs';
 import { localOrigin } from '../../scripts/lib/test-target-safety.mjs';
-import { releaseTcpPorts } from '../../scripts/lib/free-tcp-port.mjs';
+import { listenOnPort } from '../../scripts/lib/free-tcp-port.mjs';
 import { referralEmail } from './api-routes.mjs';
 
 export async function createToolingContentFixture({ origin, artifact, apiRoutes = false, clockFile, server: shared }) {
@@ -383,8 +383,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
     return { evidence, close: async () => { shared.off('request', handle); stopped(); } };
   }
   const server = http.createServer(handle);
-  await releaseTcpPorts(target.hostname, [Number(target.port)]);
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(Number(target.port), target.hostname, resolve); });
+  await listenOnPort(server, target.hostname, Number(target.port));
   persist();
   return { evidence, close: () => new Promise(resolve => { server.close(() => { stopped(); resolve(); }); server.closeAllConnections(); }) };
 }

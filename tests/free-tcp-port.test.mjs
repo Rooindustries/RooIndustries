@@ -7,7 +7,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { test } from "node:test";
-import { addressInUse, freeTcpPort, freeTcpPorts, passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts, startOnFreePort } from "../scripts/lib/free-tcp-port.mjs";
+import { freeTcpPort, freeTcpPorts, listenOnPort, passHeldTcpPorts, portFromEnv, releaseTcpPorts, reserveTcpPorts } from "../scripts/lib/free-tcp-port.mjs";
 import { createToolingContentFixture } from "./fixtures/tooling-content.mjs";
 
 const host = "127.0.0.1";
@@ -97,26 +97,31 @@ test("a free pick never takes a port held for a later binder", async () => {
   }
 });
 
-test("an external program that loses its port starts again on a fresh one", async () => {
-  const taken = [];
-  const port = await startOnFreePort(host, 0, async (candidate) => {
-    if (taken.length < 2) {
-      taken.push(candidate);
-      throw addressInUse(new Error("bind failed"), "listen EADDRINUSE: address already in use");
-    }
-    return candidate;
-  });
-  assert.equal(taken.length, 2);
-  assert.ok(!taken.includes(port));
+test("port overrides are parsed strictly", () => {
+  assert.equal(portFromEnv("PORT", {}), 0);
+  assert.equal(portFromEnv("PORT", { PORT: "" }), 0);
+  assert.equal(portFromEnv("PORT", { PORT: "4682" }), 4682);
+  for (const value of ["not-a-port", "80", "70000", "4682 ", "4.5", "0"]) assert.throws(() => portFromEnv("PORT", { PORT: value }), /PORT must be a TCP port/);
 });
 
-test("an explicit port is never swapped for another", async () => {
-  let attempts = 0;
-  await assert.rejects(startOnFreePort(host, 45678, async () => {
-    attempts += 1;
-    throw addressInUse(new Error("bind failed"), "Address already in use");
-  }), { code: "EADDRINUSE" });
-  assert.equal(attempts, 1);
+test("a server takes over a held port without it ever being free", async () => {
+  const [port] = await reserveTcpPorts(host, [0]);
+  let stolen = false;
+  let competing = true;
+  const competitor = (async () => {
+    while (competing) {
+      const server = await hold(port);
+      if (server) { stolen = true; await release([server]); }
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  })();
+  const server = http.createServer((request, response) => response.end("owner"));
+  await listenOnPort(server, host, port);
+  assert.equal(await (await fetch(`http://${host}:${port}/`)).text(), "owner");
+  competing = false;
+  await competitor;
+  await new Promise((resolve) => server.close(resolve));
+  assert.equal(stolen, false);
 });
 
 test("a held port passes to a child process without ever being free", async () => {

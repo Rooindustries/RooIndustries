@@ -10,9 +10,10 @@ import {
 } from "../src/server/api/ref/referralEmailDispatches.js";
 import { createSweepPostgresFixture } from "./lib/sweep-postgres-fixture.mjs";
 import { installNetworkGuard, localOrigin, refuseEnvFiles } from "./lib/test-target-safety.mjs";
+import { portFromEnv } from "./lib/free-tcp-port.mjs";
 
 refuseEnvFiles();
-const requested = Number(process.env.EMAIL_TEST_PORT || 0);
+const requested = portFromEnv("EMAIL_TEST_PORT");
 let restoreNetwork;
 const originalError = console.error;
 const alerts = [];

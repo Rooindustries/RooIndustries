@@ -66,21 +66,20 @@ export const reserveTcpPorts = async (host, requested) => {
   }
 };
 
-export const addressInUse = (error, log = "") => {
-  if (/EADDRINUSE|Address already in use/.test(log)) error.code = "EADDRINUSE";
-  return error;
+export const portFromEnv = (name, env = process.env) => {
+  const value = env[name];
+  if (value === undefined || value === "") return 0;
+  const port = Number(value);
+  if (!/^\d+$/.test(value) || port < 1024 || port > 65535) throw new Error(`${name} must be a TCP port from 1024 to 65535, got "${value}".`);
+  return port;
 };
 
-export const startOnFreePort = async (host, requested, start, attempts = 5) => {
-  for (let attempt = 1; ; attempt += 1) {
-    const port = requested || await freeTcpPort(host);
-    try {
-      await releaseTcpPorts(host, [port]);
-      return await start(port);
-    } catch (error) {
-      if (requested || error.code !== "EADDRINUSE" || attempt === attempts) throw error;
-    }
-  }
+export const listenOnPort = async (server, host, port) => {
+  const holder = held.get(heldKey(host, port));
+  held.delete(heldKey(host, port));
+  server.listen(...(holder ? [holder] : [port, host]));
+  await once(server, "listening");
+  server.ref();
 };
 
 export const passHeldTcpPorts = (host, ports, firstFd = 3) => {

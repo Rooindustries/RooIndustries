@@ -8,7 +8,8 @@ import { once } from 'node:events';
 import { spawn, spawnSync } from 'node:child_process';
 import postgres from 'postgres';
 import { createClient } from '@supabase/supabase-js';
-import { addressInUse, releaseTcpPorts, startOnFreePort } from './free-tcp-port.mjs';
+import { listenOnPort, releaseTcpPorts, reserveTcpPorts } from './free-tcp-port.mjs';
+import { startChildOnPorts } from './start-on-port.mjs';
 
 export const root = path.resolve(new URL('../..', import.meta.url).pathname);
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';
@@ -69,7 +70,9 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
   const env = {...process.env, LC_ALL: 'C', LD_LIBRARY_PATH: libraryPath || process.env.LD_LIBRARY_PATH || '/tmp/roo-request-pg17/runtime/usr/lib/x86_64-linux-gnu'};
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'roo-persistence-sweep-'));
   const dataDir = path.join(scratch, 'data');
-  let pgPort, restPort;
+  let pgPort, restPort, postgresProcess;
+  const explicitPorts = [ports.postgres, ports.rest ?? ports.postgrest, ports.proxy].filter(Boolean);
+  await reserveTcpPorts(host, explicitPorts);
   const run = (binary, args) => {
     const result = spawnSync(binary, args, {env, encoding:'utf8',timeout:60000,maxBuffer:16*1024*1024});
     if (result.status !== 0) throw new Error(`${path.basename(binary)} failed: ${result.stderr || result.stdout}`);
@@ -86,6 +89,7 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
   let authHandler = null;
   let providerHandler = null;
   const stop = async () => {
+    await releaseTcpPorts(host, explicitPorts);
     if (proxy) {proxy.closeAllConnections();await new Promise((resolve)=>proxy.close(resolve));proxy=null;}
     if (restProcess && restProcess.exitCode === null) {restProcess.kill('SIGTERM');await once(restProcess,'exit');}
     if (sql) await sql.end({timeout:5});
@@ -98,15 +102,22 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
     run(path.join(pgBin,'initdb'),['-D',dataDir,'--auth=trust','--no-locale',...(fullMigrationChain ? ['--encoding=UTF8'] : [])]);
     fs.appendFileSync(path.join(dataDir,'pg_hba.conf'),'\nhost all all samehost trust\n');
     const postgresLog = path.join(scratch, 'postgres.log');
-    pgPort = await startOnFreePort(host, ports.postgres, async (port) => {
-      fs.writeFileSync(postgresLog, '');
-      try {
-        run(path.join(pgBin, 'pg_ctl'), ['-D', dataDir, '-l', postgresLog, '-o', `-p ${port} -h ${host} -k ${scratch}`, '-w', 'start']);
-      } catch (error) {
-        throw addressInUse(error, fs.readFileSync(postgresLog, 'utf8'));
-      }
-      return port;
-    });
+    const postmasterReady = () => {
+      const lines = fs.existsSync(path.join(dataDir, 'postmaster.pid')) ? fs.readFileSync(path.join(dataDir, 'postmaster.pid'), 'utf8').split('\n') : [];
+      return Number(lines[0]) === postgresProcess?.pid && lines[7]?.trim() === 'ready';
+    };
+    ({ ports: [pgPort], child: postgresProcess } = await startChildOnPorts({
+      host,
+      requested: [ports.postgres ?? 0],
+      output: () => fs.readFileSync(postgresLog, 'utf8'),
+      isReady: postmasterReady,
+      spawnChild: ([port]) => {
+        const log = fs.openSync(postgresLog, 'w');
+        postgresProcess = spawn(path.join(pgBin, 'postgres'), ['-D', dataDir, '-p', String(port), '-h', host, '-k', scratch], { env, stdio: ['ignore', log, log] });
+        fs.closeSync(log);
+        return postgresProcess;
+      },
+    }));
     started=true;
     sql=postgres({host,port:pgPort,database:'postgres',max:8,prepare:false,onnotice(notice){fs.appendFileSync(path.join(scratch,'schema-notices.log'),`${notice.message}\n`);}});
     let migrationConnection;
@@ -182,23 +193,24 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
     if (!fullMigrationChain) await sql.unsafe('grant usage on schema public,accounts,commerce,licensing,cms,migration,ops to service_role; grant execute on all functions in schema public,accounts,migration to service_role; grant all on all tables in schema public,accounts,commerce,licensing,cms,migration,ops to service_role; grant usage,select on all sequences in schema accounts,commerce,migration to service_role;');
     const upstreamFetch=globalThis.fetch;
     const restLogPath = path.join(scratch, 'postgrest.log');
-    restPort = await startOnFreePort(host, ports.rest ?? ports.postgrest, async (port) => {
-      const restLog = fs.openSync(restLogPath, 'w');
-      restProcess = spawn(postgrestBin, [], { env: { ...env, PGRST_DB_URI: `postgres://${os.userInfo().username}@${host}:${pgPort}/postgres`, PGRST_DB_SCHEMAS: 'public', PGRST_DB_ANON_ROLE: 'anon', PGRST_JWT_SECRET: jwtSecret, PGRST_SERVER_HOST: host, PGRST_SERVER_PORT: String(port) }, stdio: ['ignore', restLog, restLog] });
-      fs.closeSync(restLog);
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        if (restProcess.exitCode !== null) {
-          const log = fs.readFileSync(restLogPath, 'utf8');
-          throw addressInUse(new Error(log), log);
-        }
+    ({ ports: [restPort], child: restProcess } = await startChildOnPorts({
+      host,
+      requested: [ports.rest ?? ports.postgrest ?? 0],
+      output: () => fs.readFileSync(restLogPath, 'utf8'),
+      isReady: async ([port]) => {
         try {
-          const response = await upstreamFetch(`http://${host}:${port}/`, { signal: AbortSignal.timeout(300) });
-          if (response.status < 500) return port;
-        } catch {}
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      throw new Error('PostgREST readiness deadline exceeded');
-    });
+          return (await upstreamFetch(`http://${host}:${port}/`, { signal: AbortSignal.timeout(300) })).status < 500;
+        } catch {
+          return false;
+        }
+      },
+      spawnChild: ([port]) => {
+        const log = fs.openSync(restLogPath, 'w');
+        const child = spawn(postgrestBin, [], { env: { ...env, PGRST_DB_URI: `postgres://${os.userInfo().username}@${host}:${pgPort}/postgres`, PGRST_DB_SCHEMAS: 'public', PGRST_DB_ANON_ROLE: 'anon', PGRST_JWT_SECRET: jwtSecret, PGRST_SERVER_HOST: host, PGRST_SERVER_PORT: String(port) }, stdio: ['ignore', log, log] });
+        fs.closeSync(log);
+        return child;
+      },
+    }));
     proxy=http.createServer(async(req,res)=>{
       try {
         const parts=[];for await(const chunk of req)parts.push(chunk);
@@ -225,8 +237,7 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
         res.writeHead(response.status,{'content-type':response.headers.get('content-type')||'application/json'});res.end(responseBody);
       }catch(error){res.writeHead(500,{'content-type':'application/json'});res.end(JSON.stringify({code:'FIXTURE_PROXY_ERROR',message:error.message}));}
     });
-    if (ports.proxy) await releaseTcpPorts(host, [ports.proxy]);
-    proxy.listen(ports.proxy ?? 0,host);await once(proxy,'listening');
+    await listenOnPort(proxy, host, ports.proxy ?? 0);
     const origin=`http://${host}:${proxy.address().port}`;
     const header=Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url');
     const payload=Buffer.from(JSON.stringify({role:'service_role',iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+3600})).toString('base64url');
