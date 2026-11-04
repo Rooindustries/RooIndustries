@@ -1,24 +1,12 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { FaDiscord } from "react-icons/fa";
 import { Moon, Tv } from "lucide-react";
 import BackButton from "./BackButton";
 import DiscordGuideBanner from "./DiscordGuideBanner";
-import {
-  SECTION_HASHES,
-  buildHomeSectionHref,
-  clearPendingSectionTarget,
-  clearRouteTransitionIntent,
-  consumePendingSectionTarget,
-  isHomeSectionHash,
-  normalizeSectionHash,
-  readPendingSectionTarget,
-  writeRouteTransitionIntent,
-  writePendingSectionTarget,
-} from "../lib/sectionNavigation";
-import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinator";
+import { SECTION_HASHES, buildHomeSectionHref } from "../lib/sectionNavigation";
+import { useActiveHomeSection, useSectionNavigation } from "../lib/sectionNavigator";
 import { useScrollRuntime } from "../lib/scrollRuntime";
-import { HOME_SECTION_PREFETCH_BY_HASH, prefetchHomeSectionData, readHomeSectionData } from "../lib/homeSectionData";
 
 const canAnimateLogo = () => {
   if (typeof window === "undefined") return false;
@@ -78,13 +66,18 @@ const applyTheme = (theme, { persist = true } = {}) => {
   return normalized;
 };
 
-export default function Navbar({ routeShell = "browser" }) {
+export default function Navbar() {
   const location = useLocation();
-  const navigate = useNavigate();
+  const activeHomeHash = useActiveHomeSection();
+  const {
+    goToSection,
+    goToHomeTop,
+    cancelSectionNavigation: cancelSectionTransition,
+    isOwnSectionArrival,
+  } = useSectionNavigation();
   const [open, setOpen] = useState(false);
   const [proofOpen, setProofOpen] = useState(false);
   const [referralsOpen, setReferralsOpen] = useState(false);
-  const [activeHomeHash, setActiveHomeHash] = useState("");
   const [theme, setTheme] = useState("dark");
   // Keep initial server/client markup identical, then upgrade to animated mode on mount.
   const [smallLogoMode, setSmallLogoMode] = useState("static");
@@ -93,9 +86,6 @@ export default function Navbar({ routeShell = "browser" }) {
   const referralsDropdownRef = useRef(null);
   const headerRef = useRef(null);
   const navRowRef = useRef(null);
-  const activeScrollCleanupRef = useRef(null);
-  const pendingSectionNavigationTimeoutRef = useRef(null);
-  const sectionTransitionInFlightRef = useRef(false);
   const { scrollY } = useScrollRuntime();
 
   const scrolled = scrollY > 12;
@@ -128,177 +118,25 @@ export default function Navbar({ routeShell = "browser" }) {
     setSmallLogoMode("static");
   };
 
-  const getHeaderOffsetPx = useCallback(() => getCssHeaderOffsetPx(110), []);
-
-  const runHashAlignment = useCallback(
-    (hash, behavior = "auto", options = {}) => {
-      if (activeScrollCleanupRef.current) {
-        activeScrollCleanupRef.current();
-      }
-      activeScrollCleanupRef.current = alignToHashTarget({
-        hash,
-        behavior,
-        getOffsetPx: getHeaderOffsetPx,
-        stableFramesRequired: 8,
-        preAlignStableFramesRequired:
-          options.preAlignStableFramesRequired || 8,
-        maxWaitMs: 4200,
-        minRuntimeMs: options.minRuntimeMs || 0,
-        observeMutations: options.observeMutations !== false,
-      });
-    },
-    [getHeaderOffsetPx]
-  );
-
-  const cancelSectionTransition = useCallback(() => {
-    if (pendingSectionNavigationTimeoutRef.current) {
-      clearTimeout(pendingSectionNavigationTimeoutRef.current);
-      pendingSectionNavigationTimeoutRef.current = null;
-    }
-    sectionTransitionInFlightRef.current = false;
-    clearPendingSectionTarget();
-    clearRouteTransitionIntent();
-    if (typeof document !== "undefined") {
-      document.documentElement.classList.remove("route-transition-out");
-    }
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("roo:cancel-route-transition"));
-    }
-    if (activeScrollCleanupRef.current) {
-      activeScrollCleanupRef.current();
-      activeScrollCleanupRef.current = null;
-    }
-  }, []);
-
   const handleHomeClick = useCallback(
     (event) => {
+      if (!goToHomeTop(event)) return;
       setOpen(false);
       setProofOpen(false);
       setReferralsOpen(false);
-      cancelSectionTransition();
-
-      if (typeof window === "undefined") return;
-
-      if (location.pathname !== "/") {
-        return;
-      }
-
-      event?.preventDefault?.();
-
-      const nextUrl = `${window.location.pathname}${window.location.search}`;
-      if (window.location.hash && window.history?.replaceState) {
-        window.history.replaceState(window.history.state, "", nextUrl);
-      }
-
-      setActiveHomeHash("");
-
-      if (activeScrollCleanupRef.current) {
-        activeScrollCleanupRef.current();
-        activeScrollCleanupRef.current = null;
-      }
-
-      window.scrollTo({
-        top: 0,
-        behavior: "auto",
-      });
     },
-    [cancelSectionTransition, location.pathname]
+    [goToHomeTop]
   );
 
   const handleSectionLinkClick = useCallback(
-    async (event, hash) => {
+    (event, hash) => {
+      if (!goToSection(event, hash, { minRuntimeMs: 900 })) return;
       setOpen(false);
       setProofOpen(false);
       setReferralsOpen(false);
-      if (typeof window === "undefined") return;
-
-      const normalizedHash = normalizeSectionHash(hash);
-      if (!normalizedHash) return;
-      const onHomePath = location.pathname === "/";
-      const browserPath = window.location.pathname || "/";
-
-      if (!onHomePath) {
-        if (event?.preventDefault) {
-          event.preventDefault();
-        }
-
-        writePendingSectionTarget(normalizedHash);
-        writeRouteTransitionIntent({
-          kind: "section",
-          hash: normalizedHash,
-          from: location.pathname,
-        });
-        document.documentElement.classList.add("route-transition-out");
-
-        const requiredKeys = HOME_SECTION_PREFETCH_BY_HASH[normalizedHash] || [];
-        const missingKeys = requiredKeys.filter((key) => readHomeSectionData(key) === null);
-
-        if (missingKeys.length > 0) {
-          prefetchHomeSectionData(missingKeys).catch(() => {});
-        }
-
-        sectionTransitionInFlightRef.current = true;
-        if (pendingSectionNavigationTimeoutRef.current) {
-          clearTimeout(pendingSectionNavigationTimeoutRef.current);
-        }
-        pendingSectionNavigationTimeoutRef.current = window.setTimeout(() => {
-          pendingSectionNavigationTimeoutRef.current = null;
-          const nextHref = buildHomeSectionHref(normalizedHash);
-          if (routeShell === "memory") {
-            if (window.history?.pushState) {
-              window.history.pushState(window.history.state, "", nextHref);
-            } else {
-              window.location.hash = normalizedHash.slice(1);
-            }
-            navigate("/");
-            return;
-          }
-          if (browserPath !== location.pathname) {
-            window.location.assign(nextHref);
-            return;
-          }
-          navigate(nextHref);
-        }, 20);
-        return;
-      }
-
-      if (event?.preventDefault) {
-        event.preventDefault();
-      }
-
-      // Keep browser URL hash in sync even with MemoryRouter.
-      const nextUrl = `${window.location.pathname}${window.location.search}${normalizedHash}`;
-      if (window.location.hash !== normalizedHash) {
-        if (window.history?.replaceState) {
-          window.history.replaceState(window.history.state, "", nextUrl);
-        } else {
-          window.location.hash = normalizedHash.slice(1);
-        }
-      }
-
-      // replaceState doesn't fire hashchange — update active nav state directly.
-      setActiveHomeHash(normalizedHash);
-
-      // Force scroll even when clicking the same hash repeatedly.
-      runHashAlignment(normalizedHash, "auto", {
-        minRuntimeMs: 900,
-      });
     },
-    [location.pathname, navigate, routeShell, runHashAlignment]
+    [goToSection]
   );
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const syncHash = () => {
-      const nextHash = normalizeSectionHash(
-        window.location.hash || location.hash || ""
-      );
-      setActiveHomeHash(nextHash);
-    };
-    syncHash();
-    window.addEventListener("hashchange", syncHash);
-    return () => window.removeEventListener("hashchange", syncHash);
-  }, [location.hash, location.pathname]);
 
   const updateHeaderOffset = useCallback(() => {
     if (typeof document === "undefined") return;
@@ -377,20 +215,11 @@ export default function Navbar({ routeShell = "browser" }) {
   }, [updateHeaderOffset]);
 
   useEffect(() => {
+    if (isOwnSectionArrival(location.pathname)) return;
     setOpen(false);
     setProofOpen(false);
     setReferralsOpen(false);
-  }, [location.pathname, location.hash]);
-
-  useEffect(() => {
-    if (location.pathname === "/") {
-      sectionTransitionInFlightRef.current = false;
-      if (pendingSectionNavigationTimeoutRef.current) {
-        clearTimeout(pendingSectionNavigationTimeoutRef.current);
-        pendingSectionNavigationTimeoutRef.current = null;
-      }
-    }
-  }, [location.pathname]);
+  }, [isOwnSectionArrival, location.pathname, location.hash]);
 
   useEffect(() => {
     if (!open) return;
@@ -449,54 +278,6 @@ export default function Navbar({ routeShell = "browser" }) {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [proofOpen, referralsOpen]);
-
-  useEffect(() => {
-    if (location.pathname !== "/") return;
-
-    const urlHash = normalizeSectionHash(activeHomeHash);
-    const pendingHash = readPendingSectionTarget();
-    const targetHash = isHomeSectionHash(urlHash)
-      ? urlHash
-      : isHomeSectionHash(pendingHash)
-      ? consumePendingSectionTarget()
-      : "";
-
-    if (!isHomeSectionHash(targetHash)) return;
-
-    const fromPending = Boolean(pendingHash && pendingHash === targetHash);
-    if (fromPending && pendingHash === targetHash) {
-      consumePendingSectionTarget();
-    }
-
-    if (typeof window !== "undefined") {
-      const nextUrl = `${window.location.pathname}${window.location.search}${targetHash}`;
-      if (window.location.hash !== targetHash && window.history?.replaceState) {
-        window.history.replaceState(window.history.state, "", nextUrl);
-      }
-    }
-
-    if (targetHash !== activeHomeHash) {
-      setActiveHomeHash(targetHash);
-    }
-
-    runHashAlignment(targetHash, "auto", {
-      minRuntimeMs: fromPending ? 60 : 420,
-      preAlignStableFramesRequired: fromPending ? 1 : 5,
-    });
-
-    return () => {
-      if (activeScrollCleanupRef.current) {
-        activeScrollCleanupRef.current();
-        activeScrollCleanupRef.current = null;
-      }
-    };
-  }, [activeHomeHash, location.pathname, runHashAlignment]);
-
-  useEffect(() => {
-    return () => {
-      cancelSectionTransition();
-    };
-  }, [cancelSectionTransition]);
 
   // Theme-token interaction states — values per theme in src/index.css.
   const focusRing =
