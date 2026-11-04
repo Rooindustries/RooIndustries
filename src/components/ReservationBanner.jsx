@@ -10,7 +10,7 @@ import packagePricing from "../lib/packagePricing";
 import { classifyHoldResponse } from "../lib/holdResponse";
 import { CHECKOUT_CONFIRMATION_EVENT, isCheckoutConfirmationPending } from "../lib/checkoutConfirmation";
 import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
-import { scrollWindowTo } from "../lib/scrollCoordinator";
+import { scrollWindowTo } from "../lib/scrollWindowTo";
 
 const { getPublicPackageTitle } = packagePricing;
 

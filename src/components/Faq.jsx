@@ -5,7 +5,8 @@ import { useLocation } from "react-router-dom";
 import homeCopy from "../lib/homeCopy";
 import packageContent from "../lib/packageContent";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
-import { alignToHashTarget, getCssHeaderOffsetPx, scrollWindowTo } from "../lib/scrollCoordinator";
+import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinator";
+import { scrollWindowTo } from "../lib/scrollWindowTo";
 
 
 const slugify = (text = "") =>

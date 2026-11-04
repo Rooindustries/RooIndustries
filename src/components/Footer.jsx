@@ -4,7 +4,7 @@ import { FaDiscord } from "react-icons/fa";
 import packagePricing from "../lib/packagePricing";
 import { readBookingPackageSelection } from "../lib/checkoutStorage";
 import PaymentMethods from "./PaymentMethods";
-import { scrollWindowTo } from "../lib/scrollCoordinator";
+import { scrollWindowTo } from "../lib/scrollWindowTo";
 
 const { isTopPackageTitle } = packagePricing;
 

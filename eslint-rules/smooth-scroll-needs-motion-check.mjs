@@ -1,9 +1,11 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { calleeName, propertyName } from "./util.mjs";
 
 const SCROLL_CALLS = new Set(["scroll", "scrollTo", "scrollBy", "scrollIntoView"]);
 const POSITIONAL_CALLS = new Set(["scroll", "scrollTo", "scrollBy"]);
 const SAFE_BEHAVIORS = new Set(["auto", "instant"]);
-const HELPER_MODULE = "/src/lib/scrollCoordinator.js";
+const HELPER_MODULE = fileURLToPath(new URL("../src/lib/scrollWindowTo.js", import.meta.url));
 
 const staticString = (node) => {
   if (node?.type === "Literal" && typeof node.value === "string") return node.value;
@@ -40,12 +42,12 @@ export default {
     messages: {
       unchecked:
         "This scroll may animate even when the visitor asked for reduced motion. Use scrollWindowTo from " +
-        'src/lib/scrollCoordinator, or pass a plain object literal whose behavior is "auto" or "instant".',
+        'src/lib/scrollWindowTo, or pass a plain object literal whose behavior is "auto" or "instant".',
     },
     schema: [],
   },
   create(context) {
-    if (context.filename.replaceAll("\\", "/").endsWith(HELPER_MODULE)) return {};
+    if (path.resolve(context.filename) === HELPER_MODULE) return {};
     return {
       CallExpression(node) {
         const name = calleeName(node);

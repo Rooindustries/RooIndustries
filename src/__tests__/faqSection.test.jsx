@@ -73,7 +73,6 @@ jest.mock("../lib/homeSectionData", () => ({
 jest.mock("../lib/scrollCoordinator", () => ({
   alignToHashTarget: (...args) => mockAlignToHashTarget(...args),
   getCssHeaderOffsetPx: jest.fn(() => 96),
-  scrollWindowTo: jest.fn(),
 }));
 
 describe("FaqSection", () => {

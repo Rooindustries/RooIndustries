@@ -152,7 +152,7 @@ run("smooth-scroll-needs-motion-check", {
     `scrollWindowTo(0);`,
     {
       code: `window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "instant" : "smooth" });`,
-      filename: fileURLToPath(new URL("../src/lib/scrollCoordinator.js", import.meta.url)),
+      filename: fileURLToPath(new URL("../src/lib/scrollWindowTo.js", import.meta.url)),
     },
   ],
   invalid: [
@@ -189,6 +189,18 @@ run("smooth-scroll-needs-motion-check", {
     {
       name: "options stored in a variable",
       code: `const options = { block: "start" }; panel.scrollIntoView(options);`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "motion check in the section-scroll coordinator",
+      code: `window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "instant" : "smooth" });`,
+      filename: fileURLToPath(new URL("../src/lib/scrollCoordinator.js", import.meta.url)),
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "nested file sharing the helper's name",
+      code: `window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "instant" : "smooth" });`,
+      filename: fileURLToPath(new URL("../app/src/lib/scrollWindowTo.js", import.meta.url)),
       errors: [{ messageId: "unchecked" }],
     },
     {
