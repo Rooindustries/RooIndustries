@@ -141,11 +141,11 @@ describe("public content privacy boundary", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("x-roo-content-backend")).toBe("supabase");
     expect(response.headers.get("cache-control")).toBe(
-      "public, max-age=0, must-revalidate, s-maxage=300",
+      "public, max-age=0, must-revalidate, s-maxage=60",
     );
     expect(response.headers.get("vercel-cache-tag")).toBe("public-content");
     expect(response.headers.get("vercel-cdn-cache-control")).toBe(
-      "public, max-age=300, stale-while-revalidate=600, stale-if-error=86400",
+      "public, max-age=60",
     );
     expect(response.headers.get("set-cookie")).toBeNull();
     expect(response.headers.get("vary")).toBeNull();

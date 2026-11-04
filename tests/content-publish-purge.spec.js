@@ -17,7 +17,8 @@ const expectNotCacheable = (response) => {
 };
 
 const expectCacheable = (response) => {
-  expect(response.headers()["cache-control"]).toBe("public, max-age=0, must-revalidate, s-maxage=300");
+  expect(response.headers()["cache-control"]).toBe("public, max-age=0, must-revalidate, s-maxage=60");
+  expect(response.headers()["vercel-cdn-cache-control"]).toBe("public, max-age=60");
   expect(response.headers()["vercel-cache-tag"]).toBe("public-content");
 };
 
@@ -178,4 +179,35 @@ test("a read that misses its deadline answers with the last good copy and still 
   } finally {
     await gate.restore(PACKAGE, original.document);
   }
+});
+
+test("a read with no saved copy that misses its deadline answers 503 no-store and still warms the server through waitUntil", async ({ request, baseURL }) => {
+  test.setTimeout(120000);
+  const gate = createContentGate(request, baseURL);
+  const titles = [];
+  for (const id of [PACKAGE, "tooling-package-1"]) titles.push((await gate.document(id)).document.title);
+  const path = `/api/content/package?${titles.map((title) => `title=${encodeURIComponent(title)}`).join("&")}`;
+  expect((await (await gate.traced().content(PACKAGES)).json()).ok).toBe(true);
+
+  const cold = gate.traced();
+  await cold.rules([{ rpc: CONTENT_READ, action: "hold", times: 1 }]);
+  const startedAt = Date.now();
+  const unavailable = await cold.content(path);
+  const waited = Date.now() - startedAt;
+  expect(unavailable.status()).toBe(503);
+  expect(unavailable.headers()["cache-control"]).toBe(NO_STORE);
+  expect(unavailable.headers()["vercel-cache-tag"]).toBeUndefined();
+  expect(waited).toBeGreaterThanOrEqual(4500);
+  expect(waited).toBeLessThan(8000);
+  expect(await cold.contentReads()).toHaveLength(1);
+  expect(await cold.keptAlive()).toEqual(["registered"]);
+
+  await cold.release();
+  await expect.poll(() => cold.keptAlive(), { timeout: 15000 }).toEqual(["registered", "settled"]);
+  const after = gate.traced();
+  const warmed = await after.content(path);
+  expect(warmed.status()).toBe(200);
+  expectCacheable(warmed);
+  expect(titles).toContain((await warmed.json()).data.title);
+  expect(await after.contentReads()).toEqual([]);
 });
