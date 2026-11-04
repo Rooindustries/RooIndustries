@@ -16,30 +16,33 @@ Workers in steps, starting with downloads, so each step can be proven and undone
 
 ## What moves, in order
 
-1. **Public downloads to R2** (this PR). The `roo-downloads` Worker serves the Tools page installers and the Suite
-   installer from R2. `TOOL_DOWNLOADS_ORIGIN` points the Tools page at it; it ships off.
-   Done when every file verifies through the Worker and the switch has run a week in production without errors.
-2. **Suite update feed and installers to R2.** The release script uploads to R2 instead of Vercel Blob. The feed URL
+1. **Public downloads on a Worker** (this PR, live). `roo-downloads.rooindustries.workers.dev` serves the Tools page
+   installers and the Suite installer, streaming them from where they live today, with resumable ranges, caching
+   headers and a health route. Every file verifies byte for byte through it.
+2. **Those downloads on R2.** Enable R2, upload the same files and redeploy the Worker in R2 mode
+   (`npm run deploy:r2`), then turn on `TOOL_DOWNLOADS_ORIGIN` so the Tools page points at it. Done when every file
+   verifies from R2 and the switch has run a week in production without errors.
+3. **Suite update feed and installers to R2.** The release script uploads to R2 instead of Vercel Blob. The feed URL
    is compiled into the app, so a release that reads the new feed ships first and the old feed stays up until
    testers have moved to it.
-3. **Paid builds to a private R2 bucket.** `/downloads/<slug>` keeps checking the order, then redirects to a
+4. **Paid builds to a private R2 bucket.** `/downloads/<slug>` keeps checking the order, then redirects to a
    short-lived presigned R2 URL instead of a Blob or Supabase signed URL.
-4. **The site on Workers** with the OpenNext Cloudflare adapter: pages, route handlers and middleware run in one
+5. **The site on Workers** with the OpenNext Cloudflare adapter: pages, route handlers and middleware run in one
    Worker, static files from Workers static assets, the 60-second revalidation through OpenNext's R2 incremental
    cache and its tag cache. Smart Placement keeps API calls close to Supabase.
-5. **Crons to Cron Triggers** calling the same handlers with the same cron secret. Only one platform runs the
+6. **Crons to Cron Triggers** calling the same handlers with the same cron secret. Only one platform runs the
    crons at any time, so they are switched in the same change that moves traffic.
-6. **Platform pieces:** Cloudflare Web Analytics instead of Vercel Analytics and Speed Insights; Sentry gated on a
+7. **Platform pieces:** Cloudflare Web Analytics instead of Vercel Analytics and Speed Insights; Sentry gated on a
    new production marker instead of `VERCEL` and `VERCEL_ENV`; the deploy gate and rollback rewritten on Worker
    versions and `wrangler rollback`; the CMS image processing that uses `sharp` moved to the Images binding.
-7. **DNS last.** Import the rooindustries.com zone into Cloudflare with every record copied exactly (mail records
+8. **DNS last.** Import the rooindustries.com zone into Cloudflare with every record copied exactly (mail records
    included), lower TTLs, then attach `www` and the apex to the Worker. Vercel stays deployed until the move has
    held for two weeks.
 
 ## Risks
 
 - **Workers Free limits.** 10 ms of CPU per request and a 3 MB compressed bundle fit the downloads Worker, but not
-  server rendering for the whole site. Step 4 needs Workers Paid.
+  server rendering for the whole site. Step 5 needs Workers Paid.
 - **Node-only code.** Route handlers run on Node today. `nodejs_compat` covers most of it, but not native modules
   (`sharp`) or the local file download backend, which is development only.
 - **Money paths.** Bookings, holds, the Dodo webhook (raw-body signature check), the 5-minute reconcile and
@@ -55,7 +58,8 @@ Workers in steps, starting with downloads, so each step can be proven and undone
 ## How we test each step
 
 - Downloads: `npm run verify` in `workers/downloads` against the live Worker for every file (size, SHA-256 and a
-  byte range), and the Tools page clicked through with the switch on in a preview deployment.
+  byte range) after each deploy, in origin mode now and in R2 mode next, and the Tools page clicked through with
+  the switch on in a preview deployment.
 - Site build: every CI suite (Jest, Playwright, Postgres 17, booking flow, payment persistence sweep, SEO and
   monitoring checks) runs against the OpenNext build in workerd, not just against `next start`.
 - Staging on workers.dev with Dodo in test mode: a full booking through checkout, the signed webhook and the

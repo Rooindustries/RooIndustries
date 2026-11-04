@@ -9,7 +9,7 @@ const USAGE = "Usage: node scripts/upload.mjs [--local [--persist-to <dir>]] <ke
 const packageDir = fileURLToPath(new URL("..", import.meta.url));
 const wrangler = fileURLToPath(new URL("../node_modules/.bin/wrangler", import.meta.url));
 const config = JSON.parse(readFileSync(new URL("../wrangler.json", import.meta.url), "utf8"));
-const bucket = config.r2_buckets[0].bucket_name;
+const bucket = config.env.r2.r2_buckets[0].bucket_name;
 
 const targetFlags = ({ local, "persist-to": persistTo }) => {
   if (!local) {

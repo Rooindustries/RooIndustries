@@ -5,10 +5,50 @@
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
   "preview_urls": false,
-  "r2_buckets": [
-    {
-      "binding": "DOWNLOADS",
-      "bucket_name": "roo-downloads"
+  "vars": {
+    "ORIGIN_FILES": {
+      "b/BXo8goFD3jDm7LA6p2RvCrUDlIcvnMEn/RooIndustries-OptimizationSuite-0.11.2-beta-setup.exe": {
+        "source": "https://81pttzmhr81hs8hb.public.blob.vercel-storage.com/b/BXo8goFD3jDm7LA6p2RvCrUDlIcvnMEn/RooIndustries-OptimizationSuite-0.11.2-beta-setup.exe",
+        "size": 110211396,
+        "sha256": "456e4be7d72b546fea41c4a8ad8df6b9c16ef4d828672c3b48f5b3433d989882",
+        "lastModified": "2026-10-31T07:02:00Z"
+      },
+      "builds/df5a60e65fbd12270cbd61f594d9eeddae75739b.zip": {
+        "source": "https://www.rooindustries.com/api/tools/de061381-848c-498c-bb4d-d76b37e8498f/download",
+        "size": 16695386,
+        "sha256": "2eeb7553e62a940449a42b59ede3b4d3550023b2ff864a297dee818086e3564b",
+        "lastModified": "2026-07-10T22:02:36Z"
+      },
+      "builds/36c5a84f88c13c94a998904aeb14a2faa76830fa.exe": {
+        "source": "https://www.rooindustries.com/api/tools/14ab1459-599b-4e3f-8c67-bef28a26c724/download",
+        "size": 3991272,
+        "sha256": "9dd36ef956af927cf41fa441f91b329a7973e13965e4e7d70e6fa9c1df1cade6",
+        "lastModified": "2026-07-10T22:02:35Z"
+      },
+      "builds/9d97efc03eb9a95b3b664ddeda89ceccce722aa4.zip": {
+        "source": "https://www.rooindustries.com/api/tools/a056b302-b6ff-4fc5-8dbb-b298bf6a344c/download",
+        "size": 47007903,
+        "sha256": "93e39c7ad3ae2ed559ad61a7bc5b35e82ad8f1124debe9f63f20e36fda0be7b7",
+        "lastModified": "2026-07-10T22:02:55Z"
+      },
+      "builds/7ccadcd606ec7f62588d3522b9ba906d0e3d1e81.zip": {
+        "source": "https://www.rooindustries.com/api/tools/ae862a1a-8d4a-4d5c-817d-a6fb75355645/download",
+        "size": 458189,
+        "sha256": "827b4448a47f9bfde02337a842a904ac150e5ef836b3e082b5e6f5fc24815471",
+        "lastModified": "2026-07-10T22:02:34Z"
+      }
     }
-  ]
+  },
+  "env": {
+    "r2": {
+      "name": "roo-downloads",
+      "vars": {},
+      "r2_buckets": [
+        {
+          "binding": "DOWNLOADS",
+          "bucket_name": "roo-downloads"
+        }
+      ]
+    }
+  }
 }

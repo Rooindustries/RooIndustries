@@ -643,6 +643,7 @@ describe("release runtime environment validation", () => {
 
   test.each([
     ["plain http", "http://roo-downloads.rooindustries.workers.dev"],
+    ["loopback http", "http://localhost:8787"],
     ["a path", "https://roo-downloads.rooindustries.workers.dev/files"],
     ["credentials", "https://user:secret@roo-downloads.rooindustries.workers.dev"],
     ["a query", "https://roo-downloads.rooindustries.workers.dev/?cache=0"],

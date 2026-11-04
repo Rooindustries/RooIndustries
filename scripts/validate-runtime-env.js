@@ -502,7 +502,8 @@ if (
     "DOWNLOAD_STORAGE_BACKEND must be blob, local, or supabase."
   );
 }
-if (parseToolDownloadsOrigin(readEnvValue(process.env, "TOOL_DOWNLOADS_ORIGIN")) === null) {
+const toolDownloadsOrigin = parseToolDownloadsOrigin(readEnvValue(process.env, "TOOL_DOWNLOADS_ORIGIN"));
+if (toolDownloadsOrigin === null || (toolDownloadsOrigin && !toolDownloadsOrigin.startsWith("https://"))) {
   downloadConsistencyFailures.push(
     "TOOL_DOWNLOADS_ORIGIN must be an https origin with no path, query or credentials."
   );

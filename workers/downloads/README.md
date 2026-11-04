@@ -1,12 +1,12 @@
 # Roo Industries downloads Worker
 
-Serves installer downloads from the `roo-downloads` R2 bucket at
-`https://roo-downloads.rooindustries.workers.dev`.
+Serves our installer downloads at `https://roo-downloads.rooindustries.workers.dev` on the Workers free plan.
 
 - `GET /<key>` and `HEAD /<key>` return the file with its content type (`.exe`, `.msi`, `.zip`, `.7z`),
   `Content-Disposition: attachment`, `Cache-Control: public, max-age=86400`, `ETag` and `Last-Modified`.
-  Conditional requests answer 304 or 412, and a single byte range answers 206 (or 416 when it is past the end).
-- `GET /health` answers `{"status":"ok"}` when the bucket responds, 503 otherwise, and is never cached.
+  Conditional requests answer 304 or 412, and a single byte range on a GET answers 206 (or 416 when it starts past
+  the end), so downloads can resume.
+- `GET /health` answers `{"status":"ok","storage":"origin"}` (or `"r2"`) and is never cached.
 - Anything else answers 404, and methods other than GET and HEAD answer 405.
 
 Keys keep the path each file has today, so links only change host:
@@ -15,14 +15,25 @@ Keys keep the path each file has today, so links only change host:
 - Optimization Suite installers use their Vercel Blob path,
   e.g. `b/<random>/RooIndustries-OptimizationSuite-<version>-setup.exe`.
 
-## Set up once
+## Storage modes
 
-1. `npm ci` in this folder.
-2. `npx wrangler login` with the Roo Industries Cloudflare account.
-3. Enable R2 on that account in the dashboard (R2 Object Storage). Cloudflare asks for a payment method
-   even for the free tier: 10 GB stored, 1 million class A and 10 million class B operations a month, free egress.
-4. `npx wrangler r2 bucket create roo-downloads`
-5. `npm run deploy`
+The Worker runs in one of two modes, with the same HTTP behavior in both.
+
+**Origin (live now).** `npm run deploy` publishes the Worker with `ORIGIN_FILES` from `wrangler.json`: each key's
+source URL, size, SHA-256 and date. The Worker streams the file from its current home: the Suite installer from
+Vercel Blob, the Tools page installers through the site's `/api/tools/<id>/download`, which redirects to a fresh
+signed Supabase URL. A redirect is followed only to a URL whose path ends with the key and that isn't the Worker
+itself. The ETag is the pinned SHA-256, and a body that comes back shorter or longer than the pinned size aborts
+instead of finishing. When a source ignores the Range header, the Worker cuts the range out of the stream.
+To add or replace a file, add its entry to `ORIGIN_FILES` and deploy.
+
+**R2 (next).** `npm run deploy:r2` publishes the same Worker with the `roo-downloads` R2 bucket bound as `DOWNLOADS`
+and no `ORIGIN_FILES`. R2 needs a payment method on the Cloudflare account even for the free tier (10 GB stored,
+1 million class A and 10 million class B operations a month, free egress). Once that is in place:
+
+1. `npx wrangler r2 bucket create roo-downloads`
+2. Upload every file (below).
+3. `npm run deploy:r2`, then run `verify` against the live URL.
 
 ## Upload and verify
 
@@ -32,12 +43,12 @@ npm run upload -- builds/<hash>.zip=/path/to/tool.zip \
 npm run verify -- --url https://roo-downloads.rooindustries.workers.dev <same pairs>
 ```
 
-`upload` puts each file in the bucket and prints its size and SHA-256. `verify` checks `/health`, downloads every
-file through the Worker, compares its size and SHA-256 with the local file, checks a 1 KB range from the middle,
-and exits 1 on any difference.
+`upload` puts each file in the R2 bucket and prints its size and SHA-256. `verify` works in either mode: it checks
+`/health`, downloads every file through the Worker, compares its size and SHA-256 with the local file, checks a
+1 KB range from the middle, and exits 1 on any difference.
 
 Add `--local --persist-to <dir>` to `upload` to fill the local bucket that
-`npx wrangler dev --persist-to <dir>` serves.
+`npx wrangler dev --env r2 --persist-to <dir>` serves.
 
 ## Point the site at the Worker
 
@@ -45,15 +56,17 @@ Set `TOOL_DOWNLOADS_ORIGIN=https://roo-downloads.rooindustries.workers.dev` in t
 Tools page downloads (`/api/tools/<id>/download`) redirect to the Worker instead of a signed Supabase URL.
 Unset means off. A release build refuses a value that isn't a bare https origin.
 
-The site doesn't check the bucket, so upload every hosted tool's file before turning it on, and upload a new tool
-file before publishing it while the switch is on.
+Turn it on only once the Worker runs on R2. In origin mode the Worker reads the Tools installers through that same
+site route, so with the switch on it would be redirected back to itself and answer 503. On R2, upload every hosted
+tool's file before turning the switch on, and upload a new tool file before publishing it while the switch is on.
 
 ## Limits
 
-Workers Free allows 100,000 requests a day. A download costs at most two class B operations, so even a full day,
-every day, stays under the free 10 million a month.
+Workers Free allows 100,000 requests a day. On R2 a download costs at most two class B operations, so even a full
+day, every day, stays under the free 10 million a month.
 
 ## Tests
 
-`npm test` runs the Worker in workerd against a local R2 bucket. It covers both scripts, downloads, ranges,
-conditional requests and refusals. CI runs it in the Downloads Worker job.
+`npm test` runs the Worker in workerd in both modes: R2 mode against a local bucket, origin mode against a local
+source server. It covers both scripts, downloads, ranges, conditional requests, refusals and broken sources. CI runs
+it in the Downloads Worker job.
