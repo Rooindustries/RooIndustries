@@ -145,7 +145,7 @@ describe("public content privacy boundary", () => {
     );
     expect(response.headers.get("vercel-cache-tag")).toBe("public-content");
     expect(response.headers.get("vercel-cdn-cache-control")).toBe(
-      "public, max-age=60, stale-if-error=86400",
+      "public, max-age=60",
     );
     expect(response.headers.get("set-cookie")).toBeNull();
     expect(response.headers.get("vary")).toBeNull();
