@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { FaDiscord } from "react-icons/fa";
 import { FcGoogle } from "react-icons/fc";
-import { getSupabaseBrowserClient } from "../lib/supabaseBrowser";
 import { requestDeadline } from "../lib/clientRequest";
 
 const providers = [
@@ -77,6 +76,7 @@ export default function SupabaseSocialLogin({
 
     try {
       onBeforeRedirect?.();
+      const { getSupabaseBrowserClient } = await import("../lib/supabaseBrowser");
       const client = getSupabaseBrowserClient();
       if (!["link", "reauth", "reclaim"].includes(action)) {
         await client.auth.signOut({ scope: "local" }).catch(() => {});

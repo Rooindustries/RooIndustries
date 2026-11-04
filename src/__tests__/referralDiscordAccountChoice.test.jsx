@@ -27,6 +27,8 @@ const renderReferralAuth = (
   );
 
 describe("unlinked referral Discord account choice", () => {
+  beforeAll(() => import("../components/SiteDialog"));
+
   beforeEach(() => {
     jest.clearAllMocks();
     window.sessionStorage.clear();

@@ -1,9 +1,21 @@
 import { readBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
-import React, { useState, useEffect, useRef } from "react";
+import React, { Suspense, lazy, useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import SupabaseSocialLogin from "./SupabaseSocialLogin";
-import SiteDialog from "./SiteDialog";
 import { requestDeadline } from "../lib/clientRequest";
+
+const LazySiteDialog = lazy(() => import("./SiteDialog"));
+
+function SiteDialog(props) {
+  const [loaded, setLoaded] = useState(props.open);
+  if (props.open && !loaded) setLoaded(true);
+  if (!loaded) return null;
+  return (
+    <Suspense fallback={null}>
+      <LazySiteDialog {...props} />
+    </Suspense>
+  );
+}
 
 const PENDING_DISCORD_CHOICE_KEY = "refPendingDiscordChoice";
 const PENDING_DISCORD_CHOICE_MAX_AGE_MS = 15 * 60 * 1000;
