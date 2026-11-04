@@ -54,10 +54,10 @@ const braceStep = longTotal => {
   };
 };
 const braceSteps = [];
-for (const longTotal of [128000, 1024000]) {
+for (const longTotal of [128000, 1024000, 4096000]) {
   const step = braceStep(longTotal);
   braceSteps.push(step);
-  if (step.cpuMs >= 8 * step.sameBytesShortCpuMs) {
+  if (step.cpuMs >= braceRatioLimit * step.sameBytesShortCpuMs) {
     break;
   }
 }
@@ -76,4 +76,6 @@ const braceRatios = JSON.stringify(braceSteps.map(step => [step.totalCharacters,
 assert.deepEqual(slowBraceSteps, [], `brace expansion cost grew faster than its input: ${braceRatios}`);
 const postcss=require("postcss");assert.match(postcss([]).process("a { color: red }",{from:undefined,map:false}).css,/color: red/);assert.ok(require("browserslist")(["last 1 chrome version"]).length>0);
 evidence.push({check:"retained-native-build-parser-apis",packages:["postcss","browserslist"]});
-fs.mkdirSync("test-results",{recursive:true});fs.writeFileSync(artifact,JSON.stringify({passed:true,evidence},null,2)+"\n");console.log(JSON.stringify({passed:true,checks:evidence.length,artifact}));
+fs.mkdirSync("test-results", { recursive: true });
+fs.writeFileSync(artifact, JSON.stringify({ passed: true, evidence }, null, 2) + "\n");
+console.log(JSON.stringify({ passed: true, checks: evidence.length, artifact }));

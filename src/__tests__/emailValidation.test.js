@@ -9,7 +9,7 @@ test.each(["user@exämple.de", "first.last+tag@sub.domain.com", " visitor@exampl
   expect(isValidEmail(value)).toBe(true);
 });
 
-test("rejects a 10,000-character input without expensive matching", () => {
+test("rejects long addresses at a cost that grows no faster than their length", () => {
   const value = "a@" + "b.".repeat(4998) + "bc";
   expect(value).toHaveLength(10000);
   expect(isValidEmail(value)).toBe(false);
@@ -27,6 +27,7 @@ test("rejects a 10,000-character input without expensive matching", () => {
   const shortLength = 1024;
   const rounds = 7;
   const ratioLimit = 4;
+  const longCalls = 4;
   const compare = (longLength) => {
     const longInput = address(longLength);
     const shortInput = address(shortLength);
@@ -36,7 +37,7 @@ test("rejects a 10,000-character input without expensive matching", () => {
       const order = round % 2 ? ["short", "long"] : ["long", "short"];
       for (const side of order) {
         const input = side === "long" ? longInput : shortInput;
-        elapsed[side].push(cost(input, (4 * longLength) / input.length));
+        elapsed[side].push(cost(input, (longCalls * longLength) / input.length));
       }
     }
     const longMs = Math.min(...elapsed.long);
@@ -47,7 +48,7 @@ test("rejects a 10,000-character input without expensive matching", () => {
   for (const longLength of [16384, 65536]) {
     const step = compare(longLength);
     steps.push(step);
-    if (step.longMs >= 8 * step.shortMs) {
+    if (step.longMs >= ratioLimit * step.shortMs) {
       break;
     }
   }

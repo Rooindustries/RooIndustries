@@ -441,6 +441,41 @@ try {
       build: length => 'file:///app/' + '@scope1/'.repeat(length / 8 - 3) + 'pkg/index.js',
       scrubbed: value => value,
     },
+    {
+      name: 'dot run',
+      build: length => '1' + '.'.repeat(length - 2) + '2',
+      scrubbed: value => value,
+    },
+    {
+      name: 'space run',
+      build: length => '1' + ' '.repeat(length - 2) + '2',
+      scrubbed: value => value,
+    },
+    {
+      name: 'unmatched at signs',
+      build: length => '.x' + 'a@'.repeat((length - 2) / 2),
+      scrubbed: value => value,
+    },
+    {
+      name: 'many contacts',
+      build: length => 'a@b.cde '.repeat(length / 8),
+      scrubbed: value => value.replaceAll('a@b.cde', '[email]'),
+    },
+    {
+      name: 'raw query',
+      build: length => 'a?'.repeat(length / 2),
+      scrubbed: () => 'a?[query]',
+    },
+    {
+      name: 'encoded card',
+      build: length => '%31+'.repeat(length / 4),
+      scrubbed: () => '[card]',
+    },
+    {
+      name: 'encoded credentials',
+      build: length => '%2F%2F' + 'u'.repeat(length - 9) + '%40',
+      scrubbed: () => '[Filtered]',
+    },
   ];
   const scalingValues = (shape, length, total) => {
     return Array.from({ length: total / length }, () => shape.build(length));
@@ -451,16 +486,25 @@ try {
     const used = process.cpuUsage(before);
     return (used.user + used.system) / 1000;
   };
+  const scrubberBytesPerMeasurement = 262144;
+  const scrubberOutputs = [];
   const scalingPaths = {
-    scrubber: values => {
-      const calls = Math.max(1, 262144 / values.join('').length);
-      return cpuMsOf(() => {
+    scrubber: async (shape, values) => {
+      const calls = Math.max(1, scrubberBytesPerMeasurement / values.join('').length);
+      let result;
+      const cpuMs = await cpuMsOf(() => {
         for (let call = 0; call < calls; call++) {
-          scrubEvent({ extra: { scaling_values: values } });
+          result = scrubEvent({ extra: { scaling_values: values } });
         }
       });
+      scrubberOutputs.push({
+        shape: shape.name,
+        length: values[0].length,
+        exact: isDeepStrictEqual(result.extra?.scaling_values, values.map(shape.scrubbed)),
+      });
+      return cpuMs;
     },
-    sdk: (values, message) => cpuMsOf(async () => {
+    sdk: (shape, values, message) => cpuMsOf(async () => {
       sdk.captureEvent({ message, extra: { scaling_values: values } });
       await sdk.flush(5000);
     }),
@@ -477,7 +521,7 @@ try {
         const length = side === 'long' ? total : scalingShort;
         const values = scalingValues(shape, length, total);
         const message = `Fixture scrub scaling ${shape.name}|${length}|${round}`;
-        cpuMs[side].push(await scalingPaths[path](values, message));
+        cpuMs[side].push(await scalingPaths[path](shape, values, message));
         await new Promise(resolve => setImmediate(resolve));
       }
     }
@@ -493,16 +537,20 @@ try {
     };
   };
   const scaling = [];
-  for (const [step, paths] of scalingStepPaths.entries()) {
-    if (scaling.some(item => item.ratio >= scalingRatioLimit)) {
-      break;
-    }
-    for (const shape of scalingShapes) {
-      for (const path of paths) {
-        scaling.push(await compareScaling(path, shape, scalingSteps[step]));
+  const measureScaling = async () => {
+    for (const [step, paths] of scalingStepPaths.entries()) {
+      for (const shape of scalingShapes) {
+        for (const path of paths) {
+          const result = await compareScaling(path, shape, scalingSteps[step]);
+          scaling.push(result);
+          if (result.ratio >= scalingRatioLimit) {
+            return;
+          }
+        }
       }
     }
-  }
+  };
+  await measureScaling();
   const scalingItems = events().filter(item => item.event.message?.startsWith('Fixture scrub scaling '));
   const unrelated = received.filter(item => !scalingItems.some(scalingItem => scalingItem.raw === item.body));
   received.splice(0, received.length, ...unrelated);
@@ -524,9 +572,13 @@ try {
     const expected = scalingValues(shape, Number(length), scalingSteps[0]).map(shape.scrubbed);
     return isDeepStrictEqual(item.event.extra?.scaling_values, expected);
   });
-  const sdkComparisonsPerShape = scalingStepPaths.flat().filter(path => path === 'sdk').length;
-  const sdkScalingEvents = scalingShapes.length * sdkComparisonsPerShape * scalingRounds * scalingSides.length;
+  const measurementsPerComparison = scalingRounds * scalingSides.length;
+  const sdkScalingEvents = scaling.filter(item => item.path === 'sdk').length * measurementsPerComparison;
+  const scrubberMeasurements = scaling.filter(item => item.path === 'scrubber').length * measurementsPerComparison;
   const scalingComparisons = scalingShapes.length * scalingStepPaths.flat().length;
+  const inexactScrubberOutputs = scrubberOutputs
+    .filter(output => !output.exact)
+    .map(({ shape, length }) => ({ shape, length }));
   const slowScaling = scaling
     .filter(item => item.ratio >= scalingRatioLimit)
     .map(({ shape, path, bytes, ratio }) => ({ shape, path, bytes, ratio: Number(ratio.toFixed(2)) }));
@@ -535,6 +587,11 @@ try {
     '1KiB and 32KiB scaling values reach ingest fully scrubbed',
     scrubbedAsExpected,
     Array(sdkScalingEvents).fill(true),
+  );
+  check(
+    '1KiB, 32KiB and 1MiB scaling values leave the scrubber fully scrubbed',
+    { measured: scrubberOutputs.length, inexact: inexactScrubberOutputs },
+    { measured: scrubberMeasurements, inexact: [] },
   );
   check(
     '32KiB and 1MiB tokens of every shape cost under four times the CPU of the same bytes as 1KiB tokens',
