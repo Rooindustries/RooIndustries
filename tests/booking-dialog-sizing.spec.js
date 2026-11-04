@@ -411,6 +411,45 @@ const resizeViews = [
   ["payment-success receipt", receipt("/payment-success")],
   ["thank-you receipt", receipt("/thank-you")],
 ];
+const sampleFrames = () => {
+  window.__resizeFrames = [];
+  const measure = () => {
+    const frame = document.querySelector('[role="dialog"].ri-booking');
+    if (!frame || frame.classList.contains("invisible")) return null;
+    const stage = frame.closest(".booking-dialog-stage").getBoundingClientRect();
+    const box = frame.getBoundingClientRect();
+    const content = frame.querySelector("[data-booking-scaler] > div").getBoundingClientRect();
+    const width = document.documentElement.clientWidth;
+    return {
+      time: performance.now(),
+      width,
+      frameWidth: box.width,
+      stageGap: Math.abs(stage.width - width),
+      contentPastFrame: Math.max(content.right - box.right, box.left - content.left),
+      contentPastWindow: Math.max(content.right - width, -content.left),
+    };
+  };
+  const probe = document.createElement("div");
+  probe.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;visibility:hidden;pointer-events:none";
+  const observer = new ResizeObserver(() => {
+    const entry = measure();
+    if (entry) window.__resizeFrames.push(entry);
+  });
+  const attach = () => {
+    if (probe.isConnected || !document.body) return;
+    document.body.append(probe);
+    observer.observe(probe);
+  };
+  const tick = () => {
+    attach();
+    probe.style.width = probe.style.width === "1px" ? "2px" : "1px";
+    requestAnimationFrame(tick);
+  };
+  attach();
+  requestAnimationFrame(tick);
+};
+const subPixel = 0.05;
+const misfit = entry => entry.stageGap > subPixel || entry.contentPastFrame > subPixel || entry.contentPastWindow > subPixel;
 const sizes = { phone: { width: 390, height: 844 }, desktop: { width: 1440, height: 900 } };
 
 for (const [from, to] of [["phone", "desktop"], ["desktop", "phone"]]) {
@@ -424,42 +463,64 @@ for (const [from, to] of [["phone", "desktop"], ["desktop", "phone"]]) {
         await expect(dialog).toBeVisible();
         await expect(dialog).not.toHaveClass(/invisible/);
         await page.evaluate(() => document.fonts.ready);
-        await page.evaluate(() => {
-          window.__resizeFrames = [];
-          const measure = () => {
-            const frame = document.querySelector('[role="dialog"].ri-booking');
-            if (!frame) return null;
-            const stage = frame.closest(".booking-dialog-stage").getBoundingClientRect();
-            const box = frame.getBoundingClientRect();
-            const content = frame.querySelector("[data-booking-scaler] > div").getBoundingClientRect();
-            const width = document.documentElement.clientWidth;
-            return {
-              width,
-              stageGap: Math.abs(stage.width - width),
-              contentPastFrame: Math.max(content.right - box.right, box.left - content.left),
-              contentPastWindow: Math.max(content.right - width, -content.left),
-            };
-          };
-          const probe = document.createElement("div");
-          probe.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;visibility:hidden;pointer-events:none";
-          document.body.append(probe);
-          new ResizeObserver(() => {
-            const entry = measure();
-            if (entry) window.__resizeFrames.push(entry);
-          }).observe(probe);
-          const tick = () => {
-            probe.style.width = probe.style.width === "1px" ? "2px" : "1px";
-            requestAnimationFrame(tick);
-          };
-          requestAnimationFrame(tick);
-        });
+        await page.evaluate(sampleFrames);
         await page.setViewportSize(sizes[to]);
         await expect.poll(() => page.evaluate(width => window.__resizeFrames.filter(entry => entry.width === width).length, sizes[to].width)).toBeGreaterThanOrEqual(30);
         const frames = await page.evaluate(width => window.__resizeFrames.filter(entry => entry.width === width), sizes[to].width);
         await save(page, testInfo, `${name.replace(/\W+/g, "-")}-${from}-to-${to}`, frames);
-        const subPixel = 0.05;
-        const misfits = frames.filter(entry => entry.stageGap > subPixel || entry.contentPastFrame > subPixel || entry.contentPastWindow > subPixel);
-        expect(misfits).toEqual([]);
+        expect(frames.filter(misfit)).toEqual([]);
+      });
+    }
+  });
+}
+
+const openFrom = (route, link) => async page => {
+  await page.goto(route);
+  await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+  await page.evaluate(() => document.fonts.ready);
+  await page.evaluate(sampleFrames);
+  await link(page).click();
+};
+const homeLink = page => page.locator('a[href="/booking"]').first();
+const openers = [
+  ["the homepage", openFrom("/", homeLink)],
+  ["packages", openFrom("/packages", page => page.locator(".ri-package-details-button").first().locator("xpath=..").locator('a[href="/booking"]'))],
+  ["a reopen after closing", async page => {
+    await openFrom("/", homeLink)(page);
+    await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+    await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.evaluate(() => { window.__resizeFrames = []; });
+    await homeLink(page).click();
+  }],
+  ["a Forward after going Back", async page => {
+    await openFrom("/", homeLink)(page);
+    await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+    await page.goBack();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.evaluate(() => { window.__resizeFrames = []; });
+    await page.goForward();
+  }],
+  ["a direct load", async page => {
+    await page.addInitScript(sampleFrames);
+    await page.goto("/booking");
+  }],
+];
+
+for (const [size, viewport] of Object.entries(sizes)) {
+  test.describe(`${size} open`, () => {
+    test.use({ viewport, hasTouch: viewport.width < 780 });
+
+    for (const [name, open] of openers) {
+      test(`opening from ${name} matches the window from the first frame`, async ({ page, flow }, testInfo) => {
+        await open(page);
+        await expect(page).toHaveURL(/\/booking$/);
+        await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+        await expect.poll(() => page.evaluate(() => window.__resizeFrames.length)).toBeGreaterThanOrEqual(60);
+        const frames = await page.evaluate(() => window.__resizeFrames);
+        await save(page, testInfo, `${name.replace(/\W+/g, "-")}-open-${size}`, frames);
+        expect(frames.filter(misfit)).toEqual([]);
       });
     }
   });
