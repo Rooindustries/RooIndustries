@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { isDeepStrictEqual } from 'node:util';
 import { installNetworkGuard, refuseEnvFiles } from './lib/test-target-safety.mjs';
+import { compareUntilSlow, cpuMsOf } from './lib/input-scaling.mjs';
 import { checkBrowserBootstrap } from './monitoring-bootstrap-e2e.mjs';
 import { normalizedCards, normalizedEmails, separatorRuns, releaseSha, samplingId, surfaceCases, plusRun, diagnosticControls, querySegments } from './monitoring-recognizer-cases.mjs';
 
@@ -467,6 +468,11 @@ try {
       scrubbed: () => 'a?[query]',
     },
     {
+      name: 'raw query with encoded marks',
+      build: length => 'a?' + '%3fx'.repeat((length - 4) / 4) + 'yz',
+      scrubbed: () => 'a?[query]',
+    },
+    {
       name: 'encoded card',
       build: length => '%31+'.repeat(length / 4),
       scrubbed: () => '[card]',
@@ -479,12 +485,6 @@ try {
   ];
   const scalingValues = (shape, length, total) => {
     return Array.from({ length: total / length }, () => shape.build(length));
-  };
-  const cpuMsOf = async work => {
-    const before = process.cpuUsage();
-    await work();
-    const used = process.cpuUsage(before);
-    return (used.user + used.system) / 1000;
   };
   const scrubberBytesPerMeasurement = 262144;
   const scrubberOutputs = [];
@@ -510,47 +510,16 @@ try {
     }),
   };
   const scalingStepPaths = [Object.keys(scalingPaths), ['scrubber']];
-  const scalingRounds = 7;
-  const scalingSides = ['long', 'short'];
   const scalingRatioLimit = 4;
-  const compareScaling = async (path, shape, total) => {
-    const cpuMs = { short: [], long: [] };
-    for (let round = 0; round < scalingRounds; round++) {
-      const order = round % 2 ? [...scalingSides].reverse() : scalingSides;
-      for (const side of order) {
-        const length = side === 'long' ? total : scalingShort;
-        const values = scalingValues(shape, length, total);
-        const message = `Fixture scrub scaling ${shape.name}|${length}|${round}`;
-        cpuMs[side].push(await scalingPaths[path](shape, values, message));
-        await new Promise(resolve => setImmediate(resolve));
-      }
-    }
-    const shortCpuMs = Math.min(...cpuMs.short);
-    const longCpuMs = Math.min(...cpuMs.long);
-    return {
-      shape: shape.name,
-      path,
-      bytes: total,
-      shortCpuMs,
-      longCpuMs,
-      ratio: longCpuMs / shortCpuMs,
-    };
-  };
-  const scaling = [];
-  const measureScaling = async () => {
-    for (const [step, paths] of scalingStepPaths.entries()) {
-      for (const shape of scalingShapes) {
-        for (const path of paths) {
-          const result = await compareScaling(path, shape, scalingSteps[step]);
-          scaling.push(result);
-          if (result.ratio >= scalingRatioLimit) {
-            return;
-          }
-        }
-      }
-    }
-  };
-  await measureScaling();
+  const scalingPlans = scalingStepPaths.flatMap((paths, step) => scalingShapes.flatMap(shape => paths.map(path => ({
+    details: { shape: shape.name, path, bytes: scalingSteps[step] },
+    measure: (side, round) => {
+      const length = side === 'long' ? scalingSteps[step] : scalingShort;
+      const values = scalingValues(shape, length, scalingSteps[step]);
+      return scalingPaths[path](shape, values, `Fixture scrub scaling ${shape.name}|${length}|${round}`);
+    },
+  }))));
+  const scaling = await compareUntilSlow(scalingPlans, { rounds: 7, limit: scalingRatioLimit });
   const scalingItems = events().filter(item => item.event.message?.startsWith('Fixture scrub scaling '));
   const unrelated = received.filter(item => !scalingItems.some(scalingItem => scalingItem.raw === item.body));
   received.splice(0, received.length, ...unrelated);
@@ -572,10 +541,12 @@ try {
     const expected = scalingValues(shape, Number(length), scalingSteps[0]).map(shape.scrubbed);
     return isDeepStrictEqual(item.event.extra?.scaling_values, expected);
   });
-  const measurementsPerComparison = scalingRounds * scalingSides.length;
-  const sdkScalingEvents = scaling.filter(item => item.path === 'sdk').length * measurementsPerComparison;
-  const scrubberMeasurements = scaling.filter(item => item.path === 'scrubber').length * measurementsPerComparison;
-  const scalingComparisons = scalingShapes.length * scalingStepPaths.flat().length;
+  const measurementsOn = path => scaling
+    .filter(item => item.path === path)
+    .reduce((sum, item) => sum + item.measurements, 0);
+  const sdkScalingEvents = measurementsOn('sdk');
+  const scrubberMeasurements = measurementsOn('scrubber');
+  const scalingComparisons = scalingPlans.length;
   const inexactScrubberOutputs = scrubberOutputs
     .filter(output => !output.exact)
     .map(({ shape, length }) => ({ shape, length }));
