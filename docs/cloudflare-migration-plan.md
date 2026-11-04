@@ -41,7 +41,7 @@ Workers in steps, starting with downloads, so each step can be proven and undone
 
 ## Risks
 
-- **Workers Free limits.** 10 ms of CPU per request and a 3 MB compressed bundle fit the downloads Worker, but not
+- **Workers Free limits.** 10 ms of CPU per request fits the downloads Worker, which only streams bytes, but not
   server rendering for the whole site. Step 5 needs Workers Paid.
 - **Node-only code.** Route handlers run on Node today. `nodejs_compat` covers most of it, but not native modules
   (`sharp`) or the local file download backend, which is development only.

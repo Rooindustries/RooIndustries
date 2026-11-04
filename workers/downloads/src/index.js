@@ -48,19 +48,22 @@ const HTTP_DATE_FORMATS = [
   new RegExp(`^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?<month>\\w{3}) (?<day>[ \\d]\\d) ${TIME} (?<year>\\d{4})$`),
 ];
 
-const fullYear = (shortYear) => {
-  const thisYear = new Date().getUTCFullYear();
-  const year = thisYear - (thisYear % 100) + Number(shortYear);
-  return year > thisYear + 50 ? year - 100 : year;
+const fiftyYearsFromNow = () => {
+  const limit = new Date();
+  limit.setUTCFullYear(limit.getUTCFullYear() + 50);
+  return limit;
 };
 
 const parseHttpDate = (value) => {
   const fields = HTTP_DATE_FORMATS.map((format) => format.exec(value ?? "")).find(Boolean)?.groups;
   if (!fields) return null;
-  const year = fields.year ? Number(fields.year) : fullYear(fields.shortYear);
   const month = MONTHS.indexOf(fields.month);
   const [day, hour, minute, second] = [fields.day, fields.hour, fields.minute, fields.second].map(Number);
-  const date = new Date(Date.UTC(year, month, day, hour, minute, second));
+  const at = (year) => new Date(Date.UTC(year, month, day, hour, minute, second));
+  const thisYear = new Date().getUTCFullYear();
+  let year = fields.year ? Number(fields.year) : thisYear - (thisYear % 100) + Number(fields.shortYear);
+  if (fields.shortYear && at(year) > fiftyYearsFromNow()) year -= 100;
+  const date = at(year);
   const valid =
     month >= 0 &&
     hour < 24 &&

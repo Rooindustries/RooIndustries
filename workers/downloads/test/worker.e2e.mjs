@@ -26,6 +26,7 @@ const movedKey = "builds/1111111111111111111111111111111111111111.zip";
 const shortKey = "builds/2222222222222222222222222222222222222222.zip";
 const loopKey = "builds/3333333333333333333333333333333333333333.zip";
 const truncatedKey = "builds/4444444444444444444444444444444444444444.zip";
+const overflowKey = "builds/5555555555555555555555555555555555555555.zip";
 const signedPath = (key) => `/storage/v1/object/sign/optimization-builds-private/${key}?token=fixture`;
 
 const writeFixture = (name, bytes) => {
@@ -62,6 +63,7 @@ const sourceBytes = {
   [movedKey]: randomBytes(200),
   [shortKey]: randomBytes(100),
   [truncatedKey]: randomBytes(100),
+  [overflowKey]: randomBytes(16384),
 };
 const streamedWithoutRanges = new Set([exeKey, truncatedKey]);
 const workerOrigins = {};
@@ -83,6 +85,14 @@ const source = createHttpServer((req, res) => {
     return;
   }
   const bytes = sourceBytes[key];
+  if (key === overflowKey) {
+    const range = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range ?? "");
+    const [first, last] = range ? [Number(range[1]), Number(range[2])] : [0, bytes.length - 1];
+    res.writeHead(range ? 206 : 200, range ? { "Content-Range": `bytes ${first}-${last}/${bytes.length}` } : {});
+    res.write(bytes.subarray(first, last + 1));
+    setTimeout(() => res.end(randomBytes(5)), 75);
+    return;
+  }
   if (streamedWithoutRanges.has(key)) {
     res.writeHead(200);
     res.write(bytes.subarray(0, 1000));
@@ -119,6 +129,7 @@ const originConfig = (sourceOrigin) => {
         [shortKey]: entry(sourceBytes[shortKey], `/${shortKey}`, 200),
         [loopKey]: entry(sourceBytes[movedKey], "/api/tools/loop/download"),
         [truncatedKey]: entry(sourceBytes[truncatedKey], `/${truncatedKey}`, 200),
+        [overflowKey]: entry(sourceBytes[overflowKey], `/${overflowKey}`),
       },
     },
   };
@@ -292,6 +303,13 @@ for (const mode of ["r2", "origin"]) {
       const asctime = `${weekday} ${month} ${day.replace(/^0/, " ")} ${time} ${year}`;
       assert.equal(await status({ "If-Modified-Since": rfc850 }), 304);
       assert.equal(await status({ "If-Modified-Since": asctime }), 304);
+      const pastCutoff = new Date();
+      pastCutoff.setUTCFullYear(pastCutoff.getUTCFullYear() + 50, pastCutoff.getUTCMonth(), pastCutoff.getUTCDate() + 2);
+      const [, cutoffDay, cutoffMonth, cutoffYear] = pastCutoff.toUTCString().split(/,? /);
+      const cutoffWeekday = pastCutoff.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+      const centuryAgo = `${cutoffWeekday}, ${cutoffDay}-${cutoffMonth}-${cutoffYear.slice(2)} 00:00:00 GMT`;
+      assert.equal(await status({ "If-Modified-Since": centuryAgo }), 200);
+      assert.equal(await status({ "If-Unmodified-Since": centuryAgo }), 412);
       const earlier = new Date(Date.parse(lastModified) - 86_400_000).toUTCString().split(/,? /);
       const earlierAsctime = `${earlier[0]} ${earlier[2]} ${earlier[1]} ${earlier[4]} ${earlier[3]}`;
       assert.equal(await status({ "If-Unmodified-Since": earlierAsctime }), 412);
@@ -330,4 +348,12 @@ test("origin storage serves ranges from a source that ignores them and aborts a 
   const truncated = await fetch(`${workerOrigins.origin}/${truncatedKey}`);
   assert.equal(truncated.headers.get("Content-Length"), "200");
   await assert.rejects(truncated.arrayBuffer());
+});
+
+test("origin storage aborts a source that sends extra bytes after the expected end", async () => {
+  for (const headers of [{}, { Range: "bytes=0-99" }]) {
+    const response = await fetch(`${workerOrigins.origin}/${overflowKey}`, { headers });
+    assert.equal(response.status, headers.Range ? 206 : 200);
+    await assert.rejects(response.arrayBuffer(), JSON.stringify(headers));
+  }
 });

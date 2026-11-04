@@ -45,16 +45,40 @@ const sliceStream = ({ offset, length }) => {
   });
 };
 
+const exactLength = (expected) => {
+  let received = 0;
+  let lastByte;
+  return new TransformStream({
+    transform(chunk, controller) {
+      if (!chunk.byteLength) return;
+      received += chunk.byteLength;
+      if (received > expected) throw new RangeError("The source sent more bytes than expected.");
+      if (received < expected) {
+        controller.enqueue(chunk);
+        return;
+      }
+      controller.enqueue(chunk.subarray(0, -1));
+      lastByte = chunk.subarray(-1);
+    },
+    flush(controller) {
+      if (received !== expected) throw new RangeError("The source ended early.");
+      controller.enqueue(lastByte);
+    },
+  });
+};
+
+const checkedBody = (body, length) => body.pipeThrough(exactLength(length)).pipeThrough(new FixedLengthStream(length));
+
 const fileBody = (response, file, range) => {
   const contentLength = response.headers.get("Content-Length");
   if (range && response.status === 206) {
     const expected = `bytes ${range.offset}-${lastByte(range)}/${file.size}`;
     return response.headers.get("Content-Range") === expected
-      ? response.body.pipeThrough(new FixedLengthStream(range.length))
+      ? checkedBody(response.body, range.length)
       : null;
   }
   if (response.status !== 200 || (contentLength !== null && contentLength !== String(file.size))) return null;
-  if (!range) return response.body.pipeThrough(new FixedLengthStream(file.size));
+  if (!range) return checkedBody(response.body, file.size);
   return response.body.pipeThrough(sliceStream(range)).pipeThrough(new FixedLengthStream(range.length));
 };
 
