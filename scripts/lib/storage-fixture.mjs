@@ -111,7 +111,7 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
             STORAGE_PUBLIC_URL: supabaseUrl, REQUEST_ALLOW_X_FORWARDED_PATH: 'true',
             VERSION: storageRelease.tag,
           };
-          const child = spawn(process.execPath, [path.join(storageSource, 'dist/start/server.js')], { cwd: scratch, env: childEnv, stdio: ['ignore', logFd, logFd] });
+          const child = spawn(process.execPath, [path.join(storageSource, 'dist/start/server.js')], { cwd: scratch, env: childEnv, stdio: ['ignore', logFd, logFd], detached: true });
           fs.closeSync(logFd);
           cleanup.storagePid = child.pid;
           return child;

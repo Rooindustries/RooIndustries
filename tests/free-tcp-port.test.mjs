@@ -171,9 +171,14 @@ const startUiSweep = (env) => new Promise((resolve) => {
     detached: true, stdio: ["ignore", "pipe", "pipe"],
     env: { PATH: process.env.PATH, HOME: scratch, ROO_TEST_HOST: host, NEXT_DIST_DIR: dist, UI_ARTIFACT: path.join(scratch, "ui-sweep.json"), ...env },
   });
-  let stdout = "", stderr = "";
-  const finish = (result) => {
-    try { process.kill(-child.pid, "SIGKILL"); } catch {}
+  let stdout = "", stderr = "", finished = false;
+  const finish = async (result) => {
+    if (finished) return;
+    finished = true;
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGTERM");
+      await once(child, "exit");
+    }
     fs.rmSync(dist, { recursive: true, force: true });
     fs.rmSync(scratch, { recursive: true, force: true });
     resolve({ ...result, stderr });

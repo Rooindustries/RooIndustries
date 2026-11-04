@@ -4,12 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { once } from 'node:events';
 import { spawn, spawnSync } from 'node:child_process';
 import postgres from 'postgres';
 import { createClient } from '@supabase/supabase-js';
 import { listenOnPort, releaseTcpPorts, reserveTcpPorts } from './free-tcp-port.mjs';
-import { startChildOnPorts } from './start-on-port.mjs';
+import { startChildOnPorts, stopChild } from './start-on-port.mjs';
 
 export const root = path.resolve(new URL('../..', import.meta.url).pathname);
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';
@@ -84,16 +83,15 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
   let sql;
   let proxy;
   let restProcess;
-  let started = false;
   let requestHook = null;
   let authHandler = null;
   let providerHandler = null;
   const stop = async () => {
     await releaseTcpPorts(host, explicitPorts);
     if (proxy) {proxy.closeAllConnections();await new Promise((resolve)=>proxy.close(resolve));proxy=null;}
-    if (restProcess && restProcess.exitCode === null) {restProcess.kill('SIGTERM');await once(restProcess,'exit');}
+    if (restProcess) await stopChild(restProcess);
     if (sql) await sql.end({timeout:5});
-    if (started) {run(path.join(pgBin,'pg_ctl'),['-D',dataDir,'-m','fast','-w','stop']);started=false;}
+    if (postgresProcess) await stopChild(postgresProcess);
   };
   try {
     postgresVersion = run(path.join(pgBin,'postgres'),['--version']);
@@ -113,12 +111,11 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
       isReady: postmasterReady,
       spawnChild: ([port]) => {
         const log = fs.openSync(postgresLog, 'w');
-        postgresProcess = spawn(path.join(pgBin, 'postgres'), ['-D', dataDir, '-p', String(port), '-h', host, '-k', scratch], { env, stdio: ['ignore', log, log] });
+        postgresProcess = spawn(path.join(pgBin, 'postgres'), ['-D', dataDir, '-p', String(port), '-h', host, '-k', scratch], { env, stdio: ['ignore', log, log], detached: true });
         fs.closeSync(log);
         return postgresProcess;
       },
     }));
-    started=true;
     sql=postgres({host,port:pgPort,database:'postgres',max:8,prepare:false,onnotice(notice){fs.appendFileSync(path.join(scratch,'schema-notices.log'),`${notice.message}\n`);}});
     let migrationConnection;
     const apply = async (name, text = readMigration(name), selection = 'complete migration') => {
@@ -206,7 +203,7 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
       },
       spawnChild: ([port]) => {
         const log = fs.openSync(restLogPath, 'w');
-        const child = spawn(postgrestBin, [], { env: { ...env, PGRST_DB_URI: `postgres://${os.userInfo().username}@${host}:${pgPort}/postgres`, PGRST_DB_SCHEMAS: 'public', PGRST_DB_ANON_ROLE: 'anon', PGRST_JWT_SECRET: jwtSecret, PGRST_SERVER_HOST: host, PGRST_SERVER_PORT: String(port) }, stdio: ['ignore', log, log] });
+        const child = spawn(postgrestBin, [], { env: { ...env, PGRST_DB_URI: `postgres://${os.userInfo().username}@${host}:${pgPort}/postgres`, PGRST_DB_SCHEMAS: 'public', PGRST_DB_ANON_ROLE: 'anon', PGRST_JWT_SECRET: jwtSecret, PGRST_SERVER_HOST: host, PGRST_SERVER_PORT: String(port) }, stdio: ['ignore', log, log], detached: true });
         fs.closeSync(log);
         return child;
       },

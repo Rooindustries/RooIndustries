@@ -8,7 +8,6 @@ import { uiFinishFixture } from '../tests/fixtures/ui-finish-server.mjs';
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from './lib/test-target-safety.mjs';
 import { portFromEnv, reserveTcpPorts } from './lib/free-tcp-port.mjs';
 import { startChildOnPorts } from './lib/start-on-port.mjs';
-import { lockBuildDirectory } from './lib/build-lock.mjs';
 
 refuseEnvFiles();
 const host = testHost;
@@ -19,8 +18,7 @@ await new Promise((resolve, reject) => { server.once('error', reject); server.li
 const port = server.address().port;
 const base = localOrigin(`http://${host}:${port}`);
 let nextPort, upstream;
-const lock = await lockBuildDirectory(validateDistDir(process.env.NEXT_DIST_DIR || '.next-e2e-ui-sweep', { isolated: true }), { slots: process.env.NEXT_DIST_DIR ? 1 : 20 });
-const dist = validateDistDir(lock.dir, { isolated: true });
+const dist = validateDistDir(process.env.NEXT_DIST_DIR || '.next-e2e-ui-sweep', { isolated: true });
 const artifact = path.resolve(process.env.UI_ARTIFACT || 'test-results/ui-sweep.json');
 let state = { scenario: '', mode: 'valid', calls: [] };
 let pendingOld;
@@ -115,7 +113,7 @@ const { ports: [startedPort], child } = await startChildOnPorts({
   timeout: 60000,
   output: () => output.join(''),
   spawnChild: ([candidate]) => {
-    const next = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--hostname', host, '--port', String(candidate)], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const next = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--hostname', host, '--port', String(candidate)], { env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     next.stdout.on('data', chunk => { output.push(String(chunk)); process.stdout.write(chunk); });
     next.stderr.on('data', chunk => { output.push(String(chunk)); process.stderr.write(chunk); });
     return next;

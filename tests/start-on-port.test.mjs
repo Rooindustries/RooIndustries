@@ -8,7 +8,6 @@ import { once } from "node:events";
 import { test } from "node:test";
 import { freeTcpPort, reserveTcpPorts } from "../scripts/lib/free-tcp-port.mjs";
 import { addressInUse, startChildOnPorts } from "../scripts/lib/start-on-port.mjs";
-import { lockBuildDirectory } from "../scripts/lib/build-lock.mjs";
 
 const host = "127.0.0.1";
 const library = (name) => JSON.stringify(new URL(`../scripts/lib/${name}`, import.meta.url).href);
@@ -148,28 +147,6 @@ await listenOnPort(http.createServer((q, s) => s.end("child")), "127.0.0.1", Num
   }
 });
 
-test("a build directory is locked against other runs and freed when the run ends", async () => {
-  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "roo-build-lock-")), ".next-e2e-lock");
-  const holder = spawn(process.execPath, ["--input-type=module", "-e", `const { lockBuildDirectory } = await import(${library("build-lock.mjs")});
-await lockBuildDirectory(${JSON.stringify(dir)});
-process.stdout.write("locked\\n");
-setInterval(() => {}, 1000);`], { stdio: ["ignore", "pipe", "inherit"] });
-  try {
-    await once(holder.stdout, "data");
-    await assert.rejects(lockBuildDirectory(dir), { code: "ELOCKED" });
-    const next = await lockBuildDirectory(dir, { slots: 3 });
-    assert.equal(next.dir, `${dir}-2`);
-    await next.release();
-  } finally {
-    holder.kill();
-    await once(holder, "exit");
-  }
-  const reclaimed = await lockBuildDirectory(dir);
-  assert.equal(reclaimed.dir, dir);
-  await reclaimed.release();
-  fs.rmSync(path.dirname(dir), { recursive: true, force: true });
-});
-
 test("explicit ports reserved for later binders are skipped by automatic starts", async () => {
   const [later] = await reserveTcpPorts(host, [0]);
   const picked = [];
@@ -185,4 +162,105 @@ test("explicit ports reserved for later binders are skipped by automatic starts"
     await once(child, "exit");
   }
   assert.ok(!picked.includes(later));
+});
+
+const alive = (pid) => {
+  try {
+    return !fs.readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1].startsWith("Z");
+  } catch {
+    return false;
+  }
+};
+const waitUntilGone = async (pids, timeout = 5000) => {
+  const deadline = Date.now() + timeout;
+  while (pids.some(alive) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
+  return pids.filter(alive);
+};
+const familyScript = (detachGrandchild) => `const { spawn } = require("node:child_process");
+process.on("SIGTERM", () => {});
+const grandchild = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: "ignore", detached: ${detachGrandchild} });
+console.log(grandchild.pid);
+setInterval(() => {}, 1000);`;
+const spawnFamily = (detached, detachGrandchild, pids) => {
+  const child = spawn(process.execPath, ["-e", familyScript(detachGrandchild)], { stdio: ["ignore", "pipe", "ignore"], detached });
+  pids.push(child.pid);
+  child.stdout.once("data", (chunk) => pids.push(Number(chunk)));
+  return child;
+};
+
+for (const [label, detached] of [["an ordinary child", false], ["a detached child with a detached grandchild", true]]) {
+  test(`a failed start stops ${label} and every descendant`, async () => {
+    const pids = [];
+    await assert.rejects(startChildOnPorts({ host, requested: [0], timeout: 1500, output: () => "", spawnChild: () => spawnFamily(detached, detached, pids) }), /not ready/);
+    assert.equal(pids.length, 2);
+    assert.deepEqual(await waitUntilGone(pids), []);
+  });
+}
+
+for (const [label, ending] of [["is killed by SIGTERM", "kill"], ["exits", "exit"]]) {
+  test(`children are stopped when their parent ${label}`, async () => {
+    const parent = spawn(process.execPath, ["--input-type=module", "-e", `const { spawn } = await import("node:child_process");
+const { startChildOnPorts } = await import(${library("start-on-port.mjs")});
+const family = ${familyScript.toString()};
+startChildOnPorts({ host: "127.0.0.1", requested: [0], timeout: 60000, output: () => "", spawnChild: () => {
+  const child = spawn(process.execPath, ["-e", family(true)], { stdio: ["ignore", "pipe", "ignore"], detached: true });
+  child.stdout.once("data", (chunk) => {
+    console.log(JSON.stringify([child.pid, Number(chunk)]));
+    if (${JSON.stringify(ending)} === "exit") setTimeout(() => process.exit(0), 100);
+  });
+  return child;
+} });`], { stdio: ["ignore", "pipe", "inherit"] });
+    const [line] = await once(parent.stdout, "data");
+    const pids = JSON.parse(String(line));
+    if (ending === "kill") parent.kill("SIGTERM");
+    await once(parent, "exit");
+    assert.deepEqual(await waitUntilGone(pids), []);
+  });
+}
+
+test("a spawn that throws releases the held ports", async () => {
+  let picked;
+  await assert.rejects(startChildOnPorts({ host, requested: [0], passHeld: true, output: () => "", spawnChild: ([port]) => {
+    picked = port;
+    throw new Error("spawn failed");
+  } }), /spawn failed/);
+  const server = await competitor(picked);
+  await close(server);
+});
+
+test("a listener on another host never counts as the child's port", async () => {
+  let thief;
+  try {
+    await assert.rejects(startChildOnPorts({
+      host,
+      requested: [0],
+      timeout: 1500,
+      output: () => "",
+      isReady: answers,
+      spawnChild: ([port]) => {
+        thief = competitor(port);
+        return spawn(process.execPath, ["-e", `require("http").createServer((q, s) => s.end("child")).listen(${port}, "127.0.0.2")`], { stdio: "ignore", detached: true });
+      },
+    }), /not ready/);
+  } finally {
+    await close(await thief);
+  }
+});
+
+test("a child that dies during the readiness probe is not accepted", async () => {
+  let child;
+  await assert.rejects(startChildOnPorts({
+    host,
+    requested: [0],
+    output: () => "",
+    isReady: async () => {
+      child.kill("SIGKILL");
+      await once(child, "exit");
+      return true;
+    },
+    spawnChild: ([port]) => {
+      child = httpChild(port, []);
+      return child;
+    },
+  }), /exited before it was ready/);
 });

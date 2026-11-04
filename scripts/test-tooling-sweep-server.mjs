@@ -9,7 +9,6 @@ import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } fro
 import { createToolingContentFixture } from "../tests/fixtures/tooling-content.mjs";
 import { apiRouteSecrets } from "../tests/fixtures/api-routes.mjs";
 import { adoptHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
-import { lockBuildDirectory } from "./lib/build-lock.mjs";
 
 await adoptHeldTcpPorts();
 if (process.env.ROO_ADMIN_FIXTURE === "1") {
@@ -17,7 +16,6 @@ if (process.env.ROO_ADMIN_FIXTURE === "1") {
 } else {
 refuseEnvFiles();
 const dist = validateDistDir(process.env.NEXT_DIST_DIR, { isolated: true });
-await lockBuildDirectory(dist);
 const baseURL = localOrigin(process.env.BASE_URL);
 const target = new URL(baseURL);
 if (target.hostname !== testHost || target.port !== process.env.PW_PORT) throw new Error("Invalid Tailscale test server target.");

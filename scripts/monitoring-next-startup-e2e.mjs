@@ -10,16 +10,8 @@ refuseEnvFiles();
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';
 const requestedOrigin = process.env.BASE_URL && new URL(localOrigin(process.env.BASE_URL));
 const requestedPort = portFromEnv('PW_PORT') || Number(requestedOrigin?.port || 0);
-const reservePair = async (port) => (await reserveTcpPorts(host, [port, port + 1]))[0];
-let port = requestedPort && await reservePair(requestedPort);
-for (let candidate = 3459; !port; candidate += 2) {
-  port = await reservePair(candidate).catch((cause) => {
-    if (cause.code !== 'EADDRINUSE' || candidate >= 3557) throw cause;
-    return 0;
-  });
-}
-const contentPort = port + 1;
-const dist = validateDistDir(process.env.NEXT_DIST_DIR || `.next-e2e-monitoring-startup-${host.replace(/[^a-zA-Z0-9]/g, '-')}-${port}`, { isolated: true });
+const [port, contentPort] = await reserveTcpPorts(host, [requestedPort || 3459, (requestedPort || 3459) + 1]);
+const dist = validateDistDir(process.env.NEXT_DIST_DIR || '.next-e2e-monitoring-startup', { isolated: true });
 const origin = localOrigin(process.env.BASE_URL || `http://${host}:${port}`);
 if (new URL(origin).hostname !== host || new URL(origin).port !== String(port)) throw new Error('Startup check requires its own local fixture origin.');
 const artifact = join('test-results', 'monitoring-startup', new Date().toISOString().replace(/[:.]/g, '-'));
