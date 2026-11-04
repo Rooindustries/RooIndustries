@@ -1,4 +1,3 @@
-import { performance } from "node:perf_hooks";
 import { isValidEmail } from "../lib/emailValidation";
 
 test.each(["a@.b.c", "a@b..c", "a@b.", "a@-b.c", "a@b-.c", "a@b!c.de", "a@@b.c", "a b@c.de", "a@b\u007fc.de", undefined, null, 42])("rejects malformed email %p", (value) => {
@@ -9,11 +8,47 @@ test.each(["user@exämple.de", "first.last+tag@sub.domain.com", " visitor@exampl
   expect(isValidEmail(value)).toBe(true);
 });
 
-test("rejects a 10,000-character input without expensive matching", () => {
+const domain = ["c".repeat(63), "c".repeat(63), "c".repeat(63), "c".repeat(60)].join(".");
+const longestAddress = "a@" + domain;
+const tooLongAddress = "aa@" + domain;
+
+const patternWork = () => {
+  const spies = [
+    jest.spyOn(RegExp.prototype, "test"),
+    jest.spyOn(RegExp.prototype, "exec"),
+    jest.spyOn(String.prototype, "split"),
+    jest.spyOn(String.prototype, "indexOf"),
+    jest.spyOn(String.prototype, "lastIndexOf"),
+  ];
+  spies.forEach((spy) => spy.mockClear());
+  return {
+    stop: () => {
+      const calls = spies.map((spy) => spy.mock.calls.length);
+      spies.forEach((spy) => spy.mockRestore());
+      return calls;
+    },
+  };
+};
+
+test("accepts exactly 254 characters and rejects 255", () => {
+  expect([longestAddress.length, tooLongAddress.length]).toEqual([254, 255]);
+  expect(isValidEmail(longestAddress)).toBe(true);
+  expect(isValidEmail(tooLongAddress)).toBe(false);
+});
+
+test("rejects an over-long address before any pattern or label work", () => {
   const value = "a@" + "b.".repeat(4998) + "bc";
   expect(value).toHaveLength(10000);
-  const started = performance.now();
-  const valid = isValidEmail(value);
-  expect(performance.now() - started).toBeLessThan(100);
-  expect(valid).toBe(false);
+  for (const input of [tooLongAddress, value]) {
+    const work = patternWork();
+    const valid = isValidEmail(input);
+    const calls = work.stop();
+    expect(valid).toBe(false);
+    expect(calls).toEqual([0, 0, 0, 0, 0]);
+  }
+  const work = patternWork();
+  const valid = isValidEmail(longestAddress);
+  const [regexTests, , splits, indexes, lastIndexes] = work.stop();
+  expect(valid).toBe(true);
+  expect([regexTests, splits, indexes, lastIndexes].map((count) => count > 0)).toEqual([true, true, true, true]);
 });
