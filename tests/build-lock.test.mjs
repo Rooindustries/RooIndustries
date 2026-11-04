@@ -3,17 +3,16 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { test } from "node:test";
 import { lockBuildDirectory } from "../scripts/lib/build-lock.mjs";
 
 const library = JSON.stringify(new URL("../scripts/lib/build-lock.mjs", import.meta.url).href);
 const scratchDir = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), "roo-build-lock-")), ".next-e2e-lock");
-const groupAlive = (group) => {
+const alive = (pid) => {
   try {
-    process.kill(-group, 0);
-    return true;
+    return !fs.readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1].startsWith("Z");
   } catch {
     return false;
   }
@@ -25,8 +24,8 @@ const waitFor = async (check, timeout = 10000) => {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 };
-const wrapper = (dir, body) => {
-  const child = spawn(process.execPath, ["--input-type=module", "-e", `import { spawn } from "node:child_process";
+const runWrapper = (dir, body, command = [process.execPath]) => {
+  const child = spawn(command[0], [...command.slice(1), "--input-type=module", "-e", `import { spawn } from "node:child_process";
 const { lockBuildDirectory } = await import(${library});
 const lock = await lockBuildDirectory(${JSON.stringify(dir)});
 ${body}`], { stdio: ["ignore", "pipe", "inherit"] });
@@ -34,16 +33,19 @@ ${body}`], { stdio: ["ignore", "pipe", "inherit"] });
   child.stdout.on("data", (chunk) => lines.push(...String(chunk).trim().split("\n")));
   return { child, lines };
 };
-const startBuilder = `const builder = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore", detached: true });
-lock.track(builder);
+const startBuilder = `const builder = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: ["ignore", "ignore", "ignore", lock.fd] });
 console.log(builder.pid);`;
+const refused = async (dir) => {
+  await assert.rejects(async () => await lockBuildDirectory(dir), { code: "ELOCKED" });
+};
+const reclaim = async (dir) => (await lockBuildDirectory(dir)).release();
 
 test("a locked build directory is refused to other runs and offered as the next slot", async () => {
   const dir = scratchDir();
-  const { child, lines } = wrapper(dir, 'console.log("locked");\nsetInterval(() => {}, 1000);');
+  const { child, lines } = runWrapper(dir, 'console.log("locked");\nsetInterval(() => {}, 1000);');
   try {
     await waitFor(() => lines.includes("locked"));
-    await assert.rejects(lockBuildDirectory(dir), { code: "ELOCKED" });
+    await refused(dir);
     const next = await lockBuildDirectory(dir, { slots: 3 });
     assert.equal(next.dir, `${dir}-2`);
     await next.release();
@@ -51,36 +53,109 @@ test("a locked build directory is refused to other runs and offered as the next 
     child.kill("SIGKILL");
     await once(child, "exit");
   }
-  const reclaimed = await lockBuildDirectory(dir);
-  await reclaimed.release();
+  await reclaim(dir);
 });
 
-test("the lock stays held while a killed wrapper's builders still run", async () => {
+test("a run in another network namespace cannot take the same directory", async () => {
   const dir = scratchDir();
-  const { child, lines } = wrapper(dir, `${startBuilder}\nsetInterval(() => {}, 1000);`);
+  const { child, lines } = runWrapper(dir, 'console.log("locked");\nsetInterval(() => {}, 1000);', ["unshare", "--user", "--map-root-user", "--net", process.execPath]);
+  try {
+    await waitFor(() => lines.includes("locked"));
+    await refused(dir);
+  } finally {
+    child.kill("SIGKILL");
+    await once(child, "exit");
+  }
+  await reclaim(dir);
+});
+
+test("a builder holds the lock from the moment it is spawned, even if its wrapper is killed at once", async () => {
+  const dir = scratchDir();
+  const { child, lines } = runWrapper(dir, `${startBuilder}\nprocess.kill(process.pid, "SIGKILL");`);
+  await once(child, "exit");
+  const builder = Number(lines[0]);
+  try {
+    assert.ok(alive(builder));
+    await refused(dir);
+  } finally {
+    process.kill(builder, "SIGKILL");
+  }
+  await waitFor(() => !alive(builder));
+  await reclaim(dir);
+});
+
+test("deleting files beside the directory never frees a lock that a builder holds", async () => {
+  const dir = scratchDir();
+  const { child, lines } = runWrapper(dir, `${startBuilder}\nsetInterval(() => {}, 1000);`);
   await waitFor(() => lines.length > 0);
   const builder = Number(lines[0]);
   child.kill("SIGKILL");
   await once(child, "exit");
   try {
-    assert.ok(groupAlive(builder));
-    await assert.rejects(lockBuildDirectory(dir), { code: "ELOCKED" });
+    for (const entry of fs.readdirSync(path.dirname(dir))) if (entry !== path.basename(dir)) fs.rmSync(path.join(path.dirname(dir), entry), { recursive: true, force: true });
+    await refused(dir);
   } finally {
-    process.kill(-builder, "SIGKILL");
+    process.kill(builder, "SIGKILL");
   }
-  await waitFor(() => !groupAlive(builder));
-  const reclaimed = await lockBuildDirectory(dir);
-  await reclaimed.release();
+  await waitFor(() => !alive(builder));
+  await reclaim(dir);
 });
 
-test("a wrapper that exits takes its builders with it", async () => {
+test("a wrapper that exits never signals its builder, which keeps the lock until it ends", async () => {
   const dir = scratchDir();
-  const { child, lines } = wrapper(dir, `${startBuilder}\nsetTimeout(() => process.exit(0), 200);`);
-  await waitFor(() => lines.length > 0);
+  const { child, lines } = runWrapper(dir, `${startBuilder}\nsetTimeout(() => process.exit(0), 100);`);
   await once(child, "exit");
-  await waitFor(() => !groupAlive(Number(lines[0])));
-  const reclaimed = await lockBuildDirectory(dir);
-  await reclaimed.release();
+  const builder = Number(lines[0]);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.ok(alive(builder));
+    await refused(dir);
+  } finally {
+    process.kill(builder, "SIGKILL");
+  }
+  await waitFor(() => !alive(builder));
+  await reclaim(dir);
+});
+
+test("files and process ids left by an earlier run never block the lock", async () => {
+  const dir = scratchDir();
+  fs.writeFileSync(`${dir}.lock`, JSON.stringify({ owner: process.pid, groups: [Number(fs.readFileSync("/proc/self/stat", "utf8").split(") ")[1].split(" ")[2])] }));
+  await reclaim(dir);
+  fs.writeFileSync(`${dir}.lock`, "{not json");
+  await reclaim(dir);
+});
+
+test("a former owner exiting never frees the lock of the run after it", async () => {
+  const dir = scratchDir();
+  const former = runWrapper(dir, 'await lock.release();\nprocess.on("SIGTERM", () => process.exit(0));\nconsole.log("released");\nsetInterval(() => {}, 1000);');
+  await waitFor(() => former.lines.includes("released"));
+  const current = runWrapper(dir, `${startBuilder}\nsetInterval(() => {}, 1000);`);
+  await waitFor(() => current.lines.length > 0);
+  const builder = Number(current.lines[0]);
+  former.child.kill("SIGTERM");
+  await once(former.child, "exit");
+  current.child.kill("SIGKILL");
+  await once(current.child, "exit");
+  try {
+    await refused(dir);
+  } finally {
+    process.kill(builder, "SIGKILL");
+  }
+  await waitFor(() => !alive(builder));
+  await reclaim(dir);
+});
+
+test("the lock refuses to run without Linux and util-linux flock", () => {
+  const dir = scratchDir();
+  const attempt = (prelude, env) => spawnSync(process.execPath, ["--input-type=module", "-e", `${prelude}
+const { lockBuildDirectory } = await import(${library});
+lockBuildDirectory(${JSON.stringify(dir)});`], { encoding: "utf8", env: { ...process.env, ...env } });
+  const otherPlatform = attempt('Object.defineProperty(process, "platform", { value: "darwin" });', {});
+  assert.notEqual(otherPlatform.status, 0);
+  assert.match(otherPlatform.stderr, /need Linux flock/);
+  const noFlock = attempt("", { PATH: path.dirname(process.execPath) });
+  assert.notEqual(noFlock.status, 0);
+  assert.match(noFlock.stderr, /need util-linux flock/);
 });
 
 test("killing the UI sweep wrapper keeps its build directory locked until next dev stops", async () => {
@@ -104,15 +179,14 @@ test("killing the UI sweep wrapper keeps its build directory locked until next d
     next = Number(output.match(/"nextPid":(\d+)/)[1]);
     ui.kill("SIGKILL");
     await once(ui, "exit");
-    assert.ok(groupAlive(next));
-    await assert.rejects(lockBuildDirectory(dist), { code: "ELOCKED" });
+    assert.ok(alive(next));
+    await refused(dist);
   } finally {
     if (next) {
-      try { process.kill(-next, "SIGKILL"); } catch {}
-      await waitFor(() => !groupAlive(next));
+      process.kill(next, "SIGTERM");
+      await waitFor(() => !alive(next), 15000);
     }
   }
-  const reclaimed = await lockBuildDirectory(dist);
-  await reclaimed.release();
-  for (const entry of [dist, `${dist}.lock`, scratch]) fs.rmSync(entry, { recursive: true, force: true });
+  await reclaim(dist);
+  for (const entry of [dist, scratch]) fs.rmSync(entry, { recursive: true, force: true });
 });

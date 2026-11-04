@@ -106,6 +106,15 @@ jobs:
       - run: npm run test:playwright-groups
       - run: npm run test:tested-tree
       - run: npm run test:free-ports
+      - name: Allow user namespaces for the build lock checks
+        if: ${{ runner.environment == 'github-hosted' }}
+        run: |
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] &&
+             [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = 1 ]; then
+            printf '%s\n' 'abi <abi/4.0>,' \
+              'profile roo-build-lock-unshare /usr/bin/unshare flags=(unconfined) {' \
+              '  userns,' '}' | sudo apparmor_parser --replace
+          fi
       - run: npm run test:build-lock
       - run: npm run test:tooling:dependencies
       - run: npm run check:seo
