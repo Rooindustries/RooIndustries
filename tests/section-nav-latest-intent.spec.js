@@ -7,6 +7,7 @@ const SECTIONS = {
   benefits: "#services",
   faq: "#faq",
   plans: "#packages",
+  howItWorks: "#how-it-works",
 };
 
 const PAIRS = [
@@ -103,3 +104,71 @@ for (const surface of ["desktop", "mobile"]) {
     });
   }
 }
+
+const NAVBAR = (target) => ({ selector: `[data-nav-surface="desktop"][data-nav-target="${target}"]` });
+const ON_PAGE = (hash, text = "") => ({ selector: `#main-content a[href="/${hash}"]`, text });
+
+const clickInQuickSuccession = (page, first, second, gapMs = 10) =>
+  page.evaluate(
+    ([firstLink, secondLink, gap]) =>
+      new Promise((resolve, reject) => {
+        const find = ({ selector, text }) =>
+          [...document.querySelectorAll(selector)].find((element) => !text || element.textContent.includes(text));
+        const firstElement = find(firstLink);
+        if (!firstElement) {
+          reject(new Error(`Missing ${firstLink.selector}`));
+          return;
+        }
+        firstElement.click();
+        const clickedAt = performance.now();
+        const clickSecond = () => {
+          const secondElement = find(secondLink);
+          if (secondElement && performance.now() - clickedAt >= gap) {
+            secondElement.click();
+            resolve();
+            return;
+          }
+          if (performance.now() - clickedAt > 15000) {
+            reject(new Error(`Missing ${secondLink.selector}`));
+            return;
+          }
+          requestAnimationFrame(clickSecond);
+        };
+        requestAnimationFrame(clickSecond);
+      }),
+    [first, second, gapMs]
+  );
+
+const HOME_MIXED_ORDERS = [
+  { label: "on-page packages then navbar FAQ", first: ON_PAGE("#packages"), second: NAVBAR("faq"), hash: "#faq" },
+  { label: "navbar FAQ then on-page how it works", first: NAVBAR("faq"), second: ON_PAGE("#how-it-works"), hash: "#how-it-works" },
+  {
+    label: "on-page how it works then on-page Tune My PC",
+    first: ON_PAGE("#how-it-works"),
+    second: ON_PAGE("#packages", "Tune My PC"),
+    hash: "#packages",
+  },
+];
+
+test("latest click wins between navbar and on-page section links on the homepage", async ({ page }) => {
+  test.setTimeout(180000);
+  await page.setViewportSize({ width: 1536, height: 960 });
+  for (const { label, first, second, hash } of HOME_MIXED_ORDERS) {
+    await openPage(page, "/", "desktop");
+    await clickInQuickSuccession(page, first, second);
+    await expectLanded(page, hash, `/ ${label}`);
+  }
+});
+
+test("an on-page section link clicked as the homepage lands wins over the navbar section", async ({ page }) => {
+  test.setTimeout(180000);
+  await page.setViewportSize({ width: 1536, height: 960 });
+  const label = "/reviews navbar Benefits then on-page how it works";
+  await openPage(page, "/reviews", "desktop");
+  await clickInQuickSuccession(page, NAVBAR("benefits"), ON_PAGE("#how-it-works"), 0);
+  await expectLanded(page, "#how-it-works", label);
+  await page.goBack();
+  await expect.poll(() => new URL(page.url()).pathname, { message: `${label} back` }).toBe("/reviews");
+  await page.goForward();
+  await expectLanded(page, "#how-it-works", `${label} forward`);
+});

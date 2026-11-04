@@ -18,6 +18,7 @@ import ImageZoomModal from "../components/ImageZoomModal";
 import MoreReviews from "../components/MoreReviews";
 import Navbar from "../components/Navbar";
 import Packages from "../components/Packages";
+import { SectionNavigationProvider } from "../lib/sectionNavigator";
 import Tools from "../components/Tools";
 import { getPublicContent } from "../lib/publicContentClient";
 
@@ -219,7 +220,7 @@ describe("UI accessibility regressions", () => {
       },
     ]);
 
-    render(<MemoryRouter><Tools /></MemoryRouter>);
+    render(<MemoryRouter><SectionNavigationProvider><Tools /></SectionNavigationProvider></MemoryRouter>);
     const downloadButton = await screen.findByRole("button", {
       name: "Download",
     });
@@ -240,18 +241,20 @@ describe("UI accessibility regressions", () => {
   test("uses a legible text token for excluded package rows", () => {
     render(
       <MemoryRouter>
-        <Packages
-          initialPackages={[
-            {
-              _id: "package-example",
-              title: "Standard plan",
-              price: "$20",
-              checkedBullets: ["Core tuning"],
-              uncheckedBullets: ["Extended support"],
-            },
-          ]}
-          initialSectionCopy={{ heading: "Example plans" }}
-        />
+        <SectionNavigationProvider>
+          <Packages
+            initialPackages={[
+              {
+                _id: "package-example",
+                title: "Standard plan",
+                price: "$20",
+                checkedBullets: ["Core tuning"],
+                uncheckedBullets: ["Extended support"],
+              },
+            ]}
+            initialSectionCopy={{ heading: "Example plans" }}
+          />
+        </SectionNavigationProvider>
       </MemoryRouter>
     );
 
@@ -266,7 +269,9 @@ describe("UI accessibility regressions", () => {
   test("uses disclosure semantics and closes desktop dropdowns from the keyboard", () => {
     render(
       <MemoryRouter>
-        <Navbar />
+        <SectionNavigationProvider>
+          <Navbar />
+        </SectionNavigationProvider>
       </MemoryRouter>
     );
 

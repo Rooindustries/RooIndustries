@@ -36,18 +36,25 @@ export const isHomeSectionHash = (hash = "") => {
   return SECTION_IDS.includes(normalized.slice(1));
 };
 
-export const writePendingSectionTarget = (hash = "", source = "") => {
+export const announceSectionTarget = (hash = "") => {
+  if (typeof window === "undefined") return;
+  const normalized = normalizeSectionHash(hash);
+  if (!normalized) return;
+  window.dispatchEvent(
+    new CustomEvent("roo:pending-section-target", {
+      detail: { hash: normalized },
+    })
+  );
+};
+
+export const writePendingSectionTarget = (hash = "") => {
   if (typeof window === "undefined") return;
   const normalized = normalizeSectionHash(hash);
   if (!normalized) return;
   try {
     sessionStorage.setItem(PENDING_SECTION_KEY, normalized);
   } catch {}
-  window.dispatchEvent(
-    new CustomEvent("roo:pending-section-target", {
-      detail: { hash: normalized, source },
-    })
-  );
+  announceSectionTarget(normalized);
 };
 
 export const readPendingSectionTarget = () => {
