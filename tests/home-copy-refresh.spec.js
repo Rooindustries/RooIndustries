@@ -280,40 +280,68 @@ test("an older revision from the content API never replaces the newer server cop
 test("a content response without a revision never replaces versioned copy", async ({ page }) => {
   const unlabelledHero = "Hero copy with no revision";
   const nextHero = "Hero copy at the next revision";
+  const followUpHero = "Hero copy after the unlabelled response";
+  const firstHero = "Fixture Hero Heading One";
+  const heading = page.locator("#top h1");
+  await page.addInitScript(() => {
+    window.__heroStates = [];
+    new MutationObserver(() => {
+      const text = document.querySelector("#top h1")?.textContent;
+      if (text && window.__heroStates.at(-1) !== text) window.__heroStates.push(text);
+    }).observe(document, { childList: true, subtree: true, characterData: true });
+  });
   await page.clock.install();
   await controlContent(page);
   const heroResponses = [
     (body) => ({ ...body, data: { ...body.data, headingLine1: nextHero }, revision: body.revision + 1 }),
     (body) => ({ ok: true, data: { ...body.data, headingLine1: unlabelledHero } }),
+    (body) => ({ ...body, data: { ...body.data, headingLine1: followUpHero }, revision: body.revision + 2 }),
   ];
+  let heroRequests = 0;
   await page.route("**/api/content/hero", async (route) => {
+    heroRequests += 1;
     const body = await (await route.fetch()).json();
     const respond = heroResponses.shift();
     await route.fulfill({ json: respond ? respond(body) : body });
   });
-  const returnHome = async () => {
+  const shownHeroes = async () => (await page.evaluate(() => window.__heroStates))
+    .map((text) => [firstHero, nextHero, unlabelledHero, followUpHero].find((hero) => text.includes(hero)) ?? text)
+    .filter((hero, index, heroes) => hero !== heroes[index - 1]);
+  const leaveAndReturn = async (beforeReturn = async () => {}) => {
     await footerLink(page, "/terms").click();
     await expect(page).toHaveURL(/\/terms$/);
-    await page.clock.fastForward("01:01");
-    const hero = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/content/hero");
+    await beforeReturn();
     await footerLink(page, "/").click();
     await expect(page).toHaveURL(/\/$/);
+  };
+  const refreshHome = async () => {
+    let hero;
+    await leaveAndReturn(async () => {
+      await page.clock.fastForward("01:01");
+      hero = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/content/hero");
+    });
     await (await hero).finished();
   };
 
   await page.goto("/", { waitUntil: "networkidle" });
   await hydrated(page);
-  await expect(page.locator("#top h1")).toContainText("Fixture Hero Heading One");
+  await expect(heading).toContainText(firstHero);
   await page.evaluate(() => { window.__unlabelledDocument = true; });
 
-  await returnHome();
-  await expect(page.locator("#top h1")).toContainText(nextHero);
+  await refreshHome();
+  await expect(heading).toContainText(nextHero);
 
-  await returnHome();
-  await page.waitForTimeout(500);
-  await expect(page.locator("#top h1")).toContainText(nextHero);
-  await expect(page.locator("#top h1")).not.toContainText(unlabelledHero);
+  await refreshHome();
+  await expect(async () => {
+    expect((await shownHeroes()).filter((hero) => hero !== followUpHero)).toEqual([firstHero, nextHero]);
+    await leaveAndReturn();
+    expect(heroRequests).toBe(3);
+  }).toPass({ timeout: 10000 });
+  await expect(heading).toContainText(followUpHero);
+
+  expect(await shownHeroes()).toEqual([firstHero, nextHero, followUpHero]);
   expect(heroResponses).toEqual([]);
+  expect(heroRequests).toBe(3);
   expect(await page.evaluate(() => window.__unlabelledDocument)).toBe(true);
 });
 
