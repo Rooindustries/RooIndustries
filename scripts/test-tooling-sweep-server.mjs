@@ -111,7 +111,7 @@ if (development) {
   if (fs.existsSync(dist) && fs.readdirSync(dist).some(entry => entry !== "cache")) throw new Error("Incomplete isolated build exists; choose a fresh NEXT_DIST_DIR.");
 }
 const fixture = await createToolingContentFixture({ origin: contentURL, artifact: process.env.TOOLING_CONTENT_ARTIFACT, apiRoutes, clockFile });
-fixturePorts.writeFixturePorts(dist, baseURL, { TOOLING_CONTENT_PORT: contentPort });
+fixturePorts.writeFixturePorts(baseURL, { TOOLING_CONTENT_PORT: contentPort });
 try {
   await execute(["scripts/generate-sitemap.js"]);
   await execute(["scripts/generate-robots.js"], { ...env, VERCEL_ENV: "production" });
@@ -134,7 +134,7 @@ try {
 } catch (error) {
   if (!stopping) throw error;
 } finally {
-  fixturePorts.removeFixturePorts(dist);
+  fixturePorts.removeFixturePorts(baseURL);
   await fixture.close();
   if (clockFile) fs.rmSync(clockFile, { force: true });
 }

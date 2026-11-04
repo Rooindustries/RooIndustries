@@ -45,7 +45,7 @@ let stopped = false;
 const stop = async () => {
   if (stopped) return;
   stopped = true;
-  fixturePorts.removeFixturePorts(dist);
+  fixturePorts.removeFixturePorts(baseURL);
   if (active && active.exitCode === null && active.signalCode === null) {
     const child = active;
     await new Promise(resolve => {
@@ -237,7 +237,7 @@ try {
     }
     response.writeHead(404); response.end();
   });
-  fixturePorts.writeFixturePorts(dist, baseURL, { TOOLING_ADMIN_CONTROL_PORT: controlPort });
+  fixturePorts.writeFixturePorts(baseURL, { TOOLING_ADMIN_CONTROL_PORT: controlPort });
   const env = {
     PATH: process.env.PATH, HOME: process.env.HOME, CI: "true", TZ: "UTC", TOURNEY_DATABASE_MODE: "memory",
     DATA_PRIMARY_BACKEND: "supabase", COMMERCE_PRIMARY_BACKEND: "supabase", COMMERCE_FAILOVER_GENERATION: "0", SUPABASE_CUTOVER_ENABLED: "1", COMMERCE_CUTOVER_ENABLED: "1",

@@ -98,6 +98,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           node-version: 22
+          browsers: chromium
       - run: npm test -- --maxWorkers=2
         env:
           BASE_URL: http://127.0.0.1:3211

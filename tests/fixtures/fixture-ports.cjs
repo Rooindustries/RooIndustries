@@ -19,18 +19,35 @@ const fixtureOrigin = (baseURL, name) => {
   return url.origin;
 };
 
-const reportPath = dist => `${path.resolve(dist)}-ports.json`;
+const reportDir = path.resolve(__dirname, "../../.next-fixture-ports");
 
-const writeFixturePorts = (dist, baseURL, ports) =>
-  fs.writeFileSync(reportPath(dist), JSON.stringify({ baseURL: new URL(baseURL).origin, pid: process.pid, ports }));
+const reportPath = baseURL => path.join(reportDir, `${new URL(baseURL).host.replace(/[^a-zA-Z0-9.-]/g, "_")}.json`);
 
-const removeFixturePorts = dist => fs.rmSync(reportPath(dist), { force: true });
+const readReport = baseURL => {
+  try { return JSON.parse(fs.readFileSync(reportPath(baseURL), "utf8")); } catch { return null; }
+};
 
-const loadFixturePorts = (dist, baseURL) => {
-  let report;
-  try { report = JSON.parse(fs.readFileSync(reportPath(dist), "utf8")); } catch { return null; }
-  if (report.baseURL !== new URL(baseURL).origin) return null;
-  try { process.kill(report.pid, 0); } catch { return null; }
+const running = pid => {
+  try { process.kill(pid, 0); return true; } catch (error) { return error.code === "EPERM"; }
+};
+
+const writeFixturePorts = (baseURL, ports) => {
+  const file = reportPath(baseURL);
+  fs.mkdirSync(reportDir, { recursive: true });
+  fs.writeFileSync(`${file}.${process.pid}`, JSON.stringify({ baseURL: new URL(baseURL).origin, pid: process.pid, ports }));
+  fs.renameSync(`${file}.${process.pid}`, file);
+};
+
+const removeFixturePorts = baseURL => {
+  if (readReport(baseURL)?.pid === process.pid) fs.rmSync(reportPath(baseURL), { force: true });
+};
+
+const loadFixturePorts = baseURL => {
+  const origin = new URL(baseURL).origin;
+  const report = readReport(baseURL);
+  if (report?.baseURL !== origin || !Number.isInteger(report.pid) || report.pid <= 0 || !running(report.pid)) {
+    throw new Error(`No running fixture server reported its ports for ${origin}; start scripts/test-tooling-sweep-server.mjs with BASE_URL=${origin}.`);
+  }
   for (const [name, port] of Object.entries(report.ports)) {
     if (!FIXTURE_PORT_NAMES.includes(name) || !validPort(port)) throw new Error(`Invalid fixture port report for ${name}.`);
     process.env[name] = String(port);
