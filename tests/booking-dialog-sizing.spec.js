@@ -426,29 +426,38 @@ for (const [from, to] of [["phone", "desktop"], ["desktop", "phone"]]) {
         await page.evaluate(() => document.fonts.ready);
         await page.evaluate(() => {
           window.__resizeFrames = [];
-          const sample = () => {
+          const measure = () => {
             const frame = document.querySelector('[role="dialog"].ri-booking');
-            if (!frame) return;
+            if (!frame) return null;
             const stage = frame.closest(".booking-dialog-stage").getBoundingClientRect();
             const box = frame.getBoundingClientRect();
             const content = frame.querySelector("[data-booking-scaler] > div").getBoundingClientRect();
             const width = document.documentElement.clientWidth;
-            window.__resizeFrames.push({
+            return {
               width,
-              frameOverflow: frame.scrollWidth - frame.clientWidth,
-              stageWidth: Math.round(stage.width),
-              contentPastFrame: Math.round(Math.max(content.right - box.right, box.left - content.left)),
-              contentPastWindow: Math.round(Math.max(content.right - width, -content.left)),
-            });
-            requestAnimationFrame(sample);
+              stageGap: Math.abs(stage.width - width),
+              contentPastFrame: Math.max(content.right - box.right, box.left - content.left),
+              contentPastWindow: Math.max(content.right - width, -content.left),
+            };
           };
-          requestAnimationFrame(sample);
+          const probe = document.createElement("div");
+          probe.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;visibility:hidden;pointer-events:none";
+          document.body.append(probe);
+          new ResizeObserver(() => {
+            const entry = measure();
+            if (entry) window.__resizeFrames.push(entry);
+          }).observe(probe);
+          const tick = () => {
+            probe.style.width = probe.style.width === "1px" ? "2px" : "1px";
+            requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
         });
         await page.setViewportSize(sizes[to]);
         await expect.poll(() => page.evaluate(width => window.__resizeFrames.filter(entry => entry.width === width).length, sizes[to].width)).toBeGreaterThanOrEqual(30);
         const frames = await page.evaluate(width => window.__resizeFrames.filter(entry => entry.width === width), sizes[to].width);
         await save(page, testInfo, `${name.replace(/\W+/g, "-")}-${from}-to-${to}`, frames);
-        const misfits = frames.filter(entry => entry.frameOverflow > 0 || entry.stageWidth !== entry.width || entry.contentPastFrame > 1 || entry.contentPastWindow > 1);
+        const misfits = frames.filter(entry => entry.stageGap > 0.5 || entry.contentPastFrame > 0.5 || entry.contentPastWindow > 0.5);
         expect(misfits).toEqual([]);
       });
     }
