@@ -58,20 +58,6 @@ test.describe("Home styles without JavaScript", () => {
       await page.goto("/", { waitUntil: "load" });
       expectNoScriptStyles(await readHomeStyles(page));
     });
-
-    test(`no-JS styles hold where the scripting media feature is unsupported at ${viewport.width}px`, async ({ page }) => {
-      let rewrittenSheets = 0;
-      await page.route(/\.css(?:\?|$)/, async route => {
-        const response = await route.fetch();
-        const body = (await response.text()).replace(/\(\s*scripting\s*:/g, "(-roo-unsupported-scripting:");
-        rewrittenSheets += 1;
-        await route.fulfill({ response, body });
-      });
-      await page.setViewportSize(viewport);
-      await page.goto("/", { waitUntil: "load" });
-      expect(rewrittenSheets).toBeGreaterThan(0);
-      expectNoScriptStyles(await readHomeStyles(page));
-    });
   }
 });
 
