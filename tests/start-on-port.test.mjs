@@ -223,6 +223,71 @@ setInterval(() => {}, 1000);`], { stdio: ["ignore", "pipe", "ignore"] });
   await within(closed, 3000);
 });
 
+test("a leader that exits on its own still takes its descendants down", async () => {
+  let closed;
+  const { child } = await startChildOnPorts({
+    host,
+    requested: [0],
+    isReady: answers,
+    output: () => "",
+    spawnChild: ([candidate], launch) => {
+      const child = launch.spawn(process.execPath, ["-e", `require("node:child_process").spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: ["ignore", "inherit", "ignore"] });
+const server = require("http").createServer((q, s) => s.end("child")).listen(${candidate}, "127.0.0.1");
+process.stdin.once("data", () => { server.close(); process.exit(0); });`], { stdio: ["pipe", "pipe", "ignore"] });
+      child.stdout.resume();
+      closed = once(child.stdout, "close");
+      return child;
+    },
+  });
+  child.stdin.end("exit\n");
+  await once(child, "exit");
+  assert.equal(child.exitCode, 0);
+  await within(closed, 3000);
+});
+
+test("each attempt is judged on its own output, so a later unrelated failure is reported and not retried", async () => {
+  const output = [];
+  let attempts = 0;
+  await assert.rejects(startChildOnPorts({
+    host,
+    requested: [0],
+    output: () => output.join(""),
+    spawnChild: ([candidate], launch) => {
+      attempts += 1;
+      const failure = attempts === 1 ? `console.error("listen EADDRINUSE: address already in use 127.0.0.1:${candidate}"); process.exit(1);` : `console.error("migration failed"); process.exit(42);`;
+      const child = launch.spawn(process.execPath, ["-e", failure], { stdio: ["ignore", "ignore", "pipe"] });
+      child.stderr.on("data", (chunk) => output.push(String(chunk)));
+      return child;
+    },
+  }), /exited before it was ready \(exit 42\)/);
+  assert.equal(attempts, 2);
+});
+
+test("a retry judges a log file only by what the failed attempt appended", async () => {
+  const log = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "start-on-port-")), "child.log");
+  let attempts = 0;
+  try {
+    await assert.rejects(startChildOnPorts({
+      host,
+      requested: [0],
+      output: () => fs.readFileSync(log, "utf8"),
+      spawnChild: ([candidate], launch) => {
+        attempts += 1;
+        const failure = attempts === 1 ? `console.error("listen EADDRINUSE: address already in use 127.0.0.1:${candidate}"); process.exit(1);` : `console.error("migration failed"); process.exit(42);`;
+        const fd = fs.openSync(log, "a");
+        try {
+          return launch.spawn(process.execPath, ["-e", failure], { stdio: ["ignore", fd, fd] });
+        } finally {
+          fs.closeSync(fd);
+        }
+      },
+    }), /exited before it was ready \(exit 42\)/);
+    assert.equal(attempts, 2);
+  } finally {
+    fs.rmSync(path.dirname(log), { recursive: true, force: true });
+  }
+});
+
 test("held ports reach the child without ever being free", async () => {
   const program = `const { adoptHeldTcpPorts, listenOnPort } = await import(${library("free-tcp-port.mjs")});
 const http = await import("node:http");
