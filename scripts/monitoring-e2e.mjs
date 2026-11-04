@@ -452,21 +452,27 @@ try {
     return (used.user + used.system) / 1000;
   };
   const scalingPaths = {
-    scrubber: values => cpuMsOf(() => {
+    scrubber: values => {
       const calls = Math.max(1, 262144 / values.join('').length);
-      for (let call = 0; call < calls; call++) {
-        scrubEvent({ extra: { scaling_values: values } });
-      }
-    }),
+      return cpuMsOf(() => {
+        for (let call = 0; call < calls; call++) {
+          scrubEvent({ extra: { scaling_values: values } });
+        }
+      });
+    },
     sdk: (values, message) => cpuMsOf(async () => {
       sdk.captureEvent({ message, extra: { scaling_values: values } });
       await sdk.flush(5000);
     }),
   };
+  const scalingStepPaths = [Object.keys(scalingPaths), ['scrubber']];
+  const scalingRounds = 7;
+  const scalingSides = ['long', 'short'];
+  const scalingRatioLimit = 4;
   const compareScaling = async (path, shape, total) => {
     const cpuMs = { short: [], long: [] };
-    for (let round = 0; round < 7; round++) {
-      const order = round % 2 ? ['short', 'long'] : ['long', 'short'];
+    for (let round = 0; round < scalingRounds; round++) {
+      const order = round % 2 ? [...scalingSides].reverse() : scalingSides;
       for (const side of order) {
         const length = side === 'long' ? total : scalingShort;
         const values = scalingValues(shape, length, total);
@@ -487,14 +493,14 @@ try {
     };
   };
   const scaling = [];
-  for (const shape of scalingShapes) {
-    for (const path of ['scrubber', 'sdk']) {
-      scaling.push(await compareScaling(path, shape, scalingSteps[0]));
+  for (const [step, paths] of scalingStepPaths.entries()) {
+    if (scaling.some(item => item.ratio >= scalingRatioLimit)) {
+      break;
     }
-  }
-  if (scaling.every(item => item.ratio < 4)) {
     for (const shape of scalingShapes) {
-      scaling.push(await compareScaling('scrubber', shape, scalingSteps[1]));
+      for (const path of paths) {
+        scaling.push(await compareScaling(path, shape, scalingSteps[step]));
+      }
     }
   }
   const scalingItems = events().filter(item => item.event.message?.startsWith('Fixture scrub scaling '));
@@ -518,16 +524,22 @@ try {
     const expected = scalingValues(shape, Number(length), scalingSteps[0]).map(shape.scrubbed);
     return isDeepStrictEqual(item.event.extra?.scaling_values, expected);
   });
+  const sdkComparisonsPerShape = scalingStepPaths.flat().filter(path => path === 'sdk').length;
+  const sdkScalingEvents = scalingShapes.length * sdkComparisonsPerShape * scalingRounds * scalingSides.length;
+  const scalingComparisons = scalingShapes.length * scalingStepPaths.flat().length;
+  const slowScaling = scaling
+    .filter(item => item.ratio >= scalingRatioLimit)
+    .map(({ shape, path, bytes, ratio }) => ({ shape, path, bytes, ratio: Number(ratio.toFixed(2)) }));
   check('short and long scaling values carry the same raw bytes', scalingBytes, expectedBytes);
   check(
     '1KiB and 32KiB scaling values reach ingest fully scrubbed',
     scrubbedAsExpected,
-    Array(scalingShapes.length * 14).fill(true),
+    Array(sdkScalingEvents).fill(true),
   );
   check(
     '32KiB and 1MiB tokens of every shape cost under four times the CPU of the same bytes as 1KiB tokens',
-    [scaling.length, worstScaling.ratio < 4],
-    [scalingShapes.length * 3, true],
+    { comparisons: scaling.length, slow: slowScaling },
+    { comparisons: scalingComparisons, slow: [] },
   );
   check('stack frames remain available', Boolean(reported?.event.exception?.values?.[0]?.stacktrace?.frames?.length), true);
   check('SDK release identity survives without exempting customer metadata', [reported?.event.release, reported?.event.extra?.release], ['rooindustries@0.2.0', '[email]']);

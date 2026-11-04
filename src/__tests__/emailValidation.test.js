@@ -25,24 +25,31 @@ test("rejects a 10,000-character input without expensive matching", () => {
     return elapsed;
   };
   const shortLength = 1024;
+  const rounds = 7;
+  const ratioLimit = 4;
   const compare = (longLength) => {
     const longInput = address(longLength);
     const shortInput = address(shortLength);
     expect([longInput.length, shortInput.length]).toEqual([longLength, shortLength]);
-    const rounds = Array.from({ length: 7 }, () => [
-      cost(longInput, 4),
-      cost(shortInput, (4 * longLength) / shortLength),
-    ]);
-    const long = Math.min(...rounds.map(([elapsed]) => elapsed));
-    const short = Math.min(...rounds.map(([, elapsed]) => elapsed));
-    return long / short;
+    const elapsed = { long: [], short: [] };
+    for (let round = 0; round < rounds; round++) {
+      const order = round % 2 ? ["short", "long"] : ["long", "short"];
+      for (const side of order) {
+        const input = side === "long" ? longInput : shortInput;
+        elapsed[side].push(cost(input, (4 * longLength) / input.length));
+      }
+    }
+    const longMs = Math.min(...elapsed.long);
+    const shortMs = Math.min(...elapsed.short);
+    return { longLength, longMs, shortMs, ratio: Number((longMs / shortMs).toFixed(2)) };
   };
-  const ratios = [];
+  const steps = [];
   for (const longLength of [16384, 65536]) {
-    ratios.push(compare(longLength));
-    if (ratios.at(-1) >= 8) {
+    const step = compare(longLength);
+    steps.push(step);
+    if (step.longMs >= 8 * step.shortMs) {
       break;
     }
   }
-  expect(Math.max(...ratios)).toBeLessThan(4);
+  expect(steps.filter((step) => step.longMs >= ratioLimit * step.shortMs)).toEqual([]);
 });

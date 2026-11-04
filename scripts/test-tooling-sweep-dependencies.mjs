@@ -20,6 +20,7 @@ evidence.push({check:"native-direct-sharp-and-vendor-retirement",sharp:"0.35.5"}
 const expansion=require("brace-expansion");assert.deepEqual(expansion("a{b,c}d"),["abd","acd"]);
 const bounded = expansion("{a}" + "}".repeat(128000) + ",z}");
 assert.ok(Array.isArray(bounded));
+const artifact = "test-results/tooling-dependencies.json";
 const braces = total => "{a}" + "}".repeat(total - 6) + ",z}";
 const braceCpuMs = (total, calls) => {
   const input = braces(total);
@@ -32,15 +33,24 @@ const braceCpuMs = (total, calls) => {
   return (used.user + used.system) / 1000;
 };
 const braceShort = 8000;
+const braceRounds = 7;
+const braceRatioLimit = 4;
 const braceStep = longTotal => {
-  const rounds = Array.from({ length: 5 }, () => [
-    braceCpuMs(longTotal, 1),
-    braceCpuMs(braceShort, longTotal / braceShort),
-  ]);
+  const cpuMs = { long: [], short: [] };
+  for (let round = 0; round < braceRounds; round++) {
+    const order = round % 2 ? ["short", "long"] : ["long", "short"];
+    for (const side of order) {
+      const total = side === "long" ? longTotal : braceShort;
+      cpuMs[side].push(braceCpuMs(total, longTotal / total));
+    }
+  }
+  const longCpuMs = Math.min(...cpuMs.long);
+  const shortCpuMs = Math.min(...cpuMs.short);
   return {
     totalCharacters: longTotal,
-    cpuMs: Math.min(...rounds.map(([long]) => long)),
-    sameBytesShortCpuMs: Math.min(...rounds.map(([, short]) => short)),
+    cpuMs: longCpuMs,
+    sameBytesShortCpuMs: shortCpuMs,
+    ratio: Number((longCpuMs / shortCpuMs).toFixed(2)),
   };
 };
 const braceSteps = [];
@@ -51,13 +61,19 @@ for (const longTotal of [128000, 1024000]) {
     break;
   }
 }
-assert.ok(braceSteps.every(step => step.cpuMs < 4 * step.sameBytesShortCpuMs));
 evidence.push({
   check: "brace-expansion-documented-boundary",
   literalClosingBraces: 128000,
   outputs: bounded.length,
   steps: braceSteps,
 });
+const slowBraceSteps = braceSteps.filter(step => step.cpuMs >= braceRatioLimit * step.sameBytesShortCpuMs);
+if (slowBraceSteps.length > 0) {
+  fs.mkdirSync("test-results", { recursive: true });
+  fs.writeFileSync(artifact, JSON.stringify({ passed: false, evidence }, null, 2) + "\n");
+}
+const braceRatios = JSON.stringify(braceSteps.map(step => [step.totalCharacters, step.ratio]));
+assert.deepEqual(slowBraceSteps, [], `brace expansion cost grew faster than its input: ${braceRatios}`);
 const postcss=require("postcss");assert.match(postcss([]).process("a { color: red }",{from:undefined,map:false}).css,/color: red/);assert.ok(require("browserslist")(["last 1 chrome version"]).length>0);
 evidence.push({check:"retained-native-build-parser-apis",packages:["postcss","browserslist"]});
-const artifact="test-results/tooling-dependencies.json";fs.mkdirSync("test-results",{recursive:true});fs.writeFileSync(artifact,JSON.stringify({passed:true,evidence},null,2)+"\n");console.log(JSON.stringify({passed:true,checks:evidence.length,artifact}));
+fs.mkdirSync("test-results",{recursive:true});fs.writeFileSync(artifact,JSON.stringify({passed:true,evidence},null,2)+"\n");console.log(JSON.stringify({passed:true,checks:evidence.length,artifact}));
