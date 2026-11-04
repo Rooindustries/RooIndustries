@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { reportContentLoadError } from "../lib/contentLoadErrors";
 import { FaDiscord } from "react-icons/fa";
-import { getPublicContent } from "../lib/publicContentClient";
+import { getPublicContent, reportContentLoadError } from "../lib/publicContentClient";
 import { usePublicContent } from "../next/PublicContentContext";
 
 const DEFAULT_BANNER = {

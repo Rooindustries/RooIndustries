@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { reportContentLoadError } from "../lib/contentLoadErrors";
+import { reportContentLoadError } from "../lib/publicContentClient";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 
 /* Record card design tokens — all theme accents derive from the active palette. */

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { reportContentLoadError } from "../lib/contentLoadErrors";
+import { reportContentLoadError } from "../lib/publicContentClient";
 import { AnimatePresence, motion } from "framer-motion";
 import { urlFor } from "../lib/cmsImageUrl";
 import About from "./About";

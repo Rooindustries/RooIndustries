@@ -16,50 +16,58 @@ const buildPublicContentUrl = (resource, params = {}) => {
 let pendingRequests = 0;
 export const getPublicContentPendingCount = () => pendingRequests;
 
-const fetchFailureMessages = new Set([
+let pageHides = 0;
+let currentHide = 0;
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => {
+    currentHide = ++pageHides;
+  });
+  window.addEventListener("pageshow", () => {
+    currentHide = 0;
+  });
+}
+
+const fetchFailureMessages = [
   "Failed to fetch",
   "NetworkError when attempting to fetch resource.",
   "Load failed",
-]);
+];
 
-export const getPublicContent = async (resource, params = {}, options = {}) => {
+export const getPublicContent = async (resource, params, options) => {
   pendingRequests += 1;
-  let pageLeft = false;
-  const markPageLeft = () => {
-    pageLeft = true;
-  };
-  const markPageShown = () => {
-    pageLeft = false;
-  };
-  window.addEventListener("pagehide", markPageLeft);
-  window.addEventListener("pageshow", markPageShown);
-  const markCancelled = (error) => {
-    const aborted = options.signal?.aborted || pageLeft;
-    const abortError =
-      error?.name === "AbortError" || (error instanceof TypeError && fetchFailureMessages.has(error.message));
-    if (aborted && abortError) error.requestCancelled = true;
-    return error;
-  };
+  const hidesAtStart = pageHides;
+  let response;
+  let body;
   try {
-    const response = await fetch(buildPublicContentUrl(resource, params), {
-      method: "GET",
-      credentials: "same-origin",
-      headers: { Accept: "application/json" },
-      ...(options.signal ? { signal: options.signal } : {}),
-    }).catch((error) => {
-      throw markCancelled(error);
-    });
-    const body = await response.json().catch((error) => {
-      if (response.ok && markCancelled(error).requestCancelled) throw error;
-      return {};
-    });
+    try {
+      response = await fetch(buildPublicContentUrl(resource, params), {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        signal: options?.signal,
+      });
+      body = await response.json();
+    } catch (error) {
+      if (
+        (options?.signal?.aborted || currentHide > hidesAtStart) &&
+        response?.ok !== false &&
+        (error?.name === "AbortError" || (error instanceof TypeError && fetchFailureMessages.includes(error.message)))
+      ) {
+        error.requestCancelled = true;
+        throw error;
+      }
+      if (!response) throw error;
+    }
     if (!response.ok || body?.ok !== true) {
       throw new Error(body?.error || "Public content could not be loaded.");
     }
     return body.data ?? null;
   } finally {
-    window.removeEventListener("pagehide", markPageLeft);
-    window.removeEventListener("pageshow", markPageShown);
     pendingRequests -= 1;
   }
+};
+
+export const reportContentLoadError = (error, label) => {
+  if (error?.requestCancelled) return;
+  if (label) console.error(label, error);
+  else console.error(error);
 };

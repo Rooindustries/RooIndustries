@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef, useLayoutEffect } from "react";
-import { reportContentLoadError } from "../lib/contentLoadErrors";
+import { reportContentLoadError } from "../lib/publicContentClient";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import { useLocation } from "react-router-dom";

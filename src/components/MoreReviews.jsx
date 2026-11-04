@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { reportContentLoadError } from "../lib/contentLoadErrors";
 import { urlFor } from "../lib/cmsImageUrl";
-import { getPublicContent } from "../lib/publicContentClient";
+import { getPublicContent, reportContentLoadError } from "../lib/publicContentClient";
 import ImageZoomModal from "./ImageZoomModal";
 
 const localDiscordReviews = [];

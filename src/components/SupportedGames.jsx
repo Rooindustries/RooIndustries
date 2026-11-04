@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { reportContentLoadError } from "../lib/contentLoadErrors";
+import { reportContentLoadError } from "../lib/publicContentClient";
 import { ChevronDown } from "lucide-react";
 import { urlFor } from "../lib/cmsImageUrl";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";

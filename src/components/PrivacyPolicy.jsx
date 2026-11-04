@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { reportContentLoadError } from "../lib/contentLoadErrors";
 import { normalizePolicyLink } from "../lib/policyLinks";
 import { PortableText } from "@portabletext/react";
-import { getPublicContent } from "../lib/publicContentClient";
+import { getPublicContent, reportContentLoadError } from "../lib/publicContentClient";
 
 export default function PrivacyPolicy({ initialData = null }) {
   const [data, setData] = useState(initialData);

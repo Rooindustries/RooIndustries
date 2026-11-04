@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { reportContentLoadError } from "../lib/contentLoadErrors";
+import { reportContentLoadError } from "../lib/publicContentClient";
 import { Link } from "react-router-dom";
 import {
   PERF_TOGGLE_KEYS,
@@ -121,7 +121,7 @@ export default function HowItWorks({ initialData = null }) {
     }
     fetchHomeSectionData(HOME_SECTION_DATA_KEYS.howItWorks)
       .then((res) => { if (res) setData(res); })
-      .catch((err) => reportContentLoadError("CMS fetch error:", err));
+      .catch((err) => reportContentLoadError(err, "CMS fetch error:"));
   }, [initialData]);
 
   useEffect(() => {

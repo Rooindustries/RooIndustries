@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { reportContentLoadError } from "../lib/contentLoadErrors";
 import { urlFor } from "../lib/cmsImageUrl";
-import { getPublicContent } from "../lib/publicContentClient";
+import { getPublicContent, reportContentLoadError } from "../lib/publicContentClient";
 
 const HEX_CLIP_PATH = "circle(50% at 50% 50%)";
 
