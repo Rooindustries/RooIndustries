@@ -321,7 +321,7 @@ export default function Tools({ initialData = null }) {
                       </p>
                     )}
 
-                    <p className="mt-2 text-[10px] text-ink-muted">
+                    <p className="mt-2 text-xs text-ink-secondary">
                       {downloadNote
                         ? downloadNote
                         : downloadMode === "hosted"

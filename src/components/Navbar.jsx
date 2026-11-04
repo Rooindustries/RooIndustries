@@ -111,6 +111,7 @@ export default function Navbar() {
   const isProofActive = isActive("/benchmarks") || isActive("/reviews");
   const isReferralsActive =
     location.pathname === "/referrals" || location.pathname.startsWith("/referrals/");
+  const isDashboardActive = isReferralsActive && !isActive("/referrals/register");
   const isTeamActive = isActive("/meet-the-team");
   const navMenuOpen = open || proofOpen || referralsOpen;
 
@@ -282,10 +283,10 @@ export default function Navbar() {
   // Theme-token interaction states — values per theme in src/index.css.
   const focusRing =
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--color-canvas-deep)]";
-  const linkBase = `px-3 sm:px-5 py-2 rounded-full text-base font-medium transition border border-line-soft hover:border-line-accent ${focusRing}`;
+  const linkBase = `px-4 py-2 rounded-full text-base font-medium transition ${focusRing}`;
   const linkIdle =
-    "text-ink-secondary hover:text-[color:var(--color-link-hover)]";
-  const linkActive = "bg-accent text-accent-contrast border-accent";
+    "text-ink-secondary hover:bg-surface-hover hover:text-[color:var(--color-link-hover)]";
+  const linkActive = "bg-surface-hover-accent text-ink";
   const mobileLinkBase = `px-5 py-4 text-base transition ${focusRing}`;
   const mobileLinkIdle =
     "text-ink-secondary hover:text-[color:var(--color-link-hover)]";
@@ -296,7 +297,7 @@ export default function Navbar() {
   const mobileSubLinkActive = "bg-accent text-accent-contrast";
   const menuItemIdle =
     "text-ink-secondary hover:text-[color:var(--color-link-hover)] hover:bg-[color:var(--color-surface-hover)]";
-  const menuItemActive = "bg-accent text-accent-contrast";
+  const menuItemActive = "bg-surface-hover-accent text-ink";
   const nextTheme = theme === "dark" ? "default" : "dark";
   const themeLabel = THEME_LABELS[theme] || THEME_LABELS.default;
   const nextThemeLabel = THEME_LABELS[nextTheme];
@@ -340,7 +341,7 @@ export default function Navbar() {
         <div ref={navRowRef} className="flex h-20 items-center overflow-visible sm:h-24">
           <div className="hidden min-w-0 flex-1 items-center gap-4 md:flex">
             {location.pathname !== "/" ? (
-              <BackButton hidden={false} inline={true} />
+              <BackButton />
             ) : null}
 
             <Link to="/"
@@ -374,7 +375,7 @@ export default function Navbar() {
                 <div className="text-ink font-semibold tracking-wide text-sm sm:text-lg truncate">
                   Roo Industries
                 </div>
-                <div className="text-[9px] sm:text-xs text-ink-muted whitespace-nowrap truncate">
+                <div className="text-[13px] text-ink-secondary whitespace-nowrap truncate">
                   Precision Performance Engineering
                 </div>
               </div>
@@ -414,18 +415,19 @@ export default function Navbar() {
                 <div className="truncate text-sm font-semibold tracking-wide text-ink sm:text-base">
                   Roo Industries
                 </div>
-                <div className="whitespace-nowrap text-[8px] leading-tight text-ink-muted min-[340px]:text-[8.6px] min-[360px]:text-[9.2px] min-[375px]:text-[10px] sm:text-xs">
+                <div className="whitespace-nowrap text-[8px] leading-tight text-ink-secondary min-[340px]:text-[8.6px] min-[360px]:text-[9.2px] min-[375px]:text-[10px] sm:text-[13px]">
                   Precision Performance Engineering
                 </div>
               </div>
             </Link>
 
             <div className="ml-auto flex shrink-0 items-center gap-1 min-[360px]:gap-2 sm:gap-3">
-            <nav className="hidden md:flex items-center gap-2">
+            <nav className="hidden md:flex items-center gap-1">
               <a
                 href={buildHomeSectionHref(SECTION_HASHES.benefits)}
                 data-nav-surface="desktop"
                 data-nav-target="benefits"
+                aria-current={isBenefitsActive ? "location" : undefined}
                 onClick={(event) =>
                   handleSectionLinkClick(event, SECTION_HASHES.benefits)
                 }
@@ -482,6 +484,7 @@ export default function Navbar() {
                 >
                   <Link
                     to="/benchmarks"
+                    aria-current={isActive("/benchmarks") ? "page" : undefined}
                     onClick={() => {
                       cancelSectionTransition();
                       setProofOpen(false);
@@ -496,6 +499,7 @@ export default function Navbar() {
                   </Link>
                   <Link
                     to="/reviews"
+                    aria-current={isActive("/reviews") ? "page" : undefined}
                     onClick={() => {
                       cancelSectionTransition();
                       setProofOpen(false);
@@ -512,6 +516,7 @@ export default function Navbar() {
                 href={buildHomeSectionHref(SECTION_HASHES.faq)}
                 data-nav-surface="desktop"
                 data-nav-target="faq"
+                aria-current={isFaqActive ? "location" : undefined}
                 onClick={(event) =>
                   handleSectionLinkClick(event, SECTION_HASHES.faq)
                 }
@@ -566,6 +571,7 @@ export default function Navbar() {
                 >
                   <Link
                     to="/referrals/register"
+                    aria-current={isActive("/referrals/register") ? "page" : undefined}
                     onClick={() => {
                       cancelSectionTransition();
                       setReferralsOpen(false);
@@ -580,12 +586,13 @@ export default function Navbar() {
                   </Link>
                   <Link
                     to="/referrals/login"
+                    aria-current={isDashboardActive ? "page" : undefined}
                     onClick={() => {
                       cancelSectionTransition();
                       setReferralsOpen(false);
                     }}
                     className={`block px-4 py-3 text-sm transition ${
-                      isReferralsActive && !isActive("/referrals/register")
+                      isDashboardActive
                         ? menuItemActive
                         : menuItemIdle
                     }`}
@@ -702,6 +709,7 @@ export default function Navbar() {
               </div>
               <a
                 href={buildHomeSectionHref(SECTION_HASHES.benefits)}
+                aria-current={isBenefitsActive ? "location" : undefined}
                 data-nav-surface="mobile"
                 data-nav-target="benefits"
                 onClick={(event) =>
@@ -756,6 +764,7 @@ export default function Navbar() {
               >
                 <Link
                   to="/benchmarks"
+                  aria-current={isActive("/benchmarks") ? "page" : undefined}
                   onClick={() => {
                     cancelSectionTransition();
                     setProofOpen(false);
@@ -771,6 +780,7 @@ export default function Navbar() {
                 </Link>
                 <Link
                   to="/reviews"
+                  aria-current={isActive("/reviews") ? "page" : undefined}
                   onClick={() => {
                     cancelSectionTransition();
                     setProofOpen(false);
@@ -787,6 +797,7 @@ export default function Navbar() {
               </div>
               <a
                 href={buildHomeSectionHref(SECTION_HASHES.faq)}
+                aria-current={isFaqActive ? "location" : undefined}
                 data-nav-surface="mobile"
                 data-nav-target="faq"
                 onClick={(event) =>
@@ -841,6 +852,7 @@ export default function Navbar() {
               >
                 <Link
                   to="/referrals/register"
+                  aria-current={isActive("/referrals/register") ? "page" : undefined}
                   onClick={() => {
                     cancelSectionTransition();
                     setReferralsOpen(false);
@@ -856,13 +868,14 @@ export default function Navbar() {
                 </Link>
                 <Link
                   to="/referrals/login"
+                  aria-current={isDashboardActive ? "page" : undefined}
                   onClick={() => {
                     cancelSectionTransition();
                     setReferralsOpen(false);
                     setOpen(false);
                   }}
                   className={`${mobileSubLinkBase} ${
-                    isReferralsActive && !isActive("/referrals/register")
+                    isDashboardActive
                       ? mobileSubLinkActive
                       : mobileSubLinkIdle
                   }`}
@@ -872,6 +885,7 @@ export default function Navbar() {
               </div>
               <Link
                 to="/meet-the-team"
+                aria-current={isTeamActive ? "page" : undefined}
                 onClick={cancelSectionTransition}
                 className={`${mobileLinkBase} ${
                   isTeamActive ? mobileLinkActive : mobileLinkIdle
@@ -892,6 +906,7 @@ export default function Navbar() {
                 href={buildHomeSectionHref(SECTION_HASHES.plans)}
                 data-nav-surface="mobile"
                 data-nav-target="plans"
+                aria-current={isActive("/packages") ? "page" : isPlansActive ? "location" : undefined}
                 onClick={(event) =>
                   handleSectionLinkClick(event, SECTION_HASHES.plans)
                 }
