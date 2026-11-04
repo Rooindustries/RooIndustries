@@ -1,7 +1,9 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { randomUUID } = require("node:crypto");
 
 const FIXTURE_PORT_NAMES = ["TOOLING_CONTENT_PORT", "TOOLING_ADMIN_CONTROL_PORT"];
+const INSTANCE_PATH = "/__instance";
 
 const validPort = port => Number.isInteger(port) && port >= 1024 && port <= 65535;
 
@@ -27,32 +29,40 @@ const readReport = baseURL => {
   try { return JSON.parse(fs.readFileSync(reportPath(baseURL), "utf8")); } catch { return null; }
 };
 
-const running = pid => {
-  try { process.kill(pid, 0); return true; } catch (error) { return error.code === "EPERM"; }
-};
+const fixtureInstance = () => randomUUID();
 
-const writeFixturePorts = (baseURL, ports) => {
+const writeFixturePorts = (baseURL, instance, ports) => {
   const file = reportPath(baseURL);
+  const temporary = `${file}.${randomUUID()}.tmp`;
   fs.mkdirSync(reportDir, { recursive: true });
-  fs.writeFileSync(`${file}.${process.pid}`, JSON.stringify({ baseURL: new URL(baseURL).origin, pid: process.pid, ports }));
-  fs.renameSync(`${file}.${process.pid}`, file);
+  fs.writeFileSync(temporary, JSON.stringify({ baseURL: new URL(baseURL).origin, instance, ports }));
+  fs.renameSync(temporary, file);
 };
 
-const removeFixturePorts = baseURL => {
-  if (readReport(baseURL)?.pid === process.pid) fs.rmSync(reportPath(baseURL), { force: true });
+const answersInstance = async (baseURL, port, instance) => {
+  const url = new URL(INSTANCE_PATH, baseURL);
+  url.port = String(port);
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    return response.ok && await response.text() === instance;
+  } catch {
+    return false;
+  }
 };
 
-const loadFixturePorts = baseURL => {
+const loadFixturePorts = async baseURL => {
   const origin = new URL(baseURL).origin;
+  const missing = new Error(`No running fixture server reported its ports for ${origin}; start scripts/test-tooling-sweep-server.mjs with BASE_URL=${origin}.`);
   const report = readReport(baseURL);
-  if (report?.baseURL !== origin || !Number.isInteger(report.pid) || report.pid <= 0 || !running(report.pid)) {
-    throw new Error(`No running fixture server reported its ports for ${origin}; start scripts/test-tooling-sweep-server.mjs with BASE_URL=${origin}.`);
-  }
-  for (const [name, port] of Object.entries(report.ports)) {
+  if (report?.baseURL !== origin || typeof report.instance !== "string" || !report.instance || !report.ports || typeof report.ports !== "object") throw missing;
+  const entries = Object.entries(report.ports);
+  for (const [name, port] of entries) {
     if (!FIXTURE_PORT_NAMES.includes(name) || !validPort(port)) throw new Error(`Invalid fixture port report for ${name}.`);
-    process.env[name] = String(port);
   }
+  const live = await Promise.all(entries.map(([, port]) => answersInstance(origin, port, report.instance)));
+  if (!entries.length || live.includes(false)) throw missing;
+  for (const [name, port] of entries) process.env[name] = String(port);
   return report.ports;
 };
 
-module.exports = { FIXTURE_PORT_NAMES, fixturePort, fixtureOrigin, writeFixturePorts, removeFixturePorts, loadFixturePorts };
+module.exports = { FIXTURE_PORT_NAMES, INSTANCE_PATH, fixturePort, fixtureOrigin, fixtureInstance, writeFixturePorts, loadFixturePorts };

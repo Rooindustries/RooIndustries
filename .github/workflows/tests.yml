@@ -98,7 +98,6 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           node-version: 22
-          browsers: chromium
       - run: npm test -- --maxWorkers=2
         env:
           BASE_URL: http://127.0.0.1:3211
@@ -263,6 +262,9 @@ jobs:
           PW_PORT: "3241"
           PW_SERVER_ID: routes-portal
         run: xvfb-run -a npm run test:creator:portal -- --output=test-results/creator-portal
+      - name: Run creator portal against an external fixture server
+        if: ${{ !cancelled() }}
+        run: npm run test:fixture-ports:browser
       - uses: ./.github/actions/save-caches
         with:
           build-dirs: |

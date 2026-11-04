@@ -8,7 +8,6 @@ const host = process.env.ROO_TEST_HOST || "127.0.0.1";
 const pwPort = portFromEnv("PW_PORT");
 const target = (process.env.BASE_URL || pwPort) && new URL(localOrigin(process.env.BASE_URL || `http://${host}:${pwPort}`));
 if (target && target.hostname !== host) throw new Error("API audit host must match ROO_TEST_HOST.");
-const requested = target ? [Number(target.port) + 2, Number(target.port) + 3] : [0, 0];
 const distBase = validateDistDir(`${process.env.NEXT_DIST_DIR || `.next-e2e-${process.env.PW_SERVER_ID || process.pid}`}-api`, { isolated: true });
 let env, restoreGuard;
 const configure = ([port, contentPort]) => {
@@ -74,7 +73,7 @@ try {
   const output = [];
   await startChildOnPorts({
     host,
-    requested,
+    requested: [0, 0],
     passHeld: true,
     timeout: 180000,
     output: () => output.join(""),

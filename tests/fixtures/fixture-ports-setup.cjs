@@ -1,5 +1,5 @@
 const { loadFixturePorts } = require("./fixture-ports.cjs");
 
-module.exports = () => {
-  loadFixturePorts(process.env.BASE_URL);
+module.exports = async () => {
+  await loadFixturePorts(process.env.BASE_URL);
 };
