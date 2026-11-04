@@ -57,7 +57,7 @@
       "css": 26624
     },
     "/payment": {
-      "js": 242688,
+      "js": 245760,
       "css": 26624
     },
     "/payment-success": {
@@ -81,11 +81,11 @@
       "css": 26624
     },
     "/referrals/login": {
-      "js": 161792,
+      "js": 168960,
       "css": 26624
     },
     "/referrals/register": {
-      "js": 234496,
+      "js": 168960,
       "css": 26624
     },
     "/referrals/reset": {
@@ -232,6 +232,14 @@
     },
     "src/components/Packages.jsx -> ./PackageDetailsModal": {
       "js": 41984,
+      "css": 1024
+    },
+    "src/components/RefLogin.jsx -> ./SiteDialog": {
+      "js": 40960,
+      "css": 1024
+    },
+    "src/components/SupabaseSocialLogin.jsx -> ../lib/supabaseBrowser": {
+      "js": 68608,
       "css": 1024
     },
     "src/legacyPages/Book.jsx -> ../components/Footer": {
