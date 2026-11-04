@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
-import { RuleTester } from "eslint";
+import assert from "node:assert/strict";
+import { Linter, RuleTester } from "eslint";
 import { rules } from "../eslint-rules/index.mjs";
 
 RuleTester.describe = describe;
@@ -76,6 +77,7 @@ run("aria-expanded-needs-controls", {
 
 run("no-unguarded-timer-navigation", {
   valid: [
+    `function Steps() { const history = []; history[0] = "/"; setTimeout(() => history.push("/next"), 100); return null; }`,
     `function RefLogin() { useEffect(() => { const id = setTimeout(() => nav("/x"), 500); return () =>
       clearTimeout(id); }, []); return null; }`,
     `function Toast() { setTimeout(() => setToast((current) => (current === next ? null : current)), 2800); return null;
@@ -237,6 +239,11 @@ run("no-ignored-write-request", {
       errors: [{ messageId: "ignored" }],
     },
     {
+      name: "quoted method key left unchecked",
+      code: `fetch("/api/releaseHold", { "method": "POST" });`,
+      errors: [{ messageId: "ignored" }],
+    },
+    {
       name: "window.fetch write left unchecked",
       code: `window.fetch("/api/releaseHold", { method: "POST" });`,
       errors: [{ messageId: "ignored" }],
@@ -315,10 +322,24 @@ run("no-aria-label-on-generic", {
 
 run("inputs-need-form", {
   valid: [
+    `function Help() { return <div><input /><button onClick={() => { const later = () => saveDraft();
+      openHelp(later); }}>Help</button></div>; }`,
     `function Upgrade() { return <form onSubmit={handleCheckOrder}><input type="email" /><button
       type="submit">Check</button></form>; }`,
     `function Share() { return <div><input value={link} readOnly /><button onClick={save}>Save</button></div>; }`,
     `function Fields() { return <div><input /><button onClick={() => move(1)}>Down</button></div>; }`,
+    `function Docs() { return <div><input type="search" /><button onClick={() => { if (confirmDiscard())
+      startNewDocument(type.name); }}>New</button></div>; }`,
+    `function Gate() { return <div><input /><button onClick={() => { switch (validateCode()) { case true:
+      openNext(); } }}>Next</button></div>; }`,
+    `function Help() { return <div><input /><button onClick={() => { switch (mode) { case checkMode(): openHelp(); }
+      }}>Help</button></div>; }`,
+    `function Rows() { return <div><input /><button onClick={() => { for (const row of checkedRows()) mark(row); }}>
+      Mark</button></div>; }`,
+    `function Ready() { return <div><input /><button onClick={() => { const ready = checkReady(); if (ready) openHelp();
+      }}>Help</button></div>; }`,
+    `function Retry() { return <div><input /><button onClick={() => { for (; checkReady(); ) wait(); }}>
+      Wait</button></div>; }`,
   ],
   invalid: [
     {
@@ -333,6 +354,34 @@ run("inputs-need-form", {
         onClick={handleSubmit}>Find</button></div>; }`,
       errors: [{ messageId: "form" }, { messageId: "form" }],
     },
+    {
+      name: "async block-bodied submit handler",
+      code: `function Redeem() { return <div><input type="email" /><button onClick={async () => { await
+        handleSubmit(); }}>Redeem</button></div>; }`,
+      errors: [{ messageId: "form" }],
+    },
+    {
+      name: "submit after an early return",
+      code: `function Send() { return <div><input /><button onClick={() => { if (!validateCode()) return;
+        form.submit(); }}>Send</button></div>; }`,
+      errors: [{ messageId: "form" }],
+    },
+    {
+      name: "submit settled with then",
+      code: `function Code() { return <div><input /><button onClick={() => saveCode().then(close)}>Save</button></div>; }`,
+      errors: [{ messageId: "form" }],
+    },
+    {
+      name: "submit behind a logical guard",
+      code: `function Send() { return <div><input /><button onClick={() => ready && handleSubmit()}>Send</button></div>; }`,
+      errors: [{ messageId: "form" }],
+    },
+    {
+      name: "function handler calling a member save",
+      code: `function Keep() { return <div><input type="tel" /><button onClick={function () {
+        void props.saveCode(); }}>Keep</button></div>; }`,
+      errors: [{ messageId: "form" }],
+    },
   ],
 });
 
@@ -342,6 +391,16 @@ run("no-client-only-public-content", {
       { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
     `export default function Terms({ initialData }) { const [data, setData] = useState(initialData); useEffect(() =>
       { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Terms(props) { const { initialData: seed = null } = props; const [data, setData] =
+      useState(seed); useEffect(() => { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Faq(props) { const [data, setData] = useState(props["initialFaq"]); useEffect(() =>
+      { getPublicContent("faq").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Terms({ initialData } = {}) { const [data, setData] = useState(initialData); useEffect(() =>
+      { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Terms(props = {}) { const [data, setData] = useState(props.initialData); useEffect(() =>
+      { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Terms(props) { const { ["initialData"]: seed } = props; const [data, setData] =
+      useState(seed); useEffect(() => { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
     `export default function Upgrade({ slug }) { useEffect(() => { getPublicContent("upgrade", { slug }); },
       [slug]); return null; }`,
   ],
@@ -350,6 +409,13 @@ run("no-client-only-public-content", {
       name: "Terms before #195",
       code: `export default function Terms() { const [data, setData] = useState(null); useEffect(() => {
         getPublicContent("terms").then((d) => setData(d)); }, []); return <p>{data}</p>; }`,
+      errors: [{ messageId: "clientOnly" }],
+    },
+    {
+      name: "an inner callback's own props parameter",
+      code: `export default function List(props) { const rows = props.items.map((props) => { const { initialData }
+        = props; return initialData; }); const [data, setData] = useState(null); useEffect(() => {
+        getPublicContent("list").then(setData); }, []); return <p>{data}{rows}</p>; }`,
       errors: [{ messageId: "clientOnly" }],
     },
     {
@@ -409,4 +475,30 @@ run("no-nested-components", {
       errors: [{ messageId: "nested" }],
     },
   ],
+});
+
+describe("spread resolution", () => {
+  const layers = Array.from({ length: 24 }, (_, index) => `const s${index + 1} = { ...s${index}, ...s${index} };`);
+  const nested = `const s0 = { method: "POST", signal: requestDeadline(), opacity: 1 }; ${layers.join(" ")}`;
+  const cases = {
+    "fetch-needs-deadline": `${nested} fetch(url, s24);`,
+    "no-ignored-write-request": `${nested} fetch(url, s24);`,
+    "no-hidden-server-motion": `${nested} function Fade() { return <motion.div initial={s24} />; }`,
+  };
+  for (const [name, code] of Object.entries(cases)) {
+    it(`${name} resolves deeply repeated spreads in linear time`, () => {
+      const linter = new Linter({ configType: "flat" });
+      const started = performance.now();
+      const messages = linter.verify(code, {
+        languageOptions: { ecmaVersion: "latest", sourceType: "module", parserOptions: { ecmaFeatures: { jsx: true } } },
+        plugins: { local: { rules } },
+        rules: { [`local/${name}`]: "error" },
+      });
+      assert.ok(performance.now() - started < 1000);
+      assert.deepEqual(
+        messages.map(({ messageId }) => messageId),
+        name === "no-ignored-write-request" ? ["ignored"] : [],
+      );
+    });
+  }
 });

@@ -1,31 +1,57 @@
 import {
   ancestors,
   attribute,
+  calleeName,
+  containsNode,
   functionName,
   isCapitalized,
   isFunction,
   jsxName,
   literalValue,
+  referenceName,
 } from "./util.mjs";
 
 const textTypes = new Set(["text", "email", "password", "tel", "url", "number", "search"]);
 const submitVerb =
-  /^(handle)?(submit|save|update|check|apply|validate|login|register|confirm|send|verify|review|start)/i;
+  /^(handle)?(submit|save|update|check|apply|validate|login|register|confirm|send|verify|review)/i;
 
-const submitHandlerName = (attr) => {
-  const expression = attr?.value?.type === "JSXExpressionContainer" ? attr.value.expression : null;
-  if (!expression) return "";
-  if (expression.type === "Identifier") return expression.name;
-  if (expression.type === "ArrowFunctionExpression") {
-    const body =
-      expression.body.type === "BlockStatement" &&
-      expression.body.body.length === 1 &&
-      expression.body.body[0].type === "ExpressionStatement"
-        ? expression.body.body[0].expression
-        : expression.body;
-    if (body.type === "CallExpression" && body.callee.type === "Identifier") return body.callee.name;
+const settles = (node, parent) =>
+  parent.type === "MemberExpression" &&
+  parent.object === node &&
+  parent.parent?.type === "CallExpression" &&
+  parent.parent.callee === parent &&
+  ["then", "catch", "finally"].includes(referenceName(parent));
+
+const passesResult = (node, parent) =>
+  parent.type === "AwaitExpression" ||
+  parent.type === "ChainExpression" ||
+  parent.type === "SequenceExpression" ||
+  (parent.type === "UnaryExpression" && parent.operator === "void") ||
+  (parent.type === "LogicalExpression" && parent.right === node) ||
+  (parent.type === "ConditionalExpression" && parent.test !== node);
+
+const discardsResult = (call) => {
+  for (let node = call; node.parent; ) {
+    const parent = node.parent;
+    if (parent.type === "ExpressionStatement" || parent.type === "ReturnStatement") return true;
+    if (parent.type === "ArrowFunctionExpression") return parent.body === node;
+    if (settles(node, parent)) node = parent.parent;
+    else if (passesResult(node, parent)) node = parent;
+    else return false;
   }
-  return "";
+  return false;
+};
+
+const isSubmitCall = (node) =>
+  node.type === "CallExpression" && submitVerb.test(calleeName(node)) && discardsResult(node);
+
+const submitsOnClick = (attr) => {
+  const expression = attr?.value?.type === "JSXExpressionContainer" ? attr.value.expression : null;
+  if (!expression) return false;
+  if (expression.type === "Identifier" || expression.type === "MemberExpression") {
+    return submitVerb.test(referenceName(expression));
+  }
+  return containsNode(expression, isSubmitCall, { skip: isFunction });
 };
 
 const insideForm = (context, node) =>
@@ -70,7 +96,7 @@ export default {
           return;
         }
         if (
-          submitVerb.test(submitHandlerName(attribute(node, "onClick"))) &&
+          submitsOnClick(attribute(node, "onClick")) &&
           literalValue(attribute(node, "type")) !== "submit"
         ) {
           entry(component).clickButtons += 1;
