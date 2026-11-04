@@ -606,6 +606,7 @@ run("no-virtual-mock-of-installed-module", {
     { filename: testFile, code: `jest.mock("roo-package-that-is-not-installed", () => ({}), { virtual: true });` },
     { filename: testFile, code: `jest.mock("../lib/not-a-real-file", () => ({}), { virtual: true });` },
     { filename: testFile, code: `jest.mock("lucide-react", () => ({}), { virtual: false });` },
+    { filename: testFile, code: `jest.mock("@/src/lib/not-a-real-file", () => ({}), { virtual: true });` },
   ],
   invalid: [
     {
@@ -618,6 +619,12 @@ run("no-virtual-mock-of-installed-module", {
       name: "installed icon package",
       filename: testFile,
       code: `jest.doMock("lucide-react", () => ({}), { virtual: true });`,
+      errors: [{ messageId: "installed" }],
+    },
+    {
+      name: "existing app module through the Jest alias",
+      filename: testFile,
+      code: `jest.mock("@/src/lib/sectionNavigator", () => ({}), { virtual: true });`,
       errors: [{ messageId: "installed" }],
     },
     {

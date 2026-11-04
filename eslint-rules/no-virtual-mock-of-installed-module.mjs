@@ -1,4 +1,6 @@
 import { createRequire } from "node:module";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { propertyName } from "./util.mjs";
 
 const mockCalls = new Set(["mock", "doMock", "setMock"]);
@@ -18,12 +20,25 @@ const marksVirtual = (options) =>
 
 const extensions = ["", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".json"];
 
+const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const aliases = Object.entries(createRequire(import.meta.url)("../jest.aliases.cjs")).map(([pattern, target]) => [
+  new RegExp(pattern),
+  target.replace("<rootDir>", rootDir),
+]);
+
+const unalias = (name) => {
+  const alias = aliases.find(([pattern]) => pattern.test(name));
+  return alias ? name.replace(alias[0], alias[1]) : name;
+};
+
+const isPath = (name) => name.startsWith(".") || path.isAbsolute(name);
+
 const candidates = (name) =>
-  name.startsWith(".") ? [...extensions.map((ext) => name + ext), ...extensions.slice(1).map((ext) => `${name}/index${ext}`)] : [name];
+  isPath(name) ? [...extensions.map((ext) => name + ext), ...extensions.slice(1).map((ext) => `${name}/index${ext}`)] : [name];
 
 const resolves = (filename, name) => {
   const require = createRequire(filename);
-  return candidates(name).some((candidate) => {
+  return candidates(unalias(name)).some((candidate) => {
     try {
       require.resolve(candidate);
       return true;
