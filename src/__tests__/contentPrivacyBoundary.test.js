@@ -4,8 +4,12 @@ const path = require("path");
 const mockFetch = jest.fn();
 const mockCreateClient = jest.fn(() => ({ fetch: mockFetch }));
 const mockSupabaseFetch = jest.fn();
-const mockCreateSupabaseDocumentClient = jest.fn(() => ({
-  fetch: mockSupabaseFetch,
+let mockRevision = 7;
+const mockCreateSupabaseDocumentClient = jest.fn((options) => ({
+  fetch: async (...args) => {
+    await options.readDocuments({});
+    return mockSupabaseFetch(...args);
+  },
 }));
 const mockEnrichSupabaseContentAssets = jest.fn(async ({ data }) => data);
 
@@ -16,6 +20,11 @@ jest.mock("../server/data/documentClient.js", () => ({
 jest.mock("../server/supabase/documentClient", () => ({
   createSupabaseDocumentClient: (...args) =>
     mockCreateSupabaseDocumentClient(...args),
+}));
+
+jest.mock("../server/supabase/shadowStore.js", () => ({
+  fetchPublicContentDocuments: async () => ({ revision: mockRevision, documents: [] }),
+  readPublicContentRevision: async () => mockRevision,
 }));
 
 jest.mock("../server/supabase/assets", () => ({
@@ -35,6 +44,7 @@ describe("public content privacy boundary", () => {
       clearSupabasePublicContentCache,
     } = require("../server/content/publicContent");
     clearSupabasePublicContentCache();
+    mockRevision = 7;
     process.env.SANITY_PROJECT_ID = "project-test";
     process.env.SANITY_DATASET = "production";
     process.env.SANITY_READ_TOKEN = "server-only-read-token";
@@ -131,8 +141,9 @@ describe("public content privacy boundary", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("x-roo-content-backend")).toBe("supabase");
     expect(response.headers.get("cache-control")).toBe(
-      "public, max-age=60, stale-while-revalidate=300",
+      "public, max-age=0, must-revalidate, s-maxage=300",
     );
+    expect(response.headers.get("vercel-cache-tag")).toBe("public-content");
     expect(response.headers.get("vercel-cdn-cache-control")).toBe(
       "public, max-age=300, stale-while-revalidate=600, stale-if-error=86400",
     );
@@ -174,6 +185,7 @@ describe("public content privacy boundary", () => {
 
     await expect(request()).resolves.toEqual([{ _id: "benchmark-one" }]);
     now.mockReturnValue(62_000);
+    mockRevision = 8;
     mockSupabaseFetch.mockRejectedValueOnce(new Error("Temporary outage"));
     await expect(request()).resolves.toEqual([{ _id: "benchmark-one" }]);
     expect(mockSupabaseFetch).toHaveBeenCalledTimes(2);

@@ -3,7 +3,6 @@ import { validateContentDocument, createContentDefaults } from "../../lib/cms/co
 import { stableCmsJson } from "../../lib/globalCmsContract.js";
 import { UNUSED_FIELD_NOTE } from "../../lib/cms/fieldUsage.js";
 import { CMS_SYSTEM_FIELDS as system, preserveContentDocument, removedProtectedRows } from "../../lib/cms/contentPreservation.js";
-import { clearSupabasePublicContentCache } from "../content/publicContent.js";
 import { contentType, documentId, loadDocument } from "./documents.js";
 import { cmsError, rpcData, validationError } from "./errors.js";
 import { assertGlobalCmsWritesAllowed } from "./writeControl.js";
@@ -32,7 +31,6 @@ const committed = (result, id) => {
   const record = result?.results?.find?.(entry => entry?._id === id || entry?.id === id) || result?.results?.[0];
   const revision = record?._rev || record?.document?._rev;
   if (!revision || typeof revision !== "string") throw cmsError("The committed receipt is missing its revision. Retry the same request.", 503, "CMS_RECEIPT_INVALID");
-  clearSupabasePublicContentCache();
   return { committed: true, replayed: result.replayed === true, documentId: id, revision };
 };
 const prepareCmsCommand = (body, actor) => {

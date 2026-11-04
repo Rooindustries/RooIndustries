@@ -41,4 +41,24 @@ if (control) {
     if (action === "hold") await report("/store-holds", { trace, rpc }, 25000);
     return response;
   };
+
+  const record = (operation) => async (target, options) => {
+    await report("/purges", { operation, target, options: options ?? null, trace: traces.getStore() ?? null });
+  };
+  const purge = {
+    invalidateByTag: record("invalidateByTag"),
+    dangerouslyDeleteByTag: record("dangerouslyDeleteByTag"),
+    invalidateBySrcImage: record("invalidateBySrcImage"),
+    dangerouslyDeleteBySrcImage: record("dangerouslyDeleteBySrcImage"),
+  };
+  const waitUntil = (promise) => {
+    const trace = traces.getStore();
+    if (!trace) return;
+    void report("/kept-alive", { trace, state: "registered" }).catch(() => {});
+    Promise.resolve(promise).then(
+      () => report("/kept-alive", { trace, state: "settled" }).catch(() => {}),
+      () => report("/kept-alive", { trace, state: "settled" }).catch(() => {}),
+    );
+  };
+  globalThis[Symbol.for("@vercel/request-context")] = { get: () => ({ purge, waitUntil }) };
 }
