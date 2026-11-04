@@ -11,7 +11,9 @@ import noHiddenServerMotion from "./no-hidden-server-motion.mjs";
 import noIgnoredWriteRequest from "./no-ignored-write-request.mjs";
 import noLowContrastText from "./no-low-contrast-text.mjs";
 import noNestedComponents from "./no-nested-components.mjs";
+import noScriptingMediaQuery from "./no-scripting-media-query.mjs";
 import noUnguardedTimerNavigation from "./no-unguarded-timer-navigation.mjs";
+import noVirtualMockOfInstalledModule from "./no-virtual-mock-of-installed-module.mjs";
 
 export const rules = {
   "aria-expanded-needs-controls": ariaExpandedNeedsControls,
@@ -27,7 +29,9 @@ export const rules = {
   "no-ignored-write-request": noIgnoredWriteRequest,
   "no-low-contrast-text": noLowContrastText,
   "no-nested-components": noNestedComponents,
+  "no-scripting-media-query": noScriptingMediaQuery,
   "no-unguarded-timer-navigation": noUnguardedTimerNavigation,
+  "no-virtual-mock-of-installed-module": noVirtualMockOfInstalledModule,
 };
 
 export default { meta: { name: "roo" }, rules };

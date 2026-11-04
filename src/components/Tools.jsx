@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { reportContentLoadError } from "../lib/contentLoadErrors";
 import { getPublicContent } from "../lib/publicContentClient";
 import { Link } from "react-router-dom";
+import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
 const FOCUSABLE_SELECTOR = [
   "button:not([disabled])",
@@ -26,6 +27,7 @@ const normalizeTools = (tools) => tools.map((tool) => ({
 }));
 
 export default function Tools({ initialData = null }) {
+  const handleHomeSectionLink = useHomeSectionLinkHandler();
   const [tools, setTools] = useState(() => Array.isArray(initialData) ? normalizeTools(initialData) : []);
   const [loading, setLoading] = useState(() => !Array.isArray(initialData));
   const [loadError, setLoadError] = useState(false);
@@ -231,7 +233,7 @@ export default function Tools({ initialData = null }) {
       ) : !loading && tools.length === 0 ? (
         <div role="status" className="mt-16 text-center text-ink-secondary">
           <p>No tools are listed right now.</p>
-          <Link to="/#faq" className="mt-3 inline-flex min-h-11 items-center text-accent underline underline-offset-4">Read the FAQ</Link>
+          <Link to="/#faq" onClick={(event) => handleHomeSectionLink(event, "#faq")} className="mt-3 inline-flex min-h-11 items-center text-accent underline underline-offset-4">Read the FAQ</Link>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
