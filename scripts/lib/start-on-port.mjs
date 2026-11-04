@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import net from "node:net";
+import { execFileSync } from "node:child_process";
 import { freeTcpPorts, passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "./free-tcp-port.mjs";
 
 export const addressInUse = (output) => /EADDRINUSE|Address already in use|\(Address in use\)/.test(output);
@@ -12,8 +13,8 @@ const processTable = () => {
   for (const name of fs.readdirSync("/proc").filter((entry) => /^\d+$/.test(entry))) {
     try {
       const stat = fs.readFileSync(`/proc/${name}/stat`, "utf8");
-      const [state, parent, group] = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-      table.set(Number(name), { state, parent: Number(parent), group: Number(group) });
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      table.set(Number(name), { state: fields[0], parent: Number(fields[1]), startTime: fields[19] });
     } catch {}
   }
   return table;
@@ -48,25 +49,41 @@ const ipv6Bytes = (address) => {
     .flatMap((group) => [parseInt(group, 16) >> 8, parseInt(group, 16) & 255]);
 };
 
-const tableAddresses = (host) => {
-  if (net.isIPv4(host)) {
-    const bytes = host.split(".").map(Number);
-    return {
-      "/proc/net/tcp": new Set([littleEndianWords(bytes), "00000000"]),
-      "/proc/net/tcp6": new Set([littleEndianWords([...Array(10).fill(0), 255, 255, ...bytes]), "0".repeat(32)]),
-    };
+const ipv6Wildcard = "0".repeat(32);
+
+const dualStackSockets = (port) => {
+  try {
+    return new Set(execFileSync("ss", ["-Hltne", `sport = :${port}`], { encoding: "utf8" }).trim().split("\n")
+      .map((line) => line.trim().split(/\s+/))
+      .filter((fields) => fields[3] === `*:${port}`)
+      .map((fields) => fields.find((field) => field.startsWith("ino:"))?.slice(4))
+      .filter(Boolean)
+      .map((inode) => `socket:[${inode}]`));
+  } catch {
+    return new Set();
   }
-  return { "/proc/net/tcp": new Set(), "/proc/net/tcp6": new Set([littleEndianWords(ipv6Bytes(host)), "0".repeat(32)]) };
 };
 
 const listeningSockets = (host, port) => {
+  const ipv4 = net.isIPv4(host);
+  const bytes = ipv4 ? host.split(".").map(Number) : ipv6Bytes(host);
+  const exact = ipv4
+    ? { "/proc/net/tcp": new Set([littleEndianWords(bytes), "00000000"]), "/proc/net/tcp6": new Set([littleEndianWords([...Array(10).fill(0), 255, 255, ...bytes])]) }
+    : { "/proc/net/tcp": new Set(), "/proc/net/tcp6": new Set([littleEndianWords(bytes), ipv6Wildcard]) };
   const sockets = new Set();
-  for (const [table, addresses] of Object.entries(tableAddresses(host))) {
+  const wildcards = [];
+  for (const [table, addresses] of Object.entries(exact)) {
     for (const line of fs.readFileSync(table, "utf8").trim().split("\n").slice(1)) {
       const fields = line.trim().split(/\s+/);
       const [address, localPort] = fields[1].split(":");
-      if (fields[3] === "0A" && parseInt(localPort, 16) === port && addresses.has(address)) sockets.add(`socket:[${fields[9]}]`);
+      if (fields[3] !== "0A" || parseInt(localPort, 16) !== port) continue;
+      if (addresses.has(address)) sockets.add(`socket:[${fields[9]}]`);
+      else if (ipv4 && address === ipv6Wildcard) wildcards.push(`socket:[${fields[9]}]`);
     }
+  }
+  if (wildcards.length) {
+    const dualStack = dualStackSockets(port);
+    for (const socket of wildcards) if (dualStack.has(socket)) sockets.add(socket);
   }
   return sockets;
 };
@@ -99,6 +116,27 @@ const carriesMarker = (pid, marker) => {
 
 const exited = (child) => child.exitCode !== null || child.signalCode !== null;
 
+export const childTreeEnv = () => (process.env[markerName] ? { [markerName]: process.env[markerName] } : {});
+
+const startTimeOf = (pid) => {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+  } catch {
+    return null;
+  }
+};
+
+export const signalIfUnchanged = (pid, startTime, signal) => {
+  if (startTimeOf(pid) !== startTime) return false;
+  try {
+    process.kill(pid, signal);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const family = (children) => {
   const table = processTable();
   const wanted = new Set(children.map((child) => running.get(child)).filter(Boolean));
@@ -114,13 +152,11 @@ const family = (children) => {
     }
   }
   found.delete(process.pid);
-  return new Set([...found].filter((pid) => table.get(pid)?.state !== "Z"));
+  return new Map([...found].filter((pid) => table.get(pid) && table.get(pid).state !== "Z").map((pid) => [pid, table.get(pid).startTime]));
 };
 
 const signalEach = (pids, signal) => {
-  for (const pid of pids) {
-    try { process.kill(pid, signal); } catch {}
-  }
+  for (const [pid, startTime] of pids) signalIfUnchanged(pid, startTime, signal);
 };
 
 const terminateNow = (children) => {
@@ -145,9 +181,14 @@ const signalHandlers = new Map(["SIGINT", "SIGTERM", "SIGHUP"].map((signal) => [
   if (!othersListening) process.kill(process.pid, signal);
 }]));
 
+let watcher;
+
 const install = () => {
   if (installed) return;
   installed = true;
+  watcher = setInterval(() => {
+    for (const child of [...running.keys()]) if (exited(child) && !family([child]).size) forget(child);
+  }, 250).unref();
   process.on("exit", onExit);
   for (const [signal, handler] of signalHandlers) process.prependListener(signal, handler);
 };
@@ -155,6 +196,7 @@ const install = () => {
 function uninstall() {
   if (!installed) return;
   installed = false;
+  clearInterval(watcher);
   process.removeListener("exit", onExit);
   for (const [signal, handler] of signalHandlers) process.removeListener(signal, handler);
 }
