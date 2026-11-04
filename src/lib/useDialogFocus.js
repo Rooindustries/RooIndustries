@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 const dialogs = [];
 export const isTopDialog = (ref) => dialogs.at(-1) === ref;
 
-export function useDialogFocus({ open, dialogRef, initialFocusRef, onClose, dismissible = true }) {
+export function useDialogFocus({ open, dialogRef, initialFocusRef, returnFocusRef, onClose, dismissible = true }) {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {
@@ -48,7 +48,8 @@ export function useDialogFocus({ open, dialogRef, initialFocusRef, onClose, dism
       if (index >= 0) dialogs.splice(index, 1);
       if (wasTop) {
         const parent = dialogs.at(-1)?.current;
-        const opener = previousFocus?.isConnected && previousFocus !== document.body && previousFocus !== document.documentElement && previousFocus.id !== "main-content" ? previousFocus : null;
+        const returnTarget = returnFocusRef?.current?.isConnected ? returnFocusRef.current : null;
+        const opener = returnTarget || (previousFocus?.isConnected && previousFocus !== document.body && previousFocus !== document.documentElement && previousFocus.id !== "main-content" ? previousFocus : null);
         const target = opener || parent?.querySelector("[data-autofocus], button, input") || parent ||
           document.querySelector("[data-reservation-continue]") || document.getElementById("main-content");
         target?.focus({ preventScroll: true });
@@ -60,5 +61,5 @@ export function useDialogFocus({ open, dialogRef, initialFocusRef, onClose, dism
         }
       }
     };
-  }, [dialogRef, dismissible, initialFocusRef, open]);
+  }, [dialogRef, dismissible, initialFocusRef, open, returnFocusRef]);
 }

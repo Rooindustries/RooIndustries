@@ -386,3 +386,24 @@ test("the account choice skips its motion when reduced motion is preferred", asy
   await expect(page.getByLabel("Referral code or login email", { exact: true })).toBeFocused();
   await attach(testInfo, "account-choice-reduced-motion", { opening, closing });
 });
+
+for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 }]) {
+  test(`a rapid second click while the account choice closes keeps sign-in focused at ${viewport.width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/referrals/login?oauth=unlinked&provider=discord");
+    const choice = page.getByRole("button", { name: "Log in and link", exact: true });
+    await expect(choice).toBeVisible();
+    await page.waitForTimeout(800);
+    const box = await choice.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await page.mouse.click(x, y);
+    await page.waitForTimeout(35);
+    await page.mouse.click(x, y);
+    await expect(page.locator('[aria-labelledby="unlinked-discord-title"]')).toHaveCount(0);
+    await page.waitForTimeout(300);
+    const focused = await page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName);
+    await attach(testInfo, "rapid-close-focus", { viewport, focused });
+    expect(focused).toBe("ref-login-identifier");
+  });
+}

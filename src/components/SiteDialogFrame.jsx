@@ -18,11 +18,14 @@ export default function SiteDialogFrame({
   panel: Panel = "div",
   panelProps = {},
   presence,
+  returnFocusRef,
 }) {
   const closeButtonRef = useRef(null);
   const dialogRef = useRef(null);
   const overlayRef = useRef(null);
   const scrollLockRef = useRef(null);
+  const openRef = useRef(open);
+  openRef.current = open;
   const [rendered, setRendered] = useState(open);
   if (open && !rendered) setRendered(true);
   const closing = !presence && rendered && !open;
@@ -40,7 +43,7 @@ export default function SiteDialogFrame({
     };
   }, [closing]);
 
-  useDialogFocus({ open, dialogRef, initialFocusRef: closeButtonRef, onClose, dismissible });
+  useDialogFocus({ open, dialogRef, initialFocusRef: closeButtonRef, returnFocusRef, onClose, dismissible });
 
   useEffect(() => {
     if (!open) return undefined;
@@ -76,6 +79,9 @@ export default function SiteDialogFrame({
       onClick={(event) => {
         event.stopPropagation();
         if (dismissible && isTopDialog(dialogRef)) onClose?.();
+      }}
+      onMouseDown={(event) => {
+        if (!openRef.current) event.preventDefault();
       }}
     >
       <Panel

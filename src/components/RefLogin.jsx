@@ -418,6 +418,7 @@ export default function RefLogin() {
         ariaLabelledBy="unlinked-discord-title"
         dismissible={false}
         open={showUnlinkedDiscord}
+        returnFocusRef={identifierInputRef}
       >
         <h2
           className="text-2xl font-bold text-info-text"
@@ -441,7 +442,6 @@ export default function RefLogin() {
               savePendingDiscordChoice("link", linkProvider);
               setLinkDiscord(true);
               setShowUnlinkedDiscord(false);
-              requestAnimationFrame(() => identifierInputRef.current?.focus());
             }}
             type="button"
           >
