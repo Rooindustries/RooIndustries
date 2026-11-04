@@ -1,5 +1,13 @@
-const aliases = { "-r": "--require", "--loader": "--experimental-loader" };
-const canonical = (flag) => aliases[flag] ?? flag;
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const moduleFlags = { "--import": "--import", "--require": "--require", "-r": "--require" };
+
+const moduleFlag = (flag) => {
+  const option = moduleFlags[flag];
+  if (!option) throw new TypeError(`NODE_OPTIONS helpers only add module-loading flags (--import, --require, -r), not ${JSON.stringify(flag)}.`);
+  return option;
+};
 
 const parseNodeOptions = (value) => {
   const tokens = [];
@@ -18,16 +26,16 @@ const parseNodeOptions = (value) => {
 
 const quoteNodeOption = (value) => `"${String(value).replace(/[\\"]/g, "\\$&")}"`;
 
-const hasNodeOption = (tokens, flag, value) => tokens.some((token, index) => {
+const loadsModule = (tokens, flag, value) => tokens.some((token, index) => {
   const separator = token.indexOf("=");
-  if (separator > 0 && canonical(token.slice(0, separator)) === flag) return token.slice(separator + 1) === value;
-  return canonical(token) === flag && tokens[index + 1] === value;
+  if (separator > 0) return moduleFlags[token.slice(0, separator)] === flag && token.slice(separator + 1) === value;
+  return moduleFlags[token] === flag && tokens[index + 1] === value;
 });
 
 export const appendNodeOption = (nodeOptions, flag, value) => {
   const current = String(nodeOptions ?? "");
-  const option = canonical(flag);
-  if (hasNodeOption(parseNodeOptions(current), option, String(value))) return current;
+  const option = moduleFlag(flag);
+  if (loadsModule(parseNodeOptions(current), option, String(value))) return current;
   return `${current}${current ? " " : ""}${option}=${quoteNodeOption(value)}`;
 };
 
@@ -35,3 +43,24 @@ export const withNodeOption = (env, flag, ...values) => ({
   ...env,
   NODE_OPTIONS: values.reduce((nodeOptions, value) => appendNodeOption(nodeOptions, flag, value), env?.NODE_OPTIONS),
 });
+
+const runsAsCli = () => {
+  try {
+    return Boolean(process.argv[1]) && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+};
+
+if (runsAsCli()) {
+  const args = process.argv.slice(2);
+  try {
+    if (!args.length || args.length % 2) throw new TypeError("Usage: node scripts/lib/node-options.mjs --import <path> [--require <path> ...]");
+    let nodeOptions = process.env.NODE_OPTIONS ?? "";
+    for (let index = 0; index < args.length; index += 2) nodeOptions = appendNodeOption(nodeOptions, args[index], args[index + 1]);
+    process.stdout.write(nodeOptions);
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 2;
+  }
+}

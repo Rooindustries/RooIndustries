@@ -296,6 +296,43 @@ console.log(JSON.stringify({ lock: process.env.ROO_BUILD_LOCK, child: await ${ou
   }
 });
 
+test("module flags add up once per path and any other flag is refused instead of being skipped", async () => {
+  const { appendNodeOption, withNodeOption } = await import("../scripts/lib/node-options.mjs");
+  const dir = scratchRoot("roo node options \"flags\" ");
+  const preload = (name) => {
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, `globalThis.loaded = [...(globalThis.loaded ?? []), ${JSON.stringify(name)}];`);
+    return file;
+  };
+  const [first, second, holder] = [preload("first one.mjs"), preload("second \"two\".mjs"), preload("holder.cjs")];
+  assert.throws(() => appendNodeOption("--title=first --title=second", "--title", "first"), /module-loading flags/);
+  assert.throws(() => withNodeOption({ NODE_OPTIONS: "" }, "--loader", first), /module-loading flags/);
+  const once = withNodeOption({ PATH: process.env.PATH, NODE_OPTIONS: `--title=--import=${JSON.stringify(second)}` }, "--import", first, second, first);
+  const env = withNodeOption(withNodeOption(once, "--require", holder), "-r", holder);
+  const child = spawnSync(process.execPath, ["-e", "console.log(JSON.stringify(globalThis.loaded))"], { env, encoding: "utf8", timeout: 30000 });
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(JSON.parse(child.stdout), ["holder.cjs", "first one.mjs", "second \"two\".mjs"]);
+});
+
+test("the NODE_OPTIONS command line loads a preload from a checkout path with quotes and spaces", () => {
+  const checkout = path.join(scratchRoot("roo node options cli "), "checkout with \"quotes\" and spaces");
+  fs.mkdirSync(path.join(checkout, "scripts", "lib"), { recursive: true });
+  fs.copyFileSync(new URL("../scripts/lib/node-options.mjs", import.meta.url), path.join(checkout, "scripts", "lib", "node-options.mjs"));
+  fs.writeFileSync(path.join(checkout, "scripts", "lib", "guard.mjs"), "process.env.ROO_GUARD_LOADED = '1';");
+  const script = `set -e
+node_options="$(node scripts/lib/node-options.mjs --import "$PWD/scripts/lib/guard.mjs")"
+NODE_OPTIONS="$node_options" node -e 'console.log(JSON.stringify({ guard: process.env.ROO_GUARD_LOADED ?? null, options: process.env.NODE_OPTIONS }))'`;
+  const child = spawnSync("bash", ["-c", script], { cwd: checkout, env: { PATH: process.env.PATH, NODE_OPTIONS: "--no-warnings" }, encoding: "utf8", timeout: 30000 });
+  assert.equal(child.status, 0, child.stderr);
+  const proof = JSON.parse(child.stdout);
+  assert.equal(proof.guard, "1");
+  assert.match(proof.options, /^--no-warnings --import=/);
+  const refused = spawnSync(process.execPath, [path.join(checkout, "scripts", "lib", "node-options.mjs"), "--title", "x"], { encoding: "utf8", timeout: 30000 });
+  assert.equal(refused.status, 2);
+  assert.equal(refused.stdout, "");
+  assert.match(refused.stderr, /module-loading flags/);
+});
+
 test("a worker paused before its preload never joins a run that started after its own run ended", async () => {
   const dir = scratchDir();
   const scratch = scratchRoot("roo-build-lock-pause-");

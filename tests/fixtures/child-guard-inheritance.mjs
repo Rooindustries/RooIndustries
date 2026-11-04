@@ -12,7 +12,6 @@ import { syncBuiltinESMExports } from 'node:module';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { withNodeOption } from '../../scripts/lib/node-options.mjs';
 
 const file = fileURLToPath(import.meta.url);
 const targets = ['https://outside.fixture.invalid', 'http://192.0.2.1:45991'];
@@ -89,7 +88,7 @@ if (!process.argv.includes('--parent')) {
     ['captured-cjs-execFileSync-default-env', () => ({ stdout: globalThis.rooEarlyChildMethods.execFileSync(process.execPath, [file], { env: { ...process.env }, encoding: 'utf8', timeout: 10000 }) })],
     ['promisified-exec', () => { const promise = promisify(childProcess.exec)(command, options); assert.ok(promise.child?.pid); return promise; }],
     ['promisified-execFile', () => { const promise = promisify(childProcess.execFile)(process.execPath, [file], options); assert.ok(promise.child?.pid); return promise; }],
-    ['import-text-in-title', () => childProcess.spawnSync(process.execPath, [file], { ...options, env: withNodeOption(env, '--title', ...['../../scripts/lib/test-target-safety.mjs', '../../scripts/test-payment-persistence-sweep-network-guard.mjs'].map(relative => `--import=${JSON.stringify(new URL(relative, import.meta.url).href)}`)) })],
+    ['import-text-in-title', () => childProcess.spawnSync(process.execPath, [file], { ...options, env: { ...env, NODE_OPTIONS: '--no-warnings ' + ['../../scripts/lib/test-target-safety.mjs', '../../scripts/test-payment-persistence-sweep-network-guard.mjs'].map(relative => `--title=--import=${JSON.stringify(new URL(relative, import.meta.url).href)}`).join(' ') } })],
   ];
   const rows = [];
   for (const [name, execute] of cases) {

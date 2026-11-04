@@ -484,6 +484,10 @@ run("no-hand-built-node-options", {
     `const env = { NODE_OPTIONS: "--no-warnings" };`,
     `process.env.NODE_OPTIONS = appendNodeOption(process.env.NODE_OPTIONS, "--import", guard);`,
     `const label = \`--import=\${guard}\`;`,
+    `const env = { NODE_OPTIONS: [process.env.NODE_OPTIONS, "--no-warnings"].filter(Boolean).join(" ") };`,
+    "const env = { NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --no-warnings --max-old-space-size=${limit}` };",
+    "env.NODE_OPTIONS += ' --no-warnings';",
+    "const env = { NODE_OPTIONS: '--no-warnings ' + files.map(file => `--title=--import=${JSON.stringify(file)}`).join(' ') };",
   ],
   invalid: [
     {
@@ -519,6 +523,21 @@ run("no-hand-built-node-options", {
     {
       name: "assigned on process.env",
       code: "process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS} --import=${guard}`;",
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "preload kept in a variable first",
+      code: "const options = `--import=${guard}`; const env = { NODE_OPTIONS: options };",
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "flag and path joined from a named array",
+      code: 'const flags = ["--require", holder]; process.env.NODE_OPTIONS = flags.join(" ");',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "flag prefix kept in a variable",
+      code: 'const preload = "--import="; const env = { NODE_OPTIONS: preload + guard };',
       errors: [{ messageId: "handBuilt" }],
     },
   ],

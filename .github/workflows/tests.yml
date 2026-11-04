@@ -96,11 +96,12 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           node-version: 22
-      - run: npm test -- --maxWorkers=2
+      - run: |
+          node_options="$(node scripts/lib/node-options.mjs --import "$PWD/scripts/lib/test-target-safety.mjs")"
+          NODE_OPTIONS="$node_options" npm test -- --maxWorkers=2
         env:
           BASE_URL: http://127.0.0.1:3211
           TOOLING_NETWORK_GUARD: "1"
-          NODE_OPTIONS: --import="${{ github.workspace }}/scripts/lib/test-target-safety.mjs"
       - run: npm run lint
       - run: npm run test:lint-rules
       - run: npm run test:playwright-groups
@@ -205,9 +206,10 @@ jobs:
           curl --fail --silent "$BASE_URL" > /dev/null
           if [ "$PW_SUITE" = "rest-1" ]; then
             npm run check:budgets
-            TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=\"$PWD/scripts/lib/test-target-safety.mjs\"" npm run test:agent-readiness
-            TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=\"$PWD/scripts/lib/test-target-safety.mjs\"" npm run test:traffic-recovery
-            TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=\"$PWD/scripts/lib/test-target-safety.mjs\"" npm run test:tourney-retirement:phases
+            guarded_options="$(node scripts/lib/node-options.mjs --import "$PWD/scripts/lib/test-target-safety.mjs")"
+            TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="$guarded_options" npm run test:agent-readiness
+            TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="$guarded_options" npm run test:traffic-recovery
+            TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="$guarded_options" npm run test:tourney-retirement:phases
             npm run test:remote-browser-guard
             npm run test:smoke:production
           fi
