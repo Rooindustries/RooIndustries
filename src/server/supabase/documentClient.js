@@ -303,8 +303,10 @@ export class SupabaseDocumentClient {
     commerceOnly = false,
     allowLegacyFallback,
     cutoverGeneration = 0,
+    readDocuments = fetchShadowDocuments,
   } = {}) {
     this.shadowClient = shadowClient;
+    this.readDocuments = readDocuments;
     this.backend = "supabase";
     this.commerceOnly = commerceOnly === true;
     this.allowLegacyFallback =
@@ -331,7 +333,7 @@ export class SupabaseDocumentClient {
       error.statusCode = 503;
       throw error;
     }
-    let documents = await fetchShadowDocuments({
+    let documents = await this.readDocuments({
       client: this.shadowClient,
       documentTypes: scope.documentTypes || this.documentTypes,
       ids: scope.ids,
@@ -343,7 +345,7 @@ export class SupabaseDocumentClient {
       console.error("Shadow document read hit its cap; results may be incomplete. Owner attention is required.", { code: "SHADOW_READ_CAPPED", documentTypes: scope.documentTypes, limit: scope.limit });
     }
     if (scope.capped && scope.pinnedIds.length) {
-      const pinned = await fetchShadowDocuments({
+      const pinned = await this.readDocuments({
         client: this.shadowClient,
         documentTypes: scope.documentTypes || this.documentTypes,
         ids: scope.pinnedIds,

@@ -158,6 +158,7 @@ describe("public content privacy boundary", () => {
     expect(mockEnrichSupabaseContentAssets).toHaveBeenCalledTimes(1);
     expect(mockCreateSupabaseDocumentClient).toHaveBeenCalledWith({
       documentTypes: ["benchmark"],
+      readDocuments: expect.any(Function),
     });
   });
 
