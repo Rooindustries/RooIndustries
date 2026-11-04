@@ -136,6 +136,44 @@ run("no-unguarded-timer-navigation", {
   ],
 });
 
+run("smooth-scroll-needs-motion-check", {
+  valid: [
+    `window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "instant" : "smooth" });`,
+    `window.scrollTo({ top: 0, behavior: "auto" });`,
+    `window.scrollTo(0, 120);`,
+    `el.scrollIntoView({ block: "nearest" });`,
+    `const behavior = "instant"; window.scrollBy({ top: 40, behavior });`,
+    `scrollWindowTo(0);`,
+  ],
+  invalid: [
+    {
+      name: "Footer back to top before the reduced-motion fix",
+      code: `const scrollToTop = () => { window.scrollTo({ top: 0, behavior: "smooth" }); };`,
+      errors: [{ messageId: "smooth" }],
+    },
+    {
+      name: "FAQ page change scroll before the reduced-motion fix",
+      code: `const scrollWithOffset = (id, behavior = "smooth") => { window.scrollTo({ top: 1, behavior }); };`,
+      errors: [{ messageId: "smooth" }],
+    },
+    {
+      name: "motion check guarding the wrong branch",
+      code: `window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "smooth" : "auto" });`,
+      errors: [{ messageId: "smooth" }],
+    },
+    {
+      name: "smooth options stored in a variable",
+      code: "const options = { block: \"start\", behavior: `smooth` }; panel.scrollIntoView(options);",
+      errors: [{ messageId: "smooth" }],
+    },
+    {
+      name: "smooth scrollBy on an element",
+      code: `list.scrollBy({ left: 200, behavior: wide && "smooth" });`,
+      errors: [{ messageId: "smooth" }],
+    },
+  ],
+});
+
 run("no-bare-route-prefix", {
   valid: [`pathName === "/booking" || pathName.startsWith("/booking/");`, `name.startsWith("/booking");`],
   invalid: [

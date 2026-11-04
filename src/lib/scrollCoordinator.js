@@ -20,6 +20,17 @@ const setWindowScrollTop = (top) => {
   });
 };
 
+export const prefersReducedMotion = () =>
+  typeof window !== "undefined" &&
+  window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
+
+export const scrollWindowTo = (top) => {
+  window.scrollTo({
+    top: Math.max(0, top),
+    behavior: prefersReducedMotion() ? "instant" : "smooth",
+  });
+};
+
 export const getCssHeaderOffsetPx = (fallback = 110) => {
   if (typeof window === "undefined" || typeof document === "undefined") {
     return fallback;
@@ -52,9 +63,7 @@ export const alignToHashTarget = ({
 
   const targetId = normalizedHash.slice(1);
   if (!targetId) return () => {};
-  const prefersReducedMotion =
-    window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
-  const resolvedScrollMode = prefersReducedMotion
+  const resolvedScrollMode = prefersReducedMotion()
     ? "instant"
     : scrollMode || (behavior === "smooth" ? "fast-smooth" : "instant");
   const root = document.documentElement;

@@ -1,10 +1,11 @@
 "use client";
 
 import { FaDiscord } from "react-icons/fa";
+import { scrollWindowTo } from "../../src/lib/scrollCoordinator";
 
 export default function TourneyFooter() {
   const scrollToTop = () => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollWindowTo(0);
   };
 
   return (
