@@ -212,7 +212,7 @@ test("a child that never becomes ready is stopped", async () => {
   assert.ok(child.exitCode !== null || child.signalCode !== null);
 });
 
-test("a failed start kills the child's whole process group, even members that ignore SIGTERM after the leader exits", async () => {
+test("a failed start kills the child's whole process group, even members that ignore SIGTERM", async () => {
   const pids = [];
   await assert.rejects(startChildOnPorts({
     host,
@@ -220,7 +220,8 @@ test("a failed start kills the child's whole process group, even members that ig
     timeout: 1000,
     output: () => "",
     spawnChild: (ports, launch) => {
-      const child = launch.spawn(process.execPath, ["-e", `const grandchild = require("node:child_process").spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: "ignore" });
+      const child = launch.spawn(process.execPath, ["-e", `process.on("SIGTERM", () => {});
+const grandchild = require("node:child_process").spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: "ignore" });
 console.log(grandchild.pid);
 setInterval(() => {}, 1000);`], { stdio: ["ignore", "pipe", "ignore"] });
       pids.push(child.pid);
@@ -232,7 +233,7 @@ setInterval(() => {}, 1000);`], { stdio: ["ignore", "pipe", "ignore"] });
   assert.deepEqual(await waitUntilGone(pids), []);
 });
 
-test("a leader that exits on its own still takes its whole process group down", async () => {
+test("once the leader has exited, its process group number is never signalled again", async (t) => {
   let reported;
   const { child } = await startChildOnPorts({
     host,
@@ -240,20 +241,30 @@ test("a leader that exits on its own still takes its whole process group down", 
     isReady: answers,
     output: () => "",
     spawnChild: ([candidate], launch) => {
-      const child = launch.spawn(process.execPath, ["-e", `const grandchild = require("node:child_process").spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: "ignore" });
-console.log(grandchild.pid);
+      const child = launch.spawn(process.execPath, ["-e", `const grandchild = require("node:child_process").spawn(process.execPath, ["-e", "process.on('SIGTERM', () => console.log('TERM')); console.log(process.pid); setInterval(() => {}, 1000)"], { stdio: ["ignore", "inherit", "ignore"] });
 const server = require("http").createServer((q, s) => s.end("child")).listen(${candidate}, "127.0.0.1");
 process.stdin.once("data", () => { server.close(); process.exit(0); });`], { stdio: ["pipe", "pipe", "ignore"] });
-      reported = once(child.stdout, "data").then(([chunk]) => String(chunk));
+      const lines = [];
+      child.stdout.on("data", (chunk) => lines.push(...String(chunk).split("\n").filter(Boolean)));
+      reported = { lines, pid: once(child.stdout, "data").then(([chunk]) => Number(String(chunk).split("\n")[0])) };
       return child;
     },
   });
-  const grandchild = Number(await reported);
-  assert.ok(alive(grandchild));
-  child.stdin.end("exit\n");
-  await once(child, "exit");
-  assert.equal(child.exitCode, 0);
-  assert.deepEqual(await waitUntilGone([grandchild], 9000), []);
+  const grandchild = await reported.pid;
+  try {
+    child.stdin.end("exit\n");
+    await once(child, "exit");
+    const kill = t.mock.method(process, "kill");
+    await stopChild(child, 500);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    assert.deepEqual(kill.mock.calls.filter(({ arguments: [pid] }) => pid === -child.pid || pid === child.pid), []);
+    kill.mock.restore();
+    assert.ok(alive(grandchild));
+    assert.deepEqual(reported.lines.slice(1), []);
+  } finally {
+    if (alive(grandchild)) process.kill(grandchild, "SIGKILL");
+    await waitUntilGone([grandchild]);
+  }
 });
 
 test("each attempt is judged on its own output, so a later unrelated failure is reported and not retried", async () => {

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import net from "node:net";
+import { once } from "node:events";
 import { execFileSync, spawn } from "node:child_process";
 import { freeTcpPorts, passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "./free-tcp-port.mjs";
 
@@ -63,8 +64,7 @@ const listeningSockets = (host, port) => {
 const groupMembers = (group) => fs.readdirSync("/proc").filter((entry) => /^\d+$/.test(entry)).filter((pid) => {
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
-    const [state, , processGroup, session] = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-    return state !== "Z" && Number(processGroup) === group && Number(session) === group;
+    return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2]) === group;
   } catch {
     return false;
   }
@@ -84,55 +84,30 @@ export const ownsPorts = (group, host, ports) => {
 
 const exited = (child) => child.exitCode !== null || child.signalCode !== null;
 
-const signalGroup = (group, signal) => {
-  if (!groupMembers(group).length) return false;
+const signalGroup = (child, signal) => {
+  if (!child.pid || exited(child)) return;
   try {
-    process.kill(-group, signal);
-    return true;
+    process.kill(-child.pid, signal);
   } catch (error) {
     if (error.code !== "ESRCH") throw error;
-    return false;
   }
-};
-
-const launched = new WeakSet();
-const stops = new WeakMap();
-const closes = new WeakMap();
-const captures = new WeakMap();
-
-const stopGroup = (child, grace) => {
-  if (!stops.has(child)) {
-    const group = launched.has(child) || (!exited(child) && groupMembers(child.pid).includes(String(child.pid))) ? child.pid : null;
-    const remaining = () => !exited(child) || (group !== null && groupMembers(group).length > 0);
-    const ended = new Promise((resolve) => (exited(child) ? resolve() : child.once("exit", resolve)));
-    const settle = async (wait) => {
-      const until = Date.now() + wait;
-      let timer;
-      await Promise.race([ended, new Promise((resolve) => { timer = setTimeout(resolve, wait); })]);
-      clearTimeout(timer);
-      while (remaining() && Date.now() < until) await pause(50);
-    };
-    const signal = (name) => {
-      if (group !== null && signalGroup(group, name)) return;
-      if (!exited(child)) child.kill(name);
-    };
-    stops.set(child, (async () => {
-      if (!remaining()) return;
-      signal("SIGTERM");
-      await settle(grace);
-      if (!remaining()) return;
-      signal("SIGKILL");
-      await ended;
-      while (remaining()) await pause(50);
-    })());
-  }
-  return stops.get(child);
 };
 
 export const stopChild = async (child, grace = 5000) => {
-  if (!child.pid) return;
-  await stopGroup(child, grace);
+  if (!child.pid || exited(child)) return;
+  const ended = once(child, "exit");
+  signalGroup(child, "SIGTERM");
+  let timer;
+  await Promise.race([ended, new Promise((resolve) => { timer = setTimeout(resolve, grace); })]);
+  clearTimeout(timer);
+  if (exited(child)) return;
+  signalGroup(child, "SIGKILL");
+  await ended;
 };
+
+const launched = new WeakSet();
+const closes = new WeakMap();
+const captures = new WeakMap();
 
 const logFiles = (stdio) => [...new Set(stdio.slice(1, 3).filter(Number.isInteger).flatMap((fd) => {
   try {
@@ -172,7 +147,6 @@ const launcher = (held) => (command, args, options = {}) => {
   launched.add(child);
   captures.set(child, captureOutput(child, stdio, logs));
   closes.set(child, new Promise((resolve) => child.once("close", resolve)));
-  child.once("exit", () => stopGroup(child, 5000).catch(() => {}));
   return child;
 };
 
