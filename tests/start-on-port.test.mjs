@@ -249,6 +249,30 @@ process.stdin.once("data", () => { server.close(); process.exit(0); });`], { std
   await within(closed, 3000);
 });
 
+test("a leader reaped alongside another is never signalled by number while its exit is still pending", async (t) => {
+  const start = () => startChildOnPorts({ host, requested: [0], isReady: answers, output: () => "", spawnChild: ([port], launch) => httpChild(launch, port) });
+  const { child: first } = await start();
+  const { child: second } = await start();
+  const zombie = (pid) => {
+    try {
+      return fs.readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1].startsWith("Z");
+    } catch {
+      return false;
+    }
+  };
+  process.kill(first.pid, "SIGKILL");
+  process.kill(second.pid, "SIGKILL");
+  const deadline = Date.now() + 5000;
+  while (!(zombie(first.pid) && zombie(second.pid)) && Date.now() < deadline);
+  assert.ok(zombie(first.pid) && zombie(second.pid));
+  const kill = t.mock.method(process, "kill");
+  await stopChild(first);
+  await stopChild(second);
+  const calls = kill.mock.calls.map(({ arguments: [pid] }) => pid);
+  kill.mock.restore();
+  assert.deepEqual(calls.filter((pid) => pid === -second.pid || pid === second.pid), []);
+});
+
 test("each attempt is judged on its own output, so a later unrelated failure is reported and not retried", async () => {
   const output = [];
   let attempts = 0;
