@@ -2,6 +2,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import Packages from "../legacyPages/Packages";
 import Contact from "../legacyPages/Contact";
+import { SectionNavigationProvider } from "../lib/sectionNavigator";
 
 jest.mock("../components/Footer", () => () => null);
 jest.mock("../components/PackageDetailsModal", () => () => null);
@@ -9,7 +10,9 @@ jest.mock("../components/PackageDetailsModal", () => () => null);
 test("renders supplied package content before client effects run", () => {
   const html = renderToString(
     <MemoryRouter initialEntries={["/packages"]}>
-      <Packages initialData={{ packagesList: [{ _id: "package-test", title: "Independent Package", price: "$42.50", description: "A measured tuning session.", checkedBullets: ["Measured results"] }], packagesSettings: { title: "Choose your session" } }} />
+      <SectionNavigationProvider>
+        <Packages initialData={{ packagesList: [{ _id: "package-test", title: "Independent Package", price: "$42.50", description: "A measured tuning session.", checkedBullets: ["Measured results"] }], packagesSettings: { title: "Choose your session" } }} />
+      </SectionNavigationProvider>
     </MemoryRouter>
   );
   expect(html).toContain("Independent Package");

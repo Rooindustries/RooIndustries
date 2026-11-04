@@ -627,8 +627,7 @@ export default function BookingForm() {
             className="underline underline-offset-2 transition"
             style={{ color: "var(--color-accent)" }}
             onClick={(event) => {
-              handleHomeSectionLink(event, `#${UPGRADE_FAQ_HASH}`);
-              closeVertexModal();
+              if (handleHomeSectionLink(event, `#${UPGRADE_FAQ_HASH}`)) closeVertexModal();
             }}
           >
             {part}

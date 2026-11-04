@@ -39,7 +39,11 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
   });
   const lowPerformanceMode = useLowPerformanceMode();
   const hydrating = useHydrating();
-  const [dynamicScale, setDynamicScale] = useState(1);
+  const scalerRef = useRef(null);
+  const baseWidthRef = useRef(DESKTOP_BASE_WIDTH);
+  const scaleToFrame = useCallback((frameWidth) => {
+    if (scalerRef.current) scalerRef.current.style.transform = `scale(${frameWidth / baseWidthRef.current})`;
+  }, []);
   const [isMobile, setIsMobile] = useState(false);
   const [renderWidth, setRenderWidth] = useState(DESKTOP_BASE_WIDTH);
   const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
@@ -118,6 +122,8 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       if (contentRef.current && contentRef.current.offsetWidth !== baseWidth) {
         contentRef.current.style.width = `${baseWidth}px`;
       }
+      baseWidthRef.current = baseWidth;
+      scaleToFrame(parseFloat(wrapperRef.current?.style.width) || 0);
       const contentHeight = contentRef.current?.offsetHeight || 0;
 
       let scale = 1;
@@ -161,7 +167,6 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       laidOutRef.current = nextLayout.wrapperWidth > 0 && nextLayout.wrapperHeight > 0;
       setLayoutInstant(viewportChanged);
       setIsMobile(currentIsMobile);
-      setDynamicScale(nextLayout.scale);
       setRenderWidth(nextLayout.renderWidth);
       setWrapperSize({ width: nextLayout.wrapperWidth, height: nextLayout.wrapperHeight });
       setViewport({ top, left: 0, width, height });
@@ -192,7 +197,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       layoutFrameRef.current = 0;
       observer.disconnect();
     };
-  }, [children, open, contentKey]);
+  }, [children, open, contentKey, scaleToFrame]);
 
   useLayoutEffect(() => {
     if (open && viewport) revealFocusedControl(document.activeElement);
@@ -357,7 +362,6 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     ease: [0.4, 0, 0.2, 1],
   };
 
-  const scalerTransition = lowPerformanceMode ? fadeTransition : springTransition;
   const sizeTransition = contentRevealed && sizeTransitionEnabledRef.current && !layoutInstant ? springTransition : { duration: 0 };
 
   const handleGlobalClick = (e) => {
@@ -406,6 +410,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
               animate={wrapperSize.height ? { width: wrapperSize.width, height: wrapperSize.height } : undefined}
               layout={!lowPerformanceMode}
               transition={sizeTransition}
+              onUpdate={(latest) => scaleToFrame(latest.width)}
             >
               <button
                 id="booking-modal-close"
@@ -422,13 +427,14 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
               </button>
 
               <motion.div
+                ref={scalerRef}
                 data-booking-scaler="true"
                 className="shadow-none outline-none overflow-visible absolute left-0 origin-top-left cursor-default"
                 style={{ top: CLOSE_ROW_HEIGHT }}
-                initial={hydrating ? false : lowPerformanceMode ? { scale: dynamicScale, opacity: 0 } : { scale: dynamicScale * 0.95 }}
-                animate={lowPerformanceMode ? { scale: dynamicScale, opacity: 1 } : { scale: dynamicScale }}
-                exit={lowPerformanceMode ? { scale: dynamicScale, opacity: 0 } : { scale: dynamicScale * 0.95 }}
-                transition={{ ...scalerTransition, scale: sizeTransition }}
+                initial={!hydrating && lowPerformanceMode ? { opacity: 0 } : false}
+                animate={lowPerformanceMode ? { opacity: 1 } : undefined}
+                exit={lowPerformanceMode ? { opacity: 0 } : undefined}
+                transition={fadeTransition}
               >
                 <div
                   ref={contentRef}

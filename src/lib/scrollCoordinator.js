@@ -52,8 +52,11 @@ export const alignToHashTarget = ({
 
   const targetId = normalizedHash.slice(1);
   if (!targetId) return () => {};
-  const resolvedScrollMode =
-    scrollMode || (behavior === "smooth" ? "fast-smooth" : "instant");
+  const prefersReducedMotion =
+    window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
+  const resolvedScrollMode = prefersReducedMotion
+    ? "instant"
+    : scrollMode || (behavior === "smooth" ? "fast-smooth" : "instant");
   const root = document.documentElement;
   const previousRootScrollBehavior = root.style.scrollBehavior;
 

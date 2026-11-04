@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { Linter, RuleTester } from "eslint";
@@ -501,4 +502,136 @@ describe("spread resolution", () => {
       );
     });
   }
+});
+
+run("no-scripting-media-query", {
+  valid: [
+    `matchMedia("(prefers-reduced-motion: reduce)");`,
+    `<link rel="stylesheet" media="(min-width: 768px)" href="/a.css" />`,
+    `<p>Pages still read without (scripting) turned on.</p>`,
+    `const label = "(scripting: none)"; render(label);`,
+    `<Video media="(scripting: none)" />`,
+    "<style>{`/* @media (scripting: none) */ .a::before { content: \"(scripting)\"; }`}</style>",
+    `<style>{css}</style>`,
+    "const f = getFeature(); matchMedia(`(${f}: none)`);",
+    "const w = 768; matchMedia(`(min-width: ${w}px)`);",
+    `<style dangerouslySetInnerHTML={{ __html: ".a { color: red; }" }} />`,
+    "const rules = load(); <style>{`${rules} .a { color: red; }`}</style>;",
+    `const s0 = "(min-width: 1px)"; ${Array.from({ length: 24 }, (_, i) => `const s${i + 1} = s${i} + s${i};`).join(" ")} matchMedia(s24);`,
+  ],
+  invalid: [
+    {
+      name: "matchMedia on the scripting feature",
+      code: `window.matchMedia("(scripting: none)");`,
+      errors: [{ messageId: "scripting", line: 1, column: 19 }],
+    },
+    {
+      name: "matchMedia with an escaped feature name in a template",
+      code: "matchMedia(`not (\\\\73 cripting)`);",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "matchMedia on a query built from a constant",
+      code: `const noJs = "(SCRIPTING: " + "none)"; globalThis["matchMedia"](noJs);`,
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "link media attribute",
+      code: `<link rel="stylesheet" media="screen and ( scripting : initial-only )" href="/a.css" />`,
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "style media attribute in an expression",
+      code: "<style media={`(scr\\\\ipting: enabled)`}>{`.a { color: red; }`}</style>",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "inline style element with a scripting block",
+      code: "const css = `@media (scripting: none) { .x { display: block; } }`; <style>{css}</style>;",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "matchMedia with the feature name in a template expression",
+      code: "const f = \"scripting\"; matchMedia(`(${f}:none)`);",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "matchMedia with a nested template constant",
+      code: "const name = \"script\"; const q = `(${`${name}ing`}: none)`; matchMedia(q);",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "matchMedia reusing one constant twice",
+      code: "const s = \"script\"; matchMedia(`${s}s, (${s}ing)`);",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "matchMedia with a runtime value after the feature",
+      code: "matchMedia(`(scripting: ${mode})`);",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "link media from a template expression",
+      code: "const f = \"scripting\"; <link rel=\"stylesheet\" media={`(${f}: none)`} href=\"/a.css\" />;",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "inline style with the feature in a template expression",
+      code: "const f = \"scripting\"; <style>{`@media (${f}: none) { .x { display: block; } }`}</style>;",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "inline style after a runtime chunk",
+      code: "<style>{`${rules} @media (scripting: none) { .x { display: block; } }`}</style>;",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "style with dangerouslySetInnerHTML",
+      code: "<style dangerouslySetInnerHTML={{ __html: \"@media (scripting: none) { .x { display: block; } }\" }} />;",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "style with dangerouslySetInnerHTML from constants",
+      code: "const f = \"scripting\"; const html = { __html: `@media (${f}: none) {}` }; <style dangerouslySetInnerHTML={html} />;",
+      errors: [{ messageId: "scripting" }],
+    },
+  ],
+});
+
+const testFile = fileURLToPath(new URL("../src/__tests__/virtualMock.test.js", import.meta.url));
+
+run("no-virtual-mock-of-installed-module", {
+  valid: [
+    { filename: testFile, code: `jest.mock("react-router-dom", () => ({ useLocation: () => ({}) }));` },
+    { filename: testFile, code: `jest.mock("roo-package-that-is-not-installed", () => ({}), { virtual: true });` },
+    { filename: testFile, code: `jest.mock("../lib/not-a-real-file", () => ({}), { virtual: true });` },
+    { filename: testFile, code: `jest.mock("lucide-react", () => ({}), { virtual: false });` },
+    { filename: testFile, code: `jest.mock("@/src/lib/not-a-real-file", () => ({}), { virtual: true });` },
+  ],
+  invalid: [
+    {
+      name: "booking UI test before the router fix",
+      filename: testFile,
+      code: `jest.mock("react-router-dom", () => ({ useLocation: () => ({}) }), { virtual: true });`,
+      errors: [{ messageId: "installed" }],
+    },
+    {
+      name: "installed icon package",
+      filename: testFile,
+      code: `jest.doMock("lucide-react", () => ({}), { virtual: true });`,
+      errors: [{ messageId: "installed" }],
+    },
+    {
+      name: "existing app module through the Jest alias",
+      filename: testFile,
+      code: `jest.mock("@/src/lib/sectionNavigator", () => ({}), { virtual: true });`,
+      errors: [{ messageId: "installed" }],
+    },
+    {
+      name: "existing app module",
+      filename: testFile,
+      code: `jest.mock("../lib/sectionNavigator", () => ({}), { virtual: true });`,
+      errors: [{ messageId: "installed" }],
+    },
+  ],
 });

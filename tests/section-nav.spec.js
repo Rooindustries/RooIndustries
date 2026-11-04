@@ -24,7 +24,6 @@ if (
 }
 
 test.use({ javaScriptEnabled: true });
-test.describe.configure({ mode: "serial" });
 
 const DEFAULT_REPEAT_COUNTS = {
   desktop: Number(process.env.NAV_REPEAT_COUNT_DESKTOP || 5),
@@ -127,10 +126,20 @@ const navArtifactPath = path.join(auditDir, "phase1-nav-reliability.json");
 const crashArtifactPath = path.join(auditDir, "phase1-client-crash-log.json");
 const hydrationArtifactPath = path.join(auditDir, "phase1-hydration-log.json");
 
-const navMetrics = [];
-const navFailures = [];
-const settleSummaries = [];
-const crashLog = [];
+const runId = process.ppid;
+const readRunArtifact = (file) => {
+  try {
+    const artifact = JSON.parse(fs.readFileSync(file, "utf8"));
+    return artifact.runId === runId ? artifact : null;
+  } catch {
+    return null;
+  }
+};
+const earlierNav = readRunArtifact(navArtifactPath);
+const navMetrics = earlierNav?.metrics || [];
+const navFailures = earlierNav?.failures || [];
+const settleSummaries = earlierNav?.settleSummaries || [];
+const crashLog = readRunArtifact(crashArtifactPath)?.errors || [];
 
 const ensureAuditDir = () => {
   fs.mkdirSync(auditDir, { recursive: true });
@@ -141,8 +150,8 @@ const nowMs = () => Date.now();
 const waitForHash = async (page, expectedHash, timeoutMs) => {
   const start = nowMs();
   while (nowMs() - start <= timeoutMs) {
-    const currentHash = new URL(page.url()).hash;
-    if (currentHash === expectedHash) {
+    const current = new URL(page.url());
+    if (current.pathname === "/" && current.hash === expectedHash) {
       return { ok: true, latencyMs: nowMs() - start };
     }
     await page.waitForTimeout(25);
@@ -366,7 +375,8 @@ for (const viewportCfg of VIEWPORTS) {
       }
     }
 
-    const samples = navMetrics
+    const attemptMetrics = navMetrics.slice(navMetricsAtStart);
+    const samples = attemptMetrics
       .filter((result) => result.viewport === viewportCfg.name)
       .map((result) => result.settleMs)
       .sort((a, b) => a - b);
@@ -377,7 +387,7 @@ for (const viewportCfg of VIEWPORTS) {
       p90Ms: samples[Math.ceil(samples.length * 0.9) - 1],
       maxMs: samples[samples.length - 1],
       cases: ORIGINS.flatMap((origin) => ACTIONS.map((action) => {
-        const times = navMetrics
+        const times = attemptMetrics
           .filter((result) => result.viewport === viewportCfg.name && result.origin === origin && result.action === action.label)
           .map((result) => result.settleMs)
           .sort((a, b) => a - b);
@@ -448,6 +458,7 @@ test.afterAll(async () => {
   ensureAuditDir();
 
   const payload = {
+    runId,
     generatedAt: new Date().toISOString(),
     cpuThrottleRate: CPU_THROTTLE_RATE,
     repeatCount: DEFAULT_REPEAT_COUNTS,
@@ -482,6 +493,7 @@ test.afterAll(async () => {
     crashArtifactPath,
     JSON.stringify(
       {
+        runId,
         generatedAt: new Date().toISOString(),
         errors: crashLog,
       },
@@ -498,6 +510,7 @@ test.afterAll(async () => {
     hydrationArtifactPath,
     JSON.stringify(
       {
+        runId,
         generatedAt: new Date().toISOString(),
         errors: hydrationErrors,
       },
@@ -505,18 +518,28 @@ test.afterAll(async () => {
       2
     )
   );
-
-  expect(navFailures, "navigation reliability failures").toEqual([]);
-  expect(crashLog.length, "client crash/hydration errors captured").toBe(0);
-  expect(hydrationErrors.length, "hydration mismatch errors captured").toBe(0);
 });
 
+let navFailuresAtStart = 0;
+let crashLogAtStart = 0;
+let navMetricsAtStart = 0;
 
 test.beforeEach(async ({ context, page, baseURL }) => {
+  navFailuresAtStart = navFailures.length;
+  crashLogAtStart = crashLog.length;
+  navMetricsAtStart = navMetrics.length;
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
   await guardBrowserContext(context, [baseURL]);
   if (CPU_THROTTLE_RATE > 1) {
     const session = await context.newCDPSession(page);
     await session.send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE_RATE });
   }
+});
+
+test.afterEach(async () => {
+  expect.soft(navFailures.slice(navFailuresAtStart), "navigation reliability failures").toEqual([]);
+  expect.soft(
+    crashLog.slice(crashLogAtStart).map(({ type, viewport, url, message }) => ({ type, viewport, url, message })),
+    "client crash/hydration errors captured"
+  ).toEqual([]);
 });
