@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream, statSync } from "node:fs";
+import path from "node:path";
 import { isDownloadKey } from "../src/keys.js";
 
 export const parseFilePairs = (pairs) => {
@@ -7,7 +8,7 @@ export const parseFilePairs = (pairs) => {
   return pairs.map((pair) => {
     const separator = pair.indexOf("=");
     const key = pair.slice(0, separator);
-    const file = pair.slice(separator + 1);
+    const file = path.resolve(pair.slice(separator + 1));
     if (separator < 1 || !isDownloadKey(key)) throw new Error(`Invalid download key in "${pair}".`);
     const stats = statSync(file, { throwIfNoEntry: false });
     if (!stats?.isFile() || stats.size === 0) throw new Error(`No non-empty file at "${file}".`);

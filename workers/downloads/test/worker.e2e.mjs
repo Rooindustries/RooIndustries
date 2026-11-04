@@ -81,8 +81,12 @@ before(async () => {
   throw new Error("wrangler dev did not become healthy within 60 seconds");
 });
 
-after(() => {
-  if (worker?.pid) process.kill(-worker.pid, "SIGTERM");
+after(async () => {
+  if (worker?.exitCode === null) {
+    const exited = new Promise((resolve) => worker.once("exit", resolve));
+    process.kill(-worker.pid, "SIGTERM");
+    await exited;
+  }
   rmSync(workDir, { recursive: true, force: true });
 });
 
@@ -151,8 +155,15 @@ test("byte ranges follow RFC 9110", async () => {
 
   const { headers } = await request(`/${zipKey}`, { method: "HEAD" });
   await expectPart(await ranged("bytes=0-9", { "If-Range": headers.get("ETag") }), 0, 9);
-  await expectPart(await ranged("bytes=0-9", { "If-Range": headers.get("Last-Modified") }), 0, 9);
+  assert.equal((await ranged("bytes=0-9", { "If-Range": headers.get("Last-Modified") })).status, 200);
   assert.equal((await ranged("bytes=0-9", { "If-Range": '"another"' })).status, 200);
+
+  for (const range of ["bytes=0-9", `bytes=${size}-`]) {
+    const head = await request(`/${zipKey}`, { method: "HEAD", headers: { Range: range } });
+    assert.equal(head.status, 200, range);
+    assert.equal(head.headers.get("Content-Length"), String(size));
+    assert.equal(head.headers.get("Content-Range"), null);
+  }
   assert.equal((await ranged("bytes=0-9", { "If-Range": `W/${headers.get("ETag")}` })).status, 200);
 });
 
@@ -174,6 +185,9 @@ test("conditional requests answer 304 and 412", async () => {
   assert.equal(await status({ "If-Match": '"other"' }), 412);
   assert.equal(await status({ "If-Unmodified-Since": new Date(Date.parse(lastModified) - 1000).toUTCString() }), 412);
   assert.equal(await status({ "If-Unmodified-Since": lastModified }), 200);
+  assert.equal(await status({ "If-Unmodified-Since": "0" }), 200);
+  assert.equal(await status({ "If-Modified-Since": "9999" }), 200);
+  assert.equal(await status({ "If-Modified-Since": lastModified.replace("GMT", "UTC") }), 200);
 });
 
 test("unknown, unsafe and unsupported requests are refused", async () => {

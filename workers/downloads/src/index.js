@@ -38,8 +38,11 @@ const keyFromPath = (pathname) => {
 
 const toSeconds = (date) => Math.floor(date.getTime() / 1000);
 
+const HTTP_DATE = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/;
+
 const parseHttpDate = (value) => {
-  const time = Date.parse(value ?? "");
+  if (!HTTP_DATE.test(value ?? "")) return null;
+  const time = Date.parse(value);
   return Number.isNaN(time) ? null : Math.floor(time / 1000);
 };
 
@@ -66,11 +69,7 @@ const notModified = (headers, object) => {
   return modifiedSince !== null && toSeconds(object.uploaded) <= modifiedSince;
 };
 
-const rangeAllowed = (ifRange, object) => {
-  if (ifRange === null) return true;
-  if (ifRange.startsWith('"')) return ifRange === object.httpEtag;
-  return parseHttpDate(ifRange) === toSeconds(object.uploaded);
-};
+const rangeAllowed = (ifRange, object) => ifRange === null || ifRange === object.httpEtag;
 
 const requestedRange = (headers, object) => {
   const match = /^bytes=(\d*)-(\d*)$/i.exec(headers.get("Range")?.trim() ?? "");
@@ -105,7 +104,7 @@ const serveFile = async (request, env, key) => {
   if (notModified(request.headers, object)) {
     return new Response(null, { status: 304, headers: validatorHeaders(object) });
   }
-  const range = requestedRange(request.headers, object);
+  const range = request.method === "GET" ? requestedRange(request.headers, object) : null;
   if (range === UNSATISFIABLE) {
     return jsonResponse(416, { error: "range_not_satisfiable" }, { "Content-Range": `bytes */${object.size}` });
   }

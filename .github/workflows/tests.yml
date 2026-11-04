@@ -325,6 +325,8 @@ jobs:
           npx --yes npm@11.12.1 run build --prefix "$STORAGE_SOURCE"
       - name: Run native admin CMS suite
         run: xvfb-run -a npx playwright test -c playwright.admin.config.js
+      - name: Run hosted tool download suite
+        run: node scripts/test-sanity-admin.mjs --scenario=unverified-assets-tools-fresh-redirect
       - name: Run all six native booking-hold browser cases
         env:
           NEXT_DIST_DIR: .next-e2e-native-booking
