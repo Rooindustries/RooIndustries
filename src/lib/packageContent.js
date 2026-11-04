@@ -180,9 +180,6 @@ const toTitleCase = (value = "") =>
 const getPackageWarranty = (pkg = {}) => {
   const isLifetime = isTopPackageTitle(pkg.title || pkg.sourceTitle);
   return {
-    className: isLifetime
-      ? "ri-package-warranty-callout-max"
-      : "ri-package-warranty-callout-standard",
     title: isLifetime
       ? "Lifetime warranty included"
       : "90-day warranty included",
