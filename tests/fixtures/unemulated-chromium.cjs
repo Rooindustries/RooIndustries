@@ -13,8 +13,37 @@ const freePort = () =>
     });
   });
 
-const waitForEndpoint = async (port, child) => {
-  const deadline = Date.now() + 20000;
+const contentAssetOrigin = (baseURL) => {
+  const url = new URL(baseURL);
+  url.port = process.env.TOOLING_CONTENT_PORT || String(Number(url.port) + 1);
+  return url.origin;
+};
+
+const killGroup = (child) => {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch {
+    child.kill("SIGKILL");
+  }
+};
+
+const stopChild = (child, graceMs) =>
+  new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => killGroup(child), graceMs);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      killGroup(child);
+      resolve();
+    });
+  });
+
+const waitForEndpoint = async (port, child, timeoutMs) => {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`Chromium exited with code ${child.exitCode}.`);
     try {
@@ -26,41 +55,17 @@ const waitForEndpoint = async (port, child) => {
   throw new Error("Chromium did not open its debugging endpoint.");
 };
 
-const contentAssetOrigin = (baseURL) => {
-  const url = new URL(baseURL);
-  url.port = process.env.TOOLING_CONTENT_PORT || String(Number(url.port) + 1);
-  return url.origin;
-};
-
-async function launchUnemulatedChromium({ baseURL, userDataDir, width, height }) {
-  const origin = new URL(baseURL).origin;
-  const assetOrigin = contentAssetOrigin(baseURL);
-  const port = await freePort();
-  fs.mkdirSync(userDataDir, { recursive: true });
-  const child = spawn(
-    chromium.executablePath(),
-    [
-      `--remote-debugging-port=${port}`,
-      `--user-data-dir=${userDataDir}`,
-      `--window-size=${width},${height}`,
-      `--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE ${new URL(baseURL).hostname}`,
-      "--no-first-run",
-      "--no-default-browser-check",
-      ...(process.platform === "linux" ? ["--ozone-platform=x11"] : []),
-      "about:blank",
-    ],
-    { stdio: "ignore" }
-  );
-  const socket = new WebSocket(await waitForEndpoint(port, child));
-  await new Promise((resolve, reject) => {
-    socket.addEventListener("open", resolve, { once: true });
-    socket.addEventListener("error", reject, { once: true });
-  });
-
+const connect = (endpoint) => {
+  const socket = new WebSocket(endpoint);
   let nextId = 0;
+  let closedError = null;
   const pending = new Map();
   const listeners = new Set();
-  const blockedRequests = [];
+  const failPending = (error) => {
+    closedError = closedError || error;
+    pending.forEach(({ reject }) => reject(closedError));
+    pending.clear();
+  };
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(event.data);
     if (message.id && pending.has(message.id)) {
@@ -72,13 +77,70 @@ async function launchUnemulatedChromium({ baseURL, userDataDir, width, height })
     }
     listeners.forEach((listener) => listener(message));
   });
-  const send = (method, params = {}, sessionId) =>
-    new Promise((resolve, reject) => {
+  socket.addEventListener("close", () => failPending(new Error("Chromium connection closed.")));
+  socket.addEventListener("error", () => failPending(new Error("Chromium connection failed.")));
+  const opened = new Promise((resolve, reject) => {
+    socket.addEventListener("open", resolve, { once: true });
+    socket.addEventListener("close", () => reject(closedError || new Error("Chromium connection closed.")), { once: true });
+  });
+  const send = (method, params = {}, sessionId) => {
+    if (closedError) return Promise.reject(closedError);
+    return new Promise((resolve, reject) => {
       nextId += 1;
       pending.set(nextId, { resolve, reject });
       socket.send(JSON.stringify({ id: nextId, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
+  };
+  return { socket, opened, send, listeners };
+};
 
+async function launchUnemulatedChromium({
+  baseURL,
+  userDataDir,
+  width,
+  height,
+  chromiumSandbox = false,
+  executablePath = chromium.executablePath(),
+  startupTimeoutMs = 20000,
+}) {
+  const origin = new URL(baseURL).origin;
+  const assetOrigin = contentAssetOrigin(baseURL);
+  const allowedHosts = [origin, assetOrigin].map((value) => new URL(value).host);
+  const port = await freePort();
+  fs.mkdirSync(userDataDir, { recursive: true });
+  const child = spawn(
+    executablePath,
+    [
+      `--remote-debugging-port=${port}`,
+      `--user-data-dir=${userDataDir}`,
+      `--window-size=${width},${height}`,
+      `--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE ${new URL(baseURL).hostname}`,
+      "--proxy-server=127.0.0.1:9",
+      `--proxy-bypass-list=<-loopback>;${allowedHosts.join(";")}`,
+      "--no-first-run",
+      "--no-default-browser-check",
+      ...(chromiumSandbox === true ? [] : ["--no-sandbox"]),
+      ...(process.platform === "linux" ? ["--ozone-platform=x11"] : []),
+      "about:blank",
+    ],
+    { stdio: "ignore", detached: process.platform !== "win32" }
+  );
+  const killOnExit = () => killGroup(child);
+  process.once("exit", killOnExit);
+
+  let connection;
+  try {
+    connection = connect(await waitForEndpoint(port, child, startupTimeoutMs));
+    await connection.opened;
+  } catch (error) {
+    connection?.socket.close();
+    await stopChild(child, 0);
+    process.off("exit", killOnExit);
+    throw error;
+  }
+  const { socket, send, listeners } = connection;
+
+  const blockedRequests = [];
   listeners.add((message) => {
     if (message.method !== "Fetch.requestPaused") return;
     const { requestId, request, resourceType } = message.params;
@@ -96,15 +158,71 @@ async function launchUnemulatedChromium({ baseURL, userDataDir, width, height })
     send("Fetch.failRequest", { requestId, errorReason: "BlockedByClient" }, message.sessionId).catch(() => {});
   });
 
+  const close = async () => {
+    process.off("exit", killOnExit);
+    const stopped = stopChild(child, 5000);
+    send("Browser.close").catch(() => {});
+    await stopped;
+    socket.close();
+  };
+
+  const guardedTargets = new Map();
+  const targetWaiters = new Map();
+  const unguardedTargets = [];
+  const observedSessions = new Set();
+  const guardTarget = async ({ sessionId, targetInfo, waitingForDebugger }) => {
+    try {
+      await send("Fetch.enable", { patterns: [{ urlPattern: "*" }] }, sessionId);
+    } catch {
+      try {
+        await send("Network.enable", {}, sessionId);
+        observedSessions.add(sessionId);
+      } catch (error) {
+        unguardedTargets.push(`${targetInfo.type} ${targetInfo.url}: ${error.message}`);
+      }
+    }
+    await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sessionId).catch(() => {});
+    if (waitingForDebugger) await send("Runtime.runIfWaitingForDebugger", {}, sessionId).catch(() => {});
+    guardedTargets.set(targetInfo.targetId, sessionId);
+    targetWaiters.get(targetInfo.targetId)?.(sessionId);
+  };
+  listeners.add((message) => {
+    if (message.method === "Target.attachedToTarget") guardTarget(message.params);
+    if (message.method === "Network.requestWillBeSent" && observedSessions.has(message.sessionId)) {
+      const { request } = message.params;
+      if (!request.url.startsWith(`${origin}/`)) blockedRequests.push(`${request.method} ${request.url}`);
+    }
+  });
+  const guardedSession = (targetId) =>
+    guardedTargets.has(targetId)
+      ? Promise.resolve(guardedTargets.get(targetId))
+      : new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            targetWaiters.delete(targetId);
+            reject(new Error(`Chromium never attached target ${targetId}.`));
+          }, 10000);
+          targetWaiters.set(targetId, (sessionId) => {
+            clearTimeout(timer);
+            targetWaiters.delete(targetId);
+            resolve(sessionId);
+          });
+        });
+
+  try {
+    await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
+  } catch (error) {
+    await close();
+    throw error;
+  }
+
   const openTab = async (url) => {
     const { targetId } = await send("Target.createTarget", { url: "about:blank" });
-    const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
-    await send("Fetch.enable", { patterns: [{ urlPattern: "*" }] }, sessionId);
+    const sessionId = await guardedSession(targetId);
     await send("Runtime.enable", {}, sessionId);
-    const evaluate = async (fn, arg) => {
+    const evaluate = async (fn, arg, options = {}) => {
       const result = await send(
         "Runtime.evaluate",
-        { expression: `(${fn})(${JSON.stringify(arg ?? null)})`, awaitPromise: true, returnByValue: true },
+        { expression: `(${fn})(${JSON.stringify(arg ?? null)})`, awaitPromise: true, returnByValue: true, ...options },
         sessionId
       );
       if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || "Evaluation failed.");
@@ -150,26 +268,7 @@ async function launchUnemulatedChromium({ baseURL, userDataDir, width, height })
     };
   };
 
-  return {
-    openTab,
-    blockedRequests,
-    close: async () => {
-      await send("Browser.close").catch(() => {});
-      socket.close();
-      if (child.exitCode === null) {
-        await new Promise((resolve) => {
-          const timer = setTimeout(() => {
-            child.kill("SIGKILL");
-            resolve();
-          }, 5000);
-          child.once("exit", () => {
-            clearTimeout(timer);
-            resolve();
-          });
-        });
-      }
-    },
-  };
+  return { pid: child.pid, openTab, blockedRequests, unguardedTargets, close };
 }
 
 module.exports = { launchUnemulatedChromium };

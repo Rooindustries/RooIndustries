@@ -257,6 +257,7 @@ test("visibility transition does not break section navigation", async ({ baseURL
     userDataDir: testInfo.outputPath("unemulated-chromium"),
     width: 1536,
     height: 960,
+    chromiumSandbox: testInfo.project.use.launchOptions?.chromiumSandbox,
   });
   try {
     const tab = await browser.openTab(`${baseURL}/benchmarks`);
