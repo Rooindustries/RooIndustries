@@ -632,6 +632,28 @@ describe("release runtime environment validation", () => {
     expect(result.output).toContain("invalid storageBackend");
   });
 
+  test("accepts a Worker origin for hosted tool downloads", () => {
+    const result = validate({
+      TOOL_DOWNLOADS_ORIGIN: "https://roo-downloads.rooindustries.workers.dev",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain("Runtime secret validation passed");
+  });
+
+  test.each([
+    ["plain http", "http://roo-downloads.rooindustries.workers.dev"],
+    ["a path", "https://roo-downloads.rooindustries.workers.dev/files"],
+    ["credentials", "https://user:secret@roo-downloads.rooindustries.workers.dev"],
+    ["a query", "https://roo-downloads.rooindustries.workers.dev/?cache=0"],
+    ["no URL", "roo-downloads"],
+  ])("blocks a tool downloads origin with %s", (_label, origin) => {
+    const result = validate({ TOOL_DOWNLOADS_ORIGIN: origin });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("TOOL_DOWNLOADS_ORIGIN must be an https origin");
+  });
+
   test.each([
     ["missing", "", "require DOWNLOAD_CATALOG_JSON"],
     ["malformed", "{not-json", "must contain valid JSON"],

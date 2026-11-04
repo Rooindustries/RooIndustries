@@ -1,0 +1,140 @@
+import { contentTypeFor, fileNameOf, isDownloadKey } from "./keys.js";
+
+const FILE_CACHE_CONTROL = "public, max-age=86400";
+const HEALTH_PROBE_KEY = "health";
+const UNSATISFIABLE = "unsatisfiable";
+
+const commonHeaders = (cacheControl) =>
+  new Headers({
+    "Cache-Control": cacheControl,
+    "X-Content-Type-Options": "nosniff",
+    "X-Robots-Tag": "noindex",
+  });
+
+const jsonResponse = (status, body, extraHeaders = {}) => {
+  const headers = commonHeaders("no-store");
+  headers.set("Content-Type", "application/json; charset=utf-8");
+  for (const [name, value] of Object.entries(extraHeaders)) headers.set(name, value);
+  return new Response(JSON.stringify(body), { status, headers });
+};
+
+const health = async (env) => {
+  try {
+    await env.DOWNLOADS.head(HEALTH_PROBE_KEY);
+    return jsonResponse(200, { status: "ok" });
+  } catch {
+    return jsonResponse(503, { status: "unavailable" });
+  }
+};
+
+const keyFromPath = (pathname) => {
+  try {
+    const key = decodeURIComponent(pathname.slice(1));
+    return isDownloadKey(key) ? key : null;
+  } catch {
+    return null;
+  }
+};
+
+const toSeconds = (date) => Math.floor(date.getTime() / 1000);
+
+const parseHttpDate = (value) => {
+  const time = Date.parse(value ?? "");
+  return Number.isNaN(time) ? null : Math.floor(time / 1000);
+};
+
+const entityTags = (header) => header.split(",").map((tag) => tag.trim());
+
+const opaqueTag = (tag) => tag.replace(/^W\//, "");
+
+const strongMatch = (header, etag) => entityTags(header).some((tag) => tag === "*" || tag === etag);
+
+const weakMatch = (header, etag) =>
+  entityTags(header).some((tag) => tag === "*" || opaqueTag(tag) === opaqueTag(etag));
+
+const preconditionFailed = (headers, object) => {
+  const ifMatch = headers.get("If-Match");
+  if (ifMatch !== null) return !strongMatch(ifMatch, object.httpEtag);
+  const unmodifiedSince = parseHttpDate(headers.get("If-Unmodified-Since"));
+  return unmodifiedSince !== null && toSeconds(object.uploaded) > unmodifiedSince;
+};
+
+const notModified = (headers, object) => {
+  const ifNoneMatch = headers.get("If-None-Match");
+  if (ifNoneMatch !== null) return weakMatch(ifNoneMatch, object.httpEtag);
+  const modifiedSince = parseHttpDate(headers.get("If-Modified-Since"));
+  return modifiedSince !== null && toSeconds(object.uploaded) <= modifiedSince;
+};
+
+const rangeAllowed = (ifRange, object) => {
+  if (ifRange === null) return true;
+  if (ifRange.startsWith('"')) return ifRange === object.httpEtag;
+  return parseHttpDate(ifRange) === toSeconds(object.uploaded);
+};
+
+const requestedRange = (headers, object) => {
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(headers.get("Range")?.trim() ?? "");
+  if (!match || (!match[1] && !match[2]) || !rangeAllowed(headers.get("If-Range"), object)) return null;
+  const size = object.size;
+  if (!match[1]) {
+    const suffix = Number(match[2]);
+    if (suffix === 0 || size === 0) return UNSATISFIABLE;
+    const length = Math.min(suffix, size);
+    return { offset: size - length, length };
+  }
+  const first = Number(match[1]);
+  if (match[2] && Number(match[2]) < first) return null;
+  if (first >= size) return UNSATISFIABLE;
+  const last = match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
+  return { offset: first, length: last - first + 1 };
+};
+
+const validatorHeaders = (object) => {
+  const headers = commonHeaders(FILE_CACHE_CONTROL);
+  headers.set("ETag", object.httpEtag);
+  headers.set("Last-Modified", object.uploaded.toUTCString());
+  return headers;
+};
+
+const serveFile = async (request, env, key) => {
+  const object = await env.DOWNLOADS.head(key);
+  if (!object) return jsonResponse(404, { error: "not_found" });
+  if (preconditionFailed(request.headers, object)) {
+    return jsonResponse(412, { error: "precondition_failed" });
+  }
+  if (notModified(request.headers, object)) {
+    return new Response(null, { status: 304, headers: validatorHeaders(object) });
+  }
+  const range = requestedRange(request.headers, object);
+  if (range === UNSATISFIABLE) {
+    return jsonResponse(416, { error: "range_not_satisfiable" }, { "Content-Range": `bytes */${object.size}` });
+  }
+
+  const headers = validatorHeaders(object);
+  headers.set("Content-Type", contentTypeFor(key));
+  headers.set("Content-Disposition", `attachment; filename="${fileNameOf(key)}"`);
+  headers.set("Accept-Ranges", "bytes");
+  headers.set("Content-Length", String(range ? range.length : object.size));
+  if (range) {
+    headers.set("Content-Range", `bytes ${range.offset}-${range.offset + range.length - 1}/${object.size}`);
+  }
+  const status = range ? 206 : 200;
+  if (request.method === "HEAD") return new Response(null, { status, headers });
+
+  const onlyIf = { etagMatches: object.etag };
+  const file = await env.DOWNLOADS.get(key, range ? { range, onlyIf } : { onlyIf });
+  if (!file?.body) return jsonResponse(503, { error: "file_changed" });
+  return new Response(file.body, { status, headers });
+};
+
+export default {
+  async fetch(request, env) {
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return jsonResponse(405, { error: "method_not_allowed" }, { Allow: "GET, HEAD" });
+    }
+    const { pathname } = new URL(request.url);
+    if (pathname === "/health") return health(env);
+    const key = keyFromPath(pathname);
+    return key ? serveFile(request, env, key) : jsonResponse(404, { error: "not_found" });
+  },
+};

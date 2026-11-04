@@ -500,6 +500,21 @@ try {
     const second=await tools.GET(request,{params:Promise.resolve({id:tool.data.documentId})});assert.equal(second.status,302);
     const newer=JSON.parse(Buffer.from(new URL(second.headers.get('Location')).searchParams.get('token').split('.')[1],'base64url').toString());
     const fresh=await fetch(second.headers.get('Location'));assert.equal(fresh.status,200);assert.equal(hashes(Buffer.from(await fresh.arrayBuffer())).sha256,hashes(zip).sha256);
+    const storagePath=new URL(second.headers.get('Location')).pathname.replace('/storage/v1/object/sign/optimization-builds-private/','');
+    assert.match(storagePath,/^builds\/[A-Za-z0-9_.-]+\.zip$/);
+    try {
+      process.env.TOOL_DOWNLOADS_ORIGIN='https://downloads.example.test/';
+      const worker=await tools.GET(request,{params:Promise.resolve({id:tool.data.documentId})});
+      assert.equal(worker.status,302);
+      assert.match(worker.headers.get('Cache-Control'),/private, no-store/);
+      assert.equal(worker.headers.get('Location'),`https://downloads.example.test/${storagePath}`);
+      process.env.TOOL_DOWNLOADS_ORIGIN='http://downloads.example.test';
+      const insecure=await tools.GET(request,{params:Promise.resolve({id:tool.data.documentId})});
+      assert.equal(insecure.status,302);
+      assert.match(insecure.headers.get('Location'),/\/storage\/v1\/object\/sign\/optimization-builds-private\//);
+    } finally {
+      delete process.env.TOOL_DOWNLOADS_ORIGIN;
+    }
     observed('click-time fresh Storage signing', {oldExp:old.exp,newExp:newer.exp,oldStatus:expired.status,freshStatus:fresh.status,fixture:'Short TTL fixture: first actual Storage signing request expiresIn is reduced from900s to1s by transport injection; real token is expired before subsequent normal900s click signing. Equivalent expiry ordering, not15min wall time.'});
     assert.ok(newer.exp>old.exp);
     const replaced=await publish({operation:'replace',type:'tool',documentId:tool.data.documentId,expectedRevision:tool.data.revision,document:{title:'Now external',downloadMode:'external',downloadUrl:'https://fixture.invalid/download'}});assert.equal(replaced.ok,true);
