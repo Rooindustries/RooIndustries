@@ -22,12 +22,21 @@ if (
 }
 
 test.use({ javaScriptEnabled: true });
-test.describe.configure({ mode: "serial" });
 
 const auditDir = path.join(process.cwd(), "audit");
 const chaosReportPath = path.join(auditDir, "phase1-nav-chaos.md");
-const failures = [];
-const notes = [];
+const chaosStatePath = path.join(auditDir, "phase1-nav-chaos.json");
+const runId = process.ppid;
+const earlierRun = (() => {
+  try {
+    const state = JSON.parse(fs.readFileSync(chaosStatePath, "utf8"));
+    return state.runId === runId ? state : null;
+  } catch {
+    return null;
+  }
+})();
+const failures = earlierRun?.failures || [];
+const notes = earlierRun?.notes || [];
 const CPU_THROTTLE_RATE = Number(process.env.NAV_CPU_THROTTLE_RATE || 1);
 if (!Number.isFinite(CPU_THROTTLE_RATE) || CPU_THROTTLE_RATE < 1 || CPU_THROTTLE_RATE > 4) {
   throw new Error("NAV_CPU_THROTTLE_RATE must be between 1 and 4.");
@@ -65,7 +74,7 @@ const recordFailure = async (page, context, reason) => {
 const verifyHashAndTarget = async (page, hash, settleMs = 2500) => {
   const start = Date.now();
   while (Date.now() - start <= settleMs) {
-    const currentHash = new URL(page.url()).hash;
+    const current = new URL(page.url());
     let top = null;
     try {
       top = await page.evaluate((selector) => {
@@ -89,7 +98,7 @@ const verifyHashAndTarget = async (page, hash, settleMs = 2500) => {
       await page.waitForTimeout(50);
       continue;
     }
-    if (currentHash === hash && top !== null && Math.abs(top) <= 160) {
+    if (current.pathname === "/" && current.hash === hash && top !== null && Math.abs(top) <= 160) {
       return true;
     }
     await page.waitForTimeout(50);
@@ -300,6 +309,7 @@ test.afterAll(async () => {
   }
 
   fs.writeFileSync(chaosReportPath, lines.join("\n"));
+  fs.writeFileSync(chaosStatePath, JSON.stringify({ runId, failures, notes }, null, 2));
 });
 
 let failuresAtStart = 0;

@@ -24,7 +24,6 @@ if (
 }
 
 test.use({ javaScriptEnabled: true });
-test.describe.configure({ mode: "serial" });
 
 const DEFAULT_REPEAT_COUNTS = {
   desktop: Number(process.env.NAV_REPEAT_COUNT_DESKTOP || 5),
@@ -127,10 +126,20 @@ const navArtifactPath = path.join(auditDir, "phase1-nav-reliability.json");
 const crashArtifactPath = path.join(auditDir, "phase1-client-crash-log.json");
 const hydrationArtifactPath = path.join(auditDir, "phase1-hydration-log.json");
 
-const navMetrics = [];
-const navFailures = [];
-const settleSummaries = [];
-const crashLog = [];
+const runId = process.ppid;
+const readRunArtifact = (file) => {
+  try {
+    const artifact = JSON.parse(fs.readFileSync(file, "utf8"));
+    return artifact.runId === runId ? artifact : null;
+  } catch {
+    return null;
+  }
+};
+const earlierNav = readRunArtifact(navArtifactPath);
+const navMetrics = earlierNav?.metrics || [];
+const navFailures = earlierNav?.failures || [];
+const settleSummaries = earlierNav?.settleSummaries || [];
+const crashLog = readRunArtifact(crashArtifactPath)?.errors || [];
 
 const ensureAuditDir = () => {
   fs.mkdirSync(auditDir, { recursive: true });
@@ -141,8 +150,8 @@ const nowMs = () => Date.now();
 const waitForHash = async (page, expectedHash, timeoutMs) => {
   const start = nowMs();
   while (nowMs() - start <= timeoutMs) {
-    const currentHash = new URL(page.url()).hash;
-    if (currentHash === expectedHash) {
+    const current = new URL(page.url());
+    if (current.pathname === "/" && current.hash === expectedHash) {
       return { ok: true, latencyMs: nowMs() - start };
     }
     await page.waitForTimeout(25);
@@ -448,6 +457,7 @@ test.afterAll(async () => {
   ensureAuditDir();
 
   const payload = {
+    runId,
     generatedAt: new Date().toISOString(),
     cpuThrottleRate: CPU_THROTTLE_RATE,
     repeatCount: DEFAULT_REPEAT_COUNTS,
@@ -482,6 +492,7 @@ test.afterAll(async () => {
     crashArtifactPath,
     JSON.stringify(
       {
+        runId,
         generatedAt: new Date().toISOString(),
         errors: crashLog,
       },
@@ -498,6 +509,7 @@ test.afterAll(async () => {
     hydrationArtifactPath,
     JSON.stringify(
       {
+        runId,
         generatedAt: new Date().toISOString(),
         errors: hydrationErrors,
       },
@@ -522,8 +534,8 @@ test.beforeEach(async ({ context, page, baseURL }) => {
 });
 
 test.afterEach(async () => {
-  expect(navFailures.slice(navFailuresAtStart), "navigation reliability failures").toEqual([]);
-  expect(
+  expect.soft(navFailures.slice(navFailuresAtStart), "navigation reliability failures").toEqual([]);
+  expect.soft(
     crashLog.slice(crashLogAtStart).map(({ type, viewport, url, message }) => ({ type, viewport, url, message })),
     "client crash/hydration errors captured"
   ).toEqual([]);
