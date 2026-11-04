@@ -1,6 +1,6 @@
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
 import { Linter, RuleTester } from "eslint";
 import { rules } from "../eslint-rules/index.mjs";
 
@@ -688,6 +688,44 @@ run("no-scripting-media-query", {
       name: "style with dangerouslySetInnerHTML from constants",
       code: "const f = \"scripting\"; const html = { __html: `@media (${f}: none) {}` }; <style dangerouslySetInnerHTML={html} />;",
       errors: [{ messageId: "scripting" }],
+    },
+  ],
+});
+
+const testFile = fileURLToPath(new URL("../src/__tests__/virtualMock.test.js", import.meta.url));
+
+run("no-virtual-mock-of-installed-module", {
+  valid: [
+    { filename: testFile, code: `jest.mock("react-router-dom", () => ({ useLocation: () => ({}) }));` },
+    { filename: testFile, code: `jest.mock("roo-package-that-is-not-installed", () => ({}), { virtual: true });` },
+    { filename: testFile, code: `jest.mock("../lib/not-a-real-file", () => ({}), { virtual: true });` },
+    { filename: testFile, code: `jest.mock("lucide-react", () => ({}), { virtual: false });` },
+    { filename: testFile, code: `jest.mock("@/src/lib/not-a-real-file", () => ({}), { virtual: true });` },
+  ],
+  invalid: [
+    {
+      name: "booking UI test before the router fix",
+      filename: testFile,
+      code: `jest.mock("react-router-dom", () => ({ useLocation: () => ({}) }), { virtual: true });`,
+      errors: [{ messageId: "installed" }],
+    },
+    {
+      name: "installed icon package",
+      filename: testFile,
+      code: `jest.doMock("lucide-react", () => ({}), { virtual: true });`,
+      errors: [{ messageId: "installed" }],
+    },
+    {
+      name: "existing app module through the Jest alias",
+      filename: testFile,
+      code: `jest.mock("@/src/lib/sectionNavigator", () => ({}), { virtual: true });`,
+      errors: [{ messageId: "installed" }],
+    },
+    {
+      name: "existing app module",
+      filename: testFile,
+      code: `jest.mock("../lib/sectionNavigator", () => ({}), { virtual: true });`,
+      errors: [{ messageId: "installed" }],
     },
   ],
 });
