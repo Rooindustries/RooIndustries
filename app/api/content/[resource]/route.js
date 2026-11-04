@@ -5,9 +5,8 @@ import { fetchPublicContentEntry, PUBLIC_CONTENT_CACHE_TAG } from "@/src/server/
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const PUBLIC_BROWSER_CACHE = "public, max-age=0, must-revalidate, s-maxage=300";
-const PUBLIC_VERCEL_CACHE =
-  "public, max-age=300, stale-while-revalidate=600, stale-if-error=86400";
+const PUBLIC_BROWSER_CACHE = "public, max-age=0, must-revalidate, s-maxage=60";
+const PUBLIC_VERCEL_CACHE = "public, max-age=60";
 const ERROR_CACHE = "no-store, max-age=0";
 const BASE_HEADERS = {
   "Content-Type": "application/json",

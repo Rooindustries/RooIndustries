@@ -152,12 +152,12 @@ const checkRevision = () => {
   return pending;
 };
 
+const storeTimeout = () =>
+  Object.assign(new Error("Public content store did not answer in time."), { status: 503, code: "PUBLIC_CONTENT_STORE_TIMEOUT" });
+
 const withinDeadline = (pending) =>
   new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(Object.assign(new Error("Public content store did not answer in time."), { status: 503, code: "PUBLIC_CONTENT_STORE_TIMEOUT" })),
-      PUBLIC_CONTENT_READ_DEADLINE_MS,
-    );
+    const timer = setTimeout(() => reject(storeTimeout()), PUBLIC_CONTENT_READ_DEADLINE_MS);
     pending.then(
       (value) => {
         clearTimeout(timer);
@@ -211,6 +211,7 @@ const awaitStoreRead = (read, key) =>
     const timer = setTimeout(() => {
       const copy = lastGoodCopy(key);
       if (copy) answer(resolve, copy);
+      else answer(reject, storeTimeout());
     }, Math.max(0, read.deadlineAt - Date.now()));
     read.result.then(
       (entry) => answer(resolve, entry),
