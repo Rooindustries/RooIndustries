@@ -435,3 +435,23 @@ console.log(orphan.pid);`], { stdio: ["ignore", "pipe", "ignore"], env: { ...pro
   assert.ok(grandchild);
   assert.deepEqual(await waitUntilGone([grandchild]), []);
 });
+
+test("a grandchild orphaned by our own cleanup is still stopped", async () => {
+  let grandchild;
+  const { child } = await startChildOnPorts({
+    host,
+    requested: [0],
+    output: () => "",
+    spawnChild: ([port], launch) => {
+      const started = spawn(process.execPath, ["-e", `const { spawn } = require("node:child_process");
+const grandchild = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: "ignore", env: { PATH: process.env.PATH } });
+console.log(grandchild.pid);
+require("http").createServer().listen(${port}, "127.0.0.1");`], { stdio: ["ignore", "pipe", "ignore"], env: { ...process.env, ...launch.env }, detached: true });
+      started.stdout.once("data", (chunk) => { grandchild = Number(chunk); });
+      return started;
+    },
+  });
+  assert.ok(grandchild && alive(grandchild));
+  await stopChild(child);
+  assert.deepEqual(await waitUntilGone([grandchild], 1000), []);
+});
