@@ -489,12 +489,16 @@ describe("spread resolution", () => {
     it(`${name} resolves deeply repeated spreads in linear time`, () => {
       const linter = new Linter({ configType: "flat" });
       const started = performance.now();
-      linter.verify(code, {
+      const messages = linter.verify(code, {
         languageOptions: { ecmaVersion: "latest", sourceType: "module", parserOptions: { ecmaFeatures: { jsx: true } } },
         plugins: { local: { rules } },
         rules: { [`local/${name}`]: "error" },
       });
       assert.ok(performance.now() - started < 1000);
+      assert.deepEqual(
+        messages.map(({ messageId }) => messageId),
+        name === "no-ignored-write-request" ? ["ignored"] : [],
+      );
     });
   }
 });
