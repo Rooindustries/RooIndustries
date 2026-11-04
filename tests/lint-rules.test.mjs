@@ -676,6 +676,12 @@ run("no-hand-built-node-options", {
       errors: [{ messageId: "handBuilt" }],
     },
     {
+      name: "helper name taken from a nested default instead of the module",
+      filename: scriptFile,
+      code: 'const { missing: { appendNodeOption } = { appendNodeOption: (x) => "--import=" + x } } = await import("./lib/node-options.mjs"); env.NODE_OPTIONS = appendNodeOption(guard);',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
       name: "nested destructured default that builds a preload",
       code: 'const { env: { NODE_OPTIONS: options = "--import=" + guard } } = settings; child.env.NODE_OPTIONS = options;',
       errors: [{ messageId: "handBuilt" }],

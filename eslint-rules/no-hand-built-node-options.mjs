@@ -63,6 +63,7 @@ const isHelperBinding = (context, identifier) => {
   return (
     Boolean(destructured) &&
     !destructured.fallback &&
+    !destructured.nested &&
     helpers.has(keyName(context, destructured.property.key, destructured.property.computed)) &&
     loadsHelperModule(context, destructured.source)
   );

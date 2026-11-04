@@ -106,7 +106,7 @@ export const destructuredConst = (context, identifier) => {
     if (pattern?.type !== "ObjectPattern" || outer?.type !== "Property" || outer.value !== holder) return null;
     pattern = outer.parent;
   }
-  return { property, source: definition.node.init, fallback };
+  return { property, source: definition.node.init, fallback, nested: property.parent !== definition.node.id };
 };
 
 export const isFetchCall = (call) => {
