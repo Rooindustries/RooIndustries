@@ -106,7 +106,7 @@ const server = http.createServer(async (req, res) => {
 });
 await new Promise(resolve => server.listen(port, host, resolve));
 const env = { PATH: process.env.PATH, HOME: process.env.HOME, CI: 'true', TZ: 'UTC', NODE_ENV: 'development', NEXT_TELEMETRY_DISABLED: '1', NEXT_DIST_DIR: dist, BASE_URL: base, ROO_TEST_HOST: testHost, TOOLING_NETWORK_GUARD: '1', NODE_OPTIONS: `--import=${path.resolve('scripts/lib/test-target-safety.mjs')}`, NEXT_PUBLIC_SUPABASE_URL: base, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'synthetic-ui-publishable-key', NEXT_PUBLIC_SUPABASE_ASSET_URL: base, DATA_PRIMARY_BACKEND: 'supabase', SALES_PREVIEW_READ_ONLY: '1' };
-const child = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--hostname', host, '--port', String(nextPort)], { env, stdio: ['inherit', 'inherit', 'inherit', lock.fd] });
+const child = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--hostname', host, '--port', String(nextPort)], { env: lock.childEnv(env), stdio: ['inherit', 'inherit', 'inherit', lock.fd] });
 child.on('exit', code => { server.close(); process.exitCode = code || 0; });
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => { child.kill(signal); server.close(); });
 console.log(JSON.stringify({ pid: process.pid, nextPid: child.pid, url: base, runner: `${base}/__ui`, artifact, isolatedHttpFixtures: true, browserCsp: csp }));

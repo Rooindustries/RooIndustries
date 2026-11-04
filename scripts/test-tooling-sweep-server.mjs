@@ -84,7 +84,7 @@ const manifestPath = path.join(dist, "tooling-build.json");
 let active;
 let stopping = false;
 const execute = (args, executionEnv = env) => new Promise((resolve, reject) => {
-  active = spawn(process.execPath, args, { env: executionEnv, stdio: ["inherit", "inherit", "inherit", lock.fd] });
+  active = spawn(process.execPath, args, { env: lock.childEnv(executionEnv), stdio: ["inherit", "inherit", "inherit", lock.fd] });
   active.once("error", reject);
   active.once("exit", (code, signal) => code === 0 ? resolve() : reject(new Error(`Test server exited ${signal || code}.`)));
 });
