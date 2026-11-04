@@ -65,13 +65,17 @@ describe("check-no-scripting-media", () => {
         '@import "no-js.css" screen, (scripting: none);',
         "@custom-media --no-js (scripting: none);",
         "@supports (display: grid) { @media (scripting: none) {} }",
+        "@container card (min-width: 1px) { @media (scripting: none) {} }",
+        "@layer base { @media (scripting: none) {} }",
+        "@import url(a.css) layer(base) supports(display: grid) (scripting: none);",
+        "@MEDIA (scripting) {}",
       ].join("\n"),
     );
     const { status, hits } = check([file]);
     assert.equal(status, 1);
     assert.deepEqual(
       hits.map((hit) => Number(hit.split(":")[1].split(" ")[0])),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
     );
   });
 
@@ -86,6 +90,12 @@ describe("check-no-scripting-media", () => {
         "@import url((scripting).css);",
         "@keyframes scripting { to { opacity: 1; } }",
         "@media (prefers-reduced-motion: reduce) { .a { animation: none; } }",
+        "@scope (.\\(scripting\\)) { .a { color: red; } }",
+        "@container style(--label: (scripting)) { .a { color: red; } }",
+        "@container (scripting) { .a { color: red; } }",
+        "@supports selector(.\\(scripting\\)) { .a { color: red; } }",
+        "@layer scripting { .a { color: red; } }",
+        '@import "a.css" supports((scripting: none)) screen;',
       ].join("\n"),
     );
     const { status, output } = check([file]);

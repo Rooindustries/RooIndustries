@@ -512,6 +512,11 @@ run("no-scripting-media-query", {
     `<Video media="(scripting: none)" />`,
     "<style>{`/* @media (scripting: none) */ .a::before { content: \"(scripting)\"; }`}</style>",
     `<style>{css}</style>`,
+    "const f = getFeature(); matchMedia(`(${f}: none)`);",
+    "const w = 768; matchMedia(`(min-width: ${w}px)`);",
+    `<style dangerouslySetInnerHTML={{ __html: ".a { color: red; }" }} />`,
+    "const rules = load(); <style>{`${rules} .a { color: red; }`}</style>;",
+    `const s0 = "(min-width: 1px)"; ${Array.from({ length: 24 }, (_, i) => `const s${i + 1} = s${i} + s${i};`).join(" ")} matchMedia(s24);`,
   ],
   invalid: [
     {
@@ -542,6 +547,51 @@ run("no-scripting-media-query", {
     {
       name: "inline style element with a scripting block",
       code: "const css = `@media (scripting: none) { .x { display: block; } }`; <style>{css}</style>;",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "matchMedia with the feature name in a template expression",
+      code: "const f = \"scripting\"; matchMedia(`(${f}:none)`);",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "matchMedia with a nested template constant",
+      code: "const name = \"script\"; const q = `(${`${name}ing`}: none)`; matchMedia(q);",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "matchMedia reusing one constant twice",
+      code: "const s = \"script\"; matchMedia(`${s}s, (${s}ing)`);",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "matchMedia with a runtime value after the feature",
+      code: "matchMedia(`(scripting: ${mode})`);",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "link media from a template expression",
+      code: "const f = \"scripting\"; <link rel=\"stylesheet\" media={`(${f}: none)`} href=\"/a.css\" />;",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "inline style with the feature in a template expression",
+      code: "const f = \"scripting\"; <style>{`@media (${f}: none) { .x { display: block; } }`}</style>;",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "inline style after a runtime chunk",
+      code: "<style>{`${rules} @media (scripting: none) { .x { display: block; } }`}</style>;",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "style with dangerouslySetInnerHTML",
+      code: "<style dangerouslySetInnerHTML={{ __html: \"@media (scripting: none) { .x { display: block; } }\" }} />;",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "style with dangerouslySetInnerHTML from constants",
+      code: "const f = \"scripting\"; const html = { __html: `@media (${f}: none) {}` }; <style dangerouslySetInnerHTML={html} />;",
       errors: [{ messageId: "scripting" }],
     },
   ],

@@ -16,10 +16,36 @@ const unescapeCss = (text) =>
 export const usesScriptingMedia = (mediaText) =>
   scriptingFeature.test(unescapeCss(mediaText.replace(ignoredTokens, " ")));
 
+const importLayer = /^\s*layer(?:\(\s*[^()]*\))?/i;
+const importSupports = /^\s*supports\(/i;
+
+const afterParens = (text, open) => {
+  let depth = 0;
+  for (let index = open; index < text.length; index += 1) {
+    if (text[index] === "(") depth += 1;
+    else if (text[index] === ")" && --depth === 0) return text.slice(index + 1);
+  }
+  return "";
+};
+
+const importMedia = (params) => {
+  let rest = params.replace(ignoredTokens, " ").replace(importLayer, "");
+  const supports = rest.match(importSupports);
+  if (supports) rest = afterParens(rest, supports.index + supports[0].length - 1);
+  return rest;
+};
+
+const mediaText = {
+  media: (params) => params,
+  "custom-media": (params) => params,
+  import: importMedia,
+};
+
 export const scriptingAtRules = (css, from) => {
   const found = [];
   postcss.parse(css, { from }).walkAtRules((rule) => {
-    if (usesScriptingMedia(rule.params)) found.push(rule);
+    const media = mediaText[rule.name.toLowerCase()];
+    if (media && usesScriptingMedia(media(rule.params))) found.push(rule);
   });
   return found;
 };
