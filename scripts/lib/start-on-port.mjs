@@ -84,8 +84,20 @@ export const ownsPorts = (group, host, ports) => {
 
 const exited = (child) => child.exitCode !== null || child.signalCode !== null;
 
+const leaders = new WeakMap();
+
+const startTime = (pid) => {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+  } catch {
+    return undefined;
+  }
+};
+
 const signalGroup = (child, signal) => {
-  if (!child.pid || exited(child)) return;
+  const started = leaders.get(child);
+  if (!child.pid || exited(child) || started === undefined || startTime(child.pid) !== started) return;
   try {
     process.kill(-child.pid, signal);
   } catch (error) {
@@ -145,6 +157,7 @@ const launcher = (held) => (command, args, options = {}) => {
     stdio: [...stdio.slice(0, 3), ...held.stdio],
   });
   launched.add(child);
+  if (child.pid) leaders.set(child, startTime(child.pid));
   captures.set(child, captureOutput(child, stdio, logs));
   closes.set(child, new Promise((resolve) => child.once("close", resolve)));
   return child;
