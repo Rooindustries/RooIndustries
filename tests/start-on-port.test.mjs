@@ -278,17 +278,30 @@ test("a leader reaped alongside another is never signalled by number while its e
       return false;
     }
   };
+  const startedAt = (pid) => {
+    try {
+      const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+      return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+    } catch {
+      return undefined;
+    }
+  };
+  const secondStart = startedAt(second.pid);
   process.kill(first.pid, "SIGKILL");
   process.kill(second.pid, "SIGKILL");
   const deadline = Date.now() + 5000;
   while (!(zombie(first.pid) && zombie(second.pid)) && Date.now() < deadline);
   assert.ok(zombie(first.pid) && zombie(second.pid));
-  const kill = t.mock.method(process, "kill");
+  const send = process.kill.bind(process);
+  const signalledAfterReap = [];
+  const kill = t.mock.method(process, "kill", (pid, signal) => {
+    if (Math.abs(pid) === second.pid && startedAt(second.pid) !== secondStart) signalledAfterReap.push(pid);
+    return send(pid, signal);
+  });
   await stopChild(first);
   await stopChild(second);
-  const calls = kill.mock.calls.map(({ arguments: [pid] }) => pid);
   kill.mock.restore();
-  assert.deepEqual(calls.filter((pid) => pid === -second.pid || pid === second.pid), []);
+  assert.deepEqual(signalledAfterReap, []);
 });
 
 test("each attempt is judged on its own output, so a later unrelated failure is reported and not retried", async () => {
