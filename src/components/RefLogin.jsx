@@ -1,20 +1,21 @@
 import { readBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
-import React, { Suspense, lazy, useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import SupabaseSocialLogin from "./SupabaseSocialLogin";
+import SiteDialogFrame from "./SiteDialogFrame";
 import { requestDeadline } from "../lib/clientRequest";
 
-const LazySiteDialog = lazy(() => import("./SiteDialog"));
+const revealOverlay = {
+  className: "ri-reveal",
+  style: { "--ri-reveal-from": "none", "--ri-reveal-duration": "0.3s" },
+};
+const revealPanel = {
+  className: "ri-reveal",
+  style: { "--ri-reveal-from": "translateY(6px)", "--ri-reveal-duration": "0.16s" },
+};
 
 function SiteDialog(props) {
-  const [loaded, setLoaded] = useState(props.open);
-  if (props.open && !loaded) setLoaded(true);
-  if (!loaded) return null;
-  return (
-    <Suspense fallback={null}>
-      <LazySiteDialog {...props} />
-    </Suspense>
-  );
+  return <SiteDialogFrame {...props} overlayProps={revealOverlay} panelProps={revealPanel} />;
 }
 
 const PENDING_DISCORD_CHOICE_KEY = "refPendingDiscordChoice";
@@ -98,6 +99,7 @@ export default function RefLogin() {
   const editVersionRef = useRef(0);
   const mountedRef = useRef(true);
   const navTimerRef = useRef(null);
+  const scrubbedLocationRef = useRef(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -108,6 +110,11 @@ export default function RefLogin() {
   }, []);
 
   useEffect(() => {
+    const currentLocation = `${location.pathname}${location.search}`;
+    if (scrubbedLocationRef.current === currentLocation) {
+      scrubbedLocationRef.current = null;
+      return;
+    }
     const query = new URLSearchParams(location.search);
     const emailConfirmed = query.get("notice") === "email-confirmed";
     const oauthError = query.get("oauth");
@@ -149,12 +156,13 @@ export default function RefLogin() {
       query.delete("notice");
     }
     const cleanSearch = query.toString();
+    const cleanLocation = `${location.pathname}${cleanSearch ? `?${cleanSearch}` : ""}`;
     if (window.location.pathname === location.pathname) {
-      window.history.replaceState(
-        window.history.state,
-        "",
-        `${location.pathname}${cleanSearch ? `?${cleanSearch}` : ""}`
-      );
+      window.history.replaceState(window.history.state, "", cleanLocation);
+      if (cleanLocation !== currentLocation) {
+        scrubbedLocationRef.current = cleanLocation;
+        nav(cleanLocation, { replace: true, state: location.state });
+      }
     }
 
     const checkSession = async () => {

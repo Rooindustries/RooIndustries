@@ -1,10 +1,9 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
+import React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useLowPerformanceMode } from "../lib/performanceMode";
-import { isTopDialog, useDialogFocus } from "../lib/useDialogFocus";
+import SiteDialogFrame from "./SiteDialogFrame";
 
 const overlayVariants = {
   hidden: { opacity: 0 },
@@ -41,107 +40,38 @@ const modalContainerVariants = {
   },
 };
 
-export default function SiteDialog({
-  ariaDescribedBy,
-  ariaLabelledBy,
-  children,
-  className = "",
-  closeLabel = "Close",
-  dismissible = true,
-  onClose,
-  open,
-}) {
-  const closeButtonRef = useRef(null);
-  const dialogRef = useRef(null);
-  const scrollLockRef = useRef(null);
+const lowPerformanceVariants = {
+  hidden: { opacity: 0, y: 6 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.16, ease: "easeOut" },
+  },
+  exit: {
+    opacity: 0,
+    y: 6,
+    transition: { duration: 0.12, ease: "easeIn" },
+  },
+};
+
+const animatePresence = (content) => <AnimatePresence>{content}</AnimatePresence>;
+
+export default function SiteDialog(props) {
   const lowPerformanceMode = useLowPerformanceMode();
 
-  useDialogFocus({ open, dialogRef, initialFocusRef: closeButtonRef, onClose, dismissible });
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const body = document.body;
-    const html = document.documentElement;
-    const original = {
-      htmlOverflow: html.style.overflow,
-      overflow: body.style.overflow,
-      scrollY: window.scrollY,
-    };
-    scrollLockRef.current = original;
-    body.classList.add("is-modal-open", "is-modal-blur");
-    body.style.overflow = "hidden";
-    html.style.overflow = "hidden";
-    return () => {
-      const stored = scrollLockRef.current || original;
-      body.classList.remove("is-modal-open", "is-modal-blur");
-      body.style.overflow = stored.overflow || "";
-      html.style.overflow = stored.htmlOverflow || "";
-      window.scrollTo(0, stored.scrollY || 0);
-    };
-  }, [open]);
-
-  if (typeof document === "undefined") return null;
-
-  return createPortal(
-    <AnimatePresence>
-      {open ? (
-        <motion.div
-          animate="visible"
-          className="glass-overlay low-perf-overlay fixed inset-0 z-[100] flex items-center justify-center px-4"
-          exit="exit"
-          initial="hidden"
-          onClick={(event) => {
-            event.stopPropagation();
-            if (dismissible && isTopDialog(dialogRef)) onClose?.();
-          }}
-          variants={overlayVariants}
-        >
-          <motion.div
-            animate="visible"
-            aria-describedby={ariaDescribedBy}
-            aria-labelledby={ariaLabelledBy}
-            aria-modal="true"
-            className={`low-perf-surface glass-premium glass-card-surface relative w-full max-w-md rounded-2xl border border-info-border p-6 text-center transition-all duration-500 ease-in-out hover:shadow-glow-strong ${className}`}
-            exit="exit"
-            initial="hidden"
-            onClick={(event) => event.stopPropagation()}
-            ref={dialogRef}
-            role="dialog"
-            tabIndex={-1}
-            variants={
-              lowPerformanceMode
-                ? {
-                    hidden: { opacity: 0, y: 6 },
-                    visible: {
-                      opacity: 1,
-                      y: 0,
-                      transition: { duration: 0.16, ease: "easeOut" },
-                    },
-                    exit: {
-                      opacity: 0,
-                      y: 6,
-                      transition: { duration: 0.12, ease: "easeIn" },
-                    },
-                  }
-                : modalContainerVariants
-            }
-          >
-            {dismissible ? (
-              <button
-                aria-label={closeLabel}
-                className="absolute right-3 top-3 z-10 text-2xl text-info-text transition hover:text-white"
-                onClick={onClose}
-                ref={closeButtonRef}
-                type="button"
-              >
-                <span aria-hidden="true">&times;</span>
-              </button>
-            ) : null}
-            {children}
-          </motion.div>
-        </motion.div>
-      ) : null}
-    </AnimatePresence>,
-    document.body
+  return (
+    <SiteDialogFrame
+      {...props}
+      overlay={motion.div}
+      overlayProps={{ animate: "visible", exit: "exit", initial: "hidden", variants: overlayVariants }}
+      panel={motion.div}
+      panelProps={{
+        animate: "visible",
+        exit: "exit",
+        initial: "hidden",
+        variants: lowPerformanceMode ? lowPerformanceVariants : modalContainerVariants,
+      }}
+      presence={animatePresence}
+    />
   );
 }

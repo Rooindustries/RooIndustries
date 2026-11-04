@@ -215,3 +215,92 @@ for (const provider of ["discord", "google"]) {
     await attach(testInfo, "account-choice", { provider, choice });
   });
 }
+
+for (const [entry, message] of [
+  ["/referrals/login?notice=password-updated", /Password updated/i],
+  ["/referrals/login?notice=email-confirmed", "Email confirmed. Log in to open your creator dashboard."],
+  ["/referrals/login?oauth=unavailable", "Social sign-in is temporarily unavailable. Use your email or referral code."],
+]) {
+  test(`${entry} shows its notice and keeps the cleared URL`, async ({ page }, testInfo) => {
+    await page.goto(entry);
+    await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+    await expect(page.getByText(message)).toBeVisible();
+    await page.waitForTimeout(1000);
+    await expect(page).toHaveURL(/\/referrals\/login$/);
+    await attach(testInfo, "cleared-notice", { entry, url: page.url() });
+  });
+}
+
+test("a confirmation link keeps its cleared URL", async ({ page }, testInfo) => {
+  await page.goto("/referrals/verify?source=email#token=fixture-token");
+  await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+  await page.waitForTimeout(1000);
+  await expect(page).toHaveURL(/\/referrals\/verify$/);
+  await attach(testInfo, "cleared-confirmation", { url: page.url() });
+});
+
+const interceptOnDemandChunks = async (page, entry, handle) => {
+  const initialChunks = new Set();
+  await page.route(`**${entry.split("?")[0]}*`, async route => {
+    if (route.request().resourceType() !== "document") return route.fallback();
+    const response = await route.fetch();
+    const body = await response.text();
+    for (const match of body.matchAll(/static\/chunks\/[^"'\\\s]+?\.js/g)) initialChunks.add(match[0]);
+    await route.fulfill({ response, body });
+  });
+  const intercepted = [];
+  await page.route("**/_next/static/chunks/**", async route => {
+    const chunk = new URL(route.request().url()).pathname.replace(/^\/_next\//, "");
+    if (initialChunks.has(chunk)) return route.fallback();
+    intercepted.push(chunk);
+    await handle(route);
+  });
+  return intercepted;
+};
+
+const loginIsCoveredByDialog = page => page.getByRole("button", { name: "Login", exact: true }).evaluate(button => {
+  const box = button.getBoundingClientRect();
+  const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  return Boolean(top?.closest(".glass-overlay")) && !button.contains(top);
+});
+
+for (const provider of ["discord", "google"]) {
+  test(`the ${provider} account choice blocks login while on-demand code is still downloading`, async ({ page }, testInfo) => {
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const entry = `/referrals/login?oauth=unlinked&provider=${provider}`;
+    const intercepted = await interceptOnDemandChunks(page, entry, async route => {
+      await gate;
+      await route.fallback().catch(() => {});
+    });
+    try {
+      await page.goto(entry);
+      await expect(page.getByRole("dialog")).toBeVisible({ timeout: 5000 });
+      await expect(page.getByRole("button", { name: "Log in and link", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Create account", exact: true })).toBeVisible();
+      expect(await loginIsCoveredByDialog(page)).toBe(true);
+      await attach(testInfo, "held-on-demand-chunks", { provider, intercepted });
+    } finally {
+      release();
+      await page.unrouteAll({ behavior: "wait" });
+    }
+  });
+
+  test(`the ${provider} account choice still works when on-demand code fails to load`, async ({ page }, testInfo) => {
+    const entry = `/referrals/login?oauth=unlinked&provider=${provider}`;
+    const intercepted = await interceptOnDemandChunks(page, entry, route => route.abort("failed"));
+    try {
+      await page.goto(entry);
+      await expect(page.getByRole("dialog")).toBeVisible({ timeout: 5000 });
+      await page.getByRole("button", { name: "Log in and link", exact: true }).click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(page.getByLabel("Referral code or login email", { exact: true })).toBeFocused();
+      await expect(page.getByRole("heading", { name: "We couldn’t load this page." })).toHaveCount(0);
+      const choice = await page.evaluate(() => JSON.parse(sessionStorage.getItem("refPendingDiscordChoice")));
+      expect(choice).toMatchObject({ state: "link", provider });
+      await attach(testInfo, "failed-on-demand-chunks", { provider, intercepted, choice });
+    } finally {
+      await page.unrouteAll({ behavior: "wait" });
+    }
+  });
+}

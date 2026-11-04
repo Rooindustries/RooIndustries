@@ -234,10 +234,6 @@
       "js": 41984,
       "css": 1024
     },
-    "src/components/RefLogin.jsx -> ./SiteDialog": {
-      "js": 40960,
-      "css": 1024
-    },
     "src/components/SupabaseSocialLogin.jsx -> ../lib/supabaseBrowser": {
       "js": 68608,
       "css": 1024
