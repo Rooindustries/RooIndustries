@@ -398,3 +398,59 @@ test.describe("details fields above the on-screen keyboard", () => {
     });
   }
 });
+
+const receipt = route => async (flow, page) => {
+  await page.addInitScript(bookingId => {
+    sessionStorage.setItem("booking_confirmation_state", JSON.stringify({ bookingId }));
+    sessionStorage.setItem(`booking_confirmation_summary:${bookingId}`, JSON.stringify({ bookingId, packageTitle: "Performance Vertex Overhaul", startTimeUTC: "2026-03-08T07:30:00.000Z", localTimeZone: "America/New_York" }));
+  }, "booking.resize-frames");
+  await page.goto(route);
+};
+const resizeViews = [
+  ...hitSteps,
+  ["payment-success receipt", receipt("/payment-success")],
+  ["thank-you receipt", receipt("/thank-you")],
+];
+const sizes = { phone: { width: 390, height: 844 }, desktop: { width: 1440, height: 900 } };
+
+for (const [from, to] of [["phone", "desktop"], ["desktop", "phone"]]) {
+  test.describe(`${from} to ${to} resize`, () => {
+    test.use({ viewport: sizes[from] });
+
+    for (const [name, open] of resizeViews) {
+      test(`the ${name} dialog matches the window on every frame`, async ({ page, flow }, testInfo) => {
+        await open(flow, page);
+        const dialog = page.locator(dialogSelector).first();
+        await expect(dialog).toBeVisible();
+        await expect(dialog).not.toHaveClass(/invisible/);
+        await page.evaluate(() => document.fonts.ready);
+        await page.evaluate(() => {
+          window.__resizeFrames = [];
+          const sample = () => {
+            const frame = document.querySelector('[role="dialog"].ri-booking');
+            if (!frame) return;
+            const stage = frame.closest(".booking-dialog-stage").getBoundingClientRect();
+            const box = frame.getBoundingClientRect();
+            const content = frame.querySelector("[data-booking-scaler] > div").getBoundingClientRect();
+            const width = document.documentElement.clientWidth;
+            window.__resizeFrames.push({
+              width,
+              frameOverflow: frame.scrollWidth - frame.clientWidth,
+              stageWidth: Math.round(stage.width),
+              contentPastFrame: Math.round(Math.max(content.right - box.right, box.left - content.left)),
+              contentPastWindow: Math.round(Math.max(content.right - width, -content.left)),
+            });
+            requestAnimationFrame(sample);
+          };
+          requestAnimationFrame(sample);
+        });
+        await page.setViewportSize(sizes[to]);
+        await expect.poll(() => page.evaluate(width => window.__resizeFrames.filter(entry => entry.width === width).length, sizes[to].width)).toBeGreaterThanOrEqual(30);
+        const frames = await page.evaluate(width => window.__resizeFrames.filter(entry => entry.width === width), sizes[to].width);
+        await save(page, testInfo, `${name.replace(/\W+/g, "-")}-${from}-to-${to}`, frames);
+        const misfits = frames.filter(entry => entry.frameOverflow > 0 || entry.stageWidth !== entry.width || entry.contentPastFrame > 1 || entry.contentPastWindow > 1);
+        expect(misfits).toEqual([]);
+      });
+    }
+  });
+}
