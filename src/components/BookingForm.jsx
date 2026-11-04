@@ -28,6 +28,7 @@ import {
 } from "../lib/checkoutStorage";
 import {
   calculateCheckoutDiscounts,
+  fetchCheckoutQuote,
   CODE_VALIDATION_UNAVAILABLE_MESSAGE,
   resolveCheckoutCode,
   sanitizeCouponForCheckout,
@@ -1657,14 +1658,47 @@ export default function BookingForm() {
     return `${dateLabel} · ${timeLabel} (${userTimeZone})`;
   }, [selectedSlot, userTimeZone, localSlotMap, localSlotFormatters]);
   const reviewBaseAmount = Math.max(0, toMoney(selectedPackage.price));
+  const reviewStartTime = selectedSlot?.utcStart ? selectedSlot.utcStart.toISOString() : "";
+  const [reviewQuote, setReviewQuote] = useState(null);
+  useEffect(() => {
+    setReviewQuote(null);
+    if (step !== 3 || !selectedPackage.title || !reviewStartTime) return undefined;
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(new DOMException("Request timed out.", "TimeoutError")),
+      CLIENT_REQUEST_TIMEOUT_MS
+    );
+    fetchCheckoutQuote(
+      {
+        packageTitle: selectedPackage.title,
+        originalOrderId: "",
+        startTimeUTC: reviewStartTime,
+        email: form.email.trim(),
+        referralCode: appliedReferral?.code || "",
+        couponCode: appliedCoupon?.code || "",
+        upgradeIntentToken: "",
+      },
+      { signal: controller.signal }
+    )
+      .then((data) => {
+        if (!controller.signal.aborted) setReviewQuote(data.quote || null);
+      })
+      .catch(() => {})
+      .finally(() => clearTimeout(timeout));
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [step, selectedPackage.title, reviewStartTime, form.email, appliedReferral?.code, appliedCoupon?.code]);
   const reviewDiscounts = useMemo(
     () =>
       calculateCheckoutDiscounts({
         baseAmount: reviewBaseAmount,
         referral: appliedReferral,
         coupon: appliedCoupon,
+        serverQuote: reviewQuote,
       }),
-    [appliedCoupon, appliedReferral, reviewBaseAmount]
+    [appliedCoupon, appliedReferral, reviewBaseAmount, reviewQuote]
   );
   const reviewTotal =
     reviewBaseAmount > 0 ? formatUsd(reviewDiscounts.finalAmount) : "";

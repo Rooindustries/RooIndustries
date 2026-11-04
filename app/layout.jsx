@@ -19,6 +19,7 @@ const shouldPreconnectSupabase = Boolean(SUPABASE_ASSET_ORIGIN) && (
 
 const themeInitScript = `
 (function() {
+  document.documentElement.classList.add("js");
   try {
     var root = document.documentElement;
     var key = "roo-theme";

@@ -201,7 +201,14 @@ describe("payment reload hydration", () => {
           json: async () => ({
             ok: true,
             quoteFingerprint: "prefilled-quote",
-            quote: { grossAmount: 99.95, netAmount: 80.95, isFree: false },
+            quote: {
+              grossAmount: 99.95,
+              netAmount: 80.95,
+              isFree: false,
+              couponDiscountAmount: 10,
+              referralDiscountAmount: 9,
+              referralDiscountPercent: 10,
+            },
             providers: {
               razorpay: { enabled: false },
               paypal: { enabled: false, clientId: "" },
@@ -234,7 +241,7 @@ describe("payment reload hydration", () => {
       expect(screen.getByPlaceholderText("e.g. BF10")).toHaveValue("SAVE10");
     });
     expect(await screen.findByText("$80.95 USD")).toBeInTheDocument();
-    expect(screen.getByText(/creator · −\$/)).toBeInTheDocument();
+    expect(screen.getByText("creator · −$9.00")).toBeInTheDocument();
     expect(screen.queryByText(/Private Creator Name/i)).not.toBeInTheDocument();
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(

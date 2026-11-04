@@ -1,25 +1,36 @@
-import { ancestors, calleeName, containsNode, enclosingComponent } from "./util.mjs";
+import { ancestors, calleeName, containsNode, enclosingComponent, memberName, propertyName } from "./util.mjs";
 
-const receivesInitialData = (component) => {
-  const props = component.params[0];
-  if (!props) return false;
-  if (props.type === "ObjectPattern") {
-    return props.properties.some(
-      (property) =>
-        property.type === "Property" &&
-        property.key.type === "Identifier" &&
-        /^initial/.test(property.key.name),
-    );
+const isInitial = (name) => /^initial/.test(name);
+
+const patternKey = (property) =>
+  property?.computed && property.key.type === "Literal" && typeof property.key.value === "string"
+    ? property.key.value
+    : propertyName(property);
+
+const takesInitial = (pattern) =>
+  pattern?.type === "ObjectPattern" && pattern.properties.some((property) => isInitial(patternKey(property)));
+
+const bindsTo = (context, identifier, component) => {
+  if (identifier?.type !== "Identifier") return false;
+  for (let scope = context.sourceCode.getScope(identifier); scope; scope = scope.upper) {
+    const variable = scope.set.get(identifier.name);
+    if (variable) return variable.defs.some((def) => def.type === "Parameter" && def.node === component);
   }
-  if (props.type !== "Identifier") return false;
+  return false;
+};
+
+const receivesInitialData = (context, component) => {
+  const param = component.params[0];
+  const props = param?.type === "AssignmentPattern" ? param.left : param;
+  if (takesInitial(props)) return true;
+  if (props?.type !== "Identifier") return false;
+  const isProps = (node) =>
+    node?.type === "Identifier" && node.name === props.name && bindsTo(context, node, component);
   return containsNode(
     component.body,
     (node) =>
-      node.type === "MemberExpression" &&
-      !node.computed &&
-      node.object.type === "Identifier" &&
-      node.object.name === props.name &&
-      /^initial/.test(node.property.name),
+      (node.type === "MemberExpression" && isProps(node.object) && isInitial(memberName(node))) ||
+      (node.type === "VariableDeclarator" && isProps(node.init) && takesInitial(node.id)),
   );
 };
 
@@ -49,7 +60,7 @@ export default {
         const deps = effect.arguments[1];
         if (!deps || deps.type !== "ArrayExpression" || deps.elements.length > 0) return;
         const component = enclosingComponent(context, node);
-        if (component && receivesInitialData(component)) return;
+        if (component && receivesInitialData(context, component)) return;
         context.report({ node, messageId: "clientOnly" });
       },
     };
