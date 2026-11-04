@@ -375,7 +375,8 @@ for (const viewportCfg of VIEWPORTS) {
       }
     }
 
-    const samples = navMetrics
+    const attemptMetrics = navMetrics.slice(navMetricsAtStart);
+    const samples = attemptMetrics
       .filter((result) => result.viewport === viewportCfg.name)
       .map((result) => result.settleMs)
       .sort((a, b) => a - b);
@@ -386,7 +387,7 @@ for (const viewportCfg of VIEWPORTS) {
       p90Ms: samples[Math.ceil(samples.length * 0.9) - 1],
       maxMs: samples[samples.length - 1],
       cases: ORIGINS.flatMap((origin) => ACTIONS.map((action) => {
-        const times = navMetrics
+        const times = attemptMetrics
           .filter((result) => result.viewport === viewportCfg.name && result.origin === origin && result.action === action.label)
           .map((result) => result.settleMs)
           .sort((a, b) => a - b);
@@ -521,10 +522,12 @@ test.afterAll(async () => {
 
 let navFailuresAtStart = 0;
 let crashLogAtStart = 0;
+let navMetricsAtStart = 0;
 
 test.beforeEach(async ({ context, page, baseURL }) => {
   navFailuresAtStart = navFailures.length;
   crashLogAtStart = crashLog.length;
+  navMetricsAtStart = navMetrics.length;
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
   await guardBrowserContext(context, [baseURL]);
   if (CPU_THROTTLE_RATE > 1) {
