@@ -277,6 +277,96 @@ test("an older revision from the content API never replaces the newer server cop
   expect(await page.evaluate(() => window.__revisionDocument)).toBe(true);
 });
 
+test("a content response without a revision never replaces versioned copy", async ({ page }) => {
+  const unlabelledHero = "Hero copy with no revision";
+  const nextHero = "Hero copy at the next revision";
+  await page.clock.install();
+  await controlContent(page);
+  const heroResponses = [
+    (body) => ({ ...body, data: { ...body.data, headingLine1: nextHero }, revision: body.revision + 1 }),
+    (body) => ({ ok: true, data: { ...body.data, headingLine1: unlabelledHero } }),
+  ];
+  await page.route("**/api/content/hero", async (route) => {
+    const body = await (await route.fetch()).json();
+    const respond = heroResponses.shift();
+    await route.fulfill({ json: respond ? respond(body) : body });
+  });
+  const returnHome = async () => {
+    await footerLink(page, "/terms").click();
+    await expect(page).toHaveURL(/\/terms$/);
+    await page.clock.fastForward("01:01");
+    const hero = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/content/hero");
+    await footerLink(page, "/").click();
+    await expect(page).toHaveURL(/\/$/);
+    await (await hero).finished();
+  };
+
+  await page.goto("/", { waitUntil: "networkidle" });
+  await hydrated(page);
+  await expect(page.locator("#top h1")).toContainText("Fixture Hero Heading One");
+  await page.evaluate(() => { window.__unlabelledDocument = true; });
+
+  await returnHome();
+  await expect(page.locator("#top h1")).toContainText(nextHero);
+
+  await returnHome();
+  await page.waitForTimeout(500);
+  await expect(page.locator("#top h1")).toContainText(nextHero);
+  await expect(page.locator("#top h1")).not.toContainText(unlabelledHero);
+  expect(heroResponses).toEqual([]);
+  expect(await page.evaluate(() => window.__unlabelledDocument)).toBe(true);
+});
+
+test("the referral box mounting after hydration starts from the newer cached copy", async ({ page, request, baseURL }) => {
+  const publishedHeading = "Referral heading cached before the box mounted";
+  const heading = page.locator(".ri-referral-heading");
+  const errors = [];
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.clock.install();
+  const content = await controlContent(page);
+  const referralRequests = () => content.requests.filter((resource) => resource === "referral-box").length;
+  try {
+    await page.goto("/", { waitUntil: "networkidle" });
+    await hydrated(page);
+    await siteFooter(page).scrollIntoViewIfNeeded();
+    await expect(heading).toHaveText("Join the Referral Program");
+    await page.evaluate(() => { window.__mountDocument = true; });
+
+    await contentControl(request, baseURL, { patch: { _id: "tooling-referralBox", heading: publishedHeading } });
+    await footerLink(page, "/terms").click();
+    await expect(page).toHaveURL(/\/terms$/);
+    await page.clock.fastForward("01:01");
+    await footerLink(page, "/").click();
+    await expect(page).toHaveURL(/\/$/);
+    await siteFooter(page).scrollIntoViewIfNeeded();
+    await expect(heading).toHaveText(publishedHeading);
+    const requestsBeforeMount = referralRequests();
+
+    await footerLink(page, "/terms").click();
+    await expect(page).toHaveURL(/\/terms$/);
+    await page.evaluate(() => {
+      window.__referralHeadings = [];
+      new MutationObserver(() => {
+        const text = document.querySelector(".ri-referral-heading")?.textContent;
+        if (text) window.__referralHeadings.push(text);
+      }).observe(document.body, { childList: true, subtree: true, characterData: true });
+    });
+    await footerLink(page, "/").click();
+    await expect(page).toHaveURL(/\/$/);
+    await siteFooter(page).scrollIntoViewIfNeeded();
+    await expect(heading).toHaveText(publishedHeading);
+    const headings = await page.evaluate(() => window.__referralHeadings);
+    expect(headings.length).toBeGreaterThan(0);
+    expect(headings.filter((text) => text !== publishedHeading)).toEqual([]);
+    expect(referralRequests()).toBe(requestsBeforeMount);
+    expect(errors.filter((text) => /hydrat|did not match|#418|#423|#425/i.test(text))).toEqual([]);
+    expect(await page.evaluate(() => window.__mountDocument)).toBe(true);
+  } finally {
+    await contentControl(request, baseURL, { reset: true });
+  }
+});
+
 test("a publish during a content read never labels the new copy with the older revision", async ({ request, baseURL }) => {
   const publishedDuringRead = "Hero published during a read";
   const readHero = async () => {

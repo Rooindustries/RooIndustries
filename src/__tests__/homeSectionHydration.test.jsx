@@ -4,7 +4,6 @@ import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import Services from "../components/Services";
-import ReferralBox from "../components/ReferralBox";
 import { getPublicContent } from "../lib/publicContentClient";
 import { loadContent } from "../lib/contentCache";
 
@@ -99,38 +98,5 @@ describe("home section hydration", () => {
       )
     );
     expect(hydrationErrors).toEqual([]);
-  });
-
-  test("hydrates the server copy first even when a newer copy is already cached", async () => {
-    const page = (
-      <MemoryRouter>
-        <ReferralBox initialData={{ heading: "Server referral heading" }} />
-      </MemoryRouter>
-    );
-    container.innerHTML = renderToString(page);
-    getPublicContent.mockImplementation(async () => ({ heading: "Cached referral heading" }));
-    await loadContent("referral-box");
-    const errorSpy = jest.spyOn(console, "error");
-    const recoverableErrors = [];
-
-    try {
-      await act(async () => {
-        root = hydrateRoot(container, page, {
-          onRecoverableError: (error) => recoverableErrors.push(String(error?.message || error)),
-        });
-        await Promise.resolve();
-      });
-    } catch (error) {
-      throw error?.errors?.[0] || error;
-    }
-
-    const hydrationErrors = errorSpy.mock.calls.filter((args) =>
-      args.some((value) =>
-        /hydration failed|did not match|minified react error #418/i.test(String(value))
-      )
-    );
-    expect(hydrationErrors).toEqual([]);
-    expect(recoverableErrors).toEqual([]);
-    expect(container.querySelector(".ri-referral-heading")).toHaveTextContent("Cached referral heading");
   });
 });
