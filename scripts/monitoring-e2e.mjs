@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { isDeepStrictEqual } from 'node:util';
 import { installNetworkGuard, refuseEnvFiles } from './lib/test-target-safety.mjs';
+import { compareUntilSlow, cpuMsOf } from './lib/input-scaling.mjs';
 import { checkBrowserBootstrap } from './monitoring-bootstrap-e2e.mjs';
 import { normalizedCards, normalizedEmails, separatorRuns, releaseSha, samplingId, surfaceCases, plusRun, diagnosticControls, querySegments } from './monitoring-recognizer-cases.mjs';
 
@@ -402,7 +403,170 @@ try {
   check('valid numeric trace identifiers retain their links', reported?.event.contexts?.trace, { trace_id: '0123456789abcdef0123456789abcdef', span_id: '1234567890123456', parent_span_id: '2345678901234567' });
   check('customer data named span_id still scrubs cards', reported?.event.extra?.span_id, '[card]');
   check('16KiB tokens remain usable diagnostic data', reported?.event.extra?.diagnostic_values?.map?.(value => value.length), Array(8).fill(16000));
-  check('16KiB tokens stay below 250ms of SDK CPU', sdkCpuMs < 250, true);
+  const { scrubEvent } = await import('../src/lib/monitoring/scrub.js');
+  const scalingShort = 1024;
+  const scalingSteps = [32768, 1048576];
+  const scalingShapes = [
+    {
+      name: 'plain',
+      build: length => 'a'.repeat(length),
+      scrubbed: value => value,
+    },
+    {
+      name: 'plus card',
+      build: length => '1+'.repeat(length / 2),
+      scrubbed: () => '[card]+',
+    },
+    {
+      name: 'separator run',
+      build: length => '1' + ' -'.repeat(length / 2 - 1) + '2',
+      scrubbed: value => value,
+    },
+    {
+      name: 'encoded query',
+      build: length => '%41%3Fab'.repeat(length / 8),
+      scrubbed: () => '[query]',
+    },
+    {
+      name: 'contact',
+      build: length => 'a@b.'.repeat(length / 4),
+      scrubbed: () => '[email]',
+    },
+    {
+      name: 'credentials',
+      build: length => '//' + 'u'.repeat(length - 3) + '@',
+      scrubbed: () => '//',
+    },
+    {
+      name: 'scoped path',
+      build: length => 'file:///app/' + '@scope1/'.repeat(length / 8 - 3) + 'pkg/index.js',
+      scrubbed: value => value,
+    },
+    {
+      name: 'dot run',
+      build: length => '1' + '.'.repeat(length - 2) + '2',
+      scrubbed: value => value,
+    },
+    {
+      name: 'space run',
+      build: length => '1' + ' '.repeat(length - 2) + '2',
+      scrubbed: value => value,
+    },
+    {
+      name: 'unmatched at signs',
+      build: length => '.x' + 'a@'.repeat((length - 2) / 2),
+      scrubbed: value => value,
+    },
+    {
+      name: 'many contacts',
+      build: length => 'a@b.cde '.repeat(length / 8),
+      scrubbed: value => value.replaceAll('a@b.cde', '[email]'),
+    },
+    {
+      name: 'raw query',
+      build: length => 'a?'.repeat(length / 2),
+      scrubbed: () => 'a?[query]',
+    },
+    {
+      name: 'raw query with encoded marks',
+      build: length => 'a?' + '%3fx'.repeat((length - 4) / 4) + 'yz',
+      scrubbed: () => 'a?[query]',
+    },
+    {
+      name: 'encoded card',
+      build: length => '%31+'.repeat(length / 4),
+      scrubbed: () => '[card]',
+    },
+    {
+      name: 'encoded credentials',
+      build: length => '%2F%2F' + 'u'.repeat(length - 9) + '%40',
+      scrubbed: () => '[Filtered]',
+    },
+  ];
+  const scalingValues = (shape, length, total) => {
+    return Array.from({ length: total / length }, () => shape.build(length));
+  };
+  const scrubberBytesPerMeasurement = 262144;
+  const scrubberOutputs = [];
+  const scalingPaths = {
+    scrubber: async (shape, values) => {
+      const calls = Math.max(1, scrubberBytesPerMeasurement / values.join('').length);
+      let result;
+      const cpuMs = await cpuMsOf(() => {
+        for (let call = 0; call < calls; call++) {
+          result = scrubEvent({ extra: { scaling_values: values } });
+        }
+      });
+      scrubberOutputs.push({
+        shape: shape.name,
+        path: 'scrubber',
+        length: values[0].length,
+        exact: isDeepStrictEqual(result.extra?.scaling_values, values.map(shape.scrubbed)),
+      });
+      return cpuMs;
+    },
+    sdk: (shape, values, message) => cpuMsOf(async () => {
+      sdk.captureEvent({ message, extra: { scaling_values: values } });
+      await sdk.flush(5000);
+    }),
+  };
+  const scalingStepPaths = [Object.keys(scalingPaths), ['scrubber']];
+  const scalingRatioLimit = 4;
+  const scalingPlans = scalingStepPaths.flatMap((paths, step) => scalingShapes.flatMap(shape => paths.map(path => ({
+    details: { shape: shape.name, path, bytes: scalingSteps[step] },
+    measure: (side, round) => {
+      const length = side === 'long' ? scalingSteps[step] : scalingShort;
+      const values = scalingValues(shape, length, scalingSteps[step]);
+      const message = `Fixture scrub scaling ${shape.name}|${length}|${scalingSteps[step]}|${round}`;
+      return scalingPaths[path](shape, values, message);
+    },
+  }))));
+  const scaling = await compareUntilSlow(scalingPlans, { rounds: 7, limit: scalingRatioLimit });
+  const scalingItems = events().filter(item => item.event.message?.startsWith('Fixture scrub scaling '));
+  const unrelated = received.filter(item => !scalingItems.some(scalingItem => scalingItem.raw === item.body));
+  received.splice(0, received.length, ...unrelated);
+  const worstScaling = scaling.reduce((worst, item) => (item.ratio > worst.ratio ? item : worst));
+  timing.push({
+    name: 'Scrubbing the same bytes as 1KiB tokens or as 32KiB and 1MiB tokens',
+    worst: worstScaling,
+    results: scaling,
+  });
+  const scalingBytes = scalingSteps.flatMap(total => scalingShapes.map(shape => {
+    const shortBytes = scalingValues(shape, scalingShort, total).join('').length;
+    const longBytes = scalingValues(shape, total, total).join('').length;
+    return [shortBytes, longBytes];
+  }));
+  const expectedBytes = scalingSteps.flatMap(total => Array(scalingShapes.length).fill([total, total]));
+  const sdkOutputs = scalingItems.map(item => {
+    const [name, length, total] = item.event.message.slice('Fixture scrub scaling '.length).split('|');
+    const shape = scalingShapes.find(candidate => candidate.name === name);
+    const expected = scalingValues(shape, Number(length), Number(total)).map(shape.scrubbed);
+    return {
+      shape: name,
+      path: 'sdk',
+      length: Number(length),
+      exact: isDeepStrictEqual(item.event.extra?.scaling_values, expected),
+    };
+  });
+  const scalingOutputs = [...scrubberOutputs, ...sdkOutputs];
+  const inexactOutputs = scalingOutputs
+    .filter(output => !output.exact)
+    .map(({ shape, path, length }) => ({ shape, path, length }));
+  const scalingMeasurements = scaling.reduce((sum, item) => sum + item.measurements, 0);
+  const slowScaling = scaling
+    .filter(item => item.slow)
+    .map(({ shape, path, bytes, ratio }) => ({ shape, path, bytes, ratio: Number(ratio.toFixed(2)) }));
+  check('short and long scaling values carry the same raw bytes', scalingBytes, expectedBytes);
+  check(
+    'scaling values leave the scrubber and reach ingest exactly scrubbed at every size',
+    { measured: scalingOutputs.length, inexact: inexactOutputs },
+    { measured: scalingMeasurements, inexact: [] },
+  );
+  check(
+    '32KiB and 1MiB tokens of every shape cost under four times the CPU of the same bytes as 1KiB tokens',
+    { comparisons: scaling.length, slow: slowScaling },
+    { comparisons: scalingPlans.length, slow: [] },
+  );
   check('stack frames remain available', Boolean(reported?.event.exception?.values?.[0]?.stacktrace?.frames?.length), true);
   check('SDK release identity survives without exempting customer metadata', [reported?.event.release, reported?.event.extra?.release], ['rooindustries@0.2.0', '[email]']);
   check('semantic release handling still scrubs private and card-shaped root values', events().filter(item => item.event.message === 'Fixture private release' || item.event.message === 'Fixture card release').map(item => item.event.release), ['[email]', '[email]']);

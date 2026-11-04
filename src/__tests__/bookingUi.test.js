@@ -30,8 +30,7 @@ jest.mock(
       </a>
     );
   },
-  }),
-  { virtual: true }
+  })
 );
 
 const { __setMockLocation } = require("react-router-dom");
