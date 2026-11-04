@@ -15,6 +15,18 @@ const routes = [
   "/referrals/register",
 ];
 
+const stylesheetsReady = async (page) => {
+  await page.waitForFunction(() => [...document.querySelectorAll('link[rel="stylesheet"]')].every(link => link.sheet));
+  const stylesheets = await page.locator('link[rel="stylesheet"]').evaluateAll(links => links.map(link => ({
+    href: link.getAttribute("href"),
+    inHead: link.parentElement === document.head,
+    media: link.media || "all",
+    disabled: link.disabled,
+  })));
+  expect(stylesheets.length).toBeGreaterThan(0);
+  expect(stylesheets.filter(sheet => !sheet.inHead || sheet.media !== "all" || sheet.disabled)).toEqual([]);
+};
+
 test.describe("Non-JS crawlability", () => {
   for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }]) {
     for (const [route, selector] of [
@@ -26,6 +38,7 @@ test.describe("Non-JS crawlability", () => {
       test(`${route}'s dialog content doesn't start hidden on the server at ${viewport.width}px`, async ({ page }, testInfo) => {
         await page.setViewportSize(viewport);
         await page.goto(route, { waitUntil: "domcontentloaded" });
+        await stylesheetsReady(page);
         const content = page.locator(selector);
         await expect(content).toHaveCount(1);
         await expect(page.locator('[hidden][id^="S:"]')).toHaveCount(0);

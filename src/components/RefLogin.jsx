@@ -5,19 +5,6 @@ import SupabaseSocialLogin from "./SupabaseSocialLogin";
 import SiteDialogFrame from "./SiteDialogFrame";
 import { requestDeadline } from "../lib/clientRequest";
 
-const revealOverlay = {
-  className: "ri-reveal",
-  style: { "--ri-reveal-from": "none", "--ri-reveal-duration": "0.3s" },
-};
-const revealPanel = {
-  className: "ri-reveal",
-  style: { "--ri-reveal-from": "translateY(6px)", "--ri-reveal-duration": "0.16s" },
-};
-
-function SiteDialog(props) {
-  return <SiteDialogFrame {...props} overlayProps={revealOverlay} panelProps={revealPanel} />;
-}
-
 const PENDING_DISCORD_CHOICE_KEY = "refPendingDiscordChoice";
 const PENDING_DISCORD_CHOICE_MAX_AGE_MS = 15 * 60 * 1000;
 const LINK_PROVIDERS = ["discord", "google"];
@@ -426,7 +413,7 @@ export default function RefLogin() {
         </button>
       </div>
 
-      <SiteDialog
+      <SiteDialogFrame
         ariaDescribedBy="unlinked-discord-description"
         ariaLabelledBy="unlinked-discord-title"
         dismissible={false}
@@ -475,7 +462,7 @@ export default function RefLogin() {
             Create account
           </button>
         </div>
-      </SiteDialog>
+      </SiteDialogFrame>
 
     </section>
   );

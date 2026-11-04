@@ -304,3 +304,85 @@ for (const provider of ["discord", "google"]) {
     }
   });
 }
+
+const describeDialogMotion = () => {
+  const panel = document.querySelector('[role="dialog"]');
+  const overlay = panel?.parentElement;
+  const describe = element => {
+    if (!element) return null;
+    const style = getComputedStyle(element);
+    return {
+      name: style.animationName,
+      duration: style.animationDuration,
+      delay: style.animationDelay,
+      easing: style.animationTimingFunction,
+    };
+  };
+  return {
+    overlay: describe(overlay),
+    panel: describe(panel),
+    closing: overlay?.hasAttribute("data-closing") ?? null,
+    inert: panel?.inert ?? null,
+  };
+};
+
+const dialogAnimations = page => page.evaluate(describeDialogMotion);
+
+const recordDialogClosing = async page => {
+  await page.evaluate(`window.__describeDialogMotion = ${describeDialogMotion.toString()}`);
+  await page.evaluate(() => {
+    window.__dialogClosing = null;
+    const observer = new MutationObserver(() => {
+      if (!document.querySelector("[data-closing]")) return;
+      window.__dialogClosing = window.__describeDialogMotion();
+      observer.disconnect();
+    });
+    observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ["data-closing"] });
+  });
+};
+
+test("the account choice fades in and out around the sign-in step", async ({ page }, testInfo) => {
+  const loginRequests = [];
+  page.on("request", request => {
+    if (request.method() === "POST" && /\/api\/ref\/login/.test(request.url())) loginRequests.push(request.url());
+  });
+  await page.goto("/referrals/login?oauth=unlinked&provider=discord");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  const opening = await dialogAnimations(page);
+  expect(opening.overlay).toEqual({ name: "siteDialogOverlayIn", duration: "0.3s", delay: "0s", easing: "ease-out" });
+  expect(opening.panel).toEqual({ name: "siteDialogPanelIn", duration: "0.5s", delay: "0.16s", easing: "cubic-bezier(0.4, 0, 0.2, 1)" });
+  await page.waitForTimeout(800);
+  await page.getByLabel("Referral code or login email", { exact: true }).fill("fixture-creator");
+  await page.getByLabel("Password", { exact: true }).fill("fixture-password");
+  const loginBox = await page.getByRole("button", { name: "Login", exact: true }).boundingBox();
+  const choice = page.getByRole("button", { name: "Log in and link", exact: true });
+  const choiceBox = await choice.boundingBox();
+  await recordDialogClosing(page);
+  await choice.click();
+  const closing = await page.evaluate(() => window.__dialogClosing);
+  expect(closing.closing).toBe(true);
+  expect(closing.inert).toBe(true);
+  expect(closing.overlay).toEqual({ name: "siteDialogOverlayOut", duration: "0.2s", delay: "0s", easing: "ease-in" });
+  expect(closing.panel).toEqual({ name: "siteDialogPanelOut", duration: "0.12s", delay: "0s", easing: "ease-in" });
+  await page.mouse.click(choiceBox.x + choiceBox.width / 2, choiceBox.y + choiceBox.height / 2);
+  await page.mouse.click(loginBox.x + loginBox.width / 2, loginBox.y + loginBox.height / 2);
+  await expect(page.locator('[aria-labelledby="unlinked-discord-title"]')).toHaveCount(0);
+  await expect(page.getByLabel("Referral code or login email", { exact: true })).toBeFocused();
+  expect(loginRequests).toEqual([]);
+  await attach(testInfo, "account-choice-motion", { opening, closing, loginRequests });
+});
+
+test("the account choice skips its motion when reduced motion is preferred", async ({ page }, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/referrals/login?oauth=unlinked&provider=discord");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  const opening = await dialogAnimations(page);
+  expect(opening.overlay.name).toBe("none");
+  expect(opening.panel.name).toBe("none");
+  await page.getByRole("button", { name: "Log in and link", exact: true }).click();
+  const closing = await dialogAnimations(page);
+  expect(closing.overlay?.name ?? "none").toBe("none");
+  await expect(page.locator('[aria-labelledby="unlinked-discord-title"]')).toHaveCount(0);
+  await expect(page.getByLabel("Referral code or login email", { exact: true })).toBeFocused();
+  await attach(testInfo, "account-choice-reduced-motion", { opening, closing });
+});

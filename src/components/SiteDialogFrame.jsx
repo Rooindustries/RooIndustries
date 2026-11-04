@@ -1,10 +1,8 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { isTopDialog, useDialogFocus } from "../lib/useDialogFocus";
-
-const renderContent = (content) => content;
 
 export default function SiteDialogFrame({
   ariaDescribedBy,
@@ -19,11 +17,28 @@ export default function SiteDialogFrame({
   overlayProps = {},
   panel: Panel = "div",
   panelProps = {},
-  presence = renderContent,
+  presence,
 }) {
   const closeButtonRef = useRef(null);
   const dialogRef = useRef(null);
+  const overlayRef = useRef(null);
   const scrollLockRef = useRef(null);
+  const [rendered, setRendered] = useState(open);
+  if (open && !rendered) setRendered(true);
+  const closing = !presence && rendered && !open;
+
+  useEffect(() => {
+    if (!closing) return undefined;
+    let cancelled = false;
+    const overlay = overlayRef.current;
+    const animations = typeof overlay?.getAnimations === "function" ? overlay.getAnimations({ subtree: true }) : [];
+    Promise.allSettled(animations.map((animation) => animation.finished)).then(() => {
+      if (!cancelled) setRendered(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [closing]);
 
   useDialogFocus({ open, dialogRef, initialFocusRef: closeButtonRef, onClose, dismissible });
 
@@ -51,44 +66,45 @@ export default function SiteDialogFrame({
 
   if (typeof document === "undefined") return null;
 
-  return createPortal(
-    presence(
-      open ? (
-        <Overlay
-          {...overlayProps}
-          className={`glass-overlay low-perf-overlay fixed inset-0 z-[100] flex items-center justify-center px-4 ${overlayProps.className || ""}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            if (dismissible && isTopDialog(dialogRef)) onClose?.();
-          }}
-        >
-          <Panel
-            {...panelProps}
-            aria-describedby={ariaDescribedBy}
-            aria-labelledby={ariaLabelledBy}
-            aria-modal="true"
-            className={`low-perf-surface glass-premium glass-card-surface relative w-full max-w-md rounded-2xl border border-info-border p-6 text-center transition-all duration-500 ease-in-out hover:shadow-glow-strong ${panelProps.className || ""} ${className}`}
-            onClick={(event) => event.stopPropagation()}
-            ref={dialogRef}
-            role="dialog"
-            tabIndex={-1}
+  const visible = presence ? open : rendered;
+  const content = visible ? (
+    <Overlay
+      {...overlayProps}
+      className={`glass-overlay low-perf-overlay fixed inset-0 z-[100] flex items-center justify-center px-4 ${presence ? "" : "site-dialog-overlay"} ${overlayProps.className || ""}`}
+      data-closing={closing || undefined}
+      ref={overlayRef}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (dismissible && isTopDialog(dialogRef)) onClose?.();
+      }}
+    >
+      <Panel
+        {...panelProps}
+        aria-describedby={ariaDescribedBy}
+        aria-labelledby={ariaLabelledBy}
+        aria-modal="true"
+        className={`low-perf-surface glass-premium glass-card-surface relative w-full max-w-md rounded-2xl border border-info-border p-6 text-center transition-all duration-500 ease-in-out hover:shadow-glow-strong ${presence ? "" : "site-dialog-panel"} ${panelProps.className || ""} ${className}`}
+        inert={closing || undefined}
+        onClick={(event) => event.stopPropagation()}
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
+      >
+        {dismissible ? (
+          <button
+            aria-label={closeLabel}
+            className="absolute right-3 top-3 z-10 text-2xl text-info-text transition hover:text-white"
+            onClick={onClose}
+            ref={closeButtonRef}
+            type="button"
           >
-            {dismissible ? (
-              <button
-                aria-label={closeLabel}
-                className="absolute right-3 top-3 z-10 text-2xl text-info-text transition hover:text-white"
-                onClick={onClose}
-                ref={closeButtonRef}
-                type="button"
-              >
-                <span aria-hidden="true">&times;</span>
-              </button>
-            ) : null}
-            {children}
-          </Panel>
-        </Overlay>
-      ) : null
-    ),
-    document.body
-  );
+            <span aria-hidden="true">&times;</span>
+          </button>
+        ) : null}
+        {children}
+      </Panel>
+    </Overlay>
+  ) : null;
+
+  return createPortal(presence ? presence(content) : content, document.body);
 }
