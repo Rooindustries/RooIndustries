@@ -106,7 +106,7 @@ if (development) {
   if (fs.existsSync(path.join(dist, "BUILD_ID"))) throw new Error("Development server cannot reuse a production build.");
 } else if (fs.existsSync(path.join(dist, "BUILD_ID"))) {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-  if (manifest.version !== 1 || manifest.sourceHash !== sourceHash || manifest.baseURL !== baseURL || manifest.contentURL !== contentURL) throw new Error("Isolated build ownership or source fingerprint differs; choose a fresh NEXT_DIST_DIR.");
+  if (manifest.version !== 1 || manifest.sourceHash !== sourceHash || manifest.baseURL !== baseURL) throw new Error("Isolated build ownership or source fingerprint differs; choose a fresh NEXT_DIST_DIR.");
 } else {
   if (fs.existsSync(dist) && fs.readdirSync(dist).some(entry => entry !== "cache")) throw new Error("Incomplete isolated build exists; choose a fresh NEXT_DIST_DIR.");
 }
@@ -121,8 +121,8 @@ try {
   } else {
     const content = { contentSha256: fixture.evidence.contentSha256, contentResponse: process.env.TOOLING_CLS_RESPONSE || "success" };
     const built = fs.existsSync(path.join(dist, "BUILD_ID")) ? JSON.parse(fs.readFileSync(manifestPath, "utf8")) : null;
-    if (!built || built.contentSha256 !== content.contentSha256 || built.contentResponse !== content.contentResponse) {
-      if (built) console.log("Fixture content differs from the reused build; rebuilding.");
+    if (!built || built.contentURL !== contentURL || built.contentSha256 !== content.contentSha256 || built.contentResponse !== content.contentResponse) {
+      if (built) console.log(built.contentURL === contentURL ? "Fixture content differs from the reused build; rebuilding." : "The reused build's content port is taken; rebuilding.");
       const buildEnv = { ...env, VERCEL_ENV: "development" };
       await execute(["scripts/validate-runtime-env.js"], buildEnv);
       await execute([next, "build"], monitoringStartup ? env : buildEnv);

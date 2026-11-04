@@ -90,7 +90,7 @@ jobs:
     needs: tested-tree
     if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -108,6 +108,7 @@ jobs:
       - run: npm run test:playwright-groups
       - run: npm run test:tested-tree
       - run: npm run test:free-ports
+      - run: npm run test:fixture-ports
       - run: npm run test:tooling:dependencies
       - run: npm run check:seo
       - run: npm run check:supabase:migrations

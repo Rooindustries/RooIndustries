@@ -9,9 +9,9 @@ import { installNetworkGuard, localOrigin, refuseEnvFiles } from '../scripts/lib
 import { portFromEnv, reserveTcpPorts } from '../scripts/lib/free-tcp-port.mjs';
 
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';
-const baseURL = localOrigin(`http://${host}:${process.env.BOOKING_ROUTE_PORT || process.env.PW_PORT || 4173}`);
+const [routePort, contentPort] = await reserveTcpPorts(host, [portFromEnv('BOOKING_ROUTE_PORT') || portFromEnv('PW_PORT') || 4173, portFromEnv('TOOLING_CONTENT_PORT')]);
+const baseURL = localOrigin(`http://${host}:${routePort}`);
 const routeOrigin = baseURL;
-const [contentPort] = await reserveTcpPorts(host, [portFromEnv('TOOLING_CONTENT_PORT')]);
 process.env.TOOLING_CONTENT_PORT = String(contentPort);
 const contentOrigin = apiFixtureOrigin(baseURL);
 const artifact = process.env.BOOKING_HOLDS_ARTIFACT || 'test-results/api-routes/booking-holds.jsonl';
