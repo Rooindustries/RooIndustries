@@ -493,6 +493,15 @@ const openers = [
     await page.evaluate(() => { window.__resizeFrames = []; });
     await homeLink(page).click();
   }],
+  ["a Forward after going Back", async page => {
+    await openFrom("/", homeLink)(page);
+    await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+    await page.goBack();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.evaluate(() => { window.__resizeFrames = []; });
+    await page.goForward();
+  }],
   ["a direct load", async page => {
     await page.addInitScript(sampleFrames);
     await page.goto("/booking");
