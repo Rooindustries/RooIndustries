@@ -71,14 +71,21 @@ export const referenceName = (node) => (node?.type === "Identifier" ? node.name 
 
 export const calleeName = (call) => referenceName(call.callee);
 
-export const declaredValue = (context, identifier) => {
+const variableDefinition = (context, identifier) => {
   let variable = null;
   for (let scope = context.sourceCode.getScope(identifier); scope && !variable; scope = scope.upper) {
     variable = scope.set.get(identifier.name) || null;
   }
   const definition = variable?.defs?.[0];
   if (!definition || definition.type !== "Variable" || definition.node.id.type !== "Identifier") return null;
-  return definition.node.init || null;
+  return definition;
+};
+
+export const declaredValue = (context, identifier) => variableDefinition(context, identifier)?.node.init || null;
+
+export const constValue = (context, identifier) => {
+  const definition = variableDefinition(context, identifier);
+  return definition?.parent.kind === "const" ? definition.node.init || null : null;
 };
 
 export const isFetchCall = (call) => {

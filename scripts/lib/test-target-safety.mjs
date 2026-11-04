@@ -7,7 +7,7 @@ import childProcess from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
 import { promisify } from "node:util";
 import { getGlobalDispatcher, setGlobalDispatcher } from "undici";
-import { appendNodeOption } from "./node-options.mjs";
+import { withNodeOption } from "./node-options.mjs";
 
 const connect = net.createConnection;
 const isPrivateTestHost = value => {
@@ -75,9 +75,8 @@ const nonNodeBinaries = new Set(["postgres", "postgrest", "pg_ctl", "initdb", "p
 
 const originalInheritedOrigins = process.env.ROO_TEST_NETWORK_ORIGINS;
 const serializeChildOrigins = () => JSON.stringify(childGuardOrigins.reduce((origins, allowed) => origins.filter(origin => allowed.includes(origin))));
-const appendChildGuardOptions = value => [...childGuardImports].reduce((nodeOptions, preload) => appendNodeOption(nodeOptions, "--import", preload), String(value ?? ""));
 const refreshInheritedGuardEnvironment = () => {
-  process.env.NODE_OPTIONS = appendChildGuardOptions(process.env.NODE_OPTIONS);
+  process.env.NODE_OPTIONS = withNodeOption(process.env, "--import", ...childGuardImports).NODE_OPTIONS;
   if (childGuardOrigins.length) process.env.ROO_TEST_NETWORK_ORIGINS = serializeChildOrigins();
   else if (originalInheritedOrigins !== undefined) process.env.ROO_TEST_NETWORK_ORIGINS = originalInheritedOrigins;
   else delete process.env.ROO_TEST_NETWORK_ORIGINS;
@@ -107,7 +106,7 @@ const childOptions = (file, options, method) => {
     return options;
   }
   const env = { ...(options?.env ?? process.env) };
-  env.NODE_OPTIONS = appendChildGuardOptions(env.NODE_OPTIONS ?? process.env.NODE_OPTIONS);
+  env.NODE_OPTIONS = withNodeOption({ NODE_OPTIONS: env.NODE_OPTIONS ?? process.env.NODE_OPTIONS }, "--import", ...childGuardImports).NODE_OPTIONS;
   for (const name of ["ROO_TEST_HOST", "TOOLING_NETWORK_GUARD", "BASE_URL"]) {
     if (process.env[name] !== undefined && env[name] === undefined) env[name] = process.env[name];
   }

@@ -39,10 +39,13 @@ export const appendNodeOption = (nodeOptions, flag, value) => {
   return `${current}${current ? " " : ""}${option}=${quoteNodeOption(value)}`;
 };
 
-export const withNodeOption = (env, flag, ...values) => ({
-  ...env,
-  NODE_OPTIONS: values.reduce((nodeOptions, value) => appendNodeOption(nodeOptions, flag, value), env?.NODE_OPTIONS),
-});
+export const prependNodeOption = (nodeOptions, flag, value) => {
+  const current = String(nodeOptions ?? "");
+  return `${moduleFlag(flag)}=${quoteNodeOption(value)}${current ? " " : ""}${current}`;
+};
+
+export const withNodeOption = (env, flag, ...values) =>
+  values.reduce((next, value) => ({ ...next, NODE_OPTIONS: appendNodeOption(next.NODE_OPTIONS, flag, value) }), { ...env });
 
 const runsAsCli = () => {
   try {

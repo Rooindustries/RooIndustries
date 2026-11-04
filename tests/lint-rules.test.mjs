@@ -484,10 +484,16 @@ run("no-hand-built-node-options", {
     `const env = { NODE_OPTIONS: "--no-warnings" };`,
     `process.env.NODE_OPTIONS = appendNodeOption(process.env.NODE_OPTIONS, "--import", guard);`,
     `const label = \`--import=\${guard}\`;`,
-    `const env = { NODE_OPTIONS: [process.env.NODE_OPTIONS, "--no-warnings"].filter(Boolean).join(" ") };`,
-    "const env = { NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --no-warnings --max-old-space-size=${limit}` };",
-    "env.NODE_OPTIONS += ' --no-warnings';",
-    "const env = { NODE_OPTIONS: '--no-warnings ' + files.map(file => `--title=--import=${JSON.stringify(file)}`).join(' ') };",
+    `const env = { NODE_OPTIONS: '--no-warnings --title="my --import=./guard.mjs"' };`,
+    "const env = { NODE_OPTIONS: `--title=\"--import=./guard.mjs\"` };",
+    `child.env.NODE_OPTIONS = undefined;`,
+    `const env = { ...process.env, NODE_OPTIONS: "" };`,
+    `env.NODE_OPTIONS = options?.env?.NODE_OPTIONS ?? process.env.NODE_OPTIONS;`,
+    `env.NODE_OPTIONS ??= "--no-warnings";`,
+    `process.env.NODE_OPTIONS = withNodeOption(process.env, "--import", ...imports).NODE_OPTIONS;`,
+    `const guarded = withNodeOption(env, "--import", guard); spawn(node, [], { env: { PATH, NODE_OPTIONS: guarded.NODE_OPTIONS } });`,
+    `const NODE_OPTIONS = prependNodeOption(process.env.NODE_OPTIONS, "--require", pauser); spawn(node, [], { env: { NODE_OPTIONS } });`,
+    `const { NODE_OPTIONS } = process.env;`,
   ],
   invalid: [
     {
@@ -538,6 +544,46 @@ run("no-hand-built-node-options", {
     {
       name: "flag prefix kept in a variable",
       code: 'const preload = "--import="; const env = { NODE_OPTIONS: preload + guard };',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "flag prefix picked in a conditional variable",
+      code: 'const prefix = esm ? "--import=" : "--require="; env.NODE_OPTIONS = prefix + guard;',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "preload appended to a variable after its declaration",
+      code: 'let options = ""; options += "--import=" + guard; env.NODE_OPTIONS = options;',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "helper result held in a variable that can change",
+      code: 'let options = withNodeOption(env, "--import", guard).NODE_OPTIONS; options = `--import=${guard}`; env.NODE_OPTIONS = options;',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "result of a local wrapper",
+      code: "env.NODE_OPTIONS = appendGuardOptions(env.NODE_OPTIONS);",
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "literal flags appended with +=",
+      code: "env.NODE_OPTIONS += ' --no-warnings';",
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "existing value joined with a literal",
+      code: 'const env = { NODE_OPTIONS: [process.env.NODE_OPTIONS, "--no-warnings"].filter(Boolean).join(" ") };',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "title text built from a template",
+      code: "const env = { NODE_OPTIONS: `--title=\"my --import=${name}\"` };",
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "written through a computed key",
+      code: 'process.env[`NODE_OPTIONS`] = "--import=" + guard;',
       errors: [{ messageId: "handBuilt" }],
     },
   ],
