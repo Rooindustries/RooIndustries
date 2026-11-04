@@ -47,6 +47,21 @@ function expectReadablePromises(promises, check = expect) {
   }
 }
 
+function readDeferredHeights(page) {
+  return page.evaluate(async () => {
+    const sections = [...document.querySelectorAll(".deferred-section-content")];
+    const reservedHeight = element => parseFloat(getComputedStyle(element).containIntrinsicHeight.replace("auto", ""));
+    const reserved = sections.map(reservedHeight);
+    sections.forEach(element => { element.style.contentVisibility = "visible"; });
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return sections.map((element, index) => ({
+      name: element.closest("section[id]")?.id || `section ${index + 1}`,
+      reserved: reserved[index],
+      real: element.offsetHeight,
+    }));
+  });
+}
+
 function expectNoScriptStyles(styles) {
   expect.soft(styles.jsClass).toBe(false);
   expect.soft(styles.scrollBehavior).toBe("auto");
@@ -75,6 +90,19 @@ test.describe("Home styles without JavaScript", () => {
 
 test.describe("Home styles with JavaScript", () => {
   test.use({ javaScriptEnabled: true });
+
+  for (const width of [320, 390, 768, 1024, 1440]) {
+    test(`deferred sections reserve close to their real height at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/", { waitUntil: "networkidle" });
+      const sections = await readDeferredHeights(page);
+      expect(sections.length).toBeGreaterThan(0);
+      for (const { name, reserved, real } of sections) {
+        const message = `${name}: reserves ${reserved}px for ${real}px`;
+        expect(Math.abs(reserved - real), message).toBeLessThanOrEqual(real * 0.2);
+      }
+    });
+  }
 
   for (const viewport of viewports) {
     test(`deferred sections defer, the hero heading stays on one line and the promises stay readable at ${viewport.width}px`, async ({ page }) => {

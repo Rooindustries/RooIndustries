@@ -440,7 +440,7 @@ html[data-theme="dark"] {
 
 html.js .deferred-section-content {
   content-visibility: auto;
-  contain-intrinsic-size: auto 500px;
+  contain-intrinsic-size: auto var(--deferred-height);
 }
 
 html {
@@ -1325,11 +1325,6 @@ html:not([data-theme="dark"]) .ri-services-skeleton {
     rgba(13, 21, 38, 0.7),
     rgba(8, 16, 29, 0.8)
   );
-}
-
-.ri-service-card {
-  background-color: color-mix(in srgb, var(--color-text-primary) 4%, var(--color-surface-elevated));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 5%, transparent);
 }
 
 html:not([data-theme="dark"]) .ri-service-icon {
