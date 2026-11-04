@@ -457,7 +457,8 @@ for (const [from, to] of [["phone", "desktop"], ["desktop", "phone"]]) {
         await expect.poll(() => page.evaluate(width => window.__resizeFrames.filter(entry => entry.width === width).length, sizes[to].width)).toBeGreaterThanOrEqual(30);
         const frames = await page.evaluate(width => window.__resizeFrames.filter(entry => entry.width === width), sizes[to].width);
         await save(page, testInfo, `${name.replace(/\W+/g, "-")}-${from}-to-${to}`, frames);
-        const misfits = frames.filter(entry => entry.stageGap > 0.5 || entry.contentPastFrame > 0.5 || entry.contentPastWindow > 0.5);
+        const subPixel = 0.05;
+        const misfits = frames.filter(entry => entry.stageGap > subPixel || entry.contentPastFrame > subPixel || entry.contentPastWindow > subPixel);
         expect(misfits).toEqual([]);
       });
     }
