@@ -206,6 +206,7 @@ jobs:
           curl --fail --silent "$BASE_URL" > /dev/null
           if [ "$PW_SUITE" = "rest-1" ]; then
             npm run check:budgets
+            npm run check:no-scripting-media
             guarded_options="$(node scripts/lib/node-options.mjs --import "$PWD/scripts/lib/test-target-safety.mjs")"
             TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="$guarded_options" npm run test:agent-readiness
             TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="$guarded_options" npm run test:traffic-recovery
