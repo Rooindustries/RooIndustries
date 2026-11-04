@@ -432,35 +432,69 @@ setInterval(() => {}, 1000);`], { stdio: ["ignore", "pipe", "inherit"] });
   }
 });
 
-test("stopping a child never signals a process whose PID was reused", async () => {
+test("a fixture whose exit callback stops another that exited with it never signals the reused PID", async () => {
   const program = `import fs from "node:fs";
 import { spawn } from "node:child_process";
 const { startChildOnPorts, stopChild } = await import(${library("start-on-port.mjs")});
 const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-const signal = process.kill.bind(process);
-let started, victim, reused = false;
-process.kill = (pid, name) => {
-  const target = Math.abs(pid);
-  const held = started && target === started.child.pid && started.child.exitCode === null && started.child.signalCode === null;
-  if (!victim && name && !held) {
-    signal(target, "SIGKILL");
-    for (let tries = 0; tries < 300 && fs.existsSync("/proc/" + target); tries += 1) wait(10);
+const zombie = (pid) => { try { return fs.readFileSync("/proc/" + pid + "/stat", "utf8").split(") ")[1][0] === "Z"; } catch { return false; } };
+const start = () => startChildOnPorts({ host: "127.0.0.1", requested: [0], output: () => "", spawnChild: ([port], launch) => launch.spawn(process.execPath, ["-e", 'require("http").createServer().listen(' + port + ', "127.0.0.1")']) });
+const fixtures = [await start(), await start()];
+let victim, target;
+const stopOther = (other) => () => {
+  if (!victim && other.child.exitCode === null && other.child.signalCode === null && !fs.existsSync("/proc/" + other.child.pid)) {
+    target = other.child.pid;
+    const grouped = () => fs.readdirSync("/proc").some((entry) => { try { return /^\\d+$/.test(entry) && Number(fs.readFileSync("/proc/" + entry + "/stat", "utf8").split(") ")[1].split(" ")[2]) === target; } catch { return false; } });
+    for (let tries = 0; tries < 500 && grouped(); tries += 1) wait(10);
     fs.writeFileSync("/proc/sys/kernel/ns_last_pid", String(target - 1));
-    victim = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
-    reused = victim.pid === target;
+    victim = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore", detached: true });
   }
-  return signal(pid, name);
+  stopChild(other.child);
 };
-started = await startChildOnPorts({ host: "127.0.0.1", requested: [0], output: () => "", spawnChild: ([port], launch) => launch.spawn(process.execPath, ["-e", 'process.on("SIGTERM", () => {}); require("node:child_process").spawn(process.execPath, ["-e", "process.on(\\'SIGTERM\\', () => {}); setInterval(() => {}, 1000)"], { stdio: "ignore" }); require("http").createServer().listen(' + port + ', "127.0.0.1");']) });
-await stopChild(started.child);
-await new Promise((resolve) => setTimeout(resolve, 300));
-console.log(JSON.stringify({ signalledOther: Boolean(victim), reused, victimAlive: victim ? victim.exitCode === null && victim.signalCode === null : null }));
+fixtures[0].child.once("exit", stopOther(fixtures[1]));
+fixtures[1].child.once("exit", stopOther(fixtures[0]));
+for (const { child } of fixtures) process.kill(-child.pid, "SIGKILL");
+for (let tries = 0; tries < 500 && !fixtures.every(({ child }) => zombie(child.pid)); tries += 1) wait(10);
+await new Promise((resolve) => setTimeout(resolve, 500));
+console.log(JSON.stringify({ reused: Boolean(victim) && victim.pid === target, victimAlive: victim ? victim.exitCode === null && victim.signalCode === null : null }));
 victim?.kill("SIGKILL");
 process.exit(0);`;
-  const run = spawnSync("unshare", ["--user", "--map-root-user", "--pid", "--fork", "--mount-proc", "--", process.execPath, "--input-type=module", "-e", program], { encoding: "utf8", timeout: 60000 });
+  const run = spawnSync("unshare", ["--user", "--map-root-user", "--pid", "--fork", "--mount-proc", "--", "/bin/sh", "-c", "\"$@\"; exit $?", "sh", process.execPath, "--input-type=module", "-e", program], { encoding: "utf8", timeout: 60000 });
   assert.equal(run.status, 0, run.stderr);
   const result = JSON.parse(run.stdout.trim().split("\n").at(-1));
-  assert.equal(result.signalledOther, false, `stopChild signalled a PID it does not hold (reused by another process: ${result.reused}, that process survived: ${result.victimAlive})`);
+  assert.equal(result.reused, true, "the second fixture's PID was not reused, so the race never happened");
+  assert.equal(result.victimAlive, true, "stopping the second fixture signalled the unrelated process that took its PID");
+});
+
+test("a fixture started while its parent dies never runs", async () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "roo-paused-setpriv-"));
+  const real = spawnSync("sh", ["-c", "command -v setpriv"], { encoding: "utf8" }).stdout.trim();
+  fs.writeFileSync(path.join(bin, "setpriv"), `#!/bin/sh\nfor last; do :; done\nif [ "$last" != true ]; then echo $$ > "${bin}/pid"; kill -STOP $$; fi\nexec ${real} "$@"\n`, { mode: 0o755 });
+  const parent = spawn(process.execPath, ["--input-type=module", "-e", `const { startChildOnPorts } = await import(${library("start-on-port.mjs")});
+const server = ${server.toString()};
+await startChildOnPorts({ host: "127.0.0.1", requested: [0], output: () => "", spawnChild: ([port], launch) => { console.log(port); return launch.spawn(process.execPath, ["-e", server(port, false)]); } });`], { stdio: ["ignore", "pipe", "inherit"], env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+  const [line] = await once(parent.stdout, "data");
+  const port = Number(line);
+  let wrapper;
+  try {
+    const deadline = Date.now() + 5000;
+    const stopped = () => { try { return fs.readFileSync(`/proc/${wrapper}/stat`, "utf8").split(") ")[1][0] === "T"; } catch { return false; } };
+    while (!(wrapper = Number(fs.existsSync(path.join(bin, "pid")) && fs.readFileSync(path.join(bin, "pid"), "utf8"))) || !stopped()) {
+      assert.ok(Date.now() < deadline, "the wrapper never paused");
+      await pause(20);
+    }
+    parent.kill("SIGKILL");
+    await once(parent, "exit");
+    process.kill(wrapper, "SIGCONT");
+    const quiet = Date.now() + 3000;
+    while (Date.now() < quiet) {
+      assert.equal(await answering(port), false, "the fixture started after its parent was gone");
+      await pause(100);
+    }
+  } finally {
+    await dismiss(port);
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
 });
 
 test("a machine that refuses PID namespaces stops the start with a clear error", () => {

@@ -100,7 +100,7 @@ export const passHeldTcpPorts = (host, ports) => {
     const onExit = () => finish(new Error("Child exited before it took its held ports."));
     const onMessage = (message) => {
       if (message?.[holderEnv] === "wanted") servers.forEach((server, index) => child.send({ [holderEnv]: ports[index] }, server, { keepOpen: true }));
-      if (message?.[holderEnv] === "adopted") finish();
+      if (message?.[holderEnv] === "adopted") releaseTcpPorts(host, ports).then(() => child.send({ [holderEnv]: "released" }, finish), finish);
     };
     child.on("message", onMessage);
     child.once("exit", onExit);
@@ -131,6 +131,14 @@ export const adoptHeldTcpPorts = async () => {
     process.on("message", onMessage);
     process.send({ [holderEnv]: "wanted" });
   });
-  await new Promise((resolve) => process.send({ [holderEnv]: "adopted" }, resolve));
-  process.disconnect();
+  await new Promise((resolve) => {
+    const onReleased = (message) => {
+      if (message?.[holderEnv] !== "released") return;
+      process.off("message", onReleased);
+      resolve();
+    };
+    process.on("message", onReleased);
+    process.send({ [holderEnv]: "adopted" });
+  });
+  if (process.connected) process.disconnect();
 };

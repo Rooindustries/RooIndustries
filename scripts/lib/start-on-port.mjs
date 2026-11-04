@@ -69,15 +69,28 @@ const namespaceOf = (pid, kind) => {
   }
 };
 
-const namespaceMembers = (wrapper) => {
-  const namespace = namespaceOf(wrapper, "pid_for_children");
+const handles = new WeakMap();
+const procOf = (child) => handles.has(child) ? `self/fd/${handles.get(child)}` : null;
+const unreaped = (child) => handles.has(child) && fs.existsSync(`/proc/${procOf(child)}/stat`);
+
+const track = (child) => {
+  const fd = fs.openSync(`/proc/${child.pid}`, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+  handles.set(child, fd);
+  child.once("exit", () => {
+    handles.delete(child);
+    fs.closeSync(fd);
+  });
+};
+
+const namespaceMembers = (child) => {
+  const namespace = unreaped(child) ? namespaceOf(procOf(child), "pid_for_children") : null;
   if (!namespace || namespace === namespaceOf("self", "pid")) return [];
   return fs.readdirSync("/proc").filter((entry) => /^\d+$/.test(entry) && namespaceOf(entry, "pid") === namespace);
 };
 
-export const ownsPorts = (wrapper, host, ports) => {
+export const ownsPorts = (child, host, ports) => {
   const open = new Set();
-  for (const member of namespaceMembers(wrapper)) {
+  for (const member of namespaceMembers(child)) {
     try {
       for (const fd of fs.readdirSync(`/proc/${member}/fd`)) {
         try { open.add(fs.readlinkSync(`/proc/${member}/fd/${fd}`)); } catch {}
@@ -90,7 +103,7 @@ export const ownsPorts = (wrapper, host, ports) => {
 const exited = (child) => child.exitCode !== null || child.signalCode !== null;
 
 const signalGroup = (child, signal) => {
-  if (!child.pid || exited(child)) return;
+  if (!child.pid || exited(child) || !unreaped(child)) return;
   try {
     process.kill(-child.pid, signal);
   } catch (error) {
@@ -111,7 +124,8 @@ export const stopChild = async (child, grace = 5000) => {
 };
 
 const launched = new WeakSet();
-const containment = ["--pdeathsig", "KILL", "--", "unshare", "--user", "--map-current-user", "--pid", "--fork", "--kill-child", "--mount-proc", "--", "/bin/sh", "-c", "exec 9<&0; \"$@\" <&9 9<&- & wait $!", "sh"];
+const containment = ["--pdeathsig", "KILL", "--", "unshare", "--user", "--map-current-user", "--pid", "--fork", "--kill-child", "--mount-proc", "--"];
+const init = ["/bin/sh", "-c", "exec 9<&0; printf x >&3 && read -r go <&3 || exit 125; exec 3<&-; \"$@\" <&9 9<&- & wait $!", "sh"];
 let contained = false;
 
 const requireContainment = () => {
@@ -127,12 +141,16 @@ const requireContainment = () => {
 const launcher = (held) => (command, args, options = {}) => {
   requireContainment();
   const stdio = typeof options.stdio === "string" ? Array(3).fill(options.stdio) : [...(options.stdio || ["ignore", "ignore", "ignore"])];
-  const child = spawn("setpriv", [...containment, command, ...args], {
+  const child = spawn("setpriv", [...containment, ...init, command, ...args], {
     ...options,
     detached: true,
     env: { ...(options.env || process.env), ...held.env },
-    stdio: [...stdio.slice(0, 3), ...held.stdio],
+    stdio: [...stdio.slice(0, 3), "pipe", ...held.stdio],
   });
+  const lifeline = child.stdio[3];
+  lifeline?.on("error", () => {});
+  lifeline?.once("data", () => lifeline.end("\n", () => lifeline.destroy()));
+  if (child.pid) track(child);
   launched.add(child);
   return child;
 };
@@ -142,7 +160,7 @@ const waitUntilReady = async ({ child, host, ports, isReady, output, timeout, fa
   while (Date.now() < deadline) {
     if (failure()) throw failure();
     if (exited(child)) throw new Error(`Child exited before it was ready:\n${output()}`);
-    if (ownsPorts(child.pid, host, ports) && await isReady(ports) && !exited(child) && ownsPorts(child.pid, host, ports)) return;
+    if (ownsPorts(child, host, ports) && await isReady(ports) && !exited(child) && ownsPorts(child, host, ports)) return;
     await pause(100);
   }
   throw new Error(`Child was not ready within ${timeout} ms:\n${output()}`);
@@ -183,7 +201,6 @@ export const startChildOnPorts = async ({ host, requested, preferred, spawnChild
       child.once("error", (error) => { spawnError = error; });
       if (passHeld) {
         await within(held.handOver(child), timeout, `Child did not take its held ports within ${timeout} ms:`, output);
-        await releaseTcpPorts(host, ports);
       }
       await waitUntilReady({ child, host, ports, isReady, output, timeout, failure: () => spawnError || (!child.pid && new Error("Child did not start.")) });
       return { ports, child };
