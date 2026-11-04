@@ -11,7 +11,7 @@ export default function useHomeSectionLinkHandler() {
         window.matchMedia("(max-width: 767px)").matches &&
         window.matchMedia("(pointer: coarse)").matches;
 
-      goToSection(event, hash, {
+      return goToSection(event, hash, {
         scrollMode: isPhone ? "fast-smooth" : "instant",
         durationMs: isPhone ? 220 : undefined,
         stableFramesRequired: isPhone ? 1 : 8,

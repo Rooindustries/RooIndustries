@@ -19,6 +19,15 @@ const ActiveHomeSectionContext = createContext("");
 
 const getHeaderOffsetPx = () => getCssHeaderOffsetPx(110);
 
+const isPlainPrimaryClick = (event) => {
+  if (!event) return true;
+  if (event.defaultPrevented) return false;
+  if (typeof event.button === "number" && event.button !== 0) return false;
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return false;
+  const target = event.currentTarget?.getAttribute?.("target");
+  return !target || target === "_self";
+};
+
 const replaceBrowserUrl = (href, hash) => {
   if (window.history?.replaceState) {
     window.history.replaceState(window.history.state, "", href);
@@ -95,9 +104,9 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
 
   const goToSection = useCallback(
     (event, hash, alignment) => {
-      if (typeof window === "undefined") return;
+      if (typeof window === "undefined" || !isPlainPrimaryClick(event)) return false;
       const normalizedHash = normalizeSectionHash(hash);
-      if (!normalizedHash) return;
+      if (!normalizedHash) return false;
       event?.preventDefault?.();
 
       if (location.pathname === "/") {
@@ -113,7 +122,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
         setActiveHomeHash(normalizedHash);
         alignTo(normalizedHash, alignment);
         clickAlignedHashRef.current = normalizedHash;
-        return;
+        return true;
       }
 
       const fromPath = location.pathname;
@@ -127,15 +136,15 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       const nextHref = buildHomeSectionHref(normalizedHash);
       if (homeNavigationRef.current === "memory") {
         replaceBrowserUrl(nextHref, normalizedHash);
-        return;
+        return true;
       }
       if (homeNavigationRef.current === "router") {
         navigate(nextHref, { replace: true });
-        return;
+        return true;
       }
       if (homeNavigationRef.current === "document") {
         window.location.assign(nextHref);
-        return;
+        return true;
       }
 
       clearTripTimeout();
@@ -159,14 +168,16 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
         homeNavigationRef.current = "router";
         navigate(nextHref);
       }, 20);
+      return true;
     },
     [alignTo, clearTripTimeout, location.pathname, navigate, routeShell]
   );
 
   const goToHomeTop = useCallback(
     (event) => {
+      if (!isPlainPrimaryClick(event)) return false;
       cancelSectionNavigation();
-      if (typeof window === "undefined" || location.pathname !== "/") return;
+      if (typeof window === "undefined" || location.pathname !== "/") return true;
       event?.preventDefault?.();
       if (window.location.hash && window.history?.replaceState) {
         window.history.replaceState(
@@ -177,6 +188,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       }
       setActiveHomeHash("");
       window.scrollTo({ top: 0, behavior: "auto" });
+      return true;
     },
     [cancelSectionNavigation, location.pathname]
   );

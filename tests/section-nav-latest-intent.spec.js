@@ -172,3 +172,76 @@ test("an on-page section link clicked as the homepage lands wins over the navbar
   await page.goForward();
   await expectLanded(page, "#how-it-works", `${label} forward`);
 });
+
+for (const { label, origin, selector, text = "", hash } of [
+  { label: "navbar FAQ off the homepage", origin: "/reviews", ...NAVBAR("faq"), hash: "#faq" },
+  { label: "on-page Tune My PC", origin: "/", ...ON_PAGE("#packages", "Tune My PC"), hash: "#packages" },
+]) {
+  test(`modifier click on ${label} opens the section in a new page`, async ({ context, page }) => {
+    await page.setViewportSize({ width: 1536, height: 960 });
+    await page.goto(origin, { waitUntil: "domcontentloaded" });
+    await waitForHydrated(page, selector);
+    const before = await page.evaluate(() => ({ url: window.location.href, y: window.scrollY }));
+    const [opened] = await Promise.all([
+      context.waitForEvent("page", { timeout: 15000 }),
+      page.locator(selector, { hasText: text }).first().click({ modifiers: ["ControlOrMeta"] }),
+    ]);
+    await opened.waitForLoadState("domcontentloaded");
+    const openedUrl = new URL(opened.url());
+    expect(`${openedUrl.pathname}${openedUrl.hash}`, `${label} new page`).toBe(`/${hash}`);
+    await page.waitForTimeout(1500);
+    expect(
+      await page.evaluate(() => ({ url: window.location.href, y: window.scrollY })),
+      `${label} current tab`
+    ).toEqual(before);
+    await opened.close();
+  });
+}
+
+test.describe("reduced motion on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("an on-page section link jumps straight to the section", async ({ page }) => {
+    test.setTimeout(120000);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const link = ON_PAGE("#packages", "Tune My PC");
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(
+      ({ selector, text }) =>
+        [...document.querySelectorAll(selector)].some(
+          (element) =>
+            element.textContent.includes(text) && Object.keys(element).some((key) => key.startsWith("__reactProps$"))
+        ),
+      link,
+      { timeout: 15000 }
+    );
+    const samples = await page.evaluate(
+      ({ selector, text, hash }) =>
+        new Promise((resolve) => {
+          const target = () => document.querySelector(hash);
+          const read = () => ({ y: window.scrollY, top: target()?.getBoundingClientRect().top ?? null });
+          const frames = [read()];
+          const element = [...document.querySelectorAll(selector)].find((item) => item.textContent.includes(text));
+          element.click();
+          const clickedAt = performance.now();
+          const sample = () => {
+            frames.push(read());
+            if (performance.now() - clickedAt > 1500) {
+              resolve(frames);
+              return;
+            }
+            requestAnimationFrame(sample);
+          };
+          requestAnimationFrame(sample);
+        }),
+      { ...link, hash: SECTIONS.plans }
+    );
+    const [start] = samples;
+    expect(Math.abs(start.top), "section starts well below the fold").toBeGreaterThan(844);
+    const moved = samples.filter((frame) => Math.abs(frame.y - start.y) > 1);
+    expect(moved.length, "page scrolled").toBeGreaterThan(0);
+    const inBetween = moved.filter((frame) => Math.abs(frame.top) > FINAL_OFFSET_MAX);
+    expect(inBetween, "no animated in-between positions").toEqual([]);
+    await expectLanded(page, SECTIONS.plans, "reduced motion phone Tune My PC");
+  });
+});

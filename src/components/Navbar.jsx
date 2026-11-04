@@ -120,20 +120,20 @@ export default function Navbar() {
 
   const handleHomeClick = useCallback(
     (event) => {
+      if (!goToHomeTop(event)) return;
       setOpen(false);
       setProofOpen(false);
       setReferralsOpen(false);
-      goToHomeTop(event);
     },
     [goToHomeTop]
   );
 
   const handleSectionLinkClick = useCallback(
     (event, hash) => {
+      if (!goToSection(event, hash, { minRuntimeMs: 900 })) return;
       setOpen(false);
       setProofOpen(false);
       setReferralsOpen(false);
-      goToSection(event, hash, { minRuntimeMs: 900 });
     },
     [goToSection]
   );
