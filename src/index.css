@@ -1439,156 +1439,45 @@ html:not([data-theme="dark"]) .ri-service-copy {
   color: #cbd5e1;
 }
 
-html:not([data-theme="dark"]) .ri-bench-shell {
-  --tw-ring-color: rgba(255, 255, 255, 0.1);
-  background-image: linear-gradient(
-    180deg,
-    rgba(13, 21, 38, 0.7),
-    rgba(7, 12, 21, 0.85)
-  );
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1),
-    0 32px 110px rgba(0, 0, 0, 0.7);
-}
-
-html:not([data-theme="dark"]) .ri-bench-radial {
-  background-image: radial-gradient(
-    80% 60% at 50% 0%,
-    rgba(56, 189, 248, 0.18),
-    transparent 65%
-  );
-}
-
-html:not([data-theme="dark"]) .ri-bench-top-glow {
-  background-color: rgba(255, 255, 255, 0.05);
-}
-
-html:not([data-theme="dark"]) .ri-bench-left-glow {
-  background-color: rgba(34, 211, 238, 0.1);
-}
-
-html:not([data-theme="dark"]) .ri-bench-right-glow {
-  background-color: rgba(56, 189, 248, 0.1);
-}
-
-html:not([data-theme="dark"]) .ri-bench-card {
-  --tw-ring-color: rgba(255, 255, 255, 0.1);
-  background-image: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.06),
-    rgba(255, 255, 255, 0.015)
-  );
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1),
-    0 18px 60px rgba(0, 0, 0, 0.55);
-}
-
-html:not([data-theme="dark"]) .ri-bench-card-top-glow {
-  background-color: rgba(34, 211, 238, 0.1);
-}
-
-html:not([data-theme="dark"]) .ri-bench-card-bottom-glow {
-  background-color: rgba(56, 189, 248, 0.08);
-}
-
-html:not([data-theme="dark"]) .ri-bench-card-rail {
-  background-image: linear-gradient(
-    180deg,
-    rgba(103, 232, 249, 0.7),
-    rgba(125, 211, 252, 0.3),
-    transparent
-  );
-}
-
 html:not([data-theme="dark"]) .ri-bench-game-title,
 html:not([data-theme="dark"]) .ri-bench-number {
   color: #ffffff;
 }
 
-html:not([data-theme="dark"]) .ri-bench-game-rule {
-  background-image: linear-gradient(
-    90deg,
-    rgba(103, 232, 249, 0.7),
-    transparent
-  );
-}
-
 html:not([data-theme="dark"]) .ri-bench-metric-pill {
-  --tw-ring-color: rgba(255, 255, 255, 0.1);
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: rgba(255, 255, 255, 0.06);
   color: rgba(241, 245, 249, 0.9);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1),
-    0 8px 22px rgba(0, 0, 0, 0.3);
 }
 
 html:not([data-theme="dark"]) .ri-bench-boost-pill {
   --tw-ring-color: rgba(103, 232, 249, 0.25);
   background-color: rgba(255, 255, 255, 0.05);
   color: #cffafe;
-  box-shadow: 0 0 0 1px rgba(103, 232, 249, 0.25),
-    0 10px 30px rgba(0, 0, 0, 0.35);
 }
 
-html:not([data-theme="dark"]) .ri-bench-bars {
-  --tw-ring-color: rgba(255, 255, 255, 0.1);
-  background-color: rgba(0, 0, 0, 0.25);
-}
-
-html:not([data-theme="dark"]) .ri-bench-before-label,
-html:not([data-theme="dark"]) .ri-bench-legend {
+html:not([data-theme="dark"]) .ri-bench-before-label {
   color: rgba(203, 213, 225, 0.8);
 }
 
 html:not([data-theme="dark"]) .ri-bench-after-label {
-  color: rgba(207, 250, 254, 0.8);
+  color: #a5f3fc;
 }
 
-html:not([data-theme="dark"]) .ri-bench-before-track {
-  --tw-ring-color: rgba(255, 255, 255, 0.1);
-  background-color: rgba(255, 255, 255, 0.1);
+html:not([data-theme="dark"]) .ri-bench-before-track,
+html:not([data-theme="dark"]) .ri-bench-after-track {
+  background-color: rgba(255, 255, 255, 0.08);
 }
 
 html:not([data-theme="dark"]) .ri-bench-before-fill {
-  background-image: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0.3),
-    rgba(255, 255, 255, 0.15),
-    transparent
-  );
-}
-
-html:not([data-theme="dark"]) .ri-bench-after-track {
-  --tw-ring-color: rgba(103, 232, 249, 0.2);
-  background-color: rgba(34, 211, 238, 0.1);
+  background-color: rgba(255, 255, 255, 0.4);
 }
 
 html:not([data-theme="dark"]) .ri-bench-after-fill {
-  background-image: linear-gradient(
-    90deg,
-    rgba(56, 189, 248, 0.55),
-    rgba(125, 211, 252, 0.22),
-    transparent
-  );
-}
-
-html:not([data-theme="dark"]) .ri-bench-before-dot {
-  background-color: rgba(255, 255, 255, 0.6);
-}
-
-html:not([data-theme="dark"]) .ri-bench-after-dot {
-  background-color: rgba(103, 232, 249, 0.8);
-  box-shadow: 0 0 14px rgba(56, 189, 248, 0.28);
-}
-
-html:not([data-theme="dark"]) .ri-bench-hardware {
-  --tw-ring-color: rgba(255, 255, 255, 0.05);
-  background-color: rgba(0, 0, 0, 0.4);
-}
-
-html:not([data-theme="dark"]) .ri-bench-hardware-grid {
-  border-color: rgba(255, 255, 255, 0.1);
+  background-color: #38bdf8;
 }
 
 html:not([data-theme="dark"]) .ri-bench-hardware-label {
-  color: #64748b;
+  color: #94a3b8;
 }
 
 html:not([data-theme="dark"]) .ri-bench-hardware-value {
@@ -2352,23 +2241,6 @@ html[data-theme="dark"] .ri-service-icon {
   color: #cbb46c !important;
 }
 
-html[data-theme="dark"] .ri-bench-card-rail {
-  background-image: linear-gradient(
-    to bottom,
-    rgba(255, 255, 255, 0.5),
-    rgba(255, 255, 255, 0.08),
-    transparent
-  );
-}
-
-html[data-theme="dark"] .ri-bench-game-rule {
-  background-image: linear-gradient(
-    to right,
-    rgba(255, 255, 255, 0.58),
-    transparent
-  );
-}
-
 html[data-theme="dark"] .ri-hiw-step-badge {
   border-color: rgba(255, 255, 255, 0.2);
   background-color: rgba(255, 255, 255, 0.045);
@@ -2499,16 +2371,6 @@ html[data-theme="dark"] [class*="border-indigo-"] {
 .sparkle-icon,
 .glow-beam {
   contain: paint;
-}
-
-.blur-2xl,
-.blur-3xl {
-  contain: paint;
-}
-
-html.animations-ready .blur-2xl,
-html.animations-ready .blur-3xl {
-  will-change: transform;
 }
 
 .roo-logo-video {
@@ -2703,17 +2565,13 @@ html.low-performance-mode .glow-beam {
   opacity: 0.6 !important;
 }
 
-html.low-performance-mode .site-navbar-glass,
-html.low-performance-mode .blur-2xl,
-html.low-performance-mode .blur-3xl {
+html.low-performance-mode .site-navbar-glass {
   will-change: auto !important;
 }
 
 html.low-performance-mode .blur-sm,
 html.low-performance-mode .blur-lg,
 html.low-performance-mode .blur-xl,
-html.low-performance-mode .blur-2xl,
-html.low-performance-mode .blur-3xl,
 html.low-performance-mode [class*="blur-["] {
   display: none !important;
 }
@@ -2868,8 +2726,6 @@ html.perf-reduced-effects-mode .app-bg-radial-layer {
   opacity: 0.42 !important;
 }
 
-html.perf-reduced-effects-mode .blur-2xl,
-html.perf-reduced-effects-mode .blur-3xl,
 html.perf-reduced-effects-mode .scroll-blur-lite {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
