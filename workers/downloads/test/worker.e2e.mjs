@@ -173,7 +173,7 @@ before(async () => {
 
   await new Promise((resolve) => source.listen(0, "127.0.0.1", resolve));
   const sourceOrigin = `http://127.0.0.1:${source.address().port}`;
-  workerOrigins.r2 = await startWorker(["--env", "r2", "--persist-to", stateDir]);
+  workerOrigins.r2 = await startWorker(["--env=", "--persist-to", stateDir]);
   await waitHealthy(workerOrigins.r2);
   workerOrigins.origin = await startWorker(["--config", originConfig(sourceOrigin)]);
   await waitHealthy(workerOrigins.origin);

@@ -16,12 +16,11 @@ Workers in steps, starting with downloads, so each step can be proven and undone
 
 ## What moves, in order
 
-1. **Public downloads on a Worker** (this PR, live). `roo-downloads.rooindustries.workers.dev` serves the Tools page
-   installers and the Suite installer, streaming them from where they live today, with resumable ranges, caching
-   headers and a health route. Every file verifies byte for byte through it.
-2. **Those downloads on R2.** Enable R2, upload the same files and redeploy the Worker in R2 mode
-   (`npm run deploy:r2`), then turn on `TOOL_DOWNLOADS_ORIGIN` so the Tools page points at it. Done when every file
-   verifies from R2 and the switch has run a week in production without errors.
+1. **Public downloads on R2** (this PR, live). `roo-downloads.rooindustries.workers.dev` serves the Tools page
+   installers and the Suite installer from the `roo-downloads` R2 bucket, with resumable ranges, caching headers and
+   a health route. Every file verifies byte for byte through it.
+2. **The Tools page on the Worker.** Turn on `TOOL_DOWNLOADS_ORIGIN` in a preview deployment, click every hosted
+   tool, then in production. Done when the switch has run a week in production without errors.
 3. **Suite update feed and installers to R2.** The release script uploads to R2 instead of Vercel Blob. The feed URL
    is compiled into the app, so a release that reads the new feed ships first and the old feed stays up until
    testers have moved to it.
@@ -58,8 +57,8 @@ Workers in steps, starting with downloads, so each step can be proven and undone
 ## How we test each step
 
 - Downloads: `npm run verify` in `workers/downloads` against the live Worker for every file (size, SHA-256 and a
-  byte range) after each deploy, in origin mode now and in R2 mode next, and the Tools page clicked through with
-  the switch on in a preview deployment.
+  byte range) after each deploy and upload, and the Tools page clicked through with the switch on in a preview
+  deployment.
 - Site build: every CI suite (Jest, Playwright, Postgres 17, booking flow, payment persistence sweep, SEO and
   monitoring checks) runs against the OpenNext build in workerd, not just against `next start`.
 - Staging on workers.dev with Dodo in test mode: a full booking through checkout, the signed webhook and the
