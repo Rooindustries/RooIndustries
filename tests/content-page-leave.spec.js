@@ -106,6 +106,75 @@ test("a successful response cut off by leaving the page reports no error", async
   expect(errors).toEqual([]);
 });
 
+const withBackForwardCache = async ({ playwright, browserName, launchOptions, headless, baseURL }, run) => {
+  const browser = await playwright[browserName].launch({
+    ...launchOptions,
+    headless,
+    ignoreDefaultArgs: ["--disable-back-forward-cache"],
+  });
+  try {
+    const context = await browser.newContext({ baseURL, javaScriptEnabled: true, viewport: { width: 1440, height: 900 } });
+    const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+    await guardBrowserContext(context, [baseURL]);
+    await context.addInitScript(() => {
+      window.addEventListener("pageshow", (event) => {
+        if (event.persisted) window.restoredFromCache = true;
+      });
+    });
+    await run(await context.newPage());
+  } finally {
+    await browser.close();
+  }
+};
+
+const leaveTermsAndComeBack = async (page, respond, { disconnectWhileAway = false } = {}) => {
+  const server = await startTermsServer(respond);
+  try {
+    await page.route("**/api/content/terms", (request) => request.continue({ url: server.url }));
+    const errors = collectConsoleErrors(page);
+    const headersReceived = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/content/terms");
+    await page.goto("/terms");
+    await headersReceived;
+    await page.goto("/contact");
+    await expect(page.locator("main h1").first()).toBeVisible();
+    if (disconnectWhileAway) await server.close();
+    await page.goBack({ waitUntil: "commit" });
+    await expect.poll(() => page.evaluate(() => window.restoredFromCache === true)).toBe(true);
+    return errors;
+  } finally {
+    await server.close();
+  }
+};
+
+for (const [status, body, disconnectWhileAway] of [
+  [200, '{"ok":true,"data":', false],
+  [503, '{"ok":false,', false],
+  [503, '{"ok":false,', true],
+]) {
+  const when = disconnectWhileAway ? "while the page sits in" : "after the page is restored from";
+  test(`a ${status} response cut off ${when} the back/forward cache is reported`, async ({
+    playwright,
+    browserName,
+    launchOptions,
+    headless,
+    baseURL,
+  }) => {
+    await withBackForwardCache({ playwright, browserName, launchOptions, headless, baseURL }, async (page) => {
+      const errors = await leaveTermsAndComeBack(
+        page,
+        (response) => {
+          response.writeHead(status, { "content-type": "application/json" });
+          response.write(body);
+        },
+        { disconnectWhileAway }
+      );
+      const appReports = () => errors.filter((text) => !text.startsWith("Failed to load resource"));
+
+      await expect.poll(() => appReports().length).toBeGreaterThan(0);
+    });
+  });
+}
+
 test("a malformed successful response is reported while the visitor stays", async ({ page }) => {
   const server = await startTermsServer((response) => {
     response.writeHead(200, { "content-type": "application/json" });

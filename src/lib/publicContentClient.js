@@ -28,7 +28,11 @@ export const getPublicContent = async (resource, params = {}, options = {}) => {
   const markPageLeft = () => {
     pageLeft = true;
   };
+  const markPageShown = () => {
+    pageLeft = false;
+  };
   window.addEventListener("pagehide", markPageLeft);
+  window.addEventListener("pageshow", markPageShown);
   const markCancelled = (error) => {
     const aborted = options.signal?.aborted || pageLeft;
     const abortError =
@@ -55,6 +59,7 @@ export const getPublicContent = async (resource, params = {}, options = {}) => {
     return body.data ?? null;
   } finally {
     window.removeEventListener("pagehide", markPageLeft);
+    window.removeEventListener("pageshow", markPageShown);
     pendingRequests -= 1;
   }
 };
