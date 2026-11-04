@@ -4,6 +4,7 @@ import { FaDiscord } from "react-icons/fa";
 import packagePricing from "../lib/packagePricing";
 import { readBookingPackageSelection } from "../lib/checkoutStorage";
 import PaymentMethods from "./PaymentMethods";
+import { scrollWindowTo } from "../lib/scrollWindowTo";
 
 const { isTopPackageTitle } = packagePricing;
 
@@ -25,7 +26,7 @@ export default function Footer() {
     );
 
   const scrollToTop = () => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollWindowTo(0);
   };
 
   return (

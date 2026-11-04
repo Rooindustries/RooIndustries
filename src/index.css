@@ -3180,6 +3180,10 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto !important;
+  }
+
   .ri-reveal {
     animation: none;
   }
