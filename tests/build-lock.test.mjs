@@ -84,7 +84,7 @@ const stopTree = async (roots, group) => {
 const runWrapper = (dir, body, { command = [process.execPath], from = library } = {}) => {
   const child = spawn(command[0], [...command.slice(1), "--input-type=module", "-e", `import { spawn } from "node:child_process";
 const { lockBuildDirectory } = await import(${JSON.stringify(from)});
-const lock = await lockBuildDirectory(${JSON.stringify(dir)});
+const lock = lockBuildDirectory(${JSON.stringify(dir)});
 ${body}`], { stdio: ["ignore", "pipe", "inherit"], detached: true });
   const lines = [];
   child.stdout.on("data", (chunk) => lines.push(...String(chunk).trim().split("\n")));
@@ -94,10 +94,10 @@ ${body}`], { stdio: ["ignore", "pipe", "inherit"], detached: true });
 };
 const startBuilder = `const builder = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: ["ignore", "ignore", "ignore", lock.fd] });
 console.log(builder.pid);`;
-const refused = async (dir) => {
-  await assert.rejects(async () => await lockBuildDirectory(dir), { code: "ELOCKED" });
+const refused = (dir) => {
+  assert.throws(() => lockBuildDirectory(dir), { code: "ELOCKED" });
 };
-const reclaim = async (dir) => (await lockBuildDirectory(dir)).release();
+const reclaim = (dir) => lockBuildDirectory(dir).release();
 const neverAcquirableWhileAlive = async (dir, pids) => {
   for (let check = 0; check < 10; check += 1) {
     let lock;
@@ -126,14 +126,14 @@ test("a locked build directory is refused to other runs and offered as the next 
   const wrapper = runWrapper(dir, 'console.log("locked");\nsetInterval(() => {}, 1000);');
   try {
     await waitFor(() => wrapper.lines.includes("locked"), 10000, wrapper.ended);
-    await refused(dir);
-    const next = await lockBuildDirectory(dir, { slots: 3 });
+    refused(dir);
+    const next = lockBuildDirectory(dir, { slots: 3 });
     assert.equal(next.dir, `${dir}-2`);
-    await next.release();
+    next.release();
   } finally {
     await wrapper.stop();
   }
-  await reclaim(dir);
+  reclaim(dir);
 });
 
 test("a run in another network namespace cannot take the same directory", async () => {
@@ -141,11 +141,11 @@ test("a run in another network namespace cannot take the same directory", async 
   const wrapper = runWrapper(dir, 'console.log("locked");\nsetInterval(() => {}, 1000);', { command: ["unshare", "--user", "--map-root-user", "--net", process.execPath] });
   try {
     await waitFor(() => wrapper.lines.includes("locked"), 10000, wrapper.ended);
-    await refused(dir);
+    refused(dir);
   } finally {
     await wrapper.stop();
   }
-  await reclaim(dir);
+  reclaim(dir);
 });
 
 test("a builder holds the lock from the moment it is spawned, even if its wrapper is killed at once", async () => {
@@ -154,11 +154,11 @@ test("a builder holds the lock from the moment it is spawned, even if its wrappe
   try {
     await wrapper.exited;
     assert.ok(alive(Number(wrapper.lines[0])));
-    await refused(dir);
+    refused(dir);
   } finally {
     await wrapper.stop();
   }
-  await reclaim(dir);
+  reclaim(dir);
 });
 
 test("deleting files beside the directory never frees a lock that a builder holds", async () => {
@@ -169,11 +169,11 @@ test("deleting files beside the directory never frees a lock that a builder hold
     wrapper.child.kill("SIGKILL");
     await wrapper.exited;
     for (const entry of fs.readdirSync(path.dirname(dir))) if (entry !== path.basename(dir)) fs.rmSync(path.join(path.dirname(dir), entry), { recursive: true, force: true });
-    await refused(dir);
+    refused(dir);
   } finally {
     await wrapper.stop();
   }
-  await reclaim(dir);
+  reclaim(dir);
 });
 
 test("a wrapper that exits never signals its builder, which keeps the lock until it ends", async () => {
@@ -183,24 +183,38 @@ test("a wrapper that exits never signals its builder, which keeps the lock until
     await wrapper.exited;
     await pause(200);
     assert.ok(alive(Number(wrapper.lines[0])));
-    await refused(dir);
+    refused(dir);
   } finally {
     await wrapper.stop();
   }
-  await reclaim(dir);
+  reclaim(dir);
 });
 
-test("files and process ids left by an earlier run never block the lock", async () => {
+test("the next owner replaces the token record, so processes carrying the earlier token are refused", () => {
   const dir = scratchDir();
-  fs.writeFileSync(`${dir}.lock`, JSON.stringify({ owner: process.pid, groups: [Number(fs.readFileSync("/proc/self/stat", "utf8").split(") ")[1].split(" ")[2])] }));
-  await reclaim(dir);
-  fs.writeFileSync(`${dir}.lock`, "{not json");
-  await reclaim(dir);
+  const joinBuild = (env) => spawnSync(process.execPath, ["-e", ""], { env, encoding: "utf8", timeout: 30000 });
+  const first = lockBuildDirectory(dir);
+  const earlier = first.childEnv({ PATH: process.env.PATH });
+  first.release();
+  fs.writeFileSync(`${dir}.build-lock`, "left by an earlier run");
+  const second = lockBuildDirectory(dir);
+  try {
+    const current = second.childEnv({ PATH: process.env.PATH });
+    assert.equal(fs.readFileSync(`${dir}.build-lock`, "utf8"), current.ROO_BUILD_LOCK_TOKEN);
+    assert.notEqual(current.ROO_BUILD_LOCK_TOKEN, earlier.ROO_BUILD_LOCK_TOKEN);
+    const stale = joinBuild(earlier);
+    assert.equal(stale.status, 1);
+    assert.match(stale.stderr, /belongs to another run/);
+    const joined = joinBuild(current);
+    assert.equal(joined.status, 0, joined.stderr);
+  } finally {
+    second.release();
+  }
 });
 
 test("a former owner exiting never frees the lock of the run after it", async () => {
   const dir = scratchDir();
-  const former = runWrapper(dir, 'await lock.release();\nprocess.on("SIGTERM", () => process.exit(0));\nconsole.log("released");\nsetInterval(() => {}, 1000);');
+  const former = runWrapper(dir, 'lock.release();\nprocess.on("SIGTERM", () => process.exit(0));\nconsole.log("released");\nsetInterval(() => {}, 1000);');
   let current;
   try {
     await waitFor(() => former.lines.includes("released"), 10000, former.ended);
@@ -210,12 +224,12 @@ test("a former owner exiting never frees the lock of the run after it", async ()
     await former.exited;
     current.child.kill("SIGKILL");
     await current.exited;
-    await refused(dir);
+    refused(dir);
   } finally {
     await former.stop();
     await current?.stop();
   }
-  await reclaim(dir);
+  reclaim(dir);
 });
 
 test("the lock refuses to run without Linux and util-linux flock", () => {
@@ -255,7 +269,7 @@ const outlivingWorker = async (from) => {
   } finally {
     await wrapper.stop();
   }
-  await reclaim(dir);
+  reclaim(dir);
 };
 
 test("a forked worker that outlives its wrapper and its parent keeps the directory locked", async () => {
@@ -292,7 +306,7 @@ while (!fs.existsSync(${JSON.stringify(go)})) Atomics.wait(new Int32Array(new Sh
     next?.release();
     await wrapper.stop();
   }
-  await reclaim(dir);
+  reclaim(dir);
 });
 
 test("the UI sweep build directory stays locked while the wrapper, next dev or its server still runs", { timeout: 120000 }, async () => {
@@ -326,7 +340,7 @@ test("the UI sweep build directory stays locked while the wrapper, next dev or i
   } finally {
     await stopTree([ui.pid, ...tree], ui.pid);
   }
-  await reclaim(dist);
+  reclaim(dist);
 });
 
 test("a production build stays locked while the wrapper, next build or any build worker still runs", { timeout: 300000 }, async () => {
@@ -357,5 +371,5 @@ test("a production build stays locked while the wrapper, next build or any build
   } finally {
     await stopTree([wrapper.pid, ...tree], wrapper.pid);
   }
-  await reclaim(dist);
+  reclaim(dist);
 });
