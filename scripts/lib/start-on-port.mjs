@@ -137,22 +137,31 @@ export const signalIfUnchanged = (pid, startTime, signal) => {
   }
 };
 
+const known = new WeakMap();
+
 const family = (children) => {
   const table = processTable();
-  const wanted = new Set(children.map((child) => running.get(child)).filter(Boolean));
-  const found = new Set(children.filter((child) => child.pid && !exited(child)).map((child) => child.pid));
-  for (const pid of table.keys()) if (wanted.size && [...wanted].some((marker) => carriesMarker(pid, marker))) found.add(pid);
-  for (let grew = true; grew;) {
-    grew = false;
-    for (const [pid, { parent }] of table) {
-      if (!found.has(pid) && found.has(parent)) {
-        found.add(pid);
-        grew = true;
+  const members = new Map();
+  for (const child of children) {
+    const marker = running.get(child);
+    const found = new Set([...(known.get(child) || [])].filter(([pid, startTime]) => table.get(pid)?.startTime === startTime).map(([pid]) => pid));
+    if (child.pid && !exited(child)) found.add(child.pid);
+    if (marker) for (const pid of table.keys()) if (carriesMarker(pid, marker)) found.add(pid);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const [pid, { parent }] of table) {
+        if (!found.has(pid) && found.has(parent)) {
+          found.add(pid);
+          grew = true;
+        }
       }
     }
+    found.delete(process.pid);
+    const live = new Map([...found].filter((pid) => table.get(pid) && table.get(pid).state !== "Z").map((pid) => [pid, table.get(pid).startTime]));
+    known.set(child, live);
+    for (const [pid, startTime] of live) members.set(pid, startTime);
   }
-  found.delete(process.pid);
-  return new Map([...found].filter((pid) => table.get(pid) && table.get(pid).state !== "Z").map((pid) => [pid, table.get(pid).startTime]));
+  return members;
 };
 
 const signalEach = (pids, signal) => {
