@@ -218,6 +218,8 @@ const launcher = (held) => (command, args, options = {}) => {
   return child;
 };
 
+export const spawnContained = launcher({ stdio: [], env: {} });
+
 const waitUntilReady = async ({ child, host, ports, isReady, output, timeout, failure }) => {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { once } from "node:events";
 import { test } from "node:test";
 import { holdGroupMembers, releaseGroupMembers, signalGroup, spawnGroup } from "../scripts/lib/process-group.mjs";
+import { spawnContained, stopChild } from "../scripts/lib/start-on-port.mjs";
 
 const zombie = (pid) => {
   try {
@@ -51,4 +52,20 @@ test("signalGroup stops the whole group while its leader is running", async () =
   const gone = () => !fs.existsSync(`/proc/${grandchild}`) || zombie(grandchild);
   while (!gone() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(releaseGroupMembers(members), 0);
+});
+
+test("stopping a contained child ends a descendant that ignores SIGTERM and keeps its output open", async () => {
+  const child = spawnContained(process.execPath, ["-e", `
+    const { spawn } = require("node:child_process");
+    spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); process.stdout.write('ready'); setInterval(() => {}, 1000)"], { stdio: ["ignore", "inherit", "ignore"] });
+    setInterval(() => {}, 1000);
+  `], { stdio: ["ignore", "pipe", "ignore"] });
+  await once(child.stdout, "data");
+  const closed = once(child, "close");
+  await stopChild(child, 200);
+  let timer;
+  const stuck = new Promise((resolve) => { timer = setTimeout(() => resolve("stuck"), 5000); });
+  const result = await Promise.race([closed.then(() => "closed"), stuck]);
+  clearTimeout(timer);
+  assert.equal(result, "closed", "a descendant that ignored SIGTERM kept the child's output open");
 });

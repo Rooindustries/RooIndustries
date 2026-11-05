@@ -7,17 +7,16 @@ import { homedir, networkInterfaces } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { freeTcpPorts } from './lib/free-tcp-port.mjs';
-import { signalGroup, spawnGroup } from './lib/process-group.mjs';
+import { spawnGroup } from './lib/process-group.mjs';
+import { spawnContained, stopChild } from './lib/start-on-port.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const delay = ms => new Promise(done => setTimeout(done, ms));
 const stop = async child => {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
   const closed = new Promise(done => child.once('close', done));
-  signalGroup(child, 'SIGTERM');
-  const force = setTimeout(() => signalGroup(child, 'SIGKILL'), 5000);
+  await stopChild(child);
   await closed;
-  clearTimeout(force);
 };
 
 if (process.argv[2] !== '--sandbox') {
@@ -140,7 +139,7 @@ export function GET() { throw new Error('Fixture edge error'); }
   let active;
   let browser;
   const execute = async (name, args, env, timeout = 300000) => {
-    active = spawnGroup(process.execPath, args, { cwd: work, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    active = spawnContained(process.execPath, args, { cwd: work, env, stdio: ['ignore', 'pipe', 'pipe'] });
     const logs = [];
     active.stdout.on('data', chunk => logs.push(chunk));
     active.stderr.on('data', chunk => logs.push(chunk));
@@ -190,7 +189,7 @@ export function GET() { throw new Error('Fixture edge error'); }
       const env = environment({ ...mode.env, NEXT_DIST_DIR: dist });
       console.log(`checking ${mode.name}`);
       if (!mode.dev && !mode.reuse) await execute(`${mode.name}-build`, [next, 'build'], env);
-      active = spawnGroup(process.execPath, [next, mode.dev ? 'dev' : 'start', '--hostname', '127.0.0.1', '--port', new URL(site).port],
+      active = spawnContained(process.execPath, [next, mode.dev ? 'dev' : 'start', '--hostname', '127.0.0.1', '--port', new URL(site).port],
         { cwd: work, env, stdio: ['ignore', 'pipe', 'pipe'] });
       const logs = [];
       active.stdout.on('data', chunk => logs.push(chunk));

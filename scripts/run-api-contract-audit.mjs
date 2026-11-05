@@ -1,8 +1,7 @@
-import { spawn } from "node:child_process";
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
 import { portFromEnv } from "./lib/free-tcp-port.mjs";
-import { startChildOnPorts } from "./lib/start-on-port.mjs";
-import { signalGroup, trackGroupLeader } from "./lib/process-group.mjs";
+import { spawnContained, startChildOnPorts, stopChild } from "./lib/start-on-port.mjs";
+import { signalGroup } from "./lib/process-group.mjs";
 
 refuseEnvFiles();
 const host = process.env.ROO_TEST_HOST || "127.0.0.1";
@@ -32,10 +31,9 @@ const configure = ([port, contentPort]) => {
 const children = new Map();
 let stopping = false;
 
-const launch = (args, stdio = "inherit", start = spawn) => {
+const launch = (args, stdio = "inherit", start = spawnContained) => {
   if (stopping) throw new Error("API audit was stopped.");
-  const child = start(process.execPath, args, { env, stdio, detached: process.platform !== "win32" });
-  if (process.platform !== "win32") trackGroupLeader(child);
+  const child = start(process.execPath, args, { env, stdio });
   const closed = new Promise(resolve => {
     child.once("error", error => resolve({ error }));
     child.once("close", (code, signal) => resolve({ code, signal }));
@@ -48,9 +46,8 @@ const launch = (args, stdio = "inherit", start = spawn) => {
 const stopChildren = async () => {
   stopping = true;
   await Promise.all([...children].map(async ([child, closed]) => {
-    signalGroup(child, "SIGTERM");
-    const timer = setTimeout(() => signalGroup(child, "SIGKILL"), 15000);
-    try { await closed; } finally { clearTimeout(timer); }
+    await stopChild(child, 15000);
+    await closed;
   }));
   children.clear();
 };
