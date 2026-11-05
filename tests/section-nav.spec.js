@@ -2,6 +2,7 @@ const testHost = process.env.ROO_TEST_HOST || '127.0.0.1';
 const fs = require("fs");
 const path = require("path");
 const { test, expect } = require("@playwright/test");
+const { waitForHydrated } = require("./fixtures/react-hydration.cjs");
 
 const BASE_URL = process.env.BASE_URL;
 if (!BASE_URL) {
@@ -70,7 +71,7 @@ const FLOW_ORIGINS = [
       const viewport = page.viewportSize();
       await page.setViewportSize({ width: 390, height: 844 });
       await page.goto("/", { waitUntil: "domcontentloaded" });
-      await waitForReactHydratedSelector(page, 'button[aria-label="Open menu"]');
+      await waitForHydrated(page, 'button[aria-label="Open menu"]');
       await page.getByRole("button", { name: "Open menu" }).click();
       await page.getByRole("link", { name: "Meet the Team" }).first().click();
       await page.waitForURL(`${BASE_URL}/meet-the-team`);
@@ -82,7 +83,7 @@ const FLOW_ORIGINS = [
     route: "/reviews",
     open: async (page) => {
       await page.goto("/", { waitUntil: "domcontentloaded" });
-      await waitForReactHydratedSelector(
+      await waitForHydrated(
         page,
         'button[aria-controls="desktop-proof-menu"]'
       );
@@ -102,7 +103,7 @@ const FLOW_ORIGINS = [
     route: "/benchmarks",
     open: async (page) => {
       await page.goto("/", { waitUntil: "domcontentloaded" });
-      await waitForReactHydratedSelector(
+      await waitForHydrated(
         page,
         'button[aria-controls="desktop-proof-menu"]'
       );
@@ -193,24 +194,10 @@ const waitForTargetSettle = async (page, hash, timeoutMs) => {
   };
 };
 
-const waitForReactHydratedSelector = async (page, selector) => {
-  await page.waitForFunction(
-    (targetSelector) => {
-      const element = document.querySelector(targetSelector);
-      return Boolean(
-        element &&
-          Object.keys(element).some((key) => key.startsWith("__reactProps$"))
-      );
-    },
-    selector,
-    { timeout: 10000 }
-  );
-};
-
 const clickNav = async (page, target, viewportName) => {
   if (viewportName === "mobile") {
     const menuButtonSelector = 'button[aria-label="Open menu"]';
-    await waitForReactHydratedSelector(page, menuButtonSelector);
+    await waitForHydrated(page, menuButtonSelector);
 
     const menuButton = page.getByRole("button", { name: "Open menu" });
     await menuButton.click();

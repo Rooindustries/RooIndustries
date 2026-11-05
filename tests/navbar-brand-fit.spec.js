@@ -1,7 +1,8 @@
 const { test, expect } = require("@playwright/test");
 const { waitForHydrated } = require("./fixtures/react-hydration.cjs");
 
-const WIDTHS = [320, 360, 390, 640, 700, 767, 768, 800, 820, 900, 1023, 1024, 1280, 1440];
+const WIDTHS = [320, 340, 360, 375, 390, 640, 700, 767, 768, 800, 820, 900, 1023, 1024, 1100, 1180, 1279, 1280, 1440];
+const TABLET_WIDTHS = [768, 820, 900, 1023];
 const PAGES = ["/", "/benchmarks"];
 const MIN_GAP = 4;
 const BRAND_LINK = 'header [data-nav-row] a[href="/"]';
@@ -101,11 +102,21 @@ for (const path of PAGES) {
   });
 }
 
+for (const width of TABLET_WIDTHS) {
+  test(`at ${width} px the bar keeps the back button, the brand and the menu button`, async ({ page }) => {
+    await openPage(page, "/benchmarks", { width, height: 900 });
+    const row = page.locator("header [data-nav-row]");
+    await expect(row.getByRole("button", { name: "Go Back" })).toBeVisible();
+    await expect(row.getByText("Roo Industries", { exact: true }).filter({ visible: true })).toHaveCount(1);
+    await expect(row.getByRole("button", { name: "Open menu" })).toBeVisible();
+    await expect(page.locator('[data-nav-surface="desktop"][data-nav-target="benefits"]')).toBeHidden();
+  });
+}
+
 test("below 1024 px the menu button opens the site menu and Escape closes it", async ({ page }) => {
   await openPage(page, "/", { width: 1023, height: 900 });
   const menuButton = page.getByRole("button", { name: "Open menu" });
   const menu = page.locator("#mobile-site-menu");
-  await expect(page.locator('[data-nav-surface="desktop"][data-nav-target="benefits"]')).toBeHidden();
   await menuButton.click();
   await expect(menu).toHaveAttribute("aria-hidden", "false");
   await page.keyboard.press("Escape");
@@ -125,22 +136,48 @@ test("from 1024 px the Proof and Referrals menus open in the bar and close on an
   }
 });
 
+async function waitForHeaderToSettle(page) {
+  await expect.poll(() => page.evaluate(() => document.querySelector("header").getAnimations({ subtree: true }).length))
+    .toBe(0);
+}
+
+async function expectMenuFitsScreen(page, viewport) {
+  await waitForHeaderToSettle(page);
+  const menu = page.locator("#mobile-site-menu");
+  const menuBox = await menu.boundingBox();
+  expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(viewport.height + 1);
+  const lastLink = menu.locator("a").last();
+  await page.mouse.move(menuBox.x + menuBox.width / 2, menuBox.y + menuBox.height / 2);
+  await expect.poll(async () => {
+    await page.mouse.wheel(0, 400);
+    const box = await lastLink.boundingBox();
+    return box.y + box.height <= viewport.height;
+  }).toBe(true);
+}
+
 for (const viewport of [{ width: 844, height: 390 }, { width: 667, height: 375 }]) {
   test(`site menu scrolls to its last link on a sideways phone at ${viewport.width}x${viewport.height}`, async ({
     page,
   }) => {
     await openPage(page, "/", viewport);
     await page.getByRole("button", { name: "Open menu" }).click();
-    const menu = page.locator("#mobile-site-menu");
-    await expect(menu).toHaveAttribute("aria-hidden", "false");
-    const menuBox = await menu.boundingBox();
-    expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(viewport.height + 1);
-    const lastLink = menu.locator("a").last();
-    await page.mouse.move(menuBox.x + menuBox.width / 2, menuBox.y + menuBox.height / 2);
-    await expect.poll(async () => {
-      await page.mouse.wheel(0, 400);
-      const box = await lastLink.boundingBox();
-      return box.y + box.height <= viewport.height;
-    }).toBe(true);
+    await expect(page.locator("#mobile-site-menu")).toHaveAttribute("aria-hidden", "false");
+    await expectMenuFitsScreen(page, viewport);
   });
 }
+
+test("site menu refits when the Discord banner slides back in on a sideways phone", async ({ page }) => {
+  const viewport = { width: 844, height: 390 };
+  const banner = page.locator(".ri-discord-guide-banner");
+  await openPage(page, "/", viewport);
+  await page.evaluate(() => window.scrollTo(0, 600));
+  await expect(banner).toHaveAttribute("aria-hidden", "true");
+  await waitForHeaderToSettle(page);
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await expect(page.locator("#mobile-site-menu")).toHaveAttribute("aria-hidden", "false");
+  await waitForHeaderToSettle(page);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(banner).not.toHaveAttribute("aria-hidden", "true");
+  await expect(banner).toBeVisible();
+  await expectMenuFitsScreen(page, viewport);
+});

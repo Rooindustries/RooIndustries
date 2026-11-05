@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { FaDiscord } from "react-icons/fa";
 import { Moon, Tv } from "lucide-react";
@@ -80,7 +80,6 @@ export default function Navbar() {
   const [open, setOpen] = useState(false);
   const [proofOpen, setProofOpen] = useState(false);
   const [referralsOpen, setReferralsOpen] = useState(false);
-  const [menuMaxHeight, setMenuMaxHeight] = useState(null);
   const [theme, setTheme] = useState("dark");
   // Keep initial server/client markup identical, then upgrade to animated mode on mount.
   const [smallLogoMode, setSmallLogoMode] = useState("static");
@@ -238,17 +237,6 @@ export default function Navbar() {
     return () => document.removeEventListener("keydown", handleEscape);
   }, [open]);
 
-  useLayoutEffect(() => {
-    if (!open) return;
-    const fitMenuToScreen = () => {
-      const rowBottom = navRowRef.current?.getBoundingClientRect().bottom ?? 0;
-      setMenuMaxHeight(Math.max(0, Math.floor(window.innerHeight - rowBottom)));
-    };
-    fitMenuToScreen();
-    window.addEventListener("resize", fitMenuToScreen);
-    return () => window.removeEventListener("resize", fitMenuToScreen);
-  }, [open]);
-
   useEffect(() => {
     if ((!proofOpen && !referralsOpen) || typeof window === "undefined") return;
     if (!window.matchMedia(DESKTOP_NAV_QUERY).matches) return;
@@ -330,7 +318,7 @@ export default function Navbar() {
   return (
     <header
       ref={headerRef}
-      className={`site-nav site-navbar-glass glass-premium glass-scroll-lite fixed top-0 left-0 right-0 z-50 overflow-visible border-b transition-all duration-300 ${
+      className={`site-nav site-navbar-glass glass-premium glass-scroll-lite fixed top-0 left-0 right-0 z-50 flex max-h-[100dvh] flex-col overflow-visible border-b transition-all duration-300 ${
         scrolled
           ? "border-[color:var(--navbar-border-scrolled)]"
           : "border-[color:var(--navbar-border-rest)]"
@@ -349,13 +337,13 @@ export default function Navbar() {
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-[color:var(--color-accent-soft)] to-transparent z-0" />
 
-      <div className="relative z-10 hidden md:block">
+      <div className="relative z-10 hidden shrink-0 md:block">
         <DiscordGuideBanner hidden={bannerHidden} />
       </div>
 
-      <div className="relative z-10 mx-auto max-w-7xl overflow-visible px-4 sm:px-6">
-        <div ref={navRowRef} data-nav-row className="flex h-20 items-center overflow-visible sm:h-24">
-          <div className="hidden min-w-0 flex-1 items-center gap-4 lg:flex">
+      <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-7xl flex-col overflow-visible px-4 sm:px-6">
+        <div ref={navRowRef} data-nav-row className="flex h-20 shrink-0 items-center overflow-visible sm:h-24">
+          <div className="hidden min-w-0 flex-1 items-center gap-4 md:flex">
             {location.pathname !== "/" ? (
               <BackButton hidden={false} inline={true} />
             ) : null}
@@ -398,11 +386,11 @@ export default function Navbar() {
             </Link>
           </div>
 
-          <div className="ml-0 flex w-full min-w-0 items-center gap-2 lg:ml-auto lg:w-auto lg:justify-end lg:gap-3">
+          <div className="ml-0 flex w-full min-w-0 items-center gap-2 md:ml-auto md:w-auto md:justify-end md:gap-3">
             <Link
               to="/"
               onClick={handleHomeClick}
-              className="flex min-w-0 flex-1 items-center gap-1.5 select-none lg:hidden min-[360px]:gap-2"
+              className="flex min-w-0 flex-1 items-center gap-1.5 select-none md:hidden min-[360px]:gap-2"
             >
               <div className="relative grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-lg min-[360px]:h-10 min-[360px]:w-10 sm:h-12 sm:w-12 sm:rounded-xl">
                 <img
@@ -661,7 +649,7 @@ export default function Navbar() {
               role="switch"
               aria-checked={theme === "dark"}
               onClick={handleThemeToggle}
-              className={`theme-switch hidden shrink-0 lg:inline-flex lg:ml-3 ${focusRing}`}
+              className={`theme-switch hidden shrink-0 md:inline-flex md:ml-3 ${focusRing}`}
               aria-label={`Switch to ${nextThemeLabel} theme. Current theme: ${themeLabel}`}
               title={`Theme: ${themeLabel}, switch to ${nextThemeLabel}`}
             >
@@ -683,12 +671,11 @@ export default function Navbar() {
         <div
           id="mobile-site-menu"
           inert={!open}
-          className={`lg:hidden transition-all duration-300 ease-out ${
+          className={`min-h-0 lg:hidden transition-all duration-300 ease-out ${
             open
               ? "pb-4 max-h-[680px] overflow-y-auto overscroll-contain opacity-100 translate-y-0"
               : "max-h-0 overflow-hidden opacity-0 -translate-y-2 pointer-events-none"
           }`}
-          style={open && menuMaxHeight !== null ? { maxHeight: `min(680px, ${menuMaxHeight}px)` } : undefined}
           aria-hidden={!open}
         >
           <div className="glass-premium glass-menu-surface mt-2 transition-all duration-300">
