@@ -223,6 +223,35 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  reproducible-build:
+    name: Reproducible build sizes
+    needs: tested-tree
+    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      ROO_TEST_HOST: 127.0.0.1
+      BASE_URL: http://127.0.0.1:3211
+      PW_PORT: "3211"
+      PW_SERVER_ID: ci
+      NEXT_DIST_DIR: .next-e2e-ci
+      TOOLING_API_ROUTES: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: 22
+      - name: Restore the browser suites' build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .next-e2e-ci/cache/webpack
+          key: next-build-playwright-${{ hashFiles('package-lock.json', 'next.config.mjs') }}-${{ github.sha }}
+          restore-keys: next-build-playwright-${{ hashFiles('package-lock.json', 'next.config.mjs') }}-
+      - name: Build with that cache and again from a clean second checkout, then compare
+        run: bash scripts/check-reproducible-build.sh "$RUNNER_TEMP/reproducible/second-checkout"
+
   routes:
     name: Playwright creator portal and API routes
     needs: tested-tree
@@ -435,11 +464,12 @@ jobs:
       && needs.jest.result == 'success'
       && needs.booking-model.result == 'success'
       && needs.playwright.result == 'success'
+      && needs.reproducible-build.result == 'success'
       && needs.routes.result == 'success'
       && needs.native.result == 'success'
       && needs.native-payouts.result == 'success'
       && needs.revalidation.result == 'success'
-    needs: [monitoring, jest, booking-model, playwright, routes, native, native-payouts, revalidation]
+    needs: [monitoring, jest, booking-model, playwright, reproducible-build, routes, native, native-payouts, revalidation]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
