@@ -2,6 +2,7 @@ import { withSentryConfig } from "@sentry/nextjs/config";
 import { readdirSync, lstatSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { isProductionDeployment } from "./src/lib/monitoring/deployment.mjs";
+import { makeBuildReproducible } from "./scripts/lib/reproducible-build.mjs";
 
 export function validateDistDir(value, { isolated = false } = {}) {
   if (typeof value !== "string" || !/^\.next(?:-[a-zA-Z0-9_-]+)?$/.test(value) ||
@@ -111,6 +112,7 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
   webpack(config, { isServer, dev }) {
+    if (!dev) makeBuildReproducible(config);
     if (!isServer && !dev) {
       config.optimization.splitChunks.cacheGroups.default = false;
       config.optimization.splitChunks.cacheGroups.rooMotion = {
