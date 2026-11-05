@@ -73,7 +73,7 @@
       "css": 26624
     },
     "/referrals/dashboard": {
-      "js": 239616,
+      "js": 173056,
       "css": 26624
     },
     "/referrals/forgot": {
@@ -85,7 +85,7 @@
       "css": 26624
     },
     "/referrals/register": {
-      "js": 168960,
+      "js": 167936,
       "css": 26624
     },
     "/referrals/reset": {
@@ -187,7 +187,7 @@
       "css": 1024
     },
     "src/App.jsx -> ./legacyPages/RefDashboard": {
-      "js": 79872,
+      "js": 14336,
       "css": 1024
     },
     "src/App.jsx -> ./legacyPages/RefForgot": {
@@ -195,11 +195,11 @@
       "css": 1024
     },
     "src/App.jsx -> ./legacyPages/RefLogin": {
-      "js": 114688,
+      "js": 10240,
       "css": 1024
     },
     "src/App.jsx -> ./legacyPages/RefRegister": {
-      "js": 74752,
+      "js": 8192,
       "css": 1024
     },
     "src/App.jsx -> ./legacyPages/RefReset": {
