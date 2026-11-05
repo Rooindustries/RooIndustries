@@ -2,6 +2,7 @@ const testHost = process.env.ROO_TEST_HOST || '127.0.0.1';
 const fs = require("fs");
 const path = require("path");
 const { test, expect } = require("@playwright/test");
+const { waitForHydrated } = require("./fixtures/react-hydration.cjs");
 
 const BASE_URL = process.env.BASE_URL;
 if (!BASE_URL) {
@@ -219,10 +220,7 @@ test("latest rapid navbar click wins across section and route transitions", asyn
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/meet-the-team", { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(() => {
-    const button = document.querySelector('button[aria-label="Open menu"]');
-    return button && Object.keys(button).some(key => key.startsWith("__reactProps$"));
-  });
+  await waitForHydrated(page, 'button[aria-label="Open menu"]');
   await page.getByRole("button", { name: "Open menu" }).click();
   await page.locator('[data-nav-surface="mobile"][data-nav-target="faq"]').click();
   await page.waitForTimeout(10);

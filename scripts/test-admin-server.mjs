@@ -6,12 +6,14 @@ import { registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
+import { lockBuildDirectory } from "./lib/build-lock.mjs";
 
 refuseEnvFiles();
 const root = process.cwd();
 const baseURL = localOrigin(process.env.BASE_URL);
 const target = new URL(baseURL);
 const dist = validateDistDir(process.env.NEXT_DIST_DIR, { isolated: true });
+const lock = lockBuildDirectory(dist);
 const port = Number(target.port);
 if (port !== Number(process.env.PW_PORT) || target.hostname !== process.env.ROO_TEST_HOST || port > 65528) throw new Error("Invalid admin fixture target.");
 const controlOrigin = `http://127.0.0.1:${port + 6}`;
@@ -306,7 +308,7 @@ try {
     ROO_TEST_NETWORK_ORIGINS: JSON.stringify([baseURL, fixture.origin, fixture.storageUrl, fixture.postgrestUrl, controlOrigin]),
   };
   const execute = args => new Promise((resolve, reject) => {
-    active = spawn(process.execPath, args, { env, stdio: "inherit" });
+    active = spawn(process.execPath, args, { env: lock.childEnv(env), stdio: ["inherit", "inherit", "inherit", lock.fd] });
     active.once("error", reject);
     active.once("exit", (code, signal) => code === 0 || stopped ? resolve() : reject(new Error(`Admin fixture server exited ${signal || code}.`)));
   });

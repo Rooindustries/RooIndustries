@@ -258,8 +258,8 @@ export default function Packages({
                       : "ri-package-card-secondary"
                   } ${
                     p.isHighlighted
-                      ? "ri-package-card-highlighted border-info-border shadow-glow-strong hover:shadow-glow-strong"
-                      : "ri-package-card-standard border-line-input shadow-glow-soft hover:shadow-glow-strong"
+                      ? "ri-package-card-highlighted border-line-accent"
+                      : "ri-package-card-standard border-line-input"
                   }`}
                 >
                   {p.tag && (
@@ -289,7 +289,7 @@ export default function Packages({
 
                     {warranty && (
                       <div
-                        className={`ri-package-warranty-callout ${warranty.className}`}
+                        className="ri-package-warranty-callout"
                       >
                         <span className="ri-package-warranty-icon" aria-hidden="true">
                           <WarrantyIcon size={18} strokeWidth={2.4} />
@@ -314,8 +314,8 @@ export default function Packages({
                     )}
                     {p.suitableFor && (
                       <div className="mt-3 flex flex-wrap items-baseline justify-center gap-x-1.5 text-xs sm:text-sm">
-                        <span className="ri-package-suitable-label font-bold text-white">Suitable for:</span>
-                        <span className="ri-package-suitable-value text-gradient-display font-semibold">
+                        <span className="ri-package-suitable-label text-ink-secondary">Suitable for:</span>
+                        <span className="ri-package-suitable-value font-semibold text-ink">
                           {p.suitableFor}
                         </span>
                       </div>
@@ -411,7 +411,7 @@ export default function Packages({
               <p className="ri-packages-divider-text w-full text-[1.1875rem] sm:text-[1.1875rem] font-bold leading-relaxed whitespace-pre-line break-words text-ink">
                 {dividerText}
               </p>
-              <div className="ri-packages-divider-line glow-button packages-divider-line h-[6px] w-full rounded-full opacity-90 shadow-[var(--shadow-divider-extra)]" />
+              <div className="ri-packages-divider-line h-px w-full bg-line-soft" />
             </div>
           )}
         </div>

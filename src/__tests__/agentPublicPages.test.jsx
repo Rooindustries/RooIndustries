@@ -36,7 +36,12 @@ describe("Public company content", () => {
     const document = new DOMParser().parseFromString(html, "text/html");
     expect(document.querySelector("h1").textContent).toBe("About Roo Industries");
     expect(ABOUT_PARAGRAPHS.join(" ").length).toBeGreaterThan(500);
-    expect(document.querySelector("article").textContent).toContain(ABOUT_PARAGRAPHS[0]);
+    const article = document.querySelector("article");
+    const links = [
+      "Meet the team", "Packages", "Benchmarks", "Reviews", "Service terms", "Privacy", "Contact", CONTACT_EMAIL,
+    ];
+    expect([...article.querySelectorAll("a")].map((link) => link.textContent)).toEqual(links);
+    expect(article.textContent).toBe(["About Roo Industries", ...ABOUT_PARAGRAPHS, ...links].join(""));
     expect(document.querySelector('a[href="/contact"]')).not.toBeNull();
     expect(document.querySelector('footer a[href="/about"]')).not.toBeNull();
     expect(routes.INDEXABLE_ROUTES).toContain("/about");
