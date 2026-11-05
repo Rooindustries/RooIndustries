@@ -42,9 +42,7 @@ const refreshPublicContent = async (committed) => {
 export const POST = (request, context) => handleCmsRequest(request, context, async ({ request, params, body, client, env, signal, actor }) => {
   let committed = false;
   try {
-    const receipt = await executeGlobalCmsCommand({ body, supabaseClient: client, env, actor });
-    committed = true;
-    return receipt;
+    return await executeGlobalCmsCommand({ body, supabaseClient: client, env, actor, onCommit: () => { committed = true; } });
   } finally {
     await refreshPublicContent(committed);
   }

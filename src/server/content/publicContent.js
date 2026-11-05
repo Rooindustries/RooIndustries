@@ -139,8 +139,8 @@ const validateAllowedParameters = (resource, searchParams) => {
 const timely = (check) => Date.now() - check.startedAt <= PUBLIC_CONTENT_REVISION_CHECK_BUDGET_MS;
 
 let revisionCheck = null;
-const checkRevision = () => {
-  if (revisionCheck) return revisionCheck;
+let queuedRevisionCheck = null;
+const startRevisionCheck = () => {
   const startedAt = Date.now();
   const pending = readPublicContentRevision().then((revision) => ({ revision, startedAt }));
   revisionCheck = pending;
@@ -150,6 +150,17 @@ const checkRevision = () => {
     })
     .catch(() => {});
   return pending;
+};
+const checkRevision = () => {
+  if (!revisionCheck) return startRevisionCheck();
+  if (!queuedRevisionCheck) {
+    const queued = revisionCheck.catch(() => {}).then(() => {
+      if (queuedRevisionCheck === queued) queuedRevisionCheck = null;
+      return startRevisionCheck();
+    });
+    queuedRevisionCheck = queued;
+  }
+  return queuedRevisionCheck;
 };
 
 const storeTimeout = () =>
@@ -173,7 +184,7 @@ const withinDeadline = (pending) =>
 const lastGoodCopy = (key) => {
   const entry = key ? supabaseContentCache.get(key) : null;
   if (!entry || Date.now() - entry.confirmedAt > SUPABASE_CONTENT_STALE_TTL_MS) return null;
-  return { data: entry.data, revision: entry.revision, cacheable: false };
+  return { data: entry.data, revision: entry.revision, cacheable: false, stale: true };
 };
 
 const startStoreRead = ({ resource, query, params, key, revision }) => {
@@ -261,9 +272,9 @@ const memoryKey = (resource, params) =>
 
 const readIndex = async (resource, check) => {
   const index = indexFor(resource);
-  if (!index) return null;
   const entry = await loadAt({ resource: index.resource, query: CONTENT_QUERIES[index.resource], params: {}, key: index.key, check });
-  if (entry.revision !== check.revision || !Array.isArray(entry.data) || entry.data.length >= index.limit) return null;
+  if (entry.stale) throw Object.assign(new Error("Public content store is unavailable."), { status: 503, code: "PUBLIC_CONTENT_STORE_UNAVAILABLE" });
+  if (!Array.isArray(entry.data) || entry.data.length >= index.limit) return null;
   return knownValues(resource, entry.data);
 };
 

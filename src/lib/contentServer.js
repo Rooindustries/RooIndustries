@@ -13,7 +13,7 @@ const recordContentRevision = (resource, revision) => {
 
 const readContentRevisions = () => Object.fromEntries(contentRevisionLedger());
 
-const createPublicContentFetcher = async ({ fresh = false } = {}) => {
+const createPublicContentFetcher = async () => {
   const [{ fetchPublicContentEntry }, { resolveSupabaseRuntimePolicy }] =
     await Promise.all([
       import("../server/content/publicContent.js"),
@@ -25,7 +25,6 @@ const createPublicContentFetcher = async ({ fresh = false } = {}) => {
       resource,
       backend,
       searchParams: new URLSearchParams(),
-      fresh,
     });
     recordContentRevision(resource, entry.revision);
     return entry.data;
@@ -61,13 +60,12 @@ const refuseHomeFallback = (error) =>
   refuseContentFallback("Home content unavailable; keeping the previous page", error);
 
 async function fetchHomePageData({
-  fresh = false,
   requireContent = false,
   requiredResources = [],
 } = {}) {
   let fetchContent;
   try {
-    fetchContent = await createPublicContentFetcher({ fresh });
+    fetchContent = await createPublicContentFetcher();
   } catch (error) {
     if (requireContent) await refuseHomeFallback(error);
     console.warn("[content] home fetch failed");
@@ -187,7 +185,7 @@ async function fetchPrivacyPolicy() {
 
 async function fetchStaticPageContent(resource, { requireContent = false } = {}) {
   try {
-    const fetchContent = await createPublicContentFetcher({ fresh: true });
+    const fetchContent = await createPublicContentFetcher();
     const content = await fetchContent(resource);
     if (requireContent && content == null) {
       throw Object.assign(new Error(`No published ${resource} document.`), { code: "PAGE_CONTENT_MISSING" });
@@ -201,7 +199,7 @@ async function fetchStaticPageContent(resource, { requireContent = false } = {})
 
 async function fetchContentList(resource, label, { requireContent = false } = {}) {
   try {
-    const fetchContent = await createPublicContentFetcher({ fresh: true });
+    const fetchContent = await createPublicContentFetcher();
     const rows = await fetchContent(resource);
     return Array.isArray(rows) ? rows : [];
   } catch (error) {
@@ -219,7 +217,7 @@ async function fetchPackagesPageData({ requireContent = false } = {}) {
     refuseContentFallback("Packages content unavailable; keeping the previous page", error);
   let fetchContent;
   try {
-    fetchContent = await createPublicContentFetcher({ fresh: true });
+    fetchContent = await createPublicContentFetcher();
   } catch (error) {
     if (requireContent) await refuse(error);
     return { packagesList: null, packagesSettings: null };

@@ -211,3 +211,94 @@ test("a read with no saved copy that misses its deadline answers 503 no-store an
   expect(titles).toContain((await warmed.json()).data.title);
   expect(await after.contentReads()).toEqual([]);
 });
+
+test("package and upgrade-link lookups answer with their last good copy when reads fail or stall after a publish", async ({ request, baseURL }) => {
+  test.setTimeout(120000);
+  const gate = createContentGate(request, baseURL);
+  const original = await gate.document(PACKAGE);
+  const lookups = [`/api/content/package?title=${encodeURIComponent(original.document.title)}`, "/api/content/upgrade-link?slug=fixture-upgrade"];
+  try {
+    const warm = gate.traced();
+    const saved = [];
+    for (const path of lookups) {
+      const response = await warm.content(path);
+      expectCacheable(response);
+      saved.push((await response.json()).data);
+    }
+    expect(saved[0]).toMatchObject({ title: original.document.title, price: original.document.price });
+    expect(saved[1]).toMatchObject({ targetPackage: { title: original.document.title, price: original.document.price } });
+    await gate.publishElsewhere(original, { price: "$606.06" });
+
+    const down = gate.traced();
+    await down.rules([{ rpc: CONTENT_READ, action: "fail" }]);
+    for (const [index, path] of lookups.entries()) {
+      const served = await down.content(path);
+      expect(served.status()).toBe(200);
+      expectNotCacheable(served);
+      expect((await served.json()).data).toEqual(saved[index]);
+    }
+
+    const slow = gate.traced();
+    await slow.rules([{ rpc: CONTENT_READ, action: "hold" }]);
+    const startedAt = Date.now();
+    const held = await Promise.all(lookups.map((path) => slow.content(path)));
+    expect(Date.now() - startedAt).toBeLessThan(8000);
+    for (const [index, served] of held.entries()) {
+      expect(served.status()).toBe(200);
+      expectNotCacheable(served);
+      expect((await served.json()).data).toEqual(saved[index]);
+    }
+    await slow.release();
+  } finally {
+    await gate.restore(PACKAGE, original.document);
+  }
+});
+
+test("a request that arrives after a publish never reuses a revision check that started before it", async ({ request, baseURL }) => {
+  test.setTimeout(120000);
+  const gate = createContentGate(request, baseURL);
+  const original = await gate.document(PACKAGE);
+  try {
+    expect(await priceOf(await gate.traced().content(PACKAGES))).toBe(original.document.price);
+
+    const early = gate.traced();
+    await early.rules([{ rpc: "^roo_read_public_content_revision$", action: "hold", times: 1 }]);
+    const before = early.content(PACKAGES);
+    await early.waitForHold();
+    await gate.publishElsewhere(await gate.document(PACKAGE), { price: "$707.07" });
+
+    const late = gate.traced();
+    const after = late.content(PACKAGES);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await early.release();
+    expect((await before).status()).toBe(200);
+    const served = await after;
+    expect(served.status()).toBe(200);
+    expect(await priceOf(served)).toBe("$707.07");
+    expect(await late.calls()).toContain("roo_read_public_content_revision");
+  } finally {
+    await gate.restore(PACKAGE, original.document);
+  }
+});
+
+test("a publish whose answer is lost after the commit still purges twice and serves the new price", async ({ request, baseURL }) => {
+  test.setTimeout(120000);
+  const gate = createContentGate(request, baseURL);
+  const original = await gate.document(PACKAGE);
+  try {
+    const lost = gate.traced();
+    await lost.rules([{ rpc: "^roo_apply_cms_publish_command$", action: "lose", times: 1 }]);
+    const attempt = await lost.cms("/api/admin/content/publish", gate.replaceCommand(original, { price: "$808.08" }));
+    expect(attempt.status).toBe(503);
+    expect((await gate.document(PACKAGE)).document.price).toBe("$808.08");
+    await expect.poll(async () => (await lost.purges()).map(({ trace, ...purge }) => purge), {
+      timeout: 20000,
+      intervals: [250, 500, 1000],
+    }).toEqual([CONTENT_PURGE, CONTENT_PURGE]);
+    const current = await gate.traced().content(PACKAGES);
+    expectCacheable(current);
+    expect(await priceOf(current)).toBe("$808.08");
+  } finally {
+    await gate.restore(PACKAGE, original.document);
+  }
+});

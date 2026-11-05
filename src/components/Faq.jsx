@@ -7,6 +7,7 @@ import packageContent from "../lib/packageContent";
 import { HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 import { useContent } from "../lib/contentCache";
 import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinator";
+import { scrollWindowTo } from "../lib/scrollWindowTo";
 
 
 const slugify = (text = "") =>
@@ -151,13 +152,10 @@ export default function FaqSection({
 
   const [containerRef, { height }] = useElementSize();
 
-  const scrollWithOffset = (id, behavior = "smooth") => {
-    const el = typeof id === "string" ? document.getElementById(id) : id;
-    if (!el) return false;
-    const yOffset = -96;
-    const y = el.getBoundingClientRect().top + window.scrollY + yOffset;
-    window.scrollTo({ top: y, behavior });
-    return true;
+  const scrollWithOffset = (id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    scrollWindowTo(el.getBoundingClientRect().top + window.scrollY - 96);
   };
 
   const toggleQuestion = (questionId) => {
@@ -245,10 +243,10 @@ export default function FaqSection({
           <span className="ri-faq-eyebrow inline-flex items-center gap-2 px-4 py-1 rounded-full bg-info-soft border border-info-border text-xs sm:text-sm font-semibold uppercase tracking-wide text-info-text shadow-info-soft">
             {eyebrowText}
           </span>
-          <Heading className="ri-faq-heading mt-4 text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_20px_rgba(56,189,248,0.35)]">
+          <Heading className="ri-faq-heading section-title mt-4">
             {headingText}
           </Heading>
-          <p className="mt-3 text-ink-secondary text-sm sm:text-base">
+          <p className="section-lede">
             {subtitleText}
           </p>
         </div>

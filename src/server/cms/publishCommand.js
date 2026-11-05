@@ -81,12 +81,15 @@ export const getCreateCommandStatus = async ({ body, supabaseClient, actor = "ad
   }
   return { committed: true, createIntentId: body.createIntentId.toLowerCase(), type: body.type, documentId: resultId, revision: record._rev };
 };
-export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = process.env, actor = "admin:key" } = {}) => {
+export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = process.env, actor = "admin:key", onCommit = () => {} } = {}) => {
   assertGlobalCmsWritesAllowed(env);
   const { schema, creating, id, requestHash, lookup, document: inputDocument } = prepareCmsCommand(body, actor);
   let document = inputDocument;
   const receipt = rpcData(await supabaseClient.rpc("roo_cms_publish_command_result", lookup), "Receipt lookup");
-  if (receipt?.replayed) return committed(receipt, id);
+  if (receipt?.replayed) {
+    onCommit();
+    return committed(receipt, id);
+  }
   const current = await loadDocument(supabaseClient, id);
   if (current && current._type !== body.type) throw cmsError("Document type conflicts with its stored identity.", 409, "CMS_TYPE_MISMATCH", { currentRevision: current._rev });
   if (document) {
@@ -98,6 +101,8 @@ export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = proc
     document = { ...document, _id: id, _type: body.type };
   }
   const mutation = { operation: body.operation, id, ...(document ? { document } : {}), ...(!creating ? { expected_revision: body.expectedRevision || "" } : {}) };
-  const result = rpcData(await supabaseClient.rpc("roo_apply_cms_publish_command", { ...lookup, p_mutations: [mutation], p_assets: [], p_asset_links: [] }), "Content publish");
+  const applied = await supabaseClient.rpc("roo_apply_cms_publish_command", { ...lookup, p_mutations: [mutation], p_assets: [], p_asset_links: [] });
+  if (!applied.error || !applied.status) onCommit();
+  const result = rpcData(applied, "Content publish");
   return committed(result, id);
 };

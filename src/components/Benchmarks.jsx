@@ -49,13 +49,13 @@ export default function Benchmarks({ initialData = null, setIsModalOpen = () => 
         />
       )}
 
-      <h1 className="text-4xl sm:text-5xl font-extrabold text-center mb-2 text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+      <h1 className="section-title text-center">
         Performance Benchmarks
       </h1>
-      <p className="text-center text-ink-secondary">
+      <p className="section-lede text-center">
         Real results from real tuning.
       </p>
-      <p className="text-center text-ink-secondary mb-12">
+      <p className="section-lede mb-12 text-center">
         Want numbers like these on your own PC?{" "}
         <Link to="/packages" className="inline-flex min-h-11 items-center text-accent underline underline-offset-4">See the packages</Link>
       </p>

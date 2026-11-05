@@ -24,11 +24,11 @@ export default function SeoFallback({ pathname }) {
   return (
     <noscript>
       <section aria-label="No-JS SEO fallback">
-        <div className="mx-auto max-w-4xl px-6 pt-28 pb-8 text-ink">
-          <h2 className="text-4xl font-extrabold tracking-tight text-info-text">
+        <div className="mx-auto max-w-4xl px-6 pt-28 pb-8 text-center text-ink">
+          <h2 className="section-title">
             {copy.title}
           </h2>
-          <p className="mt-4 text-base text-ink-secondary leading-relaxed">
+          <p className="section-lede">
             {copy.body}
           </p>
         </div>

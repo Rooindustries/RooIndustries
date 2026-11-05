@@ -4,9 +4,6 @@ import { getPerfToggleEnabled, isPerfDebugEnabled, PERF_DEBUG_EVENT, PERF_TOGGLE
 import { HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 import { useContent } from "../lib/contentCache";
 
-const titleClass =
-  "text-[28px] sm:text-[32px] md:text-[36px] leading-tight font-extrabold text-center tracking-tight " +
-  "text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]";
 const AUTO_SCROLL_PIXELS_PER_SECOND = 24;
 const AUTO_SCROLL_RESUME_DELAY_MS = 1500;
 const AUTO_SCROLL_RAMP_MS = 900;
@@ -92,10 +89,10 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
       className="pt-4 sm:pt-5 pb-4 text-center text-ink relative overflow-hidden"
     >
       <div className="px-4 sm:px-6 mb-3">
-        <h2 className={`ri-reviews-heading ${titleClass} mb-2`}>
+        <h2 className="ri-reviews-heading section-title">
           {data?.title || defaultTitle}
         </h2>
-        <p className="text-ink-secondary text-sm sm:text-base">
+        <p className="section-lede">
           {data?.subtitle || defaultSubtitle}
         </p>
       </div>

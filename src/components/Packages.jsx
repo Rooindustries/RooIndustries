@@ -152,7 +152,7 @@ export default function Packages({
   return (
     <section className="ri-packages-section relative z-10 pt-8 pb-24 text-center text-ink">
       {headingText && (
-        <h2 className="ri-packages-heading text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+        <h2 className="section-title px-4">
           {headingText}
         </h2>
       )}
@@ -184,7 +184,7 @@ export default function Packages({
       )}
 
       {subheadingText && (
-        <p className="ri-packages-subheading mx-auto mt-3 max-w-xl px-6 text-ink-secondary text-sm sm:text-base">
+        <p className="section-lede px-6">
           {subheadingText}
         </p>
       )}

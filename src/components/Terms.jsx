@@ -37,7 +37,7 @@ export default function Terms({ initialData = null }) {
 
   return (
     <section className="max-w-4xl mx-auto px-6 py-28 text-ink">
-      {data.title && <h1 className="text-3xl font-bold mb-6">{data.title}</h1>}
+      {data.title && <h1 className="section-title mb-6">{data.title}</h1>}
 
       {data.lastUpdated && (
         <p className="text-ink-secondary mb-6">Last Updated: {data.lastUpdated}</p>
