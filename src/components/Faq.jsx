@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef, useLayoutEffect } from "react";
+import { reportRequestError } from "../lib/clientRequest";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import { useLocation } from "react-router-dom";
@@ -183,7 +184,7 @@ export default function FaqSection({
     if (faqCopy !== null) return;
     fetchHomeSectionData(HOME_SECTION_DATA_KEYS.faqSettings)
       .then(setFaqCopy)
-      .catch(console.error);
+      .catch(reportRequestError);
   }, [faqCopy]);
 
   useEffect(() => {
@@ -192,7 +193,7 @@ export default function FaqSection({
       .then((res) =>
         setQuestions(normalizeFaqQuestions(Array.isArray(res) ? res : []))
       )
-      .catch(console.error);
+      .catch(reportRequestError);
   }, [questions]);
 
   const flatQuestions = useMemo(

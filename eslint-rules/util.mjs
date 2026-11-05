@@ -71,12 +71,16 @@ export const referenceName = (node) => (node?.type === "Identifier" ? node.name 
 
 export const calleeName = (call) => referenceName(call.callee);
 
-export const declaredValue = (context, identifier) => {
+export const findVariable = (context, identifier) => {
   let variable = null;
   for (let scope = context.sourceCode.getScope(identifier); scope && !variable; scope = scope.upper) {
     variable = scope.set.get(identifier.name) || null;
   }
-  const definition = variable?.defs?.[0];
+  return variable;
+};
+
+export const declaredValue = (context, identifier) => {
+  const definition = findVariable(context, identifier)?.defs?.[0];
   if (!definition || definition.type !== "Variable" || definition.node.id.type !== "Identifier") return null;
   return definition.node.init || null;
 };

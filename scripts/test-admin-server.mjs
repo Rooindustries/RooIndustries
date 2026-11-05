@@ -44,6 +44,8 @@ let notificationSequence = 0;
 const storeRules = new Map();
 const storeCalls = [];
 const storeHolds = [];
+const purges = [];
+const keptAlive = [];
 const readJson = async request => {
   let raw = "";
   for await (const chunk of request) raw += chunk;
@@ -175,6 +177,17 @@ try {
         response.writeHead(500, { "Content-Type": "application/json" });
         response.end(JSON.stringify({ error: error.message })); return;
       }
+    }
+    if (request.method === "POST" && ["/purges", "/kept-alive"].includes(request.url)) {
+      (request.url === "/purges" ? purges : keptAlive).push(await readJson(request));
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
+    }
+    if (request.method === "GET" && request.url === "/purges") {
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(purges)); return;
+    }
+    if (request.method === "GET" && request.url.startsWith("/kept-alive?")) {
+      const trace = new URL(request.url, controlOrigin).searchParams.get("trace");
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(keptAlive.filter(entry => entry.trace === trace).map(({ state }) => state))); return;
     }
     if (request.method === "POST" && request.url === "/store-rules") {
       const { trace, rules } = await readJson(request);

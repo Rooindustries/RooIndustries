@@ -251,6 +251,9 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         }
         call.status = 200;
         json(res, 200, { delivery, session, documents, requests: evidence.requests, emails, clockNow });
+      } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_read_public_content_revision') {
+        if (contentOutage === true) throw Object.assign(new Error('Synthetic content outage.'), { status: 503, code: 'FIXTURE_CONTENT_OUTAGE' });
+        call.status = 200; json(res, 200, contentRevision);
       } else if (req.method === 'POST' && ['/rest/v1/rpc/roo_fetch_shadow_documents_targeted', '/rest/v1/rpc/roo_fetch_public_content_documents'].includes(url.pathname)) {
         if (contentOutage === true || (Array.isArray(contentOutage) && body.p_document_types?.some(type => contentOutage.includes(type)))) throw Object.assign(new Error('Synthetic content outage.'), { status: 503, code: 'FIXTURE_CONTENT_OUTAGE' });
         const scopedIds = apiRoutes && body.p_document_types === null && Array.isArray(body.p_ids) && body.p_ids.length > 0;

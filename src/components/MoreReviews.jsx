@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
+import { reportRequestError } from "../lib/clientRequest";
 import { getPublicContent } from "../lib/publicContentClient";
 import ImageZoomModal from "./ImageZoomModal";
 
@@ -28,7 +29,7 @@ export default function Reviews({ initialData = null }) {
     getPublicContent("reviews-gallery")
       .then((data) => setReviews(Array.isArray(data) ? data : []))
       .catch((error) => {
-        console.error(error);
+        reportRequestError(error);
         setReviews([]);
       });
   }, []);
