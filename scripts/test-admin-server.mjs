@@ -7,12 +7,14 @@ import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
 import { releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
+import { lockBuildDirectory } from "./lib/build-lock.mjs";
 
 refuseEnvFiles();
 const root = process.cwd();
 const baseURL = localOrigin(process.env.BASE_URL);
 const target = new URL(baseURL);
 const dist = validateDistDir(process.env.NEXT_DIST_DIR, { isolated: true });
+const lock = lockBuildDirectory(dist);
 const port = Number(target.port);
 if (port !== Number(process.env.PW_PORT) || target.hostname !== process.env.ROO_TEST_HOST || port > 65528) throw new Error("Invalid admin fixture target.");
 const controlOrigin = `http://127.0.0.1:${port + 6}`;
@@ -39,6 +41,16 @@ const fixture = await start({
 let active, restoreEmailFetch;
 const emails = [];
 let notificationSequence = 0;
+const storeRules = new Map();
+const storeCalls = [];
+const storeHolds = [];
+const purges = [];
+const keptAlive = [];
+const readJson = async request => {
+  let raw = "";
+  for await (const chunk of request) raw += chunk;
+  return JSON.parse(raw || "{}");
+};
 let stopped = false;
 const stop = async () => {
   if (stopped) return;
@@ -166,6 +178,58 @@ try {
         response.end(JSON.stringify({ error: error.message })); return;
       }
     }
+    if (request.method === "POST" && ["/purges", "/kept-alive"].includes(request.url)) {
+      (request.url === "/purges" ? purges : keptAlive).push(await readJson(request));
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
+    }
+    if (request.method === "GET" && request.url === "/purges") {
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(purges)); return;
+    }
+    if (request.method === "GET" && request.url.startsWith("/kept-alive?")) {
+      const trace = new URL(request.url, controlOrigin).searchParams.get("trace");
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(keptAlive.filter(entry => entry.trace === trace).map(({ state }) => state))); return;
+    }
+    if (request.method === "POST" && request.url === "/store-rules") {
+      const { trace, rules } = await readJson(request);
+      storeRules.set(trace, rules.map(rule => ({ ...rule, pattern: new RegExp(rule.rpc) })));
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
+    }
+    if (request.method === "POST" && request.url === "/store-calls") {
+      const call = await readJson(request);
+      storeCalls.push(call);
+      const rule = (storeRules.get(call.trace) || []).find(entry => entry.pattern.test(call.rpc) && entry.times !== 0);
+      if (rule && rule.times > 0) rule.times -= 1;
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ action: rule?.action || "pass" })); return;
+    }
+    if (request.method === "POST" && request.url === "/store-holds") {
+      const hold = await readJson(request);
+      await new Promise(resolve => storeHolds.push({ ...hold, release: resolve }));
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
+    }
+    if (request.method === "GET" && request.url.startsWith("/store-holds?")) {
+      const trace = new URL(request.url, controlOrigin).searchParams.get("trace");
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(storeHolds.filter(hold => hold.trace === trace).map(({ rpc }) => rpc))); return;
+    }
+    if (request.method === "POST" && request.url === "/store-release") {
+      const { trace } = await readJson(request);
+      const released = storeHolds.filter(hold => hold.trace === trace);
+      storeHolds.splice(0, storeHolds.length, ...storeHolds.filter(hold => hold.trace !== trace));
+      for (const hold of released) hold.release();
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ released: released.length })); return;
+    }
+    if (request.method === "GET" && request.url.startsWith("/store-calls?")) {
+      const trace = new URL(request.url, controlOrigin).searchParams.get("trace");
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(storeCalls.filter(call => call.trace === trace).map(({ rpc }) => rpc))); return;
+    }
+    if (request.method === "POST" && request.url === "/publish-elsewhere") {
+      try {
+        const { executeGlobalCmsCommand } = await import("../src/server/cms/publishCommand.js");
+        const data = await executeGlobalCmsCommand({ body: await readJson(request), supabaseClient: fixture.client, env: { CMS_WRITES_PAUSED: "0" } });
+        response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(data)); return;
+      } catch (error) {
+        response.writeHead(500, { "Content-Type": "application/json" }); response.end(JSON.stringify({ error: error.message })); return;
+      }
+    }
     if (request.method === "GET" && request.url === "/content-counts") {
       const [counts] = await fixture.sql`select
         (select count(*)::int from cms.documents) as documents,
@@ -241,11 +305,12 @@ try {
     SUPABASE_SECRET_KEY: fixture.serviceRoleKey, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: fixture.anonKey, NEXT_PUBLIC_SUPABASE_ANON_KEY: fixture.anonKey,
     REF_ADMIN_KEY: "synthetic-admin-key", REF_SESSION_SECRET: "synthetic-content-session-secret", RATE_LIMIT_HASH_SECRET: "synthetic-admin-rate-secret", CMS_WRITES_PAUSED: "0",
     ALLOW_LIVE_PAYMENTS: "0", SALES_PREVIEW_READ_ONLY: "0", NEXT_TELEMETRY_DISABLED: "1", BASE_URL: baseURL, ROO_TEST_HOST: target.hostname, NEXT_DIST_DIR: dist, TOOLING_NETWORK_GUARD: "1",
-    NODE_OPTIONS: `--import=${path.join(root, "scripts/lib/test-target-safety.mjs")}`,
+    NODE_OPTIONS: `--import=${path.join(root, "scripts/lib/test-target-safety.mjs")} --import=${path.join(root, "scripts/lib/content-test-hooks.mjs")}`,
+    ROO_CONTENT_TEST_CONTROL_URL: controlOrigin,
     ROO_TEST_NETWORK_ORIGINS: JSON.stringify([baseURL, fixture.origin, fixture.storageUrl, fixture.postgrestUrl, controlOrigin]),
   };
   const execute = args => new Promise((resolve, reject) => {
-    active = spawn(process.execPath, args, { env, stdio: "inherit" });
+    active = spawn(process.execPath, args, { env: lock.childEnv(env), stdio: ["inherit", "inherit", "inherit", lock.fd] });
     active.once("error", reject);
     active.once("exit", (code, signal) => code === 0 || stopped ? resolve() : reject(new Error(`Admin fixture server exited ${signal || code}.`)));
   });

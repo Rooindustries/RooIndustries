@@ -7,20 +7,21 @@ describe("review carousel design", () => {
     "utf8"
   );
 
-  test("keeps the existing centered heading treatment", () => {
-    expect(componentSource).toContain("font-extrabold text-center tracking-tight");
-    expect(componentSource).toContain('className="px-4 sm:px-6 mb-3"');
-    expect(componentSource).toContain("text-[28px] sm:text-[32px] md:text-[36px]");
+  test("uses the shared section heading treatment", () => {
+    expect(componentSource).toContain('className="ri-reviews-heading section-title"');
+    expect(componentSource).toContain('className="px-4 sm:px-6 mb-8"');
+    expect(componentSource).not.toContain("drop-shadow-[0_0_15px");
   });
 
-  test("shows multiple compact reviews with automatic and manual scrolling", () => {
+  test("shows multiple readable reviews with automatic and manual scrolling", () => {
     const stylesheet = fs.readFileSync(
-      path.join(__dirname, "../index.css"),
+      path.join(__dirname, "../styles/sections.css"),
       "utf8"
     );
     expect(componentSource).toContain("function AutoReviewCarousel");
     expect(componentSource).toContain("ri-reviews-auto-track");
-    expect(componentSource).toContain("w-[320px] sm:w-[360px] min-h-[184px]");
+    expect(componentSource).toContain("${REVIEW_CARD_WIDTH} min-h-[232px]");
+    expect(componentSource).toContain('const REVIEW_CARD_WIDTH = "w-[320px] sm:w-[380px]";');
     expect(componentSource).toContain("Array.from({ length: groupCount }");
     expect(componentSource).toContain("“{review.text}”");
     expect(componentSource).toContain("AUTO_SCROLL_PIXELS_PER_SECOND = 24");
@@ -29,8 +30,8 @@ describe("review carousel design", () => {
     expect(componentSource).toContain("onPointerDown={onPointerDown}");
     expect(componentSource).toContain("Scroll reviews left");
     expect(componentSource).toContain("Scroll reviews right");
-    expect(componentSource).toContain("absolute left-1 sm:left-3 top-1/2");
-    expect(componentSource).toContain("absolute right-1 sm:right-3 top-1/2");
+    expect(componentSource).toContain("${REVIEW_ARROW_CLASS} left-4");
+    expect(componentSource).toContain("${REVIEW_ARROW_CLASS} right-4");
     expect(stylesheet).toContain(".ri-reviews-viewport::-webkit-scrollbar");
     expect(componentSource).toContain('color: "var(--color-accent)"');
     expect(componentSource).not.toContain("bg-yellow");

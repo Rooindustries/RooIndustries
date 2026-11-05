@@ -37,7 +37,7 @@ jobs:
     name: Production-only monitoring
     needs: tested-tree
     if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.TESTS_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
     env:
       SENTRY_CLI_NO_TELEMETRY: "1"
@@ -80,7 +80,7 @@ jobs:
     name: Jest
     needs: tested-tree
     if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.TESTS_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -99,6 +99,7 @@ jobs:
       - run: npm run test:playwright-groups
       - run: npm run test:tested-tree
       - run: npm run test:free-ports
+      - run: npm run test:build-lock
       - run: npm run test:tooling:dependencies
       - run: npm run check:seo
       - run: npm run check:supabase:migrations
@@ -108,7 +109,7 @@ jobs:
     name: Booking hold model
     needs: tested-tree
     if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.TESTS_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -124,7 +125,7 @@ jobs:
     name: Playwright ${{ matrix.suite.name }}
     needs: tested-tree
     if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.TESTS_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -220,7 +221,7 @@ jobs:
     name: Playwright creator portal and API routes
     needs: tested-tree
     if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.TESTS_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
     env:
       ROO_TEST_HOST: 127.0.0.1
@@ -264,7 +265,7 @@ jobs:
     name: Native PostgreSQL 17 suites
     needs: tested-tree
     if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.TESTS_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 60
     env:
       ROO_TEST_HOST: 127.0.0.1
@@ -380,7 +381,7 @@ jobs:
     name: Playwright revalidation
     needs: tested-tree
     if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.TESTS_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
     env:
       ROO_TEST_HOST: 127.0.0.1

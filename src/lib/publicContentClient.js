@@ -1,3 +1,5 @@
+import { watchPageLeave } from "./clientRequest";
+
 const buildPublicContentUrl = (resource, params = {}) => {
   const url = new URL(
     `/api/content/${encodeURIComponent(resource)}`,
@@ -16,16 +18,22 @@ const buildPublicContentUrl = (resource, params = {}) => {
 let pendingRequests = 0;
 export const getPublicContentPendingCount = () => pendingRequests;
 
-export const getPublicContent = async (resource, params = {}, options = {}) => {
+export const getPublicContent = async (resource, params, options) => {
+  const signal = options?.signal;
   pendingRequests += 1;
+  const markCancelled = watchPageLeave(signal);
+  let response;
+  let body;
   try {
-    const response = await fetch(buildPublicContentUrl(resource, params), {
-      method: "GET",
-      credentials: "same-origin",
-      headers: { Accept: "application/json" },
-      ...(options.signal ? { signal: options.signal } : {}),
-    });
-    const body = await response.json().catch(() => ({}));
+    try {
+      response = await fetch(buildPublicContentUrl(resource, params), {
+        headers: { Accept: "application/json" },
+        signal,
+      });
+      body = await response.json();
+    } catch (error) {
+      if (markCancelled(error, response).requestCancelled || !response) throw error;
+    }
     if (!response.ok || body?.ok !== true) {
       throw new Error(body?.error || "Public content could not be loaded.");
     }

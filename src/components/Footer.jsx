@@ -4,6 +4,7 @@ import { FaDiscord } from "react-icons/fa";
 import packagePricing from "../lib/packagePricing";
 import { readBookingPackageSelection } from "../lib/checkoutStorage";
 import PaymentMethods from "./PaymentMethods";
+import { scrollWindowTo } from "../lib/scrollWindowTo";
 
 const { isTopPackageTitle } = packagePricing;
 
@@ -25,7 +26,7 @@ export default function Footer() {
     );
 
   const scrollToTop = () => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollWindowTo(0);
   };
 
   return (
@@ -88,12 +89,12 @@ export default function Footer() {
         </div>
 
         <div className="py-2 flex justify-center md:justify-end">
-          <PaymentMethods className="px-2 py-2 sm:px-4 rounded-2xl border border-line-soft bg-surface-veil backdrop-blur-md" />
+          <PaymentMethods className="py-2" />
         </div>
 
         <div className="flex flex-col md:flex-row items-center justify-between gap-3 pt-1">
           <div className="flex flex-col items-center md:items-start gap-1">
-            <p className="text-center md:text-left text-[11px] text-ink-muted">
+            <p className="text-center md:text-left text-[13px] text-ink-secondary">
               <span className="block md:inline">
                 © {new Date().getFullYear()} Roo Industries. All rights reserved.
               </span>
@@ -105,7 +106,7 @@ export default function Footer() {
               ))}
             </p>
 
-            <p className="text-[11px] text-ink-muted">
+            <p className="text-[13px] text-ink-secondary">
               Designed by{" "}
               <a
                 href="https://discord.com/users/286457824081346570"
@@ -129,7 +130,7 @@ export default function Footer() {
 
           <button
             onClick={scrollToTop}
-            className="flex items-center gap-2 text-[11px] font-medium tracking-wider uppercase text-ink-muted hover:text-[color:var(--color-link-hover)] transition-colors group"
+            className="flex items-center gap-2 text-xs font-medium tracking-wider uppercase text-ink-secondary hover:text-[color:var(--color-link-hover)] transition-colors group"
           >
             To the top
             <span className="text-accent group-hover:translate-y-[-2px] transition-transform">
@@ -139,7 +140,7 @@ export default function Footer() {
         </div>
 
         {isXocBookingForm && (
-          <p className="mt-2 text-center text-[11px] text-ink-muted">
+          <p className="mt-2 text-center text-[13px] text-ink-secondary">
             Refunds will not be issued in case you proceed with
             unsupported/custom parts. Please join the Discord and open a ticket
             or DM <span className="font-semibold">serviroo</span> to check for

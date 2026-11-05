@@ -203,7 +203,7 @@ const launcher = (held) => (command, args, options = {}) => {
     ...options,
     detached: true,
     env: { ...(options.env || process.env), ...held.env },
-    stdio: [...stdio.slice(0, 3), "pipe", ...held.stdio],
+    stdio: [...stdio.slice(0, 3), "pipe", ...held.stdio, ...stdio.slice(3)],
   });
   trackGroupLeader(child, () => drain(child));
   const lifeline = child.stdio[3];

@@ -4,12 +4,13 @@ import roo, { rules } from "./eslint-rules/index.mjs";
 
 const emailTextRules = new Set(["no-hand-built-dollars"]);
 const scriptRules = new Set(["no-parent-ipc-disconnect", "no-unchecked-group-signal"]);
+const testFiles = "src/**/__tests__/**";
 const ruleSet = (names) => Object.fromEntries(names.map((name) => [`roo/${name}`, "error"]));
 
 export default [
-  { ignores: ["src/**/__tests__/**"] },
   {
     files: ["src/**/*.{js,jsx,mjs,cjs}", "app/**/*.{js,jsx,mjs,cjs}", "middleware.js"],
+    ignores: [testFiles],
     linterOptions: { reportUnusedDisableDirectives: "off" },
     languageOptions: {
       ecmaVersion: "latest",
@@ -32,6 +33,18 @@ export default [
     files: ["scripts/**/*.{js,mjs,cjs}", "tests/fixtures/**/*.{js,mjs,cjs}"],
     plugins: { roo },
     rules: ruleSet(["no-parent-ipc-disconnect"]),
+  },
+  {
+    files: [`${testFiles}/*.{js,jsx,mjs,cjs}`],
+    linterOptions: { reportUnusedDisableDirectives: "off" },
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      parserOptions: { ecmaFeatures: { jsx: true } },
+      globals: { ...globals.browser, ...globals.node, ...globals.jest },
+    },
+    plugins: { roo },
+    rules: ruleSet(["no-virtual-mock-of-installed-module"]),
   },
   {
     files: ["**/*.cjs"],

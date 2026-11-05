@@ -24,6 +24,68 @@ const watchConsole = page => {
 
 const hydrationWarnings = messages => messages.filter(text => /hydrat|did not match|server rendered|server HTML|#418|#423|#425/i.test(text));
 
+const HEADING_ROUTES = [...PREBUILT_ROUTES.filter((route) => route !== "/tourney"), "/payment", "/thank-you", "/referrals/login", "/referrals/reset"];
+
+for (const [theme, viewport] of [["dark", { width: 1440, height: 900 }], ["default", { width: 390, height: 844 }]]) {
+  for (const route of HEADING_ROUTES) {
+    test(`${route} headings and intros share one flat style in the ${theme} theme at ${viewport.width}px`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await page.addInitScript((value) => localStorage.setItem("roo-theme", value), theme);
+      await page.goto(route);
+      await hydrated(page);
+      await page.evaluate(() => document.fonts.ready);
+      await expect(page.locator(".section-title").first()).toBeVisible();
+      const styles = await page.locator(".section-title, .section-lede").evaluateAll((nodes) => nodes.map((node) => {
+        const style = getComputedStyle(node);
+        const probe = document.createElement("span");
+        const isTitle = node.classList.contains("section-title");
+        const danger = node.classList.contains("section-title-danger");
+        const token = danger ? "--color-danger-text" : isTitle ? "--color-text-primary" : "--color-text-secondary";
+        probe.style.color = `var(${token})`;
+        node.append(probe);
+        const expectedColor = getComputedStyle(probe).color;
+        probe.remove();
+        const lines = [];
+        const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+        const range = document.createRange();
+        for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+          range.selectNodeContents(text);
+          for (const box of range.getClientRects()) {
+            const line = lines.find((entry) => Math.abs(entry.bottom - box.bottom) < parseFloat(style.fontSize) / 2);
+            if (line) {
+              line.left = Math.min(line.left, box.left);
+              line.right = Math.max(line.right, box.right);
+            } else if (box.width > 0) {
+              lines.push({ bottom: box.bottom, left: box.left, right: box.right });
+            }
+          }
+        }
+        const widths = lines.sort((a, b) => a.bottom - b.bottom).map((line) => line.right - line.left);
+        return {
+          isTitle,
+          text: node.textContent.trim().slice(0, 40),
+          weight: isTitle ? style.fontWeight : "lede",
+          withinScale: !isTitle || parseFloat(style.fontSize) <= (node.classList.contains("section-title-compact") ? 36 : 44),
+          shadow: style.textShadow,
+          filter: style.filter,
+          matchesToken: style.color === expectedColor,
+          shortLastLine: !isTitle && widths.length > 1 && widths.at(-1) < Math.max(...widths) * 0.4,
+        };
+      }));
+      for (const { isTitle, text, ...style } of styles) {
+        expect(style, `${route} ${text}`).toEqual({
+          weight: isTitle ? "800" : "lede",
+          withinScale: true,
+          shadow: "none",
+          filter: "none",
+          matchesToken: true,
+          shortLastLine: false,
+        });
+      }
+    });
+  }
+}
+
 const readPrerenderManifest = async testInfo => {
   const ownsServer = testInfo.config.metadata.ownsToolingServer === true;
   return ownsServer || process.env.NEXT_DIST_DIR ? JSON.parse(await fs.readFile(path.join(testInfo.config.metadata.toolingDistDir, "prerender-manifest.json"), "utf8")) : null;
@@ -194,3 +256,35 @@ test("/faq hydrates the prebuilt page without warnings", async ({ page }, testIn
   await testInfo.attach("faq-query-console", { body: JSON.stringify(messages, null, 2), contentType: "application/json" });
   expect(hydrationWarnings(messages)).toEqual([]);
 });
+
+const PAGE_TOP_ROUTES = ["/about", "/benchmarks", "/contact", "/faq", "/meet-the-team", "/reviews", "/tools", "/privacy", "/terms"];
+
+for (const [width, expected] of [[390, 24], [1440, 80]]) {
+  test(`standalone pages share one page top at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const tops = [];
+    for (const route of PAGE_TOP_ROUTES) {
+      await page.goto(route);
+      await hydrated(page);
+      const top = page.locator("main .page-top").first();
+      await expect(top, route).toBeVisible();
+      tops.push({
+        route,
+        ...(await top.evaluate((node) => {
+          const main = node.closest("main");
+          const mainTop = main.getBoundingClientRect().top + parseFloat(getComputedStyle(main).paddingTop);
+          const content = [...node.querySelectorAll("*")].find((element) =>
+            [...element.childNodes].some((child) => child.nodeType === Node.TEXT_NODE && child.textContent.trim()));
+          return {
+            fromMain: Math.round(node.getBoundingClientRect().top - mainTop),
+            contentOffset: Math.round(content.getBoundingClientRect().top - mainTop),
+          };
+        })),
+      });
+    }
+    for (const { route, fromMain, contentOffset } of tops) {
+      expect(fromMain, route).toBe(0);
+      expect(contentOffset, route).toBe(expected);
+    }
+  });
+}

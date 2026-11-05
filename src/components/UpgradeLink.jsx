@@ -1,8 +1,8 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
-import useUpgradeEligibility from "../lib/useUpgradeEligibility";
+import useUpgradeEligibility, { fetchUpgradeInfo } from "../lib/useUpgradeEligibility";
 import { useNavigate, useParams } from "react-router-dom";
+import { CLIENT_REQUEST_TIMEOUT_MS, reportRequestError, requestTimeoutError } from "../lib/clientRequest";
 import { getPublicContent } from "../lib/publicContentClient";
-import { CLIENT_REQUEST_TIMEOUT_MS, fetchJsonWithTimeout } from "../lib/clientRequest";
 import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
 
@@ -78,7 +78,7 @@ export default function UpgradeLink() {
     }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), CLIENT_REQUEST_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(requestTimeoutError()), CLIENT_REQUEST_TIMEOUT_MS);
     getPublicContent("upgrade-link", { slug: normalizedSlug }, { signal: controller.signal })
       .then((data) => {
         if (!active) return;
@@ -93,8 +93,8 @@ export default function UpgradeLink() {
           targetPackage: applyPackagePricing(data.targetPackage),
         });
       })
-      .catch(() => {
-        console.error("Upgrade link load failed");
+      .catch((error) => {
+        reportRequestError(error);
         if (!active) return;
         setLinkError("Could not load this upgrade link. Please try again.");
       })
@@ -155,16 +155,10 @@ export default function UpgradeLink() {
     eligibilityAbortRef.current = controller;
     setLoading(true);
     try {
-      const { response: res, data } = await fetchJsonWithTimeout("/api/ref/getUpgradeInfo", {
-        signal: controller.signal,
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: trimmed,
-          email: trimmedEmail,
-          slug: normalizedSlug,
-        }),
-      });
+      const { response: res, data } = await fetchUpgradeInfo(
+        { id: trimmed, email: trimmedEmail, slug: normalizedSlug },
+        controller.signal
+      );
       if (!snapshot.isCurrent()) return;
 
       if (!res.ok || !data.ok) {
@@ -183,9 +177,9 @@ export default function UpgradeLink() {
           targetPackage: data.targetPackage,
         });
       }
-    } catch {
+    } catch (error) {
       if (!snapshot.isCurrent()) return;
-      console.error("Upgrade eligibility check failed");
+      reportRequestError(error);
       setError("Something went wrong while checking your order. Try again.");
     } finally {
       if (eligibilityAbortRef.current === controller) eligibilityAbortRef.current = null;
@@ -253,10 +247,10 @@ export default function UpgradeLink() {
 
   return (
     <section className="relative z-10 pt-32 pb-24 px-6 max-w-3xl mx-auto text-ink">
-      <h2 className="text-4xl sm:text-5xl font-extrabold text-center text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+      <h2 className="section-title text-center">
         {headingText}
       </h2>
-      <p className="mt-3 text-ink-secondary text-center text-sm sm:text-base">
+      <p className="section-lede text-center">
         {introText}
       </p>
 

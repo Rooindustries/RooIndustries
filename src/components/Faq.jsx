@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef, useLayoutEffect } from "react";
+import { reportRequestError } from "../lib/clientRequest";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import { useLocation } from "react-router-dom";
@@ -6,6 +7,7 @@ import homeCopy from "../lib/homeCopy";
 import packageContent from "../lib/packageContent";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinator";
+import { scrollWindowTo } from "../lib/scrollWindowTo";
 
 
 const slugify = (text = "") =>
@@ -87,6 +89,10 @@ const variants = {
   }),
 };
 
+const FAQ_ANSWER_CLASS = "pb-5 pr-10 text-[15px] leading-relaxed text-ink-secondary sm:text-base";
+const FAQ_PAGE_LAYOUT_CLASS = "lg:grid lg:grid-cols-[22rem_minmax(0,1fr)] lg:items-start lg:gap-x-16";
+const FAQ_PAGE_QUESTIONS_CLASS = "lg:col-start-2 lg:row-start-1 lg:mt-0 lg:max-w-none";
+
 export default function FaqSection({
   compact = false,
   headingTag = "h2",
@@ -161,13 +167,10 @@ export default function FaqSection({
 
   const [containerRef, { height }] = useElementSize();
 
-  const scrollWithOffset = (id, behavior = "smooth") => {
-    const el = typeof id === "string" ? document.getElementById(id) : id;
-    if (!el) return false;
-    const yOffset = -96;
-    const y = el.getBoundingClientRect().top + window.scrollY + yOffset;
-    window.scrollTo({ top: y, behavior });
-    return true;
+  const scrollWithOffset = (id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    scrollWindowTo(el.getBoundingClientRect().top + window.scrollY - 96);
   };
 
   const toggleQuestion = (questionId) => {
@@ -181,7 +184,7 @@ export default function FaqSection({
     if (faqCopy !== null) return;
     fetchHomeSectionData(HOME_SECTION_DATA_KEYS.faqSettings)
       .then(setFaqCopy)
-      .catch(console.error);
+      .catch(reportRequestError);
   }, [faqCopy]);
 
   useEffect(() => {
@@ -190,7 +193,7 @@ export default function FaqSection({
       .then((res) =>
         setQuestions(normalizeFaqQuestions(Array.isArray(res) ? res : []))
       )
-      .catch(console.error);
+      .catch(reportRequestError);
   }, [questions]);
 
   const flatQuestions = useMemo(
@@ -204,13 +207,14 @@ export default function FaqSection({
     [questions]
   );
 
-  const totalPages = Math.ceil(flatQuestions.length / QUESTIONS_PER_PAGE);
+  const questionsPerPage = compact ? QUESTIONS_PER_PAGE : Math.max(flatQuestions.length, 1);
+  const totalPages = Math.ceil(flatQuestions.length / questionsPerPage);
   const safePage = Math.min(Math.max(0, page), Math.max(0, totalPages - 1));
 
   const pagedQuestions = useMemo(() => {
-    const start = safePage * QUESTIONS_PER_PAGE;
-    return flatQuestions.slice(start, start + QUESTIONS_PER_PAGE);
-  }, [flatQuestions, safePage]);
+    const start = safePage * questionsPerPage;
+    return flatQuestions.slice(start, start + questionsPerPage);
+  }, [flatQuestions, questionsPerPage, safePage]);
 
   const paginate = (newDirection) => {
     const newPage = safePage + newDirection;
@@ -236,7 +240,7 @@ export default function FaqSection({
 
     const questionIndex = flatQuestions.findIndex((q) => q.id === hash);
     if (questionIndex >= 0) {
-      const targetPage = Math.floor(questionIndex / QUESTIONS_PER_PAGE);
+      const targetPage = Math.floor(questionIndex / questionsPerPage);
       if (targetPage !== safePage) {
         const dir = targetPage > safePage ? 1 : -1;
         setPage([targetPage, dir]);
@@ -252,12 +256,12 @@ export default function FaqSection({
         maxWaitMs: 5000,
       });
     }
-  }, [activeHash, flatQuestions, safePage]);
+  }, [activeHash, flatQuestions, questionsPerPage, safePage]);
 
   const eyebrowText = faqCopy?.eyebrow || HOME_COPY.faqSettings.eyebrow;
   const headingText = faqCopy?.title || HOME_COPY.faqSettings.title;
   const subtitleText = faqCopy?.subtitle || HOME_COPY.faqSettings.subtitle;
-  const sectionPaddingClass = compact ? "pt-20 pb-10" : "pt-20 pb-24";
+  const sectionPaddingClass = compact ? "pt-20 pb-10" : "page-top pb-24";
   const sectionId = compact ? undefined : "faq";
 
   return (
@@ -266,20 +270,20 @@ export default function FaqSection({
       id={sectionId}
       className={`relative z-10 scroll-mt-32 ${sectionPaddingClass} px-4 sm:px-6 text-ink`}
     >
-      <div className="relative max-w-6xl mx-auto">
-        <div className="text-center">
-          <span className="ri-faq-eyebrow inline-flex items-center gap-2 px-4 py-1 rounded-full bg-info-soft border border-info-border text-xs sm:text-sm font-semibold uppercase tracking-wide text-info-text shadow-info-soft">
+      <div className={`relative max-w-6xl mx-auto ${compact ? "" : FAQ_PAGE_LAYOUT_CLASS}`}>
+        <div className={compact ? "text-center" : "text-center lg:text-left"}>
+          <p className="text-sm font-semibold text-ink-secondary">
             {eyebrowText}
-          </span>
-          <Heading className="ri-faq-heading mt-4 text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_20px_rgba(56,189,248,0.35)]">
+          </p>
+          <Heading className="ri-faq-heading section-title mt-3">
             {headingText}
           </Heading>
-          <p className="mt-3 text-ink-secondary text-sm sm:text-base">
+          <p className="section-lede">
             {subtitleText}
           </p>
         </div>
 
-        <div className="mt-12">
+        <div className={`ri-faq-questions mx-auto mt-12 w-full max-w-3xl ${compact ? "" : FAQ_PAGE_QUESTIONS_CLASS}`}>
           {isLoading && (
             <div className="rounded-2xl border border-line-input bg-skeleton p-6 animate-pulse">
               <div className="h-4 w-24 rounded-full bg-surface-hover-accent" />
@@ -291,7 +295,7 @@ export default function FaqSection({
           )}
 
           <motion.div
-            animate={{ height: height || "auto" }}
+            animate={{ height: compact ? height || "auto" : "auto" }}
             transition={{ type: "spring", stiffness: 180, damping: 20 }}
             className="relative overflow-hidden"
           >
@@ -308,37 +312,33 @@ export default function FaqSection({
                     x: { type: "spring", stiffness: 300, damping: 30 },
                     opacity: { duration: 0.2 },
                   }}
-                  className="space-y-4 py-2" // py-2 prevents margin collapse issues
+                  className="space-y-3 py-2" // py-2 prevents margin collapse issues
                 >
-                  {pagedQuestions.map((q, idx) => {
+                  {pagedQuestions.map((q) => {
                     const isAnswerOpen = openQuestions[q.id] || false;
                     const answerId = `${q.id}-answer`;
-                    const questionNumber = safePage * QUESTIONS_PER_PAGE + idx + 1;
 
                     return (
                       <motion.div
                         layout="position"
                         key={q.key}
                         id={q.id}
-                        className="rounded-xl border border-line-input bg-surface-card px-4 sm:px-5 py-3 transition-all duration-200 hover:border-line-accent"
+                        className="ri-faq-question rounded-xl border border-line-input bg-surface-card px-5 sm:px-6 transition-colors duration-200 hover:border-line-accent"
                       >
                         <button
                           type="button"
                           onClick={() => toggleQuestion(q.id)}
-                          className="w-full flex items-start justify-between gap-3 text-left"
+                          className="flex min-h-14 w-full items-center justify-between gap-4 py-4 text-left"
                           aria-expanded={isAnswerOpen}
                           aria-controls={answerId}
                         >
-                          <div className="flex-1 text-[15px] sm:text-[16px] font-semibold text-ink">
-                            <span className="ri-faq-number mr-2 text-info-text font-semibold">
-                              {questionNumber})
-                            </span>
+                          <div className="flex-1 text-base font-semibold leading-snug text-ink sm:text-[17px]">
                             {q.question}
                           </div>
                           <motion.span
                             animate={{ rotate: isAnswerOpen ? 180 : 0 }}
                             transition={{ duration: 0.2 }}
-                            className="ri-faq-chevron ml-2 text-info-text"
+                            className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-surface-hover text-ink-secondary"
                           >
                             <ChevronDown className="h-4 w-4" />
                           </motion.span>
@@ -355,14 +355,14 @@ export default function FaqSection({
                                 transition={{ duration: 0.3, ease: "easeOut" }}
                                 className="overflow-hidden"
                               >
-                                <div className="pt-2 text-ink-secondary leading-relaxed font-normal">
+                                <div className={FAQ_ANSWER_CLASS}>
                                   {q.answer}
                                 </div>
                               </motion.div>
                             )}
                           </AnimatePresence>
                           {!isAnswerOpen && (
-                            <div hidden className="pt-2 text-ink-secondary leading-relaxed font-normal">
+                            <div hidden className={FAQ_ANSWER_CLASS}>
                               {q.answer}
                             </div>
                           )}
