@@ -356,46 +356,79 @@ run("no-ignored-write-request", {
   ],
 });
 
-const helperImport = 'import { reportContentLoadError } from "../lib/publicContentClient";';
+const helperImport = 'import { reportRequestError } from "../lib/clientRequest";';
 
-run("no-unfiltered-content-load-error", {
+run("no-unfiltered-request-error", {
   valid: [
-    `${helperImport} fetchHomeSectionData(key).then(setPackages).catch(reportContentLoadError);`,
-    `${helperImport} getPublicContent("tools").catch((error) => { if (active) reportContentLoadError(error); });`,
-    `import { reportContentLoadError as report } from "@/lib/publicContentClient"; getPublicContent("faq").catch(report);`,
-    `${helperImport} const pending = fetchHomeSectionData(key); pending.then(setPackages).catch(reportContentLoadError);`,
+    `${helperImport} fetchHomeSectionData(key).then(setPackages).catch(reportRequestError);`,
+    `${helperImport} getPublicContent("tools").catch((error) => { if (active) reportRequestError(error); });`,
+    `import { reportRequestError as report } from "@/lib/clientRequest"; getPublicContent("faq").catch(report);`,
+    `${helperImport} const pending = fetchHomeSectionData(key); pending.then(setPackages).catch(reportRequestError);`,
     `getPublicContent("hero").then(setHero).catch(() => {});`,
     `getPublicContent("contact").then(show, () => setFailed(true));`,
     `async function load() { try { await getPublicContent("referral-box"); } catch { setFallback(); } }`,
-    `${helperImport} async function load() { try { await getPublicContent("package"); } catch (error) { reportContentLoadError(error); } }`,
+    `${helperImport} async function load() { try { await getPublicContent("package"); } catch (error) { reportRequestError(error); } }`,
     `try { items.forEach(async () => { await getPublicContent("x"); }); } catch (error) { console.error(error); }`,
     `fetch("/api/bookingAvailability").catch(console.error);`,
+    `${helperImport} async function load() { try { await fetchJsonWithRetry("/api/bookingAvailability"); } catch (error) { reportRequestError(error); setFailed(true); } }`,
+    `${helperImport} async function check() { try { await fetchUpgradeInfo(input, signal); } catch (error) { if (!current()) return; reportRequestError(error); } }`,
+    `async function lookup() { try { await fetchJsonWithTimeout(url); } catch { return unavailableCode(); } }`,
     {
       name: "outer try only sees an unrelated failure after the content error is handled",
-      code: `${helperImport} async function save() { try { const data = await getPublicContent("package").catch(reportContentLoadError); await saveDraft(data); } catch (error) { console.error("Draft save failed", error); } }`,
+      code: `${helperImport} async function save() { try { const data = await getPublicContent("package").catch(reportRequestError); await saveDraft(data); } catch (error) { console.error("Draft save failed", error); } }`,
     },
     {
       name: "outer try around an inner try that already handles the content error",
-      code: `${helperImport} async function save() { try { try { await getPublicContent("package"); } catch (error) { reportContentLoadError(error); } await saveDraft(); } catch (error) { console.error(error); } }`,
+      code: `${helperImport} async function save() { try { try { await getPublicContent("package"); } catch (error) { reportRequestError(error); } await saveDraft(); } catch (error) { console.error(error); } }`,
     },
     {
       name: "outer try around a content load that is never awaited",
-      code: `${helperImport} function warm() { try { prefetchHomeSectionData(keys).catch(reportContentLoadError); track("warm"); } catch (error) { console.error(error); } }`,
+      code: `${helperImport} function warm() { try { prefetchHomeSectionData(keys).catch(reportRequestError); track("warm"); } catch (error) { console.error(error); } }`,
     },
     {
       name: "rethrown error reaches the shared helper",
-      code: `${helperImport} getPublicContent("faq").catch((error) => { throw error; }).then(show, (error) => Promise.reject(error)).catch(reportContentLoadError);`,
+      code: `${helperImport} getPublicContent("faq").catch((error) => { throw error; }).then(show, (error) => Promise.reject(error)).catch(reportRequestError);`,
     },
     {
       name: "rethrown error from an inner try reaches the shared helper",
-      code: `${helperImport} async function load() { try { try { await getPublicContent("faq"); } catch (error) { throw error; } } catch (error) { reportContentLoadError(error); } }`,
+      code: `${helperImport} async function load() { try { try { await getPublicContent("faq"); } catch (error) { throw error; } } catch (error) { reportRequestError(error); } }`,
     },
     {
       name: "error passed first to the shared helper with more arguments",
-      code: `${helperImport} getPublicContent("faq").catch((error) => reportContentLoadError(error, "faq"));`,
+      code: `${helperImport} getPublicContent("faq").catch((error) => reportRequestError(error, "faq"));`,
     },
   ],
   invalid: [
+    {
+      name: "BookingForm availability before the shared rule",
+      code: `const load = async () => { try { const data = await fetchJsonWithRetry("/api/bookingAvailability"); setSettings(data); } catch { console.error("Failed to fetch booking availability"); } };`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "UpgradeLink eligibility check before the shared rule",
+      code: `async function check() { try { const { data } = await fetchJsonWithTimeout("/api/ref/getUpgradeInfo", { signal }); show(data); } catch { if (!current()) return; console.error("Upgrade eligibility check failed"); } }`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "UpgradeXoc eligibility check before the shared rule",
+      code: `async function check() { try { await fetchUpgradeInfo(input, signal); } catch (err) { console.error("Upgrade check error:", err); } }`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "request failure sent to the client error tracker",
+      code: `async function load() { try { await fetchJsonWithRetry(url); } catch { reportClientError(new Error("Availability failed")); } }`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "content failure sent to the client error tracker",
+      code: `import { reportClientError } from "@/src/lib/monitoring/client"; getPublicContent("faq").catch(() => reportClientError(new Error("faq")));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "helper name imported from somewhere other than the shared request module",
+      code: 'import { reportRequestError } from "../lib/publicContentClient"; getPublicContent("faq").catch(reportRequestError);',
+      errors: [{ messageId: "unfiltered" }],
+    },
     {
       name: "Packages before #312",
       code: `fetchHomeSectionData(HOME_SECTION_DATA_KEYS.packagesList).then((pkgs) => setPackages(pkgs)).catch(console.error);`,
@@ -433,7 +466,7 @@ run("no-unfiltered-content-load-error", {
     },
     {
       name: "local function shadowing the shared helper name",
-      code: `const reportContentLoadError = (error) => console.error(error); getPublicContent("terms").catch(reportContentLoadError);`,
+      code: `const reportRequestError = (error) => console.error(error); getPublicContent("terms").catch(reportRequestError);`,
       errors: [{ messageId: "unfiltered" }],
     },
     {
@@ -523,7 +556,7 @@ run("no-unfiltered-content-load-error", {
     },
     {
       name: "error passed to the helper after another argument",
-      code: `${helperImport} getPublicContent("faq").catch((error) => reportContentLoadError("faq", error));`,
+      code: `${helperImport} getPublicContent("faq").catch((error) => reportRequestError("faq", error));`,
       errors: [{ messageId: "unfiltered" }],
     },
     {
