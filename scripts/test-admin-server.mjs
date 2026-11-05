@@ -6,6 +6,7 @@ import { registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
+import { releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
 import { lockBuildDirectory } from "./lib/build-lock.mjs";
 
 refuseEnvFiles();
@@ -24,18 +25,20 @@ registerHooks({ resolve(specifier, context, next) {
     throw error;
   }
 }});
+await reserveTcpPorts(target.hostname, [port]);
+const control = http.createServer();
+await new Promise((resolve, reject) => { control.once("error", reject); control.listen(port + 6, "127.0.0.1", resolve); });
 process.env.ROO_TEST_HOST = "127.0.0.1";
 const { start } = await import("./lib/storage-fixture.mjs");
 const fixture = await start({
   fullMigrationChain: true,
-  ports: { storage: port + 1, gateway: port + 2, postgres: port + 3, postgrest: port + 4, proxy: port + 5 },
   additionalOrigins: [baseURL, controlOrigin],
   ...(process.env.STORAGE_SOURCE ? { storageSource: process.env.STORAGE_SOURCE } : {}),
   ...(process.env.PG_BIN ? { pgBin: process.env.PG_BIN } : {}),
   ...(process.env.POSTGREST_BIN ? { postgrestBin: process.env.POSTGREST_BIN } : {}),
   ...(process.env.LD_LIBRARY_PATH ? { libraryPath: process.env.LD_LIBRARY_PATH } : {}),
 });
-let active, control, restoreEmailFetch;
+let active, restoreEmailFetch;
 const emails = [];
 let notificationSequence = 0;
 const storeRules = new Map();
@@ -60,7 +63,7 @@ const stop = async () => {
       child.kill("SIGTERM");
     });
   }
-  if (control) { control.closeAllConnections(); await new Promise(resolve => control.close(resolve)); }
+  if (control.listening) { control.closeAllConnections(); await new Promise(resolve => control.close(resolve)); }
   restoreEmailFetch?.();
   const cleanup = await fixture.stop();
   fs.mkdirSync("test-results/admin", { recursive: true });
@@ -84,7 +87,7 @@ try {
   restoreEmailFetch = () => { globalThis.fetch = originalFetch; };
   const { CONTENT_TYPES, createContentDefaults } = await import("../src/lib/cms/contentSchema.js");
   const { createToolingContentFixture } = await import("../tests/fixtures/tooling-content.mjs");
-  const seed = await createToolingContentFixture({ origin: controlOrigin });
+  const seed = await createToolingContentFixture({ origin: controlOrigin, server: control });
   let documents;
   try {
     const response = await fetch(`${controlOrigin}/rest/v1/rpc/roo_fetch_shadow_documents_targeted`, {
@@ -142,7 +145,7 @@ try {
     await fixture.sql`update accounts.creator_profiles set commission_basis_points=1000,discount_basis_points=500,total_basis_points=1500,successful_referrals=${index} where user_id=${user.id}`;
   }
   const marker = { version: 1, isolated: true, baseURL, origins: [baseURL, fixture.origin], versions: fixture.versions };
-  control = http.createServer(async (request, response) => {
+  control.on("request", async (request, response) => {
     if (request.method === "GET" && request.url === "/fixture") {
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(marker)); return;
     }
@@ -295,7 +298,6 @@ try {
     }
     response.writeHead(404); response.end();
   });
-  await new Promise((resolve, reject) => { control.once("error", reject); control.listen(port + 6, "127.0.0.1", resolve); });
   const env = {
     PATH: process.env.PATH, HOME: process.env.HOME, CI: "true", TZ: "UTC", TOURNEY_DATABASE_MODE: "memory",
     DATA_PRIMARY_BACKEND: "supabase", COMMERCE_PRIMARY_BACKEND: "supabase", COMMERCE_FAILOVER_GENERATION: "0", SUPABASE_CUTOVER_ENABLED: "1", COMMERCE_CUTOVER_ENABLED: "1",
@@ -316,10 +318,13 @@ try {
   console.log(`Guarded native CMS fixture: ${baseURL}`);
   await execute(["scripts/generate-sitemap.js"]);
   await execute(["scripts/generate-robots.js"]);
-  if (process.env.ROO_TEST_DEV === "1") await execute([next, "dev", "--hostname", target.hostname, "--port", target.port]);
-  else {
+  if (process.env.ROO_TEST_DEV === "1") {
+    await releaseTcpPorts(target.hostname, [port]);
+    await execute([next, "dev", "--hostname", target.hostname, "--port", target.port]);
+  } else {
     await execute(["scripts/validate-runtime-env.js"]);
     await execute([next, "build"]);
+    await releaseTcpPorts(target.hostname, [port]);
     await execute([next, "start", "--hostname", target.hostname, "--port", target.port]);
   }
 } finally { await stop(); }

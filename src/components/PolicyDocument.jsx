@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { PortableText } from "@portabletext/react";
-import { getPublicContent, reportContentLoadError } from "../lib/publicContentClient";
+import { reportRequestError } from "../lib/clientRequest";
+import { getPublicContent } from "../lib/publicContentClient";
 import { normalizePolicyLink } from "../lib/policyLinks";
 import contactEmail from "../lib/contactEmail";
 
@@ -97,7 +98,7 @@ export function PolicyPage({ contentKey, initialData = null }) {
       .then((next) => {
         if (next) setData(next);
       })
-      .catch(reportContentLoadError);
+      .catch(reportRequestError);
   }, [contentKey]);
 
   if (!data) return null;

@@ -1,28 +1,26 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
-import { once } from 'node:events';
 import { registerHooks } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import { installNetworkGuard, refuseEnvFiles } from '../../scripts/lib/test-target-safety.mjs';
+import { portFromEnv } from '../../scripts/lib/free-tcp-port.mjs';
 
 export async function createBookingContactFixture({ artifactName = 'booking-contact' } = {}) {
   refuseEnvFiles();
   const host = process.env.ROO_TEST_HOST || '127.0.0.1';
-  const port = Number(process.env.BOOKING_CONTACT_PORT || 4173);
-  assert.ok(Number.isInteger(port) && port >= 1024 && port <= 65532, 'Invalid fixture port');
-  const base = `http://${host}:${port}`;
-  const origins = Array.from({ length: 4 }, (_, index) => `http://${host}:${port + index}`);
-  installNetworkGuard(origins);
+  const requested = portFromEnv('BOOKING_CONTACT_PORT');
+  const server = http.createServer();
+  let base, origins;
   Object.assign(process.env, {
     NODE_ENV: 'test', VERCEL_ENV: 'development', ALLOW_LIVE_PAYMENTS: '0',
     ALLOW_LIVE_PAYMENTS_IN_DEVELOPMENT: '0', DATA_PRIMARY_BACKEND: 'supabase',
     COMMERCE_PRIMARY_BACKEND: 'supabase', COMMERCE_FAILOVER_GENERATION: '0',
     DODO_PAYMENTS_ENVIRONMENT: 'test_mode', DODO_PAYMENTS_API_KEY: 'fixture-only',
     DODO_PAYMENTS_WEBHOOK_KEY: 'whsec_Zml4dHVyZS1vbmx5',
-    DODO_PAYMENTS_PRODUCT_ID: 'pdt_fixture', DODO_PAYMENTS_RETURN_URL: `${base}/handoff`,
+    DODO_PAYMENTS_PRODUCT_ID: 'pdt_fixture',
     PAYMENT_SESSION_SECRET: 'fixture-only-payment-session', HOLD_TOKEN_SECRET: 'fixture-only-hold',
     CRON_SECRET: 'fixture-only-cron', REF_ADMIN_KEY: 'fixture-only-admin',
     REF_SESSION_SECRET: 'fixture-only-ref-session', RESEND_API_KEY: 're_fixture',
@@ -47,30 +45,34 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     fs.mkdirSync(new URL('.', artifact), { recursive: true });
     fs.writeFileSync(artifact, JSON.stringify(evidence, null, 2));
   };
-  const originalFetch = globalThis.fetch;
+  let originalFetch;
   let database;
-  let server;
   const stop = async () => {
-    if (server) {
+    if (server.listening) {
       server.closeAllConnections();
       await new Promise(resolve => server.close(resolve));
-      server = null;
     }
     if (database) await database.stop();
-    globalThis.fetch = originalFetch;
+    if (originalFetch) globalThis.fetch = originalFetch;
     evidence.stopped = true;
     save();
   };
 
   try {
+    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(requested, host, resolve); });
+    base = `http://${host}:${server.address().port}`;
+    process.env.DODO_PAYMENTS_RETURN_URL = `${base}/handoff`;
     const { createSweepPostgresFixture } = await import('../../scripts/lib/sweep-postgres-fixture.mjs');
     database = await createSweepPostgresFixture({
       fullMigrationChain: true,
       excludedMigrations: (process.env.ROO_TEST_EXCLUDED_MIGRATIONS || '').split(',').filter(Boolean),
-      ports: { postgres: port + 2, rest: port + 3, proxy: port + 1 },
+      ports: requested ? { proxy: requested + 1, postgres: requested + 2, rest: requested + 3 } : {},
       pgBin: process.env.PG_BIN || execFileSync('pg_config', ['--bindir'], { encoding: 'utf8' }).trim(),
       postgrestBin: process.env.POSTGREST_BIN || 'postgrest',
     });
+    origins = [base, database.origin, database.postgrestUrl, `http://${host}:${database.pgPort}`];
+    installNetworkGuard(origins);
+    originalFetch = globalThis.fetch;
     evidence.database = {
       version: database.postgresVersion, postgrest: database.postgrestVersion,
       migrations: database.manifest.length,
@@ -164,7 +166,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       '/api/ref/createBooking': '../../src/server/api/ref/createBooking.js',
       '/api/ref/sendBookingEmails': '../../src/server/api/ref/sendBookingEmails.js',
     })) handlers.set(route, (await import(module)).default);
-    server = http.createServer(async (req, res) => {
+    server.on('request', async (req, res) => {
       try {
         const chunks = [];
         for await (const chunk of req) chunks.push(chunk);
@@ -185,8 +187,6 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
         res.end(JSON.stringify({ error: error.message }));
       }
     });
-    server.listen(port, host);
-    await once(server, 'listening');
     const dateSlots = Array.from({ length: 240 }, (_, index) => ({
       date: new Date(Date.UTC(2099, 0, index + 1)).toISOString().slice(0, 10), times: ['10:00'],
     }));

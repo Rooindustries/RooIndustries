@@ -1,34 +1,39 @@
 import { spawn } from "node:child_process";
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
+import { portFromEnv } from "./lib/free-tcp-port.mjs";
+import { startChildOnPorts } from "./lib/start-on-port.mjs";
 
 refuseEnvFiles();
 const host = process.env.ROO_TEST_HOST || "127.0.0.1";
-const target = new URL(localOrigin(process.env.BASE_URL || `http://${host}:${process.env.PW_PORT || 3001}`));
-if (target.hostname !== host) throw new Error("API audit host must match ROO_TEST_HOST.");
-const port = Number(target.port) + 2;
-if (port > 65534) throw new Error("API audit requires two available fixture ports.");
-const baseURL = localOrigin(`http://${host}:${port}`);
-const contentURL = localOrigin(`http://${host}:${port + 1}`);
-const dist = validateDistDir(`${process.env.NEXT_DIST_DIR || `.next-e2e-${process.env.PW_SERVER_ID || process.pid}`}-api`, { isolated: true });
-installNetworkGuard([baseURL, contentURL]);
-
-const env = {
-  ...process.env,
-  BASE_URL: baseURL,
-  ROO_TEST_HOST: host,
-  PW_PORT: String(port),
-  NEXT_DIST_DIR: dist,
-  TOOLING_API_ROUTES: "1",
-  TOOLING_CONTENT_PORT: String(port + 1),
-  TOOLING_CONTENT_ARTIFACT: "audit/phase1-api-fixture.json",
-  ALLOW_LIVE_PAYMENTS: "0",
+const pwPort = portFromEnv("PW_PORT");
+const target = (process.env.BASE_URL || pwPort) && new URL(localOrigin(process.env.BASE_URL || `http://${host}:${pwPort}`));
+if (target && target.hostname !== host) throw new Error("API audit host must match ROO_TEST_HOST.");
+const requested = target ? [Number(target.port) + 2, Number(target.port) + 3] : [0, 0];
+const distBase = validateDistDir(`${process.env.NEXT_DIST_DIR || `.next-e2e-${process.env.PW_SERVER_ID || process.pid}`}-api`, { isolated: true });
+let env, restoreGuard;
+const configure = ([port, contentPort]) => {
+  const baseURL = localOrigin(`http://${host}:${port}`);
+  const contentURL = localOrigin(`http://${host}:${contentPort}`);
+  restoreGuard?.();
+  restoreGuard = installNetworkGuard([baseURL, contentURL]);
+  env = {
+    ...process.env,
+    BASE_URL: baseURL,
+    ROO_TEST_HOST: host,
+    PW_PORT: String(port),
+    NEXT_DIST_DIR: validateDistDir(`${distBase}-${port}`, { isolated: true }),
+    TOOLING_API_ROUTES: "1",
+    TOOLING_CONTENT_PORT: String(contentPort),
+    TOOLING_CONTENT_ARTIFACT: "audit/phase1-api-fixture.json",
+    ALLOW_LIVE_PAYMENTS: "0",
+  };
 };
 const children = new Map();
 let stopping = false;
 
-const launch = (args, stdio = "inherit") => {
+const launch = (args, stdio = "inherit", start = spawn) => {
   if (stopping) throw new Error("API audit was stopped.");
-  const child = spawn(process.execPath, args, { env, stdio, detached: process.platform !== "win32" });
+  const child = start(process.execPath, args, { env, stdio, detached: process.platform !== "win32" });
   const closed = new Promise(resolve => {
     child.once("error", error => resolve({ error }));
     child.once("close", (code, signal) => resolve({ code, signal }));
@@ -65,25 +70,24 @@ for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => {
 });
 
 try {
-  const server = launch(["scripts/test-tooling-sweep-server.mjs"], ["ignore", "pipe", "inherit"]);
-  let timer;
-  const ready = new Promise((resolve, reject) => {
-    timer = setTimeout(() => reject(new Error("API fixture startup timed out.")), 180000);
-    let output = "";
-    server.child.stdout.on("data", chunk => {
-      process.stdout.write(chunk);
-      output = (output + chunk.toString()).slice(-2048);
-      if (/\bReady in\b/.test(output)) resolve();
-    });
+  let server;
+  const output = [];
+  await startChildOnPorts({
+    host,
+    requested,
+    passHeld: true,
+    timeout: 180000,
+    output: () => output.join(""),
+    isReady: () => /\bReady in\b/.test(output.join("")),
+    spawnChild: (ports, held) => {
+      output.length = 0;
+      configure(ports);
+      server = launch(["scripts/test-tooling-sweep-server.mjs"], ["ignore", "pipe", "pipe"], held.spawn);
+      server.child.stdout.on("data", chunk => { output.push(String(chunk)); process.stdout.write(chunk); });
+      server.child.stderr.on("data", chunk => { output.push(String(chunk)); process.stderr.write(chunk); });
+      return server.child;
+    },
   });
-  try {
-    await Promise.race([
-      ready,
-      server.closed.then(({ error, code, signal }) => {
-        throw error || new Error(`API fixture exited before readiness: ${signal || code}.`);
-      }),
-    ]);
-  } finally { clearTimeout(timer); }
 
   const audit = launch(["scripts/phase1-api-contract.js"]);
   const result = await Promise.race([

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { reportContentLoadError } from "../lib/publicContentClient";
+import { reportRequestError } from "../lib/clientRequest";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 
 /* Record card design tokens — all theme accents derive from the active palette. */
@@ -47,7 +47,7 @@ export default function About({ initialData = null, compact = false }) {
     if (aboutData !== null) return;
     fetchHomeSectionData(HOME_SECTION_DATA_KEYS.about)
       .then(setAboutData)
-      .catch(reportContentLoadError);
+      .catch(reportRequestError);
   }, [aboutData]);
 
   if (!aboutData) {

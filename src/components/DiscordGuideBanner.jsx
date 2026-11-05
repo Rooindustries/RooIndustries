@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { FaDiscord } from "react-icons/fa";
-import { getPublicContent, reportContentLoadError } from "../lib/publicContentClient";
+import { reportRequestError } from "../lib/clientRequest";
+import { getPublicContent } from "../lib/publicContentClient";
 import { usePublicContent } from "../next/PublicContentContext";
 
 const DEFAULT_BANNER = {
@@ -27,7 +28,7 @@ export default function DiscordGuideBanner({ hidden = false }) {
           link: data.link || prev.link,
         }));
       })
-      .catch(reportContentLoadError);
+      .catch(reportRequestError);
     return () => {
       mounted = false;
     };
