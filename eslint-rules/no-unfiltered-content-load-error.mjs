@@ -78,22 +78,58 @@ export default {
         return list?.type === "ArrayExpression" && list.elements.some((item) => isContentPromise(item, seen));
       }
       if (!["then", "catch", "finally"].includes(method)) return false;
-      return isAbsent(rejectionHandler(node, method)) && isContentPromise(callee.object, seen);
+      const handler = rejectionHandler(node, method);
+      const passesOn = isAbsent(handler) || (isFunction(handler) && rethrows(handler, handler.params[0]));
+      return passesOn && isContentPromise(callee.object, seen);
     };
 
     const errorVariable = (owner, param) =>
       param?.type === "Identifier" ? sourceCode.getDeclaredVariables(owner).find((item) => item.name === param.name) : null;
 
-    const leak = (root, error) => {
+    const directlyIn = (node, owner) => {
+      for (let current = node.parent; current && current !== owner; current = current.parent) {
+        if (isFunction(current)) return false;
+      }
+      return true;
+    };
+
+    const isRejection = (call) =>
+      call.callee.type === "MemberExpression" &&
+      !call.callee.computed &&
+      call.callee.object.type === "Identifier" &&
+      call.callee.object.name === "Promise" &&
+      call.callee.property.name === "reject";
+
+    const isRethrow = (identifier, owner) => {
+      const { parent } = identifier;
+      if (parent.type === "ThrowStatement") return directlyIn(parent, owner);
+      if (parent.type !== "CallExpression" || parent.arguments[0] !== identifier || !isRejection(parent)) return false;
+      const returned =
+        (parent.parent.type === "ReturnStatement" && parent.parent.argument === parent) ||
+        (parent.parent === owner && owner.body === parent);
+      return returned && directlyIn(parent, owner);
+    };
+
+    const isHelperArgument = (identifier) =>
+      identifier.parent.type === "CallExpression" &&
+      identifier.parent.arguments[0] === identifier &&
+      isHelper(identifier.parent.callee);
+
+    const rethrows = (owner, param) =>
+      errorVariable(owner, param)?.references.some((ref) => isRethrow(ref.identifier, owner)) ?? false;
+
+    const errorLeak = (owner, param) => {
+      if (!param) return null;
+      if (param.type !== "Identifier") return param;
+      const uses = errorVariable(owner, param)?.references ?? [];
+      return uses.find((ref) => !isHelperArgument(ref.identifier) && !isRethrow(ref.identifier, owner))?.identifier;
+    };
+
+    const reporterCall = (root) => {
       const stack = [root];
       while (stack.length) {
         const node = stack.pop();
-        if (node.type === "CallExpression" && !isHelper(node.callee)) {
-          if (isReporter(node.callee)) return node;
-          if (error && node.arguments.some((arg) => arg.type === "Identifier" && findVariable(context, arg) === error)) {
-            return node;
-          }
-        }
+        if (node.type === "CallExpression" && !isHelper(node.callee) && isReporter(node.callee)) return node;
         for (const key of sourceCode.visitorKeys[node.type] ?? []) {
           const child = node[key];
           if (Array.isArray(child)) child.forEach((item) => item && stack.push(item));
@@ -103,8 +139,10 @@ export default {
       return null;
     };
 
+    const leak = (owner, param) => errorLeak(owner, param) ?? reporterCall(owner.body);
+
     const handlerLeak = (handler) => {
-      if (isFunction(handler)) return leak(handler.body, errorVariable(handler, handler.params[0]));
+      if (isFunction(handler)) return leak(handler, handler.params[0]);
       return isHelper(handler) ? null : handler;
     };
 
@@ -121,8 +159,9 @@ export default {
         for (let child = node; child.parent && !isFunction(child.parent); child = child.parent) {
           const parent = child.parent;
           if (parent.type === "TryStatement" && parent.block === child && parent.handler) {
-            report(leak(parent.handler.body, errorVariable(parent.handler, parent.handler.param)));
-            return;
+            const { handler } = parent;
+            report(leak(handler, handler.param));
+            if (!rethrows(handler, handler.param)) return;
           }
         }
       },

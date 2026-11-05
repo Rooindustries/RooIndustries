@@ -382,6 +382,18 @@ run("no-unfiltered-content-load-error", {
       name: "outer try around a content load that is never awaited",
       code: `${helperImport} function warm() { try { prefetchHomeSectionData(keys).catch(reportContentLoadError); track("warm"); } catch (error) { console.error(error); } }`,
     },
+    {
+      name: "rethrown error reaches the shared helper",
+      code: `${helperImport} getPublicContent("faq").catch((error) => { throw error; }).then(show, (error) => Promise.reject(error)).catch(reportContentLoadError);`,
+    },
+    {
+      name: "rethrown error from an inner try reaches the shared helper",
+      code: `${helperImport} async function load() { try { try { await getPublicContent("faq"); } catch (error) { throw error; } } catch (error) { reportContentLoadError(error); } }`,
+    },
+    {
+      name: "error passed first to the shared helper with more arguments",
+      code: `${helperImport} getPublicContent("faq").catch((error) => reportContentLoadError(error, "faq"));`,
+    },
   ],
   invalid: [
     {
@@ -452,6 +464,71 @@ run("no-unfiltered-content-load-error", {
     {
       name: "try handler forwarding the error to a named logger",
       code: `async function load() { try { await getPublicContent("faq"); } catch (error) { logContentError(error); } }`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "thrown error caught by the next handler",
+      code: `getPublicContent("faq").catch((error) => { throw error; }).catch(console.error);`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "rejected promise returned to the next handler",
+      code: `getPublicContent("faq").then(show, function (error) { return Promise.reject(error); }).catch((error) => console.warn(error));`,
+      errors: [{ messageId: "unfiltered", column: 118 }],
+    },
+    {
+      name: "stored rethrowing chain caught later",
+      code: `const pending = getPublicContent("faq").catch((error) => Promise.reject(error)); pending.catch(console.error);`,
+      errors: [{ messageId: "unfiltered", column: 96 }],
+    },
+    {
+      name: "rethrowing chain awaited inside a try",
+      code: `async function load() { try { await getPublicContent("faq").catch((error) => { throw error; }); } catch (error) { console.error(error); } }`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "inner try rethrowing to an outer try",
+      code: `async function load() { try { try { await getPublicContent("faq"); } catch (error) { throw error; } } catch (error) { console.error(error); } }`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error wrapped in an object for a named logger",
+      code: `getPublicContent("faq").catch((error) => logContentError({ error }));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error wrapped in an object with a key",
+      code: `getPublicContent("faq").catch((e) => logContentError({ error: e }));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error put in an array",
+      code: `getPublicContent("faq").catch((error) => logContentError([error]));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error put in a template",
+      code: "getPublicContent(\"faq\").catch((error) => logContentError(`load failed: ${error}`));",
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error property read",
+      code: `async function load() { try { await getPublicContent("faq"); } catch (error) { setMessage(error.message); } }`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error destructured in the handler parameter",
+      code: `getPublicContent("faq").catch(({ message }) => logContentError(message));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error passed to the helper after another argument",
+      code: `${helperImport} getPublicContent("faq").catch((error) => reportContentLoadError("faq", error));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error rethrown later from a nested callback",
+      code: `getPublicContent("faq").catch((error) => { setTimeout(() => { throw error; }); });`,
       errors: [{ messageId: "unfiltered" }],
     },
   ],
