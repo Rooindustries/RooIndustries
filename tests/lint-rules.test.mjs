@@ -1,5 +1,7 @@
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
-import { RuleTester } from "eslint";
+import assert from "node:assert/strict";
+import { Linter, RuleTester } from "eslint";
 import { rules } from "../eslint-rules/index.mjs";
 
 RuleTester.describe = describe;
@@ -76,6 +78,7 @@ run("aria-expanded-needs-controls", {
 
 run("no-unguarded-timer-navigation", {
   valid: [
+    `function Steps() { const history = []; history[0] = "/"; setTimeout(() => history.push("/next"), 100); return null; }`,
     `function RefLogin() { useEffect(() => { const id = setTimeout(() => nav("/x"), 500); return () =>
       clearTimeout(id); }, []); return null; }`,
     `function Toast() { setTimeout(() => setToast((current) => (current === next ? null : current)), 2800); return null;
@@ -130,6 +133,100 @@ run("no-unguarded-timer-navigation", {
       name: "RefRegister toast reset before #205",
       code: `function RefRegister() { function showToast() { setTimeout(() => setToast(null), 2800); } return null; }`,
       errors: [{ messageId: "timer" }],
+    },
+  ],
+});
+
+run("smooth-scroll-needs-motion-check", {
+  valid: [
+    `window.scrollTo();`,
+    `window.scrollTo({ top: 0, behavior: "auto" });`,
+    `window.scrollTo({ top: 0, behavior: "instant" });`,
+    "window.scroll({ top: 0, behavior: `instant` });",
+    `window.scrollTo(0, 120);`,
+    `window.scrollTo(0, stored.scrollY || 0);`,
+    `el.scrollIntoView({ block: "nearest" });`,
+    `ref.current?.scrollIntoView?.({ block: "nearest" });`,
+    `el.scrollIntoView(false);`,
+    `window.scrollTo({ top: 0, behavior: "smooth", behavior: "instant" });`,
+    `scrollWindowTo(0);`,
+    {
+      code: `window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "instant" : "smooth" });`,
+      filename: fileURLToPath(new URL("../src/lib/scrollWindowTo.js", import.meta.url)),
+    },
+  ],
+  invalid: [
+    {
+      name: "Footer back to top before the reduced-motion fix",
+      code: `const scrollToTop = () => { window.scrollTo({ top: 0, behavior: "smooth" }); };`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "FAQ page change scroll before the reduced-motion fix",
+      code: `const scrollWithOffset = (id, behavior = "smooth") => { window.scrollTo({ top: 1, behavior }); };`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "behavior reassigned to smooth after a safe start",
+      code: `let behavior = "auto"; behavior = "smooth"; window.scrollTo({ behavior });`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "smooth options spread into the call",
+      code: `const opts = { behavior: "smooth" }; window.scrollTo({ ...opts });`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "spread placed before a safe behavior",
+      code: `window.scrollTo({ ...opts, behavior: "auto" });`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "conditional between whole option objects",
+      code: `window.scrollTo(fast ? { top: 0, behavior: "smooth" } : { top: 0 });`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "options stored in a variable",
+      code: `const options = { block: "start" }; panel.scrollIntoView(options);`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "motion check in the section-scroll coordinator",
+      code: `window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "instant" : "smooth" });`,
+      filename: fileURLToPath(new URL("../src/lib/scrollCoordinator.js", import.meta.url)),
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "nested file sharing the helper's name",
+      code: `window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "instant" : "smooth" });`,
+      filename: fileURLToPath(new URL("../app/src/lib/scrollWindowTo.js", import.meta.url)),
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "motion check written outside the helper",
+      code: `window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "instant" : "smooth" });`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "smooth scrollBy on an element",
+      code: `list.scrollBy({ left: 200, behavior: wide && "smooth" });`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "computed option key",
+      code: `window.scrollTo({ top: 0, [key]: "smooth" });`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "spread arguments",
+      code: `window.scrollBy(...delta);`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "scrollIntoView argument from a variable",
+      code: `el.scrollIntoView(alignTop);`,
+      errors: [{ messageId: "unchecked" }],
     },
   ],
 });
@@ -237,6 +334,11 @@ run("no-ignored-write-request", {
       errors: [{ messageId: "ignored" }],
     },
     {
+      name: "quoted method key left unchecked",
+      code: `fetch("/api/releaseHold", { "method": "POST" });`,
+      errors: [{ messageId: "ignored" }],
+    },
+    {
       name: "window.fetch write left unchecked",
       code: `window.fetch("/api/releaseHold", { method: "POST" });`,
       errors: [{ messageId: "ignored" }],
@@ -250,6 +352,217 @@ run("no-ignored-write-request", {
       name: "BookingForm release before #158",
       code: `async function release() { await fetch("/api/releaseHold", { method: "POST", body }); }`,
       errors: [{ messageId: "ignored" }],
+    },
+  ],
+});
+
+const helperImport = 'import { reportRequestError } from "../lib/clientRequest";';
+
+run("no-unfiltered-request-error", {
+  valid: [
+    `${helperImport} fetchHomeSectionData(key).then(setPackages).catch(reportRequestError);`,
+    `${helperImport} getPublicContent("tools").catch((error) => { if (active) reportRequestError(error); });`,
+    `import { reportRequestError as report } from "@/lib/clientRequest"; getPublicContent("faq").catch(report);`,
+    `${helperImport} const pending = fetchHomeSectionData(key); pending.then(setPackages).catch(reportRequestError);`,
+    `getPublicContent("hero").then(setHero).catch(() => {});`,
+    `getPublicContent("contact").then(show, () => setFailed(true));`,
+    `async function load() { try { await getPublicContent("referral-box"); } catch { setFallback(); } }`,
+    `${helperImport} async function load() { try { await getPublicContent("package"); } catch (error) { reportRequestError(error); } }`,
+    `try { items.forEach(async () => { await getPublicContent("x"); }); } catch (error) { console.error(error); }`,
+    `fetch("/api/bookingAvailability").catch(console.error);`,
+    `${helperImport} async function load() { try { await fetchJsonWithRetry("/api/bookingAvailability"); } catch (error) { reportRequestError(error); setFailed(true); } }`,
+    `${helperImport} async function check() { try { await fetchUpgradeInfo(input, signal); } catch (error) { if (!current()) return; reportRequestError(error); } }`,
+    `async function lookup() { try { await fetchJsonWithTimeout(url); } catch { return unavailableCode(); } }`,
+    {
+      name: "outer try only sees an unrelated failure after the content error is handled",
+      code: `${helperImport} async function save() { try { const data = await getPublicContent("package").catch(reportRequestError); await saveDraft(data); } catch (error) { console.error("Draft save failed", error); } }`,
+    },
+    {
+      name: "outer try around an inner try that already handles the content error",
+      code: `${helperImport} async function save() { try { try { await getPublicContent("package"); } catch (error) { reportRequestError(error); } await saveDraft(); } catch (error) { console.error(error); } }`,
+    },
+    {
+      name: "outer try around a content load that is never awaited",
+      code: `${helperImport} function warm() { try { prefetchHomeSectionData(keys).catch(reportRequestError); track("warm"); } catch (error) { console.error(error); } }`,
+    },
+    {
+      name: "rethrown error reaches the shared helper",
+      code: `${helperImport} getPublicContent("faq").catch((error) => { throw error; }).then(show, (error) => Promise.reject(error)).catch(reportRequestError);`,
+    },
+    {
+      name: "rethrown error from an inner try reaches the shared helper",
+      code: `${helperImport} async function load() { try { try { await getPublicContent("faq"); } catch (error) { throw error; } } catch (error) { reportRequestError(error); } }`,
+    },
+    {
+      name: "error passed first to the shared helper with more arguments",
+      code: `${helperImport} getPublicContent("faq").catch((error) => reportRequestError(error, "faq"));`,
+    },
+  ],
+  invalid: [
+    {
+      name: "BookingForm availability before the shared rule",
+      code: `const load = async () => { try { const data = await fetchJsonWithRetry("/api/bookingAvailability"); setSettings(data); } catch { console.error("Failed to fetch booking availability"); } };`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "UpgradeLink eligibility check before the shared rule",
+      code: `async function check() { try { const { data } = await fetchJsonWithTimeout("/api/ref/getUpgradeInfo", { signal }); show(data); } catch { if (!current()) return; console.error("Upgrade eligibility check failed"); } }`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "UpgradeXoc eligibility check before the shared rule",
+      code: `async function check() { try { await fetchUpgradeInfo(input, signal); } catch (err) { console.error("Upgrade check error:", err); } }`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "request failure sent to the client error tracker",
+      code: `async function load() { try { await fetchJsonWithRetry(url); } catch { reportClientError(new Error("Availability failed")); } }`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "content failure sent to the client error tracker",
+      code: `import { reportClientError } from "@/src/lib/monitoring/client"; getPublicContent("faq").catch(() => reportClientError(new Error("faq")));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "helper name imported from somewhere other than the shared request module",
+      code: 'import { reportRequestError } from "../lib/publicContentClient"; getPublicContent("faq").catch(reportRequestError);',
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "Packages before #312",
+      code: `fetchHomeSectionData(HOME_SECTION_DATA_KEYS.packagesList).then((pkgs) => setPackages(pkgs)).catch(console.error);`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "BookingForm package lookup before #312",
+      code: `const fetchVertex = async () => { try { const data = await getPublicContent("package", { title }); setVertex(data); } catch { console.error("Failed to fetch Performance Vertex package"); } };`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "UpgradeLink before #312",
+      code: `getPublicContent("upgrade-link", { slug }, { signal }).then(show).catch(() => { console.error("Upgrade link load failed"); if (!active) return; setLinkError(message); }).finally(done);`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "rejection handler passed to then",
+      code: `getPublicContent("terms").then(setTerms, (error) => console.warn(error));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error tracker called directly",
+      code: `prefetchHomeSectionData(keys).catch((error) => Sentry.captureException(error));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "named logger passed to catch",
+      code: `import { logContentError } from "../lib/log"; getPublicContent("terms").catch(logContentError);`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "tracker method passed to catch",
+      code: `fetchHomeSectionData(key).catch(Sentry.captureException);`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "local function shadowing the shared helper name",
+      code: `const reportRequestError = (error) => console.error(error); getPublicContent("terms").catch(reportRequestError);`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "named rejection handler passed to then",
+      code: `getPublicContent("terms").then(setTerms, onLoadFailed);`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "inline handler forwarding the error to a named logger",
+      code: `getPublicContent("terms").catch((error) => logContentError(error));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "stored content promise caught later",
+      code: `const pending = fetchHomeSectionData(key); pending.catch(console.error);`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "stored content chain given a rejection handler later",
+      code: `const pending = getPublicContent("faq").then(show); pending.then(null, (error) => console.warn(error));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "stored content promise awaited inside a try",
+      code: `async function load() { const pending = getPublicContent("faq"); try { await pending; } catch (error) { console.error(error); } }`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "try handler forwarding the error to a named logger",
+      code: `async function load() { try { await getPublicContent("faq"); } catch (error) { logContentError(error); } }`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "thrown error caught by the next handler",
+      code: `getPublicContent("faq").catch((error) => { throw error; }).catch(console.error);`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "rejected promise returned to the next handler",
+      code: `getPublicContent("faq").then(show, function (error) { return Promise.reject(error); }).catch((error) => console.warn(error));`,
+      errors: [{ messageId: "unfiltered", column: 118 }],
+    },
+    {
+      name: "stored rethrowing chain caught later",
+      code: `const pending = getPublicContent("faq").catch((error) => Promise.reject(error)); pending.catch(console.error);`,
+      errors: [{ messageId: "unfiltered", column: 96 }],
+    },
+    {
+      name: "rethrowing chain awaited inside a try",
+      code: `async function load() { try { await getPublicContent("faq").catch((error) => { throw error; }); } catch (error) { console.error(error); } }`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "inner try rethrowing to an outer try",
+      code: `async function load() { try { try { await getPublicContent("faq"); } catch (error) { throw error; } } catch (error) { console.error(error); } }`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error wrapped in an object for a named logger",
+      code: `getPublicContent("faq").catch((error) => logContentError({ error }));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error wrapped in an object with a key",
+      code: `getPublicContent("faq").catch((e) => logContentError({ error: e }));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error put in an array",
+      code: `getPublicContent("faq").catch((error) => logContentError([error]));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error put in a template",
+      code: "getPublicContent(\"faq\").catch((error) => logContentError(`load failed: ${error}`));",
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error property read",
+      code: `async function load() { try { await getPublicContent("faq"); } catch (error) { setMessage(error.message); } }`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error destructured in the handler parameter",
+      code: `getPublicContent("faq").catch(({ message }) => logContentError(message));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error passed to the helper after another argument",
+      code: `${helperImport} getPublicContent("faq").catch((error) => reportRequestError("faq", error));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error rethrown later from a nested callback",
+      code: `getPublicContent("faq").catch((error) => { setTimeout(() => { throw error; }); });`,
+      errors: [{ messageId: "unfiltered" }],
     },
   ],
 });
@@ -315,10 +628,24 @@ run("no-aria-label-on-generic", {
 
 run("inputs-need-form", {
   valid: [
+    `function Help() { return <div><input /><button onClick={() => { const later = () => saveDraft();
+      openHelp(later); }}>Help</button></div>; }`,
     `function Upgrade() { return <form onSubmit={handleCheckOrder}><input type="email" /><button
       type="submit">Check</button></form>; }`,
     `function Share() { return <div><input value={link} readOnly /><button onClick={save}>Save</button></div>; }`,
     `function Fields() { return <div><input /><button onClick={() => move(1)}>Down</button></div>; }`,
+    `function Docs() { return <div><input type="search" /><button onClick={() => { if (confirmDiscard())
+      startNewDocument(type.name); }}>New</button></div>; }`,
+    `function Gate() { return <div><input /><button onClick={() => { switch (validateCode()) { case true:
+      openNext(); } }}>Next</button></div>; }`,
+    `function Help() { return <div><input /><button onClick={() => { switch (mode) { case checkMode(): openHelp(); }
+      }}>Help</button></div>; }`,
+    `function Rows() { return <div><input /><button onClick={() => { for (const row of checkedRows()) mark(row); }}>
+      Mark</button></div>; }`,
+    `function Ready() { return <div><input /><button onClick={() => { const ready = checkReady(); if (ready) openHelp();
+      }}>Help</button></div>; }`,
+    `function Retry() { return <div><input /><button onClick={() => { for (; checkReady(); ) wait(); }}>
+      Wait</button></div>; }`,
   ],
   invalid: [
     {
@@ -333,6 +660,34 @@ run("inputs-need-form", {
         onClick={handleSubmit}>Find</button></div>; }`,
       errors: [{ messageId: "form" }, { messageId: "form" }],
     },
+    {
+      name: "async block-bodied submit handler",
+      code: `function Redeem() { return <div><input type="email" /><button onClick={async () => { await
+        handleSubmit(); }}>Redeem</button></div>; }`,
+      errors: [{ messageId: "form" }],
+    },
+    {
+      name: "submit after an early return",
+      code: `function Send() { return <div><input /><button onClick={() => { if (!validateCode()) return;
+        form.submit(); }}>Send</button></div>; }`,
+      errors: [{ messageId: "form" }],
+    },
+    {
+      name: "submit settled with then",
+      code: `function Code() { return <div><input /><button onClick={() => saveCode().then(close)}>Save</button></div>; }`,
+      errors: [{ messageId: "form" }],
+    },
+    {
+      name: "submit behind a logical guard",
+      code: `function Send() { return <div><input /><button onClick={() => ready && handleSubmit()}>Send</button></div>; }`,
+      errors: [{ messageId: "form" }],
+    },
+    {
+      name: "function handler calling a member save",
+      code: `function Keep() { return <div><input type="tel" /><button onClick={function () {
+        void props.saveCode(); }}>Keep</button></div>; }`,
+      errors: [{ messageId: "form" }],
+    },
   ],
 });
 
@@ -342,6 +697,16 @@ run("no-client-only-public-content", {
       { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
     `export default function Terms({ initialData }) { const [data, setData] = useState(initialData); useEffect(() =>
       { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Terms(props) { const { initialData: seed = null } = props; const [data, setData] =
+      useState(seed); useEffect(() => { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Faq(props) { const [data, setData] = useState(props["initialFaq"]); useEffect(() =>
+      { getPublicContent("faq").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Terms({ initialData } = {}) { const [data, setData] = useState(initialData); useEffect(() =>
+      { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Terms(props = {}) { const [data, setData] = useState(props.initialData); useEffect(() =>
+      { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
+    `export default function Terms(props) { const { ["initialData"]: seed } = props; const [data, setData] =
+      useState(seed); useEffect(() => { getPublicContent("terms").then(setData); }, []); return <p>{data}</p>; }`,
     `export default function Upgrade({ slug }) { useEffect(() => { getPublicContent("upgrade", { slug }); },
       [slug]); return null; }`,
   ],
@@ -350,6 +715,13 @@ run("no-client-only-public-content", {
       name: "Terms before #195",
       code: `export default function Terms() { const [data, setData] = useState(null); useEffect(() => {
         getPublicContent("terms").then((d) => setData(d)); }, []); return <p>{data}</p>; }`,
+      errors: [{ messageId: "clientOnly" }],
+    },
+    {
+      name: "an inner callback's own props parameter",
+      code: `export default function List(props) { const rows = props.items.map((props) => { const { initialData }
+        = props; return initialData; }); const [data, setData] = useState(null); useEffect(() => {
+        getPublicContent("list").then(setData); }, []); return <p>{data}{rows}</p>; }`,
       errors: [{ messageId: "clientOnly" }],
     },
     {
@@ -407,6 +779,164 @@ run("no-nested-components", {
       name: "expression-bodied component with no children",
       code: `export default function Card() { const Divider = () => <hr />; return <Divider />; }`,
       errors: [{ messageId: "nested" }],
+    },
+  ],
+});
+
+describe("spread resolution", () => {
+  const layers = Array.from({ length: 24 }, (_, index) => `const s${index + 1} = { ...s${index}, ...s${index} };`);
+  const nested = `const s0 = { method: "POST", signal: requestDeadline(), opacity: 1 }; ${layers.join(" ")}`;
+  const cases = {
+    "fetch-needs-deadline": `${nested} fetch(url, s24);`,
+    "no-ignored-write-request": `${nested} fetch(url, s24);`,
+    "no-hidden-server-motion": `${nested} function Fade() { return <motion.div initial={s24} />; }`,
+  };
+  for (const [name, code] of Object.entries(cases)) {
+    it(`${name} resolves deeply repeated spreads in linear time`, () => {
+      const linter = new Linter({ configType: "flat" });
+      const started = performance.now();
+      const messages = linter.verify(code, {
+        languageOptions: { ecmaVersion: "latest", sourceType: "module", parserOptions: { ecmaFeatures: { jsx: true } } },
+        plugins: { local: { rules } },
+        rules: { [`local/${name}`]: "error" },
+      });
+      assert.ok(performance.now() - started < 1000);
+      assert.deepEqual(
+        messages.map(({ messageId }) => messageId),
+        name === "no-ignored-write-request" ? ["ignored"] : [],
+      );
+    });
+  }
+});
+
+run("no-scripting-media-query", {
+  valid: [
+    `matchMedia("(prefers-reduced-motion: reduce)");`,
+    `<link rel="stylesheet" media="(min-width: 768px)" href="/a.css" />`,
+    `<p>Pages still read without (scripting) turned on.</p>`,
+    `const label = "(scripting: none)"; render(label);`,
+    `<Video media="(scripting: none)" />`,
+    "<style>{`/* @media (scripting: none) */ .a::before { content: \"(scripting)\"; }`}</style>",
+    `<style>{css}</style>`,
+    "const f = getFeature(); matchMedia(`(${f}: none)`);",
+    "const w = 768; matchMedia(`(min-width: ${w}px)`);",
+    `<style dangerouslySetInnerHTML={{ __html: ".a { color: red; }" }} />`,
+    "const rules = load(); <style>{`${rules} .a { color: red; }`}</style>;",
+    `const s0 = "(min-width: 1px)"; ${Array.from({ length: 24 }, (_, i) => `const s${i + 1} = s${i} + s${i};`).join(" ")} matchMedia(s24);`,
+  ],
+  invalid: [
+    {
+      name: "matchMedia on the scripting feature",
+      code: `window.matchMedia("(scripting: none)");`,
+      errors: [{ messageId: "scripting", line: 1, column: 19 }],
+    },
+    {
+      name: "matchMedia with an escaped feature name in a template",
+      code: "matchMedia(`not (\\\\73 cripting)`);",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "matchMedia on a query built from a constant",
+      code: `const noJs = "(SCRIPTING: " + "none)"; globalThis["matchMedia"](noJs);`,
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "link media attribute",
+      code: `<link rel="stylesheet" media="screen and ( scripting : initial-only )" href="/a.css" />`,
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "style media attribute in an expression",
+      code: "<style media={`(scr\\\\ipting: enabled)`}>{`.a { color: red; }`}</style>",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "inline style element with a scripting block",
+      code: "const css = `@media (scripting: none) { .x { display: block; } }`; <style>{css}</style>;",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "matchMedia with the feature name in a template expression",
+      code: "const f = \"scripting\"; matchMedia(`(${f}:none)`);",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "matchMedia with a nested template constant",
+      code: "const name = \"script\"; const q = `(${`${name}ing`}: none)`; matchMedia(q);",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "matchMedia reusing one constant twice",
+      code: "const s = \"script\"; matchMedia(`${s}s, (${s}ing)`);",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "matchMedia with a runtime value after the feature",
+      code: "matchMedia(`(scripting: ${mode})`);",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "link media from a template expression",
+      code: "const f = \"scripting\"; <link rel=\"stylesheet\" media={`(${f}: none)`} href=\"/a.css\" />;",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "inline style with the feature in a template expression",
+      code: "const f = \"scripting\"; <style>{`@media (${f}: none) { .x { display: block; } }`}</style>;",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "inline style after a runtime chunk",
+      code: "<style>{`${rules} @media (scripting: none) { .x { display: block; } }`}</style>;",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "style with dangerouslySetInnerHTML",
+      code: "<style dangerouslySetInnerHTML={{ __html: \"@media (scripting: none) { .x { display: block; } }\" }} />;",
+      errors: [{ messageId: "scripting" }],
+    },
+    {
+      name: "style with dangerouslySetInnerHTML from constants",
+      code: "const f = \"scripting\"; const html = { __html: `@media (${f}: none) {}` }; <style dangerouslySetInnerHTML={html} />;",
+      errors: [{ messageId: "scripting" }],
+    },
+  ],
+});
+
+const testFile = fileURLToPath(new URL("../src/__tests__/virtualMock.test.js", import.meta.url));
+
+run("no-virtual-mock-of-installed-module", {
+  valid: [
+    { filename: testFile, code: `jest.mock("react-router-dom", () => ({ useLocation: () => ({}) }));` },
+    { filename: testFile, code: `jest.mock("roo-package-that-is-not-installed", () => ({}), { virtual: true });` },
+    { filename: testFile, code: `jest.mock("../lib/not-a-real-file", () => ({}), { virtual: true });` },
+    { filename: testFile, code: `jest.mock("lucide-react", () => ({}), { virtual: false });` },
+    { filename: testFile, code: `jest.mock("@/src/lib/not-a-real-file", () => ({}), { virtual: true });` },
+  ],
+  invalid: [
+    {
+      name: "booking UI test before the router fix",
+      filename: testFile,
+      code: `jest.mock("react-router-dom", () => ({ useLocation: () => ({}) }), { virtual: true });`,
+      errors: [{ messageId: "installed" }],
+    },
+    {
+      name: "installed icon package",
+      filename: testFile,
+      code: `jest.doMock("lucide-react", () => ({}), { virtual: true });`,
+      errors: [{ messageId: "installed" }],
+    },
+    {
+      name: "existing app module through the Jest alias",
+      filename: testFile,
+      code: `jest.mock("@/src/lib/sectionNavigator", () => ({}), { virtual: true });`,
+      errors: [{ messageId: "installed" }],
+    },
+    {
+      name: "existing app module",
+      filename: testFile,
+      code: `jest.mock("../lib/sectionNavigator", () => ({}), { virtual: true });`,
+      errors: [{ messageId: "installed" }],
     },
   ],
 });

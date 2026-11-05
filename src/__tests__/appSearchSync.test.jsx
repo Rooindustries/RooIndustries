@@ -44,6 +44,8 @@ jest.mock("../lib/homeSectionData", () => ({
   prefetchHomeSectionData: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock("../lib/sectionNavigation", () => ({
+  clearPendingSectionTarget: jest.fn(),
+  clearRouteTransitionIntent: jest.fn(),
   consumeRouteTransitionIntent: jest.fn(() => null),
   isHomeSectionHash: jest.fn(() => false),
   normalizeSectionHash: jest.fn((value) => value || ""),

@@ -248,6 +248,48 @@ export const fetchShadowDocuments = async ({
   return requireShadowDocumentArray(data);
 };
 
+const requirePublicContentRevision = (value) => {
+  const revision = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+  if (Number.isSafeInteger(revision) && revision >= 0) return revision;
+  const failure = new Error("Public content read returned an invalid revision.");
+  failure.code = "SUPABASE_DOCUMENT_RESPONSE_INVALID";
+  failure.status = 503;
+  failure.statusCode = 503;
+  throw failure;
+};
+
+export const fetchPublicContentDocuments = async ({
+  documentTypes = null,
+  ids = null,
+  filters = [],
+  limit = 500,
+  client = createSupabaseAdminClient(),
+} = {}) => {
+  const data = requireRpcData(
+    await client.rpc("roo_fetch_public_content_documents", {
+      p_document_types:
+        Array.isArray(documentTypes) && documentTypes.length > 0
+          ? documentTypes
+          : null,
+      p_ids: Array.isArray(ids) && ids.length > 0 ? ids : null,
+      p_filters: Array.isArray(filters) ? filters : [],
+      p_limit: Math.max(1, Math.min(1000, Number(limit) || 500)),
+    }),
+    "public content fetch"
+  );
+  return {
+    revision: requirePublicContentRevision(data?.revision),
+    documents: requireShadowDocumentArray(data?.documents),
+  };
+};
+
+export const readPublicContentRevision = async ({
+  client = createSupabaseAdminClient(),
+} = {}) =>
+  requirePublicContentRevision(
+    requireRpcData(await client.rpc("roo_read_public_content_revision"), "public content revision")
+  );
+
 export const fetchRecoveryPaymentDocuments = async ({
   backend,
   statuses,

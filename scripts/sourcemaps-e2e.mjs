@@ -9,6 +9,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { freeTcpPorts } from './lib/free-tcp-port.mjs';
+import { lockBuildDirectory } from './lib/build-lock.mjs';
 import { inheritTestProcessGuard, installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from './lib/test-target-safety.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -92,7 +93,7 @@ if (process.argv[2] === '--build') {
   const report = { ok: false, buildSha, scenarios: [] };
   const requests = [];
   const uploadedChunks = new Map();
-  let content, server, restoreGuard, productionDist;
+  let content, server, restoreGuard, productionDist, productionLock;
   let rejectUpload = false;
   let bundlePath;
   let uploadError;
@@ -112,6 +113,7 @@ if (process.argv[2] === '--build') {
     const siteOrigin = localOrigin(`http://127.0.0.1:${sitePort}`);
     const contentOrigin = localOrigin(`http://127.0.0.1:${contentPort}`);
     productionDist = validateDistDir(`.next-e2e-sourcemaps-${stamp}`, { isolated: true });
+    productionLock = lockBuildDirectory(join(root, productionDist));
     server = createServer(async (request, response) => {
       const chunks = [];
       for await (const chunk of request) chunks.push(chunk);
@@ -181,8 +183,8 @@ if (process.argv[2] === '--build') {
       assert.equal(await readFile(networkLog, 'utf8'), '', 'A source-map child attempted a nonlocal connection.');
     }
 
-    async function execute(name, args, env, { cwd = root, timeout = 60000 } = {}) {
-      const child = spawn(process.execPath, args, { cwd, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env });
+    async function execute(name, args, env, { cwd = root, timeout = 60000, fds = [] } = {}) {
+      const child = spawn(process.execPath, args, { cwd, detached: true, stdio: ['ignore', 'pipe', 'pipe', ...fds], env });
       const logs = [];
       child.stdout.on('data', data => logs.push(data));
       child.stderr.on('data', data => logs.push(data));
@@ -219,7 +221,7 @@ if (process.argv[2] === '--build') {
     async function productionWithoutToken() {
       const { createToolingContentFixture } = await import('../tests/fixtures/tooling-content.mjs');
       content = await createToolingContentFixture({ origin: contentOrigin, artifact: join(artifact, 'content-fixture.json') });
-      const env = environment({
+      const env = productionLock.childEnv(environment({
         SENTRY_AUTH_TOKEN: '', NEXT_DIST_DIR: productionDist,
         TOURNEY_DATABASE_MODE: 'memory', DATA_PRIMARY_BACKEND: 'supabase', COMMERCE_PRIMARY_BACKEND: 'supabase',
         SUPABASE_CUTOVER_ENABLED: '1', COMMERCE_CUTOVER_ENABLED: '1',
@@ -227,9 +229,9 @@ if (process.argv[2] === '--build') {
         SUPABASE_SECRET_KEY: 'fixture-only-tooling-server-secret-key',
         NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'fixture-only-tooling-browser-publishable-key',
         ALLOW_LIVE_PAYMENTS: '0', SALES_PREVIEW_READ_ONLY: '1',
-      });
+      }));
       const start = requests.length;
-      const result = await execute('production-missing-token-build', [join(root, 'node_modules/next/dist/bin/next'), 'build'], env, { timeout: 900000 });
+      const result = await execute('production-missing-token-build', [join(root, 'node_modules/next/dist/bin/next'), 'build'], env, { timeout: 900000, fds: [productionLock.fd] });
       assert.equal(result.status, 0);
       assert.equal(result.log.split(missingTokenWarning).length - 1, 1);
       assert.equal(requests.length, start);
@@ -241,7 +243,7 @@ if (process.argv[2] === '--build') {
       assert(!browserFiles.some(path => path.endsWith('.map')));
       const site = new URL(siteOrigin);
       const child = spawn(process.execPath, [join(root, 'node_modules/next/dist/bin/next'), 'start',
-        '--hostname', site.hostname, '--port', site.port], { cwd: root, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+        '--hostname', site.hostname, '--port', site.port], { cwd: root, env, detached: true, stdio: ['ignore', 'pipe', 'pipe', productionLock.fd] });
       const logs = [];
       child.stdout.on('data', data => logs.push(data));
       child.stderr.on('data', data => logs.push(data));
@@ -365,7 +367,11 @@ if (process.argv[2] === '--build') {
       server?.listening ? new Promise(done => { server.closeAllConnections(); server.close(done); }) : undefined,
     ]);
     restoreGuard?.();
-    if (productionDist) await rm(join(root, productionDist), { recursive: true, force: true });
+    if (productionLock) {
+      await rm(join(root, productionDist), { recursive: true, force: true });
+      await rm(`${join(root, productionDist)}.build-lock`, { force: true });
+      productionLock.release();
+    }
     await rm(fixture, { recursive: true, force: true });
     const errors = cleanup.filter(result => result.status === 'rejected').map(result => result.reason.message);
     if (errors.length) { report.ok = false; report.cleanupErrors = errors; process.exitCode = 1; }

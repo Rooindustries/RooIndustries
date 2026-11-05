@@ -131,8 +131,19 @@ const test = base.extend({
       }
       if (path === "/api/payment/providers") return json(route, { ok: true, providers });
       if (path === "/api/payment/quote") {
-        return json(route, { ok: true, quoteFingerprint: "fixture-quote", providers,
-          quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false } });
+        const body = request.postDataJSON() || {};
+        const couponCode = String(body.couponCode || "").toLowerCase();
+        const referralCode = String(body.referralCode || "").toLowerCase();
+        const cents = (value) => Math.round(value * 100) / 100;
+        const couponDiscountAmount =
+          couponCode === "save20" || (couponCode === "friend" && state.collision) ? cents(84.99 * 0.2) : 0;
+        const referralDiscountPercent =
+          referralCode === "friend" || (referralCode === "save20" && state.collision) ? 10 : 0;
+        const referralDiscountAmount = cents((84.99 - couponDiscountAmount) * referralDiscountPercent / 100);
+        return json(route, { ok: true, quoteFingerprint: "fixture-quote", providers, quote: {
+          grossAmount: 84.99, netAmount: cents(84.99 - couponDiscountAmount - referralDiscountAmount), isFree: false,
+          couponDiscountAmount, referralDiscountAmount, referralDiscountPercent,
+        } });
       }
       if (path === "/api/payment/start") {
         return json(route, {

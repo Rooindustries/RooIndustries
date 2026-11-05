@@ -57,8 +57,7 @@ jest.mock(
   "lucide-react",
   () => ({
     ChevronDown: (props) => <svg {...props} />,
-  }),
-  { virtual: true }
+  })
 );
 
 jest.mock("../lib/homeSectionData", () => ({

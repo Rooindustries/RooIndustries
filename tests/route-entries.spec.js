@@ -31,7 +31,7 @@ for (const route of ["/reviews", "/tools", "/packages", "/about"]) {
     await page.waitForTimeout(700);
     await Promise.all(pending);
     await attach(testInfo, "initial-page-scripts", scripts.map(({ url, body }) => ({ url, rawBytes: body.length, gzipBytes: gzipSync(body).length })));
-    for (const marker of ["deferred-section-content", "ri-faq-number", "package-details-modal-title", "formspree.io", "[@portabletext/react]"]) {
+    for (const marker of ["deferred-section-content", "ri-faq-question", "package-details-modal-title", "formspree.io", "[@portabletext/react]"]) {
       expect(scripts.filter(({ body }) => body.includes(marker)).map(({ url }) => url), marker).toEqual([]);
     }
   });

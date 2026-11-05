@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
+import { lockBuildDirectory } from "./lib/build-lock.mjs";
 import { createToolingContentFixture } from "../tests/fixtures/tooling-content.mjs";
 import { apiRouteSecrets } from "../tests/fixtures/api-routes.mjs";
 import { adoptHeldTcpPorts, portFromEnv, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
@@ -17,6 +18,7 @@ if (process.env.ROO_ADMIN_FIXTURE === "1") {
 } else {
 refuseEnvFiles();
 const dist = validateDistDir(process.env.NEXT_DIST_DIR, { isolated: true });
+const lock = lockBuildDirectory(dist);
 const baseURL = localOrigin(process.env.BASE_URL);
 const target = new URL(baseURL);
 if (target.hostname !== testHost || target.port !== process.env.PW_PORT) throw new Error("Invalid Tailscale test server target.");
@@ -92,7 +94,7 @@ const sourceHash = fingerprint.digest("hex");
 let active;
 let stopping = false;
 const execute = (args, executionEnv = env) => new Promise((resolve, reject) => {
-  active = spawn(process.execPath, args, { env: executionEnv, stdio: "inherit" });
+  active = spawn(process.execPath, args, { env: lock.childEnv(executionEnv), stdio: ["inherit", "inherit", "inherit", lock.fd] });
   active.once("error", reject);
   active.once("exit", (code, signal) => code === 0 ? resolve() : reject(new Error(`Test server exited ${signal || code}.`)));
 });

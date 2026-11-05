@@ -13,6 +13,7 @@ export const SECTION_IDS = Object.freeze(
 
 export const PENDING_SECTION_KEY = "roo_pending_section";
 export const ROUTE_TRANSITION_KEY = "roo_route_transition";
+export const SECTION_TRIP_ENTRY = "__rooSectionTrip";
 
 export const normalizeSectionHash = (hash = "") => {
   const raw = String(hash || "").trim();
@@ -36,13 +37,10 @@ export const isHomeSectionHash = (hash = "") => {
   return SECTION_IDS.includes(normalized.slice(1));
 };
 
-export const writePendingSectionTarget = (hash = "") => {
+export const announceSectionTarget = (hash = "") => {
   if (typeof window === "undefined") return;
   const normalized = normalizeSectionHash(hash);
   if (!normalized) return;
-  try {
-    sessionStorage.setItem(PENDING_SECTION_KEY, normalized);
-  } catch {}
   window.dispatchEvent(
     new CustomEvent("roo:pending-section-target", {
       detail: { hash: normalized },
@@ -50,8 +48,16 @@ export const writePendingSectionTarget = (hash = "") => {
   );
 };
 
+export const writePendingSectionTarget = (hash = "") => {
+  const normalized = normalizeSectionHash(hash);
+  if (!normalized) return;
+  try {
+    sessionStorage.setItem(PENDING_SECTION_KEY, normalized);
+  } catch {}
+  announceSectionTarget(normalized);
+};
+
 export const readPendingSectionTarget = () => {
-  if (typeof window === "undefined") return "";
   try {
     return normalizeSectionHash(sessionStorage.getItem(PENDING_SECTION_KEY) || "");
   } catch {
@@ -60,7 +66,6 @@ export const readPendingSectionTarget = () => {
 };
 
 export const consumePendingSectionTarget = () => {
-  if (typeof window === "undefined") return "";
   try {
     const value = normalizeSectionHash(
       sessionStorage.getItem(PENDING_SECTION_KEY) || ""
@@ -73,27 +78,18 @@ export const consumePendingSectionTarget = () => {
 };
 
 export const clearPendingSectionTarget = () => {
-  if (typeof window === "undefined") return;
   try {
     sessionStorage.removeItem(PENDING_SECTION_KEY);
   } catch {}
 };
 
-export const writeRouteTransitionIntent = (payload = {}) => {
-  if (typeof window === "undefined") return;
+export const writeRouteTransitionIntent = (hash) => {
   try {
-    sessionStorage.setItem(
-      ROUTE_TRANSITION_KEY,
-      JSON.stringify({
-        ...payload,
-        ts: Date.now(),
-      })
-    );
+    sessionStorage.setItem(ROUTE_TRANSITION_KEY, JSON.stringify({ hash, ts: Date.now() }));
   } catch {}
 };
 
 export const consumeRouteTransitionIntent = () => {
-  if (typeof window === "undefined") return null;
   try {
     const raw = sessionStorage.getItem(ROUTE_TRANSITION_KEY);
     sessionStorage.removeItem(ROUTE_TRANSITION_KEY);
@@ -107,7 +103,6 @@ export const consumeRouteTransitionIntent = () => {
 };
 
 export const clearRouteTransitionIntent = () => {
-  if (typeof window === "undefined") return;
   try {
     sessionStorage.removeItem(ROUTE_TRANSITION_KEY);
   } catch {}

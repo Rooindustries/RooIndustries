@@ -10,8 +10,8 @@ import { createPortal } from "react-dom";
 import { useDialogFocus } from "../lib/useDialogFocus";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
 import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
+import { CLIENT_REQUEST_TIMEOUT_MS, reportRequestError, requestTimeoutError, watchPageLeave } from "../lib/clientRequest";
 import { getPublicContent } from "../lib/publicContentClient";
-import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
@@ -28,6 +28,7 @@ import {
 } from "../lib/checkoutStorage";
 import {
   calculateCheckoutDiscounts,
+  fetchCheckoutQuote,
   CODE_VALIDATION_UNAVAILABLE_MESSAGE,
   resolveCheckoutCode,
   sanitizeCouponForCheckout,
@@ -47,6 +48,10 @@ const {
 } = packagePricing;
 const preparePackage = (pkg) =>
   applyPackageContentOverrides(applyPackagePricing(pkg));
+const loadPackage = (title, apply) =>
+  getPublicContent("package", { title })
+    .then((data) => apply(preparePackage(data)))
+    .catch(reportRequestError);
 const DEFAULT_VERTEX_PACKAGE = preparePackage({
   title: "Performance Vertex Overhaul",
   price: "$79.95",
@@ -345,30 +350,19 @@ function HoldBanner({
   );
 }
 
-const fetchJsonWithRetry = async (
-  url,
-  options = {},
-  attempts = 3,
-  delayMs = 250,
-  timeoutMs = BOOKING_FETCH_TIMEOUT_MS
-) => {
-  let lastErr;
-  for (let i = 0; i < attempts; i++) {
-    const controller =
-      typeof AbortController === "function" ? new AbortController() : null;
-    const timeoutId = controller
-      ? setTimeout(() => {
-          controller.abort();
-        }, timeoutMs)
-      : null;
+const fetchJsonWithRetry = async (url) => {
+  const markCancelled = watchPageLeave();
+  for (let i = 0; ; i++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(requestTimeoutError()), BOOKING_FETCH_TIMEOUT_MS);
+    let response;
 
     try {
-      const response = await fetch(url, {
-        ...options,
-        cache: "no-store",
-        signal: controller?.signal,
+      response = await fetch(url, { cache: "no-store", signal: controller.signal });
+      const data = await response.json().catch((error) => {
+        if (markCancelled(error, response, controller.signal).requestCancelled) throw error;
+        return null;
       });
-      const data = await response.json().catch(() => null);
       if (!response.ok || data?.ok === false) {
         throw new Error(
           data?.error || data?.message || "Request failed."
@@ -376,14 +370,12 @@ const fetchJsonWithRetry = async (
       }
       return data;
     } catch (err) {
-      lastErr = err;
-      if (i === attempts - 1) break;
-      await new Promise((res) => setTimeout(res, delayMs));
+      if (i === 2) throw markCancelled(err, response, controller.signal);
+      await new Promise((res) => setTimeout(res, 250));
     } finally {
-      if (timeoutId) clearTimeout(timeoutId);
+      clearTimeout(timeoutId);
     }
   }
-  throw lastErr || new Error("Unable to fetch booking data.");
 };
 
 const broadcastHold = (payload) => {
@@ -555,7 +547,6 @@ export default function BookingForm() {
   }, []);
   useDialogFocus({ open: showVertexModal, dialogRef: planDialogRef, initialFocusRef: planCloseRef, onClose: closePlan });
   const [vertexPackage, setVertexPackage] = useState(null);
-  const [vertexEssentialsPackage, setVertexEssentialsPackage] = useState(null);
   const [planPackage, setPlanPackage] = useState(null);
   const [modalPackage, setModalPackage] = useState(null);
   const [modalMode, setModalMode] = useState("switch");
@@ -623,8 +614,7 @@ export default function BookingForm() {
             className="underline underline-offset-2 transition"
             style={{ color: "var(--color-accent)" }}
             onClick={(event) => {
-              handleHomeSectionLink(event, `#${UPGRADE_FAQ_HASH}`);
-              closeVertexModal();
+              if (handleHomeSectionLink(event, `#${UPGRADE_FAQ_HASH}`)) closeVertexModal();
             }}
           >
             {part}
@@ -1148,8 +1138,8 @@ export default function BookingForm() {
       s.bookedSlots = Array.isArray(data.bookedSlots) ? data.bookedSlots : [];
 
       if (availabilityFetchMountedRef.current) setSettings(s);
-    } catch {
-      console.error("Failed to fetch booking availability");
+    } catch (error) {
+      reportRequestError(error);
       if (availabilityFetchMountedRef.current) {
         setSettingsError("Booking availability took too long to load.");
       }
@@ -1367,48 +1357,16 @@ export default function BookingForm() {
   }, [showVertexModal, modalMode]);
 
   useEffect(() => {
-    const fetchVertex = async () => {
-      try {
-        const data = await getPublicContent("package", {
-          title: "Performance Vertex Overhaul",
-        });
-        setVertexPackage(preparePackage(data));
-      } catch {
-        console.error("Failed to fetch Performance Vertex package");
-      }
-    };
-    fetchVertex();
-  }, []);
-
-  useEffect(() => {
-    const fetchVertexEssentials = async () => {
-      try {
-        const data = await getPublicContent("package", {
-          title: "Vertex Essentials",
-        });
-        setVertexEssentialsPackage(preparePackage(data));
-      } catch {
-        console.error("Failed to fetch Vertex Essentials package");
-      }
-    };
-    fetchVertexEssentials();
+    loadPackage("Performance Vertex Overhaul", setVertexPackage);
   }, []);
 
   useEffect(() => {
     if (!selectedPackage.title) return;
     let active = true;
     setPlanPackage(null);
-    const fetchPlan = async () => {
-      try {
-        const data = await getPublicContent("package", {
-          title: getPackageTitleAliases(selectedPackage.title),
-        });
-        if (active) setPlanPackage(preparePackage(data));
-      } catch {
-        console.error("Failed to fetch current package");
-      }
-    };
-    fetchPlan();
+    loadPackage(getPackageTitleAliases(selectedPackage.title), (plan) => {
+      if (active) setPlanPackage(plan);
+    });
     return () => {
       active = false;
     };
@@ -1657,14 +1615,47 @@ export default function BookingForm() {
     return `${dateLabel} · ${timeLabel} (${userTimeZone})`;
   }, [selectedSlot, userTimeZone, localSlotMap, localSlotFormatters]);
   const reviewBaseAmount = Math.max(0, toMoney(selectedPackage.price));
+  const reviewStartTime = selectedSlot?.utcStart ? selectedSlot.utcStart.toISOString() : "";
+  const [reviewQuote, setReviewQuote] = useState(null);
+  useEffect(() => {
+    setReviewQuote(null);
+    if (step !== 3 || !selectedPackage.title || !reviewStartTime) return undefined;
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(requestTimeoutError()),
+      CLIENT_REQUEST_TIMEOUT_MS
+    );
+    fetchCheckoutQuote(
+      {
+        packageTitle: selectedPackage.title,
+        originalOrderId: "",
+        startTimeUTC: reviewStartTime,
+        email: form.email.trim(),
+        referralCode: appliedReferral?.code || "",
+        couponCode: appliedCoupon?.code || "",
+        upgradeIntentToken: "",
+      },
+      { signal: controller.signal }
+    )
+      .then((data) => {
+        if (!controller.signal.aborted) setReviewQuote(data.quote || null);
+      })
+      .catch(() => {})
+      .finally(() => clearTimeout(timeout));
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [step, selectedPackage.title, reviewStartTime, form.email, appliedReferral?.code, appliedCoupon?.code]);
   const reviewDiscounts = useMemo(
     () =>
       calculateCheckoutDiscounts({
         baseAmount: reviewBaseAmount,
         referral: appliedReferral,
         coupon: appliedCoupon,
+        serverQuote: reviewQuote,
       }),
-    [appliedCoupon, appliedReferral, reviewBaseAmount]
+    [appliedCoupon, appliedReferral, reviewBaseAmount, reviewQuote]
   );
   const reviewTotal =
     reviewBaseAmount > 0 ? formatUsd(reviewDiscounts.finalAmount) : "";

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { reportRequestError } from "../lib/clientRequest";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 
 /* Record card design tokens — all theme accents derive from the active palette. */
@@ -46,7 +47,7 @@ export default function About({ initialData = null, compact = false }) {
     if (aboutData !== null) return;
     fetchHomeSectionData(HOME_SECTION_DATA_KEYS.about)
       .then(setAboutData)
-      .catch(console.error);
+      .catch(reportRequestError);
   }, [aboutData]);
 
   if (!aboutData) {
@@ -61,7 +62,7 @@ export default function About({ initialData = null, compact = false }) {
         aria-hidden="true"
       >
         <div
-          className={`${compact ? "h-full min-h-[220px]" : "mt-6 min-h-[360px]"} rounded-2xl`}
+          className={`${compact ? "h-full min-h-[280px]" : "mt-6 min-h-[360px]"} rounded-2xl`}
           style={{ ...RC, background: "var(--rc-bg)", border: "1px solid var(--rc-border-sub)" }}
         />
       </section>
@@ -112,7 +113,7 @@ export default function About({ initialData = null, compact = false }) {
       <section id="about" className="mx-auto h-full w-full max-w-sm text-center">
         <div
           ref={revealWhenInView}
-          className="ri-proof-card ri-reveal relative flex h-full flex-col overflow-hidden rounded-xl p-3"
+          className="ri-proof-card ri-reveal relative flex h-full flex-col overflow-hidden rounded-2xl p-5 sm:p-6"
           style={{
             ...RC,
             "--ri-reveal-from": "translateY(16px)",
@@ -120,29 +121,29 @@ export default function About({ initialData = null, compact = false }) {
             border: "1px solid var(--rc-border)",
           }}
         >
-          <p className="text-[10px] font-bold uppercase leading-3 tracking-[0.2em]" style={{ color: "var(--rc-accent)" }}>
+          <p className="text-xs font-bold uppercase leading-4 tracking-[0.18em]" style={{ color: "var(--rc-accent)" }}>
             {recordBadgeText}
           </p>
-          <h3 className="mt-0.5 text-[17px] font-bold leading-5 tracking-tight">
+          <h3 className="mt-2 text-xl font-bold leading-7 tracking-tight">
             <span className="ri-proof-title gold-flair-text">{recordTitle}</span>
           </h3>
-          <p className="mt-0.5 text-[11px] leading-4 text-ink-secondary">{compactRecordSubtitle}</p>
+          <p className="mt-1 text-sm leading-5 text-ink-secondary">{compactRecordSubtitle}</p>
 
-          <dl className="ri-proof-summary my-3 grid grid-cols-3 gap-2 border-y border-line-soft px-2 py-2">
+          <dl className="ri-proof-summary my-5 grid grid-cols-3 gap-2 border-y border-line-soft py-4">
             {summaryStats.map((detail, index) => (
               <div key={detail?._key || `${detail.label}-${index}`} className="flex min-w-0 flex-col items-center text-center">
-                <dt className="text-[10px] uppercase leading-3 tracking-wider text-ink-muted">{detail.label}</dt>
-                <dd className="mt-0.5 whitespace-nowrap text-base font-semibold leading-6 tabular-nums text-ink min-[350px]:text-lg">{detail.value}</dd>
+                <dt className="text-xs uppercase leading-4 tracking-wider text-ink-muted">{detail.label}</dt>
+                <dd className="mt-1 whitespace-nowrap text-base font-semibold leading-6 tabular-nums text-ink min-[350px]:text-lg">{detail.value}</dd>
               </div>
             ))}
           </dl>
 
-          <div className="mt-auto flex items-center justify-between gap-2 pt-2">
+          <div className="mt-auto flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
             <a
               href={leaderboardHref}
               target="_blank"
               rel="noopener noreferrer"
-              className="ri-proof-cta glow-button relative inline-flex min-h-8 items-center justify-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold text-white hover:brightness-110"
+              className="ri-proof-cta glow-button relative inline-flex min-h-10 whitespace-nowrap items-center justify-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
               style={{
                 background: "linear-gradient(135deg, var(--rc-cta), var(--rc-cta-end))",
                 border: "1px solid var(--rc-border)",
@@ -153,7 +154,7 @@ export default function About({ initialData = null, compact = false }) {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25" />
               </svg>
             </a>
-            <span className="ri-proof-note shrink-0 text-[10px] font-semibold">{compactRecordNote}</span>
+            <span className="ri-proof-note shrink-0 text-xs font-semibold">{compactRecordNote}</span>
           </div>
         </div>
       </section>

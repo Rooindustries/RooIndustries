@@ -10,7 +10,7 @@ refuseEnvFiles();
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';
 const requestedOrigin = process.env.BASE_URL && new URL(localOrigin(process.env.BASE_URL));
 const requestedPort = portFromEnv('PW_PORT') || Number(requestedOrigin?.port || 0);
-const distBase = validateDistDir(process.env.NEXT_DIST_DIR || '.next-e2e-monitoring-startup', { isolated: true });
+const distBase = validateDistDir(process.env.NEXT_DIST_DIR || `.next-e2e-monitoring-startup-${host.replace(/[^a-zA-Z0-9]/g, '-')}`, { isolated: true });
 const artifact = join('test-results', 'monitoring-startup', new Date().toISOString().replace(/[:.]/g, '-'));
 await mkdir(artifact, { recursive: true });
 const checks = [];

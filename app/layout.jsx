@@ -1,5 +1,6 @@
 import "../src/roboto-latin.css";
 import "../src/index.css";
+import "../src/styles/sections.css";
 import seo from "@/src/lib/seo";
 import AppClientRuntime from "@/src/next/AppClientRuntime";
 import { PublicContentProvider } from "@/src/next/PublicContentContext";
@@ -19,6 +20,7 @@ const shouldPreconnectSupabase = Boolean(SUPABASE_ASSET_ORIGIN) && (
 
 const themeInitScript = `
 (function() {
+  document.documentElement.classList.add("js");
   try {
     var root = document.documentElement;
     var key = "roo-theme";

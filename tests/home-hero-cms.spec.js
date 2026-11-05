@@ -47,7 +47,7 @@ test("renders CMS hero in server HTML without JavaScript", async ({ page }) => {
       path: path.join(artifactDir, `ssr-${name}.png`),
     });
     if (viewport.width <= 390) {
-      const bounds = await page.locator("#top h1 > span, .ri-hero-cta-note p:visible").evaluateAll((elements) =>
+      const bounds = await page.locator("#top h1 > span, .ri-hero-cta-note li:visible").evaluateAll((elements) =>
         elements.map((element) => {
           const rect = element.getBoundingClientRect();
           return {
@@ -90,16 +90,16 @@ test("Markdown uses the same CMS hero copy", async ({ request }) => {
   expect(body.match(/^# /gm)).toHaveLength(1);
 });
 
+const navigateHome = async (page) => {
+  await page.goto("/packages", { waitUntil: "networkidle" });
+  await page.evaluate(() => { window.__heroSpaDocument = true; });
+  await page.locator('footer a[href="/"]').first().click();
+  await expect(page).toHaveURL(/\/$/);
+  expect(await page.evaluate(() => window.__heroSpaDocument)).toBe(true);
+};
+
 test.describe("hydrated hero", () => {
   test.use({ javaScriptEnabled: true });
-
-  const navigateHome = async (page) => {
-    await page.goto("/packages", { waitUntil: "networkidle" });
-    await page.evaluate(() => { window.__heroSpaDocument = true; });
-    await page.locator('footer a[href="/"]').first().click();
-    await expect(page).toHaveURL(/\/$/);
-    expect(await page.evaluate(() => window.__heroSpaDocument)).toBe(true);
-  };
 
   test("keeps server hero copy without a client hero request", async ({ page }) => {
     const heroRequests = [];
@@ -162,7 +162,9 @@ test.describe("hydrated hero", () => {
     await expect(hero.locator("h1")).toContainText(HOME_COPY.hero.headingLine1);
     await expect(hero.locator("h1")).toContainText(HOME_COPY.hero.headingLine2);
     await expect(hero.getByText(HOME_COPY.hero.subtext, { exact: true })).toBeVisible();
-    await expect(hero.locator(".ri-hero-cta-note")).toContainText(HOME_COPY.hero.ctaNote);
+    for (const promise of HOME_COPY.hero.ctaNote.split(" · ")) {
+      await expect(hero.locator(".ri-hero-cta-note")).toContainText(promise);
+    }
     await expect(hero.getByRole("link", { name: "Tune My PC", exact: true })).toHaveAttribute("href", "/#packages");
     await expect(hero.getByRole("link", { name: "How It Works", exact: true })).toHaveAttribute("href", "/#how-it-works");
     await expect(page.getByText("Legacy Field Must Not Render", { exact: true })).toHaveCount(0);
@@ -185,4 +187,34 @@ test.describe("hydrated hero", () => {
     await expect(hero.getByText(HOME_COPY.hero.description, { exact: true })).toBeVisible();
     await expect(hero.getByText(HOME_COPY.hero.subtext, { exact: true })).toBeVisible();
   });
+});
+
+test.describe("home benchmark badges", () => {
+  test.use({ javaScriptEnabled: true });
+
+  const game = {
+    gameTitle: "Fixture Lows Game",
+    beforeFps: 100,
+    afterFps: 210,
+    metricLabel: "1% Lows",
+    gpu: "RTX 4070",
+    cpu: "7800X3D",
+    ram: "32GB 6000MT/s CL30",
+  };
+
+  for (const [section, badge] of [[{}, "+110% FPS"], [{ benchBadgeSuffix: "faster" }, "+110% faster"]]) {
+    test(`keeps the CMS suffix next to a card's own metric label: ${badge}`, async ({ page }) => {
+      await page.route("**/api/content/services", (route) => route.fulfill({
+        json: { ok: true, data: { ...section, benchPages: [{ games: [game] }] } },
+      }));
+      const servicesResponse = page.waitForResponse((response) =>
+        new URL(response.url()).pathname === "/api/content/services"
+      );
+      await navigateHome(page);
+      await servicesResponse;
+      const card = page.getByRole("article", { name: "Fixture Lows Game benchmark", exact: true });
+      await expect(card.locator(".ri-bench-metric-pill")).toContainText("1% Lows");
+      await expect(card.locator(".ri-bench-boost-pill")).toHaveText(badge);
+    });
+  }
 });

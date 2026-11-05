@@ -5,10 +5,10 @@ export default function NotFound() {
   return (
     <>
       <div className="flex-1 flex flex-col items-center justify-center px-4 py-32 text-center">
-        <h1 className="text-6xl font-extrabold text-info-text drop-shadow-[0_0_20px_rgba(56,189,248,0.35)]">
+        <h1 className="section-title">
           404
         </h1>
-        <p className="mt-4 text-lg text-ink-secondary">
+        <p className="section-lede">
           The page you're looking for doesn't exist.
         </p>
         <Link

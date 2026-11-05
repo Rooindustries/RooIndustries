@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
+import { reportRequestError } from "../lib/clientRequest";
 import { getPublicContent } from "../lib/publicContentClient";
 
 const HEX_CLIP_PATH = "circle(50% at 50% 50%)";
@@ -299,7 +300,7 @@ export default function MeetTheTeam({ onSeoData, initialData = null }) {
     if (initialData) return;
     getPublicContent("team")
       .then(setRawData)
-      .catch(console.error);
+      .catch(reportRequestError);
   }, []);
 
   const resolved = useMemo(() => {
@@ -390,12 +391,12 @@ export default function MeetTheTeam({ onSeoData, initialData = null }) {
     <section className="w-full text-ink">
       <div className="w-full bg-panel">
         <div className="px-5">
-          <div className="mx-auto max-w-6xl text-center pt-20 pb-16 relative">
-            <h1 className="text-4xl sm:text-5xl font-bold bg-gradient-to-br from-ink to-accent bg-clip-text text-transparent">
+          <div className="mx-auto max-w-6xl text-center page-top pb-16 relative">
+            <h1 className="section-title">
               {resolved.heroTitle}
             </h1>
             {resolved.heroSubtitle && (
-              <p className="mt-4 text-lg text-ink-muted max-w-[520px] mx-auto">
+              <p className="section-lede">
                 {resolved.heroSubtitle}
               </p>
             )}

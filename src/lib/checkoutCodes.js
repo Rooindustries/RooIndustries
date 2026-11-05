@@ -161,6 +161,10 @@ const calculateFinalDiscounts = ({ baseAmount, client, serverQuote }) => {
   const parsedQuotedNetAmount = parseMoneyValue(serverQuote?.netAmount);
   const hasQuotedNetAmount = parsedQuotedNetAmount !== null;
   const quotedIsFree = serverQuote?.isFree === true;
+  const hasQuote = hasQuotedNetAmount || quotedIsFree;
+  const quotedGrossAmount = hasQuote ? parseMoneyValue(serverQuote?.grossAmount) : null;
+  const displayBaseAmount =
+    quotedGrossAmount === null ? baseAmount : Math.max(0, toMoney(quotedGrossAmount));
   const finalAmount = quotedIsFree
     ? 0
     : hasQuotedNetAmount
@@ -173,13 +177,16 @@ const calculateFinalDiscounts = ({ baseAmount, client, serverQuote }) => {
       : client.clientIsFree);
   const preventedFreeReduction =
     client.clientIsFree && hasQuotedNetAmount && finalAmount > 0;
-  const effectiveDiscountAmount = hasQuotedNetAmount || quotedIsFree
-    ? clamp(toMoney(baseAmount - finalAmount), 0, baseAmount)
+  const effectiveDiscountAmount = hasQuote
+    ? clamp(toMoney(displayBaseAmount - finalAmount), 0, displayBaseAmount)
     : client.totalDiscountAmount;
   const discountPercentCombined =
-    baseAmount > 0
-      ? clamp(toMoney((effectiveDiscountAmount / baseAmount) * 100), 0, 100)
+    displayBaseAmount > 0
+      ? clamp(toMoney((effectiveDiscountAmount / displayBaseAmount) * 100), 0, 100)
       : 0;
+
+  const quotedLine = (name) =>
+    clamp(parseMoneyValue(serverQuote?.[name]) ?? 0, 0, displayBaseAmount);
 
   return {
     isFree,
@@ -187,7 +194,29 @@ const calculateFinalDiscounts = ({ baseAmount, client, serverQuote }) => {
     finalAmount,
     effectiveDiscountAmount,
     discountPercentCombined,
+    displayBaseAmount,
+    ...(hasQuote
+      ? {
+          couponDiscountAmount: quotedLine("couponDiscountAmount"),
+          referralDiscountAmount: quotedLine("referralDiscountAmount"),
+          referralPercent: clampPercent(parseMoneyValue(serverQuote?.referralDiscountPercent) ?? 0),
+        }
+      : {}),
   };
+};
+
+export const fetchCheckoutQuote = async (body, { signal }) => {
+  const response = await fetch("/api/payment/quote", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.error || "Unable to confirm checkout price.");
+  }
+  return data;
 };
 
 export const calculateCheckoutDiscounts = ({

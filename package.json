@@ -17,6 +17,7 @@
     "@testing-library/user-event": "^13.5.0",
     "@vercel/analytics": "^1.6.1",
     "@vercel/blob": "^2.5.0",
+    "@vercel/functions": "3.10.4",
     "@vercel/speed-insights": "^1.2.0",
     "bcryptjs": "^3.0.3",
     "dayjs": "^1.11.19",
@@ -117,6 +118,7 @@
     "check:booking-model": "bash scripts/check-booking-model.sh",
     "check:budgets": "node scripts/check-budgets.js",
     "check:budgets:update": "node scripts/check-budgets.js --update",
+    "check:no-scripting-media": "node scripts/check-no-scripting-media.mjs",
     "test:seo:nonjs": "playwright test tests/nonjs-seo.spec.js",
     "test:smoke:routes": "playwright test tests/routes-smoke.spec.js",
     "test:sweep": "playwright test tests/public-route-sweep.spec.js --project=chromium",
@@ -145,12 +147,13 @@
     "test:e2e:admin": "playwright test --config=playwright.admin.config.js",
     "test:sourcemaps": "node scripts/sourcemaps-e2e.mjs",
     "lint": "eslint src app middleware.js",
-    "test:lint-rules": "node --test tests/lint-rules.test.mjs",
+    "test:lint-rules": "node --test tests/lint-rules.test.mjs tests/no-scripting-media.test.mjs",
     "test:playwright-groups": "node --test tests/playwright-groups.test.mjs",
     "test:tested-tree": "node --test tests/tested-tree.test.mjs",
     "test:free-ports": "node --test tests/free-tcp-port.test.mjs tests/start-on-port.test.mjs",
     "test:fixture-ports": "node --test tests/fixture-ports.test.mjs",
-    "test:fixture-ports:browser": "node --test tests/fixture-ports-browser.test.mjs"
+    "test:fixture-ports:browser": "node --test tests/fixture-ports-browser.test.mjs",
+    "test:build-lock": "node --test tests/build-lock.test.mjs"
   },
   "eslintConfig": {
     "extends": [
