@@ -450,7 +450,7 @@ jobs:
   record-tested-tree:
     name: Record the tested tree
     if: >-
-      !cancelled() && github.event_name == 'pull_request'
+      !cancelled()
       && needs.monitoring.result == 'success'
       && needs.jest.result == 'success'
       && needs.booking-model.result == 'success'
@@ -474,12 +474,14 @@ jobs:
       - name: Compare the cached build with the clean build from another path
         run: bash scripts/compare-build-fingerprints.sh build-fingerprint/rest-1.txt build-fingerprint/navigation.txt
       - id: tree
+        if: github.event_name == 'pull_request'
         run: |
           tree="$(git rev-parse 'HEAD^{tree}')"
           mkdir -p tested-tree
           echo "$tree" > tested-tree/tree
           echo "tree=$tree" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
+        if: github.event_name == 'pull_request'
         with:
           name: tested-tree-${{ steps.tree.outputs.tree }}
           path: tested-tree/
