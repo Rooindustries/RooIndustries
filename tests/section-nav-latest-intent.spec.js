@@ -314,19 +314,28 @@ const SCROLL_BUTTONS = [
   { label: "footer back to top", button: BACK_TO_TOP },
 ];
 
+const REDUCED_MOTION_VIEWPORTS = [
+  { width: 1536, height: 960 },
+  { width: 1024, height: 768 },
+  { width: 390, height: 844 },
+];
+
 test.describe("reduced motion on button scrolls", () => {
   test.use({ viewport: { width: 1536, height: 960 } });
 
-  test("FAQ paging and back to top jump without animating", async ({ page }) => {
-    test.setTimeout(120000);
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.goto("/", { waitUntil: "domcontentloaded" });
-    for (const { label, button } of SCROLL_BUTTONS) {
-      const path = scrollPath(await sampleScrollAfterClick(page, button));
-      expect(path.distance, `${label} scrolled`).toBeGreaterThan(300);
-      expect(path.inBetween, `${label} has no animated in-between positions`).toEqual([]);
-    }
-  });
+  for (const viewport of REDUCED_MOTION_VIEWPORTS) {
+    test(`FAQ paging and back to top jump without animating at ${viewport.width}px`, async ({ page }) => {
+      test.setTimeout(120000);
+      await page.setViewportSize(viewport);
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+      for (const { label, button } of SCROLL_BUTTONS) {
+        const path = scrollPath(await sampleScrollAfterClick(page, button));
+        expect(path.distance, `${label} scrolled`).toBeGreaterThan(300);
+        expect(path.inBetween, `${label} has no animated in-between positions`).toEqual([]);
+      }
+    });
+  }
 
   test("FAQ paging and back to top still glide without a reduced-motion preference", async ({ page }) => {
     test.setTimeout(120000);
