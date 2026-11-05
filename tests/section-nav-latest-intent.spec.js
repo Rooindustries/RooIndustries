@@ -320,7 +320,11 @@ const REDUCED_MOTION_VIEWPORTS = [
   { width: 390, height: 844 },
 ];
 
-const faqTopOffset = (page) => page.evaluate(() => document.getElementById("faq").getBoundingClientRect().top);
+const faqLandingGap = (page) =>
+  page.evaluate(() => {
+    const faq = document.getElementById("faq");
+    return faq.getBoundingClientRect().top - Number.parseFloat(getComputedStyle(faq).scrollMarginTop);
+  });
 
 test.describe("reduced motion on button scrolls", () => {
   for (const viewport of REDUCED_MOTION_VIEWPORTS) {
@@ -334,7 +338,7 @@ test.describe("reduced motion on button scrolls", () => {
         expect(path.distance, `${label} scrolled`).toBeGreaterThan(300);
         expect(path.inBetween, `${label} has no animated in-between positions`).toEqual([]);
         if (button.scope === "#faq") {
-          expect(Math.abs((await faqTopOffset(page)) - 96), `${label} lands with the FAQ top under the header`)
+          expect(Math.abs(await faqLandingGap(page)), `${label} lands with the FAQ top under the header`)
             .toBeLessThanOrEqual(1);
         }
       }

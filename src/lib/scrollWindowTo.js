@@ -11,7 +11,8 @@ export const scrollWindowTo = (top) => {
 
 export const REVEAL_DEFERRED_SECTIONS_EVENT = "roo:reveal-deferred-sections";
 
-export const scrollWindowToElement = (element, offset = 0) => {
+export const scrollWindowToElement = (element) => {
   window.dispatchEvent(new Event(REVEAL_DEFERRED_SECTIONS_EVENT));
-  scrollWindowTo(element.getBoundingClientRect().top + window.scrollY - offset);
+  const marginTop = Number.parseFloat(getComputedStyle(element).scrollMarginTop) || 0;
+  scrollWindowTo(element.getBoundingClientRect().top + window.scrollY - marginTop);
 };

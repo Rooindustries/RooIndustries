@@ -166,10 +166,10 @@ export default function FaqSection({
 
   const [containerRef, { height }] = useElementSize();
 
-  const scrollWithOffset = (id) => {
+  const scrollToSection = (id) => {
     const el = document.getElementById(id);
     if (!el) return;
-    scrollWindowToElement(el, 96);
+    scrollWindowToElement(el);
   };
 
   const toggleQuestion = (questionId) => {
@@ -219,7 +219,7 @@ export default function FaqSection({
     const newPage = safePage + newDirection;
     if (newPage >= 0 && newPage < totalPages) {
       setPage([newPage, newDirection]);
-      setTimeout(() => scrollWithOffset("faq"), 250);
+      setTimeout(() => scrollToSection("faq"), 250);
     }
   };
 
