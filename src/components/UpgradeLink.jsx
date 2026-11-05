@@ -1,7 +1,7 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import useUpgradeEligibility from "../lib/useUpgradeEligibility";
 import { useNavigate, useParams } from "react-router-dom";
-import { getPublicContent } from "../lib/publicContentClient";
+import { getPublicContent, reportContentLoadError } from "../lib/publicContentClient";
 import { CLIENT_REQUEST_TIMEOUT_MS, fetchJsonWithTimeout } from "../lib/clientRequest";
 import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
@@ -78,7 +78,10 @@ export default function UpgradeLink() {
     }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), CLIENT_REQUEST_TIMEOUT_MS);
+    const timeout = setTimeout(
+      () => controller.abort(new DOMException("Request timed out.", "TimeoutError")),
+      CLIENT_REQUEST_TIMEOUT_MS
+    );
     getPublicContent("upgrade-link", { slug: normalizedSlug }, { signal: controller.signal })
       .then((data) => {
         if (!active) return;
@@ -93,8 +96,8 @@ export default function UpgradeLink() {
           targetPackage: applyPackagePricing(data.targetPackage),
         });
       })
-      .catch(() => {
-        console.error("Upgrade link load failed");
+      .catch((error) => {
+        reportContentLoadError(error);
         if (!active) return;
         setLinkError("Could not load this upgrade link. Please try again.");
       })

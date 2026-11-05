@@ -71,13 +71,15 @@ export const referenceName = (node) => (node?.type === "Identifier" ? node.name 
 
 export const calleeName = (call) => referenceName(call.callee);
 
-export const bindingDefinition = (context, identifier) => {
+export const findVariable = (context, identifier) => {
   let variable = null;
   for (let scope = context.sourceCode.getScope(identifier); scope && !variable; scope = scope.upper) {
     variable = scope.set.get(identifier.name) || null;
   }
-  return variable?.defs?.[0] || null;
+  return variable;
 };
+
+export const bindingDefinition = (context, identifier) => findVariable(context, identifier)?.defs?.[0] || null;
 
 const variableDefinition = (context, identifier) => {
   const definition = bindingDefinition(context, identifier);
