@@ -72,7 +72,6 @@ export default function Navbar() {
   const {
     goToSection,
     goToHomeTop,
-    cancelSectionNavigation: cancelSectionTransition,
     isOwnSectionArrival,
   } = useSectionNavigation();
   const [open, setOpen] = useState(false);
@@ -215,11 +214,11 @@ export default function Navbar() {
   }, [updateHeaderOffset]);
 
   useEffect(() => {
-    if (isOwnSectionArrival(location.pathname)) return;
+    if (isOwnSectionArrival(location)) return;
     setOpen(false);
     setProofOpen(false);
     setReferralsOpen(false);
-  }, [isOwnSectionArrival, location.pathname, location.hash]);
+  }, [isOwnSectionArrival, location]);
 
   useEffect(() => {
     if (!open) return;
@@ -483,7 +482,6 @@ export default function Navbar() {
                   <Link
                     to="/benchmarks"
                     onClick={() => {
-                      cancelSectionTransition();
                       setProofOpen(false);
                     }}
                     className={`block px-4 py-3 text-sm transition ${
@@ -497,7 +495,6 @@ export default function Navbar() {
                   <Link
                     to="/reviews"
                     onClick={() => {
-                      cancelSectionTransition();
                       setProofOpen(false);
                     }}
                     className={`block px-4 py-3 text-sm transition ${
@@ -567,7 +564,6 @@ export default function Navbar() {
                   <Link
                     to="/referrals/register"
                     onClick={() => {
-                      cancelSectionTransition();
                       setReferralsOpen(false);
                     }}
                     className={`block px-4 py-3 text-sm transition ${
@@ -581,7 +577,6 @@ export default function Navbar() {
                   <Link
                     to="/referrals/login"
                     onClick={() => {
-                      cancelSectionTransition();
                       setReferralsOpen(false);
                     }}
                     className={`block px-4 py-3 text-sm transition ${
@@ -757,7 +752,6 @@ export default function Navbar() {
                 <Link
                   to="/benchmarks"
                   onClick={() => {
-                    cancelSectionTransition();
                     setProofOpen(false);
                     setOpen(false);
                   }}
@@ -772,7 +766,6 @@ export default function Navbar() {
                 <Link
                   to="/reviews"
                   onClick={() => {
-                    cancelSectionTransition();
                     setProofOpen(false);
                     setOpen(false);
                   }}
@@ -842,7 +835,6 @@ export default function Navbar() {
                 <Link
                   to="/referrals/register"
                   onClick={() => {
-                    cancelSectionTransition();
                     setReferralsOpen(false);
                     setOpen(false);
                   }}
@@ -857,7 +849,6 @@ export default function Navbar() {
                 <Link
                   to="/referrals/login"
                   onClick={() => {
-                    cancelSectionTransition();
                     setReferralsOpen(false);
                     setOpen(false);
                   }}
@@ -872,7 +863,6 @@ export default function Navbar() {
               </div>
               <Link
                 to="/meet-the-team"
-                onClick={cancelSectionTransition}
                 className={`${mobileLinkBase} ${
                   isTeamActive ? mobileLinkActive : mobileLinkIdle
                 }`}

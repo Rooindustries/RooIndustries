@@ -23,6 +23,7 @@ import {
   consumeRouteTransitionIntent,
   isHomeSectionHash,
   normalizeSectionHash,
+  SECTION_TRIP_ENTRY,
 } from "./lib/sectionNavigation";
 import { sanitizeBrowserSearch } from "./lib/browserSearch";
 import { prefetchHomeSectionData } from "./lib/homeSectionData";
@@ -392,12 +393,8 @@ export function AppContent({
   useEffect(() => {
     if (typeof window === "undefined") return;
     const intent = consumeRouteTransitionIntent();
-    if (!intent) {
-      document.documentElement.classList.remove("route-transition-out");
-      return;
-    }
-    const ageMs = Date.now() - Number(intent.ts || 0);
-    if (ageMs > 5000) {
+    if (!intent || Date.now() - Number(intent.ts || 0) > 5000) {
+      setShowRouteTransition(false);
       document.documentElement.classList.remove("route-transition-out");
       return;
     }
@@ -548,14 +545,15 @@ export function AppContent({
     if (routeShell === "memory") {
       const initial = !historyInitializedRef.current;
       historyInitializedRef.current = true;
+      const { [SECTION_TRIP_ENTRY]: unlandedTripEntry, ...browserState } = window.history.state || {};
       const state = {
-        ...window.history.state,
+        ...browserState,
         // Retain Next's router tree and any checkout state on first hydration.
-        usr: initial ? window.history.state?.usr ?? null : location.state,
+        usr: initial ? browserState.usr ?? null : location.state,
         __rooLegacy: true,
       };
       // Navbar section links may already have pushed their browser entry.
-      if (!initial && navigationType === "PUSH" && currentUrl !== nextUrl) {
+      if (!initial && navigationType === "PUSH" && currentUrl !== nextUrl && !unlandedTripEntry) {
         window.history.pushState(state, "", nextUrl);
       } else {
         window.history.replaceState(state, "", nextUrl);

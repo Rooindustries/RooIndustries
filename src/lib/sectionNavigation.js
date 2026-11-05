@@ -13,6 +13,7 @@ export const SECTION_IDS = Object.freeze(
 
 export const PENDING_SECTION_KEY = "roo_pending_section";
 export const ROUTE_TRANSITION_KEY = "roo_route_transition";
+export const SECTION_TRIP_ENTRY = "__rooSectionTrip";
 
 export const normalizeSectionHash = (hash = "") => {
   const raw = String(hash || "").trim();

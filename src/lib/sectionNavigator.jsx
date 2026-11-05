@@ -10,6 +10,7 @@ import {
   isHomeSectionHash,
   normalizeSectionHash,
   readPendingSectionTarget,
+  SECTION_TRIP_ENTRY,
   writePendingSectionTarget,
   writeRouteTransitionIntent,
 } from "./sectionNavigation";
@@ -19,12 +20,12 @@ const ActiveHomeSectionContext = createContext("");
 
 const getHeaderOffsetPx = () => getCssHeaderOffsetPx(110);
 
-const isPlainPrimaryClick = (event) => {
+const isPlainPrimaryClick = (event, link = event?.currentTarget) => {
   if (!event) return true;
   if (event.defaultPrevented) return false;
   if (typeof event.button === "number" && event.button !== 0) return false;
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return false;
-  const target = event.currentTarget?.getAttribute?.("target");
+  const target = link?.getAttribute?.("target");
   return !target || target === "_self";
 };
 
@@ -48,8 +49,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   const location = useLocation();
   const navigate = useNavigate();
   const [activeHomeHash, setActiveHomeHash] = useState("");
-  const tripTimeoutRef = useRef(null);
-  const homeNavigationRef = useRef(null);
+  const tripRef = useRef(null);
   const intentRef = useRef("");
   const alignmentCleanupRef = useRef(null);
   const clickAlignedHashRef = useRef("");
@@ -80,16 +80,12 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
     [stopAlignment]
   );
 
-  const clearTripTimeout = useCallback(() => {
-    if (tripTimeoutRef.current) {
-      clearTimeout(tripTimeoutRef.current);
-      tripTimeoutRef.current = null;
-    }
-  }, []);
-
   const cancelSectionNavigation = useCallback(() => {
-    clearTripTimeout();
-    homeNavigationRef.current = null;
+    const trip = tripRef.current;
+    tripRef.current = null;
+    if (trip && typeof window !== "undefined" && window.history.state?.[SECTION_TRIP_ENTRY]) {
+      window.history.replaceState(window.history.state, "", trip.from);
+    }
     intentRef.current = "";
     clearPendingSectionTarget();
     clearRouteTransitionIntent();
@@ -100,7 +96,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       window.dispatchEvent(new CustomEvent("roo:cancel-route-transition"));
     }
     stopAlignment();
-  }, [clearTripTimeout, stopAlignment]);
+  }, [stopAlignment]);
 
   const goToSection = useCallback(
     (event, hash, alignment) => {
@@ -134,43 +130,34 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       prefetchSectionData(normalizedHash);
 
       const nextHref = buildHomeSectionHref(normalizedHash);
-      if (homeNavigationRef.current === "memory") {
+      const trip = tripRef.current;
+      if (trip?.via === "memory") {
         replaceBrowserUrl(nextHref, normalizedHash);
         return true;
       }
-      if (homeNavigationRef.current === "router") {
-        navigate(nextHref, { replace: true });
+      if (trip?.via === "router") {
+        navigate(nextHref, { replace: true, state: { sectionTrip: trip.key } });
         return true;
       }
-      if (homeNavigationRef.current === "document") {
+      if (trip?.via === "document") {
         window.location.assign(nextHref);
         return true;
       }
 
-      clearTripTimeout();
-      tripTimeoutRef.current = window.setTimeout(() => {
-        tripTimeoutRef.current = null;
-        if (routeShell === "memory") {
-          homeNavigationRef.current = "memory";
-          if (window.history?.pushState) {
-            window.history.pushState(window.history.state, "", nextHref);
-          } else {
-            window.location.hash = normalizedHash.slice(1);
-          }
-          navigate("/");
-          return;
-        }
-        if (browserPath !== fromPath) {
-          homeNavigationRef.current = "document";
-          window.location.assign(nextHref);
-          return;
-        }
-        homeNavigationRef.current = "router";
-        navigate(nextHref);
-      }, 20);
+      const via = routeShell === "memory" ? "memory" : browserPath !== fromPath ? "document" : "router";
+      tripRef.current = { key: location.key, via, from: `${browserPath}${window.location.search}${window.location.hash}` };
+      const tripState = { sectionTrip: location.key };
+      if (via === "memory") {
+        window.history.pushState({ ...window.history.state, [SECTION_TRIP_ENTRY]: true }, "", nextHref);
+        navigate("/", { state: tripState });
+      } else if (via === "document") {
+        window.location.assign(nextHref);
+      } else {
+        navigate(nextHref, { state: tripState });
+      }
       return true;
     },
-    [alignTo, clearTripTimeout, location.pathname, navigate, routeShell]
+    [alignTo, location.key, location.pathname, navigate, routeShell]
   );
 
   const goToHomeTop = useCallback(
@@ -194,9 +181,21 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   );
 
   const isOwnSectionArrival = useCallback(
-    (pathname) => pathname === "/" && homeNavigationRef.current !== null,
+    (target) => Boolean(tripRef.current) && target?.state?.sectionTrip === tripRef.current.key,
     []
   );
+
+  useEffect(() => {
+    const trip = tripRef.current;
+    if (trip && trip.key !== location.key) {
+      if (location.state?.sectionTrip === trip.key) {
+        tripRef.current = null;
+      } else {
+        cancelSectionNavigation();
+      }
+    }
+    if (location.pathname !== "/") stopAlignment();
+  }, [cancelSectionNavigation, location.key, location.pathname, location.state, stopAlignment]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -209,13 +208,21 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   }, [location.hash, location.pathname]);
 
   useEffect(() => {
-    if (location.pathname !== "/") {
-      stopAlignment();
-      return;
-    }
-    homeNavigationRef.current = null;
-    clearTripTimeout();
-  }, [clearTripTimeout, location.hash, location.pathname, stopAlignment]);
+    if (typeof window === "undefined") return undefined;
+    const endTripOnDocumentLink = (event) => {
+      if (!tripRef.current || !(event.target instanceof Element)) return;
+      const link = event.target.closest("a[href]");
+      if (!link || link.hasAttribute("download") || !isPlainPrimaryClick(event, link)) return;
+      const tripEntryPushed = Boolean(window.history.state?.[SECTION_TRIP_ENTRY]);
+      cancelSectionNavigation();
+      if (tripEntryPushed && /^https?:$/.test(link.protocol) && !link.getAttribute("href").startsWith("#")) {
+        event.preventDefault();
+        window.location.replace(link.href);
+      }
+    };
+    window.addEventListener("click", endTripOnDocumentLink);
+    return () => window.removeEventListener("click", endTripOnDocumentLink);
+  }, [cancelSectionNavigation]);
 
   useEffect(() => {
     if (location.pathname !== "/") return;
@@ -265,8 +272,8 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   useEffect(() => cancelSectionNavigation, [cancelSectionNavigation]);
 
   const actions = useMemo(
-    () => ({ goToSection, goToHomeTop, cancelSectionNavigation, isOwnSectionArrival }),
-    [cancelSectionNavigation, goToHomeTop, goToSection, isOwnSectionArrival]
+    () => ({ goToSection, goToHomeTop, isOwnSectionArrival }),
+    [goToHomeTop, goToSection, isOwnSectionArrival]
   );
 
   return (

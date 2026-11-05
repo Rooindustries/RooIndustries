@@ -173,6 +173,146 @@ test("an on-page section link clicked as the homepage lands wins over the navbar
   await expectLanded(page, "#how-it-works", `${label} forward`);
 });
 
+const FOOTER = (path) => ({ selector: `footer a[href="${path}"]` });
+
+const readRoute = (page) =>
+  page.evaluate(() => ({ path: window.location.pathname, hash: window.location.hash, top: window.scrollY <= 160 }));
+
+const expectOnRoute = async (page, path, label) => {
+  const landed = { path, hash: "", top: true };
+  await expect
+    .poll(() => readRoute(page).catch(() => null), { message: `${label} lands on ${path}`, timeout: 8000, intervals: [100] })
+    .toEqual(landed);
+  await page.waitForTimeout(1500);
+  expect(await readRoute(page), `${label} stays on ${path}`).toEqual(landed);
+};
+
+const expectPath = (page, path, label) =>
+  expect.poll(() => new URL(page.url()).pathname, { message: label, timeout: 8000 }).toBe(path);
+
+const historyLength = (page) => page.evaluate(() => window.history.length);
+
+const clickWhileTripInFlight = (page, first, second) =>
+  page.evaluate(
+    ([firstLink, secondLink]) => {
+      const find = ({ selector, text }) =>
+        [...document.querySelectorAll(selector)].find((element) => !text || element.textContent.includes(text));
+      const pushState = window.history.pushState;
+      window.history.pushState = function (...args) {
+        window.history.pushState = pushState;
+        pushState.apply(this, args);
+        queueMicrotask(() => find(secondLink).click());
+      };
+      find(firstLink).click();
+    },
+    [first, second]
+  );
+
+const ROUTE_AFTER_SECTION = [
+  { label: "footer Privacy", link: FOOTER("/privacy"), path: "/privacy" },
+  { label: "footer Tools", link: FOOTER("/tools"), path: "/tools" },
+  { label: "footer FAQ page", link: FOOTER("/faq"), path: "/faq" },
+  { label: "navbar logo", link: { selector: `header a[href="/"]` }, path: "/" },
+  { label: "footer logo", link: FOOTER("/"), path: "/" },
+];
+
+test("a route link clicked right after a section link wins", async ({ page }) => {
+  test.setTimeout(180000);
+  await page.setViewportSize({ width: 1536, height: 960 });
+  for (const { label, link, path } of ROUTE_AFTER_SECTION) {
+    const name = `/reviews navbar Benefits then ${label}`;
+    await openPage(page, "/reviews", "desktop");
+    await clickInQuickSuccession(page, NAVBAR("benefits"), link).catch(() => {});
+    await expectOnRoute(page, path, name);
+    await page.goBack();
+    await expectPath(page, "/reviews", `${name} back`);
+  }
+});
+
+test("a route link clicked while the homepage trip is in flight wins", async ({ page }) => {
+  test.setTimeout(180000);
+  await page.setViewportSize({ width: 1536, height: 960 });
+  for (const { label, link, path } of [ROUTE_AFTER_SECTION[0], ROUTE_AFTER_SECTION[2]]) {
+    const name = `/reviews navbar Benefits then ${label} in flight`;
+    await openPage(page, "/reviews", "desktop");
+    await clickWhileTripInFlight(page, NAVBAR("benefits"), link).catch(() => {});
+    await expectOnRoute(page, path, name);
+    await page.goBack();
+    await expectPath(page, "/reviews", `${name} back`);
+  }
+});
+
+test("a route link clicked as the section lands leaves the page scrollable", async ({ page }) => {
+  test.setTimeout(120000);
+  await page.setViewportSize({ width: 1536, height: 960 });
+  const name = "/reviews navbar Benefits, landed, then footer Privacy";
+  await openPage(page, "/reviews", "desktop");
+  await page.evaluate(
+    ([sectionSelector, routeSelector]) =>
+      new Promise((resolve) => {
+        document.querySelector(sectionSelector).click();
+        const clickRouteOnLanding = () => {
+          if (window.location.pathname === "/" && document.documentElement.classList.contains("route-transition-lock")) {
+            document.querySelector(routeSelector).click();
+            resolve();
+            return;
+          }
+          requestAnimationFrame(clickRouteOnLanding);
+        };
+        requestAnimationFrame(clickRouteOnLanding);
+      }),
+    [NAVBAR("benefits").selector, FOOTER("/privacy").selector]
+  );
+  await expectOnRoute(page, "/privacy", name);
+  expect(
+    await page.evaluate(() => ({
+      locked: document.documentElement.classList.contains("route-transition-lock"),
+      veil: getComputedStyle(document.querySelector(".route-transition-veil")).opacity,
+    })),
+    `${name} veil`
+  ).toEqual({ locked: false, veil: "0" });
+});
+
+test("a section click after an abandoned trip adds its own history entry", async ({ page }) => {
+  test.setTimeout(120000);
+  await page.setViewportSize({ width: 1536, height: 960 });
+  const name = "/reviews Benefits, Privacy, then FAQ";
+  await openPage(page, "/reviews", "desktop");
+  const startLength = await historyLength(page);
+  await clickInQuickSuccession(page, NAVBAR("benefits"), FOOTER("/privacy"));
+  await expectOnRoute(page, "/privacy", name);
+  await clickSection(page, "faq", "desktop");
+  await expectLanded(page, SECTIONS.faq, name);
+  expect(await historyLength(page), `${name} history`).toBe(startLength + 2);
+  await page.goBack();
+  await expectPath(page, "/privacy", `${name} back to Privacy`);
+  await page.goBack();
+  await expectPath(page, "/reviews", `${name} back to Reviews`);
+  await page.goForward();
+  await page.goForward();
+  await expectLanded(page, SECTIONS.faq, `${name} forward`);
+});
+
+test("Back right after a section click returns to the page it was clicked on", async ({ page }) => {
+  test.setTimeout(120000);
+  await page.setViewportSize({ width: 1536, height: 960 });
+  const name = "/reviews to Privacy, Benefits, then Back";
+  await openPage(page, "/reviews", "desktop");
+  await page.locator('footer a[href="/privacy"]').click();
+  await expectOnRoute(page, "/privacy", name);
+  await page.evaluate((selector) => {
+    document.querySelector(selector).click();
+    document.querySelector(`header button[aria-label="Go Back"]`).click();
+  }, NAVBAR("benefits").selector);
+  await expectOnRoute(page, "/privacy", name);
+  await page.goForward();
+  await expectLanded(page, SECTIONS.benefits, `${name} forward`);
+  await page.goBack();
+  await expectOnRoute(page, "/privacy", `${name} back again`);
+  await page.goBack();
+  await expectPath(page, "/reviews", `${name} back to Reviews`);
+});
+
 for (const { label, origin, selector, text = "", hash } of [
   { label: "navbar FAQ off the homepage", origin: "/reviews", ...NAVBAR("faq"), hash: "#faq" },
   { label: "on-page Tune My PC", origin: "/", ...ON_PAGE("#packages", "Tune My PC"), hash: "#packages" },
