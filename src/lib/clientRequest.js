@@ -30,9 +30,9 @@ const fetchFailureMessages = [
 
 export const watchPageLeave = (signal) => {
   const hidesAtStart = pageHides;
-  return (error, response) => {
+  return (error, response, requestSignal = signal) => {
     if (
-      (signal?.aborted ? signal.reason?.name !== "TimeoutError" : currentHide > hidesAtStart) &&
+      (requestSignal?.aborted ? requestSignal.reason?.name !== "TimeoutError" : currentHide > hidesAtStart) &&
       response?.ok !== false &&
       (error?.name === "AbortError" || (error instanceof TypeError && fetchFailureMessages.includes(error.message)))
     ) {
@@ -46,7 +46,7 @@ export const reportRequestError = (error) => {
   if (!error?.requestCancelled) console.error(error);
 };
 
-export const fetchJsonWithTimeout = async (url, options, fetchImpl = fetch) => {
+export const fetchJsonWithTimeout = async (url, options = {}, fetchImpl = fetch) => {
   const controller = new AbortController();
   const abort = () => controller.abort(options.signal.reason);
   if (options.signal?.aborted) abort();

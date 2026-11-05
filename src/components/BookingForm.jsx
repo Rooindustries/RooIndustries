@@ -351,16 +351,16 @@ function HoldBanner({
 }
 
 const fetchJsonWithRetry = async (url) => {
+  const markCancelled = watchPageLeave();
   for (let i = 0; ; i++) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(requestTimeoutError()), BOOKING_FETCH_TIMEOUT_MS);
-    const markCancelled = watchPageLeave(controller.signal);
     let response;
 
     try {
       response = await fetch(url, { cache: "no-store", signal: controller.signal });
       const data = await response.json().catch((error) => {
-        if (markCancelled(error, response).requestCancelled) throw error;
+        if (markCancelled(error, response, controller.signal).requestCancelled) throw error;
         return null;
       });
       if (!response.ok || data?.ok === false) {
@@ -370,7 +370,7 @@ const fetchJsonWithRetry = async (url) => {
       }
       return data;
     } catch (err) {
-      if (i === 2) throw markCancelled(err, response);
+      if (i === 2) throw markCancelled(err, response, controller.signal);
       await new Promise((res) => setTimeout(res, 250));
     } finally {
       clearTimeout(timeoutId);

@@ -309,6 +309,31 @@ test("leaving the booking page during its last availability retry reports no err
   expect(appReports(errors)).toEqual([]);
 });
 
+test("leaving between availability retries suppresses the final network failure", async ({ page }) => {
+  await page.addInitScript(() => {
+    const schedule = window.setTimeout.bind(window);
+    let retryGaps = 0;
+    window.setTimeout = (callback, delay, ...args) => {
+      if (delay === 250 && ++retryGaps === 2) {
+        window.dispatchEvent(new PageTransitionEvent("pagehide"));
+      }
+      return schedule(callback, delay, ...args);
+    };
+  });
+  let requests = 0;
+  await page.route("**/api/bookingAvailability", (request) => {
+    requests += 1;
+    return requests < 4 ? request.fulfill(unavailable) : request.abort("failed");
+  });
+  const errors = collectConsoleErrors(page);
+  await page.goto("/booking");
+  await expect(page.getByText(availabilityFailed, { exact: true })).toBeVisible();
+  await settle(page);
+
+  expect(requests).toBe(4);
+  expect(appReports(errors)).toEqual([]);
+});
+
 test("booking availability that times out is reported once", async ({ page }) => {
   await page.route("**/api/bookingAvailability", () => {});
   const errors = collectConsoleErrors(page);
