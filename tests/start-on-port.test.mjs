@@ -108,6 +108,29 @@ test("a held port lost between the child's release and its own bind is retried o
   }
 });
 
+test("a child that took held ports still reports close once it stops", async () => {
+  const started = await startChildOnPorts({
+    host,
+    requested: [0],
+    passHeld: true,
+    output: () => "",
+    isReady: answers,
+    spawnChild: ([candidate], launch) => {
+      const args = ["--input-type=module", "-e", handoffChild, String(candidate)];
+      const child = launch.spawn(process.execPath, args, { stdio: ["pipe", "pipe", "ignore"] });
+      child.stdout.once("data", () => child.stdin.end("go\n"));
+      return child;
+    },
+  });
+  const closed = once(started.child, "close").then(() => "closed");
+  await stopChild(started.child);
+  let timer;
+  const stuck = new Promise((resolve) => { timer = setTimeout(() => resolve("stuck"), 5000); });
+  const result = await Promise.race([closed, stuck]);
+  clearTimeout(timer);
+  assert.equal(result, "closed", "close never fired after the port hand-over");
+});
+
 test("a held explicit port lost before the child binds fails without trying another", async () => {
   const port = await freeTcpPort(host);
   const thieves = [];
