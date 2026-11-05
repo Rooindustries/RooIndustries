@@ -1124,6 +1124,44 @@ run("no-scripting-media-query", {
   ],
 });
 
+run("no-unchecked-group-signal", {
+  valid: [
+    `signalGroup(child, "SIGTERM");`,
+    `process.kill(child.pid, "SIGTERM");`,
+    `process.kill(pid, 0);`,
+  ],
+  invalid: [
+    {
+      name: "sourcemaps stop before the shared helper",
+      code: `function stopGroup(child, signal) {
+        if (!child.pid) return;
+        try { process.kill(-child.pid, signal); } catch (error) { if (error.code !== "ESRCH") throw error; }
+      }`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "group probe after the leader was stopped",
+      code: `await stopChild(child); try { process.kill(-child.pid, 0); } catch {}`,
+      errors: [{ messageId: "unchecked" }],
+    },
+  ],
+});
+
+run("no-parent-ipc-disconnect", {
+  valid: [
+    `if (process.connected) process.disconnect();`,
+    `child.channel?.unref();`,
+    `class Tracked extends Base { disconnect() { return super.disconnect(); } }`,
+  ],
+  invalid: [
+    {
+      name: "held port hand-over before #320's close fix",
+      code: `const finish = () => { if (child.connected) child.disconnect(); };`,
+      errors: [{ messageId: "parent" }],
+    },
+  ],
+});
+
 const testFile = fileURLToPath(new URL("../src/__tests__/virtualMock.test.js", import.meta.url));
 
 run("no-virtual-mock-of-installed-module", {

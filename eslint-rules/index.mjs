@@ -15,6 +15,8 @@ import noNestedComponents from "./no-nested-components.mjs";
 import noScriptingMediaQuery from "./no-scripting-media-query.mjs";
 import noUnfilteredRequestError from "./no-unfiltered-request-error.mjs";
 import noUnguardedTimerNavigation from "./no-unguarded-timer-navigation.mjs";
+import noParentIpcDisconnect from "./no-parent-ipc-disconnect.mjs";
+import noUncheckedGroupSignal from "./no-unchecked-group-signal.mjs";
 import smoothScrollNeedsMotionCheck from "./smooth-scroll-needs-motion-check.mjs";
 import noVirtualMockOfInstalledModule from "./no-virtual-mock-of-installed-module.mjs";
 
@@ -36,6 +38,8 @@ export const rules = {
   "no-scripting-media-query": noScriptingMediaQuery,
   "no-unfiltered-request-error": noUnfilteredRequestError,
   "no-unguarded-timer-navigation": noUnguardedTimerNavigation,
+  "no-parent-ipc-disconnect": noParentIpcDisconnect,
+  "no-unchecked-group-signal": noUncheckedGroupSignal,
   "smooth-scroll-needs-motion-check": smoothScrollNeedsMotionCheck,
   "no-virtual-mock-of-installed-module": noVirtualMockOfInstalledModule,
 };
