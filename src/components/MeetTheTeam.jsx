@@ -390,7 +390,7 @@ export default function MeetTheTeam({ onSeoData, initialData = null }) {
     <section className="w-full text-ink">
       <div className="w-full bg-panel">
         <div className="px-5">
-          <div className="mx-auto max-w-6xl text-center pt-20 pb-16 relative">
+          <div className="mx-auto max-w-6xl text-center page-top pb-16 relative">
             <h1 className="section-title">
               {resolved.heroTitle}
             </h1>
