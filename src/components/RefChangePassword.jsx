@@ -37,7 +37,7 @@ export default function RefChangePassword() {
   if (checking) return <p role="status" className="pt-32 text-center text-ink">Checking your account...</p>;
   if (accountError) return (
     <section className="pt-32 px-6 max-w-xl mx-auto text-ink">
-      <h1 className="text-3xl font-bold text-accent">Change Password</h1>
+      <h1 className="section-title section-title-compact">Change Password</h1>
       <p role="alert" className="mt-4 text-danger-text">{accountError}</p>
       <button onClick={retry} className="mt-6 rounded-xl bg-accent-strong px-6 py-3 font-semibold text-accent-contrast">Retry</button>
     </section>
@@ -157,7 +157,7 @@ export default function RefChangePassword() {
 
   return (
     <section className="pt-32 px-6 min-h-screen text-ink flex flex-col items-center">
-      <h1 className="text-4xl font-extrabold text-center text-accent drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+      <h1 className="section-title text-center">
         Change Password
       </h1>
 

@@ -8,7 +8,7 @@ export default function AboutPage() {
   return (
     <>
       <article className="py-28 max-w-3xl mx-auto p-6 text-ink">
-        <h1 className="text-3xl font-bold mb-6">About Roo Industries</h1>
+        <h1 className="section-title mb-6">About Roo Industries</h1>
         {ABOUT_PARAGRAPHS.map((paragraph) => (
           <p key={paragraph} className="mb-4 leading-relaxed text-ink-secondary">
             {paragraph}

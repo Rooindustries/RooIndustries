@@ -1390,9 +1390,7 @@ html[data-theme="dark"] .text-gradient-display {
   background-image: var(--gradient-display-text);
 }
 
-html[data-theme="dark"] h1.text-info-text,
-html[data-theme="dark"] h2.text-info-text,
-html[data-theme="dark"] .ri-services-heading {
+html[data-theme="dark"] h2.text-info-text {
   background-image: var(--gradient-display-text);
   -webkit-background-clip: text;
   background-clip: text;
@@ -1422,14 +1420,6 @@ html:not([data-theme="dark"]) .ri-services-skeleton {
     rgba(13, 21, 38, 0.7),
     rgba(8, 16, 29, 0.8)
   );
-}
-
-html:not([data-theme="dark"]) .ri-services-heading {
-  color: #bae6fd;
-}
-
-html:not([data-theme="dark"]) .ri-services-subheading {
-  color: rgba(203, 213, 225, 0.9);
 }
 
 .ri-service-card {
@@ -1639,11 +1629,6 @@ html:not([data-theme="dark"]) .ri-packages-skeleton {
   );
 }
 
-html:not([data-theme="dark"]) .ri-packages-heading {
-  color: #bae6fd;
-  filter: drop-shadow(0 0 15px rgba(56, 189, 248, 0.5));
-}
-
 html:not([data-theme="dark"]) .ri-packages-badge {
   color: #ecfeff;
 }
@@ -1651,10 +1636,6 @@ html:not([data-theme="dark"]) .ri-packages-badge {
 html:not([data-theme="dark"]) .ri-packages-badge-dot {
   background-color: #34d399;
   box-shadow: 0 0 8px rgba(52, 211, 153, 0.9);
-}
-
-html:not([data-theme="dark"]) .ri-packages-subheading {
-  color: rgba(203, 213, 225, 0.8);
 }
 
 html:not([data-theme="dark"]) .ri-packages-review-link {
@@ -2225,15 +2206,6 @@ html:not([data-theme="dark"]) .ri-hiw-video {
   box-shadow: 0 0 26px rgba(14, 165, 233, 0.3);
 }
 
-html:not([data-theme="dark"]) .ri-hiw-heading {
-  color: #bae6fd;
-  filter: drop-shadow(0 0 15px rgba(56, 189, 248, 0.5));
-}
-
-html:not([data-theme="dark"]) .ri-hiw-subtitle {
-  color: #e6eef8;
-}
-
 html:not([data-theme="dark"]) .ri-hiw-card {
   border-color: rgba(3, 105, 161, 0.3);
   background-color: rgba(11, 17, 32, 0.8);
@@ -2325,23 +2297,6 @@ html[data-theme="dark"] .ri-hero-cta-note .gold-flair-text {
   background-clip: border-box;
   -webkit-text-fill-color: #deded9;
   color: #deded9;
-  text-shadow: none;
-}
-
-html[data-theme="dark"]
-  :is(
-    .ri-reviews-heading,
-    h2.ri-services-heading,
-    .ri-hiw-heading,
-    .ri-supported-games-heading,
-    .ri-faq-heading
-  ) {
-  background: none;
-  -webkit-background-clip: border-box;
-  background-clip: border-box;
-  -webkit-text-fill-color: #f5f5f2;
-  color: #f5f5f2;
-  filter: none !important;
   text-shadow: none;
 }
 
@@ -3124,7 +3079,8 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
 }
 
 .booking-confirmation-panel > h1 {
-  min-height: 80px;
+  min-height: 2.16em;
+  min-height: 2lh;
 }
 
 .booking-confirmation-panel > p {
@@ -3180,6 +3136,10 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto !important;
+  }
+
   .ri-reveal {
     animation: none;
   }

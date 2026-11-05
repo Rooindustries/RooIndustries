@@ -19,7 +19,7 @@ export default async function Page() {
       <JsonLd data={faqJsonLd.mainEntity.length ? faqJsonLd : null} />
       <noscript>
         <section aria-label="Frequently asked questions" className="mx-auto max-w-6xl px-6 pt-28">
-          <h2 className="mb-6 text-4xl font-bold">Frequently asked questions</h2>
+          <h2 className="section-title mb-6">Frequently asked questions</h2>
           {initialHomeData.faqQuestions.map(({ question, answer }) => (
             <div key={question} className="mb-6">
               <h2 className="text-xl font-semibold">{question}</h2>

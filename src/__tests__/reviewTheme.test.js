@@ -7,10 +7,10 @@ describe("review carousel design", () => {
     "utf8"
   );
 
-  test("keeps the existing centered heading treatment", () => {
-    expect(componentSource).toContain("font-extrabold text-center tracking-tight");
+  test("uses the shared section heading treatment", () => {
+    expect(componentSource).toContain('className="ri-reviews-heading section-title"');
     expect(componentSource).toContain('className="px-4 sm:px-6 mb-3"');
-    expect(componentSource).toContain("text-[28px] sm:text-[32px] md:text-[36px]");
+    expect(componentSource).not.toContain("drop-shadow-[0_0_15px");
   });
 
   test("shows multiple compact reviews with automatic and manual scrolling", () => {
