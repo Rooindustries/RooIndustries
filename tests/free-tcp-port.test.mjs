@@ -128,6 +128,7 @@ await new Promise((resolve) => process.stdin.once("data", resolve));
 await releaseTcpPorts(${JSON.stringify(host)}, [${port}]);
 process.stdout.write("released\\n");`;
   const child = spawn(process.execPath, ["--input-type=module", "-e", program], { env: { PATH: process.env.PATH, ...passed.env }, stdio: ["pipe", "pipe", "inherit", ...passed.stdio] });
+  await passed.handOver(child);
   await releaseTcpPorts(host, [port]);
   const lines = [];
   const next = () => new Promise((resolve) => child.stdout.once("data", (chunk) => { lines.push(String(chunk).trim()); resolve(); }));
@@ -138,6 +139,37 @@ process.stdout.write("released\\n");`;
   await once(child, "exit");
   assert.deepEqual(lines, ["adopted", "released"]);
   assert.equal(await bindable(port), true);
+});
+
+test("a child that releases an adopted port can bind it even when the parent is slow to let go", async () => {
+  const [port] = await reserveTcpPorts(host, [0]);
+  const passed = passHeldTcpPorts(host, [port]);
+  const program = `import net from "node:net";
+const { adoptHeldTcpPorts, releaseTcpPorts } = await import(${JSON.stringify(new URL("../scripts/lib/free-tcp-port.mjs", import.meta.url).href)});
+await adoptHeldTcpPorts();
+await releaseTcpPorts(${JSON.stringify(host)}, [${port}]);
+const server = net.createServer();
+server.once("error", (error) => { console.log(error.code); process.exit(0); });
+server.listen(${port}, ${JSON.stringify(host)}, () => { console.log("bound"); server.close(); });`;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", program], { env: { PATH: process.env.PATH, ...passed.env }, stdio: ["ignore", "pipe", "inherit", ...passed.stdio] });
+  const emit = child.emit.bind(child);
+  child.emit = (event, message, ...rest) => {
+    if (event === "message" && message?.ROO_HELD_TCP_PORTS === "adopted") {
+      setTimeout(() => emit(event, message, ...rest), 400);
+      return true;
+    }
+    return emit(event, message, ...rest);
+  };
+  let output = "";
+  child.stdout.on("data", (chunk) => { output += chunk; });
+  try {
+    const handed = passed.handOver(child).catch((error) => error);
+    await once(child, "exit");
+    assert.equal(output.trim(), "bound");
+    assert.equal(await handed, undefined);
+  } finally {
+    await releaseTcpPorts(host, [port]);
+  }
 });
 
 test("the content fixture can share a server that keeps its port", async () => {
