@@ -21,7 +21,10 @@ async function measureTopBar(page) {
     const rowRect = row.getBoundingClientRect();
     const controls = [...row.querySelectorAll("a, button")]
       .filter((el) => el !== brandLink && !brandLink.contains(el) && visible(el) && !el.closest("[hidden]"))
-      .map((el) => ({ label: el.textContent.trim() || el.getAttribute("aria-label"), rect: el.getBoundingClientRect() }));
+      .map((el) => ({
+        label: el.textContent.trim() || el.getAttribute("aria-label"),
+        rect: el.getBoundingClientRect(),
+      }));
     const brandRect = brandLink.getBoundingClientRect();
     const box = (r) => ({ left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top) });
     return {
@@ -32,7 +35,9 @@ async function measureTopBar(page) {
       textRight: Math.round(Math.max(brand.scrollWidth, tagline.scrollWidth) + brand.getBoundingClientRect().left),
       row: box(rowRect),
       controls: controls.map((c) => ({ label: c.label, ...box(c.rect), bottom: Math.round(c.rect.bottom) })),
-      nextControlLeft: Math.round(Math.min(...controls.map((c) => c.rect.left).filter((left) => left >= brandRect.left))),
+      nextControlLeft: Math.round(Math.min(
+        ...controls.map((c) => c.rect.left).filter((left) => left >= brandRect.left),
+      )),
       overlaps: controls
         .filter((c) => c.rect.left < brandRect.right - 0.5 && c.rect.right > brandRect.left + 0.5)
         .map((c) => c.label),
@@ -63,3 +68,31 @@ for (const path of PAGES) {
     }
   });
 }
+
+test.describe("menus at the layout switch", () => {
+  test.use({ javaScriptEnabled: true });
+
+  test("below 1024 px the menu button opens the site menu and Escape closes it", async ({ page }) => {
+    await page.setViewportSize({ width: 1023, height: 900 });
+    await page.goto("/", { waitUntil: "networkidle" });
+    const menuButton = page.getByRole("button", { name: "Open menu" });
+    const menu = page.locator("#mobile-site-menu");
+    await expect(page.locator('[data-nav-surface="desktop"][data-nav-target="benefits"]')).toBeHidden();
+    await menuButton.click();
+    await expect(menu).toHaveAttribute("aria-hidden", "false");
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveAttribute("aria-hidden", "true");
+    await expect(menuButton).toBeFocused();
+  });
+
+  test("from 1024 px the Proof menu opens in the bar and closes on an outside click", async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 900 });
+    await page.goto("/", { waitUntil: "networkidle" });
+    await expect(page.getByRole("button", { name: "Open menu" })).toBeHidden();
+    const proofMenu = page.locator("#desktop-proof-menu");
+    await page.locator('button[aria-controls="desktop-proof-menu"]').click();
+    await expect(proofMenu).toBeVisible();
+    await page.mouse.click(10, 600);
+    await expect(proofMenu).toBeHidden();
+  });
+});

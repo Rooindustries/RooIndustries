@@ -283,7 +283,10 @@ export default function Navbar() {
   // Theme-token interaction states — values per theme in src/index.css.
   const focusRing =
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--color-canvas-deep)]";
-  const linkBase = `px-3 sm:px-5 lg:px-4 xl:px-5 py-2 rounded-full text-base font-medium transition border border-line-soft hover:border-line-accent ${focusRing}`;
+  const linkBase = [
+    "px-3 sm:px-5 lg:px-4 xl:px-5 py-2 rounded-full text-base font-medium transition",
+    `border border-line-soft hover:border-line-accent ${focusRing}`,
+  ].join(" ");
   const linkIdle =
     "text-ink-secondary hover:text-[color:var(--color-link-hover)]";
   const linkActive = "bg-accent text-accent-contrast border-accent";
