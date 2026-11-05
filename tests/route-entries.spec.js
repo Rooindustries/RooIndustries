@@ -215,3 +215,219 @@ for (const provider of ["discord", "google"]) {
     await attach(testInfo, "account-choice", { provider, choice });
   });
 }
+
+for (const [entry, message] of [
+  ["/referrals/login?notice=password-updated", /Password updated/i],
+  ["/referrals/login?notice=email-confirmed", "Email confirmed. Log in to open your creator dashboard."],
+  ["/referrals/login?oauth=unavailable", "Social sign-in is temporarily unavailable. Use your email or referral code."],
+]) {
+  test(`${entry} shows its notice and keeps the cleared URL`, async ({ page }, testInfo) => {
+    await page.goto(entry);
+    await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+    await expect(page.getByText(message)).toBeVisible();
+    await page.waitForTimeout(1000);
+    await expect(page).toHaveURL(/\/referrals\/login$/);
+    await attach(testInfo, "cleared-notice", { entry, url: page.url() });
+  });
+}
+
+test("a confirmation link keeps its cleared URL", async ({ page }, testInfo) => {
+  await page.goto("/referrals/verify?source=email#token=fixture-token");
+  await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+  await page.waitForTimeout(1000);
+  await expect(page).toHaveURL(/\/referrals\/verify$/);
+  await attach(testInfo, "cleared-confirmation", { url: page.url() });
+});
+
+const interceptOnDemandChunks = async (page, entry, handle) => {
+  const initialChunks = new Set();
+  await page.route(`**${entry.split("?")[0]}*`, async route => {
+    if (route.request().resourceType() !== "document") return route.fallback();
+    const response = await route.fetch();
+    const body = await response.text();
+    for (const match of body.matchAll(/static\/chunks\/[^"'\\\s]+?\.js/g)) initialChunks.add(match[0]);
+    await route.fulfill({ response, body });
+  });
+  const intercepted = [];
+  await page.route("**/_next/static/chunks/**", async route => {
+    const chunk = new URL(route.request().url()).pathname.replace(/^\/_next\//, "");
+    if (initialChunks.has(chunk)) return route.fallback();
+    intercepted.push(chunk);
+    await handle(route);
+  });
+  return intercepted;
+};
+
+const loginIsCoveredByDialog = page => page.getByRole("button", { name: "Login", exact: true }).evaluate(button => {
+  const box = button.getBoundingClientRect();
+  const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  return Boolean(top?.closest(".glass-overlay")) && !button.contains(top);
+});
+
+for (const provider of ["discord", "google"]) {
+  test(`the ${provider} account choice blocks login while on-demand code is still downloading`, async ({ page }, testInfo) => {
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const entry = `/referrals/login?oauth=unlinked&provider=${provider}`;
+    const intercepted = await interceptOnDemandChunks(page, entry, async route => {
+      await gate;
+      await route.fallback().catch(() => {});
+    });
+    try {
+      await page.goto(entry);
+      await expect(page.getByRole("dialog")).toBeVisible({ timeout: 5000 });
+      await expect(page.getByRole("button", { name: "Log in and link", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Create account", exact: true })).toBeVisible();
+      expect(await loginIsCoveredByDialog(page)).toBe(true);
+      await attach(testInfo, "held-on-demand-chunks", { provider, intercepted });
+    } finally {
+      release();
+      await page.unrouteAll({ behavior: "wait" });
+    }
+  });
+
+  test(`the ${provider} account choice still works when on-demand code fails to load`, async ({ page }, testInfo) => {
+    const entry = `/referrals/login?oauth=unlinked&provider=${provider}`;
+    const intercepted = await interceptOnDemandChunks(page, entry, route => route.abort("failed"));
+    try {
+      await page.goto(entry);
+      await expect(page.getByRole("dialog")).toBeVisible({ timeout: 5000 });
+      await page.getByRole("button", { name: "Log in and link", exact: true }).click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(page.getByLabel("Referral code or login email", { exact: true })).toBeFocused();
+      await expect(page.getByRole("heading", { name: "We couldn’t load this page." })).toHaveCount(0);
+      const choice = await page.evaluate(() => JSON.parse(sessionStorage.getItem("refPendingDiscordChoice")));
+      expect(choice).toMatchObject({ state: "link", provider });
+      await attach(testInfo, "failed-on-demand-chunks", { provider, intercepted, choice });
+    } finally {
+      await page.unrouteAll({ behavior: "wait" });
+    }
+  });
+}
+
+const describeDialogMotion = () => {
+  const panel = document.querySelector('[role="dialog"]');
+  const overlay = panel?.parentElement;
+  const describe = element => {
+    if (!element) return null;
+    const style = getComputedStyle(element);
+    return {
+      name: style.animationName,
+      duration: style.animationDuration,
+      delay: style.animationDelay,
+      easing: style.animationTimingFunction,
+    };
+  };
+  return {
+    overlay: describe(overlay),
+    panel: describe(panel),
+    closing: overlay?.hasAttribute("data-closing") ?? null,
+    inert: panel?.inert ?? null,
+  };
+};
+
+const dialogAnimations = page => page.evaluate(describeDialogMotion);
+
+const recordDialogClosing = async page => {
+  await page.evaluate(`window.__describeDialogMotion = ${describeDialogMotion.toString()}`);
+  await page.evaluate(() => {
+    window.__dialogClosing = null;
+    const observer = new MutationObserver(() => {
+      if (!document.querySelector("[data-closing]")) return;
+      window.__dialogClosing = window.__describeDialogMotion();
+      observer.disconnect();
+    });
+    observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ["data-closing"] });
+  });
+};
+
+test("the account choice fades in and out around the sign-in step", async ({ page }, testInfo) => {
+  const loginRequests = [];
+  page.on("request", request => {
+    if (request.method() === "POST" && /\/api\/ref\/login/.test(request.url())) loginRequests.push(request.url());
+  });
+  await page.goto("/referrals/login?oauth=unlinked&provider=discord");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  const opening = await dialogAnimations(page);
+  expect(opening.overlay).toEqual({ name: "siteDialogOverlayIn", duration: "0.3s", delay: "0s", easing: "ease-out" });
+  expect(opening.panel).toEqual({ name: "siteDialogPanelIn", duration: "0.5s", delay: "0.16s", easing: "cubic-bezier(0.4, 0, 0.2, 1)" });
+  await page.waitForTimeout(800);
+  await page.getByLabel("Referral code or login email", { exact: true }).fill("fixture-creator");
+  await page.getByLabel("Password", { exact: true }).fill("fixture-password");
+  const loginBox = await page.getByRole("button", { name: "Login", exact: true }).boundingBox();
+  const choice = page.getByRole("button", { name: "Log in and link", exact: true });
+  const choiceBox = await choice.boundingBox();
+  await recordDialogClosing(page);
+  await choice.click();
+  const closing = await page.evaluate(() => window.__dialogClosing);
+  expect(closing.closing).toBe(true);
+  expect(closing.inert).toBe(true);
+  expect(closing.overlay).toEqual({ name: "siteDialogOverlayOut", duration: "0.2s", delay: "0s", easing: "ease-in" });
+  expect(closing.panel).toEqual({ name: "siteDialogPanelOut", duration: "0.12s", delay: "0s", easing: "ease-in" });
+  await page.mouse.click(choiceBox.x + choiceBox.width / 2, choiceBox.y + choiceBox.height / 2);
+  await page.mouse.click(loginBox.x + loginBox.width / 2, loginBox.y + loginBox.height / 2);
+  await expect(page.locator('[aria-labelledby="unlinked-discord-title"]')).toHaveCount(0);
+  await expect(page.getByLabel("Referral code or login email", { exact: true })).toBeFocused();
+  expect(loginRequests).toEqual([]);
+  await attach(testInfo, "account-choice-motion", { opening, closing, loginRequests });
+});
+
+test("the account choice skips its motion when reduced motion is preferred", async ({ page }, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/referrals/login?oauth=unlinked&provider=discord");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  const opening = await dialogAnimations(page);
+  expect(opening.overlay.name).toBe("none");
+  expect(opening.panel.name).toBe("none");
+  await page.getByRole("button", { name: "Log in and link", exact: true }).click();
+  const closing = await dialogAnimations(page);
+  expect(closing.overlay?.name ?? "none").toBe("none");
+  await expect(page.locator('[aria-labelledby="unlinked-discord-title"]')).toHaveCount(0);
+  await expect(page.getByLabel("Referral code or login email", { exact: true })).toBeFocused();
+  await attach(testInfo, "account-choice-reduced-motion", { opening, closing });
+});
+
+for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 }]) {
+  test(`a rapid second click while the account choice closes keeps sign-in focused at ${viewport.width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/referrals/login?oauth=unlinked&provider=discord");
+    const choice = page.getByRole("button", { name: "Log in and link", exact: true });
+    await expect(choice).toBeVisible();
+    await page.waitForTimeout(800);
+    const box = await choice.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await page.mouse.click(x, y);
+    await page.waitForTimeout(35);
+    await page.mouse.click(x, y);
+    await expect(page.locator('[aria-labelledby="unlinked-discord-title"]')).toHaveCount(0);
+    await page.waitForTimeout(300);
+    const focused = await page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName);
+    await attach(testInfo, "rapid-close-focus", { viewport, focused });
+    expect(focused).toBe("ref-login-identifier");
+  });
+}
+
+test("a looping animation inside the account choice doesn't keep its overlay after it closes", async ({ page }, testInfo) => {
+  await page.goto("/referrals/login?oauth=unlinked&provider=discord");
+  const choice = page.getByRole("button", { name: "Log in and link", exact: true });
+  await expect(choice).toBeVisible();
+  const looping = await page.getByRole("dialog").evaluate(dialog => {
+    const spinner = document.createElement("span");
+    spinner.setAttribute("data-test-spinner", "");
+    spinner.style.display = "inline-block";
+    spinner.style.width = "12px";
+    spinner.style.height = "12px";
+    dialog.append(spinner);
+    const animation = spinner.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], { duration: 400, iterations: Infinity });
+    return animation.effect.getComputedTiming().iterations;
+  });
+  expect(looping).toBe(Infinity);
+  await choice.click();
+  await expect(page.locator(".glass-overlay")).toHaveCount(0, { timeout: 2000 });
+  expect(await loginIsCoveredByDialog(page)).toBe(false);
+  const password = page.getByLabel("Password", { exact: true });
+  await password.click();
+  await expect(password).toBeFocused();
+  await attach(testInfo, "looping-animation-close", { looping: String(looping) });
+});

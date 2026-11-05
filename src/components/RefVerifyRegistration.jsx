@@ -58,6 +58,9 @@ export default function RefVerifyRegistration() {
         "",
         verificationLocation.pathname
       );
+      if (location.search || location.hash) {
+        navigate(verificationLocation.pathname, { replace: true, state: location.state });
+      }
     }
     currentToken.current = token;
     if (!token) {

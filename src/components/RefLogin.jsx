@@ -2,7 +2,7 @@ import { readBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import React, { useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import SupabaseSocialLogin from "./SupabaseSocialLogin";
-import SiteDialog from "./SiteDialog";
+import SiteDialogFrame from "./SiteDialogFrame";
 import { requestDeadline } from "../lib/clientRequest";
 
 const PENDING_DISCORD_CHOICE_KEY = "refPendingDiscordChoice";
@@ -86,6 +86,7 @@ export default function RefLogin() {
   const editVersionRef = useRef(0);
   const mountedRef = useRef(true);
   const navTimerRef = useRef(null);
+  const scrubbedLocationRef = useRef(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -96,6 +97,11 @@ export default function RefLogin() {
   }, []);
 
   useEffect(() => {
+    const currentLocation = `${location.pathname}${location.search}`;
+    if (scrubbedLocationRef.current === currentLocation) {
+      scrubbedLocationRef.current = null;
+      return;
+    }
     const query = new URLSearchParams(location.search);
     const emailConfirmed = query.get("notice") === "email-confirmed";
     const oauthError = query.get("oauth");
@@ -137,12 +143,13 @@ export default function RefLogin() {
       query.delete("notice");
     }
     const cleanSearch = query.toString();
+    const cleanLocation = `${location.pathname}${cleanSearch ? `?${cleanSearch}` : ""}`;
     if (window.location.pathname === location.pathname) {
-      window.history.replaceState(
-        window.history.state,
-        "",
-        `${location.pathname}${cleanSearch ? `?${cleanSearch}` : ""}`
-      );
+      window.history.replaceState(window.history.state, "", cleanLocation);
+      if (cleanLocation !== currentLocation) {
+        scrubbedLocationRef.current = cleanLocation;
+        nav(cleanLocation, { replace: true, state: location.state });
+      }
     }
 
     const checkSession = async () => {
@@ -406,11 +413,12 @@ export default function RefLogin() {
         </button>
       </div>
 
-      <SiteDialog
+      <SiteDialogFrame
         ariaDescribedBy="unlinked-discord-description"
         ariaLabelledBy="unlinked-discord-title"
         dismissible={false}
         open={showUnlinkedDiscord}
+        returnFocusRef={identifierInputRef}
       >
         <h2
           className="text-2xl font-bold text-info-text"
@@ -434,7 +442,6 @@ export default function RefLogin() {
               savePendingDiscordChoice("link", linkProvider);
               setLinkDiscord(true);
               setShowUnlinkedDiscord(false);
-              requestAnimationFrame(() => identifierInputRef.current?.focus());
             }}
             type="button"
           >
@@ -455,7 +462,7 @@ export default function RefLogin() {
             Create account
           </button>
         </div>
-      </SiteDialog>
+      </SiteDialogFrame>
 
     </section>
   );

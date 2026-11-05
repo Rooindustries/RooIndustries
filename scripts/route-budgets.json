@@ -57,7 +57,7 @@
       "css": 26624
     },
     "/payment": {
-      "js": 241664,
+      "js": 244736,
       "css": 26624
     },
     "/payment-success": {
@@ -73,7 +73,7 @@
       "css": 26624
     },
     "/referrals/dashboard": {
-      "js": 239616,
+      "js": 173056,
       "css": 26624
     },
     "/referrals/forgot": {
@@ -81,11 +81,11 @@
       "css": 26624
     },
     "/referrals/login": {
-      "js": 160768,
+      "js": 168960,
       "css": 26624
     },
     "/referrals/register": {
-      "js": 233472,
+      "js": 167936,
       "css": 26624
     },
     "/referrals/reset": {
@@ -187,7 +187,7 @@
       "css": 1024
     },
     "src/App.jsx -> ./legacyPages/RefDashboard": {
-      "js": 79872,
+      "js": 14336,
       "css": 1024
     },
     "src/App.jsx -> ./legacyPages/RefForgot": {
@@ -195,11 +195,11 @@
       "css": 1024
     },
     "src/App.jsx -> ./legacyPages/RefLogin": {
-      "js": 114688,
+      "js": 10240,
       "css": 1024
     },
     "src/App.jsx -> ./legacyPages/RefRegister": {
-      "js": 74752,
+      "js": 8192,
       "css": 1024
     },
     "src/App.jsx -> ./legacyPages/RefReset": {
@@ -232,6 +232,10 @@
     },
     "src/components/Packages.jsx -> ./PackageDetailsModal": {
       "js": 41984,
+      "css": 1024
+    },
+    "src/components/SupabaseSocialLogin.jsx -> ../lib/supabaseBrowser": {
+      "js": 68608,
       "css": 1024
     },
     "src/legacyPages/Book.jsx -> ../components/Footer": {
