@@ -19,6 +19,8 @@ const CLOSE_ROW_HEIGHT = 48;
 const CONTENT_REVEAL_FALLBACK_MS = 300;
 const CONTENT_READY_MAX_WAIT_MS = 1500;
 
+const contentLayoutHeight = (content) => parseFloat(getComputedStyle(content).height) || 0;
+
 export default function BookingModal({ open, onClose, children, skipInitialSizeAnimation = false, contentKey, routePath, reservationRef }) {
   const contentRef = useRef(null);
   const wrapperRef = useRef(null);
@@ -41,8 +43,19 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
   const hydrating = useHydrating();
   const scalerRef = useRef(null);
   const baseWidthRef = useRef(DESKTOP_BASE_WIDTH);
-  const scaleToFrame = useCallback((frameWidth) => {
-    if (scalerRef.current) scalerRef.current.style.transform = `scale(${frameWidth / baseWidthRef.current})`;
+  const fitToFrame = useCallback((frameWidth) => {
+    const wrapper = wrapperRef.current;
+    const scaler = scalerRef.current;
+    const content = contentRef.current;
+    if (!wrapper || !scaler || !content) return;
+    const scale = frameWidth / baseWidthRef.current;
+    const targetWidth = lastLayoutRef.current.wrapperWidth;
+    const growth = targetWidth ? frameWidth / targetWidth : 1;
+    const closeRow = CLOSE_ROW_HEIGHT * growth;
+    scaler.style.transform = `scale(${scale})`;
+    scaler.style.top = `${closeRow}px`;
+    if (closeButtonRef.current) closeButtonRef.current.style.transform = `scale(${growth})`;
+    wrapper.style.height = `${closeRow + contentLayoutHeight(content) * scale}px`;
   }, []);
   const [isMobile, setIsMobile] = useState(false);
   const [renderWidth, setRenderWidth] = useState(DESKTOP_BASE_WIDTH);
@@ -115,23 +128,25 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     const calculateLayout = () => {
       const visual = window.visualViewport;
       const width = document.documentElement.clientWidth || window.innerWidth;
+      const stage = stageRef.current;
+      const stageWidth = width - (stage ? stage.offsetWidth - stage.clientWidth : 0);
       const height = visual?.height || window.innerHeight;
       const top = visual?.offsetTop || 0;
       const currentIsMobile = mobileQuery.matches || width < MOBILE_BREAKPOINT;
-      const baseWidth = currentIsMobile ? Math.max(width, MOBILE_BASE_WIDTH) : DESKTOP_BASE_WIDTH;
+      const baseWidth = currentIsMobile ? Math.max(stageWidth, MOBILE_BASE_WIDTH) : DESKTOP_BASE_WIDTH;
       if (contentRef.current && contentRef.current.offsetWidth !== baseWidth) {
         contentRef.current.style.width = `${baseWidth}px`;
       }
       baseWidthRef.current = baseWidth;
-      scaleToFrame(parseFloat(wrapperRef.current?.style.width) || 0);
-      const contentHeight = contentRef.current?.offsetHeight || 0;
+      fitToFrame(parseFloat(wrapperRef.current?.style.width) || 0);
+      const contentHeight = contentRef.current ? contentLayoutHeight(contentRef.current) : 0;
 
       let scale = 1;
 
       if (currentIsMobile) {
-        scale = Math.min(width / baseWidth, 1);
+        scale = Math.min(stageWidth / baseWidth, 1);
       } else {
-        const widthScale = ((width * 0.95) / baseWidth) * DESKTOP_SCALE_BOOST;
+        const widthScale = ((stageWidth * 0.95) / baseWidth) * DESKTOP_SCALE_BOOST;
         const heightScale = contentHeight ? (height - DESKTOP_PADDING_Y - CLOSE_ROW_HEIGHT) / contentHeight : MAX_SCALE;
         scale = Math.min(widthScale, heightScale);
       }
@@ -197,7 +212,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       layoutFrameRef.current = 0;
       observer.disconnect();
     };
-  }, [children, open, contentKey, scaleToFrame]);
+  }, [children, open, contentKey, fitToFrame]);
 
   useLayoutEffect(() => {
     if (open && viewport) revealFocusedControl(document.activeElement);
@@ -408,17 +423,17 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
               aria-modal="true"
               aria-label="Schedule your session"
               className={`ri-booking m-auto relative${frameVisibility}`}
-              initial={hydrating ? false : { width: wrapperSize.width, height: wrapperSize.height }}
-              animate={wrapperSize.height ? { width: wrapperSize.width, height: wrapperSize.height } : undefined}
-              layout={!lowPerformanceMode}
+              initial={hydrating ? false : { width: wrapperSize.width }}
+              animate={wrapperSize.height ? { width: wrapperSize.width } : undefined}
               transition={sizeTransition}
-              onUpdate={(latest) => scaleToFrame(latest.width)}
+              onUpdate={(latest) => fitToFrame(latest.width)}
             >
               <button
                 id="booking-modal-close"
                 aria-label="Close"
                 className="absolute right-1 top-1 z-50 flex h-11 w-11 items-center justify-center rounded-lg text-info-text hover:text-white text-3xl leading-none opacity-80 hover:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-info-border"
                 ref={closeButtonRef}
+                style={{ transformOrigin: "calc(100% + 0.25rem) -0.25rem" }}
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();

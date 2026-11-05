@@ -506,12 +506,14 @@ body {
 
 @media (max-width: 767px) {
   html,
-  body {
+  body,
+  .booking-dialog-stage {
     scrollbar-width: none;
   }
 
   html::-webkit-scrollbar,
-  body::-webkit-scrollbar {
+  body::-webkit-scrollbar,
+  .booking-dialog-stage::-webkit-scrollbar {
     display: none;
   }
 }
@@ -3011,6 +3013,10 @@ html[data-theme="dark"] .ri-booking .ri-booking-secondary.glow-button:hover {
 
 html[data-theme="dark"] .ri-booking .glow-button .glow-line {
   display: none;
+}
+
+.booking-dialog-stage {
+  scrollbar-gutter: stable;
 }
 
 .booking-dialog-content {

@@ -416,17 +416,23 @@ const sampleFrames = () => {
   const measure = () => {
     const frame = document.querySelector('[role="dialog"].ri-booking');
     if (!frame || getComputedStyle(frame).visibility === "hidden") return null;
-    const stage = frame.closest(".booking-dialog-stage").getBoundingClientRect();
+    const stageNode = frame.closest(".booking-dialog-stage");
+    const stage = stageNode.getBoundingClientRect();
     const box = frame.getBoundingClientRect();
     const content = frame.querySelector("[data-booking-scaler] > div").getBoundingClientRect();
+    const close = frame.querySelector("#booking-modal-close").getBoundingClientRect();
     const width = document.documentElement.clientWidth;
+    const visibleRight = Math.min(width, stage.left + stageNode.clientWidth);
     return {
       time: performance.now(),
       width,
       frameWidth: box.width,
       stageGap: Math.abs(stage.width - width),
       contentPastFrame: Math.max(content.right - box.right, box.left - content.left),
-      contentPastWindow: Math.max(content.right - width, -content.left),
+      contentBelowFrame: Math.max(content.bottom - box.bottom, box.top - content.top),
+      closePastFrame: Math.max(
+        close.right - box.right, box.left - close.left, close.bottom - box.bottom, box.top - close.top),
+      contentPastWindow: Math.max(content.right - visibleRight, -content.left),
     };
   };
   const probe = document.createElement("div");
@@ -449,7 +455,8 @@ const sampleFrames = () => {
   requestAnimationFrame(tick);
 };
 const subPixel = 0.05;
-const misfit = entry => entry.stageGap > subPixel || entry.contentPastFrame > subPixel || entry.contentPastWindow > subPixel;
+const fitChecks = ["stageGap", "contentPastFrame", "contentBelowFrame", "closePastFrame", "contentPastWindow"];
+const misfit = entry => fitChecks.some(check => entry[check] > subPixel);
 const sizes = { phone: { width: 390, height: 844 }, desktop: { width: 1440, height: 900 } };
 
 for (const [from, to] of [["phone", "desktop"], ["desktop", "phone"]]) {
@@ -520,6 +527,33 @@ for (const [size, viewport] of Object.entries(sizes)) {
         await expect.poll(() => page.evaluate(() => window.__resizeFrames.length)).toBeGreaterThanOrEqual(60);
         const frames = await page.evaluate(() => window.__resizeFrames);
         await save(page, testInfo, `${name.replace(/\W+/g, "-")}-open-${size}`, frames);
+        expect(frames.filter(misfit)).toEqual([]);
+      });
+    }
+  });
+}
+
+const closers = [
+  ["the Close button", page => page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click()],
+  ["Escape", page => page.keyboard.press("Escape")],
+  ["Back", page => page.goBack()],
+];
+
+const closeSizes = { ...sizes, "narrow window": { width: 770, height: 900 } };
+
+for (const [size, viewport] of Object.entries(closeSizes)) {
+  test.describe(`${size} close`, () => {
+    test.use({ viewport, hasTouch: viewport.width < 780 });
+
+    for (const [name, close] of closers) {
+      test(`closing with ${name} matches the window until the last frame`, async ({ page, flow }, testInfo) => {
+        await openFrom("/", homeLink)(page);
+        await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+        await expect.poll(() => page.evaluate(() => window.__resizeFrames.length)).toBeGreaterThanOrEqual(60);
+        await close(page);
+        await expect(page.getByRole("dialog")).toHaveCount(0);
+        const frames = await page.evaluate(() => window.__resizeFrames);
+        await save(page, testInfo, `${name.replace(/\W+/g, "-")}-close-${size}`, frames);
         expect(frames.filter(misfit)).toEqual([]);
       });
     }
