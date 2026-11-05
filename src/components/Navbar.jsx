@@ -71,7 +71,6 @@ export default function Navbar() {
   const activeHomeHash = useActiveHomeSection();
   const {
     goToSection,
-    goToHomeTop,
     isOwnSectionArrival,
   } = useSectionNavigation();
   const [open, setOpen] = useState(false);
@@ -92,21 +91,12 @@ export default function Navbar() {
 
   const isActive = (path) => location.pathname === path;
 
-  const benefitsHashes = [SECTION_HASHES.benefits];
-  const plansHashes = [SECTION_HASHES.plans];
-  const faqHashes = [
-    SECTION_HASHES.faq,
-    SECTION_HASHES.upgradePath,
-    SECTION_HASHES.trust,
-  ];
-  const isBenefitsActive =
-    location.pathname === "/" && benefitsHashes.includes(activeHomeHash);
-  const isPlansActive =
-    location.pathname === "/packages" ||
-    (location.pathname === "/" && plansHashes.includes(activeHomeHash));
+  const isHomeSectionActive = (...hashes) => isActive("/") && hashes.includes(activeHomeHash);
+  const isBenefitsActive = isHomeSectionActive(SECTION_HASHES.benefits);
+  const isPlansActive = isActive("/packages") || isHomeSectionActive(SECTION_HASHES.plans);
   const isFaqActive =
-    location.pathname === "/faq" ||
-    (location.pathname === "/" && faqHashes.includes(activeHomeHash));
+    isActive("/faq") ||
+    isHomeSectionActive(SECTION_HASHES.faq, SECTION_HASHES.upgradePath, SECTION_HASHES.trust);
   const isProofActive = isActive("/benchmarks") || isActive("/reviews");
   const isReferralsActive =
     location.pathname === "/referrals" || location.pathname.startsWith("/referrals/");
@@ -117,15 +107,11 @@ export default function Navbar() {
     setSmallLogoMode("static");
   };
 
-  const handleHomeClick = useCallback(
-    (event) => {
-      if (!goToHomeTop(event)) return;
-      setOpen(false);
-      setProofOpen(false);
-      setReferralsOpen(false);
-    },
-    [goToHomeTop]
-  );
+  const handleHomeClick = useCallback(() => {
+    setOpen(false);
+    setProofOpen(false);
+    setReferralsOpen(false);
+  }, []);
 
   const handleSectionLinkClick = useCallback(
     (event, hash) => {
@@ -138,7 +124,6 @@ export default function Navbar() {
   );
 
   const updateHeaderOffset = useCallback(() => {
-    if (typeof document === "undefined") return;
     const navHeight = navRowRef.current?.offsetHeight || 96;
     document.documentElement.style.setProperty(
       "--section-nav-offset",
@@ -147,7 +132,7 @@ export default function Navbar() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !canAnimateLogo()) return undefined;
+    if (!canAnimateLogo()) return undefined;
     let idleId = null;
     let timeoutId = null;
     const enableAnimatedLogo = () => setSmallLogoMode("animated");
@@ -171,8 +156,6 @@ export default function Navbar() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-
     setTheme(applyTheme(readTheme(), { persist: false }));
 
     const handleThemeChange = (event) => {
@@ -235,7 +218,7 @@ export default function Navbar() {
   }, [open]);
 
   useEffect(() => {
-    if ((!proofOpen && !referralsOpen) || typeof window === "undefined") return;
+    if (!proofOpen && !referralsOpen) return;
     if (!window.matchMedia("(min-width: 768px)").matches) return;
 
     const handleClickOutside = (event) => {
@@ -481,9 +464,6 @@ export default function Navbar() {
                 >
                   <Link
                     to="/benchmarks"
-                    onClick={() => {
-                      setProofOpen(false);
-                    }}
                     className={`block px-4 py-3 text-sm transition ${
                       isActive("/benchmarks")
                         ? menuItemActive
@@ -494,9 +474,6 @@ export default function Navbar() {
                   </Link>
                   <Link
                     to="/reviews"
-                    onClick={() => {
-                      setProofOpen(false);
-                    }}
                     className={`block px-4 py-3 text-sm transition ${
                       isActive("/reviews") ? menuItemActive : menuItemIdle
                     }`}
@@ -563,9 +540,6 @@ export default function Navbar() {
                 >
                   <Link
                     to="/referrals/register"
-                    onClick={() => {
-                      setReferralsOpen(false);
-                    }}
                     className={`block px-4 py-3 text-sm transition ${
                       isActive("/referrals/register")
                         ? menuItemActive
@@ -576,9 +550,6 @@ export default function Navbar() {
                   </Link>
                   <Link
                     to="/referrals/login"
-                    onClick={() => {
-                      setReferralsOpen(false);
-                    }}
                     className={`block px-4 py-3 text-sm transition ${
                       isReferralsActive && !isActive("/referrals/register")
                         ? menuItemActive
@@ -751,10 +722,6 @@ export default function Navbar() {
               >
                 <Link
                   to="/benchmarks"
-                  onClick={() => {
-                    setProofOpen(false);
-                    setOpen(false);
-                  }}
                   className={`${mobileSubLinkBase} ${
                     isActive("/benchmarks")
                       ? mobileSubLinkActive
@@ -765,10 +732,6 @@ export default function Navbar() {
                 </Link>
                 <Link
                   to="/reviews"
-                  onClick={() => {
-                    setProofOpen(false);
-                    setOpen(false);
-                  }}
                   className={`${mobileSubLinkBase} ${
                     isActive("/reviews")
                       ? mobileSubLinkActive
@@ -834,10 +797,6 @@ export default function Navbar() {
               >
                 <Link
                   to="/referrals/register"
-                  onClick={() => {
-                    setReferralsOpen(false);
-                    setOpen(false);
-                  }}
                   className={`${mobileSubLinkBase} ${
                     isActive("/referrals/register")
                       ? mobileSubLinkActive
@@ -848,10 +807,6 @@ export default function Navbar() {
                 </Link>
                 <Link
                   to="/referrals/login"
-                  onClick={() => {
-                    setReferralsOpen(false);
-                    setOpen(false);
-                  }}
                   className={`${mobileSubLinkBase} ${
                     isReferralsActive && !isActive("/referrals/register")
                       ? mobileSubLinkActive

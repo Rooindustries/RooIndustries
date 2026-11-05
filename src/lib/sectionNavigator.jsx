@@ -20,22 +20,14 @@ const ActiveHomeSectionContext = createContext("");
 
 const getHeaderOffsetPx = () => getCssHeaderOffsetPx(110);
 
-const isPlainPrimaryClick = (event, link = event?.currentTarget) => {
-  if (!event) return true;
-  if (event.defaultPrevented) return false;
-  if (typeof event.button === "number" && event.button !== 0) return false;
-  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return false;
-  const target = link?.getAttribute?.("target");
-  return !target || target === "_self";
-};
+const isPlainPrimaryClick = (event, link = event.currentTarget) =>
+  !event.defaultPrevented &&
+  !event.button &&
+  !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) &&
+  /^(_self)?$/.test(link.getAttribute("target") || "");
 
-const replaceBrowserUrl = (href, hash) => {
-  if (window.history?.replaceState) {
-    window.history.replaceState(window.history.state, "", href);
-  } else {
-    window.location.hash = hash.slice(1);
-  }
-};
+const replaceBrowserUrl = (hash = "", href = `${window.location.pathname}${window.location.search}${hash}`) =>
+  window.history.replaceState(window.history.state, "", href);
 
 const prefetchSectionData = (hash) => {
   const requiredKeys = HOME_SECTION_PREFETCH_BY_HASH[hash] || [];
@@ -83,37 +75,26 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   const cancelSectionNavigation = useCallback(() => {
     const trip = tripRef.current;
     tripRef.current = null;
-    if (trip && typeof window !== "undefined" && window.history.state?.[SECTION_TRIP_ENTRY]) {
-      window.history.replaceState(window.history.state, "", trip.from);
-    }
+    if (trip && window.history.state?.[SECTION_TRIP_ENTRY]) replaceBrowserUrl("", trip.from);
     intentRef.current = "";
     clearPendingSectionTarget();
     clearRouteTransitionIntent();
-    if (typeof document !== "undefined") {
-      document.documentElement.classList.remove("route-transition-out");
-    }
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("roo:cancel-route-transition"));
-    }
+    document.documentElement.classList.remove("route-transition-out");
+    window.dispatchEvent(new CustomEvent("roo:cancel-route-transition"));
     stopAlignment();
   }, [stopAlignment]);
 
   const goToSection = useCallback(
     (event, hash, alignment) => {
-      if (typeof window === "undefined" || !isPlainPrimaryClick(event)) return false;
+      if (!isPlainPrimaryClick(event)) return false;
       const normalizedHash = normalizeSectionHash(hash);
       if (!normalizedHash) return false;
-      event?.preventDefault?.();
+      event.preventDefault();
 
       if (location.pathname === "/") {
         intentRef.current = "";
         clearPendingSectionTarget();
-        if (window.location.hash !== normalizedHash) {
-          replaceBrowserUrl(
-            `${window.location.pathname}${window.location.search}${normalizedHash}`,
-            normalizedHash
-          );
-        }
+        if (window.location.hash !== normalizedHash) replaceBrowserUrl(normalizedHash);
         announceSectionTarget(normalizedHash);
         setActiveHomeHash(normalizedHash);
         alignTo(normalizedHash, alignment);
@@ -121,67 +102,37 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
         return true;
       }
 
-      const fromPath = location.pathname;
-      const browserPath = window.location.pathname || "/";
       intentRef.current = normalizedHash;
       writePendingSectionTarget(normalizedHash);
-      writeRouteTransitionIntent({ kind: "section", hash: normalizedHash, from: fromPath });
+      writeRouteTransitionIntent(normalizedHash);
       document.documentElement.classList.add("route-transition-out");
       prefetchSectionData(normalizedHash);
 
       const nextHref = buildHomeSectionHref(normalizedHash);
       const trip = tripRef.current;
-      if (trip?.via === "memory") {
-        replaceBrowserUrl(nextHref, normalizedHash);
-        return true;
-      }
-      if (trip?.via === "router") {
-        navigate(nextHref, { replace: true, state: { sectionTrip: trip.key } });
-        return true;
-      }
-      if (trip?.via === "document") {
+      const {
+        key = location.key,
+        via = routeShell === "memory" ? "memory" : window.location.pathname !== location.pathname ? "document" : "router",
+      } = trip || {};
+      const state = { sectionTrip: key };
+      if (!trip) tripRef.current = { key, via, from: window.location.href };
+      if (via === "document") {
         window.location.assign(nextHref);
-        return true;
-      }
-
-      const via = routeShell === "memory" ? "memory" : browserPath !== fromPath ? "document" : "router";
-      tripRef.current = { key: location.key, via, from: `${browserPath}${window.location.search}${window.location.hash}` };
-      const tripState = { sectionTrip: location.key };
-      if (via === "memory") {
-        window.history.pushState({ ...window.history.state, [SECTION_TRIP_ENTRY]: true }, "", nextHref);
-        navigate("/", { state: tripState });
-      } else if (via === "document") {
-        window.location.assign(nextHref);
+      } else if (via === "router") {
+        navigate(nextHref, { replace: Boolean(trip), state });
+      } else if (trip) {
+        replaceBrowserUrl("", nextHref);
       } else {
-        navigate(nextHref, { state: tripState });
+        window.history.pushState({ ...window.history.state, [SECTION_TRIP_ENTRY]: true }, "", nextHref);
+        navigate("/", { state });
       }
       return true;
     },
     [alignTo, location.key, location.pathname, navigate, routeShell]
   );
 
-  const goToHomeTop = useCallback(
-    (event) => {
-      if (!isPlainPrimaryClick(event)) return false;
-      cancelSectionNavigation();
-      if (typeof window === "undefined" || location.pathname !== "/") return true;
-      event?.preventDefault?.();
-      if (window.location.hash && window.history?.replaceState) {
-        window.history.replaceState(
-          window.history.state,
-          "",
-          `${window.location.pathname}${window.location.search}`
-        );
-      }
-      setActiveHomeHash("");
-      window.scrollTo({ top: 0, behavior: "auto" });
-      return true;
-    },
-    [cancelSectionNavigation, location.pathname]
-  );
-
   const isOwnSectionArrival = useCallback(
-    (target) => Boolean(tripRef.current) && target?.state?.sectionTrip === tripRef.current.key,
+    (target) => Boolean(tripRef.current) && target.state?.sectionTrip === tripRef.current.key,
     []
   );
 
@@ -198,9 +149,8 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   }, [cancelSectionNavigation, location.key, location.pathname, location.state, stopAlignment]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return undefined;
     const syncHash = () => {
-      setActiveHomeHash(normalizeSectionHash(window.location.hash || location.hash || ""));
+      setActiveHomeHash(normalizeSectionHash(window.location.hash || location.hash));
     };
     syncHash();
     window.addEventListener("hashchange", syncHash);
@@ -208,21 +158,34 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   }, [location.hash, location.pathname]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    const endTripOnDocumentLink = (event) => {
-      if (!tripRef.current || !(event.target instanceof Element)) return;
-      const link = event.target.closest("a[href]");
-      if (!link || link.hasAttribute("download") || !isPlainPrimaryClick(event, link)) return;
-      const tripEntryPushed = Boolean(window.history.state?.[SECTION_TRIP_ENTRY]);
+    const plainLink = (event) => {
+      const link = event.target instanceof Element && event.target.closest("a[href]");
+      return link && !link.hasAttribute("download") && isPlainPrimaryClick(event, link) && link;
+    };
+    const goToHomeTop = (event) => {
+      const link = location.pathname === "/" && plainLink(event);
+      if (!link || link.href !== `${window.location.origin}/`) return;
+      event.preventDefault();
+      cancelSectionNavigation();
+      if (window.location.hash) replaceBrowserUrl();
+      setActiveHomeHash("");
+      window.scrollTo(0, 0);
+    };
+    const endTripOnLink = (event) => {
+      const link = tripRef.current && plainLink(event);
+      if (!link) return;
+      const tripEntryPushed = window.history.state?.[SECTION_TRIP_ENTRY];
       cancelSectionNavigation();
       if (tripEntryPushed && /^https?:$/.test(link.protocol) && !link.getAttribute("href").startsWith("#")) {
         event.preventDefault();
         window.location.replace(link.href);
       }
     };
-    window.addEventListener("click", endTripOnDocumentLink);
-    return () => window.removeEventListener("click", endTripOnDocumentLink);
-  }, [cancelSectionNavigation]);
+    const listeners = new AbortController();
+    window.addEventListener("click", goToHomeTop, { capture: true, signal: listeners.signal });
+    window.addEventListener("click", endTripOnLink, { signal: listeners.signal });
+    return () => listeners.abort();
+  }, [cancelSectionNavigation, location.pathname]);
 
   useEffect(() => {
     if (location.pathname !== "/") return;
@@ -249,13 +212,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       clearPendingSectionTarget();
     }
 
-    if (window.location.hash !== targetHash && window.history?.replaceState) {
-      window.history.replaceState(
-        window.history.state,
-        "",
-        `${window.location.pathname}${window.location.search}${targetHash}`
-      );
-    }
+    if (window.location.hash !== targetHash) replaceBrowserUrl(targetHash);
 
     if (targetHash !== activeHomeHash) {
       setActiveHomeHash(targetHash);
@@ -272,8 +229,8 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   useEffect(() => cancelSectionNavigation, [cancelSectionNavigation]);
 
   const actions = useMemo(
-    () => ({ goToSection, goToHomeTop, isOwnSectionArrival }),
-    [goToHomeTop, goToSection, isOwnSectionArrival]
+    () => ({ goToSection, isOwnSectionArrival }),
+    [goToSection, isOwnSectionArrival]
   );
 
   return (
@@ -285,12 +242,6 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   );
 }
 
-export const useSectionNavigation = () => {
-  const actions = useContext(SectionNavigationContext);
-  if (!actions) {
-    throw new Error("Section navigation needs a SectionNavigationProvider.");
-  }
-  return actions;
-};
+export const useSectionNavigation = () => useContext(SectionNavigationContext);
 
 export const useActiveHomeSection = () => useContext(ActiveHomeSectionContext);

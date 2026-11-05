@@ -273,6 +273,52 @@ test("a route link clicked as the section lands leaves the page scrollable", asy
   ).toEqual({ locked: false, veil: "0" });
 });
 
+const clickOnceSectionLands = (page, sectionSelector, linkSelector, hash) =>
+  page.evaluate(
+    ([section, link, target]) =>
+      new Promise((resolve) => {
+        document.querySelector(section).click();
+        const clickLinkOnLanding = () => {
+          if (window.location.pathname === "/" && window.location.hash === target && window.scrollY > 300) {
+            document.querySelector(link).click();
+            resolve();
+            return;
+          }
+          requestAnimationFrame(clickLinkOnLanding);
+        };
+        requestAnimationFrame(clickLinkOnLanding);
+      }),
+    [sectionSelector, linkSelector, hash]
+  );
+
+const readHomeTop = (page) =>
+  page.evaluate(() => ({ path: window.location.pathname, hash: window.location.hash, y: window.scrollY }));
+
+for (const { label, selector } of [
+  { label: "footer logo", selector: FOOTER("/").selector },
+  { label: "navbar logo", selector: `header a[href="/"]` },
+]) {
+  for (const origin of ["/reviews", "/"]) {
+    test(`the ${label} clicked as a section lands from ${origin} goes to the top of a clean homepage`, async ({ page }) => {
+      test.setTimeout(120000);
+      await page.setViewportSize({ width: 1536, height: 960 });
+      const name = `${origin} navbar Benefits, then ${label} while it lands`;
+      await openPage(page, origin, "desktop");
+      await clickOnceSectionLands(page, NAVBAR("benefits").selector, selector, SECTIONS.benefits);
+      const top = { path: "/", hash: "", y: 0 };
+      await expect
+        .poll(() => readHomeTop(page).catch(() => null), { message: `${name} lands on /`, timeout: 8000, intervals: [100] })
+        .toEqual(top);
+      await page.waitForTimeout(1500);
+      expect(await readHomeTop(page), `${name} stays on /`).toEqual(top);
+      if (origin !== "/") {
+        await page.goBack();
+        await expectPath(page, origin, `${name} back`);
+      }
+    });
+  }
+}
+
 test("a section click after an abandoned trip adds its own history entry", async ({ page }) => {
   test.setTimeout(120000);
   await page.setViewportSize({ width: 1536, height: 960 });
