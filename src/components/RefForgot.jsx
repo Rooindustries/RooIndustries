@@ -65,11 +65,11 @@ export default function RefForgot() {
 
   return (
     <section className="pt-32 px-6 min-h-screen text-ink flex flex-col items-center">
-      <h1 className="text-4xl font-extrabold text-center text-accent drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+      <h1 className="section-title text-center">
         Forgot Password
       </h1>
 
-      <p className="text-ink-muted mt-3 text-center max-w-md text-base">
+      <p className="section-lede text-center">
         Enter the email attached to your referral account and we&apos;ll send
         you a reset link.
       </p>

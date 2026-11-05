@@ -150,13 +150,13 @@ export default function HowItWorks({ initialData = null }) {
   return (
     <section className="ri-hiw-section relative z-10 py-16 px-4 sm:px-6 text-ink max-w-[110rem] mx-auto">
       {data.title && (
-        <h2 className="ri-hiw-heading text-4xl sm:text-5xl font-extrabold text-center tracking-tight text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+        <h2 className="section-title text-center">
           {data.title}
         </h2>
       )}
 
       {data.subtitle && (
-        <p className="ri-hiw-subtitle mt-3 text-ink-secondary text-center text-sm sm:text-base">
+        <p className="section-lede text-center">
           {data.subtitle}
         </p>
       )}
