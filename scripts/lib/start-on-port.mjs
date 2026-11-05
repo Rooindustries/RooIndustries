@@ -106,6 +106,7 @@ const signalGroup = (child, signal) => {
 };
 
 export const stopChild = async (child, grace = 5000) => {
+  if (!launched.has(child)) throw new Error("stopChild only stops children started with launch.spawn or launchChild.");
   if (!child.pid || exited(child)) return;
   const ended = once(child, "exit");
   signalGroup(child, "SIGTERM");
@@ -162,6 +163,8 @@ const launcher = (held) => (command, args, options = {}) => {
   closes.set(child, new Promise((resolve) => child.once("close", resolve)));
   return child;
 };
+
+export const launchChild = launcher({ stdio: [], env: {} });
 
 const waitUntilReady = async ({ child, host, ports, isReady, output, timeout, failure }) => {
   const deadline = Date.now() + timeout;

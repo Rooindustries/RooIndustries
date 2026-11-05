@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { stopChild } from "../../scripts/lib/start-on-port.mjs";
+import { launchChild, stopChild } from "../../scripts/lib/start-on-port.mjs";
 
 export const host = "127.0.0.1";
 const inherited = /SENTRY_DSN$|^BASE_URL$|^NEXT_DIST_DIR$|^PW_PORT$|^PW_SERVER_ID$|^TOOLING_|^BOOKING_ROUTE_PORT$|^NODE_OPTIONS$|^NODE_TEST_CONTEXT$/;
@@ -10,7 +10,8 @@ export const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export const run = (args, env, { detached = false, command = process.execPath } = {}) => {
   let output = "";
-  const child = spawn(command, args, { detached, stdio: ["ignore", "pipe", "pipe"], env: { ...cleanEnv(), ROO_TEST_HOST: host, ...env } });
+  const start = detached ? launchChild : spawn;
+  const child = start(command, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...cleanEnv(), ROO_TEST_HOST: host, ...env } });
   for (const stream of [child.stdout, child.stderr]) stream.on("data", chunk => { output += chunk; });
   return { child, output: () => output };
 };
