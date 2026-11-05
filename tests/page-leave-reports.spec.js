@@ -405,6 +405,7 @@ for (const route of ["/upgrade/max", "/upgrade-xoc"]) {
     [503, 1],
     [403, 1],
     [404, 0],
+    [409, 0],
     [429, 0],
   ]) {
     const outcome = reports ? "is reported once" : "is shown without a report";

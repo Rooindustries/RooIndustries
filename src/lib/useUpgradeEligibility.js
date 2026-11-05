@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { fetchJsonWithTimeout, reportRequestError } from './clientRequest';
 
-const eligibilityAnswers = new Set([400, 404, 429]);
+const eligibilityAnswers = new Set([400, 404, 409, 429]);
 
 export const fetchUpgradeInfo = async (input, signal) => {
   const result = await fetchJsonWithTimeout('/api/ref/getUpgradeInfo', {
