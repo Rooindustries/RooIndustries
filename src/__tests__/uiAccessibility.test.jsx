@@ -62,7 +62,7 @@ describe("UI accessibility regressions", () => {
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       value: jest.fn((query) => ({
-        matches: query === "(min-width: 768px)",
+        matches: query === "(min-width: 1024px)",
         media: query,
         addEventListener: jest.fn(),
         removeEventListener: jest.fn(),
