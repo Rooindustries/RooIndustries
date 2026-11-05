@@ -356,16 +356,32 @@ run("no-ignored-write-request", {
   ],
 });
 
+const helperImport = 'import { reportContentLoadError } from "../lib/publicContentClient";';
+
 run("no-unfiltered-content-load-error", {
   valid: [
-    `fetchHomeSectionData(key).then(setPackages).catch(reportContentLoadError);`,
-    `getPublicContent("tools").catch((error) => { if (active) reportContentLoadError(error); });`,
+    `${helperImport} fetchHomeSectionData(key).then(setPackages).catch(reportContentLoadError);`,
+    `${helperImport} getPublicContent("tools").catch((error) => { if (active) reportContentLoadError(error); });`,
+    `import { reportContentLoadError as report } from "@/lib/publicContentClient"; getPublicContent("faq").catch(report);`,
+    `${helperImport} const pending = fetchHomeSectionData(key); pending.then(setPackages).catch(reportContentLoadError);`,
     `getPublicContent("hero").then(setHero).catch(() => {});`,
     `getPublicContent("contact").then(show, () => setFailed(true));`,
     `async function load() { try { await getPublicContent("referral-box"); } catch { setFallback(); } }`,
-    `async function load() { try { await getPublicContent("package"); } catch (error) { reportContentLoadError(error); } }`,
+    `${helperImport} async function load() { try { await getPublicContent("package"); } catch (error) { reportContentLoadError(error); } }`,
     `try { items.forEach(async () => { await getPublicContent("x"); }); } catch (error) { console.error(error); }`,
     `fetch("/api/bookingAvailability").catch(console.error);`,
+    {
+      name: "outer try only sees an unrelated failure after the content error is handled",
+      code: `${helperImport} async function save() { try { const data = await getPublicContent("package").catch(reportContentLoadError); await saveDraft(data); } catch (error) { console.error("Draft save failed", error); } }`,
+    },
+    {
+      name: "outer try around an inner try that already handles the content error",
+      code: `${helperImport} async function save() { try { try { await getPublicContent("package"); } catch (error) { reportContentLoadError(error); } await saveDraft(); } catch (error) { console.error(error); } }`,
+    },
+    {
+      name: "outer try around a content load that is never awaited",
+      code: `${helperImport} function warm() { try { prefetchHomeSectionData(keys).catch(reportContentLoadError); track("warm"); } catch (error) { console.error(error); } }`,
+    },
   ],
   invalid: [
     {
@@ -391,6 +407,51 @@ run("no-unfiltered-content-load-error", {
     {
       name: "error tracker called directly",
       code: `prefetchHomeSectionData(keys).catch((error) => Sentry.captureException(error));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "named logger passed to catch",
+      code: `import { logContentError } from "../lib/log"; getPublicContent("terms").catch(logContentError);`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "tracker method passed to catch",
+      code: `fetchHomeSectionData(key).catch(Sentry.captureException);`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "local function shadowing the shared helper name",
+      code: `const reportContentLoadError = (error) => console.error(error); getPublicContent("terms").catch(reportContentLoadError);`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "named rejection handler passed to then",
+      code: `getPublicContent("terms").then(setTerms, onLoadFailed);`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "inline handler forwarding the error to a named logger",
+      code: `getPublicContent("terms").catch((error) => logContentError(error));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "stored content promise caught later",
+      code: `const pending = fetchHomeSectionData(key); pending.catch(console.error);`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "stored content chain given a rejection handler later",
+      code: `const pending = getPublicContent("faq").then(show); pending.then(null, (error) => console.warn(error));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "stored content promise awaited inside a try",
+      code: `async function load() { const pending = getPublicContent("faq"); try { await pending; } catch (error) { console.error(error); } }`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "try handler forwarding the error to a named logger",
+      code: `async function load() { try { await getPublicContent("faq"); } catch (error) { logContentError(error); } }`,
       errors: [{ messageId: "unfiltered" }],
     },
   ],
