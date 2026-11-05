@@ -33,13 +33,19 @@ export default function SiteDialogFrame({
   useEffect(() => {
     if (!closing) return undefined;
     let cancelled = false;
-    const overlay = overlayRef.current;
-    const animations = typeof overlay?.getAnimations === "function" ? overlay.getAnimations({ subtree: true }) : [];
-    Promise.allSettled(animations.map((animation) => animation.finished)).then(() => {
+    const finish = () => {
       if (!cancelled) setRendered(false);
-    });
+    };
+    const exits = [overlayRef.current, dialogRef.current]
+      .flatMap((element) => (typeof element?.getAnimations === "function" ? element.getAnimations() : []))
+      .map((animation) => ({ animation, timing: animation.effect?.getComputedTiming() }))
+      .filter(({ timing }) => Number.isFinite(timing?.endTime));
+    const exitMs = Math.max(0, ...exits.map(({ animation, timing }) => timing.endTime - (typeof animation.currentTime === "number" ? animation.currentTime : 0)));
+    const fallback = window.setTimeout(finish, exitMs + 100);
+    Promise.allSettled(exits.map(({ animation }) => animation.finished)).then(finish);
     return () => {
       cancelled = true;
+      window.clearTimeout(fallback);
     };
   }, [closing]);
 
