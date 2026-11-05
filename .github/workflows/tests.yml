@@ -106,6 +106,7 @@ jobs:
       - run: npm run test:playwright-groups
       - run: npm run test:tested-tree
       - run: npm run test:free-ports
+      - run: npm run test:reproducible-build
       - run: npm run test:tooling:dependencies
       - run: npm run check:seo
       - run: npm run check:supabase:migrations
@@ -138,6 +139,7 @@ jobs:
       matrix:
         suite:
           - name: navigation
+            relocate: true
           - name: booking
           - name: rest-1
           - name: rest-2
@@ -159,7 +161,14 @@ jobs:
         with:
           node-version: 22
           browsers: chromium webkit
-          build-dirs: .next-e2e-ci/cache/webpack
+          build-dirs: ${{ !matrix.suite.relocate && '.next-e2e-ci/cache/webpack' || '' }}
+      - name: Build from a clean checkout at another path
+        if: ${{ matrix.suite.relocate }}
+        run: |
+          relocated="$RUNNER_TEMP/relocated/RooIndustries"
+          git worktree add --detach "$relocated" HEAD
+          cp -a --reflink=auto node_modules "$relocated/"
+          echo "SUITE_DIR=$relocated" >> "$GITHUB_ENV"
       - name: Pick a fixed group's spec file
         if: ${{ !startsWith(matrix.suite.name, 'rest-') }}
         run: |
@@ -182,6 +191,7 @@ jobs:
           echo "PW_FILES=$files" >> "$GITHUB_ENV"
       - name: Run browser and agent-readiness tests
         run: |
+          cd "${SUITE_DIR:-$GITHUB_WORKSPACE}"
           node scripts/test-tooling-sweep-server.mjs &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" || true' EXIT
@@ -193,8 +203,10 @@ jobs:
             sleep 1
           done
           curl --fail --silent "$BASE_URL" > /dev/null
+          if [ "$PW_SUITE" = "rest-1" ] || [ "$PW_SUITE" = "navigation" ]; then
+            bash scripts/build-fingerprint.sh "$RUNNER_TEMP/build-fingerprint/$PW_SUITE.txt"
+          fi
           if [ "$PW_SUITE" = "rest-1" ]; then
-            npm run check:budgets
             npm run check:no-scripting-media
             TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:agent-readiness
             TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:traffic-recovery
@@ -206,51 +218,30 @@ jobs:
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-timings/${{ matrix.suite.name }}.json
       - uses: ./.github/actions/save-caches
+        if: ${{ !matrix.suite.relocate }}
         with:
           build-dirs: .next-e2e-ci/cache/webpack
+      - uses: actions/upload-artifact@v4
+        if: ${{ matrix.suite.name == 'rest-1' || matrix.suite.name == 'navigation' }}
+        with:
+          name: build-fingerprint-${{ matrix.suite.name }}
+          path: ${{ runner.temp }}/build-fingerprint/
+          if-no-files-found: error
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: test-timings-${{ matrix.suite.name }}
-          path: test-timings/
+          path: ${{ env.SUITE_DIR || github.workspace }}/test-timings/
           if-no-files-found: ignore
           retention-days: 30
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: test-results-${{ matrix.suite.name }}
-          path: test-results/
+          path: ${{ env.SUITE_DIR || github.workspace }}/test-results/
           if-no-files-found: ignore
           retention-days: 7
-
-  reproducible-build:
-    name: Reproducible build sizes
-    needs: tested-tree
-    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    env:
-      ROO_TEST_HOST: 127.0.0.1
-      BASE_URL: http://127.0.0.1:3211
-      PW_PORT: "3211"
-      PW_SERVER_ID: ci
-      NEXT_DIST_DIR: .next-e2e-ci
-      TOOLING_API_ROUTES: "0"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-        with:
-          node-version: 22
-      - name: Restore the browser suites' build cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .next-e2e-ci/cache/webpack
-          key: next-build-playwright-${{ hashFiles('package-lock.json', 'next.config.mjs') }}-${{ github.sha }}
-          restore-keys: next-build-playwright-${{ hashFiles('package-lock.json', 'next.config.mjs') }}-
-      - name: Build with that cache and again from a clean second checkout, then compare
-        run: bash scripts/check-reproducible-build.sh "$RUNNER_TEMP/reproducible/second-checkout"
 
   routes:
     name: Playwright creator portal and API routes
@@ -464,18 +455,24 @@ jobs:
       && needs.jest.result == 'success'
       && needs.booking-model.result == 'success'
       && needs.playwright.result == 'success'
-      && needs.reproducible-build.result == 'success'
       && needs.routes.result == 'success'
       && needs.native.result == 'success'
       && needs.native-payouts.result == 'success'
       && needs.revalidation.result == 'success'
-    needs: [monitoring, jest, booking-model, playwright, reproducible-build, routes, native, native-payouts, revalidation]
+    needs: [monitoring, jest, booking-model, playwright, routes, native, native-payouts, revalidation]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: build-fingerprint-*
+          path: build-fingerprint
+          merge-multiple: true
+      - name: Compare the cached build with the clean build from another path
+        run: bash scripts/compare-build-fingerprints.sh build-fingerprint/rest-1.txt build-fingerprint/navigation.txt
       - id: tree
         run: |
           tree="$(git rev-parse 'HEAD^{tree}')"

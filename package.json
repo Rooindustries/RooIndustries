@@ -149,7 +149,8 @@
     "test:lint-rules": "node --test tests/lint-rules.test.mjs tests/no-scripting-media.test.mjs",
     "test:playwright-groups": "node --test tests/playwright-groups.test.mjs",
     "test:tested-tree": "node --test tests/tested-tree.test.mjs",
-    "test:free-ports": "node --test tests/free-tcp-port.test.mjs"
+    "test:free-ports": "node --test tests/free-tcp-port.test.mjs",
+    "test:reproducible-build": "node --test tests/reproducible-build.test.mjs"
   },
   "eslintConfig": {
     "extends": [

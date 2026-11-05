@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 
 const pluginName = "StableModuleIdsPlugin";
+const chunkGraphMethods = ["getModuleId", "setModuleId", "getNumberOfModuleChunks"];
+
+const describe = (message) => `${pluginName}: ${message} Client chunk ids would depend on the checkout path.`;
+const fail = (message) => {
+  throw new Error(describe(message));
+};
 
 const rootForms = (root) => {
   const escaped = JSON.stringify(root).slice(1, -1);
@@ -18,11 +24,30 @@ const pathFreeIdentifier = (identifier, root) => {
   return forms.reduce((name, form) => name.split(form).join("<root>"), identifier);
 };
 
+const internalsProblem = (compilation, modules) => {
+  const strategy = compilation.compiler.options.optimization?.moduleIds;
+  if (strategy !== "deterministic") return `expects deterministic module ids, but this build uses ${strategy}.`;
+  const missing = chunkGraphMethods.filter((name) => typeof compilation.chunkGraph?.[name] !== "function");
+  if (missing.length) return `the webpack chunk graph has no ${missing.join(", ")}.`;
+  if ([...modules].some((module) => typeof module.needId !== "boolean")) {
+    return "webpack modules no longer say whether they need an id.";
+  }
+  return null;
+};
+
+const report = (compiler, compilation, message) => {
+  const WebpackError = compiler.webpack?.WebpackError;
+  if (typeof WebpackError !== "function") fail("this webpack has no WebpackError to report with.");
+  compilation.errors.push(new WebpackError(describe(message)));
+};
+
 class StableModuleIdsPlugin {
   apply(compiler) {
     compiler.hooks.compilation.tap(pluginName, (compilation) => {
-      if (compiler.options.optimization.moduleIds !== "deterministic") return;
+      if (!compilation.hooks.moduleIds) return report(compiler, compilation, "this webpack has no moduleIds hook.");
       compilation.hooks.moduleIds.tap({ name: pluginName, stage: -100 }, (modules) => {
+        const problem = internalsProblem(compilation, modules);
+        if (problem) return report(compiler, compilation, problem);
         const { chunkGraph } = compilation;
         const used = new Set([...(compilation.usedModuleIds || [])].map(String));
         const pending = [];
@@ -39,7 +64,11 @@ class StableModuleIdsPlugin {
           const name = pathFreeIdentifier(module.identifier(), compiler.context);
           if (name) pending.push({ module, name });
         }
-        if (!pending.length) return;
+        if (!pending.length) {
+          if (compilation.compiler.isChild()) return;
+          return report(compiler, compilation,
+            `no module in the ${compiler.name || "main"} build has the project path in its request.`);
+        }
         let range = 1000;
         while (range < unassigned * 20 + used.size) range *= 10;
         pending.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -58,11 +87,16 @@ class StableModuleIdsPlugin {
   }
 }
 
-const sortedEntries = (entries) =>
-  Object.fromEntries(Object.keys(entries).sort().map((name) => [name, entries[name]]));
+const isPlainObject = (value) => value !== null && Object.getPrototypeOf(value) === Object.prototype;
+
+const sortedEntries = (entries) => {
+  if (!isPlainObject(entries)) fail("expects the webpack entry to be an object of named entries.");
+  return Object.fromEntries(Object.keys(entries).sort().map((name) => [name, entries[name]]));
+};
 
 export const makeBuildReproducible = (config) => {
   const entry = config.entry;
+  if (typeof entry !== "function") sortedEntries(entry);
   config.entry = async () => sortedEntries(typeof entry === "function" ? await entry() : entry);
   config.plugins.push(new StableModuleIdsPlugin());
   return config;
