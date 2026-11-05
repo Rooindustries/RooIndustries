@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useLayoutEffect, useState, useRef, useCallback } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { FaDiscord } from "react-icons/fa";
 import { Moon, Tv } from "lucide-react";
@@ -14,9 +14,10 @@ const canAnimateLogo = () => {
     !navigator?.connection?.saveData;
 };
 
+const DESKTOP_NAV_QUERY = "(min-width: 1024px)";
+
 // Two themes only: "dark" (Blackout Gold, the site default) and "default"
 // (Roo Blue). There is no light mode. Legacy stored values normalize to dark.
-const DESKTOP_NAV_QUERY = "(min-width: 1024px)";
 const THEME_STORAGE_KEY = "roo-theme";
 const THEME_LABELS = {
   default: "Roo Blue",
@@ -79,6 +80,7 @@ export default function Navbar() {
   const [open, setOpen] = useState(false);
   const [proofOpen, setProofOpen] = useState(false);
   const [referralsOpen, setReferralsOpen] = useState(false);
+  const [menuMaxHeight, setMenuMaxHeight] = useState(null);
   const [theme, setTheme] = useState("dark");
   // Keep initial server/client markup identical, then upgrade to animated mode on mount.
   const [smallLogoMode, setSmallLogoMode] = useState("static");
@@ -236,6 +238,17 @@ export default function Navbar() {
     return () => document.removeEventListener("keydown", handleEscape);
   }, [open]);
 
+  useLayoutEffect(() => {
+    if (!open) return;
+    const fitMenuToScreen = () => {
+      const rowBottom = navRowRef.current?.getBoundingClientRect().bottom ?? 0;
+      setMenuMaxHeight(Math.max(0, Math.floor(window.innerHeight - rowBottom)));
+    };
+    fitMenuToScreen();
+    window.addEventListener("resize", fitMenuToScreen);
+    return () => window.removeEventListener("resize", fitMenuToScreen);
+  }, [open]);
+
   useEffect(() => {
     if ((!proofOpen && !referralsOpen) || typeof window === "undefined") return;
     if (!window.matchMedia(DESKTOP_NAV_QUERY).matches) return;
@@ -341,7 +354,7 @@ export default function Navbar() {
       </div>
 
       <div className="relative z-10 mx-auto max-w-7xl overflow-visible px-4 sm:px-6">
-        <div ref={navRowRef} className="flex h-20 items-center overflow-visible sm:h-24">
+        <div ref={navRowRef} data-nav-row className="flex h-20 items-center overflow-visible sm:h-24">
           <div className="hidden min-w-0 flex-1 items-center gap-4 lg:flex">
             {location.pathname !== "/" ? (
               <BackButton hidden={false} inline={true} />
@@ -670,11 +683,12 @@ export default function Navbar() {
         <div
           id="mobile-site-menu"
           inert={!open}
-          className={`lg:hidden overflow-hidden transition-all duration-300 ease-out ${
+          className={`lg:hidden transition-all duration-300 ease-out ${
             open
-              ? "pb-4 max-h-[680px] opacity-100 translate-y-0"
-              : "max-h-0 opacity-0 -translate-y-2 pointer-events-none"
+              ? "pb-4 max-h-[680px] overflow-y-auto overscroll-contain opacity-100 translate-y-0"
+              : "max-h-0 overflow-hidden opacity-0 -translate-y-2 pointer-events-none"
           }`}
+          style={open && menuMaxHeight !== null ? { maxHeight: `min(680px, ${menuMaxHeight}px)` } : undefined}
           aria-hidden={!open}
         >
           <div className="glass-premium glass-menu-surface mt-2 transition-all duration-300">
