@@ -20,6 +20,14 @@ export default [
     rules: ruleSet(Object.keys(rules).filter((name) => !emailTextRules.has(name))),
   },
   {
+    files: ["scripts/**/*.{js,mjs,cjs}", "tests/**/*.{js,mjs,cjs}"],
+    ignores: ["scripts/lib/process-group.mjs"],
+    linterOptions: { reportUnusedDisableDirectives: "off" },
+    languageOptions: { ecmaVersion: "latest", sourceType: "module", globals: { ...globals.node } },
+    plugins: { roo },
+    rules: ruleSet(["no-unchecked-group-signal"]),
+  },
+  {
     files: ["**/*.cjs"],
     languageOptions: { sourceType: "commonjs" },
   },

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
 import { portFromEnv } from "./lib/free-tcp-port.mjs";
 import { startChildOnPorts } from "./lib/start-on-port.mjs";
+import { signalGroup, trackGroupLeader } from "./lib/process-group.mjs";
 
 refuseEnvFiles();
 const host = process.env.ROO_TEST_HOST || "127.0.0.1";
@@ -34,6 +35,7 @@ let stopping = false;
 const launch = (args, stdio = "inherit", start = spawn) => {
   if (stopping) throw new Error("API audit was stopped.");
   const child = start(process.execPath, args, { env, stdio, detached: process.platform !== "win32" });
+  if (process.platform !== "win32") trackGroupLeader(child);
   const closed = new Promise(resolve => {
     child.once("error", error => resolve({ error }));
     child.once("close", (code, signal) => resolve({ code, signal }));
@@ -43,21 +45,11 @@ const launch = (args, stdio = "inherit", start = spawn) => {
   return { child, closed };
 };
 
-const signalChild = (child, signal) => {
-  if (!child.pid) return;
-  try {
-    if (process.platform === "win32") child.kill(signal);
-    else process.kill(-child.pid, signal);
-  } catch (error) {
-    if (error.code !== "ESRCH") throw error;
-  }
-};
-
 const stopChildren = async () => {
   stopping = true;
   await Promise.all([...children].map(async ([child, closed]) => {
-    signalChild(child, "SIGTERM");
-    const timer = setTimeout(() => signalChild(child, "SIGKILL"), 15000);
+    signalGroup(child, "SIGTERM");
+    const timer = setTimeout(() => signalGroup(child, "SIGKILL"), 15000);
     try { await closed; } finally { clearTimeout(timer); }
   }));
   children.clear();
@@ -66,7 +58,7 @@ const stopChildren = async () => {
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => {
   process.exitCode = 1;
   stopping = true;
-  for (const child of children.keys()) signalChild(child, signal);
+  for (const child of children.keys()) signalGroup(child, signal);
 });
 
 try {

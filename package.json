@@ -145,11 +145,11 @@
     "audit:lighthouse:mobile": "lhci autorun --config=lighthouserc.mobile.json --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/",
     "test:e2e:admin": "playwright test --config=playwright.admin.config.js",
     "test:sourcemaps": "node scripts/sourcemaps-e2e.mjs",
-    "lint": "eslint src app middleware.js",
+    "lint": "eslint src app middleware.js scripts tests",
     "test:lint-rules": "node --test tests/lint-rules.test.mjs tests/no-scripting-media.test.mjs",
     "test:playwright-groups": "node --test tests/playwright-groups.test.mjs",
     "test:tested-tree": "node --test tests/tested-tree.test.mjs",
-    "test:free-ports": "node --test tests/free-tcp-port.test.mjs tests/start-on-port.test.mjs"
+    "test:free-ports": "node --test tests/free-tcp-port.test.mjs tests/start-on-port.test.mjs tests/process-group.test.mjs"
   },
   "eslintConfig": {
     "extends": [

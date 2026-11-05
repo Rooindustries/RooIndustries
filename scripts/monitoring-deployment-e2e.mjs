@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { cp, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -7,14 +7,15 @@ import { homedir, networkInterfaces } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { freeTcpPorts } from './lib/free-tcp-port.mjs';
+import { signalGroup, spawnGroup } from './lib/process-group.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const delay = ms => new Promise(done => setTimeout(done, ms));
 const stop = async child => {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
   const closed = new Promise(done => child.once('close', done));
-  try { process.kill(-child.pid, 'SIGTERM'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
-  const force = setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch {} }, 5000);
+  signalGroup(child, 'SIGTERM');
+  const force = setTimeout(() => signalGroup(child, 'SIGKILL'), 5000);
   await closed;
   clearTimeout(force);
 };
@@ -27,10 +28,10 @@ if (process.argv[2] !== '--sandbox') {
   await mkdir(artifact, { recursive: true });
   await mkdir(join(scratch, 'home'));
   const hostNetwork = await readlink('/proc/self/ns/net');
-  const child = spawn('unshare', ['--user', '--map-root-user', '--net', '--',
+  const child = spawnGroup('unshare', ['--user', '--map-root-user', '--net', '--',
     'sh', '-ec', 'ip link set lo up; exec "$@"', 'monitoring-sandbox',
     process.execPath, fileURLToPath(import.meta.url), '--sandbox', scratch, artifact, hostNetwork], {
-    cwd: root, detached: true, stdio: 'inherit',
+    cwd: root, stdio: 'inherit',
     env: {
       PATH: process.env.PATH, HOME: join(scratch, 'home'), TMPDIR: scratch,
       XDG_CONFIG_HOME: join(scratch, 'home/.config'), XDG_CACHE_HOME: join(scratch, 'home/.cache'),
@@ -139,7 +140,7 @@ export function GET() { throw new Error('Fixture edge error'); }
   let active;
   let browser;
   const execute = async (name, args, env, timeout = 300000) => {
-    active = spawn(process.execPath, args, { cwd: work, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    active = spawnGroup(process.execPath, args, { cwd: work, env, stdio: ['ignore', 'pipe', 'pipe'] });
     const logs = [];
     active.stdout.on('data', chunk => logs.push(chunk));
     active.stderr.on('data', chunk => logs.push(chunk));
@@ -189,8 +190,8 @@ export function GET() { throw new Error('Fixture edge error'); }
       const env = environment({ ...mode.env, NEXT_DIST_DIR: dist });
       console.log(`checking ${mode.name}`);
       if (!mode.dev && !mode.reuse) await execute(`${mode.name}-build`, [next, 'build'], env);
-      active = spawn(process.execPath, [next, mode.dev ? 'dev' : 'start', '--hostname', '127.0.0.1', '--port', new URL(site).port],
-        { cwd: work, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      active = spawnGroup(process.execPath, [next, mode.dev ? 'dev' : 'start', '--hostname', '127.0.0.1', '--port', new URL(site).port],
+        { cwd: work, env, stdio: ['ignore', 'pipe', 'pipe'] });
       const logs = [];
       active.stdout.on('data', chunk => logs.push(chunk));
       active.stderr.on('data', chunk => logs.push(chunk));
