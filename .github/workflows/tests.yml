@@ -99,6 +99,7 @@ jobs:
       - run: npm run test:playwright-groups
       - run: npm run test:tested-tree
       - run: npm run test:free-ports
+      - run: npm run test:reproducible-build
       - run: npm run test:build-lock
       - run: npm run test:tooling:dependencies
       - run: npm run check:seo
@@ -132,6 +133,7 @@ jobs:
       matrix:
         suite:
           - name: navigation
+            relocate: true
           - name: booking
           - name: rest-1
           - name: rest-2
@@ -153,7 +155,14 @@ jobs:
         with:
           node-version: 22
           browsers: chromium webkit
-          build-dirs: .next-e2e-ci/cache/webpack
+          build-dirs: ${{ !matrix.suite.relocate && '.next-e2e-ci/cache/webpack' || '' }}
+      - name: Build from a clean checkout at another path
+        if: ${{ matrix.suite.relocate }}
+        run: |
+          relocated="$RUNNER_TEMP/relocated/RooIndustries"
+          git worktree add --detach "$relocated" HEAD
+          cp -a --reflink=auto node_modules "$relocated/"
+          echo "SUITE_DIR=$relocated" >> "$GITHUB_ENV"
       - name: Pick a fixed group's spec file
         if: ${{ !startsWith(matrix.suite.name, 'rest-') }}
         run: |
@@ -176,6 +185,7 @@ jobs:
           echo "PW_FILES=$files" >> "$GITHUB_ENV"
       - name: Run browser and agent-readiness tests
         run: |
+          cd "${SUITE_DIR:-$GITHUB_WORKSPACE}"
           node scripts/test-tooling-sweep-server.mjs &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" || true' EXIT
@@ -187,8 +197,10 @@ jobs:
             sleep 1
           done
           curl --fail --silent "$BASE_URL" > /dev/null
+          if [ "$PW_SUITE" = "rest-1" ] || [ "$PW_SUITE" = "navigation" ]; then
+            bash scripts/build-fingerprint.sh "$RUNNER_TEMP/build-fingerprint/$PW_SUITE.txt"
+          fi
           if [ "$PW_SUITE" = "rest-1" ]; then
-            npm run check:budgets
             npm run check:no-scripting-media
             TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:agent-readiness
             TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="--import=$PWD/scripts/lib/test-target-safety.mjs" npm run test:traffic-recovery
@@ -200,20 +212,28 @@ jobs:
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-timings/${{ matrix.suite.name }}.json
       - uses: ./.github/actions/save-caches
+        if: ${{ !matrix.suite.relocate }}
         with:
           build-dirs: .next-e2e-ci/cache/webpack
+      - uses: actions/upload-artifact@v4
+        if: ${{ matrix.suite.name == 'rest-1' || matrix.suite.name == 'navigation' }}
+        with:
+          name: build-fingerprint-${{ matrix.suite.name }}
+          path: ${{ runner.temp }}/build-fingerprint/
+          if-no-files-found: error
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: test-timings-${{ matrix.suite.name }}
-          path: test-timings/
+          path: ${{ env.SUITE_DIR || github.workspace }}/test-timings/
           if-no-files-found: ignore
           retention-days: 30
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: test-results-${{ matrix.suite.name }}
-          path: test-results/
+          path: ${{ env.SUITE_DIR || github.workspace }}/test-results/
           if-no-files-found: ignore
           retention-days: 7
 
@@ -424,7 +444,7 @@ jobs:
   record-tested-tree:
     name: Record the tested tree
     if: >-
-      !cancelled() && github.event_name == 'pull_request'
+      !cancelled()
       && needs.monitoring.result == 'success'
       && needs.jest.result == 'success'
       && needs.booking-model.result == 'success'
@@ -440,13 +460,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: build-fingerprint-*
+          path: build-fingerprint
+          merge-multiple: true
+      - name: Compare the cached build with the clean build from another path
+        run: bash scripts/compare-build-fingerprints.sh build-fingerprint/rest-1.txt build-fingerprint/navigation.txt
       - id: tree
+        if: github.event_name == 'pull_request'
         run: |
           tree="$(git rev-parse 'HEAD^{tree}')"
           mkdir -p tested-tree
           echo "$tree" > tested-tree/tree
           echo "tree=$tree" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
+        if: github.event_name == 'pull_request'
         with:
           name: tested-tree-${{ steps.tree.outputs.tree }}
           path: tested-tree/
