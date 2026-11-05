@@ -83,11 +83,11 @@ export default function Services({
   if (!data) {
     return (
       <section
-        className="mx-auto max-w-[92rem] px-4 py-8 sm:px-6"
+        className="mx-auto max-w-[80rem] px-4 py-8 sm:px-6"
         aria-hidden="true"
         data-section-placeholder=""
       >
-        <div className="ri-services-skeleton min-h-[520px] rounded-2xl border border-line-input bg-skeleton sm:min-h-[380px]" />
+        <div className="ri-services-skeleton min-h-[900px] rounded-2xl border border-line-input bg-skeleton md:min-h-[740px] lg:min-h-[440px]" />
       </section>
     );
   }
@@ -133,65 +133,61 @@ export default function Services({
 
   return (
     <section
-      className="ri-services-section mx-auto max-w-[92rem] px-4 pt-6 pb-8 sm:px-6 sm:pb-10"
+      className="ri-services-section mx-auto max-w-[80rem] px-4 pt-6 pb-8 sm:px-6 sm:pb-10"
       aria-labelledby="services-heading"
     >
-      <div className="ri-performance-overview grid w-full gap-6 lg:grid-cols-[336px_minmax(0,1fr)] lg:items-stretch">
-        <About initialData={initialAboutData} compact />
-        <div className="ri-services-benefit-column flex min-w-0 flex-col">
-          <div className="text-center">
-            <div>
-              <h2
-                id="services-heading"
-                className="ri-services-heading section-title"
-              >
-                {data.heading || HOME_COPY.services.heading}
-              </h2>
-              <p className="section-lede">
-                {HOME_COPY.services.subheading}
-              </p>
-            </div>
-          </div>
+      <div className="text-center">
+        <h2
+          id="services-heading"
+          className="ri-services-heading section-title"
+        >
+          {data.heading || HOME_COPY.services.heading}
+        </h2>
+        <p className="section-lede">
+          {HOME_COPY.services.subheading}
+        </p>
+      </div>
 
-          <ul className="ri-services-benefits mt-3 grid auto-rows-fr grid-cols-2 gap-2 sm:grid-cols-3 lg:mt-auto lg:pt-3">
-            {HOME_COPY.services.cards.map((card, index) => {
-              const Icon = ICONS[card.iconType];
-              const customIcon = data.cards?.[index]?.customIcon;
-              return (
-                <li
-                  key={card.iconType}
-                  className="ri-service-card flex items-center gap-2.5 rounded-[10px] border border-transparent p-3 sm:p-2.5 xl:justify-center"
-                >
-                  <span className="ri-service-icon-shell grid h-7 w-7 shrink-0 place-items-center">
-                    {customIcon ? (
-                      <img
-                        src={urlFor(customIcon).width(40).url()}
-                        alt=""
-                        width={20}
-                        height={20}
-                        loading="lazy"
-                        decoding="async"
-                      />
-                    ) : (
-                      <Icon
-                        className="ri-service-icon h-5 w-5 text-accent"
-                        aria-hidden="true"
-                      />
-                    )}
-                  </span>
-                  <div className="min-w-0 xl:flex xl:items-center xl:gap-2">
-                    <h3 className="ri-service-title text-[13px] font-semibold leading-5 text-ink sm:text-sm xl:shrink-0">
-                      {card.title}
-                    </h3>
-                    <p className="ri-service-copy mt-0.5 hidden text-xs leading-[1.45] text-ink-secondary sm:block xl:mt-0 xl:text-left">
-                      {card.description}
-                    </p>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
+      <div className="ri-performance-overview mt-10 grid w-full gap-8 lg:grid-cols-[minmax(0,1fr)_23rem] lg:gap-6">
+        <ul className="grid grid-cols-2 gap-x-6 gap-y-8 sm:gap-x-8 md:grid-cols-3">
+          {HOME_COPY.services.cards.map((card, index) => {
+            const Icon = ICONS[card.iconType];
+            const customIcon = data.cards?.[index]?.customIcon;
+            return (
+              <li
+                key={card.iconType}
+                className="ri-service-card flex flex-col gap-3 border-t border-line-soft pt-5"
+              >
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface-hover">
+                  {customIcon ? (
+                    <img
+                      src={urlFor(customIcon).width(48).url()}
+                      alt=""
+                      width={24}
+                      height={24}
+                      loading="lazy"
+                      decoding="async"
+                    />
+                  ) : (
+                    <Icon
+                      className="ri-service-icon h-6 w-6 text-accent"
+                      aria-hidden="true"
+                    />
+                  )}
+                </span>
+                <div className="min-w-0">
+                  <h3 className="ri-service-title text-base font-semibold leading-6 text-ink">
+                    {card.title}
+                  </h3>
+                  <p className="ri-service-copy mt-1 text-sm leading-normal text-ink-secondary">
+                    {card.description}
+                  </p>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+        <About initialData={initialAboutData} compact />
       </div>
 
       {showBenchmarks && (
