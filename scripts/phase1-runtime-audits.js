@@ -570,6 +570,7 @@ async function runAll() {
   const safety = await import("./lib/test-target-safety.mjs");
   safety.refuseEnvFiles();
   BASE_URL = safety.localOrigin(BASE_URL);
+  await require("../tests/fixtures/fixture-ports.cjs").loadFixturePorts(BASE_URL);
   safety.installNetworkGuard([BASE_URL]);
   fs.mkdirSync(auditDir, { recursive: true });
   for (const [name, check] of Object.entries(checks)) {

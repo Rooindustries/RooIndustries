@@ -30,3 +30,22 @@ test("an external server's ports reach the specs when its build directory is not
     fs.rmSync(`test-results/fixture-ports-${process.pid}`, { recursive: true, force: true });
   }
 });
+
+test("the hand-run route audit finds the content port in the server's report", { timeout: 900000 }, async () => {
+  const dist = `.next-e2e-audit-${process.pid}`;
+  const port = await freeTcpPort(host);
+  const origin = `http://${host}:${port}`;
+  try {
+    const server = await startTooling(dist, port);
+    try {
+      const audit = playwright([process.execPath, "scripts/phase1-route-contract.js"], { BASE_URL: origin });
+      const [code] = await once(audit.child, "exit");
+      assert.equal(code, 0, audit.output());
+    } finally {
+      await stopChild(server.child);
+    }
+  } finally {
+    fs.rmSync(dist, { recursive: true, force: true });
+    fs.rmSync(reportFile(port), { force: true });
+  }
+});

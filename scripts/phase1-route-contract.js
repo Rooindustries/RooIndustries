@@ -40,6 +40,7 @@ async function run() {
   const safety = await import("./lib/test-target-safety.mjs");
   safety.refuseEnvFiles();
   BASE_URL = safety.localOrigin(BASE_URL);
+  await require("../tests/fixtures/fixture-ports.cjs").loadFixturePorts(BASE_URL);
   safety.installNetworkGuard([BASE_URL]);
   const browser = await chromium.launch({ headless: false });
   const page = await browser.newPage({ serviceWorkers: "block" });
