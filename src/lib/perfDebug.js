@@ -11,7 +11,6 @@ export const PERF_TOGGLE_KEYS = {
   NO_NAVBAR_BLUR: "noNavbarBlur",
   NO_BANNER_BLUR: "noBannerBlur",
   PAUSE_REVIEWS_AUTOPLAY: "pauseReviewsAutoplay",
-  PAUSE_HOWITWORKS_VIDEOS: "pauseHowItWorksVideos",
   NO_GLOW_ANIMATIONS: "noGlowAnimations",
 };
 
@@ -20,14 +19,12 @@ const TOGGLE_CLASS_MAP = {
   [PERF_TOGGLE_KEYS.NO_BANNER_BLUR]: "perf-no-banner-blur",
   [PERF_TOGGLE_KEYS.NO_GLOW_ANIMATIONS]: "perf-no-glow",
   [PERF_TOGGLE_KEYS.PAUSE_REVIEWS_AUTOPLAY]: "perf-pause-reviews",
-  [PERF_TOGGLE_KEYS.PAUSE_HOWITWORKS_VIDEOS]: "perf-pause-howitworks",
 };
 
 const DEFAULT_TOGGLES = Object.freeze({
   [PERF_TOGGLE_KEYS.NO_NAVBAR_BLUR]: false,
   [PERF_TOGGLE_KEYS.NO_BANNER_BLUR]: false,
   [PERF_TOGGLE_KEYS.PAUSE_REVIEWS_AUTOPLAY]: false,
-  [PERF_TOGGLE_KEYS.PAUSE_HOWITWORKS_VIDEOS]: false,
   [PERF_TOGGLE_KEYS.NO_GLOW_ANIMATIONS]: false,
 });
 

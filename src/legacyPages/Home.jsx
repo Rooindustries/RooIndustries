@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import Hero from "../components/Hero";
 import Services from "../components/Services";
 import Packages from "../components/Packages";
@@ -12,6 +13,7 @@ import {
   isHomeSectionHash,
   normalizeSectionHash,
   readPendingSectionTarget,
+  REVEAL_DEFERRED_SECTIONS_EVENT,
 } from "../lib/sectionNavigation";
 import { useLowPerformanceMode } from "../lib/performanceMode";
 import StreamerYoutuberReviews from "../components/StreamerYoutuberReviews";
@@ -23,7 +25,6 @@ import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
 const DEFERRED_HEIGHTS = {
   packages: "[--deferred-height:2800px] xl:[--deferred-height:1370px]",
-  howItWorks: "[--deferred-height:1970px] sm:[--deferred-height:1140px] lg:[--deferred-height:690px]",
   supportedGames: "[--deferred-height:420px]",
   faq: "[--deferred-height:1180px]",
   referral: "[--deferred-height:300px] sm:[--deferred-height:175px] lg:[--deferred-height:128px]",
@@ -37,6 +38,7 @@ function DeferredSection({
 }) {
   const ref = useRef(null);
   const [isVisible, setIsVisible] = useState(eager);
+  const shown = isVisible || eager;
 
   useEffect(() => {
     if (eager) {
@@ -45,7 +47,7 @@ function DeferredSection({
   }, [eager]);
 
   useEffect(() => {
-    if (isVisible) return;
+    if (shown) return;
     if (typeof IntersectionObserver === "undefined" || !ref.current) {
       setIsVisible(true);
       return;
@@ -63,11 +65,11 @@ function DeferredSection({
 
     observer.observe(ref.current);
     return () => observer.disconnect();
-  }, [isVisible, rootMargin]);
+  }, [shown, rootMargin]);
 
   return (
     <div ref={ref}>
-      {isVisible ? (
+      {shown ? (
         children
       ) : (
         <div aria-hidden="true" data-section-placeholder="" className={fallbackClassName} />
@@ -121,6 +123,13 @@ export default function Home({ initialData = null, heroHeadingTag = "h1" }) {
       );
     };
   }, [location.hash]);
+
+  useEffect(() => {
+    if (forceEagerSections) return undefined;
+    const revealSections = () => flushSync(() => setForceEagerSections(true));
+    window.addEventListener(REVEAL_DEFERRED_SECTIONS_EVENT, revealSections);
+    return () => window.removeEventListener(REVEAL_DEFERRED_SECTIONS_EVENT, revealSections);
+  }, [forceEagerSections]);
 
   useEffect(() => {
     if (typeof window === "undefined" || isLowPerf) {
@@ -185,18 +194,7 @@ export default function Home({ initialData = null, heroHeadingTag = "h1" }) {
         id="how-it-works"
         style={{ scrollMarginTop: "var(--section-nav-offset)" }}
       >
-        <DeferredSection
-          fallbackClassName="min-h-[340px]"
-          rootMargin="220px 0px"
-          eager={eagerAll}
-        >
-          <div
-            className={`deferred-section-content ${DEFERRED_HEIGHTS.howItWorks}`}
-            style={sectionContentStyle}
-          >
-            <HowItWorks initialData={initialData?.howItWorks || null} />
-          </div>
-        </DeferredSection>
+        <HowItWorks initialData={initialData?.howItWorks || null} />
       </section>
       <div className="mt-4 flex items-center justify-center">
         <Link

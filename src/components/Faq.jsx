@@ -6,7 +6,7 @@ import homeCopy from "../lib/homeCopy";
 import packageContent from "../lib/packageContent";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinator";
-import { scrollWindowTo } from "../lib/scrollWindowTo";
+import { scrollWindowToElement } from "../lib/scrollWindowTo";
 
 
 const slugify = (text = "") =>
@@ -166,10 +166,10 @@ export default function FaqSection({
 
   const [containerRef, { height }] = useElementSize();
 
-  const scrollWithOffset = (id) => {
+  const scrollToSection = (id) => {
     const el = document.getElementById(id);
     if (!el) return;
-    scrollWindowTo(el.getBoundingClientRect().top + window.scrollY - 96);
+    scrollWindowToElement(el, getCssHeaderOffsetPx());
   };
 
   const toggleQuestion = (questionId) => {
@@ -219,7 +219,7 @@ export default function FaqSection({
     const newPage = safePage + newDirection;
     if (newPage >= 0 && newPage < totalPages) {
       setPage([newPage, newDirection]);
-      setTimeout(() => scrollWithOffset("faq"), 250);
+      setTimeout(() => scrollToSection("faq"), 250);
     }
   };
 

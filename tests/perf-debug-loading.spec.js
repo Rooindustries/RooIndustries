@@ -68,7 +68,6 @@ for (const enabledBy of ["query", "storage", "event"]) {
       ["Disable navbar blur", "perf-no-navbar-blur"],
       ["Disable reservation blur", "perf-no-banner-blur"],
       ["Pause reviews autoplay", "perf-pause-reviews"],
-      ["Pause how-it-works videos", "perf-pause-howitworks"],
       ["Disable glow/shimmer animations", "perf-no-glow"],
     ]) {
       await page.getByLabel(label, { exact: true }).check();

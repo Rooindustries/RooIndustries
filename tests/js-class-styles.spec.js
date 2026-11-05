@@ -11,7 +11,7 @@ async function readHomeStyles(page) {
   return page.evaluate(() => {
     const root = document.documentElement;
     const deferred = [...document.querySelectorAll(".deferred-section-content")]
-      .filter(element => !element.closest("#how-it-works") && !element.style.contentVisibility)
+      .filter(element => !element.style.contentVisibility)
       .map(element => {
         return {
           contentVisibility: getComputedStyle(element).contentVisibility,
@@ -47,6 +47,19 @@ function expectReadablePromises(promises, check = expect) {
   }
 }
 
+async function readHowItWorksSteps(page) {
+  await page.locator("#how-it-works").scrollIntoViewIfNeeded();
+  return page.locator("#how-it-works ol > li").evaluateAll((steps) => steps.map((step) => {
+    const box = step.getBoundingClientRect();
+    return {
+      title: Boolean(step.querySelector("h3")?.textContent.trim()),
+      text: Boolean(step.querySelector("p")?.textContent.trim()),
+      shown: box.width > 0 && box.height > 0,
+      fits: step.scrollWidth <= step.clientWidth + 1 && box.right <= document.documentElement.clientWidth + 1,
+    };
+  }));
+}
+
 function readDeferredHeights(page) {
   return page.evaluate(async () => {
     const sections = [...document.querySelectorAll(".deferred-section-content")];
@@ -60,6 +73,13 @@ function readDeferredHeights(page) {
       real: element.offsetHeight,
     }));
   });
+}
+
+function expectReadableSteps(steps) {
+  expect(steps.length).toBeGreaterThanOrEqual(4);
+  for (const step of steps) {
+    expect(step).toEqual({ title: true, text: true, shown: true, fits: true });
+  }
 }
 
 function expectNoScriptStyles(styles) {
@@ -84,6 +104,7 @@ test.describe("Home styles without JavaScript", () => {
       await page.setViewportSize(viewport);
       await page.goto("/", { waitUntil: "load" });
       expectNoScriptStyles(await readHomeStyles(page));
+      expectReadableSteps(await readHowItWorksSteps(page));
     });
   }
 });
@@ -123,6 +144,7 @@ test.describe("Home styles with JavaScript", () => {
         expect(line.fits).toBe(true);
       }
       expectReadablePromises(styles.promises);
+      expectReadableSteps(await readHowItWorksSteps(page));
     });
   }
 });

@@ -128,7 +128,6 @@ const withScenario = async (browser, testInfo, baseURL, options, run) => {
 };
 
 const widgetRequests = (scenario) => scenario.requests.filter(({ url }) => new URL(url).hostname === "widget.intercom.io");
-const videoRequests = (scenario) => scenario.requests.filter(({ url }) => new URL(url).pathname.startsWith("/videos/"));
 
 for (const [name, options] of [
   ["desktop", { viewport: { width: 1366, height: 768 } }],
@@ -144,7 +143,6 @@ for (const [name, options] of [
       expect(scenario.requests.filter(({ url, phase }) =>
         phase === "before interaction" && homeSectionPaths.has(new URL(url).pathname)
       )).toHaveLength(0);
-      expect(videoRequests(scenario)).toHaveLength(0);
       expect(scenario.requests.filter(({ url }) => new URL(url).pathname.endsWith(".apng"))).toHaveLength(0);
       expect(scenario.requests.some(({ url }) => new URL(url).pathname === "/logo-animated-small.webp")).toBe(true);
       scenario.logoTiming = await page.evaluate(() => ({
@@ -205,18 +203,5 @@ test("reduced motion keeps the animated logo unloaded", async ({ browser, baseUR
     await navigate();
     await page.waitForTimeout(4000);
     expect(scenario.requests.filter(({ url }) => new URL(url).pathname === "/logo-animated-small.webp")).toHaveLength(0);
-  });
-});
-
-test("How It Works videos load and play near the viewport and pause away", async ({ browser, baseURL }, testInfo) => {
-  await withScenario(browser, testInfo, baseURL, devices["Pixel 7"], async ({ page, scenario, navigate, interact }) => {
-    await navigate();
-    await interact();
-    await page.locator("#how-it-works").scrollIntoViewIfNeeded();
-    await expect.poll(() => videoRequests(scenario).length, { timeout: 8000 }).toBeGreaterThan(0);
-    await expect.poll(() => page.locator("#how-it-works video").evaluateAll((videos) => videos.some((video) => video.currentTime > 0.25)), { timeout: 8000 }).toBe(true);
-    await page.screenshot({ path: path.join(artifactDir, "mobile-videos.png") });
-    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
-    await expect.poll(() => page.locator("#how-it-works video").evaluateAll((videos) => videos.length > 0 && videos.every((video) => video.paused)), { timeout: 3000 }).toBe(true);
   });
 });
