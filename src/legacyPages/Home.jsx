@@ -13,9 +13,9 @@ import {
   isHomeSectionHash,
   normalizeSectionHash,
   readPendingSectionTarget,
+  REVEAL_DEFERRED_SECTIONS_EVENT,
 } from "../lib/sectionNavigation";
 import { useLowPerformanceMode } from "../lib/performanceMode";
-import { REVEAL_DEFERRED_SECTIONS_EVENT } from "../lib/scrollWindowTo";
 import StreamerYoutuberReviews from "../components/StreamerYoutuberReviews";
 import Footer from "../components/Footer";
 import HowItWorks from "../components/HowItWorks";

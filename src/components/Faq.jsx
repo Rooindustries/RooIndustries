@@ -169,7 +169,7 @@ export default function FaqSection({
   const scrollToSection = (id) => {
     const el = document.getElementById(id);
     if (!el) return;
-    scrollWindowToElement(el);
+    scrollWindowToElement(el, getCssHeaderOffsetPx());
   };
 
   const toggleQuestion = (questionId) => {

@@ -322,8 +322,9 @@ const REDUCED_MOTION_VIEWPORTS = [
 
 const faqLandingGap = (page) =>
   page.evaluate(() => {
-    const faq = document.getElementById("faq");
-    return faq.getBoundingClientRect().top - Number.parseFloat(getComputedStyle(faq).scrollMarginTop);
+    const navOffset = getComputedStyle(document.documentElement).getPropertyValue("--section-nav-offset");
+    const sectionLinkLanding = Number.parseFloat(navOffset) + 12;
+    return document.getElementById("faq").getBoundingClientRect().top - sectionLinkLanding;
   });
 
 test.describe("reduced motion on button scrolls", () => {

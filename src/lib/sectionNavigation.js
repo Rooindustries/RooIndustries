@@ -47,6 +47,13 @@ export const announceSectionTarget = (hash = "") => {
   );
 };
 
+export const REVEAL_DEFERRED_SECTIONS_EVENT = "roo:reveal-deferred-sections";
+
+export const revealDeferredSections = () => {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(REVEAL_DEFERRED_SECTIONS_EVENT));
+};
+
 export const writePendingSectionTarget = (hash = "") => {
   if (typeof window === "undefined") return;
   const normalized = normalizeSectionHash(hash);
