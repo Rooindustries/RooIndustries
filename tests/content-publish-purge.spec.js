@@ -281,23 +281,47 @@ test("a request that arrives after a publish never reuses a revision check that 
   }
 });
 
-test("a publish whose answer is lost after the commit still purges twice and serves the new price", async ({ request, baseURL }) => {
+for (const [action, answer, price] of [
+  ["lose", "is lost", "$808.08"],
+  ["gateway", "is a 504 from the gateway", "$818.18"],
+  ["garble", "is a 200 with an unreadable body", "$828.28"],
+]) {
+  test(`a publish whose answer ${answer} after the commit still purges twice and serves the new price`, async ({ request, baseURL }) => {
+    test.setTimeout(120000);
+    const gate = createContentGate(request, baseURL);
+    const original = await gate.document(PACKAGE);
+    try {
+      const after = gate.traced();
+      await after.rules([{ rpc: "^roo_apply_cms_publish_command$", action, times: 1 }]);
+      const attempt = await after.cms("/api/admin/content/publish", gate.replaceCommand(original, { price }));
+      expect(attempt.status).toBe(503);
+      expect((await gate.document(PACKAGE)).document.price).toBe(price);
+      await expect.poll(async () => (await after.purges()).map(({ trace, ...purge }) => purge), {
+        timeout: 20000,
+        intervals: [250, 500, 1000],
+      }).toEqual([CONTENT_PURGE, CONTENT_PURGE]);
+      const current = await gate.traced().content(PACKAGES);
+      expectCacheable(current);
+      expect(await priceOf(current)).toBe(price);
+    } finally {
+      await gate.restore(PACKAGE, original.document);
+    }
+  });
+}
+
+test("a publish the database rejects before the commit only marks the CDN copy stale", async ({ request, baseURL }) => {
   test.setTimeout(120000);
   const gate = createContentGate(request, baseURL);
   const original = await gate.document(PACKAGE);
   try {
-    const lost = gate.traced();
-    await lost.rules([{ rpc: "^roo_apply_cms_publish_command$", action: "lose", times: 1 }]);
-    const attempt = await lost.cms("/api/admin/content/publish", gate.replaceCommand(original, { price: "$808.08" }));
-    expect(attempt.status).toBe(503);
-    expect((await gate.document(PACKAGE)).document.price).toBe("$808.08");
-    await expect.poll(async () => (await lost.purges()).map(({ trace, ...purge }) => purge), {
-      timeout: 20000,
-      intervals: [250, 500, 1000],
-    }).toEqual([CONTENT_PURGE, CONTENT_PURGE]);
-    const current = await gate.traced().content(PACKAGES);
-    expectCacheable(current);
-    expect(await priceOf(current)).toBe("$808.08");
+    await gate.publishElsewhere(original, { price: "$838.38" });
+    const rejected = gate.traced();
+    const attempt = await rejected.cms("/api/admin/content/publish", gate.replaceCommand(original, { price: "$848.48" }));
+    expect(attempt.status).toBe(409);
+    await expect.poll(() => rejected.purges(), { timeout: 10000 }).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 6000));
+    expect((await rejected.purges()).map(({ operation }) => operation)).toEqual(["invalidateByTag"]);
+    expect((await gate.document(PACKAGE)).document.price).toBe("$838.38");
   } finally {
     await gate.restore(PACKAGE, original.document);
   }

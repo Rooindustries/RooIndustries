@@ -27,6 +27,13 @@ const refuseEnrichment = (value, path = "$", depth = 0) => {
     refuseEnrichment(item, `${path}.${key}`, depth + 1);
   }
 };
+const OUTCOME_UNKNOWN_SQLSTATE = /^(08...|40003)$/;
+const rejectedBeforeCommit = ({ error, status }) => {
+  const code = typeof error?.code === "string" ? error.code : "";
+  if (status < 400) return false;
+  if (/^PGRST\d{3}$/.test(code)) return true;
+  return /^[0-9A-Z]{5}$/.test(code) && !OUTCOME_UNKNOWN_SQLSTATE.test(code);
+};
 const committed = (result, id) => {
   const record = result?.results?.find?.(entry => entry?._id === id || entry?.id === id) || result?.results?.[0];
   const revision = record?._rev || record?.document?._rev;
@@ -102,7 +109,7 @@ export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = proc
   }
   const mutation = { operation: body.operation, id, ...(document ? { document } : {}), ...(!creating ? { expected_revision: body.expectedRevision || "" } : {}) };
   const applied = await supabaseClient.rpc("roo_apply_cms_publish_command", { ...lookup, p_mutations: [mutation], p_assets: [], p_asset_links: [] });
-  if (!applied.error || !applied.status) onCommit();
+  if (!rejectedBeforeCommit(applied)) onCommit();
   const result = rpcData(applied, "Content publish");
   return committed(result, id);
 };

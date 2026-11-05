@@ -43,6 +43,14 @@ if (control) {
       await response.arrayBuffer();
       throw new TypeError("fetch failed");
     }
+    if (action === "gateway") {
+      await response.arrayBuffer();
+      return new Response("<html><body>504 Gateway Time-out</body></html>", { status: 504, headers: { "Content-Type": "text/html" } });
+    }
+    if (action === "garble") {
+      await response.arrayBuffer();
+      return new Response("{\"results\": [", { status: 200, headers: { "Content-Type": "application/json" } });
+    }
     return response;
   };
 
