@@ -100,9 +100,9 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
     run(path.join(pgBin,'initdb'),['-D',dataDir,'--auth=trust','--no-locale',...(fullMigrationChain ? ['--encoding=UTF8'] : [])]);
     fs.appendFileSync(path.join(dataDir,'pg_hba.conf'),'\nhost all all samehost trust\n');
     const postgresLog = path.join(scratch, 'postgres.log');
-    const postmasterReady = () => {
+    const postmasterReady = ([port]) => {
       const lines = fs.existsSync(path.join(dataDir, 'postmaster.pid')) ? fs.readFileSync(path.join(dataDir, 'postmaster.pid'), 'utf8').split('\n') : [];
-      return Number(lines[0]) === postgresProcess?.pid && lines[7]?.trim() === 'ready';
+      return Number(lines[3]) === port && lines[7]?.trim() === 'ready';
     };
     ({ ports: [pgPort], child: postgresProcess } = await startChildOnPorts({
       host,
@@ -127,7 +127,7 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
     const selectedBootstrap = fullMigrationChain ? fs.readFileSync(path.join(root, 'scripts/fixtures/sanity-sql/platform-bootstrap.sql'), 'utf8') : bootstrap;
     const bootstrapSql = beforeMigrations ? selectedBootstrap.replace(/^create table storage\.(buckets|objects).*;$/gm, '') : selectedBootstrap;
     await sql.unsafe(bootstrapSql.replace("select nullif(current_setting('request.jwt.claims',true),'')::jsonb->>'sub'", "select (nullif(current_setting('request.jwt.claims',true),'')::jsonb->>'sub')::uuid"));
-    if (beforeMigrations) await beforeMigrations({sql,scratch,host,pgPort,jwtSecret,databaseUrl:`postgres://${os.userInfo().username}@${host}:${pgPort}/postgres`});
+    if (beforeMigrations) await beforeMigrations({sql,scratch,host,pgPort,postgresPid:postgresProcess.pid,jwtSecret,databaseUrl:`postgres://${os.userInfo().username}@${host}:${pgPort}/postgres`});
     if (fullMigrationChain) {
       migrationConnection = await sql.reserve();
       try {
@@ -240,6 +240,6 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
     const payload=Buffer.from(JSON.stringify({role:'service_role',iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+3600})).toString('base64url');
     const token=`${header}.${payload}.${crypto.createHmac('sha256',jwtSecret).update(`${header}.${payload}`).digest('base64url')}`;
     const client=createClient(origin,token,{auth:{autoRefreshToken:false,persistSession:false,detectSessionInUrl:false}});
-    return {sql,client,origin,token,scratch,manifest,requestLog,postgresVersion,postgrestVersion,postgrestUrl:`http://${host}:${restPort}`,pgPort,restPort,postgrestPid:restProcess.pid,stop,apply,setRequestHook(fn){requestHook=fn;},setAuthHandler(fn){authHandler=fn;},setProviderHandler(fn){providerHandler=fn;}};
+    return {sql,client,origin,token,scratch,manifest,requestLog,postgresVersion,postgrestVersion,postgrestUrl:`http://${host}:${restPort}`,pgPort,restPort,postgresPid:postgresProcess.pid,postgrestPid:restProcess.pid,stop,apply,setRequestHook(fn){requestHook=fn;},setAuthHandler(fn){authHandler=fn;},setProviderHandler(fn){providerHandler=fn;}};
   } catch(error) {await stop();throw Object.assign(error,{scratch,manifest});}
 };

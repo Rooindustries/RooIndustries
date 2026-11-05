@@ -82,27 +82,63 @@ export const listenOnPort = async (server, host, port) => {
   server.ref();
 };
 
-export const passHeldTcpPorts = (host, ports, firstFd = 3) => {
-  const fds = ports.map((port) => {
+export const passHeldTcpPorts = (host, ports) => {
+  const servers = ports.map((port) => {
     const server = held.get(heldKey(host, port));
     assert.ok(server, `Port ${port} is not reserved`);
-    return server._handle.fd;
+    return server;
   });
-  return {
-    stdio: fds,
-    env: { [holderEnv]: JSON.stringify(Object.fromEntries(ports.map((port, index) => [firstFd + index, port]))) },
-  };
+  const handOver = (child) => new Promise((resolve, reject) => {
+    const finish = (error) => {
+      child.off("message", onMessage);
+      child.off("exit", onExit);
+      child.off("error", finish);
+      child.channel?.unref();
+      if (error) reject(error);
+      else resolve();
+    };
+    const onExit = () => finish(new Error("Child exited before it took its held ports."));
+    const onMessage = (message) => {
+      if (message?.[holderEnv] === "wanted") servers.forEach((server, index) => child.send({ [holderEnv]: ports[index] }, server, { keepOpen: true }));
+      if (message?.[holderEnv] === "adopted") releaseTcpPorts(host, ports).then(() => child.send({ [holderEnv]: "released" }, finish), finish);
+    };
+    child.on("message", onMessage);
+    child.once("exit", onExit);
+    child.once("error", finish);
+  });
+  return { stdio: ["ipc"], env: { [holderEnv]: JSON.stringify(ports) }, handOver };
 };
 
 export const adoptHeldTcpPorts = async () => {
-  const passed = JSON.parse(process.env[holderEnv] || "{}");
+  const ports = JSON.parse(process.env[holderEnv] || "[]");
   delete process.env[holderEnv];
-  for (const [fd, port] of Object.entries(passed)) {
-    const server = holder();
-    server.listen({ fd: Number(fd) });
-    await once(server, "listening");
-    server.unref();
-    assert.equal(server.address().port, port, "Passed fixture port does not match its socket");
-    held.set(heldKey(server.address().address, port), server);
-  }
+  if (!ports.length) return;
+  assert.ok(process.send, "Held ports need an IPC channel to arrive on");
+  const pending = new Set(ports);
+  await new Promise((resolve) => {
+    const onMessage = (message, server) => {
+      const port = message?.[holderEnv];
+      if (!pending.has(port)) return;
+      assert.equal(server.address().port, port, "Passed fixture port does not match its socket");
+      server.on("connection", (socket) => socket.destroy());
+      server.unref();
+      held.set(heldKey(server.address().address, port), server);
+      pending.delete(port);
+      if (pending.size) return;
+      process.off("message", onMessage);
+      resolve();
+    };
+    process.on("message", onMessage);
+    process.send({ [holderEnv]: "wanted" });
+  });
+  await new Promise((resolve) => {
+    const onReleased = (message) => {
+      if (message?.[holderEnv] !== "released") return;
+      process.off("message", onReleased);
+      resolve();
+    };
+    process.on("message", onReleased);
+    process.send({ [holderEnv]: "adopted" });
+  });
+  if (process.connected) process.disconnect();
 };

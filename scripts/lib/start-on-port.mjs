@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import net from "node:net";
-import { once } from "node:events";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { freeTcpPorts, passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "./free-tcp-port.mjs";
 
 export const addressInUse = (output) => /EADDRINUSE|Address already in use|\(Address in use\)/.test(output);
@@ -61,18 +60,85 @@ const listeningSockets = (host, port) => {
   return sockets;
 };
 
-const groupMembers = (group) => fs.readdirSync("/proc").filter((entry) => /^\d+$/.test(entry)).filter((pid) => {
+const namespaceOf = (pid, kind) => {
+  try {
+    return fs.readlinkSync(`/proc/${pid}/ns/${kind}`);
+  } catch {
+    return null;
+  }
+};
+
+const live = (pid) => {
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
-    return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2]) === group;
+    return stat[stat.lastIndexOf(")") + 2] !== "Z";
   } catch {
     return false;
   }
-});
+};
 
-export const ownsPorts = (group, host, ports) => {
+const handles = new WeakMap();
+const procOf = (child) => `self/fd/${handles.get(child)}`;
+const unreaped = (child) => handles.has(child) && fs.existsSync(`/proc/${procOf(child)}/stat`);
+const running = (child) => handles.has(child) && live(procOf(child));
+
+const namespaceMembers = (namespace) => namespace
+  ? fs.readdirSync("/proc").filter((entry) => /^\d+$/.test(entry) && namespaceOf(entry, "pid") === namespace && live(entry))
+  : [];
+
+const pins = new WeakMap();
+const drains = new WeakMap();
+
+const pinNamespace = (child) => {
+  if (pins.has(child)) return true;
+  if (!running(child)) return false;
+  let fd;
+  try {
+    fd = fs.openSync(`/proc/${procOf(child)}/ns/pid_for_children`, "r");
+  } catch {
+    return false;
+  }
+  let namespace = null;
+  try {
+    namespace = fs.readlinkSync(`/proc/self/fd/${fd}`);
+  } catch {}
+  if (!namespace || namespace === namespaceOf("self", "pid")) {
+    fs.closeSync(fd);
+    return false;
+  }
+  pins.set(child, { fd, namespace });
+  return true;
+};
+
+const drain = (child) => {
+  if (!drains.has(child)) {
+    drains.set(child, (async () => {
+      const pinned = pins.get(child);
+      if (!pinned) return;
+      try {
+        while (namespaceMembers(pinned.namespace).length) await pause(50);
+      } finally {
+        pins.delete(child);
+        fs.closeSync(pinned.fd);
+      }
+    })());
+  }
+  return drains.get(child);
+};
+
+const track = (child) => {
+  const fd = fs.openSync(`/proc/${child.pid}`, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+  handles.set(child, fd);
+  child.once("exit", () => {
+    handles.delete(child);
+    fs.closeSync(fd);
+    drain(child);
+  });
+};
+
+export const ownsPorts = (child, host, ports) => {
   const open = new Set();
-  for (const member of groupMembers(group)) {
+  for (const member of namespaceMembers(pins.get(child)?.namespace)) {
     try {
       for (const fd of fs.readdirSync(`/proc/${member}/fd`)) {
         try { open.add(fs.readlinkSync(`/proc/${member}/fd/${fd}`)); } catch {}
@@ -84,20 +150,13 @@ export const ownsPorts = (group, host, ports) => {
 
 const exited = (child) => child.exitCode !== null || child.signalCode !== null;
 
-const leaders = new WeakMap();
-
-const startTime = (pid) => {
-  try {
-    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
-    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
-  } catch {
-    return undefined;
-  }
-};
-
 const signalGroup = (child, signal) => {
-  const started = leaders.get(child);
-  if (!child.pid || exited(child) || started === undefined || startTime(child.pid) !== started) return;
+  if (exited(child)) return;
+  if (!handles.has(child)) {
+    child.kill(signal);
+    return;
+  }
+  if (!unreaped(child)) return;
   try {
     process.kill(-child.pid, signal);
   } catch (error) {
@@ -105,22 +164,47 @@ const signalGroup = (child, signal) => {
   }
 };
 
-export const stopChild = async (child, grace = 5000) => {
-  if (!launched.has(child)) throw new Error("stopChild only stops children started with launch.spawn or launchChild.");
-  if (!child.pid || exited(child)) return;
-  const ended = once(child, "exit");
-  signalGroup(child, "SIGTERM");
-  let timer;
-  await Promise.race([ended, new Promise((resolve) => { timer = setTimeout(resolve, grace); })]);
-  clearTimeout(timer);
-  if (exited(child)) return;
-  signalGroup(child, "SIGKILL");
-  await ended;
+const stops = new WeakMap();
+
+export const stopChild = (child, grace = 5000) => {
+  if (!launched.has(child)) return Promise.reject(new Error("stopChild only stops children started with launch.spawn or launchChild."));
+  if (!child.pid) return Promise.resolve();
+  if (!stops.has(child)) {
+    stops.set(child, (async () => {
+      pinNamespace(child);
+      if (!exited(child)) {
+        const ended = new Promise((resolve) => child.once("exit", resolve));
+        signalGroup(child, "SIGTERM");
+        let timer;
+        await Promise.race([ended, new Promise((resolve) => { timer = setTimeout(resolve, grace); })]);
+        clearTimeout(timer);
+        if (!exited(child)) {
+          signalGroup(child, "SIGKILL");
+          await ended;
+        }
+      }
+      await drain(child);
+    })());
+  }
+  return stops.get(child);
 };
 
 const launched = new WeakSet();
 const closes = new WeakMap();
 const captures = new WeakMap();
+const containment = ["--pdeathsig", "KILL", "--", "unshare", "--user", "--map-current-user", "--pid", "--fork", "--kill-child", "--mount-proc", "--"];
+const init = ["/bin/sh", "-c", "exec 9<&0; printf x >&3 && read -r go <&3 || exit 125; exec 3<&-; \"$@\" <&9 9<&- & wait $!", "sh"];
+let contained = false;
+
+const requireContainment = () => {
+  if (contained) return;
+  const probe = spawnSync("setpriv", [...containment, "true"], { encoding: "utf8" });
+  if (probe.status !== 0) {
+    const reason = (probe.error?.message || probe.stderr || `exit ${probe.status}`).trim();
+    throw new Error(`Fixture children run in their own PID namespace, and this machine refused to create one: ${reason}. Allow unprivileged user namespaces for unshare (on Ubuntu 24.04, the AppArmor profile in .github/actions/setup/action.yml).`);
+  }
+  contained = true;
+};
 
 const logFiles = (stdio) => [...new Set(stdio.slice(1, 3).filter(Number.isInteger).flatMap((fd) => {
   try {
@@ -149,16 +233,23 @@ const captureOutput = (child, stdio, logs) => {
 };
 
 const launcher = (held) => (command, args, options = {}) => {
+  requireContainment();
   const stdio = typeof options.stdio === "string" ? Array(3).fill(options.stdio) : [...(options.stdio || ["ignore", "ignore", "ignore"])];
   const logs = logFiles(stdio);
-  const child = spawn(command, args, {
+  const child = spawn("setpriv", [...containment, ...init, command, ...args], {
     ...options,
     detached: true,
     env: { ...(options.env || process.env), ...held.env },
-    stdio: [...stdio.slice(0, 3), ...held.stdio, ...stdio.slice(3)],
+    stdio: [...stdio.slice(0, 3), "pipe", ...held.stdio, ...stdio.slice(3)],
+  });
+  if (child.pid) track(child);
+  const lifeline = child.stdio[3];
+  lifeline?.on("error", () => {});
+  lifeline?.once("data", () => {
+    if (!stops.has(child) && pinNamespace(child)) lifeline.end("\n", () => lifeline.destroy());
+    else lifeline.destroy();
   });
   launched.add(child);
-  if (child.pid) leaders.set(child, startTime(child.pid));
   captures.set(child, captureOutput(child, stdio, logs));
   closes.set(child, new Promise((resolve) => child.once("close", resolve)));
   return child;
@@ -171,10 +262,19 @@ const waitUntilReady = async ({ child, host, ports, isReady, output, timeout, fa
   while (Date.now() < deadline) {
     if (failure()) throw failure();
     if (exited(child)) throw new Error(`Child exited before it was ready (exit ${child.exitCode ?? child.signalCode}):\n${output()}`);
-    if (ownsPorts(child.pid, host, ports) && await isReady(ports) && !exited(child) && ownsPorts(child.pid, host, ports)) return;
+    if (ownsPorts(child, host, ports) && await isReady(ports) && !exited(child) && ownsPorts(child, host, ports)) return;
     await pause(100);
   }
   throw new Error(`Child was not ready within ${timeout} ms:\n${output()}`);
+};
+
+const within = async (promise, timeout, message, output) => {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((resolve, reject) => { timer = setTimeout(() => reject(new Error(`${message}\n${output()}`)), timeout); })]);
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 const choosePorts = async (host, wanted, passHeld, probe = false) => {
@@ -201,7 +301,9 @@ export const startChildOnPorts = async ({ host, requested, preferred, spawnChild
       child = spawnChild(ports, { spawn: launcher(held) });
       if (!launched.has(child)) throw new Error("spawnChild must start its child with launch.spawn.");
       child.once("error", (error) => { spawnError = error; });
-      if (passHeld) await releaseTcpPorts(host, ports);
+      if (passHeld) {
+        await within(held.handOver(child), timeout, `Child did not take its held ports within ${timeout} ms:`, output);
+      }
       await waitUntilReady({ child, host, ports, isReady, output, timeout, failure: () => spawnError || (!child.pid && new Error("Child did not start.")) });
       return { ports, child };
     } catch (error) {
