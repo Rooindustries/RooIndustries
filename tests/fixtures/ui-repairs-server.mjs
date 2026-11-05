@@ -20,7 +20,7 @@ export function uiRepairsFixture({ json, read, base }) {
     if (resource === 'reviews') return { title: 'Synthetic reviews', reviews: [1, 3, 5, 5].map((rating, i) => ({ _id: `review${i}`, name: `Reviewer ${i}`, text: 'Synthetic review text', rating })) };
     if (resource === 'faq-questions') { const file = require.resolve('../../src/lib/policyContent.js'); delete require.cache[file]; return require(file).applyFaqPolicyOverrides([{ _id: 'warranty-ui', question: 'Do you offer a money-back guarantee? What is the warranty?', answer: 'Synthetic old warranty' }]); }
     if (resource === 'package') return packageData;
-    if (resource === 'packages-list') return [packageData, { title: 'Performance Vertex Max', price: '$149.99', features: ['Synthetic max feature'] }];
+    if (resource === 'packages-list') return [packageData, { title: 'Performance Vertex Max', price: '$149.99', features: ['Synthetic max feature'] }, { title: 'Vertex Essentials', price: '$29.95', description: 'Real performance gains with zero risk to your system. The safe path to smooth gameplay. Best for: laptops and locked hardware.', features: ['Synthetic essentials feature'] }];
     if (resource === 'faq-settings') return { title: 'FAQ' };
     if (resource === 'global' || resource === 'global-content' || resource === 'packages-settings') return {};
     return null;

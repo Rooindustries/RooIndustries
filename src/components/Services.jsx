@@ -104,8 +104,8 @@ export default function Services({
     games.length === 1
       ? "grid grid-cols-1 gap-5"
       : games.length === 2
-        ? "grid grid-cols-1 md:grid-cols-2 gap-5"
-        : "grid grid-cols-1 md:grid-cols-3 gap-5";
+        ? "grid grid-cols-1 lg:grid-cols-2 gap-5"
+        : "grid grid-cols-1 lg:grid-cols-3 gap-5";
   const containerClass =
     games.length === 1
       ? "max-w-xl"
@@ -200,209 +200,178 @@ export default function Services({
 
           <motion.div
             layout
-            className={`ri-bench-shell relative rounded-[28px] ring-1 ring-line-soft bg-panel shadow-surface-deep overflow-hidden mx-auto ${containerClass}`}
+            className={`mx-auto ${containerClass}`}
           >
-            <div className="pointer-events-none absolute inset-0">
-              <div className="ri-bench-radial absolute inset-0 opacity-[0.35] bg-[radial-gradient(80%_60%_at_50%_0%,var(--color-surface-hover-accent),transparent_65%)]" />
-              <div className="absolute inset-0 opacity-[0.28] bg-[linear-gradient(to_bottom,transparent,rgba(0,0,0,.22))]" />
-              <div className="ri-bench-top-glow absolute -top-56 left-1/2 -translate-x-1/2 h-[32rem] w-[52rem] rounded-full bg-surface-hover blur-3xl hidden sm:block" />
-              <div className="ri-bench-left-glow absolute -bottom-48 left-0 h-[30rem] w-[30rem] rounded-full bg-surface-hover-accent blur-3xl hidden sm:block" />
-              <div className="ri-bench-right-glow absolute -bottom-48 right-0 h-[30rem] w-[30rem] rounded-full bg-surface-hover-accent blur-3xl hidden sm:block" />
-            </div>
+            <div className={gridClass}>
+              {games.map((g, idx) => {
+                const pct = g ? calcPct(g?.beforeFps, g?.afterFps) : null;
+                const { bf, af } = g
+                  ? calcFill(g?.beforeFps, g?.afterFps)
+                  : { bf: 0, af: 0 };
 
-            <div className="relative p-5 sm:p-6">
-              <div className={gridClass}>
-                {games.map((g, idx) => {
-                  const pct = g ? calcPct(g?.beforeFps, g?.afterFps) : null;
-                  const { bf, af } = g
-                    ? calcFill(g?.beforeFps, g?.afterFps)
-                    : { bf: 0, af: 0 };
+                const beforeNum = positiveNumber(g?.beforeFps);
+                const afterNum = positiveNumber(g?.afterFps);
 
-                  const beforeNum = positiveNumber(g?.beforeFps);
-                  const afterNum = positiveNumber(g?.afterFps);
+                const metricText =
+                  g?.metricLabel || data?.benchMetricLabel || "Avg FPS";
 
-                  const metricText =
-                    g?.metricLabel || data?.benchMetricLabel || "Avg FPS";
+                return (
+                  <motion.div
+                    role="article"
+                    aria-label={`${g.gameTitle} benchmark`}
+                    layout
+                    key={idx}
+                    className={
+                      "overflow-hidden rounded-2xl p-5 " +
+                      "bg-surface-card ring-1 ring-line-soft"
+                    }
+                  >
+                    <AnimatePresence mode="wait">
+                      <motion.div
+                        key={`${safePage}-${idx}`}
+                        initial={false}
+                        animate={contentSwap.animate}
+                        exit={contentSwap.exit}
+                        transition={contentSwap.transition}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 min-w-0">
+                              {g?.gameLogoUrl || g?.gameLogo ? (
+                                <img
+                                  src={
+                                    g?.gameLogoUrl
+                                      ? g.gameLogoUrl
+                                      : urlFor(g.gameLogo)
+                                          .width(64)
+                                          .height(64)
+                                          .fit("max")
+                                          .url()
+                                  }
+                                  alt={
+                                    g?.gameTitle
+                                      ? `${g.gameTitle} logo`
+                                      : "Game logo"
+                                  }
+                                  width={24}
+                                  height={24}
+                                  loading="lazy"
+                                  decoding="async"
+                                  className={`h-5 w-5 sm:h-6 sm:w-6 shrink-0 rounded-sm object-contain ${
+                                    g?.gameLogoUrl ? "bg-white p-0.5" : ""
+                                  }`}
+                                />
+                              ) : null}
+                              <div className="ri-bench-game-title truncate text-[16px] sm:text-[17px] font-extrabold tracking-tight text-ink">
+                                {g?.gameTitle || "-"}
+                              </div>
+                            </div>
+                            {metricText ? (
+                              <div className="mt-3">
+                                <span
+                                  className={
+                                    "ri-bench-metric-pill inline-flex items-center rounded-full px-2.5 py-1 text-[13px] font-semibold " +
+                                    "bg-surface-hover text-ink-secondary"
+                                  }
+                                >
+                                  {metricText}
+                                </span>
+                              </div>
+                            ) : null}
+                          </div>
 
-                  return (
-                    <motion.div
-                      role="article"
-                      aria-label={`${g.gameTitle} benchmark`}
-                      layout
-                      key={idx}
-                      className={
-                        "ri-bench-card relative overflow-hidden rounded-2xl " +
-                        "bg-surface-card ring-1 ring-line-soft shadow-surface-deep"
-                      }
-                    >
-                      <div className="pointer-events-none absolute inset-0">
-                        <div className="ri-bench-card-top-glow absolute -top-16 -right-16 h-44 w-44 rounded-full bg-surface-hover-accent blur-2xl hidden sm:block" />
-                        <div className="ri-bench-card-bottom-glow absolute -bottom-16 -left-16 h-44 w-44 rounded-full bg-surface-hover-accent blur-2xl hidden sm:block" />
-                        <div className="ri-bench-card-rail absolute left-0 top-0 h-full w-[3px] bg-gradient-to-b from-accent via-accent-soft to-transparent opacity-60" />
-                      </div>
-
-                      <div className="relative p-5">
-                        <AnimatePresence mode="wait">
-                          <motion.div
-                            key={`${safePage}-${idx}`}
-                            initial={false}
-                            animate={contentSwap.animate}
-                            exit={contentSwap.exit}
-                            transition={contentSwap.transition}
+                          <span
+                            className={
+                              "ri-bench-boost-pill inline-flex items-center rounded-full px-3 py-1 text-[12px] font-extrabold " +
+                              "bg-surface-hover-accent text-accent ring-1 ring-line-accent"
+                            }
                           >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  {g?.gameLogoUrl || g?.gameLogo ? (
-                                    <img
-                                      src={
-                                        g?.gameLogoUrl
-                                          ? g.gameLogoUrl
-                                          : urlFor(g.gameLogo)
-                                              .width(64)
-                                              .height(64)
-                                              .fit("max")
-                                              .url()
-                                      }
-                                      alt={
-                                        g?.gameTitle
-                                          ? `${g.gameTitle} logo`
-                                          : "Game logo"
-                                      }
-                                      width={24}
-                                      height={24}
-                                      loading="lazy"
-                                      decoding="async"
-                                      className={`h-5 w-5 sm:h-6 sm:w-6 shrink-0 rounded-sm object-contain ${
-                                        g?.gameLogoUrl ? "bg-white p-0.5" : ""
-                                      }`}
-                                    />
-                                  ) : null}
-                                  <div className="ri-bench-game-title truncate text-[16px] sm:text-[17px] font-extrabold tracking-tight text-ink">
-                                    {g?.gameTitle || "-"}
-                                  </div>
-                                </div>
-                                <div className="ri-bench-game-rule mt-1 h-[2px] w-14 rounded-full bg-gradient-to-r from-accent to-transparent opacity-70" />
-                                {metricText ? (
-                                  <div className="mt-3">
-                                    <span
-                                      className={
-                                        "ri-bench-metric-pill inline-flex items-center rounded-full px-2.5 py-1 text-[13px] font-semibold " +
-                                        "bg-surface-hover text-ink-secondary ring-1 ring-line-soft " +
-                                        "shadow-[0_8px_22px_rgba(0,0,0,.3)]"
-                                      }
-                                    >
-                                      {metricText}
-                                    </span>
-                                  </div>
-                                ) : null}
+                            {pct === null
+                              ? "-"
+                              : `${pct > 0 ? "+" : ""}${pct}% ${badgeSuffix}`}
+                          </span>
+                        </div>
+
+                        <div className="mt-5">
+                          <div className="space-y-3">
+                            <div>
+                              <div className="flex items-center justify-between text-[13px]">
+                                <span className="ri-bench-before-label text-ink-secondary">
+                                  {beforeLabel}
+                                </span>
+                                <span className="ri-bench-number font-extrabold text-ink">
+                                  {beforeNum === null ? "-" : beforeNum}
+                                </span>
                               </div>
 
-                              <span
-                                className={
-                                  "ri-bench-boost-pill inline-flex items-center rounded-full px-3 py-1 text-[12px] font-extrabold " +
-                                  "bg-surface-hover-accent text-accent ring-1 ring-line-accent shadow-glow-soft"
-                                }
+                              <div className="ri-bench-before-track mt-2 h-2 rounded-full bg-surface-hover overflow-hidden">
+                                <motion.div
+                                  className="ri-bench-before-fill h-full rounded-full bg-ink-muted"
+                                  initial={{ width: 0 }}
+                                  animate={{
+                                    width: `${beforeNum ? bf : 0}%`,
+                                  }}
+                                  transition={{
+                                    duration: 0.8,
+                                    ease: "easeOut",
+                                  }}
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <div className="flex items-center justify-between text-[13px]">
+                                <span className="ri-bench-after-label text-accent">
+                                  {afterLabel}
+                                </span>
+                                <span className="ri-bench-number font-extrabold text-ink">
+                                  {afterNum === null ? "-" : afterNum}
+                                </span>
+                              </div>
+
+                              <div className="ri-bench-after-track mt-2 h-2 rounded-full bg-surface-hover overflow-hidden">
+                                <motion.div
+                                  className="ri-bench-after-fill h-full rounded-full bg-accent"
+                                  initial={{ width: 0 }}
+                                  animate={{
+                                    width: `${afterNum ? af : 0}%`,
+                                  }}
+                                  transition={{
+                                    duration: 0.8,
+                                    ease: "easeOut",
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="ri-bench-hardware mt-5 border-t border-line-soft pt-4">
+                          <div className="grid grid-cols-[1fr_1fr_1.4fr] gap-3">
+                            {[
+                              { label: "GPU", value: g?.gpu || "-" },
+                              { label: "CPU", value: g?.cpu || "-" },
+                              { label: "RAM", value: g?.ram || "-" },
+                            ].map((detail) => (
+                              <div
+                                key={detail.label}
+                                className="flex min-w-0 flex-col"
                               >
-                                {pct === null
-                                  ? "-"
-                                  : `${pct > 0 ? "+" : ""}${pct}% ${badgeSuffix}`}
-                              </span>
-                            </div>
-
-                            <div className="ri-bench-bars mt-4 rounded-2xl bg-surface-input ring-1 ring-line-input p-3">
-                              <div className="space-y-3">
-                                <div>
-                                  <div className="flex items-center justify-between text-[12px]">
-                                    <span className="ri-bench-before-label text-ink-secondary">
-                                      {beforeLabel}
-                                    </span>
-                                    <span className="ri-bench-number font-extrabold text-ink">
-                                      {beforeNum === null ? "-" : beforeNum}
-                                    </span>
-                                  </div>
-
-                                  <div className="ri-bench-before-track mt-2 h-[10px] rounded-full bg-surface-hover ring-1 ring-line-soft overflow-hidden">
-                                    <motion.div
-                                      className="ri-bench-before-fill h-full rounded-full bg-gradient-to-r from-ink-muted via-line-soft to-transparent"
-                                      initial={{ width: 0 }}
-                                      animate={{
-                                        width: `${beforeNum ? bf : 0}%`,
-                                      }}
-                                      transition={{
-                                        duration: 0.8,
-                                        ease: "easeOut",
-                                      }}
-                                    />
-                                  </div>
-                                </div>
-
-                                <div>
-                                  <div className="flex items-center justify-between text-[12px]">
-                                    <span className="ri-bench-after-label text-accent">
-                                      {afterLabel}
-                                    </span>
-                                    <span className="ri-bench-number font-extrabold text-ink">
-                                      {afterNum === null ? "-" : afterNum}
-                                    </span>
-                                  </div>
-
-                                  <div className="ri-bench-after-track mt-2 h-[10px] rounded-full bg-surface-hover-accent ring-1 ring-line-accent overflow-hidden">
-                                    <motion.div
-                                      className="ri-bench-after-fill h-full rounded-full bg-gradient-to-r from-accent via-accent-soft to-transparent"
-                                      initial={{ width: 0 }}
-                                      animate={{
-                                        width: `${afterNum ? af : 0}%`,
-                                      }}
-                                      transition={{
-                                        duration: 0.8,
-                                        ease: "easeOut",
-                                      }}
-                                    />
-                                  </div>
-                                </div>
+                                <span className="ri-bench-hardware-label mb-1 text-xs font-semibold text-ink-muted">
+                                  {detail.label}
+                                </span>
+                                <span className="ri-bench-hardware-value break-words text-[13px] font-medium leading-snug text-ink-secondary">
+                                  {detail.value}
+                                </span>
                               </div>
-
-                              <div className="ri-bench-legend mt-3 flex items-center gap-5 text-[12px] text-ink-secondary">
-                                <div className="flex items-center gap-2">
-                                  <span className="ri-bench-before-dot h-2 w-2 rounded-full bg-ink-muted" />
-                                  <span>{beforeLabel}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="ri-bench-after-dot h-2 w-2 rounded-full bg-accent shadow-glow-soft" />
-                                  <span>{afterLabel}</span>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="ri-bench-hardware mt-4 rounded-xl bg-surface-veil ring-1 ring-line-soft p-3">
-                              <div className="ri-bench-hardware-grid grid grid-cols-3 gap-2 divide-x divide-line-soft text-center">
-                                {[
-                                  { label: "GPU", value: g?.gpu || "-" },
-                                  { label: "CPU", value: g?.cpu || "-" },
-                                  { label: "RAM", value: g?.ram || "-" },
-                                ].map((detail) => (
-                                  <div
-                                    key={detail.label}
-                                    className="flex flex-col px-1"
-                                  >
-                                    <span className="ri-bench-hardware-label mb-1 text-[10px] font-bold uppercase tracking-wider text-ink-muted">
-                                      {detail.label}
-                                    </span>
-                                    <span className="ri-bench-hardware-value break-words text-[11px] font-medium leading-tight text-ink-secondary">
-                                      {detail.value}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          </motion.div>
-                        </AnimatePresence>
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </motion.div>
+                    </AnimatePresence>
+                  </motion.div>
+                );
+              })}
             </div>
           </motion.div>
 

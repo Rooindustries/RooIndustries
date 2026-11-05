@@ -237,8 +237,8 @@ export default function Packages({
       </Link>
 
       <div className="mt-12 px-4 sm:px-6">
-        <div className="mx-auto w-fit max-w-full">
-          <div className="flex flex-col sm:flex-row justify-center gap-6 sm:gap-10 flex-wrap">
+        <div className="mx-auto w-full max-w-[34rem] xl:max-w-[77rem]">
+          <div className="grid gap-8 xl:grid-cols-[repeat(auto-fit,minmax(18rem,1fr))] xl:gap-6">
             {packages.map((p, i) => {
               const warranty = getWarrantyCallout(p);
               const WarrantyIcon = warranty.Icon;
@@ -252,7 +252,7 @@ export default function Packages({
               return (
                 <div
                   key={p._id || i}
-                  className={`ri-package-card relative w-full sm:w-[500px] border rounded-xl px-5 sm:px-7 py-6 sm:py-7 transition-all duration-500 flex flex-col bg-panel text-base sm:text-lg ${
+                  className={`ri-package-card relative w-full border rounded-2xl px-5 sm:px-7 py-7 transition-all duration-500 flex flex-col xl:row-span-6 xl:grid xl:grid-cols-[minmax(0,1fr)] xl:grid-rows-subgrid xl:gap-0 bg-panel text-base ${
                     p.tagGoldGlow
                       ? "ri-package-card-featured"
                       : "ri-package-card-secondary"
@@ -260,7 +260,7 @@ export default function Packages({
                     p.isHighlighted
                       ? "ri-package-card-highlighted border-info-border shadow-glow-strong hover:shadow-glow-strong"
                       : "ri-package-card-standard border-line-input shadow-glow-soft hover:shadow-glow-strong"
-                  } sm:min-h-[620px]`}
+                  }`}
                 >
                   {p.tag && (
                     <div className="absolute -top-3 left-1/2 -translate-x-1/2">
@@ -280,10 +280,12 @@ export default function Packages({
                     </div>
                   )}
 
-                  <div>
-                    <h3 className="text-3xl font-semibold">{p.title}</h3>
+                  <h3 className="text-2xl font-bold tracking-tight sm:text-[1.75rem] xl:self-end">
+                    {p.title}
+                  </h3>
 
-                    <PriceDisplay pkg={p} className="mt-6" />
+                  <div>
+                    <PriceDisplay pkg={p} className="mt-5" />
 
                     {warranty && (
                       <div
@@ -302,35 +304,39 @@ export default function Packages({
                         </span>
                       </div>
                     )}
+                  </div>
 
+                  <div className="max-xl:order-last">
                     {p.descriptionText && (
-                      <p className="ri-package-description mt-4 text-center text-base sm:text-lg leading-relaxed text-ink-secondary">
+                      <p className="ri-package-description mt-6 text-center xl:mt-4 text-base leading-relaxed text-ink-secondary">
                         {p.descriptionText}
                       </p>
                     )}
                     {p.suitableFor && (
-                      <div className="mt-3 flex items-baseline justify-center gap-1.5 whitespace-nowrap text-xs sm:text-sm">
+                      <div className="mt-3 flex flex-wrap items-baseline justify-center gap-x-1.5 text-xs sm:text-sm">
                         <span className="ri-package-suitable-label font-bold text-white">Suitable for:</span>
                         <span className="ri-package-suitable-value text-gradient-display font-semibold">
                           {p.suitableFor}
                         </span>
                       </div>
                     )}
+                  </div>
 
-                    <div className="ri-package-divider mt-5 border-t border-line-soft" />
+                  <div className="max-xl:order-last">
+                    <div className="ri-package-divider mt-6 border-t border-line-soft" />
 
                     <div className="mt-5">
-                      <ul className="ri-package-bullets w-full space-y-2.5 text-left text-base sm:text-lg text-ink-secondary leading-relaxed">
+                      <ul className="ri-package-bullets w-full space-y-2.5 text-left text-base text-ink-secondary leading-relaxed">
                         {hasBullets ? (
                           orderedBullets.map((b, index) => {
                             const on = b.checked;
                             return (
                               <li
                                 key={`${on ? "on" : "off"}-${index}`}
-                                className={`flex items-start gap-2 transition ${
+                                className={`items-start gap-2 transition ${
                                   on
-                                    ? "text-ink-secondary"
-                                    : "ri-package-bullet-excluded text-ink-muted"
+                                    ? "flex text-ink-secondary"
+                                    : "ri-package-bullet-excluded hidden text-ink-muted sm:flex"
                                 }`}
                               >
                                 <span
@@ -355,17 +361,7 @@ export default function Packages({
                     </div>
                   </div>
 
-                  <div className="mt-auto pt-7 flex flex-col sm:flex-row gap-3">
-                    <button
-                      type="button"
-                      onPointerEnter={() => { loadPackageDetails().catch(() => {}); }}
-                      onFocus={() => { loadPackageDetails().catch(() => {}); }}
-                      onClick={() => openDetails(p)}
-                      className="ri-package-details-button w-full sm:w-1/2 rounded-md border border-info-border bg-surface-input py-3 text-base font-semibold text-info-text shadow-info-soft transition hover:bg-surface-hover-accent hover:text-[color:var(--color-link-hover)]"
-                    >
-                      {p.detailsButtonText || "See What's Included"}
-                    </button>
-
+                  <div className="pt-7 flex flex-col sm:flex-row xl:flex-col gap-3 xl:self-end">
                     <Link
                       to="/booking"
                       state={{
@@ -383,7 +379,7 @@ export default function Packages({
                           surface: "packages",
                         });
                       }}
-                      className="ri-package-book-button glow-button w-full sm:w-1/2 text-white text-lg py-3 rounded-md font-semibold shadow-[var(--shadow-button-accent)] transition-all duration-300 text-center inline-flex items-center justify-center gap-2"
+                      className="ri-package-book-button glow-button w-full sm:w-1/2 xl:w-full text-white text-base py-3 rounded-md font-semibold shadow-[var(--shadow-button-accent)] transition-all duration-300 text-center inline-flex items-center justify-center gap-2"
                     >
                       {p.buttonText || "Book Now"}
                       <span className="glow-line glow-line-top" />
@@ -391,6 +387,16 @@ export default function Packages({
                       <span className="glow-line glow-line-bottom" />
                       <span className="glow-line glow-line-left" />
                     </Link>
+
+                    <button
+                      type="button"
+                      onPointerEnter={() => { loadPackageDetails().catch(() => {}); }}
+                      onFocus={() => { loadPackageDetails().catch(() => {}); }}
+                      onClick={() => openDetails(p)}
+                      className="ri-package-details-button w-full sm:w-1/2 xl:w-full rounded-md border border-info-border bg-surface-input py-3 text-base font-semibold text-info-text shadow-info-soft transition hover:bg-surface-hover-accent hover:text-[color:var(--color-link-hover)]"
+                    >
+                      {p.detailsButtonText || "See What's Included"}
+                    </button>
                   </div>
                   <p className="ri-package-guarantee mt-3 text-center text-sm text-ink-secondary">
                     No gains? 3-day money-back guarantee.
