@@ -73,8 +73,6 @@ export default function Navbar() {
   const activeHomeHash = useActiveHomeSection();
   const {
     goToSection,
-    goToHomeTop,
-    cancelSectionNavigation: cancelSectionTransition,
     isOwnSectionArrival,
   } = useSectionNavigation();
   const [open, setOpen] = useState(false);
@@ -95,21 +93,12 @@ export default function Navbar() {
 
   const isActive = (path) => location.pathname === path;
 
-  const benefitsHashes = [SECTION_HASHES.benefits];
-  const plansHashes = [SECTION_HASHES.plans];
-  const faqHashes = [
-    SECTION_HASHES.faq,
-    SECTION_HASHES.upgradePath,
-    SECTION_HASHES.trust,
-  ];
-  const isBenefitsActive =
-    location.pathname === "/" && benefitsHashes.includes(activeHomeHash);
-  const isPlansActive =
-    location.pathname === "/packages" ||
-    (location.pathname === "/" && plansHashes.includes(activeHomeHash));
+  const isHomeSectionActive = (...hashes) => isActive("/") && hashes.includes(activeHomeHash);
+  const isBenefitsActive = isHomeSectionActive(SECTION_HASHES.benefits);
+  const isPlansActive = isActive("/packages") || isHomeSectionActive(SECTION_HASHES.plans);
   const isFaqActive =
-    location.pathname === "/faq" ||
-    (location.pathname === "/" && faqHashes.includes(activeHomeHash));
+    isActive("/faq") ||
+    isHomeSectionActive(SECTION_HASHES.faq, SECTION_HASHES.upgradePath, SECTION_HASHES.trust);
   const isProofActive = isActive("/benchmarks") || isActive("/reviews");
   const isReferralsActive =
     location.pathname === "/referrals" || location.pathname.startsWith("/referrals/");
@@ -121,28 +110,19 @@ export default function Navbar() {
     setSmallLogoMode("static");
   };
 
-  const handleHomeClick = useCallback(
-    (event) => {
-      if (!goToHomeTop(event)) return;
-      setOpen(false);
-      setProofOpen(false);
-      setReferralsOpen(false);
-    },
-    [goToHomeTop]
-  );
+  const closeMenus = useCallback(() => {
+    setOpen(false);
+    setProofOpen(false);
+    setReferralsOpen(false);
+  }, []);
 
-  const handleSectionLinkClick = useCallback(
-    (event, hash) => {
-      if (!goToSection(event, hash, { minRuntimeMs: 900 })) return;
-      setOpen(false);
-      setProofOpen(false);
-      setReferralsOpen(false);
-    },
-    [goToSection]
-  );
+  const closeMenusOnLinkClick = (event) => {
+    if (event.target.closest("a[href]")) closeMenus();
+  };
+
+  const handleSectionLinkClick = (event, hash) => goToSection(event, hash, { minRuntimeMs: 900 });
 
   const updateHeaderOffset = useCallback(() => {
-    if (typeof document === "undefined") return;
     const navHeight = navRowRef.current?.offsetHeight || 96;
     document.documentElement.style.setProperty(
       "--section-nav-offset",
@@ -151,7 +131,7 @@ export default function Navbar() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !canAnimateLogo()) return undefined;
+    if (!canAnimateLogo()) return undefined;
     let idleId = null;
     let timeoutId = null;
     const enableAnimatedLogo = () => setSmallLogoMode("animated");
@@ -175,8 +155,6 @@ export default function Navbar() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-
     setTheme(applyTheme(readTheme(), { persist: false }));
 
     const handleThemeChange = (event) => {
@@ -218,28 +196,23 @@ export default function Navbar() {
   }, [updateHeaderOffset]);
 
   useEffect(() => {
-    if (isOwnSectionArrival(location.pathname)) return;
-    setOpen(false);
-    setProofOpen(false);
-    setReferralsOpen(false);
-  }, [isOwnSectionArrival, location.pathname, location.hash]);
+    if (!isOwnSectionArrival(location)) closeMenus();
+  }, [closeMenus, isOwnSectionArrival, location]);
 
   useEffect(() => {
     if (!open) return;
     const handleEscape = (event) => {
       if (event.key !== "Escape" || window.matchMedia(DESKTOP_NAV_QUERY).matches) return;
       event.preventDefault();
-      setOpen(false);
-      setProofOpen(false);
-      setReferralsOpen(false);
+      closeMenus();
       mobileMenuButtonRef.current?.focus();
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [open]);
+  }, [closeMenus, open]);
 
   useEffect(() => {
-    if ((!proofOpen && !referralsOpen) || typeof window === "undefined") return;
+    if (!proofOpen && !referralsOpen) return;
     if (!window.matchMedia(DESKTOP_NAV_QUERY).matches) return;
 
     const handleClickOutside = (event) => {
@@ -316,6 +289,7 @@ export default function Navbar() {
   return (
     <header
       ref={headerRef}
+      onClick={closeMenusOnLinkClick}
       className={`site-nav site-navbar-glass glass-premium glass-scroll-lite fixed top-0 left-0 right-0 z-50 flex max-h-[100dvh] flex-col overflow-visible border-b transition-all duration-300 ${
         scrolled
           ? "border-[color:var(--navbar-border-scrolled)]"
@@ -347,7 +321,6 @@ export default function Navbar() {
             ) : null}
 
             <Link to="/"
-              onClick={handleHomeClick}
               className="flex min-w-0 items-center gap-3 select-none"
             >
               <div className="relative h-14 w-14 grid place-items-center overflow-hidden rounded-xl">
@@ -387,7 +360,6 @@ export default function Navbar() {
           <div className="ml-0 flex w-full min-w-0 items-center gap-2 md:ml-auto md:w-auto md:justify-end md:gap-3">
             <Link
               to="/"
-              onClick={handleHomeClick}
               className="flex min-w-0 flex-1 items-center gap-1.5 select-none md:hidden min-[360px]:gap-2"
             >
               <div className="relative grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-lg min-[360px]:h-10 min-[360px]:w-10 sm:h-12 sm:w-12 sm:rounded-xl">
@@ -487,10 +459,6 @@ export default function Navbar() {
                   <Link
                     to="/benchmarks"
                     aria-current={isActive("/benchmarks") ? "page" : undefined}
-                    onClick={() => {
-                      cancelSectionTransition();
-                      setProofOpen(false);
-                    }}
                     className={`block px-4 py-3 text-sm transition ${
                       isActive("/benchmarks")
                         ? menuItemActive
@@ -502,10 +470,6 @@ export default function Navbar() {
                   <Link
                     to="/reviews"
                     aria-current={isActive("/reviews") ? "page" : undefined}
-                    onClick={() => {
-                      cancelSectionTransition();
-                      setProofOpen(false);
-                    }}
                     className={`block px-4 py-3 text-sm transition ${
                       isActive("/reviews") ? menuItemActive : menuItemIdle
                     }`}
@@ -574,10 +538,6 @@ export default function Navbar() {
                   <Link
                     to="/referrals/register"
                     aria-current={isActive("/referrals/register") ? "page" : undefined}
-                    onClick={() => {
-                      cancelSectionTransition();
-                      setReferralsOpen(false);
-                    }}
                     className={`block px-4 py-3 text-sm transition ${
                       isActive("/referrals/register")
                         ? menuItemActive
@@ -589,10 +549,6 @@ export default function Navbar() {
                   <Link
                     to="/referrals/login"
                     aria-current={isDashboardActive ? "page" : undefined}
-                    onClick={() => {
-                      cancelSectionTransition();
-                      setReferralsOpen(false);
-                    }}
                     className={`block px-4 py-3 text-sm transition ${
                       isDashboardActive
                         ? menuItemActive
@@ -767,11 +723,6 @@ export default function Navbar() {
                 <Link
                   to="/benchmarks"
                   aria-current={isActive("/benchmarks") ? "page" : undefined}
-                  onClick={() => {
-                    cancelSectionTransition();
-                    setProofOpen(false);
-                    setOpen(false);
-                  }}
                   className={`${mobileSubLinkBase} ${
                     isActive("/benchmarks")
                       ? mobileSubLinkActive
@@ -783,11 +734,6 @@ export default function Navbar() {
                 <Link
                   to="/reviews"
                   aria-current={isActive("/reviews") ? "page" : undefined}
-                  onClick={() => {
-                    cancelSectionTransition();
-                    setProofOpen(false);
-                    setOpen(false);
-                  }}
                   className={`${mobileSubLinkBase} ${
                     isActive("/reviews")
                       ? mobileSubLinkActive
@@ -855,11 +801,6 @@ export default function Navbar() {
                 <Link
                   to="/referrals/register"
                   aria-current={isActive("/referrals/register") ? "page" : undefined}
-                  onClick={() => {
-                    cancelSectionTransition();
-                    setReferralsOpen(false);
-                    setOpen(false);
-                  }}
                   className={`${mobileSubLinkBase} ${
                     isActive("/referrals/register")
                       ? mobileSubLinkActive
@@ -871,11 +812,6 @@ export default function Navbar() {
                 <Link
                   to="/referrals/login"
                   aria-current={isDashboardActive ? "page" : undefined}
-                  onClick={() => {
-                    cancelSectionTransition();
-                    setReferralsOpen(false);
-                    setOpen(false);
-                  }}
                   className={`${mobileSubLinkBase} ${
                     isDashboardActive
                       ? mobileSubLinkActive
@@ -888,7 +824,6 @@ export default function Navbar() {
               <Link
                 to="/meet-the-team"
                 aria-current={isTeamActive ? "page" : undefined}
-                onClick={cancelSectionTransition}
                 className={`${mobileLinkBase} ${
                   isTeamActive ? mobileLinkActive : mobileLinkIdle
                 }`}
