@@ -376,17 +376,25 @@ for (const route of ["/upgrade/max", "/upgrade-xoc"]) {
     expect(appReports(errors)[0]).toContain("Request timed out.");
   });
 
-  test(`an eligibility check on ${route} answering 503 is reported once`, async ({ page }) => {
-    const message = "Order lookup is unavailable right now.";
-    await page.route("**/api/ref/getUpgradeInfo", (request) =>
-      request.fulfill({ status: 503, json: { ok: false, error: message } })
-    );
-    const errors = collectConsoleErrors(page);
-    await checkOrder(page);
-    await expect(page.getByText(message, { exact: true })).toBeVisible();
-    await settle(page);
+  for (const [status, reports] of [
+    [503, 1],
+    [403, 1],
+    [404, 0],
+    [429, 0],
+  ]) {
+    const outcome = reports ? "is reported once" : "is shown without a report";
+    test(`an eligibility check on ${route} answering ${status} ${outcome}`, async ({ page }) => {
+      const message = `Order lookup answered ${status}.`;
+      await page.route("**/api/ref/getUpgradeInfo", (request) =>
+        request.fulfill({ status, json: { ok: false, error: message } })
+      );
+      const errors = collectConsoleErrors(page);
+      await checkOrder(page);
+      await expect(page.getByText(message, { exact: true })).toBeVisible();
+      await settle(page);
 
-    expect(appReports(errors)).toHaveLength(1);
-    expect(appReports(errors)[0]).toContain(message);
-  });
+      expect(appReports(errors)).toHaveLength(reports);
+      if (reports) expect(appReports(errors)[0]).toContain(message);
+    });
+  }
 }

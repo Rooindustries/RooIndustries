@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { fetchJsonWithTimeout, reportRequestError } from './clientRequest';
 
+const eligibilityAnswers = new Set([400, 404, 429]);
+
 export const fetchUpgradeInfo = async (input, signal) => {
   const result = await fetchJsonWithTimeout('/api/ref/getUpgradeInfo', {
     signal,
@@ -8,7 +10,7 @@ export const fetchUpgradeInfo = async (input, signal) => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
-  if (result.response.status >= 500) {
+  if (!result.response.ok && !eligibilityAnswers.has(result.response.status)) {
     reportRequestError(new Error(result.data?.error || 'Upgrade eligibility check failed.'));
   }
   return result;
