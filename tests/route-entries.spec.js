@@ -407,3 +407,27 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 
     expect(focused).toBe("ref-login-identifier");
   });
 }
+
+test("a looping animation inside the account choice doesn't keep its overlay after it closes", async ({ page }, testInfo) => {
+  await page.goto("/referrals/login?oauth=unlinked&provider=discord");
+  const choice = page.getByRole("button", { name: "Log in and link", exact: true });
+  await expect(choice).toBeVisible();
+  const looping = await page.getByRole("dialog").evaluate(dialog => {
+    const spinner = document.createElement("span");
+    spinner.setAttribute("data-test-spinner", "");
+    spinner.style.display = "inline-block";
+    spinner.style.width = "12px";
+    spinner.style.height = "12px";
+    dialog.append(spinner);
+    const animation = spinner.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], { duration: 400, iterations: Infinity });
+    return animation.effect.getComputedTiming().iterations;
+  });
+  expect(looping).toBe(Infinity);
+  await choice.click();
+  await expect(page.locator(".glass-overlay")).toHaveCount(0, { timeout: 2000 });
+  expect(await loginIsCoveredByDialog(page)).toBe(false);
+  const password = page.getByLabel("Password", { exact: true });
+  await password.click();
+  await expect(password).toBeFocused();
+  await attach(testInfo, "looping-animation-close", { looping: String(looping) });
+});
