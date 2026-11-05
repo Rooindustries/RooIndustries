@@ -231,7 +231,7 @@ const clickNav = async (page, target, viewportName) => {
 
 const getDesktopNavRowMetrics = async (page) =>
   page.evaluate(() => {
-    const nav = document.querySelector("nav.hidden.md\\:flex");
+    const nav = document.querySelector('nav:has([data-nav-surface="desktop"])');
     if (!nav) return null;
     const desktopLinks = [...nav.querySelectorAll('[data-nav-surface="desktop"]')];
     const proofButton = [...nav.querySelectorAll("button")].find((button) =>

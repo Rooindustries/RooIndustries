@@ -16,6 +16,7 @@ const canAnimateLogo = () => {
 
 // Two themes only: "dark" (Blackout Gold, the site default) and "default"
 // (Roo Blue). There is no light mode. Legacy stored values normalize to dark.
+const DESKTOP_NAV_QUERY = "(min-width: 1024px)";
 const THEME_STORAGE_KEY = "roo-theme";
 const THEME_LABELS = {
   default: "Roo Blue",
@@ -224,7 +225,7 @@ export default function Navbar() {
   useEffect(() => {
     if (!open) return;
     const handleEscape = (event) => {
-      if (event.key !== "Escape" || window.matchMedia("(min-width: 768px)").matches) return;
+      if (event.key !== "Escape" || window.matchMedia(DESKTOP_NAV_QUERY).matches) return;
       event.preventDefault();
       setOpen(false);
       setProofOpen(false);
@@ -237,7 +238,7 @@ export default function Navbar() {
 
   useEffect(() => {
     if ((!proofOpen && !referralsOpen) || typeof window === "undefined") return;
-    if (!window.matchMedia("(min-width: 768px)").matches) return;
+    if (!window.matchMedia(DESKTOP_NAV_QUERY).matches) return;
 
     const handleClickOutside = (event) => {
       if (
@@ -282,7 +283,7 @@ export default function Navbar() {
   // Theme-token interaction states — values per theme in src/index.css.
   const focusRing =
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--color-canvas-deep)]";
-  const linkBase = `px-3 sm:px-5 py-2 rounded-full text-base font-medium transition border border-line-soft hover:border-line-accent ${focusRing}`;
+  const linkBase = `px-3 sm:px-5 lg:px-4 xl:px-5 py-2 rounded-full text-base font-medium transition border border-line-soft hover:border-line-accent ${focusRing}`;
   const linkIdle =
     "text-ink-secondary hover:text-[color:var(--color-link-hover)]";
   const linkActive = "bg-accent text-accent-contrast border-accent";
@@ -338,7 +339,7 @@ export default function Navbar() {
 
       <div className="relative z-10 mx-auto max-w-7xl overflow-visible px-4 sm:px-6">
         <div ref={navRowRef} className="flex h-20 items-center overflow-visible sm:h-24">
-          <div className="hidden min-w-0 flex-1 items-center gap-4 md:flex">
+          <div className="hidden min-w-0 flex-1 items-center gap-4 lg:flex">
             {location.pathname !== "/" ? (
               <BackButton hidden={false} inline={true} />
             ) : null}
@@ -381,11 +382,11 @@ export default function Navbar() {
             </Link>
           </div>
 
-          <div className="ml-0 flex w-full min-w-0 items-center gap-2 md:ml-auto md:w-auto md:justify-end md:gap-3">
+          <div className="ml-0 flex w-full min-w-0 items-center gap-2 lg:ml-auto lg:w-auto lg:justify-end lg:gap-3">
             <Link
               to="/"
               onClick={handleHomeClick}
-              className="flex min-w-0 flex-1 items-center gap-1.5 select-none md:hidden min-[360px]:gap-2"
+              className="flex min-w-0 flex-1 items-center gap-1.5 select-none lg:hidden min-[360px]:gap-2"
             >
               <div className="relative grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-lg min-[360px]:h-10 min-[360px]:w-10 sm:h-12 sm:w-12 sm:rounded-xl">
                 <img
@@ -421,7 +422,7 @@ export default function Navbar() {
             </Link>
 
             <div className="ml-auto flex shrink-0 items-center gap-1 min-[360px]:gap-2 sm:gap-3">
-            <nav className="hidden md:flex items-center gap-2">
+            <nav className="hidden lg:flex items-center gap-2">
               <a
                 href={buildHomeSectionHref(SECTION_HASHES.benefits)}
                 data-nav-surface="desktop"
@@ -620,7 +621,7 @@ export default function Navbar() {
                 })
               }
               className="
-                  md:hidden
+                  lg:hidden
                   h-9 w-9 min-[360px]:h-10 min-[360px]:w-10 sm:h-12 sm:w-12 grid place-items-center rounded-full
                   text-ink-secondary hover:text-[color:var(--color-link-hover)]
                   border border-line-soft hover:border-line-accent
@@ -644,7 +645,7 @@ export default function Navbar() {
               role="switch"
               aria-checked={theme === "dark"}
               onClick={handleThemeToggle}
-              className={`theme-switch hidden shrink-0 md:inline-flex md:ml-3 ${focusRing}`}
+              className={`theme-switch hidden shrink-0 lg:inline-flex lg:ml-3 ${focusRing}`}
               aria-label={`Switch to ${nextThemeLabel} theme. Current theme: ${themeLabel}`}
               title={`Theme: ${themeLabel}, switch to ${nextThemeLabel}`}
             >
@@ -666,7 +667,7 @@ export default function Navbar() {
         <div
           id="mobile-site-menu"
           inert={!open}
-          className={`md:hidden overflow-hidden transition-all duration-300 ease-out ${
+          className={`lg:hidden overflow-hidden transition-all duration-300 ease-out ${
             open
               ? "pb-4 max-h-[680px] opacity-100 translate-y-0"
               : "max-h-0 opacity-0 -translate-y-2 pointer-events-none"
