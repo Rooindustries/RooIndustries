@@ -1,14 +1,11 @@
 const { randomUUID } = require("node:crypto");
 const { expect } = require("@playwright/test");
+const { fixtureOrigin } = require("./fixture-ports.cjs");
 
 const ADMIN_KEY = "synthetic-admin-key";
 const CONTENT_READ = "^roo_fetch_";
 
-const controlOrigin = (baseURL) => {
-  const origin = new URL(baseURL);
-  origin.port = String(Number(origin.port) + 6);
-  return origin.origin;
-};
+const controlOrigin = (baseURL) => fixtureOrigin(baseURL, "TOOLING_ADMIN_CONTROL_PORT");
 
 const createContentGate = (request, baseURL) => {
   const control = controlOrigin(baseURL);

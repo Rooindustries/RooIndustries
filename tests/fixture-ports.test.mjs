@@ -140,11 +140,18 @@ test("a run against a server without a live port report stops before any spec", 
   }
 });
 
-const holdPorts = async ports => Promise.all(ports.map(async port => {
-  const holder = net.createServer().listen(port, host);
-  await once(holder, "listening");
-  return holder;
-}));
+const holdPorts = async ports => {
+  const results = await Promise.allSettled(ports.map(async port => {
+    const holder = net.createServer().listen(port, host);
+    await once(holder, "listening");
+    return holder;
+  }));
+  const held = results.filter(result => result.status === "fulfilled").map(result => result.value);
+  const failure = results.find(result => result.status === "rejected");
+  if (!failure) return held;
+  await Promise.all(held.map(close));
+  throw failure.reason;
+};
 const freePortWithFreeNeighbors = async count => {
   for (;;) {
     const port = await freeTcpPort(host);
@@ -153,6 +160,21 @@ const freePortWithFreeNeighbors = async count => {
     if (held) return { port, held };
   }
 };
+
+test("holding neighbour ports lets go of the ones it got when one is taken", async () => {
+  const { port, held } = await freePortWithFreeNeighbors(3);
+  await Promise.all(held.map(close));
+  const blocker = net.createServer().listen(port + 2, host);
+  await once(blocker, "listening");
+  try {
+    await assert.rejects(holdPorts([port + 1, port + 2, port + 3]), { code: "EADDRINUSE" });
+    const again = await holdPorts([port + 1, port + 3]);
+    await Promise.all(again.map(close));
+  } finally {
+    await close(blocker);
+  }
+});
+
 const reportsSince = since => {
   try {
     return fs.readdirSync(reportDir).filter(name => name.endsWith(".json")).map(name => path.join(reportDir, name))
