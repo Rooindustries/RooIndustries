@@ -31,6 +31,7 @@ export function startServerMonitoring(value) {
   client?.on("beforeEnvelope", envelopeHeaderScrubber(client.getDsn()?.publicKey, monitoringEnvironment()));
   globalThis[Symbol.for("roo.reportServerError")] = (label, error, metadata) => {
     try {
+      if (!isProductionDeployment()) return;
       const message = label.split(": ", 1)[0];
       const report = new Error(message);
       report.name = metadata.name;
@@ -46,7 +47,7 @@ export function startServerMonitoring(value) {
         }
       } catch {}
       report.stack = [`${report.name}: ${message}`, ...frames].join("\n");
-      captureException(report, { tags: { error_code: metadata.code, error_status: String(metadata.status) } });
+      captureException(report, { ...(metadata.level === "warning" ? { level: "warning" } : {}), tags: { error_code: metadata.code, error_status: String(metadata.status) } });
     } catch {}
   };
 }

@@ -71,7 +71,7 @@ export default function RevisionHistory({ api, documentId, selectionGeneration, 
             <div>
               <strong>Before the edit at <time dateTime={revision.createdAt}>{displayTime(revision.createdAt)}</time></strong>
             </div>
-            <span>{revision.actor?.startsWith("admin:") ? "Admin" : revision.actor?.startsWith("sanity:") ? "Studio editor" : revision.actor}</span>
+            <span>{revision.actor === "admin:cron-hero-ram-price" ? "Automatic RAM price refresh" : revision.actor?.startsWith("admin:") ? "Admin" : revision.actor?.startsWith("sanity:") ? "Studio editor" : revision.actor}</span>
             <button
               type="button"
               className={styles.secondaryButton}

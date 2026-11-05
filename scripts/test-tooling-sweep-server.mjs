@@ -66,6 +66,13 @@ const env = {
 if (monitoringStartup) Object.assign(env, { NODE_ENV: "production", VERCEL: "1", VERCEL_ENV: "production", NEXT_PUBLIC_SENTRY_DSN: "false" });
 const next = path.resolve("node_modules/next/dist/bin/next");
 const development = process.env.TOOLING_DEV_SERVER === "1";
+if (process.env.TOOLING_RAM_PRICE === "1") Object.assign(env, {
+  HERO_RAM_PRICE_SOURCE_URL: `${contentURL}/storefront`,
+  CRON_SECRET: "fixture-only-ram-price-cron",
+  REF_ADMIN_KEY: "fixture-only-ram-price-admin",
+  CMS_WRITES_PAUSED: "0",
+  SALES_PREVIEW_READ_ONLY: "0",
+});
 const fingerprint = createHash("sha256");
 const tracked = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean);
 for (const file of tracked.filter(file => /^(?:src\/|app\/|scripts\/|tests\/fixtures\/|package(?:-lock)?\.json$|next\.config\.mjs$|instrumentation(?:-client)?\.js$|middleware\.js$|jsconfig\.json$|(?:tailwind|postcss)\.config)/.test(file)).sort()) {
