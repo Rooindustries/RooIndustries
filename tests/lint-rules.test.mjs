@@ -619,3 +619,18 @@ run("no-unchecked-group-signal", {
     },
   ],
 });
+
+run("no-parent-ipc-disconnect", {
+  valid: [
+    `if (process.connected) process.disconnect();`,
+    `child.channel?.unref();`,
+    `class Tracked extends Base { disconnect() { return super.disconnect(); } }`,
+  ],
+  invalid: [
+    {
+      name: "held port hand-over before #320's close fix",
+      code: `const finish = () => { if (child.connected) child.disconnect(); };`,
+      errors: [{ messageId: "parent" }],
+    },
+  ],
+});

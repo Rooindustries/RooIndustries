@@ -13,6 +13,7 @@ import noLowContrastText from "./no-low-contrast-text.mjs";
 import noNestedComponents from "./no-nested-components.mjs";
 import noScriptingMediaQuery from "./no-scripting-media-query.mjs";
 import noUnguardedTimerNavigation from "./no-unguarded-timer-navigation.mjs";
+import noParentIpcDisconnect from "./no-parent-ipc-disconnect.mjs";
 import noUncheckedGroupSignal from "./no-unchecked-group-signal.mjs";
 
 export const rules = {
@@ -31,6 +32,7 @@ export const rules = {
   "no-nested-components": noNestedComponents,
   "no-scripting-media-query": noScriptingMediaQuery,
   "no-unguarded-timer-navigation": noUnguardedTimerNavigation,
+  "no-parent-ipc-disconnect": noParentIpcDisconnect,
   "no-unchecked-group-signal": noUncheckedGroupSignal,
 };
 
