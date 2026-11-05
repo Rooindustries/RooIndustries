@@ -226,8 +226,6 @@ html[data-theme="default"] {
   --shadow-card-glow: 0 0 35px rgba(56, 189, 248, 0.35);
   --shadow-card-glow-info: 0 0 35px rgba(14, 165, 233, 0.15);
   --shadow-referral-glow: 0 0 30px rgba(99, 102, 241, 0.2);
-  --shadow-back-button: 0 0 15px rgba(0, 255, 255, 0.3);
-  --shadow-back-button-hover: 0 0 20px rgba(0, 255, 255, 0.5);
 }
 
 html[data-theme="dark"] {
@@ -438,8 +436,6 @@ html[data-theme="dark"] {
   --shadow-card-glow: 0 0 22px rgba(244, 206, 116, 0.1);
   --shadow-card-glow-info: 0 0 22px rgba(244, 206, 116, 0.07);
   --shadow-referral-glow: 0 0 18px rgba(150, 150, 160, 0.12);
-  --shadow-back-button: 0 0 10px rgba(255, 215, 110, 0.16);
-  --shadow-back-button-hover: 0 0 14px rgba(255, 215, 110, 0.28);
 }
 
 html.js .deferred-section-content {
