@@ -26,7 +26,7 @@ const load = async (url, cfg = {}) => {
 const release = key => fetch(`/__ui/repairs-release?key=${key}`);
 const save = complete => fetch('/__ui/repairs-evidence', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phase, scenario: requested, complete, passed: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length, results }) });
 const run = async (name, action) => {
-  if (requested !== 'all' && !(requested === 'baseline-final' && ['storage-login-setItem','warranty-parity','booking-hold-write','booking-banner-release','booking-captured-remove'].includes(name)) && !(requested === 'account-baseline' && /^storage-(login|register|verify)-/.test(name)) && !(requested === 'recheck' && ['hero-resize','warranty-parity','storage-home-property','storage-home-getItem','storage-home-setItem','storage-home-removeItem'].includes(name)) && !(requested === 'remaining' && ['editor-draft-order','contact-config','games-sparse','games-populated','warranty-parity','reviews-rating','reviews-pause','booking-captured-remove','recovery-hash-only'].includes(name)) && requested !== name && !name.startsWith(`${requested}-`)) return;
+  if (requested !== 'all' && !(requested === 'baseline-final' && ['storage-login-setItem','warranty-parity','booking-hold-write','booking-banner-release','booking-captured-remove'].includes(name)) && !(requested === 'account-baseline' && /^storage-(login|register|verify)-/.test(name)) && !(requested === 'recheck' && ['hero-promises','warranty-parity','storage-home-property','storage-home-getItem','storage-home-setItem','storage-home-removeItem'].includes(name)) && !(requested === 'remaining' && ['editor-draft-order','contact-config','games-sparse','games-populated','warranty-parity','reviews-rating','reviews-pause','booking-captured-remove','recovery-hash-only'].includes(name)) && requested !== name && !name.startsWith(`${requested}-`)) return;
   try { const evidence = await action(); results.push({ name, ok: true, ...evidence, fixtureHydrationWarnings: win()?.__uiHydrationWarnings?.length || 0 }); }
   catch (error) { results.push({ name, ok: false, error: error.message, url: win()?.location.href, rendered: text().slice(-1800), errors: win()?.__uiErrors || [], calls: (await control()).calls }); }
   output.textContent = JSON.stringify(results, null, 2); await save(false);
@@ -62,12 +62,38 @@ await run('contact-config', async () => {
   const calls = (await control()).calls.filter(c => c.path === '/__ui/formspree'); assert(calls.length === 1 && calls[0].form === 'formB' && blockedBeforeConfig, `Real Formspree SDK ignored delayed configured formB: ${JSON.stringify({calls,blockedBeforeConfig})}`);
   await wait(() => text().includes('Your message has been sent'), 'SDK success response not rendered'); return { calls, externalSends: 0, standIn: 'Actual @formspree/react3 SDK; browser fetch redirected before network to local HTTP' };
 });
-await run('hero-resize', async () => {
-  frame.style.width = '320px'; await load('/'); await wait(() => doc().querySelector('.ri-hero-cta-note'), 'Hero note absent'); await delay(400);
-  const narrow = [...doc().querySelectorAll('.ri-hero-cta-note')].map(n => ({ paragraphs: n.querySelectorAll('p:not([aria-hidden=true])').length, width: n.clientWidth, scrollWidth: n.scrollWidth }));
-  assert(narrow.some(n => n.paragraphs === 2), 'Narrow320 did not produce split'); frame.style.width = '1440px'; doc().querySelector('.ri-hero-cta-note').getBoundingClientRect(); win().dispatchEvent(new (win().Event)('resize')); await delay(500); await wait(() => [...doc().querySelectorAll('.ri-hero-cta-note')].every(n => n.querySelectorAll('p:not([aria-hidden=true])').length === 1), 'Wide1440 remains split after layout', 2500);
-  const wide = [...doc().querySelectorAll('.ri-hero-cta-note')].map(n => ({ paragraphs: n.querySelectorAll('p:not([aria-hidden=true])').length, width: n.clientWidth, scrollWidth: n.scrollWidth }));
-  assert(wide.every(n => n.paragraphs === 1), `Wide1440 remains split: ${JSON.stringify(wide)}`); assert(narrow.every(n => n.scrollWidth <= n.width + 1) && wide.every(n => n.scrollWidth <= n.width + 1), `Note overflows narrow=${JSON.stringify(narrow)} wide=${JSON.stringify(wide)}`); frame.style.width = '100%'; return { narrow, wide };
+await run('hero-promises', async () => {
+  const measureItem = (item, note) => {
+    const box = item.getBoundingClientRect();
+    const noteBox = note.getBoundingClientRect();
+    return {
+      text: item.textContent,
+      fontSize: parseFloat(win().getComputedStyle(item).fontSize),
+      fits: box.left >= noteBox.left - 1 && box.right <= noteBox.right + 1,
+    };
+  };
+  const measure = () => [...doc().querySelectorAll('.ri-hero-cta-note')].map(note => ({
+    width: note.clientWidth,
+    scrollWidth: note.scrollWidth,
+    items: [...note.querySelectorAll('li')].map(item => measureItem(item, note)),
+  }));
+  const readable = notes => notes.length > 0 && notes.every(note =>
+    note.items.length > 0 && note.scrollWidth <= note.width + 1 && note.items.every(item => item.fontSize >= 14 && item.fits));
+  const texts = notes => notes.map(note => note.items.map(item => item.text).join('|'));
+  frame.style.width = '320px';
+  await load('/');
+  await wait(() => doc().querySelector('.ri-hero-cta-note'), 'Hero note absent');
+  await doc().fonts.ready;
+  const narrow = measure();
+  frame.style.width = '1440px';
+  win().dispatchEvent(new (win().Event)('resize'));
+  await new Promise(resolve => win().requestAnimationFrame(() => resolve()));
+  const wide = measure();
+  assert(readable(narrow), `Hero promises unreadable or clipped at 320px: ${JSON.stringify(narrow)}`);
+  assert(readable(wide), `Hero promises unreadable or clipped at 1440px: ${JSON.stringify(wide)}`);
+  assert(JSON.stringify(texts(narrow)) === JSON.stringify(texts(wide)), 'Hero promises differ between widths');
+  frame.style.width = '100%';
+  return { narrow, wide };
 });
 for (const mode of ['sparse', 'populated']) await run(`games-${mode}`, async () => {
   await load('/#faq', { mode }); await wait(() => doc().querySelector('#supported-games'), 'Games container absent'); doc().querySelector('#supported-games').scrollIntoView(); await wait(() => button('View All Games'), 'Games missing'); await click('View All Games'); await delay(800);
