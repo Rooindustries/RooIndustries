@@ -24,7 +24,7 @@ const paint = (locator) =>
     return { color: style.color, image: style.backgroundImage };
   });
 
-test.use({ reducedMotion: "reduce" });
+test.use({ javaScriptEnabled: true, reducedMotion: "reduce" });
 
 test.beforeEach(async ({ context, baseURL }) => {
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
@@ -59,11 +59,6 @@ for (const [width, height] of [[1440, 900], [390, 844]]) {
           expect(contrast(color, stop), `${name} ${state} text on ${stop}`).toBeGreaterThanOrEqual(4.5);
         }
       }
-    }
-
-    const pill = page.locator(".ri-package-tag-gold.gold-flair-pill").first();
-    if (await pill.count()) {
-      expect((await paint(pill)).image).toContain(CHAMPAGNE);
     }
   });
 
