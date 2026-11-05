@@ -384,6 +384,35 @@ for (const { label, origin, selector, text = "", hash } of [
   });
 }
 
+for (const surface of ["desktop", "mobile"]) {
+  test(`${surface} menus close when a menu link opens in a new page`, async ({ context, page }) => {
+    test.setTimeout(120000);
+    await page.setViewportSize(surface === "mobile" ? { width: 390, height: 844 } : { width: 1536, height: 960 });
+    await openPage(page, "/faq", surface);
+    const siteMenu = page.locator('button[aria-controls="mobile-site-menu"]');
+    for (const [menu, href] of [
+      ["proof", "/benchmarks"],
+      ["proof", "/reviews"],
+      ["referrals", "/referrals/register"],
+      ["referrals", "/referrals/login"],
+    ]) {
+      const name = `${surface} ${href} opened in a new page`;
+      const toggle = page.locator(`button[aria-controls="${surface}-${menu}-menu"]`);
+      if (surface === "mobile") await siteMenu.click();
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+      const [opened] = await Promise.all([
+        context.waitForEvent("page", { timeout: 15000 }),
+        page.locator(`#${surface}-${menu}-menu a[href="${href}"]`).click({ modifiers: ["ControlOrMeta"] }),
+      ]);
+      await opened.close();
+      await expect(toggle, `${name} closes its menu`).toHaveAttribute("aria-expanded", "false");
+      if (surface === "mobile") await expect(siteMenu, `${name} closes the site menu`).toHaveAttribute("aria-expanded", "false");
+      expect(new URL(page.url()).pathname, `${name} stays on /faq`).toBe("/faq");
+    }
+  });
+}
+
 test.describe("reduced motion on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 

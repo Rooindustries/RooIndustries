@@ -107,21 +107,17 @@ export default function Navbar() {
     setSmallLogoMode("static");
   };
 
-  const handleHomeClick = useCallback(() => {
+  const closeMenus = useCallback(() => {
     setOpen(false);
     setProofOpen(false);
     setReferralsOpen(false);
   }, []);
 
-  const handleSectionLinkClick = useCallback(
-    (event, hash) => {
-      if (!goToSection(event, hash, { minRuntimeMs: 900 })) return;
-      setOpen(false);
-      setProofOpen(false);
-      setReferralsOpen(false);
-    },
-    [goToSection]
-  );
+  const closeMenusOnLinkClick = (event) => {
+    if (event.target.closest("a[href]")) closeMenus();
+  };
+
+  const handleSectionLinkClick = (event, hash) => goToSection(event, hash, { minRuntimeMs: 900 });
 
   const updateHeaderOffset = useCallback(() => {
     const navHeight = navRowRef.current?.offsetHeight || 96;
@@ -197,25 +193,20 @@ export default function Navbar() {
   }, [updateHeaderOffset]);
 
   useEffect(() => {
-    if (isOwnSectionArrival(location)) return;
-    setOpen(false);
-    setProofOpen(false);
-    setReferralsOpen(false);
-  }, [isOwnSectionArrival, location]);
+    if (!isOwnSectionArrival(location)) closeMenus();
+  }, [closeMenus, isOwnSectionArrival, location]);
 
   useEffect(() => {
     if (!open) return;
     const handleEscape = (event) => {
       if (event.key !== "Escape" || window.matchMedia("(min-width: 768px)").matches) return;
       event.preventDefault();
-      setOpen(false);
-      setProofOpen(false);
-      setReferralsOpen(false);
+      closeMenus();
       mobileMenuButtonRef.current?.focus();
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [open]);
+  }, [closeMenus, open]);
 
   useEffect(() => {
     if (!proofOpen && !referralsOpen) return;
@@ -295,6 +286,7 @@ export default function Navbar() {
   return (
     <header
       ref={headerRef}
+      onClick={closeMenusOnLinkClick}
       className={`site-nav site-navbar-glass glass-premium glass-scroll-lite fixed top-0 left-0 right-0 z-50 overflow-visible border-b transition-all duration-300 ${
         scrolled
           ? "border-[color:var(--navbar-border-scrolled)]"
@@ -326,7 +318,6 @@ export default function Navbar() {
             ) : null}
 
             <Link to="/"
-              onClick={handleHomeClick}
               className="flex min-w-0 items-center gap-3 select-none"
             >
               <div className="relative h-14 w-14 grid place-items-center overflow-hidden rounded-xl">
@@ -366,7 +357,6 @@ export default function Navbar() {
           <div className="ml-0 flex w-full min-w-0 items-center gap-2 md:ml-auto md:w-auto md:justify-end md:gap-3">
             <Link
               to="/"
-              onClick={handleHomeClick}
               className="flex min-w-0 flex-1 items-center gap-1.5 select-none md:hidden min-[360px]:gap-2"
             >
               <div className="relative grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-lg min-[360px]:h-10 min-[360px]:w-10 sm:h-12 sm:w-12 sm:rounded-xl">
