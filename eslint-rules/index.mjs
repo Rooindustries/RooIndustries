@@ -7,6 +7,7 @@ import noAriaLabelOnGeneric from "./no-aria-label-on-generic.mjs";
 import noBareRoutePrefix from "./no-bare-route-prefix.mjs";
 import noClientOnlyPublicContent from "./no-client-only-public-content.mjs";
 import noHandBuiltDollars from "./no-hand-built-dollars.mjs";
+import noHandMeasuredPageJump from "./no-hand-measured-page-jump.mjs";
 import noHiddenServerMotion from "./no-hidden-server-motion.mjs";
 import noIgnoredWriteRequest from "./no-ignored-write-request.mjs";
 import noLowContrastText from "./no-low-contrast-text.mjs";
@@ -26,6 +27,7 @@ export const rules = {
   "no-bare-route-prefix": noBareRoutePrefix,
   "no-client-only-public-content": noClientOnlyPublicContent,
   "no-hand-built-dollars": noHandBuiltDollars,
+  "no-hand-measured-page-jump": noHandMeasuredPageJump,
   "no-hidden-server-motion": noHiddenServerMotion,
   "no-ignored-write-request": noIgnoredWriteRequest,
   "no-low-contrast-text": noLowContrastText,

@@ -137,6 +137,35 @@ run("no-unguarded-timer-navigation", {
   ],
 });
 
+run("no-hand-measured-page-jump", {
+  valid: [
+    `scrollWindowToElement(el, getCssHeaderOffsetPx());`,
+    `const offset = el.getBoundingClientRect().top - 10;`,
+    `const y = window.scrollY + 40;`,
+    {
+      code: `scrollWindowTo(element.getBoundingClientRect().top + window.scrollY - offset);`,
+      filename: fileURLToPath(new URL("../src/lib/scrollWindowTo.js", import.meta.url)),
+    },
+  ],
+  invalid: [
+    {
+      name: "FAQ page change jump before the deferred-section fix",
+      code: `scrollWindowTo(el.getBoundingClientRect().top + window.scrollY - 96);`,
+      errors: [{ messageId: "handMeasured" }],
+    },
+    {
+      name: "page offset on the left",
+      code: `window.scrollTo({ top: window.pageYOffset + el.getBoundingClientRect().top });`,
+      errors: [{ messageId: "handMeasured" }],
+    },
+    {
+      name: "bare scrollY",
+      code: `const top = scrollY + section.getBoundingClientRect().top;`,
+      errors: [{ messageId: "handMeasured" }],
+    },
+  ],
+});
+
 run("smooth-scroll-needs-motion-check", {
   valid: [
     `window.scrollTo();`,

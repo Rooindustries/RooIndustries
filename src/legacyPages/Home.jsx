@@ -194,13 +194,7 @@ export default function Home({ initialData = null, heroHeadingTag = "h1" }) {
         id="how-it-works"
         style={{ scrollMarginTop: "var(--section-nav-offset)" }}
       >
-        <DeferredSection
-          fallbackClassName="min-h-[340px]"
-          rootMargin="220px 0px"
-          eager={eagerAll}
-        >
-          <HowItWorks initialData={initialData?.howItWorks || null} />
-        </DeferredSection>
+        <HowItWorks initialData={initialData?.howItWorks || null} />
       </section>
       <div className="mt-4 flex items-center justify-center">
         <Link
