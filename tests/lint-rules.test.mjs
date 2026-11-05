@@ -1,11 +1,11 @@
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
 import { Linter, RuleTester } from "eslint";
 import { rules } from "../eslint-rules/index.mjs";
 
 const scriptFile = fileURLToPath(new URL("../scripts/start-server.mjs", import.meta.url));
-const testFile = fileURLToPath(new URL("./build-lock.test.mjs", import.meta.url));
+const buildLockTestFile = fileURLToPath(new URL("./build-lock.test.mjs", import.meta.url));
 const helperFile = fileURLToPath(new URL("../scripts/lib/node-options.mjs", import.meta.url));
 
 RuleTester.describe = describe;
@@ -137,6 +137,100 @@ run("no-unguarded-timer-navigation", {
       name: "RefRegister toast reset before #205",
       code: `function RefRegister() { function showToast() { setTimeout(() => setToast(null), 2800); } return null; }`,
       errors: [{ messageId: "timer" }],
+    },
+  ],
+});
+
+run("smooth-scroll-needs-motion-check", {
+  valid: [
+    `window.scrollTo();`,
+    `window.scrollTo({ top: 0, behavior: "auto" });`,
+    `window.scrollTo({ top: 0, behavior: "instant" });`,
+    "window.scroll({ top: 0, behavior: `instant` });",
+    `window.scrollTo(0, 120);`,
+    `window.scrollTo(0, stored.scrollY || 0);`,
+    `el.scrollIntoView({ block: "nearest" });`,
+    `ref.current?.scrollIntoView?.({ block: "nearest" });`,
+    `el.scrollIntoView(false);`,
+    `window.scrollTo({ top: 0, behavior: "smooth", behavior: "instant" });`,
+    `scrollWindowTo(0);`,
+    {
+      code: `window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "instant" : "smooth" });`,
+      filename: fileURLToPath(new URL("../src/lib/scrollWindowTo.js", import.meta.url)),
+    },
+  ],
+  invalid: [
+    {
+      name: "Footer back to top before the reduced-motion fix",
+      code: `const scrollToTop = () => { window.scrollTo({ top: 0, behavior: "smooth" }); };`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "FAQ page change scroll before the reduced-motion fix",
+      code: `const scrollWithOffset = (id, behavior = "smooth") => { window.scrollTo({ top: 1, behavior }); };`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "behavior reassigned to smooth after a safe start",
+      code: `let behavior = "auto"; behavior = "smooth"; window.scrollTo({ behavior });`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "smooth options spread into the call",
+      code: `const opts = { behavior: "smooth" }; window.scrollTo({ ...opts });`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "spread placed before a safe behavior",
+      code: `window.scrollTo({ ...opts, behavior: "auto" });`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "conditional between whole option objects",
+      code: `window.scrollTo(fast ? { top: 0, behavior: "smooth" } : { top: 0 });`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "options stored in a variable",
+      code: `const options = { block: "start" }; panel.scrollIntoView(options);`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "motion check in the section-scroll coordinator",
+      code: `window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "instant" : "smooth" });`,
+      filename: fileURLToPath(new URL("../src/lib/scrollCoordinator.js", import.meta.url)),
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "nested file sharing the helper's name",
+      code: `window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "instant" : "smooth" });`,
+      filename: fileURLToPath(new URL("../app/src/lib/scrollWindowTo.js", import.meta.url)),
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "motion check written outside the helper",
+      code: `window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "instant" : "smooth" });`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "smooth scrollBy on an element",
+      code: `list.scrollBy({ left: 200, behavior: wide && "smooth" });`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "computed option key",
+      code: `window.scrollTo({ top: 0, [key]: "smooth" });`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "spread arguments",
+      code: `window.scrollBy(...delta);`,
+      errors: [{ messageId: "unchecked" }],
+    },
+    {
+      name: "scrollIntoView argument from a variable",
+      code: `el.scrollIntoView(alignTop);`,
+      errors: [{ messageId: "unchecked" }],
     },
   ],
 });
@@ -500,7 +594,7 @@ run("no-hand-built-node-options", {
       code: `import * as nodeOptions from "./lib/node-options.mjs"; env.NODE_OPTIONS = nodeOptions.prependNodeOption(env.NODE_OPTIONS, "--require", holder);`,
     },
     {
-      filename: testFile,
+      filename: buildLockTestFile,
       code: `const { prependNodeOption } = await import("../scripts/lib/node-options.mjs"); const env = { ...ordered, NODE_OPTIONS: prependNodeOption(ordered.NODE_OPTIONS, "--import", leading) };`,
     },
     {
@@ -645,7 +739,7 @@ run("no-hand-built-node-options", {
     },
     {
       name: "helper name destructured from another module",
-      filename: testFile,
+      filename: buildLockTestFile,
       code: 'const { prependNodeOption } = await import("./fixtures/flags.mjs"); env.NODE_OPTIONS = prependNodeOption(env.NODE_OPTIONS, "--import", guard);',
       errors: [{ messageId: "handBuilt" }],
     },
@@ -815,6 +909,44 @@ run("no-scripting-media-query", {
       name: "style with dangerouslySetInnerHTML from constants",
       code: "const f = \"scripting\"; const html = { __html: `@media (${f}: none) {}` }; <style dangerouslySetInnerHTML={html} />;",
       errors: [{ messageId: "scripting" }],
+    },
+  ],
+});
+
+const testFile = fileURLToPath(new URL("../src/__tests__/virtualMock.test.js", import.meta.url));
+
+run("no-virtual-mock-of-installed-module", {
+  valid: [
+    { filename: testFile, code: `jest.mock("react-router-dom", () => ({ useLocation: () => ({}) }));` },
+    { filename: testFile, code: `jest.mock("roo-package-that-is-not-installed", () => ({}), { virtual: true });` },
+    { filename: testFile, code: `jest.mock("../lib/not-a-real-file", () => ({}), { virtual: true });` },
+    { filename: testFile, code: `jest.mock("lucide-react", () => ({}), { virtual: false });` },
+    { filename: testFile, code: `jest.mock("@/src/lib/not-a-real-file", () => ({}), { virtual: true });` },
+  ],
+  invalid: [
+    {
+      name: "booking UI test before the router fix",
+      filename: testFile,
+      code: `jest.mock("react-router-dom", () => ({ useLocation: () => ({}) }), { virtual: true });`,
+      errors: [{ messageId: "installed" }],
+    },
+    {
+      name: "installed icon package",
+      filename: testFile,
+      code: `jest.doMock("lucide-react", () => ({}), { virtual: true });`,
+      errors: [{ messageId: "installed" }],
+    },
+    {
+      name: "existing app module through the Jest alias",
+      filename: testFile,
+      code: `jest.mock("@/src/lib/sectionNavigator", () => ({}), { virtual: true });`,
+      errors: [{ messageId: "installed" }],
+    },
+    {
+      name: "existing app module",
+      filename: testFile,
+      code: `jest.mock("../lib/sectionNavigator", () => ({}), { virtual: true });`,
+      errors: [{ messageId: "installed" }],
     },
   ],
 });

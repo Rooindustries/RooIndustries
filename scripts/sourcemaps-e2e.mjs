@@ -367,8 +367,8 @@ if (process.argv[2] === '--build') {
       server?.listening ? new Promise(done => { server.closeAllConnections(); server.close(done); }) : undefined,
     ]);
     restoreGuard?.();
-    if (productionDist) await rm(join(root, productionDist), { recursive: true, force: true });
     if (productionLock) {
+      await rm(join(root, productionDist), { recursive: true, force: true });
       await rm(`${join(root, productionDist)}.build-lock`, { force: true });
       productionLock.release();
     }

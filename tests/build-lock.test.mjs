@@ -240,7 +240,7 @@ lockBuildDirectory(${JSON.stringify(dir)});`], { encoding: "utf8", env: { ...pro
   const otherPlatform = attempt('Object.defineProperty(process, "platform", { value: "darwin" });', {});
   assert.notEqual(otherPlatform.status, 0);
   assert.match(otherPlatform.stderr, /need Linux flock/);
-  const noFlock = attempt("", { PATH: path.dirname(process.execPath) });
+  const noFlock = attempt("", { PATH: scratchRoot("roo-no-flock-") });
   assert.notEqual(noFlock.status, 0);
   assert.match(noFlock.stderr, /need util-linux flock/);
 });
