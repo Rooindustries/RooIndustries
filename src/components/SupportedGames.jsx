@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { reportContentLoadError } from "../lib/publicContentClient";
+import { reportRequestError } from "../lib/clientRequest";
 import { ChevronDown } from "lucide-react";
 import { urlFor } from "../lib/cmsImageUrl";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
@@ -61,7 +61,7 @@ export default function SupportedGames({ initialData = null }) {
     if (data !== null) return;
     fetchHomeSectionData(HOME_SECTION_DATA_KEYS.supportedGames)
       .then(setData)
-      .catch(reportContentLoadError);
+      .catch(reportRequestError);
   }, [data]);
 
   const featuredGames = useMemo(() => {

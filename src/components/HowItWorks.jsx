@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { reportContentLoadError } from "../lib/publicContentClient";
+import { reportRequestError } from "../lib/clientRequest";
 import { Link } from "react-router-dom";
 import {
   PERF_TOGGLE_KEYS,
@@ -121,7 +121,7 @@ export default function HowItWorks({ initialData = null }) {
     }
     fetchHomeSectionData(HOME_SECTION_DATA_KEYS.howItWorks)
       .then((res) => { if (res) setData(res); })
-      .catch(reportContentLoadError);
+      .catch(reportRequestError);
   }, [initialData]);
 
   useEffect(() => {

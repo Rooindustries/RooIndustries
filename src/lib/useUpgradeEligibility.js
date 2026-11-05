@@ -1,4 +1,18 @@
 import { useEffect, useRef } from 'react';
+import { fetchJsonWithTimeout, reportRequestError } from './clientRequest';
+
+export const fetchUpgradeInfo = async (input, signal) => {
+  const result = await fetchJsonWithTimeout('/api/ref/getUpgradeInfo', {
+    signal,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (result.response.status >= 500) {
+    reportRequestError(new Error(result.data?.error || 'Upgrade eligibility check failed.'));
+  }
+  return result;
+};
 
 export default function useUpgradeEligibility(input) {
   const current = useRef('');

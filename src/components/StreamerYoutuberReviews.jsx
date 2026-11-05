@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { reportContentLoadError } from "../lib/publicContentClient";
+import { reportRequestError } from "../lib/clientRequest";
 import { urlFor } from "../lib/cmsImageUrl";
 import { getPerfToggleEnabled, isPerfDebugEnabled, PERF_DEBUG_EVENT, PERF_TOGGLE_KEYS } from "../lib/perfDebug";
 import {
@@ -103,7 +103,7 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
         const res = await fetchHomeSectionData(HOME_SECTION_DATA_KEYS.reviews);
         if (!cancelled) setData(res);
       } catch (error) {
-        reportContentLoadError(error);
+        reportRequestError(error);
       }
     };
 

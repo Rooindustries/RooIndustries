@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { normalizePolicyLink } from "../lib/policyLinks";
 import { PortableText } from "@portabletext/react";
-import { getPublicContent, reportContentLoadError } from "../lib/publicContentClient";
+import { reportRequestError } from "../lib/clientRequest";
+import { getPublicContent } from "../lib/publicContentClient";
 
 export default function Terms({ initialData = null }) {
   const [data, setData] = useState(initialData);
@@ -11,7 +12,7 @@ export default function Terms({ initialData = null }) {
       .then((next) => {
         if (next) setData(next);
       })
-      .catch(reportContentLoadError);
+      .catch(reportRequestError);
   }, []);
 
   const renderTextWithLinks = (text) => {
