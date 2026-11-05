@@ -38,6 +38,7 @@ function DeferredSection({
 }) {
   const ref = useRef(null);
   const [isVisible, setIsVisible] = useState(eager);
+  const shown = isVisible || eager;
 
   useEffect(() => {
     if (eager) {
@@ -46,7 +47,7 @@ function DeferredSection({
   }, [eager]);
 
   useEffect(() => {
-    if (isVisible) return;
+    if (shown) return;
     if (typeof IntersectionObserver === "undefined" || !ref.current) {
       setIsVisible(true);
       return;
@@ -64,11 +65,11 @@ function DeferredSection({
 
     observer.observe(ref.current);
     return () => observer.disconnect();
-  }, [isVisible, rootMargin]);
+  }, [shown, rootMargin]);
 
   return (
     <div ref={ref}>
-      {isVisible ? (
+      {shown ? (
         children
       ) : (
         <div aria-hidden="true" data-section-placeholder="" className={fallbackClassName} />
@@ -124,10 +125,11 @@ export default function Home({ initialData = null, heroHeadingTag = "h1" }) {
   }, [location.hash]);
 
   useEffect(() => {
+    if (forceEagerSections) return undefined;
     const revealSections = () => flushSync(() => setForceEagerSections(true));
     window.addEventListener(REVEAL_DEFERRED_SECTIONS_EVENT, revealSections);
     return () => window.removeEventListener(REVEAL_DEFERRED_SECTIONS_EVENT, revealSections);
-  }, []);
+  }, [forceEagerSections]);
 
   useEffect(() => {
     if (typeof window === "undefined" || isLowPerf) {
