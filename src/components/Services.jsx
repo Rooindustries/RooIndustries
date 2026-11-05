@@ -157,7 +157,7 @@ export default function Services({
             return (
               <li
                 key={card.iconType}
-                className="ri-service-card flex flex-col gap-3 border-t border-line-soft pt-5"
+                className="ri-service-card flex flex-col items-center gap-3 border-t border-line-soft pt-5 text-center"
               >
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface-hover">
                   {customIcon ? (
