@@ -8,6 +8,7 @@ import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } fro
 import { portFromEnv, reserveTcpPorts } from './lib/free-tcp-port.mjs';
 import { startChildOnPorts, stopChild } from './lib/start-on-port.mjs';
 import { lockBuildDirectory } from './lib/build-lock.mjs';
+import { withNodeOption } from './lib/node-options.mjs';
 
 refuseEnvFiles();
 const host = testHost;
@@ -106,7 +107,7 @@ server.on('request', async (req, res) => {
     proxy.on('error', () => json(res, { error: 'Isolated Next server is starting.' }, 503)); req.pipe(proxy);
   } catch (error) { json(res, { error: error.message }, 500); }
 });
-const env = { PATH: process.env.PATH, HOME: process.env.HOME, CI: 'true', TZ: 'UTC', NODE_ENV: 'development', NEXT_TELEMETRY_DISABLED: '1', NEXT_DIST_DIR: dist, BASE_URL: base, ROO_TEST_HOST: testHost, TOOLING_NETWORK_GUARD: '1', NODE_OPTIONS: `--import=${path.resolve('scripts/lib/test-target-safety.mjs')}`, NEXT_PUBLIC_SUPABASE_URL: base, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'synthetic-ui-publishable-key', NEXT_PUBLIC_SUPABASE_ASSET_URL: base, DATA_PRIMARY_BACKEND: 'supabase', SALES_PREVIEW_READ_ONLY: '1' };
+const env = withNodeOption({ PATH: process.env.PATH, HOME: process.env.HOME, CI: 'true', TZ: 'UTC', NODE_ENV: 'development', NEXT_TELEMETRY_DISABLED: '1', NEXT_DIST_DIR: dist, BASE_URL: base, ROO_TEST_HOST: testHost, TOOLING_NETWORK_GUARD: '1', NEXT_PUBLIC_SUPABASE_URL: base, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'synthetic-ui-publishable-key', NEXT_PUBLIC_SUPABASE_ASSET_URL: base, DATA_PRIMARY_BACKEND: 'supabase', SALES_PREVIEW_READ_ONLY: '1' }, '--import', path.resolve('scripts/lib/test-target-safety.mjs'));
 const output = [];
 const { ports: [startedPort], child } = await startChildOnPorts({
   host,

@@ -9,6 +9,7 @@ import { localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-
 import { listenOnPort, portFromEnv, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
 import fixturePorts from "../tests/fixtures/fixture-ports.cjs";
 import { lockBuildDirectory } from "./lib/build-lock.mjs";
+import { withNodeOption } from "./lib/node-options.mjs";
 
 refuseEnvFiles();
 const root = process.cwd();
@@ -305,17 +306,16 @@ try {
     response.writeHead(404); response.end();
   });
   fixturePorts.writeFixturePorts(baseURL, instance, { TOOLING_ADMIN_CONTROL_PORT: controlPort });
-  const env = {
+  const env = withNodeOption({
     PATH: process.env.PATH, HOME: process.env.HOME, CI: "true", TZ: "UTC", TOURNEY_DATABASE_MODE: "memory",
     DATA_PRIMARY_BACKEND: "supabase", COMMERCE_PRIMARY_BACKEND: "supabase", COMMERCE_FAILOVER_GENERATION: "0", SUPABASE_CUTOVER_ENABLED: "1", COMMERCE_CUTOVER_ENABLED: "1",
     SUPABASE_URL: fixture.origin, NEXT_PUBLIC_SUPABASE_URL: fixture.origin, NEXT_PUBLIC_SUPABASE_ASSET_URL: fixture.origin,
     SUPABASE_SECRET_KEY: fixture.serviceRoleKey, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: fixture.anonKey, NEXT_PUBLIC_SUPABASE_ANON_KEY: fixture.anonKey,
     REF_ADMIN_KEY: "synthetic-admin-key", REF_SESSION_SECRET: "synthetic-content-session-secret", RATE_LIMIT_HASH_SECRET: "synthetic-admin-rate-secret", CMS_WRITES_PAUSED: "0",
     ALLOW_LIVE_PAYMENTS: "0", SALES_PREVIEW_READ_ONLY: "0", NEXT_TELEMETRY_DISABLED: "1", BASE_URL: baseURL, ROO_TEST_HOST: target.hostname, NEXT_DIST_DIR: dist, TOOLING_NETWORK_GUARD: "1",
-    NODE_OPTIONS: `--import=${path.join(root, "scripts/lib/test-target-safety.mjs")} --import=${path.join(root, "scripts/lib/content-test-hooks.mjs")}`,
     ROO_CONTENT_TEST_CONTROL_URL: controlOrigin,
     ROO_TEST_NETWORK_ORIGINS: JSON.stringify([baseURL, fixture.origin, fixture.storageUrl, fixture.postgrestUrl, controlOrigin]),
-  };
+  }, "--import", path.join(root, "scripts/lib/test-target-safety.mjs"), path.join(root, "scripts/lib/content-test-hooks.mjs"));
   const execute = args => new Promise((resolve, reject) => {
     active = spawn(process.execPath, args, { env: lock.childEnv(env), stdio: ["inherit", "inherit", "inherit", lock.fd] });
     active.once("error", reject);
