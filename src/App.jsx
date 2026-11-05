@@ -23,6 +23,7 @@ import {
   consumeRouteTransitionIntent,
   isHomeSectionHash,
   normalizeSectionHash,
+  SECTION_TRIP_ENTRY,
 } from "./lib/sectionNavigation";
 import { sanitizeBrowserSearch } from "./lib/browserSearch";
 import { prefetchHomeSectionData } from "./lib/homeSectionData";
@@ -390,90 +391,40 @@ export function AppContent({
 
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
     const intent = consumeRouteTransitionIntent();
-    if (!intent) {
+    const hideTransition = () => setShowRouteTransition(false);
+    if (!(Date.now() - intent?.ts <= 5000)) {
+      hideTransition();
       document.documentElement.classList.remove("route-transition-out");
-      return;
-    }
-    const ageMs = Date.now() - Number(intent.ts || 0);
-    if (ageMs > 5000) {
-      document.documentElement.classList.remove("route-transition-out");
-      return;
+      return undefined;
     }
 
     setShowRouteTransition(true);
     const clearOutClassId = window.setTimeout(() => {
       document.documentElement.classList.remove("route-transition-out");
     }, 120);
-
-    const finishTransition = () => {
-      setShowRouteTransition(false);
-    };
-
     const handleSettled = (event) => {
-      const settledHash = normalizeSectionHash(event?.detail?.hash || "");
-      const intentHash = normalizeSectionHash(intent.hash || "");
-      if (!intentHash || settledHash === intentHash) {
-        finishTransition();
-      }
+      if (event.detail?.hash === intent.hash) hideTransition();
     };
-
+    const hideOverlayId = window.setTimeout(hideTransition, 1600);
     window.addEventListener("roo:section-align-settled", handleSettled);
-
-    const hideOverlayId = window.setTimeout(() => {
-      finishTransition();
-    }, 1600);
+    window.addEventListener("roo:cancel-route-transition", hideTransition);
 
     return () => {
       window.clearTimeout(clearOutClassId);
       window.clearTimeout(hideOverlayId);
       window.removeEventListener("roo:section-align-settled", handleSettled);
+      window.removeEventListener("roo:cancel-route-transition", hideTransition);
     };
   }, [location.pathname, location.hash]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    const handleCancelTransition = () => {
-      setShowRouteTransition(false);
-      document.documentElement.classList.remove("route-transition-out");
-    };
-    window.addEventListener("roo:cancel-route-transition", handleCancelTransition);
-    return () => {
-      window.removeEventListener("roo:cancel-route-transition", handleCancelTransition);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-
-    if (!showRouteTransition) {
-      document.documentElement.classList.remove("route-transition-lock");
-      document.body.classList.remove("route-transition-lock");
-      window.dispatchEvent(
-        new CustomEvent("roo:route-transition-visibility", {
-          detail: { active: false },
-        })
-      );
-      return;
-    }
-
+    if (!showRouteTransition) return undefined;
     document.documentElement.classList.add("route-transition-lock");
     document.body.classList.add("route-transition-lock");
-    window.dispatchEvent(
-      new CustomEvent("roo:route-transition-visibility", {
-        detail: { active: true },
-      })
-    );
-
     return () => {
       document.documentElement.classList.remove("route-transition-lock");
       document.body.classList.remove("route-transition-lock");
-      window.dispatchEvent(
-        new CustomEvent("roo:route-transition-visibility", {
-          detail: { active: false },
-        })
-      );
     };
   }, [showRouteTransition]);
 
@@ -510,7 +461,7 @@ export function AppContent({
   }, []);
 
   useEffect(() => {
-    if (routeShell !== "memory" || typeof window === "undefined") return;
+    if (routeShell !== "memory") return;
     const restoreBrowserEntry = (event) => {
       if (!event.state?.__rooLegacy) return;
       navigate(
@@ -526,8 +477,6 @@ export function AppContent({
   }, [navigate, routeShell]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
     const rawHash = location.hash || (
       window.location.pathname === location.pathname ? window.location.hash : ""
     );
@@ -541,34 +490,32 @@ export function AppContent({
           : location.pathname === "/referrals/reset" && isReferralResetHash(rawHash)
             ? rawHash
             : "";
-    const sanitizedSearch = sanitizeBrowserSearch(location.pathname || "/", location.search || "");
-    const nextUrl = `${location.pathname || "/"}${sanitizedSearch}${keepHash}`;
-    const currentUrl = `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
+    const nextUrl = `${location.pathname}${sanitizeBrowserSearch(location.pathname, location.search)}${keepHash}`;
+    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
 
     if (routeShell === "memory") {
       const initial = !historyInitializedRef.current;
       historyInitializedRef.current = true;
+      const { [SECTION_TRIP_ENTRY]: unlandedTripEntry, ...browserState } = window.history.state || {};
       const state = {
-        ...window.history.state,
+        ...browserState,
         // Retain Next's router tree and any checkout state on first hydration.
-        usr: initial ? window.history.state?.usr ?? null : location.state,
+        usr: initial ? browserState.usr ?? null : location.state,
         __rooLegacy: true,
       };
       // Navbar section links may already have pushed their browser entry.
-      if (!initial && navigationType === "PUSH" && currentUrl !== nextUrl) {
+      if (!initial && navigationType === "PUSH" && currentUrl !== nextUrl && !unlandedTripEntry) {
         window.history.pushState(state, "", nextUrl);
       } else {
         window.history.replaceState(state, "", nextUrl);
       }
-    } else if (currentUrl !== nextUrl && window.history?.replaceState) {
+    } else if (currentUrl !== nextUrl) {
       window.history.replaceState(window.history.state, "", nextUrl);
     }
   }, [location.pathname, location.search, location.hash, location.key, location.state, navigationType, routeShell]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const routeKey = `${location.pathname || "/"}${location.search || ""}`;
+    const routeKey = location.pathname + location.search;
     const previousRouteKey = lastRouteKeyRef.current;
     lastRouteKeyRef.current = routeKey;
 
@@ -576,7 +523,7 @@ export function AppContent({
       return;
     }
 
-    const currentHash = normalizeSectionHash(window.location.hash || location.hash || "");
+    const currentHash = normalizeSectionHash(window.location.hash || location.hash);
     const hasHomeSectionIntent =
       location.pathname === "/" && isHomeSectionHash(currentHash);
     const isModalBackgroundNavigation = Boolean(location.state?.backgroundLocation);
@@ -585,7 +532,7 @@ export function AppContent({
       return;
     }
 
-    window.scrollTo({ top: 0, behavior: "auto" });
+    window.scrollTo(0, 0);
   }, [isFlowRoute, location.hash, location.pathname, location.search, location.state]);
 
   useEffect(() => {

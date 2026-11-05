@@ -27,6 +27,8 @@ const createContentGate = (request, baseURL) => {
       rules: (rules) => post("/store-rules", { trace, rules }),
       calls: () => get(`/store-calls?trace=${trace}`),
       contentReads: async () => (await get(`/store-calls?trace=${trace}`)).filter((rpc) => new RegExp(CONTENT_READ).test(rpc)),
+      keptAlive: () => get(`/kept-alive?trace=${trace}`),
+      purges: async () => (await get("/purges")).filter((purge) => purge.trace === trace),
       waitForHold: () =>
         expect.poll(async () => (await get(`/store-holds?trace=${trace}`)).length, { timeout: 15000, intervals: [100, 250, 500] }).toBeGreaterThan(0),
       release: () => post("/store-release", { trace }),
@@ -60,6 +62,7 @@ const createContentGate = (request, baseURL) => {
   return {
     control,
     traced,
+    admin,
     cms,
     document,
     replaceCommand,

@@ -283,6 +283,13 @@ export const fetchPublicContentDocuments = async ({
   };
 };
 
+export const readPublicContentRevision = async ({
+  client = createSupabaseAdminClient(),
+} = {}) =>
+  requirePublicContentRevision(
+    requireRpcData(await client.rpc("roo_read_public_content_revision"), "public content revision")
+  );
+
 export const fetchRecoveryPaymentDocuments = async ({
   backend,
   statuses,

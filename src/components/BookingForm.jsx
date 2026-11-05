@@ -10,7 +10,7 @@ import { createPortal } from "react-dom";
 import { useDialogFocus } from "../lib/useDialogFocus";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
 import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
-import { getPublicContent } from "../lib/publicContentClient";
+import { getPublicContent, reportContentLoadError } from "../lib/publicContentClient";
 import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -48,6 +48,10 @@ const {
 } = packagePricing;
 const preparePackage = (pkg) =>
   applyPackageContentOverrides(applyPackagePricing(pkg));
+const loadPackage = (title, apply) =>
+  getPublicContent("package", { title })
+    .then((data) => apply(preparePackage(data)))
+    .catch(reportContentLoadError);
 const DEFAULT_VERTEX_PACKAGE = preparePackage({
   title: "Performance Vertex Overhaul",
   price: "$79.95",
@@ -556,7 +560,6 @@ export default function BookingForm() {
   }, []);
   useDialogFocus({ open: showVertexModal, dialogRef: planDialogRef, initialFocusRef: planCloseRef, onClose: closePlan });
   const [vertexPackage, setVertexPackage] = useState(null);
-  const [vertexEssentialsPackage, setVertexEssentialsPackage] = useState(null);
   const [planPackage, setPlanPackage] = useState(null);
   const [modalPackage, setModalPackage] = useState(null);
   const [modalMode, setModalMode] = useState("switch");
@@ -1367,48 +1370,16 @@ export default function BookingForm() {
   }, [showVertexModal, modalMode]);
 
   useEffect(() => {
-    const fetchVertex = async () => {
-      try {
-        const data = await getPublicContent("package", {
-          title: "Performance Vertex Overhaul",
-        });
-        setVertexPackage(preparePackage(data));
-      } catch {
-        console.error("Failed to fetch Performance Vertex package");
-      }
-    };
-    fetchVertex();
-  }, []);
-
-  useEffect(() => {
-    const fetchVertexEssentials = async () => {
-      try {
-        const data = await getPublicContent("package", {
-          title: "Vertex Essentials",
-        });
-        setVertexEssentialsPackage(preparePackage(data));
-      } catch {
-        console.error("Failed to fetch Vertex Essentials package");
-      }
-    };
-    fetchVertexEssentials();
+    loadPackage("Performance Vertex Overhaul", setVertexPackage);
   }, []);
 
   useEffect(() => {
     if (!selectedPackage.title) return;
     let active = true;
     setPlanPackage(null);
-    const fetchPlan = async () => {
-      try {
-        const data = await getPublicContent("package", {
-          title: getPackageTitleAliases(selectedPackage.title),
-        });
-        if (active) setPlanPackage(preparePackage(data));
-      } catch {
-        console.error("Failed to fetch current package");
-      }
-    };
-    fetchPlan();
+    loadPackage(getPackageTitleAliases(selectedPackage.title), (plan) => {
+      if (active) setPlanPackage(plan);
+    });
     return () => {
       active = false;
     };
