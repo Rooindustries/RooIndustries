@@ -159,3 +159,58 @@ test.describe("Route smoke", () => {
     await page.reload(); await expect(toggle).toHaveAttribute("aria-checked", "false"); await expect(page.locator("html")).toHaveAttribute("data-theme", "default");
   });
 });
+
+test("desktop nav marks the current page inside its menus", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  for (const [route, menu, item] of [["/reviews", "Proof", "Reviews"], ["/referrals/login", "Referrals", "Dashboard"]]) {
+    await page.goto(route);
+    const button = page.locator(`header nav button[aria-controls="desktop-${menu.toLowerCase()}-menu"]`);
+    await button.click();
+    const panel = page.locator(`#desktop-${menu.toLowerCase()}-menu`);
+    await expect(panel.getByRole("link", { name: item, exact: true }), route).toHaveAttribute("aria-current", "page");
+  }
+});
+
+test("phone menu marks the current page", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const [route, item] of [["/meet-the-team", "Meet the Team"], ["/packages", "Packages"]]) {
+    await page.goto(route);
+    await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+    const toggle = page.getByRole("button", { name: "Open menu", exact: true });
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const menu = page.locator("#mobile-site-menu");
+    await expect(menu.getByRole("link", { name: item, exact: true }), route).toHaveAttribute("aria-current", "page");
+  }
+});
+
+test("desktop nav links stay quiet so Packages is the only filled item", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  for (const theme of ["dark", "default"]) {
+    await page.addInitScript((value) => localStorage.setItem("roo-theme", value), theme);
+    await page.goto("/reviews");
+    const links = page.locator("header nav").first().locator(":scope > a, :scope > div > button, :scope > button");
+    const items = await links.evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const style = getComputedStyle(node);
+        const alpha = style.backgroundColor.match(/[\d.]+/g)?.[3];
+        return {
+          name: node.textContent.trim(),
+          current: node.getAttribute("aria-current") || node.getAttribute("aria-expanded"),
+          shadow: style.boxShadow,
+          borderWidth: style.borderTopWidth,
+          image: style.backgroundImage,
+          alpha: alpha === undefined ? 1 : Number(alpha),
+        };
+      }));
+    expect(items.length, theme).toBeGreaterThan(3);
+    for (const item of items) {
+      expect({ shadow: item.shadow, borderWidth: item.borderWidth, image: item.image }, `${theme} ${item.name}`)
+        .toEqual({ shadow: "none", borderWidth: "0px", image: "none" });
+      expect(item.alpha, `${theme} ${item.name}`).toBeLessThan(0.2);
+    }
+    const cta = page.locator("header .nav-cta").first();
+    const ctaImage = await cta.evaluate((node) => getComputedStyle(node).backgroundImage);
+    expect(ctaImage, theme).not.toBe("none");
+  }
+});

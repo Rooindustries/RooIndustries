@@ -39,3 +39,43 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await page.screenshot({ path: testInfo.outputPath("terms-hydrated.png"), fullPage: true, animations: "disabled" });
   });
 }
+
+const POLICY_LINKS = [
+  { href: "/faq", outside: false },
+  { href: "https://www.rooindustries.com/reviews", outside: false },
+  { href: "https://rooindustries.com/tools", outside: false },
+  { href: "https://example.com/elsewhere", outside: true },
+  { href: "//example.org/elsewhere", outside: true },
+  { href: "mailto:help@example.com", outside: false },
+];
+
+const policyWithLinks = {
+  title: "Synthetic policy",
+  sections: [{
+    heading: "Links",
+    content: [{
+      _type: "block",
+      _key: "links",
+      style: "normal",
+      markDefs: POLICY_LINKS.map(({ href }, index) => ({ _type: "link", _key: `link${index}`, href })),
+      children: POLICY_LINKS.map((_, index) => ({ _type: "span", _key: `span${index}`, text: `policy-link-${index} `, marks: [`link${index}`] })),
+    }],
+  }],
+};
+
+for (const [route, resource] of [["/terms", "terms"], ["/privacy", "privacy-policy"]]) {
+  test(`${route} opens outside links in a new tab and site links in the same tab`, async ({ page }) => {
+    await page.route(`**/api/content/${resource}**`, (request) => request.fulfill({ json: { ok: true, data: policyWithLinks } }));
+    await page.goto(route, { waitUntil: "networkidle" });
+    for (const [index, { href, outside }] of POLICY_LINKS.entries()) {
+      const link = page.locator("main a", { hasText: `policy-link-${index}` });
+      await expect(link, href).toHaveAttribute("href", href);
+      if (outside) {
+        await expect(link, href).toHaveAttribute("target", "_blank");
+        await expect(link, href).toHaveAttribute("rel", /noopener/);
+      } else {
+        await expect(link, href).not.toHaveAttribute("target", /.+/);
+      }
+    }
+  });
+}

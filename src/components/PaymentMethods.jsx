@@ -16,17 +16,17 @@ const METHODS = [
 
 export default function PaymentMethods({ className = "" }) {
   return (
-    <ul role="list" aria-label="Payment methods" className={`flex max-w-[22rem] flex-wrap justify-center gap-1 sm:max-w-none sm:gap-2 ${className}`}>
+    <ul role="list" aria-label="Payment methods" className={`flex max-w-[17rem] flex-wrap justify-center gap-1.5 sm:max-w-none ${className}`}>
       {METHODS.map(([id, name]) => (
         <li key={id}>
           <img
             src={`/payment-methods/${id}.svg`}
             alt={name}
-            width={48}
-            height={32}
+            width={36}
+            height={24}
             loading="lazy"
             decoding="async"
-            className="block h-8 w-12"
+            className="block h-6 w-9"
           />
         </li>
       ))}

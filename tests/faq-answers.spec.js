@@ -15,7 +15,13 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.setViewportSize(viewport);
       await page.goto(route, { waitUntil: "networkidle" });
       const regions = page.locator('[id$="-answer"]');
-      await expect(regions).toHaveCount(10);
+      if (route === "/faq") {
+        await expect(page.getByText(/^Page \d+ of \d+$/)).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Synthetic local question 12", exact: true })).toHaveCount(1);
+        await expect(regions).toHaveCount(13);
+      } else {
+        await expect(regions).toHaveCount(10);
+      }
       const collapsed = await regions.evaluateAll(items => items.map(item => ({
         id: item.id,
         text: item.textContent.trim(),
@@ -47,6 +53,30 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(text).toBeHidden();
     });
   }
+}
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  test(`/faq keeps the question column steady beside its heading at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/faq", { waitUntil: "networkidle" });
+    await expect(page.locator("#faq a")).toHaveCount(0);
+    const firstQuestion = page.getByRole("button", { name: /Synthetic local question 1$/ });
+    const heading = await page.locator(".ri-faq-heading").boundingBox();
+    const column = page.locator(".ri-faq-questions");
+    const before = await column.boundingBox();
+    if (viewport.width >= 1024) {
+      expect(heading.x + heading.width).toBeLessThan(before.x);
+      expect(Math.abs(heading.y - before.y)).toBeLessThanOrEqual(heading.height);
+    } else {
+      expect(heading.y + heading.height).toBeLessThan(before.y);
+    }
+    await firstQuestion.click();
+    await expect(firstQuestion).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByText(answer(1), { exact: true })).toBeVisible();
+    const after = await column.boundingBox();
+    expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(after.width - before.width)).toBeLessThanOrEqual(1);
+  });
 }
 
 test.describe("without JavaScript", () => {

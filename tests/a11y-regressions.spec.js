@@ -99,16 +99,22 @@ for (const [name, viewport] of [
       await reviews.screenshot({ path: testInfo.outputPath("keyboard-reviews.png") });
     });
 
-    test("the reviews region stops auto-scrolling while focused", async ({ page }) => {
+    test("the reviews region only auto-scrolls on wide screens and stops while focused", async ({ page }) => {
       await page.goto("/", { waitUntil: "networkidle" });
       const reviews = page.getByRole("region", { name: "Player reviews", exact: true });
       await reviews.scrollIntoViewIfNeeded();
       const position = () => reviews.evaluate((element) => element.scrollLeft);
-      await expect.poll(async () => {
-        const start = await position();
-        await page.waitForTimeout(600);
-        return (await position()) - start;
-      }, { timeout: 15000 }).toBeGreaterThan(0);
+      if (viewport.width < 640) {
+        const idleStart = await position();
+        await page.waitForTimeout(2000);
+        expect(Math.abs((await position()) - idleStart)).toBeLessThanOrEqual(1);
+      } else {
+        await expect.poll(async () => {
+          const start = await position();
+          await page.waitForTimeout(600);
+          return (await position()) - start;
+        }, { timeout: 15000 }).toBeGreaterThan(0);
+      }
 
       await reviews.focus();
       await page.keyboard.press("Shift+Tab");
