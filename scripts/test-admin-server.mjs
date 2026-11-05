@@ -6,12 +6,14 @@ import { registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
+import { lockBuildDirectory } from "./lib/build-lock.mjs";
 
 refuseEnvFiles();
 const root = process.cwd();
 const baseURL = localOrigin(process.env.BASE_URL);
 const target = new URL(baseURL);
 const dist = validateDistDir(process.env.NEXT_DIST_DIR, { isolated: true });
+const lock = lockBuildDirectory(dist);
 const port = Number(target.port);
 if (port !== Number(process.env.PW_PORT) || target.hostname !== process.env.ROO_TEST_HOST || port > 65528) throw new Error("Invalid admin fixture target.");
 const controlOrigin = `http://127.0.0.1:${port + 6}`;
@@ -39,6 +41,8 @@ let notificationSequence = 0;
 const storeRules = new Map();
 const storeCalls = [];
 const storeHolds = [];
+const purges = [];
+const keptAlive = [];
 const readJson = async request => {
   let raw = "";
   for await (const chunk of request) raw += chunk;
@@ -171,6 +175,17 @@ try {
         response.end(JSON.stringify({ error: error.message })); return;
       }
     }
+    if (request.method === "POST" && ["/purges", "/kept-alive"].includes(request.url)) {
+      (request.url === "/purges" ? purges : keptAlive).push(await readJson(request));
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
+    }
+    if (request.method === "GET" && request.url === "/purges") {
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(purges)); return;
+    }
+    if (request.method === "GET" && request.url.startsWith("/kept-alive?")) {
+      const trace = new URL(request.url, controlOrigin).searchParams.get("trace");
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(keptAlive.filter(entry => entry.trace === trace).map(({ state }) => state))); return;
+    }
     if (request.method === "POST" && request.url === "/store-rules") {
       const { trace, rules } = await readJson(request);
       storeRules.set(trace, rules.map(rule => ({ ...rule, pattern: new RegExp(rule.rpc) })));
@@ -293,7 +308,7 @@ try {
     ROO_TEST_NETWORK_ORIGINS: JSON.stringify([baseURL, fixture.origin, fixture.storageUrl, fixture.postgrestUrl, controlOrigin]),
   };
   const execute = args => new Promise((resolve, reject) => {
-    active = spawn(process.execPath, args, { env, stdio: "inherit" });
+    active = spawn(process.execPath, args, { env: lock.childEnv(env), stdio: ["inherit", "inherit", "inherit", lock.fd] });
     active.once("error", reject);
     active.once("exit", (code, signal) => code === 0 || stopped ? resolve() : reject(new Error(`Admin fixture server exited ${signal || code}.`)));
   });

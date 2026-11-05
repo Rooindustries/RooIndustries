@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
-import { getPublicContent } from "../lib/publicContentClient";
+import { getPublicContent, reportContentLoadError } from "../lib/publicContentClient";
 
 const HEX_CLIP_PATH = "circle(50% at 50% 50%)";
 
@@ -299,7 +299,7 @@ export default function MeetTheTeam({ onSeoData, initialData = null }) {
     if (initialData) return;
     getPublicContent("team")
       .then(setRawData)
-      .catch(console.error);
+      .catch(reportContentLoadError);
   }, []);
 
   const resolved = useMemo(() => {
