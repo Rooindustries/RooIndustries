@@ -9,7 +9,9 @@ import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } fro
 import { lockBuildDirectory } from "./lib/build-lock.mjs";
 import { createToolingContentFixture } from "../tests/fixtures/tooling-content.mjs";
 import { apiRouteSecrets } from "../tests/fixtures/api-routes.mjs";
+import { adoptHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
 
+await adoptHeldTcpPorts();
 if (process.env.ROO_ADMIN_FIXTURE === "1") {
   await import("./test-admin-server.mjs");
 } else {
@@ -100,11 +102,13 @@ if (development) {
 } else {
   if (fs.existsSync(dist) && fs.readdirSync(dist).some(entry => entry !== "cache")) throw new Error("Incomplete isolated build exists; choose a fresh NEXT_DIST_DIR.");
 }
+await reserveTcpPorts(testHost, [Number(target.port), contentPort]);
 const fixture = await createToolingContentFixture({ origin: contentURL, artifact: process.env.TOOLING_CONTENT_ARTIFACT, apiRoutes, clockFile });
 try {
   await execute(["scripts/generate-sitemap.js"]);
   await execute(["scripts/generate-robots.js"], { ...env, VERCEL_ENV: "production" });
   if (development) {
+    await releaseTcpPorts(testHost, [Number(target.port)]);
     await execute([next, "dev", "--hostname", testHost, "--port", target.port]);
   } else {
     const content = { contentSha256: fixture.evidence.contentSha256, contentResponse: process.env.TOOLING_CLS_RESPONSE || "success" };
@@ -116,6 +120,7 @@ try {
       await execute([next, "build"], monitoringStartup ? env : buildEnv);
       fs.writeFileSync(manifestPath, JSON.stringify({ version: 1, sourceHash, baseURL, contentURL, ...content }));
     }
+    await releaseTcpPorts(testHost, [Number(target.port)]);
     await execute([next, "start", "--hostname", testHost, "--port", target.port]);
   }
 } catch (error) {

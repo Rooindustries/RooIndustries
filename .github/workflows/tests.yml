@@ -69,9 +69,11 @@ jobs:
           if command -v heavy >/dev/null; then
             heavy npm run test:monitoring
             heavy npm run test:monitoring:startup
+            heavy npm run test:monitoring:startup
             heavy npm run test:monitoring:deployments
           else
             npm run test:monitoring
+            npm run test:monitoring:startup
             npm run test:monitoring:startup
             npm run test:monitoring:deployments
           fi
