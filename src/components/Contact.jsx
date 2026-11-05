@@ -73,7 +73,7 @@ export default function Contact({ initialData = null }) {
   };
 
   return (
-    <section className="text-ink px-4 py-28 flex flex-col items-center">
+    <section className="text-ink px-4 pb-28 page-top flex flex-col items-center">
       <div className="text-center mb-10">
         <h1 className="section-title">
           {contactData?.title || "Get In Touch"}

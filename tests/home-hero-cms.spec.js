@@ -47,7 +47,7 @@ test("renders CMS hero in server HTML without JavaScript", async ({ page }) => {
       path: path.join(artifactDir, `ssr-${name}.png`),
     });
     if (viewport.width <= 390) {
-      const bounds = await page.locator("#top h1 > span, .ri-hero-cta-note p:visible").evaluateAll((elements) =>
+      const bounds = await page.locator("#top h1 > span, .ri-hero-cta-note li:visible").evaluateAll((elements) =>
         elements.map((element) => {
           const rect = element.getBoundingClientRect();
           return {
@@ -162,7 +162,9 @@ test.describe("hydrated hero", () => {
     await expect(hero.locator("h1")).toContainText(HOME_COPY.hero.headingLine1);
     await expect(hero.locator("h1")).toContainText(HOME_COPY.hero.headingLine2);
     await expect(hero.getByText(HOME_COPY.hero.subtext, { exact: true })).toBeVisible();
-    await expect(hero.locator(".ri-hero-cta-note")).toContainText(HOME_COPY.hero.ctaNote);
+    for (const promise of HOME_COPY.hero.ctaNote.split(" · ")) {
+      await expect(hero.locator(".ri-hero-cta-note")).toContainText(promise);
+    }
     await expect(hero.getByRole("link", { name: "Tune My PC", exact: true })).toHaveAttribute("href", "/#packages");
     await expect(hero.getByRole("link", { name: "How It Works", exact: true })).toHaveAttribute("href", "/#how-it-works");
     await expect(page.getByText("Legacy Field Must Not Render", { exact: true })).toHaveCount(0);

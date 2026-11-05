@@ -17,7 +17,7 @@ jest.mock("../components/Navbar", () => function NavigationFixture() {
       window.history.pushState(window.history.state, "", "/#packages");
       navigate("/");
     }}>Section fixture</button>
-    <BackButton inline />
+    <BackButton />
   </nav>;
 });
 jest.mock("../components/ReservationBanner", () => () => null);
@@ -36,7 +36,7 @@ jest.mock("../legacyPages/RefDashboard", () => function RedirectFixture() {
   return <Navigate to="/referrals/login" replace />;
 });
 jest.mock("../lib/performanceProfile", () => ({ initializePerformanceProfile: jest.fn() }));
-jest.mock("../lib/scrollRuntime", () => ({ useScrollRuntime: () => ({ scrollY: 0, direction: "up" }) }));
+jest.mock("../lib/scrollRuntime", () => ({ useScrollRuntime: () => ({ scrollY: 0 }) }));
 jest.mock("../lib/homeSectionData", () => ({ prefetchHomeSectionData: jest.fn().mockResolvedValue(undefined) }));
 jest.mock("@vercel/analytics/react", () => ({ Analytics: () => null }));
 jest.mock("@vercel/speed-insights/react", () => ({ SpeedInsights: () => null }));

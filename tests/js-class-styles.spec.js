@@ -1,6 +1,7 @@
 const { test, expect } = require("@playwright/test");
 
 const viewports = [
+  { width: 320, height: 700 },
   { width: 390, height: 844 },
   { width: 1440, height: 900 },
 ];
@@ -30,9 +31,20 @@ async function readHomeStyles(page) {
       scrollBehavior: getComputedStyle(root).scrollBehavior,
       deferred,
       headingLines: [...document.querySelectorAll("#top .ri-hero-heading-line")].map(wrapStyle),
-      ctaNotes: [...document.querySelectorAll("#top .ri-hero-cta-note p:not([aria-hidden=true])")].map(wrapStyle),
+      promises: [...document.querySelectorAll("#top .ri-hero-cta-note li")].map(element => ({
+        fontSize: parseFloat(getComputedStyle(element).fontSize),
+        fits: fits(element),
+      })),
     };
   });
+}
+
+function expectReadablePromises(promises, check = expect) {
+  check(promises.length).toBeGreaterThan(0);
+  for (const promise of promises) {
+    check(promise.fits).toBe(true);
+    check(promise.fontSize).toBeGreaterThanOrEqual(14);
+  }
 }
 
 function expectNoScriptStyles(styles) {
@@ -43,10 +55,10 @@ function expectNoScriptStyles(styles) {
     expect.soft(section).toEqual({ contentVisibility: "visible", rendered: true });
   }
   expect.soft(styles.headingLines.length).toBeGreaterThan(0);
-  expect.soft(styles.ctaNotes.length).toBeGreaterThan(0);
-  for (const line of [...styles.headingLines, ...styles.ctaNotes]) {
+  for (const line of styles.headingLines) {
     expect.soft(line).toEqual({ whiteSpace: "normal", textWrapStyle: "balance", fits: true });
   }
+  expectReadablePromises(styles.promises, expect.soft);
 }
 
 test.describe("Home styles without JavaScript", () => {
@@ -65,7 +77,7 @@ test.describe("Home styles with JavaScript", () => {
   test.use({ javaScriptEnabled: true });
 
   for (const viewport of viewports) {
-    test(`deferred sections defer and hero text stays on one line at ${viewport.width}px`, async ({ page }) => {
+    test(`deferred sections defer, the hero heading stays on one line and the promises stay readable at ${viewport.width}px`, async ({ page }) => {
       await page.setViewportSize(viewport);
       await page.goto("/", { waitUntil: "networkidle" });
       await expect(page.locator("html.js")).toHaveCount(1);
@@ -78,11 +90,11 @@ test.describe("Home styles with JavaScript", () => {
       }
       expect(styles.deferred.some(section => !section.rendered)).toBe(true);
       expect(styles.headingLines.length).toBeGreaterThan(0);
-      expect(styles.ctaNotes.length).toBeGreaterThan(0);
-      for (const line of [...styles.headingLines, ...styles.ctaNotes]) {
+      for (const line of styles.headingLines) {
         expect(line.whiteSpace).toBe("nowrap");
         expect(line.fits).toBe(true);
       }
+      expectReadablePromises(styles.promises);
     });
   }
 });
