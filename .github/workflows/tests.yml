@@ -145,6 +145,7 @@ jobs:
       ROO_TEST_HOST: 127.0.0.1
       BASE_URL: http://127.0.0.1:3211
       PW_PORT: "3211"
+      TOOLING_CONTENT_PORT: "3219"
       PW_SERVER_ID: ci
       NEXT_DIST_DIR: .next-e2e-ci
       TOOLING_API_ROUTES: "0"
