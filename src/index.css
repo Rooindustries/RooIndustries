@@ -328,6 +328,11 @@ html[data-theme="dark"] {
   --color-accent-strong: #b88708;
   --color-accent-contrast: #171003;
   --color-accent-glow: #f5c542;
+  --color-champagne-edge: #c4983a;
+  --color-champagne-edge-light: #cfa64a;
+  --color-champagne: #fff0a6;
+  --color-champagne-light: #fff6c9;
+  --color-champagne-gold: #ecd389;
   --color-accent-soft: rgba(212, 175, 55, 0.54);
   --color-focus-ring: rgba(245, 197, 66, 0.74);
 
@@ -369,15 +374,31 @@ html[data-theme="dark"] {
     #0f0f0f 100%
   );
 
-  --gradient-button-primary: linear-gradient(180deg, #e6c158, #d2a637);
+  --gradient-button-primary: linear-gradient(
+    110deg,
+    var(--color-champagne-edge) 0%,
+    #dfba5c 20%,
+    #f6e19a 38%,
+    var(--color-champagne) 50%,
+    #ecc95e 68%,
+    var(--color-champagne-edge) 100%
+  );
   --gradient-button-booking: var(--gradient-button-primary);
   --gradient-platform-twitch: linear-gradient(135deg, #7a3df0, #4c22a8);
 
-  --shadow-button: inset 0 1px 0 rgba(255, 245, 200, 0.45);
+  --shadow-button: inset 0 0 0 1px rgba(255, 240, 166, 0.4),
+    inset 0 1px 0 rgba(255, 250, 230, 0.6);
   --shadow-button-accent: var(--shadow-button);
   --shadow-cta-success: 0 0 12px rgba(16, 185, 129, 0.22);
   --gradient-nav-cta: var(--gradient-button-primary);
-  --gradient-nav-cta-hover: linear-gradient(180deg, #edcb66, #dbb043);
+  --gradient-nav-cta-hover: linear-gradient(
+    110deg,
+    var(--color-champagne-edge-light) 0%,
+    #e8c870 22%,
+    var(--color-champagne-light) 50%,
+    #f0d47e 72%,
+    var(--color-champagne-edge-light) 100%
+  );
   --shadow-divider-extra: 0 0 14px rgba(255, 215, 110, 0.3);
   --shadow-booking-glow: 0 0 10px rgba(240, 240, 235, 0.1),
     0 0 18px rgba(240, 240, 235, 0.05);
@@ -1406,7 +1427,7 @@ html:not([data-theme="dark"]) .ri-package-tag-gold {
 
 html[data-theme="dark"] .ri-package-tag-gold.gold-flair-pill {
   border-color: transparent;
-  background: #e2bb4c;
+  background: var(--gradient-button-primary);
   padding: 0.3rem 1rem;
   box-shadow: none;
 }
@@ -1418,9 +1439,9 @@ html[data-theme="dark"].animations-ready
 
 html[data-theme="dark"] .ri-package-tag-gold .gold-flair-text {
   background: none;
-  color: #171102;
+  color: var(--color-accent-contrast);
   font-weight: 800;
-  -webkit-text-fill-color: #171102;
+  -webkit-text-fill-color: var(--color-accent-contrast);
   text-shadow: none;
 }
 
@@ -1707,7 +1728,7 @@ html[data-theme="dark"]
 }
 
 html[data-theme="dark"] .ri-proof-card {
-  --rc-accent: #bda45f !important;
+  --rc-accent: var(--color-accent) !important;
   --rc-border: rgba(255, 255, 255, 0.2) !important;
   --rc-border-sub: rgba(255, 255, 255, 0.13) !important;
   --rc-cta: #2a2a2d !important;
@@ -1718,8 +1739,8 @@ html[data-theme="dark"] .ri-proof-title {
   background: none;
   -webkit-background-clip: border-box;
   background-clip: border-box;
-  -webkit-text-fill-color: #dfca86;
-  color: #dfca86;
+  -webkit-text-fill-color: var(--color-champagne-gold);
+  color: var(--color-champagne-gold);
   filter: none;
   text-shadow: 0 0 10px rgba(212, 175, 55, 0.1);
 }
@@ -1741,7 +1762,7 @@ html[data-theme="dark"] .ri-proof-cta {
 }
 
 html[data-theme="dark"] .ri-service-icon {
-  color: #cbb46c !important;
+  color: var(--color-champagne-gold) !important;
 }
 
 html[data-theme="dark"] .ri-hiw-step-badge {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
-import { getPublicContent } from "../lib/publicContentClient";
+import { getPublicContent, reportContentLoadError } from "../lib/publicContentClient";
 import { Link } from "react-router-dom";
 import ImageZoomModal from "../components/ImageZoomModal";
 
@@ -42,7 +42,7 @@ export default function Benchmarks({ initialData = null, setIsModalOpen = () => 
       .then((rows) => {
         if (Array.isArray(rows)) setBenchmarks(rows);
       })
-      .catch(console.error);
+      .catch(reportContentLoadError);
   }, []);
 
   return (
