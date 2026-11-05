@@ -39,6 +39,42 @@ if (control) {
     }
     const response = await baseFetch(input, init);
     if (action === "hold") await report("/store-holds", { trace, rpc }, 25000);
+    if (action === "lose") {
+      await response.arrayBuffer();
+      throw new TypeError("fetch failed");
+    }
+    if (action === "gateway") {
+      await response.arrayBuffer();
+      return new Response("<html><body>504 Gateway Time-out</body></html>", { status: 504, headers: { "Content-Type": "text/html" } });
+    }
+    if (action.startsWith("error:")) {
+      await response.arrayBuffer();
+      return new Response(JSON.stringify({ code: action.slice(6), message: "Store error after the call." }), { status: 500, headers: { "Content-Type": "application/json" } });
+    }
+    if (action === "garble") {
+      await response.arrayBuffer();
+      return new Response("{\"results\": [", { status: 200, headers: { "Content-Type": "application/json" } });
+    }
     return response;
   };
+
+  const record = (operation) => async (target, options) => {
+    await report("/purges", { operation, target, options: options ?? null, trace: traces.getStore() ?? null });
+  };
+  const purge = {
+    invalidateByTag: record("invalidateByTag"),
+    dangerouslyDeleteByTag: record("dangerouslyDeleteByTag"),
+    invalidateBySrcImage: record("invalidateBySrcImage"),
+    dangerouslyDeleteBySrcImage: record("dangerouslyDeleteBySrcImage"),
+  };
+  const waitUntil = (promise) => {
+    const trace = traces.getStore();
+    if (!trace) return;
+    void report("/kept-alive", { trace, state: "registered" }).catch(() => {});
+    Promise.resolve(promise).then(
+      () => report("/kept-alive", { trace, state: "settled" }).catch(() => {}),
+      () => report("/kept-alive", { trace, state: "settled" }).catch(() => {}),
+    );
+  };
+  globalThis[Symbol.for("@vercel/request-context")] = { get: () => ({ purge, waitUntil }) };
 }

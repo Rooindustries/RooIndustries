@@ -21,10 +21,13 @@ test("content reads carry the CMS revision they came from, even when a publish l
     expect(listed.data.find((row) => row._id === TARGET_PACKAGE)?.price).toBe("$188.88");
 
     const straddled = gate.traced();
-    await straddled.rules([{ rpc: CONTENT_READ, action: "hold", times: 1 }]);
+    await straddled.rules([
+      { rpc: CONTENT_READ, action: "pass", times: 1 },
+      { rpc: CONTENT_READ, action: "hold", times: 1 },
+    ]);
     const pending = straddled.content(UPGRADE_LINK);
     await straddled.waitForHold();
-    expect(await straddled.contentReads()).toHaveLength(1);
+    expect(await straddled.contentReads()).toHaveLength(2);
     await gate.publishElsewhere(originalLink, { title: "Straddled upgrade title" });
     await gate.publishElsewhere(await gate.document(TARGET_PACKAGE), { price: "$211.11" });
     await straddled.release();
@@ -35,7 +38,7 @@ test("content reads carry the CMS revision they came from, even when a publish l
       revision: before.revision + 3,
       data: { title: "Straddled upgrade title", targetPackage: { price: "$211.11" } },
     });
-    expect(await straddled.contentReads()).toHaveLength(4);
+    expect(await straddled.contentReads()).toHaveLength(5);
   } finally {
     await gate.restore(TARGET_PACKAGE, original.document);
     await gate.restore(TARGET_LINK, originalLink.document);
