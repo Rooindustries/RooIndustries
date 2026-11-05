@@ -1,27 +1,24 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
-import { once } from "node:events";
 import { createHmac } from "node:crypto";
 import { registerHooks } from "node:module";
 import { fileURLToPath } from "node:url";
 import { installNetworkGuard, refuseEnvFiles } from "../../scripts/lib/test-target-safety.mjs";
+import { portFromEnv } from "../../scripts/lib/free-tcp-port.mjs";
 
 export async function createBookingHoldFixture() {
   refuseEnvFiles();
   const host = process.env.ROO_TEST_HOST || "127.0.0.1";
-  const port = Number(process.env.BOOKING_HOLD_PORT || Number(process.env.PW_PORT || 4173) + 2);
-  assert.ok(Number.isInteger(port) && port >= 1024 && port <= 65532, "Invalid booking fixture port");
-  const baseURL = `http://${host}:${port}`;
-  const origins = Array.from({ length: 4 }, (_, index) => `http://${host}:${port + index}`);
-  installNetworkGuard(origins);
+  const requested = portFromEnv("BOOKING_HOLD_PORT");
+  const server = http.createServer();
+  let baseURL, origins;
   Object.assign(process.env, {
     NODE_ENV: "test", VERCEL_ENV: "development", ALLOW_LIVE_PAYMENTS: "0",
     DATA_PRIMARY_BACKEND: "supabase", COMMERCE_PRIMARY_BACKEND: "supabase",
     SUPABASE_CUTOVER_ENABLED: "1", COMMERCE_CUTOVER_ENABLED: "1", COMMERCE_FAILOVER_GENERATION: "0",
     DODO_PAYMENTS_ENVIRONMENT: "test_mode", DODO_PAYMENTS_API_KEY: "fixture-only",
     DODO_PAYMENTS_WEBHOOK_KEY: "whsec_Zml4dHVyZS1vbmx5", DODO_PAYMENTS_PRODUCT_ID: "pdt_fixture",
-    DODO_PAYMENTS_RETURN_URL: `${baseURL}/handoff`,
     PAYMENT_SESSION_SECRET: "fixture-only-payment-session", HOLD_TOKEN_SECRET: "fixture-only-hold",
     CRON_SECRET: "fixture-only-cron",
     REF_SESSION_SECRET: "fixture-only-ref-session", RESEND_API_KEY: "re_fixture",
@@ -44,23 +41,29 @@ export async function createBookingHoldFixture() {
     fs.mkdirSync(new URL(".", artifact), { recursive: true });
     fs.writeFileSync(artifact, JSON.stringify(evidence, null, 2));
   };
-  const originalFetch = globalThis.fetch;
+  let originalFetch;
   const originalDate = globalThis.Date;
-  let database, server;
+  let database;
   const stop = async () => {
-    if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); server = null; }
+    if (server.listening) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
     if (database) { await database.stop(); database = null; }
-    globalThis.fetch = originalFetch;
+    if (originalFetch) globalThis.fetch = originalFetch;
     globalThis.Date = originalDate;
     evidence.stopped = true;
     save();
   };
   try {
+    await new Promise((resolve, reject) => { server.once("error", reject); server.listen(requested, host, resolve); });
+    baseURL = `http://${host}:${server.address().port}`;
+    process.env.DODO_PAYMENTS_RETURN_URL = `${baseURL}/handoff`;
     const { createSweepPostgresFixture } = await import("../../scripts/lib/sweep-postgres-fixture.mjs");
     database = await createSweepPostgresFixture({ fullMigrationChain: true,
       pgBin: process.env.PG_BIN, postgrestBin: process.env.POSTGREST_BIN,
       libraryPath: process.env.LD_LIBRARY_PATH,
-      ports: { postgres: port + 1, rest: port + 2, proxy: port + 3 } });
+      ports: requested ? { postgres: requested + 1, rest: requested + 2, proxy: requested + 3 } : {} });
+    origins = [baseURL, database.origin, database.postgrestUrl, `http://${host}:${database.pgPort}`];
+    installNetworkGuard(origins);
+    originalFetch = globalThis.fetch;
     evidence.database = { version: database.postgresVersion, postgrest: database.postgrestVersion, migrations: database.manifest.length };
     Object.assign(process.env, { SUPABASE_URL: database.origin, SUPABASE_SERVICE_ROLE_KEY: database.token,
       NEXT_PUBLIC_SUPABASE_URL: database.origin, NEXT_PUBLIC_SUPABASE_ANON_KEY: database.token });
@@ -128,7 +131,7 @@ export async function createBookingHoldFixture() {
       "/api/payment/reconcile": "../../src/server/api/payment/reconcile.js",
       "/api/payment/webhook/dodo": "../../src/server/api/payment/webhookDodo.js",
     })) handlers.set(route, (await import(module)).default);
-    server = http.createServer(async (req, res) => {
+    server.on("request", async (req, res) => {
       try {
         const chunks = [];
         for await (const chunk of req) chunks.push(chunk);
@@ -146,8 +149,6 @@ export async function createBookingHoldFixture() {
         res.end(body);
       } catch (error) { res.writeHead(500, { "content-type": "application/json" }); res.end(JSON.stringify({ error: error.message })); }
     });
-    server.listen(port, host);
-    await once(server, "listening");
     const post = async (route, body, authorization = "", headers = {}) => {
       globalThis.__rooRateLimitBuckets?.clear();
       const response = await fetch(`${baseURL}${route}`, {

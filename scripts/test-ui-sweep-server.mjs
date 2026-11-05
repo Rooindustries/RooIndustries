@@ -2,21 +2,23 @@ const testHost = process.env.ROO_TEST_HOST || '127.0.0.1';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 import { uiRepairsFixture } from '../tests/fixtures/ui-repairs-server.mjs';
 import { uiFinishFixture } from '../tests/fixtures/ui-finish-server.mjs';
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from './lib/test-target-safety.mjs';
+import { portFromEnv, reserveTcpPorts } from './lib/free-tcp-port.mjs';
+import { startChildOnPorts, stopChild } from './lib/start-on-port.mjs';
 import { lockBuildDirectory } from './lib/build-lock.mjs';
 import { withNodeOption } from './lib/node-options.mjs';
 
 refuseEnvFiles();
 const host = testHost;
-const port = Number(process.env.UI_PORT || 45981);
-const nextPort = Number(process.env.UI_NEXT_PORT || 45980);
-if (![port, nextPort].every(value => Number.isInteger(value) && value > 1024 && value < 65536) || port === nextPort) throw new Error('Invalid fixture ports.');
+const requestedNextPort = portFromEnv('UI_NEXT_PORT');
+await reserveTcpPorts(host, [requestedNextPort].filter(Boolean));
+const server = http.createServer();
+await new Promise((resolve, reject) => { server.once('error', reject); server.listen(portFromEnv('UI_PORT'), host, resolve); });
+const port = server.address().port;
 const base = localOrigin(`http://${host}:${port}`);
-const upstream = localOrigin(`http://${host}:${nextPort}`);
-installNetworkGuard([base, upstream]);
+let nextPort, upstream;
 const lock = lockBuildDirectory(validateDistDir(process.env.NEXT_DIST_DIR || '.next-e2e-ui-sweep', { isolated: true }), { slots: process.env.NEXT_DIST_DIR ? 1 : 20 });
 const dist = validateDistDir(lock.dir, { isolated: true });
 const artifact = path.resolve(process.env.UI_ARTIFACT || 'test-results/ui-sweep.json');
@@ -42,7 +44,7 @@ const json = (res, value, status = 200) => { res.writeHead(status, { 'Content-Ty
 const read = async req => { let body = ''; for await (const part of req) { body += part; if (body.length > 131072) throw new Error('Fixture body too large.'); } return body ? JSON.parse(body) : {}; };
 const repairs = uiRepairsFixture({ json, read, base });
 const finish = uiFinishFixture({ json, read, base });
-const server = http.createServer(async (req, res) => {
+server.on('request', async (req, res) => {
   try {
     const url = new URL(req.url, base);
     res.setHeader('Content-Security-Policy', csp);
@@ -105,9 +107,23 @@ const server = http.createServer(async (req, res) => {
     proxy.on('error', () => json(res, { error: 'Isolated Next server is starting.' }, 503)); req.pipe(proxy);
   } catch (error) { json(res, { error: error.message }, 500); }
 });
-await new Promise(resolve => server.listen(port, host, resolve));
 const env = withNodeOption({ PATH: process.env.PATH, HOME: process.env.HOME, CI: 'true', TZ: 'UTC', NODE_ENV: 'development', NEXT_TELEMETRY_DISABLED: '1', NEXT_DIST_DIR: dist, BASE_URL: base, ROO_TEST_HOST: testHost, TOOLING_NETWORK_GUARD: '1', NEXT_PUBLIC_SUPABASE_URL: base, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'synthetic-ui-publishable-key', NEXT_PUBLIC_SUPABASE_ASSET_URL: base, DATA_PRIMARY_BACKEND: 'supabase', SALES_PREVIEW_READ_ONLY: '1' }, '--import', path.resolve('scripts/lib/test-target-safety.mjs'));
-const child = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--hostname', host, '--port', String(nextPort)], { env: lock.childEnv(env), stdio: ['inherit', 'inherit', 'inherit', lock.fd] });
+const output = [];
+const { ports: [startedPort], child } = await startChildOnPorts({
+  host,
+  requested: [requestedNextPort],
+  timeout: 60000,
+  output: () => output.join(''),
+  spawnChild: ([candidate], launch) => {
+    const next = launch.spawn(process.execPath, ['node_modules/next/dist/bin/next', 'dev', '--hostname', host, '--port', String(candidate)], { env: lock.childEnv(env), stdio: ['ignore', 'pipe', 'pipe', lock.fd] });
+    next.stdout.on('data', chunk => { output.push(String(chunk)); process.stdout.write(chunk); });
+    next.stderr.on('data', chunk => { output.push(String(chunk)); process.stderr.write(chunk); });
+    return next;
+  },
+});
+nextPort = startedPort;
+upstream = localOrigin(`http://${host}:${nextPort}`);
+installNetworkGuard([base, upstream]);
 child.on('exit', code => { server.close(); process.exitCode = code || 0; });
-for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => { child.kill(signal); server.close(); });
+for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => { stopChild(child); server.close(); });
 console.log(JSON.stringify({ pid: process.pid, nextPid: child.pid, url: base, runner: `${base}/__ui`, artifact, isolatedHttpFixtures: true, browserCsp: csp }));

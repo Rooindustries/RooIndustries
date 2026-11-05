@@ -1,11 +1,18 @@
 import { declaredValue, findVariable, isFunction } from "./util.mjs";
 
-const loaders = new Set(["getPublicContent", "fetchHomeSectionData", "prefetchHomeSectionData"]);
+const loaders = new Set([
+  "getPublicContent",
+  "fetchHomeSectionData",
+  "prefetchHomeSectionData",
+  "fetchJsonWithTimeout",
+  "fetchJsonWithRetry",
+  "fetchUpgradeInfo",
+]);
 const combinators = new Set(["all", "any", "race"]);
-const reporters = new Set(["captureException", "captureMessage", "reportError"]);
+const reporters = new Set(["captureException", "captureMessage", "reportError", "reportClientError"]);
 const consoleMethods = new Set(["error", "warn"]);
-const helperName = "reportContentLoadError";
-const helperModule = /(^|\/)publicContentClient(\.js)?$/;
+const helperName = "reportRequestError";
+const helperModule = /(^|\/)clientRequest(\.js)?$/;
 
 const calleeName = (callee) => {
   if (callee?.type === "Identifier") return callee.name;
@@ -36,11 +43,11 @@ export default {
     type: "problem",
     docs: {
       description:
-        "A content load failure logged outside reportContentLoadError reports requests the browser cut off because the visitor left.",
+        "A request failure logged outside reportRequestError reports requests the browser cut off because the visitor left.",
     },
     messages: {
       unfiltered:
-        "Pass this content load failure to reportContentLoadError so a request cut off by leaving the page isn't reported.",
+        "Pass this request failure to reportRequestError so a request cut off by leaving the page isn't reported.",
     },
     schema: [],
   },
@@ -61,12 +68,12 @@ export default {
       return (imported.name ?? imported.value) === helperName && helperModule.test(definition.parent.source.value);
     };
 
-    const isContentPromise = (node, seen = new Set()) => {
+    const isRequestPromise = (node, seen = new Set()) => {
       if (!node || seen.has(node)) return false;
       seen.add(node);
       if (node.type === "Identifier") {
         const init = declaredValue(context, node);
-        return init?.parent?.parent?.kind === "const" && isContentPromise(init, seen);
+        return init?.parent?.parent?.kind === "const" && isRequestPromise(init, seen);
       }
       if (node.type !== "CallExpression") return false;
       const { callee } = node;
@@ -75,12 +82,12 @@ export default {
       const method = callee.property.name;
       if (callee.object.type === "Identifier" && callee.object.name === "Promise" && combinators.has(method)) {
         const list = node.arguments[0];
-        return list?.type === "ArrayExpression" && list.elements.some((item) => isContentPromise(item, seen));
+        return list?.type === "ArrayExpression" && list.elements.some((item) => isRequestPromise(item, seen));
       }
       if (!["then", "catch", "finally"].includes(method)) return false;
       const handler = rejectionHandler(node, method);
       const passesOn = isAbsent(handler) || (isFunction(handler) && rethrows(handler, handler.params[0]));
-      return passesOn && isContentPromise(callee.object, seen);
+      return passesOn && isRequestPromise(callee.object, seen);
     };
 
     const errorVariable = (owner, param) =>
@@ -151,11 +158,11 @@ export default {
         const { callee } = call;
         if (callee.type !== "MemberExpression" || callee.computed) return;
         const handler = rejectionHandler(call, callee.property.name);
-        if (isAbsent(handler) || !isContentPromise(callee.object)) return;
+        if (isAbsent(handler) || !isRequestPromise(callee.object)) return;
         report(handlerLeak(handler));
       },
       AwaitExpression(node) {
-        if (!isContentPromise(node.argument)) return;
+        if (!isRequestPromise(node.argument)) return;
         for (let child = node; child.parent && !isFunction(child.parent); child = child.parent) {
           const parent = child.parent;
           if (parent.type === "TryStatement" && parent.block === child && parent.handler) {

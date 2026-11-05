@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { fetchJsonWithTimeout } from "../lib/clientRequest";
-import useUpgradeEligibility from "../lib/useUpgradeEligibility";
+import { reportRequestError } from "../lib/clientRequest";
+import useUpgradeEligibility, { fetchUpgradeInfo } from "../lib/useUpgradeEligibility";
 import { useNavigate } from "react-router-dom";
 
 const formatLocalDate = (utcDate, timeZone) => {
@@ -69,12 +69,7 @@ export default function UpgradeXoc() {
     eligibilityAbortRef.current = controller;
     setLoading(true);
     try {
-      const { response: res, data } = await fetchJsonWithTimeout("/api/ref/getUpgradeInfo", {
-        signal: controller.signal,
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: trimmed, email: trimmedEmail }),
-      });
+      const { response: res, data } = await fetchUpgradeInfo({ id: trimmed, email: trimmedEmail }, controller.signal);
       if (!snapshot.isCurrent()) return;
 
       if (!res.ok || !data.ok) {
@@ -88,7 +83,7 @@ export default function UpgradeXoc() {
       setUpgradeInfo({ ...data, requestInput: snapshot.input });
     } catch (err) {
       if (!snapshot.isCurrent()) return;
-      console.error("Upgrade check error:", err);
+      reportRequestError(err);
       setError("Something went wrong while checking your order. Try again.");
     } finally {
       if (eligibilityAbortRef.current === controller) eligibilityAbortRef.current = null;

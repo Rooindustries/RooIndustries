@@ -286,3 +286,141 @@ test("an upgrade link that times out is reported once", async ({ page }) => {
   expect(appReports(errors)[0]).toContain("Request timed out.");
   await content.release();
 });
+
+const availabilityFailed = "Booking availability took too long to load.";
+
+const unavailable = { status: 503, json: { ok: false, error: "Booking availability unavailable." } };
+
+test("leaving the booking page during its last availability retry reports no error", async ({ page }) => {
+  const held = [];
+  let failures = 0;
+  await page.route("**/api/bookingAvailability", (request) => {
+    if (failures++ < 3) return request.fulfill(unavailable);
+    held.push(request);
+  });
+  const errors = collectConsoleErrors(page);
+  await page.goto("/booking");
+  await expect.poll(() => held.length).toBe(1);
+  await page.goto("/contact");
+  await expect(page.locator("main h1").first()).toBeVisible();
+  await Promise.all(held.map((request) => request.fallback().catch(() => {})));
+  await settle(page);
+
+  expect(appReports(errors)).toEqual([]);
+});
+
+test("leaving between availability retries suppresses the final network failure", async ({ page }) => {
+  await page.addInitScript(() => {
+    const schedule = window.setTimeout.bind(window);
+    let retryGaps = 0;
+    window.setTimeout = (callback, delay, ...args) => {
+      if (delay === 250 && ++retryGaps === 2) {
+        window.dispatchEvent(new PageTransitionEvent("pagehide"));
+      }
+      return schedule(callback, delay, ...args);
+    };
+  });
+  let requests = 0;
+  await page.route("**/api/bookingAvailability", (request) => {
+    requests += 1;
+    return requests < 4 ? request.fulfill(unavailable) : request.abort("failed");
+  });
+  const errors = collectConsoleErrors(page);
+  await page.goto("/booking");
+  await expect(page.getByText(availabilityFailed, { exact: true })).toBeVisible();
+  await settle(page);
+
+  expect(requests).toBe(4);
+  expect(appReports(errors)).toEqual([]);
+});
+
+test("booking availability that times out is reported once", async ({ page }) => {
+  await page.route("**/api/bookingAvailability", () => {});
+  const errors = collectConsoleErrors(page);
+  await page.goto("/booking");
+  await expect(page.getByText(availabilityFailed, { exact: true })).toBeVisible({ timeout: 40000 });
+  await settle(page);
+
+  expect(appReports(errors)).toHaveLength(1);
+  expect(appReports(errors)[0]).toContain("Request timed out.");
+});
+
+test("booking availability answering 503 is reported once", async ({ page }) => {
+  await page.route("**/api/bookingAvailability", (request) => request.fulfill(unavailable));
+  const errors = collectConsoleErrors(page);
+  await page.goto("/booking");
+  await expect(page.getByText(availabilityFailed, { exact: true })).toBeVisible();
+  await settle(page);
+
+  expect(appReports(errors)).toHaveLength(1);
+  expect(appReports(errors)[0]).toContain("Booking availability unavailable.");
+});
+
+const checkFailed = "Something went wrong while checking your order. Try again.";
+
+for (const route of ["/upgrade/max", "/upgrade-xoc"]) {
+  const checkOrder = async (page) => {
+    await page.route("**/api/content/upgrade-link?*", (request) =>
+      request.fulfill({
+        json: {
+          ok: true,
+          data: { title: "Upgrade to Performance Vertex Max", targetPackage: { title: "Performance Vertex Max", price: "$99.95" } },
+        },
+      })
+    );
+    await page.goto(route);
+    await page.getByPlaceholder("Email used on the original booking").fill("client@example.com");
+    await page.getByPlaceholder("e.g. 1a2b3c4d5e6f7g8h9i").fill("order-123");
+    await page.getByRole("button", { name: "Check eligibility", exact: true }).click();
+  };
+
+  test(`leaving ${route} while its eligibility check runs reports no error`, async ({ page }) => {
+    const held = [];
+    await page.route("**/api/ref/getUpgradeInfo", (request) => {
+      held.push(request);
+    });
+    const errors = collectConsoleErrors(page);
+    await checkOrder(page);
+    await expect.poll(() => held.length).toBe(1);
+    await page.goto("/contact");
+    await expect(page.locator("main h1").first()).toBeVisible();
+    await Promise.all(held.map((request) => request.fallback().catch(() => {})));
+    await settle(page);
+
+    expect(appReports(errors)).toEqual([]);
+  });
+
+  test(`an eligibility check on ${route} that times out is reported once`, async ({ page }) => {
+    await page.route("**/api/ref/getUpgradeInfo", () => {});
+    const errors = collectConsoleErrors(page);
+    await checkOrder(page);
+    await expect(page.getByText(checkFailed, { exact: true })).toBeVisible({ timeout: 20000 });
+    await settle(page);
+
+    expect(appReports(errors)).toHaveLength(1);
+    expect(appReports(errors)[0]).toContain("Request timed out.");
+  });
+
+  for (const [status, reports] of [
+    [503, 1],
+    [403, 1],
+    [404, 0],
+    [409, 0],
+    [429, 0],
+  ]) {
+    const outcome = reports ? "is reported once" : "is shown without a report";
+    test(`an eligibility check on ${route} answering ${status} ${outcome}`, async ({ page }) => {
+      const message = `Order lookup answered ${status}.`;
+      await page.route("**/api/ref/getUpgradeInfo", (request) =>
+        request.fulfill({ status, json: { ok: false, error: message } })
+      );
+      const errors = collectConsoleErrors(page);
+      await checkOrder(page);
+      await expect(page.getByText(message, { exact: true })).toBeVisible();
+      await settle(page);
+
+      expect(appReports(errors)).toHaveLength(reports);
+      if (reports) expect(appReports(errors)[0]).toContain(message);
+    });
+  }
+}
