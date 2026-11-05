@@ -39,6 +39,10 @@ if (control) {
     }
     const response = await baseFetch(input, init);
     if (action === "hold") await report("/store-holds", { trace, rpc }, 25000);
+    if (action === "lose") {
+      await response.arrayBuffer();
+      throw new TypeError("fetch failed");
+    }
     return response;
   };
 
