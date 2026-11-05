@@ -1447,14 +1447,6 @@ html[data-theme="dark"] .ri-package-card-secondary {
     0 16px 38px rgba(0, 0, 0, 0.42);
 }
 
-html[data-theme="dark"] .ri-package-card-standard:hover,
-html[data-theme="dark"] .ri-package-card-secondary:hover {
-  border-color: rgba(255, 255, 255, 0.3);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 18px 42px rgba(0, 0, 0, 0.5);
-}
-
 html[data-theme="dark"]
   :is(.ri-package-card-standard, .ri-package-card-secondary)
   :is(.ri-package-tag-gold, .ri-package-tag-blue),
