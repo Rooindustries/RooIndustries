@@ -131,7 +131,7 @@ export default function RefVerifyRegistration() {
   return (
     <section className="pt-32 px-6 min-h-screen text-ink flex flex-col items-center">
       <div className="w-full max-w-md rounded-2xl border border-line-input bg-surface-card p-8 text-center shadow-[var(--shadow-card-glow)]">
-        <h1 className="text-3xl font-extrabold text-accent">Confirm creator account</h1>
+        <h1 className="section-title section-title-compact">Confirm creator account</h1>
         <p
           className={state.status === "error" ? "mt-4 text-danger-text" : "mt-4 text-ink-secondary"}
           role="status"

@@ -4,6 +4,7 @@ import {
   PUBLIC_CONTENT_RESOURCES,
 } from "../../lib/publicContentQueries";
 import { createSupabaseDocumentClient } from "../supabase/documentClient.js";
+import { fetchPublicContentDocuments } from "../supabase/shadowStore.js";
 import { clearSupabaseAssetManifestCache, enrichSupabaseContentAssets } from "../supabase/assets.js";
 import policyContent from "../../lib/policyContent";
 import { UPGRADE_LINK_SLUG_PATTERN } from "../../lib/globalCmsContract.js";
@@ -40,7 +41,7 @@ const DOCUMENT_TYPES_BY_RESOURCE = Object.freeze({
 });
 const ASSET_DEREFERENCE_RESOURCES = new Set(["tools"]);
 
-const createPublicContentClient = ({ resource }) => {
+const createPublicContentClient = ({ resource, revisions }) => {
   const assetDocumentTypes = ASSET_DEREFERENCE_RESOURCES.has(resource)
     ? ["sanity.imageAsset", "sanity.fileAsset"]
     : [];
@@ -49,7 +50,25 @@ const createPublicContentClient = ({ resource }) => {
       ...(DOCUMENT_TYPES_BY_RESOURCE[resource] || []),
       ...assetDocumentTypes,
     ],
+    readDocuments: async (scope) => {
+      const { revision, documents } = await fetchPublicContentDocuments(scope);
+      revisions.add(revision);
+      return documents;
+    },
   });
+};
+
+const PUBLIC_CONTENT_READ_ATTEMPTS = 3;
+
+const readPublicContent = async ({ resource, query, params }) => {
+  for (let attempt = 1; attempt <= PUBLIC_CONTENT_READ_ATTEMPTS; attempt += 1) {
+    const revisions = new Set();
+    const data = await createPublicContentClient({ resource, revisions }).fetch(query, params);
+    if (revisions.size <= 1) {
+      return { data: await enrichSupabaseContentAssets({ data }), revision: revisions.size ? [...revisions][0] : null };
+    }
+  }
+  throw Object.assign(new Error("Public content kept changing while it was read."), { status: 503, code: "PUBLIC_CONTENT_REVISION_MOVED" });
 };
 
 const parseTitles = (searchParams) => {
@@ -104,31 +123,24 @@ const validateAllowedParameters = (resource, searchParams) => {
 };
 
 const loadSupabasePublicContent = async ({ resource, query, params, fresh = false }) => {
-  if (Object.keys(params).length > 0) {
-    const data = await createPublicContentClient({
-      resource,
-    }).fetch(query, params);
-    return enrichSupabaseContentAssets({ data });
-  }
+  if (Object.keys(params).length > 0) return readPublicContent({ resource, query, params });
 
   const key = `${resource}:${JSON.stringify(params)}`;
   const now = Date.now();
   const cached = supabaseContentCache.get(key);
-  if (!fresh && cached?.hasData && cached.expiresAt > now) return cached.data;
+  if (!fresh && cached?.hasData && cached.expiresAt > now) return cached.entry;
   if (!fresh && cached?.pending) return cached.pending;
 
-  const pending = createPublicContentClient({ resource })
-    .fetch(query, params)
-    .then((data) => enrichSupabaseContentAssets({ data }))
-    .then((data) => {
-      if (supabaseContentCache.get(key)?.pending !== pending) return data;
+  const pending = readPublicContent({ resource, query, params })
+    .then((entry) => {
+      if (supabaseContentCache.get(key)?.pending !== pending) return entry;
       supabaseContentCache.set(key, {
-        data,
+        entry,
         hasData: true,
         expiresAt: Date.now() + SUPABASE_CONTENT_CACHE_TTL_MS,
         staleUntil: Date.now() + SUPABASE_CONTENT_STALE_TTL_MS,
       });
-      return data;
+      return entry;
     })
     .catch((error) => {
       if (supabaseContentCache.get(key)?.pending !== pending) throw error;
@@ -138,7 +150,7 @@ const loadSupabasePublicContent = async ({ resource, query, params, fresh = fals
           expiresAt: Date.now() + SUPABASE_CONTENT_RETRY_TTL_MS,
           pending: null,
         });
-        return cached.data;
+        return cached.entry;
       }
       supabaseContentCache.delete(key);
       throw error;
@@ -153,7 +165,7 @@ export const clearSupabasePublicContentCache = () => {
   clearSupabaseAssetManifestCache();
 };
 
-export const fetchPublicContent = async ({
+export const fetchPublicContentEntry = async ({
   resource,
   searchParams,
   fresh = false,
@@ -172,6 +184,11 @@ export const fetchPublicContent = async ({
       : resource === "upgrade-link"
         ? { slug: parseSlug(searchParams) }
         : {};
-  const data = await loadSupabasePublicContent({ resource, query, params, fresh });
-  return applyPublicPolicyOverrides(resource, resource === "tools" ? stableToolDownloadLinks(data) : data);
+  const { data, revision } = await loadSupabasePublicContent({ resource, query, params, fresh });
+  return {
+    data: applyPublicPolicyOverrides(resource, resource === "tools" ? stableToolDownloadLinks(data) : data),
+    revision,
+  };
 };
+
+export const fetchPublicContent = async (options) => (await fetchPublicContentEntry(options)).data;

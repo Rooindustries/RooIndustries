@@ -27,14 +27,17 @@ const expectMethods = async (scope, width) => {
     const { width, height } = image.getBoundingClientRect();
     return [width, height];
   }));
-  expect(sizes).toEqual(METHODS.map(() => [48, 32]));
+  expect(sizes).toEqual(METHODS.map(() => [36, 24]));
   const rows = await list.getByRole("img").evaluateAll(images => Object.values(images.reduce((count, image) => {
     const top = Math.round(image.getBoundingClientRect().top);
     return { ...count, [top]: (count[top] || 0) + 1 };
   }, {})));
   expect(Math.min(...rows)).toBeGreaterThan(1);
   if (width === 1440) expect(rows).toHaveLength(1);
-  else expect(rows.length).toBeGreaterThan(1);
+  else {
+    expect(rows.length).toBeGreaterThan(1);
+    expect(Math.max(...rows) - Math.min(...rows)).toBeLessThanOrEqual(1);
+  }
   return list;
 };
 

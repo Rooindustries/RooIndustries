@@ -1,4 +1,4 @@
-import { fetchPublicContent } from "@/src/server/content/publicContent";
+import { fetchPublicContentEntry } from "@/src/server/content/publicContent";
 
 
 export const runtime = "nodejs";
@@ -13,12 +13,12 @@ export async function GET(request, context) {
   try {
     const params = await context.params;
     const resource = String(params?.resource || "").trim();
-    const data = await fetchPublicContent({
+    const { data, revision } = await fetchPublicContentEntry({
       resource,
       searchParams: new URL(request.url).searchParams,
     });
     const response = Response.json(
-      { ok: true, data },
+      { ok: true, data, revision },
       {
         status: 200,
         headers: {

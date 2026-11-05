@@ -73,12 +73,12 @@ export default function Contact({ initialData = null }) {
   };
 
   return (
-    <section className="text-ink px-4 py-28 flex flex-col items-center">
+    <section className="text-ink px-4 pb-28 page-top flex flex-col items-center">
       <div className="text-center mb-10">
-        <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)] mb-2">
+        <h1 className="section-title">
           {contactData?.title || "Get In Touch"}
         </h1>
-        <p className="text-ink-secondary text-lg">
+        <p className="section-lede">
           {contactData?.subtitle ||
             "Ready to optimize your PC? Let's discuss how I can help improve your system's performance."}
         </p>
