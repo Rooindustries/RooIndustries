@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { isRequestTimeout, requestDeadline } from "../lib/clientRequest";
 
 export default function RefForgot() {
   const nav = useNavigate();
@@ -36,6 +37,7 @@ export default function RefForgot() {
     try {
       const res = await fetch("/api/ref/forgot", {
         method: "POST",
+        signal: requestDeadline(15000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: submittedEmail }),
       });
@@ -47,9 +49,15 @@ export default function RefForgot() {
       } else {
         if (submittedEmailRef.current === submittedEmail) setFormError(data.error || "Failed to send link");
       }
-    } catch {
+    } catch (error) {
       console.error("Referral reset request failed");
-      if (submittedEmailRef.current === submittedEmail) setFormError("Server error.");
+      if (submittedEmailRef.current === submittedEmail) {
+        setFormError(
+          isRequestTimeout(error)
+            ? "We couldn't confirm the link went out. Check your inbox in a minute before asking again."
+            : "Server error.",
+        );
+      }
     }
 
     setLoading(false);
@@ -57,11 +65,11 @@ export default function RefForgot() {
 
   return (
     <section className="pt-32 px-6 min-h-screen text-ink flex flex-col items-center">
-      <h1 className="text-4xl font-extrabold text-center text-accent drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+      <h1 className="section-title text-center">
         Forgot Password
       </h1>
 
-      <p className="text-ink-muted mt-3 text-center max-w-md text-base">
+      <p className="section-lede text-center">
         Enter the email attached to your referral account and we&apos;ll send
         you a reset link.
       </p>
@@ -130,7 +138,7 @@ export default function RefForgot() {
         <div
           role={toast.type === "error" ? "alert" : "status"}
           aria-atomic="true"
-          className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl text-white text-sm font-semibold shadow-lg transition-all ${
+          className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl text-black text-sm font-semibold shadow-lg transition-all ${
             toast.type === "success"
               ? "bg-success shadow-success-soft"
               : "bg-danger shadow-danger-soft"

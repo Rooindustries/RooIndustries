@@ -1,7 +1,10 @@
 import "../src/roboto-latin.css";
 import "../src/index.css";
+import "../src/styles/sections.css";
 import seo from "@/src/lib/seo";
 import AppClientRuntime from "@/src/next/AppClientRuntime";
+import { PublicContentProvider } from "@/src/next/PublicContentContext";
+import contentServer from "@/src/lib/contentServer";
 import { getSupabaseAssetOrigin } from "../next.config.mjs";
 import envValue from "@/src/server/supabase/envValue.cjs";
 
@@ -17,6 +20,7 @@ const shouldPreconnectSupabase = Boolean(SUPABASE_ASSET_ORIGIN) && (
 
 const themeInitScript = `
 (function() {
+  document.documentElement.classList.add("js");
   try {
     var root = document.documentElement;
     var key = "roo-theme";
@@ -36,7 +40,8 @@ const themeInitScript = `
 })();
 `;
 
-export default function RootLayout({ children }) {
+export default async function RootLayout({ children }) {
+  const discordBanner = await contentServer.fetchDiscordBanner();
   return (
     <html lang="en" data-theme="dark" suppressHydrationWarning>
       <head>
@@ -71,7 +76,7 @@ export default function RootLayout({ children }) {
           Skip to content
         </a>
         <AppClientRuntime />
-        {children}
+        <PublicContentProvider discordBanner={discordBanner}>{children}</PublicContentProvider>
       </body>
     </html>
   );

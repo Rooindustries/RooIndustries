@@ -18,6 +18,7 @@ import ImageZoomModal from "../components/ImageZoomModal";
 import MoreReviews from "../components/MoreReviews";
 import Navbar from "../components/Navbar";
 import Packages from "../components/Packages";
+import { SectionNavigationProvider } from "../lib/sectionNavigator";
 import Tools from "../components/Tools";
 import { getPublicContent } from "../lib/publicContentClient";
 
@@ -47,6 +48,7 @@ jest.mock("../lib/cmsImageUrl", () => ({
 
 jest.mock("../components/BackButton", () => () => null);
 jest.mock("../components/DiscordGuideBanner", () => () => null);
+jest.mock("../lib/contentServer", () => ({ fetchDiscordBanner: async () => null }));
 
 const image = (name) => ({
   dimensions: { height: 720, width: 1280 },
@@ -60,7 +62,7 @@ describe("UI accessibility regressions", () => {
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       value: jest.fn((query) => ({
-        matches: query === "(min-width: 768px)",
+        matches: query === "(min-width: 1024px)",
         media: query,
         addEventListener: jest.fn(),
         removeEventListener: jest.fn(),
@@ -218,7 +220,7 @@ describe("UI accessibility regressions", () => {
       },
     ]);
 
-    render(<MemoryRouter><Tools /></MemoryRouter>);
+    render(<MemoryRouter><SectionNavigationProvider><Tools /></SectionNavigationProvider></MemoryRouter>);
     const downloadButton = await screen.findByRole("button", {
       name: "Download",
     });
@@ -239,18 +241,20 @@ describe("UI accessibility regressions", () => {
   test("uses a legible text token for excluded package rows", () => {
     render(
       <MemoryRouter>
-        <Packages
-          initialPackages={[
-            {
-              _id: "package-example",
-              title: "Standard plan",
-              price: "$20",
-              checkedBullets: ["Core tuning"],
-              uncheckedBullets: ["Extended support"],
-            },
-          ]}
-          initialSectionCopy={{ heading: "Example plans" }}
-        />
+        <SectionNavigationProvider>
+          <Packages
+            initialPackages={[
+              {
+                _id: "package-example",
+                title: "Standard plan",
+                price: "$20",
+                checkedBullets: ["Core tuning"],
+                uncheckedBullets: ["Extended support"],
+              },
+            ]}
+            initialSectionCopy={{ heading: "Example plans" }}
+          />
+        </SectionNavigationProvider>
       </MemoryRouter>
     );
 
@@ -265,7 +269,9 @@ describe("UI accessibility regressions", () => {
   test("uses disclosure semantics and closes desktop dropdowns from the keyboard", () => {
     render(
       <MemoryRouter>
-        <Navbar />
+        <SectionNavigationProvider>
+          <Navbar />
+        </SectionNavigationProvider>
       </MemoryRouter>
     );
 
@@ -302,8 +308,8 @@ describe("UI accessibility regressions", () => {
     outsideButton.remove();
   });
 
-  test("renders a global skip link with a focusable main target", () => {
-    const layout = RootLayout({ children: <div>Example page</div> });
+  test("renders a global skip link with a focusable main target", async () => {
+    const layout = await RootLayout({ children: <div>Example page</div> });
     const body = React.Children.toArray(layout.props.children).find(
       (child) => child.type === "body"
     );

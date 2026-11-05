@@ -81,6 +81,7 @@ async function fetchHomePageData({
     supportedGames,
     faqSettings,
     faqQuestions,
+    referralBox,
   ] = await Promise.all([
     safeFetch("hero", null),
     safeFetch("reviews", null),
@@ -92,6 +93,7 @@ async function fetchHomePageData({
     safeFetch("supported-games", null),
     safeFetch("faq-settings", null),
     safeFetch("faq-questions", []),
+    safeFetch("referral-box", null),
   ]);
   if (requireContent && requiredResources.length === 0 && failed.has("hero") && failed.has("packages-list")) {
     await refuseHomeFallback(Object.assign(new Error("Home content is unavailable."), { code: "HOME_CONTENT_UNAVAILABLE" }));
@@ -117,20 +119,21 @@ async function fetchHomePageData({
     faqQuestions: normalizeFaqQuestions(
       Array.isArray(faqQuestions) ? faqQuestions : []
     ),
+    referralBox,
   });
 }
 
-const FLOW_PAGE_HOME_DATA_WAIT_MS = 1000;
+const PER_REQUEST_CONTENT_WAIT_MS = 1000;
 
-async function fetchFlowPageHomeData() {
+async function withinRequestWait(load, label) {
   let timer;
   const timedOut = new Promise((resolve) => {
-    timer = setTimeout(() => resolve(null), FLOW_PAGE_HOME_DATA_WAIT_MS);
+    timer = setTimeout(() => resolve(null), PER_REQUEST_CONTENT_WAIT_MS);
   });
   try {
     return await Promise.race([
-      fetchHomePageData().catch(() => {
-        console.warn("[content] flow page home fetch failed");
+      load().catch(() => {
+        console.warn(`[content] ${label} fetch failed`);
         return null;
       }),
       timedOut,
@@ -138,6 +141,14 @@ async function fetchFlowPageHomeData() {
   } finally {
     clearTimeout(timer);
   }
+}
+
+const fetchFlowPageHomeData = () => withinRequestWait(() => fetchHomePageData(), "flow page home");
+
+async function fetchDiscordBanner() {
+  const banner = await withinRequestWait(() => fetchStaticPageContent("discord-banner"), "discord banner");
+  const link = typeof banner?.link === "string" ? banner.link.trim() : "";
+  return link ? { link } : null;
 }
 
 async function fetchHeroCopy() {
@@ -221,6 +232,7 @@ module.exports = {
   fetchFaqQuestions,
   fetchHomePageData,
   fetchFlowPageHomeData,
+  fetchDiscordBanner,
   fetchHeroCopy,
   fetchPackagesPageData,
 };

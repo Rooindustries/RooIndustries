@@ -1,26 +1,14 @@
 import React from "react";
 import { FaArrowLeft } from "react-icons/fa";
-import { useScrollRuntime } from "../lib/scrollRuntime";
 
-export default function BackButton({ hidden, inline = false }) {
-  const { scrollY, direction } = useScrollRuntime();
+const BACK_BUTTON_CLASS = [
+  "flex scale-90 items-center justify-center rounded-full border border-line-soft bg-surface-solid p-2 text-ink",
+  "transition duration-200 hover:border-line-accent hover:text-[color:var(--color-link-hover)] active:scale-95 sm:p-3",
+].join(" ");
 
-  if (hidden) return null;
-  const isVisible = inline || !(direction === "down" && scrollY > 50);
-
+export default function BackButton() {
   return (
-    <button
-      onClick={() => window.history.back()}
-      aria-label="Go Back"
-      className={`${inline ? "" : "fixed top-[80px] left-20"}
-        bg-accent hover:bg-accent-strong text-accent-contrast p-2 sm:p-3 rounded-full border border-line-accent
-        transition-all duration-500 ease-in-out shadow-[var(--shadow-back-button)]
-        hover:shadow-[var(--shadow-back-button-hover)]
-        z-40 flex items-center justify-center
-        ${isVisible ? "translate-y-0 opacity-100" : "-translate-y-10 opacity-0"}
-        scale-90 active:scale-95
-      `}
-    >
+    <button onClick={() => window.history.back()} aria-label="Go Back" className={BACK_BUTTON_CLASS}>
       <FaArrowLeft className="text-base sm:text-lg" />
     </button>
   );

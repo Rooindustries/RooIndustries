@@ -51,11 +51,64 @@ export const enclosingComponent = (context, node) =>
     .reverse()
     .find((item) => isFunction(item) && isCapitalized(functionName(item)));
 
-export const calleeName = (call) => {
-  const callee = call.callee;
-  if (callee.type === "Identifier") return callee.name;
-  if (callee.type === "MemberExpression" && !callee.computed && callee.property.type === "Identifier") {
-    return callee.property.name;
+export const propertyName = (property) => {
+  if (property?.type !== "Property" || property.computed) return "";
+  if (property.key.type === "Identifier") return property.key.name;
+  if (property.key.type === "Literal") return String(property.key.value);
+  return "";
+};
+
+export const memberName = (member) => {
+  if (member?.type !== "MemberExpression") return "";
+  if (!member.computed && member.property.type === "Identifier") return member.property.name;
+  if (member.computed && member.property.type === "Literal" && typeof member.property.value === "string") {
+    return member.property.value;
   }
   return "";
 };
+
+export const referenceName = (node) => (node?.type === "Identifier" ? node.name : memberName(node));
+
+export const calleeName = (call) => referenceName(call.callee);
+
+export const declaredValue = (context, identifier) => {
+  let variable = null;
+  for (let scope = context.sourceCode.getScope(identifier); scope && !variable; scope = scope.upper) {
+    variable = scope.set.get(identifier.name) || null;
+  }
+  const definition = variable?.defs?.[0];
+  if (!definition || definition.type !== "Variable" || definition.node.id.type !== "Identifier") return null;
+  return definition.node.init || null;
+};
+
+export const isFetchCall = (call) => {
+  const callee = call.callee;
+  if (callee.type === "Identifier") return callee.name === "fetch";
+  return (
+    callee.type === "MemberExpression" &&
+    !callee.computed &&
+    callee.property.name === "fetch" &&
+    callee.object.type === "Identifier" &&
+    ["window", "globalThis", "self"].includes(callee.object.name)
+  );
+};
+
+export const containsNode = (root, test, { skip } = {}) => {
+  const stack = [root];
+  while (stack.length) {
+    const node = stack.pop();
+    if (!node || typeof node.type !== "string") continue;
+    if (node !== root && skip?.(node)) continue;
+    if (node !== root && test(node)) return true;
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "parent") continue;
+      if (Array.isArray(value)) stack.push(...value);
+      else if (value && typeof value.type === "string") stack.push(value);
+    }
+  }
+  return false;
+};
+
+const isJsx = (node) => node?.type === "JSXElement" || node?.type === "JSXFragment";
+
+export const returnsJsx = (fn) => isJsx(fn.body) || containsNode(fn.body, isJsx);

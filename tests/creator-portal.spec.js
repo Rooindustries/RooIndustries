@@ -472,6 +472,98 @@ test.describe('portal requests that stall', () => {
     } finally { await held.release(); }
   });
 
+  test('a stalled password change reports an unknown outcome', async ({ page }, testInfo) => {
+    await page.route('**/api/auth/reauth', route => route.fulfill({ json: { ok: true } }));
+    const held = await stall(page, '/api/ref/hashPassword', 'POST');
+    try {
+      await page.goto('/referrals/change-password');
+      await page.getByLabel('Current Password', { exact: true }).fill('Synthetic-password1!');
+      await page.getByLabel('New Password', { exact: true }).fill('Fresh-password-22!');
+      await page.getByLabel('Confirm Password', { exact: true }).fill('Fresh-password-22!');
+      await page.getByRole('button', { name: 'Save Password', exact: true }).click();
+      await held.arrived;
+      const message = page.getByRole('alert').filter({ hasText: "We couldn't tell if your password changed." });
+      await expect(message).toBeVisible({ timeout: 20000 });
+      expect(held.count()).toBe(1);
+      await record(page, testInfo, 'stalled-password-change', { timedOut: true, requests: held.count() });
+    } finally { await held.release(); }
+  });
+
+  test('an unreadable reply to a sent password change reports an unknown outcome', async ({ page }) => {
+    await page.route('**/api/auth/reauth', route => route.fulfill({ json: { ok: true } }));
+    const unreadable = { status: 200, contentType: 'text/html', body: '<html>' };
+    await page.route('**/api/ref/hashPassword', route => route.fulfill(unreadable));
+    await page.goto('/referrals/change-password');
+    await page.getByLabel('Current Password', { exact: true }).fill('Synthetic-password1!');
+    await page.getByLabel('New Password', { exact: true }).fill('Fresh-password-22!');
+    await page.getByLabel('Confirm Password', { exact: true }).fill('Fresh-password-22!');
+    await page.getByRole('button', { name: 'Save Password', exact: true }).click();
+    const message = page.getByRole('alert').filter({ hasText: "We couldn't tell if your password changed." });
+    await expect(message).toBeVisible();
+  });
+
+  test('a stalled signup asks to check the email before retrying', async ({ page }) => {
+    const held = await stall(page, '/api/ref/register', 'POST');
+    try {
+      await page.goto('/referrals/register');
+      await page.getByLabel('Discord Username', { exact: true }).fill('synthetic_creator');
+      await page.getByLabel('Login Email', { exact: true }).fill('new-creator@example.invalid');
+      await page.getByLabel('PayPal Email (for payouts)', { exact: true }).fill('payouts@example.invalid');
+      await page.getByLabel('Referral Code', { exact: true }).fill('freshcreator');
+      await page.getByLabel('Password', { exact: true }).fill('Fresh-password-22!');
+      await page.getByLabel('Confirm Password', { exact: true }).fill('Fresh-password-22!');
+      await page.getByRole('button', { name: 'Register', exact: true }).click();
+      await held.arrived;
+      const message = page.getByText("We couldn't tell if your account was created.", { exact: false });
+      await expect(message).toBeVisible({ timeout: 20000 });
+      expect(held.count()).toBe(1);
+    } finally { await held.release(); }
+  });
+
+  test('a stalled reset request asks to check the inbox before retrying', async ({ page }) => {
+    const held = await stall(page, '/api/ref/forgot', 'POST');
+    try {
+      await page.goto('/referrals/forgot');
+      await page.getByRole('textbox').first().fill('creator@example.invalid');
+      await page.getByRole('button', { name: 'Send Reset Link', exact: true }).click();
+      await held.arrived;
+      const message = page.getByText("We couldn't confirm the link went out.", { exact: false });
+      await expect(message).toBeVisible({ timeout: 20000 });
+      expect(held.count()).toBe(1);
+    } finally { await held.release(); }
+  });
+
+  test('a failed sign-in check on signup can be tried again', async ({ page }) => {
+    let failing = true;
+    await page.route('**/api/auth/identities?flow=referral', route => (failing
+      ? route.fulfill({ status: 503, json: { ok: false, error: 'Temporarily unavailable.' } })
+      : route.fallback()));
+    await page.goto('/referrals/register');
+    const notice = page.getByRole('alert').filter({ hasText: "We couldn't check your Google or Discord sign-in." });
+    await expect(notice).toBeVisible();
+    failing = false;
+    const retried = page.waitForResponse(response => response.url().includes('/api/auth/identities?flow=referral'));
+    await notice.getByRole('button', { name: 'Try again', exact: true }).click();
+    expect((await retried).status()).toBe(200);
+    await expect(notice).toHaveCount(0);
+  });
+
+  test('a stalled sign-in check on signup can be tried again', async ({ page }, testInfo) => {
+    const held = await stall(page, '/api/auth/identities?flow=referral', 'GET');
+    try {
+      await page.goto('/referrals/register');
+      await held.arrived;
+      const notice = page.getByRole('alert').filter({ hasText: "We couldn't check your Google or Discord sign-in." });
+      await expect(notice).toBeVisible({ timeout: 15000 });
+      await record(page, testInfo, 'stalled-signup-identity', { timedOut: true });
+      await held.release();
+      const retried = page.waitForResponse(response => response.url().includes('/api/auth/identities?flow=referral'));
+      await notice.getByRole('button', { name: 'Try again', exact: true }).click();
+      expect((await retried).status()).toBe(200);
+      await expect(notice).toHaveCount(0);
+    } finally { await held.release(); }
+  });
+
   test('stalled unlink reports an unknown outcome', async ({ page }, testInfo) => {
     await page.route('**/api/auth/reauth', route => route.fulfill({ json: { ok: true } }));
     const held = await stall(page, '/api/auth/identities', 'POST');
@@ -1686,7 +1778,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       for (const code of [400, 409, 503, 0]) {
         hashCase = { status: code, json: { ok: false, error: `Synthetic ${code} password failure.` } };
         await save.click();
-        await expect(alert).toContainText(code ? `Synthetic ${code} password failure.` : 'Password update could not be completed. Please try again.');
+        await expect(alert).toContainText(code ? `Synthetic ${code} password failure.` : "We couldn't tell if your password changed.");
         await retained();
         outcomes.push({ route: 'hashPassword', status: code, message: await alert.innerText() });
       }
@@ -1786,13 +1878,16 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.route('**/api/ref/validateReferral?*', route => route.fulfill({ status: 200, json: { ok: false, reason: 'available', error: 'Not found' } }));
       await page.getByLabel('Referral Code', { exact: true }).fill('retry-creator');
       await expect(page.getByText('Referral code is available.', { exact: true })).toBeVisible();
+      const registrationUnclear =
+        "We couldn't tell if your account was created. Check your email for a confirmation link before trying again.";
       for (const status of [400, 409, 429, 503, 0]) {
         await page.route('**/api/ref/register', route => status ? route.fulfill({ status, json: { ok: false, error: `Synthetic ${status} registration failure.` } }) : route.abort('failed'));
         await submitRegistration(page);
-        await expect(page.getByText(status ? `Synthetic ${status} registration failure.` : 'Server error.', { exact: true })).toBeVisible();
+        const expected = status ? `Synthetic ${status} registration failure.` : registrationUnclear;
+        await expect(page.getByText(expected, { exact: true })).toBeVisible();
         await expect(page.getByRole('button', { name: 'Register', exact: true })).toBeEnabled();
         await expectRegistrationFields(page, 'new@fixture.invalid', 'new-creator');
-        const message = page.getByText(status ? `Synthetic ${status} registration failure.` : 'Server error.', { exact: true });
+        const message = page.getByText(expected, { exact: true });
         expect(await message.evaluate(element => Boolean(element.closest('[aria-live],[role=alert],[role=status]')))).toBe(true);
         outcomes.push({ route: 'register', status, registrationPosts, fieldsRetained: true, message: await message.innerText() });
         await page.unroute('**/api/ref/register');

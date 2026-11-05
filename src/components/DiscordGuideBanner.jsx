@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { FaDiscord } from "react-icons/fa";
 import { getPublicContent } from "../lib/publicContentClient";
+import { usePublicContent } from "../next/PublicContentContext";
 
 const DEFAULT_BANNER = {
   text: "Free FPS tuning guide in Discord",
@@ -9,9 +10,13 @@ const DEFAULT_BANNER = {
 };
 
 export default function DiscordGuideBanner({ hidden = false }) {
-  const [banner, setBanner] = useState(DEFAULT_BANNER);
+  const serverLink = usePublicContent().discordBanner?.link || "";
+  const [banner, setBanner] = useState(
+    serverLink ? { ...DEFAULT_BANNER, link: serverLink } : DEFAULT_BANNER
+  );
 
   useEffect(() => {
+    if (serverLink) return undefined;
     let mounted = true;
     getPublicContent("discord-banner")
       .then((data) => {
@@ -26,7 +31,7 @@ export default function DiscordGuideBanner({ hidden = false }) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [serverLink]);
 
   return (
     <div

@@ -1,6 +1,7 @@
 import { asConfirmationReceipt, clearBookingConfirmation } from "../lib/confirmationReceipt";
 import React, { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { requestDeadline } from "../lib/clientRequest";
 
 const BOOKING_CONFIRMATION_STORAGE_KEY = "booking_confirmation_state";
 const TERMINAL_FAILURE_STATUSES = new Set([400, 401, 403, 404]);
@@ -54,6 +55,7 @@ export default function BookingEmailDispatchEffect() {
         key: attemptKey,
         promise: fetch("/api/ref/sendBookingEmails", {
           method: "POST",
+          signal: requestDeadline(30000),
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ bookingId, emailDispatchToken }),
           keepalive: true,

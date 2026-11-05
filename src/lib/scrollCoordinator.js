@@ -1,4 +1,5 @@
 import { normalizeSectionHash } from "./sectionNavigation";
+import { prefersReducedMotion } from "./scrollWindowTo";
 
 const SCROLL_TOLERANCE_PX = 1;
 const FAST_SMOOTH_DURATION_MS = 220;
@@ -52,8 +53,9 @@ export const alignToHashTarget = ({
 
   const targetId = normalizedHash.slice(1);
   if (!targetId) return () => {};
-  const resolvedScrollMode =
-    scrollMode || (behavior === "smooth" ? "fast-smooth" : "instant");
+  const resolvedScrollMode = prefersReducedMotion()
+    ? "instant"
+    : scrollMode || (behavior === "smooth" ? "fast-smooth" : "instant");
   const root = document.documentElement;
   const previousRootScrollBehavior = root.style.scrollBehavior;
 

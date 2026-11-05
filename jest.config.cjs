@@ -10,7 +10,5 @@ module.exports = createJestConfig({
   setupFilesAfterEnv: ["<rootDir>/src/setupTests.js"],
   testMatch: ["<rootDir>/src/**/__tests__/**/*.[jt]s?(x)"],
   testPathIgnorePatterns: ["<rootDir>/.next/", "<rootDir>/node_modules/"],
-  moduleNameMapper: {
-    "^@/(.*)$": "<rootDir>/$1",
-  },
+  moduleNameMapper: require("./jest.aliases.cjs"),
 });

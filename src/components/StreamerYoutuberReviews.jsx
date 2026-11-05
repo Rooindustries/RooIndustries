@@ -7,9 +7,6 @@ import {
   readHomeSectionData,
 } from "../lib/homeSectionData";
 
-const titleClass =
-  "text-[28px] sm:text-[32px] md:text-[36px] leading-tight font-extrabold text-center tracking-tight " +
-  "text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]";
 const AUTO_SCROLL_PIXELS_PER_SECOND = 24;
 const AUTO_SCROLL_RESUME_DELAY_MS = 1500;
 const AUTO_SCROLL_RAMP_MS = 900;
@@ -18,6 +15,14 @@ const ARROW_SCROLL_MS = 450;
 const MAX_FRAME_MS = 100;
 const REVIEW_CARD_GAP = 16;
 const MIN_REVIEW_GROUPS = 3;
+const REVIEW_CARD_WIDTH = "w-[320px] sm:w-[380px]";
+const REVIEW_SKELETON_CLASS =
+  `${REVIEW_CARD_WIDTH} h-[296px] sm:h-[286px] rounded-2xl bg-skeleton animate-pulse flex-shrink-0`;
+const REVIEW_SWIPE_ONLY_QUERY = "(max-width: 639.98px)";
+const REVIEW_ARROW_CLASS =
+  "absolute top-1/2 -translate-y-1/2 z-10 hidden sm:grid h-10 w-10 place-items-center rounded-full border border-line-soft " +
+  "bg-panel text-lg leading-none text-ink-secondary shadow-lg hover:border-line-accent hover:text-ink focus-visible:outline " +
+  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-accent)]";
 
 const getReviewKey = (review) => review._id || review.name || "review";
 const easeInOut = (progress) =>
@@ -124,22 +129,22 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
   return (
     <section
       ref={sectionRef}
-      className="pt-4 sm:pt-5 pb-4 text-center text-ink relative overflow-hidden"
+      className="py-6 sm:py-8 text-center text-ink relative overflow-hidden"
     >
-      <div className="px-4 sm:px-6 mb-3">
-        <h2 className={`ri-reviews-heading ${titleClass} mb-2`}>
+      <div className="px-4 sm:px-6 mb-8">
+        <h2 className="ri-reviews-heading section-title">
           {data?.title || defaultTitle}
         </h2>
-        <p className="text-ink-secondary text-sm sm:text-base">
+        <p className="section-lede">
           {data?.subtitle || defaultSubtitle}
         </p>
       </div>
 
       {isLoading ? (
         <div className="px-4 flex gap-4 overflow-hidden">
-          <div className="w-[320px] sm:w-[360px] h-[184px] rounded-xl bg-skeleton animate-pulse flex-shrink-0" />
-          <div className="w-[320px] sm:w-[360px] h-[184px] rounded-xl bg-skeleton animate-pulse flex-shrink-0" />
-          <div className="hidden lg:block w-[360px] h-[184px] rounded-xl bg-skeleton animate-pulse flex-shrink-0" />
+          <div className={REVIEW_SKELETON_CLASS} />
+          <div className={REVIEW_SKELETON_CLASS} />
+          <div className={`hidden lg:block ${REVIEW_SKELETON_CLASS}`} />
         </div>
       ) : (
         <AutoReviewCarousel reviews={reviews} />
@@ -154,7 +159,7 @@ function ReviewerAvatar({ review, isCreator }) {
       <img
         src={getReviewAvatarUrl(review.pfp)}
         alt={review.name}
-        className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+        className="w-10 h-10 rounded-full object-cover flex-shrink-0"
         style={{
           boxShadow: isCreator ? "0 0 0 2px #f5c954" : "none",
         }}
@@ -167,7 +172,7 @@ function ReviewerAvatar({ review, isCreator }) {
 
   return (
     <div
-      className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-black flex-shrink-0 bg-surface-hover"
+      className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-black flex-shrink-0 bg-surface-hover"
       style={{ color: "var(--color-accent)" }}
       aria-hidden="true"
     >
@@ -201,7 +206,7 @@ function ReviewCard({ review, groupIndex }) {
       data-group-index={groupIndex}
       className={`ri-review-card ${
         isCreator ? "ri-review-card-creator" : "ri-review-card-standard"
-      } flex flex-col w-[320px] sm:w-[360px] min-h-[184px] p-3 rounded-xl text-left flex-shrink-0`}
+      } flex flex-col ${REVIEW_CARD_WIDTH} min-h-[232px] p-5 rounded-2xl text-left flex-shrink-0`}
       style={{
         background: isCreator
           ? "linear-gradient(145deg, rgba(250, 219, 120, 0.12), var(--color-surface-solid) 52%)"
@@ -211,39 +216,33 @@ function ReviewCard({ review, groupIndex }) {
           : "inset 0 0 0 1px var(--color-border-soft), 0 16px 40px rgba(0, 0, 0, 0.18)",
       }}
     >
-      <div className="flex items-center justify-between gap-3 text-[10px] font-bold uppercase tracking-[0.14em]">
-        <p className={isCreator ? "ri-review-champagne-text" : "text-white"}>
+      <div className="flex items-center justify-between gap-3 text-[11px] font-bold uppercase tracking-[0.12em]">
+        <p className={isCreator ? "ri-review-champagne-text" : "text-ink-secondary"}>
           {isCreator ? "Creator review" : "Player review"}
         </p>
-        <p className="text-white">{review.game || "PC performance"}</p>
+        <p className="text-ink-secondary">{review.game || "PC performance"}</p>
       </div>
 
-      <div className={`mt-1 flex min-h-4 items-end gap-3 ${result ? "justify-between" : "justify-end"}`}>
+      <div className={`mt-3 flex min-h-4 flex-wrap items-end gap-x-3 gap-y-1 ${result ? "justify-between" : "justify-end"}`}>
         {result && (
-          <p className="font-black leading-none tracking-[-0.04em] tabular-nums whitespace-nowrap">
-            <span className="mr-2 text-[10px] uppercase tracking-[0.12em] text-white">
+          <p className="min-w-0 font-black leading-none tracking-[-0.04em] tabular-nums">
+            <span className="mr-2 text-[11px] uppercase tracking-[0.1em] text-ink-secondary">
               {result.label}
             </span>
-          {result.before && (
-              <span className="text-lg text-white">{result.before}</span>
-          )}
-            {result.before && (
-              <span
-                className="mx-1.5 text-base"
-                style={{ color: "#f5c954" }}
-              >
+            <span className="whitespace-nowrap">
+              <span className="text-lg text-ink">{result.before}</span>
+              <span className="mx-1.5 text-base" style={{ color: "#f5c954" }}>
                 →
               </span>
-            )}
-            <span
-              className="ri-review-champagne-text text-[28px]"
-            >
-              {result.after}
+              <span className="ri-review-champagne-text text-[28px]">
+                {result.after}
+              </span>
             </span>
           </p>
         )}
         <p
-          className="ri-review-champagne-text text-xs font-bold tracking-[0.08em] flex-shrink-0"
+          className="ri-review-champagne-text text-xs font-bold tracking-[0.08em] flex-shrink-0 ml-auto"
+          role="img"
           aria-label={`${rating} out of 5 stars`}
         >
           <span aria-hidden="true">{"★".repeat(rating)}{"☆".repeat(5 - rating)}</span>
@@ -251,24 +250,24 @@ function ReviewCard({ review, groupIndex }) {
         </p>
       </div>
 
-      <blockquote className="mt-2 flex-1">
-        <p className="text-white text-[11px] sm:text-[12px] leading-[1.35] break-words whitespace-normal">
+      <blockquote className="mt-3 flex-1">
+        <p className="text-ink text-[15px] leading-[1.5] break-words whitespace-normal">
           “{review.text}”
         </p>
       </blockquote>
 
-      <footer className="mt-2 flex items-center gap-2">
+      <footer className="mt-4 flex items-center gap-3">
         <ReviewerAvatar review={review} isCreator={isCreator} />
         <div className="min-w-0">
           <p
-            className={`font-extrabold text-[13px] leading-tight text-ink truncate ${
+            className={`font-bold text-[15px] leading-tight text-ink truncate ${
               isCreator ? "ri-review-champagne-text" : ""
             }`}
           >
             {review.name}
           </p>
           {review.profession && (
-            <p className="mt-0.5 text-[9px] leading-snug text-white">
+            <p className="mt-0.5 text-[13px] leading-snug text-ink-secondary">
               {review.profession}
             </p>
           )}
@@ -291,6 +290,7 @@ function AutoReviewCarousel({ reviews }) {
     wheelAt: -Infinity,
     interactedAt: -Infinity,
     wake: null,
+    centered: false,
   });
   const [groupCount, setGroupCount] = useState(1);
 
@@ -313,8 +313,11 @@ function AutoReviewCarousel({ reviews }) {
         return;
       }
       if (motion.groupWidth !== groupWidth) {
-        const position = motion.groupWidth ? readReviewScroll(viewport, motion) : viewport.scrollLeft;
+        const firstCardWidth = firstGroup.firstElementChild?.offsetWidth || 0;
+        const startOffset = motion.centered ? 0 : Math.max(0, (viewport.clientWidth - firstCardWidth) / 2);
+        const position = motion.groupWidth ? readReviewScroll(viewport, motion) : viewport.scrollLeft - startOffset;
         motion.groupWidth = groupWidth;
+        motion.centered = true;
         commitReviewScroll(viewport, motion, position);
       }
     };
@@ -373,12 +376,16 @@ function AutoReviewCarousel({ reviews }) {
     };
     motion.wake = wake;
 
+    const swipeOnly = window.matchMedia(REVIEW_SWIPE_ONLY_QUERY);
     const updatePause = () => {
-      paused = isPerfDebugEnabled() && getPerfToggleEnabled(PERF_TOGGLE_KEYS.PAUSE_REVIEWS_AUTOPLAY);
+      paused =
+        swipeOnly.matches ||
+        (isPerfDebugEnabled() && getPerfToggleEnabled(PERF_TOGGLE_KEYS.PAUSE_REVIEWS_AUTOPLAY));
       wake();
     };
     updatePause();
     window.addEventListener(PERF_DEBUG_EVENT, updatePause);
+    swipeOnly.addEventListener("change", updatePause);
 
     const visibilityObserver =
       typeof IntersectionObserver === "undefined"
@@ -409,6 +416,7 @@ function AutoReviewCarousel({ reviews }) {
       viewport.removeEventListener("scroll", onScroll);
       visibilityObserver?.disconnect();
       window.removeEventListener(PERF_DEBUG_EVENT, updatePause);
+      swipeOnly.removeEventListener("change", updatePause);
     };
   }, [reviews.length]);
 
@@ -536,7 +544,7 @@ function AutoReviewCarousel({ reviews }) {
       <button
         type="button"
         onClick={() => scrollReviews(-1)}
-        className="absolute left-1 sm:left-3 top-1/2 -translate-y-1/2 z-10 w-9 h-12 text-2xl leading-none text-ink-muted hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-accent)]"
+        className={`${REVIEW_ARROW_CLASS} left-4`}
         aria-label="Scroll reviews left"
       >
         ←
@@ -544,7 +552,7 @@ function AutoReviewCarousel({ reviews }) {
       <button
         type="button"
         onClick={() => scrollReviews(1)}
-        className="absolute right-1 sm:right-3 top-1/2 -translate-y-1/2 z-10 w-9 h-12 text-2xl leading-none text-ink-muted hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-accent)]"
+        className={`${REVIEW_ARROW_CLASS} right-4`}
         aria-label="Scroll reviews right"
       >
         →

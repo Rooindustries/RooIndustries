@@ -4,6 +4,7 @@ import { useState } from "react";
 import { FaDiscord } from "react-icons/fa";
 import { FcGoogle } from "react-icons/fc";
 import { getSupabaseBrowserClient } from "../lib/supabaseBrowser";
+import { requestDeadline } from "../lib/clientRequest";
 
 const providers = [
   { id: "google", label: "Google", Icon: FcGoogle },
@@ -82,6 +83,7 @@ export default function SupabaseSocialLogin({
       }
       const intentResponse = await fetch("/api/auth/intent", {
         method: "POST",
+        signal: requestDeadline(15000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action,

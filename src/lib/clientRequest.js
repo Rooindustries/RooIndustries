@@ -1,5 +1,7 @@
 export const CLIENT_REQUEST_TIMEOUT_MS = 8000;
 
+export const isRequestTimeout = (error) => error?.name === "TimeoutError" || error?.name === "AbortError";
+
 export const requestDeadline = (timeoutMs = CLIENT_REQUEST_TIMEOUT_MS) => {
   if (typeof AbortSignal.timeout === "function") return AbortSignal.timeout(timeoutMs);
   const controller = new AbortController();

@@ -95,7 +95,7 @@ describe("unlinked referral Discord account choice", () => {
     renderReferralAuth("/referrals/login");
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith("/api/ref/sessionStatus");
+      expect(global.fetch).toHaveBeenCalledWith("/api/ref/sessionStatus", { signal: expect.anything() });
     });
     expect(global.fetch).not.toHaveBeenCalledWith("/api/ref/getData");
   });
@@ -109,7 +109,7 @@ describe("unlinked referral Discord account choice", () => {
     renderReferralAuth("/referrals/login");
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith("/api/ref/sessionStatus");
+      expect(global.fetch).toHaveBeenCalledWith("/api/ref/sessionStatus", { signal: expect.anything() });
     });
     expect(global.fetch).not.toHaveBeenCalledWith("/api/ref/getData");
     expect(consoleError).not.toHaveBeenCalled();
@@ -150,6 +150,7 @@ describe("unlinked referral Discord account choice", () => {
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith("/api/ref/login", {
+        signal: expect.anything(),
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -201,6 +202,7 @@ describe("unlinked referral Discord account choice", () => {
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith("/api/ref/login", {
+        signal: expect.anything(),
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

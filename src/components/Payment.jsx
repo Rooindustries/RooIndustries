@@ -13,12 +13,14 @@ import { useBookingDialogPending } from "../lib/bookingDialogHold";
 import { beginCheckoutConfirmation } from "../lib/checkoutConfirmation";
 import {
   calculateCheckoutDiscounts,
+  fetchCheckoutQuote,
   formatCouponValue,
   resolveCheckoutCode,
   sanitizeCouponForCheckout,
   sanitizeReferralForCheckout,
   toMoney,
 } from "../lib/checkoutCodes";
+import { requestDeadline } from "../lib/clientRequest";
 
 const { applyPackagePricing } = packagePricing;
 const PAYMENT_FETCH_TIMEOUT_MS = 15_000;
@@ -474,7 +476,6 @@ export default function Payment({ hideFooter = false }) {
   }, [holdExpiresAt, processingDodoReturn, creatingFree, navigate, navState, location]);
 
   const {
-    referralPercent,
     couponDiscountAmount,
     canStackCouponWithReferral,
     referralDiscountAmount,
@@ -483,6 +484,7 @@ export default function Payment({ hideFooter = false }) {
     finalAmount,
     effectiveDiscountAmount,
     discountPercentCombined,
+    displayBaseAmount,
   } = calculateCheckoutDiscounts({
     baseAmount,
     referral,
@@ -630,12 +632,11 @@ export default function Payment({ hideFooter = false }) {
       ? setTimeout(() => controller.abort(), PAYMENT_FETCH_TIMEOUT_MS)
       : null;
     let active = true;
+    setServerQuote(null);
     setQuoteLoading(true);
 
-    fetch("/api/payment/quote", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    fetchCheckoutQuote(
+      {
         packageTitle,
         originalOrderId: bookingData.originalOrderId || "",
         startTimeUTC: bookingData.startTimeUTC || "",
@@ -643,14 +644,10 @@ export default function Payment({ hideFooter = false }) {
         referralCode: referral?.code || "",
         couponCode: coupon?.code || "",
         upgradeIntentToken: bookingData.upgradeIntentToken || "",
-      }),
-      signal: controller?.signal,
-    })
-      .then(async (response) => {
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok || !data?.ok) {
-          throw new Error(data?.error || "Unable to confirm checkout price.");
-        }
+      },
+      { signal: controller?.signal }
+    )
+      .then((data) => {
         if (!active) return;
         setServerQuote(data.quote || null);
         setQuoteFingerprint(
@@ -843,7 +840,7 @@ export default function Payment({ hideFooter = false }) {
   useEffect(() => {
     let active = true;
 
-    fetch("/api/payment/providers")
+    fetch("/api/payment/providers", { signal: requestDeadline() })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("bad_status"))))
       .then((data) => {
         if (!active || !data?.ok || !data?.providers) return;
@@ -1820,16 +1817,16 @@ export default function Payment({ hideFooter = false }) {
 
   return (
     <motion.section
-      className="booking-payment relative z-10 max-w-3xl mx-auto text-ink"
+      className="booking-payment relative z-10 py-4 px-6 max-w-3xl mx-auto text-ink"
       variants={containerVariants}
-      initial="hidden"
+      initial={false}
       animate="visible"
     >
       <motion.div variants={itemVariants}>
-        <h2 className="text-4xl sm:text-5xl font-extrabold text-center text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+        <h2 className="section-title text-center">
           {isUpgrade ? "Complete Upgrade Payment" : "Complete Payment"}
         </h2>
-        <p className="mt-3 text-ink-secondary text-center text-sm sm:text-base">
+        <p className="section-lede text-center">
           {isUpgrade
             ? "Review your upgrade details and proceed to payment"
             : "Review your booking details and proceed to payment"}
@@ -1915,7 +1912,7 @@ export default function Payment({ hideFooter = false }) {
                   ) : null}
                 </dd>
               </div>
-              {referralPercent > 0 && (
+              {referralDiscountAmount > 0 && referral && (
                 <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
                   <dt className="text-ink-muted">Referral</dt>
                   <dd className="font-semibold text-ink sm:text-right">
@@ -1934,9 +1931,9 @@ export default function Payment({ hideFooter = false }) {
               <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr] sm:items-baseline">
                 <dt className="font-semibold text-ink">{dodoTaxExclusive ? "Subtotal" : "Total"}</dt>
                 <dd className="sm:text-right">
-                  {(referralPercent > 0 || couponDiscountAmount > 0) && (
+                  {(referralDiscountAmount > 0 || couponDiscountAmount > 0) && (
                     <span className="mr-2 text-sm text-ink-secondary line-through">
-                      ${baseAmount.toFixed(2)}
+                      ${displayBaseAmount.toFixed(2)}
                     </span>
                   )}
                   <span className="text-2xl font-extrabold text-accent">
@@ -1984,7 +1981,13 @@ export default function Payment({ hideFooter = false }) {
               >
                 Referral Code (optional)
               </label>
-              <div className="flex flex-wrap gap-2 items-center">
+              <form
+                className="flex flex-wrap gap-2 items-center"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  validateReferral(referralInput);
+                }}
+              >
                 <input
                   id="payment-referral-code"
                   value={referralInput}
@@ -2002,7 +2005,7 @@ export default function Payment({ hideFooter = false }) {
                 />
 
                 <button
-                  onClick={() => validateReferral(referralInput)}
+                  type="submit"
                   disabled={creatingFree || preApplyingCodes || checkingCode || !!lockedProvider}
                   className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
                 >
@@ -2012,7 +2015,7 @@ export default function Payment({ hideFooter = false }) {
                   <span className="glow-line glow-line-bottom" />
                   <span className="glow-line glow-line-left" />
                 </button>
-              </div>
+              </form>
               {referralError && !validating && (
                 <p
                   id="payment-referral-code-error"
@@ -2032,7 +2035,13 @@ export default function Payment({ hideFooter = false }) {
               >
                 Coupon Code (optional)
               </label>
-              <div className="flex flex-wrap gap-2 items-center">
+              <form
+                className="flex flex-wrap gap-2 items-center"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  validateCoupon(couponInput);
+                }}
+              >
                 <input
                   id="payment-coupon-code"
                   value={couponInput}
@@ -2050,7 +2059,7 @@ export default function Payment({ hideFooter = false }) {
                 />
 
                 <button
-                  onClick={() => validateCoupon(couponInput)}
+                  type="submit"
                   disabled={
                     creatingFree || preApplyingCodes || checkingCode || !!lockedProvider
                   }
@@ -2065,6 +2074,7 @@ export default function Payment({ hideFooter = false }) {
 
                 {coupon && (
                   <button
+                    type="button"
                     onClick={() => {
                       if (creatingFree || validating || validatingCoupon) return;
                       setCoupon(null);
@@ -2077,7 +2087,7 @@ export default function Payment({ hideFooter = false }) {
                     Remove coupon
                   </button>
                 )}
-              </div>
+              </form>
               {couponError && !validatingCoupon && (
                 <p
                   id="payment-coupon-code-error"

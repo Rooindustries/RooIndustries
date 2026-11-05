@@ -2,7 +2,6 @@ import React from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Payment from "../components/Payment";
-import { BookingDialogBody } from "../components/BookingModal";
 
 let paypalButtonsProps = null;
 let mockLocation = {
@@ -64,14 +63,14 @@ const bookingFixture = (overrides = {}) => ({
   ...overrides,
 });
 
-const renderPayment = (bookingData, search = "", inDialog = false) => {
+const renderPayment = (bookingData, search = "") => {
   __setMockLocation({
     pathname: "/payment",
     search,
     hash: "",
     state: { bookingData },
   });
-  return render(inDialog ? <BookingDialogBody><Payment /></BookingDialogBody> : <Payment />);
+  return render(<Payment />);
 };
 
 const loadRazorpay = async () => {
@@ -128,7 +127,7 @@ describe("payment session UI", () => {
 
     renderPayment(bookingFixture());
     await waitFor(() =>
-      expect(global.fetch).toHaveBeenCalledWith("/api/payment/providers")
+      expect(global.fetch).toHaveBeenCalledWith("/api/payment/providers", { signal: expect.anything() })
     );
     expect(
       document.querySelector(
@@ -290,7 +289,7 @@ describe("payment session UI", () => {
       return response({ ok: true });
     });
 
-    renderPayment(bookingFixture(), "", true);
+    renderPayment(bookingFixture());
     await waitFor(() => expect(paypalButtonsProps?.disabled).toBe(false));
     const razorpayButton = screen.getByRole("button", {
       name: "Pay with Razorpay",
@@ -320,11 +319,8 @@ describe("payment session UI", () => {
     expect(paypalShell.className).toContain("[&_iframe]:!outline-0");
     expect(paypalShell.className).not.toContain(`[&_iframe]:!outline-${"none"}`);
     expect(
-      screen.getByRole("link", { name: /back to booking/i }).closest(".booking-dialog-body")
-    ).toHaveStyle({
-      paddingBlock: "var(--booking-body-padding)",
-      paddingInline: "var(--booking-body-padding-inline, var(--booking-body-padding))",
-    });
+      screen.getByRole("link", { name: /back to booking/i }).closest("section")
+    ).toHaveClass("py-4", "px-6");
 
     const clientCreate = jest.fn();
     let orderId;

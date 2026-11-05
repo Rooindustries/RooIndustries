@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { homedir, networkInterfaces } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
+import { freeTcpPorts } from './lib/free-tcp-port.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const delay = ms => new Promise(done => setTimeout(done, ms));
@@ -54,6 +55,7 @@ async function run(scratch, artifact, hostNetwork) {
   const { installNetworkGuard, inheritTestProcessGuard, refuseEnvFiles } = await import('./lib/test-target-safety.mjs');
   const { createToolingContentFixture } = await import('../tests/fixtures/tooling-content.mjs');
   const { apiRouteSecrets } = await import('../tests/fixtures/api-routes.mjs');
+  const { lockBuildDirectory } = await import('./lib/build-lock.mjs');
   const { chromium } = await import('playwright');
   refuseEnvFiles(root);
   const checks = [];
@@ -75,17 +77,11 @@ async function run(scratch, artifact, hostNetwork) {
     received.push({ path: request.url, body });
     response.writeHead(200, { 'Content-Type': 'application/json' }).end('{}');
   });
-  const reserve = async () => {
-    const server = createServer();
-    await new Promise(done => server.listen(0, '127.0.0.1', done));
-    const port = server.address().port;
-    await new Promise(done => server.close(done));
-    return `http://127.0.0.1:${port}`;
-  };
   await new Promise(done => requests.listen(0, '127.0.0.1', done));
   const sink = `http://127.0.0.1:${requests.address().port}`;
-  const site = (await reserve()).replace('127.0.0.1', 'localhost');
-  const content = await reserve();
+  const [sitePort, contentPort] = await freeTcpPorts('127.0.0.1', [0, 0]);
+  const site = `http://localhost:${sitePort}`;
+  const content = `http://127.0.0.1:${contentPort}`;
   const dsn = sink.replace('http://', 'http://fixturekey@') + '/42';
   const restoreGuard = installNetworkGuard([site, sink, content]);
   inheritTestProcessGuard(pathToFileURL(join(root, 'scripts/fixtures/sourcemaps-network-guard.mjs')));
@@ -143,8 +139,9 @@ export function GET() { throw new Error('Fixture edge error'); }
   });
   let active;
   let browser;
-  const execute = async (name, args, env, timeout = 300000) => {
-    active = spawn(process.execPath, args, { cwd: work, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  let lock;
+  const execute = async (name, args, env, fds = [], timeout = 300000) => {
+    active = spawn(process.execPath, args, { cwd: work, env, detached: true, stdio: ['ignore', 'pipe', 'pipe', ...fds] });
     const logs = [];
     active.stdout.on('data', chunk => logs.push(chunk));
     active.stderr.on('data', chunk => logs.push(chunk));
@@ -190,12 +187,13 @@ export function GET() { throw new Error('Fixture edge error'); }
     for (const mode of modes) {
       const from = received.length;
       const dist = `.next-e2e-monitoring-${mode.reuse || mode.name}`;
+      lock = lockBuildDirectory(join(work, dist));
       if (mode.dev) inheritTestProcessGuard(pathToFileURL(join(root, 'scripts/fixtures/monitoring-dev-preload.mjs')));
-      const env = environment({ ...mode.env, NEXT_DIST_DIR: dist });
+      const env = lock.childEnv(environment({ ...mode.env, NEXT_DIST_DIR: dist }));
       console.log(`checking ${mode.name}`);
-      if (!mode.dev && !mode.reuse) await execute(`${mode.name}-build`, [next, 'build'], env);
+      if (!mode.dev && !mode.reuse) await execute(`${mode.name}-build`, [next, 'build'], env, [lock.fd]);
       active = spawn(process.execPath, [next, mode.dev ? 'dev' : 'start', '--hostname', '127.0.0.1', '--port', new URL(site).port],
-        { cwd: work, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+        { cwd: work, env, detached: true, stdio: ['ignore', 'pipe', 'pipe', lock.fd] });
       const logs = [];
       active.stdout.on('data', chunk => logs.push(chunk));
       active.stderr.on('data', chunk => logs.push(chunk));
@@ -285,6 +283,8 @@ export function GET() { throw new Error('Fixture edge error'); }
           try { await stop(active); } finally { process.kill = kill; active.removeListener('close', onClose); }
           check('local: cleanup waits for child close after an ESRCH termination result', [injected, closed], [true, true]);
         } else await stop(active);
+        lock.release();
+        lock = null;
         if (!mode.enabled) check(`${mode.name}: shutdown sends no late envelope`, received.length - from, 0);
         await writeFile(join(artifact, `${mode.name}-server.log`), Buffer.concat(logs));
       }
@@ -295,6 +295,7 @@ export function GET() { throw new Error('Fixture edge error'); }
     check('deployment E2E completes', error.stack, null);
   } finally {
     await stop(active);
+    lock?.release();
     await browser?.close();
     await fixture.close();
     requests.closeAllConnections();

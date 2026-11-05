@@ -39,6 +39,7 @@ describe("referral registration confirmation client", () => {
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith("/api/ref/verifyRegistration", {
+        signal: expect.anything(),
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: verificationToken }),
@@ -49,6 +50,18 @@ describe("referral registration confirmation client", () => {
     ).toBeInTheDocument();
     expect(window.location.pathname).toBe("/referrals/verify");
     expect(window.location.hash).toBe("");
+  });
+
+  test("a confirmation that times out says the outcome is unknown instead of rejecting the link", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.reject(new DOMException("Request timed out.", "TimeoutError")),
+    });
+    renderVerification();
+
+    expect(await screen.findByText(/We couldn't tell if your email was confirmed\./)).toBeInTheDocument();
+    expect(screen.queryByText(/invalid or expired/i)).not.toBeInTheDocument();
   });
 
   test("removes a definitively rejected token from session storage", async () => {

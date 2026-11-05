@@ -46,7 +46,7 @@ function FieldShell({ field, path, htmlFor, children, inline = false }) {
     <div className={`${styles.field} ${invalid ? styles.fieldInvalid : ""} ${inline ? styles.fieldInline : ""}`}>
       <label className={styles.fieldLabel} htmlFor={htmlFor}>
         {field.title || field.name}
-        {field.required ? <span className={styles.required} aria-label="required">*</span> : null}
+        {field.required ? <span className={styles.required} role="img" aria-label="required">*</span> : null}
         {field.readOnly ? <span className={styles.readOnlyTag} aria-hidden="true">Read only</span> : null}
       </label>
       {field.description ? <p id={helpId(path)} className={styles.fieldHelp}>{field.description}</p> : null}

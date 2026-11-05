@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import postgres from "postgres";
+import { freeTcpPort } from "./lib/free-tcp-port.mjs";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 const pgBin = String(process.env.PG_BIN || "").trim() || spawnSync(
@@ -16,7 +17,7 @@ const pgBin = String(process.env.PG_BIN || "").trim() || spawnSync(
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "roo-backend-integrity-"));
 const dataDir = path.join(tempRoot, "pgdata");
 const postgresHost = process.env.ROO_TEST_POSTGRES_HOST || "127.0.0.1";
-const port = 57300 + Math.floor(Math.random() * 500);
+const port = await freeTcpPort(postgresHost);
 
 const run = (command, args, options = {}) => {
   const result = spawnSync(command, args, {

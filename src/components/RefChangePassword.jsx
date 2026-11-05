@@ -2,11 +2,16 @@ import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../lib/passwordPolicy";
 import { useReferralAccount } from "../lib/useReferralAccount";
+import { requestDeadline } from "../lib/clientRequest";
 
 const PASSWORD_PENDING_MESSAGE =
   "Your password change is saving. It will finish in a moment.";
 const PASSWORD_UPDATED_MESSAGE =
   "Password updated. Log in with your new password.";
+const PASSWORD_UNCERTAIN_MESSAGE =
+  "We couldn't tell if your password changed. " +
+  "Try signing in with the new one, and change it again if that doesn't work.";
+const PASSWORD_FAILED_MESSAGE = "Password update could not be completed. Please try again.";
 
 export default function RefChangePassword() {
   const nav = useNavigate();
@@ -32,7 +37,7 @@ export default function RefChangePassword() {
   if (checking) return <p role="status" className="pt-32 text-center text-ink">Checking your account...</p>;
   if (accountError) return (
     <section className="pt-32 px-6 max-w-xl mx-auto text-ink">
-      <h1 className="text-3xl font-bold text-accent">Change Password</h1>
+      <h1 className="section-title section-title-compact">Change Password</h1>
       <p role="alert" className="mt-4 text-danger-text">{accountError}</p>
       <button onClick={retry} className="mt-6 rounded-xl bg-accent-strong px-6 py-3 font-semibold text-accent-contrast">Retry</button>
     </section>
@@ -59,10 +64,12 @@ export default function RefChangePassword() {
     const version = editVersionRef.current;
     setLoading(true);
     setOutcome(null);
+    let passwordUpdateSent = false;
 
     try {
       const reauthResponse = await fetch("/api/auth/reauth", {
         method: "POST",
+        signal: requestDeadline(15000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           flow: "referral",
@@ -88,13 +95,18 @@ export default function RefChangePassword() {
         }
         return;
       }
+      passwordUpdateSent = true;
       const res = await fetch("/api/ref/hashPassword", {
         method: "POST",
+        signal: requestDeadline(15000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: pass1 }),
       });
 
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json().catch((error) => {
+        if (res.ok) throw error;
+        return {};
+      });
 
       if (res.status === 202 || data.status === "pending") {
         setOutcome({
@@ -136,7 +148,7 @@ export default function RefChangePassword() {
       setOutcome({
         type: "error",
         kind: "service",
-        message: "Password update could not be completed. Please try again.",
+        message: passwordUpdateSent ? PASSWORD_UNCERTAIN_MESSAGE : PASSWORD_FAILED_MESSAGE,
       });
     } finally {
       setLoading(false);
@@ -145,14 +157,19 @@ export default function RefChangePassword() {
 
   return (
     <section className="pt-32 px-6 min-h-screen text-ink flex flex-col items-center">
-      <h1 className="text-4xl font-extrabold text-center text-accent drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+      <h1 className="section-title text-center">
         Change Password
       </h1>
 
-      <div
+      <form
         className="mt-10 w-full max-w-md bg-surface-card backdrop-blur-xl
                       border border-line-input shadow-[var(--shadow-card-glow)]
                       rounded-2xl p-8 space-y-6"
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          update();
+        }}
       >
         <div>
           <label
@@ -244,7 +261,7 @@ export default function RefChangePassword() {
         ) : null}
 
         <button
-          onClick={update}
+          type="submit"
           disabled={loading}
           className={`w-full py-4 rounded-xl font-bold text-lg transition-all
             ${
@@ -264,7 +281,7 @@ export default function RefChangePassword() {
         >
           Back to Dashboard
         </button>
-      </div>
+      </form>
 
     </section>
   );

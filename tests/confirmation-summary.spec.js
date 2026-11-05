@@ -234,9 +234,9 @@ for (const kind of ["paid", "free", "status recovery", "session replay", "captur
         await page.setViewportSize(viewport);
         await assertSummary(page);
         const measurements = await page.getByRole("dialog").evaluate(frame => {
-          const body = frame.querySelector(".booking-dialog-body");
-          const copy = [...frame.querySelectorAll("button")].find(node => node.textContent === "Copy").getBoundingClientRect();
-          return { frameOverflow: frame.scrollWidth - frame.clientWidth, bodyOverflow: body.scrollWidth - body.clientWidth, copy: { width: copy.width, height: copy.height } };
+          const body = frame.querySelector(".booking-dialog-content");
+          const copy = [...frame.querySelectorAll("button")].find(node => node.textContent === "Copy");
+          return { frameOverflow: frame.scrollWidth - frame.clientWidth, bodyOverflow: body.scrollWidth - body.clientWidth, copy: { width: copy.offsetWidth, height: copy.offsetHeight } };
         });
         expect(measurements.frameOverflow).toBe(0);
         expect(measurements.bodyOverflow).toBe(0);
