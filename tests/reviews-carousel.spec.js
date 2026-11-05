@@ -553,6 +553,17 @@ test.describe("review carousel", () => {
 
   test("mobile-390", async ({ page }) => {
     const region = await openCarousel(page, { width: 390, height: 844 });
+    await expect(page.getByRole("button", { name: "Scroll reviews left" })).toBeHidden();
+    await expect(page.getByRole("button", { name: "Scroll reviews right" })).toBeHidden();
+    const spilled = await page.locator(".ri-review-card").evaluateAll((cards) => cards
+      .filter((card) => {
+        const edge = card.getBoundingClientRect().right + 1;
+        return [...card.querySelectorAll("*")]
+          .filter((child) => child.getBoundingClientRect().width > 1)
+          .some((child) => child.getBoundingClientRect().right > edge);
+      })
+      .map((card) => card.dataset.reviewId));
+    expect(spilled).toEqual([]);
     const backward = await wheelAcross(page, region, -1, 5);
     const forward = await wheelAcross(page, region, 1, 5);
     const overflow = await page.evaluate(() => ({
@@ -564,6 +575,54 @@ test.describe("review carousel", () => {
     expectInfinite(forward);
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.innerWidth);
   });
+
+  test("phones-swipe-without-autoplay", async ({ page }) => {
+    const region = await openCarousel(page, { width: 390, height: 844 });
+    const scrollLeft = () => region.evaluate((el) => el.scrollLeft);
+    const phoneStart = await scrollLeft();
+    await page.waitForTimeout(2000);
+    expect(Math.abs((await scrollLeft()) - phoneStart)).toBeLessThanOrEqual(1);
+    const firstCard = await region.evaluate((el) => {
+      const viewport = el.getBoundingClientRect();
+      const cards = [...el.querySelectorAll(".ri-review-card")];
+      const card = cards.find((node) => node.getBoundingClientRect().right > viewport.left + 40);
+      const box = card.getBoundingClientRect();
+      return { left: box.left - viewport.left, right: viewport.right - box.right };
+    });
+    expect(Math.abs(firstCard.left - firstCard.right)).toBeLessThanOrEqual(2);
+    await page.setViewportSize({ width: 800, height: 900 });
+    await expect.poll(async () => {
+      const start = await scrollLeft();
+      await page.waitForTimeout(600);
+      return (await scrollLeft()) - start;
+    }, { timeout: 15000 }).toBeGreaterThan(0);
+  });
+
+  test("keyboard-focus-drops-fade", async ({ page }) => {
+    const region = await openCarousel(page);
+    const mask = () => region.evaluate((el) => getComputedStyle(el).maskImage);
+    expect(await mask()).toContain("linear-gradient");
+    await page.keyboard.press("Shift");
+    await region.focus();
+    await expect(region).toBeFocused();
+    await expect.poll(mask).toBe("none");
+    expect(await region.evaluate((el) => getComputedStyle(el).outlineStyle)).toBe("solid");
+    await page.keyboard.press("Tab");
+    await expect.poll(mask).toContain("linear-gradient");
+  });
+
+  for (const width of [640, 1024, 1440]) {
+    test(`arrows-sit-on-faded-edges-${width}`, async ({ page }) => {
+      const region = await openCarousel(page, { width, height: 900 });
+      const mask = await region.evaluate((el) => getComputedStyle(el).maskImage);
+      const clear = Number(/rgba\(0, 0, 0, 0\) ([\d.]+)px/.exec(mask)?.[1]);
+      const edges = await region.boundingBox();
+      const left = await page.getByRole("button", { name: "Scroll reviews left" }).boundingBox();
+      const right = await page.getByRole("button", { name: "Scroll reviews right" }).boundingBox();
+      expect(left.x + left.width - edges.x, mask).toBeLessThanOrEqual(clear);
+      expect(edges.x + edges.width - right.x, mask).toBeLessThanOrEqual(clear);
+    });
+  }
 
   test("idle-frames-offscreen", async ({ page }) => {
     await page.addInitScript(() => {
