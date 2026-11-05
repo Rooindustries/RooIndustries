@@ -285,6 +285,7 @@ for (const [action, answer, price] of [
   ["lose", "is lost", "$808.08"],
   ["gateway", "is a 504 from the gateway", "$818.18"],
   ["garble", "is a 200 with an unreadable body", "$828.28"],
+  ["response-error", "is a PostgREST response error", "$858.58"],
 ]) {
   test(`a publish whose answer ${answer} after the commit still purges twice and serves the new price`, async ({ request, baseURL }) => {
     test.setTimeout(120000);

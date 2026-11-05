@@ -31,7 +31,6 @@ const OUTCOME_UNKNOWN_SQLSTATE = /^(08...|40003)$/;
 const rejectedBeforeCommit = ({ error, status }) => {
   const code = typeof error?.code === "string" ? error.code : "";
   if (status < 400) return false;
-  if (/^PGRST\d{3}$/.test(code)) return true;
   return /^[0-9A-Z]{5}$/.test(code) && !OUTCOME_UNKNOWN_SQLSTATE.test(code);
 };
 const committed = (result, id) => {

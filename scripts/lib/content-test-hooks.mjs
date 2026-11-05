@@ -47,6 +47,10 @@ if (control) {
       await response.arrayBuffer();
       return new Response("<html><body>504 Gateway Time-out</body></html>", { status: 504, headers: { "Content-Type": "text/html" } });
     }
+    if (action === "response-error") {
+      await response.arrayBuffer();
+      return new Response(JSON.stringify({ code: "PGRST111", message: "Invalid response.headers" }), { status: 500, headers: { "Content-Type": "application/json" } });
+    }
     if (action === "garble") {
       await response.arrayBuffer();
       return new Response("{\"results\": [", { status: 200, headers: { "Content-Type": "application/json" } });
