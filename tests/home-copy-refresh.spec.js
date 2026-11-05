@@ -90,35 +90,79 @@ test("an in-app return to the homepage shows CMS copy published after the first 
   expect(pageErrors).toEqual([]);
 });
 
-test("an older content response never replaces copy refreshed after it", async ({ page }) => {
+test("a package response from an older revision never replaces copy refreshed before it", async ({ page, request, baseURL }) => {
+  const publishedTag = "Offer tag published before the older response";
+  const offers = page.locator("#packages");
+  const isPackages = (url) => new URL(url).pathname === "/api/content/packages-list";
+  const readPackages = async () => {
+    const response = await request.get("/api/content/packages-list");
+    expect(response.status()).toBe(200);
+    return response.json();
+  };
+  const leaveAndReturnAfterWindow = async () => {
+    await footerLink(page, "/terms").click();
+    await expect(page).toHaveURL(/\/terms$/);
+    await page.clock.fastForward("01:01");
+    await footerLink(page, "/").click();
+    await expect(page).toHaveURL(/\/$/);
+  };
+  const held = [];
+  let holdOlder = false;
   await page.clock.install();
-  const content = await controlContent(page);
+  try {
+    const older = await readPackages();
+    expect(older.data.some((row) => row.tag === publishedTag)).toBe(false);
+    await page.route("**/api/content/packages-list", async (route) => {
+      if (!holdOlder) return route.fallback();
+      held.push({ body: older, release: () => route.fulfill({ json: older }) });
+    });
 
-  await page.goto("/", { waitUntil: "networkidle" });
-  await hydrated(page);
-  await page.evaluate(() => { window.__offerDocument = true; });
-  content.hold = true;
-  await footerLink(page, "/terms").click();
-  await expect(page).toHaveURL(/\/terms$/);
-  await page.waitForTimeout(1500);
+    await page.goto("/", { waitUntil: "networkidle" });
+    await hydrated(page);
+    await page.evaluate(() => { window.__offerDocument = true; });
 
-  content.published = true;
-  content.hold = false;
-  await page.clock.fastForward("01:01");
-  await footerLink(page, "/").click();
-  await expect(page).toHaveURL(/\/$/);
-  await page.locator("#packages").scrollIntoViewIfNeeded();
-  await expect(page.locator("#packages").getByText(refreshedTag, { exact: true })).toBeVisible();
+    await contentControl(request, baseURL, { patch: { _id: "tooling-package-0", tag: publishedTag } });
+    const published = await readPackages();
+    expect(published.revision).toBeGreaterThan(older.revision);
+    await leaveAndReturnAfterWindow();
+    await offers.scrollIntoViewIfNeeded();
+    await expect(offers.getByText(publishedTag, { exact: true })).toBeVisible();
 
-  for (const respond of content.held.splice(0)) await respond().catch(() => {});
-  await page.waitForTimeout(500);
+    holdOlder = true;
+    await page.evaluate(() => {
+      window.__offerStates = [];
+      new MutationObserver(() => {
+        const text = document.querySelector("#packages")?.innerText || "";
+        if (text.includes("$149.95")) window.__offerStates.push(text.includes("Offer tag published before the older response"));
+      }).observe(document.body, { childList: true, subtree: true, characterData: true });
+    });
+    await leaveAndReturnAfterWindow();
+    await expect.poll(() => held.length).toBe(1);
+    holdOlder = false;
+    expect(held[0].body.revision).toBeLessThan(published.revision);
+    expect(held[0].body.data.some((row) => row.tag === publishedTag)).toBe(false);
 
-  await footerLink(page, "/about").click();
-  await expect(page).toHaveURL(/\/about$/);
-  await pageLink(page, "/packages").click();
-  await expect(page).toHaveURL(/\/packages$/);
-  await expect(page.getByText(refreshedTag, { exact: true }).first()).toBeVisible();
-  expect(await page.evaluate(() => window.__offerDocument)).toBe(true);
+    const consumed = page.waitForEvent("requestfinished", (finished) => isPackages(finished.url()));
+    await held[0].release();
+    const olderResponse = await (await consumed).response();
+    expect(olderResponse.status()).toBe(200);
+    expect(await olderResponse.json()).toEqual(older);
+
+    await offers.scrollIntoViewIfNeeded();
+    await expect(offers.getByText(publishedTag, { exact: true })).toBeVisible();
+    await footerLink(page, "/about").click();
+    await expect(page).toHaveURL(/\/about$/);
+    await pageLink(page, "/packages").click();
+    await expect(page).toHaveURL(/\/packages$/);
+    await expect(page.getByText(publishedTag, { exact: true }).first()).toBeVisible();
+    const states = await page.evaluate(() => window.__offerStates);
+    expect(states.length).toBeGreaterThan(0);
+    expect(states.filter((shown) => !shown)).toEqual([]);
+    expect(held).toHaveLength(1);
+    expect(await page.evaluate(() => window.__offerDocument)).toBe(true);
+  } finally {
+    await contentControl(request, baseURL, { reset: true });
+  }
 });
 
 test("a page keeps its last copy when the refresh after the window fails", async ({ page }) => {
