@@ -143,11 +143,11 @@ export default function Services({
             <div>
               <h2
                 id="services-heading"
-                className="ri-services-heading text-3xl font-bold tracking-tight text-info-text sm:text-4xl"
+                className="ri-services-heading section-title"
               >
                 {data.heading || HOME_COPY.services.heading}
               </h2>
-              <p className="ri-services-subheading mt-2 text-sm text-ink-secondary sm:text-[15px]">
+              <p className="section-lede">
                 {HOME_COPY.services.subheading}
               </p>
             </div>

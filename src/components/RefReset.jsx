@@ -407,7 +407,7 @@ export default function RefReset() {
   if (!mode) {
     return (
       <section className="pt-32 px-6 min-h-screen text-ink flex flex-col items-center">
-        <h1 className="text-3xl font-bold text-danger-text">Invalid Link</h1>
+        <h1 className="section-title section-title-compact section-title-danger">Invalid Link</h1>
         <p className="text-ink-muted mt-2">
           {linkError || "This password reset link is missing recovery credentials."}
         </p>
@@ -424,7 +424,7 @@ export default function RefReset() {
 
   return (
     <section className="pt-32 px-6 min-h-screen text-ink flex flex-col items-center">
-      <h1 className="text-4xl font-extrabold text-center text-accent drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+      <h1 className="section-title text-center">
         Reset Password
       </h1>
 
