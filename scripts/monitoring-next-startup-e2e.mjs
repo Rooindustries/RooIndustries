@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from './lib/test-target-safety.mjs';
 import { portFromEnv } from './lib/free-tcp-port.mjs';
 import { startChildOnPorts, stopChild } from './lib/start-on-port.mjs';
+import { holdGroupMembers, releaseGroupMembers } from './lib/process-group.mjs';
 
 refuseEnvFiles();
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';
@@ -71,13 +72,10 @@ try {
   error ||= cause.message;
 } finally {
   if (child?.pid) {
+    const members = holdGroupMembers(child);
     await stopChild(child);
-    let groupEmpty = false;
-    for (let i = 0; i < 20; i++) {
-      try { process.kill(-child.pid, 0); } catch (cause) { if (cause.code === 'ESRCH') groupEmpty = true; else error ||= cause.message; break; }
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-    checks.push({ name: 'owned framework fixture process group is empty', ok: groupEmpty });
+    const empty = members.length > 0 && releaseGroupMembers(members) === 0;
+    checks.push({ name: 'owned framework fixture process group is empty', ok: empty });
   }
   restoreGuard?.();
 }

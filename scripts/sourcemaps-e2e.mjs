@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -9,6 +9,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { freeTcpPorts } from './lib/free-tcp-port.mjs';
+import { spawnContained, stopChild } from './lib/start-on-port.mjs';
 import { lockBuildDirectory } from './lib/build-lock.mjs';
 import { inheritTestProcessGuard, installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from './lib/test-target-safety.mjs';
 
@@ -34,11 +35,6 @@ async function privateFiles(directory) {
   for (const path of await files(directory)) {
     assert(!(await readFile(path)).includes(Buffer.from(token)), 'The build contains the fake upload token.');
   }
-}
-
-function stopGroup(child, signal) {
-  if (!child.pid) return;
-  try { process.kill(-child.pid, signal); } catch (error) { if (error.code !== 'ESRCH') throw error; }
 }
 
 function uploadedMap(bundle, js, originalSource) {
@@ -184,18 +180,14 @@ if (process.argv[2] === '--build') {
     }
 
     async function execute(name, args, env, { cwd = root, timeout = 60000, fds = [] } = {}) {
-      const child = spawn(process.execPath, args, { cwd, detached: true, stdio: ['ignore', 'pipe', 'pipe', ...fds], env });
+      const child = spawnContained(process.execPath, args, { cwd, stdio: ['ignore', 'pipe', 'pipe', ...fds], env });
       const logs = [];
       child.stdout.on('data', data => logs.push(data));
       child.stderr.on('data', data => logs.push(data));
-      let escalation;
-      const timer = setTimeout(() => {
-        stopGroup(child, 'SIGTERM');
-        escalation = setTimeout(() => stopGroup(child, 'SIGKILL'), 2000);
-      }, timeout);
+      const timer = setTimeout(() => void stopChild(child, 2000), timeout);
       const status = await new Promise((done, reject) => {
         child.once('error', reject); child.once('close', done);
-      }).finally(() => { clearTimeout(timer); clearTimeout(escalation); });
+      }).finally(() => clearTimeout(timer));
       const log = Buffer.concat(logs).toString();
       await writeFile(join(artifact, `${name}.log`), log);
       assert(!log.includes(token), 'The child logged the fake upload token.');
@@ -242,8 +234,8 @@ if (process.argv[2] === '--build') {
       const browserFiles = await files(join(output, 'static'));
       assert(!browserFiles.some(path => path.endsWith('.map')));
       const site = new URL(siteOrigin);
-      const child = spawn(process.execPath, [join(root, 'node_modules/next/dist/bin/next'), 'start',
-        '--hostname', site.hostname, '--port', site.port], { cwd: root, env, detached: true, stdio: ['ignore', 'pipe', 'pipe', productionLock.fd] });
+      const child = spawnContained(process.execPath, [join(root, 'node_modules/next/dist/bin/next'), 'start',
+        '--hostname', site.hostname, '--port', site.port], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe', productionLock.fd] });
       const logs = [];
       child.stdout.on('data', data => logs.push(data));
       child.stderr.on('data', data => logs.push(data));
@@ -273,10 +265,8 @@ if (process.argv[2] === '--build') {
           assert.equal(response.status, 404);
         }
       } finally {
-        stopGroup(child, 'SIGTERM');
-        const escalation = setTimeout(() => stopGroup(child, 'SIGKILL'), 5000);
-        await closed.finally(() => clearTimeout(escalation));
-        stopGroup(child, 'SIGKILL');
+        await stopChild(child);
+        await closed;
         const log = Buffer.concat(logs).toString();
         await writeFile(join(artifact, 'production-missing-token-start.log'), log);
         assert(!log.includes(token));

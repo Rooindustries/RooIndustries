@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import net from "node:net";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { exited, isRunning, isTrackedLeader, leaderProc, signalGroup, trackGroupLeader } from "./process-group.mjs";
 import { freeTcpPorts, passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "./free-tcp-port.mjs";
 
 export const addressInUse = (output) => /EADDRINUSE|Address already in use|\(Address in use\)/.test(output);
@@ -68,22 +69,11 @@ const namespaceOf = (pid, kind) => {
   }
 };
 
-const live = (pid) => {
-  try {
-    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
-    return stat[stat.lastIndexOf(")") + 2] !== "Z";
-  } catch {
-    return false;
-  }
-};
-
-const handles = new WeakMap();
-const procOf = (child) => `self/fd/${handles.get(child)}`;
-const unreaped = (child) => handles.has(child) && fs.existsSync(`/proc/${procOf(child)}/stat`);
-const running = (child) => handles.has(child) && live(procOf(child));
+const running = (child) => Boolean(leaderProc(child)) && isRunning(leaderProc(child));
 
 const namespaceMembers = (namespace) => namespace
-  ? fs.readdirSync("/proc").filter((entry) => /^\d+$/.test(entry) && namespaceOf(entry, "pid") === namespace && live(entry))
+  ? fs.readdirSync("/proc").filter((entry) => /^\d+$/.test(entry) && namespaceOf(entry, "pid") === namespace)
+    .filter((entry) => isRunning(`/proc/${entry}`))
   : [];
 
 const pins = new WeakMap();
@@ -94,7 +84,7 @@ const pinNamespace = (child) => {
   if (!running(child)) return false;
   let fd;
   try {
-    fd = fs.openSync(`/proc/${procOf(child)}/ns/pid_for_children`, "r");
+    fd = fs.openSync(`${leaderProc(child)}/ns/pid_for_children`, "r");
   } catch {
     return false;
   }
@@ -126,16 +116,6 @@ const drain = (child) => {
   return drains.get(child);
 };
 
-const track = (child) => {
-  const fd = fs.openSync(`/proc/${child.pid}`, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
-  handles.set(child, fd);
-  child.once("exit", () => {
-    handles.delete(child);
-    fs.closeSync(fd);
-    drain(child);
-  });
-};
-
 export const ownsPorts = (child, host, ports) => {
   const open = new Set();
   for (const member of namespaceMembers(pins.get(child)?.namespace)) {
@@ -148,27 +128,11 @@ export const ownsPorts = (child, host, ports) => {
   return ports.every((port) => [...listeningSockets(host, port)].some((socket) => open.has(socket)));
 };
 
-const exited = (child) => child.exitCode !== null || child.signalCode !== null;
-
-const signalGroup = (child, signal) => {
-  if (exited(child)) return;
-  if (!handles.has(child)) {
-    child.kill(signal);
-    return;
-  }
-  if (!unreaped(child)) return;
-  try {
-    process.kill(-child.pid, signal);
-  } catch (error) {
-    if (error.code !== "ESRCH") throw error;
-  }
-};
-
 const stops = new WeakMap();
 
 export const stopChild = (child, grace = 5000) => {
-  if (!launched.has(child)) return Promise.reject(new Error("stopChild only stops children started with launch.spawn or launchChild."));
   if (!child.pid) return Promise.resolve();
+  if (!isTrackedLeader(child)) return Promise.reject(new Error("stopChild only stops children started with launch.spawn, spawnContained or spawnGroup."));
   if (!stops.has(child)) {
     stops.set(child, (async () => {
       pinNamespace(child);
@@ -242,7 +206,7 @@ const launcher = (held) => (command, args, options = {}) => {
     env: { ...(options.env || process.env), ...held.env },
     stdio: [...stdio.slice(0, 3), "pipe", ...held.stdio, ...stdio.slice(3)],
   });
-  if (child.pid) track(child);
+  trackGroupLeader(child, () => drain(child));
   const lifeline = child.stdio[3];
   lifeline?.on("error", () => {});
   lifeline?.once("data", () => {
@@ -255,7 +219,7 @@ const launcher = (held) => (command, args, options = {}) => {
   return child;
 };
 
-export const launchChild = launcher({ stdio: [], env: {} });
+export const spawnContained = launcher({ stdio: [], env: {} });
 
 const waitUntilReady = async ({ child, host, ports, isReady, output, timeout, failure }) => {
   const deadline = Date.now() + timeout;

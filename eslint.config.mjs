@@ -3,6 +3,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 import roo, { rules } from "./eslint-rules/index.mjs";
 
 const emailTextRules = new Set(["no-hand-built-dollars"]);
+const scriptRules = new Set(["no-parent-ipc-disconnect", "no-unchecked-group-signal"]);
 const testFiles = "src/**/__tests__/**";
 const ruleSet = (names) => Object.fromEntries(names.map((name) => [`roo/${name}`, "error"]));
 
@@ -18,7 +19,23 @@ export default [
       globals: { ...globals.browser, ...globals.node },
     },
     plugins: { roo, "react-hooks": reactHooks },
-    rules: ruleSet(Object.keys(rules).filter((name) => !emailTextRules.has(name))),
+    rules: ruleSet(Object.keys(rules).filter((name) => !emailTextRules.has(name) && !scriptRules.has(name))),
+  },
+  {
+    files: ["scripts/**/*.{js,mjs,cjs}", "tests/**/*.{js,mjs,cjs}"],
+    linterOptions: { reportUnusedDisableDirectives: "off" },
+    languageOptions: { ecmaVersion: "latest", sourceType: "module", globals: { ...globals.node } },
+    plugins: { roo },
+    rules: ruleSet(["no-hand-built-node-options", "no-unchecked-group-signal"]),
+  },
+  {
+    files: ["scripts/lib/process-group.mjs"],
+    rules: { "roo/no-unchecked-group-signal": "off" },
+  },
+  {
+    files: ["scripts/**/*.{js,mjs,cjs}", "tests/fixtures/**/*.{js,mjs,cjs}"],
+    plugins: { roo },
+    rules: ruleSet(["no-parent-ipc-disconnect"]),
   },
   {
     files: [`${testFiles}/*.{js,jsx,mjs,cjs}`],
@@ -31,13 +48,6 @@ export default [
     },
     plugins: { roo },
     rules: ruleSet(["no-virtual-mock-of-installed-module"]),
-  },
-  {
-    files: ["scripts/**/*.{js,mjs,cjs}", "tests/**/*.{js,mjs,cjs}"],
-    linterOptions: { reportUnusedDisableDirectives: "off" },
-    languageOptions: { ecmaVersion: "latest", sourceType: "module", globals: { ...globals.node } },
-    plugins: { roo },
-    rules: ruleSet(["no-hand-built-node-options"]),
   },
   {
     files: ["**/*.cjs"],
