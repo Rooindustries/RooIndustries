@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { getPublicContent } from "../lib/publicContentClient";
+import { getPublicContent, reportContentLoadError } from "../lib/publicContentClient";
 import { Link } from "react-router-dom";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
@@ -55,7 +55,7 @@ export default function Tools({ initialData = null }) {
           setLoading(false);
         }
       } catch (err) {
-        console.error("Error fetching tools:", err);
+        reportContentLoadError(err);
         if (!cancelled) {
           setLoadError(true);
           setLoading(false);

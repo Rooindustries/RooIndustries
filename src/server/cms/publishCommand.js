@@ -3,7 +3,6 @@ import { validateContentDocument, createContentDefaults } from "../../lib/cms/co
 import { stableCmsJson } from "../../lib/globalCmsContract.js";
 import { UNUSED_FIELD_NOTE } from "../../lib/cms/fieldUsage.js";
 import { CMS_SYSTEM_FIELDS as system, preserveContentDocument, removedProtectedRows } from "../../lib/cms/contentPreservation.js";
-import { clearSupabasePublicContentCache } from "../content/publicContent.js";
 import { contentType, documentId, loadDocument } from "./documents.js";
 import { cmsError, rpcData, validationError } from "./errors.js";
 import { assertGlobalCmsWritesAllowed } from "./writeControl.js";
@@ -28,11 +27,16 @@ const refuseEnrichment = (value, path = "$", depth = 0) => {
     refuseEnrichment(item, `${path}.${key}`, depth + 1);
   }
 };
+const ROLLED_BACK_SQLSTATE = /^(22...|23...|40001|40P01|42501|55000|55006|P0001|P0002)$/;
+const rejectedBeforeCommit = ({ error, status }) => {
+  const code = typeof error?.code === "string" ? error.code : "";
+  if (status < 400) return false;
+  return ROLLED_BACK_SQLSTATE.test(code);
+};
 const committed = (result, id) => {
   const record = result?.results?.find?.(entry => entry?._id === id || entry?.id === id) || result?.results?.[0];
   const revision = record?._rev || record?.document?._rev;
   if (!revision || typeof revision !== "string") throw cmsError("The committed receipt is missing its revision. Retry the same request.", 503, "CMS_RECEIPT_INVALID");
-  clearSupabasePublicContentCache();
   return { committed: true, replayed: result.replayed === true, documentId: id, revision };
 };
 const prepareCmsCommand = (body, actor) => {
@@ -83,12 +87,15 @@ export const getCreateCommandStatus = async ({ body, supabaseClient, actor = "ad
   }
   return { committed: true, createIntentId: body.createIntentId.toLowerCase(), type: body.type, documentId: resultId, revision: record._rev };
 };
-export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = process.env, actor = "admin:key" } = {}) => {
+export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = process.env, actor = "admin:key", onCommit = () => {} } = {}) => {
   assertGlobalCmsWritesAllowed(env);
   const { schema, creating, id, requestHash, lookup, document: inputDocument } = prepareCmsCommand(body, actor);
   let document = inputDocument;
   const receipt = rpcData(await supabaseClient.rpc("roo_cms_publish_command_result", lookup), "Receipt lookup");
-  if (receipt?.replayed) return committed(receipt, id);
+  if (receipt?.replayed) {
+    onCommit();
+    return committed(receipt, id);
+  }
   const current = await loadDocument(supabaseClient, id);
   if (current && current._type !== body.type) throw cmsError("Document type conflicts with its stored identity.", 409, "CMS_TYPE_MISMATCH", { currentRevision: current._rev });
   if (document) {
@@ -100,6 +107,8 @@ export const executeGlobalCmsCommand = async ({ body, supabaseClient, env = proc
     document = { ...document, _id: id, _type: body.type };
   }
   const mutation = { operation: body.operation, id, ...(document ? { document } : {}), ...(!creating ? { expected_revision: body.expectedRevision || "" } : {}) };
-  const result = rpcData(await supabaseClient.rpc("roo_apply_cms_publish_command", { ...lookup, p_mutations: [mutation], p_assets: [], p_asset_links: [] }), "Content publish");
+  const applied = await supabaseClient.rpc("roo_apply_cms_publish_command", { ...lookup, p_mutations: [mutation], p_assets: [], p_asset_links: [] });
+  if (!rejectedBeforeCommit(applied)) onCommit();
+  const result = rpcData(applied, "Content publish");
   return committed(result, id);
 };
