@@ -356,6 +356,46 @@ run("no-ignored-write-request", {
   ],
 });
 
+run("no-unfiltered-content-load-error", {
+  valid: [
+    `fetchHomeSectionData(key).then(setPackages).catch(reportContentLoadError);`,
+    `getPublicContent("tools").catch((error) => { if (active) reportContentLoadError(error); });`,
+    `getPublicContent("hero").then(setHero).catch(() => {});`,
+    `getPublicContent("contact").then(show, () => setFailed(true));`,
+    `async function load() { try { await getPublicContent("referral-box"); } catch { setFallback(); } }`,
+    `async function load() { try { await getPublicContent("package"); } catch (error) { reportContentLoadError(error); } }`,
+    `try { items.forEach(async () => { await getPublicContent("x"); }); } catch (error) { console.error(error); }`,
+    `fetch("/api/bookingAvailability").catch(console.error);`,
+  ],
+  invalid: [
+    {
+      name: "Packages before #312",
+      code: `fetchHomeSectionData(HOME_SECTION_DATA_KEYS.packagesList).then((pkgs) => setPackages(pkgs)).catch(console.error);`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "BookingForm package lookup before #312",
+      code: `const fetchVertex = async () => { try { const data = await getPublicContent("package", { title }); setVertex(data); } catch { console.error("Failed to fetch Performance Vertex package"); } };`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "UpgradeLink before #312",
+      code: `getPublicContent("upgrade-link", { slug }, { signal }).then(show).catch(() => { console.error("Upgrade link load failed"); if (!active) return; setLinkError(message); }).finally(done);`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "rejection handler passed to then",
+      code: `getPublicContent("terms").then(setTerms, (error) => console.warn(error));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+    {
+      name: "error tracker called directly",
+      code: `prefetchHomeSectionData(keys).catch((error) => Sentry.captureException(error));`,
+      errors: [{ messageId: "unfiltered" }],
+    },
+  ],
+});
+
 run("no-aria-label-on-generic", {
   valid: [
     `<p role="img" aria-label="5 out of 5 stars">★★★★★</p>`,

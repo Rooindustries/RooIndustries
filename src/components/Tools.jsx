@@ -55,7 +55,7 @@ export default function Tools({ initialData = null }) {
           setLoading(false);
         }
       } catch (err) {
-        reportContentLoadError(err, "Error fetching tools:");
+        reportContentLoadError(err);
         if (!cancelled) {
           setLoadError(true);
           setLoading(false);

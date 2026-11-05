@@ -106,7 +106,7 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
         const res = await fetchHomeSectionData(HOME_SECTION_DATA_KEYS.reviews);
         if (!cancelled) setData(res);
       } catch (error) {
-        reportContentLoadError(error, "Could not fetch reviews:");
+        reportContentLoadError(error);
       }
     };
 

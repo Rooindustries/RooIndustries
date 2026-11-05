@@ -14,6 +14,7 @@ import { persistBookingPackageSelection } from "../lib/checkoutStorage";
 import { trackEvent } from "../lib/analytics";
 import { getSessionAvailability } from "../lib/sessionAvailability";
 import { requestDeadline } from "../lib/clientRequest";
+import { reportContentLoadError } from "../lib/publicContentClient";
 
 const loadPackageDetails = () => import("./PackageDetailsModal");
 const PackageDetailsModal = lazy(loadPackageDetails);
@@ -126,7 +127,7 @@ export default function Packages({
           .then((pkgs) => {
             setPackages(buildPackageOffers(pkgs));
           })
-          .catch(console.error);
+          .catch(reportContentLoadError);
       }
     }
 
@@ -139,7 +140,7 @@ export default function Packages({
       } else {
         fetchHomeSectionData(HOME_SECTION_DATA_KEYS.packagesSettings)
           .then(setSectionCopy)
-          .catch(console.error);
+          .catch(reportContentLoadError);
       }
     }
   }, [packages.length, sectionCopy]);

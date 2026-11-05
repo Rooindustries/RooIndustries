@@ -212,3 +212,77 @@ test("a corrupt compressed body is reported even when the visitor leaves right a
     await server.close();
   }
 });
+
+const holdContent = async (page, resources) => {
+  const held = [];
+  let holding = true;
+  await page.route("**/api/content/**", async (request) => {
+    const resource = new URL(request.request().url()).pathname.split("/").pop();
+    if (!holding || !resources.includes(resource)) return request.fallback();
+    held.push(request);
+  });
+  return {
+    held,
+    release: async () => {
+      holding = false;
+      await Promise.all(held.map((request) => request.fallback().catch(() => {})));
+    },
+  };
+};
+
+const appReports = (errors) => errors.filter((text) => !text.startsWith("Failed to load resource"));
+const settle = (page) => page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)));
+
+test("leaving while the packages section loads its packages reports no error", async ({ page }) => {
+  const content = await holdContent(page, ["packages-list", "packages-settings"]);
+  const errors = collectConsoleErrors(page);
+  await page.goto("/contact");
+  await page.locator('a[data-nav-surface="desktop"][data-nav-target="plans"]').click();
+  await expect(page.locator("#packages")).toBeAttached();
+  await expect.poll(() => content.held.some((route) => route.request().url().includes("/packages-list"))).toBe(true);
+  await page.goto("/terms");
+  await expect(page.locator("main h1").first()).toBeVisible();
+  await content.release();
+  await settle(page);
+
+  expect(appReports(errors)).toEqual([]);
+});
+
+test("leaving the booking page while its package details load reports no error", async ({ page }) => {
+  const content = await holdContent(page, ["package"]);
+  const errors = collectConsoleErrors(page);
+  await page.goto("/booking");
+  await expect.poll(() => content.held.length).toBeGreaterThan(0);
+  await page.goto("/contact");
+  await expect(page.locator("main h1").first()).toBeVisible();
+  await content.release();
+  await settle(page);
+
+  expect(appReports(errors)).toEqual([]);
+});
+
+test("moving away in the app while an upgrade link loads reports no error", async ({ page }) => {
+  const content = await holdContent(page, ["upgrade-link"]);
+  const errors = collectConsoleErrors(page);
+  await page.goto("/upgrade/max");
+  await expect(page.getByText("Loading upgrade link...", { exact: true })).toBeVisible();
+  await expect.poll(() => content.held.length).toBe(1);
+  await page.getByRole("link", { name: "Roo Industries Precision Performance Engineering", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await settle(page);
+
+  expect(appReports(errors)).toEqual([]);
+  await content.release();
+});
+
+test("an upgrade link that times out is reported once", async ({ page }) => {
+  const content = await holdContent(page, ["upgrade-link"]);
+  const errors = collectConsoleErrors(page);
+  await page.goto("/upgrade/max");
+  await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible({ timeout: 20000 });
+  await settle(page);
+
+  expect(appReports(errors)).toHaveLength(1);
+  expect(appReports(errors)[0]).toContain("Request timed out.");
+  await content.release();
+});

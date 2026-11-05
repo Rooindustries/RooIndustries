@@ -34,6 +34,7 @@ const fetchFailureMessages = [
 ];
 
 export const getPublicContent = async (resource, params, options) => {
+  const signal = options?.signal;
   pendingRequests += 1;
   const hidesAtStart = pageHides;
   let response;
@@ -41,14 +42,13 @@ export const getPublicContent = async (resource, params, options) => {
   try {
     try {
       response = await fetch(buildPublicContentUrl(resource, params), {
-        credentials: "same-origin",
         headers: { Accept: "application/json" },
-        signal: options?.signal,
+        signal,
       });
       body = await response.json();
     } catch (error) {
       if (
-        (options?.signal?.aborted || currentHide > hidesAtStart) &&
+        (signal?.aborted ? signal.reason?.name !== "TimeoutError" : currentHide > hidesAtStart) &&
         response?.ok !== false &&
         (error?.name === "AbortError" || (error instanceof TypeError && fetchFailureMessages.includes(error.message)))
       ) {
@@ -66,8 +66,6 @@ export const getPublicContent = async (resource, params, options) => {
   }
 };
 
-export const reportContentLoadError = (error, label) => {
-  if (error?.requestCancelled) return;
-  if (label) console.error(label, error);
-  else console.error(error);
+export const reportContentLoadError = (error) => {
+  if (!error?.requestCancelled) console.error(error);
 };
