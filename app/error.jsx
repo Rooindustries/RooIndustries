@@ -16,7 +16,7 @@ export default function ErrorPage({ error }) {
       <a href="/" className="text-accent font-semibold">
         Roo Industries
       </a>
-      <h1 className="text-3xl font-bold">We couldn’t load this page.</h1>
+      <h1 className="section-title section-title-compact">We couldn’t load this page.</h1>
       <p className="text-ink-secondary">Please reload the page to try again.</p>
       <button
         type="button"

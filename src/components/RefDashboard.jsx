@@ -332,7 +332,7 @@ export default function RefDashboard() {
     return <p role="status" className="text-center text-ink pt-32">Loading...</p>;
   if (accountError) return (
     <section className="pt-32 px-6 max-w-xl mx-auto text-ink">
-      <h1 className="text-3xl font-bold text-accent">Creator dashboard</h1>
+      <h1 className="section-title section-title-compact">Creator dashboard</h1>
       <p role="alert" className="mt-4 text-danger-text">{accountError}</p>
       <button onClick={retry} className="mt-6 rounded-xl bg-accent-strong px-6 py-3 font-semibold text-accent-contrast">Retry</button>
     </section>
@@ -422,7 +422,7 @@ export default function RefDashboard() {
     <>
       <style>{noScrollbarStyles}</style>
       <section className="pt-28 px-6 w-full max-w-xl mx-auto text-ink mb-20">
-      <h1 className="text-4xl font-extrabold text-center text-accent drop-shadow break-words">
+      <h1 className="section-title text-center break-words">
         Welcome, {creator.name}
       </h1>
 
