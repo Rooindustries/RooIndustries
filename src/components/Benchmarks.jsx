@@ -47,7 +47,7 @@ export default function Benchmarks({ initialData = null, setIsModalOpen = () => 
   }, []);
 
   return (
-    <section className="relative py-28 px-4 max-w-7xl mx-auto text-ink">
+    <section className="relative px-4 pb-28 page-top max-w-7xl mx-auto text-ink">
       {selectedImage && (
         <ImageZoomModal
           src={selectedImage}

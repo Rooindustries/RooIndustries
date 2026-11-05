@@ -1,27 +1,27 @@
 {
   "routes": {
     "/": {
-      "js": 223232,
+      "js": 222208,
       "css": 26624
     },
     "/_not-found": {
-      "js": 117760,
+      "js": 116736,
       "css": 26624
     },
     "/about": {
-      "js": 164864,
+      "js": 163840,
       "css": 26624
     },
     "/admin/content": {
-      "js": 157696,
+      "js": 156672,
       "css": 30720
     },
     "/admin/referrals": {
-      "js": 123904,
+      "js": 122880,
       "css": 28672
     },
     "/benchmarks": {
-      "js": 166912,
+      "js": 165888,
       "css": 26624
     },
     "/booking": {
@@ -29,87 +29,87 @@
       "css": 26624
     },
     "/contact": {
-      "js": 174080,
+      "js": 173056,
       "css": 26624
     },
     "/discord": {
-      "js": 117760,
+      "js": 116736,
       "css": 26624
     },
     "/downloads/[slug]": {
-      "js": 162816,
-      "css": 26624
-    },
-    "/faq": {
-      "js": 203776,
-      "css": 26624
-    },
-    "/meet-the-team": {
-      "js": 168960,
-      "css": 26624
-    },
-    "/not-found": {
-      "js": 117760,
-      "css": 26624
-    },
-    "/packages": {
-      "js": 167936,
-      "css": 26624
-    },
-    "/payment": {
-      "js": 242688,
-      "css": 26624
-    },
-    "/payment-success": {
-      "js": 228352,
-      "css": 26624
-    },
-    "/privacy": {
-      "js": 166912,
-      "css": 26624
-    },
-    "/referrals/change-password": {
-      "js": 165888,
-      "css": 26624
-    },
-    "/referrals/dashboard": {
-      "js": 240640,
-      "css": 26624
-    },
-    "/referrals/forgot": {
-      "js": 164864,
-      "css": 26624
-    },
-    "/referrals/login": {
       "js": 161792,
       "css": 26624
     },
-    "/referrals/register": {
-      "js": 234496,
+    "/faq": {
+      "js": 202752,
       "css": 26624
     },
-    "/referrals/reset": {
-      "js": 233472,
+    "/meet-the-team": {
+      "js": 167936,
       "css": 26624
     },
-    "/referrals/verify": {
+    "/not-found": {
+      "js": 116736,
+      "css": 26624
+    },
+    "/packages": {
+      "js": 166912,
+      "css": 26624
+    },
+    "/payment": {
+      "js": 241664,
+      "css": 26624
+    },
+    "/payment-success": {
+      "js": 227328,
+      "css": 26624
+    },
+    "/privacy": {
+      "js": 165888,
+      "css": 26624
+    },
+    "/referrals/change-password": {
       "js": 164864,
       "css": 26624
     },
+    "/referrals/dashboard": {
+      "js": 239616,
+      "css": 26624
+    },
+    "/referrals/forgot": {
+      "js": 163840,
+      "css": 26624
+    },
+    "/referrals/login": {
+      "js": 160768,
+      "css": 26624
+    },
+    "/referrals/register": {
+      "js": 233472,
+      "css": 26624
+    },
+    "/referrals/reset": {
+      "js": 232448,
+      "css": 26624
+    },
+    "/referrals/verify": {
+      "js": 163840,
+      "css": 26624
+    },
     "/reviews": {
-      "js": 166912,
+      "js": 165888,
       "css": 26624
     },
     "/terms": {
-      "js": 166912,
+      "js": 165888,
       "css": 26624
     },
     "/thank-you": {
-      "js": 228352,
+      "js": 227328,
       "css": 26624
     },
     "/tools": {
-      "js": 166912,
+      "js": 165888,
       "css": 26624
     },
     "/tourney": {
@@ -117,11 +117,11 @@
       "css": 27648
     },
     "/upgrade-xoc": {
-      "js": 165888,
+      "js": 164864,
       "css": 26624
     },
     "/upgrade/[slug]": {
-      "js": 166912,
+      "js": 165888,
       "css": 26624
     }
   },

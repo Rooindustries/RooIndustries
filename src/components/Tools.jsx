@@ -194,7 +194,7 @@ export default function Tools({ initialData = null }) {
 
   return (
     <section
-      className="relative z-10 pt-28 pb-24 px-6 max-w-6xl mx-auto text-ink"
+      className="relative z-10 page-top pb-24 px-6 max-w-6xl mx-auto text-ink"
       style={{
         width: "100%",
         maxWidth: "1152px",
@@ -322,7 +322,7 @@ export default function Tools({ initialData = null }) {
                       </p>
                     )}
 
-                    <p className="mt-2 text-[10px] text-ink-muted">
+                    <p className="mt-2 text-xs text-ink-secondary">
                       {downloadNote
                         ? downloadNote
                         : downloadMode === "hosted"

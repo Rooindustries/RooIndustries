@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { Check } from "lucide-react";
 import { getPublicContent } from "../lib/publicContentClient";
 import homeCopy from "../lib/homeCopy";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
@@ -13,81 +14,19 @@ const normalizeText = (s = "") =>
     .replace(/\u00a0/g, " ");
 
 
-function CtaNoteBalanced({ icon, text }) {
-  const singleRef = useRef(null);
-  const line2PRef = useRef(null);
-  const textSpan1Ref = useRef(null);
-  const textSpan2Ref = useRef(null);
-  const [isSplit, setIsSplit] = useState(false);
-
-  const fullText = normalizeText(text).trim();
-  const noteParts = fullText.split(/\s+·\s+/).filter(Boolean);
-  const splitIndex = Math.max(1, Math.floor(noteParts.length / 2));
-  const line1Text =
-    noteParts.length > 1
-      ? noteParts.slice(0, splitIndex).join(" · ")
-      : fullText;
-  const line2Text =
-    noteParts.length > 1 ? noteParts.slice(splitIndex).join(" · ") : "";
-
-  useEffect(() => {
-    const check = () => {
-      const el = singleRef.current;
-      if (!el || !el.parentElement) return;
-      setIsSplit(el.scrollWidth > el.parentElement.clientWidth);
-    };
-    check();
-    const observer = new ResizeObserver(check);
-    if (singleRef.current?.parentElement) observer.observe(singleRef.current.parentElement);
-    window.addEventListener("resize", check);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", check);
-    };
-  }, [fullText]);
-
-  useEffect(() => {
-    if (!isSplit || !textSpan1Ref.current || !textSpan2Ref.current || !line2PRef.current) return;
-
-    const match = () => {
-      const p2 = line2PRef.current;
-      if (!p2) return;
-      p2.style.fontSize = "";
-      const w1 = textSpan1Ref.current?.getBoundingClientRect().width || 0;
-      const w2 = textSpan2Ref.current?.getBoundingClientRect().width || 0;
-      if (w1 <= 0 || w2 <= 0) return;
-      const base = parseFloat(getComputedStyle(p2).fontSize);
-      // Keep the second line visually balanced without enlarging short copy.
-      p2.style.fontSize = `${Math.min(base, (base * w1) / w2)}px`;
-    };
-
-    match();
-    const onResize = () => match();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [isSplit, line1Text, line2Text]);
-
-  if (!fullText) return null;
+function CtaNote({ text }) {
+  const parts = normalizeText(text).trim().split(/\s+·\s+/).filter(Boolean);
+  if (parts.length === 0) return null;
 
   return (
-    <div className="ri-hero-cta-note relative mt-3 sm:mt-5 text-center">
-      <p ref={singleRef} aria-hidden={isSplit && Boolean(line2Text) ? "true" : undefined} className={`flex items-center justify-center gap-2 text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap overflow-hidden ${isSplit && line2Text ? "absolute inset-x-0 invisible pointer-events-none" : ""}`} >
-          {icon && <span className="text-ink" aria-hidden="true">{icon}</span>}
-          <span className="gold-flair-text">{fullText}</span>
-        </p>
-      {isSplit && line2Text ? (
-        <div className="flex flex-col items-center gap-0.5">
-          <p className="inline-flex items-center gap-2 text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap">
-            {icon && <span className="text-ink" aria-hidden="true">{icon}</span>}
-            <span ref={textSpan1Ref} className="gold-flair-text">{line1Text}</span>
-          </p>
-          <p ref={line2PRef} className="inline-flex items-center gap-2 text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap">
-            {icon && <span className="invisible" aria-hidden="true">{icon}</span>}
-            <span ref={textSpan2Ref} className="gold-flair-text">{line2Text}</span>
-          </p>
-        </div>
-      ) : null}
-    </div>
+    <ul className="ri-hero-cta-note mx-auto mt-4 flex max-w-2xl flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-center text-sm font-semibold text-ink-secondary sm:mt-5 sm:text-[15px]">
+      {parts.map((part, index) => (
+        <li key={index} className="flex items-start gap-1.5">
+          <Check aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-accent" strokeWidth={2.5} />
+          {part}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -239,7 +178,7 @@ export default function Hero({ initialData = null, headingTag = "h1" }) {
   }, [headingLine1, headingLine2, headingTag]);
 
   return (
-    <header id="top" className="py-16 flex justify-center">
+    <header id="top" className="flex justify-center pb-14 pt-6 sm:py-16">
       <section className="mx-auto max-w-4xl px-6 text-center w-full">
         <div className="w-full">
           <Heading className="font-extrabold tracking-tight text-center">
@@ -267,7 +206,7 @@ export default function Hero({ initialData = null, headingTag = "h1" }) {
 
         <div className="min-h-[36px] sm:min-h-[60px]">
           {description && (
-            <p className="mt-4 text-sm sm:text-base md:text-lg text-ink-secondary leading-relaxed max-w-2xl mx-auto text-balance">
+            <p className="mt-4 text-base md:text-lg text-ink-secondary leading-relaxed max-w-2xl mx-auto text-balance">
               {renderWithGlow110(description)}
             </p>
           )}
@@ -275,7 +214,7 @@ export default function Hero({ initialData = null, headingTag = "h1" }) {
 
         <div className="min-h-[24px] sm:min-h-[36px]">
           {subtext && (
-            <p className="mt-4 sm:mt-6 text-[14px] sm:text-lg font-semibold hero-subtext-accent text-balance">
+            <p className="mt-4 sm:mt-6 text-base sm:text-lg font-semibold hero-subtext-accent text-balance">
               {renderWithGlow110(subtext)}
             </p>
           )}
@@ -312,7 +251,7 @@ export default function Hero({ initialData = null, headingTag = "h1" }) {
         </div>
 
         {ctaNote && (
-          <CtaNoteBalanced text={ctaNote} />
+          <CtaNote text={ctaNote} />
         )}
       </section>
     </header>
