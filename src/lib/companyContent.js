@@ -1,4 +1,4 @@
-const CONTACT_EMAIL = "serviroo@rooindustries.com";
+const { CONTACT_EMAIL } = require("./contactEmail");
 
 const ABOUT_PARAGRAPHS = [
   "Roo Industries provides remote PC game optimization for competitive players, streamers, and people who want smoother gameplay from the hardware they already own. Sessions focus on higher FPS, steadier 1% lows, lower input lag, and consistent frametimes in the games each customer plays.",
