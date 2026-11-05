@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
-import { getPublicContent } from "../lib/publicContentClient";
+import { getPublicContent, reportContentLoadError } from "../lib/publicContentClient";
 import ImageZoomModal from "./ImageZoomModal";
 
 const localDiscordReviews = [];
@@ -28,7 +28,7 @@ export default function Reviews({ initialData = null }) {
     getPublicContent("reviews-gallery")
       .then((data) => setReviews(Array.isArray(data) ? data : []))
       .catch((error) => {
-        console.error(error);
+        reportContentLoadError(error);
         setReviews([]);
       });
   }, []);
