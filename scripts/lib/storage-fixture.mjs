@@ -61,7 +61,7 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
     fs.mkdirSync(filePath);
     fs.symlinkSync(path.join(storageSource, 'migrations'), path.join(scratch, 'migrations'));
     database = await createSweepPostgresFixture({ pgBin, postgrestBin, libraryPath, commerceRepairMigration, fullMigrationChain, ports: { postgres: ports.postgres, rest: ports.rest ?? ports.postgrest, proxy: ports.proxy }, beforeMigrations: async context => {
-      cleanup.postgresPid = Number(fs.readFileSync(path.join(context.scratch, 'data/postmaster.pid'), 'utf8').split('\n')[0]);
+      cleanup.postgresPid = context.postgresPid;
       cleanup.databaseScratch = context.scratch;
       serviceRoleKey = jwt(context.jwtSecret, 'service_role');
       anonKey = jwt(context.jwtSecret, 'anon');

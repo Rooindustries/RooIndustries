@@ -15,6 +15,15 @@ inputs:
 runs:
   using: composite
   steps:
+    - if: runner.environment == 'github-hosted'
+      shell: bash
+      run: |
+        if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] &&
+           [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = 1 ]; then
+          printf '%s\n' 'abi <abi/4.0>,' \
+            'profile roo-fixture-unshare /usr/bin/unshare flags=(unconfined) {' \
+            '  userns,' '}' | sudo apparmor_parser --replace
+        fi
     - uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node-version }}

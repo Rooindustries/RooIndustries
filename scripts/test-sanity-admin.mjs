@@ -39,7 +39,7 @@ try {
     ...(process.env.LD_LIBRARY_PATH ? { libraryPath: process.env.LD_LIBRARY_PATH } : {}),
   });
   artifact.versions = fixture.versions;
-  artifact.runtime = { storageScratch: fixture.scratch, databaseScratch: fixture.databaseScratch, postgresPid: Number(fs.readFileSync(path.join(fixture.databaseScratch, 'data/postmaster.pid'), 'utf8').split('\n')[0]), postgrestPid: fixture.postgrestPid };
+  artifact.runtime = { storageScratch: fixture.scratch, databaseScratch: fixture.databaseScratch, postgresPid: fixture.postgresPid, postgrestPid: fixture.postgrestPid };
   fs.mkdirSync('test-results/sanity-admin', { recursive: true }); fs.writeFileSync(`test-results/sanity-admin/${selected}.json`, JSON.stringify(sanitize(artifact), null, 2) + '\n');
   artifact.migrations = fixture.manifest.map(({ file, selection, sha256 }) => ({ file, selection, sha256 }));
   const expectedFiles = fs.readdirSync('supabase/migrations').filter(file => file.endsWith('.sql')).sort();
