@@ -1,5 +1,6 @@
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
+const { settle, waitFrames } = require("./fixtures/frames.cjs");
 
 test.use({
   javaScriptEnabled: true,
@@ -450,7 +451,7 @@ const recordStageFrames = page => page.addInitScript(() => {
 
 const expectStageShownWithDialog = async (page, testInfo, name) => {
   await expect(page.locator('[role="dialog"].ri-booking')).toBeVisible();
-  await page.waitForTimeout(1000);
+  await waitFrames(page, 60);
   const frames = await page.evaluate(() => window.__stageFrames);
   await testInfo.attach(name, { body: JSON.stringify(frames), contentType: "application/json" });
   expect(frames.length).toBeGreaterThan(0);
@@ -470,7 +471,9 @@ const recordFormFades = page => page.addInitScript(() => {
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   for (const route of ["/booking", "/payment", "/payment-success", "/thank-you"]) {
-    test(`direct load of ${route} never shows the overlay without its dialog at ${viewport.width}px`, async ({ page, flow }, testInfo) => {
+    test(`direct load of ${route} never shows the overlay without its dialog at ${viewport.width}px`, async ({
+      page, flow,
+    }, testInfo) => {
       const errors = watchErrors(page);
       await page.setViewportSize(viewport);
       await recordStageFrames(page);
@@ -481,7 +484,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
   }
 }
 
-test("a second tab's direct load of /booking shows the stage with its dialog", async ({ page, context, flow }, testInfo) => {
+test("a second tab's direct load of /booking shows the stage with its dialog", async ({
+  page, context, flow,
+}, testInfo) => {
   await page.goto("/booking");
   await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
   const second = await context.newPage();
@@ -496,23 +501,32 @@ test("a second tab's direct load of /booking shows the stage with its dialog", a
   await second.close();
 });
 
-test("the booking form skips its fade only on the direct load and fades on Back and Forward", async ({ page, flow }, testInfo) => {
+test("the booking form skips its fade only on the direct load and fades on Back and Forward", async ({
+  page, flow,
+}, testInfo) => {
   const errors = watchErrors(page);
   await recordFormFades(page);
   await page.goto("/booking");
   await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
-  await page.waitForTimeout(500);
+  await settle(page);
   const directLoad = await page.evaluate(() => window.__formFades.splice(0));
-  await page.evaluate(() => window.history.pushState({ ...window.history.state, __rooLegacy: true, usr: null }, "", "/booking"));
+  await page.evaluate(() => window.history.pushState(
+    { ...window.history.state, __rooLegacy: true, usr: null }, "", "/booking"));
   const rounds = {};
-  for (const [name, move] of [["back", () => page.goBack()], ["forward", () => page.goForward()], ["back again", () => page.goBack()]]) {
+  const moves = [
+    ["back", () => page.goBack()],
+    ["forward", () => page.goForward()],
+    ["back again", () => page.goBack()],
+  ];
+  for (const [name, move] of moves) {
     await move();
     await expect(page).toHaveURL(/\/booking$/);
     await expect.poll(() => page.evaluate(() => window.__formFades.length), { timeout: 3000 }).toBeGreaterThan(0);
     await expect(page.locator(".ri-booking.transition-opacity.opacity-100")).toBeVisible();
     rounds[name] = await page.evaluate(() => window.__formFades.splice(0).length);
   }
-  await testInfo.attach("form-fades", { body: JSON.stringify({ directLoad, rounds }), contentType: "application/json" });
+  const fades = JSON.stringify({ directLoad, rounds });
+  await testInfo.attach("form-fades", { body: fades, contentType: "application/json" });
   expect(directLoad).toEqual([]);
   expect(errors).toEqual([]);
 });

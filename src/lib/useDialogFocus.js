@@ -49,7 +49,9 @@ export function useDialogFocus({ open, dialogRef, initialFocusRef, returnFocusRe
       if (wasTop) {
         const parent = dialogs.at(-1)?.current;
         const returnTarget = returnFocusRef?.current?.isConnected ? returnFocusRef.current : null;
-        const opener = returnTarget || (previousFocus?.isConnected && previousFocus !== document.body && previousFocus !== document.documentElement && previousFocus.id !== "main-content" ? previousFocus : null);
+        const previousOpener = previousFocus?.isConnected && previousFocus !== document.body &&
+          previousFocus !== document.documentElement && previousFocus.id !== "main-content" ? previousFocus : null;
+        const opener = returnTarget || previousOpener;
         const target = opener || parent?.querySelector("[data-autofocus], button, input") || parent ||
           document.querySelector("[data-reservation-continue]") || document.getElementById("main-content");
         target?.focus({ preventScroll: true });

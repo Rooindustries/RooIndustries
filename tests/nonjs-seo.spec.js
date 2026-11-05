@@ -25,7 +25,9 @@ const stylesheetsReady = async (page) => {
     disabled: link.disabled,
   })));
   expect(stylesheets.length).toBeGreaterThan(0);
-  expect(stylesheets.filter(sheet => !sheet.loaded || !sheet.inHead || sheet.media !== "all" || sheet.disabled)).toEqual([]);
+  const unready = stylesheets
+    .filter(sheet => !sheet.loaded || !sheet.inHead || sheet.media !== "all" || sheet.disabled);
+  expect(unready).toEqual([]);
 };
 
 test.describe("Non-JS crawlability", () => {
@@ -36,7 +38,9 @@ test.describe("Non-JS crawlability", () => {
       ["/payment-success", '[role="dialog"] h1'],
       ["/thank-you", '[role="dialog"] h1'],
     ]) {
-      test(`${route}'s dialog content doesn't start hidden on the server at ${viewport.width}px`, async ({ page }, testInfo) => {
+      test(`${route}'s dialog content doesn't start hidden on the server at ${viewport.width}px`, async ({
+        page,
+      }, testInfo) => {
         await page.setViewportSize(viewport);
         await page.goto(route, { waitUntil: "domcontentloaded" });
         await stylesheetsReady(page);
@@ -59,7 +63,8 @@ test.describe("Non-JS crawlability", () => {
               visibility: getComputedStyle(node).visibility,
             }));
         });
-        await testInfo.attach("hidden-nodes", { body: JSON.stringify(hidden, null, 2), contentType: "application/json" });
+        const body = JSON.stringify(hidden, null, 2);
+        await testInfo.attach("hidden-nodes", { body, contentType: "application/json" });
         expect(hidden).toEqual([]);
         const box = await content.boundingBox();
         expect(box.width).toBeGreaterThan(0);

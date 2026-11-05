@@ -33,19 +33,14 @@ export default function SiteDialogFrame({
   useEffect(() => {
     if (!closing) return undefined;
     let cancelled = false;
-    const finish = () => {
-      if (!cancelled) setRendered(false);
-    };
     const exits = [overlayRef.current, dialogRef.current]
       .flatMap((element) => (typeof element?.getAnimations === "function" ? element.getAnimations() : []))
-      .map((animation) => ({ animation, timing: animation.effect?.getComputedTiming() }))
-      .filter(({ timing }) => Number.isFinite(timing?.endTime));
-    const exitMs = Math.max(0, ...exits.map(({ animation, timing }) => timing.endTime - (typeof animation.currentTime === "number" ? animation.currentTime : 0)));
-    const fallback = window.setTimeout(finish, exitMs + 100);
-    Promise.allSettled(exits.map(({ animation }) => animation.finished)).then(finish);
+      .filter((animation) => Number.isFinite(animation.effect?.getComputedTiming().endTime));
+    Promise.allSettled(exits.map((animation) => animation.finished)).then(() => {
+      if (!cancelled) setRendered(false);
+    });
     return () => {
       cancelled = true;
-      window.clearTimeout(fallback);
     };
   }, [closing]);
 
@@ -76,10 +71,22 @@ export default function SiteDialogFrame({
   if (typeof document === "undefined") return null;
 
   const visible = presence ? open : rendered;
+  const overlayClassName = [
+    "glass-overlay low-perf-overlay fixed inset-0 z-[100] flex items-center justify-center px-4",
+    presence ? "" : "site-dialog-overlay",
+    overlayProps.className || "",
+  ].join(" ");
+  const panelClassName = [
+    "low-perf-surface glass-premium glass-card-surface relative w-full max-w-md rounded-2xl border border-info-border",
+    "p-6 text-center transition-all duration-500 ease-in-out hover:shadow-glow-strong",
+    presence ? "" : "site-dialog-panel",
+    panelProps.className || "",
+    className,
+  ].join(" ");
   const content = visible ? (
     <Overlay
       {...overlayProps}
-      className={`glass-overlay low-perf-overlay fixed inset-0 z-[100] flex items-center justify-center px-4 ${presence ? "" : "site-dialog-overlay"} ${overlayProps.className || ""}`}
+      className={overlayClassName}
       data-closing={closing || undefined}
       ref={overlayRef}
       onClick={(event) => {
@@ -95,7 +102,7 @@ export default function SiteDialogFrame({
         aria-describedby={ariaDescribedBy}
         aria-labelledby={ariaLabelledBy}
         aria-modal="true"
-        className={`low-perf-surface glass-premium glass-card-surface relative w-full max-w-md rounded-2xl border border-info-border p-6 text-center transition-all duration-500 ease-in-out hover:shadow-glow-strong ${presence ? "" : "site-dialog-panel"} ${panelProps.className || ""} ${className}`}
+        className={panelClassName}
         inert={closing || undefined}
         onClick={(event) => event.stopPropagation()}
         ref={dialogRef}

@@ -1,6 +1,7 @@
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs/promises");
 const { gzipSync } = require("node:zlib");
+const { settle } = require("./fixtures/frames.cjs");
 
 test.use({ javaScriptEnabled: true, viewport: { width: 390, height: 844 }, serviceWorkers: "block", trace: "off", video: "off" });
 
@@ -225,7 +226,7 @@ for (const [entry, message] of [
     await page.goto(entry);
     await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
     await expect(page.getByText(message)).toBeVisible();
-    await page.waitForTimeout(1000);
+    await settle(page);
     await expect(page).toHaveURL(/\/referrals\/login$/);
     await attach(testInfo, "cleared-notice", { entry, url: page.url() });
   });
@@ -234,7 +235,7 @@ for (const [entry, message] of [
 test("a confirmation link keeps its cleared URL", async ({ page }, testInfo) => {
   await page.goto("/referrals/verify?source=email#token=fixture-token");
   await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
-  await page.waitForTimeout(1000);
+  await settle(page);
   await expect(page).toHaveURL(/\/referrals\/verify$/);
   await attach(testInfo, "cleared-confirmation", { url: page.url() });
 });
@@ -265,7 +266,9 @@ const loginIsCoveredByDialog = page => page.getByRole("button", { name: "Login",
 });
 
 for (const provider of ["discord", "google"]) {
-  test(`the ${provider} account choice blocks login while on-demand code is still downloading`, async ({ page }, testInfo) => {
+  test(`the ${provider} account choice blocks login while on-demand code is still downloading`, async ({
+    page,
+  }, testInfo) => {
     let release;
     const gate = new Promise(resolve => { release = resolve; });
     const entry = `/referrals/login?oauth=unlinked&provider=${provider}`;
@@ -328,6 +331,9 @@ const describeDialogMotion = () => {
 
 const dialogAnimations = page => page.evaluate(describeDialogMotion);
 
+const dialogSettled = page => page.getByRole("dialog").evaluate(dialog => Promise.all(
+  [dialog.parentElement, dialog].flatMap(element => element.getAnimations()).map(animation => animation.finished)));
+
 const recordDialogClosing = async page => {
   await page.evaluate(`window.__describeDialogMotion = ${describeDialogMotion.toString()}`);
   await page.evaluate(() => {
@@ -350,8 +356,10 @@ test("the account choice fades in and out around the sign-in step", async ({ pag
   await expect(page.getByRole("dialog")).toBeVisible();
   const opening = await dialogAnimations(page);
   expect(opening.overlay).toEqual({ name: "siteDialogOverlayIn", duration: "0.3s", delay: "0s", easing: "ease-out" });
-  expect(opening.panel).toEqual({ name: "siteDialogPanelIn", duration: "0.5s", delay: "0.16s", easing: "cubic-bezier(0.4, 0, 0.2, 1)" });
-  await page.waitForTimeout(800);
+  expect(opening.panel).toEqual({
+    name: "siteDialogPanelIn", duration: "0.5s", delay: "0.16s", easing: "cubic-bezier(0.4, 0, 0.2, 1)",
+  });
+  await dialogSettled(page);
   await page.getByLabel("Referral code or login email", { exact: true }).fill("fixture-creator");
   await page.getByLabel("Password", { exact: true }).fill("fixture-password");
   const loginBox = await page.getByRole("button", { name: "Login", exact: true }).boundingBox();
@@ -388,27 +396,31 @@ test("the account choice skips its motion when reduced motion is preferred", asy
 });
 
 for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 }]) {
-  test(`a rapid second click while the account choice closes keeps sign-in focused at ${viewport.width}px`, async ({ page }, testInfo) => {
+  test(`a rapid second click while the account choice closes keeps sign-in focused at ${viewport.width}px`, async ({
+    page,
+  }, testInfo) => {
     await page.setViewportSize(viewport);
     await page.goto("/referrals/login?oauth=unlinked&provider=discord");
     const choice = page.getByRole("button", { name: "Log in and link", exact: true });
     await expect(choice).toBeVisible();
-    await page.waitForTimeout(800);
+    await dialogSettled(page);
     const box = await choice.boundingBox();
     const x = box.x + box.width / 2;
     const y = box.y + box.height / 2;
     await page.mouse.click(x, y);
-    await page.waitForTimeout(35);
+    await expect(page.locator("[data-closing]")).toHaveCount(1);
     await page.mouse.click(x, y);
     await expect(page.locator('[aria-labelledby="unlinked-discord-title"]')).toHaveCount(0);
-    await page.waitForTimeout(300);
+    await settle(page);
     const focused = await page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName);
     await attach(testInfo, "rapid-close-focus", { viewport, focused });
     expect(focused).toBe("ref-login-identifier");
   });
 }
 
-test("a looping animation inside the account choice doesn't keep its overlay after it closes", async ({ page }, testInfo) => {
+test("a looping animation inside the account choice doesn't keep its overlay after it closes", async ({
+  page,
+}, testInfo) => {
   await page.goto("/referrals/login?oauth=unlinked&provider=discord");
   const choice = page.getByRole("button", { name: "Log in and link", exact: true });
   await expect(choice).toBeVisible();
@@ -419,7 +431,8 @@ test("a looping animation inside the account choice doesn't keep its overlay aft
     spinner.style.width = "12px";
     spinner.style.height = "12px";
     dialog.append(spinner);
-    const animation = spinner.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], { duration: 400, iterations: Infinity });
+    const turn = [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }];
+    const animation = spinner.animate(turn, { duration: 400, iterations: Infinity });
     return animation.effect.getComputedTiming().iterations;
   });
   expect(looping).toBe(Infinity);
@@ -430,4 +443,31 @@ test("a looping animation inside the account choice doesn't keep its overlay aft
   await password.click();
   await expect(password).toBeFocused();
   await attach(testInfo, "looping-animation-close", { looping: String(looping) });
+});
+
+test("a slowed fade keeps the account choice on screen until the fade ends", async ({ page }, testInfo) => {
+  await page.goto("/referrals/login?oauth=unlinked&provider=discord");
+  const choice = page.getByRole("button", { name: "Log in and link", exact: true });
+  await expect(choice).toBeVisible();
+  await dialogSettled(page);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Animation.enable");
+  await cdp.send("Animation.setPlaybackRate", { playbackRate: 0.1 });
+  await page.evaluate(() => {
+    window.__closingFade = [];
+    const sample = () => {
+      const overlay = document.querySelector(".site-dialog-overlay[data-closing]");
+      if (!overlay && window.__closingFade.length) return;
+      const fade = overlay?.getAnimations().find(animation => animation.animationName === "siteDialogOverlayOut");
+      if (fade) window.__closingFade.push(fade.effect.getComputedTiming().progress ?? 1);
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  await choice.click();
+  await expect(page.locator(".glass-overlay")).toHaveCount(0, { timeout: 10000 });
+  const progress = await page.evaluate(() => window.__closingFade);
+  await attach(testInfo, "slowed-close-fade", { progress });
+  expect(progress.length).toBeGreaterThan(0);
+  expect(progress.at(-1)).toBeGreaterThan(0.95);
 });

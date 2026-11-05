@@ -375,13 +375,15 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
 
   const paddingBlockValue = (isMobile ? MOBILE_PADDING_Y : DESKTOP_PADDING_Y) / 2;
   const paddingTopValue = Math.max(0, paddingBlockValue - (isMobile ? CLOSE_ROW_HEIGHT : 0));
+  const stageVisibility = stageRevealed ? "" : " [html.js_&]:invisible";
+  const frameVisibility = contentSwitch.revealPending ? " invisible" : awaitingContent ? " [html.js_&]:invisible" : "";
 
   return (
     <AnimatePresence>
       {open && (
         <motion.div
           ref={stageRef}
-          className={`booking-dialog-stage fixed z-[70] overflow-y-auto overflow-x-hidden${stageRevealed ? "" : " [html.js_&]:invisible"}`}
+          className={`booking-dialog-stage fixed z-[70] overflow-y-auto overflow-x-hidden${stageVisibility}`}
           style={viewport || { inset: 0 }}
           initial={hydrating ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -405,7 +407,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
               role="dialog"
               aria-modal="true"
               aria-label="Schedule your session"
-              className={`ri-booking m-auto relative${contentSwitch.revealPending ? " invisible" : awaitingContent ? " [html.js_&]:invisible" : ""}`}
+              className={`ri-booking m-auto relative${frameVisibility}`}
               initial={hydrating ? false : { width: wrapperSize.width, height: wrapperSize.height }}
               animate={wrapperSize.height ? { width: wrapperSize.width, height: wrapperSize.height } : undefined}
               layout={!lowPerformanceMode}
