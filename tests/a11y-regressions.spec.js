@@ -69,7 +69,7 @@ for (const [name, viewport] of [
     test("package prices expose current and previous prices as text", async ({ page }, testInfo) => {
       await page.goto("/packages", { waitUntil: "networkidle" });
       const prices = page.locator(".ri-package-card .ri-price-current");
-      await expect(prices).toHaveCount(2);
+      await expect(prices).toHaveCount(3);
 
       for (const [index, text] of [
         [0, "Price $84.99"],
