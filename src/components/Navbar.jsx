@@ -14,6 +14,8 @@ const canAnimateLogo = () => {
     !navigator?.connection?.saveData;
 };
 
+const DESKTOP_NAV_QUERY = "(min-width: 1024px)";
+
 // Two themes only: "dark" (Blackout Gold, the site default) and "default"
 // (Roo Blue). There is no light mode. Legacy stored values normalize to dark.
 const THEME_STORAGE_KEY = "roo-theme";
@@ -225,7 +227,7 @@ export default function Navbar() {
   useEffect(() => {
     if (!open) return;
     const handleEscape = (event) => {
-      if (event.key !== "Escape" || window.matchMedia("(min-width: 768px)").matches) return;
+      if (event.key !== "Escape" || window.matchMedia(DESKTOP_NAV_QUERY).matches) return;
       event.preventDefault();
       setOpen(false);
       setProofOpen(false);
@@ -238,7 +240,7 @@ export default function Navbar() {
 
   useEffect(() => {
     if ((!proofOpen && !referralsOpen) || typeof window === "undefined") return;
-    if (!window.matchMedia("(min-width: 768px)").matches) return;
+    if (!window.matchMedia(DESKTOP_NAV_QUERY).matches) return;
 
     const handleClickOutside = (event) => {
       if (
@@ -314,7 +316,7 @@ export default function Navbar() {
   return (
     <header
       ref={headerRef}
-      className={`site-nav site-navbar-glass glass-premium glass-scroll-lite fixed top-0 left-0 right-0 z-50 overflow-visible border-b transition-all duration-300 ${
+      className={`site-nav site-navbar-glass glass-premium glass-scroll-lite fixed top-0 left-0 right-0 z-50 flex max-h-[100dvh] flex-col overflow-visible border-b transition-all duration-300 ${
         scrolled
           ? "border-[color:var(--navbar-border-scrolled)]"
           : "border-[color:var(--navbar-border-rest)]"
@@ -333,12 +335,12 @@ export default function Navbar() {
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-[color:var(--color-accent-soft)] to-transparent z-0" />
 
-      <div className="relative z-10 hidden md:block">
+      <div className="relative z-10 hidden shrink-0 md:block">
         <DiscordGuideBanner hidden={bannerHidden} />
       </div>
 
-      <div className="relative z-10 mx-auto max-w-7xl overflow-visible px-4 sm:px-6">
-        <div ref={navRowRef} className="flex h-20 items-center overflow-visible sm:h-24">
+      <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-7xl flex-col overflow-visible px-4 sm:px-6">
+        <div ref={navRowRef} data-nav-row className="flex h-20 shrink-0 items-center overflow-visible sm:h-24">
           <div className="hidden min-w-0 flex-1 items-center gap-4 md:flex">
             {location.pathname !== "/" ? (
               <BackButton />
@@ -422,7 +424,7 @@ export default function Navbar() {
             </Link>
 
             <div className="ml-auto flex shrink-0 items-center gap-1 min-[360px]:gap-2 sm:gap-3">
-            <nav className="hidden md:flex items-center gap-1">
+            <nav className="hidden lg:flex items-center gap-1">
               <a
                 href={buildHomeSectionHref(SECTION_HASHES.benefits)}
                 data-nav-surface="desktop"
@@ -627,7 +629,7 @@ export default function Navbar() {
                 })
               }
               className="
-                  md:hidden
+                  lg:hidden
                   h-9 w-9 min-[360px]:h-10 min-[360px]:w-10 sm:h-12 sm:w-12 grid place-items-center rounded-full
                   text-ink-secondary hover:text-[color:var(--color-link-hover)]
                   border border-line-soft hover:border-line-accent
@@ -673,10 +675,10 @@ export default function Navbar() {
         <div
           id="mobile-site-menu"
           inert={!open}
-          className={`md:hidden overflow-hidden transition-all duration-300 ease-out ${
+          className={`min-h-0 lg:hidden transition-all duration-300 ease-out ${
             open
-              ? "pb-4 max-h-[680px] opacity-100 translate-y-0"
-              : "max-h-0 opacity-0 -translate-y-2 pointer-events-none"
+              ? "pb-4 max-h-[680px] overflow-y-auto overscroll-contain opacity-100 translate-y-0"
+              : "max-h-0 overflow-hidden opacity-0 -translate-y-2 pointer-events-none"
           }`}
           aria-hidden={!open}
         >
