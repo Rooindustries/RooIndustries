@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { waitForHydrated } = require("./fixtures/react-hydration.cjs");
 
 const CPU_THROTTLE_RATE = Number(process.env.NAV_CPU_THROTTLE_RATE || 4);
 const FINAL_OFFSET_MAX = 160;
@@ -25,16 +26,6 @@ test.beforeEach(async ({ context, page, baseURL }) => {
   const session = await context.newCDPSession(page);
   await session.send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE_RATE });
 });
-
-const waitForHydrated = (page, selector) =>
-  page.waitForFunction(
-    (target) => {
-      const element = document.querySelector(target);
-      return Boolean(element && Object.keys(element).some((key) => key.startsWith("__reactProps$")));
-    },
-    selector,
-    { timeout: 15000 }
-  );
 
 const openPage = async (page, route, surface) => {
   await page.goto(route, { waitUntil: "domcontentloaded" });
