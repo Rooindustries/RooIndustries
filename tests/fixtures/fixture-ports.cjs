@@ -65,4 +65,8 @@ const loadFixturePorts = async baseURL => {
   return report.ports;
 };
 
-module.exports = { FIXTURE_PORT_NAMES, INSTANCE_PATH, fixturePort, fixtureOrigin, fixtureInstance, writeFixturePorts, loadFixturePorts };
+const loadGivenOrReportedPorts = async baseURL => {
+  if (!process.env.TOOLING_CONTENT_PORT) await loadFixturePorts(baseURL);
+};
+
+module.exports = { FIXTURE_PORT_NAMES, INSTANCE_PATH, fixturePort, fixtureOrigin, fixtureInstance, writeFixturePorts, loadFixturePorts, loadGivenOrReportedPorts };
