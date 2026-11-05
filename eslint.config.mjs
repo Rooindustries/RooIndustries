@@ -33,6 +33,13 @@ export default [
     rules: ruleSet(["no-virtual-mock-of-installed-module"]),
   },
   {
+    files: ["scripts/**/*.{js,mjs,cjs}", "tests/**/*.{js,mjs,cjs}"],
+    linterOptions: { reportUnusedDisableDirectives: "off" },
+    languageOptions: { ecmaVersion: "latest", sourceType: "module", globals: { ...globals.node } },
+    plugins: { roo },
+    rules: ruleSet(["no-hand-built-node-options"]),
+  },
+  {
     files: ["**/*.cjs"],
     languageOptions: { sourceType: "commonjs" },
   },

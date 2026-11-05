@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
 import { lockBuildDirectory } from "./lib/build-lock.mjs";
+import { withNodeOption } from "./lib/node-options.mjs";
 import { createToolingContentFixture } from "../tests/fixtures/tooling-content.mjs";
 import { apiRouteSecrets } from "../tests/fixtures/api-routes.mjs";
 import { adoptHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
@@ -32,7 +33,7 @@ if (monitoringStartup && (process.env.NEXT_PUBLIC_SENTRY_DSN !== "false" || proc
 }
 const clockFile = apiRoutes ? path.resolve(`${dist}-clock.json`) : undefined;
 if (clockFile) fs.writeFileSync(clockFile, "null");
-const env = {
+const env = withNodeOption({
   PATH: process.env.PATH,
   HOME: process.env.HOME,
   CI: "true",
@@ -65,8 +66,7 @@ const env = {
   NEXT_DIST_DIR: dist,
   TOOLING_NETWORK_GUARD: "1",
   ...(clockFile ? { TOOLING_CLOCK_FILE: clockFile } : {}),
-  NODE_OPTIONS: `--import=${fileURLToPath(new URL("./lib/test-target-safety.mjs", import.meta.url))}${apiRoutes ? ` --import=${fileURLToPath(new URL("../tests/fixtures/server-clock.mjs", import.meta.url))}` : ""}`,
-};
+}, "--import", fileURLToPath(new URL("./lib/test-target-safety.mjs", import.meta.url)), ...(apiRoutes ? [fileURLToPath(new URL("../tests/fixtures/server-clock.mjs", import.meta.url))] : []));
 if (monitoringStartup) Object.assign(env, { NODE_ENV: "production", VERCEL: "1", VERCEL_ENV: "production", NEXT_PUBLIC_SENTRY_DSN: "false" });
 const next = path.resolve("node_modules/next/dist/bin/next");
 const development = process.env.TOOLING_DEV_SERVER === "1";

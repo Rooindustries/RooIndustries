@@ -79,10 +79,36 @@ export const findVariable = (context, identifier) => {
   return variable;
 };
 
-export const declaredValue = (context, identifier) => {
-  const definition = findVariable(context, identifier)?.defs?.[0];
+export const bindingDefinition = (context, identifier) => findVariable(context, identifier)?.defs?.[0] || null;
+
+const variableDefinition = (context, identifier) => {
+  const definition = bindingDefinition(context, identifier);
   if (!definition || definition.type !== "Variable" || definition.node.id.type !== "Identifier") return null;
-  return definition.node.init || null;
+  return definition;
+};
+
+export const declaredValue = (context, identifier) => variableDefinition(context, identifier)?.node.init || null;
+
+export const constValue = (context, identifier) => {
+  const definition = variableDefinition(context, identifier);
+  return definition?.parent.kind === "const" ? definition.node.init || null : null;
+};
+
+export const destructuredConst = (context, identifier) => {
+  const definition = bindingDefinition(context, identifier);
+  if (definition?.type !== "Variable" || definition.parent.kind !== "const" || definition.node.id.type !== "ObjectPattern") return null;
+  const binding = definition.name.parent;
+  const fallback = binding.type === "AssignmentPattern" && binding.left === definition.name ? binding.right : null;
+  const property = fallback ? binding.parent : binding;
+  if (property.type !== "Property" || property.value !== (fallback ? binding : definition.name)) return null;
+  if (!definition.node.init) return null;
+  for (let pattern = property.parent; pattern !== definition.node.id; ) {
+    const holder = pattern?.parent?.type === "AssignmentPattern" && pattern.parent.left === pattern ? pattern.parent : pattern;
+    const outer = holder?.parent;
+    if (pattern?.type !== "ObjectPattern" || outer?.type !== "Property" || outer.value !== holder) return null;
+    pattern = outer.parent;
+  }
+  return { property, source: definition.node.init, fallback, nested: property.parent !== definition.node.id };
 };
 
 export const isFetchCall = (call) => {
