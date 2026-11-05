@@ -27,11 +27,11 @@ const refuseEnrichment = (value, path = "$", depth = 0) => {
     refuseEnrichment(item, `${path}.${key}`, depth + 1);
   }
 };
-const OUTCOME_UNKNOWN_SQLSTATE = /^(08...|40003)$/;
+const ROLLED_BACK_SQLSTATE = /^(22...|23...|40001|40P01|42501|55000|55006|P0001|P0002)$/;
 const rejectedBeforeCommit = ({ error, status }) => {
   const code = typeof error?.code === "string" ? error.code : "";
   if (status < 400) return false;
-  return /^[0-9A-Z]{5}$/.test(code) && !OUTCOME_UNKNOWN_SQLSTATE.test(code);
+  return ROLLED_BACK_SQLSTATE.test(code);
 };
 const committed = (result, id) => {
   const record = result?.results?.find?.(entry => entry?._id === id || entry?.id === id) || result?.results?.[0];
