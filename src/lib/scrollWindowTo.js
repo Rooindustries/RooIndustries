@@ -9,15 +9,9 @@ export const scrollWindowTo = (top) => {
   });
 };
 
-const revealDeferredSectionsBefore = (element) => {
-  document.querySelectorAll(".deferred-section-content").forEach((section) => {
-    if (section.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING) {
-      section.style.contentVisibility = "visible";
-    }
-  });
-};
+export const REVEAL_DEFERRED_SECTIONS_EVENT = "roo:reveal-deferred-sections";
 
 export const scrollWindowToElement = (element, offset = 0) => {
-  revealDeferredSectionsBefore(element);
+  window.dispatchEvent(new Event(REVEAL_DEFERRED_SECTIONS_EVENT));
   scrollWindowTo(element.getBoundingClientRect().top + window.scrollY - offset);
 };

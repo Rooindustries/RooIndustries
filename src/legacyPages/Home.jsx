@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import Hero from "../components/Hero";
 import Services from "../components/Services";
 import Packages from "../components/Packages";
@@ -14,6 +15,7 @@ import {
   readPendingSectionTarget,
 } from "../lib/sectionNavigation";
 import { useLowPerformanceMode } from "../lib/performanceMode";
+import { REVEAL_DEFERRED_SECTIONS_EVENT } from "../lib/scrollWindowTo";
 import StreamerYoutuberReviews from "../components/StreamerYoutuberReviews";
 import Footer from "../components/Footer";
 import HowItWorks from "../components/HowItWorks";
@@ -120,6 +122,12 @@ export default function Home({ initialData = null, heroHeadingTag = "h1" }) {
       );
     };
   }, [location.hash]);
+
+  useEffect(() => {
+    const revealSections = () => flushSync(() => setForceEagerSections(true));
+    window.addEventListener(REVEAL_DEFERRED_SECTIONS_EVENT, revealSections);
+    return () => window.removeEventListener(REVEAL_DEFERRED_SECTIONS_EVENT, revealSections);
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined" || isLowPerf) {
