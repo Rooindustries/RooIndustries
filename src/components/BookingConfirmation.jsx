@@ -23,7 +23,7 @@ export default function BookingConfirmation({ free = false }) {
   return (
     <section className="booking-confirmation-panel w-full text-center text-ink max-w-lg mx-auto">
       {receipt && <BookingEmailDispatchEffect />}
-      <h1 key={receipt ? "confirmation-heading" : "neutral-heading"} className="min-h-10 text-4xl font-bold text-accent drop-shadow-[0_0_20px_rgba(56,189,248,0.5)]">
+      <h1 key={receipt ? "confirmation-heading" : "neutral-heading"} className="section-title section-title-compact">
         {receipt ? free ? "Thank You!" : "Payment Successful" : "Looking for your booking?"}
       </h1>
       <p key={receipt ? "confirmation-body" : "neutral-body"} className="mt-4 min-h-12 text-ink-secondary">

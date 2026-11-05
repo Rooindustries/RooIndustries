@@ -21,6 +21,14 @@ import ReferralBox from "../components/ReferralBox";
 import SupportedGames from "../components/SupportedGames";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
+const DEFERRED_HEIGHTS = {
+  packages: "[--deferred-height:2800px] xl:[--deferred-height:1370px]",
+  howItWorks: "[--deferred-height:1970px] sm:[--deferred-height:1140px] lg:[--deferred-height:690px]",
+  supportedGames: "[--deferred-height:420px]",
+  faq: "[--deferred-height:1180px]",
+  referral: "[--deferred-height:300px] sm:[--deferred-height:175px] lg:[--deferred-height:128px]",
+};
+
 function DeferredSection({
   children,
   fallbackClassName,
@@ -144,7 +152,7 @@ export default function Home({ initialData = null, heroHeadingTag = "h1" }) {
     <>
       <Hero initialData={initialData?.hero || null} headingTag={heroHeadingTag} />
       <DeferredSection
-        fallbackClassName="min-h-[510px]"
+        fallbackClassName="min-h-[480px]"
         rootMargin="160px 0px"
         eager={eagerAll}
       >
@@ -162,7 +170,10 @@ export default function Home({ initialData = null, heroHeadingTag = "h1" }) {
           rootMargin="300px 0px"
           eager={eagerAll}
         >
-          <div className="deferred-section-content" style={sectionContentStyle}>
+          <div
+            className={`deferred-section-content ${DEFERRED_HEIGHTS.packages}`}
+            style={sectionContentStyle}
+          >
             <Packages
               initialPackages={initialData?.packagesList || null}
               initialSectionCopy={initialData?.packagesSettings || null}
@@ -179,7 +190,10 @@ export default function Home({ initialData = null, heroHeadingTag = "h1" }) {
           rootMargin="220px 0px"
           eager={eagerAll}
         >
-          <div className="deferred-section-content" style={sectionContentStyle}>
+          <div
+            className={`deferred-section-content ${DEFERRED_HEIGHTS.howItWorks}`}
+            style={sectionContentStyle}
+          >
             <HowItWorks initialData={initialData?.howItWorks || null} />
           </div>
         </DeferredSection>
@@ -202,7 +216,10 @@ export default function Home({ initialData = null, heroHeadingTag = "h1" }) {
         rootMargin="220px 0px"
         eager={eagerAll}
       >
-        <div className="deferred-section-content" style={sectionContentStyle}>
+        <div
+          className={`deferred-section-content ${DEFERRED_HEIGHTS.supportedGames}`}
+          style={sectionContentStyle}
+        >
           <SupportedGames initialData={initialData?.supportedGames || null} />
         </div>
       </DeferredSection>
@@ -212,7 +229,10 @@ export default function Home({ initialData = null, heroHeadingTag = "h1" }) {
           rootMargin="220px 0px"
           eager={eagerAll}
         >
-          <div className="deferred-section-content" style={sectionContentStyle}>
+          <div
+            className={`deferred-section-content ${DEFERRED_HEIGHTS.faq}`}
+            style={sectionContentStyle}
+          >
             <Faq
               compact
               initialFaqCopy={initialData?.faqSettings || null}
@@ -226,7 +246,10 @@ export default function Home({ initialData = null, heroHeadingTag = "h1" }) {
         rootMargin="220px 0px"
         eager={eagerAll}
       >
-        <div className="deferred-section-content" style={sectionContentStyle}>
+        <div
+          className={`deferred-section-content ${DEFERRED_HEIGHTS.referral}`}
+          style={sectionContentStyle}
+        >
           <ReferralBox initialData={initialData?.referralBox || null} />
         </div>
       </DeferredSection>

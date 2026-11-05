@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
+import { reportRequestError } from "../lib/clientRequest";
 import { getPublicContent } from "../lib/publicContentClient";
 import ImageZoomModal from "./ImageZoomModal";
 
@@ -28,7 +29,7 @@ export default function Reviews({ initialData = null }) {
     getPublicContent("reviews-gallery")
       .then((data) => setReviews(Array.isArray(data) ? data : []))
       .catch((error) => {
-        console.error(error);
+        reportRequestError(error);
         setReviews([]);
       });
   }, []);
@@ -55,12 +56,12 @@ export default function Reviews({ initialData = null }) {
   };
 
   return (
-    <section className="w-full px-4 mt-20 py-12 max-w-7xl mx-auto">
-      <header className="mx-auto max-w-3xl py-10 sm:py-12 md:py-16 flex flex-col items-center justify-center text-center">
-        <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+    <section className="w-full px-4 pb-12 page-top max-w-7xl mx-auto">
+      <header className="mx-auto max-w-3xl pb-10 sm:pb-12 md:pb-16 flex flex-col items-center justify-center text-center">
+        <h1 className="section-title">
           Community Reviews
         </h1>
-        <p className="mt-5 text-ink-secondary text-base sm:text-lg leading-relaxed">
+        <p className="section-lede">
           Real feedback from clients who booked optimization sessions with Roo
           Industries, including FPS gains, frametime improvements, and
           day-to-day smoothness results.

@@ -22,31 +22,6 @@ export const DEVICE_CLASSES = Object.freeze({
   TABLET: "tablet",
 });
 
-const SOFTWARE_RENDERER_PATTERNS = [
-  /swiftshader/i,
-  /software/i,
-  /llvmpipe/i,
-  /basic render/i,
-  /mesa offscreen/i,
-];
-
-const LOW_END_RENDERER_PATTERNS = [
-  /adreno[^\d]{0,16}3\d\d/i,
-  /adreno[^\d]{0,16}4\d\d/i,
-  /mali-4/i,
-  /mali-t/i,
-  /powervr/i,
-];
-
-const HIGH_END_RENDERER_PATTERNS = [
-  /apple gpu/i,
-  /adreno[^\d]{0,16}7\d\d/i,
-  /adreno[^\d]{0,16}8\d\d/i,
-  /mali-g7\d/i,
-  /mali-g8\d/i,
-  /xclipse/i,
-];
-
 const DEFAULT_DECISION = Object.freeze({
   profile: PERFORMANCE_PROFILES.FULL,
   source: "default",
@@ -146,190 +121,6 @@ const setCurrentDecision = (decision, { emit = true } = {}) => {
   }
 };
 
-const normalizeNumber = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-};
-
-const getUserAgentDataMobile = (nav) => {
-  const value = nav?.userAgentData?.mobile;
-  return typeof value === "boolean" ? value : null;
-};
-
-export const resolveDeviceClass = (inputs = {}) => {
-  const userAgent = String(inputs.userAgent || "").toLowerCase();
-  const platform = String(inputs.platform || "").toLowerCase();
-  const maxTouchPoints = Number(inputs.maxTouchPoints || 0);
-  const userAgentDataMobile =
-    typeof inputs.userAgentDataMobile === "boolean"
-      ? inputs.userAgentDataMobile
-      : null;
-
-  if (platform === "macintel" && maxTouchPoints > 1) {
-    return DEVICE_CLASSES.TABLET;
-  }
-
-  if (
-    /ipad|tablet|playbook|silk/i.test(userAgent) ||
-    (/android/i.test(userAgent) && !/mobile/i.test(userAgent))
-  ) {
-    return DEVICE_CLASSES.TABLET;
-  }
-
-  if (userAgentDataMobile === true) {
-    return DEVICE_CLASSES.MOBILE;
-  }
-
-  if (
-    /iphone|ipod|windows phone|iemobile|mobile/i.test(userAgent) ||
-    /android.+mobile/i.test(userAgent)
-  ) {
-    return DEVICE_CLASSES.MOBILE;
-  }
-
-  return DEVICE_CLASSES.DESKTOP;
-};
-
-const classifyRendererFamily = (renderer = "") => {
-  if (!renderer) return "unknown";
-  if (LOW_END_RENDERER_PATTERNS.some((pattern) => pattern.test(renderer))) {
-    return "low";
-  }
-  if (HIGH_END_RENDERER_PATTERNS.some((pattern) => pattern.test(renderer))) {
-    return "high";
-  }
-  return "unknown";
-};
-
-export const detectRendererInfo = ({
-  documentObject = typeof document !== "undefined" ? document : null,
-} = {}) => {
-  if (!documentObject?.createElement) {
-    return {
-      checked: false,
-      hasWebgl: null,
-      likelySoftware: false,
-      renderer: "",
-      family: "unknown",
-    };
-  }
-
-  const canvas = documentObject.createElement("canvas");
-  const gl =
-    canvas.getContext("webgl2", { failIfMajorPerformanceCaveat: true }) ||
-    canvas.getContext("webgl", { failIfMajorPerformanceCaveat: true }) ||
-    canvas.getContext("experimental-webgl", {
-      failIfMajorPerformanceCaveat: true,
-    });
-
-  if (!gl) {
-    return {
-      checked: true,
-      hasWebgl: false,
-      likelySoftware: true,
-      renderer: "WebGL unavailable",
-      family: "unknown",
-    };
-  }
-
-  let renderer = "";
-  const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
-  if (debugInfo) {
-    renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || "";
-  }
-  if (!renderer) {
-    renderer = gl.getParameter(gl.RENDERER) || "";
-  }
-
-  return {
-    checked: true,
-    hasWebgl: true,
-    likelySoftware: SOFTWARE_RENDERER_PATTERNS.some((pattern) =>
-      pattern.test(renderer)
-    ),
-    renderer,
-    family: classifyRendererFamily(renderer),
-  };
-};
-
-export const collectPerformanceSnapshot = ({
-  includeRenderer = false,
-} = {}) => {
-  if (!isBrowser()) {
-    return {
-      userAgent: "",
-      platform: "",
-      maxTouchPoints: 0,
-      userAgentDataMobile: null,
-      hardwareConcurrency: null,
-      deviceMemory: null,
-      dpr: 1,
-      saveData: false,
-      prefersReducedMotion: false,
-      deviceClass: DEVICE_CLASSES.DESKTOP,
-      rendererInfo: {
-        checked: false,
-        hasWebgl: null,
-        likelySoftware: false,
-        renderer: "",
-        family: "unknown",
-      },
-    };
-  }
-
-  const nav = window.navigator || {};
-  const userAgent = String(nav.userAgent || "");
-  const platform = String(nav.platform || "");
-  const maxTouchPoints = Number(nav.maxTouchPoints || 0);
-  const userAgentDataMobile = getUserAgentDataMobile(nav);
-  const hardwareConcurrency = normalizeNumber(nav.hardwareConcurrency);
-  const deviceMemory = normalizeNumber(nav.deviceMemory);
-  const dpr = normalizeNumber(window.devicePixelRatio) || 1;
-  const saveData = Boolean(nav.connection?.saveData);
-  const prefersReducedMotion = Boolean(
-    window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches
-  );
-  const deviceClass = resolveDeviceClass({
-    userAgent,
-    platform,
-    maxTouchPoints,
-    userAgentDataMobile,
-  });
-
-  return {
-    userAgent,
-    platform,
-    maxTouchPoints,
-    userAgentDataMobile,
-    hardwareConcurrency,
-    deviceMemory,
-    dpr,
-    saveData,
-    prefersReducedMotion,
-    deviceClass,
-    rendererInfo: includeRenderer
-      ? detectRendererInfo()
-      : {
-          checked: false,
-          hasWebgl: null,
-          likelySoftware: false,
-          renderer: "",
-          family: "unknown",
-        },
-  };
-};
-
-export const resolveInitialPerformanceDecision = (snapshot) => {
-  return {
-    profile: PERFORMANCE_PROFILES.LITE,
-    source: "auto",
-    reason: "default-lite-mode",
-    deviceClass: snapshot.deviceClass,
-    band: "unknown",
-    renderer: snapshot.rendererInfo?.renderer || "",
-  };
-};
-
 const removeStorageKey = (storage, key) => {
   try {
     storage?.removeItem(key);
@@ -419,10 +210,11 @@ export const bootstrapPerformanceProfile = () => {
     return getPerformanceProfileSnapshot();
   }
 
-  const snapshot = collectPerformanceSnapshot({ includeRenderer: false });
-  const bootstrapDecision = resolveInitialPerformanceDecision(snapshot);
-
-  applyBootstrapDecision(bootstrapDecision);
+  applyBootstrapDecision({
+    profile: PERFORMANCE_PROFILES.LITE,
+    source: "auto",
+    reason: "default-lite-mode",
+  });
   bootstrapComplete = true;
   return getPerformanceProfileSnapshot();
 };

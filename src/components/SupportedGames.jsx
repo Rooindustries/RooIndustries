@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { reportRequestError } from "../lib/clientRequest";
 import { ChevronDown } from "lucide-react";
 import { urlFor } from "../lib/cmsImageUrl";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
@@ -60,7 +61,7 @@ export default function SupportedGames({ initialData = null }) {
     if (data !== null) return;
     fetchHomeSectionData(HOME_SECTION_DATA_KEYS.supportedGames)
       .then(setData)
-      .catch(console.error);
+      .catch(reportRequestError);
   }, [data]);
 
   const featuredGames = useMemo(() => {
@@ -124,12 +125,12 @@ export default function SupportedGames({ initialData = null }) {
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-10 sm:mb-12">
             {data.title && (
-              <h2 className="ri-supported-games-heading text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+              <h2 className="section-title">
                 {data.title}
               </h2>
             )}
             {data.subtitle && (
-              <p className="mt-3 text-ink-secondary text-sm sm:text-base">
+              <p className="section-lede">
                 {data.subtitle}
               </p>
             )}

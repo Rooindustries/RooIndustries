@@ -1,30 +1,20 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { FaDiscord } from "react-icons/fa";
 import { Moon, Tv } from "lucide-react";
 import BackButton from "./BackButton";
 import DiscordGuideBanner from "./DiscordGuideBanner";
-import {
-  SECTION_HASHES,
-  buildHomeSectionHref,
-  clearPendingSectionTarget,
-  clearRouteTransitionIntent,
-  consumePendingSectionTarget,
-  isHomeSectionHash,
-  normalizeSectionHash,
-  readPendingSectionTarget,
-  writeRouteTransitionIntent,
-  writePendingSectionTarget,
-} from "../lib/sectionNavigation";
-import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinator";
+import { SECTION_HASHES, buildHomeSectionHref } from "../lib/sectionNavigation";
+import { useActiveHomeSection, useSectionNavigation } from "../lib/sectionNavigator";
 import { useScrollRuntime } from "../lib/scrollRuntime";
-import { HOME_SECTION_PREFETCH_BY_HASH, prefetchHomeSectionData, readHomeSectionData } from "../lib/homeSectionData";
 
 const canAnimateLogo = () => {
   if (typeof window === "undefined") return false;
   return !window.matchMedia("(prefers-reduced-motion: reduce)").matches &&
     !navigator?.connection?.saveData;
 };
+
+const DESKTOP_NAV_QUERY = "(min-width: 1024px)";
 
 // Two themes only: "dark" (Blackout Gold, the site default) and "default"
 // (Roo Blue). There is no light mode. Legacy stored values normalize to dark.
@@ -78,13 +68,16 @@ const applyTheme = (theme, { persist = true } = {}) => {
   return normalized;
 };
 
-export default function Navbar({ routeShell = "browser" }) {
+export default function Navbar() {
   const location = useLocation();
-  const navigate = useNavigate();
+  const activeHomeHash = useActiveHomeSection();
+  const {
+    goToSection,
+    isOwnSectionArrival,
+  } = useSectionNavigation();
   const [open, setOpen] = useState(false);
   const [proofOpen, setProofOpen] = useState(false);
   const [referralsOpen, setReferralsOpen] = useState(false);
-  const [activeHomeHash, setActiveHomeHash] = useState("");
   const [theme, setTheme] = useState("dark");
   // Keep initial server/client markup identical, then upgrade to animated mode on mount.
   const [smallLogoMode, setSmallLogoMode] = useState("static");
@@ -93,9 +86,6 @@ export default function Navbar({ routeShell = "browser" }) {
   const referralsDropdownRef = useRef(null);
   const headerRef = useRef(null);
   const navRowRef = useRef(null);
-  const activeScrollCleanupRef = useRef(null);
-  const pendingSectionNavigationTimeoutRef = useRef(null);
-  const sectionTransitionInFlightRef = useRef(false);
   const { scrollY } = useScrollRuntime();
 
   const scrolled = scrollY > 12;
@@ -103,24 +93,16 @@ export default function Navbar({ routeShell = "browser" }) {
 
   const isActive = (path) => location.pathname === path;
 
-  const benefitsHashes = [SECTION_HASHES.benefits];
-  const plansHashes = [SECTION_HASHES.plans];
-  const faqHashes = [
-    SECTION_HASHES.faq,
-    SECTION_HASHES.upgradePath,
-    SECTION_HASHES.trust,
-  ];
-  const isBenefitsActive =
-    location.pathname === "/" && benefitsHashes.includes(activeHomeHash);
-  const isPlansActive =
-    location.pathname === "/packages" ||
-    (location.pathname === "/" && plansHashes.includes(activeHomeHash));
+  const isHomeSectionActive = (...hashes) => isActive("/") && hashes.includes(activeHomeHash);
+  const isBenefitsActive = isHomeSectionActive(SECTION_HASHES.benefits);
+  const isPlansActive = isActive("/packages") || isHomeSectionActive(SECTION_HASHES.plans);
   const isFaqActive =
-    location.pathname === "/faq" ||
-    (location.pathname === "/" && faqHashes.includes(activeHomeHash));
+    isActive("/faq") ||
+    isHomeSectionActive(SECTION_HASHES.faq, SECTION_HASHES.upgradePath, SECTION_HASHES.trust);
   const isProofActive = isActive("/benchmarks") || isActive("/reviews");
   const isReferralsActive =
     location.pathname === "/referrals" || location.pathname.startsWith("/referrals/");
+  const isDashboardActive = isReferralsActive && !isActive("/referrals/register");
   const isTeamActive = isActive("/meet-the-team");
   const navMenuOpen = open || proofOpen || referralsOpen;
 
@@ -128,180 +110,19 @@ export default function Navbar({ routeShell = "browser" }) {
     setSmallLogoMode("static");
   };
 
-  const getHeaderOffsetPx = useCallback(() => getCssHeaderOffsetPx(110), []);
-
-  const runHashAlignment = useCallback(
-    (hash, behavior = "auto", options = {}) => {
-      if (activeScrollCleanupRef.current) {
-        activeScrollCleanupRef.current();
-      }
-      activeScrollCleanupRef.current = alignToHashTarget({
-        hash,
-        behavior,
-        getOffsetPx: getHeaderOffsetPx,
-        stableFramesRequired: 8,
-        preAlignStableFramesRequired:
-          options.preAlignStableFramesRequired || 8,
-        maxWaitMs: 4200,
-        minRuntimeMs: options.minRuntimeMs || 0,
-        observeMutations: options.observeMutations !== false,
-      });
-    },
-    [getHeaderOffsetPx]
-  );
-
-  const cancelSectionTransition = useCallback(() => {
-    if (pendingSectionNavigationTimeoutRef.current) {
-      clearTimeout(pendingSectionNavigationTimeoutRef.current);
-      pendingSectionNavigationTimeoutRef.current = null;
-    }
-    sectionTransitionInFlightRef.current = false;
-    clearPendingSectionTarget();
-    clearRouteTransitionIntent();
-    if (typeof document !== "undefined") {
-      document.documentElement.classList.remove("route-transition-out");
-    }
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("roo:cancel-route-transition"));
-    }
-    if (activeScrollCleanupRef.current) {
-      activeScrollCleanupRef.current();
-      activeScrollCleanupRef.current = null;
-    }
+  const closeMenus = useCallback(() => {
+    setOpen(false);
+    setProofOpen(false);
+    setReferralsOpen(false);
   }, []);
 
-  const handleHomeClick = useCallback(
-    (event) => {
-      setOpen(false);
-      setProofOpen(false);
-      setReferralsOpen(false);
-      cancelSectionTransition();
+  const closeMenusOnLinkClick = (event) => {
+    if (event.target.closest("a[href]")) closeMenus();
+  };
 
-      if (typeof window === "undefined") return;
-
-      if (location.pathname !== "/") {
-        return;
-      }
-
-      event?.preventDefault?.();
-
-      const nextUrl = `${window.location.pathname}${window.location.search}`;
-      if (window.location.hash && window.history?.replaceState) {
-        window.history.replaceState(window.history.state, "", nextUrl);
-      }
-
-      setActiveHomeHash("");
-
-      if (activeScrollCleanupRef.current) {
-        activeScrollCleanupRef.current();
-        activeScrollCleanupRef.current = null;
-      }
-
-      window.scrollTo({
-        top: 0,
-        behavior: "auto",
-      });
-    },
-    [cancelSectionTransition, location.pathname]
-  );
-
-  const handleSectionLinkClick = useCallback(
-    async (event, hash) => {
-      setOpen(false);
-      setProofOpen(false);
-      setReferralsOpen(false);
-      if (typeof window === "undefined") return;
-
-      const normalizedHash = normalizeSectionHash(hash);
-      if (!normalizedHash) return;
-      const onHomePath = location.pathname === "/";
-      const browserPath = window.location.pathname || "/";
-
-      if (!onHomePath) {
-        if (event?.preventDefault) {
-          event.preventDefault();
-        }
-
-        writePendingSectionTarget(normalizedHash);
-        writeRouteTransitionIntent({
-          kind: "section",
-          hash: normalizedHash,
-          from: location.pathname,
-        });
-        document.documentElement.classList.add("route-transition-out");
-
-        const requiredKeys = HOME_SECTION_PREFETCH_BY_HASH[normalizedHash] || [];
-        const missingKeys = requiredKeys.filter((key) => readHomeSectionData(key) === null);
-
-        if (missingKeys.length > 0) {
-          prefetchHomeSectionData(missingKeys).catch(() => {});
-        }
-
-        sectionTransitionInFlightRef.current = true;
-        if (pendingSectionNavigationTimeoutRef.current) {
-          clearTimeout(pendingSectionNavigationTimeoutRef.current);
-        }
-        pendingSectionNavigationTimeoutRef.current = window.setTimeout(() => {
-          pendingSectionNavigationTimeoutRef.current = null;
-          const nextHref = buildHomeSectionHref(normalizedHash);
-          if (routeShell === "memory") {
-            if (window.history?.pushState) {
-              window.history.pushState(window.history.state, "", nextHref);
-            } else {
-              window.location.hash = normalizedHash.slice(1);
-            }
-            navigate("/");
-            return;
-          }
-          if (browserPath !== location.pathname) {
-            window.location.assign(nextHref);
-            return;
-          }
-          navigate(nextHref);
-        }, 20);
-        return;
-      }
-
-      if (event?.preventDefault) {
-        event.preventDefault();
-      }
-
-      // Keep browser URL hash in sync even with MemoryRouter.
-      const nextUrl = `${window.location.pathname}${window.location.search}${normalizedHash}`;
-      if (window.location.hash !== normalizedHash) {
-        if (window.history?.replaceState) {
-          window.history.replaceState(window.history.state, "", nextUrl);
-        } else {
-          window.location.hash = normalizedHash.slice(1);
-        }
-      }
-
-      // replaceState doesn't fire hashchange — update active nav state directly.
-      setActiveHomeHash(normalizedHash);
-
-      // Force scroll even when clicking the same hash repeatedly.
-      runHashAlignment(normalizedHash, "auto", {
-        minRuntimeMs: 900,
-      });
-    },
-    [location.pathname, navigate, routeShell, runHashAlignment]
-  );
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const syncHash = () => {
-      const nextHash = normalizeSectionHash(
-        window.location.hash || location.hash || ""
-      );
-      setActiveHomeHash(nextHash);
-    };
-    syncHash();
-    window.addEventListener("hashchange", syncHash);
-    return () => window.removeEventListener("hashchange", syncHash);
-  }, [location.hash, location.pathname]);
+  const handleSectionLinkClick = (event, hash) => goToSection(event, hash, { minRuntimeMs: 900 });
 
   const updateHeaderOffset = useCallback(() => {
-    if (typeof document === "undefined") return;
     const navHeight = navRowRef.current?.offsetHeight || 96;
     document.documentElement.style.setProperty(
       "--section-nav-offset",
@@ -310,7 +131,7 @@ export default function Navbar({ routeShell = "browser" }) {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !canAnimateLogo()) return undefined;
+    if (!canAnimateLogo()) return undefined;
     let idleId = null;
     let timeoutId = null;
     const enableAnimatedLogo = () => setSmallLogoMode("animated");
@@ -334,8 +155,6 @@ export default function Navbar({ routeShell = "browser" }) {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-
     setTheme(applyTheme(readTheme(), { persist: false }));
 
     const handleThemeChange = (event) => {
@@ -377,38 +196,24 @@ export default function Navbar({ routeShell = "browser" }) {
   }, [updateHeaderOffset]);
 
   useEffect(() => {
-    setOpen(false);
-    setProofOpen(false);
-    setReferralsOpen(false);
-  }, [location.pathname, location.hash]);
-
-  useEffect(() => {
-    if (location.pathname === "/") {
-      sectionTransitionInFlightRef.current = false;
-      if (pendingSectionNavigationTimeoutRef.current) {
-        clearTimeout(pendingSectionNavigationTimeoutRef.current);
-        pendingSectionNavigationTimeoutRef.current = null;
-      }
-    }
-  }, [location.pathname]);
+    if (!isOwnSectionArrival(location)) closeMenus();
+  }, [closeMenus, isOwnSectionArrival, location]);
 
   useEffect(() => {
     if (!open) return;
     const handleEscape = (event) => {
-      if (event.key !== "Escape" || window.matchMedia("(min-width: 768px)").matches) return;
+      if (event.key !== "Escape" || window.matchMedia(DESKTOP_NAV_QUERY).matches) return;
       event.preventDefault();
-      setOpen(false);
-      setProofOpen(false);
-      setReferralsOpen(false);
+      closeMenus();
       mobileMenuButtonRef.current?.focus();
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [open]);
+  }, [closeMenus, open]);
 
   useEffect(() => {
-    if ((!proofOpen && !referralsOpen) || typeof window === "undefined") return;
-    if (!window.matchMedia("(min-width: 768px)").matches) return;
+    if (!proofOpen && !referralsOpen) return;
+    if (!window.matchMedia(DESKTOP_NAV_QUERY).matches) return;
 
     const handleClickOutside = (event) => {
       if (
@@ -450,61 +255,13 @@ export default function Navbar({ routeShell = "browser" }) {
     };
   }, [proofOpen, referralsOpen]);
 
-  useEffect(() => {
-    if (location.pathname !== "/") return;
-
-    const urlHash = normalizeSectionHash(activeHomeHash);
-    const pendingHash = readPendingSectionTarget();
-    const targetHash = isHomeSectionHash(urlHash)
-      ? urlHash
-      : isHomeSectionHash(pendingHash)
-      ? consumePendingSectionTarget()
-      : "";
-
-    if (!isHomeSectionHash(targetHash)) return;
-
-    const fromPending = Boolean(pendingHash && pendingHash === targetHash);
-    if (fromPending && pendingHash === targetHash) {
-      consumePendingSectionTarget();
-    }
-
-    if (typeof window !== "undefined") {
-      const nextUrl = `${window.location.pathname}${window.location.search}${targetHash}`;
-      if (window.location.hash !== targetHash && window.history?.replaceState) {
-        window.history.replaceState(window.history.state, "", nextUrl);
-      }
-    }
-
-    if (targetHash !== activeHomeHash) {
-      setActiveHomeHash(targetHash);
-    }
-
-    runHashAlignment(targetHash, "auto", {
-      minRuntimeMs: fromPending ? 60 : 420,
-      preAlignStableFramesRequired: fromPending ? 1 : 5,
-    });
-
-    return () => {
-      if (activeScrollCleanupRef.current) {
-        activeScrollCleanupRef.current();
-        activeScrollCleanupRef.current = null;
-      }
-    };
-  }, [activeHomeHash, location.pathname, runHashAlignment]);
-
-  useEffect(() => {
-    return () => {
-      cancelSectionTransition();
-    };
-  }, [cancelSectionTransition]);
-
   // Theme-token interaction states — values per theme in src/index.css.
   const focusRing =
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--color-canvas-deep)]";
-  const linkBase = `px-3 sm:px-5 py-2 rounded-full text-base font-medium transition border border-line-soft hover:border-line-accent ${focusRing}`;
+  const linkBase = `px-4 py-2 rounded-full text-base font-medium transition ${focusRing}`;
   const linkIdle =
-    "text-ink-secondary hover:text-[color:var(--color-link-hover)]";
-  const linkActive = "bg-accent text-accent-contrast border-accent";
+    "text-ink-secondary hover:bg-surface-hover hover:text-[color:var(--color-link-hover)]";
+  const linkActive = "bg-surface-hover-accent text-ink";
   const mobileLinkBase = `px-5 py-4 text-base transition ${focusRing}`;
   const mobileLinkIdle =
     "text-ink-secondary hover:text-[color:var(--color-link-hover)]";
@@ -515,7 +272,7 @@ export default function Navbar({ routeShell = "browser" }) {
   const mobileSubLinkActive = "bg-accent text-accent-contrast";
   const menuItemIdle =
     "text-ink-secondary hover:text-[color:var(--color-link-hover)] hover:bg-[color:var(--color-surface-hover)]";
-  const menuItemActive = "bg-accent text-accent-contrast";
+  const menuItemActive = "bg-surface-hover-accent text-ink";
   const nextTheme = theme === "dark" ? "default" : "dark";
   const themeLabel = THEME_LABELS[theme] || THEME_LABELS.default;
   const nextThemeLabel = THEME_LABELS[nextTheme];
@@ -532,7 +289,8 @@ export default function Navbar({ routeShell = "browser" }) {
   return (
     <header
       ref={headerRef}
-      className={`site-nav site-navbar-glass glass-premium glass-scroll-lite fixed top-0 left-0 right-0 z-50 overflow-visible border-b transition-all duration-300 ${
+      onClick={closeMenusOnLinkClick}
+      className={`site-nav site-navbar-glass glass-premium glass-scroll-lite fixed top-0 left-0 right-0 z-50 flex max-h-[100dvh] flex-col overflow-visible border-b transition-all duration-300 ${
         scrolled
           ? "border-[color:var(--navbar-border-scrolled)]"
           : "border-[color:var(--navbar-border-rest)]"
@@ -551,19 +309,18 @@ export default function Navbar({ routeShell = "browser" }) {
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-[color:var(--color-accent-soft)] to-transparent z-0" />
 
-      <div className="relative z-10 hidden md:block">
+      <div className="relative z-10 hidden shrink-0 md:block">
         <DiscordGuideBanner hidden={bannerHidden} />
       </div>
 
-      <div className="relative z-10 mx-auto max-w-7xl overflow-visible px-4 sm:px-6">
-        <div ref={navRowRef} className="flex h-20 items-center overflow-visible sm:h-24">
+      <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-7xl flex-col overflow-visible px-4 sm:px-6">
+        <div ref={navRowRef} data-nav-row className="flex h-20 shrink-0 items-center overflow-visible sm:h-24">
           <div className="hidden min-w-0 flex-1 items-center gap-4 md:flex">
             {location.pathname !== "/" ? (
-              <BackButton hidden={false} inline={true} />
+              <BackButton />
             ) : null}
 
             <Link to="/"
-              onClick={handleHomeClick}
               className="flex min-w-0 items-center gap-3 select-none"
             >
               <div className="relative h-14 w-14 grid place-items-center overflow-hidden rounded-xl">
@@ -593,7 +350,7 @@ export default function Navbar({ routeShell = "browser" }) {
                 <div className="text-ink font-semibold tracking-wide text-sm sm:text-lg truncate">
                   Roo Industries
                 </div>
-                <div className="text-[9px] sm:text-xs text-ink-muted whitespace-nowrap truncate">
+                <div className="text-[13px] text-ink-secondary whitespace-nowrap truncate">
                   Precision Performance Engineering
                 </div>
               </div>
@@ -603,7 +360,6 @@ export default function Navbar({ routeShell = "browser" }) {
           <div className="ml-0 flex w-full min-w-0 items-center gap-2 md:ml-auto md:w-auto md:justify-end md:gap-3">
             <Link
               to="/"
-              onClick={handleHomeClick}
               className="flex min-w-0 flex-1 items-center gap-1.5 select-none md:hidden min-[360px]:gap-2"
             >
               <div className="relative grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-lg min-[360px]:h-10 min-[360px]:w-10 sm:h-12 sm:w-12 sm:rounded-xl">
@@ -633,18 +389,19 @@ export default function Navbar({ routeShell = "browser" }) {
                 <div className="truncate text-sm font-semibold tracking-wide text-ink sm:text-base">
                   Roo Industries
                 </div>
-                <div className="whitespace-nowrap text-[8px] leading-tight text-ink-muted min-[340px]:text-[8.6px] min-[360px]:text-[9.2px] min-[375px]:text-[10px] sm:text-xs">
+                <div className="whitespace-nowrap text-[8px] leading-tight text-ink-secondary min-[340px]:text-[8.6px] min-[360px]:text-[9.2px] min-[375px]:text-[10px] sm:text-[13px]">
                   Precision Performance Engineering
                 </div>
               </div>
             </Link>
 
             <div className="ml-auto flex shrink-0 items-center gap-1 min-[360px]:gap-2 sm:gap-3">
-            <nav className="hidden md:flex items-center gap-2">
+            <nav className="hidden lg:flex items-center gap-1">
               <a
                 href={buildHomeSectionHref(SECTION_HASHES.benefits)}
                 data-nav-surface="desktop"
                 data-nav-target="benefits"
+                aria-current={isBenefitsActive ? "location" : undefined}
                 onClick={(event) =>
                   handleSectionLinkClick(event, SECTION_HASHES.benefits)
                 }
@@ -701,10 +458,7 @@ export default function Navbar({ routeShell = "browser" }) {
                 >
                   <Link
                     to="/benchmarks"
-                    onClick={() => {
-                      cancelSectionTransition();
-                      setProofOpen(false);
-                    }}
+                    aria-current={isActive("/benchmarks") ? "page" : undefined}
                     className={`block px-4 py-3 text-sm transition ${
                       isActive("/benchmarks")
                         ? menuItemActive
@@ -715,10 +469,7 @@ export default function Navbar({ routeShell = "browser" }) {
                   </Link>
                   <Link
                     to="/reviews"
-                    onClick={() => {
-                      cancelSectionTransition();
-                      setProofOpen(false);
-                    }}
+                    aria-current={isActive("/reviews") ? "page" : undefined}
                     className={`block px-4 py-3 text-sm transition ${
                       isActive("/reviews") ? menuItemActive : menuItemIdle
                     }`}
@@ -731,6 +482,7 @@ export default function Navbar({ routeShell = "browser" }) {
                 href={buildHomeSectionHref(SECTION_HASHES.faq)}
                 data-nav-surface="desktop"
                 data-nav-target="faq"
+                aria-current={isFaqActive ? "location" : undefined}
                 onClick={(event) =>
                   handleSectionLinkClick(event, SECTION_HASHES.faq)
                 }
@@ -785,10 +537,7 @@ export default function Navbar({ routeShell = "browser" }) {
                 >
                   <Link
                     to="/referrals/register"
-                    onClick={() => {
-                      cancelSectionTransition();
-                      setReferralsOpen(false);
-                    }}
+                    aria-current={isActive("/referrals/register") ? "page" : undefined}
                     className={`block px-4 py-3 text-sm transition ${
                       isActive("/referrals/register")
                         ? menuItemActive
@@ -799,12 +548,9 @@ export default function Navbar({ routeShell = "browser" }) {
                   </Link>
                   <Link
                     to="/referrals/login"
-                    onClick={() => {
-                      cancelSectionTransition();
-                      setReferralsOpen(false);
-                    }}
+                    aria-current={isDashboardActive ? "page" : undefined}
                     className={`block px-4 py-3 text-sm transition ${
-                      isReferralsActive && !isActive("/referrals/register")
+                      isDashboardActive
                         ? menuItemActive
                         : menuItemIdle
                     }`}
@@ -839,7 +585,7 @@ export default function Navbar({ routeShell = "browser" }) {
                 })
               }
               className="
-                  md:hidden
+                  lg:hidden
                   h-9 w-9 min-[360px]:h-10 min-[360px]:w-10 sm:h-12 sm:w-12 grid place-items-center rounded-full
                   text-ink-secondary hover:text-[color:var(--color-link-hover)]
                   border border-line-soft hover:border-line-accent
@@ -885,10 +631,10 @@ export default function Navbar({ routeShell = "browser" }) {
         <div
           id="mobile-site-menu"
           inert={!open}
-          className={`md:hidden overflow-hidden transition-all duration-300 ease-out ${
+          className={`min-h-0 lg:hidden transition-all duration-300 ease-out ${
             open
-              ? "pb-4 max-h-[680px] opacity-100 translate-y-0"
-              : "max-h-0 opacity-0 -translate-y-2 pointer-events-none"
+              ? "pb-4 max-h-[680px] overflow-y-auto overscroll-contain opacity-100 translate-y-0"
+              : "max-h-0 overflow-hidden opacity-0 -translate-y-2 pointer-events-none"
           }`}
           aria-hidden={!open}
         >
@@ -921,6 +667,7 @@ export default function Navbar({ routeShell = "browser" }) {
               </div>
               <a
                 href={buildHomeSectionHref(SECTION_HASHES.benefits)}
+                aria-current={isBenefitsActive ? "location" : undefined}
                 data-nav-surface="mobile"
                 data-nav-target="benefits"
                 onClick={(event) =>
@@ -975,11 +722,7 @@ export default function Navbar({ routeShell = "browser" }) {
               >
                 <Link
                   to="/benchmarks"
-                  onClick={() => {
-                    cancelSectionTransition();
-                    setProofOpen(false);
-                    setOpen(false);
-                  }}
+                  aria-current={isActive("/benchmarks") ? "page" : undefined}
                   className={`${mobileSubLinkBase} ${
                     isActive("/benchmarks")
                       ? mobileSubLinkActive
@@ -990,11 +733,7 @@ export default function Navbar({ routeShell = "browser" }) {
                 </Link>
                 <Link
                   to="/reviews"
-                  onClick={() => {
-                    cancelSectionTransition();
-                    setProofOpen(false);
-                    setOpen(false);
-                  }}
+                  aria-current={isActive("/reviews") ? "page" : undefined}
                   className={`${mobileSubLinkBase} ${
                     isActive("/reviews")
                       ? mobileSubLinkActive
@@ -1006,6 +745,7 @@ export default function Navbar({ routeShell = "browser" }) {
               </div>
               <a
                 href={buildHomeSectionHref(SECTION_HASHES.faq)}
+                aria-current={isFaqActive ? "location" : undefined}
                 data-nav-surface="mobile"
                 data-nav-target="faq"
                 onClick={(event) =>
@@ -1060,11 +800,7 @@ export default function Navbar({ routeShell = "browser" }) {
               >
                 <Link
                   to="/referrals/register"
-                  onClick={() => {
-                    cancelSectionTransition();
-                    setReferralsOpen(false);
-                    setOpen(false);
-                  }}
+                  aria-current={isActive("/referrals/register") ? "page" : undefined}
                   className={`${mobileSubLinkBase} ${
                     isActive("/referrals/register")
                       ? mobileSubLinkActive
@@ -1075,13 +811,9 @@ export default function Navbar({ routeShell = "browser" }) {
                 </Link>
                 <Link
                   to="/referrals/login"
-                  onClick={() => {
-                    cancelSectionTransition();
-                    setReferralsOpen(false);
-                    setOpen(false);
-                  }}
+                  aria-current={isDashboardActive ? "page" : undefined}
                   className={`${mobileSubLinkBase} ${
-                    isReferralsActive && !isActive("/referrals/register")
+                    isDashboardActive
                       ? mobileSubLinkActive
                       : mobileSubLinkIdle
                   }`}
@@ -1091,7 +823,7 @@ export default function Navbar({ routeShell = "browser" }) {
               </div>
               <Link
                 to="/meet-the-team"
-                onClick={cancelSectionTransition}
+                aria-current={isTeamActive ? "page" : undefined}
                 className={`${mobileLinkBase} ${
                   isTeamActive ? mobileLinkActive : mobileLinkIdle
                 }`}
@@ -1111,6 +843,7 @@ export default function Navbar({ routeShell = "browser" }) {
                 href={buildHomeSectionHref(SECTION_HASHES.plans)}
                 data-nav-surface="mobile"
                 data-nav-target="plans"
+                aria-current={isActive("/packages") ? "page" : isPlansActive ? "location" : undefined}
                 onClick={(event) =>
                   handleSectionLinkClick(event, SECTION_HASHES.plans)
                 }

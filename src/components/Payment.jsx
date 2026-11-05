@@ -1823,10 +1823,10 @@ export default function Payment({ hideFooter = false }) {
       animate="visible"
     >
       <motion.div variants={itemVariants}>
-        <h2 className="text-4xl sm:text-5xl font-extrabold text-center text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+        <h2 className="section-title text-center">
           {isUpgrade ? "Complete Upgrade Payment" : "Complete Payment"}
         </h2>
-        <p className="mt-3 text-ink-secondary text-center text-sm sm:text-base">
+        <p className="section-lede text-center">
           {isUpgrade
             ? "Review your upgrade details and proceed to payment"
             : "Review your booking details and proceed to payment"}

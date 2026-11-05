@@ -2,12 +2,10 @@ import { useSyncExternalStore } from "react";
 
 const SCROLL_IDLE_MS = 160;
 
-// Thresholds match Navbar (8/12px) and BackButton (50px).
-const getZone = (y) => {
+const navbarScrollZone = (y) => {
   if (y <= 8) return 0;
   if (y <= 12) return 1;
-  if (y <= 50) return 2;
-  return 3;
+  return 2;
 };
 
 const isLowPerf = () =>
@@ -16,13 +14,11 @@ const isLowPerf = () =>
 
 let snapshot = {
   scrollY: 0,
-  direction: "up",
   isScrolling: false,
 };
 
 const SERVER_SNAPSHOT = Object.freeze({
   scrollY: 0,
-  direction: "up",
   isScrolling: false,
 });
 
@@ -30,7 +26,6 @@ let cleanup = null;
 let idleTimer = null;
 let rafId = null;
 let pendingScrollY = 0;
-let lastRealScrollY = 0;
 const listeners = new Set();
 
 const emit = () => {
@@ -50,7 +45,6 @@ const applyScrollingClass = (active) => {
 const setSnapshot = (nextSnapshot) => {
   if (
     nextSnapshot.scrollY === snapshot.scrollY &&
-    nextSnapshot.direction === snapshot.direction &&
     nextSnapshot.isScrolling === snapshot.isScrolling
   ) {
     return;
@@ -71,32 +65,17 @@ const flushScrollFrame = () => {
   rafId = null;
   const nextScrollY = pendingScrollY;
 
-  // Emitted snapshots can skip positions; direction uses the last real position.
-  const nextDirection =
-    nextScrollY > lastRealScrollY
-      ? "down"
-      : nextScrollY < lastRealScrollY
-      ? "up"
-      : snapshot.direction;
-
-  lastRealScrollY = nextScrollY;
-
   // Low-performance consumers use thresholds, not exact scroll positions.
   if (isLowPerf()) {
-    const prevZone = getZone(snapshot.scrollY);
-    const nextZone = getZone(nextScrollY);
-    if (
-      nextZone === prevZone &&
-      nextDirection === snapshot.direction &&
-      snapshot.isScrolling
-    ) {
+    const prevZone = navbarScrollZone(snapshot.scrollY);
+    const nextZone = navbarScrollZone(nextScrollY);
+    if (nextZone === prevZone && snapshot.isScrolling) {
       return;
     }
   }
 
   setSnapshot({
     scrollY: nextScrollY,
-    direction: nextDirection,
     isScrolling: true,
   });
 };
@@ -115,11 +94,9 @@ const handleScroll = () => {
       rafId = null;
     }
     const finalScrollY = getScrollY();
-    lastRealScrollY = finalScrollY;
     applyScrollingClass(false);
     setSnapshot({
       scrollY: finalScrollY,
-      direction: snapshot.direction,
       isScrolling: false,
     });
   }, SCROLL_IDLE_MS);
@@ -130,11 +107,9 @@ const attach = () => {
 
   snapshot = {
     scrollY: getScrollY(),
-    direction: "up",
     isScrolling: false,
   };
   pendingScrollY = snapshot.scrollY;
-  lastRealScrollY = snapshot.scrollY;
 
   window.addEventListener("scroll", handleScroll, { passive: true });
 

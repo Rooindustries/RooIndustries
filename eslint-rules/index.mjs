@@ -12,7 +12,10 @@ import noIgnoredWriteRequest from "./no-ignored-write-request.mjs";
 import noLowContrastText from "./no-low-contrast-text.mjs";
 import noNestedComponents from "./no-nested-components.mjs";
 import noScriptingMediaQuery from "./no-scripting-media-query.mjs";
+import noUnfilteredRequestError from "./no-unfiltered-request-error.mjs";
 import noUnguardedTimerNavigation from "./no-unguarded-timer-navigation.mjs";
+import smoothScrollNeedsMotionCheck from "./smooth-scroll-needs-motion-check.mjs";
+import noVirtualMockOfInstalledModule from "./no-virtual-mock-of-installed-module.mjs";
 
 export const rules = {
   "aria-expanded-needs-controls": ariaExpandedNeedsControls,
@@ -29,7 +32,10 @@ export const rules = {
   "no-low-contrast-text": noLowContrastText,
   "no-nested-components": noNestedComponents,
   "no-scripting-media-query": noScriptingMediaQuery,
+  "no-unfiltered-request-error": noUnfilteredRequestError,
   "no-unguarded-timer-navigation": noUnguardedTimerNavigation,
+  "smooth-scroll-needs-motion-check": smoothScrollNeedsMotionCheck,
+  "no-virtual-mock-of-installed-module": noVirtualMockOfInstalledModule,
 };
 
 export default { meta: { name: "roo" }, rules };
