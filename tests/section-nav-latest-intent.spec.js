@@ -375,10 +375,14 @@ for (const { label, origin, selector, text = "", hash } of [
   });
 }
 
-for (const surface of ["desktop", "mobile"]) {
-  test(`${surface} menus close when a menu link opens in a new page`, async ({ context, page }) => {
+for (const { label, surface, viewport } of [
+  { label: "desktop", surface: "desktop", viewport: { width: 1536, height: 960 } },
+  { label: "tablet", surface: "mobile", viewport: { width: 900, height: 1200 } },
+  { label: "phone", surface: "mobile", viewport: { width: 390, height: 844 } },
+]) {
+  test(`${label} menus close when a menu link opens in a new page`, async ({ context, page }) => {
     test.setTimeout(120000);
-    await page.setViewportSize(surface === "mobile" ? { width: 390, height: 844 } : { width: 1536, height: 960 });
+    await page.setViewportSize(viewport);
     await openPage(page, "/faq", surface);
     const siteMenu = page.locator('button[aria-controls="mobile-site-menu"]');
     for (const [menu, href] of [
@@ -387,7 +391,7 @@ for (const surface of ["desktop", "mobile"]) {
       ["referrals", "/referrals/register"],
       ["referrals", "/referrals/login"],
     ]) {
-      const name = `${surface} ${href} opened in a new page`;
+      const name = `${label} ${href} opened in a new page`;
       const toggle = page.locator(`button[aria-controls="${surface}-${menu}-menu"]`);
       if (surface === "mobile") await siteMenu.click();
       await toggle.click();
