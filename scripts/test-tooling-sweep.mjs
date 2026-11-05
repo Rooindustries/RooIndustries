@@ -7,6 +7,7 @@ import http from "node:http";
 import vm from "node:vm";
 import { spawnSync, spawn } from "node:child_process";
 import { createRequire } from "node:module";
+import { withNodeOption } from "./lib/node-options.mjs";
 
 if (process.argv.includes('--contact-e2e-server')) {
   const { registerHooks } = await import('node:module');
@@ -60,7 +61,7 @@ await run('child-guard-inheritance', async () => {
   const cases = [];
   try {
     for (const [name, imports, activation] of [['shared', [shared], '1'], ['payment', [payment], null], ['shared-payment', [shared, payment], null], ['payment-shared', [payment, shared], null]]) {
-      const env = { PATH: process.env.PATH, NODE_ENV: 'test', ROO_TEST_HOST: testHost, BASE_URL: origin, NODE_OPTIONS: imports.map(file => `--import=${file}`).join(' '), ...(activation ? { TOOLING_NETWORK_GUARD: activation } : {}) };
+      const env = withNodeOption({ PATH: process.env.PATH, NODE_ENV: 'test', ROO_TEST_HOST: testHost, BASE_URL: origin, ...(activation ? { TOOLING_NETWORK_GUARD: activation } : {}) }, '--import', ...imports);
       const proc = spawn(process.execPath, ['--require', path.join(root, 'tests/fixtures/child-guard-early.cjs'), 'tests/fixtures/child-guard-inheritance.mjs', '--parent', '--early-cjs-capture'], { env, stdio: ['ignore', 'pipe', 'pipe'], timeout: 120000 });
       const result = await new Promise((resolve, reject) => {
         let stdout = '', stderr = '';
@@ -292,7 +293,7 @@ await run("operator-local-http", async () => {
   await new Promise(resolve => server.listen(0, testHost, resolve));
   const base = `http://${testHost}:${server.address().port}`;
   const execute = script => new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [path.join(root, "scripts", script)], { env: { PATH: process.env.PATH, HOME: scratch, CI: "true", ROO_TEST_HOST: testHost, BASE_URL: base, TOOLING_NETWORK_GUARD: "1", NODE_OPTIONS: `--import=${path.join(root, "scripts/lib/test-target-safety.mjs")}` }, stdio: ["ignore", "pipe", "pipe"] });
+    const proc = spawn(process.execPath, [path.join(root, "scripts", script)], { env: withNodeOption({ PATH: process.env.PATH, HOME: scratch, CI: "true", ROO_TEST_HOST: testHost, BASE_URL: base, TOOLING_NETWORK_GUARD: "1" }, "--import", path.join(root, "scripts/lib/test-target-safety.mjs")), stdio: ["ignore", "pipe", "pipe"] });
     let output = ""; proc.stdout.on("data", b => output += b); proc.stderr.on("data", b => output += b);
     proc.once("error", reject); proc.once("exit", code => { try { assert.equal(code, 0, output); resolve(); } catch (e) { reject(e); } });
   });

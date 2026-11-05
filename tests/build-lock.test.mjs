@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { after, test } from "node:test";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { lockBuildDirectory } from "../scripts/lib/build-lock.mjs";
 
 const library = new URL("../scripts/lib/build-lock.mjs", import.meta.url).href;
@@ -282,6 +282,74 @@ test("a checkout path with spaces still locks every Node process of the build", 
   await outlivingWorker(pathToFileURL(path.join(checkout, "scripts", "lib", "build-lock.mjs")).href);
 });
 
+test("a server started from a checkout path with spaces and quotes loads its network guard and build lock in every child", async () => {
+  const repo = new URL("../", import.meta.url);
+  const checkout = path.join(scratchRoot("roo node options "), "checkout with \"quotes\" and spaces");
+  fs.cpSync(new URL("scripts/lib", repo), path.join(checkout, "scripts", "lib"), { recursive: true });
+  fs.copyFileSync(new URL("next.config.mjs", repo), path.join(checkout, "next.config.mjs"));
+  for (const name of ["src", "node_modules"]) fs.symlinkSync(fileURLToPath(new URL(name, repo)), path.join(checkout, name));
+  const lib = (name) => import(pathToFileURL(path.join(checkout, "scripts", "lib", name)).href);
+  const [{ withNodeOption }, checkoutLock] = await Promise.all([lib("node-options.mjs"), lib("build-lock.mjs")]);
+  const guard = path.join(checkout, "scripts", "lib", "test-target-safety.mjs");
+  const dir = scratchDir();
+  const lock = checkoutLock.lockBuildDirectory(dir);
+  try {
+    const serverEnv = withNodeOption({ PATH: process.env.PATH, HOME: process.env.HOME, TOOLING_NETWORK_GUARD: "1", BASE_URL: "http://127.0.0.1:9", NODE_OPTIONS: "--no-warnings" }, "--import", guard);
+    assert.equal(withNodeOption(serverEnv, "--import", guard).NODE_OPTIONS, serverEnv.NODE_OPTIONS);
+    const outside = `fetch("http://outside.fixture.invalid/").then(() => "reached", (error) => String(error.cause?.message ?? error.message))`;
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", `import { execFileSync } from "node:child_process";
+const grandchild = execFileSync(process.execPath, ["-e", ${JSON.stringify(`${outside}.then(console.log)`)}], { encoding: "utf8" }).trim();
+console.log(JSON.stringify({ lock: process.env.ROO_BUILD_LOCK, child: await ${outside}, grandchild }));`], { cwd: checkout, env: lock.childEnv(serverEnv), encoding: "utf8", timeout: 30000 });
+    assert.equal(child.status, 0, child.stderr);
+    const proof = JSON.parse(child.stdout);
+    assert.equal(proof.lock, path.resolve(dir));
+    assert.match(proof.child, /\[test-target\]/);
+    assert.match(proof.grandchild, /\[test-target\]/);
+  } finally {
+    lock.release();
+  }
+});
+
+test("module flags add up once per path and any other flag is refused instead of being skipped", async () => {
+  const { appendNodeOption, prependNodeOption, withNodeOption } = await import("../scripts/lib/node-options.mjs");
+  const dir = scratchRoot("roo node options \"flags\" ");
+  const preload = (name) => {
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, `globalThis.loaded = [...(globalThis.loaded ?? []), ${JSON.stringify(name)}];`);
+    return file;
+  };
+  const [first, second, holder, leading] = [preload("first one.mjs"), preload("second \"two\".mjs"), preload("holder.cjs"), preload("leading \"0\".mjs")];
+  assert.throws(() => appendNodeOption("--title=first --title=second", "--title", "first"), /module-loading flags/);
+  assert.throws(() => withNodeOption({ NODE_OPTIONS: "" }, "--loader", first), /module-loading flags/);
+  const relativeSecond = `./${path.basename(second)}`;
+  const once = withNodeOption({ PATH: process.env.PATH, NODE_OPTIONS: '--title=--import="./second \\"two\\".mjs"' }, "--import", first, relativeSecond, first);
+  const ordered = withNodeOption(withNodeOption(once, "--require", holder), "-r", holder);
+  const env = { ...ordered, NODE_OPTIONS: prependNodeOption(ordered.NODE_OPTIONS, "--import", leading) };
+  assert.match(env.NODE_OPTIONS, /^--import="/);
+  const child = spawnSync(process.execPath, ["-e", "console.log(JSON.stringify(globalThis.loaded))"], { cwd: dir, env, encoding: "utf8", timeout: 30000 });
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(JSON.parse(child.stdout), ["holder.cjs", "leading \"0\".mjs", "first one.mjs", "second \"two\".mjs"]);
+});
+
+test("the NODE_OPTIONS command line loads a preload from a checkout path with quotes and spaces", () => {
+  const checkout = path.join(scratchRoot("roo node options cli "), "checkout with \"quotes\" and spaces");
+  fs.mkdirSync(path.join(checkout, "scripts", "lib"), { recursive: true });
+  fs.copyFileSync(new URL("../scripts/lib/node-options.mjs", import.meta.url), path.join(checkout, "scripts", "lib", "node-options.mjs"));
+  fs.writeFileSync(path.join(checkout, "scripts", "lib", "guard.mjs"), "process.env.ROO_GUARD_LOADED = '1';");
+  const script = `set -e
+node_options="$(node scripts/lib/node-options.mjs --import "$PWD/scripts/lib/guard.mjs")"
+NODE_OPTIONS="$node_options" node -e 'console.log(JSON.stringify({ guard: process.env.ROO_GUARD_LOADED ?? null, options: process.env.NODE_OPTIONS }))'`;
+  const child = spawnSync("bash", ["-c", script], { cwd: checkout, env: { PATH: process.env.PATH, NODE_OPTIONS: "--no-warnings" }, encoding: "utf8", timeout: 30000 });
+  assert.equal(child.status, 0, child.stderr);
+  const proof = JSON.parse(child.stdout);
+  assert.equal(proof.guard, "1");
+  assert.match(proof.options, /^--no-warnings --import=/);
+  const refused = spawnSync(process.execPath, [path.join(checkout, "scripts", "lib", "node-options.mjs"), "--title", "x"], { encoding: "utf8", timeout: 30000 });
+  assert.equal(refused.status, 2);
+  assert.equal(refused.stdout, "");
+  assert.match(refused.stderr, /module-loading flags/);
+});
+
 test("a worker paused before its preload never joins a run that started after its own run ended", async () => {
   const dir = scratchDir();
   const scratch = scratchRoot("roo-build-lock-pause-");
@@ -289,7 +357,7 @@ test("a worker paused before its preload never joins a run that started after it
   fs.writeFileSync(pauser, `const fs = require("node:fs");
 fs.writeFileSync(${JSON.stringify(paused)}, "");
 while (!fs.existsSync(${JSON.stringify(go)})) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);`);
-  const workerEnv = `{ ...process.env, NODE_OPTIONS: ${JSON.stringify(`--require ${JSON.stringify(pauser)} `)} + process.env.NODE_OPTIONS }`;
+  const workerEnv = `{ ...process.env, NODE_OPTIONS: require(${JSON.stringify(fileURLToPath(new URL("../scripts/lib/node-options.mjs", import.meta.url)))}).prependNodeOption(process.env.NODE_OPTIONS, "--require", ${JSON.stringify(pauser)}) }`;
   const wrapper = runWrapper(dir, startCli(workerCli(`require("node:fs").writeFileSync(${JSON.stringify(ran)}, ""); setInterval(() => {}, 1000)`, workerEnv)));
   let next;
   try {

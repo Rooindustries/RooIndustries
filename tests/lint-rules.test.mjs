@@ -4,6 +4,10 @@ import assert from "node:assert/strict";
 import { Linter, RuleTester } from "eslint";
 import { rules } from "../eslint-rules/index.mjs";
 
+const scriptFile = fileURLToPath(new URL("../scripts/start-server.mjs", import.meta.url));
+const buildLockTestFile = fileURLToPath(new URL("./build-lock.test.mjs", import.meta.url));
+const helperFile = fileURLToPath(new URL("../scripts/lib/node-options.mjs", import.meta.url));
+
 RuleTester.describe = describe;
 RuleTester.it = it;
 RuleTester.itOnly = it.only;
@@ -779,6 +783,223 @@ run("no-nested-components", {
       name: "expression-bodied component with no children",
       code: `export default function Card() { const Divider = () => <hr />; return <Divider />; }`,
       errors: [{ messageId: "nested" }],
+    },
+  ],
+});
+
+run("no-hand-built-node-options", {
+  valid: [
+    `const env = withNodeOption({ PATH: process.env.PATH }, "--import", guard);`,
+    `spawn(node, [], { env: { NODE_OPTIONS: process.env.NODE_OPTIONS } });`,
+    `const env = { NODE_OPTIONS: "--no-warnings" };`,
+    {
+      filename: scriptFile,
+      code: `import { appendNodeOption } from "./lib/node-options.mjs"; process.env.NODE_OPTIONS = appendNodeOption(process.env.NODE_OPTIONS, "--import", guard);`,
+    },
+    {
+      filename: scriptFile,
+      code: `import { appendNodeOption as addPreload } from "./lib/node-options.mjs"; env.NODE_OPTIONS = addPreload(env.NODE_OPTIONS, "--import", guard);`,
+    },
+    {
+      filename: scriptFile,
+      code: `import * as nodeOptions from "./lib/node-options.mjs"; env.NODE_OPTIONS = nodeOptions.prependNodeOption(env.NODE_OPTIONS, "--require", holder);`,
+    },
+    {
+      filename: buildLockTestFile,
+      code: `const { prependNodeOption } = await import("../scripts/lib/node-options.mjs"); const env = { ...ordered, NODE_OPTIONS: prependNodeOption(ordered.NODE_OPTIONS, "--import", leading) };`,
+    },
+    {
+      filename: helperFile,
+      code: `export const appendNodeOption = (current, flag, value) => current; export const withNodeOption = (env, flag, value) => ({ ...env, NODE_OPTIONS: appendNodeOption(env.NODE_OPTIONS, flag, value) });`,
+    },
+    `const inherited = process.env.NODE_OPTIONS; env.NODE_OPTIONS = quiet ? inherited || "--no-warnings" : inherited;`,
+    `const { NODE_OPTIONS } = process.env; const env = { NODE_OPTIONS };`,
+    `const { NODE_OPTIONS: inherited = "" } = env; child.env.NODE_OPTIONS = inherited;`,
+    `const { env: { NODE_OPTIONS: inherited = "" } } = options; child.env.NODE_OPTIONS = inherited;`,
+    `const { env: { NODE_OPTIONS } = {} } = options; child.env.NODE_OPTIONS = NODE_OPTIONS;`,
+    `const key = "NODE_OPTIONS"; env[key] = process.env.NODE_OPTIONS;`,
+    `const label = \`--import=\${guard}\`;`,
+    `const env = { NODE_OPTIONS: '--no-warnings --title="my --import=./guard.mjs"' };`,
+    "const env = { NODE_OPTIONS: `--title=\"--import=./guard.mjs\"` };",
+    `child.env.NODE_OPTIONS = undefined;`,
+    `const env = { ...process.env, NODE_OPTIONS: "" };`,
+    `env.NODE_OPTIONS = options?.env?.NODE_OPTIONS ?? process.env.NODE_OPTIONS;`,
+    `env.NODE_OPTIONS ??= "--no-warnings";`,
+    `process.env.NODE_OPTIONS = withNodeOption(process.env, "--import", ...imports).NODE_OPTIONS;`,
+    `const guarded = withNodeOption(env, "--import", guard); spawn(node, [], { env: { PATH, NODE_OPTIONS: guarded.NODE_OPTIONS } });`,
+    {
+      filename: scriptFile,
+      code: `import { prependNodeOption } from "./lib/node-options.mjs"; const NODE_OPTIONS = prependNodeOption(process.env.NODE_OPTIONS, "--require", pauser); spawn(node, [], { env: { NODE_OPTIONS } });`,
+    },
+    `const { NODE_OPTIONS } = process.env;`,
+  ],
+  invalid: [
+    {
+      name: "UI sweep server before this change",
+      code: "const env = { TOOLING_NETWORK_GUARD: '1', NODE_OPTIONS: `--import=${path.resolve('scripts/lib/test-target-safety.mjs')}` };",
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "build lock before this change",
+      code: 'const childEnv = (env) => ({ ...env, NODE_OPTIONS: [env.NODE_OPTIONS, `--require ${quote(holder)}`].filter(Boolean).join(" ") });',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "tooling sweep before this change",
+      code: "const env = { NODE_OPTIONS: imports.map(file => `--import=${file}`).join(' ') };",
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "remote browser guard test before this change",
+      code: 'const env = { NODE_OPTIONS: "--import=" + pathToFileURL(guard) };',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "optional preload picked in a conditional",
+      code: "const env = { NODE_OPTIONS: clock ? `--import=${clock}` : undefined };",
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "appended to an existing value",
+      code: 'env["NODE_OPTIONS"] += ` --require ${holder}`;',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "assigned on process.env",
+      code: "process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS} --import=${guard}`;",
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "preload kept in a variable first",
+      code: "const options = `--import=${guard}`; const env = { NODE_OPTIONS: options };",
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "flag and path joined from a named array",
+      code: 'const flags = ["--require", holder]; process.env.NODE_OPTIONS = flags.join(" ");',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "flag prefix kept in a variable",
+      code: 'const preload = "--import="; const env = { NODE_OPTIONS: preload + guard };',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "flag prefix picked in a conditional variable",
+      code: 'const prefix = esm ? "--import=" : "--require="; env.NODE_OPTIONS = prefix + guard;',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "preload appended to a variable after its declaration",
+      code: 'let options = ""; options += "--import=" + guard; env.NODE_OPTIONS = options;',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "helper result held in a variable that can change",
+      code: 'let options = withNodeOption(env, "--import", guard).NODE_OPTIONS; options = `--import=${guard}`; env.NODE_OPTIONS = options;',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "result of a local wrapper",
+      code: "env.NODE_OPTIONS = appendGuardOptions(env.NODE_OPTIONS);",
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "literal flags appended with +=",
+      code: "env.NODE_OPTIONS += ' --no-warnings';",
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "existing value joined with a literal",
+      code: 'const env = { NODE_OPTIONS: [process.env.NODE_OPTIONS, "--no-warnings"].filter(Boolean).join(" ") };',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "title text built from a template",
+      code: "const env = { NODE_OPTIONS: `--title=\"my --import=${name}\"` };",
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "written through a computed key",
+      code: 'process.env[`NODE_OPTIONS`] = "--import=" + guard;',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "local function named like a helper",
+      filename: scriptFile,
+      code: 'const appendNodeOption = (...parts) => parts.join(" "); env.NODE_OPTIONS = appendNodeOption(env.NODE_OPTIONS, "--import", guard);',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "helper name imported from another module",
+      filename: scriptFile,
+      code: 'import { appendNodeOption } from "./lib/flags.mjs"; env.NODE_OPTIONS = appendNodeOption(env.NODE_OPTIONS, "--import", guard);',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "another export renamed to a helper name",
+      filename: scriptFile,
+      code: 'import { withNodeOption as appendNodeOption } from "./lib/node-options.mjs"; env.NODE_OPTIONS = appendNodeOption(env.NODE_OPTIONS, "--import", guard);',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "helper name called on an unrelated object",
+      filename: scriptFile,
+      code: 'env.NODE_OPTIONS = flags.appendNodeOption(env.NODE_OPTIONS, "--import", guard);',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "helper name destructured from another module",
+      filename: buildLockTestFile,
+      code: 'const { prependNodeOption } = await import("./fixtures/flags.mjs"); env.NODE_OPTIONS = prependNodeOption(env.NODE_OPTIONS, "--import", guard);',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "unexported helper name inside the helper module",
+      filename: helperFile,
+      code: 'const appendNodeOption = (...parts) => parts.join(" "); env.NODE_OPTIONS = appendNodeOption(env.NODE_OPTIONS, "--import", guard);',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "written through a constant computed key",
+      code: 'const key = "NODE_OPTIONS"; env[key] = "--import=" + guard;',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "object literal with a constant computed key",
+      code: 'const key = `NODE_OPTIONS`; Object.assign(env, { [key]: `--import=${guard}` });',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "constant computed key held through another constant",
+      code: 'const name = "NODE_OPTIONS"; const key = name; process.env[key] = flags.join(" ");',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "destructured default that builds a preload",
+      code: 'const { NODE_OPTIONS: options = "--import=" + guard } = env; child.env.NODE_OPTIONS = options;',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "helper name taken from a nested default instead of the module",
+      filename: scriptFile,
+      code: 'const { missing: { appendNodeOption } = { appendNodeOption: (x) => "--import=" + x } } = await import("./lib/node-options.mjs"); env.NODE_OPTIONS = appendNodeOption(guard);',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "nested destructured default that builds a preload",
+      code: 'const { env: { NODE_OPTIONS: options = "--import=" + guard } } = settings; child.env.NODE_OPTIONS = options;',
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "a different variable destructured into NODE_OPTIONS",
+      code: "const { PRELOAD: options } = env; child.env.NODE_OPTIONS = options;",
+      errors: [{ messageId: "handBuilt" }],
+    },
+    {
+      name: "only one branch of a shared constant is safe",
+      code: 'const inherited = process.env.NODE_OPTIONS; env.NODE_OPTIONS = quiet ? inherited || "--no-warnings" : inherited + " --import=" + guard;',
+      errors: [{ messageId: "handBuilt" }],
     },
   ],
 });

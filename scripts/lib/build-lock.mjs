@@ -3,11 +3,11 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { withNodeOption } from "./node-options.mjs";
 
 const { flock, recordOf, withGate } = createRequire(import.meta.url)("./build-lock-gate.cjs");
 const inUse = 75;
 const holder = fileURLToPath(new URL("./build-lock-holder.cjs", import.meta.url));
-const nodeOptionValue = (value) => `"${value.replace(/[\\"]/g, "\\$&")}"`;
 
 const record = (candidate, token) => {
   const target = recordOf(candidate);
@@ -51,12 +51,7 @@ export const lockBuildDirectory = (dir, { slots = 1 } = {}) => {
     return {
       dir: candidate,
       fd,
-      childEnv: (env) => ({
-        ...env,
-        ROO_BUILD_LOCK: path.resolve(candidate),
-        ROO_BUILD_LOCK_TOKEN: token,
-        NODE_OPTIONS: [env.NODE_OPTIONS, `--require ${nodeOptionValue(holder)}`].filter(Boolean).join(" "),
-      }),
+      childEnv: (env) => withNodeOption({ ...env, ROO_BUILD_LOCK: path.resolve(candidate), ROO_BUILD_LOCK_TOKEN: token }, "--require", holder),
       release: () => fs.closeSync(fd),
     };
   }

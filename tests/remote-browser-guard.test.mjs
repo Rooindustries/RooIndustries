@@ -6,6 +6,7 @@ import path from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "@playwright/test";
+import { withNodeOption } from "../scripts/lib/node-options.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const fixture = http.createServer((request, response) => {
@@ -98,13 +99,12 @@ after(async () => {
 });
 
 const runChild = (code, endpointEnv) => new Promise((resolve, reject) => {
-  const caseEnv = {
+  const caseEnv = withNodeOption({
     PATH: process.env.PATH,
     HOME: process.env.HOME,
-    NODE_OPTIONS: "--import=" + pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")),
     ROO_TEST_NETWORK_ORIGINS: JSON.stringify([fixtureOrigin]),
     ...(endpointEnv ? { PW_TEST_CONNECT_WS_ENDPOINT: endpointEnv } : {}),
-  };
+  }, "--import", pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href);
   const child = spawn("/usr/bin/env", ["-i", ...Object.entries(caseEnv).map(([key, value]) => `${key}=${value}`), process.execPath, "--input-type=module", "-e", code], {
     cwd: root,
     timeout: 60_000,
