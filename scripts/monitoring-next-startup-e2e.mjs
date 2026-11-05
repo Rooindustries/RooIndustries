@@ -12,7 +12,7 @@ const port = Number(process.env.PW_PORT || 3459);
 if (!Number.isInteger(port) || port < 1024 || port >= 65535) throw new Error('Startup check requires an unprivileged fixture port pair.');
 const origin = localOrigin(process.env.BASE_URL || `http://${host}:${port}`);
 if (new URL(origin).hostname !== host || new URL(origin).port !== String(port)) throw new Error('Startup check requires its own local fixture origin.');
-const dist = validateDistDir(process.env.NEXT_DIST_DIR || '.next-e2e-monitoring-startup', { isolated: true });
+const dist = validateDistDir(process.env.NEXT_DIST_DIR || `.next-e2e-monitoring-startup-${host.replace(/[^a-zA-Z0-9]/g, '-')}-${port}`, { isolated: true });
 const artifact = join('test-results', 'monitoring-startup', new Date().toISOString().replace(/[:.]/g, '-'));
 await mkdir(artifact, { recursive: true });
 const restoreGuard = installNetworkGuard([origin, `http://${host}:${port + 1}`]);
