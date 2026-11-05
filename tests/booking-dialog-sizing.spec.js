@@ -437,21 +437,16 @@ const sampleFrames = () => {
   };
   const probe = document.createElement("div");
   probe.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;visibility:hidden;pointer-events:none";
-  const observer = new ResizeObserver(() => {
-    const entry = measure();
-    if (entry) window.__resizeFrames.push(entry);
-  });
-  const attach = () => {
-    if (probe.isConnected || !document.body) return;
-    document.body.append(probe);
-    observer.observe(probe);
-  };
   const tick = () => {
-    attach();
-    probe.style.width = probe.style.width === "1px" ? "2px" : "1px";
+    if (!probe.isConnected && document.body) document.body.append(probe);
+    const observer = new ResizeObserver(() => {
+      observer.disconnect();
+      const entry = measure();
+      if (entry) window.__resizeFrames.push(entry);
+    });
+    observer.observe(probe);
     requestAnimationFrame(tick);
   };
-  attach();
   requestAnimationFrame(tick);
 };
 const subPixel = 0.05;
@@ -530,6 +525,36 @@ for (const [size, viewport] of Object.entries(sizes)) {
         expect(frames.filter(misfit)).toEqual([]);
       });
     }
+  });
+}
+
+const frameCount = page => page.evaluate(() => window.__resizeFrames.length);
+
+for (const [size, viewport] of Object.entries(sizes)) {
+  test.describe(`${size} content growth`, () => {
+    test.use({ viewport, hasTouch: viewport.width < 780 });
+
+    test("slots that arrive after the dialog opens stay inside the frame", async ({ page, flow }, testInfo) => {
+      flow.state.slots[0].times = allDaySlots;
+      flow.state.failures["/api/bookingAvailability"] = "timeout";
+      await openFrom("/", homeLink)(page);
+      await expect.poll(() => flow.state.pending.length).toBeGreaterThan(0);
+      await expect(page.locator(dialogSelector)).toBeVisible();
+      await expect(page.locator(dialogSelector)).not.toHaveClass(/invisible/);
+      const before = await frameCount(page);
+      delete flow.state.failures["/api/bookingAvailability"];
+      const body = JSON.stringify({ settings: { dateSlots: flow.state.slots }, bookedSlots: flow.state.bookedSlots });
+      for (const route of flow.state.pending.splice(0)) {
+        await route.fulfill({ contentType: "application/json", body });
+      }
+      await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+      const grown = await frameCount(page);
+      await expect.poll(() => frameCount(page)).toBeGreaterThanOrEqual(grown + 30);
+      const frames = await page.evaluate(() => window.__resizeFrames);
+      await save(page, testInfo, `content-growth-${size}`, frames);
+      expect(frames.length).toBeGreaterThan(before);
+      expect(frames.filter(misfit)).toEqual([]);
+    });
   });
 }
 

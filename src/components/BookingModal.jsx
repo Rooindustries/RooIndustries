@@ -43,11 +43,13 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
   const hydrating = useHydrating();
   const scalerRef = useRef(null);
   const baseWidthRef = useRef(DESKTOP_BASE_WIDTH);
+  const frameWidthRef = useRef(0);
   const fitToFrame = useCallback((frameWidth) => {
     const wrapper = wrapperRef.current;
     const scaler = scalerRef.current;
     const content = contentRef.current;
     if (!wrapper || !scaler || !content) return;
+    frameWidthRef.current = frameWidth;
     const scale = frameWidth / baseWidthRef.current;
     const targetWidth = lastLayoutRef.current.wrapperWidth;
     const growth = targetWidth ? frameWidth / targetWidth : 1;
@@ -57,6 +59,9 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     if (closeButtonRef.current) closeButtonRef.current.style.transform = `scale(${growth})`;
     wrapper.style.height = `${closeRow + contentLayoutHeight(content) * scale}px`;
   }, []);
+  const refitFrame = useCallback(() => {
+    fitToFrame(frameWidthRef.current || parseFloat(wrapperRef.current?.style.width) || 0);
+  }, [fitToFrame]);
   const [isMobile, setIsMobile] = useState(false);
   const [renderWidth, setRenderWidth] = useState(DESKTOP_BASE_WIDTH);
   const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
@@ -138,7 +143,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
         contentRef.current.style.width = `${baseWidth}px`;
       }
       baseWidthRef.current = baseWidth;
-      fitToFrame(parseFloat(wrapperRef.current?.style.width) || 0);
+      refitFrame();
       const contentHeight = contentRef.current ? contentLayoutHeight(contentRef.current) : 0;
 
       let scale = 1;
@@ -197,11 +202,16 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       flushSync(calculateLayout);
     };
 
+    const fitResizedContent = () => {
+      refitFrame();
+      scheduleLayout();
+    };
+
     calculateLayout();
     window.addEventListener("resize", applyViewport);
     window.visualViewport?.addEventListener("resize", applyViewport);
     window.visualViewport?.addEventListener("scroll", applyViewport);
-    const observer = new ResizeObserver(scheduleLayout);
+    const observer = new ResizeObserver(fitResizedContent);
     if (contentRef.current) observer.observe(contentRef.current);
 
     return () => {
@@ -212,7 +222,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       layoutFrameRef.current = 0;
       observer.disconnect();
     };
-  }, [children, open, contentKey, fitToFrame]);
+  }, [children, open, contentKey, refitFrame]);
 
   useLayoutEffect(() => {
     if (open && viewport) revealFocusedControl(document.activeElement);
