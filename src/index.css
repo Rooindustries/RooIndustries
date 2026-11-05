@@ -2522,12 +2522,6 @@ html.perf-reduced-effects-mode .scroll-blur-lite {
 html.perf-reduced-motion-mode {
   scroll-behavior: auto;
 }
-.ri-reviews-viewport {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  overscroll-behavior-x: contain;
-}
-
 .ri-review-champagne-text {
   display: inline-block;
   background-image: linear-gradient(
@@ -2545,10 +2539,6 @@ html.perf-reduced-motion-mode {
   -webkit-text-fill-color: transparent;
   color: transparent;
   filter: drop-shadow(0 0 5px rgba(246, 203, 86, 0.36));
-}
-
-.ri-reviews-viewport::-webkit-scrollbar {
-  display: none;
 }
 
 @keyframes riEngineerStatusPulse {
