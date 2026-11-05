@@ -23,7 +23,6 @@ import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
 const DEFERRED_HEIGHTS = {
   packages: "[--deferred-height:2800px] xl:[--deferred-height:1370px]",
-  howItWorks: "[--deferred-height:1200px] sm:[--deferred-height:785px] lg:[--deferred-height:560px]",
   supportedGames: "[--deferred-height:420px]",
   faq: "[--deferred-height:1180px]",
   referral: "[--deferred-height:300px] sm:[--deferred-height:175px] lg:[--deferred-height:128px]",
@@ -190,12 +189,7 @@ export default function Home({ initialData = null, heroHeadingTag = "h1" }) {
           rootMargin="220px 0px"
           eager={eagerAll}
         >
-          <div
-            className={`deferred-section-content ${DEFERRED_HEIGHTS.howItWorks}`}
-            style={sectionContentStyle}
-          >
-            <HowItWorks initialData={initialData?.howItWorks || null} />
-          </div>
+          <HowItWorks initialData={initialData?.howItWorks || null} />
         </DeferredSection>
       </section>
       <div className="mt-4 flex items-center justify-center">
