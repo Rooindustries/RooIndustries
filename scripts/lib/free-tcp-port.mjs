@@ -93,7 +93,7 @@ export const passHeldTcpPorts = (host, ports) => {
       child.off("message", onMessage);
       child.off("exit", onExit);
       child.off("error", finish);
-      if (child.connected) child.disconnect();
+      child.channel?.unref();
       if (error) reject(error);
       else resolve();
     };
