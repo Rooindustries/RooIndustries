@@ -45,7 +45,7 @@ export default function PrivacyPolicy({ initialData = null }) {
 
   return (
     <div className="py-20 max-w-3xl mx-auto p-6 text-ink">
-      {data.title && <h1 className="text-3xl font-bold mb-6">{data.title}</h1>}
+      {data.title && <h1 className="section-title mb-6">{data.title}</h1>}
 
       {data.sections?.map((section, i) => (
         <div key={i} className="mb-8">
