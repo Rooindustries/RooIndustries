@@ -9,6 +9,7 @@ import { gunzipSync } from 'node:zlib';
 import { freeTcpPorts } from './lib/free-tcp-port.mjs';
 import { spawnGroup } from './lib/process-group.mjs';
 import { spawnContained, stopChild } from './lib/start-on-port.mjs';
+import { localImportsOf } from './lib/local-imports.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const delay = ms => new Promise(done => setTimeout(done, ms));
@@ -27,9 +28,10 @@ if (process.argv[2] !== '--sandbox') {
   await mkdir(artifact, { recursive: true });
   await mkdir(join(scratch, 'home'));
   const hostNetwork = await readlink('/proc/self/ns/net');
+  const configImports = JSON.stringify(localImportsOf(join(root, 'next.config.mjs'), root));
   const child = spawnGroup('unshare', ['--user', '--map-root-user', '--net', '--',
     'sh', '-ec', 'ip link set lo up; exec "$@"', 'monitoring-sandbox',
-    process.execPath, fileURLToPath(import.meta.url), '--sandbox', scratch, artifact, hostNetwork], {
+    process.execPath, fileURLToPath(import.meta.url), '--sandbox', scratch, artifact, hostNetwork, configImports], {
     cwd: root, stdio: 'inherit',
     env: {
       PATH: process.env.PATH, HOME: join(scratch, 'home'), TMPDIR: scratch,
@@ -48,10 +50,10 @@ if (process.argv[2] !== '--sandbox') {
     console.log(`report: ${join(artifact, 'report.json')}`);
   }
 } else {
-  await run(process.argv[3], process.argv[4], process.argv[5]);
+  await run(process.argv[3], process.argv[4], process.argv[5], JSON.parse(process.argv[6]));
 }
 
-async function run(scratch, artifact, hostNetwork) {
+async function run(scratch, artifact, hostNetwork, configImports) {
   const { installNetworkGuard, inheritTestProcessGuard, refuseEnvFiles } = await import('./lib/test-target-safety.mjs');
   const { createToolingContentFixture } = await import('../tests/fixtures/tooling-content.mjs');
   const { apiRouteSecrets } = await import('../tests/fixtures/api-routes.mjs');
@@ -99,7 +101,8 @@ async function run(scratch, artifact, hostNetwork) {
   const work = join(scratch, 'site');
   await mkdir(work);
   for (const name of ['app', 'src', 'public', 'instrumentation.js', 'instrumentation-client.js', 'middleware.js',
-    'jsconfig.json', 'postcss.config.js', 'tailwind.config.js', 'package.json']) {
+    'jsconfig.json', 'postcss.config.js', 'tailwind.config.js', 'package.json', ...configImports]) {
+    await mkdir(dirname(join(work, name)), { recursive: true });
     await cp(join(root, name), join(work, name), { recursive: true });
   }
   await cp(join(root, 'next.config.mjs'), join(work, 'next.base.mjs'));
