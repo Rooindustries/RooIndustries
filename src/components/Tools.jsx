@@ -193,7 +193,7 @@ export default function Tools({ initialData = null }) {
 
   return (
     <section
-      className="relative z-10 pt-28 pb-24 px-6 max-w-6xl mx-auto text-ink"
+      className="relative z-10 page-top pb-24 px-6 max-w-6xl mx-auto text-ink"
       style={{
         width: "100%",
         maxWidth: "1152px",
@@ -204,15 +204,15 @@ export default function Tools({ initialData = null }) {
         <p className="text-xs tracking-[0.3em] uppercase text-accent mb-2">
           Tools I Use
         </p>
-        <h1 className="text-4xl sm:text-5xl font-extrabold text-info-text drop-shadow-[0_0_30px_rgba(56,189,248,0.45)]">
+        <h1 className="section-title">
           All Tools & Utilities
         </h1>
-        <p className="mt-3 text-sm sm:text-base text-ink-secondary max-w-2xl mx-auto">
+        <p className="section-lede">
           Quick access to the exact software I use during optimization, stress
           testing, overclocking and troubleshooting. Downloads are either direct
           from the official developer or securely hosted by Roo Industries.
         </p>
-        <p className="mt-2 text-sm sm:text-base text-ink-secondary">
+        <p className="section-lede">
           Don&apos;t want to do it yourself? I&apos;ll tune your PC for you.{" "}
           <Link to="/packages" className="inline-flex min-h-11 items-center text-accent underline underline-offset-4">See the packages</Link>
         </p>
@@ -321,7 +321,7 @@ export default function Tools({ initialData = null }) {
                       </p>
                     )}
 
-                    <p className="mt-2 text-[10px] text-ink-muted">
+                    <p className="mt-2 text-xs text-ink-secondary">
                       {downloadNote
                         ? downloadNote
                         : downloadMode === "hosted"

@@ -32,9 +32,9 @@ test("privacy Markdown preserves PortableText line breaks", async ({ page, reque
   ].join("\n"));
 
   await page.goto("/privacy");
-  const section = page.locator("div").filter({
+  const section = page.locator("main section").filter({
     has: page.getByRole("heading", { name: "Synthetic line breaks", exact: true }),
-  }).last();
+  });
   await expect(section.getByRole("heading", { name: "Synthetic line breaks", exact: true })).toBeVisible();
   await expect(section.locator("p")).toHaveCount(2);
   await expect(section.locator("p").nth(0).locator("br")).toHaveCount(5);
