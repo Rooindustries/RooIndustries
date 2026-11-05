@@ -19,6 +19,7 @@ const loadRouteRenderer = async () => {
     __esModule: true,
     default: {
       fetchHomePageData,
+      readContentRevisions: () => ({}),
     },
   }));
 

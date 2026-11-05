@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { getPublicContent } from "../lib/publicContentClient";
+import { useContent } from "../lib/contentCache";
 import homeCopy from "../lib/homeCopy";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import { trackEvent } from "../lib/analytics";
@@ -93,27 +93,14 @@ function CtaNoteBalanced({ icon, text }) {
 
 export default function Hero({ initialData = null, headingTag = "h1" }) {
   const Heading = headingTag;
-  const [fetchedHero, setFetchedHero] = useState(null);
-  const heroData = resolveHeroCopy(initialData || fetchedHero);
+  const { data } = useContent("hero", initialData);
+  const heroData = resolveHeroCopy(data);
   const handleHomeSectionLink = useHomeSectionLinkHandler();
 
   const handleHeroCta = (event, hash, cta) => {
     trackEvent("home_cta_click", { cta, surface: "hero" });
     handleHomeSectionLink(event, hash);
   };
-
-  useEffect(() => {
-    if (initialData) return undefined;
-    let cancelled = false;
-    getPublicContent("hero")
-      .then((data) => {
-        if (!cancelled) setFetchedHero(data);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [initialData]);
 
   const {
     headingLine1,

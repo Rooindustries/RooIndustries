@@ -28,7 +28,8 @@ import { sanitizeBrowserSearch } from "./lib/browserSearch";
 import { prefetchHomeSectionData } from "./lib/homeSectionData";
 import { whenUserInteracts } from "./lib/firstInteraction";
 import { migrateCheckoutStorageToSession } from "./lib/checkoutStorage";
-import { getPublicContent, getPublicContentPendingCount } from "./lib/publicContentClient";
+import { getPublicContentPendingCount } from "./lib/publicContentClient";
+import { ContentRevisionContext, loadContent } from "./lib/contentCache";
 import { useBookingDialogPending } from "./lib/bookingDialogHold";
 import { setVisibleTimeout } from "./lib/visibleTimeout";
 import { SectionNavigationProvider } from "./lib/sectionNavigator";
@@ -41,7 +42,7 @@ const Contact = lazy(() => import("./legacyPages/Contact"));
 const Privacy = lazy(async () => {
   const [{ default: Page }, initialData] = await Promise.all([
     import("./legacyPages/PrivacyPolicy"),
-    getPublicContent("privacy-policy").catch(() => null),
+    loadContent("privacy-policy").catch(() => null),
   ]);
   return { default: (props) => <Page {...props} initialData={props.initialData || initialData} /> };
 });
@@ -317,6 +318,7 @@ function AnimatedRoutes({
 export function AppContent({
   initialHomeData = null,
   initialRouteData = null,
+  contentRevisions = null,
   routeJsonLd = null,
   initialRouteComponent = null,
   initialRoutePath = null,
@@ -680,6 +682,7 @@ export function AppContent({
   };
 
   return (
+    <ContentRevisionContext.Provider value={contentRevisions}>
     <SectionNavigationProvider routeShell={routeShell}>
       {routeJsonLd && location.pathname === initialRoutePath ? <JsonLd data={routeJsonLd} /> : null}
       <DeferredTelemetry />
@@ -757,6 +760,7 @@ export function AppContent({
       )}
       <PerfDebugRuntime />
     </SectionNavigationProvider>
+    </ContentRevisionContext.Provider>
   );
 }
 

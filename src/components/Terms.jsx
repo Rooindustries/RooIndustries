@@ -1,18 +1,10 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { normalizePolicyLink } from "../lib/policyLinks";
 import { PortableText } from "@portabletext/react";
-import { getPublicContent } from "../lib/publicContentClient";
+import { useContent } from "../lib/contentCache";
 
 export default function Terms({ initialData = null }) {
-  const [data, setData] = useState(initialData);
-
-  useEffect(() => {
-    getPublicContent("terms")
-      .then((next) => {
-        if (next) setData(next);
-      })
-      .catch(console.error);
-  }, []);
+  const { data } = useContent("terms", initialData, { refreshSnapshot: true });
 
   const renderTextWithLinks = (text) => {
     if (typeof text !== "string") return text;

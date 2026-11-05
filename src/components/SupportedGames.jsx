@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
+import { useContent } from "../lib/contentCache";
 import { ChevronDown } from "lucide-react";
 import { urlFor } from "../lib/cmsImageUrl";
-import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
+import { HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 
 function GameCard({ game, index }) {
   const title = game?.title || "Game";
@@ -47,21 +48,8 @@ function GameCard({ game, index }) {
 }
 
 export default function SupportedGames({ initialData = null }) {
-  const [data, setData] = useState(() => initialData);
-
-  useEffect(() => {
-    if (initialData !== null) {
-      setData(initialData);
-    }
-  }, [initialData]);
+  const { data } = useContent(HOME_SECTION_DATA_KEYS.supportedGames, initialData);
   const [showAll, setShowAll] = useState(false);
-
-  useEffect(() => {
-    if (data !== null) return;
-    fetchHomeSectionData(HOME_SECTION_DATA_KEYS.supportedGames)
-      .then(setData)
-      .catch(console.error);
-  }, [data]);
 
   const featuredGames = useMemo(() => {
     if (!Array.isArray(data?.featuredGames)) return [];

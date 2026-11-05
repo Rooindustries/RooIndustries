@@ -3,6 +3,7 @@ const mockResolveSupabaseRuntimePolicy = jest.fn();
 
 jest.mock("../server/content/publicContent.js", () => ({
   fetchPublicContent: (...args) => mockFetchPublicContent(...args),
+  fetchPublicContentEntry: async (...args) => ({ data: await mockFetchPublicContent(...args), revision: 7 }),
 }));
 
 jest.mock("../server/supabase/runtime.js", () => ({

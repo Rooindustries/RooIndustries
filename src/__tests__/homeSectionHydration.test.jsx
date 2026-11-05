@@ -4,6 +4,16 @@ import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import Services from "../components/Services";
+import { getPublicContent } from "../lib/publicContentClient";
+import { loadContent } from "../lib/contentCache";
+
+jest.mock("../lib/publicContentClient", () => {
+  const getPublicContent = jest.fn();
+  return {
+    getPublicContent,
+    getPublicContentEntry: jest.fn(async (...args) => ({ data: await getPublicContent(...args), revision: null })),
+  };
+});
 
 jest.mock("../lib/cmsImageUrl", () => ({
   urlFor: jest.fn(() => ({
@@ -40,7 +50,6 @@ describe("home section hydration", () => {
       unobserve() {}
       disconnect() {}
     };
-    window.sessionStorage.clear();
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -51,7 +60,6 @@ describe("home section hydration", () => {
       root = null;
     }
     container.remove();
-    window.sessionStorage.clear();
     global.IntersectionObserver = originalIntersectionObserver;
     jest.restoreAllMocks();
   });
@@ -60,15 +68,11 @@ describe("home section hydration", () => {
     const page = <MemoryRouter><Services initialData={null} /></MemoryRouter>;
     container.innerHTML = renderToString(page);
     expect(container.querySelector(".ri-services-skeleton").closest("[data-section-placeholder]")).not.toBeNull();
-    window.sessionStorage.setItem(
-      "roo-home-data:services",
-      JSON.stringify(CACHED_SERVICES)
+    getPublicContent.mockImplementation(async (resource) =>
+      resource === "services" ? CACHED_SERVICES : CACHED_ABOUT
     );
-    window.sessionStorage.setItem(
-      "roo-home-data:about",
-      JSON.stringify(CACHED_ABOUT)
-    );
-    window.sessionStorage.setItem("roo-home-data:__ts", String(Date.now()));
+    await loadContent("services");
+    await loadContent("about");
     const errorSpy = jest.spyOn(console, "error");
 
     try {

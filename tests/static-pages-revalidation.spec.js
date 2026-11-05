@@ -247,3 +247,41 @@ test("/ rates the service only from CMS reviews with a whole 1-5 star rating aft
     await testInfo.attach("review-rating-edit", { body: JSON.stringify(timeline, null, 2), contentType: "application/json" });
   }
 });
+
+test("/ shows its packages after hydration when its server render came back without them", async ({ request, baseURL, browser }, testInfo) => {
+  test.setTimeout(180000);
+  const control = contentControl(request, baseURL);
+  const timeline = [];
+  const read = pageReader(request, timeline);
+  try {
+    await control({ missing: ["package"] });
+    await wait(61000);
+    expect((await read("/", "first request after the revalidation window")).cache).toBe("STALE");
+    await expect.poll(async () => {
+      const home = await read("/", "waiting for the render without packages");
+      return home.cache === "HIT" && !home.body.includes("ri-price-current");
+    }, { timeout: 20000 }).toBe(true);
+    await control({ reset: true });
+    const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
+    const context = await browser.newContext({ javaScriptEnabled: true, serviceWorkers: "block", reducedMotion: "reduce" });
+    try {
+      await guardBrowserContext(context, [baseURL]);
+      const page = await context.newPage();
+      const refreshes = [];
+      page.on("request", entry => {
+        if (new URL(entry.url()).pathname === "/api/content/packages-list") refreshes.push(entry.url());
+      });
+      await page.goto("/", { waitUntil: "networkidle" });
+      await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+      await page.locator("#packages").scrollIntoViewIfNeeded();
+      await expect(page.locator("#packages .ri-price-current").first()).toBeVisible();
+      timeline.push({ route: "/", step: "browser refresh of the empty packages", refreshes: refreshes.length });
+      expect(refreshes).toHaveLength(1);
+    } finally {
+      await context.close();
+    }
+  } finally {
+    await control({ reset: true });
+    await testInfo.attach("home-empty-packages", { body: JSON.stringify(timeline, null, 2), contentType: "application/json" });
+  }
+});

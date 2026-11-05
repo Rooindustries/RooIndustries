@@ -1,19 +1,34 @@
 const { applyHomePageCopyOverrides, resolveHeroCopy } = require("./homeCopy");
 const { buildPackageOffers, normalizeFaqQuestions } = require("./packageContent");
+const { cache } = require("react");
+
+const contentRevisionLedger = cache(() => new Map());
+
+const recordContentRevision = (resource, revision) => {
+  if (!Number.isSafeInteger(revision)) return;
+  const ledger = contentRevisionLedger();
+  const current = ledger.get(resource);
+  ledger.set(resource, current === undefined ? revision : Math.min(current, revision));
+};
+
+const readContentRevisions = () => Object.fromEntries(contentRevisionLedger());
 
 const createPublicContentFetcher = async () => {
-  const [{ fetchPublicContent }, { resolveSupabaseRuntimePolicy }] =
+  const [{ fetchPublicContentEntry }, { resolveSupabaseRuntimePolicy }] =
     await Promise.all([
       import("../server/content/publicContent.js"),
       import("../server/supabase/runtime.js"),
     ]);
   const backend = resolveSupabaseRuntimePolicy().primaryBackend;
-  return (resource) =>
-    fetchPublicContent({
+  return async (resource) => {
+    const entry = await fetchPublicContentEntry({
       resource,
       backend,
       searchParams: new URLSearchParams(),
     });
+    recordContentRevision(resource, entry.revision);
+    return entry.data;
+  };
 };
 
 async function fetchFaqQuestions() {
@@ -233,4 +248,5 @@ module.exports = {
   fetchDiscordBanner,
   fetchHeroCopy,
   fetchPackagesPageData,
+  readContentRevisions,
 };

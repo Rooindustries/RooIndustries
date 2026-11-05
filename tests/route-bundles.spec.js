@@ -272,13 +272,15 @@ test("Privacy preserves rich-text links and lists, and Terms still loads", async
   await expect(page.getByRole("heading", { name: "Terms of Service", exact: true })).toBeVisible();
 });
 
-test("Privacy refreshes content after a client-side revisit", async ({ page }) => {
+test("Privacy refreshes content after a client-side revisit past the refresh window", async ({ page }) => {
+  await page.clock.install();
   await page.goto("/about");
   await settle(page);
   await page.locator('nav[aria-label="About Roo Industries"] a[href="/privacy"]').click();
   await expect(page.getByRole("heading", { name: "Privacy Policy", exact: true })).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/about$/);
+  await page.clock.fastForward("01:01");
   await page.route("**/api/content/privacy-policy", async route => {
     const response = await route.fetch();
     const body = await response.json();

@@ -224,24 +224,26 @@ test("a rejected download offers help without losing the entered order", async (
 });
 
 test("tools distinguish an empty catalog from a retryable load failure", async ({ page }) => {
-  let failed = false;
+  let failed = true;
   let data = [];
+  await page.clock.install();
   await page.route("**/api/content/tools", route => route.fulfill({
     status: failed ? 503 : 200,
     json: failed ? { ok: false, error: "Synthetic content is unavailable." } : { ok: true, data },
   }));
   await page.goto("/contact");
   await page.locator("footer").getByRole("link", { name: "Tools", exact: true }).click();
-  await expect(page.getByText("No tools are listed right now.", { exact: true })).toBeVisible();
-  await page.locator("main").getByRole("link", { name: "Read the FAQ", exact: true }).click();
-  await expect(page).toHaveURL(/\/#faq$/);
-  failed = true;
-  await page.locator("footer").getByRole("link", { name: "Tools", exact: true }).click();
   await expect(page.getByText("Couldn't load the tools.", { exact: true })).toBeVisible();
   await expect(page.getByText("No tools are listed right now.", { exact: true })).toHaveCount(0);
   failed = false;
-  data = [{ _id: "recovered-tool", title: "Recovered benchmark tool", shortDescription: "A tool available after retry.", category: "Benchmark", downloadMode: "external", downloadUrl: "/favicon-96x96.png" }];
   await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(page.getByText("No tools are listed right now.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Couldn't load the tools.", { exact: true })).toHaveCount(0);
+  await page.locator("main").getByRole("link", { name: "Read the FAQ", exact: true }).click();
+  await expect(page).toHaveURL(/\/#faq$/);
+  data = [{ _id: "recovered-tool", title: "Recovered benchmark tool", shortDescription: "A tool available after retry.", category: "Benchmark", downloadMode: "external", downloadUrl: "/favicon-96x96.png" }];
+  await page.clock.fastForward("01:01");
+  await page.locator("footer").getByRole("link", { name: "Tools", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Recovered benchmark tool", exact: true })).toBeVisible();
   await expect(page.locator("main article")).toHaveCount(1);
   await expect(page.getByText("Couldn't load the tools.", { exact: true })).toHaveCount(0);

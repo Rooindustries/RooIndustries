@@ -1,11 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
 import { getPerfToggleEnabled, isPerfDebugEnabled, PERF_DEBUG_EVENT, PERF_TOGGLE_KEYS } from "../lib/perfDebug";
-import {
-  fetchHomeSectionData,
-  HOME_SECTION_DATA_KEYS,
-  readHomeSectionData,
-} from "../lib/homeSectionData";
+import { HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
+import { useContent } from "../lib/contentCache";
 
 const AUTO_SCROLL_PIXELS_PER_SECOND = 24;
 const AUTO_SCROLL_RESUME_DELAY_MS = 1500;
@@ -56,21 +53,9 @@ const getReviewAvatarUrl = (pfp) => {
 };
 
 export default function StreamerYoutuberReviews({ initialData = null }) {
-  const [data, setData] = useState(() => initialData);
   const [shouldLoad, setShouldLoad] = useState(() => Boolean(initialData));
+  const { data } = useContent(HOME_SECTION_DATA_KEYS.reviews, initialData, { enabled: shouldLoad });
   const sectionRef = useRef(null);
-
-  useEffect(() => {
-    if (initialData !== null) {
-      setData(initialData);
-      setShouldLoad(true);
-      return;
-    }
-
-    if (readHomeSectionData(HOME_SECTION_DATA_KEYS.reviews) !== null) {
-      setShouldLoad(true);
-    }
-  }, [initialData]);
 
   useEffect(() => {
     if (typeof IntersectionObserver === "undefined" || !sectionRef.current) {
@@ -91,26 +76,6 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
     observer.observe(sectionRef.current);
     return () => observer.disconnect();
   }, []);
-
-  useEffect(() => {
-    if (!shouldLoad || data) return;
-
-    let cancelled = false;
-
-    const fetchData = async () => {
-      try {
-        const res = await fetchHomeSectionData(HOME_SECTION_DATA_KEYS.reviews);
-        if (!cancelled) setData(res);
-      } catch (error) {
-        console.error("Could not fetch reviews:", error);
-      }
-    };
-
-    fetchData();
-    return () => {
-      cancelled = true;
-    };
-  }, [data, shouldLoad]);
 
   const defaultTitle = "Results Players Felt";
   const defaultSubtitle =
