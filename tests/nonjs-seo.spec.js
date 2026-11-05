@@ -16,15 +16,16 @@ const routes = [
 ];
 
 const stylesheetsReady = async (page) => {
-  await page.waitForFunction(() => [...document.querySelectorAll('link[rel="stylesheet"]')].every(link => link.sheet));
+  await page.waitForLoadState("load");
   const stylesheets = await page.locator('link[rel="stylesheet"]').evaluateAll(links => links.map(link => ({
     href: link.getAttribute("href"),
+    loaded: Boolean(link.sheet),
     inHead: link.parentElement === document.head,
     media: link.media || "all",
     disabled: link.disabled,
   })));
   expect(stylesheets.length).toBeGreaterThan(0);
-  expect(stylesheets.filter(sheet => !sheet.inHead || sheet.media !== "all" || sheet.disabled)).toEqual([]);
+  expect(stylesheets.filter(sheet => !sheet.loaded || !sheet.inHead || sheet.media !== "all" || sheet.disabled)).toEqual([]);
 };
 
 test.describe("Non-JS crawlability", () => {
