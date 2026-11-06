@@ -10,16 +10,16 @@ import noHandBuiltDollars from "./no-hand-built-dollars.mjs";
 import noHandBuiltNodeOptions from "./no-hand-built-node-options.mjs";
 import noHiddenServerMotion from "./no-hidden-server-motion.mjs";
 import noIgnoredWriteRequest from "./no-ignored-write-request.mjs";
-import noLowContrastText from "./no-low-contrast-text.mjs";
 import noLinuxOnlyTestTooling from "./no-linux-only-test-tooling.mjs";
+import noLowContrastText from "./no-low-contrast-text.mjs";
 import noNestedComponents from "./no-nested-components.mjs";
+import noParentIpcDisconnect from "./no-parent-ipc-disconnect.mjs";
 import noScriptingMediaQuery from "./no-scripting-media-query.mjs";
+import noUncheckedGroupSignal from "./no-unchecked-group-signal.mjs";
 import noUnfilteredRequestError from "./no-unfiltered-request-error.mjs";
 import noUnguardedTimerNavigation from "./no-unguarded-timer-navigation.mjs";
-import noParentIpcDisconnect from "./no-parent-ipc-disconnect.mjs";
-import noUncheckedGroupSignal from "./no-unchecked-group-signal.mjs";
-import smoothScrollNeedsMotionCheck from "./smooth-scroll-needs-motion-check.mjs";
 import noVirtualMockOfInstalledModule from "./no-virtual-mock-of-installed-module.mjs";
+import smoothScrollNeedsMotionCheck from "./smooth-scroll-needs-motion-check.mjs";
 
 export const rules = {
   "aria-expanded-needs-controls": ariaExpandedNeedsControls,
@@ -34,16 +34,16 @@ export const rules = {
   "no-hand-built-node-options": noHandBuiltNodeOptions,
   "no-hidden-server-motion": noHiddenServerMotion,
   "no-ignored-write-request": noIgnoredWriteRequest,
-  "no-low-contrast-text": noLowContrastText,
   "no-linux-only-test-tooling": noLinuxOnlyTestTooling,
+  "no-low-contrast-text": noLowContrastText,
   "no-nested-components": noNestedComponents,
+  "no-parent-ipc-disconnect": noParentIpcDisconnect,
   "no-scripting-media-query": noScriptingMediaQuery,
+  "no-unchecked-group-signal": noUncheckedGroupSignal,
   "no-unfiltered-request-error": noUnfilteredRequestError,
   "no-unguarded-timer-navigation": noUnguardedTimerNavigation,
-  "no-parent-ipc-disconnect": noParentIpcDisconnect,
-  "no-unchecked-group-signal": noUncheckedGroupSignal,
-  "smooth-scroll-needs-motion-check": smoothScrollNeedsMotionCheck,
   "no-virtual-mock-of-installed-module": noVirtualMockOfInstalledModule,
+  "smooth-scroll-needs-motion-check": smoothScrollNeedsMotionCheck,
 };
 
 export default { meta: { name: "roo" }, rules };
