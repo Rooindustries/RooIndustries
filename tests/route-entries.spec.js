@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { fixturePort } = require("./fixtures/fixture-ports.cjs");
 const fs = require("node:fs/promises");
 const { gzipSync } = require("node:zlib");
 
@@ -13,7 +14,7 @@ const attach = async (testInfo, name, value) => {
 test.beforeEach(async ({ context, baseURL }) => {
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
   const contentURL = new URL(baseURL);
-  contentURL.port = String(Number(contentURL.port) + 1);
+  contentURL.port = String(fixturePort("TOOLING_CONTENT_PORT"));
   await guardBrowserContext(context, [baseURL, contentURL.origin]);
 });
 

@@ -151,6 +151,8 @@
     "test:playwright-groups": "node --test tests/playwright-groups.test.mjs",
     "test:tested-tree": "node --test tests/tested-tree.test.mjs",
     "test:free-ports": "node --test tests/free-tcp-port.test.mjs tests/start-on-port.test.mjs tests/process-group.test.mjs",
+    "test:fixture-ports": "node --test tests/fixture-ports.test.mjs",
+    "test:fixture-ports:browser": "node --test tests/fixture-ports-browser.test.mjs",
     "test:reproducible-build": "node --test tests/reproducible-build.test.mjs",
     "test:build-lock": "node --test tests/build-lock.test.mjs"
   },

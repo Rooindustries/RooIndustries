@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { fixturePort } = require("./fixtures/fixture-ports.cjs");
 
 const titles = ["Fixture Benchmark Alpha", "Fixture Benchmark Beta"];
 
@@ -7,7 +8,7 @@ test.skip(process.env.TOOLING_BENCHMARKS_REVALIDATION !== "1", "Needs its own se
 test("/benchmarks keeps its last results when revalidation cannot read the CMS", async ({ request, baseURL }, testInfo) => {
   test.setTimeout(180000);
   const contentURL = new URL(baseURL);
-  contentURL.port = process.env.TOOLING_CONTENT_PORT || String(Number(contentURL.port) + 1);
+  contentURL.port = String(fixturePort("TOOLING_CONTENT_PORT"));
   const control = async data => {
     const response = await request.post(new URL("/__content", contentURL).href, { data });
     expect(response.status()).toBe(200);

@@ -327,11 +327,11 @@ export function prepareTestTarget({ browser = false } = {}) {
 
 export async function guardBrowserContext(context, origins) {
   const allowed = new Set(origins.map(localOrigin));
-  const contentAssetOrigins = new Set([...allowed].map(origin => {
+  const contentAssetOrigins = new Set(process.env.TOOLING_CONTENT_PORT ? [...allowed].map(origin => {
     const url = new URL(origin);
-    url.port = process.env.TOOLING_CONTENT_PORT || String(Number(url.port) + 1);
+    url.port = process.env.TOOLING_CONTENT_PORT;
     return url.origin;
-  }));
+  }) : []);
   const evidence = { staticAssets: [], unexpectedRequests: [] };
   const record = (kind, request) => {
     const entry = { url: request.url(), method: request.method(), resourceType: request.resourceType(), action: kind, time: new Date().toISOString() };

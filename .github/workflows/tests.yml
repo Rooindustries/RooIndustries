@@ -81,7 +81,7 @@ jobs:
     needs: tested-tree
     if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ${{ vars.TESTS_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -100,6 +100,7 @@ jobs:
       - run: npm run test:playwright-groups
       - run: npm run test:tested-tree
       - run: npm run test:free-ports
+      - run: npm run test:fixture-ports
       - run: npm run test:reproducible-build
       - run: npm run test:build-lock
       - run: npm run test:tooling:dependencies
@@ -145,6 +146,7 @@ jobs:
       ROO_TEST_HOST: 127.0.0.1
       BASE_URL: http://127.0.0.1:3211
       PW_PORT: "3211"
+      TOOLING_CONTENT_PORT: "3219"
       PW_SERVER_ID: ci
       NEXT_DIST_DIR: .next-e2e-ci
       TOOLING_API_ROUTES: "0"
@@ -184,6 +186,9 @@ jobs:
         run: |
           files="$(node scripts/playwright-groups.mjs "$PW_SUITE" .playwright-timings/timings.json)"
           echo "PW_FILES=$files" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/hold-ports
+        with:
+          playwright-ports: "3211"
       - name: Run browser and agent-readiness tests
         run: |
           cd "${SUITE_DIR:-$GITHUB_WORKSPACE}"
@@ -258,6 +263,9 @@ jobs:
           build-dirs: |
             .next-e2e-routes-api/cache/webpack
             .next-e2e-routes-portal/cache/webpack
+      - uses: ./.github/actions/hold-ports
+        with:
+          playwright-ports: "3231 3241"
       - name: Run API route suite
         id: api-routes
         env:
@@ -270,6 +278,9 @@ jobs:
           PW_PORT: "3241"
           PW_SERVER_ID: routes-portal
         run: xvfb-run -a npm run test:creator:portal -- --output=test-results/creator-portal
+      - name: Run creator portal against an external fixture server
+        if: ${{ !cancelled() }}
+        run: npm run test:fixture-ports:browser
       - uses: ./.github/actions/save-caches
         with:
           build-dirs: |
@@ -319,6 +330,9 @@ jobs:
           test "$(git -C "$STORAGE_SOURCE" rev-parse HEAD)" = "2379ad5493f06bcf3bb5f044b844e292b98df4a0"
           npx --yes npm@11.12.1 ci --prefix "$STORAGE_SOURCE"
           npx --yes npm@11.12.1 run build --prefix "$STORAGE_SOURCE"
+      - uses: ./.github/actions/hold-ports
+        with:
+          playwright-ports: "3211"
       - name: Run native admin CMS suite
         run: xvfb-run -a npx playwright test -c playwright.admin.config.js
       - name: Run all six native booking-hold browser cases
@@ -418,6 +432,9 @@ jobs:
           build-dirs: |
             .next-e2e-revalidation-benchmarks/cache/webpack
             .next-e2e-revalidation-static/cache/webpack
+      - uses: ./.github/actions/hold-ports
+        with:
+          playwright-ports: "3251 3261"
       - name: Run benchmarks revalidation suite
         id: benchmarks-revalidation
         env:

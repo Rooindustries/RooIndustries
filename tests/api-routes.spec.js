@@ -3,7 +3,7 @@ const fs = require("node:fs/promises");
 const { spawn } = require("node:child_process");
 const { MARKDOWN_PATHS, MARKDOWN_VARY } = require("../src/lib/markdownContent");
 let apiFixture;
-let proxyFixture;
+let proxy;
 let restoreNetworkGuard;
 
 test.skip(process.env.TOOLING_API_ROUTES !== "1", "Select the writable fixture with npm run test:api:routes.");
@@ -11,11 +11,14 @@ test.skip(process.env.TOOLING_API_ROUTES !== "1", "Select the writable fixture w
 test.beforeAll(async ({ baseURL }) => {
   const { installNetworkGuard } = await import("../scripts/lib/test-target-safety.mjs");
   apiFixture = await import("./fixtures/api-routes.mjs");
-  proxyFixture = await import("./fixtures/audit-provider-proxy.mjs");
-  restoreNetworkGuard = installNetworkGuard([baseURL, apiFixture.apiFixtureOrigin(baseURL), proxyFixture.auditProviderProxyOrigin(baseURL)]);
+  proxy = await (await import("./fixtures/audit-provider-proxy.mjs")).startAuditProviderProxy(baseURL);
+  restoreNetworkGuard = installNetworkGuard([baseURL, apiFixture.apiFixtureOrigin(baseURL), proxy.origin]);
 });
 
-test.afterAll(() => restoreNetworkGuard?.());
+test.afterAll(async () => {
+  restoreNetworkGuard?.();
+  await proxy?.close();
+});
 
 test.beforeEach(async ({ context, baseURL }) => {
   const { guardBrowserContext, localOrigin, refuseEnvFiles } = await import("../scripts/lib/test-target-safety.mjs");
@@ -50,7 +53,7 @@ test("API contract audit covers handler validation and retired endpoints", async
 
 test("API contract audit rejects a null provider configuration", async ({ baseURL }, testInfo) => {
   await apiFixture.configureApiFixture(baseURL, { reset: true });
-  const proxy = await proxyFixture.startAuditProviderProxy(baseURL, { status: 200, body: { ok: true, providers: null } });
+  proxy.respond({ status: 200, body: { ok: true, providers: null } });
   try {
     const result = await runApiAudit(proxy.origin);
     await testInfo.attach("api-contract-output", { body: result.output, contentType: "text/plain" });
@@ -58,7 +61,7 @@ test("API contract audit rejects a null provider configuration", async ({ baseUR
     expect(result.code, result.output).toBe(1);
     expect(result.output).toContain("/api/payment/providers");
   } finally {
-    await proxy.close();
+    proxy.respond(null);
   }
 });
 

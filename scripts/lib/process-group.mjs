@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 
 const directory = fs.constants.O_RDONLY | fs.constants.O_DIRECTORY;
 const handles = new WeakMap();
+const tracked = new WeakSet();
 
 export const isRunning = (proc) => {
   try {
@@ -18,10 +19,13 @@ export const leaderProc = (child) => (handles.has(child) ? `/proc/self/fd/${hand
 export const exited = (child) => child.exitCode !== null || child.signalCode !== null;
 const leaderUnreaped = (child) => !exited(child) && fs.existsSync(`${leaderProc(child)}/stat`);
 
+export const isTrackedLeader = (child) => tracked.has(child);
+
 export const trackGroupLeader = (child, onExit = () => {}) => {
   if (!child.pid || handles.has(child)) return child;
   const fd = fs.openSync(`/proc/${child.pid}`, directory);
   handles.set(child, fd);
+  tracked.add(child);
   child.once("exit", () => {
     handles.delete(child);
     fs.closeSync(fd);

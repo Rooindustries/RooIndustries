@@ -1,4 +1,5 @@
 import { localOrigin } from '../../scripts/lib/test-target-safety.mjs';
+import fixturePorts from './fixture-ports.cjs';
 import { createHmac } from 'node:crypto';
 
 export const apiRouteSecrets = {
@@ -26,9 +27,7 @@ export function referralSessionCookie(overrides = {}) {
 }
 
 export function apiFixtureOrigin(baseURL) {
-  const target = new URL(localOrigin(baseURL));
-  const port = Number(process.env.TOOLING_CONTENT_PORT || Number(target.port) + 1);
-  return localOrigin(`http://${target.hostname}:${port}`);
+  return localOrigin(fixturePorts.fixtureOrigin(localOrigin(baseURL), 'TOOLING_CONTENT_PORT'));
 }
 
 export function requestRoute(baseURL, pathname, { data, ...options } = {}) {

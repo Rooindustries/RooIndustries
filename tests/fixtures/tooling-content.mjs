@@ -6,8 +6,9 @@ import { uiRepairsFixture } from './ui-repairs-server.mjs';
 import { localOrigin } from '../../scripts/lib/test-target-safety.mjs';
 import { listenOnPort } from '../../scripts/lib/free-tcp-port.mjs';
 import { referralEmail } from './api-routes.mjs';
+import fixturePorts from './fixture-ports.cjs';
 
-export async function createToolingContentFixture({ origin, artifact, apiRoutes = false, clockFile, server: shared }) {
+export async function createToolingContentFixture({ origin, artifact, apiRoutes = false, clockFile, server: shared, instance }) {
   const target = new URL(localOrigin(origin));
   const reused = uiRepairsFixture({ base: origin });
   const content = resource => reused.content(resource, target);
@@ -171,6 +172,11 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
   const handle = async (req, res) => {
     try {
       const url = new URL(req.url, origin);
+      if (instance && req.method === 'GET' && url.pathname === fixturePorts.INSTANCE_PATH) {
+        res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
+        res.end(instance);
+        return;
+      }
       let raw = '';
       for await (const chunk of req) { raw += chunk; if (Buffer.byteLength(raw) > 131072) throw new Error('Fixture body is too large.'); }
       const body = raw ? JSON.parse(raw) : {};

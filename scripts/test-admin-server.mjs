@@ -6,7 +6,8 @@ import { registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
-import { releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
+import { listenOnPort, portFromEnv, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
+import fixturePorts from "../tests/fixtures/fixture-ports.cjs";
 import { lockBuildDirectory } from "./lib/build-lock.mjs";
 import { withNodeOption } from "./lib/node-options.mjs";
 
@@ -17,8 +18,7 @@ const target = new URL(baseURL);
 const dist = validateDistDir(process.env.NEXT_DIST_DIR, { isolated: true });
 const lock = lockBuildDirectory(dist);
 const port = Number(target.port);
-if (port !== Number(process.env.PW_PORT) || target.hostname !== process.env.ROO_TEST_HOST || port > 65528) throw new Error("Invalid admin fixture target.");
-const controlOrigin = `http://127.0.0.1:${port + 6}`;
+if (port !== Number(process.env.PW_PORT) || target.hostname !== process.env.ROO_TEST_HOST) throw new Error("Invalid admin fixture target.");
 registerHooks({ resolve(specifier, context, next) {
   if (specifier.startsWith("@/")) specifier = pathToFileURL(path.join(root, specifier.slice(2))).href;
   try { return next(specifier, context); } catch (error) {
@@ -28,7 +28,9 @@ registerHooks({ resolve(specifier, context, next) {
 }});
 await reserveTcpPorts(target.hostname, [port]);
 const control = http.createServer();
-await new Promise((resolve, reject) => { control.once("error", reject); control.listen(port + 6, "127.0.0.1", resolve); });
+await listenOnPort(control, "127.0.0.1", portFromEnv("TOOLING_ADMIN_CONTROL_PORT"));
+const controlPort = control.address().port;
+const controlOrigin = `http://127.0.0.1:${controlPort}`;
 process.env.ROO_TEST_HOST = "127.0.0.1";
 const { start } = await import("./lib/storage-fixture.mjs");
 const fixture = await start({
@@ -146,7 +148,11 @@ try {
     await fixture.sql`update accounts.creator_profiles set commission_basis_points=1000,discount_basis_points=500,total_basis_points=1500,successful_referrals=${index} where user_id=${user.id}`;
   }
   const marker = { version: 1, isolated: true, baseURL, origins: [baseURL, fixture.origin], versions: fixture.versions };
+  const instance = fixturePorts.fixtureInstance();
   control.on("request", async (request, response) => {
+    if (request.method === "GET" && request.url === fixturePorts.INSTANCE_PATH) {
+      response.writeHead(200, { "Content-Type": "text/plain", "Cache-Control": "no-store" }); response.end(instance); return;
+    }
     if (request.method === "GET" && request.url === "/fixture") {
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(marker)); return;
     }
@@ -299,6 +305,7 @@ try {
     }
     response.writeHead(404); response.end();
   });
+  fixturePorts.writeFixturePorts(baseURL, instance, { TOOLING_ADMIN_CONTROL_PORT: controlPort });
   const env = withNodeOption({
     PATH: process.env.PATH, HOME: process.env.HOME, CI: "true", TZ: "UTC", TOURNEY_DATABASE_MODE: "memory",
     DATA_PRIMARY_BACKEND: "supabase", COMMERCE_PRIMARY_BACKEND: "supabase", COMMERCE_FAILOVER_GENERATION: "0", SUPABASE_CUTOVER_ENABLED: "1", COMMERCE_CUTOVER_ENABLED: "1",

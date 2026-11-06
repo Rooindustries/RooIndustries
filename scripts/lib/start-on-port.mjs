@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import net from "node:net";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { exited, isRunning, leaderProc, signalGroup, trackGroupLeader } from "./process-group.mjs";
+import { exited, isRunning, isTrackedLeader, leaderProc, signalGroup, trackGroupLeader } from "./process-group.mjs";
 import { freeTcpPorts, passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "./free-tcp-port.mjs";
 
 export const addressInUse = (output) => /EADDRINUSE|Address already in use|\(Address in use\)/.test(output);
@@ -132,6 +132,7 @@ const stops = new WeakMap();
 
 export const stopChild = (child, grace = 5000) => {
   if (!child.pid) return Promise.resolve();
+  if (!isTrackedLeader(child)) return Promise.reject(new Error("stopChild only stops children started with launch.spawn, spawnContained or spawnGroup."));
   if (!stops.has(child)) {
     stops.set(child, (async () => {
       pinNamespace(child);

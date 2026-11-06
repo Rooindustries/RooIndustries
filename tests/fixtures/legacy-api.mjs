@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { Readable } from 'node:stream';
 import { localOrigin } from '../../scripts/lib/test-target-safety.mjs';
+import { listenOnPort } from '../../scripts/lib/free-tcp-port.mjs';
 import { runLegacyApiHandler } from '../../src/lib/nextApiAdapter.js';
 
 export async function createLegacyApiFixture({ origin, pathname, handler }) {
@@ -29,10 +30,7 @@ export async function createLegacyApiFixture({ origin, pathname, handler }) {
       res.end(JSON.stringify({ ok: false, error: 'Fixture route failed.' }));
     }
   });
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(Number(target.port), target.hostname, resolve);
-  });
+  await listenOnPort(server, target.hostname, Number(target.port));
   return {
     close: () => new Promise(resolve => {
       server.close(resolve);

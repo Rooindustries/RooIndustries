@@ -1,4 +1,5 @@
 const { test, expect } = require("./fixtures/booking-flow.cjs");
+const { fixturePort } = require("./fixtures/fixture-ports.cjs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
@@ -42,7 +43,7 @@ const untilHomeStale = async (request, path = "/") => {
 
 const contentControl = async (request, baseURL, body) => {
   const origin = new URL(baseURL);
-  origin.port = String(Number(origin.port) + 1);
+  origin.port = String(fixturePort("TOOLING_CONTENT_PORT"));
   const response = await request.post(new URL("/__content", origin).href, { data: body });
   expect(response.ok(), await response.text()).toBe(true);
 };

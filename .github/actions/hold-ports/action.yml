@@ -1,0 +1,20 @@
+name: Take the old helper server ports
+description: Keeps idle listeners on each Playwright port's old helper offsets for the rest of the job, so the suites must use the ports they were given.
+inputs:
+  playwright-ports:
+    description: Space-separated Playwright ports whose old helper offsets get taken.
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        PLAYWRIGHT_PORTS: ${{ inputs.playwright-ports }}
+      run: |
+        ports=()
+        for port in $PLAYWRIGHT_PORTS; do ports+=($((port + 1)) $((port + 2)) $((port + 4)) $((port + 6))); done
+        log="$RUNNER_TEMP/held-ports.log"
+        node tests/fixtures/hold-ports.mjs "${ports[@]}" > "$log" 2>&1 &
+        holder=$!
+        until grep -q holding "$log"; do kill -0 "$holder"; sleep 0.2; done
+        cat "$log"

@@ -7,7 +7,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { test } from "node:test";
 import { freeTcpPort, reserveTcpPorts } from "../scripts/lib/free-tcp-port.mjs";
-import { startChildOnPorts, stopChild } from "../scripts/lib/start-on-port.mjs";
+import { spawnContained, startChildOnPorts, stopChild } from "../scripts/lib/start-on-port.mjs";
+import { spawnGroup } from "../scripts/lib/process-group.mjs";
 
 const host = "127.0.0.1";
 const library = (name) => JSON.stringify(new URL(`../scripts/lib/${name}`, import.meta.url).href);
@@ -482,6 +483,22 @@ test("an IPv6-only wildcard listener never counts as owning the IPv4 port", asyn
 test("a dual-stack wildcard listener does own the IPv4 port", async () => {
   const { child } = await startChildOnPorts({ host, requested: [0], isReady: answers, output: () => "", spawnChild: ([port], launch) => ipv6Child(launch, port, false) });
   await stopChild(child);
+});
+
+test("stopChild refuses a child it did not start instead of waiting on it forever", async () => {
+  const stray = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" });
+  try {
+    await assert.rejects(stopChild(stray), /only stops children started with launch\.spawn, spawnContained or spawnGroup/);
+  } finally {
+    stray.kill("SIGKILL");
+    if (stray.exitCode === null && stray.signalCode === null) await once(stray, "exit");
+  }
+  const tracked = spawnContained(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  await stopChild(tracked, 500);
+  assert.ok(tracked.exitCode !== null || tracked.signalCode !== null, "the contained child is still running");
+  const grouped = spawnGroup(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  await stopChild(grouped, 500);
+  assert.equal(grouped.signalCode, "SIGTERM");
 });
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

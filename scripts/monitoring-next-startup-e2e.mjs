@@ -16,13 +16,18 @@ const artifact = join('test-results', 'monitoring-startup', new Date().toISOStri
 await mkdir(artifact, { recursive: true });
 const checks = [];
 let child, error, origin, port, contentPort, dist, log, restoreGuard;
+let launched, stopping = false;
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
+  stopping = true;
+  if (launched) stopChild(launched);
+});
 const output = () => { try { return readFileSync(log, 'utf8'); } catch { return ''; } };
 try {
   let healthy = false;
   try {
     ({ child } = await startChildOnPorts({
       host,
-      requested: requestedPort ? [requestedPort, requestedPort + 1] : [0, 0],
+      requested: [requestedPort, 0],
       preferred: [3459, 3460],
       passHeld: true,
       timeout: 300000,
@@ -34,6 +39,7 @@ try {
         return response?.status === 200;
       },
       spawnChild: ([candidate, content], launch) => {
+        if (stopping) throw new Error('Startup check was stopped.');
         [port, contentPort] = [candidate, content];
         origin = localOrigin(process.env.BASE_URL || `http://${host}:${port}`);
         if (new URL(origin).hostname !== host || new URL(origin).port !== String(port)) throw new Error('Startup check requires its own local fixture origin.');
@@ -43,7 +49,7 @@ try {
         log = join(artifact, `next-${port}.log`);
         const fd = openSync(log, 'a');
         try {
-          return launch.spawn(process.execPath, ['scripts/test-tooling-sweep-server.mjs'], {
+          return launched = launch.spawn(process.execPath, ['scripts/test-tooling-sweep-server.mjs'], {
             env: { ...process.env, ROO_TEST_HOST: host, BASE_URL: origin, PW_PORT: String(port), TOOLING_CONTENT_PORT: String(contentPort), NEXT_DIST_DIR: dist, ROO_ADMIN_FIXTURE: '0', TOOLING_DEV_SERVER: '0', TOOLING_API_ROUTES: '0', TOOLING_MONITORING_STARTUP: '1', SENTRY_CLI_NO_TELEMETRY: '1', NEXT_PUBLIC_SENTRY_DSN: 'false' },
             stdio: ['ignore', fd, fd],
           });
