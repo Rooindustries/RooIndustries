@@ -20,46 +20,38 @@ const scratchRoot = (prefix) => {
 };
 const scratchDir = () => path.join(scratchRoot("roo-build-lock-"), ".next-e2e-lock");
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const stat = (pid) => {
-  try {
-    const text = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
-    const fields = text.slice(text.lastIndexOf(")") + 2).split(" ");
-    return { state: fields[0], parent: Number(fields[1]), group: Number(fields[2]) };
-  } catch {
-    return null;
-  }
+const processes = () => {
+  const result = spawnSync("ps", ["-A", "-o", "pid=,stat=,ppid=,pgid="], { encoding: "utf8" });
+  if (result.error) throw result.error;
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim().split("\n").map((line) => {
+    const [pid, state, parent, group] = line.trim().split(/\s+/);
+    return [Number(pid), { state, parent: Number(parent), group: Number(group) }];
+  });
 };
+const stat = (pid) => processes().find(([current]) => current === pid)?.[1] ?? null;
 const alive = (pid) => {
   const current = stat(pid);
-  return current !== null && current.state !== "Z";
+  return current !== null && !current.state.startsWith("Z");
 };
-const processes = () =>
-  fs
-    .readdirSync("/proc")
-    .filter((name) => /^\d+$/.test(name))
-    .map((name) => [Number(name), stat(name)])
-    .filter(([, current]) => current);
 const descendants = (root) => {
-  const parents = new Map(processes().map(([pid, current]) => [pid, current.parent]));
+  const snapshot = new Map(processes());
   const tree = new Set([root]);
   for (let grew = true; grew;) {
     grew = false;
-    for (const [pid, parent] of parents) {
+    for (const [pid, { parent }] of snapshot) {
       if (!tree.has(pid) && tree.has(parent)) {
         tree.add(pid);
         grew = true;
       }
     }
   }
-  return [...tree].filter(alive);
+  return [...tree].filter((pid) => snapshot.has(pid) && !snapshot.get(pid).state.startsWith("Z"));
 };
-const commandOf = (pid) => {
-  try {
-    return fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ");
-  } catch {
-    return "";
-  }
-};
+const commandOf = (pid) => spawnSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
+const hasCommand = (command) => spawnSync(command, ["--version"], { stdio: "ignore" }).error?.code !== "ENOENT";
+const networkNamespaces = hasCommand("unshare");
+const containedServers = networkNamespaces && hasCommand("setpriv");
 const waitFor = async (check, timeout = 10000, exitedEarly = () => false) => {
   const deadline = Date.now() + timeout;
   while (!check()) {
@@ -160,7 +152,9 @@ test("a locked build directory is refused to other runs and offered as the next 
   reclaim(dir);
 });
 
-test("a run in another network namespace cannot take the same directory", async () => {
+test("a run in another network namespace cannot take the same directory", {
+  skip: !networkNamespaces && "unshare is not on PATH",
+}, async () => {
   const dir = scratchDir();
   const wrapper = runWrapper(dir, 'console.log("locked");\nsetInterval(() => {}, 1000);', {
     command: ["unshare", "--user", "--map-root-user", "--net", process.execPath],
@@ -332,26 +326,167 @@ test("a former owner exiting never frees the lock of the run after it", async ()
   reclaim(dir);
 });
 
-test("the lock refuses to run without Linux and util-linux flock", () => {
+test("the lock reports a missing perl on PATH", () => {
   const dir = scratchDir();
-  const attempt = (prelude, env) =>
-    spawnSync(
-      process.execPath,
-      [
-        "--input-type=module",
-        "-e",
-        `${prelude}
-const { lockBuildDirectory } = await import(${JSON.stringify(library)});
-lockBuildDirectory(${JSON.stringify(dir)});`,
-      ],
-      { encoding: "utf8", env: { ...process.env, ...env } },
-    );
-  const otherPlatform = attempt('Object.defineProperty(process, "platform", { value: "darwin" });', {});
-  assert.notEqual(otherPlatform.status, 0);
-  assert.match(otherPlatform.stderr, /need Linux flock/);
-  const noFlock = attempt("", { PATH: scratchRoot("roo-no-flock-") });
-  assert.notEqual(noFlock.status, 0);
-  assert.match(noFlock.stderr, /need util-linux flock/);
+  const noPerl = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `const { lockBuildDirectory } = await import(${JSON.stringify(library)});
+lockBuildDirectory(${JSON.stringify(dir)}).release();`,
+    ],
+    { encoding: "utf8", env: { ...process.env, PATH: scratchRoot("roo-no-perl-") } },
+  );
+  assert.notEqual(noPerl.status, 0);
+  assert.match(noPerl.stderr, /need perl on PATH/);
+});
+
+test("the lock works without optional Perl modules", () => {
+  const dir = scratchDir();
+  const bin = scratchRoot("roo-base-perl-");
+  const modules = path.join(bin, "modules");
+  fs.mkdirSync(path.join(modules, "Time"), { recursive: true });
+  fs.writeFileSync(path.join(modules, "Time", "HiRes.pm"), 'die "Time::HiRes is unavailable\\n";');
+  const perl = spawnSync("sh", ["-c", "command -v perl"], { encoding: "utf8" });
+  assert.equal(perl.status, 0, perl.stderr);
+  const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
+  const wrapper = path.join(bin, "perl");
+  const script = `#!/bin/sh\nPERL5LIB=${quote(modules)} exec ${quote(perl.stdout.trim())} "$@"\n`;
+  fs.writeFileSync(wrapper, script, { mode: 0o755 });
+  const blocked = spawnSync(wrapper, ["-MTime::HiRes", "-e", ""], { encoding: "utf8" });
+  assert.notEqual(blocked.status, 0);
+  assert.match(blocked.stderr, /Time::HiRes is unavailable/);
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    import { lockBuildDirectory } from ${JSON.stringify(library)};
+    lockBuildDirectory(${JSON.stringify(dir)}).release();
+  `], { encoding: "utf8", env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` } });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(child.stderr, "");
+});
+
+test("the lock works through a Perl shim that needs its caller's environment", () => {
+  const dir = scratchDir();
+  const bin = scratchRoot("roo-perl-shim-");
+  const perl = spawnSync("sh", ["-c", "command -v perl"], { encoding: "utf8" });
+  assert.equal(perl.status, 0, perl.stderr);
+  fs.writeFileSync(path.join(bin, "perl"), `#!/bin/sh
+[ "$PLENV_VERSION" = "test-version" ] || { echo "PLENV_VERSION was lost" >&2; exit 2; }
+exec "$ROO_TEST_PERL" "$@"
+`, { mode: 0o755 });
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    import { lockBuildDirectory } from ${JSON.stringify(library)};
+    const lock = lockBuildDirectory(${JSON.stringify(dir)});
+    console.log(JSON.stringify(lock.childEnv(process.env)));
+    lock.release();
+  `], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+      PLENV_VERSION: "test-version",
+      ROO_TEST_PERL: perl.stdout.trim(),
+    },
+  });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(child.stderr, "");
+  const late = joinBuild(JSON.parse(child.stdout));
+  assert.equal(late.status, 1);
+  assert.equal(late.stderr, `${dir} belongs to no run now.\n`);
+});
+
+test("the lock ignores Perl settings and broken locales in its caller", () => {
+  const dir = scratchDir();
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    import { lockBuildDirectory } from ${JSON.stringify(library)};
+    const lock = lockBuildDirectory(${JSON.stringify(dir)});
+    console.log(JSON.stringify(lock.childEnv(process.env)));
+    lock.release();
+  `], {
+    encoding: "utf8",
+    env: { PATH: process.env.PATH, LC_ALL: "xx_YY.UTF-8", PERL5OPT: "-Mnonexistent", PERL5LIB: path.dirname(dir) },
+  });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(child.stderr, "");
+  const late = joinBuild(JSON.parse(child.stdout));
+  assert.equal(late.status, 1);
+  assert.equal(late.stderr, `${dir} belongs to no run now.\n`);
+});
+
+test("the gate keeps its timeout message after a 30 second hold", async (t) => {
+  const { flock } = await import("../scripts/lib/build-lock-gate.cjs");
+  const dir = scratchDir();
+  const fd = fs.openSync(path.dirname(dir), "r");
+  try {
+    assert.equal(flock(fd, { nonblock: true }).status, 0);
+    const message = `Could not take the lock gate for ${dir}: another process held it for 30 seconds.`;
+    const started = performance.now();
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
+      import { withGate } from ${JSON.stringify(new URL("../scripts/lib/build-lock-gate.cjs", import.meta.url).href)};
+      try {
+        withGate(${JSON.stringify(dir)}, () => {});
+      } catch (error) {
+        process.stderr.write(error.message + "\\n");
+        process.exit(1);
+      }
+    `], {
+      encoding: "utf8",
+      timeout: 45000,
+      env: { ...process.env, LC_ALL: "xx_YY.UTF-8", PERL5OPT: "-Mnonexistent", PERL5LIB: path.dirname(dir) },
+    });
+    assert.equal(child.status, 1);
+    assert.equal(child.stdout, "");
+    assert.equal(child.stderr, `${message}\n`);
+    assert.ok(performance.now() - started >= 30000, "the gate returned before its wait expired");
+    t.diagnostic(message);
+  } finally {
+    fs.closeSync(fd);
+  }
+});
+
+test("a waiting lock times out on conflict and takes the directory after its holder exits", async () => {
+  const { flock, inUse } = await import("../scripts/lib/build-lock-gate.cjs");
+  const dir = scratchDir();
+  const wrapper = runWrapper(dir, 'console.log("locked"); setInterval(() => {}, 1000);');
+  let fd, waiter;
+  try {
+    await waitFor(() => wrapper.lines.includes("locked"), 10000, wrapper.ended);
+    fd = fs.openSync(dir, "r");
+    assert.equal(flock(fd, { nonblock: true, conflictExitCode: inUse }).status, inUse);
+    const immediate = flock(fd, { wait: 0 });
+    assert.equal(immediate.status, 1);
+    assert.equal(immediate.stderr, "");
+    const started = performance.now();
+    const timedOut = flock(fd, { wait: 1 });
+    assert.equal(timedOut.status, 1);
+    assert.equal(timedOut.stderr, "");
+    assert.ok(performance.now() - started >= 1000, "the lock returned before its wait expired");
+    for (const wait of [0, 1, 1.5]) {
+      const started = performance.now();
+      const conflict = flock(fd, { wait, conflictExitCode: inUse });
+      assert.equal(conflict.status, inUse);
+      assert.equal(conflict.stderr, "");
+      assert.ok(performance.now() - started >= Math.ceil(wait) * 1000, "the lock returned before its wait expired");
+    }
+    waiter = spawn(process.execPath, ["--input-type=module", "-e", `
+      import { flock } from ${JSON.stringify(new URL("../scripts/lib/build-lock-gate.cjs", import.meta.url).href)};
+      console.log("waiting");
+      const result = flock(3, { wait: 5 });
+      process.stderr.write(result.stderr);
+      process.exit(result.status);
+    `], { stdio: ["ignore", "pipe", "pipe", fd] });
+    let output = "", error = "";
+    waiter.stdout.on("data", (chunk) => { output += chunk; });
+    waiter.stderr.on("data", (chunk) => { error += chunk; });
+    const exited = new Promise((resolve) => waiter.once("exit", resolve));
+    await waitFor(() => output.includes("waiting"), 10000, () => waiter.exitCode !== null);
+    await wrapper.stop();
+    assert.equal(await exited, 0, error);
+  } finally {
+    if (waiter && alive(waiter.pid)) waiter.kill("SIGKILL");
+    if (fd !== undefined) fs.closeSync(fd);
+    await wrapper.stop();
+  }
 });
 
 const startCli = (
@@ -570,7 +705,7 @@ while (!fs.existsSync(${JSON.stringify(go)})) Atomics.wait(new Int32Array(new Sh
 
 test(
   "the UI sweep build directory stays locked while the wrapper, next dev or its server still runs",
-  { timeout: 120000 },
+  { timeout: 120000, skip: !containedServers && "setpriv and unshare are required by the server launcher" },
   async () => {
     const dist = `.next-e2e-lock-ui-${process.pid}`;
     cleanup.push(path.resolve(dist), `${path.resolve(dist)}.build-lock`);
@@ -620,7 +755,7 @@ test(
 
 test(
   "a production build stays locked while the wrapper, next build or any build worker still runs",
-  { timeout: 300000 },
+  { timeout: 300000, skip: !containedServers && "setpriv and unshare are required by the server launcher" },
   async () => {
     const dist = `.next-e2e-lock-build-${process.pid}`;
     cleanup.push(path.resolve(dist), `${path.resolve(dist)}.build-lock`);
