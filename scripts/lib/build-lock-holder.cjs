@@ -5,7 +5,9 @@ const join = (dir) => withGate(dir, () => {
   let recorded = null;
   try {
     recorded = fs.readFileSync(recordOf(dir), "utf8");
-  } catch {}
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
   const token = process.env.ROO_BUILD_LOCK_TOKEN;
   if (!token || recorded === null) return `${dir} belongs to no run now.`;
   if (recorded !== token) return `${dir} now belongs to another run.`;

@@ -79,8 +79,12 @@ const stopTree = async (roots, group) => {
   const known = new Set(roots);
   const deadline = Date.now() + 10000;
   for (;;) {
-    for (const pid of [...known]) for (const member of descendants(pid)) known.add(member);
-    for (const [pid, current] of processes()) if (current.group === group) known.add(pid);
+    for (const pid of [...known]) {
+      for (const member of descendants(pid)) known.add(member);
+    }
+    for (const [pid, current] of processes()) {
+      if (current.group === group) known.add(pid);
+    }
     const living = [...known].filter(alive);
     if (!living.length) return;
     killAll(living);

@@ -362,8 +362,11 @@ if (process.argv[2] === '--build') {
     ]);
     restoreGuard?.();
     if (productionLock) {
-      await rm(join(root, productionDist), { recursive: true, force: true });
-      productionLock.release();
+      try {
+        await rm(join(root, productionDist), { recursive: true, force: true });
+      } finally {
+        productionLock.release();
+      }
     }
     await rm(fixture, { recursive: true, force: true });
     const errors = cleanup.filter(result => result.status === 'rejected').map(result => result.reason.message);
