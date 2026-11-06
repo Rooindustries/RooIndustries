@@ -5,8 +5,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { withNodeOption } from "./node-options.mjs";
 
-const { flock, recordOf, withGate } = createRequire(import.meta.url)("./build-lock-gate.cjs");
-const inUse = 75;
+const { flock, inUse, recordOf, withGate } = createRequire(import.meta.url)("./build-lock-gate.cjs");
 const holder = fileURLToPath(new URL("./build-lock-holder.cjs", import.meta.url));
 
 const readRecord = (candidate) => {
@@ -70,14 +69,20 @@ export const lockBuildDirectory = (dir, { slots = 1 } = {}) => {
       release: () => {
         if (released) return;
         released = true;
+        let closed = false;
         try {
           withGate(candidate, () => {
-            if (readRecord(candidate) === token) fs.rmSync(recordOf(candidate), { force: true });
+            try {
+              if (readRecord(candidate) === token) fs.rmSync(recordOf(candidate), { force: true });
+            } finally {
+              closed = true;
+              fs.closeSync(fd);
+            }
           });
         } catch (error) {
           process.stderr.write(`Releasing the build lock on ${candidate} left its record: ${error.message}\n`);
         } finally {
-          fs.closeSync(fd);
+          if (!closed) fs.closeSync(fd);
         }
       },
     };
