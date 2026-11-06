@@ -3,7 +3,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 import roo, { rules } from "./eslint-rules/index.mjs";
 
 const emailTextRules = new Set(["no-hand-built-dollars"]);
-const scriptRules = new Set(["no-parent-ipc-disconnect", "no-unchecked-group-signal"]);
+const scriptRules = new Set(["no-parent-ipc-disconnect", "no-unchecked-group-signal", "no-linux-only-test-tooling"]);
 const testFiles = "src/**/__tests__/**";
 const ruleSet = (names) => Object.fromEntries(names.map((name) => [`roo/${name}`, "error"]));
 
@@ -27,6 +27,15 @@ export default [
     languageOptions: { ecmaVersion: "latest", sourceType: "module", globals: { ...globals.node } },
     plugins: { roo },
     rules: ruleSet(["no-hand-built-node-options", "no-unchecked-group-signal"]),
+  },
+  {
+    files: [
+      "scripts/lib/**/*.{js,mjs,cjs}",
+      "scripts/test-*-server.mjs",
+      "scripts/sourcemaps-e2e.mjs",
+      "scripts/monitoring-deployment-e2e.mjs",
+    ],
+    rules: ruleSet(["no-linux-only-test-tooling"]),
   },
   {
     files: ["scripts/lib/process-group.mjs"],

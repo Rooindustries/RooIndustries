@@ -32,11 +32,11 @@ const lockSlot = (candidate) => {
   return withGate(candidate, () => {
     const fd = fs.openSync(candidate, "r");
     try {
-      const probe = flock(fd, ["--exclusive", "--nonblock", "--conflict-exit-code", String(inUse)]);
+      const probe = flock(fd, { nonblock: true, conflictExitCode: inUse });
       const failed = probe.status !== 0 && probe.status !== inUse;
       if (failed) throw new Error(`flock could not lock ${candidate}: ${probe.stderr}`);
       if (probe.status === 0) {
-        const shared = flock(fd, ["--shared", "--nonblock"]);
+        const shared = flock(fd, { shared: true, nonblock: true });
         if (shared.status !== 0) throw new Error(`flock could not share the lock on ${candidate}: ${shared.stderr}`);
         const token = randomUUID();
         record(candidate, token);
@@ -52,7 +52,6 @@ const lockSlot = (candidate) => {
 };
 
 export const lockBuildDirectory = (dir, { slots = 1 } = {}) => {
-  if (process.platform !== "linux") throw new Error("Build directory locks need Linux flock(2).");
   for (let slot = 1; slot <= slots; slot += 1) {
     const candidate = slot === 1 ? dir : `${dir}-${slot}`;
     const slotLock = lockSlot(candidate);

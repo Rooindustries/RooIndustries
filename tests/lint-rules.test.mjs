@@ -22,6 +22,57 @@ const tester = new RuleTester({
 
 const run = (name, cases) => tester.run(name, rules[name], cases);
 
+run("no-linux-only-test-tooling", {
+  valid: [
+    `spawnSync("/usr/bin/env", ["perl", "-e", script], { stdio: ["ignore", "ignore", "pipe", fd] });`,
+    `flock(fd, { shared: true, nonblock: true });`,
+    `const label = "flock";`,
+    `if (process.platform === "darwin") configureMac();`,
+    `if (target.platform === "linux") configureTarget();`,
+  ],
+  invalid: [
+    {
+      name: "the old build lock gate",
+      code: `const flock = (fd, options) => {
+        const result = spawnSync("flock", [...options, "3"], {
+          stdio: ["ignore", "ignore", "pipe", fd], encoding: "utf8",
+        });
+        return result;
+      };`,
+      errors: [{ messageId: "binary" }],
+    },
+    {
+      code: `childProcess.spawn("/usr/bin/flock", ["--exclusive", "3"]);`,
+      errors: [{ messageId: "binary" }],
+    },
+    {
+      code: 'execSync(`flock --exclusive 3`);',
+      errors: [{ messageId: "binary" }],
+    },
+    {
+      code: `const binary = "flock"; execFileSync(binary, ["--exclusive", "3"]);`,
+      errors: [{ messageId: "binary" }],
+    },
+    {
+      code: `spawnSync("/usr/bin/env", ["flock", "--exclusive", "3"]);`,
+      errors: [{ messageId: "binary" }],
+    },
+    {
+      name: "the old build lock platform refusal",
+      code: `if (process.platform !== "linux") throw new Error("Build directory locks need Linux flock(2).");`,
+      errors: [{ messageId: "platform" }],
+    },
+    {
+      code: `if (process.platform === "linux") takeLock();`,
+      errors: [{ messageId: "platform" }],
+    },
+    {
+      code: 'const linux = `linux`; if (linux == process["platform"]) takeLock();',
+      errors: [{ messageId: "platform" }],
+    },
+  ],
+});
+
 run("aria-label-keeps-visible-text", {
   valid: [
     `<a aria-label="Roo Industries home" href="/">Roo Industries</a>`,

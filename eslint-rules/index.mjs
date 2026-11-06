@@ -11,6 +11,7 @@ import noHandBuiltNodeOptions from "./no-hand-built-node-options.mjs";
 import noHiddenServerMotion from "./no-hidden-server-motion.mjs";
 import noIgnoredWriteRequest from "./no-ignored-write-request.mjs";
 import noLowContrastText from "./no-low-contrast-text.mjs";
+import noLinuxOnlyTestTooling from "./no-linux-only-test-tooling.mjs";
 import noNestedComponents from "./no-nested-components.mjs";
 import noScriptingMediaQuery from "./no-scripting-media-query.mjs";
 import noUnfilteredRequestError from "./no-unfiltered-request-error.mjs";
@@ -34,6 +35,7 @@ export const rules = {
   "no-hidden-server-motion": noHiddenServerMotion,
   "no-ignored-write-request": noIgnoredWriteRequest,
   "no-low-contrast-text": noLowContrastText,
+  "no-linux-only-test-tooling": noLinuxOnlyTestTooling,
   "no-nested-components": noNestedComponents,
   "no-scripting-media-query": noScriptingMediaQuery,
   "no-unfiltered-request-error": noUnfilteredRequestError,

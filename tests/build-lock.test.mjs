@@ -332,7 +332,7 @@ test("a former owner exiting never frees the lock of the run after it", async ()
   reclaim(dir);
 });
 
-test("the lock refuses to run without Linux and util-linux flock", () => {
+test("the lock runs on other platforms and reports a missing perl on PATH", () => {
   const dir = scratchDir();
   const attempt = (prelude, env) =>
     spawnSync(
@@ -342,16 +342,50 @@ test("the lock refuses to run without Linux and util-linux flock", () => {
         "-e",
         `${prelude}
 const { lockBuildDirectory } = await import(${JSON.stringify(library)});
-lockBuildDirectory(${JSON.stringify(dir)});`,
+lockBuildDirectory(${JSON.stringify(dir)}).release();`,
       ],
       { encoding: "utf8", env: { ...process.env, ...env } },
     );
   const otherPlatform = attempt('Object.defineProperty(process, "platform", { value: "darwin" });', {});
-  assert.notEqual(otherPlatform.status, 0);
-  assert.match(otherPlatform.stderr, /need Linux flock/);
-  const noFlock = attempt("", { PATH: scratchRoot("roo-no-flock-") });
-  assert.notEqual(noFlock.status, 0);
-  assert.match(noFlock.stderr, /need util-linux flock/);
+  assert.equal(otherPlatform.status, 0, otherPlatform.stderr);
+  const noPerl = attempt("", { PATH: scratchRoot("roo-no-perl-") });
+  assert.notEqual(noPerl.status, 0);
+  assert.match(noPerl.stderr, /need perl on PATH/);
+});
+
+test("a waiting lock times out on conflict and takes the directory after its holder exits", async () => {
+  const { flock, inUse } = await import("../scripts/lib/build-lock-gate.cjs");
+  const dir = scratchDir();
+  const wrapper = runWrapper(dir, 'console.log("locked"); setInterval(() => {}, 1000);');
+  let fd, waiter;
+  try {
+    await waitFor(() => wrapper.lines.includes("locked"), 10000, wrapper.ended);
+    fd = fs.openSync(dir, "r");
+    assert.equal(flock(fd, { nonblock: true, conflictExitCode: inUse }).status, inUse);
+    const started = performance.now();
+    const timedOut = flock(fd, { wait: 0.1 });
+    assert.equal(timedOut.status, 1);
+    assert.match(timedOut.stderr, /Timed out waiting for the build lock/);
+    assert.ok(performance.now() - started >= 100, "the lock returned before its wait expired");
+    waiter = spawn(process.execPath, ["--input-type=module", "-e", `
+      import { flock } from ${JSON.stringify(new URL("../scripts/lib/build-lock-gate.cjs", import.meta.url).href)};
+      console.log("waiting");
+      const result = flock(3, { wait: 5 });
+      process.stderr.write(result.stderr);
+      process.exit(result.status);
+    `], { stdio: ["ignore", "pipe", "pipe", fd] });
+    let output = "", error = "";
+    waiter.stdout.on("data", (chunk) => { output += chunk; });
+    waiter.stderr.on("data", (chunk) => { error += chunk; });
+    const exited = new Promise((resolve) => waiter.once("exit", resolve));
+    await waitFor(() => output.includes("waiting"), 10000, () => waiter.exitCode !== null);
+    await wrapper.stop();
+    assert.equal(await exited, 0, error);
+  } finally {
+    if (waiter && alive(waiter.pid)) waiter.kill("SIGKILL");
+    if (fd !== undefined) fs.closeSync(fd);
+    await wrapper.stop();
+  }
 });
 
 const startCli = (

@@ -14,10 +14,10 @@ const join = (dir) => withGate(dir, () => {
   const fd = fs.openSync(dir, "r");
   let joined = false;
   try {
-    const probe = flock(fd, ["--exclusive", "--nonblock", "--conflict-exit-code", String(inUse)]);
+    const probe = flock(fd, { nonblock: true, conflictExitCode: inUse });
     if (probe.status === 0) return `${dir} belongs to no run now.`;
     if (probe.status !== inUse) return `Could not join the build lock on ${dir}: ${probe.stderr}`;
-    const result = flock(fd, ["--shared", "--nonblock"]);
+    const result = flock(fd, { shared: true, nonblock: true });
     joined = result.status === 0;
     return joined ? null : `Could not join the build lock on ${dir}: ${result.stderr}`;
   } finally {
