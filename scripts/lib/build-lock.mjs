@@ -9,6 +9,14 @@ const { flock, recordOf, withGate } = createRequire(import.meta.url)("./build-lo
 const inUse = 75;
 const holder = fileURLToPath(new URL("./build-lock-holder.cjs", import.meta.url));
 
+const readRecord = (candidate) => {
+  try {
+    return fs.readFileSync(recordOf(candidate), "utf8");
+  } catch {
+    return null;
+  }
+};
+
 const record = (candidate, token) => {
   const target = recordOf(candidate);
   const pending = `${target}.${process.pid}.${token}`;
@@ -63,7 +71,11 @@ export const lockBuildDirectory = (dir, { slots = 1 } = {}) => {
         if (released) return;
         released = true;
         try {
-          withGate(candidate, () => fs.rmSync(recordOf(candidate), { force: true }));
+          withGate(candidate, () => {
+            if (readRecord(candidate) === token) fs.rmSync(recordOf(candidate), { force: true });
+          });
+        } catch (error) {
+          process.stderr.write(`Releasing the build lock on ${candidate} left its record: ${error.message}\n`);
         } finally {
           fs.closeSync(fd);
         }

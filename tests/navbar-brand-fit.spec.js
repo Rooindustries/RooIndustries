@@ -1,5 +1,6 @@
 const { test, expect } = require("@playwright/test");
 const { waitForHydrated } = require("./fixtures/react-hydration.cjs");
+const { navLink } = require("./fixtures/nav-link.cjs");
 
 const WIDTHS = [320, 340, 360, 375, 390, 640, 700, 767, 768, 800, 820, 900, 1023, 1024, 1100, 1180, 1279, 1280, 1440];
 const TABLET_WIDTHS = [768, 820, 900, 1023];
@@ -111,7 +112,18 @@ for (const width of TABLET_WIDTHS) {
     await expect(row.getByRole("button", { name: "Go Back" })).toBeVisible();
     await expect(row.getByText("Roo Industries", { exact: true }).filter({ visible: true })).toHaveCount(1);
     await expect(row.getByRole("button", { name: "Open menu" })).toBeVisible();
+    await expect(row.locator(navLink("plans"))).toBeVisible();
+    await expect(row.locator('[role="switch"]')).toBeVisible();
     await expect(page.locator('[data-nav-surface="desktop"][data-nav-target="benefits"]')).toBeHidden();
+  });
+}
+
+for (const width of [390, 900]) {
+  test(`with the menu open at ${width} px there is exactly one theme switch on screen`, async ({ page }) => {
+    await openPage(page, "/", { width, height: 900 });
+    await page.getByRole("button", { name: "Open menu" }).click();
+    await expect(page.locator("#mobile-site-menu")).toHaveAttribute("aria-hidden", "false");
+    await expect(page.locator('header [role="switch"]').filter({ visible: true })).toHaveCount(1);
   });
 }
 

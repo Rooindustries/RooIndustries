@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { after, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { lockBuildDirectory } from "../scripts/lib/build-lock.mjs";
+import { freeTcpPort } from "../scripts/lib/free-tcp-port.mjs";
 
 const library = new URL("../scripts/lib/build-lock.mjs", import.meta.url).href;
 const cleanup = [];
@@ -139,13 +139,6 @@ const neverAcquirableWhileAlive = async (dir, pids) => {
     return;
   }
 };
-const freePort = () =>
-  new Promise((resolve) => {
-    const server = net.createServer().listen(0, "127.0.0.1", () => {
-      const { port } = server.address();
-      server.close(() => resolve(port));
-    });
-  });
 
 test("a locked build directory is refused to other runs and offered as the next slot", async () => {
   const dir = scratchDir();
@@ -252,8 +245,28 @@ test("a release takes its token record with it, and a process whose run's direct
   fs.rmSync(dir, { recursive: true, force: true });
   const late = spawnSync(process.execPath, ["-e", ""], { env, encoding: "utf8", timeout: 30000 });
   assert.equal(late.status, 1);
-  assert.match(late.stderr, /belongs to no run now/);
+  assert.match(late.stderr, /is gone, so this process belongs to no run/);
   assert.doesNotMatch(late.stderr, /\n\s+at /);
+});
+
+test("after a release its own later processes belong to no run, and releasing twice is harmless", () => {
+  const dir = scratchDir();
+  const lock = lockBuildDirectory(dir);
+  const env = lock.childEnv({ PATH: process.env.PATH });
+  lock.release();
+  assert.throws(() => fs.fstatSync(lock.fd), { code: "EBADF" });
+  assert.doesNotThrow(() => lock.release());
+  const late = spawnSync(process.execPath, ["-e", ""], { env, encoding: "utf8", timeout: 30000 });
+  assert.equal(late.status, 1);
+  assert.match(late.stderr, /belongs to no run now\./);
+});
+
+test("a release never removes the record another run wrote", () => {
+  const dir = scratchDir();
+  const lock = lockBuildDirectory(dir);
+  fs.writeFileSync(`${dir}.build-lock`, "another run's token");
+  lock.release();
+  assert.equal(fs.readFileSync(`${dir}.build-lock`, "utf8"), "another run's token");
 });
 
 test("a former owner exiting never frees the lock of the run after it", async () => {
@@ -523,7 +536,7 @@ test(
     const dist = `.next-e2e-lock-ui-${process.pid}`;
     cleanup.push(path.resolve(dist), `${path.resolve(dist)}.build-lock`);
     const scratch = scratchRoot("roo-ui-lock-");
-    const nextPort = await freePort();
+    const nextPort = await freeTcpPort("127.0.0.1");
     const ui = spawn(process.execPath, ["scripts/test-ui-sweep-server.mjs"], {
       stdio: ["ignore", "ignore", "ignore"],
       detached: true,
@@ -531,7 +544,7 @@ test(
         PATH: process.env.PATH,
         HOME: scratch,
         ROO_TEST_HOST: "127.0.0.1",
-        UI_PORT: String(await freePort()),
+        UI_PORT: "",
         UI_NEXT_PORT: String(nextPort),
         NEXT_DIST_DIR: dist,
         UI_ARTIFACT: path.join(scratch, "ui.json"),
@@ -573,7 +586,7 @@ test(
     const dist = `.next-e2e-lock-build-${process.pid}`;
     cleanup.push(path.resolve(dist), `${path.resolve(dist)}.build-lock`);
     const scratch = scratchRoot("roo-build-tree-lock-");
-    const port = await freePort();
+    const port = await freeTcpPort("127.0.0.1");
     const wrapper = spawn(process.execPath, ["scripts/test-tooling-sweep-server.mjs"], {
       stdio: ["ignore", "ignore", "ignore"],
       detached: true,
@@ -583,7 +596,7 @@ test(
         ROO_TEST_HOST: "127.0.0.1",
         BASE_URL: `http://127.0.0.1:${port}`,
         PW_PORT: String(port),
-        TOOLING_CONTENT_PORT: String(await freePort()),
+        TOOLING_CONTENT_PORT: "",
         NEXT_DIST_DIR: dist,
         ROO_ADMIN_FIXTURE: "0",
       },

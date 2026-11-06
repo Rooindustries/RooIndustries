@@ -1,5 +1,5 @@
 const { test, expect } = require("@playwright/test");
-const { barLink } = require("./fixtures/bar-link.cjs");
+const { navLink } = require("./fixtures/nav-link.cjs");
 const { waitForHydrated } = require("./fixtures/react-hydration.cjs");
 
 const CPU_THROTTLE_RATE = Number(process.env.NAV_CPU_THROTTLE_RATE || 4);
@@ -38,7 +38,7 @@ const openPage = async (page, route, surface) => {
 };
 
 const clickSection = async (page, target, surface) => {
-  const selector = surface === "mobile" ? `[data-nav-surface="mobile"][data-nav-target="${target}"]` : barLink(target);
+  const selector = surface === "mobile" ? `[data-nav-surface="mobile"][data-nav-target="${target}"]` : navLink(target);
   const link = page.locator(selector).first();
   if (surface !== "mobile") {
     await link.click();

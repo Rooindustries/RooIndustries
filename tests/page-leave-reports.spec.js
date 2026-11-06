@@ -1,5 +1,5 @@
 const { test, expect } = require("@playwright/test");
-const { barLink } = require("./fixtures/bar-link.cjs");
+const { navLink } = require("./fixtures/nav-link.cjs");
 const http = require("node:http");
 const zlib = require("node:zlib");
 
@@ -238,7 +238,7 @@ test("leaving while the packages section loads its packages reports no error", a
   const content = await holdContent(page, ["packages-list", "packages-settings"]);
   const errors = collectConsoleErrors(page);
   await page.goto("/contact");
-  await page.locator(barLink("plans")).click();
+  await page.locator(navLink("plans")).click();
   await expect(page.locator("#packages")).toBeAttached();
   await expect.poll(() => content.held.some((route) => route.request().url().includes("/packages-list"))).toBe(true);
   await page.goto("/terms");

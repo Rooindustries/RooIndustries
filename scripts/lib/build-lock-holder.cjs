@@ -20,7 +20,7 @@ if (dir) {
     refusal = join(dir);
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
-    refusal = `${dir} belongs to no run now: ${error.message}`;
+    refusal = `${dir} is gone, so this process belongs to no run: ${error.message}`;
   }
   if (refusal) {
     fs.writeSync(2, `${refusal}\n`);

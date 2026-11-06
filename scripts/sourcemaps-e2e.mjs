@@ -224,8 +224,8 @@ if (process.argv[2] === '--build') {
       }));
       const start = requests.length;
       const nextBuild = [join(root, 'node_modules/next/dist/bin/next'), 'build'];
-      const lockFds = { timeout: 900000, fds: [productionLock.fd] };
-      const result = await execute('production-missing-token-build', nextBuild, env, lockFds);
+      const buildOptions = { timeout: 900000, fds: [productionLock.fd] };
+      const result = await execute('production-missing-token-build', nextBuild, env, buildOptions);
       assert.equal(result.status, 0);
       assert.equal(result.log.split(missingTokenWarning).length - 1, 1);
       assert.equal(requests.length, start);
@@ -236,8 +236,10 @@ if (process.argv[2] === '--build') {
       const browserFiles = await files(join(output, 'static'));
       assert(!browserFiles.some(path => path.endsWith('.map')));
       const site = new URL(siteOrigin);
-      const child = spawnContained(process.execPath, [join(root, 'node_modules/next/dist/bin/next'), 'start',
-        '--hostname', site.hostname, '--port', site.port], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe', productionLock.fd] });
+      const nextBin = join(root, 'node_modules/next/dist/bin/next');
+      const nextStart = [nextBin, 'start', '--hostname', site.hostname, '--port', site.port];
+      const stdio = ['ignore', 'pipe', 'pipe', productionLock.fd];
+      const child = spawnContained(process.execPath, nextStart, { cwd: root, env, stdio });
       const logs = [];
       child.stdout.on('data', data => logs.push(data));
       child.stderr.on('data', data => logs.push(data));
