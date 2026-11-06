@@ -5,7 +5,6 @@ import {
   __applyPerformanceDecisionForTests,
   __resetPerformanceProfileForTests,
   bootstrapPerformanceProfile,
-  DEVICE_CLASSES,
   LOW_PERFORMANCE_CLASS,
   PERFORMANCE_PROFILE_EVENT,
   PERFORMANCE_PROFILES,
@@ -61,8 +60,10 @@ describe("performanceProfile", () => {
       profile: PERFORMANCE_PROFILES.LITE,
       source: "auto",
       reason: "default-lite-mode",
-      deviceClass: DEVICE_CLASSES.DESKTOP,
     });
+    for (const field of ["deviceClass", "band", "renderer", "expiresAt"]) {
+      expect(snapshot).not.toHaveProperty(field);
+    }
     expect(isLowPerformanceModeEnabled()).toBe(true);
     expect(isReducedEffectsModeEnabled()).toBe(true);
     expect(getPerformanceProfileSnapshot().profile).toBe(

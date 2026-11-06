@@ -136,6 +136,24 @@ test("from 1024 px the Proof and Referrals menus open in the bar and close on an
   }
 });
 
+test("a menu left open across the 1024 px line closes instead of staying open with no way out", async ({ page }) => {
+  await openPage(page, "/", { width: 900, height: 900 });
+  const menu = page.locator("#mobile-site-menu");
+  const desktopProof = page.locator("#desktop-proof-menu");
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await expect(menu).toHaveAttribute("aria-hidden", "false");
+  await page.locator('button[aria-controls="mobile-proof-menu"]').click();
+  await expect(page.locator("#mobile-proof-menu")).toBeVisible();
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await expect(desktopProof).toBeHidden();
+  await page.locator('button[aria-controls="desktop-proof-menu"]').click();
+  await expect(desktopProof).toBeVisible();
+  await page.setViewportSize({ width: 900, height: 900 });
+  await expect(menu).toHaveAttribute("aria-hidden", "true");
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await expect(desktopProof).toBeHidden();
+});
+
 async function waitForHeaderToSettle(page) {
   await expect.poll(() => page.evaluate(() => document.querySelector("header").getAnimations({ subtree: true }).length))
     .toBe(0);

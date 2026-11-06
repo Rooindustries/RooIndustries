@@ -212,6 +212,20 @@ test("the next owner replaces the token record, so processes carrying the earlie
   }
 });
 
+test("a release takes its token record with it, and a process whose run's directory is gone is refused plainly", () => {
+  const dir = scratchDir();
+  const lock = lockBuildDirectory(dir);
+  const env = lock.childEnv({ PATH: process.env.PATH });
+  lock.release();
+  assert.equal(fs.existsSync(`${dir}.build-lock`), false);
+  fs.writeFileSync(`${dir}.build-lock`, env.ROO_BUILD_LOCK_TOKEN);
+  fs.rmSync(dir, { recursive: true, force: true });
+  const late = spawnSync(process.execPath, ["-e", ""], { env, encoding: "utf8", timeout: 30000 });
+  assert.equal(late.status, 1);
+  assert.match(late.stderr, /belongs to no run now/);
+  assert.doesNotMatch(late.stderr, /\n\s+at /);
+});
+
 test("a former owner exiting never frees the lock of the run after it", async () => {
   const dir = scratchDir();
   const former = runWrapper(dir, 'lock.release();\nprocess.on("SIGTERM", () => process.exit(0));\nconsole.log("released");\nsetInterval(() => {}, 1000);');

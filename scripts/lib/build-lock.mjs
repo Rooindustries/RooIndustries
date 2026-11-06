@@ -26,12 +26,15 @@ const lockSlot = (candidate) => {
     const fd = fs.openSync(candidate, "r");
     try {
       const probe = flock(fd, ["--exclusive", "--nonblock", "--conflict-exit-code", String(inUse)]);
-      if (probe.status === 0 && flock(fd, ["--shared", "--nonblock"]).status === 0) {
+      const failed = probe.status !== 0 && probe.status !== inUse;
+      if (failed) throw new Error(`flock could not lock ${candidate}: ${probe.stderr}`);
+      if (probe.status === 0) {
+        const shared = flock(fd, ["--shared", "--nonblock"]);
+        if (shared.status !== 0) throw new Error(`flock could not share the lock on ${candidate}: ${shared.stderr}`);
         const token = randomUUID();
         record(candidate, token);
         return { fd, token };
       }
-      if (probe.status !== inUse) throw new Error(`flock could not lock ${candidate}: ${probe.stderr}`);
     } catch (error) {
       fs.closeSync(fd);
       throw error;
@@ -52,7 +55,10 @@ export const lockBuildDirectory = (dir, { slots = 1 } = {}) => {
       dir: candidate,
       fd,
       childEnv: (env) => withNodeOption({ ...env, ROO_BUILD_LOCK: path.resolve(candidate), ROO_BUILD_LOCK_TOKEN: token }, "--require", holder),
-      release: () => fs.closeSync(fd),
+      release: () => {
+        withGate(candidate, () => fs.rmSync(recordOf(candidate), { force: true }));
+        fs.closeSync(fd);
+      },
     };
   }
   throw Object.assign(new Error(`${dir} is in use by another run.`), { code: "ELOCKED" });

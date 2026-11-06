@@ -200,6 +200,12 @@ export default function Navbar() {
   }, [closeMenus, isOwnSectionArrival, location]);
 
   useEffect(() => {
+    const desktop = window.matchMedia(DESKTOP_NAV_QUERY);
+    desktop.addEventListener("change", closeMenus);
+    return () => desktop.removeEventListener("change", closeMenus);
+  }, [closeMenus]);
+
+  useEffect(() => {
     if (!open) return;
     const handleEscape = (event) => {
       if (event.key !== "Escape" || window.matchMedia(DESKTOP_NAV_QUERY).matches) return;

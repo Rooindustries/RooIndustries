@@ -16,20 +16,10 @@ export const PERFORMANCE_PROFILES = Object.freeze({
   LITE: "lite",
 });
 
-export const DEVICE_CLASSES = Object.freeze({
-  DESKTOP: "desktop",
-  MOBILE: "mobile",
-  TABLET: "tablet",
-});
-
 const DEFAULT_DECISION = Object.freeze({
   profile: PERFORMANCE_PROFILES.FULL,
   source: "default",
   reason: "initial",
-  deviceClass: DEVICE_CLASSES.DESKTOP,
-  band: "unknown",
-  expiresAt: null,
-  renderer: "",
 });
 
 const SERVER_PERFORMANCE_PROFILE_SNAPSHOT = Object.freeze({
@@ -66,11 +56,7 @@ const sanitizeDecision = (decision = {}) => ({
 const areDecisionsEqual = (a, b) =>
   a.profile === b.profile &&
   a.source === b.source &&
-  a.reason === b.reason &&
-  a.deviceClass === b.deviceClass &&
-  a.band === b.band &&
-  a.expiresAt === b.expiresAt &&
-  a.renderer === b.renderer;
+  a.reason === b.reason;
 
 const getDocumentElement = () =>
   typeof document !== "undefined" ? document.documentElement : null;

@@ -19,7 +19,8 @@ await new Promise((resolve, reject) => { server.once('error', reject); server.li
 const port = server.address().port;
 const base = localOrigin(`http://${host}:${port}`);
 let nextPort, upstream;
-const lock = lockBuildDirectory(validateDistDir(process.env.NEXT_DIST_DIR || '.next-e2e-ui-sweep', { isolated: true }), { slots: process.env.NEXT_DIST_DIR ? 1 : 20 });
+const distDir = validateDistDir(process.env.NEXT_DIST_DIR || '.next-e2e-ui-sweep', { isolated: true });
+const lock = lockBuildDirectory(distDir, { slots: process.env.NEXT_DIST_DIR ? 1 : 20 });
 const dist = validateDistDir(lock.dir, { isolated: true });
 const artifact = path.resolve(process.env.UI_ARTIFACT || 'test-results/ui-sweep.json');
 let state = { scenario: '', mode: 'valid', calls: [] };
