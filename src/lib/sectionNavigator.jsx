@@ -8,6 +8,7 @@ import {
   clearPendingSectionTarget,
   clearRouteTransitionIntent,
   isHomeSectionHash,
+  isSupersededSectionTrip,
   normalizeSectionHash,
   readPendingSectionTarget,
   SECTION_TRIP_ENTRY,
@@ -42,6 +43,8 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   const navigate = useNavigate();
   const [activeHomeHash, setActiveHomeHash] = useState("");
   const tripRef = useRef(null);
+  const locationRef = useRef(location);
+  locationRef.current = location;
   const intentRef = useRef("");
   const alignmentCleanupRef = useRef(null);
   const clickAlignedHashRef = useRef("");
@@ -72,10 +75,15 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
     [stopAlignment]
   );
 
-  const cancelSectionNavigation = useCallback(() => {
+  const cancelSectionNavigation = useCallback((superseded = false) => {
     const trip = tripRef.current;
-    tripRef.current = null;
-    if (trip && window.history.state?.[SECTION_TRIP_ENTRY]) replaceBrowserUrl("", trip.from);
+    tripRef.current = trip && superseded ? { ...trip, superseded } : null;
+    if (trip && window.history.state?.[SECTION_TRIP_ENTRY]) {
+      const state = superseded
+        ? { ...window.history.state, [SECTION_TRIP_ENTRY]: { key: trip.key, superseded } }
+        : window.history.state;
+      window.history.replaceState(state, "", trip.from);
+    }
     intentRef.current = "";
     clearPendingSectionTarget();
     clearRouteTransitionIntent();
@@ -132,13 +140,15 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   );
 
   const isOwnSectionArrival = useCallback(
-    (target) => Boolean(tripRef.current) && target.state?.sectionTrip === tripRef.current.key,
+    (target) =>
+      Boolean(tripRef.current && !tripRef.current.superseded) && target.state?.sectionTrip === tripRef.current.key,
     []
   );
 
   useEffect(() => {
     const trip = tripRef.current;
-    if (trip && trip.key !== location.key) {
+    if (isSupersededSectionTrip(location.state, trip)) return;
+    if (trip && (trip.superseded || trip.key !== location.key)) {
       if (location.state?.sectionTrip === trip.key) {
         tripRef.current = null;
       } else {
@@ -150,21 +160,29 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
 
   useEffect(() => {
     const syncHash = () => {
+      if (isSupersededSectionTrip(location.state, tripRef.current)) return;
       setActiveHomeHash(normalizeSectionHash(window.location.hash || location.hash));
     };
     syncHash();
     window.addEventListener("hashchange", syncHash);
     return () => window.removeEventListener("hashchange", syncHash);
-  }, [location.hash, location.pathname]);
+  }, [location.hash, location.pathname, location.state]);
 
   useEffect(() => {
     const plainLink = (event) => {
       const link = event.target instanceof Element && event.target.closest("a[href]");
       return link && !link.hasAttribute("download") && isPlainPrimaryClick(event, link) && link;
     };
-    const goToHomeTop = (event) => {
-      const link = location.pathname === "/" && plainLink(event);
-      if (!link || link.href !== `${window.location.origin}/`) return;
+    const captureLinkIntent = (event) => {
+      const link = plainLink(event);
+      if (!link) return;
+      const homeSectionLink =
+        link.origin === window.location.origin && link.pathname === "/" && isHomeSectionHash(link.hash);
+      if (tripRef.current && !homeSectionLink) {
+        cancelSectionNavigation(true);
+        return;
+      }
+      if (locationRef.current.pathname !== "/" || link.href !== `${window.location.origin}/`) return;
       event.preventDefault();
       cancelSectionNavigation();
       if (window.location.hash) replaceBrowserUrl();
@@ -172,23 +190,23 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       window.scrollTo(0, 0);
     };
     const endTripOnLink = (event) => {
-      const link = tripRef.current && plainLink(event);
+      const link = tripRef.current?.superseded && plainLink(event);
       if (!link) return;
       const tripEntryPushed = window.history.state?.[SECTION_TRIP_ENTRY];
-      cancelSectionNavigation();
       if (tripEntryPushed && /^https?:$/.test(link.protocol) && !link.getAttribute("href").startsWith("#")) {
         event.preventDefault();
         window.location.replace(link.href);
       }
     };
     const listeners = new AbortController();
-    window.addEventListener("click", goToHomeTop, { capture: true, signal: listeners.signal });
+    window.addEventListener("click", captureLinkIntent, { capture: true, signal: listeners.signal });
     window.addEventListener("click", endTripOnLink, { signal: listeners.signal });
     return () => listeners.abort();
-  }, [cancelSectionNavigation, location.pathname]);
+  }, [cancelSectionNavigation]);
 
   useEffect(() => {
     if (location.pathname !== "/") return;
+    if (isSupersededSectionTrip(location.state, tripRef.current)) return;
 
     const intentHash = intentRef.current;
     intentRef.current = "";
@@ -224,7 +242,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       minRuntimeMs: fromPending ? 60 : 420,
       preAlignStableFramesRequired: fromPending ? 1 : 5,
     });
-  }, [activeHomeHash, alignTo, location.pathname, stopAlignment]);
+  }, [activeHomeHash, alignTo, location.pathname, location.state, stopAlignment]);
 
   useEffect(() => cancelSectionNavigation, [cancelSectionNavigation]);
 

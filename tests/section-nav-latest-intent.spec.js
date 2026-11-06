@@ -209,6 +209,33 @@ const ROUTE_AFTER_SECTION = [
   { label: "footer logo", link: FOOTER("/"), path: "/" },
 ];
 
+for (const { label, link, path } of [ROUTE_AFTER_SECTION[1], ROUTE_AFTER_SECTION[3]]) {
+  test(`the ${label} clicked when the homepage commits supersedes the section trip`, async ({ page }) => {
+    await page.setViewportSize({ width: 1536, height: 960 });
+    await openPage(page, "/reviews", "desktop");
+    const startLength = await historyLength(page);
+    await page.evaluate(
+      ([first, second]) =>
+        new Promise((resolve) => {
+          const observer = new MutationObserver(() => {
+            if (!document.querySelector("#services")) return;
+            observer.disconnect();
+            document.querySelector(second).click();
+            resolve();
+          });
+          observer.observe(document.getElementById("main-content"), { childList: true, subtree: true });
+          document.querySelector(first).click();
+        }),
+      [NAVBAR("benefits").selector, link.selector]
+    );
+    await expectOnRoute(page, path, label);
+    if (path === "/") expect(await readHomeTop(page), label).toEqual({ path: "/", hash: "", y: 0 });
+    expect(await historyLength(page), `${label} adds only its own history entry`).toBe(startLength + 1);
+    await page.goBack();
+    await expectPath(page, "/reviews", `${label} back`);
+  });
+}
+
 test("a route link clicked right after a section link wins", async ({ page }) => {
   test.setTimeout(180000);
   await page.setViewportSize({ width: 1536, height: 960 });

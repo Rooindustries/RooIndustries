@@ -22,6 +22,7 @@ import { getConfirmationPage, preloadConfirmationPage } from "./lib/confirmation
 import {
   consumeRouteTransitionIntent,
   isHomeSectionHash,
+  isSupersededSectionTrip,
   normalizeSectionHash,
   SECTION_TRIP_ENTRY,
 } from "./lib/sectionNavigation";
@@ -499,6 +500,9 @@ export function AppContent({
       const { [SECTION_TRIP_ENTRY]: unlandedTripEntry, ...browserState } = window.history.state || {};
       const state = {
         ...browserState,
+        ...(isSupersededSectionTrip(location.state, unlandedTripEntry)
+          ? { [SECTION_TRIP_ENTRY]: unlandedTripEntry }
+          : {}),
         // Retain Next's router tree and any checkout state on first hydration.
         usr: initial ? browserState.usr ?? null : location.state,
         __rooLegacy: true,

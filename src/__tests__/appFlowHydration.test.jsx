@@ -67,6 +67,7 @@ jest.mock("../lib/sectionNavigation", () => ({
   clearRouteTransitionIntent: jest.fn(),
   consumeRouteTransitionIntent: jest.fn(() => null),
   isHomeSectionHash: jest.fn(() => false),
+  isSupersededSectionTrip: jest.fn(() => false),
   normalizeSectionHash: jest.fn((value) => value || ""),
 }));
 jest.mock("../lib/browserSearch", () => ({
