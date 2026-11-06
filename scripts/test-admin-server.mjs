@@ -317,7 +317,8 @@ try {
     ROO_TEST_NETWORK_ORIGINS: JSON.stringify([baseURL, fixture.origin, fixture.storageUrl, fixture.postgrestUrl, controlOrigin]),
   }, "--import", path.join(root, "scripts/lib/test-target-safety.mjs"), path.join(root, "scripts/lib/content-test-hooks.mjs"));
   const execute = args => new Promise((resolve, reject) => {
-    active = spawn(process.execPath, args, { env: lock.childEnv(env), stdio: ["inherit", "inherit", "inherit", lock.fd] });
+    const stdio = ["inherit", "inherit", "inherit", lock.fd];
+    active = spawn(process.execPath, args, { env: lock.childEnv(env), stdio });
     active.once("error", reject);
     active.once("exit", (code, signal) => code === 0 || stopped ? resolve() : reject(new Error(`Admin fixture server exited ${signal || code}.`)));
   });

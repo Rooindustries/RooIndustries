@@ -201,8 +201,12 @@ export default function Navbar() {
 
   useEffect(() => {
     const desktop = window.matchMedia(DESKTOP_NAV_QUERY);
-    desktop.addEventListener("change", closeMenus);
-    return () => desktop.removeEventListener("change", closeMenus);
+    if (desktop.addEventListener) {
+      desktop.addEventListener("change", closeMenus);
+      return () => desktop.removeEventListener("change", closeMenus);
+    }
+    desktop.addListener(closeMenus);
+    return () => desktop.removeListener(closeMenus);
   }, [closeMenus]);
 
   useEffect(() => {

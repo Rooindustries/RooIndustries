@@ -223,7 +223,9 @@ if (process.argv[2] === '--build') {
         ALLOW_LIVE_PAYMENTS: '0', SALES_PREVIEW_READ_ONLY: '1',
       }));
       const start = requests.length;
-      const result = await execute('production-missing-token-build', [join(root, 'node_modules/next/dist/bin/next'), 'build'], env, { timeout: 900000, fds: [productionLock.fd] });
+      const nextBuild = [join(root, 'node_modules/next/dist/bin/next'), 'build'];
+      const lockFds = { timeout: 900000, fds: [productionLock.fd] };
+      const result = await execute('production-missing-token-build', nextBuild, env, lockFds);
       assert.equal(result.status, 0);
       assert.equal(result.log.split(missingTokenWarning).length - 1, 1);
       assert.equal(requests.length, start);
@@ -359,7 +361,6 @@ if (process.argv[2] === '--build') {
     restoreGuard?.();
     if (productionLock) {
       await rm(join(root, productionDist), { recursive: true, force: true });
-      await rm(`${join(root, productionDist)}.build-lock`, { force: true });
       productionLock.release();
     }
     await rm(fixture, { recursive: true, force: true });

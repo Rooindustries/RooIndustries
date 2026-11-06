@@ -18,6 +18,7 @@ if (dir) {
   try {
     refusal = join(dir);
   } catch (error) {
+    if (error.code !== "ENOENT") throw error;
     refusal = `${dir} belongs to no run now: ${error.message}`;
   }
   if (refusal) {

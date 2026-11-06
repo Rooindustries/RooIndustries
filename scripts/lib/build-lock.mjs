@@ -54,10 +54,16 @@ export const lockBuildDirectory = (dir, { slots = 1 } = {}) => {
     return {
       dir: candidate,
       fd,
-      childEnv: (env) => withNodeOption({ ...env, ROO_BUILD_LOCK: path.resolve(candidate), ROO_BUILD_LOCK_TOKEN: token }, "--require", holder),
+      childEnv: (env) => {
+        const locked = { ...env, ROO_BUILD_LOCK: path.resolve(candidate), ROO_BUILD_LOCK_TOKEN: token };
+        return withNodeOption(locked, "--require", holder);
+      },
       release: () => {
-        withGate(candidate, () => fs.rmSync(recordOf(candidate), { force: true }));
-        fs.closeSync(fd);
+        try {
+          withGate(candidate, () => fs.rmSync(recordOf(candidate), { force: true }));
+        } finally {
+          fs.closeSync(fd);
+        }
       },
     };
   }
