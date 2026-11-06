@@ -63,8 +63,15 @@ export default {
   create(context) {
     const readsPlatform = (node) => moduleMember(context, node, "process", "platform") ||
       (node.type === "CallExpression" && moduleMember(context, node.callee, "os", "platform"));
-    const refuses = (node) => includesNode(node, (child) => child.type === "ThrowStatement" ||
-      (child.type === "CallExpression" && moduleMember(context, child.callee, "process", "exit")));
+    const refuses = (node) => {
+      const statements = node?.type === "BlockStatement" ? node.body :
+        node?.type === "SwitchCase" ? node.consequent : [node];
+      return statements.some((child) => {
+        const statement = child?.type === "ExpressionStatement" ? child.expression : child;
+        return statement?.type === "ThrowStatement" || (statement?.type === "CallExpression" &&
+          moduleMember(context, statement.callee, "process", "exit"));
+      });
+    };
     const checkBranch = (node, test, branches) => {
       if (includesNode(test, readsPlatform) && branches.some(refuses)) {
         context.report({ node, messageId: "platform" });

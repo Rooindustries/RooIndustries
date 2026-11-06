@@ -17,10 +17,10 @@ open(my $lock, '<&=', 3) or do {
 };
 my $mode = $shared ? LOCK_SH : LOCK_EX;
 my $immediate = $nonblock || (length($wait) && $wait == 0);
-local $SIG{ALRM} = sub { exit(1); };
+local $SIG{ALRM} = sub { exit($conflict); };
 alarm($wait) if length($wait) && !$immediate;
 if (!flock($lock, $mode | ($immediate ? LOCK_NB : 0))) {
-  exit($nonblock ? $conflict : 1) if $immediate && ($! == EAGAIN || $! == EWOULDBLOCK);
+  exit($conflict) if $immediate && ($! == EAGAIN || $! == EWOULDBLOCK);
   print STDERR "Cannot take build lock: $!\n";
   exit(2);
 }
@@ -33,7 +33,11 @@ const flock = (fd, { shared = false, nonblock = false, wait = null, conflictExit
     "-e", lockScript,
     shared ? "1" : "0", nonblock ? "1" : "0", String(wait ?? ""), String(conflictExitCode),
   ];
-  const result = spawnSync("perl", args, { stdio: ["ignore", "ignore", "pipe", fd], encoding: "utf8" });
+  const result = spawnSync("perl", args, {
+    stdio: ["ignore", "ignore", "pipe", fd],
+    encoding: "utf8",
+    env: { PATH: process.env.PATH, PERL_BADLANG: "0" },
+  });
   if (result.error?.code === "ENOENT") {
     throw new Error("Build directory locks need perl on PATH.");
   }
