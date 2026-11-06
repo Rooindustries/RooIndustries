@@ -22,6 +22,10 @@ export default [
     rules: ruleSet(Object.keys(rules).filter((name) => !emailTextRules.has(name) && !scriptRules.has(name))),
   },
   {
+    files: ["src/lib/sectionNavigator.jsx"],
+    rules: { "react-hooks/refs": "error" },
+  },
+  {
     files: ["scripts/**/*.{js,mjs,cjs}", "tests/**/*.{js,mjs,cjs}"],
     linterOptions: { reportUnusedDisableDirectives: "off" },
     languageOptions: { ecmaVersion: "latest", sourceType: "module", globals: { ...globals.node } },

@@ -1,4 +1,13 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { HOME_SECTION_PREFETCH_BY_HASH, prefetchHomeSectionData, readHomeSectionData } from "./homeSectionData";
 import { alignToHashTarget, getCssHeaderOffsetPx } from "./scrollCoordinator";
@@ -44,10 +53,13 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   const [activeHomeHash, setActiveHomeHash] = useState("");
   const tripRef = useRef(null);
   const locationRef = useRef(location);
-  locationRef.current = location;
   const intentRef = useRef("");
   const alignmentCleanupRef = useRef(null);
   const clickAlignedHashRef = useRef("");
+
+  useLayoutEffect(() => {
+    locationRef.current = location;
+  }, [location]);
 
   const stopAlignment = useCallback(() => {
     clickAlignedHashRef.current = "";
@@ -117,10 +129,12 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       prefetchSectionData(normalizedHash);
 
       const nextHref = buildHomeSectionHref(normalizedHash);
-      const trip = tripRef.current;
+      const trip = tripRef.current?.superseded ? null : tripRef.current;
       const {
-        key = location.key,
-        via = routeShell === "memory" ? "memory" : window.location.pathname !== location.pathname ? "document" : "router",
+        key = window.crypto.randomUUID(),
+        via = routeShell === "memory"
+          ? "memory"
+          : window.location.pathname !== location.pathname ? "document" : "router",
       } = trip || {};
       const state = { sectionTrip: key };
       if (!trip) tripRef.current = { key, via, from: window.location.href };
@@ -136,12 +150,13 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       }
       return true;
     },
-    [alignTo, location.key, location.pathname, navigate, routeShell]
+    [alignTo, location.pathname, navigate, routeShell]
   );
 
   const isOwnSectionArrival = useCallback(
     (target) =>
-      Boolean(tripRef.current && !tripRef.current.superseded) && target.state?.sectionTrip === tripRef.current.key,
+      Boolean(tripRef.current && !tripRef.current.superseded) &&
+      target.state?.sectionTrip === tripRef.current.key,
     []
   );
 
@@ -188,6 +203,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       if (window.location.hash) replaceBrowserUrl();
       setActiveHomeHash("");
       window.scrollTo(0, 0);
+      navigate("/", { replace: true });
     };
     const endTripOnLink = (event) => {
       const link = tripRef.current?.superseded && plainLink(event);
@@ -202,7 +218,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
     window.addEventListener("click", captureLinkIntent, { capture: true, signal: listeners.signal });
     window.addEventListener("click", endTripOnLink, { signal: listeners.signal });
     return () => listeners.abort();
-  }, [cancelSectionNavigation]);
+  }, [cancelSectionNavigation, navigate]);
 
   useEffect(() => {
     if (location.pathname !== "/") return;

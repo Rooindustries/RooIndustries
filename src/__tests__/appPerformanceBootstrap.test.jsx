@@ -57,6 +57,7 @@ const loadAppContent = () => {
   jest.doMock("../lib/sectionNavigation", () => ({
     consumeRouteTransitionIntent: jest.fn(() => null),
     isHomeSectionHash: jest.fn(() => false),
+    isSupersededSectionTrip: jest.fn(() => false),
     normalizeSectionHash: jest.fn((value) => value || ""),
   }));
   jest.doMock("../lib/browserSearch", () => ({

@@ -66,7 +66,9 @@ const readLanding = (page) =>
 const expectLanded = async (page, hash, label) => {
   const landed = { path: "/", hash, onTop: hash };
   await expect
-    .poll(() => readLanding(page).catch(() => null), { message: `${label} lands on ${hash}`, timeout: 8000, intervals: [100] })
+    .poll(() => readLanding(page).catch(() => null), {
+      message: `${label} lands on ${hash}`, timeout: 8000, intervals: [100],
+    })
     .toEqual(landed);
   await page.waitForTimeout(1500);
   expect(await readLanding(page), `${label} stays on ${hash}`).toEqual(landed);
@@ -134,7 +136,10 @@ const clickInQuickSuccession = (page, first, second, gapMs = 10) =>
 
 const HOME_MIXED_ORDERS = [
   { label: "on-page packages then navbar FAQ", first: ON_PAGE("#packages"), second: NAVBAR("faq"), hash: "#faq" },
-  { label: "navbar FAQ then on-page how it works", first: NAVBAR("faq"), second: ON_PAGE("#how-it-works"), hash: "#how-it-works" },
+  {
+    label: "navbar FAQ then on-page how it works",
+    first: NAVBAR("faq"), second: ON_PAGE("#how-it-works"), hash: "#how-it-works",
+  },
   {
     label: "on-page how it works then on-page Tune My PC",
     first: ON_PAGE("#how-it-works"),
@@ -174,7 +179,9 @@ const readRoute = (page) =>
 const expectOnRoute = async (page, path, label) => {
   const landed = { path, hash: "", top: true };
   await expect
-    .poll(() => readRoute(page).catch(() => null), { message: `${label} lands on ${path}`, timeout: 8000, intervals: [100] })
+    .poll(() => readRoute(page).catch(() => null), {
+      message: `${label} lands on ${path}`, timeout: 8000, intervals: [100],
+    })
     .toEqual(landed);
   await page.waitForTimeout(1500);
   expect(await readRoute(page), `${label} stays on ${path}`).toEqual(landed);
@@ -211,18 +218,25 @@ const ROUTE_AFTER_SECTION = [
 
 for (const { label, link, path } of [ROUTE_AFTER_SECTION[1], ROUTE_AFTER_SECTION[3]]) {
   test(`the ${label} clicked when the homepage commits supersedes the section trip`, async ({ page }) => {
+    test.setTimeout(120000);
     await page.setViewportSize({ width: 1536, height: 960 });
     await openPage(page, "/reviews", "desktop");
     const startLength = await historyLength(page);
     await page.evaluate(
       ([first, second]) =>
-        new Promise((resolve) => {
+        new Promise((resolve, reject) => {
           const observer = new MutationObserver(() => {
-            if (!document.querySelector("#services")) return;
+            const secondLink = document.querySelector(second);
+            if (!document.querySelector("#services") || !secondLink) return;
             observer.disconnect();
-            document.querySelector(second).click();
+            clearTimeout(timeout);
+            secondLink.click();
             resolve();
           });
+          const timeout = setTimeout(() => {
+            observer.disconnect();
+            reject(new Error(`Missing #services or ${second}`));
+          }, 15000);
           observer.observe(document.getElementById("main-content"), { childList: true, subtree: true });
           document.querySelector(first).click();
         }),
@@ -272,7 +286,8 @@ test("a route link clicked as the section lands leaves the page scrollable", asy
       new Promise((resolve) => {
         document.querySelector(sectionSelector).click();
         const clickRouteOnLanding = () => {
-          if (window.location.pathname === "/" && document.documentElement.classList.contains("route-transition-lock")) {
+          const locked = document.documentElement.classList.contains("route-transition-lock");
+          if (window.location.pathname === "/" && locked) {
             document.querySelector(routeSelector).click();
             resolve();
             return;
@@ -314,20 +329,80 @@ const clickOnceSectionLands = (page, sectionSelector, linkSelector, hash) =>
 const readHomeTop = (page) =>
   page.evaluate(() => ({ path: window.location.pathname, hash: window.location.hash, y: window.scrollY }));
 
+const holdRouteChunks = async (page) => {
+  const pending = [];
+  let holding = true;
+  const pattern = "**/_next/static/chunks/*.js";
+  await page.route(pattern, async (route) => {
+    if (holding) pending.push(route);
+    else await route.continue();
+  });
+  return {
+    wait: () => expect.poll(() => pending.length, { timeout: 8000 }).toBeGreaterThan(0),
+    release: async () => {
+      holding = false;
+      await Promise.all(pending.map((route) => route.continue()));
+      await page.unroute(pattern);
+    },
+  };
+};
+
+test("the navbar logo uses the committed homepage while the Tools route is pending", async ({ page }) => {
+  test.setTimeout(120000);
+  await page.setViewportSize({ width: 1536, height: 960 });
+  await openPage(page, "/reviews", "desktop");
+  await clickSection(page, "benefits", "desktop");
+  await expectLanded(page, SECTIONS.benefits, "pending Tools setup");
+  const startLength = await historyLength(page);
+  const chunks = await holdRouteChunks(page);
+  try {
+    await page.locator(FOOTER("/tools").selector).click();
+    await chunks.wait();
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    await expect(page.locator("#services")).toBeVisible();
+    await page.locator('header a[href="/"]').first().click();
+    await expect.poll(() => readHomeTop(page), { timeout: 8000 }).toEqual({ path: "/", hash: "", y: 0 });
+  } finally {
+    await chunks.release();
+  }
+  await expectOnRoute(page, "/", "logo supersedes pending Tools");
+  expect(await readHomeTop(page)).toEqual({ path: "/", hash: "", y: 0 });
+  expect(await historyLength(page), "the logo replaces the pending route").toBe(startLength);
+  await page.goBack();
+  await expectPath(page, "/reviews", "logo back to Reviews");
+});
+
+test("a fresh section click supersedes an abandoned trip while route chunks are pending", async ({ page }) => {
+  test.setTimeout(120000);
+  await page.setViewportSize({ width: 1536, height: 960 });
+  await openPage(page, "/reviews", "desktop");
+  const chunks = await holdRouteChunks(page);
+  try {
+    await clickWhileTripInFlight(page, NAVBAR("benefits"), FOOTER("/tools"));
+    await chunks.wait();
+    await clickSection(page, "faq", "desktop");
+  } finally {
+    await chunks.release();
+  }
+  await expectLanded(page, SECTIONS.faq, "Benefits, pending Tools, then fresh FAQ");
+});
+
 for (const { label, selector } of [
   { label: "footer logo", selector: FOOTER("/").selector },
   { label: "navbar logo", selector: `header a[href="/"]` },
 ]) {
   for (const origin of ["/reviews", "/"]) {
-    test(`the ${label} clicked as a section lands from ${origin} goes to the top of a clean homepage`, async ({ page }) => {
+    const name = `${origin} navbar Benefits, then ${label} while it lands`;
+    test(`the ${label} clicked as a section lands from ${origin} goes to a clean homepage`, async ({ page }) => {
       test.setTimeout(120000);
       await page.setViewportSize({ width: 1536, height: 960 });
-      const name = `${origin} navbar Benefits, then ${label} while it lands`;
       await openPage(page, origin, "desktop");
       await clickOnceSectionLands(page, NAVBAR("benefits").selector, selector, SECTIONS.benefits);
       const top = { path: "/", hash: "", y: 0 };
       await expect
-        .poll(() => readHomeTop(page).catch(() => null), { message: `${name} lands on /`, timeout: 8000, intervals: [100] })
+        .poll(() => readHomeTop(page).catch(() => null), {
+          message: `${name} lands on /`, timeout: 8000, intervals: [100],
+        })
         .toEqual(top);
       await page.waitForTimeout(1500);
       expect(await readHomeTop(page), `${name} stays on /`).toEqual(top);
@@ -431,7 +506,9 @@ for (const { label, surface, viewport } of [
       ]);
       await opened.close();
       await expect(toggle, `${name} closes its menu`).toHaveAttribute("aria-expanded", "false");
-      if (surface === "mobile") await expect(siteMenu, `${name} closes the site menu`).toHaveAttribute("aria-expanded", "false");
+      if (surface === "mobile") {
+        await expect(siteMenu, `${name} closes the site menu`).toHaveAttribute("aria-expanded", "false");
+      }
       expect(new URL(page.url()).pathname, `${name} stays on /faq`).toBe("/faq");
     }
   });
