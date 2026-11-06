@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { onMediaChange } from "./mediaQuery";
 
 export const PERFORMANCE_PROFILE_EVENT = "roo-performance-mode-change";
 export const PERFORMANCE_PROFILE_STORAGE_KEY = "roo-performance-profile";
@@ -178,14 +179,7 @@ const attachReducedMotionListener = () => {
   const onChange = () => syncReducedMotionPreference();
 
   syncReducedMotionPreference({ emit: false });
-  if (typeof mediaQuery.addEventListener === "function") {
-    mediaQuery.addEventListener("change", onChange);
-    reducedMotionCleanup = () => mediaQuery.removeEventListener("change", onChange);
-    return;
-  }
-
-  mediaQuery.addListener(onChange);
-  reducedMotionCleanup = () => mediaQuery.removeListener(onChange);
+  reducedMotionCleanup = onMediaChange(mediaQuery, onChange);
 };
 
 export const bootstrapPerformanceProfile = () => {

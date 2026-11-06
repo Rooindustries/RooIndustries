@@ -7,6 +7,7 @@ import DiscordGuideBanner from "./DiscordGuideBanner";
 import { SECTION_HASHES, buildHomeSectionHref } from "../lib/sectionNavigation";
 import { useActiveHomeSection, useSectionNavigation } from "../lib/sectionNavigator";
 import { useScrollRuntime } from "../lib/scrollRuntime";
+import { onMediaChange } from "../lib/mediaQuery";
 
 const canAnimateLogo = () => {
   if (typeof window === "undefined") return false;
@@ -204,13 +205,7 @@ export default function Navbar() {
   }, [closeMenus, isOwnSectionArrival, location]);
 
   useEffect(() => {
-    const desktop = window.matchMedia(DESKTOP_NAV_QUERY);
-    if (desktop.addEventListener) {
-      desktop.addEventListener("change", closeMenus);
-      return () => desktop.removeEventListener("change", closeMenus);
-    }
-    desktop.addListener(closeMenus);
-    return () => desktop.removeListener(closeMenus);
+    return onMediaChange(window.matchMedia(DESKTOP_NAV_QUERY), closeMenus);
   }, [closeMenus]);
 
   useEffect(() => {
@@ -654,7 +649,7 @@ export default function Navbar() {
         >
           <div className="glass-premium glass-menu-surface mt-2 transition-all duration-300">
             <div className="flex flex-col">
-              <div className="flex items-center justify-between border-b border-line-soft px-5 py-4">
+              <div className="flex items-center justify-between border-b border-line-soft px-5 py-4 md:hidden">
                 <span className="text-base font-medium text-ink-secondary">
                   Theme
                 </span>

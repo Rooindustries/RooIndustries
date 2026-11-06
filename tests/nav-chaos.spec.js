@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { test, expect } = require("@playwright/test");
 const { waitForHydrated } = require("./fixtures/react-hydration.cjs");
+const { barLink } = require("./fixtures/bar-link.cjs");
 
 const BASE_URL = process.env.BASE_URL;
 if (!BASE_URL) {
@@ -51,7 +52,7 @@ const ACTIONS = [
 
 const clickDesktopTarget = async (page, target) => {
   await page
-    .locator(`:is([data-nav-surface="desktop"], [data-nav-surface="bar"])[data-nav-target="${target}"]`)
+    .locator(barLink(target))
     .first()
     .click();
 };

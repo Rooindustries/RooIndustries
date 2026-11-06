@@ -7,7 +7,8 @@ const join = (dir) => withGate(dir, () => {
     recorded = fs.readFileSync(recordOf(dir), "utf8");
   } catch {}
   const token = process.env.ROO_BUILD_LOCK_TOKEN;
-  if (!token || recorded !== token) return `${dir} now belongs to another run.`;
+  if (!token || recorded === null) return `${dir} belongs to no run now.`;
+  if (recorded !== token) return `${dir} now belongs to another run.`;
   const result = flock(fs.openSync(dir, "r"), ["--shared", "--nonblock"]);
   return result.status === 0 ? null : `Could not join the build lock on ${dir}: ${result.stderr}`;
 });

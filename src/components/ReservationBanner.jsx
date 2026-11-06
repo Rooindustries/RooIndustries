@@ -10,6 +10,7 @@ import packagePricing from "../lib/packagePricing";
 import { classifyHoldResponse } from "../lib/holdResponse";
 import { CHECKOUT_CONFIRMATION_EVENT, isCheckoutConfirmationPending } from "../lib/checkoutConfirmation";
 import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
+import { onMediaChange } from "../lib/mediaQuery";
 import { scrollWindowTo } from "../lib/scrollWindowTo";
 
 const { getPublicPackageTitle } = packagePricing;
@@ -27,17 +28,7 @@ const useIsMobileWidth = (maxWidth = MOBILE_MAX_WIDTH) => {
     const handleChange = (event) => setIsMobileWidth(event.matches);
     handleChange(mediaQuery);
 
-    if (typeof mediaQuery.addEventListener === "function") {
-      mediaQuery.addEventListener("change", handleChange);
-      return () => mediaQuery.removeEventListener("change", handleChange);
-    }
-
-    if (typeof mediaQuery.addListener === "function") {
-      mediaQuery.addListener(handleChange);
-      return () => mediaQuery.removeListener(handleChange);
-    }
-
-    return undefined;
+    return onMediaChange(mediaQuery, handleChange);
   }, [maxWidth]);
 
   return isMobileWidth;

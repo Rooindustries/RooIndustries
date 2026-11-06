@@ -51,6 +51,7 @@ export const lockBuildDirectory = (dir, { slots = 1 } = {}) => {
     const slotLock = lockSlot(candidate);
     if (slotLock === null) continue;
     const { fd, token } = slotLock;
+    let released = false;
     return {
       dir: candidate,
       fd,
@@ -59,6 +60,8 @@ export const lockBuildDirectory = (dir, { slots = 1 } = {}) => {
         return withNodeOption(locked, "--require", holder);
       },
       release: () => {
+        if (released) return;
+        released = true;
         try {
           withGate(candidate, () => fs.rmSync(recordOf(candidate), { force: true }));
         } finally {
