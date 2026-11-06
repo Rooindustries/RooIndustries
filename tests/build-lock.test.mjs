@@ -365,6 +365,36 @@ test("the lock works without optional Perl modules", () => {
   assert.equal(child.stderr, "");
 });
 
+test("the lock works through a Perl shim that needs its caller's environment", () => {
+  const dir = scratchDir();
+  const bin = scratchRoot("roo-perl-shim-");
+  const perl = spawnSync("sh", ["-c", "command -v perl"], { encoding: "utf8" });
+  assert.equal(perl.status, 0, perl.stderr);
+  fs.writeFileSync(path.join(bin, "perl"), `#!/bin/sh
+[ "$PLENV_VERSION" = "test-version" ] || { echo "PLENV_VERSION was lost" >&2; exit 2; }
+exec "$ROO_TEST_PERL" "$@"
+`, { mode: 0o755 });
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    import { lockBuildDirectory } from ${JSON.stringify(library)};
+    const lock = lockBuildDirectory(${JSON.stringify(dir)});
+    console.log(JSON.stringify(lock.childEnv(process.env)));
+    lock.release();
+  `], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+      PLENV_VERSION: "test-version",
+      ROO_TEST_PERL: perl.stdout.trim(),
+    },
+  });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(child.stderr, "");
+  const late = joinBuild(JSON.parse(child.stdout));
+  assert.equal(late.status, 1);
+  assert.equal(late.stderr, `${dir} belongs to no run now.\n`);
+});
+
 test("the lock ignores Perl settings and broken locales in its caller", () => {
   const dir = scratchDir();
   const child = spawnSync(process.execPath, ["--input-type=module", "-e", `

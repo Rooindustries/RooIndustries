@@ -32,10 +32,12 @@ const flock = (fd, { shared = false, nonblock = false, wait = null, conflictExit
     "-e", lockScript,
     shared ? "1" : "0", nonblock ? "1" : "0", String(wait === null ? "" : Math.ceil(wait)), String(conflictExitCode),
   ];
+  const env = { ...process.env, LC_ALL: "C" };
+  for (const name of ["PERL5OPT", "PERL5LIB", "PERLLIB", "PERL5DB"]) delete env[name];
   const result = spawnSync("perl", args, {
     stdio: ["ignore", "ignore", "pipe", fd],
     encoding: "utf8",
-    env: { PATH: process.env.PATH },
+    env,
   });
   if (result.error?.code === "ENOENT") {
     throw new Error("Build directory locks need perl on PATH.");
