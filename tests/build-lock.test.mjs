@@ -127,6 +127,7 @@ const refused = (dir) => {
   assert.throws(() => lockBuildDirectory(dir), { code: "ELOCKED" });
 };
 const reclaim = (dir) => lockBuildDirectory(dir).release();
+const joinBuild = (env) => spawnSync(process.execPath, ["-e", ""], { env, encoding: "utf8", timeout: 30000 });
 const neverAcquirableWhileAlive = async (dir, pids) => {
   for (let check = 0; check < 10; check += 1) {
     let lock;
@@ -219,7 +220,6 @@ test("a wrapper that exits never signals its builder, which keeps the lock until
 
 test("the next owner replaces the token record, so processes carrying the earlier token are refused", () => {
   const dir = scratchDir();
-  const joinBuild = (env) => spawnSync(process.execPath, ["-e", ""], { env, encoding: "utf8", timeout: 30000 });
   const first = lockBuildDirectory(dir);
   const earlier = first.childEnv({ PATH: process.env.PATH });
   first.release();
@@ -237,6 +237,41 @@ test("the next owner replaces the token record, so processes carrying the earlie
   } finally {
     second.release();
   }
+});
+
+test("a process cannot join a released run whose token record was left behind", () => {
+  const dir = scratchDir();
+  const lock = lockBuildDirectory(dir);
+  const env = lock.childEnv({ PATH: process.env.PATH });
+  lock.release();
+  fs.writeFileSync(`${dir}.build-lock`, env.ROO_BUILD_LOCK_TOKEN);
+  const late = joinBuild(env);
+  assert.equal(late.status, 1, `late process exited ${late.status}: ${late.stderr}`);
+  assert.match(late.stderr, /belongs to no run now\./);
+  reclaim(dir);
+});
+
+test("a process can join while only a joined child of its run still holds the directory", async () => {
+  const dir = scratchDir();
+  const wrapper = runWrapper(dir, `const env = lock.childEnv({ PATH: process.env.PATH });
+spawn(process.execPath, ["-e", 'console.log("joined"); setInterval(() => {}, 1000)'], {
+  env,
+  stdio: ["ignore", "inherit", "inherit"],
+});
+console.log("env " + JSON.stringify(env));
+setInterval(() => {}, 1000);`);
+  try {
+    await waitFor(() => wrapper.lines.includes("joined"), 10000, wrapper.ended);
+    const env = JSON.parse(wrapper.lines.find((line) => line.startsWith("env ")).slice(4));
+    wrapper.child.kill("SIGKILL");
+    await wrapper.exited;
+    refused(dir);
+    const joined = joinBuild(env);
+    assert.equal(joined.status, 0, joined.stderr);
+  } finally {
+    await wrapper.stop();
+  }
+  reclaim(dir);
 });
 
 test("a release takes its token record with it, and a process whose run's directory is gone is refused plainly", () => {

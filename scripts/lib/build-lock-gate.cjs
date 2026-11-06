@@ -2,6 +2,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
+const inUse = 75;
+
 const flock = (fd, options) => {
   const result = spawnSync("flock", [...options, "3"], { stdio: ["ignore", "ignore", "pipe", fd], encoding: "utf8" });
   if (result.error?.code === "ENOENT") throw new Error("Build directory locks need util-linux flock on PATH.");
@@ -25,4 +27,4 @@ const withGate = (dir, use) => {
   }
 };
 
-module.exports = { flock, recordOf, withGate };
+module.exports = { flock, inUse, recordOf, withGate };
