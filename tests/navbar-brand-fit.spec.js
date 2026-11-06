@@ -59,6 +59,7 @@ async function measureTopBar(page) {
       brandClipped: brand.scrollWidth > brand.clientWidth,
       taglineClipped: ellipsis && tagline.scrollWidth > tagline.clientWidth,
       textRight: Math.round(textRight),
+      rightOfBrand: controls.filter((c) => c.rect.left >= brandRect.left).length,
       nextControlLeft: Math.round(Math.min(
         ...controls.map((c) => c.rect.left).filter((left) => left >= brandRect.left),
       )),
@@ -89,6 +90,7 @@ for (const path of PAGES) {
       expect.soft(bar.brandClipped, where).toBe(false);
       expect.soft(bar.taglineClipped, where).toBe(false);
       expect.soft(bar.overlaps, where).toEqual([]);
+      expect.soft(bar.rightOfBrand, where).toBeGreaterThan(0);
       expect.soft(bar.textRight + MIN_GAP, where).toBeLessThanOrEqual(bar.nextControlLeft);
       expect.soft(bar.pageScroll, where).toBeLessThanOrEqual(bar.viewport);
       for (const control of bar.controls) {

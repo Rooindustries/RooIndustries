@@ -15,6 +15,10 @@ const canAnimateLogo = () => {
 };
 
 const DESKTOP_NAV_QUERY = "(min-width: 1024px)";
+const HEADER_BASE = [
+  "site-nav site-navbar-glass glass-premium glass-scroll-lite fixed top-0 left-0 right-0 z-50",
+  "flex max-h-[100dvh] flex-col overflow-visible border-b transition-all duration-300",
+].join(" ");
 
 // Two themes only: "dark" (Blackout Gold, the site default) and "default"
 // (Roo Blue). There is no light mode. Legacy stored values normalize to dark.
@@ -300,7 +304,7 @@ export default function Navbar() {
     <header
       ref={headerRef}
       onClick={closeMenusOnLinkClick}
-      className={`site-nav site-navbar-glass glass-premium glass-scroll-lite fixed top-0 left-0 right-0 z-50 flex max-h-[100dvh] flex-col overflow-visible border-b transition-all duration-300 ${
+      className={`${HEADER_BASE} ${
         scrolled
           ? "border-[color:var(--navbar-border-scrolled)]"
           : "border-[color:var(--navbar-border-rest)]"
@@ -573,7 +577,7 @@ export default function Navbar() {
 
             <a
               href="/#packages"
-              data-nav-surface="desktop"
+              data-nav-surface="bar"
               data-nav-target="plans"
               onClick={(event) => handleSectionLinkClick(event, SECTION_HASHES.plans)}
               className="nav-cta inline-flex items-center gap-2 px-2 py-1.5 text-[11px] min-[360px]:px-2.5 min-[360px]:text-xs sm:px-5 sm:py-3 sm:text-base font-semibold whitespace-nowrap rounded-full text-white transition"

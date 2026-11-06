@@ -211,7 +211,7 @@ const clickNav = async (page, target, viewportName) => {
     return;
   }
   await page
-    .locator(`[data-nav-surface="desktop"][data-nav-target="${target}"]`)
+    .locator(`:is([data-nav-surface="desktop"], [data-nav-surface="bar"])[data-nav-target="${target}"]`)
     .first()
     .click();
 };
