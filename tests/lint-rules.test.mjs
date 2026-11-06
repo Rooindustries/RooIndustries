@@ -24,16 +24,27 @@ const run = (name, cases) => tester.run(name, rules[name], cases);
 
 run("no-linux-only-test-tooling", {
   valid: [
-    `spawnSync("/usr/bin/env", ["perl", "-e", script], { stdio: ["ignore", "ignore", "pipe", fd] });`,
+    `import { spawnSync } from "node:child_process"; spawnSync("perl", ["-e", script]);`,
     `flock(fd, { shared: true, nonblock: true });`,
     `const label = "flock";`,
-    `if (process.platform === "darwin") configureMac();`,
-    `if (target.platform === "linux") configureTarget();`,
+    `if (process.platform === "linux") takeLock();`,
+    `if (process.platform !== "darwin") configureOther(); else configureMac();`,
+    `const { platform } = process; if (platform === "linux") configureLinux();`,
+    `import os from "node:os"; if (os.platform() === "darwin") configureMac();`,
+    `switch (process.platform) { case "darwin": configureMac(); break; default: configureOther(); }`,
+    `if (target.platform === "linux") throw new Error("Unsupported target");`,
+    `const process = { platform: "other" }; if (process.platform !== "linux") throw new Error();`,
+    `if (process.platform === "linux") register(() => { throw new Error(); });`,
+    `const match = /flock/.exec("flock --exclusive 3");`,
+    `const runner = { spawn() {} }; runner.spawn("flock", []);`,
+    `function execSync(command) { return command; } execSync("flock --exclusive 3");`,
+    `import { spawn } from "node:child_process"; spawn("sh", ["-c", "echo flock"]);`,
   ],
   invalid: [
     {
       name: "the old build lock gate",
-      code: `const flock = (fd, options) => {
+      code: `import { spawnSync } from "node:child_process";
+      const flock = (fd, options) => {
         const result = spawnSync("flock", [...options, "3"], {
           stdio: ["ignore", "ignore", "pipe", fd], encoding: "utf8",
         });
@@ -41,35 +52,33 @@ run("no-linux-only-test-tooling", {
       };`,
       errors: [{ messageId: "binary" }],
     },
-    {
-      code: `childProcess.spawn("/usr/bin/flock", ["--exclusive", "3"]);`,
-      errors: [{ messageId: "binary" }],
-    },
-    {
-      code: 'execSync(`flock --exclusive 3`);',
-      errors: [{ messageId: "binary" }],
-    },
-    {
-      code: `const binary = "flock"; execFileSync(binary, ["--exclusive", "3"]);`,
-      errors: [{ messageId: "binary" }],
-    },
-    {
-      code: `spawnSync("/usr/bin/env", ["flock", "--exclusive", "3"]);`,
-      errors: [{ messageId: "binary" }],
-    },
+    ...[
+      `import childProcess from "node:child_process"; childProcess.spawn("/usr/bin/flock", ["--exclusive", "3"]);`,
+      `import { execSync as run } from "child_process"; run("flock --exclusive 3");`,
+      `const { execFileSync } = require("node:child_process"); const binary = "flock"; execFileSync(binary, ["3"]);`,
+      `import { spawnSync } from "node:child_process"; spawnSync("/usr/bin/env", ["flock", "--exclusive", "3"]);`,
+      `import * as cp from "node:child_process"; cp.spawn("sh", ["-c", "flock --exclusive 3"]);`,
+      `const cp = require("child_process"); cp.spawnSync("/bin/bash", ["-lc", "exec /usr/bin/flock 3"]);`,
+      `import { exec } from "node:child_process"; exec("bash -c 'flock 3'");`,
+      `import { spawn } from "node:child_process"; spawn("sh", ["-c", "echo ready; flock 3"]);`,
+    ].map((code) => ({ code, errors: [{ messageId: "binary" }] })),
     {
       name: "the old build lock platform refusal",
       code: `if (process.platform !== "linux") throw new Error("Build directory locks need Linux flock(2).");`,
       errors: [{ messageId: "platform" }],
     },
-    {
-      code: `if (process.platform === "linux") takeLock();`,
-      errors: [{ messageId: "platform" }],
-    },
-    {
-      code: 'const linux = `linux`; if (linux == process["platform"]) takeLock();',
-      errors: [{ messageId: "platform" }],
-    },
+    ...[
+      `if (process.platform !== "darwin") throw new Error("macOS only");`,
+      `if (process.platform === "win32") process.exit(1);`,
+      `if (process["platform"] === "linux") takeLock(); else throw new Error();`,
+      `const { platform: host } = process; if (host !== "darwin") process.exit(1);`,
+      `let { platform } = process; if (platform !== "darwin") throw new Error();`,
+      `import { platform } from "node:process"; if (platform !== "darwin") throw new Error();`,
+      `import os from "node:os"; if (os.platform() !== "linux") throw new Error();`,
+      `const { platform } = require("os"); if (platform() === "win32") process.exit(1);`,
+      `switch (process.platform) { case "linux": takeLock(); break; default: throw new Error(); }`,
+      `process.platform === "win32" ? process.exit(1) : takeLock();`,
+    ].map((code) => ({ code, errors: [{ messageId: "platform" }] })),
   ],
 });
 
