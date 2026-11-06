@@ -14,7 +14,11 @@ const recordOf = (dir) => `${path.resolve(dir)}.build-lock`;
 const withGate = (dir, use) => {
   const gate = fs.openSync(path.dirname(path.resolve(dir)), "r");
   try {
-    if (flock(gate, ["--exclusive", "--wait", "30"]).status !== 0) throw new Error(`Could not take the lock gate for ${dir}.`);
+    const taken = flock(gate, ["--exclusive", "--wait", "30"]);
+    if (taken.status !== 0) {
+      const why = taken.stderr.trim() || "another process held it for 30 seconds";
+      throw new Error(`Could not take the lock gate for ${dir}: ${why}.`);
+    }
     return use();
   } finally {
     fs.closeSync(gate);

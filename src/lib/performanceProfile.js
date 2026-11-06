@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { onMediaChange } from "./mediaQuery";
 
 export const PERFORMANCE_PROFILE_EVENT = "roo-performance-mode-change";
 export const PERFORMANCE_PROFILE_STORAGE_KEY = "roo-performance-profile";
@@ -16,20 +17,10 @@ export const PERFORMANCE_PROFILES = Object.freeze({
   LITE: "lite",
 });
 
-export const DEVICE_CLASSES = Object.freeze({
-  DESKTOP: "desktop",
-  MOBILE: "mobile",
-  TABLET: "tablet",
-});
-
 const DEFAULT_DECISION = Object.freeze({
   profile: PERFORMANCE_PROFILES.FULL,
   source: "default",
   reason: "initial",
-  deviceClass: DEVICE_CLASSES.DESKTOP,
-  band: "unknown",
-  expiresAt: null,
-  renderer: "",
 });
 
 const SERVER_PERFORMANCE_PROFILE_SNAPSHOT = Object.freeze({
@@ -66,11 +57,7 @@ const sanitizeDecision = (decision = {}) => ({
 const areDecisionsEqual = (a, b) =>
   a.profile === b.profile &&
   a.source === b.source &&
-  a.reason === b.reason &&
-  a.deviceClass === b.deviceClass &&
-  a.band === b.band &&
-  a.expiresAt === b.expiresAt &&
-  a.renderer === b.renderer;
+  a.reason === b.reason;
 
 const getDocumentElement = () =>
   typeof document !== "undefined" ? document.documentElement : null;
@@ -192,14 +179,7 @@ const attachReducedMotionListener = () => {
   const onChange = () => syncReducedMotionPreference();
 
   syncReducedMotionPreference({ emit: false });
-  if (typeof mediaQuery.addEventListener === "function") {
-    mediaQuery.addEventListener("change", onChange);
-    reducedMotionCleanup = () => mediaQuery.removeEventListener("change", onChange);
-    return;
-  }
-
-  mediaQuery.addListener(onChange);
-  reducedMotionCleanup = () => mediaQuery.removeListener(onChange);
+  reducedMotionCleanup = onMediaChange(mediaQuery, onChange);
 };
 
 export const bootstrapPerformanceProfile = () => {

@@ -1,5 +1,6 @@
 const { test, expect } = require("@playwright/test");
 const { waitForHydrated } = require("./fixtures/react-hydration.cjs");
+const { navLink } = require("./fixtures/nav-link.cjs");
 
 const WIDTHS = [320, 340, 360, 375, 390, 640, 700, 767, 768, 800, 820, 900, 1023, 1024, 1100, 1180, 1279, 1280, 1440];
 const TABLET_WIDTHS = [768, 820, 900, 1023];
@@ -59,6 +60,7 @@ async function measureTopBar(page) {
       brandClipped: brand.scrollWidth > brand.clientWidth,
       taglineClipped: ellipsis && tagline.scrollWidth > tagline.clientWidth,
       textRight: Math.round(textRight),
+      rightOfBrand: controls.filter((c) => c.rect.left >= brandRect.left).length,
       nextControlLeft: Math.round(Math.min(
         ...controls.map((c) => c.rect.left).filter((left) => left >= brandRect.left),
       )),
@@ -89,6 +91,7 @@ for (const path of PAGES) {
       expect.soft(bar.brandClipped, where).toBe(false);
       expect.soft(bar.taglineClipped, where).toBe(false);
       expect.soft(bar.overlaps, where).toEqual([]);
+      expect.soft(bar.rightOfBrand, where).toBeGreaterThan(0);
       expect.soft(bar.textRight + MIN_GAP, where).toBeLessThanOrEqual(bar.nextControlLeft);
       expect.soft(bar.pageScroll, where).toBeLessThanOrEqual(bar.viewport);
       for (const control of bar.controls) {
@@ -109,7 +112,18 @@ for (const width of TABLET_WIDTHS) {
     await expect(row.getByRole("button", { name: "Go Back" })).toBeVisible();
     await expect(row.getByText("Roo Industries", { exact: true }).filter({ visible: true })).toHaveCount(1);
     await expect(row.getByRole("button", { name: "Open menu" })).toBeVisible();
+    await expect(row.locator(navLink("plans"))).toBeVisible();
+    await expect(row.locator('[role="switch"]')).toBeVisible();
     await expect(page.locator('[data-nav-surface="desktop"][data-nav-target="benefits"]')).toBeHidden();
+  });
+}
+
+for (const width of [390, 900]) {
+  test(`with the menu open at ${width} px there is exactly one theme switch on screen`, async ({ page }) => {
+    await openPage(page, "/", { width, height: 900 });
+    await page.getByRole("button", { name: "Open menu" }).click();
+    await expect(page.locator("#mobile-site-menu")).toHaveAttribute("aria-hidden", "false");
+    await expect(page.locator('header [role="switch"]').filter({ visible: true })).toHaveCount(1);
   });
 }
 
@@ -134,6 +148,24 @@ test("from 1024 px the Proof and Referrals menus open in the bar and close on an
     await page.mouse.click(10, 600);
     await expect(dropdown).toBeHidden();
   }
+});
+
+test("a menu left open across the 1024 px line closes instead of staying open with no way out", async ({ page }) => {
+  await openPage(page, "/", { width: 900, height: 900 });
+  const menu = page.locator("#mobile-site-menu");
+  const desktopProof = page.locator("#desktop-proof-menu");
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await expect(menu).toHaveAttribute("aria-hidden", "false");
+  await page.locator('button[aria-controls="mobile-proof-menu"]').click();
+  await expect(page.locator("#mobile-proof-menu")).toBeVisible();
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await expect(desktopProof).toBeHidden();
+  await page.locator('button[aria-controls="desktop-proof-menu"]').click();
+  await expect(desktopProof).toBeVisible();
+  await page.setViewportSize({ width: 900, height: 900 });
+  await expect(menu).toHaveAttribute("aria-hidden", "true");
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await expect(desktopProof).toBeHidden();
 });
 
 async function waitForHeaderToSettle(page) {

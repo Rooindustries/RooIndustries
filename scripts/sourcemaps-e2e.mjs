@@ -223,7 +223,9 @@ if (process.argv[2] === '--build') {
         ALLOW_LIVE_PAYMENTS: '0', SALES_PREVIEW_READ_ONLY: '1',
       }));
       const start = requests.length;
-      const result = await execute('production-missing-token-build', [join(root, 'node_modules/next/dist/bin/next'), 'build'], env, { timeout: 900000, fds: [productionLock.fd] });
+      const nextBuild = [join(root, 'node_modules/next/dist/bin/next'), 'build'];
+      const buildOptions = { timeout: 900000, fds: [productionLock.fd] };
+      const result = await execute('production-missing-token-build', nextBuild, env, buildOptions);
       assert.equal(result.status, 0);
       assert.equal(result.log.split(missingTokenWarning).length - 1, 1);
       assert.equal(requests.length, start);
@@ -234,8 +236,10 @@ if (process.argv[2] === '--build') {
       const browserFiles = await files(join(output, 'static'));
       assert(!browserFiles.some(path => path.endsWith('.map')));
       const site = new URL(siteOrigin);
-      const child = spawnContained(process.execPath, [join(root, 'node_modules/next/dist/bin/next'), 'start',
-        '--hostname', site.hostname, '--port', site.port], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe', productionLock.fd] });
+      const nextBin = join(root, 'node_modules/next/dist/bin/next');
+      const nextStart = [nextBin, 'start', '--hostname', site.hostname, '--port', site.port];
+      const stdio = ['ignore', 'pipe', 'pipe', productionLock.fd];
+      const child = spawnContained(process.execPath, nextStart, { cwd: root, env, stdio });
       const logs = [];
       child.stdout.on('data', data => logs.push(data));
       child.stderr.on('data', data => logs.push(data));
@@ -358,9 +362,11 @@ if (process.argv[2] === '--build') {
     ]);
     restoreGuard?.();
     if (productionLock) {
-      await rm(join(root, productionDist), { recursive: true, force: true });
-      await rm(`${join(root, productionDist)}.build-lock`, { force: true });
-      productionLock.release();
+      try {
+        await rm(join(root, productionDist), { recursive: true, force: true });
+      } finally {
+        productionLock.release();
+      }
     }
     await rm(fixture, { recursive: true, force: true });
     const errors = cleanup.filter(result => result.status === 'rejected').map(result => result.reason.message);
