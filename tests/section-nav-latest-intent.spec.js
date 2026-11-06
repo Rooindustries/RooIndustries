@@ -37,7 +37,9 @@ const openPage = async (page, route, surface) => {
 };
 
 const clickSection = async (page, target, surface) => {
-  const link = page.locator(`[data-nav-surface="${surface}"][data-nav-target="${target}"]`).first();
+  const surfaces = surface === "mobile" ? ["mobile"] : ["desktop", "bar"];
+  const selector = surfaces.map((s) => `[data-nav-surface="${s}"][data-nav-target="${target}"]`).join(", ");
+  const link = page.locator(selector).first();
   if (surface !== "mobile") {
     await link.click();
     return;

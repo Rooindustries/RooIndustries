@@ -237,7 +237,7 @@ test("leaving while the packages section loads its packages reports no error", a
   const content = await holdContent(page, ["packages-list", "packages-settings"]);
   const errors = collectConsoleErrors(page);
   await page.goto("/contact");
-  await page.locator('a[data-nav-surface="desktop"][data-nav-target="plans"]').click();
+  await page.locator('a[data-nav-surface="bar"][data-nav-target="plans"]').click();
   await expect(page.locator("#packages")).toBeAttached();
   await expect.poll(() => content.held.some((route) => route.request().url().includes("/packages-list"))).toBe(true);
   await page.goto("/terms");
