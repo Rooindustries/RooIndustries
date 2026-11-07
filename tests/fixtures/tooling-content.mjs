@@ -64,7 +64,22 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
     document('proReviewsCarousel', reviews),
     document('supportedGames', content('supported-games')),
     document('faqSettings', content('faq-settings')),
-    document('faqSection', { questions: [...content('faq-questions'), ...Array.from({ length: 12 }, (_, index) => ({ _key: `tooling-question-${index}`, question: `Synthetic local question ${index + 1}`, answer: `This synthetic answer verifies that question ${index + 1} appears in the server-rendered FAQ without requiring a browser content request.` }))] }, 'faq'),
+    document('faqSection', {
+      questions: [
+        ...content('faq-questions'),
+        {
+          _key: 'tooling-upgrade-path',
+          question: 'What is the future upgrade path?',
+          answer: 'Synthetic upgrade path details for local navigation tests.',
+        },
+        ...Array.from({ length: 12 }, (_, index) => ({
+          _key: `tooling-question-${index}`,
+          question: `Synthetic local question ${index + 1}`,
+          answer: `This synthetic answer verifies that question ${index + 1} appears in the server-rendered FAQ ` +
+            "without requiring a browser content request.",
+        })),
+      ],
+    }, 'faq'),
     document('privacyPolicy', privacy),
     document('terms', policy('Terms of Service')),
     document('contact', { title: 'Get In Touch', subtitle: 'Synthetic local contact information.', formId: '' }),

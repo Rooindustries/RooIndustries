@@ -3,7 +3,7 @@ const { waitForHydrated } = require("./fixtures/react-hydration.cjs");
 
 test.use({ javaScriptEnabled: true });
 
-test("Back during section alignment consumes the trip before Forward and another route", async ({ page, context, baseURL }) => {
+test("Back consumes the trip before Forward and another route", async ({ page, context, baseURL }) => {
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
   await guardBrowserContext(context, [baseURL]);
   await page.goto("/reviews", { waitUntil: "domcontentloaded" });

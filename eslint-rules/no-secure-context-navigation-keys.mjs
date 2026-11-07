@@ -3,7 +3,7 @@ export default {
     type: "problem",
     schema: [],
     messages: {
-      key: "Use a page-local counter for navigation keys so links work without a secure context.",
+      key: "Use navigation keys that work without a secure context.",
     },
   },
   create(context) {

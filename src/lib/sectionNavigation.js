@@ -16,7 +16,7 @@ export const ROUTE_TRANSITION_KEY = "roo_route_transition";
 export const SECTION_TRIP_ENTRY = "__rooSectionTrip";
 
 export const isSupersededSectionTrip = (state, trip) =>
-  Boolean(trip?.superseded) && state?.sectionTrip === trip.key;
+  typeof trip?.key === "string" && Boolean(trip.superseded) && state?.sectionTrip === trip.key;
 
 export const withoutSupersededSectionTrip = (state, trip) => {
   if (!isSupersededSectionTrip(state, trip)) return state;

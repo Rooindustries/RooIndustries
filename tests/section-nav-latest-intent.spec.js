@@ -38,7 +38,9 @@ const openPage = async (page, route, surface) => {
 };
 
 const clickSection = async (page, target, surface) => {
-  const selector = surface === "mobile" ? `[data-nav-surface="mobile"][data-nav-target="${target}"]` : navLink(target);
+  const selector = surface === "mobile"
+    ? `[data-nav-surface="mobile"][data-nav-target="${target}"]`
+    : navLink(target);
   const link = page.locator(selector).first();
   if (surface !== "mobile") {
     await link.click();
@@ -273,13 +275,46 @@ for (const { label, link, path } of [ROUTE_AFTER_SECTION[1], ROUTE_AFTER_SECTION
   });
 }
 
+const clickAtHomeArrival = (page, first, second, painted = false) => page.evaluate(
+  ({ first, second, painted }) => new Promise((resolve, reject) => {
+    const observer = new MutationObserver(() => {
+      if (!document.querySelector("#services")) return;
+      observer.disconnect();
+      clearTimeout(timeout);
+      const click = () => {
+        document.querySelector(second).click();
+        resolve();
+      };
+      if (painted) requestAnimationFrame(() => requestAnimationFrame(click));
+      else click();
+    });
+    const timeout = setTimeout(() => {
+      observer.disconnect();
+      reject(new Error("Missing Home arrival"));
+    }, 15000);
+    observer.observe(document.getElementById("main-content"), { childList: true, subtree: true });
+    document.querySelector(first).click();
+  }),
+  { first, second, painted }
+);
+
+test("a route link after Home is painted keeps the seen section in history", async ({ page }) => {
+  await openPage(page, "/reviews", "desktop");
+  const startLength = await historyLength(page);
+  await clickAtHomeArrival(page, NAVBAR("benefits").selector, FOOTER("/tools").selector, true);
+  await expectMatrixLanding(page, MATRIX_LINKS.Tools);
+  expect(await historyLength(page)).toBe(startLength + 2);
+  await page.goBack();
+  await expectMatrixLanding(page, MATRIX_LINKS.Benefits);
+});
+
 test("a route link clicked right after a section link wins", async ({ page }) => {
   test.setTimeout(180000);
   await page.setViewportSize({ width: 1536, height: 960 });
   for (const { label, link, path } of ROUTE_AFTER_SECTION) {
     const name = `/reviews navbar Benefits then ${label}`;
     await openPage(page, "/reviews", "desktop");
-    await clickInQuickSuccession(page, NAVBAR("benefits"), link).catch(() => {});
+    await clickAtHomeArrival(page, NAVBAR("benefits").selector, link.selector);
     await expectOnRoute(page, path, name);
     await page.goBack();
     await expectPath(page, "/reviews", `${name} back`);
@@ -400,12 +435,9 @@ const clickAtRouteCommit = (page, first, second, path) => page.evaluate(
   { first: MATRIX_LINKS[first].selector, second: MATRIX_LINKS[second].selector, path }
 );
 
-const expectMatrixLanding = async (page, { path, hash }, waitForSettlement = false) => {
+const expectMatrixLanding = async (page, { path, hash }) => {
   if (hash) {
     await expect.poll(() => readLanding(page)).toEqual({ path, hash, onTop: hash });
-    if (waitForSettlement) {
-      await expect.poll(() => page.evaluate(() => window.__matrixSettledHash)).toBe(hash);
-    }
   } else {
     await expect.poll(() => readRoute(page)).toEqual({ path, hash, top: true });
   }
@@ -455,12 +487,6 @@ test.describe("navigation interleaving matrix", () => {
         await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(250);
       }
       const startLength = await historyLength(page);
-      await page.evaluate(() => {
-        window.__matrixSettledHash = "";
-        window.addEventListener("roo:section-align-settled", event => {
-          window.__matrixSettledHash = event.detail.hash;
-        });
-      });
       const [first, second, third] = clicks;
       const winner = MATRIX_LINKS[clicks.at(-1)];
       const held = timing.includes("held") || timing === "before Home";
@@ -488,7 +514,7 @@ test.describe("navigation interleaving matrix", () => {
       } finally {
         await chunks?.release();
       }
-      await expectMatrixLanding(page, winner, true);
+      await expectMatrixLanding(page, winner);
       const committedPage = timing === "at route commit" ? MATRIX_LINKS.Tools
         : timing === "at Home commit" && first === "logo" && winner.path !== "/" ? MATRIX_LINKS.logo : null;
       const homeReplacement = origin === "/#services" && winner.path === "/" && !committedPage;
@@ -922,6 +948,74 @@ test.describe("reduced motion on button scrolls", () => {
 });
 
 test.describe("navigation interleaving matrix follow-ups", () => {
+  test("Benefits then the skip link preserves its arrival and the following Tools entry", async ({ page }) => {
+    await openPage(page, "/reviews", "desktop");
+    const chunks = await holdRouteChunks(page);
+    try {
+      await page.locator(NAVBAR("benefits").selector).evaluate(link => link.click());
+      await chunks.wait();
+      await page.locator('a[href="#main-content"]').evaluate(link => link.click());
+    } finally {
+      await chunks.release();
+    }
+    await expectMatrixLanding(page, MATRIX_LINKS.Benefits);
+    const landedLength = await historyLength(page);
+    await page.locator(MATRIX_LINKS.Tools.selector).evaluate(link => link.click());
+    await expectMatrixLanding(page, MATRIX_LINKS.Tools);
+    expect(await historyLength(page)).toBe(landedLength + 1);
+    await page.goBack();
+    await expectMatrixLanding(page, MATRIX_LINKS.Benefits);
+  });
+
+  test("real Back onto a null-state fragment ends the trip before the next section click", async ({ page }) => {
+    await openPage(page, "/reviews", "desktop");
+    const chunks = await holdRouteChunks(page);
+    try {
+      await page.locator(NAVBAR("benefits").selector).evaluate(link => link.click());
+      await chunks.wait();
+      const firstKey = await page.evaluate(() => window.history.state.__rooSectionTrip.key);
+      await page.evaluate(() => {
+        window.__fragmentPopstates = 0;
+        window.addEventListener("popstate", () => { window.__fragmentPopstates += 1; });
+        document.querySelector('a[href="#main-content"]').click();
+      });
+      await expect.poll(() => page.evaluate(() => window.__fragmentPopstates)).toBe(1);
+      await page.locator('a[href="#main-content"]').evaluate(link => {
+        link.setAttribute("href", "#app-shell");
+        link.click();
+        link.setAttribute("href", "#main-content");
+      });
+      await expect.poll(() => page.evaluate(() => window.__fragmentPopstates)).toBe(2);
+      await page.goBack();
+      await expect.poll(() => page.evaluate(() => window.__fragmentPopstates)).toBe(3);
+      await expect(page).toHaveURL(/\/#main-content$/);
+      expect(await page.evaluate(() => window.history.state)).toBeNull();
+      await page.locator(NAVBAR("faq").selector).evaluate(link => link.click());
+      const nextKey = await page.evaluate(() => window.history.state.__rooSectionTrip?.key);
+      expect(nextKey).toEqual(expect.any(String));
+      expect(nextKey).not.toBe(firstKey);
+    } finally {
+      await chunks.release();
+    }
+    await expectMatrixLanding(page, MATRIX_LINKS.FAQ);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/#main-content$/);
+  });
+
+  test("section trip keys differ after a reload", async ({ page }) => {
+    await openPage(page, "/reviews", "desktop");
+    await clickSection(page, "benefits", "desktop");
+    await expectMatrixLanding(page, MATRIX_LINKS.Benefits);
+    const firstKey = await page.evaluate(() => window.history.state.usr.sectionTrip);
+    await page.goBack();
+    await expectPath(page, "/reviews", "Back before reload");
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await waitForHydrated(page, NAVBAR("benefits").selector);
+    await clickSection(page, "benefits", "desktop");
+    await expectMatrixLanding(page, MATRIX_LINKS.Benefits);
+    expect(await page.evaluate(() => window.history.state.usr.sectionTrip)).not.toBe(firstKey);
+  });
+
   test("Back and Forward consume an abandoned trip before the next Tools click", async ({ page }) => {
     await page.setViewportSize({ width: 1536, height: 960 });
     await openPage(page, "/reviews", "desktop");
@@ -1005,7 +1099,8 @@ test.describe("navigation interleaving matrix follow-ups", () => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 960 });
       const surface = width === 390 ? "mobile" : "desktop";
       await openPage(page, "/reviews", surface);
-      await clickSettledSection(page, "plans", surface);
+      await clickSection(page, "plans", surface);
+      await expectMatrixLanding(page, { path: "/", hash: SECTIONS.plans });
       const book = page.locator('#packages a[href="/booking"]').first();
       await book.scrollIntoViewIfNeeded();
       await page.evaluate(() => window.scrollBy({ top: 180, behavior: "instant" }));
@@ -1015,9 +1110,6 @@ test.describe("navigation interleaving matrix follow-ups", () => {
       await expect(dialog).toBeVisible();
       await dialog.getByRole("button", { name: "Close", exact: true }).click();
       await expect(dialog).toBeHidden();
-      if (process.env.SECTION_BOOKING_SHOTS) {
-        await page.screenshot({ path: `${process.env.SECTION_BOOKING_SHOTS}/booking-close-${process.env.SECTION_BOOKING_VARIANT}-${width}.png` });
-      }
       await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
       await page.evaluate(() => new Promise(resolve => {
         let frames = 0;

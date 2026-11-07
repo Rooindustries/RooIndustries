@@ -501,7 +501,8 @@ export function AppContent({
     if (routeShell === "memory") {
       const initial = !historyInitializedRef.current;
       historyInitializedRef.current = true;
-      const { [SECTION_TRIP_ENTRY]: unlandedTripEntry, ...browserState } = window.history.state || {};
+      const { [SECTION_TRIP_ENTRY]: tripEntry, ...browserState } = window.history.state || {};
+      const unlandedTripEntry = typeof tripEntry?.key === "string" ? tripEntry : null;
       const isTripEntry = unlandedTripEntry && location.state?.sectionTrip === unlandedTripEntry.key;
       const state = {
         ...browserState,

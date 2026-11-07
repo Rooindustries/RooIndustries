@@ -3,6 +3,7 @@ import { render, cleanup, waitFor } from "@testing-library/react";
 
 const mockSanitizeBrowserSearch = jest.fn();
 const mockNavigate = jest.fn();
+let mockNavigationType = "POP";
 const mockLocation = {
   pathname: "/referrals/reset",
   search: "?token=abc123",
@@ -44,6 +45,7 @@ jest.mock("../lib/homeSectionData", () => ({
   prefetchHomeSectionData: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock("../lib/sectionNavigation", () => ({
+  SECTION_TRIP_ENTRY: "__rooSectionTrip",
   clearPendingSectionTarget: jest.fn(),
   clearRouteTransitionIntent: jest.fn(),
   consumeRouteTransitionIntent: jest.fn(() => null),
@@ -68,7 +70,7 @@ jest.mock("react-router-dom", () => ({
   Navigate: () => null,
   useLocation: () => mockLocation,
   useNavigate: () => mockNavigate,
-    useNavigationType: () => "POP",
+  useNavigationType: () => mockNavigationType,
 }));
 
 const { AppContent } = require("../App.jsx");
@@ -80,6 +82,7 @@ describe("AppContent search sync", () => {
     mockSanitizeBrowserSearch.mockReset();
     mockSanitizeBrowserSearch.mockReturnValue("");
     mockNavigate.mockReset();
+    mockNavigationType = "POP";
     mockLocation.pathname = "/referrals/reset";
     mockLocation.search = "?token=abc123";
     mockLocation.hash = "";
@@ -93,6 +96,19 @@ describe("AppContent search sync", () => {
   afterEach(() => {
     replaceStateSpy.mockRestore();
     cleanup();
+  });
+
+  test("strips an old section marker so later route clicks push history", () => {
+    window.history.replaceState({ __rooSectionTrip: true }, "", "/referrals/reset");
+    const { rerender } = render(<AppContent initialHomeData={null} routeShell="memory" />);
+    expect(window.history.state.__rooSectionTrip).toBeUndefined();
+    const startLength = window.history.length;
+    mockLocation.pathname = "/tools";
+    mockLocation.search = "";
+    mockNavigationType = "PUSH";
+    rerender(<AppContent initialHomeData={null} routeShell="memory" />);
+    expect(window.history.length).toBe(startLength + 1);
+    expect(window.location.pathname).toBe("/tools");
   });
 
   test("strips reset tokens on non-home routes", async () => {

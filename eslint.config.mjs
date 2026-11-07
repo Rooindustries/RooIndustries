@@ -1,10 +1,10 @@
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import roo, { rules } from "./eslint-rules/index.mjs";
-import navigationKeys from "./eslint-rules/no-secure-context-navigation-keys.mjs";
 
 const emailTextRules = new Set(["no-hand-built-dollars"]);
 const scriptRules = new Set(["no-parent-ipc-disconnect", "no-unchecked-group-signal", "no-linux-only-test-tooling"]);
+const navigationRules = new Set(["no-secure-context-navigation-keys"]);
 const testFiles = "src/**/__tests__/**";
 const ruleSet = (names) => Object.fromEntries(names.map((name) => [`roo/${name}`, "error"]));
 
@@ -20,12 +20,13 @@ export default [
       globals: { ...globals.browser, ...globals.node },
     },
     plugins: { roo, "react-hooks": reactHooks },
-    rules: ruleSet(Object.keys(rules).filter((name) => !emailTextRules.has(name) && !scriptRules.has(name))),
+    rules: ruleSet(Object.keys(rules).filter((name) =>
+      !emailTextRules.has(name) && !scriptRules.has(name) && !navigationRules.has(name)
+    )),
   },
   {
     files: ["src/lib/sectionNavigator.jsx"],
-    plugins: { navigation: { rules: { "no-secure-context-keys": navigationKeys } } },
-    rules: { "react-hooks/refs": "error", "navigation/no-secure-context-keys": "error" },
+    rules: { ...ruleSet([...navigationRules]), "react-hooks/refs": "error" },
   },
   {
     files: ["scripts/**/*.{js,mjs,cjs}", "tests/**/*.{js,mjs,cjs}"],
