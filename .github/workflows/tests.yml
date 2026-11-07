@@ -124,6 +124,27 @@ jobs:
           java-version: "21"
       - run: npm run check:booking-model
 
+  downloads-worker:
+    name: Downloads Worker
+    needs: tested-tree
+    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: workers/downloads
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: workers/downloads/package-lock.json
+      - run: npm ci
+      - run: npm test
+
   playwright:
     name: Playwright ${{ matrix.suite.name }}
     needs: tested-tree
@@ -335,6 +356,8 @@ jobs:
           playwright-ports: "3211"
       - name: Run native admin CMS suite
         run: xvfb-run -a npx playwright test -c playwright.admin.config.js
+      - name: Run hosted tool download suite
+        run: node scripts/test-sanity-admin.mjs --scenario=unverified-assets-tools-fresh-redirect
       - name: Run all six native booking-hold browser cases
         env:
           NEXT_DIST_DIR: .next-e2e-native-booking
@@ -467,12 +490,13 @@ jobs:
       && needs.monitoring.result == 'success'
       && needs.jest.result == 'success'
       && needs.booking-model.result == 'success'
+      && needs.downloads-worker.result == 'success'
       && needs.playwright.result == 'success'
       && needs.routes.result == 'success'
       && needs.native.result == 'success'
       && needs.native-payouts.result == 'success'
       && needs.revalidation.result == 'success'
-    needs: [monitoring, jest, booking-model, playwright, routes, native, native-payouts, revalidation]
+    needs: [monitoring, jest, booking-model, downloads-worker, playwright, routes, native, native-payouts, revalidation]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

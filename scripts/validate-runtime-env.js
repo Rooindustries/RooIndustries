@@ -23,6 +23,9 @@ const {
 const {
   buildPostgresConnectionEnv,
 } = require("./lib/postgres-connection-target.cjs");
+const {
+  parseToolDownloadsOrigin,
+} = require("../src/server/downloads/toolDownloadsOrigin.cjs");
 const vercelEnv = readEnvValue(process.env, "VERCEL_ENV").toLowerCase();
 const hasExplicitVercelEnv = vercelEnv.length > 0;
 const isCi = readEnvValue(process.env, "CI").toLowerCase() === "true";
@@ -497,6 +500,12 @@ if (
 ) {
   downloadConsistencyFailures.push(
     "DOWNLOAD_STORAGE_BACKEND must be blob, local, or supabase."
+  );
+}
+const toolDownloadsOrigin = parseToolDownloadsOrigin(readEnvValue(process.env, "TOOL_DOWNLOADS_ORIGIN"));
+if (toolDownloadsOrigin === null || (toolDownloadsOrigin && !toolDownloadsOrigin.startsWith("https://"))) {
+  downloadConsistencyFailures.push(
+    "TOOL_DOWNLOADS_ORIGIN must be an https origin with no path, query or credentials."
   );
 }
 const missing = requiredChecks

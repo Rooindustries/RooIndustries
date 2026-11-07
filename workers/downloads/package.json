@@ -1,0 +1,19 @@
+{
+  "name": "roo-downloads-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy --env=\"\"",
+    "deploy:origin": "wrangler deploy --env origin",
+    "upload": "node scripts/upload.mjs",
+    "verify": "node scripts/verify.mjs",
+    "test": "node --test test/worker.e2e.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "4.154.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
