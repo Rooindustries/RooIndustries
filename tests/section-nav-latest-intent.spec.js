@@ -233,6 +233,78 @@ const clickWhileTripInFlight = (page, first, second) =>
     [first, second]
   );
 
+for (const thirdClick of [false, true]) {
+  test(`an abandoned Home commit stays inert with delayed FAQ and third Tools click ${thirdClick}`, async ({ page }) => {
+    await openPage(page, "/reviews", "desktop");
+    const startLength = await historyLength(page);
+    await clickSettledSection(page, "benefits", "desktop");
+    await page.goBack();
+    await expect(page.locator('#main-content [data-route-key="/reviews"]')).toBeVisible();
+    await expectPath(page, "/reviews", "return from cached Home");
+    const historySession = thirdClick ? await page.context().newCDPSession(page) : null;
+    let resolveSample;
+    const sample = new Promise(resolve => { resolveSample = resolve; });
+    const onConsole = message => {
+      const prefix = "ABANDONED_HOME_SAMPLE ";
+      if (message.text().startsWith(prefix)) resolveSample(JSON.parse(message.text().slice(prefix.length)));
+    };
+    page.on("console", onConsole);
+    let releaseFAQ;
+    const faqReleased = new Promise(resolve => { releaseFAQ = resolve; });
+    await page.route("**/faq", async route => {
+      await faqReleased;
+      await route.continue();
+    });
+    await page.evaluate(thirdClick => {
+      const read = () => console.log("ABANDONED_HOME_SAMPLE " + JSON.stringify({
+        path: location.pathname,
+        length: history.length,
+        y: scrollY,
+        active: [...document.querySelectorAll('[data-nav-target][aria-current="location"]')]
+          .map(link => link.dataset.navTarget),
+      }));
+      if (thirdClick) {
+        for (const method of ["pushState", "replaceState"]) {
+          const update = history[method];
+          history[method] = function (...args) {
+            update.apply(this, args);
+            if (location.pathname === "/tools") read();
+          };
+        }
+      }
+      const observer = new MutationObserver(() => {
+        if (!document.querySelector("#services")) return;
+        observer.disconnect();
+        if (thirdClick) document.querySelector('footer a[href="/tools"]').click();
+        else requestAnimationFrame(() => requestAnimationFrame(read));
+      });
+      observer.observe(document.getElementById("main-content"), { childList: true, subtree: true });
+    }, thirdClick);
+    try {
+      await clickWhileTripInFlight(page, NAVBAR("benefits"), FOOTER("/faq"));
+      const observed = await sample;
+      if (thirdClick) {
+        expect(observed.path).toBe("/tools");
+        expect(observed.length).toBe(startLength + 1);
+        const history = await historySession.send("Page.getNavigationHistory");
+        expect(new URL(history.entries[history.currentIndex - 1].url).pathname).toBe("/reviews");
+      } else {
+        expect(observed.active).not.toContain("benefits");
+        expect(observed.y).toBe(0);
+      }
+    } finally {
+      releaseFAQ();
+      page.off("console", onConsole);
+      await page.unrouteAll({ behavior: "wait" });
+      await historySession?.detach();
+    }
+    if (!thirdClick) {
+      await expectOnRoute(page, "/faq", "FAQ finishes after the abandoned Home");
+      expect(await historyLength(page)).toBe(startLength + 1);
+    }
+  });
+}
+
 const ROUTE_AFTER_SECTION = [
   { label: "footer Privacy", link: FOOTER("/privacy"), path: "/privacy" },
   { label: "footer Tools", link: FOOTER("/tools"), path: "/tools" },
@@ -457,6 +529,43 @@ const expectMatrixLanding = async (page, { path, hash }) => {
     await expect.poll(() => readRoute(page)).toEqual({ path, hash, top: true });
   }
 };
+
+test("a route after the winning Home commit keeps Home in the Back chain", async ({ page }) => {
+  await openPage(page, "/reviews", "desktop");
+  const startLength = await historyLength(page);
+  await page.evaluate(() => {
+    let logoClicked = false;
+    let homeWritten = false;
+    const replaceState = history.replaceState;
+    history.replaceState = function (...args) {
+      const result = replaceState.apply(this, args);
+      if (logoClicked && !homeWritten && location.pathname === "/" && !location.hash &&
+          args[0]?.__rooLegacy && args[0]?.usr && !args[0].usr.sectionTrip) {
+        homeWritten = true;
+        window.__winningHomeEntry = { path: location.pathname, hash: location.hash, length: history.length };
+        queueMicrotask(() => document.querySelector('footer a[href="/privacy"]').click());
+      }
+      return result;
+    };
+    const observer = new MutationObserver(() => {
+      if (!document.querySelector("#services")) return;
+      observer.disconnect();
+      logoClicked = true;
+      document.querySelector('header a[href="/"]').click();
+    });
+    observer.observe(document.getElementById("main-content"), { childList: true, subtree: true });
+    document.querySelector('[data-nav-surface="desktop"][data-nav-target="benefits"]').click();
+  });
+  await expectMatrixLanding(page, MATRIX_LINKS.Privacy);
+  expect(await page.evaluate(() => window.__winningHomeEntry)).toEqual({
+    path: "/", hash: "", length: startLength + 1,
+  });
+  expect(await historyLength(page)).toBe(startLength + 2);
+  await page.goBack();
+  await expectMatrixLanding(page, MATRIX_LINKS.logo);
+  await page.goBack();
+  await expectPath(page, "/reviews", "Back returns past the winning Home entry");
+});
 
 const INTERLEAVINGS = ["before Home", "at Home commit"].flatMap((timing) => [
   ["Benefits", "FAQ"],

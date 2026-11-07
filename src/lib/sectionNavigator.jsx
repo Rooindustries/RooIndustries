@@ -40,7 +40,7 @@ const isPlainPrimaryClick = (event, link = event.currentTarget) =>
   !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) &&
   /^(_self)?$/.test(link.getAttribute("target") || "");
 
-const replaceBrowserUrl = (hash = "", href = `${window.location.pathname}${window.location.search}${hash}`) =>
+const replaceBrowserUrl = (href = `${window.location.pathname}${window.location.search}`) =>
   window.history.replaceState(window.history.state, "", href);
 
 const clearTripEntry = () => {
@@ -113,7 +113,8 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
 
   const cancelSectionNavigation = useCallback((superseded = false) => {
     const trip = tripRef.current;
-    tripRef.current = trip && superseded ? { ...trip, superseded } : null;
+    if (trip && superseded) trip.superseded = true;
+    else tripRef.current = null;
     if (trip && typeof window.history.state?.[SECTION_TRIP_ENTRY]?.key === "string") {
       const state = superseded
         ? { ...window.history.state, [SECTION_TRIP_ENTRY]: { key: trip.key, superseded } }
@@ -152,7 +153,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
         clearPendingSectionTarget();
         const committedHome = locationRef.current;
         const search = sanitizeBrowserSearch(committedHome.pathname, committedHome.search);
-        replaceBrowserUrl(normalizedHash, `${committedHome.pathname}${search}${normalizedHash}`);
+        replaceBrowserUrl(`${committedHome.pathname}${search}${normalizedHash}`);
         announceSectionTarget(normalizedHash);
         setActiveHomeHash(normalizedHash);
         alignTo(normalizedHash, alignment);
@@ -186,7 +187,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       }
       if (via === "memory") {
         if (trip) {
-          replaceBrowserUrl("", nextHref);
+          replaceBrowserUrl(nextHref);
         } else {
           const entry = window.history.state?.[SECTION_TRIP_ENTRY];
           const updateHistory = typeof entry?.key === "string" && entry.superseded ? "replaceState" : "pushState";
@@ -208,9 +209,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
 
   useIsomorphicLayoutEffect(() => {
     const trip = tripRef.current;
-    if (isSupersededSectionTrip(location.state, trip)) {
-      tripRef.current = null;
-    } else if (trip) {
+    if (trip && !trip.superseded) {
       const isTripArrival = location.state?.sectionTrip === trip.key;
       const isTripOrigin = location.key === trip.fromKey;
       if (isTripArrival) {
@@ -231,6 +230,17 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
     }
     if (location.pathname !== "/") stopAlignment();
   }, [cancelSectionNavigation, finishSectionTrip, location.key, location.pathname, location.state, stopAlignment]);
+
+  useEffect(() => {
+    const trip = tripRef.current;
+    if (!trip?.superseded || routeLocation.key === trip.fromKey) return;
+    const abandonedArrival = isSupersededSectionTrip(routeLocation.state, trip);
+    queueMicrotask(() => {
+      if (tripRef.current !== trip || (abandonedArrival && pendingRouteRef.current)) return;
+      tripRef.current = null;
+      clearTripEntry();
+    });
+  }, [routeLocation]);
 
   useIsomorphicLayoutEffect(() => {
     const onTraversal = () => {
@@ -266,7 +276,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       if (link.getAttribute("href").startsWith("#")) {
         if (tripRef.current) {
           event.preventDefault();
-          replaceBrowserUrl(link.hash, link.href);
+          replaceBrowserUrl(link.href);
           const target = document.getElementById(normalizeSectionHash(link.hash).slice(1));
           target?.focus({ preventScroll: true });
           target?.scrollIntoView();
@@ -329,7 +339,9 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       clearPendingSectionTarget();
     }
 
-    if (window.location.hash !== targetHash) replaceBrowserUrl(targetHash);
+    if (window.location.hash !== targetHash) {
+      replaceBrowserUrl(`${window.location.pathname}${window.location.search}${targetHash}`);
+    }
 
     if (targetHash !== activeHomeHash) {
       setActiveHomeHash(targetHash);
