@@ -19,7 +19,7 @@ const PAIRS = [
 ];
 
 test.use({ javaScriptEnabled: true });
-test.describe.configure({ mode: "serial" });
+test.describe.configure({ mode: "default" });
 
 test.beforeEach(async ({ context, page, baseURL }) => {
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
@@ -352,12 +352,13 @@ const clickOnceSectionLands = (page, sectionSelector, linkSelector, hash) =>
 const readHomeTop = (page) =>
   page.evaluate(() => ({ path: window.location.pathname, hash: window.location.hash, y: window.scrollY }));
 
-const holdRouteChunks = async (page) => {
+const holdRouteChunks = async (page, shouldHold = () => true) => {
   const pending = [];
   let holding = true;
   const pattern = "**/_next/static/chunks/*.js";
   await page.route(pattern, async (route) => {
-    if (holding) pending.push(route);
+    const pause = await shouldHold();
+    if (holding && pause) pending.push(route);
     else await route.continue();
   });
   return {
@@ -369,6 +370,120 @@ const holdRouteChunks = async (page) => {
     },
   };
 };
+
+const MATRIX_LINKS = {
+  Benefits: { ...NAVBAR("benefits"), path: "/", hash: SECTIONS.benefits },
+  FAQ: { ...NAVBAR("faq"), path: "/", hash: SECTIONS.faq },
+  Tools: { ...FOOTER("/tools"), path: "/tools", hash: "" },
+  Privacy: { ...FOOTER("/privacy"), path: "/privacy", hash: "" },
+  logo: { selector: 'header a[href="/"]', path: "/", hash: "" },
+};
+
+const clickAtRouteCommit = (page, first, second, path) => page.evaluate(
+  ({ first, second, path }) => new Promise((resolve, reject) => {
+    const observer = new MutationObserver(() => {
+      if (!document.querySelector(`#main-content [data-route-key="${path}"]`)) return;
+      observer.disconnect();
+      clearTimeout(timeout);
+      document.querySelector(second).click();
+      resolve();
+    });
+    const timeout = setTimeout(() => {
+      observer.disconnect();
+      reject(new Error(`Missing committed route ${path}`));
+    }, 15000);
+    observer.observe(document.getElementById("main-content"), { childList: true, subtree: true });
+    document.querySelector(first).click();
+  }),
+  { first: MATRIX_LINKS[first].selector, second: MATRIX_LINKS[second].selector, path }
+);
+
+const expectMatrixLanding = (page, { path, hash }) => hash
+  ? expect.poll(() => readLanding(page)).toEqual({ path, hash, onTop: hash })
+  : expect.poll(() => readRoute(page)).toEqual({ path, hash, top: true });
+
+const INTERLEAVINGS = ["before Home", "at Home commit"].flatMap((timing) => [
+  ["Benefits", "FAQ"],
+  ["Benefits", timing === "before Home" ? "Tools" : "Privacy"],
+  ["Benefits", "logo"],
+  ["logo", "FAQ"],
+  ["logo", timing === "before Home" ? "Privacy" : "Tools"],
+].map((clicks) => ({ origin: "/reviews", timing, clicks })));
+
+for (const origin of ["/reviews", "/#services"]) {
+  for (const winner of ["FAQ", "Privacy", "logo"]) {
+    INTERLEAVINGS.push({ origin, timing: "held route", clicks: ["Tools", winner] });
+    INTERLEAVINGS.push({ origin, timing: "held route then section", clicks: ["Tools", "Benefits", winner] });
+    if (origin === "/reviews") {
+      INTERLEAVINGS.push({ origin, timing: "Home commit then held route", clicks: ["Benefits", "Tools", winner] });
+    }
+  }
+  for (const winner of ["FAQ", "Privacy"]) {
+    INTERLEAVINGS.push({ origin, timing: "held route then logo", clicks: ["Tools", "logo", winner] });
+  }
+  INTERLEAVINGS.push({ origin, timing: "at route commit", clicks: ["Tools", "FAQ"] });
+}
+INTERLEAVINGS.push({ origin: "/#services", timing: "section replacement then route", clicks: ["FAQ", "Privacy"] });
+
+test.describe("navigation interleaving matrix", () => {
+  for (const { origin, timing, clicks } of INTERLEAVINGS) {
+    test(`${origin}: ${clicks.join(" → ")} (${timing})`, async ({ page }) => {
+      await page.setViewportSize({ width: 1536, height: 960 });
+      await openPage(page, "/reviews", "desktop");
+      if (origin !== "/reviews") await clickSettledSection(page, "benefits", "desktop");
+      const startLength = await historyLength(page);
+      const [first, second, third] = clicks;
+      const winner = MATRIX_LINKS[clicks.at(-1)];
+      const held = timing.includes("held") || timing === "before Home";
+      const chunks = held ? await holdRouteChunks(page, () =>
+        timing === "Home commit then held route" ? page.locator("#services").count() : true
+      ) : null;
+      try {
+        if (timing === "at Home commit" || timing === "Home commit then held route") {
+          await clickAtRouteCommit(page, first, second, "/");
+        } else if (timing === "at route commit") {
+          await clickAtRouteCommit(page, first, second, "/tools");
+        } else if (timing === "section replacement then route") {
+          await clickSettledSection(page, "faq", "desktop");
+          await page.locator(MATRIX_LINKS[second].selector).evaluate((link) => link.click());
+        } else {
+          await page.locator(MATRIX_LINKS[first].selector).first().evaluate((link) => link.click());
+        }
+        if (chunks) {
+          await chunks.wait();
+          const heldClicks = timing.startsWith("held route then") ? [second, third] : [third || second];
+          await page.evaluate((selectors) => {
+            for (const selector of selectors) document.querySelector(selector).click();
+          }, heldClicks.map((link) => MATRIX_LINKS[link].selector));
+        }
+      } finally {
+        await chunks?.release();
+      }
+      await expectMatrixLanding(page, winner);
+      const committedPage = timing === "at route commit" ? MATRIX_LINKS.Tools
+        : timing === "at Home commit" && first === "logo" && winner.path !== "/" ? MATRIX_LINKS.logo : null;
+      const homeReplacement = origin !== "/reviews" && winner.path === "/" && !committedPage;
+      expect(await historyLength(page)).toBe(startLength + (committedPage ? 2 : homeReplacement ? 0 : 1));
+      const nextRoute = winner.path === "/privacy" ? "Tools" : "Privacy";
+      await page.locator(MATRIX_LINKS[nextRoute].selector).evaluate((link) => link.click());
+      await expectMatrixLanding(page, MATRIX_LINKS[nextRoute]);
+      await page.goBack();
+      await expectMatrixLanding(page, winner);
+      await page.goBack();
+      if (committedPage) {
+        await expectMatrixLanding(page, committedPage);
+        await page.goBack();
+      }
+      if (origin === "/reviews" || homeReplacement) {
+        await expectMatrixLanding(page, { path: "/reviews", hash: "" });
+      } else {
+        const previousHome = timing === "section replacement then route" ? MATRIX_LINKS.FAQ
+          : timing === "held route then logo" ? MATRIX_LINKS.logo : MATRIX_LINKS.Benefits;
+        await expectMatrixLanding(page, previousHome);
+      }
+    });
+  }
+});
 
 test("the navbar logo uses the committed homepage while the Tools route is pending", async ({ page }) => {
   test.setTimeout(120000);

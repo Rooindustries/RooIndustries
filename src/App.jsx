@@ -498,9 +498,10 @@ export function AppContent({
       const initial = !historyInitializedRef.current;
       historyInitializedRef.current = true;
       const { [SECTION_TRIP_ENTRY]: unlandedTripEntry, ...browserState } = window.history.state || {};
+      const isAbandonedTripArrival = isSupersededSectionTrip(location.state, unlandedTripEntry);
       const state = {
         ...browserState,
-        ...(isSupersededSectionTrip(location.state, unlandedTripEntry)
+        ...(isAbandonedTripArrival
           ? { [SECTION_TRIP_ENTRY]: unlandedTripEntry }
           : {}),
         // Retain Next's router tree and any checkout state on first hydration.

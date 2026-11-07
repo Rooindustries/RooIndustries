@@ -106,10 +106,16 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
 
   const supersedePendingNavigation = useCallback((hash = "") => {
     const committedLocation = locationRef.current;
+    const abandonedTrip = window.history.state?.[SECTION_TRIP_ENTRY];
+    let winningState = committedLocation.state;
+    if (isSupersededSectionTrip(winningState, abandonedTrip)) {
+      winningState = { ...winningState };
+      delete winningState.sectionTrip;
+    }
     cancelSectionNavigation();
     navigate(
       { pathname: committedLocation.pathname, search: committedLocation.search, hash },
-      { replace: true, state: committedLocation.state }
+      { replace: true, state: winningState }
     );
   }, [cancelSectionNavigation, navigate]);
 
@@ -147,18 +153,22 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
           : window.location.pathname !== locationRef.current.pathname ? "document" : "router",
       } = trip || {};
       const state = { sectionTrip: key };
-      if (!trip) tripRef.current = { key, via, from: window.location.href };
+      if (!trip) {
+        tripRef.current = { key, via, from: window.location.href, fromKey: locationRef.current.key };
+      }
       if (via === "document") {
         window.location.assign(nextHref);
-      } else if (via === "router") {
-        navigate(nextHref, { replace: Boolean(trip), state });
-      } else if (trip) {
-        replaceBrowserUrl("", nextHref);
-      } else {
-        const updateHistory = window.history.state?.[SECTION_TRIP_ENTRY]?.superseded ? "replaceState" : "pushState";
-        window.history[updateHistory]({ ...window.history.state, [SECTION_TRIP_ENTRY]: true }, "", nextHref);
-        navigate("/", { state });
+        return true;
       }
+      if (via === "memory") {
+        if (trip) {
+          replaceBrowserUrl("", nextHref);
+        } else {
+          const updateHistory = window.history.state?.[SECTION_TRIP_ENTRY]?.superseded ? "replaceState" : "pushState";
+          window.history[updateHistory]({ ...window.history.state, [SECTION_TRIP_ENTRY]: true }, "", nextHref);
+        }
+      }
+      navigate({ pathname: "/", hash: normalizedHash }, { replace: Boolean(trip), state });
       return true;
     },
     [alignTo, navigate, routeShell, supersedePendingNavigation]
@@ -174,10 +184,12 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   useEffect(() => {
     const trip = tripRef.current;
     if (isSupersededSectionTrip(location.state, trip)) return;
-    if (trip && (trip.superseded || trip.key !== location.key)) {
-      if (location.state?.sectionTrip === trip.key) {
+    if (trip) {
+      const isTripArrival = location.state?.sectionTrip === trip.key;
+      const isTripOrigin = location.key === trip.fromKey;
+      if (isTripArrival) {
         tripRef.current = null;
-      } else {
+      } else if (!isTripOrigin) {
         cancelSectionNavigation();
       }
     }
