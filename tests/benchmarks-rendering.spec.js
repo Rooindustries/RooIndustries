@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 
 const titles = ["Fixture Benchmark Alpha", "Fixture Benchmark Beta"];
@@ -47,7 +48,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     for (const title of titles) {
       await expect(main.getByRole("heading", { name: title, exact: true })).toHaveCount(1);
     }
-    await page.evaluate(() => document.fonts.ready);
+    await evaluateBrowserTask(page, () => document.fonts.ready);
     const images = main.locator("figure img");
     for (let index = 0; index < await images.count(); index += 1) {
       await images.nth(index).scrollIntoViewIfNeeded();

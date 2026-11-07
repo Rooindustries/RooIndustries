@@ -1219,11 +1219,31 @@ run("no-parent-ipc-disconnect", {
     `if (process.connected) process.disconnect();`,
     `child.channel?.unref();`,
     `class Tracked extends Base { disconnect() { return super.disconnect(); } }`,
+    `new MutationObserver(f).disconnect();`,
+    `const observer = new MutationObserver(f); observer.disconnect();`,
+    `const connection = connect(); connection.disconnect();`,
+    `const spawn = () => new MutationObserver(f); const observer = spawn(); observer.disconnect();`,
   ],
   invalid: [
     {
       name: "held port hand-over before #320's close fix",
-      code: `const finish = () => { if (child.connected) child.disconnect(); };`,
+      code: `import { fork } from "node:child_process"; const child = fork("worker.js"); const finish = () => { if (child.connected) child.disconnect(); };`,
+      errors: [{ messageId: "parent" }],
+    },
+    {
+      code: `import { spawn as start } from "child_process"; const child = start("node"); const alias = child; alias["disconnect"]();`,
+      errors: [{ messageId: "parent" }],
+    },
+    {
+      code: `const { execFile: start } = require("node:child_process"); let child; child = start("node"); child?.disconnect();`,
+      errors: [{ messageId: "parent" }],
+    },
+    {
+      code: `import * as children from "node:child_process"; const child = children.fork("worker.js"); const disconnect = child.disconnect;`,
+      errors: [{ messageId: "parent" }],
+    },
+    {
+      code: `const children = require("child_process"); const child = children.spawn("node"); const { disconnect } = child;`,
       errors: [{ messageId: "parent" }],
     },
   ],

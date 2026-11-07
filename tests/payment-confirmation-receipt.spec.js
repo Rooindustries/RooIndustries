@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
@@ -199,7 +200,9 @@ test.afterEach(async ({ page }, testInfo) => {
 });
 
 async function capture(page, testInfo, name) {
-  await page.evaluate(async () => {
+  await evaluateBrowserTask(
+    page,
+    async () => {
     if (window.__confirmationMetrics.receiptDecisionAt === null) window.__markReceiptDecision();
     await document.fonts.ready;
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -258,7 +261,7 @@ async function openPendingPaidCheckout(page, flow) {
   await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
   await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
   await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
-  await page.evaluate(() => document.fonts.ready);
+  await evaluateBrowserTask(page, () => document.fonts.ready);
   await page.waitForTimeout(1000);
   return bookingId => finalizeRoute.fulfill({ json: {
     ok: true, status: "booked", provider: "dodo", bookingId,
@@ -327,7 +330,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
           await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
         }
-        await page.evaluate(() => document.fonts.ready);
+        await evaluateBrowserTask(page, () => document.fonts.ready);
         await page.waitForTimeout(1000);
         await page.evaluate(() => window.__resetConfirmationMetrics());
         const completedAt = Date.now();
@@ -448,7 +451,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           await page.goto(route, { waitUntil: "domcontentloaded" });
           await expect(page.getByRole("heading", { level: 1, name: heading, exact: true })).toBeVisible();
           await expect.poll(() => Boolean(dispatchRoute)).toBe(true);
-          await page.evaluate(() => document.fonts.ready);
+          await evaluateBrowserTask(page, () => document.fonts.ready);
           await page.waitForTimeout(1000);
           assertReceiptLayout(await capture(page, testInfo, "before-email-cleanup"));
           const stateBefore = await page.evaluate(() => history.state.usr);
@@ -602,7 +605,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
           await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
           await expect.poll(() => chunks.length).toBeGreaterThan(0);
-          await page.evaluate(() => document.fonts.ready);
+          await evaluateBrowserTask(page, () => document.fonts.ready);
           await page.waitForTimeout(1000);
           await page.evaluate(() => window.__resetConfirmationMetrics());
           const completedAt = Date.now();
@@ -712,7 +715,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
             await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
           }
         }
-        await page.evaluate(() => document.fonts.ready);
+        await evaluateBrowserTask(page, () => document.fonts.ready);
         await page.waitForTimeout(1000);
         await page.evaluate(() => window.__resetConfirmationMetrics());
         if (free) await page.getByRole("button", { name: "Confirm Free Booking", exact: true }).click();

@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 const { navLink } = require("./fixtures/nav-link.cjs");
 const http = require("node:http");
@@ -102,7 +103,7 @@ test("a successful response cut off by leaving the page reports no error", async
     response.writeHead(200, { "content-type": "application/json" });
     response.write('{"ok":true,"data":');
   });
-  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)));
+  await evaluateBrowserTask(page, () => new Promise((resolve) => setTimeout(resolve, 500)));
 
   expect(errors).toEqual([]);
 });
@@ -232,7 +233,7 @@ const holdContent = async (page, resources) => {
 };
 
 const appReports = (errors) => errors.filter((text) => !text.startsWith("Failed to load resource"));
-const settle = (page) => page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)));
+const settle = (page) => evaluateBrowserTask(page, () => new Promise((resolve) => setTimeout(resolve, 500)));
 
 test("leaving while the packages section loads its packages reports no error", async ({ page }) => {
   const content = await holdContent(page, ["packages-list", "packages-settings"]);

@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -358,7 +359,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
             const response = await page.goto(new URL(entry.route, baseURL).href, { waitUntil: "domcontentloaded", timeout: 20000 });
             record.status = response?.status();
             await page.waitForTimeout(1100);
-            await page.evaluate(() => Promise.race([document.fonts.ready, new Promise(resolve => setTimeout(resolve, 2000))]));
+            await evaluateBrowserTask(page, () => Promise.race([document.fonts.ready, new Promise(resolve => setTimeout(resolve, 2000))]));
             record.hydrationWarnings = record.console.filter(entry => /hydrat|server html|server snapshot|#418|#423|#425/i.test(entry.text));
             if (entry.route.startsWith("/admin") || privateRoutes.has(entry.route)) {
               record.privateGate = true;

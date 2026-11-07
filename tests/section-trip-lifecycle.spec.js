@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 const { waitForHydrated } = require("./fixtures/react-hydration.cjs");
 
@@ -10,7 +11,9 @@ test("Back consumes the trip before Forward and another route", async ({ page, c
   const benefits = '[data-nav-surface="desktop"][data-nav-target="benefits"]';
   await waitForHydrated(page, benefits);
   const startLength = await page.evaluate(() => window.history.length);
-  await page.evaluate((selector) => new Promise((resolve) => {
+  await evaluateBrowserTask(
+    page,
+    (selector) => new Promise((resolve) => {
     const observer = new MutationObserver(() => {
       if (!document.querySelector("#services")) return;
       observer.disconnect();

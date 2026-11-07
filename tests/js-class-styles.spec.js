@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 
 const viewports = [
@@ -7,7 +8,7 @@ const viewports = [
 ];
 
 async function readHomeStyles(page) {
-  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+  await evaluateBrowserTask(page, () => document.fonts.ready.then(() => undefined));
   return page.evaluate(() => {
     const root = document.documentElement;
     const deferred = [...document.querySelectorAll(".deferred-section-content")]
@@ -48,7 +49,9 @@ function expectReadablePromises(promises, check = expect) {
 }
 
 function readDeferredHeights(page) {
-  return page.evaluate(async () => {
+  return evaluateBrowserTask(
+    page,
+    async () => {
     const sections = [...document.querySelectorAll(".deferred-section-content")];
     const reservedHeight = element => parseFloat(getComputedStyle(element).containIntrinsicHeight.replace("auto", ""));
     const reserved = sections.map(reservedHeight);
@@ -109,7 +112,7 @@ test.describe("Home styles with JavaScript", () => {
       await page.setViewportSize(viewport);
       await page.goto("/", { waitUntil: "networkidle" });
       await expect(page.locator("html.js")).toHaveCount(1);
-      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await evaluateBrowserTask(page, () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const styles = await readHomeStyles(page);
       expect(styles.scrollBehavior).toBe(styles.lowPerformance ? "auto" : "smooth");
       expect(styles.deferred.length).toBeGreaterThan(0);

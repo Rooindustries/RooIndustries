@@ -1,5 +1,8 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 const { navLink } = require("./fixtures/nav-link.cjs");
+const { clickAtHomeArrival } = require("./fixtures/home-arrival-click.cjs");
+const { clickAtRouteCommit: clickAtCommit } = require("./fixtures/route-commit-click.cjs");
 const { waitForHydrated, waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 
 const CPU_THROTTLE_RATE = Number(process.env.NAV_CPU_THROTTLE_RATE || 4);
@@ -137,7 +140,8 @@ const ON_PAGE = (hash, text = "") => ({ selector: `#main-content a[href="/${hash
 
 const clickInQuickSuccession = async (page, first, second, gapMs = 10) => {
   await waitForLinks(page, first);
-  return page.evaluate(
+  return evaluateBrowserTask(
+    page,
     ([firstLink, secondLink, gap]) =>
       new Promise((resolve, reject) => {
         const find = ({ selector, text }) =>
@@ -332,7 +336,8 @@ for (const { label, link, path } of [ROUTE_AFTER_SECTION[1], ROUTE_AFTER_SECTION
     await page.setViewportSize({ width: 1536, height: 960 });
     await openPage(page, "/reviews", "desktop");
     const startLength = await historyLength(page);
-    await page.evaluate(
+    await evaluateBrowserTask(
+      page,
       ([first, second]) =>
         new Promise((resolve, reject) => {
           const observer = new MutationObserver(() => {
@@ -359,32 +364,6 @@ for (const { label, link, path } of [ROUTE_AFTER_SECTION[1], ROUTE_AFTER_SECTION
     await expectPath(page, "/reviews", `${label} back`);
   });
 }
-
-const clickAtHomeArrival = async (page, first, second, painted = false) => {
-  await waitForLinks(page, { selector: first }, { selector: second });
-  return page.evaluate(
-    ({ first, second, painted }) => new Promise((resolve, reject) => {
-      const observer = new MutationObserver(() => {
-        if (!document.querySelector("#services")) return;
-        observer.disconnect();
-        clearTimeout(timeout);
-        const click = () => {
-          document.querySelector(second).click();
-          resolve();
-        };
-        if (painted) requestAnimationFrame(() => requestAnimationFrame(click));
-        else click();
-      });
-      const timeout = setTimeout(() => {
-        observer.disconnect();
-        reject(new Error("Missing Home arrival"));
-      }, 15000);
-      observer.observe(document.getElementById("main-content"), { childList: true, subtree: true });
-      document.querySelector(first).click();
-    }),
-    { first, second, painted }
-  );
-};
 
 test("a route link after Home is painted keeps the seen section in history", async ({ page }) => {
   await openPage(page, "/reviews", "desktop");
@@ -442,7 +421,8 @@ test("a route link clicked as the section lands leaves the page scrollable", asy
   await page.setViewportSize({ width: 1536, height: 960 });
   const name = "/reviews navbar Benefits, landed, then footer Privacy";
   await openPage(page, "/reviews", "desktop");
-  await page.evaluate(
+  await evaluateBrowserTask(
+    page,
     ([sectionSelector, routeSelector]) =>
       new Promise((resolve) => {
         document.querySelector(sectionSelector).click();
@@ -471,7 +451,8 @@ test("a route link clicked as the section lands leaves the page scrollable", asy
 
 const clickOnceSectionLands = async (page, sectionSelector, linkSelector, hash) => {
   await waitForLinks(page, { selector: sectionSelector }, { selector: linkSelector });
-  return page.evaluate(
+  return evaluateBrowserTask(
+    page,
     ([section, link, target]) =>
       new Promise((resolve) => {
         document.querySelector(section).click();
@@ -588,28 +569,8 @@ const MATRIX_LINKS = {
   Reviews: { selector: 'header a[href="/reviews"]', path: "/reviews", hash: "" },
 };
 
-const clickAtRouteCommit = async (page, first, second, path) => {
-  await waitForLinks(page, MATRIX_LINKS[first], MATRIX_LINKS[second]);
-  return page.evaluate(
-    ({ first, second, path }) => new Promise((resolve, reject) => {
-      const observer = new MutationObserver(() => {
-        if (!document.querySelector(`#main-content [data-route-key="${path}"]`)) return;
-        if (path === "/" && !document.querySelector("#services")) return;
-        observer.disconnect();
-        clearTimeout(timeout);
-        document.querySelector(second).click();
-        resolve();
-      });
-      const timeout = setTimeout(() => {
-        observer.disconnect();
-        reject(new Error(`Missing committed route ${path}`));
-      }, 15000);
-      observer.observe(document.getElementById("main-content"), { childList: true, subtree: true });
-      document.querySelector(first).click();
-    }),
-    { first: MATRIX_LINKS[first].selector, second: MATRIX_LINKS[second].selector, path }
-  );
-};
+const clickAtRouteCommit = (page, first, second, path) =>
+  clickAtCommit(page, MATRIX_LINKS[first].selector, MATRIX_LINKS[second].selector, path);
 
 const expectMatrixLanding = async (page, { path, hash }) => {
   if (hash) {
@@ -768,7 +729,7 @@ test("the navbar logo uses the committed homepage while the Tools route is pendi
   try {
     await page.locator(FOOTER("/tools").selector).click();
     await chunks.wait();
-    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    await evaluateBrowserTask(page, () => new Promise((resolve) => requestAnimationFrame(resolve)));
     await expect(page.locator("#services")).toBeVisible();
     await page.locator('header a[href="/"]').first().click();
     await expect.poll(() => readHomeTop(page), { timeout: 8000 }).toEqual({ path: "/", hash: "", y: 0 });
@@ -1050,7 +1011,8 @@ test.describe("reduced motion on a phone", () => {
       link,
       { timeout: 15000 }
     );
-    const samples = await page.evaluate(
+    const samples = await evaluateBrowserTask(
+      page,
       ({ selector, text, hash }) =>
         new Promise((resolve) => {
           const target = () => document.querySelector(hash);
@@ -1101,7 +1063,8 @@ const waitForButton = (page, { scope, text }) =>
 const sampleScrollAfterClick = async (page, button) => {
   await waitForRouteCommitted(page);
   await waitForButton(page, button);
-  return page.evaluate(
+  return evaluateBrowserTask(
+    page,
     ({ scope, text, from }) =>
       new Promise((resolve) => {
         const find = () =>
@@ -1342,7 +1305,9 @@ test.describe("navigation interleaving matrix follow-ups", () => {
       await dialog.getByRole("button", { name: "Close", exact: true }).click();
       await expect(dialog).toBeHidden();
       await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
-      await page.evaluate(() => new Promise(resolve => {
+      await evaluateBrowserTask(
+        page,
+        () => new Promise(resolve => {
         let frames = 0;
         const sample = () => ++frames === 60 ? resolve() : requestAnimationFrame(sample);
         requestAnimationFrame(sample);

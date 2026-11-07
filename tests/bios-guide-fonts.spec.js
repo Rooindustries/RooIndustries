@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 
 test.use({ javaScriptEnabled: true, serviceWorkers: "block" });
@@ -40,7 +41,9 @@ test("/BIOSGuide loads its fonts as cached woff2 files instead of embedding them
 
 test("every character on /BIOSGuide renders with the guide's own fonts", async ({ page }, testInfo) => {
   await page.goto("/BIOSGuide");
-  const faces = await page.evaluate(() => Promise.all([...document.fonts].map(async face => {
+  const faces = await evaluateBrowserTask(
+    page,
+    () => Promise.all([...document.fonts].map(async face => {
     await face.load().catch(() => {});
     return { family: face.family, weight: face.weight, status: face.status };
   })));

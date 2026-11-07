@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 const { fixturePort } = require("./fixtures/fixture-ports.cjs");
 const fs = require("node:fs/promises");
@@ -18,7 +19,9 @@ for (const [route, resource, heading] of [
   if (process.env.TOOLING_CLS_RESPONSE === "failed") {
     test(`${route} preserves the page shell when server content fails`, async ({ page }, testInfo) => {
       await page.goto("/contact");
-      const api = await page.evaluate(async (resource) => {
+      const api = await evaluateBrowserTask(
+        page,
+        async (resource) => {
         const response = await fetch(`/api/content/${resource}`);
         return { status: response.status, body: await response.json() };
       }, resource);
@@ -115,7 +118,7 @@ for (const [route, resource, heading] of [
     test(`${route} refreshes content when revisited after its server snapshot`, async ({ page }, testInfo) => {
       await page.goto(route);
       await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
-      const initial = await page.evaluate(async (resource) => (await fetch(`/api/content/${resource}`)).json(), resource);
+      const initial = await evaluateBrowserTask(page, async (resource) => (await fetch(`/api/content/${resource}`)).json(), resource);
       expect(initial.data.length).toBeGreaterThan(1);
       await page.evaluate(() => { window.__contentNavigationMarker = "same-document"; });
       await page.locator("footer").getByRole("link", { name: "About", exact: true }).click();
