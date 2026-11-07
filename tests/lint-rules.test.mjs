@@ -1240,6 +1240,26 @@ run("no-parent-ipc-disconnect", {
       errors: [{ messageId: "parent" }],
     },
     {
+      code: `child["disconnect"]();`,
+      errors: [{ messageId: "parent" }],
+    },
+    {
+      code: `const { child } = new Supervisor(); child.disconnect();`,
+      errors: [{ messageId: "parent" }],
+    },
+    {
+      code: `let child; ({ child } = new Runner()); child.disconnect();`,
+      errors: [{ messageId: "parent" }],
+    },
+    {
+      code: `await page.evaluate(fn, [child.disconnect()]);`,
+      errors: [{ messageId: "parent" }],
+    },
+    {
+      code: `await page.evaluate(stop(child.disconnect()));`,
+      errors: [{ messageId: "parent" }],
+    },
+    {
       code: `const evaluate = () => child.disconnect(); evaluate();`,
       errors: [{ messageId: "parent" }],
     },

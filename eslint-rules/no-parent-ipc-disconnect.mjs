@@ -1,8 +1,16 @@
 const pageRunners = new Set([
   "evaluate", "evaluateHandle", "evaluateAll", "waitForFunction", "addInitScript", "$eval", "$$eval",
 ]);
-const inPage = (node) => node.parent?.type === "CallExpression" && node.parent.arguments.includes(node) &&
+const pageCode = (node) => ["ArrowFunctionExpression", "FunctionExpression"].includes(node.type) &&
+  node.parent?.type === "CallExpression" && node.parent.arguments.includes(node) &&
   node.parent.callee.type === "MemberExpression" && pageRunners.has(node.parent.callee.property.name);
+const ownValue = ({ identifier }) => {
+  const { parent } = identifier;
+  if (parent.type === "VariableDeclarator" && parent.id === identifier) return parent.init;
+  const assigned = parent.type === "AssignmentExpression" && parent.operator === "=" && parent.left === identifier;
+  if (assigned) return parent.right;
+  return false;
+};
 const isEmpty = (node) => !node || (node.type === "Literal" && node.value === null) ||
   (node.type === "Identifier" && node.name === "undefined");
 
@@ -28,20 +36,19 @@ export default {
       if (node.type !== "Identifier") return false;
       const binding = variable(node);
       if (!binding) return false;
-      const values = [
-        ...binding.defs.map((definition) => definition.type === "Variable" ? definition.node.init : undefined),
-        ...binding.references.filter((reference) => reference.writeExpr).map((reference) => reference.writeExpr),
-      ].filter((value) => !isEmpty(value));
-      return binding.defs.every((definition) => definition.type === "Variable") && values.length > 0 &&
-        values.every((value) => value.type === "NewExpression");
+      const values = binding.references.filter((reference) => reference.isWrite()).map(ownValue);
+      if (values.includes(false) || !binding.defs.every((definition) => definition.type === "Variable")) return false;
+      const held = values.filter((value) => !isEmpty(value));
+      return held.length > 0 && held.every((value) => value.type === "NewExpression");
     };
     return {
       CallExpression(node) {
         const { callee } = node;
-        if (callee.type !== "MemberExpression" || callee.computed || callee.property.name !== "disconnect") return;
+        if (callee.type !== "MemberExpression") return;
+        if ((callee.computed ? callee.property.value : callee.property.name) !== "disconnect") return;
         if (callee.object.type === "Identifier" && callee.object.name === "process") return;
         if (callee.object.type === "Super" || node.arguments.length || constructed(callee.object)) return;
-        if (context.sourceCode.getAncestors(node).some(inPage)) return;
+        if (context.sourceCode.getAncestors(node).some(pageCode)) return;
         context.report({ node, messageId: "parent" });
       },
     };
