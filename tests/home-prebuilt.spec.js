@@ -1,3 +1,4 @@
+const { waitForRouteCommitted: hydrated } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const { fixturePort } = require("./fixtures/fixture-ports.cjs");
 const fs = require("node:fs/promises");
@@ -16,7 +17,6 @@ const watchConsole = (page) => {
   return messages;
 };
 
-const hydrated = (page) => page.waitForFunction(() => window.history.state?.__rooLegacy === true);
 
 const record = async (testInfo, name, value) => {
   const artifact = testInfo.outputPath(`${name}.json`);

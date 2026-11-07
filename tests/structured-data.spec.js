@@ -1,3 +1,4 @@
+const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs");
 
@@ -156,7 +157,7 @@ test.describe("home structured data during in-app navigation", () => {
     };
 
     await page.goto("/");
-    await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+    await waitForRouteCommitted(page);
     const home = await snapshot();
     expect(home.ratings).toHaveLength(1);
     expect(home.services).toHaveLength(1);

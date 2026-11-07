@@ -32,6 +32,9 @@ const ActiveHomeSectionContext = createContext("");
 const tripDocumentKey = Math.random().toString(36).slice(2);
 let nextTripKey = 0;
 
+export const ownsTripEntry = (entry) =>
+  typeof entry?.key === "string" && entry.key.startsWith(`section-${tripDocumentKey}-`);
+
 const getHeaderOffsetPx = () => getCssHeaderOffsetPx(110);
 
 const isPlainPrimaryClick = (event, link = event.currentTarget) =>
@@ -115,7 +118,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
     const trip = tripRef.current;
     if (trip && superseded) trip.superseded = true;
     else tripRef.current = null;
-    if (trip && typeof window.history.state?.[SECTION_TRIP_ENTRY]?.key === "string") {
+    if (trip && ownsTripEntry(window.history.state?.[SECTION_TRIP_ENTRY])) {
       const state = superseded
         ? { ...window.history.state, [SECTION_TRIP_ENTRY]: { key: trip.key, superseded } }
         : window.history.state;
@@ -132,7 +135,8 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   const supersedePendingNavigation = useCallback((hash = "") => {
     const committedLocation = locationRef.current;
     cancelSectionNavigation(true);
-    const abandonedTrip = tripRef.current || window.history.state?.[SECTION_TRIP_ENTRY];
+    const entry = window.history.state?.[SECTION_TRIP_ENTRY];
+    const abandonedTrip = tripRef.current || (ownsTripEntry(entry) ? entry : null);
     const winningState = withoutSupersededSectionTrip(committedLocation.state, abandonedTrip);
     navigate(
       { pathname: committedLocation.pathname, search: committedLocation.search, hash },
@@ -190,7 +194,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
           replaceBrowserUrl(nextHref);
         } else {
           const entry = window.history.state?.[SECTION_TRIP_ENTRY];
-          const updateHistory = typeof entry?.key === "string" && entry.superseded ? "replaceState" : "pushState";
+          const updateHistory = ownsTripEntry(entry) && entry.superseded ? "replaceState" : "pushState";
           window.history[updateHistory]({ ...window.history.state, [SECTION_TRIP_ENTRY]: { key } }, "", nextHref);
         }
       }
@@ -233,7 +237,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
 
   useEffect(() => {
     const trip = tripRef.current;
-    if (!trip?.superseded || routeLocation.key === trip.fromKey) return;
+    if (!trip?.superseded) return;
     const abandonedArrival = isSupersededSectionTrip(routeLocation.state, trip);
     queueMicrotask(() => {
       if (tripRef.current !== trip || (abandonedArrival && pendingRouteRef.current)) return;
@@ -302,7 +306,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       const link = tripRef.current?.superseded && plainLink(event);
       if (!link) return;
       const tripEntryPushed = window.history.state?.[SECTION_TRIP_ENTRY];
-      if (typeof tripEntryPushed?.key === "string" && !link.getAttribute("href").startsWith("#")) {
+      if (ownsTripEntry(tripEntryPushed) && !link.getAttribute("href").startsWith("#")) {
         event.preventDefault();
         window.location.replace(link.href);
       }

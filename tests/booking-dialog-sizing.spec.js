@@ -1,3 +1,4 @@
+const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
@@ -476,7 +477,7 @@ for (const [from, to] of [["phone", "desktop"], ["desktop", "phone"]]) {
 
 const openFrom = (route, link) => async page => {
   await page.goto(route);
-  await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+  await waitForRouteCommitted(page);
   await page.evaluate(() => document.fonts.ready);
   await page.evaluate(sampleFrames);
   await link(page).click();

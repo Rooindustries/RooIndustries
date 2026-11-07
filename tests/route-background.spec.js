@@ -1,3 +1,4 @@
+const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
@@ -72,7 +73,7 @@ for (const [background, heading] of [["/reviews", "Community Reviews"], ["/bench
 for (const origin of ["/packages", "/reviews"]) {
   test(`${origin} entry opens booking and restores its background on history navigation`, async ({ page }, testInfo) => {
     await page.goto(origin);
-    await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+    await waitForRouteCommitted(page);
     await page.evaluate(() => { window.__flowDocument = true; });
     if (origin === "/reviews") {
       await page.getByRole("button", { name: "Open menu", exact: true }).click();
@@ -151,7 +152,7 @@ test("a home section link in View My Plan closes booking and adds its section en
     await route.fulfill({ response, json: { ...body, data } });
   });
   await page.goto("/");
-  await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+  await waitForRouteCommitted(page);
   await page.locator('#packages a[href="/booking"]').first().click();
   const dialog = page.getByRole("dialog", { name: "Schedule your session", exact: true });
   await expect(dialog).toBeVisible();

@@ -2,6 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 const { chromium } = require("playwright");
+const { waitForRouteCommitted } = require("../tests/fixtures/react-hydration.cjs");
 
 let BASE_URL = process.env.BASE_URL;
 if (!BASE_URL) {
@@ -52,14 +53,7 @@ async function run() {
       waitUntil: "domcontentloaded",
       timeout: 45000,
     });
-    await page.waitForFunction(
-      () =>
-        window.history.state?.__rooLegacy === true &&
-        document.body.innerText.trim() !== "Loading..." &&
-        document.querySelector("main")?.innerText.trim() !== "Loading...",
-      null,
-      { timeout: 15000 }
-    );
+    await waitForRouteCommitted(page, { timeout: 15000 });
     const finalUrl = page.url();
     const status = response?.status() ?? 0;
     const title = await page.title();

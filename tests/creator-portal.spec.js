@@ -1,3 +1,4 @@
+const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -92,7 +93,7 @@ async function openForm(page, pathname, effectPath) {
   const response = await ready;
   expect(response.status()).toBe(200);
   await response.finished();
-  await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+  await waitForRouteCommitted(page);
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 async function expectRegistrationFields(page, email, code) {
@@ -1173,7 +1174,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.unroute('**/api/ref/updateSplit');
 
       await page.goto('/referrals/forgot');
-      await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+      await waitForRouteCommitted(page);
       const email = page.getByLabel('Creator Email', { exact: true });
       await email.fill('creator@fixture.invalid');
       await page.route('**/api/ref/forgot', route => route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic forgot outage.' } }));
@@ -1307,7 +1308,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         () => page.getByLabel('Discord Username', { exact: true }).fill('edited-user'), 'registration');
 
       await page.goto('/referrals/forgot');
-      await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+      await waitForRouteCommitted(page);
       const email = page.getByLabel('Creator Email', { exact: true });
       await email.fill('creator@fixture.invalid');
       await failAfterEdit('/api/ref/forgot', 'Synthetic earlier forgot failure.', 'Send Reset Link',

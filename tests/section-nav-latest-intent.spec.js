@@ -234,7 +234,8 @@ const clickWhileTripInFlight = (page, first, second) =>
   );
 
 for (const thirdClick of [false, true]) {
-  test(`an abandoned Home commit stays inert with delayed FAQ and third Tools click ${thirdClick}`, async ({ page }) => {
+  const title = `an abandoned Home commit stays inert with delayed FAQ and third Tools click ${thirdClick}`;
+  test(title, async ({ page }) => {
     await openPage(page, "/reviews", "desktop");
     const startLength = await historyLength(page);
     await clickSettledSection(page, "benefits", "desktop");
@@ -492,6 +493,63 @@ const holdRouteChunks = async (page, shouldHold = () => true) => {
     },
   };
 };
+
+for (const [label, selector, path, hash] of [
+  ["navbar FAQ", NAVBAR("faq").selector, "/", "#faq"],
+  ["footer FAQ page", FOOTER("/faq").selector, "/faq", ""],
+]) {
+  test(`the winning Tools commit consumes its marker before ${label}`, async ({ page }) => {
+    await openPage(page, "/reviews", "desktop");
+    const startLength = await historyLength(page);
+    const markerSample = page.waitForEvent("console", {
+      predicate: message => message.text().startsWith("TOOLS_COMMIT_MARKER "),
+    });
+    await page.evaluate(selector => {
+      let toolsClicked = false;
+      const observer = new MutationObserver(() => {
+        if (document.querySelector('#main-content [data-route-key="/tools"]')) {
+          observer.disconnect();
+          console.log("TOOLS_COMMIT_MARKER " + JSON.stringify(history.state.__rooSectionTrip || null));
+          document.querySelector(selector).click();
+        } else if (!toolsClicked && document.querySelector("#services")) {
+          toolsClicked = true;
+          document.querySelector('footer a[href="/tools"]').click();
+        }
+      });
+      observer.observe(document.getElementById("main-content"), { childList: true, subtree: true });
+      document.querySelector('[data-nav-surface="desktop"][data-nav-target="benefits"]').click();
+    }, selector);
+    const marker = JSON.parse((await markerSample).text().slice("TOOLS_COMMIT_MARKER ".length));
+    if (path === "/faq") await expectOnRoute(page, path, label);
+    else await expectMatrixLanding(page, { path, hash });
+    expect(await historyLength(page)).toBe(startLength + 2);
+    await page.goBack();
+    await expectPath(page, "/tools", `${label} returns to the winning Tools entry`);
+    expect(marker).toBeNull();
+  });
+}
+
+test("reloading a pending section trip leaves Home in the Back chain after Tools", async ({ page }) => {
+  await openPage(page, "/reviews", "desktop");
+  const startLength = await historyLength(page);
+  const chunks = await holdRouteChunks(page);
+  try {
+    await page.locator(NAVBAR("benefits").selector).evaluate(link => link.click());
+    await chunks.wait();
+    await page.reload({ waitUntil: "commit" });
+  } finally {
+    await chunks.release();
+  }
+  await waitForHydrated(page, NAVBAR("benefits").selector);
+  await expectMatrixLanding(page, { path: "/", hash: "#services" });
+  await page.locator(FOOTER("/tools").selector).evaluate(link => link.click());
+  await expectMatrixLanding(page, { path: "/tools", hash: "" });
+  expect(await historyLength(page)).toBe(startLength + 2);
+  await page.goBack();
+  await expectMatrixLanding(page, { path: "/", hash: "#services" });
+  await page.goBack();
+  await expectPath(page, "/reviews", "Back returns past the reloaded Home entry");
+});
 
 const MATRIX_LINKS = {
   Benefits: { ...NAVBAR("benefits"), path: "/", hash: SECTIONS.benefits },

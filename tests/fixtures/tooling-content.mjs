@@ -67,16 +67,13 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
     document('faqSection', {
       questions: [
         ...content('faq-questions'),
-        {
-          _key: 'tooling-upgrade-path',
-          question: 'What is the future upgrade path?',
-          answer: 'Synthetic upgrade path details for local navigation tests.',
-        },
         ...Array.from({ length: 12 }, (_, index) => ({
           _key: `tooling-question-${index}`,
           question: `Synthetic local question ${index + 1}`,
-          answer: `This synthetic answer verifies that question ${index + 1} appears in the server-rendered FAQ ` +
-            "without requiring a browser content request.",
+          answer: index === 11
+            ? 'Synthetic upgrade path details for local navigation tests.'
+            : `This synthetic answer verifies that question ${index + 1} appears in the server-rendered FAQ ` +
+              "without requiring a browser content request.",
         })),
       ],
     }, 'faq'),

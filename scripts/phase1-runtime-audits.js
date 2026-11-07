@@ -4,6 +4,7 @@ const path = require("path");
 const { execSync } = require("child_process");
 const { parseArgs } = require("node:util");
 const { chromium, firefox, webkit } = require("playwright");
+const { waitForRouteCommitted } = require("../tests/fixtures/react-hydration.cjs");
 
 let BASE_URL = process.env.BASE_URL;
 if (!BASE_URL) {
@@ -520,14 +521,7 @@ const businessSmoke = async () => {
   await referralPage.goto(`${BASE_URL}/referrals/login`, {
     waitUntil: "domcontentloaded",
   });
-  await referralPage.waitForFunction(
-    () =>
-      window.history.state?.__rooLegacy === true &&
-      document.body.innerText.trim() !== "Loading..." &&
-      document.querySelector("main")?.innerText.trim() !== "Loading...",
-    null,
-    { timeout: 15000 }
-  );
+  await waitForRouteCommitted(referralPage, { timeout: 15000 });
   checks.push({
     check: "referral_login_renders",
     pass: (await referralPage.locator("text=Referral").count()) >= 1,

@@ -1,3 +1,4 @@
+const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require("@playwright/test");
 
 test.use({ javaScriptEnabled: true });
@@ -175,7 +176,7 @@ test("phone menu marks the current page", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   for (const [route, item] of [["/meet-the-team", "Meet the Team"], ["/packages", "Packages"]]) {
     await page.goto(route);
-    await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+    await waitForRouteCommitted(page);
     const toggle = page.getByRole("button", { name: "Open menu", exact: true });
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");

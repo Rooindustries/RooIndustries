@@ -1,3 +1,4 @@
+const { waitForRouteCommitted: hydrated } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs/promises");
 const path = require("node:path");
@@ -11,7 +12,6 @@ test.beforeEach(async ({ context, baseURL }) => {
   await guardBrowserContext(context, [baseURL]);
 });
 
-const hydrated = page => page.waitForFunction(() => window.history.state?.__rooLegacy === true);
 
 const watchConsole = page => {
   const messages = [];

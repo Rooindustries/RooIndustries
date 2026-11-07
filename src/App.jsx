@@ -33,7 +33,7 @@ import { migrateCheckoutStorageToSession } from "./lib/checkoutStorage";
 import { getPublicContent, getPublicContentPendingCount } from "./lib/publicContentClient";
 import { useBookingDialogPending } from "./lib/bookingDialogHold";
 import { setVisibleTimeout } from "./lib/visibleTimeout";
-import { SectionNavigationProvider } from "./lib/sectionNavigator";
+import { ownsTripEntry, SectionNavigationProvider } from "./lib/sectionNavigator";
 import { useIsomorphicLayoutEffect } from "./lib/useIsomorphicLayoutEffect";
 
 const Home = lazy(() => import("./legacyPages/Home"));
@@ -466,6 +466,7 @@ export function AppContent({
     if (routeShell !== "memory") return;
     const restoreBrowserEntry = (event) => {
       if (!event.state?.__rooLegacy) return;
+      const marker = event.state[SECTION_TRIP_ENTRY];
       navigate(
         `${window.location.pathname}${sanitizeBrowserSearch(
           window.location.pathname,
@@ -473,7 +474,7 @@ export function AppContent({
         )}${window.location.hash}`,
         {
           replace: true,
-          state: withoutSupersededSectionTrip(event.state.usr || null, event.state[SECTION_TRIP_ENTRY]),
+          state: withoutSupersededSectionTrip(event.state.usr || null, ownsTripEntry(marker) ? marker : null),
         }
       );
     };
@@ -502,10 +503,11 @@ export function AppContent({
       const initial = !historyInitializedRef.current;
       historyInitializedRef.current = true;
       const { [SECTION_TRIP_ENTRY]: tripEntry, ...browserState } = window.history.state || {};
-      const unlandedTripEntry = typeof tripEntry?.key === "string" ? tripEntry : null;
+      const unlandedTripEntry = ownsTripEntry(tripEntry) ? tripEntry : null;
+      const ownArrival = unlandedTripEntry && location.state?.sectionTrip === unlandedTripEntry.key;
       const state = {
         ...browserState,
-        ...(unlandedTripEntry
+        ...(ownArrival
           ? { [SECTION_TRIP_ENTRY]: unlandedTripEntry }
           : {}),
         // Retain Next's router tree and any checkout state on first hydration.
