@@ -2358,6 +2358,11 @@ export default function BookingForm() {
 
     const finalReferralCode = String(appliedReferral?.code || "").trim();
     const finalCouponCode = String(appliedCoupon?.code || "").trim();
+    const checkoutCodes = {
+      referral: sanitizeReferralForCheckout(appliedReferral),
+      coupon: sanitizeCouponForCheckout(appliedCoupon),
+      dismissedReferralCode,
+    };
 
     const payload = {
       salesAttribution: captureSalesAttribution(),
@@ -2386,17 +2391,15 @@ export default function BookingForm() {
 
       ...(finalReferralCode ? { referralCode: finalReferralCode } : {}),
       ...(finalCouponCode ? { couponCode: finalCouponCode } : {}),
+      checkoutCodes,
     };
 
     try {
       persistDraft({
         form: { ...form },
         selectedPackage: { ...selectedPackage },
-        checkoutCodes: {
-          referral: sanitizeReferralForCheckout(appliedReferral),
-          coupon: sanitizeCouponForCheckout(appliedCoupon),
-          dismissedReferralCode,
-        },
+        startTimeUTC: selectedSlot.utcStart.toISOString(),
+        checkoutCodes,
       });
     } catch {
       console.error("Failed to persist booking draft");
