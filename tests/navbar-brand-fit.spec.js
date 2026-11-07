@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 const { waitForHydrated } = require("./fixtures/react-hydration.cjs");
 const { navLink } = require("./fixtures/nav-link.cjs");
@@ -14,7 +15,7 @@ async function openPage(page, path, viewport) {
   await page.setViewportSize(viewport);
   await page.goto(path, { waitUntil: "networkidle" });
   await waitForHydrated(page, BRAND_LINK);
-  await page.evaluate(() => document.fonts.ready);
+  await evaluateBrowserTask(page, () => document.fonts.ready);
 }
 
 async function measureTopBar(page) {

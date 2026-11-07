@@ -1,9 +1,9 @@
+const { waitForRouteCommitted: hydrated } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
 const missingPath = "/does-not-exist-probe";
 const campaignPath = `${missingPath}?utm_source=x`;
-const hydrated = (page) => page.waitForFunction(() => window.history.state?.__rooLegacy === true);
 const address = (page) => page.evaluate(() => `${window.location.pathname}${window.location.search}${window.location.hash}`);
 
 test.use({ javaScriptEnabled: true, reducedMotion: "reduce", actionTimeout: 10000, navigationTimeout: 20000, trace: "off", video: "off" });

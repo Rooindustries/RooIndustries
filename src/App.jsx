@@ -24,6 +24,7 @@ import {
   isHomeSectionHash,
   normalizeSectionHash,
   SECTION_TRIP_ENTRY,
+  withoutSupersededSectionTrip,
 } from "./lib/sectionNavigation";
 import { sanitizeBrowserSearch } from "./lib/browserSearch";
 import { prefetchHomeSectionData } from "./lib/homeSectionData";
@@ -32,7 +33,8 @@ import { migrateCheckoutStorageToSession } from "./lib/checkoutStorage";
 import { getPublicContent, getPublicContentPendingCount } from "./lib/publicContentClient";
 import { useBookingDialogPending } from "./lib/bookingDialogHold";
 import { setVisibleTimeout } from "./lib/visibleTimeout";
-import { SectionNavigationProvider } from "./lib/sectionNavigator";
+import { ownsTripEntry, SectionNavigationProvider } from "./lib/sectionNavigator";
+import { useIsomorphicLayoutEffect } from "./lib/useIsomorphicLayoutEffect";
 
 const Home = lazy(() => import("./legacyPages/Home"));
 const AboutPage = lazy(() => import("./legacyPages/About"));
@@ -464,19 +466,23 @@ export function AppContent({
     if (routeShell !== "memory") return;
     const restoreBrowserEntry = (event) => {
       if (!event.state?.__rooLegacy) return;
+      const marker = event.state[SECTION_TRIP_ENTRY];
       navigate(
         `${window.location.pathname}${sanitizeBrowserSearch(
           window.location.pathname,
           window.location.search
         )}${window.location.hash}`,
-        { replace: true, state: event.state.usr || null }
+        {
+          replace: true,
+          state: withoutSupersededSectionTrip(event.state.usr || null, ownsTripEntry(marker) ? marker : null),
+        }
       );
     };
     window.addEventListener("popstate", restoreBrowserEntry);
     return () => window.removeEventListener("popstate", restoreBrowserEntry);
   }, [navigate, routeShell]);
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     const rawHash = location.hash || (
       window.location.pathname === location.pathname ? window.location.hash : ""
     );
@@ -496,11 +502,16 @@ export function AppContent({
     if (routeShell === "memory") {
       const initial = !historyInitializedRef.current;
       historyInitializedRef.current = true;
-      const { [SECTION_TRIP_ENTRY]: unlandedTripEntry, ...browserState } = window.history.state || {};
+      const { [SECTION_TRIP_ENTRY]: tripEntry, ...browserState } = window.history.state || {};
+      const unlandedTripEntry = ownsTripEntry(tripEntry) ? tripEntry : null;
+      const ownArrival = unlandedTripEntry && location.state?.sectionTrip === unlandedTripEntry.key;
       const state = {
         ...browserState,
+        ...(ownArrival
+          ? { [SECTION_TRIP_ENTRY]: unlandedTripEntry }
+          : {}),
         // Retain Next's router tree and any checkout state on first hydration.
-        usr: initial ? browserState.usr ?? null : location.state,
+        usr: initial ? browserState.usr ?? null : withoutSupersededSectionTrip(location.state, unlandedTripEntry),
         __rooLegacy: true,
       };
       // Navbar section links may already have pushed their browser entry.

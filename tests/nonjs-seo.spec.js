@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 
 const routes = [
@@ -124,7 +125,9 @@ test.describe("Non-JS crawlability", () => {
         expect(printed).toBe("1");
         expect(await card.evaluate(element => getComputedStyle(element).opacity)).toBe(offscreen);
         await expect(card).toHaveAttribute("data-reveal-wait", "");
-        const animations = await card.evaluate(element => new Promise(resolve => {
+        const animations = await evaluateBrowserTask(
+          card,
+          element => new Promise(resolve => {
           const observer = new MutationObserver(() => {
             if (element.hasAttribute("data-reveal-wait")) return;
             observer.disconnect();
@@ -172,7 +175,9 @@ test.describe("Non-JS crawlability", () => {
       const above = await card.evaluate(element => element.getBoundingClientRect().bottom);
       expect(above).toBeLessThanOrEqual(0);
       await expect(card).toHaveAttribute("data-reveal-wait", "");
-      const animations = await card.evaluate(element => new Promise(resolve => {
+      const animations = await evaluateBrowserTask(
+        card,
+        element => new Promise(resolve => {
         const observer = new MutationObserver(() => {
           if (element.hasAttribute("data-reveal-wait")) return;
           observer.disconnect();

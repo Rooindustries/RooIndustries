@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -12,7 +13,9 @@ test.use({ javaScriptEnabled: true, trace: "off", video: "off", screenshot: "off
 test.describe.configure({ retries: 0 });
 
 async function measureHeading(page) {
-  await page.evaluate(async () => {
+  await evaluateBrowserTask(
+    page,
+    async () => {
     await document.fonts.ready;
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   });

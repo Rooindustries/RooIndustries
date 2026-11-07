@@ -1,3 +1,4 @@
+const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
@@ -72,7 +73,7 @@ for (const [background, heading] of [["/reviews", "Community Reviews"], ["/bench
 for (const origin of ["/packages", "/reviews"]) {
   test(`${origin} entry opens booking and restores its background on history navigation`, async ({ page }, testInfo) => {
     await page.goto(origin);
-    await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+    await waitForRouteCommitted(page);
     await page.evaluate(() => { window.__flowDocument = true; });
     if (origin === "/reviews") {
       await page.getByRole("button", { name: "Open menu", exact: true }).click();
@@ -139,4 +140,33 @@ test.describe("payment step", () => {
     await expect(other).toHaveURL(url => url.pathname === "/");
     await expect.poll(() => other.evaluate(() => JSON.parse(sessionStorage.getItem("flow_background_location")).pathname)).toBe("/");
   });
+});
+
+
+test("a home section link in View My Plan closes booking and adds its section entry", async ({ page }) => {
+  await page.route("**/api/content/package*", async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    const addUpgrade = pkg => ({ ...pkg, features: ["Future Upgrade Path"] });
+    const data = Array.isArray(body.data) ? body.data.map(addUpgrade) : addUpgrade(body.data);
+    await route.fulfill({ response, json: { ...body, data } });
+  });
+  await page.goto("/");
+  await waitForRouteCommitted(page);
+  await page.locator('#packages a[href="/booking"]').first().click();
+  const dialog = page.getByRole("dialog", { name: "Schedule your session", exact: true });
+  await expect(dialog).toBeVisible();
+  const startLength = await page.evaluate(() => window.history.length);
+  await dialog.getByRole("button", { name: "View My Plan", exact: true }).click();
+  await page.getByRole("link", { name: "Future Upgrade Path", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page).toHaveURL(/\/#upgrade-path$/);
+  await expect.poll(() => page.locator("#upgrade-path").evaluate(element =>
+    Math.abs(element.getBoundingClientRect().top)
+  )).toBeLessThanOrEqual(160);
+  expect(await page.evaluate(() => window.history.length)).toBe(startLength + 1);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/booking$/);
+  await expect(dialog).toBeVisible();
+  await expect(page.locator("#services")).toBeAttached();
 });

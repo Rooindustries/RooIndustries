@@ -1,3 +1,5 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
+const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
@@ -40,7 +42,7 @@ async function save(page, testInfo, name, value) {
 
 async function ready(page) {
   await expect(page.locator(dialogSelector).first()).toBeVisible();
-  await page.evaluate(() => document.fonts.ready);
+  await evaluateBrowserTask(page, () => document.fonts.ready);
   await page.waitForTimeout(450);
 }
 
@@ -462,7 +464,7 @@ for (const [from, to] of [["phone", "desktop"], ["desktop", "phone"]]) {
         const dialog = page.locator(dialogSelector).first();
         await expect(dialog).toBeVisible();
         await expect(dialog).not.toHaveClass(/invisible/);
-        await page.evaluate(() => document.fonts.ready);
+        await evaluateBrowserTask(page, () => document.fonts.ready);
         await page.evaluate(sampleFrames);
         await page.setViewportSize(sizes[to]);
         await expect.poll(() => page.evaluate(width => window.__resizeFrames.filter(entry => entry.width === width).length, sizes[to].width)).toBeGreaterThanOrEqual(30);
@@ -476,8 +478,8 @@ for (const [from, to] of [["phone", "desktop"], ["desktop", "phone"]]) {
 
 const openFrom = (route, link) => async page => {
   await page.goto(route);
-  await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
-  await page.evaluate(() => document.fonts.ready);
+  await waitForRouteCommitted(page);
+  await evaluateBrowserTask(page, () => document.fonts.ready);
   await page.evaluate(sampleFrames);
   await link(page).click();
 };

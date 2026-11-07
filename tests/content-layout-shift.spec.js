@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 const { fixturePort } = require("./fixtures/fixture-ports.cjs");
 const fs = require("node:fs/promises");
@@ -67,7 +68,7 @@ for (const [route, resource, heading] of [
         expect(response.status()).toBe(200);
         await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
         await expect(page.locator("#main-content section [aria-hidden='true']")).toHaveCount(0);
-        await page.evaluate(() => document.fonts.ready.then(() => {}));
+        await evaluateBrowserTask(page, () => document.fonts.ready.then(() => {}));
         await page.waitForTimeout(4000);
         const measurement = await page.evaluate(() => ({
           supported: window.__layoutShiftSupported,

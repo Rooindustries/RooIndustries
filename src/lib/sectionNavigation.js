@@ -15,6 +15,15 @@ export const PENDING_SECTION_KEY = "roo_pending_section";
 export const ROUTE_TRANSITION_KEY = "roo_route_transition";
 export const SECTION_TRIP_ENTRY = "__rooSectionTrip";
 
+export const isSupersededSectionTrip = (state, trip) =>
+  typeof trip?.key === "string" && Boolean(trip.superseded) && state?.sectionTrip === trip.key;
+
+export const withoutSupersededSectionTrip = (state, trip) => {
+  if (!isSupersededSectionTrip(state, trip)) return state;
+  const { sectionTrip, ...winningState } = state;
+  return winningState;
+};
+
 export const normalizeSectionHash = (hash = "") => {
   const raw = String(hash || "").trim();
   if (!raw) return "";

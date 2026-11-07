@@ -1,3 +1,4 @@
+const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require("@playwright/test");
 const { fixturePort } = require("./fixtures/fixture-ports.cjs");
 const fs = require("node:fs/promises");
@@ -27,7 +28,7 @@ for (const route of ["/reviews", "/tools", "/packages", "/about"]) {
       pending.push(response.body().then(body => scripts.push({ url: response.url(), body })).catch(() => {}));
     });
     await page.goto(route);
-    await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+    await waitForRouteCommitted(page);
     await page.waitForTimeout(700);
     await Promise.all(pending);
     await attach(testInfo, "initial-page-scripts", scripts.map(({ url, body }) => ({ url, rawBytes: body.length, gzipBytes: gzipSync(body).length })));
@@ -81,7 +82,7 @@ for (const origin of routes) {
       if (message.type() === "error" && /hydration|didn't match|server rendered/i.test(message.text())) errors.push(message.text());
     });
     await page.goto(origin);
-    await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+    await waitForRouteCommitted(page);
     await expectPage(page, origin);
     await page.evaluate(() => { window.__routeEntryDocument = true; });
     const transitions = [];
@@ -109,7 +110,7 @@ for (const origin of routes) {
 
 test("a delayed home chunk preserves the current page until navigation is ready", async ({ page }, testInfo) => {
   await page.goto("/about");
-  await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+  await waitForRouteCommitted(page);
   let release;
   const gate = new Promise(resolve => { release = resolve; });
   const delayed = [];
@@ -138,7 +139,7 @@ test("a delayed home chunk preserves the current page until navigation is ready"
 
 test("package details load on first keyboard open and restore focus on close", async ({ page }, testInfo) => {
   await page.goto("/packages");
-  await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+  await waitForRouteCommitted(page);
   const button = page.locator(".ri-package-details-button").first();
   await button.focus();
   await page.keyboard.press("Enter");
@@ -151,7 +152,7 @@ test("package details load on first keyboard open and restore focus on close", a
 
 test("same-page hash history preserves an expanded FAQ answer", async ({ page }, testInfo) => {
   await page.goto("/#faq");
-  await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+  await waitForRouteCommitted(page);
   const question = page.locator('#faq button[aria-expanded]').first();
   await expect(question).toBeVisible();
   await question.click();
@@ -166,7 +167,7 @@ test("same-page hash history preserves an expanded FAQ answer", async ({ page },
 
 test("a failed home import cannot replace a newer tools navigation", async ({ page }, testInfo) => {
   await page.goto("/about");
-  await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+  await waitForRouteCommitted(page);
   let release;
   const gate = new Promise(resolve => { release = resolve; });
   let intercepted = 0;

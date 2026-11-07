@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 const { fixturePort } = require("./fixtures/fixture-ports.cjs");
 const fs = require("node:fs/promises");
@@ -1686,7 +1687,9 @@ test("create receipts bind a read-only lookup to the original validated request"
   expect((await request.get(`/api/admin/content/publish?type=${command.type}&createIntentId=${command.createIntentId}`, { headers: { "x-admin-key": ADMIN_KEY } })).status()).toBe(405);
   expect((await request.post(path, { data: command })).status()).toBe(401);
   await login(page);
-  const otherActor = await page.evaluate(async ({ path, command }) => {
+  const otherActor = await evaluateBrowserTask(
+    page,
+    async ({ path, command }) => {
     const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(command) });
     return { status: response.status, body: await response.json() };
   }, { path, command });

@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs");
 
@@ -31,7 +32,7 @@ const watchLayout = async (context) => context.addInitScript(() => {
 });
 
 const settle = async (page) => {
-  await page.evaluate(() => document.fonts.ready);
+  await evaluateBrowserTask(page, () => document.fonts.ready);
   await page.waitForTimeout(700);
 };
 

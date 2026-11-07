@@ -15,6 +15,7 @@ import noLowContrastText from "./no-low-contrast-text.mjs";
 import noNestedComponents from "./no-nested-components.mjs";
 import noParentIpcDisconnect from "./no-parent-ipc-disconnect.mjs";
 import noScriptingMediaQuery from "./no-scripting-media-query.mjs";
+import noSecureContextNavigationKeys from "./no-secure-context-navigation-keys.mjs";
 import noUncheckedGroupSignal from "./no-unchecked-group-signal.mjs";
 import noUnfilteredRequestError from "./no-unfiltered-request-error.mjs";
 import noUnguardedTimerNavigation from "./no-unguarded-timer-navigation.mjs";
@@ -39,6 +40,7 @@ export const rules = {
   "no-nested-components": noNestedComponents,
   "no-parent-ipc-disconnect": noParentIpcDisconnect,
   "no-scripting-media-query": noScriptingMediaQuery,
+  "no-secure-context-navigation-keys": noSecureContextNavigationKeys,
   "no-unchecked-group-signal": noUncheckedGroupSignal,
   "no-unfiltered-request-error": noUnfilteredRequestError,
   "no-unguarded-timer-navigation": noUnguardedTimerNavigation,

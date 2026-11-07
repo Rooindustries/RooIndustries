@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 
 test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata" });
@@ -187,7 +188,7 @@ test("a PayPal order created after another method started checkout is refused", 
   await page.getByRole("button", { name: "Pay your way", exact: true }).click();
   await expect.poll(() => starts.length).toBe(1);
 
-  const created = await page.evaluate(() => window.__paypalCreateOrder().then(() => "created", error => String(error?.message || error)));
+  const created = await evaluateBrowserTask(page, () => window.__paypalCreateOrder().then(() => "created", error => String(error?.message || error)));
   expect(created).toContain("Another payment method is still starting");
   expect(starts).toHaveLength(1);
 

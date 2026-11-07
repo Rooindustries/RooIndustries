@@ -1,3 +1,5 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
+const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
@@ -247,7 +249,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await settledDialogLayout(page, testInfo, "slow-availability");
       await testInfo.attach("dialog-shown", { body: JSON.stringify(shown), contentType: "application/json" });
       await page.goto("/");
-      await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+      await waitForRouteCommitted(page);
       await page.locator('a[href="/booking"]').first().click();
       await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
       await settledDialogLayout(page, testInfo, "slow-availability-click-open");
@@ -290,7 +292,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       flow.state.failures["/api/bookingAvailability"] = "timeout";
       await page.goto("/booking");
       await page.waitForFunction(() => window.__bookingDialogLayout.mountedAt !== null);
-      const tabHiddenAt = await page.evaluate(() => new Promise(resolve => {
+      const tabHiddenAt = await evaluateBrowserTask(
+        page,
+        () => new Promise(resolve => {
         const wait = window.__bookingDialogLayout.mountedAt + 500 - performance.now();
         setTimeout(() => resolve(window.__setTabVisibility("hidden")), Math.max(0, wait));
       }));
@@ -377,7 +381,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
 
     test("opening booking from the home page still animates the dialog open", async ({ page, flow }, testInfo) => {
       await page.goto("/");
-      await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+      await waitForRouteCommitted(page);
       await page.locator('a[href="/booking"]').first().click();
       await expect(page).toHaveURL(/\/booking$/);
       await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();

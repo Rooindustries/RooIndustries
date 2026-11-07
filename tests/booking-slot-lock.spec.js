@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
@@ -51,7 +52,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           await expect.poll(() => requests.length).toBe(1);
           completed = page.waitForResponse("**/api/holdSlot", { timeout: 10000 }).then(response => response.finished()).catch(() => {});
           await second.click({ force: true });
-          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+          await evaluateBrowserTask(page, () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
           const pending = await record(page, info, "slot-reservation-pending", requests);
           expect(pending.selection.selectedSlot.localLabel).toBe("10:00 AM");
           expect(pending.selection.selectedSlot.utcStart).toBe(expectedStart);

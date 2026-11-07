@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -162,7 +163,7 @@ function installProbe() {
 }
 
 const probe = (page, method, ...args) =>
-  page.evaluate(([name, values]) => window.__reviewsProbe[name](...values), [method, args]);
+  evaluateBrowserTask(page, ([name, values]) => window.__reviewsProbe[name](...values), [method, args]);
 
 const openCarousel = async (page, size = DESKTOP) => {
   await page.setViewportSize(size);

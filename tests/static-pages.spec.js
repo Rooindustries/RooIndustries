@@ -1,3 +1,5 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
+const { waitForRouteCommitted: hydrated } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs/promises");
 const path = require("node:path");
@@ -11,7 +13,6 @@ test.beforeEach(async ({ context, baseURL }) => {
   await guardBrowserContext(context, [baseURL]);
 });
 
-const hydrated = page => page.waitForFunction(() => window.history.state?.__rooLegacy === true);
 
 const watchConsole = page => {
   const messages = [];
@@ -33,7 +34,7 @@ for (const [theme, viewport] of [["dark", { width: 1440, height: 900 }], ["defau
       await page.addInitScript((value) => localStorage.setItem("roo-theme", value), theme);
       await page.goto(route);
       await hydrated(page);
-      await page.evaluate(() => document.fonts.ready);
+      await evaluateBrowserTask(page, () => document.fonts.ready);
       await expect(page.locator(".section-title").first()).toBeVisible();
       const styles = await page.locator(".section-title, .section-lede").evaluateAll((nodes) => nodes.map((node) => {
         const style = getComputedStyle(node);

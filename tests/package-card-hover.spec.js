@@ -1,3 +1,4 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 
 test.use({ javaScriptEnabled: true });
@@ -23,10 +24,10 @@ const restingPoint = (page) => page.mouse.move(1, 1);
 async function expectHoverKeepsLook(page, card, label) {
   await card.scrollIntoViewIfNeeded();
   await restingPoint(page);
-  const resting = await card.evaluate(settledLook, properties);
+  const resting = await evaluateBrowserTask(card, settledLook, properties);
   await card.locator("h3").first().hover();
   expect(await card.evaluate((node) => node.matches(":hover"))).toBe(true);
-  const hovered = await card.evaluate(settledLook, properties);
+  const hovered = await evaluateBrowserTask(card, settledLook, properties);
   expect(hovered, label).toEqual(resting);
   await restingPoint(page);
 }
@@ -89,9 +90,9 @@ for (const [themeName, theme] of Object.entries(themes)) {
     const button = page.locator(".ri-package-card .ri-package-details-button").first();
     await button.scrollIntoViewIfNeeded();
     await restingPoint(page);
-    const resting = await button.evaluate(settledLook, ["background-color", "color"]);
+    const resting = await evaluateBrowserTask(button, settledLook, ["background-color", "color"]);
     await button.hover();
-    const hovered = await button.evaluate(settledLook, ["background-color", "color"]);
+    const hovered = await evaluateBrowserTask(button, settledLook, ["background-color", "color"]);
     expect(hovered).not.toEqual(resting);
   });
 }

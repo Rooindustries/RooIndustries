@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { isProductionBrowser } from "../lib/productionBrowser";
 import { whenUserInteracts } from "../lib/firstInteraction";
+import { useIsomorphicLayoutEffect } from "../lib/useIsomorphicLayoutEffect";
 
 const INTERCOM_APP_ID =
   process.env.NEXT_PUBLIC_INTERCOM_APP_ID ||
@@ -9,8 +10,6 @@ const INTERCOM_APP_ID =
   "xvd1alq5";
 const INTERCOM_SCRIPT_ID = "intercom-embed-script";
 const INTERCOM_SRC = `https://widget.intercom.io/widget/${INTERCOM_APP_ID}`;
-const useIsomorphicLayoutEffect =
-  typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 const normalizePath = (path) => {
   if (typeof path !== "string") return "";

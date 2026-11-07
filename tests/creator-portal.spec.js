@@ -1,3 +1,5 @@
+const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
+const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -73,7 +75,7 @@ test('creator session follows login and logout', async ({ page, context }, testI
   }), contentType: 'application/json' });
   expect(response.status()).toBe(200);
   await expect.poll(async () => (await context.cookies()).some(cookie => cookie.name === 'ref_session')).toBe(true);
-  const logout = await page.evaluate(async () => (await fetch('/api/ref/logout', { method: 'POST' })).status);
+  const logout = await evaluateBrowserTask(page, async () => (await fetch('/api/ref/logout', { method: 'POST' })).status);
   expect(logout).toBe(200);
   expect((await context.cookies()).some(cookie => cookie.name === 'ref_session')).toBe(false);
 });
@@ -92,8 +94,8 @@ async function openForm(page, pathname, effectPath) {
   const response = await ready;
   expect(response.status()).toBe(200);
   await response.finished();
-  await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
-  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await waitForRouteCommitted(page);
+  await evaluateBrowserTask(page, () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 async function expectRegistrationFields(page, email, code) {
   for (const [label, value] of [
@@ -590,7 +592,9 @@ test('an upstream Auth outage stays explained after a connected-account password
   await page.getByLabel('Password', { exact: true }).fill('Synthetic-password1!');
   await page.getByRole('button', { name: 'Login', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Welcome, Synthetic Creator' })).toBeVisible();
-  const incorrect = await page.evaluate(async () => {
+  const incorrect = await evaluateBrowserTask(
+    page,
+    async () => {
     const response = await fetch('/api/auth/reauth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ flow: 'referral', purpose: 'link_identity', password: 'Earlier-wrong-password1!' }) });
     return { status: response.status, body: await response.json() };
   });
@@ -650,10 +654,10 @@ for (const viewport of [{ width: 360, height: 740 }, { width: 390, height: 844 }
       const code = 'longreferralcode'.padEnd(50, '0123456789');
       await signIn(context, baseURL);
       await page.goto('/referrals/forgot');
-      const account = await page.evaluate(async () => (await fetch('/api/ref/getData', { cache: 'no-store' })).json());
+      const account = await evaluateBrowserTask(page, async () => (await fetch('/api/ref/getData', { cache: 'no-store' })).json());
       expect(account.ok).toBe(true);
       await page.route('**/api/ref/getData', route => route.fulfill({ json: { ...account, referral: { ...account.referral, name, slug: { current: code } } } }));
-      const payouts = await page.evaluate(async () => (await fetch('/api/ref/payouts', { cache: 'no-store' })).json());
+      const payouts = await evaluateBrowserTask(page, async () => (await fetch('/api/ref/payouts', { cache: 'no-store' })).json());
       expect(payouts.logs.xoc.length).toBeGreaterThan(0);
       expect(payouts.logs.vertex.length).toBeGreaterThan(0);
       const note = 'PayPal receipt: https://www.paypal.com/activity/payment/5HG1234567890123A?ref=creator-dashboard-receipt';
@@ -1173,7 +1177,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.unroute('**/api/ref/updateSplit');
 
       await page.goto('/referrals/forgot');
-      await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+      await waitForRouteCommitted(page);
       const email = page.getByLabel('Creator Email', { exact: true });
       await email.fill('creator@fixture.invalid');
       await page.route('**/api/ref/forgot', route => route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic forgot outage.' } }));
@@ -1204,7 +1208,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       const backgroundCheck = page.waitForResponse('**/api/ref/validateReferral*');
       await fillRegistration(page);
       expect((await backgroundCheck).status()).toBe(503);
-      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+      await evaluateBrowserTask(page, () => new Promise(resolve => requestAnimationFrame(resolve)));
       submitting = true;
       await page.getByRole('button', { name: 'Register', exact: true }).dblclick();
       const notice = page.getByText('Check your email and use the confirmation link to finish creating your account.', { exact: true });
@@ -1307,7 +1311,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         () => page.getByLabel('Discord Username', { exact: true }).fill('edited-user'), 'registration');
 
       await page.goto('/referrals/forgot');
-      await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+      await waitForRouteCommitted(page);
       const email = page.getByLabel('Creator Email', { exact: true });
       await email.fill('creator@fixture.invalid');
       await failAfterEdit('/api/ref/forgot', 'Synthetic earlier forgot failure.', 'Send Reset Link',
