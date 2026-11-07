@@ -503,14 +503,15 @@ export function AppContent({
       historyInitializedRef.current = true;
       const { [SECTION_TRIP_ENTRY]: tripEntry, ...browserState } = window.history.state || {};
       const unlandedTripEntry = typeof tripEntry?.key === "string" ? tripEntry : null;
-      const isTripEntry = unlandedTripEntry && location.state?.sectionTrip === unlandedTripEntry.key;
+      const isTripEntry = unlandedTripEntry && !unlandedTripEntry.superseded &&
+        location.state?.sectionTrip === unlandedTripEntry.key;
       const state = {
         ...browserState,
         ...(isTripEntry
           ? { [SECTION_TRIP_ENTRY]: unlandedTripEntry }
           : {}),
         // Retain Next's router tree and any checkout state on first hydration.
-        usr: initial ? browserState.usr ?? null : location.state,
+        usr: initial ? browserState.usr ?? null : withoutSupersededSectionTrip(location.state, unlandedTripEntry),
         __rooLegacy: true,
       };
       // Navbar section links may already have pushed their browser entry.

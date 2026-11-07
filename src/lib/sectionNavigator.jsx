@@ -11,6 +11,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { HOME_SECTION_PREFETCH_BY_HASH, prefetchHomeSectionData, readHomeSectionData } from "./homeSectionData";
 import { alignToHashTarget, getCssHeaderOffsetPx } from "./scrollCoordinator";
 import { useIsomorphicLayoutEffect } from "./useIsomorphicLayoutEffect";
+import { sanitizeBrowserSearch } from "./browserSearch";
 import {
   announceSectionTarget,
   buildHomeSectionHref,
@@ -66,11 +67,9 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   const alignmentCleanupRef = useRef(null);
   const clickAlignedHashRef = useRef("");
   const pendingRouteRef = useRef(false);
-  const fragmentHrefRef = useRef("");
 
   useIsomorphicLayoutEffect(() => {
     locationRef.current = routeLocation;
-    fragmentHrefRef.current = "";
     pendingRouteRef.current = false;
   }, [location, routeLocation]);
 
@@ -152,7 +151,8 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
         intentRef.current = "";
         clearPendingSectionTarget();
         const committedHome = locationRef.current;
-        replaceBrowserUrl(normalizedHash, `${committedHome.pathname}${committedHome.search}${normalizedHash}`);
+        const search = sanitizeBrowserSearch(committedHome.pathname, committedHome.search);
+        replaceBrowserUrl(normalizedHash, `${committedHome.pathname}${search}${normalizedHash}`);
         announceSectionTarget(normalizedHash);
         setActiveHomeHash(normalizedHash);
         alignTo(normalizedHash, alignment);
@@ -210,7 +210,6 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
     const trip = tripRef.current;
     if (isSupersededSectionTrip(location.state, trip)) {
       tripRef.current = null;
-      clearTripEntry();
     } else if (trip) {
       const isTripArrival = location.state?.sectionTrip === trip.key;
       const isTripOrigin = location.key === trip.fromKey;
@@ -235,9 +234,6 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
 
   useIsomorphicLayoutEffect(() => {
     const onTraversal = () => {
-      const fragmentClick = fragmentHrefRef.current === window.location.href;
-      fragmentHrefRef.current = "";
-      if (fragmentClick) return;
       tripRef.current = null;
       clearTripEntry();
       cancelSectionNavigation();
@@ -268,7 +264,13 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       const link = plainLink(event);
       if (!link) return;
       if (link.getAttribute("href").startsWith("#")) {
-        if (tripRef.current) fragmentHrefRef.current = link.href;
+        if (tripRef.current) {
+          event.preventDefault();
+          replaceBrowserUrl(link.hash, link.href);
+          const target = document.getElementById(normalizeSectionHash(link.hash).slice(1));
+          target?.focus({ preventScroll: true });
+          target?.scrollIntoView();
+        }
         return;
       }
       const homeSectionLink =

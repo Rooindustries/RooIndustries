@@ -334,6 +334,21 @@ test("a route link clicked while the homepage trip is in flight wins", async ({ 
   }
 });
 
+test("a delayed FAQ document consumes the abandoned Home entry once", async ({ page }) => {
+  await openPage(page, "/reviews", "desktop");
+  const startLength = await historyLength(page);
+  await page.route("**/faq", async (route) => {
+    await new Promise(resolve => setTimeout(resolve, 4000));
+    await route.continue();
+  });
+  await clickWhileTripInFlight(page, NAVBAR("benefits"), FOOTER("/faq"));
+  await expect(page).toHaveURL(/\/faq$/);
+  await waitForHydrated(page, NAVBAR("benefits").selector);
+  expect(await historyLength(page)).toBe(startLength + 1);
+  await page.goBack();
+  await expectPath(page, "/reviews", "Back skips the abandoned Home arrival");
+});
+
 test("a route link clicked as the section lands leaves the page scrollable", async ({ page }) => {
   test.setTimeout(120000);
   await page.setViewportSize({ width: 1536, height: 960 });
@@ -656,6 +671,19 @@ test("a direct homepage section click preserves its query, state and scroll posi
   }
 });
 
+test("homepage section clicks keep stripped background queries out of the URL", async ({ page }) => {
+  await page.addInitScript(() => {
+    sessionStorage.setItem("flow_background_location", JSON.stringify({
+      pathname: "/", search: "?ref=section-navigation&junk=strip-me", hash: "",
+    }));
+  });
+  await openPage(page, "/booking", "desktop");
+  await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page).toHaveURL(/\/\?ref=section-navigation$/);
+  await clickSettledSection(page, "faq", "desktop");
+  expect((await readHomeSectionState(page)).search).toBe("?ref=section-navigation");
+});
+
 test("homepage section replacements keep Back and Forward in the same document", async ({ page }) => {
   for (const surface of ["desktop", "mobile"]) {
     await page.setViewportSize(surface === "mobile" ? { width: 390, height: 844 } : { width: 1536, height: 960 });
@@ -948,8 +976,9 @@ test.describe("reduced motion on button scrolls", () => {
 });
 
 test.describe("navigation interleaving matrix follow-ups", () => {
-  test("Benefits then the skip link preserves its arrival and the following Tools entry", async ({ page }) => {
+  test("Benefits then the skip link preserves one arrival and the full Back chain", async ({ page }) => {
     await openPage(page, "/reviews", "desktop");
+    const startLength = await historyLength(page);
     const chunks = await holdRouteChunks(page);
     try {
       await page.locator(NAVBAR("benefits").selector).evaluate(link => link.click());
@@ -960,36 +989,36 @@ test.describe("navigation interleaving matrix follow-ups", () => {
     }
     await expectMatrixLanding(page, MATRIX_LINKS.Benefits);
     const landedLength = await historyLength(page);
+    expect(landedLength).toBe(startLength + 1);
     await page.locator(MATRIX_LINKS.Tools.selector).evaluate(link => link.click());
     await expectMatrixLanding(page, MATRIX_LINKS.Tools);
     expect(await historyLength(page)).toBe(landedLength + 1);
     await page.goBack();
     await expectMatrixLanding(page, MATRIX_LINKS.Benefits);
+    await page.goBack();
+    await expectPath(page, "/reviews", "Back has no duplicate section entry");
   });
 
-  test("real Back onto a null-state fragment ends the trip before the next section click", async ({ page }) => {
+  test("real Back after pending fragments ends the trip before the next section click", async ({ page }) => {
     await openPage(page, "/reviews", "desktop");
+    const startLength = await historyLength(page);
     const chunks = await holdRouteChunks(page);
     try {
       await page.locator(NAVBAR("benefits").selector).evaluate(link => link.click());
       await chunks.wait();
       const firstKey = await page.evaluate(() => window.history.state.__rooSectionTrip.key);
-      await page.evaluate(() => {
-        window.__fragmentPopstates = 0;
-        window.addEventListener("popstate", () => { window.__fragmentPopstates += 1; });
-        document.querySelector('a[href="#main-content"]').click();
-      });
-      await expect.poll(() => page.evaluate(() => window.__fragmentPopstates)).toBe(1);
-      await page.locator('a[href="#main-content"]').evaluate(link => {
-        link.setAttribute("href", "#app-shell");
-        link.click();
-        link.setAttribute("href", "#main-content");
-      });
-      await expect.poll(() => page.evaluate(() => window.__fragmentPopstates)).toBe(2);
+      for (const hash of ["#main-content", "#app-shell", "#main-content"]) {
+        await page.locator('a[href="#main-content"]').evaluate((link, hash) => {
+          link.setAttribute("href", hash);
+          link.click();
+          link.setAttribute("href", "#main-content");
+        }, hash);
+        await expect(page).toHaveURL(new RegExp(hash + "$"));
+        expect(await historyLength(page)).toBe(startLength + 1);
+      }
       await page.goBack();
-      await expect.poll(() => page.evaluate(() => window.__fragmentPopstates)).toBe(3);
-      await expect(page).toHaveURL(/\/#main-content$/);
-      expect(await page.evaluate(() => window.history.state)).toBeNull();
+      await expectPath(page, "/reviews", "real Back cancels the trip after fragments");
+      expect(await page.evaluate(() => window.history.state.__rooSectionTrip)).toBeUndefined();
       await page.locator(NAVBAR("faq").selector).evaluate(link => link.click());
       const nextKey = await page.evaluate(() => window.history.state.__rooSectionTrip?.key);
       expect(nextKey).toEqual(expect.any(String));
@@ -998,8 +1027,9 @@ test.describe("navigation interleaving matrix follow-ups", () => {
       await chunks.release();
     }
     await expectMatrixLanding(page, MATRIX_LINKS.FAQ);
+    expect(await historyLength(page)).toBe(startLength + 1);
     await page.goBack();
-    await expect(page).toHaveURL(/\/#main-content$/);
+    await expectPath(page, "/reviews", "new trip still returns directly to Reviews");
   });
 
   test("section trip keys differ after a reload", async ({ page }) => {
