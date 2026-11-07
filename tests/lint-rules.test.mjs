@@ -1221,29 +1221,34 @@ run("no-parent-ipc-disconnect", {
     `class Tracked extends Base { disconnect() { return super.disconnect(); } }`,
     `new MutationObserver(f).disconnect();`,
     `const observer = new MutationObserver(f); observer.disconnect();`,
-    `const connection = connect(); connection.disconnect();`,
-    `const spawn = () => new MutationObserver(f); const observer = spawn(); observer.disconnect();`,
+    `let observer = null; observer = new ResizeObserver(f); observer?.disconnect();`,
+    `await page.evaluate(() => { window.__pending?.observer.disconnect(); });`,
+    `await page.waitForFunction(() => { held.channel.disconnect(); return true; });`,
   ],
   invalid: [
     {
       name: "held port hand-over before #320's close fix",
-      code: `import { fork } from "node:child_process"; const child = fork("worker.js"); const finish = () => { if (child.connected) child.disconnect(); };`,
+      code: `const finish = () => { if (child.connected) child.disconnect(); };`,
       errors: [{ messageId: "parent" }],
     },
     {
-      code: `import { spawn as start } from "child_process"; const child = start("node"); const alias = child; alias["disconnect"]();`,
+      code: `function release(child) { if (child.connected) child.disconnect(); }`,
       errors: [{ messageId: "parent" }],
     },
     {
-      code: `const { execFile: start } = require("node:child_process"); let child; child = start("node"); child?.disconnect();`,
+      code: `const child = launch.spawn("node", ["worker.js"]); child.disconnect();`,
       errors: [{ messageId: "parent" }],
     },
     {
-      code: `import * as children from "node:child_process"; const child = children.fork("worker.js"); const disconnect = child.disconnect;`,
+      code: `const evaluate = () => child.disconnect(); evaluate();`,
       errors: [{ messageId: "parent" }],
     },
     {
-      code: `const children = require("child_process"); const child = children.spawn("node"); const { disconnect } = child;`,
+      code: `class Worker { stop() { this.child.disconnect(); } }`,
+      errors: [{ messageId: "parent" }],
+    },
+    {
+      code: `let observer = new MutationObserver(f); observer = fork("worker.js"); observer.disconnect();`,
       errors: [{ messageId: "parent" }],
     },
   ],

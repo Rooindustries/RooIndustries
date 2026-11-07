@@ -1,5 +1,9 @@
-const namesRandomUUID = (key, computed) =>
-  computed ? key.type === "Literal" && key.value === "randomUUID" : key.type === "Identifier" && key.name === "randomUUID";
+const keyName = (key) => {
+  if (key.type === "Identifier") return key.name;
+  if (key.type === "Literal") return key.value;
+  if (key.type === "TemplateLiteral" && !key.expressions.length) return key.quasis[0].value.cooked;
+};
+const namesRandomUUID = (key, computed) => !(computed && key.type === "Identifier") && keyName(key) === "randomUUID";
 
 export default {
   meta: {

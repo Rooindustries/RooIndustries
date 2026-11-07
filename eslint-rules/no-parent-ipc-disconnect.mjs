@@ -1,6 +1,10 @@
-const childProcessModules = new Set(["child_process", "node:child_process"]);
-const factories = new Set(["spawn", "fork", "execFile", "exec"]);
-const propertyName = (node) => node.computed ? node.property.value : node.property.name;
+const pageRunners = new Set([
+  "evaluate", "evaluateHandle", "evaluateAll", "waitForFunction", "addInitScript", "$eval", "$$eval",
+]);
+const inPage = (node) => node.parent?.type === "CallExpression" && node.parent.arguments.includes(node) &&
+  node.parent.callee.type === "MemberExpression" && pageRunners.has(node.parent.callee.property.name);
+const isEmpty = (node) => !node || (node.type === "Literal" && node.value === null) ||
+  (node.type === "Identifier" && node.name === "undefined");
 
 export default {
   meta: {
@@ -19,59 +23,26 @@ export default {
         if (scope.set.has(node.name)) return scope.set.get(node.name);
       }
     };
-    const fromBinding = (node, seen, matches, imported) => {
+    const constructed = (node) => {
+      if (node.type === "NewExpression") return true;
+      if (node.type !== "Identifier") return false;
       const binding = variable(node);
-      if (!binding || seen.has(binding)) return false;
-      const next = new Set(seen).add(binding);
-      return binding.defs.some((definition) => {
-        if (definition.type === "ImportBinding") {
-          return childProcessModules.has(definition.parent.source.value) && imported(definition.node);
-        }
-        const declaration = definition.node;
-        if (declaration.type !== "VariableDeclarator") return false;
-        if (declaration.id.type === "ObjectPattern") {
-          const property = declaration.id.properties.find((entry) => entry.value?.name === node.name);
-          return property && isModule(declaration.init, next) && imported({
-            type: "ImportSpecifier", imported: property.key,
-          });
-        }
-        return matches(declaration.init, next);
-      }) || binding.references.some((reference) => reference.writeExpr && matches(reference.writeExpr, next));
-    };
-    const isModule = (node, seen = new Set()) => {
-      if (!node) return false;
-      if (node.type === "CallExpression") {
-        return node.callee.name === "require" && childProcessModules.has(node.arguments[0]?.value);
-      }
-      return node.type === "Identifier" && fromBinding(node, seen, isModule,
-        (specifier) => ["ImportNamespaceSpecifier", "ImportDefaultSpecifier"].includes(specifier.type));
-    };
-    const isFactory = (node, seen = new Set()) => {
-      if (!node) return false;
-      if (node.type === "MemberExpression") {
-        return isModule(node.object, seen) && factories.has(propertyName(node));
-      }
-      return node.type === "Identifier" && fromBinding(node, seen, isFactory,
-        (specifier) => specifier.type === "ImportSpecifier" && factories.has(specifier.imported.name || specifier.imported.value));
-    };
-    const isChild = (node, seen = new Set()) => {
-      if (!node) return false;
-      if (node.type === "CallExpression") return isFactory(node.callee, seen);
-      return node.type === "Identifier" && fromBinding(node, seen, isChild, () => false);
+      if (!binding) return false;
+      const values = [
+        ...binding.defs.map((definition) => definition.type === "Variable" ? definition.node.init : undefined),
+        ...binding.references.filter((reference) => reference.writeExpr).map((reference) => reference.writeExpr),
+      ].filter((value) => !isEmpty(value));
+      return binding.defs.every((definition) => definition.type === "Variable") && values.length > 0 &&
+        values.every((value) => value.type === "NewExpression");
     };
     return {
-      MemberExpression(node) {
-        if (propertyName(node) === "disconnect" && isChild(node.object)) {
-          context.report({ node, messageId: "parent" });
-        }
-      },
-      VariableDeclarator(node) {
-        if (node.id.type !== "ObjectPattern" || !isChild(node.init)) return;
-        for (const property of node.id.properties) {
-          if ((property.key?.name || property.key?.value) === "disconnect") {
-            context.report({ node: property, messageId: "parent" });
-          }
-        }
+      CallExpression(node) {
+        const { callee } = node;
+        if (callee.type !== "MemberExpression" || callee.computed || callee.property.name !== "disconnect") return;
+        if (callee.object.type === "Identifier" && callee.object.name === "process") return;
+        if (callee.object.type === "Super" || node.arguments.length || constructed(callee.object)) return;
+        if (context.sourceCode.getAncestors(node).some(inPage)) return;
+        context.report({ node, messageId: "parent" });
       },
     };
   },

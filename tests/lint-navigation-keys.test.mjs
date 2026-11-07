@@ -18,5 +18,7 @@ new RuleTester().run("no-secure-context-navigation-keys", rule, {
     { code: 'crypto["randomUUID"]()', errors: [{ messageId: "key" }] },
     { code: "const make = crypto.randomUUID; const key = make();", errors: [{ messageId: "key" }] },
     { code: "const { randomUUID } = crypto; const key = randomUUID();", errors: [{ messageId: "key" }] },
+    { code: 'const { "randomUUID": make } = crypto; const key = make();', errors: [{ messageId: "key" }] },
+    { code: "const key = crypto[`randomUUID`]();", errors: [{ messageId: "key" }] },
   ],
 });
