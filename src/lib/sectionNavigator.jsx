@@ -104,6 +104,15 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
     stopAlignment();
   }, [stopAlignment]);
 
+  const supersedePendingNavigation = useCallback((hash = "") => {
+    const committedLocation = locationRef.current;
+    cancelSectionNavigation();
+    navigate(
+      { pathname: committedLocation.pathname, search: committedLocation.search, hash },
+      { replace: true, state: committedLocation.state }
+    );
+  }, [cancelSectionNavigation, navigate]);
+
   const goToSection = useCallback(
     (event, hash, alignment) => {
       if (!isPlainPrimaryClick(event)) return false;
@@ -111,7 +120,8 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       if (!normalizedHash) return false;
       event.preventDefault();
 
-      if (location.pathname === "/") {
+      if (locationRef.current.pathname === "/") {
+        supersedePendingNavigation(normalizedHash);
         intentRef.current = "";
         clearPendingSectionTarget();
         if (window.location.hash !== normalizedHash) replaceBrowserUrl(normalizedHash);
@@ -134,7 +144,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
         key = window.crypto.randomUUID(),
         via = routeShell === "memory"
           ? "memory"
-          : window.location.pathname !== location.pathname ? "document" : "router",
+          : window.location.pathname !== locationRef.current.pathname ? "document" : "router",
       } = trip || {};
       const state = { sectionTrip: key };
       if (!trip) tripRef.current = { key, via, from: window.location.href };
@@ -145,12 +155,13 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       } else if (trip) {
         replaceBrowserUrl("", nextHref);
       } else {
-        window.history.pushState({ ...window.history.state, [SECTION_TRIP_ENTRY]: true }, "", nextHref);
+        const updateHistory = window.history.state?.[SECTION_TRIP_ENTRY]?.superseded ? "replaceState" : "pushState";
+        window.history[updateHistory]({ ...window.history.state, [SECTION_TRIP_ENTRY]: true }, "", nextHref);
         navigate("/", { state });
       }
       return true;
     },
-    [alignTo, location.pathname, navigate, routeShell]
+    [alignTo, navigate, routeShell, supersedePendingNavigation]
   );
 
   const isOwnSectionArrival = useCallback(
@@ -199,11 +210,10 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       }
       if (locationRef.current.pathname !== "/" || link.href !== `${window.location.origin}/`) return;
       event.preventDefault();
-      cancelSectionNavigation();
+      supersedePendingNavigation();
       if (window.location.hash) replaceBrowserUrl();
       setActiveHomeHash("");
       window.scrollTo(0, 0);
-      navigate("/", { replace: true });
     };
     const endTripOnLink = (event) => {
       const link = tripRef.current?.superseded && plainLink(event);
@@ -218,7 +228,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
     window.addEventListener("click", captureLinkIntent, { capture: true, signal: listeners.signal });
     window.addEventListener("click", endTripOnLink, { signal: listeners.signal });
     return () => listeners.abort();
-  }, [cancelSectionNavigation, navigate]);
+  }, [cancelSectionNavigation, supersedePendingNavigation]);
 
   useEffect(() => {
     if (location.pathname !== "/") return;

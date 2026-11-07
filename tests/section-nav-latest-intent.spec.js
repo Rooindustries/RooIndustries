@@ -74,6 +74,29 @@ const expectLanded = async (page, hash, label) => {
   expect(await readLanding(page), `${label} stays on ${hash}`).toEqual(landed);
 };
 
+const readHomeSectionState = (page) => page.evaluate(() => ({
+  length: window.history.length,
+  search: window.location.search,
+  hash: window.location.hash,
+  state: window.history.state?.usr ?? null,
+  active: [...new Set([...document.querySelectorAll('[data-nav-target][aria-current="location"]')]
+    .map((link) => link.dataset.navTarget))],
+}));
+
+const clickSettledSection = async (page, target, surface) => {
+  await page.evaluate((hash) => {
+    window.__sectionClickSettled = false;
+    const onSettled = (event) => {
+      if (event.detail.hash !== hash) return;
+      window.removeEventListener("roo:section-align-settled", onSettled);
+      window.__sectionClickSettled = true;
+    };
+    window.addEventListener("roo:section-align-settled", onSettled);
+  }, SECTIONS[target]);
+  await clickSection(page, target, surface);
+  await expect.poll(() => page.evaluate(() => window.__sectionClickSettled)).toBe(true);
+};
+
 for (const surface of ["desktop", "mobile"]) {
   const viewport = surface === "mobile" ? { width: 390, height: 844 } : { width: 1536, height: 960 };
 
@@ -385,6 +408,101 @@ test("a fresh section click supersedes an abandoned trip while route chunks are 
     await chunks.release();
   }
   await expectLanded(page, SECTIONS.faq, "Benefits, pending Tools, then fresh FAQ");
+});
+
+test("a fresh section click reuses the abandoned trip history entry", async ({ page }) => {
+  await page.setViewportSize({ width: 1536, height: 960 });
+  await openPage(page, "/reviews", "desktop");
+  const startLength = await historyLength(page);
+  const chunks = await holdRouteChunks(page);
+  try {
+    await clickWhileTripInFlight(page, NAVBAR("benefits"), FOOTER("/tools"));
+    await chunks.wait();
+    await clickSection(page, "faq", "desktop");
+  } finally {
+    await chunks.release();
+  }
+  await expect.poll(() => readLanding(page)).toEqual({ path: "/", hash: SECTIONS.faq, onTop: SECTIONS.faq });
+  expect.soft(await historyLength(page), "the final section reuses the abandoned entry").toBe(startLength + 1);
+  await page.goBack();
+  await expect.poll(() => readRoute(page)).toEqual({ path: "/reviews", hash: "", top: true });
+});
+
+test("a homepage section click supersedes the pending Tools route", async ({ page }) => {
+  await page.setViewportSize({ width: 1536, height: 960 });
+  await openPage(page, "/reviews", "desktop");
+  const startLength = await historyLength(page);
+  await clickSection(page, "benefits", "desktop");
+  await expect.poll(() => readLanding(page)).toEqual({
+    path: "/", hash: SECTIONS.benefits, onTop: SECTIONS.benefits,
+  });
+  const committedState = await page.evaluate(() => window.history.state.usr);
+  expect(committedState).toEqual({ sectionTrip: expect.any(String) });
+  const chunks = await holdRouteChunks(page);
+  try {
+    await page.locator(FOOTER("/tools").selector).click();
+    await chunks.wait();
+    await expect(page.locator("#services")).toBeVisible();
+    await clickSection(page, "faq", "desktop");
+  } finally {
+    await chunks.release();
+  }
+  await expect.poll(() => readLanding(page)).toEqual({ path: "/", hash: SECTIONS.faq, onTop: SECTIONS.faq });
+  expect(await historyLength(page), "the pending route adds no history entry").toBe(startLength + 1);
+  expect(await page.evaluate(() => window.history.state.usr)).toEqual(committedState);
+  await page.goBack();
+  await expect.poll(() => readRoute(page)).toEqual({ path: "/reviews", hash: "", top: true });
+});
+
+test("a direct homepage section click preserves its query, state and scroll position", async ({ page }) => {
+  for (const surface of ["desktop", "mobile"]) {
+    await page.setViewportSize(surface === "mobile" ? { width: 390, height: 844 } : { width: 1536, height: 960 });
+    await openPage(page, "/?ref=section-navigation", surface);
+    const initial = await readHomeSectionState(page);
+    await clickSettledSection(page, "faq", surface);
+    const before = await readHomeSectionState(page);
+    expect(before).toEqual({ ...initial, hash: SECTIONS.faq, active: ["faq"] });
+    expect(before.search).toBe("?ref=section-navigation");
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(300);
+    await page.evaluate(() => {
+      window.__sectionResetTop = false;
+      const scrollTo = window.scrollTo;
+      window.scrollTo = function (...args) {
+        const top = typeof args[0] === "number" ? args[1] : args[0]?.top;
+        if (top === 0) window.__sectionResetTop = true;
+        return scrollTo.apply(this, args);
+      };
+      window.addEventListener("roo:section-align-settled", () => {
+        window.scrollTo = scrollTo;
+      }, { once: true });
+    });
+    await clickSettledSection(page, "faq", surface);
+    expect(await page.evaluate(() => window.__sectionResetTop), `${surface} does not jump to top`).toBe(false);
+    expect(await readHomeSectionState(page)).toEqual(before);
+    expect(await readLanding(page)).toEqual({ path: "/", hash: SECTIONS.faq, onTop: SECTIONS.faq });
+  }
+});
+
+test("homepage section replacements keep Back and Forward in the same document", async ({ page }) => {
+  for (const surface of ["desktop", "mobile"]) {
+    await page.setViewportSize(surface === "mobile" ? { width: 390, height: 844 } : { width: 1536, height: 960 });
+    await openPage(page, "/reviews", surface);
+    const startLength = await historyLength(page);
+    const documentStartedAt = await page.evaluate(() => performance.timeOrigin);
+    await page.locator(FOOTER("/").selector).click();
+    await expect.poll(() => readRoute(page)).toEqual({ path: "/", hash: "", top: true });
+    await clickSettledSection(page, "benefits", surface);
+    await clickSettledSection(page, "faq", surface);
+    expect(await historyLength(page)).toBe(startLength + 1);
+    expect(await page.evaluate(() => performance.timeOrigin)).toBe(documentStartedAt);
+    await page.goBack();
+    await expect.poll(() => readRoute(page)).toEqual({ path: "/reviews", hash: "", top: true });
+    expect(await page.evaluate(() => performance.timeOrigin)).toBe(documentStartedAt);
+    await page.goForward();
+    await expect.poll(() => readLanding(page)).toEqual({ path: "/", hash: SECTIONS.faq, onTop: SECTIONS.faq });
+    expect(await historyLength(page)).toBe(startLength + 1);
+    expect(await page.evaluate(() => performance.timeOrigin)).toBe(documentStartedAt);
+  }
 });
 
 for (const { label, selector } of [
