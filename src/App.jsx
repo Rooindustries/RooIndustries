@@ -22,7 +22,6 @@ import { getConfirmationPage, preloadConfirmationPage } from "./lib/confirmation
 import {
   consumeRouteTransitionIntent,
   isHomeSectionHash,
-  isSupersededSectionTrip,
   normalizeSectionHash,
   SECTION_TRIP_ENTRY,
   withoutSupersededSectionTrip,
@@ -35,6 +34,7 @@ import { getPublicContent, getPublicContentPendingCount } from "./lib/publicCont
 import { useBookingDialogPending } from "./lib/bookingDialogHold";
 import { setVisibleTimeout } from "./lib/visibleTimeout";
 import { SectionNavigationProvider } from "./lib/sectionNavigator";
+import { useIsomorphicLayoutEffect } from "./lib/useIsomorphicLayoutEffect";
 
 const Home = lazy(() => import("./legacyPages/Home"));
 const AboutPage = lazy(() => import("./legacyPages/About"));
@@ -481,8 +481,10 @@ export function AppContent({
     return () => window.removeEventListener("popstate", restoreBrowserEntry);
   }, [navigate, routeShell]);
 
-  useEffect(() => {
-    const rawHash = window.location.pathname === location.pathname ? window.location.hash : location.hash;
+  useIsomorphicLayoutEffect(() => {
+    const rawHash = location.hash || (
+      window.location.pathname === location.pathname ? window.location.hash : ""
+    );
     const currentHash = normalizeSectionHash(rawHash);
     const keepHash =
       location.pathname === "/" && isHomeSectionHash(currentHash)
@@ -500,10 +502,10 @@ export function AppContent({
       const initial = !historyInitializedRef.current;
       historyInitializedRef.current = true;
       const { [SECTION_TRIP_ENTRY]: unlandedTripEntry, ...browserState } = window.history.state || {};
-      const isAbandonedTripArrival = isSupersededSectionTrip(location.state, unlandedTripEntry);
+      const isTripEntry = unlandedTripEntry && location.state?.sectionTrip === unlandedTripEntry.key;
       const state = {
         ...browserState,
-        ...(isAbandonedTripArrival
+        ...(isTripEntry
           ? { [SECTION_TRIP_ENTRY]: unlandedTripEntry }
           : {}),
         // Retain Next's router tree and any checkout state on first hydration.

@@ -400,9 +400,16 @@ const clickAtRouteCommit = (page, first, second, path) => page.evaluate(
   { first: MATRIX_LINKS[first].selector, second: MATRIX_LINKS[second].selector, path }
 );
 
-const expectMatrixLanding = (page, { path, hash }) => hash
-  ? expect.poll(() => readLanding(page)).toEqual({ path, hash, onTop: hash })
-  : expect.poll(() => readRoute(page)).toEqual({ path, hash, top: true });
+const expectMatrixLanding = async (page, { path, hash }, waitForSettlement = false) => {
+  if (hash) {
+    await expect.poll(() => readLanding(page)).toEqual({ path, hash, onTop: hash });
+    if (waitForSettlement) {
+      await expect.poll(() => page.evaluate(() => window.__matrixSettledHash)).toBe(hash);
+    }
+  } else {
+    await expect.poll(() => readRoute(page)).toEqual({ path, hash, top: true });
+  }
+};
 
 const INTERLEAVINGS = ["before Home", "at Home commit"].flatMap((timing) => [
   ["Benefits", "FAQ"],
@@ -429,9 +436,10 @@ INTERLEAVINGS.push({ origin: "/#services", timing: "section replacement then rou
 for (const origin of ["/reviews", "/tools", "/about"]) {
   INTERLEAVINGS.push({ origin, scrolled: true, clicks: ["Benefits", "logo"], timing: "at Home commit" });
 }
-for (const origin of ["/reviews", "/about"]) {
+for (const origin of ["/reviews", "/tools", "/about"]) {
   INTERLEAVINGS.push({
-    origin, scrolled: true, clicks: ["Benefits", "Tools", "logo"], timing: "Home commit then held route",
+    origin, scrolled: true, clicks: ["Benefits", origin === "/tools" ? "Privacy" : "Tools", "logo"],
+    timing: "Home commit then held route",
   });
 }
 INTERLEAVINGS.push({ origin: "/reviews", timing: "before Home", clicks: ["Benefits", "Reviews"] });
@@ -447,6 +455,12 @@ test.describe("navigation interleaving matrix", () => {
         await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(250);
       }
       const startLength = await historyLength(page);
+      await page.evaluate(() => {
+        window.__matrixSettledHash = "";
+        window.addEventListener("roo:section-align-settled", event => {
+          window.__matrixSettledHash = event.detail.hash;
+        });
+      });
       const [first, second, third] = clicks;
       const winner = MATRIX_LINKS[clicks.at(-1)];
       const held = timing.includes("held") || timing === "before Home";
@@ -474,7 +488,7 @@ test.describe("navigation interleaving matrix", () => {
       } finally {
         await chunks?.release();
       }
-      await expectMatrixLanding(page, winner);
+      await expectMatrixLanding(page, winner, true);
       const committedPage = timing === "at route commit" ? MATRIX_LINKS.Tools
         : timing === "at Home commit" && first === "logo" && winner.path !== "/" ? MATRIX_LINKS.logo : null;
       const homeReplacement = origin === "/#services" && winner.path === "/" && !committedPage;

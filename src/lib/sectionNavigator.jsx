@@ -3,7 +3,6 @@ import React, {
   useCallback,
   useContext,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -11,6 +10,7 @@ import React, {
 import { useLocation, useNavigate } from "react-router-dom";
 import { HOME_SECTION_PREFETCH_BY_HASH, prefetchHomeSectionData, readHomeSectionData } from "./homeSectionData";
 import { alignToHashTarget, getCssHeaderOffsetPx } from "./scrollCoordinator";
+import { useIsomorphicLayoutEffect } from "./useIsomorphicLayoutEffect";
 import {
   announceSectionTarget,
   buildHomeSectionHref,
@@ -41,6 +41,11 @@ const isPlainPrimaryClick = (event, link = event.currentTarget) =>
 const replaceBrowserUrl = (hash = "", href = `${window.location.pathname}${window.location.search}${hash}`) =>
   window.history.replaceState(window.history.state, "", href);
 
+const clearTripEntry = () => {
+  const { [SECTION_TRIP_ENTRY]: marker, ...state } = window.history.state || {};
+  if (marker) window.history.replaceState(state, "", window.location.href);
+};
+
 const prefetchSectionData = (hash) => {
   const requiredKeys = HOME_SECTION_PREFETCH_BY_HASH[hash] || [];
   const missingKeys = requiredKeys.filter((key) => readHomeSectionData(key) === null);
@@ -61,12 +66,19 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   const clickAlignedHashRef = useRef("");
   const pendingRouteRef = useRef(false);
 
-  useLayoutEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     locationRef.current = location;
     pendingRouteRef.current = false;
   }, [location, routeLocation]);
 
-  const stopAlignment = useCallback(() => {
+  const finishSectionTrip = useCallback(() => {
+    const trip = tripRef.current;
+    if (!trip || trip.superseded) return;
+    tripRef.current = null;
+    clearTripEntry();
+  }, []);
+
+  const cancelAlignment = useCallback(() => {
     clickAlignedHashRef.current = "";
     if (alignmentCleanupRef.current) {
       alignmentCleanupRef.current();
@@ -74,9 +86,14 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
     }
   }, []);
 
+  const stopAlignment = useCallback(() => {
+    cancelAlignment();
+    finishSectionTrip();
+  }, [cancelAlignment, finishSectionTrip]);
+
   const alignTo = useCallback(
     (hash, options = {}) => {
-      stopAlignment();
+      cancelAlignment();
       alignmentCleanupRef.current = alignToHashTarget({
         hash,
         behavior: "auto",
@@ -89,7 +106,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
         ...options,
       });
     },
-    [stopAlignment]
+    [cancelAlignment]
   );
 
   const cancelSectionNavigation = useCallback((superseded = false) => {
@@ -99,7 +116,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       const state = superseded
         ? { ...window.history.state, [SECTION_TRIP_ENTRY]: { key: trip.key, superseded } }
         : window.history.state;
-      window.history.replaceState(state, "", trip.from);
+      window.history.replaceState(state, "", trip.arrived ? window.location.href : trip.from);
     }
     intentRef.current = "";
     clearPendingSectionTarget();
@@ -111,12 +128,9 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
 
   const supersedePendingNavigation = useCallback((hash = "") => {
     const committedLocation = locationRef.current;
-    const abandonedTrip = tripRef.current
-      ? { ...tripRef.current, superseded: true }
-      : window.history.state?.[SECTION_TRIP_ENTRY];
-    const winningState = withoutSupersededSectionTrip(committedLocation.state, abandonedTrip);
     cancelSectionNavigation(true);
-    replaceBrowserUrl(hash, `${committedLocation.pathname}${committedLocation.search}${hash}`);
+    const abandonedTrip = tripRef.current || window.history.state?.[SECTION_TRIP_ENTRY];
+    const winningState = withoutSupersededSectionTrip(committedLocation.state, abandonedTrip);
     navigate(
       { pathname: committedLocation.pathname, search: committedLocation.search, hash },
       { replace: true, state: winningState }
@@ -132,6 +146,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
 
       if (locationRef.current.pathname === "/") {
         if (pendingRouteRef.current) supersedePendingNavigation(normalizedHash);
+        if (tripRef.current) tripRef.current.hash = normalizedHash;
         intentRef.current = "";
         clearPendingSectionTarget();
         const committedHome = locationRef.current;
@@ -159,7 +174,9 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       } = trip || {};
       const state = { sectionTrip: key };
       if (!trip) {
-        tripRef.current = { key, via, from: window.location.href, fromKey: locationRef.current.key };
+        tripRef.current = { key, via, from: window.location.href, fromKey: locationRef.current.key, hash: normalizedHash };
+      } else {
+        trip.hash = normalizedHash;
       }
       if (via === "document") {
         window.location.assign(nextHref);
@@ -170,7 +187,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
           replaceBrowserUrl("", nextHref);
         } else {
           const updateHistory = window.history.state?.[SECTION_TRIP_ENTRY]?.superseded ? "replaceState" : "pushState";
-          window.history[updateHistory]({ ...window.history.state, [SECTION_TRIP_ENTRY]: true }, "", nextHref);
+          window.history[updateHistory]({ ...window.history.state, [SECTION_TRIP_ENTRY]: { key } }, "", nextHref);
         }
       }
       navigate({ pathname: "/", hash: normalizedHash }, { replace: Boolean(trip), state });
@@ -186,14 +203,14 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
     []
   );
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     const trip = tripRef.current;
     if (isSupersededSectionTrip(location.state, trip)) return;
     if (trip) {
       const isTripArrival = location.state?.sectionTrip === trip.key;
       const isTripOrigin = location.key === trip.fromKey;
       if (isTripArrival) {
-        tripRef.current = null;
+        trip.arrived = true;
       } else if (!isTripOrigin) {
         cancelSectionNavigation();
       }
@@ -201,11 +218,28 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
     if (location.pathname !== "/") stopAlignment();
   }, [cancelSectionNavigation, location.key, location.pathname, location.state, stopAlignment]);
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
+    const onSettled = (event) => {
+      const trip = tripRef.current;
+      if (trip?.arrived && event.detail?.hash === trip.hash) finishSectionTrip();
+    };
+    const onTraversal = () => {
+      tripRef.current = null;
+      clearTripEntry();
+      cancelSectionNavigation();
+    };
+    window.addEventListener("roo:section-align-settled", onSettled);
+    window.addEventListener("popstate", onTraversal);
+    return () => {
+      window.removeEventListener("roo:section-align-settled", onSettled);
+      window.removeEventListener("popstate", onTraversal);
+    };
+  }, [cancelSectionNavigation, finishSectionTrip]);
+
+  useIsomorphicLayoutEffect(() => {
     const syncHash = () => {
       if (isSupersededSectionTrip(location.state, tripRef.current)) return;
-      const hash = window.location.pathname === location.pathname ? window.location.hash : location.hash;
-      setActiveHomeHash(normalizeSectionHash(hash));
+      setActiveHomeHash(normalizeSectionHash(window.location.hash || location.hash));
     };
     syncHash();
     window.addEventListener("hashchange", syncHash);
@@ -226,6 +260,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       if (locationRef.current.pathname === "/" && link.href === `${window.location.origin}/`) {
         event.preventDefault();
         supersedePendingNavigation();
+        if (window.location.hash) replaceBrowserUrl();
         setActiveHomeHash("");
         window.scrollTo(0, 0);
         return;
@@ -250,7 +285,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
     return () => listeners.abort();
   }, [cancelSectionNavigation, supersedePendingNavigation]);
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (location.pathname !== "/") return;
     if (isSupersededSectionTrip(location.state, tripRef.current)) return;
 
