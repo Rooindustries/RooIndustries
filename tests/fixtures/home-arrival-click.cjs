@@ -21,7 +21,13 @@ async function clickAtHomeArrival(page, first, second, painted = false) {
           click();
         }
       });
-      window.__homeArrivalClick = { state, observer };
+      window.__homeArrivalClick = {
+        state,
+        stop: () => {
+          observer.disconnect();
+          cancelAnimationFrame(state.frame);
+        },
+      };
       observer.observe(document.getElementById("main-content"), { childList: true, subtree: true });
       document.querySelector(first).click();
     }, { first, second, painted });
@@ -37,9 +43,7 @@ async function clickAtHomeArrival(page, first, second, painted = false) {
     }, { destination, start }, { timeout: 15000 });
   } finally {
     await page.evaluate(() => {
-      const pending = window.__homeArrivalClick;
-      pending?.observer.disconnect();
-      if (pending) cancelAnimationFrame(pending.state.frame);
+      window.__homeArrivalClick?.stop();
       delete window.__homeArrivalClick;
     });
   }

@@ -1222,8 +1222,7 @@ run("no-parent-ipc-disconnect", {
     `new MutationObserver(f).disconnect();`,
     `const observer = new MutationObserver(f); observer.disconnect();`,
     `let observer = null; observer = new ResizeObserver(f); observer?.disconnect();`,
-    `await page.evaluate(() => { window.__pending?.observer.disconnect(); });`,
-    `await page.waitForFunction(() => { held.channel.disconnect(); return true; });`,
+    `await page.evaluate(() => { const observer = new MutationObserver(f); observer.disconnect(); });`,
   ],
   invalid: [
     {
@@ -1237,6 +1236,22 @@ run("no-parent-ipc-disconnect", {
     },
     {
       code: `const child = launch.spawn("node", ["worker.js"]); child.disconnect();`,
+      errors: [{ messageId: "parent" }],
+    },
+    {
+      code: `class Spawner { constructor() { return fork("worker.js"); } } const child = new Spawner(); child.disconnect();`,
+      errors: [{ messageId: "parent" }],
+    },
+    {
+      code: `const helper = { evaluate: (run) => run() }; helper.evaluate(() => child.disconnect());`,
+      errors: [{ messageId: "parent" }],
+    },
+    {
+      code: `const MutationObserver = fork; const watcher = new MutationObserver("worker.js"); watcher.disconnect();`,
+      errors: [{ messageId: "parent" }],
+    },
+    {
+      code: `for (let child of children) { child.disconnect(); child = new MutationObserver(f); }`,
       errors: [{ messageId: "parent" }],
     },
     {
