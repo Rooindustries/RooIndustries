@@ -1,3 +1,6 @@
+const namesRandomUUID = (key, computed) =>
+  computed ? key.type === "Literal" && key.value === "randomUUID" : key.type === "Identifier" && key.name === "randomUUID";
+
 export default {
   meta: {
     type: "problem",
@@ -8,9 +11,13 @@ export default {
   },
   create(context) {
     return {
-      CallExpression(node) {
-        const callee = node.callee;
-        if (callee.type === "MemberExpression" && callee.property.name === "randomUUID") {
+      MemberExpression(node) {
+        if (namesRandomUUID(node.property, node.computed)) {
+          context.report({ node, messageId: "key" });
+        }
+      },
+      "ObjectPattern > Property"(node) {
+        if (namesRandomUUID(node.key, node.computed)) {
           context.report({ node, messageId: "key" });
         }
       },

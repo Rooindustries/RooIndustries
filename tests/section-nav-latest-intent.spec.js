@@ -1,6 +1,6 @@
 const { test, expect } = require("@playwright/test");
 const { navLink } = require("./fixtures/nav-link.cjs");
-const { waitForHydrated } = require("./fixtures/react-hydration.cjs");
+const { waitForHydrated, waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 
 const CPU_THROTTLE_RATE = Number(process.env.NAV_CPU_THROTTLE_RATE || 4);
 const FINAL_OFFSET_MAX = 160;
@@ -28,13 +28,18 @@ test.beforeEach(async ({ context, page, baseURL }) => {
   await session.send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE_RATE });
 });
 
+const waitForLinks = async (page, ...links) => {
+  await waitForRouteCommitted(page);
+  for (const { selector } of links) await waitForHydrated(page, selector);
+};
+
 const openPage = async (page, route, surface) => {
   await page.goto(route, { waitUntil: "domcontentloaded" });
   const selector =
     surface === "mobile"
       ? 'button[aria-label="Open menu"]'
       : '[data-nav-surface="desktop"][data-nav-target="faq"]';
-  await waitForHydrated(page, selector);
+  await waitForLinks(page, { selector });
 };
 
 const clickSection = async (page, target, surface) => {
@@ -43,12 +48,14 @@ const clickSection = async (page, target, surface) => {
     : navLink(target);
   const link = page.locator(selector).first();
   if (surface !== "mobile") {
+    await waitForLinks(page, { selector });
     await link.click();
     return;
   }
   const menuButton = page.locator('button[aria-label="Open menu"]');
   await expect(async () => {
     if ((await menuButton.getAttribute("aria-expanded")) !== "true") await menuButton.click();
+    await waitForLinks(page, { selector });
     await link.click({ timeout: 1000 });
   }).toPass({ timeout: 15000 });
 };
@@ -128,8 +135,9 @@ for (const surface of ["desktop", "mobile"]) {
 const NAVBAR = (target) => ({ selector: `[data-nav-surface="desktop"][data-nav-target="${target}"]` });
 const ON_PAGE = (hash, text = "") => ({ selector: `#main-content a[href="/${hash}"]`, text });
 
-const clickInQuickSuccession = (page, first, second, gapMs = 10) =>
-  page.evaluate(
+const clickInQuickSuccession = async (page, first, second, gapMs = 10) => {
+  await waitForLinks(page, first);
+  return page.evaluate(
     ([firstLink, secondLink, gap]) =>
       new Promise((resolve, reject) => {
         const find = ({ selector, text }) =>
@@ -143,7 +151,8 @@ const clickInQuickSuccession = (page, first, second, gapMs = 10) =>
         const clickedAt = performance.now();
         const clickSecond = () => {
           const secondElement = find(secondLink);
-          if (secondElement && performance.now() - clickedAt >= gap) {
+          const hydrated = secondElement && Object.keys(secondElement).some(key => key.startsWith("__reactProps$"));
+          if (hydrated && performance.now() - clickedAt >= gap) {
             secondElement.click();
             resolve();
             return;
@@ -158,6 +167,7 @@ const clickInQuickSuccession = (page, first, second, gapMs = 10) =>
       }),
     [first, second, gapMs]
   );
+};
 
 const HOME_MIXED_ORDERS = [
   { label: "on-page packages then navbar FAQ", first: ON_PAGE("#packages"), second: NAVBAR("faq"), hash: "#faq" },
@@ -217,8 +227,9 @@ const expectPath = (page, path, label) =>
 
 const historyLength = (page) => page.evaluate(() => window.history.length);
 
-const clickWhileTripInFlight = (page, first, second) =>
-  page.evaluate(
+const clickWhileTripInFlight = async (page, first, second) => {
+  await waitForLinks(page, first, second);
+  return page.evaluate(
     ([firstLink, secondLink]) => {
       const find = ({ selector, text }) =>
         [...document.querySelectorAll(selector)].find((element) => !text || element.textContent.includes(text));
@@ -232,6 +243,7 @@ const clickWhileTripInFlight = (page, first, second) =>
     },
     [first, second]
   );
+};
 
 for (const thirdClick of [false, true]) {
   const title = `an abandoned Home commit stays inert with delayed FAQ and third Tools click ${thirdClick}`;
@@ -348,28 +360,31 @@ for (const { label, link, path } of [ROUTE_AFTER_SECTION[1], ROUTE_AFTER_SECTION
   });
 }
 
-const clickAtHomeArrival = (page, first, second, painted = false) => page.evaluate(
-  ({ first, second, painted }) => new Promise((resolve, reject) => {
-    const observer = new MutationObserver(() => {
-      if (!document.querySelector("#services")) return;
-      observer.disconnect();
-      clearTimeout(timeout);
-      const click = () => {
-        document.querySelector(second).click();
-        resolve();
-      };
-      if (painted) requestAnimationFrame(() => requestAnimationFrame(click));
-      else click();
-    });
-    const timeout = setTimeout(() => {
-      observer.disconnect();
-      reject(new Error("Missing Home arrival"));
-    }, 15000);
-    observer.observe(document.getElementById("main-content"), { childList: true, subtree: true });
-    document.querySelector(first).click();
-  }),
-  { first, second, painted }
-);
+const clickAtHomeArrival = async (page, first, second, painted = false) => {
+  await waitForLinks(page, { selector: first }, { selector: second });
+  return page.evaluate(
+    ({ first, second, painted }) => new Promise((resolve, reject) => {
+      const observer = new MutationObserver(() => {
+        if (!document.querySelector("#services")) return;
+        observer.disconnect();
+        clearTimeout(timeout);
+        const click = () => {
+          document.querySelector(second).click();
+          resolve();
+        };
+        if (painted) requestAnimationFrame(() => requestAnimationFrame(click));
+        else click();
+      });
+      const timeout = setTimeout(() => {
+        observer.disconnect();
+        reject(new Error("Missing Home arrival"));
+      }, 15000);
+      observer.observe(document.getElementById("main-content"), { childList: true, subtree: true });
+      document.querySelector(first).click();
+    }),
+    { first, second, painted }
+  );
+};
 
 test("a route link after Home is painted keeps the seen section in history", async ({ page }) => {
   await openPage(page, "/reviews", "desktop");
@@ -454,8 +469,9 @@ test("a route link clicked as the section lands leaves the page scrollable", asy
   ).toEqual({ locked: false, veil: "0" });
 });
 
-const clickOnceSectionLands = (page, sectionSelector, linkSelector, hash) =>
-  page.evaluate(
+const clickOnceSectionLands = async (page, sectionSelector, linkSelector, hash) => {
+  await waitForLinks(page, { selector: sectionSelector }, { selector: linkSelector });
+  return page.evaluate(
     ([section, link, target]) =>
       new Promise((resolve) => {
         document.querySelector(section).click();
@@ -471,25 +487,37 @@ const clickOnceSectionLands = (page, sectionSelector, linkSelector, hash) =>
       }),
     [sectionSelector, linkSelector, hash]
   );
+};
 
 const readHomeTop = (page) =>
   page.evaluate(() => ({ path: window.location.pathname, hash: window.location.hash, y: window.scrollY }));
 
 const holdRouteChunks = async (page, shouldHold = () => true) => {
   const pending = [];
+  const inFlight = new Set();
   let holding = true;
   const pattern = "**/_next/static/chunks/*.js";
-  await page.route(pattern, async (route) => {
-    const pause = await shouldHold();
-    if (holding && pause) pending.push(route);
-    else await route.continue();
-  });
+  const handler = async (route) => {
+    const handled = (async () => {
+      const pause = await shouldHold();
+      if (holding && pause) pending.push(route);
+      else await route.continue();
+    })();
+    inFlight.add(handled);
+    try {
+      await handled;
+    } finally {
+      inFlight.delete(handled);
+    }
+  };
+  await page.route(pattern, handler);
   return {
     wait: () => expect.poll(() => pending.length, { timeout: 8000 }).toBeGreaterThan(0),
     release: async () => {
       holding = false;
-      await Promise.all(pending.map((route) => route.continue()));
-      await page.unroute(pattern);
+      await Promise.all(pending.splice(0).map((route) => route.continue()));
+      while (inFlight.size) await Promise.all(inFlight);
+      await page.unroute(pattern, handler);
     },
   };
 };
@@ -540,7 +568,7 @@ test("reloading a pending section trip leaves Home in the Back chain after Tools
   } finally {
     await chunks.release();
   }
-  await waitForHydrated(page, NAVBAR("benefits").selector);
+  await waitForLinks(page, NAVBAR("benefits"));
   await expectMatrixLanding(page, { path: "/", hash: "#services" });
   await page.locator(FOOTER("/tools").selector).evaluate(link => link.click());
   await expectMatrixLanding(page, { path: "/tools", hash: "" });
@@ -560,25 +588,28 @@ const MATRIX_LINKS = {
   Reviews: { selector: 'header a[href="/reviews"]', path: "/reviews", hash: "" },
 };
 
-const clickAtRouteCommit = (page, first, second, path) => page.evaluate(
-  ({ first, second, path }) => new Promise((resolve, reject) => {
-    const observer = new MutationObserver(() => {
-      if (!document.querySelector(`#main-content [data-route-key="${path}"]`)) return;
-      if (path === "/" && !document.querySelector("#services")) return;
-      observer.disconnect();
-      clearTimeout(timeout);
-      document.querySelector(second).click();
-      resolve();
-    });
-    const timeout = setTimeout(() => {
-      observer.disconnect();
-      reject(new Error(`Missing committed route ${path}`));
-    }, 15000);
-    observer.observe(document.getElementById("main-content"), { childList: true, subtree: true });
-    document.querySelector(first).click();
-  }),
-  { first: MATRIX_LINKS[first].selector, second: MATRIX_LINKS[second].selector, path }
-);
+const clickAtRouteCommit = async (page, first, second, path) => {
+  await waitForLinks(page, MATRIX_LINKS[first], MATRIX_LINKS[second]);
+  return page.evaluate(
+    ({ first, second, path }) => new Promise((resolve, reject) => {
+      const observer = new MutationObserver(() => {
+        if (!document.querySelector(`#main-content [data-route-key="${path}"]`)) return;
+        if (path === "/" && !document.querySelector("#services")) return;
+        observer.disconnect();
+        clearTimeout(timeout);
+        document.querySelector(second).click();
+        resolve();
+      });
+      const timeout = setTimeout(() => {
+        observer.disconnect();
+        reject(new Error(`Missing committed route ${path}`));
+      }, 15000);
+      observer.observe(document.getElementById("main-content"), { childList: true, subtree: true });
+      document.querySelector(first).click();
+    }),
+    { first: MATRIX_LINKS[first].selector, second: MATRIX_LINKS[second].selector, path }
+  );
+};
 
 const expectMatrixLanding = async (page, { path, hash }) => {
   if (hash) {
@@ -663,6 +694,7 @@ test.describe("navigation interleaving matrix", () => {
     test(`${origin}: ${clicks.join(" → ")} (${timing}${scrolled ? ", scrolled start" : ""})`, async ({ page }) => {
       await page.setViewportSize({ width: 1536, height: scrolled ? 480 : 960 });
       await openPage(page, origin === "/#services" ? "/reviews" : origin, "desktop");
+      await waitForLinks(page, ...clicks.map(link => MATRIX_LINKS[link]));
       if (origin === "/#services") await clickSettledSection(page, "benefits", "desktop");
       if (scrolled) {
         await page.evaluate(() => window.scrollTo({ top: 700, behavior: "instant" }));
@@ -947,7 +979,7 @@ for (const { label, origin, selector, text = "", hash } of [
   test(`modifier click on ${label} opens the section in a new page`, async ({ context, page }) => {
     await page.setViewportSize({ width: 1536, height: 960 });
     await page.goto(origin, { waitUntil: "domcontentloaded" });
-    await waitForHydrated(page, selector);
+    await waitForLinks(page, { selector });
     const before = await page.evaluate(() => ({ url: window.location.href, y: window.scrollY }));
     const [opened] = await Promise.all([
       context.waitForEvent("page", { timeout: 15000 }),
@@ -1008,6 +1040,7 @@ test.describe("reduced motion on a phone", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     const link = ON_PAGE("#packages", "Tune My PC");
     await page.goto("/", { waitUntil: "domcontentloaded" });
+    await waitForRouteCommitted(page);
     await page.waitForFunction(
       ({ selector, text }) =>
         [...document.querySelectorAll(selector)].some(
@@ -1066,6 +1099,7 @@ const waitForButton = (page, { scope, text }) =>
   );
 
 const sampleScrollAfterClick = async (page, button) => {
+  await waitForRouteCommitted(page);
   await waitForButton(page, button);
   return page.evaluate(
     ({ scope, text, from }) =>
