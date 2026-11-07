@@ -21,12 +21,14 @@ import {
   normalizeSectionHash,
   readPendingSectionTarget,
   SECTION_TRIP_ENTRY,
+  withoutSupersededSectionTrip,
   writePendingSectionTarget,
   writeRouteTransitionIntent,
 } from "./sectionNavigation";
 
 const SectionNavigationContext = createContext(null);
 const ActiveHomeSectionContext = createContext("");
+let nextTripKey = 0;
 
 const getHeaderOffsetPx = () => getCssHeaderOffsetPx(110);
 
@@ -48,7 +50,8 @@ const prefetchSectionData = (hash) => {
 };
 
 export function SectionNavigationProvider({ routeShell = "browser", children }) {
-  const location = useLocation();
+  const routeLocation = useLocation();
+  const location = routeLocation.state?.backgroundLocation || routeLocation;
   const navigate = useNavigate();
   const [activeHomeHash, setActiveHomeHash] = useState("");
   const tripRef = useRef(null);
@@ -56,10 +59,12 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   const intentRef = useRef("");
   const alignmentCleanupRef = useRef(null);
   const clickAlignedHashRef = useRef("");
+  const pendingRouteRef = useRef(false);
 
   useLayoutEffect(() => {
     locationRef.current = location;
-  }, [location]);
+    pendingRouteRef.current = false;
+  }, [location, routeLocation]);
 
   const stopAlignment = useCallback(() => {
     clickAlignedHashRef.current = "";
@@ -106,13 +111,12 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
 
   const supersedePendingNavigation = useCallback((hash = "") => {
     const committedLocation = locationRef.current;
-    const abandonedTrip = window.history.state?.[SECTION_TRIP_ENTRY];
-    let winningState = committedLocation.state;
-    if (isSupersededSectionTrip(winningState, abandonedTrip)) {
-      winningState = { ...winningState };
-      delete winningState.sectionTrip;
-    }
-    cancelSectionNavigation();
+    const abandonedTrip = tripRef.current
+      ? { ...tripRef.current, superseded: true }
+      : window.history.state?.[SECTION_TRIP_ENTRY];
+    const winningState = withoutSupersededSectionTrip(committedLocation.state, abandonedTrip);
+    cancelSectionNavigation(true);
+    replaceBrowserUrl(hash, `${committedLocation.pathname}${committedLocation.search}${hash}`);
     navigate(
       { pathname: committedLocation.pathname, search: committedLocation.search, hash },
       { replace: true, state: winningState }
@@ -127,10 +131,11 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       event.preventDefault();
 
       if (locationRef.current.pathname === "/") {
-        supersedePendingNavigation(normalizedHash);
+        if (pendingRouteRef.current) supersedePendingNavigation(normalizedHash);
         intentRef.current = "";
         clearPendingSectionTarget();
-        if (window.location.hash !== normalizedHash) replaceBrowserUrl(normalizedHash);
+        const committedHome = locationRef.current;
+        replaceBrowserUrl(normalizedHash, `${committedHome.pathname}${committedHome.search}${normalizedHash}`);
         announceSectionTarget(normalizedHash);
         setActiveHomeHash(normalizedHash);
         alignTo(normalizedHash, alignment);
@@ -147,7 +152,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       const nextHref = buildHomeSectionHref(normalizedHash);
       const trip = tripRef.current?.superseded ? null : tripRef.current;
       const {
-        key = window.crypto.randomUUID(),
+        key = `section-${++nextTripKey}`,
         via = routeShell === "memory"
           ? "memory"
           : window.location.pathname !== locationRef.current.pathname ? "document" : "router",
@@ -199,7 +204,8 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   useEffect(() => {
     const syncHash = () => {
       if (isSupersededSectionTrip(location.state, tripRef.current)) return;
-      setActiveHomeHash(normalizeSectionHash(window.location.hash || location.hash));
+      const hash = window.location.pathname === location.pathname ? window.location.hash : location.hash;
+      setActiveHomeHash(normalizeSectionHash(hash));
     };
     syncHash();
     window.addEventListener("hashchange", syncHash);
@@ -209,29 +215,31 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   useEffect(() => {
     const plainLink = (event) => {
       const link = event.target instanceof Element && event.target.closest("a[href]");
-      return link && !link.hasAttribute("download") && isPlainPrimaryClick(event, link) && link;
+      return link && /^https?:$/.test(link.protocol) && !link.hasAttribute("download") &&
+        isPlainPrimaryClick(event, link) && link;
     };
     const captureLinkIntent = (event) => {
       const link = plainLink(event);
       if (!link) return;
       const homeSectionLink =
         link.origin === window.location.origin && link.pathname === "/" && isHomeSectionHash(link.hash);
-      if (tripRef.current && !homeSectionLink) {
-        cancelSectionNavigation(true);
+      if (locationRef.current.pathname === "/" && link.href === `${window.location.origin}/`) {
+        event.preventDefault();
+        supersedePendingNavigation();
+        setActiveHomeHash("");
+        window.scrollTo(0, 0);
         return;
       }
-      if (locationRef.current.pathname !== "/" || link.href !== `${window.location.origin}/`) return;
-      event.preventDefault();
-      supersedePendingNavigation();
-      if (window.location.hash) replaceBrowserUrl();
-      setActiveHomeHash("");
-      window.scrollTo(0, 0);
+      if (!homeSectionLink && !link.getAttribute("href").startsWith("#")) pendingRouteRef.current = true;
+      if (tripRef.current && !homeSectionLink) {
+        cancelSectionNavigation(true);
+      }
     };
     const endTripOnLink = (event) => {
       const link = tripRef.current?.superseded && plainLink(event);
       if (!link) return;
       const tripEntryPushed = window.history.state?.[SECTION_TRIP_ENTRY];
-      if (tripEntryPushed && /^https?:$/.test(link.protocol) && !link.getAttribute("href").startsWith("#")) {
+      if (tripEntryPushed && !link.getAttribute("href").startsWith("#")) {
         event.preventDefault();
         window.location.replace(link.href);
       }

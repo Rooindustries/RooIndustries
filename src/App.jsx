@@ -25,6 +25,7 @@ import {
   isSupersededSectionTrip,
   normalizeSectionHash,
   SECTION_TRIP_ENTRY,
+  withoutSupersededSectionTrip,
 } from "./lib/sectionNavigation";
 import { sanitizeBrowserSearch } from "./lib/browserSearch";
 import { prefetchHomeSectionData } from "./lib/homeSectionData";
@@ -470,7 +471,10 @@ export function AppContent({
           window.location.pathname,
           window.location.search
         )}${window.location.hash}`,
-        { replace: true, state: event.state.usr || null }
+        {
+          replace: true,
+          state: withoutSupersededSectionTrip(event.state.usr || null, event.state[SECTION_TRIP_ENTRY]),
+        }
       );
     };
     window.addEventListener("popstate", restoreBrowserEntry);
@@ -478,9 +482,7 @@ export function AppContent({
   }, [navigate, routeShell]);
 
   useEffect(() => {
-    const rawHash = location.hash || (
-      window.location.pathname === location.pathname ? window.location.hash : ""
-    );
+    const rawHash = window.location.pathname === location.pathname ? window.location.hash : location.hash;
     const currentHash = normalizeSectionHash(rawHash);
     const keepHash =
       location.pathname === "/" && isHomeSectionHash(currentHash)

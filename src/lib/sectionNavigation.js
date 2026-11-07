@@ -18,6 +18,12 @@ export const SECTION_TRIP_ENTRY = "__rooSectionTrip";
 export const isSupersededSectionTrip = (state, trip) =>
   Boolean(trip?.superseded) && state?.sectionTrip === trip.key;
 
+export const withoutSupersededSectionTrip = (state, trip) => {
+  if (!isSupersededSectionTrip(state, trip)) return state;
+  const { sectionTrip, ...winningState } = state;
+  return winningState;
+};
+
 export const normalizeSectionHash = (hash = "") => {
   const raw = String(hash || "").trim();
   if (!raw) return "";

@@ -1,6 +1,7 @@
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import roo, { rules } from "./eslint-rules/index.mjs";
+import navigationKeys from "./eslint-rules/no-secure-context-navigation-keys.mjs";
 
 const emailTextRules = new Set(["no-hand-built-dollars"]);
 const scriptRules = new Set(["no-parent-ipc-disconnect", "no-unchecked-group-signal", "no-linux-only-test-tooling"]);
@@ -23,7 +24,8 @@ export default [
   },
   {
     files: ["src/lib/sectionNavigator.jsx"],
-    rules: { "react-hooks/refs": "error" },
+    plugins: { navigation: { rules: { "no-secure-context-keys": navigationKeys } } },
+    rules: { "react-hooks/refs": "error", "navigation/no-secure-context-keys": "error" },
   },
   {
     files: ["scripts/**/*.{js,mjs,cjs}", "tests/**/*.{js,mjs,cjs}"],
