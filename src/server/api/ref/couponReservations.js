@@ -207,6 +207,7 @@ export const appendCouponConsumption = ({
         releaseReason: "",
         recoveredAfterRelease: true,
         capacityExceededAtRecovery,
+        ownerAlertRequired: capacityExceededAtRecovery,
         deactivatedCouponAtConsume: deactivatesCoupon,
         autoDeactivationKey,
       })
@@ -240,6 +241,8 @@ export const appendCouponConsumption = ({
       bookingId: normalize(bookingId),
       consumedAt,
       releasedAt: "",
+      capacityExceededAtRecovery: maxUses > 0 && used >= maxUses,
+      ownerAlertRequired: maxUses > 0 && used >= maxUses,
       deactivatedCouponAtConsume: deactivatesCoupon,
       autoDeactivationKey,
     })

@@ -71,9 +71,9 @@ export async function fetchReferralEarnings({ client, referralId, referralCode }
         && status in ["captured", "completed"]
         && (
           referral._ref == $id
-          || ($code != "" && defined(referralCode) && lower(referralCode) == $code)
-          || ($code == "" && !(commissionCalculationVersion in [2, "2"])
-            && coalesce(referralCode, "") == "")
+          || ($code != "" && coalesce(referral._ref, "") == ""
+            && !(referralAttributionVersion in [2, "2"])
+            && defined(referralCode) && lower(referralCode) == $code)
         )
       ]{
         _id,
@@ -117,16 +117,21 @@ function positiveMoney(value) {
   return Math.max(0, roundMoney(value));
 }
 
-export function buildBalance(earnings = {}, paidXoc = 0, paidVertex = 0) {
+export function buildBalance(earnings = {}, paidXoc = 0, paidVertex = 0, referral = {}) {
   const earnedXoc = roundMoney(earnings.xoc);
   const earnedVertex = roundMoney(earnings.vertex);
   const earnedTotal = roundMoney(earnings.total || earnedXoc + earnedVertex);
   const paidXocTotal = roundMoney(paidXoc);
   const paidVertexTotal = roundMoney(paidVertex);
   const paidTotal = roundMoney(paidXocTotal + paidVertexTotal);
-  const remainingXoc = roundMoney(earnedXoc - paidXocTotal);
-  const remainingVertex = roundMoney(earnedVertex - paidVertexTotal);
-  const remainingTotal = roundMoney(earnedTotal - paidTotal);
+  const protectedXoc = normalizeNumber(referral.emptyCodeProtectedPaidXoc);
+  const protectedVertex = normalizeNumber(referral.emptyCodeProtectedPaidVertex);
+  const remainingXoc = roundMoney(earnedXoc - paidXocTotal + protectedXoc);
+  const remainingVertex = roundMoney(earnedVertex - paidVertexTotal + protectedVertex);
+  const remainingTotal = roundMoney(earnedTotal - paidTotal + protectedXoc + protectedVertex);
+  const pending = referral.registrationStatus === 'pending_email';
+  const reviewXoc = positiveMoney(normalizeNumber(referral.emptyCodeReviewXoc) - protectedXoc);
+  const reviewVertex = positiveMoney(normalizeNumber(referral.emptyCodeReviewVertex) - protectedVertex);
 
   return {
     payments: {
@@ -140,9 +145,14 @@ export function buildBalance(earnings = {}, paidXoc = 0, paidVertex = 0) {
       total: remainingTotal,
     },
     owed: {
-      xoc: positiveMoney(remainingXoc),
-      vertex: positiveMoney(remainingVertex),
-      total: positiveMoney(remainingTotal),
+      xoc: pending ? 0 : positiveMoney(remainingXoc),
+      vertex: pending ? 0 : positiveMoney(remainingVertex),
+      total: pending ? 0 : positiveMoney(remainingTotal),
+    },
+    underReview: {
+      xoc: roundMoney(reviewXoc + (pending ? positiveMoney(remainingXoc) : 0)),
+      vertex: roundMoney(reviewVertex + (pending ? positiveMoney(remainingVertex) : 0)),
+      total: roundMoney(reviewXoc + reviewVertex + (pending ? positiveMoney(remainingTotal) : 0)),
     },
     overpaid: {
       xoc: positiveMoney(-remainingXoc),

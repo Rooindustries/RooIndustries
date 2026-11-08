@@ -30,7 +30,12 @@ const fetchReferral = (referralId) =>
       contactTelegram,
       contactPhone,
       xocPayments,
-      vertexPayments
+      vertexPayments,
+      registrationStatus,
+      emptyCodeReviewXoc,
+      emptyCodeReviewVertex,
+      emptyCodeProtectedPaidXoc,
+      emptyCodeProtectedPaidVertex
     }`,
     {id: referralId}
   );
@@ -62,7 +67,7 @@ const buildPaymentUpdate = ({
     packageType === 'vertex' ? payments : referral.vertexPayments || [];
   const paidXoc = sumPayments(xocPayments);
   const paidVertex = sumPayments(vertexPayments);
-  const balance = buildBalance(earnings, paidXoc, paidVertex);
+  const balance = buildBalance(earnings, paidXoc, paidVertex, referral);
 
   return {
     xocPayments,
@@ -195,6 +200,9 @@ export default async function handler(req, res) {
       if ([...(referral.xocPayments || []), ...(referral.vertexPayments || [])].some(payment => payment?._key === key)) {
         return res.status(409).json({ok: false, error: 'This key belongs to an existing payment log. Use a new payoutId for a new transfer.'});
       }
+      if (referral.registrationStatus === 'pending_email') {
+        return res.status(409).json({ok: false, error: 'Payout is held until the creator verifies their email.'});
+      }
       const update = buildPaymentUpdate({
         referral,
         packageType,
@@ -202,7 +210,7 @@ export default async function handler(req, res) {
         entryId: key,
         earnings,
       });
-      const {payments: paymentsTotal, owed} = update.balance;
+      const {payments: paymentsTotal, owed, underReview} = update.balance;
       const patch = writeClient
         .patch(referralId)
         .ifRevisionId(referral._rev)
@@ -218,6 +226,7 @@ export default async function handler(req, res) {
           owedXoc: owed.xoc,
           owedVertex: owed.vertex,
           owedTotal: owed.total,
+          underReviewTotal: underReview.total,
         });
 
       if (typeof internalNotes === 'string') {
@@ -252,7 +261,7 @@ export default async function handler(req, res) {
     const {
       xocPayments: nextXocPayments,
       vertexPayments: nextVertexPayments,
-      balance: {payments: paymentsTotal, remaining, owed, overpaid},
+      balance: {payments: paymentsTotal, remaining, owed, overpaid, underReview},
     } = committedUpdate;
 
     return res.status(200).json({
@@ -272,6 +281,7 @@ export default async function handler(req, res) {
       remaining,
       owed,
       overpaid,
+      underReview,
       logs: {
         xoc: nextXocPayments,
         vertex: nextVertexPayments,

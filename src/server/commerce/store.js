@@ -27,6 +27,13 @@ export class CommerceStore {
       : null;
   }
 
+  pendingCouponAlerts(options) {
+    if (typeof this.client.pendingCouponAlerts !== "function") {
+      throw new Error("Pending coupon alert reads are unavailable.");
+    }
+    return this.client.pendingCouponAlerts(options);
+  }
+
   upgradeBookingChain(options) {
     return typeof this.client.upgradeBookingChain === "function"
       ? this.client.upgradeBookingChain(options)

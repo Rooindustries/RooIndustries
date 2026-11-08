@@ -42,7 +42,8 @@ export default async function handler(req, res) {
     const referrals = await readClient.fetch(
       `*[_type == "referral"]{
         _id, _rev, name, slug, xocPayments, vertexPayments,
-        earnedTotal, paidTotal, owedTotal
+        earnedTotal, paidTotal, owedTotal, underReviewTotal, registrationStatus,
+        emptyCodeReviewXoc, emptyCodeReviewVertex, emptyCodeProtectedPaidXoc, emptyCodeProtectedPaidVertex
       }`
     );
 
@@ -63,12 +64,13 @@ export default async function handler(req, res) {
       });
       const paidXoc = sumPayments(referral?.xocPayments || []);
       const paidVertex = sumPayments(referral?.vertexPayments || []);
-      const {payments, owed} = buildBalance(earnings, paidXoc, paidVertex);
+      const {payments, owed, underReview} = buildBalance(earnings, paidXoc, paidVertex, referral);
 
       const changed =
         referral.earnedTotal !== earnings.total ||
         referral.paidTotal !== payments.total ||
-        referral.owedTotal !== owed.total;
+        referral.owedTotal !== owed.total ||
+        referral.underReviewTotal !== underReview.total;
 
       if (changed) {
         await writeClient
@@ -84,6 +86,7 @@ export default async function handler(req, res) {
             owedXoc: owed.xoc,
             owedVertex: owed.vertex,
             owedTotal: owed.total,
+            underReviewTotal: underReview.total,
           })
           .commit();
 
