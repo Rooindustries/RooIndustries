@@ -31,12 +31,13 @@ const withSite = async (overrides, body) => {
   }
 };
 
-test("a healthy site passes every money-path check with GET requests only", () => withSite({ packages: { postOnLoad: true } }, (site, result) => {
+test("a healthy site passes with only GET requests and an anonymous checkout quote", () => withSite({ packages: { postOnLoad: true } }, (site, result) => {
   assert.equal(result.code, 0, result.output);
   for (const name of ["page /", "page /packages", "page /booking", "page /payment", "booking availability", "package prices", "referral capture", "booking page renders", "payment page renders"]) {
     assert.match(result.output, new RegExp(`ok\\s+${name.replace("/", "\\/")}`));
   }
-  assert.deepEqual(site.requests.filter(request => request.method !== "GET"), []);
+  assert.ok(site.requests.every(request => request.method === "GET"));
+  assert.ok(site.requests.some(request => request.path === "/api/payment/quote"));
 }));
 
 test("a hung money page that times out is a money-path failure inside the smoke deadline", async () => {
@@ -52,13 +53,13 @@ test("a hung money page that times out is a money-path failure inside the smoke 
   }
 });
 
-test("running out of the smoke's own time budget is a smoke that could not run", async () => {
+test("a deadline while required page requests are unfinished is a money-path failure", async () => {
   const site = await startSite({ dropNonBrowser: true });
   try {
     const result = await run(["--base", site.base], null, { SMOKE_DEADLINE_MS: "400" });
-    assert.equal(result.code, 1, result.output);
+    assert.equal(result.code, 2, result.output);
     assert.match(result.output, /smoke deadline/);
-    assert.doesNotMatch(result.output, /money-path check\(s\) failed/);
+    assert.match(result.output, /money-path check\(s\) failed/);
   } finally {
     await site.close();
   }
@@ -128,9 +129,10 @@ test("a ?ref link that isn't remembered is a money-path failure", () => withSite
   assert.match(result.output, /FAIL\s+referral capture/);
 }));
 
-test("a brief outage on one page is retried before it counts", () => withSite({ failFirst: { "/booking": 1 } }, (site, result) => {
-  assert.equal(result.code, 0, result.output);
-  assert.equal(site.requests.filter(request => request.path === "/booking").length, 3);
+test("a failed required page remains a failure when a later read succeeds", () => withSite({ failFirst: { "/booking": 1 } }, (site, result) => {
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /FAIL\s+page \/booking.*503/);
+  assert.match(result.output, /ok\s+booking page renders/);
 }));
 
 for (const base of ["https://example.com", "https://rooindustries.com.attacker.example", "ftp://127.0.0.1"]) {
@@ -192,6 +194,34 @@ test("a payment page that shows an application error is a money-path failure", (
 test("refuses unknown options", async () => {
   const result = await run(["--bse", "https://www.rooindustries.com"]);
   assert.equal(result.code, 1, result.output);
+});
+
+test("invalid smoke durations refuse to run before contacting the site", async () => {
+  const site = await startSite();
+  try {
+    const result = await run(["--base", site.base], null, { SMOKE_REQUEST_TIMEOUT_MS: "invalid" });
+    assert.equal(result.code, 1, result.output);
+    assert.match(result.output, /Refusing.*SMOKE_REQUEST_TIMEOUT_MS/);
+    assert.deepEqual(site.requests, []);
+  } finally {
+    await site.close();
+  }
+});
+
+test("credential-bearing smoke and deployment URLs are refused without leaking their values", async () => {
+  const target = new URL(LIVE_URL);
+  target.username = ["fixture", "user"].join("-");
+  target.password = ["fixture", "value"].join("-");
+  for (const input of [
+    { args: ["--base", target.href], env: {} },
+    { args: ["--base", "http://127.0.0.1:1"], env: { SMOKE_DEPLOYMENT_URL: target.href } },
+  ]) {
+    const result = await run(input.args, null, input.env);
+    assert.equal(result.code, 1, result.output);
+    assert.match(result.output, /credential-free|must not contain credentials/);
+    assert.ok(!result.output.includes(target.username));
+    assert.ok(!result.output.includes(target.password));
+  }
 });
 
 const gate = path.join(root, "scripts/production-deploy-gate.mjs");
@@ -287,25 +317,25 @@ test("deploy gate: without VERCEL_TOKEN a failure is reported but nothing is rol
   assert.deepEqual(vercel.requests, []);
 }));
 
-test("a runner that can't reach the site is a smoke that could not run, not a money-path failure", () => withSite({ dropNonBrowser: true }, (site, result) => {
-  assert.equal(result.code, 1, result.output);
-  assert.match(result.output, /Smoke could not run/);
-  assert.doesNotMatch(result.output, /money-path check\(s\) failed/);
+test("unreachable required pages are a money-path failure", () => withSite({ dropNonBrowser: true }, (site, result) => {
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /money-path check\(s\) failed/);
+  assert.doesNotMatch(result.output, /Smoke could not run/);
 }));
 
-test("a connection that drops mid-page is a smoke that could not run, not a money-path failure", () => withSite({ resetFetchMidBody: ["/booking"] }, (site, result) => {
-  assert.equal(result.code, 1, result.output);
-  assert.match(result.output, /Smoke could not run/);
-  assert.doesNotMatch(result.output, /money-path check\(s\) failed/);
+test("a connection that drops mid-page is a money-path failure", () => withSite({ resetFetchMidBody: ["/booking"] }, (site, result) => {
+  assert.equal(result.code, 2, result.output);
+  assert.match(result.output, /money-path check\(s\) failed/);
+  assert.doesNotMatch(result.output, /Smoke could not run/);
 }));
 
-test("deploy gate: a connection that drops mid-page rolls nothing back", () => withGate({ site: { resetFetchMidBody: ["/booking"] } }, async ({ vercel, exec }) => {
+test("deploy gate: a connection that drops mid-page triggers recovery", () => withGate({ site: { resetFetchMidBody: ["/booking"] } }, async ({ vercel, exec }) => {
   const result = await exec();
   assert.equal(result.code, 1, result.output);
-  assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(vercelChanges(vercel).length, 1);
 }));
 
-test("a page script the runner couldn't download is a smoke that could not run, and the gate rolls nothing back", async () => {
+test("a required page script that cannot load triggers recovery", async () => {
   const healthy = await startSite({ packages: { externalReferral: true } });
   try {
     const result = await run(["--base", healthy.base]);
@@ -316,15 +346,15 @@ test("a page script the runner couldn't download is a smoke that could not run, 
   await withGate({ site: { packages: { externalReferral: true }, resetReferralScript: true } }, async ({ vercel, exec }) => {
     const result = await exec();
     assert.equal(result.code, 1, result.output);
-    assert.match(result.output, /couldn't load \/referral\.js/);
-    assert.deepEqual(vercelChanges(vercel), []);
+    assert.match(result.output, /FAIL\s+referral capture.*\/referral\.js/);
+    assert.equal(vercelChanges(vercel).length, 1);
   });
 });
 
-test("deploy gate: a runner that can't reach production rolls nothing back", () => withGate({ site: { dropNonBrowser: true } }, async ({ vercel, exec }) => {
+test("deploy gate: unreachable required pages trigger recovery", () => withGate({ site: { dropNonBrowser: true } }, async ({ vercel, exec }) => {
   const result = await exec();
   assert.equal(result.code, 1, result.output);
-  assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(vercelChanges(vercel).length, 1);
 }));
 
 test("only successful Production deployments share the smoke queue, so a Preview event can't replace a pending Production smoke", () => {

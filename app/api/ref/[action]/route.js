@@ -77,6 +77,7 @@ async function handle(request, context, methodOverride) {
     const metricResponse = response.clone();
     try {
       after(() => recordCommerceResponseMetric({
+        request,
         route: `ref/${action.toLowerCase()}`,
         durationMs: performance.now() - startedAt,
         statusCode: response.status,

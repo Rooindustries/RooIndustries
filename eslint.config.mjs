@@ -48,6 +48,13 @@ export default [
     rules: ruleSet(["no-linux-only-test-tooling"]),
   },
   {
+    files: ["scripts/production-smoke.mjs"],
+    rules: {
+      "no-restricted-globals": ["error", "fetch", "globalThis", "global", "window", "self"],
+      "no-restricted-properties": ["error", { property: "fetch", message: "Use smokeRequest for GET-only requests." }],
+    },
+  },
+  {
     files: ["scripts/lib/process-group.mjs"],
     rules: { "roo/no-unchecked-group-signal": "off" },
   },

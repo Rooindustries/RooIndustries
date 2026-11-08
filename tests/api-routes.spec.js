@@ -388,3 +388,65 @@ test.describe("referral session status", () => {
     });
   });
 });
+
+test("anonymous quote GET validates input and leaves rate limits and commerce data unchanged", async ({ baseURL }) => {
+  await apiFixture.configureApiFixture(baseURL, { reset: true });
+  const before = await apiFixture.readApiFixture(baseURL);
+  const title = before.documents.find(row => row._type === "package").title;
+  const response = await apiFixture.requestRoute(baseURL, `/api/payment/quote?packageTitle=${encodeURIComponent(title)}`);
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toContain("s-maxage=60");
+  expect(await response.json()).toMatchObject({ ok: true, quoteFingerprint: expect.any(String),
+    quote: { netAmount: expect.any(Number), isFree: false } });
+  for (const query of ["", "packageTitle=", "packageTitle=a&email=private", "packageTitle=a&packageTitle=b",
+    `packageTitle=${"a".repeat(201)}`]) {
+    const invalid = await apiFixture.requestRoute(baseURL, `/api/payment/quote?${query}`);
+    expect(invalid.status).toBe(400);
+    expect(invalid.headers.get("cache-control")).not.toContain("s-maxage");
+  }
+  const after = await apiFixture.readApiFixture(baseURL);
+  expect(after.documents).toEqual(before.documents);
+  expect(after.requests.some(call => /rate_limit|response_metric/.test(call.path))).toBe(false);
+});
+
+test("the full production smoke leaves every commerce read unchanged", async ({ baseURL }, testInfo) => {
+  await apiFixture.configureApiFixture(baseURL, { reset: true });
+  const before = await apiFixture.readApiFixture(baseURL);
+  const { startSite } = await import("./fixtures/fake-site.mjs");
+  const title = before.documents.find(row => row._type === "package").title;
+  const site = await startSite({ apiUpstream: baseURL, packages: {
+    cards: [{ name: title, price: "$29.95" }], offers: [{ name: title, price: "$29.95" }],
+  } });
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, ["scripts/production-smoke.mjs", "--base", site.base], {
+        env: { PATH: process.env.PATH, HOME: process.env.HOME,
+          PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH, SMOKE_RETRY_MS: "10" },
+      });
+      let output = "";
+      child.stdout.on("data", chunk => { output += chunk; });
+      child.stderr.on("data", chunk => { output += chunk; });
+      child.once("error", reject);
+      child.once("close", code => resolve({ code, output }));
+    });
+    await testInfo.attach("full-smoke-output", { body: result.output, contentType: "text/plain" });
+    expect(result.code, result.output).toBe(0);
+    for (const path of ["/api/bookingAvailability", "/api/payment/providers", "/api/payment/quote"]) {
+      expect(site.requests.some(request => request.path === path && request.method === "GET")).toBe(true);
+    }
+    const after = await apiFixture.readApiFixture(baseURL);
+    expect(after.documents).toEqual(before.documents);
+    expect(after.requests.filter(call => /consume.*rate_limit|apply.*mutations|record_commerce_metric/.test(call.path))).toEqual([]);
+  } finally {
+    await site.close();
+  }
+});
+
+test("commerce writes still record response metrics", async ({ baseURL }) => {
+  await apiFixture.configureApiFixture(baseURL, { reset: true });
+  const response = await apiFixture.requestRoute(baseURL, "/api/holdSlot", { data: {} });
+  expect(response.status).toBe(400);
+  await expect.poll(async () => (await apiFixture.readApiFixture(baseURL)).requests.filter(call =>
+    call.path.endsWith("/roo_record_commerce_metric") && call.body.p_route === "booking/hold"
+  ).length).toBe(1);
+});

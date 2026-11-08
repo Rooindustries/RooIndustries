@@ -5,6 +5,7 @@ const {
 const { resolvePaymentProviders } = require("./providerConfig.js");
 const { buildQuoteFingerprint } = require("./paymentRecord.js");
 const { verifyUpgradeIntentToken } = require("../ref/upgradeIntentToken.js");
+const { isReadRequest } = require("../../request/isReadRequest.js");
 const {
   consumeQuoteRateLimitWithPricing,
   getClientAddress,
@@ -12,13 +13,19 @@ const {
 } = require("../ref/rateLimit.js");
 
 module.exports = async function handler(req, res) {
-  if (req.method !== "POST") {
-    res.setHeader("Allow", ["POST"]);
+  const readOnly = isReadRequest(req);
+  if (!readOnly && req.method !== "POST") {
+    res.setHeader("Allow", ["GET", "POST"]);
     return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
   try {
-    const requestBody = req.body || {};
+    const requestBody = readOnly ? req.query || {} : req.body || {};
+    if (readOnly && (Object.keys(requestBody).some(key => key !== "packageTitle") ||
+        typeof requestBody.packageTitle !== "string" || !requestBody.packageTitle.trim() ||
+        requestBody.packageTitle.length > 200)) {
+      return res.status(400).json({ ok: false, error: "A package title is required for an anonymous quote." });
+    }
     const bookingPayload =
       requestBody.bookingPayload && typeof requestBody.bookingPayload === "object"
         ? requestBody.bookingPayload
@@ -49,7 +56,7 @@ module.exports = async function handler(req, res) {
     }
 
     const combined =
-      !originalOrderId &&
+      !readOnly && !originalOrderId &&
       typeof consumeQuoteRateLimitWithPricing === "function"
         ? await consumeQuoteRateLimitWithPricing(res, {
             ...limitOptions,
@@ -63,7 +70,7 @@ module.exports = async function handler(req, res) {
           })
         : { handled: false };
     if (combined.handled && !combined.allowed) return;
-    if (!combined.handled) {
+    if (!readOnly && !combined.handled) {
       const allowed = await requireRateLimit(res, limitOptions);
       if (!allowed) return;
     }
@@ -107,6 +114,7 @@ module.exports = async function handler(req, res) {
       quote: resolvedQuote,
     });
 
+    if (readOnly) res.setHeader("Cache-Control", "public, max-age=0, s-maxage=60");
     return res.status(200).json({
       ok: true,
       quoteFingerprint,

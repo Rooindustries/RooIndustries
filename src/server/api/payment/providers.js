@@ -1,4 +1,3 @@
-import { getClientAddress, requireRateLimit } from "../ref/rateLimit.js";
 import providerConfig from "./providerConfig.js";
 
 const { resolvePaymentProviders } = providerConfig;
@@ -7,17 +6,6 @@ export default async function handler(req, res) {
   if (req.method !== "GET") {
     res.setHeader("Allow", ["GET"]);
     return res.status(405).json({ ok: false, error: "Method not allowed" });
-  }
-
-  const clientAddress = getClientAddress(req);
-  if (
-    !(await requireRateLimit(res, {
-      key: `payment-providers:${clientAddress}`,
-      max: 60,
-      message: "Too many payment provider requests. Please try again later.",
-    }))
-  ) {
-    return;
   }
 
   const providers = resolvePaymentProviders();

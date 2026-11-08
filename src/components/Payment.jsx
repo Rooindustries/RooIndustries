@@ -75,8 +75,13 @@ const paymentSessionMatchesCheckout = (storedFingerprint, currentFingerprint) =>
   );
 };
 
-function PayPalCheckout({ children }) {
+function PayPalCheckout({ children, onReadyChange }) {
   const [{ isResolved, isRejected, options }, dispatch] = usePayPalScriptReducer();
+
+  useEffect(() => {
+    onReadyChange(isResolved && !isRejected);
+    return () => onReadyChange(false);
+  }, [isResolved, isRejected, onReadyChange]);
 
   if (isRejected) {
     return (
@@ -493,6 +498,7 @@ export default function Payment({ hideFooter = false }) {
   });
 
   const [rzpReady, setRzpReady] = useState(false);
+  const [paypalReady, setPaypalReady] = useState(false);
   const [payingRzp, setPayingRzp] = useState(false);
   const [payingDodo, setPayingDodo] = useState(false);
   const [providerConfig, setProviderConfig] = useState({
@@ -539,6 +545,16 @@ export default function Payment({ hideFooter = false }) {
     String(providerConfig?.razorpay?.mode || "unknown") !== "unknown";
   const canUsePaypal = hasPaypalClientId && !!providerConfig?.paypal?.enabled;
   const onlinePaymentUnavailable = providerAvailabilityKnown && !providerConfig.dodo?.enabled && !canUseRazorpay && !providerConfig.paypal?.enabled;
+  const paymentUnavailable = hydrated && !!packageTitle && !quoteLoading && !!quoteFingerprint &&
+    !isFree && providersSettled && providerAvailabilityKnown &&
+    !providerConfig.dodo?.enabled && !canUseRazorpay && !canUsePaypal;
+  const paymentFlowReady = hydrated && !!packageTitle && !quoteLoading && !!quoteFingerprint && (
+    isFree
+      ? serverQuote?.isFree === true
+      : providersSettled && providerAvailabilityKnown && (
+        providerConfig.dodo?.enabled || (canUseRazorpay && rzpReady) || (canUsePaypal && paypalReady)
+      )
+  );
   const shouldRenderPaypalBlock =
     !!providerConfig?.paypal?.enabled || showInternalPayments;
   const canDisplayPaypalMethod = shouldRenderPaypalBlock && canUsePaypal;
@@ -1817,6 +1833,8 @@ export default function Payment({ hideFooter = false }) {
 
   return (
     <motion.section
+      data-roo-flow-ready={paymentFlowReady ? "payment" : undefined}
+      data-roo-payment-unavailable={paymentUnavailable ? "true" : undefined}
       className="booking-payment relative z-10 py-4 px-6 max-w-3xl mx-auto text-ink"
       variants={containerVariants}
       initial={false}
@@ -2291,7 +2309,7 @@ export default function Payment({ hideFooter = false }) {
                           intent: "capture",
                         }}
                       >
-                        <PayPalCheckout>
+                        <PayPalCheckout onReadyChange={setPaypalReady}>
                           <PayPalButtons
                           fundingSource="paypal"
                           disabled={

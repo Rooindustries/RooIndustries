@@ -32,6 +32,8 @@ function CtaNote({ text }) {
 
 export default function Hero({ initialData = null, headingTag = "h1" }) {
   const Heading = headingTag;
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => { setHydrated(true); }, []);
   const [fetchedHero, setFetchedHero] = useState(null);
   const heroData = resolveHeroCopy(initialData || fetchedHero);
   const handleHomeSectionLink = useHomeSectionLinkHandler();
@@ -178,7 +180,7 @@ export default function Hero({ initialData = null, headingTag = "h1" }) {
   }, [headingLine1, headingLine2, headingTag]);
 
   return (
-    <header id="top" className="flex justify-center pb-14 pt-6 sm:py-16">
+    <header id="top" data-roo-flow-ready={hydrated ? "home" : undefined} className="flex justify-center pb-14 pt-6 sm:py-16">
       <section className="mx-auto max-w-4xl px-6 text-center w-full">
         <div className="w-full">
           <Heading className="font-extrabold tracking-tight text-center">

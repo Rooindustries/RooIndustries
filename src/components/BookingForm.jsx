@@ -1517,7 +1517,8 @@ export default function BookingForm() {
     }
   }, [settings, selectedDate, localSlotMap, earliestAvailableSlot, startOfToday]);
 
-  useBookingDialogPending(settings ? !selectedDate && Boolean(localSlotMap) : !settingsError);
+  const bookingPending = settings ? !selectedDate && Boolean(localSlotMap) : !settingsError;
+  useBookingDialogPending(bookingPending);
 
   const handleChange = (e) => {
     if (isPaymentPendingHold) return;
@@ -2500,6 +2501,7 @@ export default function BookingForm() {
     <>
       <div
         ref={formRootRef}
+        data-roo-flow-ready={!bookingPending && pageFadeIn ? "booking" : undefined}
         className={`ri-booking text-ink transition-opacity duration-300 ${
           pageFadeIn ? "opacity-100" : "opacity-0"
         }`}

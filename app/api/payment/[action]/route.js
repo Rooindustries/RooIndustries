@@ -51,6 +51,7 @@ async function handle(request, context, methodOverride) {
     try {
       after(() =>
         recordCommerceResponseMetric({
+          request,
           route: `payment/${action}`,
           durationMs: performance.now() - startedAt,
           statusCode: response.status,

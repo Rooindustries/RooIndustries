@@ -1,50 +1,27 @@
 import fs from "node:fs";
+import { smokeRequest } from "./lib/production-smoke-request.mjs";
 import { isIP } from "node:net";
+import { isProductionMonitor } from "./lib/production-monitor.mjs";
+import { log, logError, redact, redactObject, deploymentOrigin } from "./lib/production-diagnostics.mjs";
 
 const PRODUCTION = "https://www.rooindustries.com";
 const MONEY_PAGES = ["/", "/packages", "/booking", "/payment"];
 const REFERRAL_CODE = "roo-smoke-check";
-const ATTEMPTS = 3;
-const RETRY_MS = Number(process.env.SMOKE_RETRY_MS || 10000);
 const SMOKE_DEADLINE_MS = Number(process.env.SMOKE_DEADLINE_MS || 180000);
 const REQUEST_TIMEOUT_MS = Number(process.env.SMOKE_REQUEST_TIMEOUT_MS || 20000);
 const PRICE_PATTERN = /^\$\d{1,3}(?:,\d{3})*(?:\.\d{2})?$/;
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+const isCiTarget = (url) =>
+  url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname) && !url.username && !url.password;
 
 class Refusal extends Error {}
-
-// The runner could not reach the site at all (DNS, TLS, refused or reset connections, a dead browser).
-// A deployment can't cause these, so they mean "the smoke could not run", never a money-path failure.
 class CouldNotRun extends Error {}
-// Only failures of the connection itself are the runner's: a deploy can't cause them. Anything the browser
-// refused on the site's say-so (CSP, CORS, redirects, bad responses) is the site's failure.
-const RUNNER_NET_ERRORS = new Set([
-  "net::ERR_CONNECTION_RESET", "net::ERR_CONNECTION_REFUSED", "net::ERR_CONNECTION_CLOSED",
-  "net::ERR_CONNECTION_ABORTED", "net::ERR_CONNECTION_FAILED", "net::ERR_CONNECTION_TIMED_OUT",
-  "net::ERR_TIMED_OUT", "net::ERR_EMPTY_RESPONSE", "net::ERR_NAME_NOT_RESOLVED",
-  "net::ERR_NAME_RESOLUTION_FAILED", "net::ERR_ADDRESS_UNREACHABLE", "net::ERR_INTERNET_DISCONNECTED",
-  "net::ERR_NETWORK_CHANGED", "net::ERR_NETWORK_IO_SUSPENDED", "net::ERR_SOCKET_NOT_CONNECTED",
-  "net::ERR_INCOMPLETE_CHUNKED_ENCODING", "net::ERR_CONTENT_LENGTH_MISMATCH", "net::ERR_SSL_PROTOCOL_ERROR",
-]);
-const runnerNetError = (text) => {
-  const code = String(text || "").match(/net::ERR_[A-Z0-9_]+/)?.[0] || "";
-  return RUNNER_NET_ERRORS.has(code) || code.startsWith("net::ERR_CERT_");
-};
-// Node's fetch reports every network-level failure as a TypeError: "fetch failed" before a response arrives,
-// "terminated" when the connection drops mid-body. Only its own header and body timeouts mean the site was slow.
-const SITE_TIMEOUTS = new Set(["UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"]);
-const asRunnerFault = (error, what) => {
-  if (error instanceof CouldNotRun) return error;
-  const fetchTransport = error?.name === "TypeError" && /^(?:fetch failed|terminated)$/.test(error.message) &&
-    !SITE_TIMEOUTS.has(error.cause?.code);
-  const transport = fetchTransport || runnerNetError(error?.message);
-  return transport ? new CouldNotRun(`couldn't reach ${what}: ${error.cause?.code || error.cause?.message || error.message}`) : error;
-};
 
 const parseArgs = (argv) => {
   const options = { base: PRODUCTION };
   for (let index = 0; index < argv.length; index += 1) {
-    if (argv[index] === "--base" && argv[index + 1]) {
-      options.base = argv[index + 1];
+    if (["--base", "--report"].includes(argv[index]) && argv[index + 1]) {
+      options[argv[index] === "--base" ? "base" : "report"] = argv[index + 1];
       index += 1;
     } else {
       throw new Refusal(`unknown option "${argv[index]}". Usage: npm run smoke:production [-- --base <url>]`);
@@ -65,62 +42,162 @@ const resolveBase = (value) => {
   try {
     url = new URL(value);
   } catch {
-    throw new Refusal(`"${value}" is not a URL.`);
+    throw new Refusal("The smoke target is not a valid URL.");
+  }
+  if (url.username || url.password) throw new Refusal("The smoke target must not contain credentials.");
+  const recoveryOrigin = process.env.SMOKE_DEPLOYMENT_URL && deploymentOrigin(process.env.SMOKE_DEPLOYMENT_URL);
+  const recoveryTarget = url.origin === recoveryOrigin && url.hostname.endsWith(".vercel.app");
+  if (process.env.GITHUB_ACTIONS === "true" && !(isCiTarget(url) || (isProductionMonitor() && (url.origin === PRODUCTION || recoveryTarget)))) {
+    throw new Refusal("CI requires an explicit loopback smoke target; live monitoring is disabled.");
   }
   if (url.origin === PRODUCTION) return url.origin;
+  if (recoveryTarget) return url.origin;
   if (url.protocol === "http:" && isPrivateHost(url.hostname)) return url.origin;
   throw new Refusal(`the smoke only runs against ${PRODUCTION} or a local test server, not ${url.origin}.`);
 };
 
-const getWithRetries = async (url, check) => {
-  let lastError;
-  for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
-    try {
-      const response = await fetch(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-      return await check(response);
-    } catch (error) {
-      lastError = asRunnerFault(error, url);
-      if (attempt < ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
-    }
-  }
-  throw lastError;
+const smokeHeaders = (url, base, original = {}) => {
+  const headers = { ...original };
+  delete headers["x-vercel-protection-bypass"];
+  const bypass = String(process.env.VERCEL_AUTOMATION_BYPASS_SECRET || "").trim();
+  if (bypass && new URL(url).origin === base) headers["x-vercel-protection-bypass"] = bypass;
+  return headers;
+};
+
+const checkGet = async (url, check, base) => {
+  const response = await smokeRequest(url, {
+    headers: smokeHeaders(url, base), signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  return check(response);
 };
 
 const expectHtml = async (response) => {
-  if (response.status !== 200) throw new Error(`answered ${response.status}`);
   if (!String(response.headers.get("content-type")).includes("text/html")) throw new Error(`answered ${response.headers.get("content-type")}`);
   await response.arrayBuffer();
 };
 
 const expectAvailability = async (response) => {
-  if (response.status !== 200) throw new Error(`answered ${response.status}`);
   const body = await response.json();
   if (body?.ok !== true) throw new Error("answered ok: false");
   if (!Array.isArray(body?.settings?.dateSlots)) throw new Error("has no dateSlots list");
   if (!Array.isArray(body?.bookedSlots)) throw new Error("has no bookedSlots list");
 };
 
-const allowOnlyGet = (context) => context.route("**/*", (route) =>
-  route.request().method() === "GET" ? route.continue() : route.abort());
+const requiresCheckoutResource = (request, base) => {
+  if (["document", "script", "stylesheet"].includes(request.resourceType())) return true;
+  const url = new URL(request.url());
+  return url.origin === base && [
+    "/api/payment/quote", "/api/payment/providers", "/api/bookingAvailability",
+  ].includes(url.pathname);
+};
 
-// Each browser check gets its own GET-only page. Only connection failures on the site's own GET requests count
-// as requests the runner couldn't load; resources the site blocks or refuses remain site failures.
-const withSmokePage = async (browser, base, contextOptions, check) => {
-  const context = await browser.newContext(contextOptions);
-  const lost = [];
-  try {
-    await allowOnlyGet(context);
-    const page = await context.newPage();
-    const origin = new URL(base).origin;
-    page.on("requestfailed", (request) => {
-      const reason = request.failure()?.errorText || "";
-      if (request.method() === "GET" && new URL(request.url()).origin === origin && runnerNetError(reason)) {
-        lost.push(`${new URL(request.url()).pathname} (${reason || "failed"})`);
+const allowSmokeRequests = async (context, base, checkout, failed) => {
+  const active = new Set();
+  context.on("close", () => { for (const controller of active) controller.abort(); });
+  await context.route("**/*", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    let quote = false;
+    if (checkout && request.method() === "POST" && url.origin === base &&
+        url.pathname === "/api/payment/quote" && !url.search) {
+      try {
+        const body = request.postDataJSON();
+        const fields = ["packageTitle", "originalOrderId", "startTimeUTC", "email", "referralCode", "couponCode", "upgradeIntentToken"];
+        quote = body?.packageTitle === checkout.packageTitle && Object.entries(body).every(([key, value]) =>
+          fields.includes(key) && (key === "packageTitle" || value === ""));
+      } catch {}
+    }
+    const allowed = (request.method() === "GET" || quote) &&
+      (process.env.GITHUB_ACTIONS !== "true" || isCiTarget(url) || (isProductionMonitor() && url.origin === base));
+    if (!allowed) return route.abort("blockedbyclient");
+    if (quote) url.searchParams.set("packageTitle", checkout.packageTitle);
+    const headers = smokeHeaders(url.href, base, request.headers());
+    const controller = new AbortController();
+    active.add(controller);
+    try {
+      const response = await smokeRequest(url.href, {
+        headers,
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
+      });
+      const body = Buffer.from(await response.arrayBuffer());
+      if (quote) {
+        const payload = JSON.parse(body.toString());
+        if (payload?.ok !== true || !payload.quoteFingerprint || !payload.quote ||
+            !Number.isFinite(payload.quote.netAmount) || typeof payload.quote.isFree !== "boolean") {
+          throw new Error("/payment quote is invalid");
+        }
       }
+      const responseHeaders = Object.fromEntries(response.headers);
+      delete responseHeaders["content-encoding"];
+      delete responseHeaders["content-length"];
+      return await route.fulfill({ status: response.status, headers: responseHeaders, body });
+    } catch (error) {
+      if (!controller.signal.aborted && requiresCheckoutResource(request, base)) {
+        const detail = error.name === "TimeoutError" ? "timed out" : error.message;
+        failed(new Error(`${url.pathname} ${detail}`));
+      }
+      await route.abort("failed").catch(() => {});
+    } finally {
+      active.delete(controller);
+    }
+  });
+  await context.routeWebSocket(/.*/, (socket) => socket.close());
+};
+
+const withSmokePage = async (browser, base, contextOptions, check) => {
+  const { checkout, ...browserOptions } = contextOptions;
+  const context = await browser.newContext({ ...browserOptions, serviceWorkers: "block" })
+    .catch(error => { throw new CouldNotRun(error.message); });
+  const pending = new Set();
+  let drained;
+  let fail;
+  const applicationError = new Promise((_, reject) => {
+    fail = reject;
+  });
+  const hasApplicationError = pattern => new RegExp(pattern, "i").test(document.body?.innerText || "");
+  try {
+    await allowSmokeRequests(context, base, checkout, fail);
+    if (checkout) await context.addInitScript((booking) => {
+      sessionStorage.setItem("checkout_booking_state", JSON.stringify(booking));
+    }, checkout);
+    const page = await context.newPage();
+    page.on("pageerror", error => {
+      const sources = (error.stack || "").split("\n").filter(frame => /^\s+at /.test(frame))
+        .flatMap(frame => frame.match(/https?:\/\/[^\s)]+/g) || []);
+      const origins = sources.map(source => { try { return new URL(source).origin; } catch { return null; } });
+      if (origins.length && origins.every(origin => origin && origin !== base)) return;
+      fail(new Error(`${new URL(page.url()).pathname} has a rendering error: ${error.message}`));
     });
-    return await check(page);
+    page.on("request", request => {
+      if (requiresCheckoutResource(request, base)) pending.add(request);
+    });
+    const finished = request => {
+      pending.delete(request);
+      if (!pending.size) drained?.();
+    };
+    page.on("requestfinished", finished);
+    page.on("requestfailed", request => {
+      if (browser.isConnected() && requiresCheckoutResource(request, base)) {
+        fail(new Error(`${new URL(request.url()).pathname} failed: ${request.failure()?.errorText}`));
+      }
+      finished(request);
+    });
+    const renderedError = page.waitForFunction(hasApplicationError, APP_ERROR_PATTERN.source, {
+      polling: 50, timeout: 0,
+    }).then(() => {
+      throw new Error(`${new URL(page.url()).pathname} shows an application error`);
+    });
+    const loaded = async () => {
+      const result = await check(page);
+      if (pending.size) await new Promise(resolve => { drained = resolve; });
+      if (await page.evaluate(hasApplicationError, APP_ERROR_PATTERN.source)) {
+        throw new Error(`${new URL(page.url()).pathname} shows an application error`);
+      }
+      return result;
+    };
+    return await Promise.race([loaded(), applicationError, renderedError]);
   } catch (error) {
-    if (lost.length && !(error instanceof CouldNotRun)) throw new CouldNotRun(`couldn't load ${lost[0]}: ${error.message}`);
+    if (!browser.isConnected()) throw new CouldNotRun(`the browser closed: ${error.message}`);
     throw error;
   } finally {
     await context.close();
@@ -133,7 +210,7 @@ const nodes = (value) => {
   return [value, ...Object.values(value).flatMap(nodes)];
 };
 
-const checkPrices = (browser, base) => withSmokePage(browser, base, { javaScriptEnabled: false }, async (page) => {
+const checkPrices = (browser, base, selectCheckout) => withSmokePage(browser, base, { javaScriptEnabled: false }, async (page) => {
     const response = await page.goto(`${base}/packages`, { waitUntil: "domcontentloaded", timeout: 30000 });
     if (response?.status() !== 200) throw new Error(`/packages answered ${response?.status()}`);
     const cards = await page.locator(".ri-package-card").evaluateAll((elements) => elements.map((card) => ({
@@ -141,6 +218,8 @@ const checkPrices = (browser, base) => withSmokePage(browser, base, { javaScript
       price: card.querySelector(".ri-price-current")?.textContent?.trim() || "",
     })));
     if (!cards.length) throw new Error("no package cards rendered");
+    const selected = cards.find(card => card.name && PRICE_PATTERN.test(card.price));
+    if (selected) selectCheckout({ packageTitle: selected.name, packagePrice: selected.price });
     const unpriced = cards.filter((card) => !card.name || !PRICE_PATTERN.test(card.price));
     if (unpriced.length) throw new Error(`cards without a name or price: ${JSON.stringify(unpriced)}`);
     const scripts = await page.locator('script[type="application/ld+json"]').allTextContents();
@@ -159,55 +238,102 @@ const FLOW_MARKERS = {
   "/payment": "Booking Summary",
 };
 
-const checkPageRenders = (browser, base, pathname) => withSmokePage(browser, base, {}, async (page) => {
-    const response = await page.goto(`${base}${pathname}`, { waitUntil: "load", timeout: 30000 });
+const checkPageRenders = (browser, base, pathname, checkout) => withSmokePage(browser, base, { checkout }, async (page) => {
+    const flow = pathname === "/" ? "home" : pathname.slice(1);
+    let quoted = false;
+    if (pathname === "/payment") page.on("response", (response) => {
+      if (response.url() === `${base}/api/payment/quote` &&
+          response.request().method() === "POST" && response.status() === 200) quoted = true;
+    });
+    const response = await page.goto(`${base}${pathname}`, { waitUntil: "domcontentloaded", timeout: 30000 });
     if (response?.status() !== 200) throw new Error(`${pathname} answered ${response?.status()}`);
-    await page.waitForFunction(() => document.body.innerText.trim().length >= 20, null, { timeout: 15000 })
+    const markerTimeout = Number(process.env.SMOKE_MARKER_TIMEOUT_MS || 15000);
+    await page.waitForFunction(() => document.body.innerText.trim().length >= 20, null, { timeout: markerTimeout })
       .catch(() => { throw new Error(`${pathname} rendered no visible content`); });
-    const text = await page.evaluate(() => document.body.innerText);
-    if (APP_ERROR_PATTERN.test(text)) throw new Error(`${pathname} shows an application error`);
+    const usable = async (locator) => {
+      await locator.evaluate(element => element.scrollIntoView({ block: "center", behavior: "instant" }), null, {
+        timeout: markerTimeout,
+      });
+      await page.waitForFunction((element) => {
+        const bounds = element.getBoundingClientRect();
+        if (bounds.width <= 0 || bounds.height <= 0 || element.disabled ||
+            getComputedStyle(element).visibility !== "visible") return false;
+        let opacity = 1;
+        for (let node = element; node; node = node.parentElement) {
+          const style = getComputedStyle(node);
+          opacity *= Number(style.opacity);
+          if (style.pointerEvents === "none" || node.inert) return false;
+        }
+        if (opacity < 0.1) return false;
+        const top = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+        return element === top || element.contains(top);
+      }, await locator.elementHandle(), { timeout: markerTimeout });
+    };
     const marker = FLOW_MARKERS[pathname];
     if (marker) {
       await page.waitForFunction((expected) => document.body.innerText.includes(expected), marker, {
-        timeout: Number(process.env.SMOKE_MARKER_TIMEOUT_MS || 15000),
-      }).catch(() => { throw new Error(`${pathname} is missing "${marker}"`); });
+        timeout: markerTimeout,
+      }).catch(() => {
+        throw new Error(`${pathname} is missing "${marker}"`);
+      });
     }
+    await page.waitForFunction((expected) =>
+      document.querySelector(`[data-roo-flow-ready="${expected}"]`) ||
+      (expected === "payment" && document.querySelector('[data-roo-payment-unavailable="true"]')), flow, {
+      timeout: markerTimeout,
+    }).catch(() => {
+      throw new Error(`${pathname} did not finish client initialization`);
+    });
+    if (pathname === "/payment" && await page.locator('[data-roo-payment-unavailable="true"]').count()) {
+      throw new Error("/payment has no usable payment provider");
+    }
+    const controls = pathname === "/"
+      ? [page.locator("#top h1"), page.locator('#top a[href="/#packages"]')]
+      : [page.getByRole("heading", { name: marker, exact: true }), page.locator(pathname === "/booking"
+        ? '[data-roo-flow-ready="booking"] button:not(:disabled)' : '#payment-coupon-code').first()];
+    try {
+      for (const control of controls) await usable(control);
+    } catch {
+      throw new Error(pathname === "/" ? "/ is missing its homepage heading or booking link"
+        : `${pathname} content or controls are not visible and usable`);
+    }
+    if (pathname === "/payment" && !quoted) throw new Error("/payment did not confirm a real checkout quote");
     return "renders";
 });
 
 const checkReferral = (browser, base) => withSmokePage(browser, base, {}, async (page) => {
-    const response = await page.goto(`${base}/packages?ref=${REFERRAL_CODE}`, { waitUntil: "load", timeout: 30000 });
+    const response = await page.goto(`${base}/packages?ref=${REFERRAL_CODE}`, { waitUntil: "domcontentloaded", timeout: 30000 });
     if (response?.status() !== 200) throw new Error(`/packages?ref answered ${response?.status()}`);
-    await page.waitForFunction((code) => window.sessionStorage.getItem("referral_session") === code, REFERRAL_CODE, { timeout: 15000 })
+    await page.waitForFunction((code) => sessionStorage.getItem("referral_session") === code, REFERRAL_CODE, {
+      timeout: Number(process.env.SMOKE_MARKER_TIMEOUT_MS || 15000),
+    })
       .catch(() => { throw new Error("the ?ref code was not remembered for checkout"); });
     return "code remembered";
 });
 
-const withBrowserRetries = async (browser, base, check) => {
-  let lastError;
-  for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
-    try {
-      return await check(browser, base);
-    } catch (error) {
-      lastError = browser.isConnected() ? asRunnerFault(error, base) : new CouldNotRun(`the browser closed: ${error.message}`);
-      if (attempt < ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+const main = async () => {
+  const options = parseArgs(process.argv.slice(2));
+  const base = resolveBase(options.base);
+  for (const name of ["SMOKE_DEADLINE_MS", "SMOKE_REQUEST_TIMEOUT_MS", "SMOKE_MARKER_TIMEOUT_MS"]) {
+    if (process.env[name] === undefined) continue;
+    const value = Number(process.env[name]);
+    if (!Number.isSafeInteger(value) || value < 1) {
+      throw new Refusal(`${name} must be a valid duration in milliseconds.`);
     }
   }
-  throw lastError;
-};
-
-const main = async () => {
-  const base = resolveBase(parseArgs(process.argv.slice(2)).base);
+  const startedAt = Date.now();
   const deadline = Date.now() + SMOKE_DEADLINE_MS;
   const withinDeadline = async (run) => {
     const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new CouldNotRun("the smoke deadline passed");
+    if (remaining <= 0) throw new Error("the smoke deadline passed before required checkout checks finished");
     let timer;
     try {
       return await Promise.race([
         run(),
         new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new CouldNotRun("the smoke deadline passed")), remaining);
+          timer = setTimeout(() => reject(new Error(
+            "the smoke deadline passed before required checkout checks finished"
+          )), remaining);
         }),
       ]);
     } finally {
@@ -215,8 +341,8 @@ const main = async () => {
     }
   };
   const checks = [
-    ...MONEY_PAGES.map((path) => [`page ${path}`, () => getWithRetries(`${base}${path}`, expectHtml)]),
-    ["booking availability", () => getWithRetries(`${base}/api/bookingAvailability`, expectAvailability)],
+    ...MONEY_PAGES.map((path) => [`page ${path}`, () => checkGet(`${base}${path}`, expectHtml, base)]),
+    ["booking availability", () => checkGet(`${base}/api/bookingAvailability`, expectAvailability, base)],
   ];
   let chromium;
   try {
@@ -224,31 +350,37 @@ const main = async () => {
   } catch (error) {
     throw new Error(`Playwright is not installed: ${error.message}`);
   }
-  const browser = await chromium.launch();
+  const browserEnv = { ...process.env };
+  for (const key of ["VERCEL_AUTOMATION_BYPASS_SECRET", "VERCEL_TOKEN", "GITHUB_TOKEN"]) delete browserEnv[key];
+  const browser = await chromium.launch({ env: browserEnv });
   const results = [];
+  let checkout;
   try {
     checks.push(
-      ["package prices", () => withBrowserRetries(browser, base, checkPrices)],
-      ["referral capture", () => withBrowserRetries(browser, base, checkReferral)],
-      ["booking page renders", () => withBrowserRetries(browser, base, (b, url) => checkPageRenders(b, url, "/booking"))],
-      ["payment page renders", () => withBrowserRetries(browser, base, (b, url) => checkPageRenders(b, url, "/payment"))],
+      ["package prices", () => checkPrices(browser, base, value => { checkout = value; })],
+      ["referral capture", () => checkReferral(browser, base)],
+      ["home page renders", () => checkPageRenders(browser, base, "/")],
+      ["booking page renders", () => checkPageRenders(browser, base, "/booking")],
+      ["payment page renders", () => {
+        if (!checkout) {
+          throw new Error("/payment has no usable checkout package because the package prices check failed");
+        }
+        return checkPageRenders(browser, base, "/payment", checkout);
+      }],
     );
     for (const [name, run] of checks) {
       try {
         const detail = await withinDeadline(run);
         results.push({ name, ok: true, detail: detail || "" });
-        console.log(`ok    ${name}${detail ? ` (${detail})` : ""}`);
+        log(`ok    ${name}${detail ? ` (${detail})` : ""}`);
       } catch (error) {
-        // Running out of the smoke's own time budget is the runner's problem; only evidence from the site counts against a deploy.
-        const fault = browser.isConnected() || error instanceof CouldNotRun ? error : new CouldNotRun(`the browser closed: ${error.message}`);
-        if (fault instanceof CouldNotRun) {
-          results.push({ name, ok: false, couldNotRun: true, detail: fault.message });
-          console.log(`SKIP  ${name}: ${fault.message}`);
-          if (!browser.isConnected() || Date.now() >= deadline) break;
-          continue;
+        if (error instanceof CouldNotRun) {
+          results.push({ name, ok: false, couldNotRun: true, detail: error.message });
+          log(`SKIP  ${name}: ${error.message}`);
+          break;
         }
         results.push({ name, ok: false, detail: error.message });
-        console.log(`FAIL  ${name}: ${error.message}`);
+        log(`FAIL  ${name}: ${error.message}`);
         if (Date.now() >= deadline) break;
       }
     }
@@ -259,20 +391,20 @@ const main = async () => {
   const unreachable = results.filter((result) => result.couldNotRun);
   if (process.env.GITHUB_STEP_SUMMARY) {
     const rows = results.map((result) => `| ${result.ok ? "ok" : result.couldNotRun ? "SKIP" : "FAIL"} | ${result.name} | ${result.detail.replace(/\|/g, "\\|")} |`);
-    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [`### Money-path smoke on ${base}`, "", "| Result | Check | Detail |", "| --- | --- | --- |", ...rows, ""].join("\n"));
+    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, redact([`### Money-path smoke on ${base}`, "", "| Result | Check | Detail |", "| --- | --- | --- |", ...rows, ""].join("\n")));
   }
-  if (failed.length) console.log(`${failed.length} money-path check(s) failed on ${base}.`);
-  else if (unreachable.length) console.log(`Smoke could not run: ${unreachable.length} check(s) couldn't reach ${base} from this runner.`);
-  else console.log(`All money-path checks passed on ${base}.`);
+  if (failed.length) log(`${failed.length} money-path check(s) failed on ${base}.`);
+  else if (unreachable.length) log(`Smoke could not run: ${unreachable.length} check(s) stopped because the browser closed.`);
+  else log(`All money-path checks passed on ${base}.`);
   const code = failed.length ? 2 : unreachable.length ? 1 : 0;
+  if (options.report) fs.writeFileSync(options.report, JSON.stringify(redactObject({ version: 1, base, startedAt, completedAt: Date.now(), results })), { mode: 0o600 });
   if (Date.now() >= deadline) {
-    await browser.close().catch(() => {});
     process.exit(code);
   }
   process.exitCode = code;
 };
 
 main().catch((error) => {
-  console.error(error instanceof Refusal ? `Refusing: ${error.message}` : `Smoke could not run: ${error.message}`);
+  logError(error instanceof Refusal ? `Refusing: ${error.message}` : `Smoke could not run: ${error.message}`);
   process.exitCode = 1;
 });
