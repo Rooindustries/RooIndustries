@@ -291,7 +291,96 @@ test("deploy gate: a deployment that never serves production still gets producti
 test("deploy gate: a healthy production passes even when this deployment isn't the live one", () => withGate({}, async ({ vercel, exec }) => {
   const result = await exec({ DEPLOYMENT_URL: PREVIOUS_URL });
   assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /not serving production/);
+  assert.equal(vercel.requests.filter(request => request.path === `/v4/aliases/${DOMAIN}`).length, 2);
   assert.deepEqual(vercelChanges(vercel), []);
+}));
+
+test("deploy gate: a later lookup can confirm the deployment went live", () => withGate({
+  vercel: { swapLiveOnAliasRead: 2, swapLiveTo: "dpl_previous" },
+}, async ({ vercel, exec }) => {
+  const result = await exec({ DEPLOYMENT_URL: PREVIOUS_URL });
+  assert.equal(result.code, 0, result.output);
+  assert.doesNotMatch(result.output, /not serving production/);
+  assert.equal(vercel.requests.filter(request => request.path === `/v4/aliases/${DOMAIN}`).length, 2);
+  assert.deepEqual(vercelChanges(vercel), []);
+}));
+
+test("deploy gate: a passing smoke fails the gate when the live deployment lookup fails", () => withGate({}, async ({ site, vercel, exec }) => {
+  const result = await exec({ GITHUB_ACTIONS: "true", VERCEL_TEAM_ID: "team_rooFixture", VERCEL_PROJECT_ID: "prj_wrong" });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /::error::Automatic rollback was unavailable because the live deployment could not be read: Refusing: VERCEL_PROJECT_ID is prj_wrong, but the live deployment belongs to prj_rooFixture\./);
+  assert.match(result.output, /ok\s+payment page renders/);
+  assert.doesNotMatch(result.output, /not serving production/);
+  assert.ok(site.requests.length > 0);
+  assert.equal(vercel.requests.filter(request => request.path === `/v4/aliases/${DOMAIN}`).length, 2);
+  assert.deepEqual(vercelChanges(vercel), []);
+}));
+
+test("deploy gate: a failed smoke and failed live lookup both report errors without a rollback", () => withGate({
+  site: { status: { "/payment": 500 } },
+}, async ({ site, vercel, exec }) => {
+  const result = await exec({ GITHUB_ACTIONS: "true", VERCEL_TEAM_ID: "team_rooFixture", VERCEL_PROJECT_ID: "prj_wrong" });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /FAIL\s+page \/payment.*500/);
+  assert.match(result.output, /::error::The money-path smoke failed on .*nothing was rolled back/);
+  assert.match(result.output, /::error::Automatic rollback was unavailable because the live deployment could not be read: Refusing: VERCEL_PROJECT_ID is prj_wrong/);
+  assert.doesNotMatch(result.output, /not serving production/);
+  assert.ok(site.requests.length > 0);
+  assert.deepEqual(vercelChanges(vercel), []);
+}));
+
+test("deploy gate: a failed final lookup takes precedence over an earlier different live deployment", () => withGate({
+  vercel: {
+    swapLiveOnAliasRead: 2,
+    swapLiveTo: "dpl_previous",
+    tweak: state => { state.deployments.find(deployment => deployment.uid === "dpl_previous").projectId = "prj_other"; },
+  },
+}, async ({ vercel, exec }) => {
+  const result = await exec({ CI: "true", VERCEL_TEAM_ID: "team_rooFixture", VERCEL_PROJECT_ID: "prj_rooFixture", DEPLOYMENT_URL: PREVIOUS_URL });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /Automatic rollback was unavailable.*VERCEL_PROJECT_ID is prj_rooFixture, but the live deployment belongs to prj_other/);
+  assert.match(result.output, /ok\s+payment page renders/);
+  assert.doesNotMatch(result.output, /not serving production/);
+  assert.equal(vercel.requests.filter(request => request.path === `/v4/aliases/${DOMAIN}`).length, 2);
+  assert.deepEqual(vercelChanges(vercel), []);
+}));
+
+test("deploy gate: a successful final lookup clears an earlier lookup failure", () => withGate({
+  vercel: {
+    swapLiveOnAliasRead: 2,
+    swapLiveTo: "dpl_previous",
+    tweak: state => { state.deployments.find(deployment => deployment.uid === "dpl_live").projectId = "prj_other"; },
+  },
+}, async ({ vercel, exec }) => {
+  const result = await exec({ CI: "true", VERCEL_TEAM_ID: "team_rooFixture", VERCEL_PROJECT_ID: "prj_rooFixture" });
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /not serving production/);
+  assert.doesNotMatch(result.output, /Automatic rollback was unavailable/);
+  assert.equal(vercel.requests.filter(request => request.path === `/v4/aliases/${DOMAIN}`).length, 2);
+  assert.deepEqual(vercelChanges(vercel), []);
+}));
+
+test("deploy gate: a failed lookup is reported even when the smoke cannot run", async () => {
+  const result = await runGate({
+    GITHUB_ACTIONS: "true",
+    VERCEL_TOKEN: TOKEN,
+    VERCEL_TEAM_ID: "team_rooFixture",
+    VERCEL_PROJECT_ID: "invalid",
+    DEPLOYMENT_URL: LIVE_URL,
+    SMOKE_BASE_URL: "https://example.com",
+  });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /The money-path smoke could not run, so nothing was rolled back/);
+  assert.match(result.output, /::error::Automatic rollback was unavailable because the live deployment could not be read: Refusing: VERCEL_PROJECT_ID must start with prj_/);
+  assert.doesNotMatch(result.output, /not serving production/);
+});
+
+test("deploy gate: without VERCEL_TOKEN a healthy smoke passes with a warning", () => withGate({}, async ({ vercel, exec }) => {
+  const result = await exec({ VERCEL_TOKEN: undefined });
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /warning: VERCEL_TOKEN is not set/);
+  assert.deepEqual(vercel.requests, []);
 }));
 
 test("deploy gate: without VERCEL_TOKEN a failure is reported but nothing is rolled back", () => withGate({ site: { status: { "/payment": 500 } } }, async ({ vercel, exec }) => {
