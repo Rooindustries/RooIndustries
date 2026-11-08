@@ -1229,6 +1229,9 @@ run("no-parent-ipc-disconnect", {
     `function swap(window) { window.ResizeObserver = fork; } new ResizeObserver(f).disconnect();`,
     `if (window === globalThis && self != null) new ResizeObserver(f).disconnect();`,
     `window.window.addEventListener("resize", f); new ResizeObserver(f).disconnect();`,
+    `if ("MutationObserver" in window.window && !self && globalThis instanceof Object) {
+      new MutationObserver(f).disconnect();
+    }`,
   ],
   invalid: [
     {
