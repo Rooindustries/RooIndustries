@@ -3,7 +3,7 @@ const BOX_CLASS = [
   "text-left text-base leading-relaxed text-warning-text",
 ].join(" ");
 
-export default function PackageSupportWarning({ widthClass }) {
+export default function PackageSupportWarning({ widthClass = "max-w-3xl" }) {
   return (
     <p className={`${BOX_CLASS} ${widthClass}`}>
       Refunds will not be issued in case you proceed with unsupported/custom parts.

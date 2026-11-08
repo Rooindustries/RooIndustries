@@ -199,16 +199,14 @@ const maxWarning = (page) => page.locator('[role="dialog"].ri-booking').getByTex
 async function expectReadableOnTop(warning) {
   await expect(warning).toBeVisible();
   await warning.scrollIntoViewIfNeeded();
-  const shown = await warning.evaluate(node => {
+  await expect.poll(() => warning.evaluate(node => {
     const box = node.getBoundingClientRect();
     const scale = box.width / node.offsetWidth;
     return {
       onTop: node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)),
-      renderedPx: parseFloat(getComputedStyle(node).fontSize) * scale,
+      readable: parseFloat(getComputedStyle(node).fontSize) * scale >= 10,
     };
-  });
-  expect(shown.onTop).toBe(true);
-  expect(shown.renderedPx).toBeGreaterThanOrEqual(10);
+  })).toEqual({ onTop: true, readable: true });
 }
 
 async function expectMaxWarningOnEveryStep(page, flow) {
