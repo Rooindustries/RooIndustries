@@ -4,7 +4,7 @@ import {logSafeError} from '../../safeErrorLog.js';
 
 export async function dispatchCouponAlerts({client, redemptionId = ''}) {
   const signal = AbortSignal.timeout(10_000);
-  let pending;
+  let pending, settings;
   try {
     if (redemptionId) {
       const row = await client.fetch('*[_type == $type && _id == $id][0]{...}', {type: 'couponRedemption', id: redemptionId});
@@ -13,6 +13,7 @@ export async function dispatchCouponAlerts({client, redemptionId = ''}) {
       pending = await client.pendingCouponAlerts({limit: 25});
     }
     if (!Array.isArray(pending)) throw new Error('Expected coupon alert records.');
+    if (pending.length) settings = await client.fetch('*[_type == "bookingSettings"][0]{ownerEmail}');
   } catch (error) {
     logSafeError('Coupon capacity alert lookup failed', error);
     return;
@@ -21,7 +22,6 @@ export async function dispatchCouponAlerts({client, redemptionId = ''}) {
     if (signal.aborted) break;
     try {
       const apiKey = String(process.env.RESEND_API_KEY || '').trim();
-      const settings = await client.fetch('*[_type == "bookingSettings"][0]{ownerEmail}');
       const current = await client.fetch('*[_type == $type && _id == $id][0]{...}', {type: 'couponRedemption', id: redemption._id});
       if (!current?.ownerAlertRequired || current.ownerAlertSentAt) continue;
       const to = String(current.ownerAlertRecipient || settings?.ownerEmail || process.env.OWNER_EMAIL || '').trim();

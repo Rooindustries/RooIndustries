@@ -13,6 +13,16 @@ import { getSafeErrorCode } from "../../safeErrorLog.js";
 import { calculateCreatorCommission } from "../../referrals/commissionMoney.js";
 import { freezeBookingCommission } from "../../referrals/bookingCommission.js";
 
+const referralCommitFields = (referralId, referral) => {
+  if (!referralId) return {};
+  if (referral?._id) return {referralAccountingApplied: true};
+  return {
+    referralAccountingApplied: false, commissionPercent: 0, commissionAmount: 0,
+    originalCommissionAmount: 0, dodoOriginalCommissionAmount: 0,
+    referralReviewRequired: true, referralReviewReason: "creator_missing_at_commit",
+  };
+};
+
 const normalize = (value) => String(value || "").trim();
 
 const bookingConflict = (message, code = "booking_conflict") => {
@@ -186,7 +196,7 @@ export const commitBookingTransaction = async ({
     ...(couponReservation?.redemption?._id
       ? { couponRedemptionId: couponReservation.redemption._id }
       : {}),
-    ...(normalize(referralId) ? { referralAccountingApplied: !!referral?._id } : {}),
+    ...referralCommitFields(normalize(referralId), referral),
     createdAt: doc.createdAt || now,
     updatedAt: now,
   };
@@ -312,7 +322,7 @@ export const createRequiresRescheduleBooking = async ({
   const pricing = await freezeBookingCommission({
     client,
     pricing: paymentRecord.pricingSnapshot || {},
-    buyerEmail: payload.email || paymentRecord.payerEmail,
+    buyerEmail: payload.email, payerEmail: paymentRecord.payerEmail,
   });
   const commission = calculateCreatorCommission(pricing);
   const originalCommissionAmount = commission.originalAmount;
@@ -373,7 +383,7 @@ export const createRequiresRescheduleBooking = async ({
       ...(resolvedReferralId
         ? {
             referral: { _type: "reference", _ref: resolvedReferralId },
-            referralAccountingApplied: !!referral?._id,
+            ...referralCommitFields(resolvedReferralId, referral),
           }
         : {}),
       ...(couponReservation?.redemption?._id

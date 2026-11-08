@@ -32,6 +32,8 @@ const sources = [
   'src/server/commerce/store.js',
 ];
 for (const source of [
+  'src/server/referrals/bookingCommission.js',
+  'src/server/api/payment/providerClients.js',
   'src/server/referrals/commissionMoney.js',
   'src/server/referrals/disputeAccounting.js',
   'src/server/api/ref/couponAlerts.js',
@@ -801,6 +803,7 @@ try {
           result = {
             id: state?.record.providerOrderId,
             status: 'COMPLETED',
+            payer: {email_address: state?.payment.email || ''},
             purchase_units: [
               {
                 amount: {
@@ -3329,7 +3332,8 @@ try {
     assert.equal((await webhook()).status, 200);
     const expiredBooking = await read((await read(expired.record._id)).bookingId);
     assert.equal(expiredBooking.referral._ref, expired.creator._id);
-    assert.equal(expiredBooking.commissionAmount, 5.5);
+    assert.equal(expiredBooking.commissionAmount, 0);
+    assert.equal(expiredBooking.referralReviewRequired, true);
     await summary(reused, 0);
 
     return {booking, pending: pending.body, verified: verified.body, payout, replacementEarnings};
@@ -3740,6 +3744,11 @@ try {
       futureValidEarnings: future.body,
       source: 'Synthetic local PostgreSQL 17 schema copy; no production data',
     };
+  });
+  const {runCreatorMoneyRegressions} = await import('./lib/creator-money-regressions.mjs');
+  await runCreatorMoneyRegressions({
+    run, seed, documents, commerce, read, post, webhook, refundCurrent, fixture, sql,
+    startCheckout, rulesSql: baselineRulesMigration || fs.readFileSync(rulesMigrationPath, 'utf8'),
   });
   await run('all-payouts-projection-rebuilds', async () => {
     const snapshot = async () => ({

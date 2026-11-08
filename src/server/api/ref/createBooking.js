@@ -566,7 +566,7 @@ export default async function handler(req, res) {
       ).trim();
       const providerPaymentId = String(
         bookingDoc.paymentRefundVerification?.providerPaymentId ||
-          bookingDoc.razorpayPaymentId || razorpayPaymentId || ""
+          bookingDoc.razorpayPaymentId || razorpayPaymentId || existingRecord?.providerPaymentId || ""
       ).trim();
       const resolvedGrossAmount = Number(
         bookingDoc.grossAmount || toMoney(bookingDoc.packagePrice || packagePrice)
@@ -1293,10 +1293,7 @@ export default async function handler(req, res) {
         error: "Frozen payment pricing is unavailable.",
       });
     }
-    const resolvedPricing = await freezeBookingCommission({
-      client: writeClient,
-      buyerEmail: resolvedEmail,
-      pricing: isInternalPaymentFinalization
+    const pricing = isInternalPaymentFinalization
       ? {
           couponDiscountAmount: Number(frozenPricing.couponDiscountAmount || 0),
           couponDiscountPercent: Number(frozenPricing.couponDiscountPercent || 0),
@@ -1318,23 +1315,20 @@ export default async function handler(req, res) {
           selfReferral: frozenPricing.selfReferral,
           commissionAmount: calculateCreatorCommission(frozenPricing).amount,
         }
-      : livePricing,
-    });
+      : livePricing;
     const {
       couponDiscountAmount,
       couponDiscountPercent,
       couponDiscountType,
       couponDiscountValue,
       couponDoc,
-      effectiveCommissionPercent,
       effectiveDiscountAmount,
       effectiveDiscountPercent,
       effectiveGrossAmount,
       effectiveNetAmount,
       effectiveReferralCode,
       effectiveReferralId,
-      commissionAmount,
-    } = resolvedPricing;
+    } = pricing;
     if (paymentProvider === "free" && effectiveNetAmount > 0) {
       return res.status(400).json({
         error: "The server quote still requires payment.",
@@ -1400,6 +1394,7 @@ export default async function handler(req, res) {
             error: "Payment verification failed.",
           });
         }
+        verifiedPayerEmail = paymentVerification.payerEmail || verifiedPayerEmail;
         if (isLegacyPublicCompletion && paymentVerification.refundStatus === "partial") {
           verifiedPartialRefund = { provider: "razorpay", refundStatus: "partial",
             providerPaymentId: razorpayPaymentId,
@@ -1453,6 +1448,12 @@ export default async function handler(req, res) {
         }
       }
     }
+
+    const resolvedPricing = await freezeBookingCommission({
+      client: writeClient, pricing, buyerEmail: resolvedEmail,
+      payerEmail: internalPaymentRecord?.payerEmail || verifiedPayerEmail,
+    });
+    const {effectiveCommissionPercent, commissionAmount} = resolvedPricing;
 
     if (!isUpgrade) {
       const signedHoldToken = verifyHoldToken({

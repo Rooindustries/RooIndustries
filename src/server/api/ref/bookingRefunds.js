@@ -194,8 +194,8 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
       };
     }
     const totalAmount = Number(paymentRecord.pricingSnapshot?.netAmount ?? booking.netAmount ?? booking.grossAmount);
-    const originalCommissionAmount = calculateCreatorCommission(paymentRecord.pricingSnapshot || booking, {
-      originalAmount: booking.originalCommissionAmount ?? paymentRecord.pricingSnapshot?.commissionAmount ?? originalBookingCommission(booking),
+    const originalCommissionAmount = calculateCreatorCommission(booking, {
+      originalAmount: booking.originalCommissionAmount ?? originalBookingCommission(booking),
     }).originalAmount;
     const commission = calculateCreatorCommission(booking, {
       originalAmount: originalCommissionAmount, paidAmount: totalAmount,
