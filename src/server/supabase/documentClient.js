@@ -7,6 +7,7 @@ import {
   fetchCommerceDerivedCount,
   fetchReferralEarningsSummary,
   fetchRecoveryPaymentDocuments,
+  fetchShadowDocumentSizes,
   fetchShadowDocuments,
   fetchUpgradeBookingChain,
 } from "./shadowStore.js";
@@ -28,6 +29,11 @@ const readPath = (object, path) =>
   );
 
 const MAX_COMMERCE_PAYLOAD_BYTES = 250 * 1024;
+
+const payloadBudgetError = () => Object.assign(
+  new Error("Commerce query exceeded its database payload budget."),
+  {code: "COMMERCE_PAYLOAD_BUDGET_EXCEEDED", status: 503, statusCode: 503}
+);
 
 const uniqueStrings = (values = []) =>
   [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
@@ -359,13 +365,47 @@ export class SupabaseDocumentClient {
       Buffer.byteLength(JSON.stringify(documents), "utf8") >
         MAX_COMMERCE_PAYLOAD_BYTES
     ) {
-      const error = new Error("Commerce query exceeded its database payload budget.");
-      error.code = "COMMERCE_PAYLOAD_BUDGET_EXCEEDED";
-      error.status = 503;
-      error.statusCode = 503;
-      throw error;
+      throw payloadBudgetError();
     }
     return documents;
+  }
+
+  async *documentBatches({ documentTypes = this.documentTypes } = {}) {
+    if (!Array.isArray(documentTypes) || !documentTypes.length) {
+      throw new Error("Document batches require document types.");
+    }
+    const readBatch = async (rows) => {
+      const ids = rows.map(row => row._id);
+      try {
+        if (rows.reduce((bytes, row) => bytes + row.bytes + 1, 2) > MAX_COMMERCE_PAYLOAD_BYTES) {
+          throw payloadBudgetError();
+        }
+        const documents = await this.dataset({ documentTypes, ids, limit: ids.length });
+        return { ids, documents };
+      } catch (error) {
+        return { ids, documents: [], error };
+      }
+    };
+    let afterId = null;
+    for (;;) {
+      const rows = await fetchShadowDocumentSizes({
+        client: this.shadowClient, documentTypes, afterId,
+      });
+      if (!rows.length) return;
+      let batch = [];
+      let bytes = 2;
+      for (const row of rows) {
+        if (batch.length && bytes + row.bytes + 1 > MAX_COMMERCE_PAYLOAD_BYTES) {
+          yield await readBatch(batch);
+          batch = [];
+          bytes = 2;
+        }
+        batch.push(row);
+        bytes += row.bytes + 1;
+      }
+      if (batch.length) yield await readBatch(batch);
+      afterId = rows.at(-1)._id;
+    }
   }
 
   async fetchUpgradeLinkDataset(slug, selector, params) {
@@ -457,11 +497,7 @@ export class SupabaseDocumentClient {
       Buffer.byteLength(JSON.stringify(dataset), "utf8") >
         MAX_COMMERCE_PAYLOAD_BYTES
     ) {
-      const error = new Error("Commerce query exceeded its database payload budget.");
-      error.code = "COMMERCE_PAYLOAD_BUDGET_EXCEEDED";
-      error.status = 503;
-      error.statusCode = 503;
-      throw error;
+      throw payloadBudgetError();
     }
     const value = await evaluate(tree, {
       dataset,

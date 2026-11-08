@@ -1,4 +1,5 @@
 import { sumCreatorCommissions } from '../../referrals/commissionMoney.js';
+import {evaluate, parse} from 'groq-js';
 
 export function normalizeNumber(value) {
   const n = Number(value);
@@ -48,6 +49,18 @@ export function computeEarningsFromBookings(bookings = []) {
     total: sumCreatorCommissions(bookings),
     byPackage: Object.fromEntries([...byPackage].map(([title, rows]) => [title, sumCreatorCommissions(rows)])),
   };
+}
+
+export async function fetchPayoutPackages({client}) {
+  const packages = [];
+  for await (const batch of client.documentBatches({documentTypes: ['package']})) {
+    if (batch.error) throw batch.error;
+    for (const {title, order} of batch.documents) packages.push({title, order});
+  }
+  const result = await evaluate(parse('* | order(coalesce(order, 999) asc, title asc)'), {
+    dataset: packages,
+  });
+  return result.get();
 }
 
 export async function fetchReferralEarnings({ client, referralId, referralCode }) {

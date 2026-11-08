@@ -57,6 +57,9 @@ const createResponse = () => ({
 
 const createClients = () => {
   const readClient = {
+    documentBatches: jest.fn(async function* () {
+      yield {documents: []};
+    }),
     fetch: jest.fn((query) =>
       Promise.resolve(String(query).includes('_type == "referral"') ? referral : [])
     ),
@@ -177,20 +180,16 @@ describe("referral payout backend selection", () => {
       notifyEarningsStarted();
       return earningsPending;
     });
-    readClient.fetch.mockImplementation((query) => {
-      if (String(query).includes('_type == "referral"')) {
-        return Promise.resolve({ ...referral, xocPayments: payments });
-      }
-      return catalogPending;
+    readClient.fetch.mockResolvedValue({ ...referral, xocPayments: payments });
+    readClient.documentBatches.mockImplementation(async function* () {
+      yield {documents: await catalogPending};
     });
     const response = createResponse();
 
     const pending = handler(request, response);
     await earningsStarted;
     try {
-      expect(readClient.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('_type == "package"')
-      );
+      expect(readClient.documentBatches).toHaveBeenCalledWith({documentTypes: ['package']});
       expect(commit).not.toHaveBeenCalled();
     } finally {
       releaseEarnings(earnings);
@@ -227,11 +226,9 @@ describe("referral payout backend selection", () => {
       if (failedRead === "earnings") {
         mockFetchReferralEarnings.mockRejectedValueOnce(failure);
       } else {
-        readClient.fetch.mockImplementation((query) =>
-          String(query).includes('_type == "referral"')
-            ? Promise.resolve(referral)
-            : Promise.reject(failure)
-        );
+        readClient.documentBatches.mockImplementation(async function* () {
+          yield {documents: [], error: failure};
+        });
       }
       const response = createResponse();
 

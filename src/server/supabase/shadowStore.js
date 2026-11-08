@@ -204,6 +204,29 @@ export const projectReferralAccountShadow = async ({
     "referral account shadow projection"
   );
 
+export const fetchShadowDocumentSizes = async ({
+  documentTypes,
+  afterId,
+  client = createSupabaseAdminClient(),
+} = {}) => {
+  const rows = requireRpcData(
+    await client.rpc("roo_fetch_shadow_document_sizes", {
+      p_document_types: documentTypes,
+      p_after_id: afterId || null,
+      p_limit: 500,
+    }),
+    "shadow document sizes"
+  );
+  if (!Array.isArray(rows) || rows.some(row =>
+    typeof row?._id !== "string" || !row._id || !Number.isSafeInteger(row.bytes) || row.bytes < 0)) {
+    const error = new Error("Shadow document sizes returned an invalid response.");
+    error.code = "SUPABASE_DOCUMENT_RESPONSE_INVALID";
+    error.status = 503;
+    throw error;
+  }
+  return rows;
+};
+
 export const fetchShadowDocuments = async ({
   documentTypes = null,
   ids = null,

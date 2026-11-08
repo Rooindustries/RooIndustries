@@ -1,4 +1,4 @@
-const mockReadFetch = jest.fn();
+const mockReadPackages = jest.fn();
 const mockWriteFetch = jest.fn();
 const mockPatch = jest.fn();
 const mockGetDocument = jest.fn();
@@ -8,10 +8,10 @@ const mockFetchReferralEarnings = jest.fn();
 
 jest.mock("../server/data/documentClient.js", () => ({
   createDataClient: () => ({
-    fetch: (...args) =>
-      String(args[0]).includes('"package"')
-        ? mockReadFetch(...args)
-        : mockWriteFetch(...args),
+    fetch: (...args) => mockWriteFetch(...args),
+    async *documentBatches() {
+      yield {documents: await mockReadPackages()};
+    },
     patch: (...args) => mockPatch(...args),
     getDocument: (...args) => mockGetDocument(...args),
     transaction: (...args) => mockTransaction(...args),
@@ -72,7 +72,7 @@ describe("admin referral payment updates", () => {
     const receipts = new Map();
     mockGetDocument.mockImplementation(async (id) => receipts.get(id) || null);
     mockRequireAdminKey.mockReturnValue(true);
-    mockReadFetch.mockResolvedValue([]);
+    mockReadPackages.mockResolvedValue([]);
     mockFetchReferralEarnings.mockResolvedValue({
       xoc: 100,
       vertex: 50,

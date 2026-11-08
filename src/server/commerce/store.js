@@ -21,6 +21,10 @@ export class CommerceStore {
     return this.client.fetch(query, params);
   }
 
+  documentBatches(options) {
+    return this.client.documentBatches(options);
+  }
+
   referralEarnings(options) {
     return typeof this.client.referralEarnings === "function"
       ? this.client.referralEarnings(options)
