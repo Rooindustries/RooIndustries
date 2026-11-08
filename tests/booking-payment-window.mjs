@@ -589,3 +589,197 @@ test('a late processing webhook cannot undo a recorded success on a payment that
   assert.equal((await cron()).status, 200);
   assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
 });
+
+for (const entry of ['webhook', 'cron', 'retry', 'reload']) {
+  test(`merchant review through ${entry} keeps the slot beyond the cleanup backstop`, async () => {
+    fixture.setPaymentAmountOverrides({ status: 'requires_merchant_action' });
+    const checkout = await startCheckoutBeforeExpiry();
+    const paymentId = `payment_${checkout.record.providerOrderId}`;
+    const alerts = [];
+    const reportKey = Symbol.for('roo.reportServerError');
+    const previousReporter = globalThis[reportKey];
+    globalThis[reportKey] = (label, error) => alerts.push({ label, code: error.code });
+    try {
+      if (entry === 'webhook') {
+        const pending = await fixture.dodoWebhook(paymentId, 'payment.processing', `review_${entry}`);
+        assert.equal(pending.status, 503, JSON.stringify(pending));
+        assert.equal(pending.body.providerPaymentState, 'requires_merchant_action');
+      } else if (entry === 'cron') {
+        assert.equal((await cron()).status, 200);
+      } else {
+        assert.equal((await fixture.post('/api/payment/finalize', {}, checkout.started.body.paymentAccessToken)).status, 202);
+      }
+      await holdRunsOut(checkout, 25 * 60 * 60_000);
+      assert.equal((await cron()).status, 200);
+      assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
+      assert.equal(await isOffered(checkout.payload), false);
+      assert.equal((await secondVisitor(checkout.payload)).status, 409);
+      const reviewed = await fixture.commerce.getDocument(checkout.record._id);
+      assert.equal(reviewed.providerPaymentState, 'requires_merchant_action');
+      assert.equal(reviewed.recoveryOwnerReviewRequired, true);
+      assert.equal(alerts.filter(alert => alert.code === 'payment_merchant_review_required').length, 1);
+      const { createPaymentAccessToken } = await import('../src/server/api/payment/accessToken.js');
+      const token = createPaymentAccessToken({ paymentRecordId: reviewed._id, provider: reviewed.provider,
+        pricingFingerprint: reviewed.pricingFingerprint, backend: 'supabase', cutoverGeneration: 0, expirySeconds: 600 });
+      for (let reload = 0; reload < 2; reload += 1) {
+        const status = await fixture.post('/api/payment/status', {}, token);
+        assert.equal(status.status, 200, JSON.stringify(status));
+        assert.equal(status.body.bookingId, '');
+      }
+      fixture.setPaymentAmountOverrides({});
+      const approved = await fixture.dodoWebhook(paymentId, 'payment.succeeded', `approved_${entry}`);
+      assert.equal(approved.status, 200, JSON.stringify(approved));
+      await assertBookedOnHeldSlot(checkout);
+      assert.equal((await fixture.commerce.getDocument(reviewed._id)).recoveryOwnerReviewRequired, false);
+    } finally {
+      if (previousReporter === undefined) delete globalThis[reportKey];
+      else globalThis[reportKey] = previousReporter;
+    }
+  });
+}
+
+for (const recoveryEntry of ['cron', 'webhook', 'retry']) {
+  test(`verified capture keeps retrying after twelve failures and completes through ${recoveryEntry}`, async () => {
+    fixture.setPaymentAmountOverrides({ status: 'requires_merchant_action' });
+    const checkout = await startCheckoutBeforeExpiry();
+    assert.equal((await fixture.post('/api/payment/finalize', {}, checkout.started.body.paymentAccessToken)).status, 202);
+    fixture.setPaymentAmountOverrides({});
+    const sql = fixture.database.sql;
+    const alerts = [];
+    const reportKey = Symbol.for('roo.reportServerError');
+    const previousReporter = globalThis[reportKey];
+    globalThis[reportKey] = (label, error) => alerts.push({ label, code: error.code });
+    await sql.unsafe(`create function public.review_booking_failure_fixture()
+      returns trigger language plpgsql as $$ begin
+        if new.document_type = 'booking' then raise exception 'Synthetic booking write failure'; end if;
+        return new;
+      end $$;
+      create trigger review_booking_failure_fixture before insert on migration.source_documents
+      for each row execute function public.review_booking_failure_fixture()`);
+    let exhausted;
+    try {
+      for (let attempt = 0; attempt < 13; attempt += 1) {
+        const response = await fixture.post('/api/payment/finalize', {}, checkout.started.body.paymentAccessToken);
+        assert.equal(response.status, 202, JSON.stringify(response));
+      }
+      exhausted = await fixture.commerce.getDocument(checkout.record._id);
+      assert.equal(exhausted.verificationState, 'server_verified');
+      assert.equal(exhausted.reconciliationRecoveryTerminal, false);
+      assert.equal(exhausted.recoveryOwnerReviewRequired, true);
+      assert.equal(exhausted.recoveryFailureCount, 12);
+      const delay = Date.parse(exhausted.nextRecoveryAt) - Date.now();
+      assert.ok(delay > 0 && delay <= 60 * 60_000, String(delay));
+      assert.equal(alerts.filter(alert => alert.code === 'payment_recovery_attempts_exhausted').length, 1);
+      const early = await cron();
+      assert.equal(early.status, 200);
+      assert.equal(early.body.summary.scanned, 0);
+    } finally {
+      await sql.unsafe('drop trigger review_booking_failure_fixture on migration.source_documents');
+      await sql.unsafe('drop function public.review_booking_failure_fixture()');
+      if (previousReporter === undefined) delete globalThis[reportKey];
+      else globalThis[reportKey] = previousReporter;
+    }
+    clockShiftMs = Date.parse(exhausted.nextRecoveryAt) - RealDate.now() + 1000;
+    let recovered;
+    if (recoveryEntry === 'cron') recovered = await cron();
+    else if (recoveryEntry === 'webhook') recovered = await fixture.dodoWebhook(
+      `payment_${checkout.record.providerOrderId}`, 'payment.succeeded', `capture_retry_${checkout.record._id}`);
+    else {
+      const { createPaymentAccessToken } = await import('../src/server/api/payment/accessToken.js');
+      const token = createPaymentAccessToken({ paymentRecordId: exhausted._id, provider: exhausted.provider,
+        pricingFingerprint: exhausted.pricingFingerprint, backend: 'supabase', cutoverGeneration: 0, expirySeconds: 600 });
+      recovered = await fixture.post('/api/payment/finalize', {}, token);
+    }
+    assert.equal(recovered.status, 200, JSON.stringify(recovered));
+    await assertBookedOnHeldSlot(checkout);
+    assert.equal((await cron()).status, 200);
+    assert.equal((await bookingsAt(checkout.payload.startTimeUTC)).length, 1);
+    const completed = await fixture.commerce.getDocument(exhausted._id);
+    assert.equal(completed.recoveryOwnerReviewRequired, false);
+    assert.equal(completed.recoveryFailureCount, 0);
+  });
+}
+
+for (const outcome of ['cancelled', 'refunded']) {
+  test(`merchant review releases its reservation when ${outcome}`, async () => {
+    fixture.setPaymentAmountOverrides({ status: 'requires_merchant_action' });
+    const checkout = await startCheckoutBeforeExpiry();
+    assert.equal((await cron()).status, 200);
+    await holdRunsOut(checkout, 25 * 60 * 60_000);
+    assert.equal((await cron()).status, 200);
+    assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
+    fixture.setPaymentAmountOverrides(outcome === 'cancelled' ? { status: 'cancelled' } : {});
+    const paymentId = `payment_${checkout.record.providerOrderId}`;
+    const result = outcome === 'cancelled'
+      ? await fixture.dodoWebhook(paymentId, 'payment.cancelled', `review_cancel_${checkout.record._id}`)
+      : await fixture.refundPayment(paymentId, [{ refund_id: 'review_refund', payment_id: paymentId,
+        amount: Math.round(checkout.record.pricingSnapshot.netAmount * 100), currency: 'USD', status: 'succeeded' }],
+      `review_refund_${checkout.record._id}`);
+    assert.equal(result.status, 200, JSON.stringify(result));
+    assert.equal((await bookingsAt(checkout.payload.startTimeUTC)).length, 0);
+    assert.equal((await holdFor(checkout.payload)).phase, 'released');
+    assert.equal((await fixture.commerce.getDocument(checkout.record._id)).recoveryOwnerReviewRequired, false);
+    assert.equal(await isOffered(checkout.payload), true);
+    assert.equal((await secondVisitor(checkout.payload)).status, 200);
+  });
+}
+
+test('verified capture migration restores retries and saves a reversible recovery state', async () => {
+  const checkout = await startCheckoutBeforeExpiry();
+  const states = [];
+  for (const provider of ['paypal', 'razorpay', 'dodo']) {
+    const id = provider === 'dodo' ? checkout.record._id : `paymentRecord.restart-${provider}`;
+    const set = { provider, status: 'needs_recovery', verificationState: 'server_verified',
+      reconciliationRecoveryTerminal: true, recoveryFailureCount: 12, recoveryAttemptCount: 12,
+      nextRecoveryAt: '9999-12-31T23:59:59.999Z' };
+    if (provider === 'dodo') await fixture.commerce.patch(id).set(set).commit();
+    else await fixture.commerce.create({ _id: id, _type: 'paymentRecord', backendOwner: 'supabase',
+      cutoverGeneration: 0, ...set });
+    states.push(await fixture.commerce.getDocument(id));
+  }
+  const excluded = [];
+  for (const [reason, values] of Object.entries({
+    unverified: { verificationState: '' }, booked: { bookingId: 'booking.already-done' },
+    refund: { providerRefundDetailsMissing: true }, disputed: { dodoDisputeActive: true },
+    policy: { providerRecoveryTerminal: true },
+  })) {
+    const id = `paymentRecord.restart-excluded-${reason}`;
+    await fixture.commerce.create({ _id: id, _type: 'paymentRecord', backendOwner: 'supabase', cutoverGeneration: 0,
+      provider: 'dodo', status: 'needs_recovery', verificationState: 'server_verified',
+      reconciliationRecoveryTerminal: true, recoveryFailureCount: 12, recoveryAttemptCount: 12,
+      nextRecoveryAt: '9999-12-31T23:59:59.999Z', ...values });
+    excluded.push(await fixture.commerce.getDocument(id));
+  }
+  const candidates = async () => {
+    const { data, error } = await fixture.database.client.rpc('roo_fetch_recovery_payment_documents', {
+      p_backend: 'supabase', p_statuses: ['needs_recovery'], p_refunded_status: 'refunded',
+      p_booked_status: 'booked', p_abandoned_status: 'abandoned', p_now: new Date().toISOString(),
+      p_limit: 100, p_dodo_enabled: true,
+    });
+    assert.equal(error, null);
+    return data.map(record => record._id);
+  };
+  for (const state of states) assert.ok((await candidates()).includes(state._id));
+  await fixture.database.apply('20261108000000_resume_captured_payment_bookings.sql');
+  for (const state of states) {
+    const current = await fixture.commerce.getDocument(state._id);
+    assert.equal(current.reconciliationRecoveryTerminal, false);
+    assert.equal(current.recoveryOwnerReviewRequired, true);
+    const [backup] = await fixture.database.sql`select previous_state, resumed_revision
+      from migration.captured_payment_recovery_resumes where document_id = ${state._id}`;
+    assert.equal(backup.resumed_revision, current._rev);
+    assert.deepEqual(backup.previous_state, { reconciliationRecoveryTerminal: true,
+      nextRecoveryAt: '9999-12-31T23:59:59.999Z' });
+    await fixture.commerce.patch(state._id).ifRevisionId(backup.resumed_revision)
+      .unset(['reconciliationRecoveryTerminal', 'nextRecoveryAt', 'recoveryOwnerReviewRequired'])
+      .set(backup.previous_state).commit();
+    const restored = await fixture.commerce.getDocument(state._id);
+    assert.equal(restored.reconciliationRecoveryTerminal, true);
+    assert.equal(restored.nextRecoveryAt, state.nextRecoveryAt);
+    assert.equal(restored.recoveryOwnerReviewRequired, undefined);
+  }
+  for (const original of excluded) assert.deepEqual(await fixture.commerce.getDocument(original._id), original);
+  const recovered = await cron();
+  assert.equal(recovered.status, 200, JSON.stringify(recovered));
+  await assertBookedOnHeldSlot(checkout);
+});

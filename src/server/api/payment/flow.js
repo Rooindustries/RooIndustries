@@ -1,4 +1,10 @@
 import { buildBrowserCompletionBody } from "./bookingSummary.js";
+import {
+  buildRecoveryFailureState,
+  buildRecoveryCompletionState,
+  isExhaustedCaptureRecovery,
+  logPaymentRecoveryReview,
+} from "./recoveryState.js";
 import envValue from "../../supabase/envValue.cjs";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
 import { isTerminalDisputeStatus, resolveDisputeReferralAccounting } from "../../referrals/disputeAccounting.js";
@@ -117,36 +123,6 @@ const getDodoCaptureAmountUpdates = (record, { totalAmount, taxAmount }) => {
     updates[field] = amount;
   }
   return updates;
-};
-
-const buildRecoveryFailureState = (record) => {
-  const normalizeCount = (value) => {
-    const count = Number(value);
-    return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
-  };
-  const recoveryAttemptCount = Math.min(12, normalizeCount(record.recoveryAttemptCount) + 1);
-  const recoveryFailureCount = Math.min(12, normalizeCount(record.recoveryFailureCount) + 1);
-  const stopped = recoveryFailureCount >= 12;
-  return {
-    recoveryAttemptCount,
-    recoveryFailureCount,
-    reconciliationRecoveryTerminal: stopped,
-    nextRecoveryAt: stopped ? "9999-12-31T23:59:59.999Z" : getNextPaymentRecoveryAt(recoveryFailureCount),
-  };
-};
-
-const buildRecoveryCompletionState = (record) => ({
-  recoveryFailureCount: 0,
-  reconciliationRecoveryTerminal: record.providerRefundDetailsMissing === true,
-});
-
-const logRecoveryExhaustion = (record, values) => {
-  if (values.reconciliationRecoveryTerminal === true &&
-      values.recoveryFailureCount === 12 && record.reconciliationRecoveryTerminal !== true) {
-    logSafeError(`Payment recovery requires owner review: ${record._id}`, Object.assign(new Error(), {
-      code: "payment_recovery_attempts_exhausted",
-    }));
-  }
 };
 
 const getFutureIso = (seconds) =>
@@ -1188,6 +1164,7 @@ const completeRefundBookingSync = async ({ client, record, sync = null }) => {
         ...(record.providerRefundDetailsMissing !== true ? {
           recoveryAttemptCount: 0,
           recoveryFailureCount: 0,
+          recoveryOwnerReviewRequired: false,
           reconciliationRecoveryTerminal: false,
         } : {}),
         ...(sync ? { refundBookingSync: normalizeObject(sync) } : {}),
@@ -1211,13 +1188,14 @@ const patchPaymentRecord = async ({
     : existingEvents;
   const values = {
     ...set,
+    ...(set.providerPaymentState === "requires_merchant_action" ? { recoveryOwnerReviewRequired: true } : {}),
     ...unconfirmedProviderState(record, set),
     ...(event ? { events: mergedEvents } : {}),
     updatedAt: nowIso(),
   };
   const patch = guardPaymentRevision(client.patch(record._id), record).set(values);
   const committed = await patch.commit();
-  logRecoveryExhaustion(record, values);
+  logPaymentRecoveryReview(record, values);
 
   return {
     ...record,
@@ -2083,6 +2061,7 @@ const markTerminalFinalizeFailure = async ({
       resourceReleaseTargetStatus: "",
       resourceReleaseReason: "",
       recoveryFailureCount: 0,
+      recoveryOwnerReviewRequired: false,
       reconciliationRecoveryTerminal: false,
       finalizationLeaseId: "",
       finalizationLeaseExpiresAt: "",
@@ -2721,6 +2700,7 @@ const abandonStartedPaymentRecord = async ({
         resourceReleaseTargetStatus: "",
         resourceReleaseReason: "",
         recoveryFailureCount: 0,
+        recoveryOwnerReviewRequired: false,
         reconciliationRecoveryTerminal: false,
         lateCaptureWatchUntil: shouldWatchForLateCapture
           ? getFutureIso(LATE_CAPTURE_WATCH_HOURS * 60 * 60)
@@ -3822,6 +3802,7 @@ const getPaymentCreatedAgeMinutes = (record = {}) => {
 };
 
 const isRecoveryAttemptDue = (record = {}) => {
+  if (isExhaustedCaptureRecovery(record)) return true;
   const next = new Date(record.nextRecoveryAt || "").getTime();
   return !Number.isFinite(next) || next <= Date.now();
 };
@@ -4357,7 +4338,14 @@ export const reconcilePaymentSessions = async ({
   const dodoEnabled = resolvePaymentProviders()?.dodo?.enabled === true;
   const fetchRecoveryRecords = () => client.fetch(
     `*[_type == $type
-      && coalesce(reconciliationRecoveryTerminal, false) == false
+      && (coalesce(reconciliationRecoveryTerminal, false) == false || (
+        verificationState == "server_verified" && provider in ["paypal", "razorpay", "dodo"]
+        && (!defined(bookingId) || bookingId == "") && recoveryFailureCount >= 12
+        && coalesce(providerRecoveryTerminal, false) == false
+        && coalesce(providerRefundDetailsMissing, false) == false
+        && coalesce(dodoDisputeActive, false) == false
+        && !(providerPaymentState in ["refunded", "disputed"])
+      ))
       && !(coalesce(providerRecoveryTerminal, false) == true
         && providerRecoveryTerminalReason in $terminalCurrencyReasons)
       && (
@@ -4382,6 +4370,7 @@ export const reconcilePaymentSessions = async ({
         !defined(nextRecoveryAt)
         || nextRecoveryAt == ""
         || nextRecoveryAt <= $now
+        || (reconciliationRecoveryTerminal == true && recoveryFailureCount >= 12)
       )
     ] | order(updatedAt asc)[0...50]`,
     {
@@ -5900,6 +5889,10 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       httpStatus: 409,
       body: { ok: false, code: validation.reason, error: "The payment does not match this checkout." },
     };
+  }
+  if (payment.status === "requires_merchant_action") {
+    const change = observedProviderState(record, payment.status);
+    if (change.providerPaymentState) record = await patchPaymentRecord({ client, record, set: change });
   }
   requirePaymentRevision(record);
   const disputes = Array.isArray(payment.disputes) ? payment.disputes : [];

@@ -23,7 +23,7 @@ EmptyHold == [phase |-> "none", nonce |-> NoNonce, exp |-> 0, rec |-> NoNonce]
 EmptyTab == [slot |-> NoSlot, nonce |-> NoNonce, exp |-> 0, details |-> FALSE, paying |-> NoNonce]
 EmptyRec == [status |-> "none", slot |-> NoSlot, tokenExp |-> 0, created |-> 0,
              pay |-> "open", paidInTime |-> FALSE, details |-> FALSE, knownCaptured |-> FALSE, terminal |-> FALSE,
-             outlived |-> FALSE, valid |-> TRUE]
+             outlived |-> FALSE, valid |-> TRUE, merchantReview |-> FALSE]
 
 TypeOK ==
   /\ now \in Times
@@ -37,7 +37,7 @@ TypeOK ==
                          slot : Slots \cup {NoSlot}, tokenExp : Times, created : Times,
                          pay : {"open", "processing", "captured", "closed"},
                          paidInTime : BOOLEAN, details : BOOLEAN, knownCaptured : BOOLEAN, terminal : BOOLEAN,
-                         outlived : BOOLEAN, valid : BOOLEAN]]
+                         outlived : BOOLEAN, valid : BOOLEAN, merchantReview : BOOLEAN]]
 
 Init ==
   /\ now = 0
@@ -163,14 +163,23 @@ SubmitPayment(n) ==
                                               /\ hold[s].exp > now)]
      /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
 
+MerchantReviewBegins(n) ==
+  LET s == rec[n].slot
+  IN /\ rec[n].pay = "processing"
+     /\ hold[s].phase = "payment_pending"
+     /\ hold[s].rec = n
+     /\ rec' = [rec EXCEPT ![n].merchantReview = TRUE]
+     /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
+
 PaymentSucceeds(n) ==
   /\ rec[n].pay = "processing"
-  /\ \E valid \in BOOLEAN : rec' = [rec EXCEPT ![n].pay = "captured", ![n].valid = valid]
+  /\ \E valid \in BOOLEAN : rec' = [rec EXCEPT ![n].pay = "captured", ![n].valid = valid,
+                                             ![n].merchantReview = FALSE]
   /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
 
 PaymentFails(n) ==
   /\ rec[n].pay = "processing"
-  /\ rec' = [rec EXCEPT ![n].pay = "open"]
+  /\ rec' = [rec EXCEPT ![n].pay = "open", ![n].merchantReview = FALSE]
   /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
 
 CheckoutExpires(n) ==
@@ -227,6 +236,7 @@ RecordReschedule(n) ==
 
 MarkNeedsRecovery(n) ==
   /\ rec' = [rec EXCEPT ![n].status = "needs_recovery",
+                          ![n].terminal = FALSE,
                           ![n].knownCaptured = rec[n].knownCaptured \/ rec[n].pay = "captured"]
   /\ UNCHANGED <<hold, lock, bookings>>
 
@@ -279,8 +289,9 @@ RecoveryGivesUp(n) ==
   /\ rec[n].status \in {"started", "needs_recovery"}
   /\ ~rec[n].terminal
   /\ \E observed \in BOOLEAN :
-       rec' = [rec EXCEPT ![n].terminal = TRUE,
-                            ![n].knownCaptured = observed /\ rec[n].pay = "captured"]
+       rec' = [rec EXCEPT ![n].terminal = ~((rec[n].knownCaptured \/ observed)
+                                            /\ rec[n].pay = "captured" /\ rec[n].valid),
+                            ![n].knownCaptured = rec[n].knownCaptured \/ (observed /\ rec[n].pay = "captured")]
   /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
 
 ReconcileRejectsCapture(n) ==
@@ -295,7 +306,7 @@ WebhookRecordsCapture(n) ==
   /\ rec[n].terminal
   /\ rec[n].pay = "captured"
   /\ ~rec[n].knownCaptured
-  /\ rec' = [rec EXCEPT ![n].knownCaptured = TRUE]
+  /\ rec' = [rec EXCEPT ![n].knownCaptured = TRUE, ![n].terminal = ~rec[n].valid]
   /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
 
 OwnerRefundsUnbookedCapture(n) ==
@@ -321,6 +332,7 @@ UnconfirmedPaymentHoldExpires(s) ==
   /\ hold[s].phase = "payment_pending"
   /\ hold[s].exp + Backstop <= now
   /\ ~rec[hold[s].rec].knownCaptured
+  /\ ~rec[hold[s].rec].merchantReview
   /\ hold' = [hold EXCEPT ![s].phase = "expired", ![s].nonce = DeadNonce]
   /\ rec' = [rec EXCEPT ![hold[s].rec].outlived =
                 rec[hold[s].rec].pay \in {"processing", "captured"} /\ ~rec[hold[s].rec].knownCaptured]
@@ -338,7 +350,8 @@ Next ==
   \/ \E t \in Tabs : \/ ReleaseHold(t) \/ TypeDetails(t) \/ StartPayment(t) \/ CancelPayment(t)
                      \/ \E s \in Slots : HoldSlot(t, s)
                      \/ \E u \in Tabs : DuplicateTab(t, u)
-  \/ \E n \in Nonces : \/ SubmitPayment(n) \/ PaymentSucceeds(n) \/ PaymentFails(n) \/ CheckoutExpires(n)
+  \/ \E n \in Nonces : \/ SubmitPayment(n) \/ MerchantReviewBegins(n)
+                       \/ PaymentSucceeds(n) \/ PaymentFails(n) \/ CheckoutExpires(n)
                        \/ FinalizeCapture(n) \/ ReconcileRecovery(n) \/ ReconcilePending(n)
                        \/ ReconcileUnpaid(n) \/ RecoveryGivesUp(n) \/ WebhookRecordsCapture(n)
                        \/ OwnerRefundsUnbookedCapture(n) \/ ReconcileRejectsCapture(n)
@@ -398,7 +411,18 @@ PaidBookingNeverLost ==
 PaymentHoldsResolve ==
   \A s \in Slots :
     (hold[s].phase = "payment_pending")
-      ~> (hold[s].phase # "payment_pending" \/ rec[hold[s].rec].knownCaptured)
+      ~> (hold[s].phase # "payment_pending" \/ rec[hold[s].rec].knownCaptured
+           \/ rec[hold[s].rec].merchantReview)
+
+MerchantReviewHoldRetained ==
+  [][\A s \in Slots :
+       (hold[s].phase = "payment_pending" /\ rec[hold[s].rec].merchantReview)
+         => hold'[s].phase # "expired"]_vars
+
+VerifiedCaptureKeepsRetrying ==
+  \A n \in Nonces :
+    (rec[n].knownCaptured /\ rec[n].pay = "captured" /\ rec[n].valid /\ BookingFor(n) = {})
+      => ~rec[n].terminal
 
 PaymentHoldHasOwner ==
   \A s \in Slots :

@@ -73,10 +73,10 @@ export const recordProviderPaymentState = async ({ client, record, providerPayme
   }
 };
 
-const moneyArrived = (record) => {
+const paymentNeedsRetainedHold = (record) => {
   const state = String(record.providerPaymentState || "").trim();
   if (REVERSED_PROVIDER_STATES.has(state)) return false;
-  return state === "succeeded" ||
+  return state === "succeeded" || state === "requires_merchant_action" ||
     record.verificationState === "server_verified" ||
     MONEY_ARRIVED_STATUSES.has(String(record.status || "").trim().toLowerCase());
 };
@@ -88,7 +88,7 @@ const withinCleanupWindow = (record) => {
 
 const nextCheckAt = (record) => {
   if (hasBooking(record)) return NEVER_AGAIN;
-  if (moneyArrived(record)) {
+  if (paymentNeedsRetainedHold(record)) {
     return new Date(Date.now() + MONEY_ARRIVED_CHECK_MS - OWNER_REVIEW_STATE_CHECK_MS).toISOString();
   }
   return withinCleanupWindow(record) ? new Date().toISOString() : NEVER_AGAIN;
