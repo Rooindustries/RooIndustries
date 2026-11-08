@@ -28,3 +28,17 @@ begin
   end loop;
 end;
 $rollback$;
+
+do $queue$
+declare
+  definition text;
+  projection constant text := $projection$payment.updated_at, (select jsonb_object_agg(key, value) from jsonb_each(source.payload)
+      where key in ('_id', '_type', 'status', 'provider', 'updatedAt', 'nextRecoveryAt',
+        'reconciliationRecoveryTerminal', 'providerRecoveryTerminal', 'providerRecoveryTerminalReason',
+        'refundRequiresBookingSync', 'resourceReleasePending', 'requiresReschedule',
+        'emailDispatchRequired', 'lateCaptureWatchUntil', 'emailDispatch')) as payload$projection$;
+begin
+  definition := pg_get_functiondef('public.roo_fetch_recovery_payment_documents(text,text[],text,text,text,timestamptz,integer,boolean)'::regprocedure);
+  execute replace(definition, projection, 'payment.updated_at, source.payload');
+end;
+$queue$;

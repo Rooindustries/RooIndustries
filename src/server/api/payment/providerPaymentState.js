@@ -45,16 +45,14 @@ const providerStateChange = (current, next) => {
   return { providerPaymentState: state, providerStateCheckedAt: new Date().toISOString() };
 };
 
-const stopsReconcile = (values) =>
-  values.providerRecoveryTerminal === true || values.reconciliationRecoveryTerminal === true;
-
 export const observedProviderState = (record, observed) =>
   hasBooking(record) ? {} : providerStateChange(record?.providerPaymentState, observed);
 
 export const unconfirmedProviderState = (record, values) => {
   const next = { ...record, ...values };
   const recorded = String(next.providerPaymentState || "").trim();
-  if (!stopsReconcile(values) || next.provider !== "dodo" || hasBooking(next) || recorded) return {};
+  if ((values.providerRecoveryTerminal !== true && !(Number(values.recoveryFailureCount) > 0)) ||
+      next.provider !== "dodo" || hasBooking(next) || recorded) return {};
   return { providerPaymentState: UNCONFIRMED_PROVIDER_STATE, providerStateCheckedAt: new Date().toISOString() };
 };
 

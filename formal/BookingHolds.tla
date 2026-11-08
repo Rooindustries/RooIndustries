@@ -285,13 +285,10 @@ CleanupExpiredHold(s) ==
   /\ hold' = [hold EXCEPT ![s].phase = "expired", ![s].nonce = DeadNonce]
   /\ UNCHANGED <<now, nextNonce, lock, tab, rec, bookings>>
 
-RecoveryGivesUp(n) ==
+RecoveryLookupFails(n) ==
   /\ rec[n].status \in {"started", "needs_recovery"}
   /\ ~rec[n].terminal
-  /\ \E observed \in BOOLEAN :
-       rec' = [rec EXCEPT ![n].terminal = ~((rec[n].knownCaptured \/ observed)
-                                            /\ rec[n].pay = "captured" /\ rec[n].valid),
-                            ![n].knownCaptured = rec[n].knownCaptured \/ (observed /\ rec[n].pay = "captured")]
+  /\ rec' = [rec EXCEPT ![n].status = "needs_recovery"]
   /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
 
 ReconcileRejectsCapture(n) ==
@@ -354,7 +351,7 @@ Next ==
   \/ \E n \in Nonces : \/ SubmitPayment(n) \/ MerchantReviewBegins(n)
                        \/ PaymentSucceeds(n) \/ PaymentFails(n) \/ CheckoutExpires(n)
                        \/ FinalizeCapture(n) \/ ReconcileRecovery(n) \/ ReconcilePending(n)
-                       \/ ReconcileUnpaid(n) \/ RecoveryGivesUp(n) \/ WebhookRecordsCapture(n)
+                       \/ ReconcileUnpaid(n) \/ RecoveryLookupFails(n) \/ WebhookRecordsCapture(n)
                        \/ OwnerRefundsUnbookedCapture(n) \/ ReconcileRejectsCapture(n)
 
 Server(n) == FinalizeCapture(n) \/ ReconcileRecovery(n) \/ ReconcilePending(n)
@@ -423,6 +420,11 @@ MerchantReviewHoldRetained ==
 VerifiedCaptureKeepsRetrying ==
   \A n \in Nonces :
     (rec[n].knownCaptured /\ rec[n].pay = "captured" /\ rec[n].valid /\ BookingFor(n) = {})
+      => ~rec[n].terminal
+
+ProviderPendingKeepsRetrying ==
+  \A n \in Nonces :
+    (rec[n].status \in {"started", "needs_recovery"} /\ rec[n].pay \in {"open", "processing"})
       => ~rec[n].terminal
 
 PaymentHoldHasOwner ==

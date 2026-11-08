@@ -876,7 +876,7 @@ try{
     const proofPath=`${artifact}.batch-${mode}.json`;fs.writeFileSync(proofPath,JSON.stringify({calls,failures,persisted:await snapshot({receipts:true})},null,2));
     assert.equal(calls[0].result.status,503);assert.equal(calls[0].result.body.summary.failed,1);assert.equal(calls[0].other.status,'abandoned');assert.equal(calls[0].saved.recoveryAttemptCount,1);assert.ok(calls[0].saved.nextRecoveryAt);assert.ok(calls[0].saved.recoveryReason);
     if(mode==='revision-conflict'){assert.equal(calls[0].saved.fixtureConcurrent,'owner retained');assert.equal(failures,1);}
-    else{assert.equal(failures,12);assert.equal(calls[11].saved.reconciliationRecoveryTerminal,true);assert.equal(calls[11].saved.nextRecoveryAt,'9999-12-31T23:59:59.999Z');assert.equal(calls[12].result.status,200);assert.equal(calls[12].result.body.summary.scanned,0);assert.equal(calls[12].saved.recoveryAttemptCount,12);}
+    else{assert.equal(failures,13);assert.equal(calls[11].saved.reconciliationRecoveryTerminal,false);assert.equal(calls[11].saved.recoveryOwnerReviewRequired,true);assert.ok(new originalDate(calls[11].saved.nextRecoveryAt).getTime()<Date.UTC(9999,0,1));assert.equal(calls[12].result.status,503);assert.equal(calls[12].result.body.summary.scanned,1);assert.equal(calls[12].saved.recoveryAttemptCount,12);}
     return{proofPath,failures,independentRecordProcessed:true,nativeRevisionConflict:mode==='revision-conflict',syntheticStorageFault:mode!=='revision-conflict'};
   });
   await run('a1-batch-failure-checkpoint-ownership-transfer-preserved',async()=>{
@@ -1329,8 +1329,10 @@ try{
     assert.equal(first.httpStatus, 200);
     const saved = await record();
     assert.equal(saved.recoveryAttemptCount, 12);
-    assert.equal(saved.reconciliationRecoveryTerminal, true);
-    assert.equal(saved.nextRecoveryAt, '9999-12-31T23:59:59.999Z');
+    assert.equal(saved.reconciliationRecoveryTerminal, false);
+    assert.equal(saved.recoveryOwnerReviewRequired, true);
+    assert.ok(Date.parse(saved.nextRecoveryAt) > Date.now());
+    assert.ok(Date.parse(saved.nextRecoveryAt) <= Date.now() + 3600000);
     assert.deepEqual((await row(bookingId)).payload, beforeBooking);
     const before = await snapshot({ receipts: true });
     const next = await flow.reconcilePaymentSessions(args);
@@ -1472,12 +1474,12 @@ try{
         attempts.push((await record()).recoveryFailureCount);
       }
       const exhausted = await record();
-      assert.equal(exhausted.reconciliationRecoveryTerminal, true);
+      assert.equal(exhausted.reconciliationRecoveryTerminal, false);
       assert.deepEqual(attempts, Array.from({ length: 12 }, (_, index) => index + 1));
       await requestFlow('paypal', { req: refundEvent('duplicate-refund-event') });
       const duplicate = await record();
       assert.equal(duplicate.recoveryFailureCount, 12);
-      assert.equal(duplicate.reconciliationRecoveryTerminal, true);
+      assert.equal(duplicate.reconciliationRecoveryTerminal, false);
       assert.equal(duplicate.nextRecoveryAt, exhausted.nextRecoveryAt);
       assert.equal((await requestFlow('reconcile')).body.summary.scanned, 0);
       return { attempts, exhausted, duplicate, realPostgresFailure: true };

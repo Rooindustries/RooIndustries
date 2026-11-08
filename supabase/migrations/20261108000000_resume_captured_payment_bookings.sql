@@ -17,21 +17,17 @@ begin
 end;
 $edit$;
 
-create or replace function commerce.exhausted_capture_can_resume(payload jsonb)
+create or replace function commerce.payment_recovery_can_resume(payload jsonb)
 returns boolean language sql immutable set search_path = '' as $$
-  select (payload->>'verificationState' = 'server_verified' or payload->>'providerPaymentState' = 'succeeded')
-    and payload->>'provider' in ('paypal', 'razorpay', 'dodo')
+  select payload->>'provider' in ('paypal', 'razorpay', 'dodo')
     and nullif(btrim(payload->>'bookingId'), '') is null
-    and payload->>'reconciliationRecoveryTerminal' = 'true'
-    and case when payload->>'recoveryFailureCount' ~ '^[0-9]+$'
-      then (payload->>'recoveryFailureCount')::numeric >= 12 else false end
+    and (payload->>'reconciliationRecoveryTerminal' = 'true'
+      or payload->>'nextRecoveryAt' >= '9999-01-01')
     and coalesce(payload->>'providerRecoveryTerminal', 'false') != 'true'
-    and coalesce(payload->>'providerRefundDetailsMissing', 'false') != 'true'
-    and coalesce(payload->>'dodoDisputeActive', 'false') != 'true'
-    and coalesce(payload->>'providerPaymentState', '') not in ('refunded', 'disputed');
+    and coalesce(payload->>'providerPaymentState', '') not in ('refunded', 'disputed', 'failed', 'cancelled', 'abandoned');
 $$;
-revoke all on function commerce.exhausted_capture_can_resume(jsonb) from public, anon, authenticated;
-grant execute on function commerce.exhausted_capture_can_resume(jsonb) to service_role;
+revoke all on function commerce.payment_recovery_can_resume(jsonb) from public, anon, authenticated;
+grant execute on function commerce.payment_recovery_can_resume(jsonb) to service_role;
 
 create table if not exists migration.captured_payment_recovery_resumes (
   document_id text primary key,
@@ -51,8 +47,8 @@ begin
     where document_type = 'paymentRecord' and not tombstoned
       and backend_owner = 'supabase'
       and cutover_generation = (select generation from migration.commerce_control where singleton)
-      and commerce.exhausted_capture_can_resume(payload)
-      and payload->>'status' in ('needs_recovery', 'finalizing', 'captured_client', 'captured_webhook')
+      and commerce.payment_recovery_can_resume(payload)
+      and payload->>'status' in ('started', 'needs_recovery', 'finalizing', 'captured_client', 'captured_webhook')
     for update
   loop
     select jsonb_object_agg(key, value) into previous_state
@@ -79,3 +75,22 @@ begin
   end loop;
 end;
 $resume$;
+
+do $queue$
+declare
+  definition text;
+  previous constant text := 'payment.updated_at, source.payload';
+  replacement constant text := $projection$payment.updated_at, (select jsonb_object_agg(key, value) from jsonb_each(source.payload)
+      where key in ('_id', '_type', 'status', 'provider', 'updatedAt', 'nextRecoveryAt',
+        'reconciliationRecoveryTerminal', 'providerRecoveryTerminal', 'providerRecoveryTerminalReason',
+        'refundRequiresBookingSync', 'resourceReleasePending', 'requiresReschedule',
+        'emailDispatchRequired', 'lateCaptureWatchUntil', 'emailDispatch')) as payload$projection$;
+begin
+  definition := pg_get_functiondef('public.roo_fetch_recovery_payment_documents(text,text[],text,text,text,timestamptz,integer,boolean)'::regprocedure);
+  if strpos(definition, replacement) > 0 then return; end if;
+  if array_length(string_to_array(definition, previous), 1) is distinct from 2 then
+    raise exception 'unexpected contract: public.roo_fetch_recovery_payment_documents';
+  end if;
+  execute replace(definition, previous, replacement);
+end;
+$queue$;

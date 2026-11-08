@@ -466,7 +466,7 @@ const getPublicRecoveryMessage = (record = {}) => {
   if (isUpgradeCreditReview(record) && record.recoveryReason === "upgrade_credit_changed_after_quote") {
     return "Your payment was received. Roo Industries will contact you about your upgrade.";
   }
-  if (record.reconciliationRecoveryTerminal === true) {
+  if (record.recoveryOwnerReviewRequired === true || record.reconciliationRecoveryTerminal === true) {
     return "This payment requires manual review. Please contact Roo Industries.";
   }
   if (status === PAYMENT_STATUS_REFUNDED) {
@@ -546,7 +546,8 @@ const buildPublicStatusBody = (record = {}) => ({
   emailDispatch: buildPublicEmailDispatch(record.emailDispatch),
   emailDispatchToken: String(record.emailDispatchToken || "").trim(),
   analyticsReceipt: buildSalesReceipt(record),
-  ...(isUpgradeCreditReview(record) && record.recoveryReason === "upgrade_credit_changed_after_quote"
+  ...(isPaymentAwaitingReview(record) ||
+      (isUpgradeCreditReview(record) && record.recoveryReason === "upgrade_credit_changed_after_quote")
     ? { manualReviewRequired: true } : {}),
 });
 
@@ -929,11 +930,14 @@ const resolveRecordFromAccessToken = async ({
     throw error;
   }
 
-  if (tokenResult.expired) {
+  const reviewResultExpired = record.reviewResultAccessUntil && !canReadPaymentReviewResult(record);
+  if (tokenResult.expired || reviewResultExpired) {
     const status = String(record.status || "").trim().toLowerCase();
     const awaitingReview = isPaymentAwaitingReview(record);
-    const withinRecoveryWindow = isWithinPaymentAccessRecoveryWindow({ payload }) || awaitingReview ||
-      (allowStatusReadExtension && canReadPaymentReviewResult(record));
+    const withinRecoveryWindow = awaitingReview || (record.reviewResultAccessUntil
+      ? canReadPaymentReviewResult(record)
+      : isWithinPaymentAccessRecoveryWindow({ payload }) ||
+        (allowStatusReadExtension && canReadPaymentReviewResult(record)));
     const recoveryMutationAllowed =
       allowRecoveryExtension && (status === PAYMENT_STATUS_NEEDS_RECOVERY || awaitingReview);
     if (!withinRecoveryWindow || (!allowStatusReadExtension && !recoveryMutationAllowed)) {
@@ -4447,8 +4451,11 @@ export const reconcilePaymentSessions = async ({
     normalizedEmailCompletions,
   };
 
-  for (const record of Array.isArray(records) ? records : []) {
+  for (const candidate of Array.isArray(records) ? records : []) {
+    let record = candidate;
     try {
+      record = await getPaymentRecordById(client, candidate._id);
+      if (!record) continue;
       if (record.providerRecoveryTerminal === true &&
           ["payment_currency_mismatch", "payment_currency_invalid"].includes(record.providerRecoveryTerminalReason)) continue;
       const localStatus = String(record.status || "").trim().toLowerCase();
@@ -4973,7 +4980,7 @@ export const reconcilePaymentSessions = async ({
             ...retry,
             recoveryReason: getSafeErrorCode(error, "payment_reconciliation_record_failed"),
           }, event: buildPaymentRecordEvent({ status: current.status, source: "reconcile",
-            reason: retry.reconciliationRecoveryTerminal ? "payment_reconciliation_owner_review_required" : "payment_reconciliation_record_failed" }) });
+            reason: retry.recoveryOwnerReviewRequired ? "payment_reconciliation_owner_review_required" : "payment_reconciliation_record_failed" }) });
           break;
         } catch (recoveryError) {
           if (isConflictError(recoveryError) && attempt < 4) continue;

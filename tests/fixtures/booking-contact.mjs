@@ -296,6 +296,8 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     };
     return { post, start, hold, snapshot, recordFor, seedUpgrade, commerce, database, details, evidence, save, stop,
       setPaymentTax, setPaymentTaxInclusive, setPaymentAmountOverrides, refundPayment, dodoWebhook,
+      resetPayments: () => database.sql`update migration.source_documents
+        set tombstoned = true where document_type = 'paymentRecord'`,
       setEmailFailure(value) { emailFailure = value; },
       setCheckoutPaymentStarted(value) { checkoutPaymentStarted = value; },
       setProviderLookupFailure(value) { providerLookupFailure = value; },

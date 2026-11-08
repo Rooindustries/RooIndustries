@@ -194,11 +194,8 @@ export const buildWebhookReceiptId = ({
   )}`;
 
 export const getPaymentRecoveryBackoffMinutes = (attemptCount = 0) => {
-  const normalized = Math.max(0, Number(attemptCount) || 0);
-  if (normalized <= 1) return 1;
-  if (normalized === 2) return 5;
-  if (normalized === 3) return 15;
-  return 60;
+  const normalized = Math.max(1, Math.floor(Number(attemptCount) || 0));
+  return Math.min(60, 2 ** Math.min(6, normalized - 1));
 };
 
 export const getNextPaymentRecoveryAt = (attemptCount = 0, now = Date.now()) =>

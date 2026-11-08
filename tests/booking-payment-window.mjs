@@ -23,7 +23,8 @@ let fixture;
 before(async () => {
   fixture = await createBookingContactFixture({ artifactName: 'booking-payment-window' });
 });
-beforeEach(() => {
+beforeEach(async () => {
+  await fixture.resetPayments();
   minutesLater(0);
   fixture.setPaymentAmountOverrides({});
   fixture.setCheckoutPaymentStarted(true);
@@ -198,25 +199,25 @@ test('a payment that fails after the hold runs out frees the slot', async () => 
   assert.deepEqual(await bookingsAt(checkout.payload.startTimeUTC), []);
 });
 
-const cronUntilRecoveryStops = async checkout => {
+const cronUntilOwnerReview = async checkout => {
   for (let run = 0; run < 15; run += 1) {
     const record = await fixture.commerce.getDocument(checkout.record._id);
-    if (record.reconciliationRecoveryTerminal === true || record.providerRecoveryTerminal === true) return record;
+    if (record.recoveryOwnerReviewRequired === true || record.providerRecoveryTerminal === true) return record;
     await fixture.commerce.patch(record._id).set({ nextRecoveryAt: '' }).commit();
     clockShiftMs += 2 * 60_000;
     assert.ok([200, 503].includes((await cron()).status));
   }
-  assert.fail('Recovery never stopped');
+  assert.fail('Recovery never reached owner review');
 };
 
-test('an unpaid checkout in a provider outage keeps its slot after recovery gives up, freed a day later', async () => {
+test('an unpaid checkout in a provider outage keeps its slot after recovery needs owner review, freed a day later', async () => {
   fixture.setCheckoutPaymentStarted(false);
   const checkout = await startCheckoutBeforeExpiry();
   await holdRunsOut(checkout);
   fixture.setProviderLookupFailure(true);
   assert.ok([200, 503].includes((await cron()).status));
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
-  await cronUntilRecoveryStops(checkout);
+  await cronUntilOwnerReview(checkout);
   assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
   await holdRunsOut(checkout, 25 * 60 * 60_000);
@@ -250,32 +251,37 @@ const addStaleRecheckRecords = async (checkout, count, { label = 'stale', state 
   }
 };
 
-test('a payment still going through when recovery gives up keeps its slot once Dodo says it succeeded', async () => {
+test('a payment still going through when recovery needs owner review books once Dodo says it succeeded', async () => {
   fixture.setPaymentAmountOverrides({ status: 'processing' });
   const checkout = await startCheckoutBeforeExpiry();
   await holdRunsOut(checkout);
   assert.equal((await cron()).status, 200);
   fixture.setProviderLookupFailure(true);
-  await cronUntilRecoveryStops(checkout);
+  await cronUntilOwnerReview(checkout);
   const hold = await holdFor(checkout.payload);
   assert.equal(hold.phase, 'payment_pending');
   assert.equal(hold.paymentRecordId, checkout.record._id);
   assert.equal(await isOffered(checkout.payload), false);
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
   assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'unknown');
+  const recoveryEvents = (await fixture.commerce.getDocument(checkout.record._id)).events;
   await addStaleRecheckRecords(checkout, 260);
   await addStaleRecheckRecords(checkout, 260, { label: 'review', state: 'succeeded' });
   await addStaleRecheckRecords(checkout, 300, { label: 'waiting', expiresAt: new Date().toISOString() });
   fixture.setProviderLookupFailure(false);
   fixture.setPaymentAmountOverrides({ status: 'succeeded' });
-  for (let hour = 0; hour < 4; hour += 1) {
+  let bookingCreated = false;
+  for (let hour = 0; hour < 4 && !bookingCreated; hour += 1) {
     clockShiftMs += 60 * 60_000;
-    for (let run = 0; run < 12; run += 1) assert.ok([200, 503].includes((await cron()).status));
+    for (let run = 0; run < 12 && !bookingCreated; run += 1) {
+      assert.ok([200, 503].includes((await cron()).status));
+      bookingCreated = !!(await fixture.commerce.getDocument(checkout.record._id)).bookingId;
+    }
   }
-  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'succeeded');
-  await holdRunsOut(checkout, 25 * 60 * 60_000);
-  assert.equal((await cron()).status, 200);
-  assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
+  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).verificationState, 'server_verified');
+  await assertBookedOnHeldSlot(checkout);
+  assert.deepEqual((await fixture.commerce.getDocument(checkout.record._id)).events.slice(0, recoveryEvents.length),
+    recoveryEvents);
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
 });
 
@@ -641,6 +647,7 @@ for (const entry of ['webhook', 'cron', 'retry', 'reload']) {
       });
       const approved = await fixture.dodoWebhook(paymentId, 'payment.succeeded', `approved_${entry}`);
       assert.equal(committedResult?.status, 200, JSON.stringify(committedResult));
+      assert.notEqual(committedResult.body.manualReviewRequired, true);
       assert.equal(approved.status, 200, JSON.stringify(approved));
       await assertBookedOnHeldSlot(checkout);
       assert.equal((await fixture.commerce.getDocument(reviewed._id)).recoveryOwnerReviewRequired, false);
@@ -800,10 +807,10 @@ for (const outcome of ['cancelled', 'refunded']) {
     assert.equal((await fixture.commerce.getDocument(checkout.record._id)).recoveryOwnerReviewRequired, false);
     assert.equal(await isOffered(checkout.payload), true);
     assert.equal((await secondVisitor(checkout.payload)).status, 200);
-    if (outcome === 'refunded') {
+    if (['cancelled', 'refunded'].includes(outcome)) {
       const final = await fixture.post('/api/payment/status', {}, token);
       assert.equal(final.status, 200, JSON.stringify(final));
-      assert.equal(final.body.status, 'refunded');
+      assert.equal(final.body.status, outcome === 'refunded' ? 'refunded' : 'abandoned');
       const completed = await fixture.commerce.getDocument(checkout.record._id);
       const deadline = Date.parse(completed.reviewResultAccessUntil);
       assert.ok(deadline > Date.now() && deadline <= Date.now() + 60 * 60_000);
@@ -859,6 +866,8 @@ test('verified capture migration restores retries and saves a reversible recover
     ['paypal', 'paypal', { nextRecoveryAt: '9999-12-31T23:59:59.999Z' }],
     ['razorpay', 'razorpay', { nextRecoveryAt: null, recoveryOwnerReviewRequired: false }],
     ['missing-date', 'razorpay', { recoveryOwnerReviewRequired: true }],
+    ['unverified', 'dodo', { verificationState: '' }],
+    ['merchant-review', 'dodo', { verificationState: '', providerPaymentState: 'requires_merchant_action' }],
     ['capture-evidence', 'dodo', { verificationState: '', providerPaymentState: 'succeeded' }],
     ['dodo', 'dodo', { nextRecoveryAt: '9999-12-31T23:59:59.999Z' }],
   ]) {
@@ -873,8 +882,8 @@ test('verified capture migration restores retries and saves a reversible recover
   }
   const excluded = [];
   for (const [reason, values] of Object.entries({
-    unverified: { verificationState: '' }, booked: { bookingId: 'booking.already-done' },
-    refund: { providerRefundDetailsMissing: true }, disputed: { dodoDisputeActive: true },
+    booked: { bookingId: 'booking.already-done' },
+    refund: { providerPaymentState: 'refunded' }, cancelled: { providerPaymentState: 'cancelled' },
     policy: { providerRecoveryTerminal: true },
   })) {
     const id = `paymentRecord.restart-excluded-${reason}`;

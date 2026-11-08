@@ -10,6 +10,14 @@ const ruleSet = (names) => Object.fromEntries(names.map((name) => [`roo/${name}`
 
 export default [
   {
+    files: ["src/server/api/payment/**/*.js"],
+    ignores: ["src/server/api/payment/providerPaymentState.js"],
+    rules: { "no-restricted-syntax": ["error", {
+      selector: "Literal[value=/^9999-/]",
+      message: "Keep payment recovery dates bounded with getNextPaymentRecoveryAt.",
+    }] },
+  },
+  {
     files: ["src/**/*.{js,jsx,mjs,cjs}", "app/**/*.{js,jsx,mjs,cjs}", "middleware.js"],
     ignores: [testFiles],
     linterOptions: { reportUnusedDisableDirectives: "off" },
