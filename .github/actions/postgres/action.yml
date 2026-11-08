@@ -7,7 +7,7 @@ runs:
       with:
         path: ~/.cache/roo-postgrest
         key: postgrest-v16.4-linux-static-x86-64-b47ecc82
-    - if: runner.environment == 'github-hosted'
+    - if: ${{ !startsWith(runner.name, 'devbox-') }}
       shell: bash
       run: |
         sudo install -d /usr/share/postgresql-common/pgdg

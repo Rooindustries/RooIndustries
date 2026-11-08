@@ -12,10 +12,10 @@ const FORKS_ELSEWHERE = new RegExp(
   ` && '(${LABEL})' \\|\\| vars\\.([A-Z][A-Z0-9_]*) \\|\\| '(${LABEL})' \\}\\}$`,
 );
 const GITHUB_HOSTED = /^ubuntu-(?:latest|[0-9]{2}\.[0-9]{2})$/;
-const HOSTED = "runner.environment == 'github-hosted'";
-const HOSTED_ONLY_DEPS = [
-  `\${{ ${HOSTED} && '--with-deps' || '' }}`,
-  `\${{ inputs.browser-deps == 'true' && ${HOSTED} && '--with-deps' || '' }}`,
+const OUTSIDE_DEVBOX = "!startsWith(runner.name, 'devbox-')";
+const OUTSIDE_DEVBOX_DEPS = [
+  `\${{ ${OUTSIDE_DEVBOX} && '--with-deps' || '' }}`,
+  `\${{ inputs.browser-deps == 'true' && ${OUTSIDE_DEVBOX} && '--with-deps' || '' }}`,
 ];
 const INSTALLS = /\bsudo\b|apt-get|install-deps|--with-deps/;
 
@@ -123,20 +123,56 @@ test("production smoke has a lane of its own and runs only for deployments", () 
   }
 });
 
-test("system packages are installed only on GitHub-hosted runners", () => {
+const outsideDevbox = (condition) => {
+  if (typeof condition !== "string") return false;
+  const expression = condition.startsWith("${{ ") && condition.endsWith(" }}") ? condition.slice(4, -3) : condition;
+  const terms = expression.split(" && ");
+  return terms.filter((term) => term === OUTSIDE_DEVBOX).length === 1 && terms.every((term) => (
+    term === OUTSIDE_DEVBOX || (term.length > 0 && term.trim() === term && !/\|\||\$\{\{|[()]|!(?!=)/.test(term))
+  ));
+};
+
+const checkSystemPackages = (file, step) => {
+  const run = String(step.run ?? "");
+  let rest = [run];
+  for (const guard of OUTSIDE_DEVBOX_DEPS) rest = rest.flatMap((part) => part.split(guard));
+  for (const part of rest) assert.ok(!part.includes("${{"), `${file}: run lines take no expressions but the outside-the-dev-box --with-deps guards: ${run}`);
+  if (rest.some((part) => INSTALLS.test(part))) assert.ok(outsideDevbox(step.if), `${file}: ${run.split("\n")[0]} must install packages only outside the dev box runners`);
+  return rest.length - 1;
+};
+
+test("system packages are installed only outside the dev box runners", () => {
   const steps = [
     ...jobs.flatMap(({ file, job }) => (job.steps ?? []).map((step) => ({ file, step }))),
     ...actions.flatMap((file) => yaml.safeLoad(fs.readFileSync(file, "utf8")).runs.steps.map((step) => ({ file, step }))),
   ];
-  const hostedOnly = (condition) => typeof condition === "string" && !/\|\||\$\{\{|[()]|!(?!=)/.test(condition) && condition.split(" && ").includes(HOSTED);
   let guarded = 0;
   for (const { file, step } of steps) {
-    const run = String(step.run ?? "");
-    let rest = [run];
-    for (const guard of HOSTED_ONLY_DEPS) rest = rest.flatMap((part) => part.split(guard));
-    guarded += rest.length - 1;
-    for (const part of rest) assert.ok(!part.includes("${{"), `${file}: run lines take no expressions but the hosted-only --with-deps guards: ${run}`);
-    if (rest.some((part) => INSTALLS.test(part))) assert.ok(hostedOnly(step.if), `${file}: ${run.split("\n")[0]} installs packages on every runner`);
+    guarded += checkSystemPackages(file, step);
   }
   assert.equal(guarded, 2);
+});
+
+test("system package guards reject unsafe conditions and accept the dev box exclusion", () => {
+  const install = { run: "sudo apt-get install example" };
+  assert.throws(() => checkSystemPackages("fixture.yml", install), assert.AssertionError);
+  for (const condition of [
+    "runner.environment == 'github-hosted'",
+    `\${{ ${OUTSIDE_DEVBOX} || true }}`,
+    "${{ startsWith(runner.name, 'devbox-') }}",
+    `\${{ ${OUTSIDE_DEVBOX} && ${OUTSIDE_DEVBOX} }}`,
+    `\${{ ${OUTSIDE_DEVBOX} && (inputs.browsers != '') }}`,
+    `\${{ ${OUTSIDE_DEVBOX} && !inputs.browsers }}`,
+    `\${{ ${OUTSIDE_DEVBOX} && \${{ inputs.browsers }} }}`,
+    `\${{ ${OUTSIDE_DEVBOX} &&  }}`,
+  ]) {
+    assert.throws(() => checkSystemPackages("fixture.yml", { ...install, if: condition }), assert.AssertionError, String(condition));
+  }
+  for (const condition of [
+    `\${{ ${OUTSIDE_DEVBOX} }}`,
+    `\${{ inputs.browsers != '' && ${OUTSIDE_DEVBOX} }}`,
+    OUTSIDE_DEVBOX,
+  ]) {
+    checkSystemPackages("fixture.yml", { ...install, if: condition });
+  }
 });
