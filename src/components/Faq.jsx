@@ -98,6 +98,7 @@ export default function FaqSection({
   headingTag = "h2",
   initialFaqCopy = null,
   initialQuestions = null,
+  onPaginationStart,
 }) {
   const Heading = headingTag;
   const location = useLocation();
@@ -214,6 +215,7 @@ export default function FaqSection({
   const paginate = (newDirection) => {
     const newPage = safePage + newDirection;
     if (newPage >= 0 && newPage < totalPages) {
+      onPaginationStart?.();
       pendingPageScrollRef.current = newPage;
       setPage([newPage, newDirection]);
     }

@@ -5,11 +5,14 @@ const { waitForRouteCommitted, waitForHydrated } = require("./fixtures/react-hyd
 
 test.use({ javaScriptEnabled: true, viewport: { width: 1536, height: 960 } });
 
-test("a question link cancels an interrupted FAQ pagination scroll", async ({ page, context, baseURL }) => {
+test.beforeEach(async ({ page, context, baseURL }) => {
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
   await guardBrowserContext(context, [baseURL]);
   const session = await context.newCDPSession(page);
   await session.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+});
+
+test("a question link cancels an interrupted FAQ pagination scroll", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await waitForRouteCommitted(page);
@@ -72,9 +75,7 @@ test("a question link cancels an interrupted FAQ pagination scroll", async ({ pa
   expect(Math.abs(result.offset), "the linked question stays below the header").toBeLessThanOrEqual(2);
 });
 
-test("FAQ scroll sampling finishes when pagination moves 0 px", async ({ page, context, baseURL }) => {
-  const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
-  await guardBrowserContext(context, [baseURL]);
+test("FAQ scroll sampling finishes when pagination moves 0 px", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await waitForRouteCommitted(page);
@@ -88,3 +89,43 @@ test("FAQ scroll sampling finishes when pagination moves 0 px", async ({ page, c
   const path = scrollPath(await sampleScrollAfterClick(page, { scope: "#faq", text: "Next", from: "top" }));
   expect(path.distance, `FAQ Next moved ${path.distance} px`).toBe(0);
 });
+
+const FAQ_NEXT = { scope: "#faq", text: "Next", from: "top" };
+const FAQ_PREVIOUS = { scope: "#faq", text: "Previous", from: "top" };
+const BACK_TO_TOP = { scope: "footer", text: "To the top", from: "bottom" };
+
+const SCROLL_BUTTONS = [
+  { label: "FAQ Next", button: FAQ_NEXT },
+  { label: "FAQ Previous", button: FAQ_PREVIOUS },
+  { label: "footer back to top", button: BACK_TO_TOP },
+];
+
+for (const width of [1440, 390]) {
+  test.describe(`reduced motion on button scrolls at ${width}px`, () => {
+    test.use({ viewport: { width, height: width === 390 ? 844 : 960 } });
+
+    test("FAQ paging and back to top jump without animating", async ({ page }, testInfo) => {
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+      for (const { label, button } of SCROLL_BUTTONS) {
+        const path = scrollPath(await sampleScrollAfterClick(page, button));
+        expect(path.distance, `${label} moved ${path.distance} px`).toBeGreaterThan(300);
+        await page.screenshot({ path: testInfo.outputPath(`${label.replaceAll(" ", "-")}.png`) });
+        expect(Math.abs(path.offset), `${label} reaches its destination`).toBeLessThanOrEqual(2);
+        expect(path.inBetween, `${label} has no animated in-between positions`).toEqual([]);
+      }
+    });
+
+    test("FAQ paging and back to top still glide without a reduced-motion preference", async ({ page }, testInfo) => {
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+      for (const { label, button } of SCROLL_BUTTONS) {
+        const path = scrollPath(await sampleScrollAfterClick(page, button));
+        expect(path.distance, `${label} moved ${path.distance} px`).toBeGreaterThan(300);
+        await page.screenshot({ path: testInfo.outputPath(`${label.replaceAll(" ", "-")}.png`) });
+        expect(Math.abs(path.offset), `${label} reaches its destination`).toBeLessThanOrEqual(2);
+        expect(path.inBetween.length, `${label} glides through in-between positions`).toBeGreaterThan(1);
+      }
+    });
+  });
+}
