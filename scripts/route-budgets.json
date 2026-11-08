@@ -9,7 +9,7 @@
       "css": 25600
     },
     "/about": {
-      "js": 165888,
+      "js": 164428,
       "css": 25600
     },
     "/admin/content": {
@@ -21,7 +21,7 @@
       "css": 27648
     },
     "/benchmarks": {
-      "js": 167936,
+      "js": 166440,
       "css": 25600
     },
     "/booking": {
@@ -29,7 +29,7 @@
       "css": 25600
     },
     "/contact": {
-      "js": 175104,
+      "js": 173651,
       "css": 25600
     },
     "/discord": {
@@ -37,7 +37,7 @@
       "css": 25600
     },
     "/downloads/[slug]": {
-      "js": 163840,
+      "js": 162376,
       "css": 25600
     },
     "/faq": {
@@ -45,7 +45,7 @@
       "css": 25600
     },
     "/meet-the-team": {
-      "js": 169984,
+      "js": 168083,
       "css": 25600
     },
     "/not-found": {
@@ -53,7 +53,7 @@
       "css": 25600
     },
     "/packages": {
-      "js": 168960,
+      "js": 166978,
       "css": 25600
     },
     "/payment": {
@@ -65,43 +65,43 @@
       "css": 25600
     },
     "/privacy": {
-      "js": 167936,
+      "js": 166494,
       "css": 25600
     },
     "/referrals/change-password": {
-      "js": 166912,
+      "js": 165077,
       "css": 25600
     },
     "/referrals/dashboard": {
-      "js": 241664,
+      "js": 239832,
       "css": 25600
     },
     "/referrals/forgot": {
-      "js": 165888,
+      "js": 164105,
       "css": 25600
     },
     "/referrals/login": {
-      "js": 162816,
+      "js": 161008,
       "css": 25600
     },
     "/referrals/register": {
-      "js": 235520,
+      "js": 234023,
       "css": 25600
     },
     "/referrals/reset": {
-      "js": 234496,
+      "js": 232773,
       "css": 25600
     },
     "/referrals/verify": {
-      "js": 165888,
+      "js": 164133,
       "css": 25600
     },
     "/reviews": {
-      "js": 167936,
+      "js": 166218,
       "css": 25600
     },
     "/terms": {
-      "js": 167936,
+      "js": 166478,
       "css": 25600
     },
     "/thank-you": {
@@ -117,7 +117,7 @@
       "css": 27648
     },
     "/upgrade-xoc": {
-      "js": 166912,
+      "js": 165300,
       "css": 25600
     },
     "/upgrade/[slug]": {
