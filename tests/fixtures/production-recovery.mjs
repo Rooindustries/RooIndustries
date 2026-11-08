@@ -3,10 +3,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { chromium } from "playwright";
 import { startSite } from "./fake-site.mjs";
 import { startVercel, TOKEN, HISTORY_TOKEN, DOMAIN } from "./fake-vercel.mjs";
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const chromiumPath = chromium.executablePath().split(path.sep);
+const installationIndex = chromiumPath.findLastIndex(part => /^chromium-\d+$/.test(part));
+if (installationIndex < 0) throw new Error("Cannot locate the installed Chromium cache.");
+const browserCache = path.dirname(chromiumPath.slice(0, installationIndex + 1).join(path.sep));
 export const LIVE_URL = "https://rooindustries-live-roo-industries.vercel.app";
 export const PREVIOUS_URL = "https://rooindustries-previous-roo-industries.vercel.app";
 export const changes = vercel => vercel.requests.filter(request => request.method === "POST" && !request.path.startsWith("/repos/"));
@@ -30,7 +35,7 @@ export const withLockTools = async (names, body) => {
 export const execute = (script, args, env, onSpawn) => new Promise(resolve => {
   const child = spawn(process.execPath, [path.join(root, "scripts", script), ...args], {
     cwd: root, env: Object.fromEntries(Object.entries({
-      PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
+      PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, PLAYWRIGHT_BROWSERS_PATH: browserCache,
       SMOKE_RETRY_MS: "10", SMOKE_MARKER_TIMEOUT_MS: "250", GATE_CONFIRM_WAIT_MS: "40",
       GATE_LIVE_ATTEMPTS: "1", GATE_LIVE_WAIT_MS: "10", ROLLBACK_VERIFY_INTERVAL_MS: "10",
       ROLLBACK_VERIFY_TIMEOUT_MS: "200", ...env,
