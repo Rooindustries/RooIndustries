@@ -121,8 +121,20 @@ for (const failing of [false, true]) {
     const result = await exec({ GITHUB_ACTIONS: "true", VERCEL_AUTOMATION_BYPASS_SECRET: "fixture-bypass-4567" });
     assert.equal(result.code, failing ? 1 : 0, result.output);
     assert.equal(changes(vercel).length, failing ? 1 : 0, result.output);
-    assert.ok(site.requests.every(row => row.bypass === "fixture-bypass-4567"));
-    assert.ok(previous.requests.every(row => row.bypass === "fixture-bypass-4567"));
+    for (const { requests } of [site, previous]) {
+      if (!requests.length) continue;
+      assert.ok(requests.some(row => row.bypass === "fixture-bypass-4567"));
+      for (const row of requests) {
+        assert.equal(row.method, "GET");
+        if (row.bypass) {
+          assert.equal(row.bypass, "fixture-bypass-4567");
+          assert.equal(row.setBypassCookie, "true");
+        } else {
+          assert.match(row.cookie || "", /fixture_bypass=allowed/);
+          assert.doesNotMatch(JSON.stringify(row), /fixture-bypass-4567/);
+        }
+      }
+    }
     assert.doesNotMatch(result.output, /fixture-bypass-4567/);
   }));
 }
