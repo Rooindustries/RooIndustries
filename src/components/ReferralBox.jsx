@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useContent } from "../lib/contentCache";
+import { useContent } from "../lib/useContent";
 
 const normalizeReferralLoginPath = (path) =>
   !path || path === "/login" ? "/referrals/login" : path;

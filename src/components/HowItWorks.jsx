@@ -7,7 +7,7 @@ import {
 } from "../lib/perfDebug";
 import homeCopy from "../lib/homeCopy";
 import { HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
-import { useContent } from "../lib/contentCache";
+import { useContent } from "../lib/useContent";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
 const { HOME_COPY } = homeCopy;

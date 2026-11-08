@@ -1,4 +1,3 @@
-export { loadContent } from "../lib/contentCache";
 import React, { useEffect, useRef, useState } from "react";
 import Hero from "../components/Hero";
 import Services from "../components/Services";

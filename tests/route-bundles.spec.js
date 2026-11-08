@@ -62,12 +62,16 @@ test("cold homepage excludes Contact and PortableText scripts", async ({ page },
 for (const route of ["/reviews", "/tools", "/packages"]) {
   test(`cold ${route} excludes booking confirmation scripts`, async ({ page }, testInfo) => {
     const scripts = captureScripts(page);
+    const prefetch = page.waitForResponse(response => new URL(response.url()).pathname === "/api/content/services");
     await page.goto(route);
+    await prefetch;
     await settle(page);
     const loaded = await scripts();
     const confirmationScripts = loaded.filter(({ body }) => body.includes("Looking for your booking?"));
     await attachJson(testInfo, "requested-scripts", loaded.map(({ url }) => url));
     expect(confirmationScripts.map(({ url }) => url)).toEqual([]);
+    const homeScripts = loaded.filter(({ body }) => body.includes("ri-referral-heading"));
+    expect(homeScripts.map(({ url }) => url)).toEqual([]);
   });
 }
 

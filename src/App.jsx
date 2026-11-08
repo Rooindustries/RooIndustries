@@ -28,7 +28,7 @@ import {
   withoutSupersededSectionTrip,
 } from "./lib/sectionNavigation";
 import { sanitizeBrowserSearch } from "./lib/browserSearch";
-import { prefetchHomeSectionData, setHomeSectionLoader } from "./lib/homeSectionData";
+import { prefetchHomeSectionData } from "./lib/homeSectionData";
 import { whenUserInteracts } from "./lib/firstInteraction";
 import { migrateCheckoutStorageToSession } from "./lib/checkoutStorage";
 import { getPublicContent, getPublicContentPendingCount } from "./lib/publicContentClient";
@@ -37,9 +37,7 @@ import { setVisibleTimeout } from "./lib/visibleTimeout";
 import { ownsTripEntry, SectionNavigationProvider } from "./lib/sectionNavigator";
 import { useIsomorphicLayoutEffect } from "./lib/useIsomorphicLayoutEffect";
 
-const loadHome = () => import("./legacyPages/Home");
-setHomeSectionLoader(loadHome);
-const Home = lazy(loadHome);
+const Home = lazy(() => import("./legacyPages/Home"));
 const AboutPage = lazy(() => import("./legacyPages/About"));
 const Packages = lazy(() => import("./legacyPages/Packages"));
 const FaqPage = lazy(() => import("./legacyPages/Faq"));

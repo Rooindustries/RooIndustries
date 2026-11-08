@@ -43,7 +43,6 @@ jest.mock("../legacyPages/MeetTheTeam", () => () => null);
 jest.mock("../legacyPages/NotFound", () => () => null);
 jest.mock("../lib/homeSectionData", () => ({
   prefetchHomeSectionData: jest.fn().mockResolvedValue(undefined),
-    setHomeSectionLoader: jest.fn(),
 }));
 jest.mock("../lib/sectionNavigation", () => ({
   SECTION_TRIP_ENTRY: "__rooSectionTrip",

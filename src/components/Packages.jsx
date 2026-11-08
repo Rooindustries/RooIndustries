@@ -3,7 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { getWarrantyCallout } from "../lib/packageWarranty";
 import PriceDisplay from "./PriceDisplay";
 import { HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
-import { useContent } from "../lib/contentCache";
+import { useContent } from "../lib/useContent";
 import homeCopy from "../lib/homeCopy";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import { persistBookingPackageSelection } from "../lib/checkoutStorage";

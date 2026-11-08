@@ -14,7 +14,7 @@ test("public copy cannot bypass the shared content cache", async () => {
     const [result] = await eslint.lintText(code, { filePath });
     assert.equal(result.messages.filter(({ ruleId }) => ruleId === "no-restricted-imports").length, 1);
   }
-  const [result] = await eslint.lintText('import { useContent } from "../lib/contentCache";', { filePath });
+  const [result] = await eslint.lintText('import { useContent } from "../lib/useContent";', { filePath });
   assert.equal(result.errorCount, 0);
 });
 

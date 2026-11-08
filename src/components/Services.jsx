@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useContent } from "../lib/contentCache";
+import { useContent } from "../lib/useContent";
 import { AnimatePresence, motion } from "framer-motion";
 import { urlFor } from "../lib/cmsImageUrl";
 import About from "./About";

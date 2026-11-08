@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { useContent } from "../lib/contentCache";
+import { useContent } from "../lib/useContent";
 import { ChevronDown } from "lucide-react";
 import { urlFor } from "../lib/cmsImageUrl";
 import { HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";

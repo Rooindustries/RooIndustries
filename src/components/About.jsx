@@ -1,5 +1,5 @@
 import React from "react";
-import { useContent } from "../lib/contentCache";
+import { useContent } from "../lib/useContent";
 import { HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 
 /* Record card design tokens — all theme accents derive from the active palette. */

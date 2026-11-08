@@ -53,7 +53,6 @@ const loadAppContent = () => {
   }));
   jest.doMock("../lib/homeSectionData", () => ({
     prefetchHomeSectionData: jest.fn().mockResolvedValue(undefined),
-    setHomeSectionLoader: jest.fn(),
   }));
   jest.doMock("../lib/sectionNavigation", () => ({
     consumeRouteTransitionIntent: jest.fn(() => null),

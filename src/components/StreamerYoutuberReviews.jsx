@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
 import { getPerfToggleEnabled, isPerfDebugEnabled, PERF_DEBUG_EVENT, PERF_TOGGLE_KEYS } from "../lib/perfDebug";
 import { HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
-import { useContent } from "../lib/contentCache";
+import { useContent } from "../lib/useContent";
 
 const AUTO_SCROLL_PIXELS_PER_SECOND = 24;
 const AUTO_SCROLL_RESUME_DELAY_MS = 1500;

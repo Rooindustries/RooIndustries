@@ -39,7 +39,6 @@ jest.mock("../lib/performanceProfile", () => ({ initializePerformanceProfile: je
 jest.mock("../lib/scrollRuntime", () => ({ useScrollRuntime: () => ({ scrollY: 0 }) }));
 jest.mock("../lib/homeSectionData", () => ({
   prefetchHomeSectionData: jest.fn().mockResolvedValue(undefined),
-  setHomeSectionLoader: jest.fn(),
 }));
 jest.mock("@vercel/analytics/react", () => ({ Analytics: () => null }));
 jest.mock("@vercel/speed-insights/react", () => ({ SpeedInsights: () => null }));

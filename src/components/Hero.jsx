@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { Check } from "lucide-react";
-import { useContent } from "../lib/contentCache";
+import { useContent } from "../lib/useContent";
 import homeCopy from "../lib/homeCopy";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import { trackEvent } from "../lib/analytics";

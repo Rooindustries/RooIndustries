@@ -4,7 +4,7 @@ import { ChevronDown } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import homeCopy from "../lib/homeCopy";
 import { HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
-import { useContent } from "../lib/contentCache";
+import { useContent } from "../lib/useContent";
 import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinator";
 import { scrollWindowTo } from "../lib/scrollWindowTo";
 
