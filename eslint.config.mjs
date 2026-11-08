@@ -46,7 +46,7 @@ export default [
     rules: ruleSet(["no-linux-only-test-tooling"]),
   },
   {
-    files: ["tests/**/*.spec.{js,mjs,cjs}", "tests/**/*.fixture.{js,mjs,cjs}"],
+    files: ["tests/**/*.{js,mjs,cjs}"],
     rules: ruleSet(["no-playwright-recording-overrides"]),
   },
   {

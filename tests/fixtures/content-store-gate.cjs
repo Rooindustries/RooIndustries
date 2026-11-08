@@ -16,19 +16,19 @@ const createContentGate = (request, baseURL) => {
   };
   const get = async (path) => (await request.get(`${control}${path}`)).json();
 
-  const traced = (trace = randomUUID()) => {
-    const headers = { "x-roo-test-trace": trace };
+  const traced = (requestId = randomUUID()) => {
+    const headers = { "x-roo-test-request-id": requestId };
     return {
-      trace,
+      requestId,
       headers,
-      rules: (rules) => post("/store-rules", { trace, rules }),
-      calls: () => get(`/store-calls?trace=${trace}`),
-      contentReads: async () => (await get(`/store-calls?trace=${trace}`)).filter((rpc) => new RegExp(CONTENT_READ).test(rpc)),
-      keptAlive: () => get(`/kept-alive?trace=${trace}`),
-      purges: async () => (await get("/purges")).filter((purge) => purge.trace === trace),
+      rules: (rules) => post("/store-rules", { requestId, rules }),
+      calls: () => get(`/store-calls?requestId=${requestId}`),
+      contentReads: async () => (await get(`/store-calls?requestId=${requestId}`)).filter((rpc) => new RegExp(CONTENT_READ).test(rpc)),
+      keptAlive: () => get(`/kept-alive?requestId=${requestId}`),
+      purges: async () => (await get("/purges")).filter((purge) => purge.requestId === requestId),
       waitForHold: () =>
-        expect.poll(async () => (await get(`/store-holds?trace=${trace}`)).length, { timeout: 15000, intervals: [100, 250, 500] }).toBeGreaterThan(0),
-      release: () => post("/store-release", { trace }),
+        expect.poll(async () => (await get(`/store-holds?requestId=${requestId}`)).length, { timeout: 15000, intervals: [100, 250, 500] }).toBeGreaterThan(0),
+      release: () => post("/store-release", { requestId }),
       content: (path) => request.get(path, { headers }),
       cms: async (path, body) => {
         const response = await request.fetch(path, {

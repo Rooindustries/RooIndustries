@@ -122,6 +122,32 @@ test("a 1,200-second booking run gets a job limit beyond its graceful deadline a
   }
 });
 
+test("every native browser run fits the combined job deadline", () => {
+  const jobs = yaml.safeLoad(fs.readFileSync(".github/workflows/tests.yml", "utf8")).jobs;
+  const job = jobs.native;
+  const plan = JSON.parse(execFileSync(process.execPath, ["scripts/playwright-groups.mjs", "native"], {
+    encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  }));
+  assert.ok(job.needs.includes("playwright-plan"));
+  assert.equal(jobs["playwright-plan"].outputs.native, "${{ steps.plan.outputs.native }}");
+  assert.ok(jobs["playwright-plan"].steps.some(step => step.id === "plan" &&
+    step.run?.includes("node scripts/playwright-groups.mjs native") &&
+    step.run.includes('"native=$native" >> "$GITHUB_OUTPUT"')));
+  assert.equal(job["timeout-minutes"], "${{ fromJSON(needs.playwright-plan.outputs.native).timeoutMinutes }}");
+  const runs = job.steps.filter(step => step.run?.includes("playwright test"));
+  const deadlines = runs.map(step => {
+    const match = step.env.PW_GROUP_TIMEOUT_MS.match(
+      /^\$\{\{ fromJSON\(needs\.playwright-plan\.outputs\.native\)\.(\w+) \}\}$/,
+    );
+    assert.ok(match, `${step.name} must use the job plan`);
+    return plan[match[1]];
+  });
+  assert.deepEqual(deadlines, [35 * 60000, 20 * 60000]);
+  assert.ok(plan.extraMs >= 7 * 60000, "Setup and the remaining native suites need time too");
+  const required = deadlines.reduce((total, deadline) => total + deadline, plan.extraMs + JOB_RESERVE_MS);
+  assert.ok(required <= plan.timeoutMinutes * 60000, "Both browser runs must fit before shutdown and uploads");
+});
+
 test("merged timings use each file's median across runs", () => {
   const report = (seconds) => ({
     suites: [{ file: "a.spec.js", specs: [{ tests: [{ results: [{ duration: seconds * 1000 }] }] }], suites: [] }],

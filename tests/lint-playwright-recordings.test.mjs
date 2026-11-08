@@ -33,3 +33,21 @@ test("repository lint keeps Playwright recordings in the shared config", () => {
     if (status) assert.equal(report.messages[0].ruleId, "roo/no-playwright-recording-overrides", code);
   }
 });
+
+test("repository lint rejects recording overrides in shared fixtures and helpers", () => {
+  for (const filename of [
+    "tests/fixtures/booking-flow.cjs",
+    "tests/fixtures/shared/recordings.js",
+    "tests/helpers/recordings.mjs",
+  ]) {
+    for (const [code, status] of [[valid[0], 0], [invalid[0], 1], [invalid[1], 1]]) {
+      const result = spawnSync(process.execPath, [cli, "--stdin", "--stdin-filename", filename, "--format=json"], {
+        input: code, encoding: "utf8",
+      });
+      assert.equal(result.status, status, `${filename}\n${code}\n${result.stdout}\n${result.stderr}`);
+      const [report] = JSON.parse(result.stdout);
+      assert.equal(report.errorCount, status, filename);
+      if (status) assert.equal(report.messages[0].ruleId, "roo/no-playwright-recording-overrides", filename);
+    }
+  }
+});
