@@ -1,12 +1,7 @@
-import { useCallback, useContext, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useContext, useEffect, useSyncExternalStore } from "react";
 import { getPublicContentEntry } from "./publicContentClient";
 import { ContentRevisionContext, ContentVisibleContext } from "./ContentRevisionContext";
 import { reportRequestError, requestDeadline } from "./clientRequest";
-import homeCopy from "./homeCopy";
-import packageContent from "./packageContent";
-
-const { applyHomeSectionCopyOverride } = homeCopy;
-const { buildPackageOffers, normalizeFaqQuestions } = packageContent;
 
 const CONTENT_MAX_AGE_MS = 60 * 1000;
 
@@ -17,22 +12,7 @@ const inflight = new Map();
 const listeners = new Map();
 let sequence = 0;
 
-const LIST_RESOURCES = new Set(["benchmarks", "tools", "reviews-gallery", "faq-questions", "packages-list"]);
-
-const matchesContentType = (resource, data) => {
-  if (data === null || data === undefined) return false;
-  const isList = Array.isArray(data);
-  return LIST_RESOURCES.has(resource) ? isList : typeof data === "object" && !isList;
-};
-
 const isStale = (receivedAt) => Date.now() - receivedAt > CONTENT_MAX_AGE_MS;
-
-const normalizeContent = (resource, value) => {
-  const copyValue = applyHomeSectionCopyOverride(resource, value);
-  if (resource === "packages-list") return buildPackageOffers(copyValue);
-  if (resource === "faq-questions") return normalizeFaqQuestions(copyValue);
-  return copyValue;
-};
 
 const outranks = (next, current) => {
   if (!current) return true;
@@ -55,13 +35,10 @@ const store = (resource, data, revision, requestSequence) => {
   notify(resource);
 };
 
-export const readContent = (resource) => entries.get(resource);
-
 const seedContent = (resource, data, revision) => {
   const current = entries.get(resource);
   if (!inBrowser || current?.data === data) return;
-  const ageUnknown = Array.isArray(data) && data.length === 0;
-  const entry = { data, revision, receivedAt: ageUnknown ? -Infinity : snapshotReceivedAt, sequence: 0 };
+  const entry = { data, revision, receivedAt: snapshotReceivedAt, sequence: 0 };
   if (!outranks(entry, current)) return;
   entries.set(resource, entry);
   notify(resource);
@@ -71,18 +48,15 @@ export const loadContent = (resource) => {
   const current = entries.get(resource);
   if (current && !isStale(current.receivedAt)) return Promise.resolve(current.data);
   const pending = inflight.get(resource);
-  if (pending && !isStale(pending.startedAt)) return pending.request;
+  if (pending) return pending;
 
   const requestSequence = ++sequence;
-  const startedAt = Date.now();
   const request = getPublicContentEntry(resource, {}, { cache: "no-cache", signal: requestDeadline() })
-    .then(({ data, revision, notModified }) => {
-      if (notModified && current) {
-        store(resource, current.data, current.revision, requestSequence);
-      } else {
-        if (!matchesContentType(resource, data)) throw new Error("Public content could not be read.");
-        store(resource, normalizeContent(resource, data), revision, requestSequence);
+    .then(({ data, revision }) => {
+      if (!data || typeof data !== "object" || Array.isArray(data)) {
+        throw new Error("Public content could not be read.");
       }
+      store(resource, data, revision, requestSequence);
       return entries.get(resource).data;
     })
     .catch((error) => {
@@ -92,9 +66,9 @@ export const loadContent = (resource) => {
       throw error;
     })
     .finally(() => {
-      if (inflight.get(resource)?.request === request) inflight.delete(resource);
+      if (inflight.get(resource) === request) inflight.delete(resource);
     });
-  inflight.set(resource, { request, startedAt });
+  inflight.set(resource, request);
   return request;
 };
 
@@ -116,43 +90,24 @@ const shownEntry = (cached, initialData, revision) => {
   return outranks({ revision, sequence: 0 }, cached) ? undefined : cached;
 };
 
-export function useContent(resource, initialData = null, { enabled = true } = {}) {
+export function useContent(resource, initialData = null) {
   const revisions = useContext(ContentRevisionContext);
   const visible = useContext(ContentVisibleContext);
   const snapshotRevision = Number.isSafeInteger(revisions?.[resource]) ? revisions[resource] : null;
   const subscribeToResource = useCallback((listener) => subscribe(resource, listener), [resource]);
   const readEntry = useCallback(() => entries.get(resource), [resource]);
   const cached = useSyncExternalStore(subscribeToResource, readEntry, noEntry);
-  const [failed, setFailed] = useState(false);
-  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     if (initialData !== null) seedContent(resource, initialData, snapshotRevision);
   }, [resource, initialData, snapshotRevision]);
 
   useEffect(() => {
-    if (!enabled || !visible) return undefined;
-    let active = true;
-    loadContent(resource)
-      .then(() => {
-        if (active) setFailed(false);
-      })
-      .catch(() => {
-        if (active) setFailed(true);
-      });
-    return () => {
-      active = false;
-    };
-  }, [resource, enabled, attempt, visible]);
+    if (visible) loadContent(resource).catch(() => {});
+  }, [resource, visible]);
 
   const entry = shownEntry(cached, initialData, snapshotRevision);
   return {
     data: entry ? entry.data : initialData,
-    loaded: Boolean(cached),
-    failed: failed && !cached,
-    retry: () => {
-      setFailed(false);
-      setAttempt((value) => value + 1);
-    },
   };
 }

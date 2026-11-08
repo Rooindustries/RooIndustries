@@ -34,17 +34,4 @@ describe("shared content refreshes", () => {
       ? [{ status: "fulfilled", value: data }, { status: "fulfilled", value: data }]
       : [{ status: "rejected", reason: error }, { status: "rejected", reason: error }]);
   });
-
-  test("an unchanged response confirms freshness without replacing the copy", async () => {
-    const data = { headingLine1: "Published copy" };
-    getPublicContentEntry.mockResolvedValueOnce({ data, revision: 1 });
-    await loadContent("hero");
-    now += 61_000;
-    getPublicContentEntry.mockResolvedValueOnce({ notModified: true });
-    expect(await loadContent("hero")).toEqual(data);
-    now += 30_000;
-    expect(await loadContent("hero")).toEqual(data);
-    expect(getPublicContentEntry).toHaveBeenCalledTimes(2);
-    expect(report).not.toHaveBeenCalled();
-  });
 });
