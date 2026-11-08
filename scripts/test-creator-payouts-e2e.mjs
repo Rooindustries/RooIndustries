@@ -715,7 +715,10 @@ try {
             ...(body ? {body} : {}),
           });
           let response;
-          if (req.url.startsWith('/api/ref/')) {
+          if (req.url === '/api/rollback/updatePayments') {
+            const {rollbackPayout} = await import('./lib/creator-rollback-payout.mjs');
+            response = await rollbackPayout(request);
+          } else if (req.url.startsWith('/api/ref/')) {
             const action = new URL(req.url, origin).pathname.split('/').at(-1);
             const route = await import('../app/api/ref/[action]/route.js');
             response = await route[req.method](request, {
@@ -3764,6 +3767,12 @@ try {
   await runCreatorMoneyRegressions({
     run, seed, documents, commerce, read, post, webhook, refundCurrent, fixture, sql,
     startCheckout, rulesSql: baselineRulesMigration || fs.readFileSync(rulesMigrationPath, 'utf8'), emailRequests,
+    rollbackSql: baselineRollback || fs.readFileSync('supabase/rollbacks/20261108092740_creator_money_rules.sql', 'utf8'),
+  });
+  const {runHistoricalCreatorRegressions} = await import('./lib/historical-creator-regressions.mjs');
+  await runHistoricalCreatorRegressions({
+    run, seed, documents, commerce, read, post, webhook, refundCurrent, sql, summary,
+    rulesSql: baselineRulesMigration || fs.readFileSync(rulesMigrationPath, 'utf8'),
     rollbackSql: baselineRollback || fs.readFileSync('supabase/rollbacks/20261108092740_creator_money_rules.sql', 'utf8'),
   });
   await run('all-payouts-projection-rebuilds', async () => {

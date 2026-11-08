@@ -338,9 +338,7 @@ export const createRequiresRescheduleBooking = async ({
   const commission = calculateCreatorCommission(pricing);
   const originalCommissionAmount = commission.originalAmount;
   const dodoTotalAmount = Number(paymentRecord.providerPublicData?.totalAmount || Number(pricing.netAmount) * 100) / 100;
-  const resolvedReferralId = preserveHistoricalAccounting
-    ? ""
-    : normalize(referralId || pricing.effectiveReferralId || "");
+  const resolvedReferralId = normalize(referralId || pricing.effectiveReferralId || "");
   const referral = resolvedReferralId
     ? await client.fetch('*[_type == "referral" && _id == $id][0]{_id}', {id: resolvedReferralId})
     : null;
@@ -396,6 +394,9 @@ export const createRequiresRescheduleBooking = async ({
         ? {
             referral: { _type: "reference", _ref: resolvedReferralId },
             ...referralCommitFields(resolvedReferralId, referral, bookingId),
+            ...(preserveHistoricalAccounting ? {
+              referralAccountingApplied: paymentRecord.referralAccountingApplied === true,
+            } : {}),
           }
         : {}),
       ...(couponReservation?.redemption?._id
@@ -475,7 +476,7 @@ export const createRequiresRescheduleBooking = async ({
       });
     }
 
-    if (referral?._id) {
+    if (referral?._id && !preserveHistoricalAccounting) {
       transaction.patch(resolvedReferralId, (patch) =>
         patch
           .setIfMissing({ successfulReferrals: 0 })

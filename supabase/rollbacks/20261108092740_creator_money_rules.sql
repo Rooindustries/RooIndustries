@@ -48,6 +48,12 @@ begin
     end loop;
     doc := doc || jsonb_build_object('earnedTotal', earned_total, 'paidTotal', paid_total,
       'owedTotal', (doc->>'owedXoc')::numeric + (doc->>'owedVertex')::numeric);
+    if current_doc->>'registrationStatus' = 'pending_email' then
+      doc := doc || jsonb_build_object('owedXoc', 0, 'owedVertex', 0, 'owedTotal', 0,
+        'underReviewTotal', greatest(case when btrim(coalesce(current_doc->>'underReviewTotal', ''))
+          ~ '^-?[0-9]+([.][0-9]+)?$' then (current_doc->>'underReviewTotal')::numeric else 0 end,
+          (earnings->>'total')::numeric - paid_total, 0));
+    end if;
     perform public.roo_apply_document_mutations(jsonb_build_array(jsonb_build_object(
       'operation', 'replace', 'document', doc, 'expected_revision', current_revision)));
     update migration.creator_empty_code_before set rolled_back_at = now()
@@ -58,4 +64,59 @@ begin
   end loop;
 end;
 $$;
+
+do $$
+begin
+  execute replace((select before_definition from migration.creator_money_rule_functions
+    where signature = 'public.roo_referral_earnings_summary(text,text)'),
+    'public.roo_referral_earnings_summary', 'migration.creator_rollback_earnings_summary');
+end;
+$$;
+revoke all on function migration.creator_rollback_earnings_summary(text,text)
+  from public, anon, authenticated, service_role;
+
+create or replace function public.roo_referral_earnings_summary(p_referral_legacy_id text, p_referral_code text)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case when exists (
+    select 1 from migration.source_documents creator
+    where creator.legacy_sanity_id = p_referral_legacy_id and creator.document_type = 'referral'
+      and not creator.tombstoned and creator.payload->>'registrationStatus' = 'pending_email'
+  ) then jsonb_build_object('xoc', 0, 'vertex', 0, 'total', 0, 'byPackage', '{}'::jsonb)
+  else migration.creator_rollback_earnings_summary(p_referral_legacy_id, p_referral_code) end;
+$$;
+
+create or replace function migration.creator_rollback_payout_hold()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.document_type = 'creatorPayout' and not new.tombstoned then
+    perform 1 from migration.source_documents creator
+    where creator.legacy_sanity_id in (new.payload->>'referralId', new.payload#>>'{creator,_ref}')
+      and creator.document_type = 'referral' and not creator.tombstoned
+      and creator.payload->>'registrationStatus' = 'pending_email'
+    for share;
+    if found then
+      raise exception 'Payout is held until the creator verifies their email.' using errcode = 'PT409';
+    end if;
+  elsif new.document_type = 'referral' and tg_op = 'UPDATE'
+    and new.payload->>'registrationStatus' = 'pending_email'
+    and (new.payload->'xocPayments' is distinct from old.payload->'xocPayments'
+      or new.payload->'vertexPayments' is distinct from old.payload->'vertexPayments') then
+    raise exception 'Payout is held until the creator verifies their email.' using errcode = 'PT409';
+  end if;
+  return new;
+end;
+$$;
+revoke all on function migration.creator_rollback_payout_hold() from public, anon, authenticated, service_role;
+create or replace trigger creator_rollback_payout_hold
+before insert or update on migration.source_documents
+for each row execute function migration.creator_rollback_payout_hold();
 commit;
