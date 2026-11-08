@@ -24,7 +24,12 @@ await fs.mkdir(output, { recursive: true });
 const artifact = await fs.mkdtemp(path.join(output, "playwright-timeouts-"));
 const instance = fixtureInstance();
 const server = http.createServer((request, response) => {
-  response.end(request.url === "/__instance" ? instance : "<!doctype html><title>Local timeout fixture</title>");
+  const respond = () => response.end(request.url === "/__instance" ? instance :
+    "<!doctype html><title>Local timeout fixture</title>");
+  if (request.url === "/slow") {
+    const timer = setTimeout(respond, 5000);
+    response.once("close", () => clearTimeout(timer));
+  } else respond();
 });
 server.listen(0, "127.0.0.1");
 await once(server, "listening");
@@ -67,17 +72,19 @@ async function inspectTrace(file) {
 }
 
 async function check(mode) {
+  const healthy = mode === "unbounded" || mode === "local";
   const directory = path.join(artifact, mode);
   await fs.mkdir(directory);
   const reportFile = path.join(directory, "results.json");
   const config = path.join(directory, "config.cjs");
   await fs.writeFile(config, `
 const base = require(${JSON.stringify(configFile)});
+const bounded = Number.isFinite(base.metadata.groupTimeoutMs);
 module.exports = {
   ...base,
-  metadata: { ...base.metadata, groupTimeoutMs: 12000 },
-  globalTimeout: 16000,
-  timeout: ${mode === "group" ? 60000 : 4000},
+  metadata: { ...base.metadata, ...(bounded ? { groupTimeoutMs: 12000 } : {}) },
+  globalTimeout: bounded ? 16000 : 0,
+  timeout: ${mode === "group" ? 60000 : healthy ? 10000 : 4000},
   retries: ${mode === "retry" ? 1 : 0},
   testDir: ${JSON.stringify(path.join(root, "tests/fixtures/playwright-timeouts"))},
   testMatch: "hang.fixture.cjs",
@@ -92,7 +99,8 @@ module.exports = {
     PATH: process.env.PATH, HOME: process.env.HOME, DISPLAY: process.env.DISPLAY,
     ...(process.env.LD_LIBRARY_PATH ? { LD_LIBRARY_PATH: process.env.LD_LIBRARY_PATH } : {}),
     PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
-    CI: "1", BASE_URL: origin, PW_PORT: String(port),
+    ...(mode === "local" ? {} : { CI: "1" }), BASE_URL: origin, PW_PORT: String(port),
+    ...(mode === "unbounded" ? {} : { PW_GROUP_TIMEOUT_MS: "12000" }),
     PLAYWRIGHT_TIMEOUT_CASE: mode,
     TOOLING_NETWORK_GUARD: "1", ROO_TEST_NETWORK_ORIGINS: JSON.stringify([origin]),
   };
@@ -117,7 +125,7 @@ module.exports = {
   const watchdog = setTimeout(() => {
     watchdogExpired = true;
     signalGroup(active, "SIGINT");
-  }, 20000);
+  }, healthy ? 30000 : 20000);
   let code;
   try {
     [code] = await once(active, "close");
@@ -135,6 +143,7 @@ module.exports = {
   return {
     mode, code, elapsedMs: Date.now() - started, watchdogExpired,
     statuses: results.map(result => result.status), traces: traces.length, traceActions,
+    testDurationMs: results.reduce((total, result) => total + result.duration, 0),
     named: log.includes(`${mode}: browser action`), deadline: log.includes("Playwright group exceeded"),
     browserTracked, remainingProcesses: releaseGroupMembers(members),
   };
@@ -142,27 +151,45 @@ module.exports = {
 
 try {
   const results = [];
+  for (const mode of ["unbounded", "local"]) {
+    const result = await check(mode);
+    results.push(result);
+    console.log(JSON.stringify(result));
+    assert.equal(result.code, 0, JSON.stringify(result));
+    assert.deepEqual(result.statuses, ["passed", "passed", "passed"]);
+    assert.ok(result.testDurationMs > 12000, "Healthy tests must outlast the scaled group deadline.");
+    assert.ok(!result.deadline && !result.watchdogExpired);
+    assert.equal(result.traces, 0);
+  }
   for (const mode of ["pass", "test", "retry", "group"]) results.push(await check(mode));
   const budgetsFit = ["routes", "revalidation"].every(name => {
     const job = workflow.jobs[name];
     return job.strategy?.matrix?.suite.length === 2 && job.strategy["fail-fast"] === false &&
-      job["timeout-minutes"] * 60000 > base.globalTimeout;
+      job["timeout-minutes"] * 60000 > Number(job.env.PW_GROUP_TIMEOUT_MS) + 120000;
   });
+  const steps = workflow.jobs.playwright.steps;
+  const checkIndex = steps.findIndex(step => step.run?.includes("npm run test:playwright-timeouts"));
+  const uploadIndex = steps.findIndex(step => step.with?.name === "playwright-timeout-proof");
+  const nextRunIndex = steps.findIndex(step => step.run?.includes("npx playwright test"));
+  assert.ok(checkIndex >= 0 && checkIndex < uploadIndex && uploadIndex < nextRunIndex,
+    "Upload timeout reports before the next Playwright run clears test-results.");
+  assert.equal(steps[uploadIndex].with.path, "test-results/playwright-timeouts-*/");
+  assert.ok(steps[uploadIndex].if.includes("always()"));
   const report = { artifact, budgetsFit, results };
   await fs.writeFile(path.join(artifact, "check.json"), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report));
   assert.ok(budgetsFit, "Each browser group needs a separate job deadline.");
-  assert.equal(results[0].code, 0);
-  assert.equal(results[0].traces, 0, "Discard the healthy first attempt's trace.");
-  for (const result of results.slice(1)) {
+  assert.equal(results[2].code, 0);
+  assert.equal(results[2].traces, 0, "Discard the healthy first attempt's trace.");
+  for (const result of results.slice(3)) {
     assert.notEqual(result.code, 0, result.mode);
     assert.ok(!result.watchdogExpired && result.named && result.traces > 0, JSON.stringify(result));
     assert.ok(result.traceActions.every(Boolean), JSON.stringify(result));
     assert.ok(result.browserTracked, "Track the browser and workers before checking their shutdown.");
     assert.equal(result.remainingProcesses, 0, JSON.stringify(result));
   }
-  assert.deepEqual(results[2].statuses, ["timedOut", "passed"]);
-  assert.ok(results[3].deadline && results[3].elapsedMs < 16000, "Interrupt before the emergency deadline.");
+  assert.deepEqual(results[4].statuses, ["timedOut", "passed"]);
+  assert.ok(results[5].deadline && results[5].elapsedMs < 16000, "Interrupt before the emergency deadline.");
 } finally {
   interrupt();
   process.off("SIGINT", interrupt);

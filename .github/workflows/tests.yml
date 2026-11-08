@@ -168,29 +168,29 @@ jobs:
           git worktree add --detach "$relocated" HEAD
           cp -a --reflink=auto node_modules "$relocated/"
           echo "SUITE_DIR=$relocated" >> "$GITHUB_ENV"
-      - name: Pick a fixed group's spec file
-        if: ${{ !startsWith(matrix.suite.name, 'rest-') }}
-        run: |
-          case "$PW_SUITE" in
-            navigation) echo 'PW_FILES=/section-nav\.spec\.js$' >> "$GITHUB_ENV" ;;
-            booking) echo 'PW_FILES=/booking-flow\.spec\.js$' >> "$GITHUB_ENV" ;;
-            *) echo "Unknown browser group $PW_SUITE" >&2; exit 1 ;;
-          esac
       - name: Restore the latest per-file test timings
-        if: startsWith(matrix.suite.name, 'rest-')
         uses: actions/cache/restore@v4
         with:
           path: .playwright-timings
           key: playwright-timings-latest
           restore-keys: playwright-timings-
-      - name: Pick this group's spec files
-        if: startsWith(matrix.suite.name, 'rest-')
+      - name: Pick this group's spec files and deadline
         run: |
-          files="$(node scripts/playwright-groups.mjs "$PW_SUITE" .playwright-timings/timings.json)"
-          echo "PW_FILES=$files" >> "$GITHUB_ENV"
+          node scripts/playwright-groups.mjs "$PW_SUITE" .playwright-timings/timings.json env >> "$GITHUB_ENV"
       - uses: ./.github/actions/hold-ports
         with:
           playwright-ports: "3211"
+      - name: Check browser timeout reports
+        if: matrix.suite.name == 'rest-1'
+        run: xvfb-run -a npm run test:playwright-timeouts
+      - name: Save browser timeout reports before the next run
+        uses: actions/upload-artifact@v4
+        if: ${{ always() && matrix.suite.name == 'rest-1' }}
+        with:
+          name: playwright-timeout-proof
+          path: test-results/playwright-timeouts-*/
+          if-no-files-found: error
+          retention-days: 7
       - name: Run browser and agent-readiness tests
         run: |
           cd "${SUITE_DIR:-$GITHUB_WORKSPACE}"
@@ -216,9 +216,6 @@ jobs:
             TOOLING_NETWORK_GUARD=1 NODE_OPTIONS="$guarded_options" npm run test:tourney-retirement:phases
             npm run test:remote-browser-guard
             npm run test:smoke:production
-          fi
-          if [ "$PW_SUITE" = "rest-1" ]; then
-            xvfb-run -a npm run test:playwright-timeouts
           fi
           xvfb-run -a npx playwright test --pass-with-no-tests --reporter=line,json "$PW_FILES"
         env:
@@ -267,6 +264,7 @@ jobs:
             port: "3241"
     env:
       ROO_TEST_HOST: 127.0.0.1
+      PW_GROUP_TIMEOUT_MS: "1200000"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -338,11 +336,14 @@ jobs:
         with:
           playwright-ports: "3211"
       - name: Run native admin CMS suite
+        env:
+          PW_GROUP_TIMEOUT_MS: "2100000"
         run: xvfb-run -a npx playwright test -c playwright.admin.config.js
       - name: Run all six native booking-hold browser cases
         env:
           NEXT_DIST_DIR: .next-e2e-native-booking
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-booking-hold.json
+          PW_GROUP_TIMEOUT_MS: "1200000"
         run: |
           xvfb-run -a npx playwright test tests/booking-hold.spec.js --project=chromium --output=test-results/booking-hold-e2e --reporter=line,json
           node - <<'NODE'
@@ -435,6 +436,7 @@ jobs:
             port: "3261"
     env:
       ROO_TEST_HOST: 127.0.0.1
+      PW_GROUP_TIMEOUT_MS: "1200000"
     steps:
       - uses: actions/checkout@v4
         with:

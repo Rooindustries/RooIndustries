@@ -82,12 +82,25 @@ const readTimings = (candidates) => {
 };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [group, timingsFile] = process.argv.slice(2);
-  if (!REST_GROUPS.includes(group)) throw new Error(`Unknown rest group "${group}"`);
+  const [group, timingsFile, format] = process.argv.slice(2);
+  if (!REST_GROUPS.includes(group) && !Object.hasOwn(FIXED_GROUPS, group)) {
+    throw new Error(`Unknown browser group "${group}"`);
+  }
   const specFiles = listSpecFiles();
   const timings = readTimings([timingsFile, path.join(".github", "playwright-timings.json")]);
-  const assigned = assignRestGroups(specFiles, timings)[group];
-  if (!assigned.files.length) throw new Error(`Rest group ${group} has no spec files`);
+  const fixedFiles = FIXED_GROUPS[group];
+  const assigned = fixedFiles ? {
+    files: specFiles.filter(file => fixedFiles.includes(path.posix.basename(file))),
+    load: fixedFiles.reduce((total, file) => total + (timings[file] ?? median(Object.values(timings))), 0),
+  } : assignRestGroups(specFiles, timings)[group];
+  if (!assigned.files.length) throw new Error(`Browser group ${group} has no spec files`);
   console.error(`${group}: ${assigned.files.length} files, about ${Math.round(assigned.load)}s`);
-  process.stdout.write(`${groupPattern(assigned.files)}\n`);
+  const pattern = groupPattern(assigned.files);
+  if (format === "env") {
+    const seconds = assigned.load - (group === "rest-1" ? REST_1_EXTRA_SECONDS : 0);
+    const timeoutMs = Math.ceil((seconds * 1.5 + 180) * 1000);
+    process.stdout.write(`PW_FILES=${pattern}\nPW_GROUP_TIMEOUT_MS=${timeoutMs}\n`);
+  } else {
+    process.stdout.write(`${pattern}\n`);
+  }
 }
