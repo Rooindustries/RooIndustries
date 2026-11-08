@@ -68,6 +68,7 @@ export const withRecovery = async (options, body) => {
   const liveSha = git(["rev-parse", "HEAD"]);
   const site = await startSite(options.site);
   const previous = await startSite(options.previous);
+  const restored = await startSite(options.restored);
   const vercel = await startVercel(options.vercel);
   vercel.state.deployments.find(item => item.uid === "dpl_live").meta.githubCommitSha = liveSha;
   vercel.state.deployments.find(item => item.uid === "dpl_previous").meta.githubCommitSha = previousSha;
@@ -75,11 +76,12 @@ export const withRecovery = async (options, body) => {
   options.history?.(vercel.state);
   const env = { VERCEL_TOKEN: TOKEN, VERCEL_API_URL: vercel.origin, GITHUB_TOKEN: HISTORY_TOKEN,
     GITHUB_API_URL: vercel.origin, PRODUCTION_RECOVERY_EPOCH: "fixture-v1", SMOKE_BASE_URL: site.base,
-    SMOKE_PREVIOUS_BASE_URL: previous.base, DEPLOYMENT_URL: LIVE_URL,
+    SMOKE_PREVIOUS_BASE_URL: previous.base, SMOKE_RESTORED_BASE_URL: restored.base, DEPLOYMENT_URL: LIVE_URL,
+    HOME: scratch,
     GIT_DIR: path.join(scratch, ".git"), GIT_WORK_TREE: scratch };
   const executions = [];
   try {
-    await body({ site, previous, vercel, env, scratch, liveSha, previousSha,
+    await body({ site, previous, restored, vercel, env, scratch, liveSha, previousSha,
       exec: async extra => {
         const result = await execute("production-deploy-gate.mjs", [], { ...env, ...extra });
         executions.push(result);
@@ -89,10 +91,11 @@ export const withRecovery = async (options, body) => {
     const artifacts = path.join(root, "test-results", "production-recovery");
     fs.mkdirSync(artifacts, { recursive: true });
     fs.writeFileSync(path.join(artifacts, `${path.basename(scratch)}.json`), JSON.stringify({ executions,
-      site: site.requests, previous: previous.requests,
+      site: site.requests, previous: previous.requests, restored: restored.requests,
       provider: vercel.requests.map(({ auth, ...request }) => request), finalState: vercel.state }, null, 2));
     await site.close();
     await previous.close();
+    await restored.close();
     await vercel.close();
     fs.rmSync(scratch, { recursive: true });
   }

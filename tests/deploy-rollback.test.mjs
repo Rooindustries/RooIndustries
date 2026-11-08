@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DOMAIN, TOKEN, startVercel } from "./fixtures/fake-vercel.mjs";
@@ -22,11 +24,13 @@ const run = (args, env) => new Promise(resolve => {
 
 const withVercel = async (options, body) => {
   const vercel = await startVercel(options);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "rollback-home-"));
   try {
-    const exec = (args, env = {}) => run(args, { VERCEL_TOKEN: TOKEN, VERCEL_API_URL: vercel.origin, ...env });
+    const exec = (args, env = {}) => run(args, { HOME: home, VERCEL_TOKEN: TOKEN, VERCEL_API_URL: vercel.origin, ...env });
     await body(vercel, exec);
   } finally {
     await vercel.close();
+    fs.rmSync(home, { recursive: true });
   }
 };
 

@@ -115,7 +115,7 @@ export const startVercel = ({
         state.deployments.unshift({
           ...structuredClone(current),
           uid: newerId,
-          url: "rooindustries-newer-roo-industries.vercel.app",
+          url: newerId === "dpl_newest" ? "rooindustries-newest-roo-industries.vercel.app" : "rooindustries-newer-roo-industries.vercel.app",
           created: newestCreated + 1000,
           createdAt: newestCreated + 1000,
           ready: newestCreated + 1000,

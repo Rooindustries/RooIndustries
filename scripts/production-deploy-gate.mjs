@@ -1,3 +1,4 @@
+import { recoveryLock, withRecoveryLock } from "./lib/production-recovery-lock.mjs";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -15,7 +16,8 @@ const LIVE_WAIT_MS = Number(process.env.GATE_LIVE_WAIT_MS || 10000);
 
 const runNode = (script, args, { env = process.env, capture = false } = {}) => new Promise(resolve => {
   const child = spawn(process.execPath, [path.join(scripts, script), ...args], { env,
-    stdio: ["ignore", "pipe", "pipe"] });
+    stdio: ["ignore", "pipe", "pipe",
+      ...(recoveryLock === undefined || script !== "deploy-rollback.mjs" ? [] : [recoveryLock])] });
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", chunk => { stdout += chunk; });
@@ -38,7 +40,7 @@ const main = async () => {
   const deploymentUrl = deploymentOrigin(process.env.DEPLOYMENT_URL || "");
   const monitoring = isProductionMonitor();
   const fixture = isLoopback(process.env.VERCEL_API_URL) && isLoopback(process.env.GITHUB_API_URL);
-  if (!fixture && (process.env.SMOKE_BASE_URL || process.env.SMOKE_PREVIOUS_BASE_URL)) {
+  if (!fixture && (process.env.SMOKE_BASE_URL || process.env.SMOKE_PREVIOUS_BASE_URL || process.env.SMOKE_RESTORED_BASE_URL)) {
     throw new Error("Recovery smoke overrides require loopback provider and history fixtures.");
   }
   if (process.env.GITHUB_ACTIONS === "true") {
@@ -124,7 +126,7 @@ const main = async () => {
   }
 };
 
-main().then(code => { process.exitCode = code; }, error => {
+withRecoveryLock(DOMAIN, main).then(code => { process.exitCode = code; }, error => {
   annotate("error", `Deploy gate failed: ${error.message}`);
   process.exitCode = 1;
 });

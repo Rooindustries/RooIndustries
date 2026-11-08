@@ -11,7 +11,7 @@ export const isProductionMonitor = () => {
       event.deployment?.environment === "Production" && event.deployment_status?.state === "success" &&
       deployment.protocol === "https:" && !deployment.username && !deployment.password &&
       deployment.pathname === "/" && !deployment.search && !deployment.hash &&
-      event.deployment_status?.environment_url === process.env.DEPLOYMENT_URL;
+      event.deployment_status?.environment_url === process.env.PRODUCTION_EVENT_URL;
   } catch {
     return false;
   }

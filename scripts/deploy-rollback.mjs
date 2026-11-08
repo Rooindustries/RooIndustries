@@ -1,5 +1,8 @@
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { recoveryLock, withRecoveryLock } from "./lib/production-recovery-lock.mjs";
 import fs from "node:fs";
-import { log, logError, logJson, deploymentOrigin } from "./lib/production-diagnostics.mjs";
+import { log, logError, logJson, deploymentOrigin, isLoopback } from "./lib/production-diagnostics.mjs";
 import { latestPassedGate, verifyHistoryTarget } from "./lib/production-recovery-history.mjs";
 import { verifyEvidence } from "./lib/production-smoke-report.mjs";
 
@@ -330,12 +333,111 @@ const postMutation = async (api, state, domain, pathname, query, payload = {}) =
     await api("POST", pathname, query, payload);
     mutationAccepted = true;
   } catch (error) {
-    if (ambiguousDelivery(error)) mutationAccepted = true;
-    if (mutationAccepted) {
-      throw new Error(`${error.message}. Vercel may have applied the request anyway, so production's state is unknown. Run \`npm run deploy:rollback -- --status\` and check the Vercel dashboard before trying again.`);
+    if (ambiguousDelivery(error)) {
+      mutationAccepted = true;
+      const uncertain = new Error(`${error.message}. Vercel may have applied the request anyway, so production's state is unknown. Run \`npm run deploy:rollback -- --status\` and check the Vercel dashboard before trying again.`);
+      uncertain.uncertainDelivery = true;
+      throw uncertain;
     }
     throw error;
   }
+};
+
+const newerReadyRelease = async (api, state) => {
+  const { body } = await api("GET", "/v7/deployments", {
+    projectId: state.project.id, target: "production", state: "READY", limit: 20, teamId: state.teamId,
+  });
+  return (body?.deployments || []).filter(deployment => isLiveable(deployment, state.project.id) &&
+    createdAt(deployment) > createdAt(state.live)).sort((a, b) => createdAt(b) - createdAt(a))[0];
+};
+
+const runRestoredGate = async (deployment) => {
+  const env = { ...process.env, DEPLOYMENT_URL: deploymentOrigin(`https://${deployment.url}`),
+    PRODUCTION_EVENT_URL: process.env.PRODUCTION_EVENT_URL || process.env.DEPLOYMENT_URL };
+  if (env.SMOKE_RESTORED_BASE_URL) {
+    if (![env.VERCEL_API_URL, env.GITHUB_API_URL, env.SMOKE_RESTORED_BASE_URL].every(isLoopback)) {
+      throw new Refusal("Restored-release smoke overrides require loopback fixtures.");
+    }
+    env.SMOKE_BASE_URL = env.SMOKE_RESTORED_BASE_URL;
+  } else delete env.SMOKE_BASE_URL;
+  const script = fileURLToPath(new URL("./production-deploy-gate.mjs", import.meta.url));
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [script], { env, stdio: ["ignore", "inherit", "inherit", recoveryLock] });
+    child.once("error", reject);
+    child.once("close", resolve);
+  });
+};
+
+const restoreNewerRelease = async (api, source, domain, rolledBackTo) => {
+  let newer = await newerReadyRelease(api, source);
+  if (!newer) return;
+  let current = await loadState(api, domain);
+  for (;;) {
+    const candidate = await resolveDeployment(api, current, deploymentId(newer));
+    if (!isLiveable(candidate, source.project.id) || candidate.readySubstate === "ROLLING" ||
+        createdAt(candidate) <= createdAt(source.live)) {
+      throw new Error("A newer production release appeared during recovery, but its restoration could not be verified.");
+    }
+    if (Object.hasOwn(current.project.lastAliasRequest || {}, "fromRollingReleaseId")) {
+      throw new Error("Recovery interrupted a rolling release; its traffic split cannot be restored from an ordinary promotion.");
+    }
+    const currentIsNewer = createdAt(current.live) > createdAt(source.live);
+    if (deploymentId(current.live) !== rolledBackTo &&
+        deploymentId(current.live) !== deploymentId(source.live) && !currentIsNewer) {
+      throw new Error("Production changed again during recovery; the newer release could not be restored safely.");
+    }
+    if (PENDING_JOBS.has(current.project.lastAliasRequest?.jobStatus)) {
+      await waitForDomain(api, current, domain, rolledBackTo);
+      current = await loadState(api, domain);
+      continue;
+    }
+    refuseBusyProject(current);
+    if (deploymentId(current.live) !== deploymentId(candidate) || current.project.autoAssignCustomDomains !== true) {
+      try {
+        await postMutation(api, current, domain,
+          `/v10/projects/${encodeURIComponent(current.project.id)}/promote/${encodeURIComponent(deploymentId(candidate))}`,
+          { teamId: current.teamId });
+      } catch (error) {
+        if (!error.uncertainDelivery) throw error;
+      }
+      await waitForDomain(api, current, domain, deploymentId(candidate), { autoAssign: true });
+    }
+    const latest = await newerReadyRelease(api, { ...source, live: candidate });
+    if (latest) {
+      newer = latest;
+      rolledBackTo = deploymentId(candidate);
+      current = await loadState(api, domain);
+      continue;
+    }
+    const code = await runRestoredGate(candidate);
+    throw new Error(`Recovery raced with a newer release; restored ${deploymentId(candidate)} and ran its own gate (${code === 0 ? "passed" : "failed"}). The judged release was not recovered.`);
+  }
+};
+
+const applyRollback = async (api, state, options, target) => {
+  let deliveryError;
+  try {
+    await postMutation(api, state, options.domain,
+      `/v1/projects/${encodeURIComponent(state.project.id)}/rollback/${encodeURIComponent(deploymentId(target))}`,
+      { teamId: state.teamId, description: options.reason || "npm run deploy:rollback" });
+  } catch (error) {
+    if (!error.uncertainDelivery) throw error;
+    deliveryError = error;
+  }
+  await restoreNewerRelease(api, state, options.domain, deploymentId(target));
+  let confirmationError;
+  try {
+    await waitForDomain(api, state, options.domain, deploymentId(target), {
+      autoAssign: false, expectedFrom: deploymentId(state.live),
+    });
+  } catch (error) {
+    confirmationError = error;
+  }
+  await restoreNewerRelease(api, state, options.domain, deploymentId(target));
+  if (confirmationError && deliveryError) {
+    throw new Error(`${deliveryError.message}\n${confirmationError.message}`);
+  }
+  if (confirmationError || deliveryError) throw confirmationError || deliveryError;
 };
 
 const main = async (options) => {
@@ -429,16 +531,16 @@ const main = async (options) => {
   if (deploymentId(freshTarget) !== deploymentId(target)) {
     throw new Refusal(`The rollback target changed from ${deploymentId(target)} to ${deploymentId(freshTarget)}; leaving production alone.`);
   }
-  await postMutation(api, fresh, options.domain, `/v1/projects/${encodeURIComponent(fresh.project.id)}/rollback/${encodeURIComponent(deploymentId(freshTarget))}`, {
-    teamId: fresh.teamId,
-    description: options.reason || "npm run deploy:rollback",
-  });
-  await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget), { autoAssign: false, expectedFrom: deploymentId(fresh.live) });
+  await applyRollback(api, fresh, options, freshTarget);
   log(`${options.domain} now serves ${deploymentId(target)}.`);
   log("New production deployments stay off the domain until you run `npm run deploy:rollback -- --undo`.");
 };
 
-const run = () => main(parseArgs(process.argv.slice(2)));
+const run = async () => {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.status || options.plan || options.dryRun || options.help) return main(options);
+  return withRecoveryLock(options.domain, () => main(options));
+};
 
 run().catch((error) => {
   logError(error instanceof Refusal ? `Refusing: ${error.message.replace(/^Refusing /, "")}` : error.message);
