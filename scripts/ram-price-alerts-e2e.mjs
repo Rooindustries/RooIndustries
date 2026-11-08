@@ -111,11 +111,6 @@ try {
   assert.equal(events[0].tags.error_code, 'RAM_PRICE_SOURCE_UNAVAILABLE');
   assert.equal(events[0].exception.values[0].value, 'RAM price refresh failed; last verified price retained');
   assert.equal(events[0].user, undefined);
-  process.env.VERCEL_ENV = 'preview';
-  reportRamPriceFailure(Object.assign(new Error('Synthetic preview failure'), { code: 'RAM_PRICE_SOURCE_UNAVAILABLE' }));
-  await flush(1000);
-  assert.equal(events.length, 1);
-  process.env.VERCEL_ENV = 'production';
   await fetch(`${origin}/__ram-price`, {
     method: 'POST', body: JSON.stringify({ reset: true, previousPrice: 49000, price: '1000.00' }),
   });

@@ -31,7 +31,6 @@ export function startServerMonitoring(value) {
   client?.on("beforeEnvelope", envelopeHeaderScrubber(client.getDsn()?.publicKey, monitoringEnvironment()));
   globalThis[Symbol.for("roo.reportServerError")] = (label, error, metadata) => {
     try {
-      if (!isProductionDeployment()) return;
       const message = label.split(": ", 1)[0];
       const report = new Error(message);
       report.name = metadata.name;

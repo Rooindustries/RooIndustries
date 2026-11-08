@@ -1,5 +1,6 @@
 import packageContent from "../packageContent.js";
 import policyContent from "../policyContent.js";
+import ramPrice from "../ramPrice.js";
 
 export const UNUSED_FIELD_NOTE = "Not shown on the site yet. Edits here won't appear.";
 
@@ -22,6 +23,7 @@ const unused = {
 };
 
 const conditional = {
+  hero: Object.fromEntries(["headingLine1", "headingLine2", "description"].map(name => [name, "ramPrice"])),
   about: { "recordDetails[].value": "hardwareStat" },
   package: { description: "package", checkedBullets: "package", uncheckedBullets: "package" },
   faqSection: { "questions[].answer": "faq" },
@@ -46,6 +48,7 @@ export const fieldUsageContext = (fields, value, context = {}) => fields.some(fi
 export const isUnusedField = (field, parent = {}, context = {}) => {
   if (field.unusedOnSite) return true;
   switch (field.unusedWhen) {
+    case "ramPrice": return ramPrice.isVerifiedRamPrice(parent.ramPrice);
     case "package": {
       const override = packageContent.PACKAGE_CONTENT_OVERRIDES.find(entry => entry.matches(String(parent.title || parent.sourceTitle || "").trim()));
       return Boolean(override && Object.hasOwn(override, field.name));

@@ -102,6 +102,30 @@ test('source price reaches the rendered hero through the CMS command', async ({ 
 
 test.afterEach(async ({ request }) => { await state(request, { reset: true }); });
 
+for (const stored of [false, true]) {
+  test(`hero copy fields explain their use ${stored ? 'with' : 'without'} a stored RAM quote`, async ({ page, request }, testInfo) => {
+    await state(request, { reset: true, ...(stored ? { previousPrice: 50000 } : {}) });
+    await page.route('**/api/admin/content/**', route => route.fallback({
+      headers: { ...route.request().headers(), 'x-admin-key': 'fixture-only-ram-price-admin' },
+    }));
+    await page.goto('/admin/content');
+    await page.getByRole('navigation', { name: 'Content types' })
+      .getByRole('button', { name: 'Hero Section', exact: true }).click();
+    for (const label of ['Main Heading (Line 1)', 'Main Heading (Line 2)', 'Short Description']) {
+      const input = page.getByLabel(label, { exact: true });
+      if (stored) {
+        await expect(input).not.toBeEditable();
+        await expect(input).toHaveAccessibleDescription("Not shown on the site yet. Edits here won't appear.");
+      } else {
+        await expect(input).toBeEditable();
+        await expect(input).not.toHaveAccessibleDescription(/Edits here won't appear/);
+      }
+    }
+    await expect(page.getByLabel('Small Highlight Text', { exact: true })).toBeEditable();
+    await page.screenshot({ path: testInfo.outputPath('hero-field-usage.png'), fullPage: true });
+  });
+}
+
 test('repeated and concurrent calls cannot repeat the source read or publish', async ({ request }) => {
   const anonymous = await request.get('/api/content/ram-price/refresh');
   expect(anonymous.status()).toBe(403);

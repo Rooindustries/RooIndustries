@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Check } from "lucide-react";
 import { getPublicContent } from "../lib/publicContentClient";
-import homeCopy from "../lib/homeCopy";
+import heroCopy from "../lib/heroCopy";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import { trackEvent } from "../lib/analytics";
 import { reportRequestError, requestTimeoutError } from "../lib/clientRequest";
 
-const { resolveHeroCopy, getHeroTunePrice } = homeCopy;
+const { resolveHeroCopy, getHeroTunePrice } = heroCopy;
 
 const normalizeText = (s = "") =>
   String(s)

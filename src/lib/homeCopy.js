@@ -1,6 +1,3 @@
-const { isVerifiedRamPrice, formatRamPrice, ramPriceSourceLabel } = require('./ramPrice');
-const { isTopPackageTitle, getPackagePricePresentation, toMoney } = require('./packagePricing');
-
 const heroDescription = amount =>
   `A 32GB DDR5 kit that was around $100 in early 2025 costs ${amount} now. ` +
   "You probably don't need a new one. We'll tune the RAM you have, and the rest of your PC, " +
@@ -159,15 +156,8 @@ const keyed = (sourceItems = [], canonicalItems = []) =>
     _key: sourceItems?.[index]?._key || item._key || `copy-${index}`,
   }));
 
-const getHeroTunePrice = (packages) => {
-  const max = Array.isArray(packages) ? packages.find(pkg => isTopPackageTitle(pkg?.title)) : null;
-  if (!max || !['string', 'number'].includes(typeof max.price) || toMoney(max.price) <= 0) return '';
-  const price = getPackagePricePresentation(max.title, max.price).price;
-  return toMoney(price) > 0 ? price : '';
-};
-
-const resolveHeroCopy = (value, packages = []) => {
-  const copy = Object.fromEntries(
+const resolveHeroCopy = (value) =>
+  Object.fromEntries(
     Object.entries(HOME_COPY.hero).map(([key, fallback]) => {
       const candidate = value?.[key];
       if (Array.isArray(fallback)) {
@@ -182,19 +172,6 @@ const resolveHeroCopy = (value, packages = []) => {
       ];
     })
   );
-  if (!isVerifiedRamPrice(value?.ramPrice)) return copy;
-  const ramPrice = value.ramPrice;
-  const amount = formatRamPrice(ramPrice.priceCents);
-  const tunePrice = getHeroTunePrice(packages);
-  return {
-    ...copy,
-    ramPrice,
-    ramPriceSourceLabel: ramPriceSourceLabel(ramPrice),
-    headingLine1: `Why Pay ${amount} For RAM?`,
-    headingLine2: toMoney(tunePrice) > 0 ? `Tune Yours For ${tunePrice}.` : 'Tune Yours.',
-    description: heroDescription(amount),
-  };
-};
 
 const applyHomeSectionCopyOverride = (key, value) => {
   if (key === "reviews") {
@@ -273,9 +250,9 @@ const applyHomePageCopyOverrides = (homeData = {}) => ({
 });
 
 module.exports = {
+  heroDescription,
   HOME_COPY,
   OVERWATCH_CREATOR_BENCHMARK,
-  getHeroTunePrice,
   resolveHeroCopy,
   applyHomePageCopyOverrides,
   applyHomeSectionCopyOverride,

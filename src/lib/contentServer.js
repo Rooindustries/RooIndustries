@@ -1,4 +1,5 @@
-const { applyHomePageCopyOverrides, resolveHeroCopy } = require("./homeCopy");
+const { applyHomePageCopyOverrides } = require("./homeCopy");
+const { resolveHeroCopy } = require("./heroCopy");
 const { buildPackageOffers, normalizeFaqQuestions } = require("./packageContent");
 
 const reportContentError = async (resource, error) => {
