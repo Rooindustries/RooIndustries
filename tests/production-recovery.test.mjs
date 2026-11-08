@@ -127,13 +127,13 @@ for (const failing of [false, true]) {
   }));
 }
 
-test("slow initialization cannot cause a rollback to a warm release", () => withRecovery({
+test("unfinished checkout startup recovers after both comparisons pass on the previous release", () => withRecovery({
   site: { startup: { "/booking": { initializeDelay: 5000 } } },
 }, async ({ exec, vercel }) => {
   const result = await exec();
   assert.equal(result.code, 1, result.output);
-  assert.equal(changes(vercel).length, 0, result.output);
-  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
+  assert.equal(changes(vercel).length, 1, result.output);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
 }));
 
 for (const stage of ["planning", "final revalidation"]) {
