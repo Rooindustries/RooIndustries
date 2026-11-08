@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { checkProviderBodyTimeouts } from '../tests/payment-provider-body.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -1172,6 +1173,7 @@ try{
 
   for (const stage of ['headers', 'body']) await run(`recovery-provider-timeout-${stage}`, async () => {
     const pending = new Set();
+    const closed = [];
     providerHook = async (request, req, res) => {
       if (request.path === '/v1/oauth2/token') return false;
       if (stage === 'body') {
@@ -1179,6 +1181,7 @@ try{
         res.write('{');
       }
       pending.add(res);
+      closed.push(once(res, 'close').then(() => pending.delete(res)));
       return true;
     };
     const began = originalNow();
@@ -1190,18 +1193,25 @@ try{
           providers.inspectPayPalCapture({ paymentId: 'capture-fixture' }),
           providers.inspectRazorpayOrder({ orderId: 'order-fixture' }),
           providers.inspectRazorpayPayment({ paymentId: 'payment-fixture' }),
-        ]),
+        ]).then(async results => { await Promise.all(closed); return results; }),
         new Promise((_, reject) => {
           timer = setTimeout(() => reject(new Error('Provider request exceeded its 8-second deadline')), 11000);
         }),
       ]);
       assert.ok(results.every(result => result.state === 'unavailable'), JSON.stringify(results));
       assert.ok(originalNow() - began < 11000);
-      return { stage, elapsedMs: originalNow() - began, results };
+      assert.equal(closed.length, 4);
+      assert.equal(pending.size, 0);
+      return { stage, elapsedMs: originalNow() - began, results, closedConnections: closed.length };
     } finally {
       clearTimeout(timer);
       for (const response of pending) response.destroy();
     }
+  });
+
+  await checkProviderBodyTimeouts({
+    run, startInput, a1Start, row, commerce, sql, requestFlow, a1Hook, originalNow,
+    setProviderHook: hook => { providerHook = hook; },
   });
 
   for (const mode of ['timeout', 'malformed', 'missing', 'invalid']) await run(`recovery-webhook-verification-body-${mode}`, async () => {

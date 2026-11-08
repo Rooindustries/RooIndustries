@@ -30,6 +30,21 @@ export default [
     rules: { ...ruleSet([...navigationRules]), "react-hooks/refs": "error" },
   },
   {
+    files: ["src/server/api/payment/providerClients.js"],
+    rules: {
+      "no-restricted-globals": [
+        "error",
+        ...["fetch", "globalThis", "global", "window", "self", "require"].map(name => ({
+          name,
+          message: "Use requestProvider so the deadline also cancels the response body.",
+        })),
+      ],
+      "no-restricted-imports": ["error", {
+        patterns: ["undici", "undici/*", "http", "https", "node:http*"],
+      }],
+    },
+  },
+  {
     files: ["scripts/**/*.{js,mjs,cjs}", "tests/**/*.{js,mjs,cjs}"],
     linterOptions: { reportUnusedDisableDirectives: "off" },
     languageOptions: { ecmaVersion: "latest", sourceType: "module", globals: { ...globals.node } },

@@ -326,6 +326,12 @@ UnconfirmedPaymentHoldExpires(s) ==
                 rec[hold[s].rec].pay \in {"processing", "captured"} /\ ~rec[hold[s].rec].knownCaptured]
   /\ UNCHANGED <<now, nextNonce, lock, tab, bookings>>
 
+UnobservedCaptureCanExpire ==
+  \A s \in Slots :
+    (hold[s].phase = "payment_pending" /\ hold[s].exp + Backstop <= now
+      /\ rec[hold[s].rec].pay = "captured" /\ ~rec[hold[s].rec].knownCaptured)
+      => ENABLED UnconfirmedPaymentHoldExpires(s)
+
 Tick ==
   /\ now < Horizon
   /\ now' = now + 1

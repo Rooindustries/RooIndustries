@@ -1,3 +1,5 @@
+const { ReadableStream } = require("node:stream/web");
+
 const loadProviderClients = () => {
   jest.resetModules();
   return require("../server/api/payment/providerClients.js");
@@ -6,7 +8,12 @@ const loadProviderClients = () => {
 const response = (body) => ({
   ok: true,
   status: 200,
-  json: async () => body,
+  body: new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(JSON.stringify(body)));
+      controller.close();
+    },
+  }),
 });
 
 const buildPayPalOrder = ({ captureStatus = "COMPLETED", capture = true } = {}) => ({

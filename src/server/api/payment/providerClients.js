@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { requestProvider } from "./providerRequest.js";
 import providerConfig from "./providerConfig.js";
 import { logSafeError } from "../../safeErrorLog.js";
 
@@ -118,10 +119,9 @@ export const inspectRazorpayOrderByReceipt = async ({
 
   let response;
   try {
-    response = await fetch(
+    response = await requestProvider(
       `https://api.razorpay.com/v1/orders?receipt=${encodeURIComponent(receipt)}&count=10`,
       {
-        signal: AbortSignal.timeout(8000),
         headers: {
           Authorization: getRazorpayAuthorization(credentials),
         },
@@ -225,9 +225,8 @@ export const createRazorpayOrder = async ({
 
   let upstream;
   try {
-    upstream = await fetch("https://api.razorpay.com/v1/orders", {
+    upstream = await requestProvider("https://api.razorpay.com/v1/orders", {
       method: "POST",
-      signal: AbortSignal.timeout(8000),
       headers: {
         Authorization: getRazorpayAuthorization(credentials),
         "Content-Type": "application/json",
@@ -293,9 +292,9 @@ export const inspectRazorpayOrder = async ({ orderId }) => {
   }
 
   try {
-    const response = await fetch(
+    const response = await requestProvider(
       `https://api.razorpay.com/v1/orders/${encodeURIComponent(orderId)}/payments`,
-      { headers: { Authorization: getRazorpayAuthorization(credentials) }, signal: AbortSignal.timeout(8000) }
+      { headers: { Authorization: getRazorpayAuthorization(credentials) } }
     );
     if (!response.ok) {
       return { state: "unavailable", reason: `razorpay_lookup_failed_${response.status}` };
@@ -344,9 +343,9 @@ export const inspectRazorpayPayment = async ({ paymentId }) => {
   }
 
   try {
-    const response = await fetch(
+    const response = await requestProvider(
       `https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`,
-      { headers: { Authorization: getRazorpayAuthorization(credentials) }, signal: AbortSignal.timeout(8000) }
+      { headers: { Authorization: getRazorpayAuthorization(credentials) } }
     );
     if (!response.ok) {
       return {
@@ -397,10 +396,9 @@ export const verifyRazorpayPayment = async ({
     const basic = Buffer.from(
       `${credentials.keyId}:${credentials.keySecret}`
     ).toString("base64");
-    const response = await fetch(
+    const response = await requestProvider(
       `https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`,
       {
-        signal: AbortSignal.timeout(8000),
         headers: {
           Authorization: `Basic ${basic}`,
         },
@@ -459,8 +457,10 @@ export const verifyRazorpayPayment = async ({
     if (amountRefundedInSubunits > 0) {
       let total = 0;
       for (let page = 0; page < 5; page += 1) {
-        const response = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}/refunds?count=100&skip=${page * 100}`,
-          { headers: { Authorization: `Basic ${basic}` }, signal: AbortSignal.timeout(8000) });
+        const response = await requestProvider(
+          `https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}/refunds?count=100&skip=${page * 100}`,
+          { headers: { Authorization: `Basic ${basic}` } }
+        );
         if (!response.ok) return { ok: false, captured: true, reason: `razorpay_refund_lookup_failed_${response.status}` };
         const payload = await response.json();
         if (!Array.isArray(payload.items)) return { ok: false, captured: true, reason: "razorpay_refund_details_pending" };
@@ -520,9 +520,8 @@ export const getPayPalToken = async () => {
 
   const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
   try {
-    const response = await fetch(`${getPayPalBaseUrl(runtimePolicy)}/v1/oauth2/token`, {
+    const response = await requestProvider(`${getPayPalBaseUrl(runtimePolicy)}/v1/oauth2/token`, {
       method: "POST",
-      signal: AbortSignal.timeout(8000),
       headers: {
         Authorization: `Basic ${basic}`,
         "Content-Type": "application/x-www-form-urlencoded",
@@ -575,9 +574,8 @@ export const createPayPalOrder = async ({
     throw error;
   }
 
-  const response = await fetch(`${getPayPalBaseUrl()}/v2/checkout/orders`, {
+  const response = await requestProvider(`${getPayPalBaseUrl()}/v2/checkout/orders`, {
     method: "POST",
-    signal: AbortSignal.timeout(8000),
     headers: {
       Authorization: `Bearer ${tokenResult.token}`,
       "Content-Type": "application/json",
@@ -672,9 +670,9 @@ export const inspectPayPalOrder = async ({ orderId }) => {
   }
 
   try {
-    const response = await fetch(
+    const response = await requestProvider(
       `${getPayPalBaseUrl()}/v2/checkout/orders/${encodeURIComponent(orderId)}`,
-      { headers: { Authorization: `Bearer ${tokenResult.token}` }, signal: AbortSignal.timeout(8000) }
+      { headers: { Authorization: `Bearer ${tokenResult.token}` } }
     );
     if (!response.ok) {
       return { state: "unavailable", reason: `paypal_lookup_failed_${response.status}` };
@@ -701,10 +699,9 @@ export const verifyPayPalOrder = async ({
   }
 
   try {
-    const response = await fetch(
+    const response = await requestProvider(
       `${getPayPalBaseUrl()}/v2/checkout/orders/${encodeURIComponent(orderId)}`,
       {
-        signal: AbortSignal.timeout(8000),
         headers: {
           Authorization: `Bearer ${tokenResult.token}`,
         },
@@ -833,8 +830,7 @@ export const inspectPayPalCapture = async ({ paymentId }) => {
   const tokenResult = await getPayPalToken();
   if (!tokenResult.ok) return { state: "unavailable", reason: tokenResult.reason };
   try {
-    const response = await fetch(`${getPayPalBaseUrl()}/v2/payments/captures/${encodeURIComponent(paymentId)}`, {
-      signal: AbortSignal.timeout(8000),
+    const response = await requestProvider(`${getPayPalBaseUrl()}/v2/payments/captures/${encodeURIComponent(paymentId)}`, {
       headers: { Authorization: `Bearer ${tokenResult.token}` },
     });
     if (!response.ok) return { state: "unavailable", reason: `paypal_capture_lookup_failed_${response.status}` };
@@ -903,11 +899,10 @@ export const verifyPayPalWebhookSignature = async ({
 
   let response;
   try {
-    response = await fetch(
+    response = await requestProvider(
       `${getPayPalBaseUrl()}/v1/notifications/verify-webhook-signature`,
       {
         method: "POST",
-        signal: AbortSignal.timeout(8000),
         headers: {
           Authorization: `Bearer ${tokenResult.token}`,
           "Content-Type": "application/json",
