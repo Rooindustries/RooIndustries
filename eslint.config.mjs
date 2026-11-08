@@ -48,6 +48,10 @@ export default [
     rules: ruleSet(["no-linux-only-test-tooling"]),
   },
   {
+    files: ["scripts/production-smoke.mjs", "scripts/lib/production-smoke-request.mjs"],
+    rules: { "no-empty": "error", "no-empty-function": "error" },
+  },
+  {
     files: ["scripts/production-smoke.mjs"],
     rules: {
       "no-restricted-globals": ["error", "fetch", "globalThis", "global", "window", "self"],

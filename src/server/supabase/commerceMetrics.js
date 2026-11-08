@@ -1,7 +1,6 @@
 import { logSafeError } from "../safeErrorLog.js";
 import { createSupabaseAdminClient, isSupabaseAdminConfigured } from "./adminClient.js";
 import { resolveSupabaseRuntimePolicy } from "./runtime.js";
-import { isReadRequest } from "../request/isReadRequest.js";
 
 export const recordCommerceMetric = async ({
   route,
@@ -30,8 +29,7 @@ export const recordCommerceMetric = async ({
   }
 };
 
-export const recordCommerceResponseMetric = async ({ request, response, ...metric }) => {
-  if (isReadRequest(request)) return;
+export const recordCommerceResponseMetric = async ({ response, ...metric }) => {
   let responseBytes = Number(response?.headers?.get?.("content-length") || 0);
   if (!responseBytes && response) {
     try {

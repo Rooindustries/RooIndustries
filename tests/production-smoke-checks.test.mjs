@@ -12,7 +12,8 @@ const smoke = async (options, extra = {}) => {
   const report = path.join(directory, "report.json");
   try {
     const result = await new Promise(resolve => {
-      const child = spawn(process.execPath, ["scripts/production-smoke.mjs", "--base", site.base, "--report", report], {
+      const child = spawn(process.execPath, [...(extra.FIXTURE_SMOKE_FAULT ? ["--import", path.resolve("tests/fixtures/smoke-browser-faults.mjs")] : []),
+        "scripts/production-smoke.mjs", "--base", site.base, "--report", report], {
         env: { PATH: process.env.PATH, HOME: process.env.HOME,
           PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
           SMOKE_RETRY_MS: "10", SMOKE_MARKER_TIMEOUT_MS: "800", SMOKE_REQUEST_TIMEOUT_MS: "1500", ...extra },
@@ -188,3 +189,102 @@ test("required resources refusing access are a money-path regression", async () 
   assert.equal(payment.couldNotRun, undefined);
   assert.match(payment.detail, /no usable payment provider/);
 });
+
+for (const resource of ["/booking", "/__fixture/client-start.js", "/api/payment/quote",
+  "/api/payment/providers", "/api/bookingAvailability"]) {
+  test(`a redirect to a healthy final response passes for ${resource}`, async () => {
+    const result = await smoke({ onRequest: (pathname, request, response) => {
+      const url = new URL(request.url, "http://fixture");
+      if (pathname !== resource || url.searchParams.has("redirected")) return;
+      url.searchParams.set("redirected", "1");
+      response.writeHead(302, { Location: url.pathname + url.search });
+      response.end();
+      return true;
+    } });
+    assert.equal(result.code, 0, result.output);
+    assert.ok(result.requests.every(row => row.method === "GET"));
+  });
+}
+
+test("a required script redirect loop fails even after the page initializes", async () => {
+  const result = await smoke({ redirectLoop: ["/loop.js"], bodies: {
+    "/booking": '<h1>Select a Date and Time for Your Session</h1><script async src="/loop.js"></script>',
+  } });
+  assert.equal(result.code, 2, result.output);
+  const booking = result.report.results.find(row => row.name === "booking page renders");
+  assert.equal(booking.couldNotRun, undefined);
+  assert.match(booking.detail, /redirect/i);
+});
+
+test("browser launch time belongs to the smoke before site requests start", async () => {
+  const result = await smoke({}, { FIXTURE_SMOKE_FAULT: "launch", SMOKE_DEADLINE_MS: "200" });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /browser launch/i);
+  assert.deepEqual(result.requests, []);
+});
+
+test("a deadline without an outstanding site request names the smoke phase", async () => {
+  const result = await smoke({}, { FIXTURE_SMOKE_FAULT: "navigation", SMOKE_DEADLINE_MS: "500" });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /deadline.*package prices/i);
+  assert.equal(result.report.results.find(row => row.name === "package prices").couldNotRun, true);
+});
+
+test("unexpected response handler errors report their cause and cannot pass", async () => {
+  const result = await smoke({}, { FIXTURE_SMOKE_FAULT: "handler" });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /fixture response handler failed/);
+  assert.match(result.output, /fixture handler cause/);
+});
+
+test("redirects cannot take ordinary CI requests outside the local fixture", async () => {
+  const result = await smoke({ onRequest: (pathname, request, response) => {
+    if (pathname !== "/booking") return;
+    response.writeHead(302, { Location: "https://fixture.invalid/booking" });
+    response.end();
+    return true;
+  } }, { GITHUB_ACTIONS: "true" });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /smoke request policy/);
+});
+
+test("a handler waiting after the site responds cannot spend the site's deadline", async () => {
+  const result = await smoke({}, {
+    FIXTURE_SMOKE_FAULT: "handler-wait", SMOKE_DEADLINE_MS: "3000", SMOKE_MARKER_TIMEOUT_MS: "5000",
+  });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /deadline.*home page renders/i);
+  assert.equal(result.report.results.find(row => row.name === "home page renders").couldNotRun, true);
+});
+
+test("unexpected body reader errors remain smoke failures with their cause", async () => {
+  const result = await smoke({}, { FIXTURE_SMOKE_FAULT: "body" });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /fixture body reader failed/);
+  assert.match(result.output, /fixture reader cause/);
+});
+
+for (const resource of ["/api/payment/quote", "/api/payment/providers", "/api/bookingAvailability"]) {
+  test(`a failed redirected API still fails initialized booking for ${resource}`, async () => {
+    const target = await startSite({ status: { "/final-api": 503 } });
+    try {
+      const result = await smoke({
+        onRequest: (pathname, request, response) => {
+          if (pathname !== resource) return;
+          response.writeHead(302, { Location: `${target.base}/final-api` });
+          response.end();
+          return true;
+        },
+        bodies: { "/booking": `<h1>Select a Date and Time for Your Session</h1>
+          <script>fetch('${resource}').catch(() => {});</script>` },
+      });
+      const booking = result.report.results.find(row => row.name === "booking page renders");
+      assert.equal(booking.ok, false, result.output);
+      assert.equal(booking.couldNotRun, undefined);
+      assert.match(booking.detail, /final-api.*503/);
+      assert.ok(target.requests.every(row => row.method === "GET"));
+    } finally {
+      await target.close();
+    }
+  });
+}

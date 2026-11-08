@@ -389,13 +389,13 @@ test.describe("referral session status", () => {
   });
 });
 
-test("anonymous quote GET validates input and leaves rate limits and commerce data unchanged", async ({ baseURL }) => {
+test("anonymous quote GET validates input and keeps commerce documents unchanged", async ({ baseURL }) => {
   await apiFixture.configureApiFixture(baseURL, { reset: true });
   const before = await apiFixture.readApiFixture(baseURL);
   const title = before.documents.find(row => row._type === "package").title;
   const response = await apiFixture.requestRoute(baseURL, `/api/payment/quote?packageTitle=${encodeURIComponent(title)}`);
   expect(response.status).toBe(200);
-  expect(response.headers.get("cache-control")).toContain("s-maxage=60");
+  expect(response.headers.get("cache-control")).toBe("private, no-store");
   expect(await response.json()).toMatchObject({ ok: true, quoteFingerprint: expect.any(String),
     quote: { netAmount: expect.any(Number), isFree: false } });
   for (const query of ["", "packageTitle=", "packageTitle=a&email=private", "packageTitle=a&packageTitle=b",
@@ -406,10 +406,10 @@ test("anonymous quote GET validates input and leaves rate limits and commerce da
   }
   const after = await apiFixture.readApiFixture(baseURL);
   expect(after.documents).toEqual(before.documents);
-  expect(after.requests.some(call => /rate_limit|response_metric/.test(call.path))).toBe(false);
+  expect(after.requests.some(call => call.path.endsWith("/roo_consume_rate_limit"))).toBe(true);
 });
 
-test("the full production smoke leaves every commerce read unchanged", async ({ baseURL }, testInfo) => {
+test("the full production smoke keeps booking and pricing documents unchanged while recording reads", async ({ baseURL }, testInfo) => {
   await apiFixture.configureApiFixture(baseURL, { reset: true });
   const before = await apiFixture.readApiFixture(baseURL);
   const { startSite } = await import("./fixtures/fake-site.mjs");
@@ -435,8 +435,14 @@ test("the full production smoke leaves every commerce read unchanged", async ({ 
       expect(site.requests.some(request => request.path === path && request.method === "GET")).toBe(true);
     }
     const after = await apiFixture.readApiFixture(baseURL);
-    expect(after.documents).toEqual(before.documents);
-    expect(after.requests.filter(call => /consume.*rate_limit|apply.*mutations|record_commerce_metric/.test(call.path))).toEqual([]);
+    const businessDocuments = rows => rows.filter(row => row._type !== "rateLimitBucket");
+    expect(businessDocuments(after.documents)).toEqual(businessDocuments(before.documents));
+    expect(after.requests.filter(call => call.path.endsWith("/roo_consume_rate_limit"))).toHaveLength(1);
+    for (const route of ["booking/availability", "payment/providers", "payment/quote"]) {
+      await expect.poll(async () => (await apiFixture.readApiFixture(baseURL)).requests.some(call =>
+        call.path.endsWith("/roo_record_commerce_metric") && call.body.p_route === route
+      )).toBe(true);
+    }
   } finally {
     await site.close();
   }
@@ -448,5 +454,38 @@ test("commerce writes still record response metrics", async ({ baseURL }) => {
   expect(response.status).toBe(400);
   await expect.poll(async () => (await apiFixture.readApiFixture(baseURL)).requests.filter(call =>
     call.path.endsWith("/roo_record_commerce_metric") && call.body.p_route === "booking/hold"
+  ).length).toBe(1);
+});
+
+test("anonymous quotes share the POST limit per client address", async ({ baseURL }) => {
+  await apiFixture.configureApiFixture(baseURL, { reset: true });
+  const before = await apiFixture.readApiFixture(baseURL);
+  const title = before.documents.find(row => row._type === "package").title;
+  const pathname = `/api/payment/quote?packageTitle=${encodeURIComponent(title)}`;
+  for (let index = 0; index < 30; index += 1) {
+    const response = await apiFixture.requestRoute(baseURL, pathname);
+    expect(response.status).toBe(200);
+    await response.json();
+  }
+  for (const options of [{}, { data: {} }]) {
+    const blocked = await apiFixture.requestRoute(baseURL, pathname, options);
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(blocked.headers.get("cache-control")).toContain("no-store");
+  }
+  const separate = await apiFixture.requestRoute(baseURL, pathname, {
+    headers: { "x-forwarded-for": "192.0.2.10" },
+  });
+  expect(separate.status).toBe(200);
+});
+
+test("real booking availability GETs still record response metrics", async ({ baseURL }) => {
+  await apiFixture.configureApiFixture(baseURL, { reset: true });
+  const response = await apiFixture.requestRoute(baseURL, "/api/bookingAvailability");
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ ok: true });
+  await expect.poll(async () => (await apiFixture.readApiFixture(baseURL)).requests.filter(call =>
+    call.path.endsWith("/roo_record_commerce_metric") && call.body.p_route === "booking/availability" &&
+      call.body.p_status_code === 200 && call.body.p_response_bytes > 0
   ).length).toBe(1);
 });

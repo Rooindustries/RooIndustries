@@ -5,7 +5,6 @@ const {
 const { resolvePaymentProviders } = require("./providerConfig.js");
 const { buildQuoteFingerprint } = require("./paymentRecord.js");
 const { verifyUpgradeIntentToken } = require("../ref/upgradeIntentToken.js");
-const { isReadRequest } = require("../../request/isReadRequest.js");
 const {
   consumeQuoteRateLimitWithPricing,
   getClientAddress,
@@ -13,13 +12,20 @@ const {
 } = require("../ref/rateLimit.js");
 
 module.exports = async function handler(req, res) {
-  const readOnly = isReadRequest(req);
+  const readOnly = req.method === "GET";
   if (!readOnly && req.method !== "POST") {
     res.setHeader("Allow", ["GET", "POST"]);
     return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
   try {
+    const limitOptions = {
+      key: `payment-quote:${getClientAddress(req)}`,
+      max: 30,
+      windowMs: 15 * 60 * 1000,
+      message: "Too many payment quote requests. Please try again later.",
+    };
+    if (readOnly && !await requireRateLimit(res, limitOptions)) return;
     const requestBody = readOnly ? req.query || {} : req.body || {};
     if (readOnly && (Object.keys(requestBody).some(key => key !== "packageTitle") ||
         typeof requestBody.packageTitle !== "string" || !requestBody.packageTitle.trim() ||
@@ -40,12 +46,6 @@ module.exports = async function handler(req, res) {
       upgradeIntentToken = "",
     } = bookingPayload;
 
-    const limitOptions = {
-      key: `payment-quote:${getClientAddress(req)}`,
-      max: 30,
-      windowMs: 15 * 60 * 1000,
-      message: "Too many payment quote requests. Please try again later.",
-    };
     if (!String(packageTitle || "").trim()) {
       const allowed = await requireRateLimit(res, limitOptions);
       if (!allowed) return;
@@ -114,7 +114,7 @@ module.exports = async function handler(req, res) {
       quote: resolvedQuote,
     });
 
-    if (readOnly) res.setHeader("Cache-Control", "public, max-age=0, s-maxage=60");
+    if (readOnly) res.setHeader("Cache-Control", "private, no-store");
     return res.status(200).json({
       ok: true,
       quoteFingerprint,

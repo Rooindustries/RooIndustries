@@ -126,7 +126,20 @@ export const startSite = (overrides = {}) => {
         const action = startup.error
           ? 'throw new Error("Fixture client startup failed")'
           : pathname === "/payment"
-            ? `const booking = JSON.parse(sessionStorage.getItem("checkout_booking_state") || "null"); if (!booking) return; fetch('/api/payment/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageTitle: booking.packageTitle }) }).then(response => response.json()).then(async body => { const providers = await fetch('/api/payment/providers').then(response => response.json()); if (!providers.ok) return; if (body.ok && body.quoteFingerprint) { ${overrides.providersDisabled ? "document.body.dataset.rooPaymentUnavailable = 'true';" : "document.body.dataset.rooFlowReady = 'payment';"} } }).catch(() => {});`
+            ? `const booking = JSON.parse(sessionStorage.getItem("checkout_booking_state") || "null");
+              if (!booking) return;
+              fetch('/api/payment/quote', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ packageTitle: booking.packageTitle }),
+              }).then(response => response.json()).then(async body => {
+                const providers = await fetch('/api/payment/providers').then(response => response.json());
+                if (!providers.ok) return;
+                if (body.ok && body.quoteFingerprint) {
+                  ${overrides.providersDisabled
+                    ? "document.body.dataset.rooPaymentUnavailable = 'true';"
+                    : "document.body.dataset.rooFlowReady = 'payment';"}
+                }
+              }).catch(() => {});`
           : `document.body.dataset.rooFlowReady = ${JSON.stringify(flow)}`;
         const readyCheck = startup.requiresExternalReady ? "if (!window.fixtureExternalReady) return;" : "";
         res.end(`const initialize = () => { ${readyCheck} ${action}; }; const start = () => setTimeout(initialize, ${Number(startup.initializeDelay || 0)}); if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true }); else start();`);

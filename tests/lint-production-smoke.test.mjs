@@ -20,3 +20,13 @@ test("production smoke transport cannot bypass GET-only requests", async () => {
   const [result] = await eslint.lintFiles(["scripts/production-smoke.mjs"]);
   assert.equal(result.errorCount, 0, JSON.stringify(result.messages));
 });
+
+test("production smoke cannot silently swallow response handling errors", async () => {
+  const eslint = new ESLint();
+  for (const source of ['try { handle(); } catch {}', 'response.catch(() => {});']) {
+    for (const filePath of ["scripts/production-smoke.mjs", "scripts/lib/production-smoke-request.mjs"]) {
+      const [result] = await eslint.lintText(source, { filePath });
+      assert.ok(result.errorCount > 0, source);
+    }
+  }
+});

@@ -16,7 +16,6 @@ async function handle(request, methodOverride) {
   const metricResponse = response.clone();
   try {
     after(() => recordCommerceResponseMetric({
-      request,
       route: "booking/hold",
       durationMs: performance.now() - startedAt,
       statusCode: response.status,
