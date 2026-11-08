@@ -13,6 +13,7 @@ import noIgnoredWriteRequest from "./no-ignored-write-request.mjs";
 import noLinuxOnlyTestTooling from "./no-linux-only-test-tooling.mjs";
 import noLowContrastText from "./no-low-contrast-text.mjs";
 import noNestedComponents from "./no-nested-components.mjs";
+import noNewComments from "./no-new-comments.mjs";
 import noParentIpcDisconnect from "./no-parent-ipc-disconnect.mjs";
 import noScriptingMediaQuery from "./no-scripting-media-query.mjs";
 import noSecureContextNavigationKeys from "./no-secure-context-navigation-keys.mjs";
@@ -38,6 +39,7 @@ export const rules = {
   "no-linux-only-test-tooling": noLinuxOnlyTestTooling,
   "no-low-contrast-text": noLowContrastText,
   "no-nested-components": noNestedComponents,
+  "no-new-comments": noNewComments,
   "no-parent-ipc-disconnect": noParentIpcDisconnect,
   "no-scripting-media-query": noScriptingMediaQuery,
   "no-secure-context-navigation-keys": noSecureContextNavigationKeys,
