@@ -1,5 +1,12 @@
 export const normalizeComment = (value) => value.replace(/^\s*\* ?/gm, "").replace(/\s+/g, " ").trim();
 
+export function consumeRemovedComment(value, removedComments) {
+  const index = removedComments.indexOf(normalizeComment(value));
+  if (index < 0) return false;
+  removedComments.splice(index, 1);
+  return true;
+}
+
 export function commentGroups(source, ranges) {
   const groups = [];
   for (const comment of source.getAllComments()) {
@@ -25,9 +32,11 @@ export const whollyChanged = (comment, ranges) =>
     .every((line) => inRanges(line, ranges));
 
 const ruleNames = "[\\w@./-]+";
+const globalNames = "[\\w$]+(?:\\s*:\\s*(?:readonly|writable|readable|writeable|off|true|false))?";
 const directives = [
   new RegExp(`^eslint-(?:disable|enable)(?:-next-line|-line)?(?:\\s+${ruleNames}(?:\\s*,\\s*${ruleNames})*)?$`),
-  /^(?:global|globals|exported)\s+[\w$]+(?::(?:readonly|writable|true|false))?(?:\s*,\s*[\w$]+)*$/,
+  new RegExp(`^(?:global|globals)\\s+${globalNames}(?:\\s*,\\s*${globalNames})*$`),
+  /^exported\s+[\w$]+(?:\s*,\s*[\w$]+)*$/,
   /^(?:prettier-ignore|@vite-ignore|@ts-expect-error|@ts-ignore|@ts-check|@ts-nocheck|[#@]__PURE__|@__NO_SIDE_EFFECTS__)$/,
   /^(?:istanbul|[cv]8) ignore (?:next|else|if|file|start|stop)$/,
 ];
@@ -73,12 +82,12 @@ export default {
   },
   create(context) {
     const { addedRanges = [], removedComments = [] } = context.options[0] || {};
-    const removed = new Set(removedComments);
+    const removed = [...removedComments];
     return {
       Program() {
         for (const comment of commentGroups(context.sourceCode, addedRanges)) {
           if (!whollyChanged(comment, addedRanges) || comment.type === "Shebang" ||
-              removed.has(normalizeComment(comment.value)) ||
+              consumeRemovedComment(comment.value, removed) ||
               directives.some((pattern) => pattern.test(comment.value.trim())) ||
               (!context.sourceCode.getTokenBefore(comment) && license(comment.value))) continue;
           context.report({ loc: comment.loc, messageId: "added" });

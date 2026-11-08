@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { Linter } from "eslint";
 import tsParser from "@typescript-eslint/parser";
-import rule, { commentGroups, inRanges, normalizeComment, whollyChanged } from "../eslint-rules/no-new-comments.mjs";
+import rule, {
+  commentGroups, consumeRemovedComment, inRanges, normalizeComment, whollyChanged,
+} from "../eslint-rules/no-new-comments.mjs";
 
 const git = (...args) => execFileSync("git", ["--literal-pathspecs", ...args], {
   encoding: "utf8", maxBuffer: 100 * 1024 * 1024,
@@ -10,8 +12,8 @@ const names = /\b(?:codex|claude|chatgpt|openai|anthropic|gpt-\d[\w.-]*)\b/i;
 const assistants = "codex|claude|chatgpt|openai|anthropic|gpt-?\\d[\\w.-]*|" +
   "cursor|gemini|opus|sonnet|copilot|devin|aider|haiku|AI|bot";
 const attribution = new RegExp(`\\b(?:generated|written|created|authored|assisted)\\s+(?:by|with)\\s+` +
-  `(?:(?:the|an?|github)\\s+)*(?:${assistants})\\b`, "i");
-const coauthor = new RegExp(`^\\s*Co-authored-by:.*(?:\\b(?:${assistants})\\b|\\[bot\\]|🤖)`, "im");
+  `(?:(?:the|an?|github)\\s+)*(?:(?:${assistants})\\b|[\\w.-]+\\[bot\\])`, "i");
+const coauthor = /^\s*Co-authored-by:.*(?:\[bot\]|\bcopilot\b)/im;
 const authored = (text) => names.test(text) || attribution.test(text) || coauthor.test(text) || /🤖/.test(text);
 const linter = new Linter();
 function inspect(text, path, addedRanges = [], removedComments = [], captureRanges = addedRanges) {
@@ -64,7 +66,9 @@ try {
     for (const comment of comments) {
       const addedText = comment.value.split(/\r?\n/)
         .filter((_, index) => inRanges(comment.loc.start.line + index, addedRanges)).join("\n");
-      if (!removedComments.includes(normalizeComment(comment.value)) && authored(addedText)) {
+      const moved = comment.type !== "Shebang" && whollyChanged(comment, addedRanges) &&
+        consumeRemovedComment(comment.value, removedComments);
+      if (!moved && authored(addedText)) {
         problems.push(`${JSON.stringify(path)}:${comment.loc.start.line}: Contains an authorship credit or reserved name.`);
       }
     }
