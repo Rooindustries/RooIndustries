@@ -1,7 +1,7 @@
 import React from "react";
 import { FaDiscord } from "react-icons/fa";
 import { useLocation } from "react-router-dom";
-import { useContent } from "../lib/contentCache";
+import { useContent } from "../lib/useContent";
 import { usePublicContent } from "../next/PublicContentContext";
 
 const DEFAULT_BANNER = {

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
-import { useContent } from "../lib/contentCache";
+import { useContent } from "../lib/useContent";
 import { Link } from "react-router-dom";
 import ImageZoomModal from "../components/ImageZoomModal";
 

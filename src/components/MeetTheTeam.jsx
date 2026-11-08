@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
-import { useContent } from "../lib/contentCache";
+import { useContent } from "../lib/useContent";
 
 const HEX_CLIP_PATH = "circle(50% at 50% 50%)";
 

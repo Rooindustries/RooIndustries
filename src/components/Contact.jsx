@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useForm, ValidationError } from "@formspree/react";
-import { useContent } from "../lib/contentCache";
+import { useContent } from "../lib/useContent";
 import companyContent from "../lib/companyContent";
 
 const { CONTACT_GUIDANCE } = companyContent;

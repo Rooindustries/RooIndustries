@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { useContent } from "../lib/contentCache";
+import { useContent } from "../lib/useContent";
 import { Link } from "react-router-dom";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 

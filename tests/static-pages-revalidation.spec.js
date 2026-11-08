@@ -99,7 +99,7 @@ test("/about, /contact, /privacy, /terms, /tools, /meet-the-team and /reviews ke
   }
 });
 
-test("/contact, /privacy, /terms and /meet-the-team keep their last content when the CMS returns no document", async ({ request, baseURL, browser }, testInfo) => {
+test("static HTML retains its copy and stale policy pages reflect a deleted document", async ({ request, baseURL, browser }, testInfo) => {
   test.setTimeout(180000);
   const control = contentControl(request, baseURL);
   const timeline = [];
@@ -134,16 +134,37 @@ test("/contact, /privacy, /terms and /meet-the-team keep their last content when
       await guardBrowserContext(context, [baseURL]);
       const page = await context.newPage();
       for (const [route, resource, heading] of [["/privacy", "privacy-policy", "Privacy Policy"], ["/terms", "terms", "Terms of Service"]]) {
-        const response = await request.get(`/api/content/${resource}`);
-        const body = await response.json();
-        timeline.push({ route, step: "content API without a document", response: body });
-        expect(response.status(), route).toBe(200);
-        expect(body.ok, route).toBe(true);
-        expect(body.data, route).toBeNull();
-        await page.goto(route);
-        await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
-        await expect(page.locator("main").getByRole("heading", { name: heading, exact: true }), route).toBeVisible();
-        await expect(page.locator("main"), route).toContainText(expected[route]);
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        const responses = [];
+        const apiPath = `/api/content/${resource}`;
+        const record = response => {
+          if (new URL(response.url()).pathname === apiPath) responses.push(response);
+        };
+        page.on("response", record);
+        await page.route(`**${apiPath}`, async entry => {
+          await gate;
+          await entry.continue();
+        });
+        try {
+          await page.goto(route);
+          await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
+          await expect(page.locator("main"), route).toContainText(expected[route]);
+          await page.screenshot({ path: testInfo.outputPath(`${resource}-seed.png`), animations: "disabled" });
+          release();
+          await expect(page.locator("main").getByRole("heading", { name: heading, exact: true }), route).toHaveCount(0);
+          await expect(page.locator("main"), route).not.toContainText(expected[route]);
+          await page.screenshot({ path: testInfo.outputPath(`${resource}-missing.png`), animations: "disabled" });
+          await expect.poll(() => responses.length, { message: route }).toBe(1);
+          const body = await responses[0].json();
+          expect(responses[0].status(), route).toBe(200);
+          expect(body.data, route).toBeNull();
+          timeline.push({ route, step: "visitor sees the deleted policy after mount", response: body });
+        } finally {
+          release();
+          page.off("response", record);
+          await page.unrouteAll({ behavior: "wait" });
+        }
       }
     } finally {
       await context.close();

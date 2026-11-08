@@ -1,6 +1,6 @@
 import React from "react";
 import { PortableText } from "@portabletext/react";
-import { useContent } from "../lib/contentCache";
+import { useContent } from "../lib/useContent";
 import { normalizePolicyLink } from "../lib/policyLinks";
 import contactEmail from "../lib/contactEmail";
 

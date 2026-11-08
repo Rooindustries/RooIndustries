@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
-import { useContent } from "../lib/contentCache";
+import { useContent } from "../lib/useContent";
 import ImageZoomModal from "./ImageZoomModal";
 
 const localDiscordReviews = [];

@@ -11,6 +11,8 @@ const controlContent = async (request, baseURL, data) => {
   expect(response.status()).toBe(200);
 };
 
+const reviewId = process.env.TOOLING_CLS_CONTENT === "1" ? "review-cls-wide" : "tooling-review";
+
 const cases = [
   ["/contact", "contact", "tooling-contact", "subtitle", "Published contact information"],
   ["/privacy", "privacy-policy", "tooling-privacyPolicy", "title", "Published privacy title"],
@@ -18,7 +20,7 @@ const cases = [
   ["/benchmarks", "benchmarks", "tooling-benchmark-z-alpha", "title", "Published benchmark title"],
   ["/tools", "tools", "tooling-cls-tool-0", "title", "Published tool title"],
   ["/meet-the-team", "team", "tooling-meetTheTeam", "heroTitle", "Published team title"],
-  ["/reviews", "reviews-gallery", "tooling-review", "alt", "Published review caption"],
+  ["/reviews", "reviews-gallery", reviewId, "alt", "Published review caption"],
 ];
 
 const shownCopy = (page, field, text) => field === "alt"
@@ -117,16 +119,15 @@ test("an unchanged public page stays fresh for the next visit", async ({ page })
   await page.goto("/contact", { waitUntil: "networkidle" });
   await hydrated(page);
   let requests = 0;
-  await page.route("**/api/content/contact", route => {
-    requests += 1;
-    return route.fulfill({ status: 304 });
+  page.on("request", request => {
+    if (new URL(request.url()).pathname === "/api/content/contact") requests += 1;
   });
   await footerLink(page, "/about").click();
   await expect(page).toHaveURL(/\/about$/);
   await page.clock.fastForward("01:01");
   const confirmed = page.waitForResponse(response => response.url().endsWith("/api/content/contact"));
   await page.goBack();
-  expect((await confirmed).status()).toBe(304);
+  expect((await confirmed).status()).toBe(200);
   await expect(page.getByText("Synthetic local contact information.")).toBeVisible();
   await page.goForward();
   await expect(page).toHaveURL(/\/about$/);
@@ -135,6 +136,46 @@ test("an unchanged public page stays fresh for the next visit", async ({ page })
   await expect(page.getByText("Synthetic local contact information.")).toBeVisible();
   expect(requests).toBe(1);
 });
+
+for (const state of ["failed", "missing", "empty"]) {
+  test(`a stale policy seed refreshes on mount with ${state} content`, async ({ page }) => {
+    const errors = [];
+    page.on("console", message => {
+      if (message.type() === "error" && message.text().includes("Synthetic policy refresh failure")) {
+        errors.push(message.text());
+      }
+    });
+    await page.clock.install({ time: new Date(Date.now() + 61_000) });
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    let refreshes = 0;
+    await page.route("**/api/content/privacy-policy", async entry => {
+      refreshes += 1;
+      await gate;
+      await entry.fulfill(state === "failed"
+        ? { status: 503, json: { ok: false, error: "Synthetic policy refresh failure" } }
+        : { json: { ok: true, data: state === "missing" ? null : {}, revision: 999 } });
+    });
+    try {
+      await page.goto("/privacy");
+      await hydrated(page);
+      await expect(page.locator("main")).toContainText("Synthetic local information");
+      await expect.poll(() => refreshes).toBe(1);
+      release();
+      if (state === "failed") {
+        await expect.poll(() => errors.length).toBe(1);
+        await expect(page.locator("main")).toContainText("Synthetic local information");
+        await expect(page.getByRole("heading", { name: "Privacy Policy", exact: true })).toBeVisible();
+      } else {
+        await expect(page.locator("main")).not.toContainText("Synthetic local information");
+        await expect(page.getByRole("heading", { name: "Privacy Policy", exact: true })).toHaveCount(0);
+        expect(errors).toEqual([]);
+      }
+    } finally {
+      release();
+    }
+  });
+}
 
 test("a published empty tools list replaces the old list", async ({ page }) => {
   await page.clock.install();
