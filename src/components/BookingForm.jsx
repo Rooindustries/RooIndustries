@@ -1,3 +1,4 @@
+import { reservationOperation } from "../lib/reservationOperation";
 import { clearBookingConfirmation, createBookingConfirmation } from "../lib/confirmationReceipt";
 import React, {
   useCallback,
@@ -580,6 +581,9 @@ export default function BookingForm() {
   const [myHold, setMyHold] = useState(null);
   const currentHoldRef = useRef(myHold);
   currentHoldRef.current = myHold;
+  const currentReservation = (hold = currentHoldRef.current, paymentAccessToken) => reservationOperation({
+    hold, currentHold: currentHoldRef, mounted: mountedRef, paymentAccessToken,
+  });
   const releaseInFlightRef = useRef(false);
   const isPaymentPendingHold =
     String(myHold?.phase || "").trim().toLowerCase() === "payment_pending";
@@ -787,6 +791,7 @@ export default function BookingForm() {
           }
           normalizedHold.startTimeUTC = utcDate.toISOString();
           sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
+          currentHoldRef.current = normalizedHold;
           setMyHold(normalizedHold);
           broadcastHold(normalizedHold);
         } else {
@@ -1620,6 +1625,7 @@ export default function BookingForm() {
   useEffect(() => {
     setReviewQuote(null);
     if (step !== 3 || !selectedPackage.title || !reviewStartTime) return undefined;
+    const isCurrent = currentReservation();
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(requestTimeoutError()),
@@ -1638,7 +1644,7 @@ export default function BookingForm() {
       { signal: controller.signal }
     )
       .then((data) => {
-        if (!controller.signal.aborted) setReviewQuote(data.quote || null);
+        if (!controller.signal.aborted && isCurrent()) setReviewQuote(data.quote || null);
       })
       .catch(() => {})
       .finally(() => clearTimeout(timeout));
@@ -1728,7 +1734,7 @@ export default function BookingForm() {
       return;
     }
 
-    const validationHold = currentHoldRef.current;
+    const isCurrent = currentReservation();
     const attempt = ++manualCodeAttemptRef.current;
     setValidatingCode(true);
     setCodeError("");
@@ -1737,8 +1743,7 @@ export default function BookingForm() {
       const result = await resolveCheckoutCode(code, selectedPackage.title);
       if (!mountedRef.current || manualCodeAttemptRef.current !== attempt ||
         !hasActiveHoldRef.current || isPaymentPendingHold) return;
-      if (currentHoldRef.current?.holdId !== validationHold?.holdId ||
-        currentHoldRef.current?.holdToken !== validationHold?.holdToken) return;
+      if (!isCurrent()) return;
       if (!result.ok) {
         setCodeError(result.error || INVALID_CHECKOUT_CODE_MESSAGE);
         return;
@@ -1793,6 +1798,7 @@ export default function BookingForm() {
     setValidatingCode(true);
     setCodeError("");
 
+    const isCurrent = currentReservation();
     const restoreValidatedCodes = async () => {
       let nextReferral = null;
       let nextCoupon = null;
@@ -1847,7 +1853,7 @@ export default function BookingForm() {
           referralCode,
           selectedPackage.title
         );
-        if (!active || !hasActiveHoldRef.current) return;
+        if (!active || !hasActiveHoldRef.current || !isCurrent()) return;
         applyResult(result, "referral", referralCode);
       }
 
@@ -1857,11 +1863,11 @@ export default function BookingForm() {
           couponCode,
           selectedPackage.title
         );
-        if (!active || !hasActiveHoldRef.current) return;
+        if (!active || !hasActiveHoldRef.current || !isCurrent()) return;
         applyResult(result, "coupon", couponCode);
       }
 
-      if (!active || !hasActiveHoldRef.current) return;
+      if (!active || !hasActiveHoldRef.current || !isCurrent()) return;
       setAppliedReferral(nextReferral);
       setAppliedCoupon(nextCoupon);
       setDismissedReferralCode(nextDismissedCode);
@@ -1928,9 +1934,10 @@ export default function BookingForm() {
     let settled = false;
     setValidatingCode(true);
 
+    const isCurrent = currentReservation();
     resolveCheckoutCode(autoCode, selectedPackage.title)
       .then((result) => {
-        if (!active || !hasActiveHoldRef.current) return;
+        if (!active || !hasActiveHoldRef.current || !isCurrent()) return;
         if (!result?.ok) {
           const nextCoupon = sanitizeCouponForCheckout(appliedCoupon);
           if (!result?.unavailable) {
@@ -2070,11 +2077,10 @@ export default function BookingForm() {
     const holdIdToDelete = myHold.holdId;
     const holdTokenToDelete = myHold.holdToken;
     const hasExpired = () => new Date(myHold.expiresAt).getTime() <= Date.now();
-    const isCurrentHold = () =>
-      currentHoldRef.current?.holdId === holdIdToDelete &&
-      currentHoldRef.current?.holdToken === holdTokenToDelete;
+    let isCurrentHold = currentReservation();
     if (classifyHoldResponse({ endpoint: "release", expired: hasExpired() }) === "clear") {
       clearHoldState(resetStep);
+      isCurrentHold = currentReservation();
     }
     if (releaseInFlightRef.current) return hasExpired();
     releaseInFlightRef.current = true;
@@ -2106,13 +2112,14 @@ export default function BookingForm() {
     } finally {
       releaseInFlightRef.current = false;
     }
+    if (!isCurrentHold()) return false;
     if (outcome !== "keep") {
-      if (isCurrentHold()) clearHoldState(resetStep);
+      clearHoldState(resetStep);
       setErrorStep1("");
       setErrorStep2("");
       return true;
     }
-    if (isCurrentHold() && !suppressError) {
+    if (!suppressError) {
       const message = serverMessage || "Could not release your slot. Your reservation and details are saved. Please try again.";
       setErrorStep1(message);
       setErrorStep2(message);
@@ -2122,6 +2129,8 @@ export default function BookingForm() {
 
   const releasePaymentSession = async () => {
     if (!isPaymentPendingHold || releasingPayment) return;
+    const releasingHold = myHold;
+    let isCurrent = currentReservation(releasingHold);
     setReleasingPayment(true);
     setErrorStep2("");
     setPaymentReleaseStatus("");
@@ -2130,6 +2139,7 @@ export default function BookingForm() {
         sessionStorage.getItem(PAYMENT_SESSION_STORAGE_KEY) || "null"
       );
       const paymentAccessToken = String(stored?.paymentAccessToken || "").trim();
+      isCurrent = currentReservation(releasingHold, paymentAccessToken);
       if (!paymentAccessToken) {
         throw new Error("Return to payment once so the active session can be checked.");
       }
@@ -2143,6 +2153,7 @@ export default function BookingForm() {
         signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
       });
       const data = await response.json().catch(() => ({}));
+      if (!isCurrent()) return;
       if (data?.captured) {
         showCapturedPaymentResult(data);
         return;
@@ -2163,6 +2174,7 @@ export default function BookingForm() {
         expiresAt: refreshed.slotHoldExpiresAt,
         phase: "holding",
       };
+      currentHoldRef.current = nextHold;
       setMyHold(nextHold);
       writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(nextHold));
       const checkoutUpdated = updateStoredCheckoutHold(refreshed);
@@ -2174,6 +2186,7 @@ export default function BookingForm() {
           : "Payment method released. Review your booking details and submit again."
       );
     } catch (error) {
+      if (!isCurrent()) return;
       setPaymentReleaseStatus("");
       const timedOut =
         error?.name === "AbortError" || error?.name === "TimeoutError";
@@ -2228,7 +2241,9 @@ export default function BookingForm() {
       await releaseHold(false, { suppressError: true });
     }
 
+    const isCurrent = currentReservation();
     try {
+      if (!isCurrent()) return;
       const body = {
         startTimeUTC: selectedSlotId,
         packageTitle: recheckingPayment ? myHold.packageTitle : selectedPackage.title,
@@ -2253,6 +2268,7 @@ export default function BookingForm() {
         console.error("Failed to reserve slot");
         networkError = true;
       }
+      if (!isCurrent()) return;
       const outcome = classifyHoldResponse({
         endpoint: "hold",
         status: res?.status,
@@ -2264,6 +2280,7 @@ export default function BookingForm() {
       if (outcome !== "replace") {
         if (res?.status === 409 && data?.code === "hold_payment_in_progress" && isSameAsExisting) {
           const pendingHold = { ...myHold, phase: "payment_pending", paymentStartedElsewhere: true };
+          currentHoldRef.current = pendingHold;
           setMyHold(pendingHold);
           writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(pendingHold));
           broadcastHold(pendingHold);
@@ -2298,6 +2315,7 @@ export default function BookingForm() {
         phase: "active",
       };
 
+      currentHoldRef.current = newHold;
       setMyHold(newHold);
       writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(newHold));
       broadcastHold(newHold);

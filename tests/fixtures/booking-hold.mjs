@@ -192,8 +192,8 @@ export async function createBookingHoldFixture() {
     };
     const reconcile = () => post("/api/payment/reconcile", {}, "Bearer fixture-only-cron");
     const paymentSucceeded = async holdId => {
-      const record = await commerce.fetch(
-        '*[_type == "paymentRecord" && bookingPayload.slotHoldId == $id][0]', { id: holdId });
+      const hold = await commerce.getDocument(holdId);
+      const record = await commerce.getDocument(hold.paymentRecordId);
       const body = { business_id: "business_fixture", type: "payment.succeeded",
         timestamp: new Date().toISOString(), data: { payment_id: `payment_${record.providerOrderId}` } };
       const eventId = `fixture_paid_${record._id}`;
