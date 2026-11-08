@@ -15,7 +15,7 @@ export default async function handler(req, res) {
 
   try {
     if (!requireAdminKey(req, res)) return;
-    const { bookingId, status, payerEmail } = req.body || {};
+    const { bookingId, status, payerEmail, referralReview } = req.body || {};
     if (!bookingId || !status) {
       return res
         .status(400)
@@ -26,6 +26,7 @@ export default async function handler(req, res) {
       bookingId: String(bookingId).trim(),
       status,
       payerEmail,
+      referralReview,
       source: "admin",
     });
     return res.status(200).json({ ok: true, ...result });

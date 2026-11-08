@@ -130,14 +130,31 @@ declare
   doc jsonb;
 begin
   for creator in select * from migration.creator_empty_code_before
-    where after_payload is null and rolled_back_at is null loop
+    where after_payload is null or rolled_back_at is not null loop
     correct := public.roo_referral_earnings_summary(creator.legacy_sanity_id, '');
     review_xoc := least(greatest(0, coalesce(case when btrim(coalesce(creator.payload->>'earnedXoc', '')) ~ '^-?[0-9]+([.][0-9]+)?$' then (creator.payload->>'earnedXoc')::numeric end, (creator.previous->>'xoc')::numeric) - (correct->>'xoc')::numeric), greatest(0, (creator.previous->>'xoc')::numeric - (correct->>'xoc')::numeric));
     review_vertex := least(greatest(0, coalesce(case when btrim(coalesce(creator.payload->>'earnedVertex', '')) ~ '^-?[0-9]+([.][0-9]+)?$' then (creator.payload->>'earnedVertex')::numeric end, (creator.previous->>'vertex')::numeric) - (correct->>'vertex')::numeric), greatest(0, (creator.previous->>'vertex')::numeric - (correct->>'vertex')::numeric));
-    select coalesce(sum(case when btrim(coalesce(p->>'amount', '')) ~ '^-?[0-9]+([.][0-9]+)?$' then (p->>'amount')::numeric else 0 end), 0) into paid_xoc from jsonb_array_elements(case when jsonb_typeof(creator.payload->'xocPayments') = 'array' then creator.payload->'xocPayments' else '[]'::jsonb end) p;
-    select coalesce(sum(case when btrim(coalesce(p->>'amount', '')) ~ '^-?[0-9]+([.][0-9]+)?$' then (p->>'amount')::numeric else 0 end), 0) into paid_vertex from jsonb_array_elements(case when jsonb_typeof(creator.payload->'vertexPayments') = 'array' then creator.payload->'vertexPayments' else '[]'::jsonb end) p;
+    select payload, source_revision into creator.payload, creator.source_revision
+    from migration.source_documents where legacy_sanity_id = creator.legacy_sanity_id and not tombstoned;
+    if creator.payload is null then
+      raise exception 'Creator % is missing during redeploy', creator.legacy_sanity_id;
+    end if;
+    select coalesce(sum(case when btrim(coalesce(p->>'amount', '')) ~ '^-?[0-9]+([.][0-9]+)?$'
+      then (p->>'amount')::numeric else 0 end), 0) into paid_xoc
+    from jsonb_array_elements(case when jsonb_typeof(creator.payload->'xocPayments') = 'array'
+      then creator.payload->'xocPayments' else '[]'::jsonb end) p;
+    select coalesce(sum(case when btrim(coalesce(p->>'amount', '')) ~ '^-?[0-9]+([.][0-9]+)?$'
+      then (p->>'amount')::numeric else 0 end), 0) into paid_vertex
+    from jsonb_array_elements(case when jsonb_typeof(creator.payload->'vertexPayments') = 'array'
+      then creator.payload->'vertexPayments' else '[]'::jsonb end) p;
     protected_xoc := least(review_xoc, greatest(0, paid_xoc - (correct->>'xoc')::numeric));
     protected_vertex := least(review_vertex, greatest(0, paid_vertex - (correct->>'vertex')::numeric));
+    if creator.rolled_back_at is not null then
+      review_xoc := (creator.after_payload->>'emptyCodeReviewXoc')::numeric;
+      review_vertex := (creator.after_payload->>'emptyCodeReviewVertex')::numeric;
+      protected_xoc := (creator.after_payload->>'emptyCodeProtectedPaidXoc')::numeric;
+      protected_vertex := (creator.after_payload->>'emptyCodeProtectedPaidVertex')::numeric;
+    end if;
     doc := creator.payload || jsonb_build_object(
       'emptyCodeReviewXoc', review_xoc, 'emptyCodeReviewVertex', review_vertex,
       'emptyCodeProtectedPaidXoc', protected_xoc, 'emptyCodeProtectedPaidVertex', protected_vertex,
@@ -151,7 +168,7 @@ begin
     perform public.roo_apply_document_mutations(jsonb_build_array(jsonb_build_object(
       'operation', 'replace', 'document', doc, 'expected_revision', creator.source_revision
     )));
-    update migration.creator_empty_code_before set after_payload = doc
+    update migration.creator_empty_code_before set after_payload = coalesce(after_payload, doc), rolled_back_at = null
     where legacy_sanity_id = creator.legacy_sanity_id;
   end loop;
 end;
@@ -210,6 +227,22 @@ $$;
 
 revoke all on function public.roo_pending_coupon_alerts(integer) from public, anon, authenticated;
 grant execute on function public.roo_pending_coupon_alerts(integer) to service_role;
+
+create or replace function public.roo_historical_referral_accounting(p_booking_id text, p_referral_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case when jsonb_typeof(source.payload->'referralAccountingApplied') = 'boolean'
+    then (source.payload->>'referralAccountingApplied')::boolean end
+  from migration.source_documents source
+  where source.legacy_sanity_id = p_booking_id and source.document_type = 'booking'
+    and source.payload#>>'{referral,_ref}' = p_referral_id;
+$$;
+revoke all on function public.roo_historical_referral_accounting(text,text) from public, anon, authenticated;
+grant execute on function public.roo_historical_referral_accounting(text,text) to service_role;
 
 drop function pg_temp.creator_empty_code_previous(text, text);
 commit;

@@ -119,4 +119,5 @@ revoke all on function migration.creator_rollback_payout_hold() from public, ano
 create or replace trigger creator_rollback_payout_hold
 before insert or update on migration.source_documents
 for each row execute function migration.creator_rollback_payout_hold();
+drop function if exists public.roo_historical_referral_accounting(text,text);
 commit;

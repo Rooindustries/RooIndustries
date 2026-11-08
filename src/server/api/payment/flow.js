@@ -4067,9 +4067,7 @@ const recoverCapturedPaymentAsReschedule = async ({
       : {}),
     couponAccountingRecoveredAfterRelease:
       couponRedemption?.status === "released",
-    referralAccountingApplied: preserveHistoricalAccounting
-      ? record.referralAccountingApplied === true
-      : !!referralId,
+    ...(!preserveHistoricalAccounting ? {referralAccountingApplied: !!referralId} : {}),
     ...(record.historicalBookingReconstruction === true
       ? {
           historicalBookingReconstruction: false,

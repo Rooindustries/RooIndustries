@@ -11,6 +11,7 @@ import { appendCouponConsumption } from "./couponReservations.js";
 import { dispatchRescheduleNotifications } from "./bookingEmails.js";
 import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
 import { calculateCreatorCommission } from "../../referrals/commissionMoney.js";
+import { historicalReferralAccounting } from "../../referrals/historicalAccounting.js";
 import { freezeBookingCommission } from "../../referrals/bookingCommission.js";
 
 const referralCommitFields = (referralId, referral, bookingId) => {
@@ -279,6 +280,7 @@ export const commitBookingTransaction = async ({
       { _id: paymentRecordMutation.id, _rev: paymentRecordMutation.revision },
       (patch) => patch.set({
         ...paymentRecordMutation.set,
+        referralAccountingApplied: bookingDocument.referralAccountingApplied === true,
         pricingSnapshot: frozen.pricingSnapshot,
         payerEmail: frozen.bookingFields.payerEmail,
         ...(upgradeLockToCreate ? { startClaimId: upgradeLockToCreate._id } : {}),
@@ -395,7 +397,7 @@ export const createRequiresRescheduleBooking = async ({
             referral: { _type: "reference", _ref: resolvedReferralId },
             ...referralCommitFields(resolvedReferralId, referral, bookingId),
             ...(preserveHistoricalAccounting ? {
-              referralAccountingApplied: paymentRecord.referralAccountingApplied === true,
+              referralAccountingApplied: await historicalReferralAccounting(paymentRecord, resolvedReferralId),
             } : {}),
           }
         : {}),
@@ -502,6 +504,7 @@ export const createRequiresRescheduleBooking = async ({
         { _id: paymentRecordMutation.id, _rev: paymentRecordMutation.revision },
         (patch) => patch.set({
           ...paymentRecordMutation.set,
+          referralAccountingApplied: booking.referralAccountingApplied === true,
           pricingSnapshot: frozen.pricingSnapshot,
           payerEmail: frozen.bookingFields.payerEmail,
           ...(upgradeLockToCreate ? { startClaimId: upgradeLockToCreate._id } : {}),

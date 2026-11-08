@@ -25,6 +25,7 @@ const sources = [
   'src/server/api/ref/validateReferral.js',
   'src/server/api/ref/cronSyncAll.js',
   'src/server/api/ref/syncPayouts.js',
+  'src/server/api/ref/updateBookingStatus.js',
   'src/server/api/ref/payouts.js',
   'src/server/api/ref/register.js',
   'src/server/api/ref/couponReservations.js',
@@ -34,6 +35,7 @@ const sources = [
 ];
 for (const source of [
   'src/server/referrals/bookingCommission.js',
+  'src/server/referrals/historicalAccounting.js',
   'src/server/api/payment/providerClients.js',
   'src/server/referrals/commissionMoney.js',
   'src/server/referrals/disputeAccounting.js',
@@ -846,6 +848,13 @@ try {
                 },
               },
             ],
+          };
+        else if (req.url.startsWith('/v2/payments/captures/'))
+          result = {
+            id: state?.record.providerPaymentId,
+            status: 'COMPLETED',
+            amount: {value: state?.record.pricingSnapshot.netAmount.toFixed(2), currency_code: 'USD'},
+            supplementary_data: {related_ids: {order_id: state?.record.providerOrderId}},
           };
         else if (req.url.startsWith('/v2/payments/refunds/'))
           result = refundsById.get(id);
@@ -3772,6 +3781,12 @@ try {
   const {runHistoricalCreatorRegressions} = await import('./lib/historical-creator-regressions.mjs');
   await runHistoricalCreatorRegressions({
     run, seed, documents, commerce, read, post, webhook, refundCurrent, sql, summary,
+    rulesSql: baselineRulesMigration || fs.readFileSync(rulesMigrationPath, 'utf8'),
+    rollbackSql: baselineRollback || fs.readFileSync('supabase/rollbacks/20261108092740_creator_money_rules.sql', 'utf8'),
+  });
+  const {runCreatorMoneyRedeployRegressions} = await import('./lib/creator-money-redeploy-regressions.mjs');
+  await runCreatorMoneyRedeployRegressions({
+    run, seed, documents, commerce, read, post, webhook, refundCurrent, sql,
     rulesSql: baselineRulesMigration || fs.readFileSync(rulesMigrationPath, 'utf8'),
     rollbackSql: baselineRollback || fs.readFileSync('supabase/rollbacks/20261108092740_creator_money_rules.sql', 'utf8'),
   });
