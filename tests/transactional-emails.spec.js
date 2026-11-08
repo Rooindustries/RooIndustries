@@ -4,7 +4,6 @@ const fs = require("node:fs");
 const check = expect.configure({ soft: true });
 let capture;
 
-test.use({ trace: "off", video: "off" });
 test.beforeAll(() => {
   capture = JSON.parse(execFileSync(process.execPath, ["tests/fixtures/transactional-emails.mjs"], {
     encoding: "utf8", maxBuffer: 16 * 1024 * 1024,

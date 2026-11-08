@@ -14,6 +14,7 @@ import noLinuxOnlyTestTooling from "./no-linux-only-test-tooling.mjs";
 import noLowContrastText from "./no-low-contrast-text.mjs";
 import noNestedComponents from "./no-nested-components.mjs";
 import noParentIpcDisconnect from "./no-parent-ipc-disconnect.mjs";
+import noPlaywrightRecordingOverrides from "./no-playwright-recording-overrides.mjs";
 import noScriptingMediaQuery from "./no-scripting-media-query.mjs";
 import noSecureContextNavigationKeys from "./no-secure-context-navigation-keys.mjs";
 import noUncheckedGroupSignal from "./no-unchecked-group-signal.mjs";
@@ -39,6 +40,7 @@ export const rules = {
   "no-low-contrast-text": noLowContrastText,
   "no-nested-components": noNestedComponents,
   "no-parent-ipc-disconnect": noParentIpcDisconnect,
+  "no-playwright-recording-overrides": noPlaywrightRecordingOverrides,
   "no-scripting-media-query": noScriptingMediaQuery,
   "no-secure-context-navigation-keys": noSecureContextNavigationKeys,
   "no-unchecked-group-signal": noUncheckedGroupSignal,
