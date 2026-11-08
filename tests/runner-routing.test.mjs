@@ -107,11 +107,11 @@ test("the routing check rejects routes a fork or an untrusted event could reach"
   }
 });
 
-test("test jobs run on the website's runners, forks' pull requests on GitHub-hosted ones", () => {
+test("test jobs default to GitHub-hosted runners", () => {
   const tests = jobs.filter(({ file }) => file === "tests.yml");
   assert.ok(tests.length > 0);
   for (const job of tests) {
-    assert.deepEqual(runner(job), { forkLabel: "ubuntu-24.04", variable: "TESTS_RUNNER", label: "roo-site" }, job.id);
+    assert.deepEqual(runner(job), { forkLabel: "ubuntu-24.04", variable: "TESTS_RUNNER", label: "ubuntu-24.04" }, job.id);
   }
 });
 
