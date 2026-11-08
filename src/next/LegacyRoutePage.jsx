@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { MemoryRouter } from "react-router-dom";
+import { ContentRevisionContext } from "../lib/contentCache";
 import { AppContent } from "../App";
 import { buildQueryString } from "./routeQuery";
 import { sanitizeBrowserSearch } from "../lib/browserSearch";
@@ -11,6 +12,7 @@ export default function LegacyRoutePage({
   searchParams,
   initialHomeData = null,
   initialRouteData = null,
+  contentRevisions = null,
   routeJsonLd = null,
   initialRouteComponent = null,
   initialHomeComponent = null,
@@ -27,17 +29,19 @@ export default function LegacyRoutePage({
 
   return (
     <MemoryRouter initialEntries={[initialEntry]}>
-      <AppContent
-        initialHomeData={initialHomeData}
-        initialRouteData={initialRouteData}
-        routeJsonLd={routeJsonLd}
-        initialRouteComponent={initialRouteComponent}
-        initialHomeComponent={initialHomeComponent}
-        initialBookingModalComponent={initialBookingModalComponent}
-        initialRoutePath={pathname}
-        routeShell="memory"
-        notFound={notFound}
-      />
+      <ContentRevisionContext.Provider value={contentRevisions}>
+        <AppContent
+          initialHomeData={initialHomeData}
+          initialRouteData={initialRouteData}
+          routeJsonLd={routeJsonLd}
+          initialRouteComponent={initialRouteComponent}
+          initialHomeComponent={initialHomeComponent}
+          initialBookingModalComponent={initialBookingModalComponent}
+          initialRoutePath={pathname}
+          routeShell="memory"
+          notFound={notFound}
+        />
+      </ContentRevisionContext.Provider>
     </MemoryRouter>
   );
 }

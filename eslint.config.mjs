@@ -11,6 +11,17 @@ const ruleSet = (names) => Object.fromEntries(names.map((name) => [`roo/${name}`
 
 export default [
   {
+    files: ["src/components/Hero.jsx", "src/components/ReferralBox.jsx"],
+    rules: {
+      "no-restricted-imports": ["error", {
+        patterns: [{
+          group: ["**/publicContentClient", "**/publicContentClient.js"],
+          message: "Read public copy through useContent so sections share revisions and refreshes.",
+        }],
+      }],
+    },
+  },
+  {
     files: ["src/**/*.{js,jsx,mjs,cjs}", "app/**/*.{js,jsx,mjs,cjs}", "middleware.js"],
     ignores: [testFiles],
     linterOptions: { reportUnusedDisableDirectives: "off" },

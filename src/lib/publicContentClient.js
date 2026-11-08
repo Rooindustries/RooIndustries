@@ -18,7 +18,7 @@ const buildPublicContentUrl = (resource, params = {}) => {
 let pendingRequests = 0;
 export const getPublicContentPendingCount = () => pendingRequests;
 
-export const getPublicContent = async (resource, params, options) => {
+export const getPublicContentEntry = async (resource, params, options) => {
   const signal = options?.signal;
   pendingRequests += 1;
   const markCancelled = watchPageLeave(signal);
@@ -29,6 +29,7 @@ export const getPublicContent = async (resource, params, options) => {
       response = await fetch(buildPublicContentUrl(resource, params), {
         headers: { Accept: "application/json" },
         signal,
+        ...(options?.cache ? { cache: options.cache } : {}),
       });
       body = await response.json();
     } catch (error) {
@@ -37,8 +38,12 @@ export const getPublicContent = async (resource, params, options) => {
     if (!response.ok || body?.ok !== true) {
       throw new Error(body?.error || "Public content could not be loaded.");
     }
-    return body.data ?? null;
+    const revision = Number.isSafeInteger(body.revision) && body.revision >= 0 ? body.revision : null;
+    return { data: body.data ?? null, revision };
   } finally {
     pendingRequests -= 1;
   }
 };
+
+export const getPublicContent = async (resource, params, options) =>
+  (await getPublicContentEntry(resource, params, options)).data;

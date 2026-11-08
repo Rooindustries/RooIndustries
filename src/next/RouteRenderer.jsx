@@ -1,5 +1,6 @@
 import LegacyRoutePage from "./LegacyRoutePage";
 import SeoFallback from "./SeoFallback";
+import contentServer from "../lib/contentServer";
 
 export default async function RouteRenderer({
   pathname,
@@ -21,6 +22,7 @@ export default async function RouteRenderer({
         initialHomeData={initialHomeData}
         initialRouteData={initialRouteData}
         routeJsonLd={routeJsonLd}
+        contentRevisions={contentServer.readContentRevisions()}
         notFound={notFound}
       />
     </>

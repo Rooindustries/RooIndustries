@@ -82,6 +82,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
     document('contact', { title: 'Get In Touch', subtitle: 'Synthetic local contact information.', formId: '' }),
     document('about', { recordTitle: 'Synthetic local results', recordSubtitle: 'Local fixture content', recordDetails: [] }),
     document('services', { heading: 'Synthetic benefits', cards: [] }),
+    document('referralBox', { heading: 'Join the Referral Program', description: 'Are you a creator? Enter your email to get started with registration.' }),
     document('howItWorks', { title: 'How It Works', steps: [] }),
     document('packagesSettings', {}),
     document('meetTheTeam', { heroTitle: 'Meet the Team', heroSubtitle: 'Synthetic local team', showFounder: true, founder: { name: 'Fixture Founder', title: 'Synthetic founder', bio: 'Synthetic founder bio for the local team page.' }, sections: [{ _key: 'tooling-team-crew', title: 'Synthetic Crew', variant: 'standard', cards: [{ _key: 'tooling-team-alpha', name: 'Fixture Member Alpha', title: 'Synthetic tuner', bio: 'Synthetic bio for the first team card.' }, { _key: 'tooling-team-beta', name: 'Fixture Member Beta', title: 'Synthetic support', bio: 'Synthetic bio for the second team card.' }] }] }),

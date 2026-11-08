@@ -1,19 +1,31 @@
 const { applyHomePageCopyOverrides, resolveHeroCopy } = require("./homeCopy");
 const { buildPackageOffers, normalizeFaqQuestions } = require("./packageContent");
 
+const { cache } = require("react");
+
+const contentRevisionLedger = cache(() => new Map());
+const readContentRevisions = () => Object.fromEntries(contentRevisionLedger());
+
 const createPublicContentFetcher = async () => {
-  const [{ fetchPublicContent }, { resolveSupabaseRuntimePolicy }] =
+  const [{ fetchPublicContentEntry }, { resolveSupabaseRuntimePolicy }] =
     await Promise.all([
       import("../server/content/publicContent.js"),
       import("../server/supabase/runtime.js"),
     ]);
   const backend = resolveSupabaseRuntimePolicy().primaryBackend;
-  return (resource) =>
-    fetchPublicContent({
+  return async (resource) => {
+    const entry = await fetchPublicContentEntry({
       resource,
       backend,
       searchParams: new URLSearchParams(),
     });
+    if (Number.isSafeInteger(entry.revision)) {
+      const ledger = contentRevisionLedger();
+      const current = ledger.get(resource);
+      ledger.set(resource, current === undefined ? entry.revision : Math.min(current, entry.revision));
+    }
+    return entry.data;
+  };
 };
 
 async function fetchFaqQuestions() {
@@ -223,6 +235,7 @@ async function fetchPackagesPageData({ requireContent = false } = {}) {
 }
 
 module.exports = {
+  readContentRevisions,
   fetchBenchmarks,
   fetchReviewsGallery,
   fetchStaticPageContent,
