@@ -220,7 +220,10 @@ jobs:
             npm run test:remote-browser-guard
             npm run test:smoke:production
           fi
-          xvfb-run -a npx playwright test --pass-with-no-tests --reporter=dot,json "$PW_FILES"
+          if [ "$PW_SUITE" = "rest-1" ]; then
+            xvfb-run -a npm run test:playwright-timeouts
+          fi
+          xvfb-run -a npx playwright test --pass-with-no-tests --reporter=line,json "$PW_FILES"
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-timings/${{ matrix.suite.name }}.json
       - uses: ./.github/actions/save-caches
@@ -242,7 +245,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: test-results-${{ matrix.suite.name }}
           path: ${{ env.SUITE_DIR || github.workspace }}/test-results/
@@ -250,11 +253,21 @@ jobs:
           retention-days: 7
 
   routes:
-    name: Playwright creator portal and API routes
+    name: Playwright ${{ matrix.suite.name }}
     needs: tested-tree
     if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - name: api-routes
+            script: test:api:routes
+            port: "3231"
+          - name: creator-portal
+            script: test:creator:portal
+            port: "3241"
     env:
       ROO_TEST_HOST: 127.0.0.1
     steps:
@@ -265,36 +278,25 @@ jobs:
         with:
           node-version: 22
           browsers: chromium
-          build-dirs: |
-            .next-e2e-routes-api/cache/webpack
-            .next-e2e-routes-portal/cache/webpack
+          build-dirs: .next-e2e-${{ matrix.suite.name }}/cache/webpack
       - uses: ./.github/actions/hold-ports
         with:
-          playwright-ports: "3231 3241"
-      - name: Run API route suite
-        id: api-routes
+          playwright-ports: ${{ matrix.suite.port }}
+      - name: Run browser suite
         env:
-          PW_PORT: "3231"
-          PW_SERVER_ID: routes-api
-        run: xvfb-run -a npm run test:api:routes -- --output=test-results/api-routes
-      - name: Run creator portal suite
-        if: ${{ !cancelled() && (success() || steps.api-routes.outcome == 'failure') }}
-        env:
-          PW_PORT: "3241"
-          PW_SERVER_ID: routes-portal
-        run: xvfb-run -a npm run test:creator:portal -- --output=test-results/creator-portal
+          PW_PORT: ${{ matrix.suite.port }}
+          PW_SERVER_ID: ${{ matrix.suite.name }}
+        run: xvfb-run -a npm run ${{ matrix.suite.script }} -- --output=test-results/${{ matrix.suite.name }}
       - name: Run creator portal against an external fixture server
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.suite.name == 'creator-portal' }}
         run: npm run test:fixture-ports:browser
       - uses: ./.github/actions/save-caches
         with:
-          build-dirs: |
-            .next-e2e-routes-api/cache/webpack
-            .next-e2e-routes-portal/cache/webpack
+          build-dirs: .next-e2e-${{ matrix.suite.name }}/cache/webpack
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
-          name: test-results-routes
+          name: test-results-${{ matrix.suite.name }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
@@ -419,11 +421,21 @@ jobs:
           retention-days: 7
 
   revalidation:
-    name: Playwright revalidation
+    name: Playwright ${{ matrix.suite.name }}
     needs: tested-tree
     if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - name: benchmarks-revalidation
+            script: test:benchmarks:revalidation
+            port: "3251"
+          - name: static-revalidation
+            script: test:static:revalidation
+            port: "3261"
     env:
       ROO_TEST_HOST: 127.0.0.1
     steps:
@@ -434,33 +446,22 @@ jobs:
         with:
           node-version: 22
           browsers: chromium
-          build-dirs: |
-            .next-e2e-revalidation-benchmarks/cache/webpack
-            .next-e2e-revalidation-static/cache/webpack
+          build-dirs: .next-e2e-${{ matrix.suite.name }}/cache/webpack
       - uses: ./.github/actions/hold-ports
         with:
-          playwright-ports: "3251 3261"
-      - name: Run benchmarks revalidation suite
-        id: benchmarks-revalidation
+          playwright-ports: ${{ matrix.suite.port }}
+      - name: Run browser suite
         env:
-          PW_PORT: "3251"
-          PW_SERVER_ID: revalidation-benchmarks
-        run: xvfb-run -a npm run test:benchmarks:revalidation -- --output=test-results/benchmarks-revalidation
-      - name: Run static pages revalidation suite
-        if: ${{ !cancelled() && (success() || steps.benchmarks-revalidation.outcome == 'failure') }}
-        env:
-          PW_PORT: "3261"
-          PW_SERVER_ID: revalidation-static
-        run: xvfb-run -a npm run test:static:revalidation -- --output=test-results/static-revalidation
+          PW_PORT: ${{ matrix.suite.port }}
+          PW_SERVER_ID: ${{ matrix.suite.name }}
+        run: xvfb-run -a npm run ${{ matrix.suite.script }} -- --output=test-results/${{ matrix.suite.name }}
       - uses: ./.github/actions/save-caches
         with:
-          build-dirs: |
-            .next-e2e-revalidation-benchmarks/cache/webpack
-            .next-e2e-revalidation-static/cache/webpack
+          build-dirs: .next-e2e-${{ matrix.suite.name }}/cache/webpack
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
-          name: test-results-revalidation
+          name: test-results-${{ matrix.suite.name }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7

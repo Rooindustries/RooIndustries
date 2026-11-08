@@ -35,8 +35,16 @@ if (!shouldUseExternalServer && !internalDistDir.startsWith(".next-e2e-")) throw
 module.exports = defineConfig({
   testDir: "./tests",
   testMatch: "**/*.spec.js",
-  metadata: { toolingDistDir: internalDistDir, ownsToolingServer: !shouldUseExternalServer },
-  globalSetup: require.resolve("./tests/fixtures/fixture-ports-setup.cjs"),
+  metadata: {
+    toolingDistDir: internalDistDir,
+    ownsToolingServer: !shouldUseExternalServer,
+    groupTimeoutMs: 20 * 60 * 1000,
+    groupStartedAt: performance.now(),
+  },
+  globalSetup: require.resolve("./scripts/playwright-group-deadline.cjs"),
+  globalTimeout: 22 * 60 * 1000,
+  reporter: process.env.CI ? [["line"], ["json", { outputFile: "test-results/playwright.json" }]] : "list",
+  failOnFlakyTests: Boolean(process.env.CI),
   timeout: 120000,
   expect: {
     timeout: 10000,
@@ -62,7 +70,7 @@ module.exports = defineConfig({
     baseURL,
     headless: false,
     javaScriptEnabled: false,
-    trace: "on-first-retry",
+    trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "on-first-retry",
     timezoneId: process.env.PW_TIMEZONE || "UTC",
