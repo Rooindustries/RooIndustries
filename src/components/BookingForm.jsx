@@ -2544,7 +2544,7 @@ export default function BookingForm() {
             )}
 
             {isXoc && (
-              <PackageSupportWarning className="mx-auto mb-6 max-w-3xl rounded-xl border border-warning-border bg-surface-card px-4 py-3 text-left text-sm leading-relaxed text-warning-text" />
+              <PackageSupportWarning widthClass={step === 2 ? "max-w-4xl" : "max-w-3xl"} />
             )}
 
             <AnimatePresence mode="wait" initial={!hydrating}>
