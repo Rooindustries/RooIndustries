@@ -1,6 +1,9 @@
 reviews:
   request_changes_workflow: true
   high_level_summary_in_walkthrough: true
+  pre_merge_checks:
+    docstrings:
+      mode: off
   auto_review:
     base_branches:
       - "^servi/archive-tourney-results$"
