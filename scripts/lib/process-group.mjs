@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { spawn } from "node:child_process";
+import { fixtureScope, rememberFixtureScope } from "./fixture-run.mjs";
 
 const directory = fs.constants.O_RDONLY | fs.constants.O_DIRECTORY;
 const handles = new WeakMap();
@@ -34,8 +35,12 @@ export const trackGroupLeader = (child, onExit = () => {}) => {
   return child;
 };
 
-export const spawnGroup = (command, args, options = {}) =>
-  trackGroupLeader(spawn(command, args, { ...options, detached: true }));
+export const spawnGroup = (command, args, options = {}) => {
+  const scope = fixtureScope(options.env);
+  const child = spawn(command, args, { ...options, env: scope.env, detached: true });
+  rememberFixtureScope(child, scope);
+  return trackGroupLeader(child);
+};
 
 export const signalGroup = (child, signal) => {
   if (exited(child)) return;

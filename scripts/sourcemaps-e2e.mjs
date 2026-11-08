@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
-import { freeTcpPorts } from './lib/free-tcp-port.mjs';
+import { freeTcpPorts, releaseTcpPorts } from './lib/free-tcp-port.mjs';
 import { spawnContained, stopChild } from './lib/fixture-tools.mjs';
 import { lockBuildDirectory } from './lib/build-lock.mjs';
 import { inheritTestProcessGuard, installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from './lib/test-target-safety.mjs';
@@ -89,7 +89,7 @@ if (process.argv[2] === '--build') {
   const report = { ok: false, buildSha, scenarios: [] };
   const requests = [];
   const uploadedChunks = new Map();
-  let content, server, restoreGuard, productionDist, productionLock;
+  let content, server, restoreGuard, productionDist, productionLock, sitePort, contentPort;
   let rejectUpload = false;
   let bundlePath;
   let uploadError;
@@ -105,7 +105,7 @@ if (process.argv[2] === '--build') {
       join(root, 'scripts/fixtures/sourcemaps-network-probe.c'), '-ldl']);
     await mkdir(join(fixture, 'home'));
     await writeFile(join(fixture, 'empty-sentry.ini'), '');
-    const [sitePort, contentPort] = await freeTcpPorts('127.0.0.1', [0, 0]);
+    [sitePort, contentPort] = await freeTcpPorts('127.0.0.1', [0, 0]);
     const siteOrigin = localOrigin(`http://127.0.0.1:${sitePort}`);
     const contentOrigin = localOrigin(`http://127.0.0.1:${contentPort}`);
     productionDist = validateDistDir(`.next-e2e-sourcemaps-${stamp}`, { isolated: true });
@@ -361,6 +361,7 @@ if (process.argv[2] === '--build') {
       content?.close(),
       server?.listening ? new Promise(done => { server.closeAllConnections(); server.close(done); }) : undefined,
     ]);
+    await releaseTcpPorts('127.0.0.1', [sitePort, contentPort].filter(Boolean));
     restoreGuard?.();
     if (productionLock) {
       try {

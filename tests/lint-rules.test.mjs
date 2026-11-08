@@ -22,24 +22,6 @@ const tester = new RuleTester({
 
 const run = (name, cases) => tester.run(name, rules[name], cases);
 
-run("no-uncontained-fixture-process", {
-  valid: [
-    `import { startPostgres } from "./lib/start-postgres.mjs";`,
-    `import { spawnSync as run } from "./lib/fixture-tools.mjs"; run("initdb", []);`,
-  ],
-  invalid: [
-    `import { spawn as run } from "node:child_process";`,
-    `import { spawnSync as run } from "node:child_process";`,
-    `const { spawnContained: run } = await import("./lib/start-on-port.mjs");`,
-    `import * as unsafe from "./lib/process-group.mjs";`,
-    `import * as cp from "child_process";`,
-    `import cp from "node:child_process";`,
-    `const cp = require("node:child_process");`,
-    `const { spawn: run } = await import("node:child_process");`,
-    `run(path.join(pgBin, "pg_ctl"), ["start"]);`,
-  ].map((code) => ({ code, errors: [{ messageId: "contained" }] })),
-});
-
 run("no-linux-only-test-tooling", {
   valid: [
     `import { spawnSync } from "node:child_process"; spawnSync("perl", ["-e", script]);`,

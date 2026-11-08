@@ -6,7 +6,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { after, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { lockBuildDirectory } from "../scripts/lib/build-lock.mjs";
-import { freeTcpPort } from "../scripts/lib/free-tcp-port.mjs";
+import { freeTcpPort, passTcpPortReservations, releaseTcpPorts } from "../scripts/lib/free-tcp-port.mjs";
 
 const library = new URL("../scripts/lib/build-lock.mjs", import.meta.url).href;
 const cleanup = [];
@@ -711,7 +711,7 @@ test(
     cleanup.push(path.resolve(dist), `${path.resolve(dist)}.build-lock`);
     const scratch = scratchRoot("roo-ui-lock-");
     const nextPort = await freeTcpPort("127.0.0.1");
-    const ui = spawn(process.execPath, ["scripts/test-ui-sweep-server.mjs"], {
+    const ui = spawn(process.execPath, ["scripts/test-ui-sweep-server.mjs"], passTcpPortReservations("127.0.0.1", [nextPort], {
       stdio: ["ignore", "ignore", "ignore"],
       detached: true,
       env: {
@@ -723,7 +723,8 @@ test(
         NEXT_DIST_DIR: dist,
         UI_ARTIFACT: path.join(scratch, "ui.json"),
       },
-    });
+    }));
+    await releaseTcpPorts("127.0.0.1", [nextPort]);
     const ended = () => ui.exitCode !== null || ui.signalCode !== null;
     let tree = [ui.pid];
     try {
@@ -761,7 +762,7 @@ test(
     cleanup.push(path.resolve(dist), `${path.resolve(dist)}.build-lock`);
     const scratch = scratchRoot("roo-build-tree-lock-");
     const port = await freeTcpPort("127.0.0.1");
-    const wrapper = spawn(process.execPath, ["scripts/test-tooling-sweep-server.mjs"], {
+    const wrapper = spawn(process.execPath, ["scripts/test-tooling-sweep-server.mjs"], passTcpPortReservations("127.0.0.1", [port], {
       stdio: ["ignore", "ignore", "ignore"],
       detached: true,
       env: {
@@ -774,7 +775,8 @@ test(
         NEXT_DIST_DIR: dist,
         ROO_ADMIN_FIXTURE: "0",
       },
-    });
+    }));
+    await releaseTcpPorts("127.0.0.1", [port]);
     const ended = () => wrapper.exitCode !== null || wrapper.signalCode !== null;
     let tree = [wrapper.pid];
     try {

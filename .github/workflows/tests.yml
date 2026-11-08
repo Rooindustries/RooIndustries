@@ -102,6 +102,7 @@ jobs:
       - run: npm run test:playwright-groups
       - run: npm run test:tested-tree
       - run: npm run test:free-ports
+      - run: node --test tests/port-reservation-lifetime.test.mjs
       - run: npm run test:fixture-ports
       - run: npm run test:reproducible-build
       - run: npm run test:build-lock
@@ -327,6 +328,7 @@ jobs:
             .next-e2e-native-booking/cache/webpack
       - uses: ./.github/actions/postgres
       - run: node --test tests/postgres-process.test.mjs
+      - run: node --test tests/fixture-run.test.mjs
       - name: Build the pinned native Storage fixture
         run: |
           git clone --depth 1 --branch v1.79.33 https://github.com/supabase/storage.git "$STORAGE_SOURCE"

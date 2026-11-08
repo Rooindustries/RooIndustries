@@ -9,7 +9,8 @@ import { lockBuildDirectory } from "./lib/build-lock.mjs";
 import { withNodeOption } from "./lib/node-options.mjs";
 import { createToolingContentFixture } from "../tests/fixtures/tooling-content.mjs";
 import { apiRouteSecrets } from "../tests/fixtures/api-routes.mjs";
-import { adoptHeldTcpPorts, portFromEnv, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
+import { adoptHeldTcpPorts, passTcpPortReservations, portFromEnv, releaseTcpPorts, releaseTcpSockets,
+  reserveTcpPorts } from "./lib/free-tcp-port.mjs";
 import fixturePorts from "../tests/fixtures/fixture-ports.cjs";
 
 await adoptHeldTcpPorts();
@@ -94,7 +95,8 @@ let active;
 let stopping = false;
 const execute = (args, executionEnv = env) => new Promise((resolve, reject) => {
   const stdio = ["inherit", "inherit", "inherit", lock.fd];
-  active = spawnContained(process.execPath, args, { env: lock.childEnv(executionEnv), stdio });
+  const options = passTcpPortReservations(testHost, [Number(target.port)], { env: lock.childEnv(executionEnv), stdio });
+  active = spawnContained(process.execPath, args, options);
   active.once("error", reject);
   active.once("exit", (code, signal) => code === 0 ? resolve() : reject(new Error(`Test server exited ${signal || code}.`)));
 });
@@ -117,7 +119,7 @@ try {
   await execute(["scripts/generate-sitemap.js"]);
   await execute(["scripts/generate-robots.js"], { ...env, VERCEL_ENV: "production" });
   if (development) {
-    await releaseTcpPorts(testHost, [Number(target.port)]);
+    await releaseTcpSockets(testHost, [Number(target.port)]);
     await execute([next, "dev", "--hostname", testHost, "--port", target.port]);
   } else {
     const content = { contentSha256: fixture.evidence.contentSha256, contentResponse: process.env.TOOLING_CLS_RESPONSE || "success" };
@@ -129,13 +131,14 @@ try {
       await execute([next, "build"], monitoringStartup ? env : buildEnv);
       fs.writeFileSync(manifestPath, JSON.stringify({ version: 1, sourceHash, baseURL, contentURL, ...content }));
     }
-    await releaseTcpPorts(testHost, [Number(target.port)]);
+    await releaseTcpSockets(testHost, [Number(target.port)]);
     await execute([next, "start", "--hostname", testHost, "--port", target.port]);
   }
 } catch (error) {
   if (!stopping) throw error;
 } finally {
   await fixture.close();
+  await releaseTcpPorts(testHost, [Number(target.port)]);
   if (clockFile) fs.rmSync(clockFile, { force: true });
 }
 

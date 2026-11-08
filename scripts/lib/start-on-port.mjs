@@ -2,7 +2,9 @@ import fs from "node:fs";
 import net from "node:net";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { exited, isRunning, isTrackedLeader, leaderProc, signalGroup, trackGroupLeader } from "./process-group.mjs";
-import { freeTcpPorts, passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "./free-tcp-port.mjs";
+import { passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts, shiftTcpPortReservations,
+  takeTcpPortReservations } from "./free-tcp-port.mjs";
+import { drainFixtureScope, fixtureScope, rememberFixtureScope, scopeOf } from "./fixture-run.mjs";
 
 export const addressInUse = (output) => /EADDRINUSE|Address already in use|\(Address in use\)/.test(output);
 
@@ -78,6 +80,7 @@ const namespaceMembers = (namespace) => namespace
 
 const pins = new WeakMap();
 const drains = new WeakMap();
+const portReservations = new WeakMap();
 
 const pinNamespace = (child) => {
   if (pins.has(child)) return true;
@@ -104,14 +107,19 @@ const drain = (child) => {
   if (!drains.has(child)) {
     drains.set(child, (async () => {
       const pinned = pins.get(child);
-      if (!pinned) return;
       try {
-        while (namespaceMembers(pinned.namespace).length) await pause(50);
+        await drainFixtureScope(scopeOf(child));
+        if (pinned) while (namespaceMembers(pinned.namespace).length) await pause(50);
       } finally {
-        pins.delete(child);
-        fs.closeSync(pinned.fd);
+        if (pinned) {
+          pins.delete(child);
+          fs.closeSync(pinned.fd);
+        }
       }
-    })());
+    })().finally(() => {
+      for (const fd of portReservations.get(child) || []) fs.closeSync(fd);
+      portReservations.delete(child);
+    }));
   }
   return drains.get(child);
 };
@@ -196,16 +204,19 @@ const captureOutput = (child, stdio, logs) => {
   }).join("");
 };
 
-const launcher = (held) => (command, args, options = {}) => {
+const launcher = (held, reservations = []) => (command, args, options = {}) => {
   requireContainment();
   const stdio = typeof options.stdio === "string" ? Array(3).fill(options.stdio) : [...(options.stdio || ["ignore", "ignore", "ignore"])];
   const logs = logFiles(stdio);
+  const scope = fixtureScope(shiftTcpPortReservations(options.env || process.env, 1 + held.stdio.length));
   const child = spawn("setpriv", [...containment, ...init, command, ...args], {
     ...options,
     detached: true,
-    env: { ...(options.env || process.env), ...held.env },
-    stdio: [...stdio.slice(0, 3), "pipe", ...held.stdio, ...stdio.slice(3)],
+    env: { ...scope.env, ...held.env },
+    stdio: [...stdio.slice(0, 3), "pipe", ...held.stdio, ...stdio.slice(3), ...reservations],
   });
+  rememberFixtureScope(child, scope);
+  portReservations.set(child, reservations);
   trackGroupLeader(child, () => drain(child));
   const lifeline = child.stdio[3];
   lifeline?.on("error", () => {});
@@ -241,29 +252,24 @@ const within = async (promise, timeout, message, output) => {
   }
 };
 
-const choosePorts = async (host, wanted, passHeld, probe = false) => {
-  if (passHeld) return reserveTcpPorts(host, wanted);
-  const picks = await freeTcpPorts(host, probe ? wanted : wanted.filter((port) => !port));
-  const ports = probe ? picks : wanted.map((port) => port || picks.shift());
-  await releaseTcpPorts(host, ports);
-  return ports;
-};
-
 export const startChildOnPorts = async ({ host, requested, preferred, spawnChild, output, isReady = () => true, passHeld = false, attempts = 5, timeout = 30000 }) => {
   const automatic = requested.every((port) => !port);
   for (let attempt = 1; ; attempt += 1) {
     const ports = automatic && preferred && attempt === 1
-      ? await choosePorts(host, preferred, passHeld, true).catch((error) => {
+      ? await reserveTcpPorts(host, preferred).catch((error) => {
         if (error.code !== "EADDRINUSE") throw error;
-        return choosePorts(host, requested, passHeld);
+        return reserveTcpPorts(host, requested);
       })
-      : await choosePorts(host, requested, passHeld);
+      : await reserveTcpPorts(host, requested);
+    const reservations = takeTcpPortReservations(host, ports);
+    if (!passHeld) await releaseTcpPorts(host, ports);
     let child;
     let spawnError;
     try {
       const held = passHeld ? passHeldTcpPorts(host, ports) : { stdio: [], env: {} };
-      child = spawnChild(ports, { spawn: launcher(held) });
-      if (!launched.has(child)) throw new Error("spawnChild must start its child with launch.spawn.");
+      const launch = launcher(held, reservations);
+      const returned = spawnChild(ports, { spawn: (...args) => (child = launch(...args)) });
+      if (returned !== child || !launched.has(child)) throw new Error("spawnChild must start its child with launch.spawn.");
       child.once("error", (error) => { spawnError = error; });
       if (passHeld) {
         await within(held.handOver(child), timeout, `Child did not take its held ports within ${timeout} ms:`, output);
@@ -275,6 +281,8 @@ export const startChildOnPorts = async ({ host, requested, preferred, spawnChild
       if (child && launched.has(child)) {
         await stopChild(child);
         await Promise.race([closes.get(child), pause(1000)]);
+      } else {
+        for (const fd of reservations) fs.closeSync(fd);
       }
       if (!automatic || attempt === attempts || !addressInUse(captures.get(child)?.() ?? "")) throw error;
     }

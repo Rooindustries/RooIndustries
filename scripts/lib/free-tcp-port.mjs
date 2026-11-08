@@ -2,6 +2,18 @@ import assert from "node:assert/strict";
 import net from "node:net";
 import { once } from "node:events";
 import { endOwnChannel } from "./own-channel.mjs";
+import fs from "node:fs";
+import { createRequire } from "node:module";
+
+const { flock, inUse } = createRequire(import.meta.url)("./build-lock-gate.cjs");
+const registry = "/tmp/roo-fixture-ports";
+const reservations = new Map();
+const reservationEnv = "ROO_TCP_PORT_RESERVATIONS";
+
+for (const { host, port, fd } of JSON.parse(process.env[reservationEnv] || "[]")) {
+  reservations.set(`${host}|${port}`, fd);
+}
+delete process.env[reservationEnv];
 
 const validPort = (requested) =>
   Number.isInteger(requested) && (requested === 0 || (requested >= 1024 && requested <= 65535));
@@ -11,16 +23,103 @@ const heldKey = (host, port) => `${host}|${port}`;
 const holderEnv = "ROO_HELD_TCP_PORTS";
 const holder = () => net.createServer((socket) => socket.destroy());
 
+const bindReserved = async (host, requested, server) => {
+  const mask = process.umask(0);
+  try {
+    try {
+      fs.mkdirSync(registry, { mode: 0o1777 });
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
+    const directory = fs.lstatSync(registry);
+    if (!directory.isDirectory()) throw new Error(`Fixture port registry is not a directory: ${registry}`);
+    if ((directory.mode & 0o7777) !== 0o1777) fs.chmodSync(registry, 0o1777);
+  } finally {
+    process.umask(mask);
+  }
+  for (;;) {
+    server.listen(requested, host);
+    await once(server, "listening");
+    const port = server.address().port;
+    const existing = reservations.get(heldKey(host, port));
+    if (existing !== undefined) {
+      if (requested) return { server, port, fd: existing, existing: true };
+      await new Promise((resolve) => server.close(resolve));
+      continue;
+    }
+    let fd;
+    try {
+      const mask = process.umask(0);
+      try {
+        try {
+          fd = fs.openSync(`${registry}/${port}`, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_RDONLY, 0o666);
+        } catch (error) {
+          if (error.code !== "EEXIST") throw error;
+          fd = fs.openSync(`${registry}/${port}`, fs.constants.O_RDONLY);
+        }
+      } finally {
+        process.umask(mask);
+      }
+      const result = flock(fd, { nonblock: true, conflictExitCode: inUse });
+      if (result.status === 0) return { server, port, fd };
+      if (result.status !== inUse) throw new Error(`Cannot reserve fixture port ${port}: ${result.stderr}`);
+    } catch (error) {
+      if (fd !== undefined) fs.closeSync(fd);
+      await new Promise((resolve) => server.close(resolve));
+      throw error;
+    }
+    fs.closeSync(fd);
+    await new Promise((resolve) => server.close(resolve));
+    if (requested) throw Object.assign(new Error(`Fixture port ${port} belongs to another run.`), { code: "EADDRINUSE" });
+  }
+};
+
+export const takeTcpPortReservations = (host, ports) => ports.map((port) => {
+  const key = heldKey(host, port);
+  const fd = reservations.get(key);
+  assert.ok(fd !== undefined, `Port ${port} has no reservation`);
+  reservations.delete(key);
+  return fd;
+});
+
+export const passTcpPortReservations = (host, ports, options = {}) => {
+  const selected = ports.flatMap((port) => {
+    const fd = reservations.get(heldKey(host, port));
+    return fd === undefined ? [] : [{ host, port, fd }];
+  });
+  if (!selected.length) return options;
+  const stdio = typeof options.stdio === "string"
+    ? Array(3).fill(options.stdio)
+    : [...(options.stdio || ["pipe", "pipe", "pipe"])];
+  const entries = selected.map(({ host: address, port }, index) => ({
+    host: address, port, fd: stdio.length + index,
+  }));
+  return {
+    ...options,
+    stdio: [...stdio, ...selected.map(({ fd }) => fd)],
+    env: { ...(options.env || process.env), [reservationEnv]: JSON.stringify(entries) },
+  };
+};
+
+export const shiftTcpPortReservations = (env, offset) => {
+  if (!env[reservationEnv]) return env;
+  const entries = JSON.parse(env[reservationEnv]).map((entry) => ({ ...entry, fd: entry.fd + offset }));
+  return { ...env, [reservationEnv]: JSON.stringify(entries) };
+};
+
 export const freeTcpPorts = async (host, requested) => {
   assert.ok(requested.every(validPort), "Invalid fixture port");
   const servers = requested.map(() => net.createServer());
   const explicitFirst = (a, b) => Number(requested[a] === 0) - Number(requested[b] === 0);
   const bindOrder = requested.map((port, index) => index).sort(explicitFirst);
+  const locks = [];
+  let complete = false;
   try {
     for (const index of bindOrder) {
-      servers[index].listen(requested[index], host);
-      await once(servers[index], "listening");
+      locks.push(await bindReserved(host, requested[index], servers[index]));
     }
+    for (const { port, fd } of locks) reservations.set(heldKey(host, port), fd);
+    complete = true;
     return servers.map((server) => server.address().port);
   } finally {
     await Promise.all(
@@ -28,18 +127,27 @@ export const freeTcpPorts = async (host, requested) => {
         .filter((server) => server.listening)
         .map((server) => new Promise((resolve) => server.close(resolve))),
     );
+    if (!complete) for (const { fd, existing } of locks) if (!existing) fs.closeSync(fd);
   }
 };
 
 export const freeTcpPort = async (host, requested = 0) => (await freeTcpPorts(host, [requested]))[0];
 
-export const releaseTcpPorts = async (host, ports) => {
+export const releaseTcpSockets = async (host, ports) => {
   await Promise.all(ports.map(async (port) => {
     const server = held.get(heldKey(host, port));
-    if (!server) return;
     held.delete(heldKey(host, port));
-    await new Promise((resolve) => server.close(resolve));
+    if (server) await new Promise((resolve) => server.close(resolve));
   }));
+};
+
+export const releaseTcpPorts = async (host, ports) => {
+  await releaseTcpSockets(host, ports);
+  for (const port of ports) {
+    const fd = reservations.get(heldKey(host, port));
+    if (fd !== undefined) fs.closeSync(fd);
+    reservations.delete(heldKey(host, port));
+  }
 };
 
 export const reserveTcpPorts = async (host, requested) => {
@@ -50,19 +158,21 @@ export const reserveTcpPorts = async (host, requested) => {
   try {
     for (const index of requested.map((port, index) => index).sort(explicitFirst)) {
       if (requested[index] !== 0 && held.has(heldKey(host, requested[index]))) continue;
-      const server = holder();
-      server.listen(requested[index], host);
-      bound.push({ server });
-      await once(server, "listening");
+      const entry = await bindReserved(host, requested[index], holder());
+      const { server, port } = entry;
+      bound.push(entry);
       server.unref();
-      ports[index] = server.address().port;
-      bound.at(-1).port = ports[index];
+      ports[index] = port;
     }
     assert.equal(new Set(ports).size, ports.length, "Fixture ports must differ");
-    for (const { port, server } of bound) held.set(heldKey(host, port), server);
+    for (const { port, server, fd } of bound) {
+      held.set(heldKey(host, port), server);
+      reservations.set(heldKey(host, port), fd);
+    }
     return ports;
   } catch (error) {
     await Promise.all(bound.filter(({ server }) => server.listening).map(({ server }) => new Promise((resolve) => server.close(resolve))));
+    for (const { fd, existing } of bound) if (!existing) fs.closeSync(fd);
     throw error;
   }
 };
@@ -78,6 +188,9 @@ export const portFromEnv = (name, env = process.env) => {
 export const listenOnPort = async (server, host, port) => {
   const holder = held.get(heldKey(host, port));
   held.delete(heldKey(host, port));
+  const fd = reservations.get(heldKey(host, port));
+  reservations.delete(heldKey(host, port));
+  if (fd !== undefined) server.once("close", () => fs.closeSync(fd));
   server.listen(...(holder ? [holder] : [port, host]));
   await once(server, "listening");
   server.ref();
@@ -107,7 +220,10 @@ export const passHeldTcpPorts = (host, ports) => {
     child.once("exit", onExit);
     child.once("error", finish);
   });
-  return { stdio: ["ipc"], env: { [holderEnv]: JSON.stringify(ports) }, handOver };
+  const transfer = passTcpPortReservations(host, ports, {
+    stdio: ["ignore", "ignore", "ignore", "ipc"], env: { [holderEnv]: JSON.stringify(ports) },
+  });
+  return { stdio: transfer.stdio.slice(3), env: transfer.env, handOver };
 };
 
 export const adoptHeldTcpPorts = async () => {

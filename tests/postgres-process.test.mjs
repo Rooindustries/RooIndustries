@@ -6,7 +6,7 @@ import path from "node:path";
 import { once } from "node:events";
 import { spawn, spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { freeTcpPort } from "../scripts/lib/free-tcp-port.mjs";
+import { freeTcpPort, passTcpPortReservations, releaseTcpPorts } from "../scripts/lib/free-tcp-port.mjs";
 
 test("PostgreSQL stays in the fixture tree and stops when its launcher is killed", { timeout: 30000 }, async () => {
   const host = "127.0.0.1";
@@ -24,7 +24,8 @@ test("PostgreSQL stays in the fixture tree and stops when its launcher is killed
 const { startPostgres } = await import(${JSON.stringify(helper)});
 await startPostgres(${JSON.stringify(pgBin)}, ${JSON.stringify(dataDir)}, ${JSON.stringify(host)}, ${port});
 console.log("ready");
-setInterval(() => {}, 1000);`], { stdio: ["ignore", "pipe", "inherit"] });
+setInterval(() => {}, 1000);`], passTcpPortReservations(host, [port], { stdio: ["ignore", "pipe", "inherit"] }));
+    await releaseTcpPorts(host, [port]);
     await Promise.race([once(parent.stdout, "data"), once(parent, "exit").then(() => {
       throw new Error("PostgreSQL launcher exited before readiness");
     })]);
@@ -45,6 +46,7 @@ setInterval(() => {}, 1000);`], { stdio: ["ignore", "pipe", "inherit"] });
     }
   } finally {
     if (parent && parent.exitCode === null && parent.signalCode === null) parent.kill("SIGKILL");
+    await releaseTcpPorts(host, [port]);
     fs.rmSync(scratch, { recursive: true, force: true });
   }
 });

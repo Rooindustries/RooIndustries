@@ -6,7 +6,8 @@ import { registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
 import { spawnContained, stopChild } from "./lib/fixture-tools.mjs";
 import { localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
-import { listenOnPort, portFromEnv, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
+import { listenOnPort, passTcpPortReservations, portFromEnv, releaseTcpPorts, releaseTcpSockets,
+  reserveTcpPorts } from "./lib/free-tcp-port.mjs";
 import fixturePorts from "../tests/fixtures/fixture-ports.cjs";
 import { lockBuildDirectory } from "./lib/build-lock.mjs";
 import { withNodeOption } from "./lib/node-options.mjs";
@@ -59,6 +60,7 @@ const stop = async () => {
   if (stopped) return;
   stopped = true;
   if (active) await stopChild(active);
+  await releaseTcpPorts(target.hostname, [port]);
   if (control.listening) { control.closeAllConnections(); await new Promise(resolve => control.close(resolve)); }
   restoreEmailFetch?.();
   const cleanup = await fixture.stop();
@@ -311,7 +313,8 @@ try {
   }, "--import", path.join(root, "scripts/lib/test-target-safety.mjs"), path.join(root, "scripts/lib/content-test-hooks.mjs"));
   const execute = args => new Promise((resolve, reject) => {
     const stdio = ["inherit", "inherit", "inherit", lock.fd];
-    active = spawnContained(process.execPath, args, { env: lock.childEnv(env), stdio });
+    const options = passTcpPortReservations(target.hostname, [port], { env: lock.childEnv(env), stdio });
+    active = spawnContained(process.execPath, args, options);
     active.once("error", reject);
     active.once("exit", (code, signal) => code === 0 || stopped ? resolve() : reject(new Error(`Admin fixture server exited ${signal || code}.`)));
   });
@@ -320,12 +323,12 @@ try {
   await execute(["scripts/generate-sitemap.js"]);
   await execute(["scripts/generate-robots.js"]);
   if (process.env.ROO_TEST_DEV === "1") {
-    await releaseTcpPorts(target.hostname, [port]);
+    await releaseTcpSockets(target.hostname, [port]);
     await execute([next, "dev", "--hostname", target.hostname, "--port", target.port]);
   } else {
     await execute(["scripts/validate-runtime-env.js"]);
     await execute([next, "build"]);
-    await releaseTcpPorts(target.hostname, [port]);
+    await releaseTcpSockets(target.hostname, [port]);
     await execute([next, "start", "--hostname", target.hostname, "--port", target.port]);
   }
 } finally { await stop(); }

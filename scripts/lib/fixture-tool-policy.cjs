@@ -13,6 +13,7 @@ const nodePrograms = new Map([
   ["scripts/phase1-api-contract.js", [undefined]],
   ["scripts/sourcemaps-e2e.mjs", ["--build"]],
   ["scripts/lib/network-control.mjs", ["https://monitoring-fixture.invalid/", "https://sourcemaps-guard.invalid"]],
+  ["tests/fixtures/port-reservation.mjs", ["reserve", "bind-later"]],
 ]);
 
 const lockScript = String.raw`

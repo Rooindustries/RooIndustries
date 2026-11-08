@@ -1,4 +1,4 @@
-import os,sys,json,re,hashlib,subprocess,tempfile,shutil,time,argparse
+import os,sys,json,re,hashlib,subprocess,tempfile,shutil,time,argparse,uuid,socket,threading,signal
 from pathlib import Path
 parser=argparse.ArgumentParser(description='Local PostgreSQL hosted-catalog alignment rehearsal; no hosted requests.')
 for name,env in [('input-dir','ROO_ALIGNMENT_INPUT_DIR'),('output-dir','ROO_ALIGNMENT_OUTPUT_DIR'),('release-dir','ROO_RELEASE_DIR'),('pg-bin','PG_BIN'),('pg-library-dir','LD_LIBRARY_PATH'),('port','ROO_ALIGNMENT_PORT'),('sunshine-migrations-dir','ROO_ALIGNMENT_SUNSHINE_MIGRATIONS'),('commerce-preimage','ROO_ALIGNMENT_COMMERCE_PREIMAGE')]:
@@ -19,6 +19,27 @@ for path in [W/name for name in ['hosted-full-catalog.sql','hosted-full-catalog.
 os.umask(0o077)
 for path in [OUTPUT,RELEASE]:path.mkdir(parents=True,exist_ok=True,mode=0o700);path.chmod(0o700)
 ENV={'PATH':'/usr/bin:/bin','LC_ALL':'C','TZ':'UTC','LD_LIBRARY_PATH':ARGS.pg_library_dir,'PGCONNECT_TIMEOUT':'5'}
+owns_run=not os.environ.get('ROO_FIXTURE_RUN')
+if owns_run:
+ os.environ['ROO_FIXTURE_RUN']=str(uuid.uuid4())
+ node=shutil.which('node')
+ if not node:raise RuntimeError('Node is required to clean up fixture processes')
+ started_at=(time.time() if sys.platform=='darwin' else time.clock_gettime(time.CLOCK_BOOTTIME))*1000
+ run_scope=json.dumps({'run':os.environ['ROO_FIXTURE_RUN'],'startedAt':started_at})
+ run_socket,watch_socket=socket.socketpair()
+ watch_env={key:value for key,value in os.environ.items() if key!='ROO_FIXTURE_RUN' and not key.startswith('ROO_FIXTURE_SCOPE_')}
+ watch_env['ROO_FIXTURE_WATCHER']='1'
+ watcher=Path(__file__).resolve().parent/'lib/fixture-run-watcher.mjs'
+ watcher_process=subprocess.Popen([node,str(watcher),run_scope,str(watch_socket.fileno()),'ready'],env=watch_env,
+  stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
+  pass_fds=(watch_socket.fileno(),),start_new_session=True)
+ watch_socket.close()
+ if run_socket.recv(1)!=b'1':raise RuntimeError('Fixture run watcher failed to start')
+ def watch_failure():
+  watcher_process.wait()
+  if run_socket.fileno()>=0:os.kill(os.getpid(),signal.SIGINT)
+ threading.Thread(target=watch_failure,daemon=True).start()
+ENV.update({key:value for key,value in os.environ.items() if key=='ROO_FIXTURE_RUN' or key.startswith('ROO_FIXTURE_SCOPE_')})
 RUN=Path(tempfile.mkdtemp(prefix='alignment-run-',dir=OUTPUT)); RUN.chmod(0o700); DATA=RUN/'pgdata'
 for filename in ['pgpass-empty','pgservice-empty']:(RUN/filename).write_text('')
 ENV.update(PGPASSFILE=str(RUN/'pgpass-empty'),PGSERVICEFILE=str(RUN/'pgservice-empty'))

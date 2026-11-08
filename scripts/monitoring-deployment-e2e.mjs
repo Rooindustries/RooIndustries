@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { homedir, networkInterfaces } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
-import { freeTcpPorts } from './lib/free-tcp-port.mjs';
+import { freeTcpPorts, releaseTcpPorts } from './lib/free-tcp-port.mjs';
 import { spawnGroup } from './lib/process-group.mjs';
 import { spawnContained, stopChild } from './lib/fixture-tools.mjs';
 import { localImportsOf } from './lib/local-imports.mjs';
@@ -302,6 +302,7 @@ export function GET() { throw new Error('Fixture edge error'); }
     lock?.release();
     await browser?.close();
     await fixture.close();
+    await releaseTcpPorts('127.0.0.1', [sitePort, contentPort]);
     requests.closeAllConnections();
     await new Promise(done => requests.close(done));
     restoreGuard();
