@@ -1,3 +1,5 @@
+import nodeProcess from "node:process";
+
 export const endOwnChannel = () => {
-  if (process.connected) process.disconnect();
+  if (nodeProcess.connected) nodeProcess.disconnect();
 };
