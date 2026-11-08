@@ -42,12 +42,11 @@ jest.mock("@paypal/react-paypal-js", () => ({
   },
 }));
 
-const response = (body, { ok = true, status = 200 } = {}) => ({
-  ok,
-  status,
-  json: async () => body,
-  text: async () => JSON.stringify(body),
-});
+const response = (body, { ok = true, status = 200 } = {}) => {
+  const payload = body.paymentAccessToken && body.providerPayload
+    ? { status: "started", sessionExpiresAt: "2099-01-15T08:20:00.000Z", ...body } : body;
+  return { ok, status, json: async () => payload, text: async () => JSON.stringify(payload) };
+};
 
 const bookingFixture = (overrides = {}) => ({
   email: "client@example.com",
@@ -428,7 +427,7 @@ describe("payment session UI", () => {
     ).toBe(false);
   });
 
-  test("reload resumes the same provider session and keeps the other provider disabled", async () => {
+  test("reload verifies the same provider session and keeps the other provider disabled", async () => {
     let starts = 0;
     global.fetch = jest.fn(async (url) => {
       if (url === "/api/payment/providers") {
@@ -467,6 +466,7 @@ describe("payment session UI", () => {
       );
     });
     expect(starts).toBe(1);
+    const original = JSON.parse(sessionStorage.getItem("payment_session_state"));
     first.unmount();
 
     renderPayment(bookingFixture());
@@ -480,7 +480,11 @@ describe("payment session UI", () => {
         "paypal_order_resume"
       );
     });
-    expect(starts).toBe(1);
+    expect(starts).toBe(2);
+    expect(JSON.parse(sessionStorage.getItem("payment_session_state"))).toMatchObject({
+      paymentAccessToken: original.paymentAccessToken,
+      providerPayload: { orderId: original.providerPayload.orderId },
+    });
     expect(screen.getByText(/pricing and provider selection are locked/i)).toBeInTheDocument();
   });
 

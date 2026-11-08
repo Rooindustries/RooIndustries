@@ -1,3 +1,4 @@
+import resolveQuoteProviders from "./quoteProviders.js";
 import { buildBrowserCompletionBody } from "./bookingSummary.js";
 import envValue from "../../supabase/envValue.cjs";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
@@ -3365,6 +3366,7 @@ export const startPaymentSession = async ({
         body: {
           ...await buildBrowserCompletionBody({ client, record: refreshed, body: buildPublicStatusBody(refreshed) }),
           provider,
+          providers: resolveQuoteProviders({ isFree: provider === "free" }),
           quote: buildQuotePayload(quote),
           quoteFingerprint: currentQuoteFingerprint,
           providerPayload: {},
@@ -3386,6 +3388,7 @@ export const startPaymentSession = async ({
         body: {
           ...await buildBrowserCompletionBody({ client, record: refreshed, body: finalized.response }),
           provider,
+          providers: resolveQuoteProviders({ isFree: provider === "free" }),
           quote: buildQuotePayload(quote),
           quoteFingerprint: currentQuoteFingerprint,
           sessionExpiresAt: String(refreshed.sessionExpiresAt || "").trim(),
@@ -3402,6 +3405,7 @@ export const startPaymentSession = async ({
         status: PAYMENT_STATUS_STARTED,
         bookingSummary: null,
         provider,
+        providers: resolveQuoteProviders({ isFree: provider === "free" }),
         quote: buildQuotePayload(quote),
         quoteFingerprint: currentQuoteFingerprint,
         providerPayload: buildProviderPayloadFromRecord(refreshed),

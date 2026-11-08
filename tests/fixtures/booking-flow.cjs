@@ -148,7 +148,7 @@ const test = base.extend({
       if (path === "/api/payment/start") {
         return json(route, {
           ok: true, paymentAccessToken: "fixture-payment", status: "started",
-          providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff` },
+          providerPayload: { orderId: "fixture-dodo", checkoutUrl: `${baseURL}/__test/checkout-handoff` },
           sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
         });
       }

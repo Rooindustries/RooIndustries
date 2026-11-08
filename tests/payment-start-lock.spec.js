@@ -44,93 +44,30 @@ test("while one payment method is starting checkout, another can't start a secon
   expect(starts).toHaveLength(1);
 });
 
-test("an older start that finishes late does not unlock another method while a newer start runs", async ({ page, flow }) => {
-  await page.route("https://checkout.razorpay.com/v1/checkout.js", route => route.fulfill({
-    contentType: "application/javascript",
-    body: "window.Razorpay = function () { return { open() {}, on() {} }; };",
-  }));
-  await page.route("**/api/payment/providers", route => route.fulfill({ json: { ok: true, providers } }));
-  await page.route("**/api/payment/quote", route => route.fulfill({ json: {
-    ok: true, quoteFingerprint: `fixture-quote-${route.request().postDataJSON()?.couponCode || "none"}`, providers,
-    quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
-  } }));
-  const releases = [];
+test("a coupon edit shares the pending start and keeps the original checkout", async ({ page, flow }) => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
   const starts = [];
   await page.route("**/api/payment/start", async route => {
-    starts.push(route.request().postDataJSON()?.provider || "unknown");
-    await new Promise(resolve => releases.push(resolve));
+    starts.push(route.request().postDataJSON());
+    await gate;
     await route.fallback();
   });
-
   await flow.review();
   await flow.payment();
-  const dodo = page.getByRole("button", { name: /^(Pay your way|Opening checkout\.\.\.)$/ });
-  const razorpay = page.getByRole("button", { name: "Pay with Razorpay", exact: true });
-  await expect(razorpay).toBeEnabled();
-  await dodo.click();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
   await expect.poll(() => starts.length).toBe(1);
-
   const coupon = page.locator("#payment-coupon-code");
   await coupon.fill("save20");
   await coupon.locator("..").getByRole("button", { name: "Apply", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Pay your way", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Pay your way", exact: true }).click();
-  await expect.poll(() => starts.length).toBe(2);
-
-  releases[0]();
-  await page.waitForTimeout(500);
-  await expect(razorpay).toBeDisabled();
-  await razorpay.click({ force: true });
-  await page.waitForTimeout(500);
-  expect(starts).toHaveLength(2);
-
-  releases[1]();
-  await expect(page).toHaveURL(/checkout-handoff$/);
-});
-
-test("a newer start that fails fast does not unlock another method while an older start is still pending", async ({ page, flow }) => {
-  await page.route("https://checkout.razorpay.com/v1/checkout.js", route => route.fulfill({
-    contentType: "application/javascript",
-    body: "window.Razorpay = function () { return { open() {}, on() {} }; };",
-  }));
-  await page.route("**/api/payment/providers", route => route.fulfill({ json: { ok: true, providers } }));
-  await page.route("**/api/payment/quote", route => route.fulfill({ json: {
-    ok: true, quoteFingerprint: `fixture-quote-${route.request().postDataJSON()?.couponCode || "none"}`, providers,
-    quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
-  } }));
-  let releaseFirst;
-  const starts = [];
-  await page.route("**/api/payment/start", async route => {
-    starts.push(route.request().postDataJSON()?.provider || "unknown");
-    if (starts.length === 1) {
-      await new Promise(resolve => { releaseFirst = resolve; });
-      return route.fallback();
-    }
-    return route.fulfill({ status: 409, json: { ok: false, code: "quote_fingerprint_mismatch", error: "The price changed." } });
-  });
-
-  await flow.review();
-  await flow.payment();
-  const razorpay = page.getByRole("button", { name: "Pay with Razorpay", exact: true });
-  await expect(razorpay).toBeEnabled();
-  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
-  await expect.poll(() => starts.length).toBe(1);
-
-  const coupon = page.locator("#payment-coupon-code");
-  await coupon.fill("save20");
-  await coupon.locator("..").getByRole("button", { name: "Apply", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Pay your way", exact: true })).toBeEnabled();
-  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
-  await expect.poll(() => starts.length).toBe(2);
-  await expect(page.getByText("The price changed. Review the updated total and click again.", { exact: true })).toBeVisible();
-
-  await expect(razorpay).toBeDisabled();
-  await razorpay.click({ force: true });
-  await page.waitForTimeout(500);
-  expect(starts).toHaveLength(2);
-
-  releaseFirst();
-  await expect(razorpay).toBeEnabled();
+  release();
+  await expect(page.getByRole("button", { name: "Resume checkout", exact: true })).toBeVisible();
+  expect(starts).toHaveLength(1);
+  const saved = await page.evaluate(() => JSON.parse(sessionStorage.getItem("payment_session_state")));
+  expect(saved.provider).toBe("dodo");
+  expect(JSON.parse(saved.fingerprint).couponCode).toBe("");
+  await expect(page).toHaveURL(/\/payment$/);
 });
 
 const paypalSdkStub = `
@@ -148,10 +85,11 @@ window.paypal = {
           window.__paypalClickResult = result;
           if (result === "resolved") window.__paypalCreateOrder = () => options.createOrder({}, {});
         });
+        this.button = button;
         container.appendChild(button);
         return Promise.resolve();
       },
-      close: () => Promise.resolve(),
+      close() { this.button?.remove(); return Promise.resolve(); },
       updateProps: () => Promise.resolve(),
     };
   },
@@ -315,8 +253,9 @@ test("a free booking can't be confirmed while a paid checkout is starting", asyn
   expect(starts).toEqual(["dodo"]);
 
   release();
-  await expect(confirmFree).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Resume checkout", exact: true })).toBeEnabled();
+  await expect(confirmFree).toHaveCount(0);
   await expect(page).toHaveURL(/\/payment$/);
   expect(starts).toEqual(["dodo"]);
-  expect(await page.evaluate(() => sessionStorage.getItem("payment_session_state"))).toBeNull();
+  expect((await page.evaluate(() => JSON.parse(sessionStorage.getItem("payment_session_state")))).provider).toBe("dodo");
 });

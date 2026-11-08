@@ -2,7 +2,7 @@ const {
   getPaymentPackageTitleAliases,
   resolvePaymentQuote,
 } = require("../ref/pricing.js");
-const { resolvePaymentProviders } = require("./providerConfig.js");
+const resolveQuoteProviders = require("./quoteProviders.js");
 const { buildQuoteFingerprint } = require("./paymentRecord.js");
 const { verifyUpgradeIntentToken } = require("../ref/upgradeIntentToken.js");
 const {
@@ -100,7 +100,6 @@ module.exports = async function handler(req, res) {
       couponCode,
       pricingInputs: combined.pricingInputs,
     });
-    const providers = resolvePaymentProviders();
     const isFree = resolvedQuote.paymentProvider === "free";
     const quoteFingerprint = buildQuoteFingerprint({
       bookingPayload,
@@ -125,19 +124,7 @@ module.exports = async function handler(req, res) {
         couponDiscountValue: resolvedQuote.couponDiscountValue,
         canCombineWithReferral: resolvedQuote.canCombineWithReferral === true,
       },
-      providers: isFree
-        ? {
-            razorpay: {
-              enabled: false,
-              mode: providers.razorpay.mode,
-            },
-            paypal: {
-              enabled: false,
-              mode: providers.paypal.mode,
-              clientId: "",
-            },
-          }
-        : providers,
+      providers: resolveQuoteProviders({ isFree }),
     });
   } catch (error) {
     const status = Number(error?.status) || 500;
