@@ -53,10 +53,15 @@ export default {
     const globalWrites = new Set(references.filter((reference) => reference.isWrite())
       .map((reference) => reference.identifier.name));
     let globalShared = false;
+    const comparisons = new Set(["===", "!==", "==", "!="]);
     for (const { identifier } of references.filter((reference) => globalObjects.has(reference.identifier.name))) {
-      const { parent } = identifier;
+      let target = identifier;
+      while (target.parent.type === "MemberExpression" && target.parent.object === target &&
+        globalObjects.has(staticKey(target.parent))) target = target.parent;
+      const { parent } = target;
       if (parent.type === "UnaryExpression" && parent.operator === "typeof") continue;
-      const member = parent.type === "MemberExpression" && parent.object === identifier;
+      if (parent.type === "BinaryExpression" && comparisons.has(parent.operator)) continue;
+      const member = parent.type === "MemberExpression" && parent.object === target;
       if (member && !isWriteTarget(parent)) continue;
       const key = member ? staticKey(parent) : undefined;
       if (typeof key === "string") globalWrites.add(key);

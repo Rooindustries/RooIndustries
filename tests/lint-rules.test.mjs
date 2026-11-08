@@ -1227,6 +1227,8 @@ run("no-parent-ipc-disconnect", {
     `const width = globalThis.innerWidth; ({ observer = window.ResizeObserver } = options);
       new ResizeObserver(f).disconnect();`,
     `function swap(window) { window.ResizeObserver = fork; } new ResizeObserver(f).disconnect();`,
+    `if (window === globalThis && self != null) new ResizeObserver(f).disconnect();`,
+    `window.window.addEventListener("resize", f); new ResizeObserver(f).disconnect();`,
   ],
   invalid: [
     {
@@ -1270,6 +1272,9 @@ run("no-parent-ipc-disconnect", {
       `const scope = globalThis; scope.MutationObserver = fork; new MutationObserver(f).disconnect();`,
       `globalThis[name] = fork; new PerformanceObserver(f).disconnect();`,
       `delete window?.ReportingObserver; new ReportingObserver(f).disconnect();`,
+      `global.global.MutationObserver = fork; new MutationObserver(f).disconnect();`,
+      `window.self["ResizeObserver"] = fork; new ResizeObserver(f).disconnect();`,
+      `Object.assign(globalThis.window, { IntersectionObserver: fork }); new IntersectionObserver(f).disconnect();`,
     ].map((code) => ({ code, errors: [{ messageId: "parent" }] })),
     {
       name: "configured globals are checked in script scope",
