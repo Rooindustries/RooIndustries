@@ -111,7 +111,7 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
       isReady: postmasterReady,
       spawnChild: ([port], launch) => {
         const log = fs.openSync(postgresLog, 'w');
-        postgresProcess = launch.spawn(path.join(pgBin, 'postgres'), ['-D', dataDir, '-p', String(port), '-h', host, '-k', scratch], { env, stdio: ['ignore', log, log] });
+        postgresProcess = launch.spawn(path.join(pgBin, 'postgres'), ['-D', dataDir, '-p', String(port), '-h', host, '-k', ''], { env, stdio: ['ignore', log, log] });
         fs.closeSync(log);
         return postgresProcess;
       },
