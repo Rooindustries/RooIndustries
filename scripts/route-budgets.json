@@ -1,7 +1,7 @@
 {
   "routes": {
     "/": {
-      "js": 222208,
+      "js": 220981,
       "css": 25600
     },
     "/_not-found": {
@@ -9,7 +9,7 @@
       "css": 25600
     },
     "/about": {
-      "js": 164428,
+      "js": 164360,
       "css": 25600
     },
     "/admin/content": {
@@ -21,15 +21,15 @@
       "css": 27648
     },
     "/benchmarks": {
-      "js": 166440,
+      "js": 166367,
       "css": 25600
     },
     "/booking": {
-      "js": 244736,
+      "js": 243133,
       "css": 25600
     },
     "/contact": {
-      "js": 173651,
+      "js": 173571,
       "css": 25600
     },
     "/discord": {
@@ -37,15 +37,15 @@
       "css": 25600
     },
     "/downloads/[slug]": {
-      "js": 162376,
+      "js": 162306,
       "css": 25600
     },
     "/faq": {
-      "js": 203365,
+      "js": 203282,
       "css": 25600
     },
     "/meet-the-team": {
-      "js": 168083,
+      "js": 168039,
       "css": 25600
     },
     "/not-found": {
@@ -53,63 +53,63 @@
       "css": 25600
     },
     "/packages": {
-      "js": 166978,
+      "js": 166922,
       "css": 25600
     },
     "/payment": {
-      "js": 241664,
+      "js": 240355,
       "css": 25600
     },
     "/payment-success": {
-      "js": 227328,
+      "js": 226472,
       "css": 25600
     },
     "/privacy": {
-      "js": 166494,
+      "js": 166406,
       "css": 25600
     },
     "/referrals/change-password": {
-      "js": 165077,
+      "js": 165010,
       "css": 25600
     },
     "/referrals/dashboard": {
-      "js": 239832,
+      "js": 239767,
       "css": 25600
     },
     "/referrals/forgot": {
-      "js": 164105,
+      "js": 164046,
       "css": 25600
     },
     "/referrals/login": {
-      "js": 161008,
+      "js": 160977,
       "css": 25600
     },
     "/referrals/register": {
-      "js": 234023,
+      "js": 233954,
       "css": 25600
     },
     "/referrals/reset": {
-      "js": 232773,
+      "js": 232704,
       "css": 25600
     },
     "/referrals/verify": {
-      "js": 164133,
+      "js": 164028,
       "css": 25600
     },
     "/reviews": {
-      "js": 166218,
+      "js": 166084,
       "css": 25600
     },
     "/terms": {
-      "js": 166478,
+      "js": 166391,
       "css": 25600
     },
     "/thank-you": {
-      "js": 227328,
+      "js": 226463,
       "css": 25600
     },
     "/tools": {
-      "js": 165537,
+      "js": 165799,
       "css": 25600
     },
     "/tourney": {
@@ -117,11 +117,11 @@
       "css": 27648
     },
     "/upgrade-xoc": {
-      "js": 165300,
+      "js": 165214,
       "css": 25600
     },
     "/upgrade/[slug]": {
-      "js": 165260,
+      "js": 165667,
       "css": 25600
     }
   },
