@@ -30,6 +30,49 @@ const smoke = async (options, extra = {}) => {
   }
 };
 
+for (const source of [
+  "https://www.paypal.com/sdk/js?client-id=fixture",
+  "https://checkout.razorpay.com/v1/checkout.js",
+]) {
+  for (const monitor of [false, true]) {
+    const mode = monitor ? "production monitoring" : "ordinary CI";
+    test(`${mode} ignores deliberately blocked ${new URL(source).hostname}`, async () => {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "smoke-monitor-"));
+      const event = path.join(directory, "deployment.json");
+      const deployment = "https://rooindustries-fixture.vercel.app";
+      fs.writeFileSync(event, JSON.stringify({
+        repository: { full_name: "Rooindustries/RooIndustries" },
+        deployment: { environment: "Production" },
+        deployment_status: { state: "success", environment_url: deployment },
+      }));
+      try {
+        const result = await smoke({
+          packages: { postOnLoad: true },
+          scriptSources: { "/payment": source },
+          bodies: {
+            "/payment": '<h3>Booking Summary</h3>' +
+              '<script>fetch("/api/payment/providers", { method: "POST" }).catch(() => {});</script>',
+          },
+        }, {
+          GITHUB_ACTIONS: "true",
+          ...(monitor ? {
+            GITHUB_EVENT_NAME: "deployment_status",
+            GITHUB_WORKFLOW_REF: "Rooindustries/RooIndustries/.github/workflows/production-smoke.yml@refs/heads/main",
+            GITHUB_EVENT_PATH: event,
+            DEPLOYMENT_URL: deployment,
+          } : {}),
+        });
+        assert.equal(result.code, 0, result.output);
+        assert.ok(result.report.results.every(row => row.ok), result.output);
+        assert.ok(result.requests.every(row => row.method === "GET"));
+        assert.ok(result.requests.some(row => row.path === "/api/payment/quote"));
+      } finally {
+        fs.rmSync(directory, { recursive: true });
+      }
+    });
+  }
+}
+
 for (const quote of [{ status: 503 }, { body: { ok: true } }, { body: { ok: false, error: "Unavailable" } }]) {
   test(`a real quote failure ${JSON.stringify(quote)} is a regression`, async () => {
     const result = await smoke({ quote });

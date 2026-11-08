@@ -93,6 +93,7 @@ const requiresCheckoutResource = (request, base) => {
 
 const allowSmokeRequests = async (context, base, checkout, failed) => {
   const active = new Set();
+  const notLoadedByDesign = new WeakSet();
   context.on("close", () => { for (const controller of active) controller.abort(); });
   await context.route("**/*", async (route) => {
     const request = route.request();
@@ -109,7 +110,10 @@ const allowSmokeRequests = async (context, base, checkout, failed) => {
     }
     const allowed = (request.method() === "GET" || quote) &&
       (process.env.GITHUB_ACTIONS !== "true" || isCiTarget(url) || (isProductionMonitor() && url.origin === base));
-    if (!allowed) return route.abort("blockedbyclient");
+    if (!allowed) {
+      notLoadedByDesign.add(request);
+      return route.abort("blockedbyclient");
+    }
     if (quote) url.searchParams.set("packageTitle", checkout.packageTitle);
     const headers = smokeHeaders(url.href, base, request.headers());
     const controller = new AbortController();
@@ -142,6 +146,7 @@ const allowSmokeRequests = async (context, base, checkout, failed) => {
     }
   });
   await context.routeWebSocket(/.*/, (socket) => socket.close());
+  return notLoadedByDesign;
 };
 
 const withSmokePage = async (browser, base, contextOptions, check) => {
@@ -156,7 +161,7 @@ const withSmokePage = async (browser, base, contextOptions, check) => {
   });
   const hasApplicationError = pattern => new RegExp(pattern, "i").test(document.body?.innerText || "");
   try {
-    await allowSmokeRequests(context, base, checkout, fail);
+    const notLoadedByDesign = await allowSmokeRequests(context, base, checkout, fail);
     if (checkout) await context.addInitScript((booking) => {
       sessionStorage.setItem("checkout_booking_state", JSON.stringify(booking));
     }, checkout);
@@ -177,7 +182,7 @@ const withSmokePage = async (browser, base, contextOptions, check) => {
     };
     page.on("requestfinished", finished);
     page.on("requestfailed", request => {
-      if (browser.isConnected() && requiresCheckoutResource(request, base)) {
+      if (browser.isConnected() && !notLoadedByDesign.has(request) && requiresCheckoutResource(request, base)) {
         fail(new Error(`${new URL(request.url()).pathname} failed: ${request.failure()?.errorText}`));
       }
       finished(request);
