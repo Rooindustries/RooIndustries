@@ -4,12 +4,30 @@ const { fixturePort } = require("./fixtures/fixture-ports.cjs");
 test.use({ javaScriptEnabled: true, reducedMotion: "reduce" });
 
 const footerLink = (page, href) => page.locator(`footer a[href="${href}"]`).first();
+const pageLink = (page, href) => page.locator(`#main-content a[href="${href}"]`).first();
 const hydrated = (page) => page.waitForFunction(() => window.history.state?.__rooLegacy === true);
 const controlContent = async (request, baseURL, data) => {
   const origin = new URL(baseURL);
   origin.port = String(fixturePort("TOOLING_CONTENT_PORT"));
   const response = await request.post(new URL("/__content", origin).href, { data });
   expect(response.status()).toBe(200);
+};
+
+const observeHero = (page) => page.evaluate(() => {
+  window.__heroCopyStates = [];
+  new MutationObserver(() => {
+    const text = document.querySelector("#top h1")?.textContent;
+    if (text) window.__heroCopyStates.push(text);
+  }).observe(document.body, { subtree: true, childList: true, characterData: true });
+});
+
+const finishHeroRefresh = async (page) => {
+  await page.unroute("**/api/content/hero");
+  await page.route("**/api/content/hero", route => route.fulfill({
+    json: { ok: true, data: { headingLine1: "Final published heading" }, revision: 1000 },
+  }));
+  await returnHome(page);
+  await expect(page.locator("#top h1")).toContainText("Final published heading");
 };
 
 const returnHome = async (page) => {
@@ -95,12 +113,20 @@ for (const [label, data] of [["missing", null], ["wrong-shaped", []]]) {
     await page.clock.install();
     await page.goto("/", { waitUntil: "networkidle" });
     await hydrated(page);
+    await observeHero(page);
     const finished = page.waitForEvent("requestfinished", request => request.url().endsWith("/api/content/hero"));
     await page.route("**/api/content/hero", route => route.fulfill({ json: { ok: true, data, revision: 999 } }));
     await returnHome(page);
     await finished;
     if (data === null) await expect(page.locator("#top h1")).not.toContainText("Fixture Hero Heading One");
     else await expect(page.locator("#top h1")).toContainText("Fixture Hero Heading One");
+    const refreshedHeading = await page.locator("#top h1").textContent();
+    await finishHeroRefresh(page);
+    const states = await page.evaluate(() => window.__heroCopyStates);
+    expect(states.length).toBeGreaterThan(0);
+    expect(states.every(text =>
+      /Fixture Hero Heading One|Final published heading/.test(text) || text === refreshedHeading
+    )).toBe(true);
   });
 }
 
@@ -108,6 +134,7 @@ test("an API copy older than the server copy cannot replace it", async ({ page }
   await page.clock.install();
   await page.goto("/", { waitUntil: "networkidle" });
   await hydrated(page);
+  await observeHero(page);
   await page.route("**/api/content/hero", route => route.fulfill({
     json: { ok: true, data: { headingLine1: "Older API heading" }, revision: 0 },
   }));
@@ -115,6 +142,8 @@ test("an API copy older than the server copy cannot replace it", async ({ page }
   await returnHome(page);
   await finished;
   await expect(page.locator("#top h1")).toContainText("Fixture Hero Heading One");
+  await finishHeroRefresh(page);
+  expect(await page.evaluate(() => window.__heroCopyStates.some(text => text.includes("Older API heading")))).toBe(false);
 });
 
 test("an unlabelled API copy cannot replace a newer cached revision", async ({ page }) => {
@@ -127,11 +156,133 @@ test("an unlabelled API copy cannot replace a newer cached revision", async ({ p
   }));
   await returnHome(page);
   await expect(page.locator("#top h1")).toContainText("Newer cached heading");
+  await observeHero(page);
   revision = null;
   const finished = page.waitForEvent("requestfinished", request => request.url().endsWith("/api/content/hero"));
   await returnHome(page);
   await finished;
   await expect(page.locator("#top h1")).toContainText("Newer cached heading");
+  await finishHeroRefresh(page);
+  expect(await page.evaluate(() => window.__heroCopyStates.some(text => text.includes("Unlabelled heading")))).toBe(false);
+});
+
+test("a package response from an older revision never replaces copy refreshed before it", async ({ page, request, baseURL }) => {
+  const publishedTag = "Offer tag published before the older response";
+  const offers = page.locator("#packages");
+  const isPackages = (url) => new URL(url).pathname === "/api/content/packages-list";
+  const readPackages = async () => {
+    const response = await request.get("/api/content/packages-list");
+    expect(response.status()).toBe(200);
+    return response.json();
+  };
+  const leaveAndReturnAfterWindow = async () => {
+    await footerLink(page, "/terms").click();
+    await expect(page).toHaveURL(/\/terms$/);
+    await page.clock.fastForward("01:01");
+    await footerLink(page, "/").click();
+    await expect(page).toHaveURL(/\/$/);
+  };
+  const held = [];
+  let holdOlder = false;
+  await page.clock.install();
+  try {
+    const older = await readPackages();
+    expect(older.data.some((row) => row.tag === publishedTag)).toBe(false);
+    await page.route("**/api/content/packages-list", async (route) => {
+      if (!holdOlder) return route.fallback();
+      held.push({ body: older, release: () => route.fulfill({ json: older }) });
+    });
+
+    await page.goto("/", { waitUntil: "networkidle" });
+    await hydrated(page);
+    await page.evaluate(() => { window.__offerDocument = true; });
+
+    await controlContent(request, baseURL, { patch: { _id: "tooling-package-0", tag: publishedTag } });
+    const published = await readPackages();
+    expect(published.revision).toBeGreaterThan(older.revision);
+    await leaveAndReturnAfterWindow();
+    await offers.scrollIntoViewIfNeeded();
+    await expect(offers.getByText(publishedTag, { exact: true })).toBeVisible();
+
+    holdOlder = true;
+    await page.evaluate(() => {
+      window.__offerStates = [];
+      new MutationObserver(() => {
+        const text = document.querySelector("#packages")?.textContent || "";
+        if (text.includes("$149.95")) window.__offerStates.push(text.includes("Offer tag published before the older response"));
+      }).observe(document.body, { childList: true, subtree: true, characterData: true });
+    });
+    await leaveAndReturnAfterWindow();
+    await expect.poll(() => held.length).toBe(1);
+    holdOlder = false;
+    expect(held[0].body.revision).toBeLessThan(published.revision);
+    expect(held[0].body.data.some((row) => row.tag === publishedTag)).toBe(false);
+
+    const consumed = page.waitForEvent("requestfinished", (finished) => isPackages(finished.url()));
+    await held[0].release();
+    const olderResponse = await (await consumed).response();
+    expect(olderResponse.status()).toBe(200);
+    expect(await olderResponse.json()).toEqual(older);
+
+    await offers.scrollIntoViewIfNeeded();
+    await expect(offers.getByText(publishedTag, { exact: true })).toBeVisible();
+    await footerLink(page, "/about").click();
+    await expect(page).toHaveURL(/\/about$/);
+    await pageLink(page, "/packages").click();
+    await expect(page).toHaveURL(/\/packages$/);
+    await expect(page.getByText(publishedTag, { exact: true }).first()).toBeVisible();
+    const states = await page.evaluate(() => window.__offerStates);
+    expect(states.length).toBeGreaterThan(0);
+    expect(states.filter((shown) => !shown)).toEqual([]);
+    expect(held).toHaveLength(1);
+    expect(await page.evaluate(() => window.__offerDocument)).toBe(true);
+  } finally {
+    await controlContent(request, baseURL, { reset: true });
+  }
+});
+
+
+test("a packages section remounted after the cache updated starts from the newer cached copy", async ({ page, request, baseURL }) => {
+  const publishedTag = "Offer tag published after the first load";
+  await page.clock.install();
+  const offers = page.locator("#packages");
+  try {
+    await page.goto("/", { waitUntil: "networkidle" });
+    await hydrated(page);
+    await offers.scrollIntoViewIfNeeded();
+    await expect(offers.getByText("$149.95").first()).toBeVisible();
+    await expect(offers.getByText(publishedTag, { exact: true })).toHaveCount(0);
+    await page.evaluate(() => { window.__remountDocument = true; });
+
+    await controlContent(request, baseURL, { patch: { _id: "tooling-package-0", tag: publishedTag } });
+    await footerLink(page, "/terms").click();
+    await expect(page).toHaveURL(/\/terms$/);
+    await page.clock.fastForward("01:01");
+    await footerLink(page, "/").click();
+    await expect(page).toHaveURL(/\/$/);
+    await offers.scrollIntoViewIfNeeded();
+    await expect(offers.getByText(publishedTag, { exact: true })).toBeVisible();
+
+    await footerLink(page, "/terms").click();
+    await expect(page).toHaveURL(/\/terms$/);
+    await page.evaluate(() => {
+      window.__offerStates = [];
+      new MutationObserver(() => {
+        const text = document.querySelector("#packages")?.textContent || "";
+        if (text.includes("$149.95")) window.__offerStates.push(text.includes("Offer tag published after the first load"));
+      }).observe(document.body, { childList: true, subtree: true, characterData: true });
+    });
+    await footerLink(page, "/").click();
+    await expect(page).toHaveURL(/\/$/);
+    await offers.scrollIntoViewIfNeeded();
+    await expect(offers.getByText(publishedTag, { exact: true })).toBeVisible();
+    const states = await page.evaluate(() => window.__offerStates);
+    expect(states.length).toBeGreaterThan(0);
+    expect(states.filter((published) => !published)).toEqual([]);
+    expect(await page.evaluate(() => window.__remountDocument)).toBe(true);
+  } finally {
+    await controlContent(request, baseURL, { reset: true });
+  }
 });
 
 for (const exit of ["close", "back"]) {

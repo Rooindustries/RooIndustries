@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from "react";
-import { reportRequestError } from "../lib/clientRequest";
 import { Link } from "react-router-dom";
 import {
   PERF_TOGGLE_KEYS,
@@ -7,7 +6,8 @@ import {
   subscribePerfDebugChanges,
 } from "../lib/perfDebug";
 import homeCopy from "../lib/homeCopy";
-import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
+import { HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
+import { useContent } from "../lib/contentCache";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
 const { HOME_COPY } = homeCopy;
@@ -100,29 +100,11 @@ function VideoBadge({ name, pauseVideos }) {
 }
 
 export default function HowItWorks({ initialData = null }) {
-  const [data, setData] = useState(
-    () => initialData ?? fallbackData
-  );
+  const { data: contentData } = useContent(HOME_SECTION_DATA_KEYS.howItWorks, initialData);
+  const data = contentData ?? fallbackData;
   const handleHomeSectionLink = useHomeSectionLinkHandler();
 
-  useEffect(() => {
-    if (initialData !== null) {
-      setData(initialData);
-    }
-  }, [initialData]);
   const [pauseVideos, setPauseVideos] = useState(false);
-
-  useEffect(() => {
-    if (initialData !== null) return;
-    const cachedData = readHomeSectionData(HOME_SECTION_DATA_KEYS.howItWorks);
-    if (cachedData !== null) {
-      setData(cachedData);
-      return;
-    }
-    fetchHomeSectionData(HOME_SECTION_DATA_KEYS.howItWorks)
-      .then((res) => { if (res) setData(res); })
-      .catch(reportRequestError);
-  }, [initialData]);
 
   useEffect(() => {
     const syncPauseState = () => {

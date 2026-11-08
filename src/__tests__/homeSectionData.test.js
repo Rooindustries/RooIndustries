@@ -1,74 +1,58 @@
-import { getPublicContent } from "../lib/publicContentClient";
-import {
-  fetchHomeSectionData,
-  readHomeSectionData,
-} from "../lib/homeSectionData";
+jest.mock("../lib/publicContentClient", () => {
+  const getPublicContent = jest.fn();
+  return {
+    getPublicContent,
+    getPublicContentEntry: jest.fn(async (...args) => ({ data: await getPublicContent(...args), revision: null })),
+  };
+});
 
-jest.mock("../lib/publicContentClient", () => ({
-  getPublicContent: jest.fn(),
-}));
+describe("shared content cache", () => {
+  let now;
+  let getPublicContent;
+  let fetchHomeSectionData;
 
-describe("home section cache", () => {
   beforeEach(() => {
-    sessionStorage.clear();
-    jest.spyOn(Date, "now").mockReturnValue(1_000_000);
-    // Drop module memory through the same expiration path used by a new page.
-    readHomeSectionData("reviews");
+    jest.resetModules();
+    now = 1_000_000;
+    jest.spyOn(Date, "now").mockImplementation(() => now);
+    ({ getPublicContent } = require("../lib/publicContentClient"));
+    ({ fetchHomeSectionData } = require("../lib/homeSectionData"));
     getPublicContent.mockReset();
   });
 
   afterEach(() => {
-    sessionStorage.clear();
     jest.restoreAllMocks();
   });
 
   test("refreshing one expired section cannot revive another expired section", async () => {
-    sessionStorage.setItem("roo-home-data:__ts", "699999");
-    sessionStorage.setItem(
-      "roo-home-data:reviews",
-      JSON.stringify({ reviews: [{ name: "Old review" }] })
-    );
-    sessionStorage.setItem(
-      "roo-home-data:about",
-      JSON.stringify({ recordTitle: "Old record" })
-    );
-    sessionStorage.setItem("referral_session", "retained-referral");
-    getPublicContent.mockImplementation(async (key) =>
-      key === "reviews"
-        ? { reviews: [{ name: "Fresh review" }] }
-        : { recordTitle: "Fresh record" }
-    );
-
+    let published = false;
+    getPublicContent.mockImplementation(async (key) => ({
+      fixtureValue: key + (published ? " new" : " old"),
+    }));
     await fetchHomeSectionData("reviews");
-    const about = await fetchHomeSectionData("about");
+    await fetchHomeSectionData("about");
+    sessionStorage.setItem("referral_session", "retained-referral");
+    now += 61_000;
+    published = true;
 
-    expect(about).toMatchObject({ recordTitle: "Fresh record" });
-    expect(getPublicContent.mock.calls.map(([key]) => key)).toEqual([
-      "reviews",
-      "about",
-    ]);
+    expect(await fetchHomeSectionData("reviews")).toMatchObject({ fixtureValue: "reviews new" });
+    expect(await fetchHomeSectionData("about")).toMatchObject({ fixtureValue: "about new" });
+    expect(getPublicContent).toHaveBeenCalledTimes(4);
     expect(sessionStorage.getItem("referral_session")).toBe("retained-referral");
   });
 
   test("reuses fresh data and coalesces simultaneous requests", async () => {
-    sessionStorage.setItem("roo-home-data:__ts", "700001");
-    sessionStorage.setItem(
-      "roo-home-data:about",
-      JSON.stringify({ recordTitle: "Current record" })
-    );
     getPublicContent.mockResolvedValue({ reviews: [{ name: "Current review" }] });
 
-    expect(await fetchHomeSectionData("about")).toMatchObject({
-      recordTitle: "Current record",
-    });
     const [first, second] = await Promise.all([
       fetchHomeSectionData("reviews"),
       fetchHomeSectionData("reviews"),
     ]);
 
     expect(first).toEqual(second);
+    expect(first.reviews).toEqual([{ name: "Current review" }]);
     expect(getPublicContent).toHaveBeenCalledTimes(1);
-    expect(getPublicContent).toHaveBeenCalledWith("reviews");
+    now += 30_000;
     expect(await fetchHomeSectionData("reviews")).toEqual(first);
     expect(getPublicContent).toHaveBeenCalledTimes(1);
   });

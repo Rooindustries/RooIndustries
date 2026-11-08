@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from "react";
-import { reportRequestError } from "../lib/clientRequest";
-import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
+import React from "react";
+import { useContent } from "../lib/contentCache";
+import { HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 
 /* Record card design tokens — all theme accents derive from the active palette. */
 const RC = {
@@ -35,20 +35,7 @@ const revealWhenInView = (node) => {
 };
 
 export default function About({ initialData = null, compact = false }) {
-  const [aboutData, setAboutData] = useState(() => initialData);
-
-  useEffect(() => {
-    if (initialData !== null) {
-      setAboutData(initialData);
-    }
-  }, [initialData]);
-
-  useEffect(() => {
-    if (aboutData !== null) return;
-    fetchHomeSectionData(HOME_SECTION_DATA_KEYS.about)
-      .then(setAboutData)
-      .catch(reportRequestError);
-  }, [aboutData]);
+  const { data: aboutData } = useContent(HOME_SECTION_DATA_KEYS.about, initialData);
 
   if (!aboutData) {
     return (

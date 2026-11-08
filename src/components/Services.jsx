@@ -1,13 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { reportRequestError } from "../lib/clientRequest";
+import { useContent } from "../lib/contentCache";
 import { AnimatePresence, motion } from "framer-motion";
 import { urlFor } from "../lib/cmsImageUrl";
 import About from "./About";
 import homeCopy from "../lib/homeCopy";
-import {
-  fetchHomeSectionData,
-  HOME_SECTION_DATA_KEYS,
-} from "../lib/homeSectionData";
+import { HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 import {
   Clock,
   Shield,
@@ -40,25 +37,8 @@ export default function Services({
   initialData = null,
   initialAboutData = null,
 }) {
-  const [data, setData] = useState(initialData);
+  const { data } = useContent(HOME_SECTION_DATA_KEYS.services, initialData);
   const [page, setPage] = useState(0);
-
-  useEffect(() => {
-    if (initialData !== null) setData(initialData);
-  }, [initialData]);
-
-  useEffect(() => {
-    if (data !== null) return;
-    let active = true;
-    fetchHomeSectionData(HOME_SECTION_DATA_KEYS.services)
-      .then((value) => {
-        if (active) setData(value);
-      })
-      .catch(reportRequestError);
-    return () => {
-      active = false;
-    };
-  }, [data]);
 
   const pages = Array.isArray(data?.benchPages)
     ? data.benchPages

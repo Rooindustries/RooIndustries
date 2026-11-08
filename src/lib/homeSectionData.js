@@ -1,9 +1,4 @@
-import { getPublicContent } from "./publicContentClient";
-import homeCopy from "./homeCopy";
-import packageContent from "./packageContent";
-
-const { buildPackageOffers, normalizeFaqQuestions } = packageContent;
-const { applyHomeSectionCopyOverride } = homeCopy;
+import { loadContent, readContent } from "./contentCache";
 
 export const HOME_SECTION_DATA_KEYS = Object.freeze({
   reviews: "reviews",
@@ -73,108 +68,15 @@ export const HOME_SECTION_PREFETCH_BY_HASH = Object.freeze({
   ],
 });
 
-const STORAGE_PREFIX = "roo-home-data:";
-const STORAGE_TS_KEY = "roo-home-data:__ts";
-const CACHE_TTL_MS = 5 * 60 * 1000;
-const memoryCache = new Map();
-const inflightCache = new Map();
-
 const homeSectionResources = new Set(Object.values(HOME_SECTION_DATA_KEYS));
 
-const getStorageKey = (key) => `${STORAGE_PREFIX}${key}`;
-
-const normalizeHomeSectionData = (key, value) => {
-  const copyValue = applyHomeSectionCopyOverride(key, value);
-  if (key === HOME_SECTION_DATA_KEYS.packagesList) {
-    return buildPackageOffers(copyValue);
-  }
-  if (key === HOME_SECTION_DATA_KEYS.faqQuestions) {
-    return normalizeFaqQuestions(copyValue);
-  }
-  return copyValue;
-};
-
-const isSessionCacheExpired = () => {
-  if (typeof window === "undefined") return false;
-  try {
-    const ts = Number(sessionStorage.getItem(STORAGE_TS_KEY) || 0);
-    return Date.now() - ts > CACHE_TTL_MS;
-  } catch {
-    return true;
-  }
-};
-
-export const readHomeSectionData = (key) => {
-  if (isSessionCacheExpired()) {
-    memoryCache.clear();
-    try {
-      // Every section shares this timestamp. Drop the whole expired generation
-      // before a refreshed section starts a new one.
-      homeSectionResources.forEach((resource) => {
-        sessionStorage.removeItem(getStorageKey(resource));
-      });
-      sessionStorage.removeItem(STORAGE_TS_KEY);
-    } catch {}
-    return null;
-  }
-  if (memoryCache.has(key)) {
-    return memoryCache.get(key);
-  }
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = sessionStorage.getItem(getStorageKey(key));
-    if (!raw) return null;
-    const parsed = normalizeHomeSectionData(key, JSON.parse(raw));
-    memoryCache.set(key, parsed);
-    return parsed;
-  } catch {
-    return null;
-  }
-};
-
-const writeHomeSectionData = (key, value) => {
-  const normalizedValue = normalizeHomeSectionData(key, value ?? null);
-  memoryCache.set(key, normalizedValue ?? null);
-  if (typeof window === "undefined") return;
-  try {
-    sessionStorage.setItem(
-      getStorageKey(key),
-      JSON.stringify(normalizedValue ?? null)
-    );
-    if (!sessionStorage.getItem(STORAGE_TS_KEY)) {
-      sessionStorage.setItem(STORAGE_TS_KEY, String(Date.now()));
-    }
-  } catch {}
-};
+export const readHomeSectionData = (key) => readContent(key)?.data ?? null;
 
 export const fetchHomeSectionData = (key) => {
   if (!homeSectionResources.has(key)) {
     return Promise.reject(new Error(`Unknown home section key: ${key}`));
   }
-
-  const cached = readHomeSectionData(key);
-  if (cached !== null) {
-    return Promise.resolve(cached);
-  }
-
-  if (inflightCache.has(key)) {
-    return inflightCache.get(key);
-  }
-
-  const request = getPublicContent(key)
-    .then((data) => {
-      const normalizedData = normalizeHomeSectionData(key, data);
-      writeHomeSectionData(key, normalizedData);
-      inflightCache.delete(key);
-      return normalizedData;
-    })
-    .catch((error) => {
-      inflightCache.delete(key);
-      throw error;
-    });
-
-  inflightCache.set(key, request);
-  return request;
+  return loadContent(key);
 };
 
 export const prefetchHomeSectionData = (keys = Object.values(HOME_SECTION_DATA_KEYS)) =>

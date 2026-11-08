@@ -11,7 +11,9 @@ const ruleSet = (names) => Object.fromEntries(names.map((name) => [`roo/${name}`
 
 export default [
   {
-    files: ["src/components/Hero.jsx", "src/components/ReferralBox.jsx"],
+    files: [
+      "src/components/{Hero,ReferralBox,About,Services,Faq,Packages,HowItWorks,SupportedGames,StreamerYoutuberReviews}.jsx",
+    ],
     rules: {
       "no-restricted-imports": ["error", {
         patterns: [{
