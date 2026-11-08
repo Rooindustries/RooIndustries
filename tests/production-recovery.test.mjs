@@ -135,3 +135,18 @@ test("slow initialization cannot cause a rollback to a warm release", () => with
   assert.equal(changes(vercel).length, 0, result.output);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
 }));
+
+for (const stage of ["planning", "final revalidation"]) {
+  test(`automatic recovery leaves a newer READY release waiting during ${stage}`, () => withRecovery({
+    site: broken, vercel: { swapNewestOnDeploymentRead: stage === "planning" ? 1 : 4 },
+  }, async ({ exec, env, vercel }) => {
+    const result = stage === "planning"
+      ? await execute("deploy-rollback.mjs", ["--plan", "--if-live", LIVE_URL], env)
+      : await exec();
+    assert.equal(result.code, 1, result.output);
+    assert.match(result.output, /not the newest/);
+    assert.equal(changes(vercel).length, 0, result.output);
+    assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
+    assert.equal(vercel.state.project.autoAssignCustomDomains, true);
+  }));
+}

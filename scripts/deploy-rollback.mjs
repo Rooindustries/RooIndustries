@@ -55,15 +55,21 @@ const parseArgs = (argv) => {
       throw new Refusal(`Unknown option "${arg}".`);
     }
   }
-  if (options.status && (options.undo || options.ifLive || options.dryRun)) throw new Refusal("--status can't be combined with other actions.");
+  if (options.status && (options.undo || options.ifLive || options.dryRun)) {
+    throw new Refusal("--status can't be combined with other actions.");
+  }
   if (options.undo && options.ifLive) throw new Refusal("--if-live only applies to a rollback, not to --undo.");
-  if ((options.plan || options.evidence) && (!options.ifLive || options.status || options.undo)) throw new Refusal("--plan and --evidence require --if-live.");
+  if ((options.plan || options.evidence) && (!options.ifLive || options.status || options.undo)) {
+    throw new Refusal("--plan and --evidence require --if-live.");
+  }
   if (options.ifLive) {
     if (options.ifLive.startsWith("dpl_")) {
       if (!/^dpl_[a-z\d_-]+$/i.test(options.ifLive)) throw new Refusal("Invalid deployment identifier.");
     } else deploymentOrigin(options.ifLive);
   }
-  if (!/^[a-z\d]+(?:[a-z\d.-]*[a-z\d])?\.?$/i.test(options.domain)) throw new Refusal("--domain must be a hostname without credentials or a URL.");
+  if (!/^[a-z\d]+(?:[a-z\d.-]*[a-z\d])?\.?$/i.test(options.domain)) {
+    throw new Refusal("--domain must be a hostname without credentials or a URL.");
+  }
   options.domain = options.domain.toLowerCase().replace(/\.$/, "");
   return options;
 };
@@ -142,13 +148,19 @@ const loadState = async (api, domain) => {
   if (!alias?.deploymentId || alias.redirect) throw new Refusal(`${domain} is not pointed at a deployment.`);
   const { body: live } = await api("GET", `/v13/deployments/${encodeURIComponent(alias.deploymentId)}`, { teamId });
   deploymentOrigin(`https://${live?.url}`);
-  if (deploymentId(live) !== alias.deploymentId) throw new Refusal(`Vercel returned ${deploymentId(live)} for ${alias.deploymentId}.`);
-  if (alias.projectId && live.projectId !== alias.projectId) throw new Refusal(`${domain} belongs to ${alias.projectId}, but its deployment belongs to ${live.projectId}.`);
+  if (deploymentId(live) !== alias.deploymentId) {
+    throw new Refusal(`Vercel returned ${deploymentId(live)} for ${alias.deploymentId}.`);
+  }
+  if (alias.projectId && live.projectId !== alias.projectId) {
+    throw new Refusal(`${domain} belongs to ${alias.projectId}, but its deployment belongs to ${live.projectId}.`);
+  }
   if (readyState(live) !== "READY" || live.target !== "production") {
     throw new Refusal(`The live deployment ${deploymentId(live)} is ${readyState(live)} with target ${live.target}; fix production by hand.`);
   }
   const { body: project } = await api("GET", `/v9/projects/${encodeURIComponent(live.projectId)}`, { teamId });
-  if (project?.id !== live.projectId) throw new Refusal(`Vercel returned project ${project?.id} for ${live.projectId}.`);
+  if (project?.id !== live.projectId) {
+    throw new Refusal(`Vercel returned project ${project?.id} for ${live.projectId}.`);
+  }
   const { body: listing } = await api("GET", "/v7/deployments", {
     projectId: project.id,
     target: "production",
@@ -192,7 +204,9 @@ const refuseBusyProject = (state) => {
   if (job && PENDING_JOBS.has(job.jobStatus)) {
     throw new Refusal(`A ${job.type} to ${job.toDeploymentId} is still ${job.jobStatus}; wait for it to finish.`);
   }
-  if (state.live.readySubstate === "ROLLING" || state.newest?.readySubstate === "ROLLING") throw new Refusal("A rolling release is moving traffic; finish or abort it in Vercel first.");
+  if (state.live.readySubstate === "ROLLING" || state.newest?.readySubstate === "ROLLING") {
+    throw new Refusal("A rolling release is moving traffic; finish or abort it in Vercel first.");
+  }
 };
 
 // Vercel's last promote or rollback says which deployment served production before the live one,
@@ -200,7 +214,10 @@ const refuseBusyProject = (state) => {
 const findRollbackTarget = async (api, state, recordedTarget = null) => {
   const job = state.project.lastAliasRequest;
   const settled = job?.jobStatus === "succeeded" && job?.fromDeploymentId;
-  const previous = recordedTarget || (settled && job.type !== "rollback" && job.toDeploymentId === deploymentId(state.live) ? job.fromDeploymentId : null);
+  const previous = recordedTarget || (
+    settled && job.type !== "rollback" && job.toDeploymentId === deploymentId(state.live)
+      ? job.fromDeploymentId : null
+  );
   const rolledAwayFrom = settled && job.type === "rollback" ? job.fromDeploymentId : null;
   const wanted = (deployment) => previous
     ? deploymentId(deployment) === previous
@@ -223,7 +240,9 @@ const findRollbackTarget = async (api, state, recordedTarget = null) => {
     if (target) return target;
     until = Number(listing?.pagination?.next) || null;
   }
-  if (previous) throw new Refusal(`No earlier production deployment to roll back to: ${previous}, which served production before ${deploymentId(state.live)}, is no longer a rollback candidate.`);
+  if (previous) {
+    throw new Refusal(`No earlier production deployment to roll back to: ${previous}, which served production before ${deploymentId(state.live)}, is no longer a rollback candidate.`);
+  }
   throw new Refusal("No earlier production deployment to roll back to.");
 };
 
@@ -233,7 +252,9 @@ const resolveDeployment = async (api, state, value) => {
     const { body } = await api("GET", `/v13/deployments/${encodeURIComponent(key)}`, { teamId: state.teamId });
     return body;
   } catch (error) {
-    if (error instanceof ApiError && error.status === 404) throw new Refusal(`Vercel doesn't know the deployment ${value}.`);
+    if (error instanceof ApiError && error.status === 404) {
+      throw new Refusal(`Vercel doesn't know the deployment ${value}.`);
+    }
     throw error;
   }
 };
@@ -242,6 +263,9 @@ const checkAutomaticRollback = async (api, state, ifLive) => {
   const failing = await resolveDeployment(api, state, ifLive);
   if (deploymentId(failing) !== deploymentId(state.live)) {
     throw new Refusal(`${deploymentId(failing)} is not live (${deploymentId(state.live)} is); leaving production alone.`);
+  }
+  if (deploymentId(state.newest) !== deploymentId(state.live)) {
+    throw new Refusal(`${deploymentId(state.live)} is not the newest production deployment (${deploymentId(state.newest)} is); leaving production alone.`);
   }
   if (state.project.autoAssignCustomDomains !== true) {
     throw new Refusal("Production is already rolled back or its automatic assignment is unknown; an automatic rollback never goes further back.");
