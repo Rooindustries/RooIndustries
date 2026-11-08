@@ -1,5 +1,13 @@
 import { readReservationStorage, writeReservationStorage, removeReservationStorage } from "../lib/reservationStorage";
-import { reservationOperation, releaseOutdatedHold } from "../lib/reservationOperation";
+import {
+  reservationOperation,
+  reconcileReservation,
+  releaseOutdatedHold,
+  reportReservationError,
+  readReservationReleaseError,
+  saveReservationReleaseError,
+  RESERVATION_ERROR_EVENT,
+} from "../lib/reservationOperation";
 import { clearBookingConfirmation, createBookingConfirmation } from "../lib/confirmationReceipt";
 import React, {
   useCallback,
@@ -605,6 +613,18 @@ export default function BookingForm() {
   const [holdCountdownMs, setHoldCountdownMs] = useState(null);
   const [releasingPayment, setReleasingPayment] = useState(false);
   const [paymentReleaseStatus, setPaymentReleaseStatus] = useState("");
+  useEffect(() => {
+    const restoreReleaseError = () => {
+      const message = readReservationReleaseError(currentHoldRef.current);
+      if (message) {
+        setErrorStep1(message);
+        setErrorStep2(message);
+      }
+    };
+    restoreReleaseError();
+    window.addEventListener(RESERVATION_ERROR_EVENT, restoreReleaseError);
+    return () => window.removeEventListener(RESERVATION_ERROR_EVENT, restoreReleaseError);
+  }, [myHold]);
   const clearedNoHoldRef = useRef(false);
   const [restoredSessionPackageTitle, setRestoredSessionPackageTitle] =
     useState("");
@@ -683,7 +703,7 @@ export default function BookingForm() {
   useEffect(() => {
     if (!selectedPackage.title) return;
     try {
-      const raw = sessionStorage.getItem(SESSION_STATE_KEY);
+      const raw = readReservationStorage(SESSION_STATE_KEY);
       if (raw) {
         const saved = JSON.parse(raw);
         if (saved.packageTitle === selectedPackage.title) {
@@ -741,7 +761,7 @@ export default function BookingForm() {
             }
           : null,
       };
-      sessionStorage.setItem(SESSION_STATE_KEY, JSON.stringify(payload));
+      writeReservationStorage(SESSION_STATE_KEY, JSON.stringify(payload));
     } catch {
       console.error("Failed to persist session state");
     }
@@ -770,7 +790,7 @@ export default function BookingForm() {
     setStep(1);
     clearedNoHoldRef.current = true;
     try {
-      sessionStorage.removeItem(SESSION_STATE_KEY);
+      removeReservationStorage(SESSION_STATE_KEY);
     } catch {
       console.error("Failed to clear session state");
     }
@@ -1231,7 +1251,7 @@ export default function BookingForm() {
       setCodeInput("");
       setCodeError("");
       setRestoredCodeCandidates(null);
-      const storedDraft = sessionStorage.getItem(BOOKING_DRAFT_KEY);
+      const storedDraft = readReservationStorage(BOOKING_DRAFT_KEY);
       if (storedDraft) {
         const parsed = JSON.parse(storedDraft);
         setDrafts(parsed.packages || {});
@@ -1277,7 +1297,7 @@ export default function BookingForm() {
 
   const persistDraft = (payload) => {
     try {
-      const current = sessionStorage.getItem(BOOKING_DRAFT_KEY);
+      const current = readReservationStorage(BOOKING_DRAFT_KEY);
       let parsed = { packages: {}, lastTitle: null };
       if (current) {
         parsed = { lastTitle: null, packages: {}, ...JSON.parse(current) };
@@ -1289,7 +1309,7 @@ export default function BookingForm() {
       };
       parsed.lastTitle = key;
       setDrafts(parsed.packages);
-      sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
+      writeReservationStorage(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
     } catch {
       console.error("Failed to persist booking draft");
     }
@@ -1311,7 +1331,7 @@ export default function BookingForm() {
 
   const clearDraftForPackage = (pkgKey) => {
     try {
-      const current = sessionStorage.getItem(BOOKING_DRAFT_KEY);
+      const current = readReservationStorage(BOOKING_DRAFT_KEY);
       if (!current) return;
       const parsed = { lastTitle: null, packages: {}, ...JSON.parse(current) };
       if (parsed.packages && parsed.packages[pkgKey]) {
@@ -1324,7 +1344,7 @@ export default function BookingForm() {
           if (parsed.lastTitle === pkgKey) parsed.lastTitle = null;
         }
         setDrafts(parsed.packages);
-        sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
+        writeReservationStorage(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
       }
     } catch {
       console.error("Failed to clear booking draft");
@@ -2044,26 +2064,23 @@ export default function BookingForm() {
     navigate("/payment", { state: getPaymentNavigationState() });
   };
 
-  const showCapturedPaymentResult = (data = {}) => {
+  const showCapturedPaymentResult = (data, ownsReservation) => {
     const status = String(data.status || "").trim().toLowerCase();
     const bookingId = String(data.bookingId || "").trim();
     if (
       !["booked", "email_partial"].includes(status) ||
       !bookingId
     ) {
-      if (mountedRef.current) returnToPayment();
+      returnToPayment();
       return;
     }
 
     const bookingConfirmation = createBookingConfirmation(data);
-    try {
+    if (ownsReservation) {
       removeReservationStorage(PAYMENT_SESSION_STORAGE_KEY);
-      sessionStorage.removeItem(CHECKOUT_BOOKING_STORAGE_KEY);
-    } catch {
-      console.error("Failed to persist booking confirmation");
+      removeReservationStorage(CHECKOUT_BOOKING_STORAGE_KEY);
+      clearHoldState(true);
     }
-    clearHoldState(true);
-    if (!mountedRef.current) return;
     const backgroundLocation = location.state?.backgroundLocation || null;
     navigate("/payment-success", {
       replace: true,
@@ -2093,6 +2110,7 @@ export default function BookingForm() {
     }
     if (releaseInFlightRef.current) return hasExpired();
     releaseInFlightRef.current = true;
+    saveReservationReleaseError(myHold, "");
 
     let outcome;
     let serverMessage = "";
@@ -2115,8 +2133,8 @@ export default function BookingForm() {
         ok: response.ok && data?.ok === true,
         expired: hasExpired(),
       });
-    } catch {
-      console.error("Failed to release hold on server");
+    } catch (error) {
+      reportReservationError("Failed to release hold on server", error);
       outcome = classifyHoldResponse({ endpoint: "release", networkError: true, expired: hasExpired() });
     } finally {
       releaseInFlightRef.current = false;
@@ -2130,10 +2148,9 @@ export default function BookingForm() {
       }
       return true;
     }
-    if (mountedRef.current && !suppressError) {
+    if (!suppressError) {
       const message = serverMessage || "Could not release your slot. Your reservation and details are saved. Please try again.";
-      setErrorStep1(message);
-      setErrorStep2(message);
+      saveReservationReleaseError(myHold, message);
     }
     return false;
   };
@@ -2145,6 +2162,7 @@ export default function BookingForm() {
     setReleasingPayment(true);
     setErrorStep2("");
     setPaymentReleaseStatus("");
+    saveReservationReleaseError(releasingHold, "");
     try {
       const stored = JSON.parse(
         readReservationStorage(PAYMENT_SESSION_STORAGE_KEY) || "null"
@@ -2164,6 +2182,13 @@ export default function BookingForm() {
         signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
       });
       const data = await response.json().catch(() => ({}));
+      if (data?.captured) {
+        showCapturedPaymentResult(data, isCurrent());
+        return;
+      }
+      if (!response.ok || data?.cancelled !== true) {
+        throw new Error(data?.error || "The payment session could not be released.");
+      }
       if (!isCurrent()) {
         if (data?.refreshedHold) {
           await releaseOutdatedHold({
@@ -2172,13 +2197,6 @@ export default function BookingForm() {
           });
         }
         return;
-      }
-      if (data?.captured) {
-        showCapturedPaymentResult(data);
-        return;
-      }
-      if (!response.ok || data?.cancelled !== true) {
-        throw new Error(data?.error || "The payment session could not be released.");
       }
       const refreshed = data.refreshedHold;
       if (!refreshed?.slotHoldId || !refreshed?.slotHoldToken) {
@@ -2206,15 +2224,16 @@ export default function BookingForm() {
           : "Payment method released. Review your booking details and submit again."
       );
     } catch (error) {
-      if (!mountedRef.current || !isCurrent()) return;
-      setPaymentReleaseStatus("");
+      reportReservationError("Failed to release payment session", error);
+      if (!isCurrent()) return;
       const timedOut =
         error?.name === "AbortError" || error?.name === "TimeoutError";
-      setErrorStep2(
+      saveReservationReleaseError(releasingHold,
         timedOut
           ? "The payment session could not be released. Please try again."
           : error.message || "The payment session could not be released."
       );
+      if (mountedRef.current) setPaymentReleaseStatus("");
     } finally {
       if (mountedRef.current) setReleasingPayment(false);
     }
@@ -2250,6 +2269,17 @@ export default function BookingForm() {
 
     if (lockingSlot) return;
 
+    const reconciled = reconcileReservation(currentHoldRef.current);
+    if (reconciled.changed) {
+      currentHoldRef.current = reconciled.hold;
+      setMyHold(reconciled.hold);
+      broadcastHold(reconciled.hold);
+      const message = "Your reservation changed. Please review it before continuing.";
+      setErrorStep1(message);
+      setErrorStep2(message);
+      return;
+    }
+
     setErrorStep1("");
     if (recheckingPayment) setErrorStep2("");
     setLockingSlot(true);
@@ -2263,7 +2293,6 @@ export default function BookingForm() {
 
     const isCurrent = currentReservation();
     try {
-      if (!isCurrent()) return;
       const body = {
         startTimeUTC: selectedSlotId,
         packageTitle: recheckingPayment ? myHold.packageTitle : selectedPackage.title,
@@ -2450,7 +2479,7 @@ export default function BookingForm() {
     const backgroundLocation =
       location.state?.backgroundLocation || location.state || null;
     try {
-      sessionStorage.setItem(
+      writeReservationStorage(
         CHECKOUT_BOOKING_STORAGE_KEY,
         JSON.stringify(payload)
       );

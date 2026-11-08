@@ -1,3 +1,5 @@
+import { readReservationStorage, writeReservationStorage } from "./reservationStorage";
+
 export const BOOKING_DRAFT_STORAGE_KEY = "booking_draft";
 export const CHECKOUT_BOOKING_STORAGE_KEY = "checkout_booking_state";
 export const HOLD_STORAGE_KEY = "my_slot_hold";
@@ -30,7 +32,7 @@ export const persistBookingPackageSelection = (pkg) => {
   const selectedPackage = normalizePackage(pkg);
   if (!selectedPackage) return null;
   try {
-    const raw = window.sessionStorage.getItem(BOOKING_DRAFT_STORAGE_KEY);
+    const raw = readReservationStorage(BOOKING_DRAFT_STORAGE_KEY);
     const parsed = raw
       ? { lastTitle: null, packages: {}, ...JSON.parse(raw) }
       : { lastTitle: null, packages: {} };
@@ -43,7 +45,7 @@ export const persistBookingPackageSelection = (pkg) => {
       },
     };
     parsed.lastTitle = selectedPackage.title;
-    window.sessionStorage.setItem(
+    writeReservationStorage(
       BOOKING_DRAFT_STORAGE_KEY,
       JSON.stringify(parsed)
     );
@@ -54,7 +56,7 @@ export const persistBookingPackageSelection = (pkg) => {
 export const readBookingPackageSelection = () => {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.sessionStorage.getItem(BOOKING_DRAFT_STORAGE_KEY);
+    const raw = readReservationStorage(BOOKING_DRAFT_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     const selected = parsed?.packages?.[parsed?.lastTitle]?.selectedPackage;
@@ -67,7 +69,7 @@ export const readBookingPackageSelection = () => {
 export const readStoredCheckoutBooking = () => {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.sessionStorage.getItem(CHECKOUT_BOOKING_STORAGE_KEY);
+    const raw = readReservationStorage(CHECKOUT_BOOKING_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" && !Array.isArray(parsed)
@@ -84,7 +86,7 @@ export const writeStoredCheckoutBooking = (bookingData) => {
     return null;
   }
   try {
-    window.sessionStorage.setItem(
+    writeReservationStorage(
       CHECKOUT_BOOKING_STORAGE_KEY,
       JSON.stringify(bookingData)
     );

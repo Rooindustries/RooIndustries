@@ -1,7 +1,6 @@
 import { readReservationStorage, writeReservationStorage, removeReservationStorage } from "../lib/reservationStorage";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { removeBrowserStorage } from "../lib/browserStorage";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   HOLD_STORAGE_KEY,
@@ -222,7 +221,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
 
   const readDraft = () => {
     try {
-      return sessionStorage.getItem(BOOKING_DRAFT_KEY);
+      return readReservationStorage(BOOKING_DRAFT_KEY);
     } catch {
       return null;
     }
@@ -232,7 +231,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
     currentHoldRef.current = null;
     setHold(null);
     removeReservationStorage(HOLD_STORAGE_KEY);
-    if (!keepDraft) removeBrowserStorage("sessionStorage", BOOKING_DRAFT_KEY);
+    if (!keepDraft) removeReservationStorage(BOOKING_DRAFT_KEY);
     broadcastHold(null);
     if (redirect) {
       nav("/", { replace: false });
@@ -348,7 +347,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
       backgroundLocation: location.state?.backgroundLocation || location,
     };
     try {
-      const draftRaw = sessionStorage.getItem(BOOKING_DRAFT_KEY);
+      const draftRaw = readReservationStorage(BOOKING_DRAFT_KEY);
       let draftPkg = null;
       if (draftRaw) {
         const draft = JSON.parse(draftRaw);

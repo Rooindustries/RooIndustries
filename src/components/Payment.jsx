@@ -1,7 +1,6 @@
 import { HOLD_STORAGE_KEY, PAYMENT_SESSION_STORAGE_KEY, CHECKOUT_BOOKING_STORAGE_KEY } from "../lib/checkoutStorage";
 import { readReservationStorage, writeReservationStorage, removeReservationStorage } from "../lib/reservationStorage";
 import { clearBookingConfirmation, createBookingConfirmation } from "../lib/confirmationReceipt";
-import { writeBrowserStorage } from "../lib/browserStorage";
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
 import { PayPalScriptProvider, PayPalButtons, usePayPalScriptReducer } from "@paypal/react-paypal-js";
@@ -207,7 +206,7 @@ export default function Payment({ hideFooter = false }) {
 
   const readStoredCheckout = () => {
     try {
-      const raw = sessionStorage.getItem(CHECKOUT_BOOKING_STORAGE_KEY);
+      const raw = readReservationStorage(CHECKOUT_BOOKING_STORAGE_KEY);
       return raw ? JSON.parse(raw) : null;
     } catch {
       return null;
@@ -217,10 +216,10 @@ export default function Payment({ hideFooter = false }) {
   const writeStoredCheckout = (value) => {
     try {
       if (!value || typeof value !== "object") {
-        sessionStorage.removeItem(CHECKOUT_BOOKING_STORAGE_KEY);
+        removeReservationStorage(CHECKOUT_BOOKING_STORAGE_KEY);
         return;
       }
-      sessionStorage.setItem(CHECKOUT_BOOKING_STORAGE_KEY, JSON.stringify(value));
+      writeReservationStorage(CHECKOUT_BOOKING_STORAGE_KEY, JSON.stringify(value));
     } catch {}
   };
 
@@ -1459,7 +1458,7 @@ export default function Payment({ hideFooter = false }) {
           slotHoldExpiresAt: refreshedHold.slotHoldExpiresAt || refreshedHold.expiresAt || "",
         } : {}),
       };
-      if (!writeBrowserStorage("sessionStorage", CHECKOUT_BOOKING_STORAGE_KEY, JSON.stringify(returnCheckout)) ||
+      if (!writeReservationStorage(CHECKOUT_BOOKING_STORAGE_KEY, JSON.stringify(returnCheckout)) ||
           !writeStoredPaymentSession(session)) {
         showBanner("error", "Your browser could not save this payment session. Checkout has stayed here so you can check its status or change payment method. Allow browser storage and try again to open checkout.", { persistent: true });
         return;

@@ -248,7 +248,7 @@ const reservationState = page => page.evaluate(() => Object.fromEntries(
     .map(key => [key, sessionStorage.getItem(key)])
 ));
 
-for (const [shape, sameSlot] of [["refreshed", false], ["refreshed", true], ["expired", false]]) {
+for (const [shape, sameSlot] of [["refreshed", false], ["refreshed", true], ["expired", false], ["captured", false]]) {
   test(`a stale ${shape} payment release preserves a newer ${sameSlot ? "generation" : "reservation"}`,
     async ({ page, context, flow, native }) => {
       const date = await native.nextSlotDate();
@@ -257,7 +257,9 @@ for (const [shape, sameSlot] of [["refreshed", false], ["refreshed", true], ["ex
       let release;
       const gate = new Promise(resolve => { release = resolve; });
       await page.route("**/api/payment/cancel", async route => {
+        if (shape === "captured") await native.setPaymentStatus("succeeded");
         delayed = await native.post("/api/payment/cancel", {}, route.request().headers().authorization);
+        if (shape === "captured") await native.setPaymentStatus(null);
         await gate;
         await route.fulfill({ status: delayed.status, json: delayed.body });
       });
@@ -270,7 +272,7 @@ for (const [shape, sameSlot] of [["refreshed", false], ["refreshed", true], ["ex
         const oldHold = JSON.parse(original.my_slot_hold);
         if (shape === "expired") await native.holdRunsOut(oldHold.holdId);
         await page.getByRole("button", { name: "Release payment", exact: true }).click();
-        await expect.poll(() => delayed?.body.cancelled).toBe(true);
+        await expect.poll(() => shape === "captured" ? delayed?.body.captured : delayed?.body.cancelled).toBe(true);
         const payload = { ...JSON.parse(original.checkout_booking_state),
           startTimeUTC: sameSlot ? oldHold.startTimeUTC : `${date}T05:30:00.000Z`,
           displayTime: sameSlot ? "10:00 AM" : "11:00 AM" };
@@ -305,6 +307,10 @@ for (const [shape, sameSlot] of [["refreshed", false], ["refreshed", true], ["ex
         }, { nextHold, payload, nextSession });
         const newer = await reservationState(page);
         release();
+        if (shape === "captured") {
+          await expect(page).toHaveURL(/\/payment-success$/);
+          expect(await page.evaluate(() => history.state.usr.bookingConfirmation.bookingId)).toBe(delayed.body.bookingId);
+        }
         await expect(page.getByRole("button", { name: "Checking payment...", exact: true })).toHaveCount(0);
         expect(await reservationState(page)).toEqual(newer);
         if (shape === "refreshed" && !sameSlot) {
@@ -466,3 +472,225 @@ for (const access of ["unreadable", "unwritable"]) {
       expect((await native.getHold(held.response.holdId)).phase).toBe("active");
     });
 }
+
+const pendingBooking = async (page, flow) => {
+  await page.goto("/packages");
+  await page.getByRole("link", { name: "Book Now" }).first().click();
+  await page.getByRole("button", { name: /^Earliest available:/ }).click();
+  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).last().click();
+  await flow.details();
+  await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+  await flow.payment();
+  await openCheckout(page);
+  await page.goBack();
+  await page.getByRole("link", { name: "Back to Booking", exact: true }).click();
+};
+const leaveBooking = async (page, leave) => {
+  if (leave === "Close") await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+  else await page.goBack();
+  await expect(page.locator(".ri-booking.transition-opacity")).toHaveCount(0);
+};
+const blockReservationStorage = (page, access) => page.evaluate(access => {
+  if (access === "unreadable") {
+    Object.defineProperty(window, "sessionStorage", {
+      configurable: true, get() { throw new DOMException("Blocked", "SecurityError"); },
+    });
+  } else {
+    Storage.prototype.setItem = () => { throw new DOMException("Full", "QuotaExceededError"); };
+    Storage.prototype.removeItem = () => { throw new DOMException("Blocked", "SecurityError"); };
+  }
+}, access);
+const watchReservationErrors = page => page.evaluate(() => {
+  window.reservationErrors = [];
+  globalThis[Symbol.for("roo.reportServerError")] = label => window.reservationErrors.push(label);
+});
+
+for (const leave of ["Close", "Back"]) {
+  test(`captured payment after ${leave} during slow Release payment still shows its receipt`,
+    async ({ page, context, flow, native }, testInfo) => {
+      await routeToNative(context, native, await native.nextSlotDate());
+      await pendingBooking(page, flow);
+      const hold = await readHold(page);
+      await native.setPaymentStatus("succeeded");
+      let delayed;
+      let release;
+      const gate = new Promise(resolve => { release = resolve; });
+      await page.route("**/api/payment/cancel", async route => {
+        delayed = await native.post("/api/payment/cancel", {}, route.request().headers().authorization);
+        await gate;
+        await route.fulfill({ status: delayed.status, json: delayed.body });
+      });
+      try {
+        await page.getByRole("button", { name: "Release payment", exact: true }).click();
+        await expect.poll(() => delayed?.body.captured).toBe(true);
+        await leaveBooking(page, leave);
+        if (leave === "Close") await page.getByRole("link", { name: "Book Now", exact: true }).first().click();
+        release();
+        await expect(page).toHaveURL(/\/payment-success$/);
+        await expect(page.getByRole("heading", { name: "Payment Successful", exact: true })).toBeVisible();
+        expect((await native.getHold(hold.holdId)).bookingId).toBe(delayed.body.bookingId);
+        expect(await readHold(page)).toBeNull();
+        expect(await page.evaluate(() => history.state.usr.bookingConfirmation.bookingId)).toBe(delayed.body.bookingId);
+        await testInfo.attach("captured-after-close", { body: await page.screenshot(), contentType: "image/png" });
+        await page.reload();
+        await expect(page.getByRole("heading", { name: "Payment Successful", exact: true })).toBeVisible();
+      } finally { release(); await native.setPaymentStatus(null); }
+    });
+
+  for (const failure of ["network", "timeout", "rejected"]) {
+    test(`${failure} Release payment after ${leave} is reported and stays visible on reopen`,
+      async ({ page, context, flow, native }) => {
+        await routeToNative(context, native, await native.nextSlotDate());
+        await pendingBooking(page, flow);
+        const original = await reservationState(page);
+        await watchReservationErrors(page);
+        let requested = false;
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        await page.route("**/api/payment/cancel", async route => {
+          requested = true;
+          await gate;
+          if (failure === "network") await route.abort("failed");
+          else if (failure === "rejected") await route.fulfill({ status: 409, json: { error: "Payment is still processing." } });
+          else await route.abort("timedout");
+        });
+        try {
+          await page.getByRole("button", { name: "Release payment", exact: true }).click();
+          await expect.poll(() => requested).toBe(true);
+          await leaveBooking(page, leave);
+          if (failure !== "timeout") release();
+          await expect.poll(() => page.evaluate(() => window.reservationErrors), { timeout: 15000 })
+            .toContain("Failed to release payment session");
+          release();
+          if (leave === "Back") await page.goForward();
+          else await page.getByRole("link", { name: "Book Now", exact: true }).first().click();
+          const message = failure === "rejected" ? "Payment is still processing." : /could not be released|Failed to fetch/;
+          await expect(page.getByRole("alert").filter({ hasText: message })).toBeVisible();
+          const { booking_draft: draftBefore, ...checkoutBefore } = original;
+          const { booking_draft: draftAfter, ...checkoutAfter } = await reservationState(page);
+          expect(checkoutAfter).toEqual(checkoutBefore);
+          const savedDraft = JSON.parse(draftBefore);
+          const reopenedDraft = JSON.parse(draftAfter);
+          expect(reopenedDraft.packages[reopenedDraft.lastTitle].form)
+            .toEqual(savedDraft.packages[savedDraft.lastTitle].form);
+        } finally { release(); }
+      });
+  }
+}
+
+for (const access of ["unreadable", "unwritable"]) {
+  for (const operation of ["Release payment", "Release Slot"]) {
+    test(`${access} storage lets ${operation} finish after Close and reopen`,
+      async ({ page, context, flow, native }) => {
+        await routeToNative(context, native, await native.nextSlotDate());
+        await pendingBooking(page, flow);
+        if (operation === "Release Slot") {
+          await page.getByRole("button", { name: "Release payment", exact: true }).click();
+          await expect(page.getByText(/Payment method released/)).toBeVisible();
+          await page.getByRole("button", { name: "Back", exact: true }).last().click();
+        }
+        const original = await readHold(page);
+        let delayed;
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        const endpoint = operation === "Release Slot" ? "/api/releaseHold" : "/api/payment/cancel";
+        await page.route(`**${endpoint}`, async route => {
+          delayed = await native.post(endpoint, route.request().postDataJSON(), route.request().headers().authorization);
+          await gate;
+          await route.fulfill({ status: delayed.status, json: delayed.body });
+        });
+        await page.evaluate(() => window.addEventListener("hold-state", event => { window.releasedHold = event.detail; }));
+        await blockReservationStorage(page, access);
+        try {
+          await page.getByRole("button", { name: operation, exact: true }).click();
+          await expect.poll(() => delayed?.status).toBe(200);
+          await leaveBooking(page, "Close");
+          release();
+          if (operation === "Release payment") {
+            await expect.poll(() => page.evaluate(() => window.releasedHold?.phase)).toBe("holding");
+            await page.getByRole("button", { name: "Continue booking", exact: true }).click();
+            await expect(page.getByRole("button", { name: "Release payment", exact: true })).toHaveCount(0);
+            await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+            await expect(page.getByText("visitor@example.invalid", { exact: true })).toBeVisible();
+            await expect(page.getByText("Ryzen 7700 / RTX 4070", { exact: true })).toBeVisible();
+          } else {
+            await expect.poll(() => page.evaluate(() => window.releasedHold)).toBeNull();
+            await page.getByRole("link", { name: "Book Now" }).first().click();
+            await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+          }
+          expect((await native.getHold(original.holdId)).phase).toBe(operation === "Release Slot" ? "released" : "holding");
+        } finally { release(); }
+      });
+  }
+}
+
+test("Reserve repairs corrupt hold storage from the live reservation and reports the repair",
+  async ({ page, context, flow, native }) => {
+    await routeToNative(context, native, await native.nextSlotDate());
+    await flow.reserve();
+    const original = await readHold(page);
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Back", exact: true }).last().click();
+    await watchReservationErrors(page);
+    await page.evaluate(() => sessionStorage.setItem("my_slot_hold", "{broken"));
+    await dialog.getByRole("button", { name: "Next", exact: true }).last().click();
+    await expect(dialog.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
+    expect(await readHold(page)).toMatchObject({ holdId: original.holdId, startTimeUTC: original.startTimeUTC });
+    expect(await page.evaluate(() => window.reservationErrors)).toContain("Repaired invalid slot reservation storage");
+  });
+
+test("Reserve restores a newer saved reservation instead of silently stopping",
+  async ({ page, context, flow, native }) => {
+    const date = await native.nextSlotDate();
+    await routeToNative(context, native, date);
+    await flow.reserve();
+    const original = await readHold(page);
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Back", exact: true }).last().click();
+    const next = await native.post("/api/holdSlot", {
+      startTimeUTC: `${date}T05:30:00.000Z`, packageTitle: original.packageTitle,
+    });
+    expect(next.status).toBe(200);
+    const newer = { ...original, ...next.body, startTimeUTC: `${date}T05:30:00.000Z` };
+    await watchReservationErrors(page);
+    await page.evaluate(hold => sessionStorage.setItem("my_slot_hold", JSON.stringify(hold)), newer);
+    const before = (await native.evidence()).http.filter(entry => entry.path === "/api/holdSlot").length;
+    await dialog.getByRole("button", { name: "Next", exact: true }).last().click();
+    await expect(page.getByRole("alert").filter({ hasText: "Your reservation changed." })).toBeVisible();
+    expect(await readHold(page)).toMatchObject({ holdId: newer.holdId, holdToken: newer.holdToken });
+    expect((await native.evidence()).http.filter(entry => entry.path === "/api/holdSlot")).toHaveLength(before);
+    expect(await page.evaluate(() => window.reservationErrors)).toContain("Slot reservation changed before reserving");
+  });
+
+test("a failed outdated hold release is reported without replacing the newer reservation",
+  async ({ page, context, flow, native }) => {
+    const date = await native.nextSlotDate();
+    await routeToNative(context, native, date);
+    let first;
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    await page.route("**/api/holdSlot", async route => {
+      first = await native.post("/api/holdSlot", route.request().postDataJSON());
+      await gate;
+      await route.fulfill({ status: first.status, json: first.body });
+    });
+    await page.route("**/api/releaseHold", route => route.fulfill({ status: 503, json: { ok: false } }));
+    try {
+      await flow.booking();
+      await watchReservationErrors(page);
+      await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+      await page.getByRole("button", { name: "Next", exact: true }).last().click();
+      await expect.poll(() => first?.status).toBe(200);
+      const next = await native.post("/api/holdSlot", {
+        startTimeUTC: `${date}T05:30:00.000Z`, packageTitle: "Performance Vertex Overhaul",
+      });
+      expect(next.status).toBe(200);
+      const newer = { ...next.body, startTimeUTC: `${date}T05:30:00.000Z`, phase: "active" };
+      await page.evaluate(hold => sessionStorage.setItem("my_slot_hold", JSON.stringify(hold)), newer);
+      release();
+      await expect.poll(() => page.evaluate(() => window.reservationErrors))
+        .toContain("Failed to release an outdated slot reservation");
+      expect(await readHold(page)).toMatchObject({ holdId: newer.holdId, holdToken: newer.holdToken });
+    } finally { release(); }
+  });
