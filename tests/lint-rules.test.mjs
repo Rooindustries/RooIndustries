@@ -1223,6 +1223,10 @@ run("no-parent-ipc-disconnect", {
     `const observer = new MutationObserver(f); observer.disconnect();`,
     `let observer = null; observer = new ResizeObserver(f); observer?.disconnect();`,
     `await page.evaluate(() => { const observer = new MutationObserver(f); observer.disconnect(); });`,
+    `if (typeof window !== "undefined") window.addEventListener("resize", f); new ResizeObserver(f).disconnect();`,
+    `const width = globalThis.innerWidth; ({ observer = window.ResizeObserver } = options);
+      new ResizeObserver(f).disconnect();`,
+    `function swap(window) { window.ResizeObserver = fork; } new ResizeObserver(f).disconnect();`,
   ],
   invalid: [
     {
@@ -1259,6 +1263,13 @@ run("no-parent-ipc-disconnect", {
       `({ observer: window.ResizeObserver } = replacements); new ResizeObserver(f).disconnect();`,
       `for (self.IntersectionObserver of constructors) {} new IntersectionObserver(f).disconnect();`,
       `delete globalThis.ReportingObserver; new ReportingObserver(f).disconnect();`,
+      `global.MutationObserver = fork; new MutationObserver(f).disconnect();`,
+      `Object.defineProperty(globalThis, "MutationObserver", { value: fork }); new MutationObserver(f).disconnect();`,
+      `Object.assign(window, { ResizeObserver: fork }); new ResizeObserver(f).disconnect();`,
+      `Reflect.set(self, "IntersectionObserver", fork); new IntersectionObserver(f).disconnect();`,
+      `const scope = globalThis; scope.MutationObserver = fork; new MutationObserver(f).disconnect();`,
+      `globalThis[name] = fork; new PerformanceObserver(f).disconnect();`,
+      `delete window?.ReportingObserver; new ReportingObserver(f).disconnect();`,
     ].map((code) => ({ code, errors: [{ messageId: "parent" }] })),
     {
       name: "configured globals are checked in script scope",
@@ -1278,7 +1289,7 @@ run("no-parent-ipc-disconnect", {
           window.ResizeObserver = fork; self.ResizeObserver = fork; globalThis.ResizeObserver = fork;
           ResizeObserver = fork;
         }
-        globalThis[observerName] = fork;
+        window.__probe = state; delete window.__probe;
         ({ observer = globalThis.ResizeObserver } = replacements);`,
       errors: [{ messageId: "parent" }],
     },
