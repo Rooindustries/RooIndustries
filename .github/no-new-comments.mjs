@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { Linter } from "eslint";
 import tsParser from "@typescript-eslint/parser";
 import rule, {
-  commentGroups, consumeComment, inRanges, normalizeComment, whollyChanged,
+  consumeComment, inRanges, normalizeComment, whollyChanged,
 } from "../eslint-rules/no-new-comments.mjs";
 
 const git = (...args) => execFileSync("git", ["--literal-pathspecs", ...args], {
@@ -17,27 +17,13 @@ const credits = /co-authored-by:|generated (with|by)|🤖|written by (an )?(ai|a
 const publicTextViolation = (text) => text.split(/\r?\n/).some((line) =>
   names.test(line) || credits.test(line) || processWords.test(line) ||
   /(^|[^A-Za-z])Sol([^A-Za-z]|$)/.test(line) || line.includes("—"));
-const assistants = "codex|claude|chatgpt|openai|anthropic|gpt-?\\d[\\w.-]*|" +
-  "cursor|gemini|opus|sonnet|copilot|devin|aider|haiku|AI|bot";
-const authorName = new RegExp(`\\b(?:${assistants}|assistant)\\b`, "i");
-const authorVendor = /(?:^|\.)(?:cursor\.(?:com|sh)|aider\.chat|openai\.com|anthropic\.com|claude\.ai|chatgpt\.com)$/i;
-function invalidIdentity(identity) {
-  const match = identity.match(/^([^<>]+?)[ \t]+<([^<>\s@]+)@([^<>\s@]+)>[ \t]*$/);
-  if (!match) return true;
-  const [, name, mailbox, domain] = match;
-  return publicTextViolation(identity) || !/^[\p{L}\p{M}][\p{L}\p{M} .'-]*$/u.test(name) || authorName.test(name) ||
-    !/^[a-z\d.!#$%&'*+/=?^_`{|}~-]+$/i.test(mailbox) || authorName.test(mailbox.replace(/[._+-]/g, " ")) ||
-    /(?:^|[._+-])(?:bot|no-?reply)(?:$|[._+-])/i.test(mailbox) ||
-    !/^[a-z\d](?:[a-z\d-]*[a-z\d])?(?:\.[a-z\d](?:[a-z\d-]*[a-z\d])?)+$/i.test(domain) ||
-    authorVendor.test(domain);
-}
 const linter = new Linter();
 function inspect(text, path, {
-  addedRanges = [], retainedComments, removedComments = [], captureRanges = addedRanges,
+  retainedComments, removedComments = [],
 } = {}) {
   let comments = [];
   const capture = {
-    create: (context) => ({ Program() { comments = commentGroups(context.sourceCode, captureRanges); } }),
+    create: (context) => ({ Program() { comments = context.sourceCode.getAllComments(); } }),
   };
   const extension = path.match(/\.[^.]+$/)[0];
   const messages = linter.verify(text, [{
@@ -50,7 +36,7 @@ function inspect(text, path, {
     plugins: { roo: { rules: { "no-new-comments": rule, capture } } },
     rules: {
       "roo/capture": "error",
-      "roo/no-new-comments": retainedComments ? ["error", { addedRanges, retainedComments, removedComments }] : "off",
+      "roo/no-new-comments": retainedComments ? ["error", { retainedComments, removedComments }] : "off",
     },
   }], { filename: `file${extension}`, allowInlineConfig: false });
   return { comments, messages };
@@ -84,7 +70,7 @@ try {
       continue;
     }
     if (status !== "A") {
-      const previous = inspect(git("show", `${base}:${path}`), path, { captureRanges: deletedRanges });
+      const previous = inspect(git("show", `${base}:${path}`), path);
       for (const message of previous.messages) problems.push(`${JSON.stringify(path)} (base): ${message.message}`);
       for (const comment of previous.comments) {
         if (comment.type === "Shebang") continue;
@@ -92,10 +78,10 @@ try {
         pool.push(normalizeComment(comment.value));
       }
     }
-    if (status !== "D") changes.push({ path, addedRanges, retainedComments, text: git("show", `${head}:${path}`) });
+    if (status !== "D") changes.push({ path, retainedComments, text: git("show", `${head}:${path}`) });
   }
-  for (const { path, text, addedRanges, retainedComments } of changes) {
-    const { comments, messages } = inspect(text, path, { addedRanges, retainedComments, removedComments });
+  for (const { path, text, retainedComments } of changes) {
+    const { comments, messages } = inspect(text, path, { retainedComments, removedComments });
     for (const message of messages) problems.push(`${JSON.stringify(path)}:${message.line}: ${message.message}`);
     for (const comment of comments) {
       if (!consumeComment(comment.value, retainedComments) && comment.type !== "Shebang") {
@@ -105,14 +91,17 @@ try {
   }
   const commits = git("rev-list", `${base}..${head}`).trim().split("\n").filter(Boolean);
   const texts = [];
+  const authors = new Set();
   for (const sha of commits) {
     const label = `Commit ${sha.slice(0, 9)}`;
     const [author, committer, ...message] = git("log", "-1", "--format=%an <%ae>%n%cn <%ce>%n%B", sha).split("\n");
     for (const [role, identity] of [["author", author], ["committer", committer]]) {
-      if (invalidIdentity(identity)) problems.push(`${label} ${role}: Contains an invalid authorship identity.`);
+      if (publicTextViolation(identity)) problems.push(`${label} ${role}: Contains an invalid authorship identity.`);
     }
+    if (author !== "GitHub <noreply@github.com>") authors.add(author);
     texts.push([label, message.join("\n")]);
   }
+  if (authors.size > 1) problems.push("Rewrite commit authors to use one identity before squashing.");
   texts.push(["PR title", process.env.PR_TITLE || ""], ["PR body", process.env.PR_BODY || ""]);
   for (const [label, text] of texts) {
     if (publicTextViolation(text)) problems.push(`${label}: Contains disallowed public text.`);

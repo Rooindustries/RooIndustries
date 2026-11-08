@@ -43,12 +43,13 @@ jobs:
       contents: read
       statuses: write
     env:
-      GH_TOKEN: ${{ github.token }}
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - name: Mark the policy as running on the pull request commit
         id: pending
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" \
             -f state=pending -f context=no-new-comments \
@@ -64,18 +65,22 @@ jobs:
           node-version: 22
       - name: Install locked dependencies
         run: npm ci --ignore-scripts
+      - name: Fetch the pull request commit
+        id: fetch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: git -c credential.helper='!gh auth git-credential' fetch --no-tags origin "$HEAD_SHA"
       - name: No new comments or authorship credits
         id: policy
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          git -c credential.helper='!gh auth git-credential' fetch --no-tags origin "$HEAD_SHA"
-          node .github/no-new-comments.mjs
+        run: node .github/no-new-comments.mjs
       - name: Report the result on the pull request commit
         id: report
         if: always()
         env:
+          GH_TOKEN: ${{ github.token }}
           POLICY_RESULT: ${{ steps.policy.outcome }}
         run: |
           state=failure

@@ -1,5 +1,6 @@
 import { ConfigCommentParser } from "@eslint/plugin-kit";
 import ts from "typescript";
+import { extract, parseWithComments } from "jest-docblock";
 
 export const normalizeComment = (value) => value.replace(/^\s*\* ?/gm, "").replace(/\s+/g, " ").trim();
 
@@ -10,60 +11,131 @@ export function consumeComment(value, comments) {
   return true;
 }
 
-export function commentGroups(source, ranges) {
-  const groups = [];
-  for (const comment of source.getAllComments()) {
-    const previous = groups.at(-1);
-    if (previous?.type === "Line" && comment.type === "Line" &&
-        whollyChanged(previous, ranges) && whollyChanged(comment, ranges) &&
-        !isDirective(previous, source) && !isDirective(comment, source) &&
-        comment.loc.start.line === previous.loc.end.line + 1 &&
-        !source.text.slice(previous.range[1], comment.range[0]).trim()) {
-      previous.value += `\n${comment.value}`;
-      previous.loc = { start: previous.loc.start, end: comment.loc.end };
-      previous.range = [previous.range[0], comment.range[1]];
-    } else {
-      groups.push({ ...comment });
-    }
-  }
-  return groups;
-}
-
 export const inRanges = (line, ranges) => ranges.some(([start, count]) => line >= start && line < start + count);
 export const whollyChanged = (comment, ranges) =>
   Array.from({ length: comment.loc.end.line - comment.loc.start.line + 1 }, (_, n) => comment.loc.start.line + n)
     .every((line) => inRanges(line, ranges));
 
-const directives = [
-  /^(?:prettier-ignore|@vite-ignore|[#@]__PURE__|@__NO_SIDE_EFFECTS__)$/,
-  /^(?:istanbul|[cv]8) ignore (?:next|else|if|file|start|stop)$/,
-];
 const commentParser = new ConfigCommentParser();
-const typeDirectives = new WeakMap();
-function isDirective(comment, source) {
-  if (directives.some((pattern) => pattern.test(comment.value.trim()))) return true;
-  if (/@ts-(?:expect-error|ignore|check|nocheck)/.test(comment.value)) {
-    if (!typeDirectives.has(source)) {
-      const file = ts.createSourceFile("file.tsx", source.text, ts.ScriptTarget.Latest, false);
-      typeDirectives.set(source, [file.checkJsDirective, ...(file.commentDirectives || []).map(({ range }) => range)]
-        .filter(Boolean));
-    }
-    if (typeDirectives.get(source).some(({ pos, end }) =>
-      pos >= comment.range[0] && end <= comment.range[1])) return true;
+const typeFiles = new WeakMap();
+function typeDirective(comment, source) {
+  if (!typeFiles.has(source)) {
+    typeFiles.set(source, ts.createSourceFile("file.tsx", source.text, ts.ScriptTarget.Latest, false));
   }
+  const file = typeFiles.get(source);
+  const body = comment.value.trim();
+  if (/^@ts-(?:expect-error|ignore|check|nocheck)$/.test(body)) {
+    return [file.checkJsDirective, ...(file.commentDirectives || []).map(({ range }) => range)]
+      .some((range) => range && range.pos >= comment.range[0] && range.end <= comment.range[1]);
+  }
+  if (comment.type !== "Line" || !/^\/\s*<reference(?:\s+[\w-]+\s*=\s*(?:"[^"]*"|'[^']*'))+\s*\/>$/i.test(body)) {
+    return false;
+  }
+  const entries = [file.pragmas.get("reference")].flat().filter(Boolean);
+  const entry = entries.find(({ range }) => range.pos === comment.range[0] && range.end === comment.range[1]);
+  const attributes = [...body.matchAll(/\s+([\w-]+)\s*=/g)].map((match) => match[1].toLowerCase());
+  return Boolean(entry) && new Set(attributes).size === attributes.length &&
+    attributes.every((name) => ts.commentPragmas.reference.args.some((arg) => arg.name === name)) &&
+    !file.parseDiagnostics.some(({ start }) => start >= comment.range[0] && start < comment.range[1]);
+}
+function directlyBefore(comment, source, types) {
+  const token = source.getTokenAfter(comment);
+  if (!token || source.text.slice(comment.range[1], token.range[0]).trim()) return false;
+  for (let node = source.getNodeByRangeIndex(token.range[0]); node; node = node.parent) {
+    if (node.range[0] === token.range[0] && types.includes(node.type)) return true;
+  }
+  return false;
+}
+function webpackDirective(comment, source) {
+  if (comment.type !== "Block") return false;
+  let node = source.getNodeByRangeIndex(comment.range[0]);
+  while (node && node.type !== "ImportExpression") node = node.parent;
+  if (!node || comment.range[1] > node.source.range[0]) return false;
+  const file = ts.createSourceFile("options.js", "({" + comment.value + "})", ts.ScriptTarget.Latest, false);
+  const expression = file.statements[0]?.expression;
+  if (file.parseDiagnostics.length || file.statements.length !== 1 ||
+      !expression || !ts.isParenthesizedExpression(expression) ||
+      !ts.isObjectLiteralExpression(expression.expression)) {
+    return false;
+  }
+  const literals = new Map();
+  const collect = (node) => {
+    if (ts.isRegularExpressionLiteral(node)) literals.set(node.getStart(file), node.end);
+    ts.forEachChild(node, collect);
+  };
+  collect(file);
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, file.text);
+  for (let token = scanner.scan(); token !== ts.SyntaxKind.EndOfFileToken; token = scanner.scan()) {
+    if (literals.has(scanner.getTokenPos())) scanner.setTextPos(literals.get(scanner.getTokenPos()));
+    else if ([ts.SyntaxKind.SingleLineCommentTrivia, ts.SyntaxKind.MultiLineCommentTrivia].includes(token)) {
+      return false;
+    }
+  }
+  const properties = expression.expression.properties;
+  return properties.length > 0 && properties.every((property) => {
+    if (!ts.isPropertyAssignment(property) ||
+        !(ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))) return false;
+    const key = property.name.text;
+    const value = property.initializer;
+    const boolean = [ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword].includes(value.kind);
+    const number = ts.isNumericLiteral(value) || (ts.isPrefixUnaryExpression(value) &&
+      [ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken].includes(value.operator) &&
+      ts.isNumericLiteral(value.operand));
+    if (key === "webpackChunkName") return ts.isStringLiteral(value);
+    if (key === "webpackMode") return ts.isStringLiteral(value) &&
+      ["lazy", "lazy-once", "eager", "weak"].includes(value.text);
+    if (key === "webpackFetchPriority") {
+      return ts.isStringLiteral(value) && ["high", "low", "auto"].includes(value.text);
+    }
+    if (["webpackPrefetch", "webpackPreload"].includes(key)) return boolean || number;
+    if (key === "webpackIgnore") return boolean;
+    if (["webpackInclude", "webpackExclude"].includes(key)) return ts.isRegularExpressionLiteral(value);
+    if (key === "webpackExports") return ts.isStringLiteral(value) ||
+      (ts.isArrayLiteralExpression(value) && value.elements.every(ts.isStringLiteral));
+    return false;
+  });
+}
+function isDirective(comment, source) {
+  const body = comment.value.trim();
+  if (/^[#@]__PURE__$/.test(body)) return comment.type === "Block" &&
+    directlyBefore(comment, source, ["CallExpression", "NewExpression"]);
+  if (/^@__NO_SIDE_EFFECTS__$/.test(body)) return comment.type === "Block" &&
+    directlyBefore(comment, source, ["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"]);
+  if (body === "prettier-ignore") return true;
+  if (body === "@vite-ignore") return directlyBefore(comment, source, ["Literal", "TemplateLiteral"]) &&
+    source.getNodeByRangeIndex(source.getTokenAfter(comment).range[0])?.parent?.type === "ImportExpression";
+  if (/^istanbul ignore (?:next|else|if|file)$/.test(body)) return comment.type === "Block";
+  if (/^(?:[cv]8) ignore (?:next(?: [0-9]+)?|start|stop)$/.test(body)) return comment.type === "Block";
+  if (/@ts-|<reference\s/.test(body) && typeDirective(comment, source)) return true;
+  if (/^@jest-environment \S+$/.test(normalizeComment(comment.value)) && comment.type === "Block") {
+    const raw = source.text.slice(...comment.range);
+    const { pragmas, comments } = parseWithComments(raw);
+    return extract(source.text) === raw && !comments &&
+      Object.keys(pragmas).length === 1 && typeof pragmas["jest-environment"] === "string";
+  }
+  if (/webpack[A-Z]/.test(body)) return webpackDirective(comment, source);
   if (!source.getInlineConfigNodes().some(({ range }) =>
     range[0] === comment.range[0] && range[1] === comment.range[1])) return false;
-  const { label, value } = commentParser.parseDirective(comment.value);
+  const directive = commentParser.parseDirective(comment.value);
+  if (!directive || /\s-{2,}\s/.test(comment.value)) return false;
+  const { label, value } = directive;
   if (/^eslint-(?:disable(?:-(?:next-)?line)?|enable)$/.test(label)) {
     if (label === "eslint-disable-line" && comment.loc.start.line !== comment.loc.end.line) return false;
     return Object.keys(commentParser.parseListConfig(value)).every((name) => /^[\w@./-]+$/.test(name));
   }
   if (label === "eslint") return commentParser.parseJSONLikeConfig(value).ok;
   if (label === "exported") {
-    return Object.keys(commentParser.parseListConfig(value)).every((name) => /^[\w$]+$/.test(name));
+    const declared = source.scopeManager.scopes.flatMap((scope) => scope.variables)
+      .filter((variable) => variable.identifiers.length).map(({ name }) => name);
+    const names = Object.keys(commentParser.parseListConfig(value));
+    return names.length > 0 && names.every((name) => declared.includes(name));
   }
   if (label === "global" || label === "globals") {
-    return Object.entries(commentParser.parseStringConfig(value)).every(([name, setting]) => /^[\w$]+$/.test(name) &&
+    const unresolved = source.scopeManager.globalScope.through.map(({ identifier }) => identifier.name);
+    const names = Object.entries(commentParser.parseStringConfig(value));
+    const parts = value.replace(/\s*:\s*/g, ":").split(/[\s,]+/).filter(Boolean);
+    return parts.every((part) => part.split(":").length <= 2) &&
+      names.length > 0 && names.every(([name, setting]) => unresolved.includes(name) &&
       [null, "readonly", "writable", "readable", "writeable", "off", "true", "false"].includes(setting));
   }
   return false;
@@ -89,11 +161,14 @@ const apache = [
   'WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.',
   'See the License for the specific language governing permissions and limitations under the License.',
 ].join(" ");
+const copyright = /^(?:Copyright (?:\(c\)|©)|©) \d{4}(?:-\d{4})? /u;
+const copyrightHolder = /^[\p{L}\p{N}][\p{L}\p{M}\p{N} .,&'’()-]*$/u;
 function license(value) {
   const lines = value.split("\n").map((line) => normalizeComment(line)).filter(Boolean);
   const prose = lines.filter((line) =>
     !/^SPDX-License-Identifier: \(*[\w.+-]+\)*(?: (?:AND|OR|WITH) \(*[\w.+-]+\)*)*$/.test(line) &&
-    !/^(?:Copyright (?:\(c\) |© )?|© )\d{4}\b[^\n]*$/i.test(line)).join(" ");
+    !(copyright.test(line) &&
+      copyrightHolder.test(line.replace(copyright, "").replace(/ All rights reserved\.$/, "")))).join(" ");
   return lines.length > 0 && (!prose || prose === mit || prose === apache);
 }
 
@@ -103,7 +178,6 @@ export default {
     schema: [{
       type: "object",
       properties: {
-        addedRanges: { type: "array" },
         retainedComments: { type: "array", items: { type: "string" } },
         removedComments: { type: "array", items: { type: "string" } },
       },
@@ -113,15 +187,15 @@ export default {
   },
   create(context) {
     if (!context.options.length) return {};
-    const { addedRanges = [], retainedComments = [], removedComments = [] } = context.options[0];
+    const { retainedComments = [], removedComments = [] } = context.options[0];
     const retained = [...retainedComments];
     const removed = [...removedComments];
     return {
       Program() {
-        for (const comment of commentGroups(context.sourceCode, addedRanges)) {
+        for (const comment of context.sourceCode.getAllComments()) {
           if (comment.type === "Shebang" || consumeComment(comment.value, retained) ||
               consumeComment(comment.value, removed) || isDirective(comment, context.sourceCode) ||
-              (!context.sourceCode.getTokenBefore(comment) && license(comment.value))) continue;
+              license(comment.value)) continue;
           context.report({ loc: comment.loc, messageId: "added" });
         }
       },
