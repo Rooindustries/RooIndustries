@@ -245,6 +245,7 @@ export default function FaqSection({
       const targetPage = Math.floor(questionIndex / questionsPerPage);
       if (targetPage !== safePage) {
         const dir = targetPage > safePage ? 1 : -1;
+        pendingPageScrollRef.current = null;
         setPage([targetPage, dir]);
       }
       setOpenQuestions((prev) => ({ ...prev, [hash]: true }));

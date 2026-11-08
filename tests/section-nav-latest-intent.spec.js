@@ -1,4 +1,5 @@
 const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
+const { sampleScrollAfterClick, scrollPath } = require("./fixtures/button-scroll.cjs");
 const { test, expect } = require("@playwright/test");
 const { navLink } = require("./fixtures/nav-link.cjs");
 const { clickAtHomeArrival } = require("./fixtures/home-arrival-click.cjs");
@@ -1063,64 +1064,6 @@ const FAQ_NEXT = { scope: "#faq", text: "Next", from: "top" };
 const FAQ_PREVIOUS = { scope: "#faq", text: "Previous", from: "top" };
 const BACK_TO_TOP = { scope: "footer", text: "To the top", from: "bottom" };
 
-const waitForButton = (page, { scope, text }) =>
-  page.waitForFunction(
-    ({ scope: root, text: label }) =>
-      [...document.querySelectorAll(`${root} button`)].some(
-        (button) =>
-          button.textContent.trim().startsWith(label) &&
-          !button.disabled &&
-          Object.keys(button).some((key) => key.startsWith("__reactProps$"))
-      ),
-    { scope, text },
-    { timeout: 15000 }
-  );
-
-const sampleScrollAfterClick = async (page, button) => {
-  await waitForRouteCommitted(page);
-  await waitForButton(page, button);
-  return evaluateBrowserTask(
-    page,
-    ({ scope, text, from }) =>
-      new Promise((resolve) => {
-        const find = () =>
-          [...document.querySelectorAll(`${scope} button`)].find((item) => item.textContent.trim().startsWith(text));
-        window.scrollTo({ top: from === "top" ? 0 : document.documentElement.scrollHeight, behavior: "instant" });
-        let lastY = -1;
-        let stillFrames = 0;
-        const settle = () => {
-          stillFrames = window.scrollY === lastY ? stillFrames + 1 : 0;
-          lastY = window.scrollY;
-          if (stillFrames < 10) {
-            requestAnimationFrame(settle);
-            return;
-          }
-          const frames = [window.scrollY];
-          const sample = () => frames.push(window.scrollY);
-          const finish = () => {
-            sample();
-            document.removeEventListener("scroll", sample);
-            resolve(frames);
-          };
-          document.addEventListener("scroll", sample);
-          document.addEventListener("scrollend", finish, { once: true });
-          find().click();
-        };
-        requestAnimationFrame(settle);
-      }),
-    button
-  );
-};
-
-const scrollPath = (frames) => {
-  const start = frames[0];
-  const end = frames[frames.length - 1];
-  return {
-    distance: Math.abs(end - start),
-    inBetween: frames.filter((y) => Math.abs(y - start) > 1 && Math.abs(y - end) > 1),
-  };
-};
-
 const SCROLL_BUTTONS = [
   { label: "FAQ Next", button: FAQ_NEXT },
   { label: "FAQ Previous", button: FAQ_PREVIOUS },
@@ -1136,7 +1079,8 @@ test.describe("reduced motion on button scrolls", () => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
     for (const { label, button } of SCROLL_BUTTONS) {
       const path = scrollPath(await sampleScrollAfterClick(page, button));
-      expect(path.distance, `${label} scrolled`).toBeGreaterThan(300);
+      expect(path.distance, `${label} moved ${path.distance} px`).toBeGreaterThan(300);
+      expect(Math.abs(path.offset), `${label} reaches its destination`).toBeLessThanOrEqual(2);
       expect(path.inBetween, `${label} has no animated in-between positions`).toEqual([]);
     }
   });
@@ -1147,7 +1091,8 @@ test.describe("reduced motion on button scrolls", () => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
     for (const { label, button } of SCROLL_BUTTONS) {
       const path = scrollPath(await sampleScrollAfterClick(page, button));
-      expect(path.distance, `${label} scrolled`).toBeGreaterThan(300);
+      expect(path.distance, `${label} moved ${path.distance} px`).toBeGreaterThan(300);
+      expect(Math.abs(path.offset), `${label} reaches its destination`).toBeLessThanOrEqual(2);
       expect(path.inBetween.length, `${label} glides through in-between positions`).toBeGreaterThan(1);
     }
   });
