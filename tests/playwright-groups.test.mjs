@@ -89,34 +89,42 @@ test("the workflow gets group files, graceful deadlines and job limits from one 
   assert.deepEqual(suite.map(group => group.name), [...Object.keys(FIXED_GROUPS), ...REST_GROUPS]);
   assertBudgetsFit(suite);
   const owners = Object.fromEntries(specFiles.map(file => [file, 0]));
-  const fullDuration = Object.values(timings).reduce((total, seconds) => total + seconds, 0);
   for (const group of suite) {
     const files = specFiles.filter(file => new RegExp(group.pattern).test(`/tests/${file}`));
     assert.ok(files.length, group.name);
     for (const file of files) owners[file] += 1;
     const measured = files.reduce((total, file) => total + (timings[file] || 0), 0);
     assert.ok(group.timeoutMs > measured * 1000, `${group.name} needs time beyond its healthy measured run`);
-    assert.ok(group.timeoutMs < fullDuration * 1000, `${group.name} must use its own workload`);
+    assert.ok(group.timeoutMs >= 60 * 60000 - JOB_RESERVE_MS - group.extraMs,
+      `${group.name} must use the job budget instead of stale estimates`);
     assert.equal(group.relocate, group.name === "navigation");
   }
   for (const [file, count] of Object.entries(owners)) assert.equal(count, 1, `${file} ran in ${count} groups`);
 });
 
-test("a 1,200-second booking run gets a job limit beyond its graceful deadline and reserve", () => {
+test("recent real runs and their retries fit without relying on the old file estimates", () => {
+  const recent = JSON.parse(fs.readFileSync("tests/fixtures/playwright-timeouts/recent-runs.json", "utf8"));
+  const { suite } = readMatrix();
+  for (const group of suite) {
+    assert.ok(group.timeoutMs > recent.durationMs[group.name], `${group.name}: ${recent.source}`);
+  }
+  const rest = suite.find(group => group.name === "rest-1");
+  assert.ok(rest.timeoutMs > 944000, "The November 8 rest-1 run outlasted its old 889-second deadline");
+});
+
+test("old file estimates never shorten or inflate the existing job budget", () => {
   fs.mkdirSync("test-results", { recursive: true });
   const dir = fs.mkdtempSync(path.resolve("test-results", "playwright-budget-"));
   const timingFile = path.join(dir, "timings.json");
-  const budgets = [];
   try {
-    for (const seconds of [10, 100, 1200]) {
+    for (const seconds of [10, 100, 1200, 5000]) {
       fs.writeFileSync(timingFile, JSON.stringify({ ...timings, "booking-flow.spec.js": seconds }));
       const { suite } = readMatrix(timingFile);
       assertBudgetsFit(suite);
-      budgets.push(suite.find(group => group.name === "booking"));
+      const group = suite.find(group => group.name === "booking");
+      assert.equal(group.timeoutMinutes, 60);
+      assert.equal(group.timeoutMs, 50 * 60000);
     }
-    assert.ok(budgets[1].timeoutMs > budgets[0].timeoutMs, "The deadline must follow the measured time.");
-    assert.ok(budgets[2].timeoutMs > 30 * 60000, "The valid slow run needs more than the old job limit.");
-    assert.ok(budgets[2].timeoutMinutes > 30, "The job limit must grow with the graceful deadline.");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -148,11 +156,45 @@ test("every native browser run fits the combined job deadline", () => {
   assert.ok(required <= plan.timeoutMinutes * 60000, "Both browser runs must fit before shutdown and uploads");
 });
 
+test("every creator-portal run and its route audit fit the same job budget", () => {
+  const jobs = yaml.safeLoad(fs.readFileSync(".github/workflows/tests.yml", "utf8")).jobs;
+  const job = jobs.routes;
+  const suites = job.strategy.matrix.suite;
+  assert.equal(job["timeout-minutes"], "${{ matrix.suite.timeoutMinutes }}");
+  for (const suite of suites) {
+    const runs = job.steps.filter(step => step.name === "Run browser suite" ||
+      (suite.name === "creator-portal" && step.run?.includes("npm run test:fixture-ports:browser")));
+    assert.equal(runs.length, suite.name === "creator-portal" ? 2 : 1);
+    const required = runs.length * Number(job.env.PW_GROUP_TIMEOUT_MS) +
+      (suite.extraMs || 0) + JOB_RESERVE_MS;
+    assert.ok(required <= suite.timeoutMinutes * 60000, suite.name);
+    if (suite.name === "creator-portal") assert.ok(suite.extraMs >= 15 * 60000);
+  }
+});
+
 test("merged timings use each file's median across runs", () => {
   const report = (seconds) => ({
     suites: [{ file: "a.spec.js", specs: [{ tests: [{ results: [{ duration: seconds * 1000 }] }] }], suites: [] }],
   });
   assert.deepEqual(mergeTimings([report(10), report(40), report(20)]), { "a.spec.js": 20 });
+});
+
+test("the timing collector includes failed attempts and retries", () => {
+  const report = {
+    suites: [{ file: "retry.spec.js", specs: [{ tests: [{ results: [
+      { duration: 120000, status: "timedOut", retry: 0 },
+      { duration: 75000, status: "passed", retry: 1 },
+    ] }] }] }],
+  };
+  fs.mkdirSync("test-results", { recursive: true });
+  const dir = fs.mkdtempSync(path.resolve("test-results", "playwright-timings-"));
+  try {
+    fs.writeFileSync(path.join(dir, "retry.json"), JSON.stringify(report));
+    const timings = JSON.parse(execFileSync(process.execPath, ["scripts/playwright-timings.mjs", dir]));
+    assert.equal(timings["retry.spec.js"], 195);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("a spec file in a subfolder is found and runs in exactly one group", () => {

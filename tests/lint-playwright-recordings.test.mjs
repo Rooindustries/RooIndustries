@@ -39,6 +39,8 @@ test("repository lint rejects recording overrides in shared fixtures and helpers
     "tests/fixtures/booking-flow.cjs",
     "tests/fixtures/shared/recordings.js",
     "tests/helpers/recordings.mjs",
+    "playwright.admin.config.js",
+    "playwright.fixture.config.js",
   ]) {
     for (const [code, status] of [[valid[0], 0], [invalid[0], 1], [invalid[1], 1]]) {
       const result = spawnSync(process.execPath, [cli, "--stdin", "--stdin-filename", filename, "--format=json"], {
