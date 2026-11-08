@@ -283,7 +283,7 @@ export const createRazorpayOrder = async ({
   });
 };
 
-export const inspectRazorpayOrder = async ({ orderId }) => {
+export const inspectRazorpayOrder = async ({ orderId, includeOrderDetails = false }) => {
   const credentials = resolveRazorpayCredentials();
   if (!credentials.enabled || !orderId) {
     return {
@@ -326,7 +326,20 @@ export const inspectRazorpayOrder = async ({ orderId }) => {
         String(entry?.status || "").trim().toLowerCase()
       )
     );
-    return { state: pending ? "pending" : "unpaid", reason: "" };
+    let details;
+    if (!pending && includeOrderDetails) {
+      const order = await fetch(`https://api.razorpay.com/v1/orders/${encodeURIComponent(orderId)}`, {
+        headers: { Authorization: getRazorpayAuthorization(credentials) }, signal: AbortSignal.timeout(8000),
+      });
+      if (!order.ok) return { state: "unavailable", reason: `razorpay_lookup_failed_${order.status}` };
+      details = await order.json();
+      if (details?.id !== orderId) return { state: "unavailable", reason: "razorpay_order_mismatch" };
+      if (details.status === "paid") return { state: "pending", reason: "razorpay_capture_details_pending", details };
+      if (!["created", "attempted"].includes(details.status)) {
+        return { state: "unavailable", reason: "razorpay_order_status_invalid" };
+      }
+    }
+    return { state: pending ? "pending" : "unpaid", reason: "", ...(includeOrderDetails ? { details } : {}) };
   } catch {
     return { state: "unavailable", reason: "razorpay_lookup_exception" };
   }

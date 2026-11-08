@@ -350,6 +350,10 @@ jobs:
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);
           NODE
+      - name: Run checkout start recovery browser cases
+        env:
+          NEXT_DIST_DIR: .next-e2e-native-booking
+        run: xvfb-run -a npx playwright test tests/payment-start-lock.spec.js --project=chromium --grep 'checkout start recovery'
       - name: Run booking-contact PostgreSQL 17 suite
         run: npm run test:booking-contact
       - name: Run booking hold API suite

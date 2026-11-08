@@ -1,5 +1,6 @@
-import resolveQuoteProviders from "./quoteProviders.js";
-import { checkoutRecoveryDecision } from "../../../lib/checkoutRecovery.js";
+import { CHECKOUT_START_CONFLICT } from "../../../lib/paymentStartIdentity.js";
+import { assertPaymentStartState, findStartedPayment } from "./startRecovery.js";
+import { canReleaseUnpaidCheckout, recoveredCheckout } from "./recoveredCheckout.js";
 import { buildBrowserCompletionBody } from "./bookingSummary.js";
 import envValue from "../../supabase/envValue.cjs";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
@@ -88,6 +89,7 @@ import {
 } from "./paymentRecord.js";
 import { selectPaymentAuthority, resolveWebhookBackend, createPaymentBackendClient } from "./backend.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
+import resolveQuoteProviders from "./quoteProviders.js";
 
 import { getBookingForEmailDispatch, isBookingEmailSuppressed, isEmailDeliveryUnknown } from "../ref/bookingEmails.js";
 
@@ -3034,11 +3036,7 @@ const createOrReusePaymentRecordForStart = async ({
     creditSources: isUpgrade ? quote.upgradeContext.creditSources : [],
   });
 
-  if (isUpgrade && ![PAYMENT_STATUS_STARTED, PAYMENT_STATUS_BOOKED, PAYMENT_STATUS_EMAIL_PARTIAL].includes(record.status)) {
-    throw Object.assign(new Error("The previous upgrade checkout is closed. Please start a new upgrade."), {
-      status: 409, code: "upgrade_checkout_closed",
-    });
-  }
+  assertPaymentStartState(record);
 
   if (isUpgrade && (record.bookingPayload.originalOrderId !== bookingPayload.originalOrderId ||
       record.bookingPayload.email !== bookingPayload.email ||
@@ -3119,6 +3117,56 @@ const createOrReusePaymentRecordForStart = async ({
   return record;
 };
 
+const buildPaymentStartResult = async ({ client, record, bookingPayload, requestedProvider, authorizedFreeCheckout,
+  recovering = false }) => {
+  assertPaymentStartState(record);
+  const provider = record.provider;
+  const quote = { ...record.pricingSnapshot, isFree: provider === "free" };
+  let status = buildPublicStatusBody(record);
+  let httpStatus = 200;
+  let checkout = await recoveredCheckout(record, buildProviderPayloadFromRecord(record),
+    recovering || record.status === PAYMENT_STATUS_NEEDS_RECOVERY);
+  if (record.status === PAYMENT_STATUS_NEEDS_RECOVERY && record.provider !== "free" &&
+      record.reconciliationRecoveryTerminal !== true && record.providerRecoveryTerminal !== true &&
+      canReleaseUnpaidCheckout(record) && checkout.checkoutRecovery.providerState === "unpaid" &&
+      checkout.checkoutRecovery.amountMatches && isFutureIso(record.sessionExpiresAt)) {
+    record = await patchPaymentRecord({ client, record,
+      set: { status: PAYMENT_STATUS_STARTED, recoveryReason: "", nextRecoveryAt: "" },
+      event: buildPaymentRecordEvent({ status: PAYMENT_STATUS_STARTED, source: "start", reason: "provider_order_recovered" }),
+    });
+    status = buildPublicStatusBody(record);
+    checkout = await recoveredCheckout(record, buildProviderPayloadFromRecord(record));
+  }
+  if (provider === "free" && ![PAYMENT_STATUS_BOOKED, PAYMENT_STATUS_EMAIL_PARTIAL].includes(record.status) &&
+      ["resumable", "confirming"].includes(checkout.checkoutState)) {
+    const finalized = await finalizePaymentRecordInternal({ client, record, source: "start", providerData: {} });
+    status = finalized.response;
+    httpStatus = finalized.httpStatus;
+    checkout = await recoveredCheckout({ ...record, status: status.status }, {});
+  }
+  const checkoutCodes = { referralCode: record.bookingPayload.referralCode || "",
+    couponCode: record.bookingPayload.couponCode || "" };
+  const conflict = (requestedProvider && requestedProvider !== provider) ||
+    Object.entries(checkoutCodes).some(([key, value]) =>
+      String(bookingPayload[key] || "").toLowerCase() !== value.toLowerCase());
+  return {
+    httpStatus,
+    body: {
+      ...await buildBrowserCompletionBody({ client, record, body: status }),
+      provider,
+      quote,
+      providers: resolveQuoteProviders(quote),
+      quoteFingerprint: record.quoteFingerprint,
+      checkoutCodes,
+      ...(conflict ? { checkoutConflict: CHECKOUT_START_CONFLICT } : {}),
+      ...checkout,
+      paymentAccessToken: authorizedFreeCheckout ? "" : issuePaymentAccessTokenForRecord(record),
+      sessionExpiresAt: String(record.sessionExpiresAt || "").trim(),
+      refreshedHold: buildRefreshedHoldBody(record),
+    },
+  };
+};
+
 export const startPaymentSession = async ({
   body,
   client = createCommerceWriteClient(),
@@ -3157,7 +3205,17 @@ export const startPaymentSession = async ({
     };
   }
 
+  const recoveryPayload = sanitizeBookingPayload(rawBookingPayload);
+  const recover = () => findStartedPayment({ client, bookingPayload: recoveryPayload,
+    backend, cutoverGeneration: pinnedCutoverGeneration });
+  const respond = (record, recovering = false) => buildPaymentStartResult({ client, record, bookingPayload: recoveryPayload,
+    requestedProvider, authorizedFreeCheckout, recovering });
   try {
+    const recovered = await recover();
+    if (recovered) return await respond(recovered, true);
+    if (requestBody.recoverOnly === true) {
+      return { httpStatus: 200, body: { ok: true, recovered: false } };
+    }
     let contact = {};
     if (!String(rawBookingPayload.originalOrderId || "").trim()) {
       const holdId = String(rawBookingPayload.slotHoldId || "").trim();
@@ -3347,82 +3405,19 @@ export const startPaymentSession = async ({
       backendOwner: backend,
       cutoverGeneration: pinnedCutoverGeneration,
     });
-    const refreshed = record?._id
-      ? record
-      : await getPaymentRecordById(client, record._id);
-    const paymentAccessToken = authorizedFreeCheckout
-      ? ""
-      : issuePaymentAccessTokenForRecord(refreshed);
-    const refreshedStatus = String(refreshed.status || "").trim().toLowerCase();
-    if (
-      provider !== "free" &&
-      [
-        PAYMENT_STATUS_BOOKED,
-        PAYMENT_STATUS_EMAIL_PARTIAL,
-        PAYMENT_STATUS_REFUNDED,
-      ].includes(refreshedStatus)
-    ) {
-      return {
-        httpStatus: 200,
-        body: {
-          ...await buildBrowserCompletionBody({ client, record: refreshed, body: buildPublicStatusBody(refreshed) }),
-          provider,
-          providers: resolveQuoteProviders({ isFree: provider === "free" }),
-          quote: buildQuotePayload(quote),
-          quoteFingerprint: currentQuoteFingerprint,
-          providerPayload: {},
-          paymentAccessToken,
-          sessionExpiresAt: String(refreshed.sessionExpiresAt || "").trim(),
-          refreshedHold: buildRefreshedHoldBody(refreshed),
-        },
-      };
-    }
-    if (provider === "free") {
-      const finalized = await finalizePaymentRecordInternal({
-        client,
-        record: refreshed,
-        source: "start",
-        providerData: {},
-      });
-      return {
-        httpStatus: finalized.httpStatus,
-        body: {
-          ...await buildBrowserCompletionBody({ client, record: refreshed, body: finalized.response }),
-          provider,
-          providers: resolveQuoteProviders({ isFree: provider === "free" }),
-          quote: buildQuotePayload(quote),
-          quoteFingerprint: currentQuoteFingerprint,
-          sessionExpiresAt: String(refreshed.sessionExpiresAt || "").trim(),
-          refreshedHold: buildRefreshedHoldBody(refreshed),
-          paymentAccessToken,
-        },
-      };
-    }
-
-    return {
-      httpStatus: 200,
-      body: {
-        ok: true,
-        status: refreshedStatus,
-        bookingSummary: null,
-        provider,
-        providers: resolveQuoteProviders({ isFree: provider === "free" }),
-        quote: buildQuotePayload(quote),
-        quoteFingerprint: currentQuoteFingerprint,
-        ...checkoutRecoveryDecision({ ...refreshed,
-          kind: refreshed.bookingPayload?.originalOrderId ? "upgrade" : "booking",
-          settled: Boolean(refreshed.bookingId || refreshed.providerPaymentId ||
-            refreshed.verificationState === "server_verified"),
-          providerPayload: buildProviderPayloadFromRecord(refreshed) }),
-        paymentAccessToken,
-        sessionExpiresAt: String(refreshed.sessionExpiresAt || "").trim(),
-        refreshedHold: buildRefreshedHoldBody(refreshed),
-      },
-    };
+    return await respond(record);
   } catch (error) {
+    if (["payment_quote_already_claimed", "payment_provider_already_claimed"].includes(error?.code)) {
+      try {
+        const recovered = await recover();
+        if (recovered) return await respond(recovered, true);
+      } catch (recoveryError) { error = recoveryError; }
+    }
     return buildPublicFailure({
       error,
-      fallbackMessage: "Failed to start payment.",
+      fallbackMessage: error?.code === "provider_checkout_unavailable"
+        ? "The payment provider could not confirm checkout. Please try again."
+        : "Failed to start payment.",
     });
   }
 };
@@ -3507,11 +3502,28 @@ export const finalizePaymentSession = async ({
     };
   }
 
+  let confirmationSource = "client";
+  let confirmationData = flatProviderData;
+  if (record.provider === "razorpay" && !flatProviderData.razorpaySignature) {
+    const inspection = await inspectProviderOrderForRecovery(record);
+    if (inspection.state === "unavailable") {
+      const error = Object.assign(new Error("Payment confirmation is temporarily unavailable."), {
+        status: 503, code: "provider_confirmation_unavailable",
+      });
+      logSafeError("Payment confirmation provider lookup failed", error);
+      return buildPublicFailure({ error, fallbackMessage: error.message });
+    }
+    if (!["captured", "refunded"].includes(inspection.state)) {
+      return { httpStatus: 202, body: buildPublicStatusBody(record) };
+    }
+    confirmationSource = "reconcile";
+    confirmationData = inspection.providerData;
+  }
   const finalized = await finalizePaymentRecordInternal({
     client,
     record,
-    source: "client",
-    providerData: flatProviderData,
+    source: confirmationSource,
+    providerData: confirmationData,
   });
 
   return {
@@ -3566,7 +3578,7 @@ export const cancelPaymentSession = async ({
       },
     };
   }
-  if (isPaymentTerminalStatus(status) || status !== PAYMENT_STATUS_STARTED) {
+  if (!canReleaseUnpaidCheckout(record)) {
     return {
       httpStatus: 409,
       body: {
@@ -3577,7 +3589,8 @@ export const cancelPaymentSession = async ({
     };
   }
 
-  const inspection = await inspectProviderOrderForRecovery(record);
+  const inspection = record.provider === "free" ? { state: "unpaid" }
+    : await inspectProviderOrderForRecovery(record, { includeOrderDetails: true });
   if (inspection.state === "captured") {
     const finalized = await finalizePaymentRecordInternal({
       client,
@@ -3609,6 +3622,13 @@ export const cancelPaymentSession = async ({
             : "Payment approval is already in progress. Close the provider checkout before changing methods.",
       },
     };
+  }
+
+  if (record.provider !== "free" && record.providerOrderId) {
+    return { httpStatus: 409, body: {
+      ...buildPublicStatusBody(record), ok: false, cancelled: false, code: "provider_checkout_live",
+      error: "This checkout can still accept payment. Continue with the existing checkout.",
+    } };
   }
 
   const holdId = String(record?.bookingPayload?.slotHoldId || "").trim();
@@ -3649,7 +3669,7 @@ export const cancelPaymentSession = async ({
   for (let attempt = 0; attempt < 4; attempt += 1) {
     record = (await getPaymentRecordById(client, record._id)) || record;
     const currentStatus = String(record.status || "").trim().toLowerCase();
-    if (currentStatus !== PAYMENT_STATUS_STARTED) {
+    if (!canReleaseUnpaidCheckout(record)) {
       const captured = [
         PAYMENT_STATUS_BOOKED,
         PAYMENT_STATUS_EMAIL_PARTIAL,
@@ -3898,7 +3918,7 @@ const closeExpiredLateCaptureWatch = async ({ client, record }) => {
   }
 };
 
-const inspectProviderOrderForRecovery = async (record = {}) => {
+const inspectProviderOrderForRecovery = async (record = {}, { includeOrderDetails = false } = {}) => {
   const provider = String(record.provider || "").trim().toLowerCase();
   const providerOrderId = String(record.providerOrderId || "").trim();
   if (provider === "free") return { state: "captured", providerData: {} };
@@ -3913,7 +3933,7 @@ const inspectProviderOrderForRecovery = async (record = {}) => {
   const result =
     provider === "paypal"
       ? await inspectPayPalOrder({ orderId: providerOrderId })
-      : await inspectRazorpayOrder({ orderId: providerOrderId });
+      : await inspectRazorpayOrder({ orderId: providerOrderId, includeOrderDetails });
   if (!["captured", "refunded"].includes(result?.state)) return result || { state: "unavailable" };
   return {
     ...result,

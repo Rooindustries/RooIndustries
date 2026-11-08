@@ -1,3 +1,4 @@
+import { runCheckoutRecoveryMatrix, runCheckoutFixScenarios } from "./lib/checkout-recovery-scenarios.mjs";
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -295,7 +296,7 @@ try{
     const bookingPayload={packageTitle,email:'customer@example.invalid',discord:'fixture',specs:'synthetic computer',mainGame:'fixture game',localTimeZone:'Asia/Kolkata',startTimeUTC:hold.startTimeUTC,slotHoldId:hold._id,slotHoldToken:issueHoldToken({holdId:hold._id,startTimeUTC:hold.startTimeUTC,expiresAt,holdNonce:hold.holdNonce,backend:'supabase',cutoverGeneration:0})};
     const {resolvePaymentQuote}=await import('../src/server/api/ref/pricing.js');const quote=await resolvePaymentQuote({packageTitle,client:commerce});const {buildQuoteFingerprint}=await import('../src/server/api/payment/paymentRecord.js');return{provider:'paypal',bookingPayload,quoteFingerprint:buildQuoteFingerprint({bookingPayload,quote})};
   };
-  const a1Start=async(provider='paypal',variant='normal')=>{
+  const a1Start=async(provider='paypal',variant='normal',bookingChanges={},staged=false)=>{
     fixture.setRequestHook(async(phase,request)=>{if(phase==='after'&&(request.status>=400||request.response?.ok===false||request.response?.error)){evidence.databaseErrors||=[];evidence.databaseErrors.push({scenario:scenarioNumber,response:request.response});}});
     const input=await startInput();input.provider=provider;input.bookingPayload.message='Original note';emailFailure=variant==='email-failure';
     if (variant === 'upgrade') {
@@ -318,7 +319,9 @@ try{
       if (existing) await documents.patch(target._id).set(target).commit();
       else await documents.create(target);
       const { issueUpgradeIntentToken } = await import('../src/server/api/ref/upgradeIntentToken.js');
-      input.bookingPayload = { originalOrderId: original._id, packageTitle: target.title, email: original.email,
+      input.bookingPayload = { originalOrderId: original._id, packageTitle: target.title,
+        packagePrice: target.price, email: original.email, startTimeUTC: original.startTimeUTC,
+        localTimeZone: original.localTimeZone,
         upgradeIntentToken: issueUpgradeIntentToken({ bookingId: original._id, email: original.email, targetPackageTitle: target.title, backend: 'supabase', cutoverGeneration: 0 }) };
     }
     if(variant==='referral'){
@@ -330,6 +333,7 @@ try{
       const code=`A1${scenarioNumber}`,percent=provider==='free'?100:10;
       await commerce.create({_id:`coupon.a1.${scenarioNumber}`,_type:'coupon',code,isActive:true,discountType:'percent',discountPercent:percent,canCombineWithReferral:true,timesUsed:0,activeReservations:0,maxUses:0,backendOwner:'supabase',cutoverGeneration:0});input.bookingPayload.couponCode=code;
     }
+    Object.assign(input.bookingPayload, bookingChanges);
     const {resolvePaymentQuote}=await import('../src/server/api/ref/pricing.js');
     const quote=await resolvePaymentQuote({...input.bookingPayload,client:commerce});
     const {buildQuoteFingerprint}=await import('../src/server/api/payment/paymentRecord.js');input.quoteFingerprint=buildQuoteFingerprint({bookingPayload:input.bookingPayload,quote});
@@ -344,10 +348,22 @@ try{
       res.writeHead(201,{'content-type':'application/json'});res.end(JSON.stringify(body));return true;
     };
     paypalOrder.status='CREATED';paypalOrder.purchase_units[0].amount={value,currency_code:'USD'};paypalOrder.purchase_units[0].payments={captures:[]};
+    let stagedId = '';
+    if (staged) fixture.setRequestHook(async (phase, request) => {
+      const mutations = request.body?.p_mutations || [];
+      if (phase === 'before' && stagedId && mutations.some(m => m.document?._id === stagedId)) {
+        throw new Error('Fixture interruption after the durable checkout claim');
+      }
+      if (phase === 'after') {
+        stagedId ||= mutations.find(m => m.document?._type === 'paymentRecord' &&
+          m.document.status === 'started')?.document._id || '';
+      }
+    });
     const browserResponse = variant === 'browser' ? await fetch(`${origin}/start-route`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }) : null;
     const started = browserResponse ? { status: browserResponse.status, body: await browserResponse.json(), cacheControl: browserResponse.headers.get('cache-control') } : await requestFlow('start', { body: input });
-    assert.equal(started.status,200,JSON.stringify(started));
-    const payment = provider === 'free'
+    fixture.setRequestHook(null);
+    if (!staged) assert.equal(started.status,200,JSON.stringify(started));
+    const payment = staged ? (await row(stagedId))?.payload : provider === 'free'
       ? await commerce.fetch('*[_type == "paymentRecord" && bookingId == $id][0]', { id: started.body.bookingId })
       : await commerce.fetch('*[_type == "paymentRecord" && providerOrderId == $id][0]', { id: started.body.providerPayload.orderId });
     assert.ok(payment?._id);
@@ -366,6 +382,162 @@ try{
     assert.equal(result.body.checkoutState, 'confirming');
     assert.equal(result.body.providerPayload, null);
     return { status, paymentHandoffWithheld: true };
+  });
+
+  const creations = () => providerRequests.filter(call => call.method === 'POST' &&
+    ['/checkouts', '/v1/orders', '/v2/checkout/orders'].includes(call.path)).length;
+  const setUnpaidCheckout = (provider, payment) => {
+    paypalOrder.status = 'CREATED';
+    paypalOrder.purchase_units[0].payments = { captures: [] };
+    providerHook = async (request, req, res) => {
+      let body;
+      if (provider === 'dodo' && request.path === '/checkouts/order-fixture') {
+        body = { id: 'order-fixture', payment_id: null };
+      } else if (provider === 'razorpay' && request.path === '/v1/orders/order-fixture/payments') {
+        body = { items: [] };
+      } else if (provider === 'razorpay' && request.path === '/v1/orders/order-fixture') {
+        body = { id: 'order-fixture', status: 'created', currency: 'USD',
+          amount: providers.toSubunits(payment.pricingSnapshot.netAmount, 'USD') };
+      }
+      if (!body) return false;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(body));
+      return true;
+    };
+  };
+  await runCheckoutFixScenarios({ run, a1Start, row, commerce, requestFlow, setUnpaidCheckout, creations,
+    setProviderHook: hook => { providerHook = hook; } });
+  await runCheckoutRecoveryMatrix({ run, a1Start, row, commerce, requestFlow, setUnpaidCheckout, creations });
+
+  for (const [provider, variant] of [
+    ['dodo', 'coupon'], ['paypal', 'coupon'], ['razorpay', 'coupon'], ['free', 'coupon'], ['dodo', 'upgrade'],
+  ]) await run(`checkout-start-recovery-${provider}-${variant}`, async () => {
+    const checkout = await a1Start(provider, variant, { deferEmailsUntilConfirmation: true });
+    setUnpaidCheckout(provider, (await row(checkout.id)).payload);
+    const before = await snapshot();
+    const ordersBefore = creations();
+    for (const changed of [false, true]) {
+      const body = { ...checkout.input, quoteFingerprint: 'lost-client-quote',
+        bookingPayload: { ...checkout.input.bookingPayload,
+          ...(changed ? { couponCode: 'expired-or-replaced' } : {}) } };
+      const recovered = await requestFlow('start', { body });
+      assert.equal(recovered.status, 200, JSON.stringify(recovered));
+      assert.equal(recovered.body.provider, provider);
+      assert.equal(recovered.body.quote.netAmount, checkout.started.body.quote.netAmount);
+      assert.equal(recovered.body.quoteFingerprint, checkout.started.body.quoteFingerprint);
+      assert.deepEqual(recovered.body.providers, checkout.started.body.providers);
+      assert.equal(recovered.body.providers.paypal.enabled, provider !== 'free');
+      assert.equal(recovered.body.providers.razorpay.enabled, provider !== 'free');
+      assert.equal(recovered.body.checkoutCodes.couponCode, checkout.input.bookingPayload.couponCode || '');
+      assert.equal(Boolean(recovered.body.checkoutConflict), changed);
+      assert.deepEqual(recovered.body.providerPayload, checkout.started.body.providerPayload);
+    }
+    assert.deepEqual(await snapshot(), before);
+    assert.equal(creations(), ordersBefore);
+    return { provider, variant, originalAmount: checkout.started.body.quote.netAmount,
+      originalCodesRetained: true, unchangedPersistence: true, noNewProviderOrder: true };
+  });
+  for (const provider of ['razorpay', 'paypal', 'dodo']) {
+    for (const variant of ['unpaid', 'expired', 'amount', 'currency', 'captured', 'unavailable',
+      ...(provider === 'razorpay' ? ['paid-order'] : [])]) {
+      await run(`checkout-start-resume-${provider}-${variant}`, async () => {
+        const checkout = await a1Start(provider);
+        const payment = (await row(checkout.id)).payload;
+        const amount = providers.toSubunits(payment.pricingSnapshot.netAmount, 'USD');
+        if (provider === 'dodo' && variant === 'currency') {
+          await assert.rejects(commerce.patch(payment._id).set({
+            providerPublicData: { ...payment.providerPublicData, currency: 'EUR' },
+          }).commit());
+          assert.equal((await row(checkout.id)).payload.providerPublicData.currency, 'USD');
+          return { provider, variant, immutableCurrencyEnforced: true };
+        }
+        await commerce.patch(payment._id).set({ status: 'needs_recovery',
+          ...(variant === 'expired' ? { sessionExpiresAt: new Date(originalNow() - 1000).toISOString() } : {}),
+          ...(provider === 'dodo' && ['amount', 'currency'].includes(variant)
+            ? { providerPublicData: { ...payment.providerPublicData,
+              ...(variant === 'amount' ? { amount: amount + 1 } : { currency: 'EUR' }) } } : {}),
+        }).commit();
+        providerHook = async (request, req, res) => {
+          if (variant === 'unavailable') { res.writeHead(503); res.end('{}'); return true; }
+          let body;
+          if (provider === 'razorpay') {
+            if (request.path.endsWith('/payments')) body = { items: variant === 'captured' ? [razorpayPayment] : [] };
+            else if (request.path === '/v1/orders/order-fixture') body = { id: 'order-fixture',
+              status: variant === 'paid-order' ? 'paid' : 'created',
+              amount: amount + (variant === 'amount' ? 1 : 0), currency: variant === 'currency' ? 'EUR' : 'USD' };
+          } else if (provider === 'paypal' && request.path === '/v2/checkout/orders/order-fixture') {
+            body = { ...paypalOrder, ...(variant === 'captured' ? {} : { status: 'CREATED', purchase_units: [{
+              amount: { value: ((amount + (variant === 'amount' ? 1 : 0)) / 100).toFixed(2),
+                currency_code: variant === 'currency' ? 'EUR' : 'USD' }, payments: { captures: [] },
+            }] }) };
+          } else if (provider === 'dodo' && request.path === '/checkouts/order-fixture') {
+            body = { id: 'order-fixture', payment_id: variant === 'captured' ? 'payment-fixture' : null };
+          }
+          if (!body) return false;
+          res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); return true;
+        };
+        const result = await requestFlow('start', { body: checkout.input });
+        assert.equal(result.status, variant === 'unavailable' ? 503 : 200, JSON.stringify(result));
+        if (variant === 'unavailable') {
+          assert.equal(result.body.code, 'provider_checkout_unavailable');
+          assert.equal(result.body.providerPayload, undefined);
+          return { provider, variant, visibleFailure: true };
+        }
+        const expected = variant === 'unpaid' ? 'resumable'
+          : ['expired', 'amount', 'currency'].includes(variant) ? 'start_again'
+          : 'confirming';
+        assert.equal(result.body.checkoutState, expected, JSON.stringify(result));
+        assert.deepEqual(result.body.providerPayload, expected === 'resumable' ? checkout.started.body.providerPayload : null);
+        if (expected === 'resumable' || variant === 'captured') {
+          providerHook = null;
+          const finalized = await requestFlow('finalize', {
+            paymentAccessToken: result.body.paymentAccessToken, body: variant === 'captured' ? {} : checkout.proof,
+          });
+          assert.equal(finalized.status, 200, JSON.stringify(finalized));
+          assert.ok(['booked', 'email_partial'].includes(finalized.body.status));
+        }
+        if (expected === 'start_again') {
+          const cancelled = await requestFlow('cancel', { paymentAccessToken: result.body.paymentAccessToken });
+          assert.equal(cancelled.status, 409, JSON.stringify(cancelled));
+          assert.equal(cancelled.body.code, 'provider_checkout_live');
+        }
+        if (variant === 'paid-order') {
+          const cancelled = await requestFlow('cancel', { paymentAccessToken: result.body.paymentAccessToken });
+          assert.equal(cancelled.status, 409, JSON.stringify(cancelled));
+          assert.equal(cancelled.body.code, 'provider_pending');
+          assert.equal((await row(checkout.id)).payload.status, 'needs_recovery');
+        }
+        return { provider, variant, checkoutState: result.body.checkoutState };
+      });
+    }
+  }
+  for (const variant of ['normal', 'upgrade']) await run(`checkout-start-recovery-closed-${variant}`, async () => {
+    const checkout = await a1Start('paypal', variant);
+    paypalOrder.status = 'CREATED';
+    paypalOrder.purchase_units[0].payments = { captures: [] };
+    await commerce.patch(checkout.id).set({ status: 'abandoned' }).commit();
+    assert.equal((await row(checkout.id)).payload.status, 'abandoned');
+    const before = await snapshot();
+    const replay = await requestFlow('start', { body: checkout.input });
+    assert.equal(replay.status, 409, JSON.stringify(replay));
+    assert.equal(replay.body.code, variant === 'upgrade' ? 'upgrade_checkout_closed' : 'payment_checkout_closed');
+    assert.equal(replay.body.paymentAccessToken, undefined);
+    assert.equal(replay.body.providerPayload, undefined);
+    assert.deepEqual(await snapshot(), before);
+    return { variant, cancellationVerified: true, closedCheckoutDenied: true, unchangedPersistence: true };
+  });
+  await run('checkout-start-recovery-ownership', async () => {
+    const checkout = await a1Start('dodo');
+    for (const mutation of [
+      { email: 'another@example.invalid' }, { packageTitle: 'Another package' },
+      { slotHoldToken: 'invalid' }, { startTimeUTC: '2099-02-02T10:00:00.000Z' },
+    ]) {
+      const denied = await requestFlow('start', { body: { ...checkout.input,
+        bookingPayload: { ...checkout.input.bookingPayload, ...mutation } } });
+      assert.ok(denied.status >= 400, JSON.stringify(denied));
+      assert.equal(denied.body.paymentAccessToken, undefined);
+    }
+    return { mismatchedBookingAndInvalidProofDenied: true };
   });
   for (const mode of ['complete', 'partial', 'missing-details']) await run(`recovery-reschedule-created-${mode}`, async () => {
     const checkout = await a1Start();
@@ -1109,11 +1281,13 @@ try{
     const first = await requestFlow('start', { body: input });
     assert.equal(first.status, 200, JSON.stringify(first));
     const before = await snapshot({ receipts: true });
-    const requestsBefore = providerRequests.length;
+    const requestsBefore = creations();
     const second = await requestFlow('start', { body: { ...input, provider: 'razorpay' } });
-    assert.equal(second.status, 409, JSON.stringify(second));
+    assert.equal(second.status, 200, JSON.stringify(second));
+    assert.equal(second.body.provider, 'paypal');
+    assert.equal(second.body.checkoutConflict, 'This checkout already started with its original price and codes. Finish it or release the payment before changing codes.');
     assert.deepEqual(await snapshot({ receipts: true }), before);
-    assert.equal(providerRequests.length, requestsBefore);
+    assert.equal(creations(), requestsBefore);
     return { firstStatus: first.status, second, secondProviderOrderRequests: 0, unchanged: true };
   });
   for(const revisionState of ['absent','null'])await run(`missing-start-hold-authorizing-revision${revisionState==='null'?'-null':''}`,async()=>{
@@ -1122,7 +1296,7 @@ try{
     const result=await requestFlow('start',{body:input});assert.equal(raced,true);assert.ok(result.status>=400);assert.deepEqual(await snapshot(),before);assert.equal(providerRequests.filter(r=>r.path==='/v2/checkout/orders').length,0);return{httpStatus:result.status,revisionState,newerHoldOwnerRetained:true,noClaimRecordProviderCreation:true};
   });
   for(const revisionState of ['absent','null'])await run(`missing-release-hold-authorizing-revision${revisionState==='null'?'-null':''}`,async()=>{
-    const r=await seed('paypal','started',{record:{bookingId:'',holdSnapshot:{slotHoldId:'slotHold.fixture',slotHoldExpiresAt:new Date(originalNow()-1000).toISOString()}}});paypalOrder.status='CREATED';paypalOrder.purchase_units[0].payments={captures:[]};
+    const r=await seed('free','started',{record:{bookingId:'',providerOrderId:'',providerPaymentId:'',holdSnapshot:{slotHoldId:'slotHold.fixture',slotHoldExpiresAt:new Date(originalNow()-1000).toISOString()}}});paypalOrder.status='CREATED';paypalOrder.purchase_units[0].payments={captures:[]};
     await commerce.create({_id:'slotHold.fixture',_type:'slotHold',backendOwner:'supabase',cutoverGeneration:0,startTimeUTC:'2099-01-01T10:00:00.000Z',packageTitle:'Vertex Essentials',phase:'holding',paymentRecordId:recordId,paymentProvider:'paypal',holdNonce:'old-release-owner',expiresAt:new Date(originalNow()+30000).toISOString()});await commerce.patch('slotHold.fixture').set({phase:'payment_pending'}).commit();await removeRevision('slotHold.fixture',revisionState);let raced=false,before;
     fixture.setRequestHook(async(phase,request)=>{if(phase!=='after'||raced||!JSON.stringify(request.response).includes('old-release-owner'))return;raced=true;fixture.setRequestHook(null);await commerce.patch('slotHold.fixture').set({holdNonce:'newer-release-owner',expiresAt:new Date(originalNow()+120000).toISOString()}).commit();before=await snapshot();});
     Date.now=()=>originalNow()+91000;const result=await requestFlow('cancel',{paymentAccessToken:tokenFor(r)});assert.equal(raced,true);assert.deepEqual(await snapshot(),before);assert.notEqual((await row('slotHold.fixture')).payload.phase,'released');return{httpStatus:result.status,revisionState,newerHoldOwnerRetained:true};
@@ -1682,9 +1856,8 @@ try{
     const beforeReplay = await snapshot({ receipts: true });
     const replay = await requestFlow('start', { body: checkout.input });
     assert.deepEqual(await snapshot({ receipts: true }), beforeReplay);
-    assert.equal(replay.status, 409, JSON.stringify(replay));
-    assert.equal(replay.body.error, 'Your slot reservation expired.');
-    assert.equal(Object.hasOwn(replay.body, 'bookingSummary'), false);
+    assert.equal(replay.status, 200, JSON.stringify(replay));
+    assert.deepEqual(replay.body.bookingSummary, response.body.bookingSummary);
     return { paymentRecord: payment, booking, response, free: checkout.started, replay };
   });
   await run('confirmation-summary-upgrade-completion', async () => {

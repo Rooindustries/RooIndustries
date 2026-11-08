@@ -1,6 +1,8 @@
 import { CHECKOUT_START_CONFLICT, paymentStartIdentity } from "../lib/paymentStartIdentity";
+import { useCheckoutStartRecovery } from "../lib/useCheckoutStartRecovery";
 import { normalizePaymentSession, readStoredPaymentSession,
-  writeStoredPaymentSession, clearStoredPaymentSession } from "../lib/checkoutRecovery";
+  writeStoredPaymentSession, clearStoredPaymentSession,
+  rememberCheckoutStart, checkoutStartNeedsRecovery } from "../lib/checkoutRecovery";
 import { clearBookingConfirmation, createBookingConfirmation } from "../lib/confirmationReceipt";
 import { writeBrowserStorage, removeBrowserStorage } from "../lib/browserStorage";
 import React, { useState, useMemo, useEffect, useRef } from "react";
@@ -393,6 +395,8 @@ export default function Payment({ hideFooter = false }) {
   const [quoteFingerprint, setQuoteFingerprint] = useState("");
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteSettled, setQuoteSettled] = useState(false);
+  const [recoverySettled, setRecoverySettled] = useState(false);
+  const checkoutRecoveryRef = useRef(null);
   const [quoteRetryCount, setQuoteRetryCount] = useState(0);
 
   const showBanner = (type, text, options = {}) => {
@@ -410,13 +414,26 @@ export default function Payment({ hideFooter = false }) {
   }, [banner]);
 
   useEffect(() => {
-    if (!holdExpiresAt || processingDodoReturn || creatingFree) return;
+    if (!holdExpiresAt || processingDodoReturn || creatingFree || !recoverySettled) return;
     const expiresAtMs = new Date(holdExpiresAt).getTime();
     if (!Number.isFinite(expiresAtMs)) return;
 
-    const triggerExpiry = () => {
+    const triggerExpiry = async () => {
       if (holdExpiryHandledRef.current) return;
       holdExpiryHandledRef.current = true;
+      try {
+        const session = await checkoutRecoveryRef.current();
+        const refreshedExpiry = session?.result?.refreshedHold?.slotHoldExpiresAt;
+        if (session?.stale || ["booked", "email_partial"].includes(session?.result?.status) ||
+            session?.result?.checkoutState === "confirming" || Date.parse(refreshedExpiry) > Date.now()) {
+          holdExpiryHandledRef.current = false;
+          return;
+        }
+      } catch (error) {
+        holdExpiryHandledRef.current = false;
+        showBanner("error", error.message || "Unable to check your reservation. Please try again.");
+        return;
+      }
       codeApplicationAllowedRef.current = false;
       showBanner(
         "error",
@@ -448,7 +465,7 @@ export default function Payment({ hideFooter = false }) {
 
     scheduleExpiry();
     return () => clearTimeout(timeoutId);
-  }, [holdExpiresAt, processingDodoReturn, creatingFree, navigate, navState, location]);
+  }, [holdExpiresAt, processingDodoReturn, creatingFree, recoverySettled, navigate, navState, location]);
 
   const {
     couponDiscountAmount,
@@ -574,6 +591,7 @@ export default function Payment({ hideFooter = false }) {
     paymentMountedRef.current = true;
     return () => { paymentMountedRef.current = false; };
   }, []);
+  useEffect(() => beginCheckoutConfirmation(), []);
   useEffect(() => {
     setPaymentStatusBusy(false);
     setCancellingPayment(false);
@@ -588,7 +606,9 @@ export default function Payment({ hideFooter = false }) {
     const operation = {
       token: String(expectedToken ?? activeSession?.paymentAccessToken ?? "").trim(),
       current: () => {
-        if (!paymentMountedRef.current || paymentViewRef.current !== paymentView) return false;
+        const current = paymentViewRef.current;
+        if (!paymentMountedRef.current || (current !== paymentView && (!operation.recovering ||
+            current?.key !== paymentView.key || current.startIdentity !== paymentView.startIdentity))) return false;
         const session = readStoredPaymentSession() || paymentView.session;
         return String(session?.paymentAccessToken || "").trim() === operation.token &&
           (!operation.token || paymentSessionMatchesCheckout(session?.fingerprint, paymentView.fingerprint));
@@ -611,6 +631,7 @@ export default function Payment({ hideFooter = false }) {
   };
 
   useEffect(() => {
+    if (!recoverySettled) return;
     if (paymentSession?.result?.quote && paymentSessionMatchesCheckout(paymentSession.fingerprint, checkoutFingerprint)) {
       applyCheckoutQuote(paymentSession.result);
       setQuoteLoading(false);
@@ -686,6 +707,7 @@ export default function Payment({ hideFooter = false }) {
     quoteRetryCount,
     paymentSession,
     checkoutFingerprint,
+    recoverySettled,
   ]);
 
   useEffect(() => {
@@ -1189,10 +1211,10 @@ export default function Payment({ hideFooter = false }) {
     throw new Error("Timed out waiting for payment confirmation.");
   };
 
-  const startSessionCheckout = async (provider, operation = createPaymentOperation()) => {
+  const startSessionCheckout = async (provider, operation = createPaymentOperation(), recoverOnly = false) => {
     if (!operation.current()) return { terminal: true, stale: true };
     if (
-      paymentSession?.provider === provider &&
+      !recoverOnly && paymentSession?.provider === provider &&
       paymentSessionMatchesCheckout(
         paymentSession?.fingerprint,
         checkoutFingerprint
@@ -1262,20 +1284,23 @@ export default function Payment({ hideFooter = false }) {
     }
 
     const promise = (async () => {
-      if (quoteLoading || !quoteFingerprint) {
+      if (!recoverOnly && (quoteLoading || !quoteFingerprint)) {
         throw new Error("Checkout price is still being confirmed. Please try again.");
       }
 
       const startPayload = buildCheckoutPayload();
+      if (!recoverOnly) rememberCheckoutStart(startIdentity);
       const { response, data } = await fetchJson("/api/payment/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider,
+          recoverOnly,
           quoteFingerprint,
           bookingPayload: startPayload,
         }),
       });
+      if (response.ok && data?.recovered === false) return { missing: true };
 
       let storedHold;
       try { storedHold = JSON.parse(sessionStorage.getItem("my_slot_hold") || "null"); } catch {}
@@ -1283,6 +1308,7 @@ export default function Payment({ hideFooter = false }) {
         slotHoldId: storedHold.holdId, slotHoldToken: storedHold.holdToken }) !== startIdentity)) {
         return { terminal: true, stale: true };
       }
+      operation.recovering = recoverOnly;
       const late = !operation.current();
       if (late) {
         const current = paymentViewRef.current;
@@ -1370,10 +1396,12 @@ export default function Payment({ hideFooter = false }) {
       if (!late && confirming) {
         operation.token = nextSession.paymentAccessToken;
         persistPaymentSession(nextSession);
-        await finalizeSessionCheckout({ paymentAccessToken: nextSession.paymentAccessToken, providerData: {}, operation });
-        return { ...nextSession, terminal: true };
+        const finalized = await finalizeSessionCheckout({
+          paymentAccessToken: nextSession.paymentAccessToken, providerData: {}, operation,
+        });
+        return { ...nextSession, result: { ...nextSession.result, ...finalized }, terminal: true };
       }
-      if (late || conflict || nextSession.result.checkoutState !== "resumable" ||
+      if (recoverOnly || late || conflict || nextSession.result.checkoutState !== "resumable" ||
           (data.provider && data.provider !== provider)) {
         persistPaymentSession(nextSession);
         if (confirming && data.recoveryReason) showBanner("info", data.recoveryReason, { persistent: true });
@@ -1402,6 +1430,20 @@ export default function Payment({ hideFooter = false }) {
       setPendingStarts(pendingStartsRef.current.filter((start) => start.promise !== promise));
     }
   };
+
+  checkoutRecoveryRef.current = useCheckoutStartRecovery({
+    enabled: hydrated && Boolean(packageTitle), identity: startIdentity,
+    recover: async force => {
+      const stored = readStoredPaymentSession();
+      if (!force && (stored?.result?.checkoutState === "resumable" || !checkoutStartNeedsRecovery(startIdentity))) {
+        return { missing: true };
+      }
+      await sessionStartRef.current?.promise.catch(() => {});
+      return startSessionCheckout("", createPaymentOperation(), true);
+    },
+    onSettled: session => setRecoverySettled(!["booked", "email_partial"].includes(session?.result?.status)),
+    onError: error => showBanner("error", error.message || "Unable to recover checkout. Please try again."),
+  });
 
   const finalizeSessionCheckout = async ({ paymentAccessToken, providerData, operation = createPaymentOperation(paymentAccessToken), captured = false }) => {
     if (!captured && !operation.current()) return null;

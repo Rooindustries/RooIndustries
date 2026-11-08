@@ -58,6 +58,7 @@ export const verifyUpgradeIntentToken = ({
   targetPackageTitle,
   backend = "",
   cutoverGeneration,
+  ignoreExpiry = false,
 }) => {
   try {
     const key = secret();
@@ -85,7 +86,7 @@ export const verifyUpgradeIntentToken = ({
       return null;
     }
     const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
-    if (payload.exp <= Math.floor(Date.now() / 1000)) return null;
+    if (!Number.isFinite(payload.exp) || (!ignoreExpiry && payload.exp <= Math.floor(Date.now() / 1000))) return null;
     if (payload.bid !== normalizedBookingId) return null;
     if (payload.emh !== digestEmail(normalizedEmail)) return null;
     if (payload.pkg !== normalizedPackage) return null;
