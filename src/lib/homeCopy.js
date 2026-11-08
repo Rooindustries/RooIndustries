@@ -1,10 +1,17 @@
+const { isVerifiedRamPrice, formatRamPrice, ramPriceSourceLabel } = require('./ramPrice');
+const { isTopPackageTitle, getPackagePricePresentation, toMoney } = require('./packagePricing');
+
+const heroDescription = amount =>
+  `A 32GB DDR5 kit that was around $100 in early 2025 costs ${amount} now. ` +
+  "You probably don't need a new one. We'll tune the RAM you have, and the rest of your PC, " +
+  'for more FPS and steadier 1% lows.';
+
 const HOME_COPY = {
   hero: {
     tagline: "",
     headingLine1: "Why Pay $400 For RAM?",
     headingLine2: "Tune Yours For $99.95.",
-    description:
-      "A 32GB DDR5 kit that was around $100 in early 2025 costs $400 now. You probably don't need a new one. We'll tune the RAM you have, and the rest of your PC, for more FPS and steadier 1% lows.",
+    description: heroDescription('$400'),
     subtext:
       "One remote session. Before-and-after benchmarks so you see exactly what changed.",
     ctaPrimaryText: "Tune My PC",
@@ -152,8 +159,15 @@ const keyed = (sourceItems = [], canonicalItems = []) =>
     _key: sourceItems?.[index]?._key || item._key || `copy-${index}`,
   }));
 
-const resolveHeroCopy = (value) =>
-  Object.fromEntries(
+const getHeroTunePrice = (packages) => {
+  const max = Array.isArray(packages) ? packages.find(pkg => isTopPackageTitle(pkg?.title)) : null;
+  if (!max || !['string', 'number'].includes(typeof max.price) || toMoney(max.price) <= 0) return '';
+  const price = getPackagePricePresentation(max.title, max.price).price;
+  return toMoney(price) > 0 ? price : '';
+};
+
+const resolveHeroCopy = (value, packages = []) => {
+  const copy = Object.fromEntries(
     Object.entries(HOME_COPY.hero).map(([key, fallback]) => {
       const candidate = value?.[key];
       if (Array.isArray(fallback)) {
@@ -168,6 +182,19 @@ const resolveHeroCopy = (value) =>
       ];
     })
   );
+  if (!isVerifiedRamPrice(value?.ramPrice)) return copy;
+  const ramPrice = value.ramPrice;
+  const amount = formatRamPrice(ramPrice.priceCents);
+  const tunePrice = getHeroTunePrice(packages);
+  return {
+    ...copy,
+    ramPrice,
+    ramPriceSourceLabel: ramPriceSourceLabel(ramPrice),
+    headingLine1: `Why Pay ${amount} For RAM?`,
+    headingLine2: toMoney(tunePrice) > 0 ? `Tune Yours For ${tunePrice}.` : 'Tune Yours.',
+    description: heroDescription(amount),
+  };
+};
 
 const applyHomeSectionCopyOverride = (key, value) => {
   if (key === "reviews") {
@@ -248,6 +275,7 @@ const applyHomePageCopyOverrides = (homeData = {}) => ({
 module.exports = {
   HOME_COPY,
   OVERWATCH_CREATOR_BENCHMARK,
+  getHeroTunePrice,
   resolveHeroCopy,
   applyHomePageCopyOverrides,
   applyHomeSectionCopyOverride,

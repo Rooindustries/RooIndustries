@@ -35,7 +35,8 @@ export const PUBLIC_CONTENT_QUERIES = Object.freeze({
   )`,
   hero: `*[_type == "hero"][0]{
     tagline,headingLine1,headingLine2,description,subtext,
-    ctaPrimaryText,ctaSecondaryText,ctaNote,bullets
+    ctaPrimaryText,ctaSecondaryText,ctaNote,bullets,
+    ramPrice{priceCents,currency,checkedAt,source,sourceUrl,sku,variantId}
   }`,
   team: `*[_type == "meetTheTeam"][0]{
     seoTitle,seoDescription,heroTitle,heroSubtitle,showFounder,

@@ -1,6 +1,11 @@
 const { applyHomePageCopyOverrides, resolveHeroCopy } = require("./homeCopy");
 const { buildPackageOffers, normalizeFaqQuestions } = require("./packageContent");
 
+const reportContentError = async (resource, error) => {
+  const { logSafeError } = await import("../server/safeErrorLog.js");
+  logSafeError(`[content] ${resource} fetch failed`, error);
+};
+
 const createPublicContentFetcher = async () => {
   const [{ fetchPublicContent }, { resolveSupabaseRuntimePolicy }] =
     await Promise.all([
@@ -53,7 +58,7 @@ async function fetchHomePageData({
     fetchContent = await createPublicContentFetcher();
   } catch (error) {
     if (requireContent) await refuseHomeFallback(error);
-    console.warn("[content] home fetch failed");
+    await reportContentError("home", error);
     fetchContent = async () => null;
   }
   const failed = new Set();
@@ -61,9 +66,9 @@ async function fetchHomePageData({
     try {
       const data = await fetchContent(resource);
       return data ?? fallback;
-    } catch {
+    } catch (error) {
       failed.add(resource);
-      console.warn("[content] home fetch failed");
+      await reportContentError(resource, error);
       return fallback;
     }
   };
@@ -105,7 +110,8 @@ async function fetchHomePageData({
   }
 
   return applyHomePageCopyOverrides({
-    hero: resolveHeroCopy(hero),
+    hero: resolveHeroCopy(hero, packagesList),
+    heroPackages: packagesList.map(({ title, price }) => ({ title, price })),
     reviews,
     about,
     services,
@@ -152,9 +158,16 @@ async function fetchDiscordBanner() {
 async function fetchHeroCopy() {
   try {
     const fetchContent = await createPublicContentFetcher();
-    return resolveHeroCopy(await fetchContent("hero"));
-  } catch {
-    console.warn("[content] hero fetch failed");
+    const [hero, packages] = await Promise.all([
+      fetchContent("hero"),
+      fetchContent("packages-list").catch(async (error) => {
+        await reportContentError("packages-list", error);
+        return [];
+      }),
+    ]);
+    return resolveHeroCopy(hero, packages);
+  } catch (error) {
+    await reportContentError("hero", error);
     return resolveHeroCopy(null);
   }
 }
