@@ -7,10 +7,6 @@ const routeCopy = {
     title: "Free PC Tools & Downloads",
     body: "Grab tools for benchmarks, FPS testing, prep checks, and getting the PC ready before a session.",
   },
-  "/referrals/login": {
-    title: "Referral Partner Login",
-    body: "Sign in to your referral portal to monitor clicks, conversions, and payout progress.",
-  },
   "/referrals/register": {
     title: "Referral Program Sign Up",
     body: "Create a partner account and start sharing your unique referral link.",

@@ -637,6 +637,42 @@ export function AppContent({
     });
   };
 
+  const eagerFlowContent = initialRoutePath === pathName && Boolean(InitialRouteComponent);
+  const flowContent = (
+    <>
+      {eagerFlowContent ? (
+        <InitialRouteComponent hideFooter compact={isBookingRoute} />
+      ) : isPaymentSuccessRoute ? (
+        <PaymentSuccess hideFooter />
+      ) : isThankYouRoute ? (
+        <Thankyou hideFooter />
+      ) : isPaymentRoute ? (
+        <Payment hideFooter />
+      ) : (
+        <Book hideFooter compact />
+      )}
+      <BookingDialogReady />
+    </>
+  );
+  const flowModal = (
+    <FlowModal
+      open
+      onClose={closeBookingModal}
+      skipInitialSizeAnimation={isPaymentSuccessRoute || isThankYouRoute || loadedOnFlowRouteRef.current}
+      contentKey={flowContentKey}
+      routePath={location.pathname}
+      reservationRef={setPaymentHoldContainer}
+    >
+      {eagerFlowContent ? (
+        <React.Fragment key={flowContentKey}>{flowContent}</React.Fragment>
+      ) : (
+        <Suspense key={flowContentKey} fallback={<RouteFallback />}>
+          {flowContent}
+        </Suspense>
+      )}
+    </FlowModal>
+  );
+
   return (
     <SectionNavigationProvider routeShell={routeShell}>
       {routeJsonLd && location.pathname === initialRoutePath ? <JsonLd data={routeJsonLd} /> : null}
@@ -683,36 +719,9 @@ export function AppContent({
           />
         </main>
       </div>
-      {isFlowRoute && (
-        <Suspense fallback={null}>
-          <FlowModal
-            open
-            onClose={closeBookingModal}
-            skipInitialSizeAnimation={isPaymentSuccessRoute || isThankYouRoute || loadedOnFlowRouteRef.current}
-            contentKey={flowContentKey}
-            routePath={location.pathname}
-            reservationRef={setPaymentHoldContainer}
-          >
-            <Suspense
-              key={flowContentKey}
-              fallback={<RouteFallback />}
-            >
-              {initialRoutePath === pathName && InitialRouteComponent ? (
-                <InitialRouteComponent hideFooter compact={isBookingRoute} />
-              ) : isPaymentSuccessRoute ? (
-                <PaymentSuccess hideFooter />
-              ) : isThankYouRoute ? (
-                <Thankyou hideFooter />
-              ) : isPaymentRoute ? (
-                <Payment hideFooter />
-              ) : (
-                <Book hideFooter compact />
-              )}
-              <BookingDialogReady />
-            </Suspense>
-          </FlowModal>
-        </Suspense>
-      )}
+      {isFlowRoute && (initialBookingModalComponent ? flowModal : (
+        <Suspense fallback={null}>{flowModal}</Suspense>
+      ))}
       <PerfDebugRuntime />
     </SectionNavigationProvider>
   );

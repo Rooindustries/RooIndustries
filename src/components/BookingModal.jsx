@@ -5,6 +5,7 @@ import { BookingDialogHoldContext, BookingDialogReadyContext } from "../lib/book
 import { useLowPerformanceMode } from "../lib/performanceMode";
 import { isTopDialog, useDialogFocus } from "../lib/useDialogFocus";
 import { setVisibleTimeout } from "../lib/visibleTimeout";
+import { useHydrating } from "../lib/useHydrating";
 
 const MOBILE_BREAKPOINT = 780;
 const MOBILE_BASE_WIDTH = 550;
@@ -37,6 +38,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     viewportTop: 0,
   });
   const lowPerformanceMode = useLowPerformanceMode();
+  const hydrating = useHydrating();
   const scalerRef = useRef(null);
   const baseWidthRef = useRef(DESKTOP_BASE_WIDTH);
   const scaleToFrame = useCallback((frameWidth) => {
@@ -59,6 +61,8 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
   const [holdCount, setHoldCount] = useState(0);
   const holdCountRef = useRef(0);
   const contentRevealed = !awaitingContent && !contentSwitch.revealPending;
+  const [stageRevealed, setStageRevealed] = useState(!skipInitialSizeAnimation);
+  if (contentRevealed && !stageRevealed) setStageRevealed(true);
 
   const revealFocusedControl = useCallback((target) => {
     const stage = stageRef.current;
@@ -377,9 +381,9 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       {open && (
         <motion.div
           ref={stageRef}
-          className="booking-dialog-stage fixed z-[70] overflow-y-auto overflow-x-hidden"
+          className={`booking-dialog-stage fixed z-[70] overflow-y-auto overflow-x-hidden${stageRevealed ? "" : " [html.js_&]:invisible"}`}
           style={viewport || { inset: 0 }}
-          initial={{ opacity: 0 }}
+          initial={hydrating ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={fadeTransition}
@@ -401,9 +405,9 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
               role="dialog"
               aria-modal="true"
               aria-label="Schedule your session"
-              className={`ri-booking m-auto relative${contentRevealed ? "" : " invisible"}`}
-              initial={{ width: wrapperSize.width, height: wrapperSize.height }}
-              animate={{ width: wrapperSize.width, height: wrapperSize.height }}
+              className={`ri-booking m-auto relative${contentSwitch.revealPending ? " invisible" : awaitingContent ? " [html.js_&]:invisible" : ""}`}
+              initial={hydrating ? false : { width: wrapperSize.width, height: wrapperSize.height }}
+              animate={!hydrating || wrapperSize.height ? { width: wrapperSize.width, height: wrapperSize.height } : undefined}
               layout={!lowPerformanceMode}
               transition={sizeTransition}
               onUpdate={(latest) => scaleToFrame(latest.width)}
@@ -427,7 +431,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
                 data-booking-scaler="true"
                 className="shadow-none outline-none overflow-visible absolute left-0 origin-top-left cursor-default"
                 style={{ top: CLOSE_ROW_HEIGHT }}
-                initial={lowPerformanceMode ? { opacity: 0 } : false}
+                initial={!hydrating && lowPerformanceMode ? { opacity: 0 } : false}
                 animate={lowPerformanceMode ? { opacity: 1 } : undefined}
                 exit={lowPerformanceMode ? { opacity: 0 } : undefined}
                 transition={fadeTransition}
