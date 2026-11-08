@@ -133,6 +133,11 @@ const loadHero = async (client) => {
     client, documentTypes: ['hero'], limit: 2, allowLegacyFallback: false,
   });
   if (documents.length !== 1 || !documents[0]._rev) throw failure('RAM_PRICE_HERO_UNAVAILABLE');
+  for (const field of ['ramPrice', 'ramPriceCandidate']) {
+    if (documents[0][field] && !isVerifiedRamPrice(documents[0][field])) {
+      throw failure('RAM_PRICE_INVALID_HISTORY');
+    }
+  }
   return documents[0];
 };
 
@@ -140,8 +145,6 @@ export async function refreshRamPrice({ client, env = process.env, signal, now =
   sourceEndpoint(env);
   const windowStart = Math.floor(now / RAM_PRICE_WINDOW_MS) * RAM_PRICE_WINDOW_MS;
   let current = await loadHero(client);
-  if (current.ramPrice && !isVerifiedRamPrice(current.ramPrice, now))
-    throw failure('RAM_PRICE_INVALID_HISTORY');
   if (current.ramPrice && Date.parse(current.ramPrice.checkedAt) >= windowStart)
     return { state: 'fresh', checkedAt: current.ramPrice.checkedAt };
   const { data, error } = await client.rpc('roo_consume_rate_limit', {
@@ -155,42 +158,61 @@ export async function refreshRamPrice({ client, env = process.env, signal, now =
     return { state: 'limited', retryAfter: Math.ceil((windowStart + RAM_PRICE_WINDOW_MS - now) / 1000) };
   const quote = await fetchQuote({ env, signal, now });
   for (let attempt = 0; attempt < 2; attempt++) {
-    if (
+    const outlier = Boolean(
       current.ramPrice &&
       Math.abs(quote.priceCents - current.ramPrice.priceCents) * 100 > current.ramPrice.priceCents * 30
-    )
-      throw failure('RAM_PRICE_OUTLIER');
+    );
+    const candidate = current.ramPriceCandidate;
+    const confirmed = outlier && candidate &&
+      Math.floor(Date.parse(candidate.checkedAt) / RAM_PRICE_WINDOW_MS) === windowStart / RAM_PRICE_WINDOW_MS - 1 &&
+      Math.abs(quote.priceCents - candidate.priceCents) * 100 <= candidate.priceCents * 2;
+    const pending = outlier && !confirmed;
+    const field = pending ? 'ramPriceCandidate' : 'ramPrice';
+    const document = { ...current, [field]: quote };
+    if (!pending) delete document.ramPriceCandidate;
     try {
       await executeGlobalCmsCommand({
         supabaseClient: client, env, actor: 'admin:cron-hero-ram-price', onCommit,
         body: {
           operation: 'replace', type: 'hero', documentId: current._id, expectedRevision: current._rev,
-          document: { ...current, ramPrice: quote },
+          document,
         },
       });
-      return { state: 'updated', checkedAt: quote.checkedAt };
     } catch (error) {
       const latest = await loadHero(createSupabaseAdminClient({ env, signal: AbortSignal.timeout(5000) }));
-      if (latest.ramPrice && Object.keys(quote).every((key) => latest.ramPrice[key] === quote[key])) {
+      if (
+        latest[field] && Object.keys(quote).every((key) => latest[field][key] === quote[key]) &&
+        (pending || !latest.ramPriceCandidate)
+      ) {
         onCommit();
-        return { state: 'updated', checkedAt: quote.checkedAt };
+      } else {
+        if (signal?.aborted || error.code !== 'CMS_REVISION_CONFLICT' || attempt > 0) throw error;
+        if (latest.ramPrice && Date.parse(latest.ramPrice.checkedAt) >= windowStart)
+          return { state: 'fresh', checkedAt: latest.ramPrice.checkedAt };
+        current = latest;
+        continue;
       }
-      if (signal?.aborted || error.code !== 'CMS_REVISION_CONFLICT' || attempt > 0) throw error;
-      if (latest.ramPrice && !isVerifiedRamPrice(latest.ramPrice, now))
-        throw failure('RAM_PRICE_INVALID_HISTORY');
-      if (latest.ramPrice && Date.parse(latest.ramPrice.checkedAt) >= windowStart)
-        return { state: 'fresh', checkedAt: latest.ramPrice.checkedAt };
-      current = latest;
     }
+    if (pending) throw failure('RAM_PRICE_OUTLIER');
+    if (confirmed) {
+      reportRamPriceEvent(
+        'RAM price reprice confirmed by consecutive quotes',
+        Object.assign(new Error('RAM price reprice confirmed.'), { code: 'RAM_PRICE_REPRICE_CONFIRMED' }),
+      );
+    }
+    return { state: 'updated', checkedAt: quote.checkedAt };
   }
 }
 
-export function reportRamPriceFailure(error) {
-  const label = 'RAM price refresh failed; last verified price retained';
+function reportRamPriceEvent(label, error) {
   logSafeWarn(label, error);
   globalThis[Symbol.for('roo.reportServerError')]?.(label, error, {
     ...getSafeErrorMetadata(error),
     name: 'RamPriceRefreshError',
     level: 'warning',
   });
+}
+
+export function reportRamPriceFailure(error) {
+  reportRamPriceEvent('RAM price refresh failed; last verified price retained', error);
 }

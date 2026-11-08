@@ -1,5 +1,6 @@
 import homeCopy from '../../src/lib/homeCopy.js';
 import { createHmac, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 
 export function createRamPriceFixture({ documents, cronSecret = 'fixture-only-ram-price-cron', onCommit = () => {} }) {
   let state;
@@ -39,6 +40,13 @@ export function createRamPriceFixture({ documents, cronSecret = 'fixture-only-ra
       if (body.reset) reset();
       for (const name of ['mode', 'price', 'race', 'lostReceipt']) if (body[name] !== undefined) state[name] = body[name];
       if (body.previousPrice !== undefined) hero().ramPrice = quote(body.previousPrice, body.checkedAt);
+      if (body.nextWindow) {
+        state.limits.clear();
+        if (hero().ramPriceCandidate) {
+          hero().ramPriceCandidate.checkedAt =
+            new Date(Date.parse(hero().ramPriceCandidate.checkedAt) - 6 * 3600000).toISOString();
+        }
+      }
       if (body.reset || body.previousPrice !== undefined) onCommit();
       json(res, 200, { ...state, limits: [...state.limits], hero: hero(), packages: documents.filter(document => document._type === 'package') });
       return true;
@@ -123,11 +131,20 @@ export function createRamPriceFixture({ documents, cronSecret = 'fixture-only-ra
       const mutation = body.p_mutations?.[0];
       if (body.p_mutations?.length !== 1 || mutation?.id !== hero()._id || mutation.operation !== 'replace') throw new Error('Refresh tried to publish other content.');
       if (mutation.expected_revision !== hero()._rev) { json(res, 409, { code: '40001', message: 'CMS_REVISION_CONFLICT' }); return true; }
-      const changed = Object.keys(mutation.document).filter(key => !key.startsWith('_') && JSON.stringify(mutation.document[key]) !== JSON.stringify(hero()[key]));
-      if (changed.length !== 1 || changed[0] !== 'ramPrice') throw new Error('Refresh changed a field other than ramPrice.');
+      const changed = [...new Set([...Object.keys(mutation.document), ...Object.keys(hero())])]
+        .filter(key => !key.startsWith('_') && !isDeepStrictEqual(mutation.document[key], hero()[key]));
+      if (!changed.length || changed.some(key => !['ramPrice', 'ramPriceCandidate'].includes(key))) {
+        throw new Error('Refresh changed a field other than the RAM quotes.');
+      }
       state.revisions.push({ revisionId: randomUUID(), createdAt: new Date().toISOString(), actor: body.p_actor, operation: mutation.operation });
-      Object.assign(hero(), mutation.document, { _rev: `ram-price-${state.publishes.length + 1}` });
-      hero().ramPrice = Object.fromEntries(Object.entries(hero().ramPrice).sort(([left], [right]) => left.localeCompare(right)));
+      const currentHero = hero();
+      for (const key of Object.keys(currentHero)) delete currentHero[key];
+      Object.assign(currentHero, mutation.document, { _rev: `ram-price-${state.publishes.length + 1}` });
+      for (const key of ['ramPrice', 'ramPriceCandidate']) {
+        if (hero()[key]) {
+          hero()[key] = Object.fromEntries(Object.entries(hero()[key]).sort(([left], [right]) => left.localeCompare(right)));
+        }
+      }
       state.publishes.push(structuredClone(mutation));
       onCommit();
       const receipt = { command_id: body.p_command_id, operation: mutation.operation, document_ids: [hero()._id], replayed: false, results: [{ _id: hero()._id, _type: 'hero', _rev: hero()._rev }] };

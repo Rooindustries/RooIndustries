@@ -115,6 +115,43 @@ try {
   reportRamPriceFailure(Object.assign(new Error('Synthetic preview failure'), { code: 'RAM_PRICE_SOURCE_UNAVAILABLE' }));
   await flush(1000);
   assert.equal(events.length, 1);
+  process.env.VERCEL_ENV = 'production';
+  await fetch(`${origin}/__ram-price`, {
+    method: 'POST', body: JSON.stringify({ reset: true, previousPrice: 49000, price: '1000.00' }),
+  });
+  const refreshQuote = () => refreshRamPrice({ client, env, signal: AbortSignal.timeout(5000) });
+  const holdQuote = () => assert.rejects(refreshQuote(), error => {
+    reportRamPriceFailure(error);
+    return error.code === 'RAM_PRICE_OUTLIER';
+  });
+  const nextQuote = price => fetch(`${origin}/__ram-price`, {
+    method: 'POST', body: JSON.stringify({ nextWindow: true, price }),
+  });
+  await holdQuote();
+  assert.equal(documents[0].ramPrice.priceCents, 49000);
+  assert.equal(documents[0].ramPriceCandidate.priceCents, 100000);
+  assert.equal((await refreshQuote()).state, 'limited');
+  await nextQuote('1200.00');
+  await holdQuote();
+  assert.equal(documents[0].ramPrice.priceCents, 49000);
+  assert.equal(documents[0].ramPriceCandidate.priceCents, 120000);
+  await nextQuote('1224.00');
+  assert.equal((await refreshQuote()).state, 'updated');
+  assert.equal(documents[0].ramPrice.priceCents, 122400);
+  assert.equal(documents[0].ramPriceCandidate, undefined);
+  await fetch(`${origin}/__ram-price`, {
+    method: 'POST', body: JSON.stringify({ reset: true, previousPrice: 49000, price: '1000.00' }),
+  });
+  await holdQuote();
+  await nextQuote('500.00');
+  assert.equal((await refreshQuote()).state, 'updated');
+  assert.equal(documents[0].ramPrice.priceCents, 50000);
+  assert.equal(documents[0].ramPriceCandidate, undefined);
+  await flush(5000);
+  assert.equal(events.filter(event => event.tags.error_code === 'RAM_PRICE_OUTLIER').length, 3);
+  assert.equal(events.filter(event => event.tags.error_code === 'RAM_PRICE_REPRICE_CONFIRMED').length, 1);
+  const confirmed = events.find(event => event.tags.error_code === 'RAM_PRICE_REPRICE_CONFIRMED');
+  assert.equal(confirmed.exception.values[0].value, 'RAM price reprice confirmed by consecutive quotes');
   Object.assign(process.env, env);
   const reports = [];
   const reporterKey = Symbol.for('roo.reportServerError');

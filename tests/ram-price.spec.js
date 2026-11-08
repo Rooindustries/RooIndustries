@@ -133,7 +133,7 @@ for (const price of ['1400.00', '1.00', '2000.00', '0', '-100', 'NaN', '5e2', '5
     expect((await refresh(request)).status()).toBe(503);
     const after = await state(request);
     expect(after.hero.ramPrice).toEqual(before.hero.ramPrice);
-    expect(after.publishes).toHaveLength(0);
+    expect(after.publishes).toHaveLength(price === '1400.00' ? 1 : 0);
   });
 }
 
@@ -146,6 +146,47 @@ test('a concurrent editor change survives the refresh', async ({ request }) => {
   expect(after.publishes).toHaveLength(1);
   expect(after.publishes[0].expected_revision).toBe('concurrent-editor');
 });
+
+for (const scenario of [
+  {
+    name: 'a one-off spike', prices: ['1000.00', '500.00'],
+    statuses: [503, 200], expected: 50000, label: '$500',
+  },
+  {
+    name: 'a sustained reprice', prices: ['1000.00', '1020.00'],
+    statuses: [503, 200], expected: 102000, label: '$1,020',
+  },
+  {
+    name: 'a changed candidate', prices: ['1000.00', '1200.00', '1224.00'],
+    statuses: [503, 503, 200], expected: 122400, label: '$1,224',
+  },
+]) {
+  test(`${scenario.name} requires consecutive consistent quotes before reaching the page`,
+    async ({ page, request }, testInfo) => {
+      const before = await state(request, { previousPrice: 49000 });
+      await publishHero(request);
+      await page.goto('/');
+      await expect(page.locator('#top h1')).toContainText('Why Pay $490 For RAM?');
+      for (let index = 0; index < scenario.prices.length; index++) {
+        await state(request, { price: scenario.prices[index], nextWindow: index > 0 });
+        expect((await refresh(request)).status()).toBe(scenario.statuses[index]);
+        const current = await state(request);
+        const publicHero = await (await request.get('/api/content/hero')).json();
+        expect(publicHero.data.ramPriceCandidate).toBeUndefined();
+        await page.reload();
+        if (scenario.statuses[index] === 503) {
+          expect(current.hero.ramPrice).toEqual(before.hero.ramPrice);
+          expect(current.hero.ramPriceCandidate.priceCents).toBe(Number(scenario.prices[index]) * 100);
+          await expect(page.locator('#top h1')).toContainText('Why Pay $490 For RAM?');
+        } else {
+          expect(current.hero.ramPrice.priceCents).toBe(scenario.expected);
+          expect(current.hero.ramPriceCandidate).toBeUndefined();
+          await expect(page.locator('#top h1')).toContainText(`Why Pay ${scenario.label} For RAM?`);
+        }
+        await page.locator('#top').screenshot({ path: testInfo.outputPath(`quote-${index + 1}.png`) });
+      }
+    });
+}
 
 test('a lost publish receipt never causes a second write', async ({ request }) => {
   await state(request, { lostReceipt: true });
@@ -221,7 +262,7 @@ for (const scenario of [
     expect((await refresh(request)).status()).toBe(503);
     const after = await state(request);
     expect(after.hero.ramPrice).toEqual(before.hero.ramPrice);
-    expect(after.publishes).toHaveLength(0);
+    expect(after.publishes).toHaveLength(scenario.name === 'outlier source' ? 1 : 0);
     await page.reload();
     await expect(page.locator('#top h1')).toContainText('Why Pay $490 For RAM?');
     await expect(source).toHaveText(originalLabel);
@@ -488,5 +529,53 @@ test(`${outcome} package reads keep a finite retry budget`, async ({ page, reque
   await expect(page.locator('#top h1')).toContainText('Tune Yours.');
   await testInfo.attach('finite-package-retries', { body: JSON.stringify({ exhaustedReads, finalReads: reads }), contentType: 'application/json' });
 });
+}
+
+for (const leave of [false, true]) {
+  test(`pending package reads ${leave ? 'stay quiet after navigation' : 'report three timeouts once'}`,
+    async ({ page, request }) => {
+      await page.clock.install();
+      await page.clock.pauseAt(new Date(Date.now() + 1000));
+      expect((await refresh(request)).status()).toBe(200);
+      let reads = 0;
+      let prefetching = true;
+      const reports = [];
+      page.on('console', message => {
+        if (message.type() === 'error' && /Request timed out|AbortError/.test(message.text())) {
+          reports.push(message.text());
+        }
+      });
+      await page.route('**/api/content/packages-list', route => {
+        reads++;
+        if (prefetching) return route.fulfill({ json: { ok: true, data: [] } });
+      });
+      await page.goto('/about');
+      await page.clock.runFor(1500);
+      await expect.poll(() => reads).toBe(1);
+      reads = 0;
+      prefetching = false;
+      await page.locator('footer a[href="/"]').first().click();
+      await expect(page.locator('#top h1')).toContainText('Tune Yours.');
+      await expect.poll(() => reads).toBe(1);
+      if (leave) {
+        await page.locator('footer a[href="/about"]').first().click();
+        await expect(page).toHaveURL(/\/about$/);
+        await page.clock.fastForward(30000);
+        expect(reads).toBe(1);
+        expect(reports).toHaveLength(0);
+      } else {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          await page.clock.fastForward(5000);
+          if (attempt < 2) {
+            await page.clock.fastForward((attempt + 1) * 1000);
+            await expect.poll(() => reads).toBe(attempt + 2);
+          }
+        }
+        await expect.poll(() => reports.length).toBe(1);
+        await page.clock.fastForward(30000);
+        expect(reads).toBe(3);
+        expect(reports).toHaveLength(1);
+      }
+    });
 }
 });

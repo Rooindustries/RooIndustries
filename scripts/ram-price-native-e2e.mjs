@@ -72,11 +72,49 @@ try {
   assert.equal(recovered.state, 'updated');
   fixture.setRequestHook(null);
   assert.equal(await count() - beforeCount, 1);
+  const [current] = await fixture.sql`select payload from migration.source_documents where legacy_sanity_id='native-ram-hero'`;
+  await executeGlobalCmsCommand({ supabaseClient: fixture.client, env, actor: 'admin:key', body: {
+    operation: 'replace', type: 'hero', documentId: current.payload._id, expectedRevision: current.payload._rev,
+    document: {
+      ...current.payload,
+      ramPrice: { ...current.payload.ramPrice, checkedAt: new Date(Date.now() - 7 * 3600000).toISOString() },
+    },
+  } });
+  await fetch(`http://${host}:${sourcePort}/__ram-price`, {
+    method: 'POST', body: JSON.stringify({ price: '1000.00' }),
+  });
+  await assert.rejects(refreshRamPrice({
+    client: fixture.client, env: { ...env, CRON_SECRET: 'fixture-native-candidate-cron' },
+  }), error => error.code === 'RAM_PRICE_OUTLIER');
+  const [pending] = await fixture.sql`select payload from migration.source_documents where legacy_sanity_id='native-ram-hero'`;
+  assert.equal(pending.payload.ramPrice.priceCents, 50000);
+  assert.equal(pending.payload.ramPriceCandidate.priceCents, 100000);
+  await executeGlobalCmsCommand({ supabaseClient: fixture.client, env, actor: 'admin:key', body: {
+    operation: 'replace', type: 'hero', documentId: pending.payload._id, expectedRevision: pending.payload._rev,
+    document: {
+      ...pending.payload,
+      ramPriceCandidate: {
+        ...pending.payload.ramPriceCandidate, checkedAt: new Date(Date.now() - 6 * 3600000).toISOString(),
+      },
+    },
+  } });
+  await fetch(`http://${host}:${sourcePort}/__ram-price`, {
+    method: 'POST', body: JSON.stringify({ price: '1020.00' }),
+  });
+  assert.equal((await refreshRamPrice({
+    client: fixture.client, env: { ...env, CRON_SECRET: 'fixture-native-confirmed-cron' },
+  })).state, 'updated');
+  const [confirmed] = await fixture.sql`select payload from migration.source_documents where legacy_sanity_id='native-ram-hero'`;
+  assert.equal(confirmed.payload.ramPrice.priceCents, 102000);
+  assert.equal(confirmed.payload.ramPriceCandidate, undefined);
   const [packageAfter] = await fixture.sql`select payload from migration.source_documents where legacy_sanity_id='native-ram-package'`;
   assert.deepEqual(packageAfter, packageBefore);
   const actors = await fixture.sql`select distinct actor from cms.document_revisions where document_id='native-ram-hero'`;
   assert.ok(actors.some(row => row.actor === 'admin:cron-hero-ram-price'));
-  Object.assign(result, { passed: true, normalPublish: true, deadlineRecovery: true, deadlineWrites: 1, packageUnchanged: true, actor: 'admin:cron-hero-ram-price' });
+  Object.assign(result, {
+    passed: true, normalPublish: true, deadlineRecovery: true, deadlineWrites: 1,
+    confirmedReprice: true, packageUnchanged: true, actor: 'admin:cron-hero-ram-price',
+  });
 } finally {
   if (sourceServer) { sourceServer.closeAllConnections(); await new Promise(resolve => sourceServer.close(resolve)); }
   if (fixture) { await fixture.stop(); await fs.rm(fixture.scratch, { recursive: true, force: true }); }

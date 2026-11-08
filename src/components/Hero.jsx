@@ -5,7 +5,7 @@ import { getPublicContent } from "../lib/publicContentClient";
 import homeCopy from "../lib/homeCopy";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import { trackEvent } from "../lib/analytics";
-import { reportRequestError } from "../lib/clientRequest";
+import { reportRequestError, requestTimeoutError } from "../lib/clientRequest";
 
 const { resolveHeroCopy, getHeroTunePrice } = homeCopy;
 
@@ -62,7 +62,7 @@ export default function Hero({ initialData = null, initialPackages = null, headi
     }
     const loadPackages = async (attempt = 0) => {
       packageRequest = new AbortController();
-      packageTimeout = setTimeout(() => packageRequest.abort(), 5000);
+      packageTimeout = setTimeout(() => packageRequest.abort(requestTimeoutError()), 5000);
       let retry = true;
       try {
         const packages = await getPublicContent("packages-list", {}, { signal: packageRequest.signal });
