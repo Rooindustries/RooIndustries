@@ -136,6 +136,7 @@ export default function FaqSection({
     }
 
     const syncHashFromWindow = () => {
+      pendingPageScrollRef.current = null;
       const nextHash = (
         window.location.hash ||
         location.hash ||
@@ -145,6 +146,7 @@ export default function FaqSection({
     };
 
     const syncHashFromIntent = (event) => {
+      pendingPageScrollRef.current = null;
       const nextHash = String(
         event?.detail?.hash || window.location.hash || location.hash || ""
       ).replace(/^#/, "");

@@ -31,6 +31,7 @@ jest.mock("framer-motion", () => {
           exit,
           initial,
           layout,
+          onAnimationComplete,
           transition,
           variants,
           whileHover,
