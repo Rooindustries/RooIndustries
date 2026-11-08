@@ -7,7 +7,8 @@ runs:
       with:
         path: ~/.cache/roo-postgrest
         key: postgrest-v16.4-linux-static-x86-64-b47ecc82
-    - shell: bash
+    - if: ${{ !startsWith(runner.name, 'devbox-') }}
+      shell: bash
       run: |
         sudo install -d /usr/share/postgresql-common/pgdg
         sudo curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 20 \
@@ -16,6 +17,8 @@ runs:
         echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
         sudo apt-get -o Acquire::Retries=5 update
         sudo apt-get -o Acquire::Retries=5 install --yes --no-install-recommends postgresql-17
+    - shell: bash
+      run: |
         archive="$HOME/.cache/roo-postgrest/postgrest.tar.xz"
         mkdir -p "$(dirname "$archive")" "$RUNNER_TEMP/postgrest"
         if [ ! -f "$archive" ]; then
