@@ -727,6 +727,8 @@ try{
       assert.equal(terminalPayment.refundProcessedAmountInSubunits,999);
       assert.equal(terminalBooking.status,'refunded');
       assert.equal(terminalBooking.refundedAmount,9.99);
+      assert.equal(terminalBooking.commissionAmount,0);
+      assert.equal(terminalBooking.commissionCalculationVersion,2);
       const rowMetadata=['_rev','_updatedAt'];
       const stable=value=>Object.fromEntries(Object.entries(value).filter(([key])=>!rowMetadata.includes(key)));
       const terminalLedger=await emailLedger();
