@@ -33,29 +33,6 @@ $$;
 revoke all on function commerce.exhausted_capture_can_resume(jsonb) from public, anon, authenticated;
 grant execute on function commerce.exhausted_capture_can_resume(jsonb) to service_role;
 
-do $edit$
-declare
-  definition text;
-  previous constant text :=
-    $old$and coalesce(nullif(source.payload->'reconciliationRecoveryTerminal', 'null'::jsonb), 'false'::jsonb) = 'false'::jsonb$old$;
-  replacement constant text := $new$and (
-        coalesce(nullif(source.payload->'reconciliationRecoveryTerminal', 'null'::jsonb), 'false'::jsonb) = 'false'::jsonb
-        or commerce.exhausted_capture_can_resume(source.payload)
-      )$new$;
-  due_filter constant text := $old$and (payment.next_recovery_at is null or payment.next_recovery_at <= p_now)$old$;
-begin
-  definition := pg_get_functiondef(
-    'public.roo_fetch_recovery_payment_documents(text,text[],text,text,text,timestamptz,integer,boolean)'::regprocedure);
-  if strpos(definition, 'commerce.exhausted_capture_can_resume') > 0 then return; end if;
-  if strpos(definition, previous) = 0 or strpos(definition, due_filter) = 0 then
-    raise exception 'unexpected contract: public.roo_fetch_recovery_payment_documents';
-  end if;
-  execute replace(replace(definition, previous, replacement), due_filter,
-    $new$and (payment.next_recovery_at is null or payment.next_recovery_at <= p_now
-        or commerce.exhausted_capture_can_resume(source.payload))$new$);
-end;
-$edit$;
-
 create table if not exists migration.captured_payment_recovery_resumes (
   document_id text primary key,
   previous_state jsonb not null,

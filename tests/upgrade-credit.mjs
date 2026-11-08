@@ -155,6 +155,7 @@ test('retained upgrade credit over HTTP with PostgreSQL', { timeout: 900000 }, a
     assert.equal(record.bookingId || '', '');
     assert.equal(record.finalizationLeaseId || '', '');
     assert.equal(record.reconciliationRecoveryTerminal, true);
+    assert.equal(record.recoveryOwnerReviewRequired, true);
     assert.equal(record.nextRecoveryAt || '', '');
     assert.deepEqual(result.bookings, []);
     assert.ok(!evidence.providerRequests.some(request => request.method === 'POST' && request.path === '/refunds'));
@@ -188,6 +189,15 @@ test('retained upgrade credit over HTTP with PostgreSQL', { timeout: 900000 }, a
         assert.equal(result.status.body.ok, true);
         assert.equal(result.status.body.manualReviewRequired, true);
         assert.match(result.status.body.recoveryReason, /payment.*received.*contact/i);
+        const originalNow = Date.now;
+        try {
+          Date.now = () => originalNow() + 25 * 60 * 60_000;
+          const reloaded = await post('/api/payment/status', {}, scenario.started.body.paymentAccessToken);
+          assert.equal(reloaded.status, 200, JSON.stringify(reloaded));
+          assert.equal(reloaded.body.manualReviewRequired, true);
+        } finally {
+          Date.now = originalNow;
+        }
         for (const replay of ['client', 'webhook', 'recovery']) {
           const repeated = await finalizeUpgrade(scenario, replay, { });
           assert.equal(repeated.status, 'needs_recovery');

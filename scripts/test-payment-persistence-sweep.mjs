@@ -1164,6 +1164,7 @@ try{
       for(const priorRow of before.tables.commerce_outbox)assert.deepEqual(after.tables.commerce_outbox.find(r=>r.row.id===priorRow.row.id),priorRow);
       const newOutbox=after.tables.commerce_outbox.filter(r=>!before.tables.commerce_outbox.some(p=>p.row.id===r.row.id));if(fullChain)assert.equal(newOutbox.length,0);else assert.ok(newOutbox.length);for(const {row:outbox} of newOutbox){assert.deepEqual(outbox.deleted_ids,[]);assert.equal(outbox.documents.length,1);assert.equal(outbox.documents[0]._id,recordId);assert.notEqual(outbox.documents[0].verificationState,'server_verified');}
       assert.equal(saved.recoveryFailureCount,1);assert.equal(saved.reconciliationRecoveryTerminal,false);
+      assert.equal(Object.hasOwn(saved,'recoveryOwnerReviewRequired'),false);
       assert.equal(saved.status,'needs_recovery');assert.equal(saved.recoveryReason,'dodo_refund_requires_reconciliation');assert.ok(saved.events.every(e=>!['provider_capture_verified','refund_full'].includes(e.reason)));
     }return{httpStatus:result.status,status:saved.status,typed,noBookingGrant:true,claimsUnchanged:true,fullPersistenceUnchanged:action==='finalize',allowedRecoveryDiagnosticsOnly:action!=='finalize',sourceAndTypedFinancialStateAndResourcesUnchanged:true,typedLegacyQuoteFingerprintFollowsSourceHash:true};
   });

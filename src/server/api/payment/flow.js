@@ -2,7 +2,7 @@ import { buildBrowserCompletionBody } from "./bookingSummary.js";
 import {
   buildRecoveryFailureState,
   buildRecoveryCompletionState,
-  isExhaustedCaptureRecovery,
+  buildOwnerReviewState,
   logPaymentRecoveryReview,
 } from "./recoveryState.js";
 import envValue from "../../supabase/envValue.cjs";
@@ -925,10 +925,14 @@ const resolveRecordFromAccessToken = async ({
 
   if (tokenResult.expired) {
     const status = String(record.status || "").trim().toLowerCase();
-    const withinHardCap = isWithinPaymentAccessRecoveryWindow({ payload });
+    const awaitingReview = !record.bookingId &&
+      [PAYMENT_STATUS_STARTED, PAYMENT_STATUS_NEEDS_RECOVERY, PAYMENT_STATUS_FINALIZING,
+        PAYMENT_STATUS_CAPTURED_CLIENT, PAYMENT_STATUS_CAPTURED_WEBHOOK].includes(status) &&
+      (record.providerPaymentState === "requires_merchant_action" || record.recoveryOwnerReviewRequired === true);
+    const withinRecoveryWindow = isWithinPaymentAccessRecoveryWindow({ payload }) || awaitingReview;
     const recoveryMutationAllowed =
-      allowRecoveryExtension && status === PAYMENT_STATUS_NEEDS_RECOVERY;
-    if (!withinHardCap || (!allowStatusReadExtension && !recoveryMutationAllowed)) {
+      allowRecoveryExtension && (status === PAYMENT_STATUS_NEEDS_RECOVERY || awaitingReview);
+    if (!withinRecoveryWindow || (!allowStatusReadExtension && !recoveryMutationAllowed)) {
       const error = new Error("Payment session expired.");
       error.status = 401;
       error.code = tokenResult.reason || "payment_access_token_expired";
@@ -1164,7 +1168,7 @@ const completeRefundBookingSync = async ({ client, record, sync = null }) => {
         ...(record.providerRefundDetailsMissing !== true ? {
           recoveryAttemptCount: 0,
           recoveryFailureCount: 0,
-          recoveryOwnerReviewRequired: false,
+          ...buildOwnerReviewState(record, false),
           reconciliationRecoveryTerminal: false,
         } : {}),
         ...(sync ? { refundBookingSync: normalizeObject(sync) } : {}),
@@ -1901,6 +1905,7 @@ const holdCapturedUpgradeForReview = async ({ client, record, source, error }) =
       recoveryHttpStatus: 409,
       providerRecoveryTerminal: true,
       providerRecoveryTerminalReason: error.code,
+      ...buildOwnerReviewState(current, true),
       reconciliationRecoveryTerminal: true,
       nextRecoveryAt: "",
       finalizationLeaseId: "",
@@ -2061,7 +2066,7 @@ const markTerminalFinalizeFailure = async ({
       resourceReleaseTargetStatus: "",
       resourceReleaseReason: "",
       recoveryFailureCount: 0,
-      recoveryOwnerReviewRequired: false,
+      ...buildOwnerReviewState(record, false),
       reconciliationRecoveryTerminal: false,
       finalizationLeaseId: "",
       finalizationLeaseExpiresAt: "",
@@ -2700,7 +2705,7 @@ const abandonStartedPaymentRecord = async ({
         resourceReleaseTargetStatus: "",
         resourceReleaseReason: "",
         recoveryFailureCount: 0,
-        recoveryOwnerReviewRequired: false,
+        ...buildOwnerReviewState(record, false),
         reconciliationRecoveryTerminal: false,
         lateCaptureWatchUntil: shouldWatchForLateCapture
           ? getFutureIso(LATE_CAPTURE_WATCH_HOURS * 60 * 60)
@@ -3802,7 +3807,6 @@ const getPaymentCreatedAgeMinutes = (record = {}) => {
 };
 
 const isRecoveryAttemptDue = (record = {}) => {
-  if (isExhaustedCaptureRecovery(record)) return true;
   const next = new Date(record.nextRecoveryAt || "").getTime();
   return !Number.isFinite(next) || next <= Date.now();
 };
@@ -4338,14 +4342,7 @@ export const reconcilePaymentSessions = async ({
   const dodoEnabled = resolvePaymentProviders()?.dodo?.enabled === true;
   const fetchRecoveryRecords = () => client.fetch(
     `*[_type == $type
-      && (coalesce(reconciliationRecoveryTerminal, false) == false || (
-        verificationState == "server_verified" && provider in ["paypal", "razorpay", "dodo"]
-        && (!defined(bookingId) || bookingId == "") && recoveryFailureCount >= 12
-        && coalesce(providerRecoveryTerminal, false) == false
-        && coalesce(providerRefundDetailsMissing, false) == false
-        && coalesce(dodoDisputeActive, false) == false
-        && !(providerPaymentState in ["refunded", "disputed"])
-      ))
+      && coalesce(reconciliationRecoveryTerminal, false) == false
       && !(coalesce(providerRecoveryTerminal, false) == true
         && providerRecoveryTerminalReason in $terminalCurrencyReasons)
       && (
@@ -4370,7 +4367,6 @@ export const reconcilePaymentSessions = async ({
         !defined(nextRecoveryAt)
         || nextRecoveryAt == ""
         || nextRecoveryAt <= $now
-        || (reconciliationRecoveryTerminal == true && recoveryFailureCount >= 12)
       )
     ] | order(updatedAt asc)[0...50]`,
     {

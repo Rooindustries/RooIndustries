@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import { after, before, beforeEach, test } from 'node:test';
 import { createBookingContactFixture } from './fixtures/booking-contact.mjs';
 
@@ -36,10 +37,12 @@ after(async () => {
 const paymentInProgress = 'This slot already has a payment session in progress.';
 const cron = () => fixture.post('/api/payment/reconcile', {}, 'fixture-only-cron');
 const holdFor = payload => fixture.commerce.getDocument(payload.slotHoldId);
-const recordFor = started =>
-  fixture.commerce.fetch('*[_type == "paymentRecord" && providerOrderId == $id][0]', {
-    id: started.body.providerPayload.orderId,
-  });
+const recordFor = async started => {
+  const { verifyPaymentAccessToken } = await import('../src/server/api/payment/accessToken.js');
+  const verified = verifyPaymentAccessToken({ token: started.body.paymentAccessToken });
+  assert.equal(verified.ok, true);
+  return fixture.commerce.getDocument(verified.payload.paymentRecordId);
+};
 const bookingsAt = startTimeUTC =>
   fixture.commerce.fetch(
     '*[_type == "booking" && (startTimeUTC == $start || originalRequestedStartTimeUTC == $start)]',
@@ -618,19 +621,22 @@ for (const entry of ['webhook', 'cron', 'retry', 'reload']) {
       assert.equal(reviewed.providerPaymentState, 'requires_merchant_action');
       assert.equal(reviewed.recoveryOwnerReviewRequired, true);
       assert.equal(alerts.filter(alert => alert.code === 'payment_merchant_review_required').length, 1);
-      const { createPaymentAccessToken } = await import('../src/server/api/payment/accessToken.js');
-      const token = createPaymentAccessToken({ paymentRecordId: reviewed._id, provider: reviewed.provider,
-        pricingFingerprint: reviewed.pricingFingerprint, backend: 'supabase', cutoverGeneration: 0, expirySeconds: 600 });
+      clockShiftMs += 25 * 60 * 60_000;
+      const token = checkout.started.body.paymentAccessToken;
+      assert.equal((await fixture.post('/api/payment/status', {}, `${token}invalid`)).status, 401);
       for (let reload = 0; reload < 2; reload += 1) {
         const status = await fixture.post('/api/payment/status', {}, token);
         assert.equal(status.status, 200, JSON.stringify(status));
         assert.equal(status.body.bookingId, '');
       }
+      assert.equal((await fixture.post('/api/payment/finalize', {}, token)).status, 202);
+      assert.equal((await fixture.post('/api/payment/cancel', {}, token)).status, 401);
       fixture.setPaymentAmountOverrides({});
       const approved = await fixture.dodoWebhook(paymentId, 'payment.succeeded', `approved_${entry}`);
       assert.equal(approved.status, 200, JSON.stringify(approved));
       await assertBookedOnHeldSlot(checkout);
       assert.equal((await fixture.commerce.getDocument(reviewed._id)).recoveryOwnerReviewRequired, false);
+      assert.equal((await fixture.post('/api/payment/status', {}, token)).status, 401);
     } finally {
       if (previousReporter === undefined) delete globalThis[reportKey];
       else globalThis[reportKey] = previousReporter;
@@ -727,11 +733,17 @@ for (const outcome of ['cancelled', 'refunded']) {
 test('verified capture migration restores retries and saves a reversible recovery state', async () => {
   const checkout = await startCheckoutBeforeExpiry();
   const states = [];
-  for (const provider of ['paypal', 'razorpay', 'dodo']) {
-    const id = provider === 'dodo' ? checkout.record._id : `paymentRecord.restart-${provider}`;
+  const recoveryKeys = ['reconciliationRecoveryTerminal', 'nextRecoveryAt', 'recoveryOwnerReviewRequired'];
+  for (const [name, provider, previous] of [
+    ['paypal', 'paypal', { nextRecoveryAt: '9999-12-31T23:59:59.999Z' }],
+    ['razorpay', 'razorpay', { nextRecoveryAt: null, recoveryOwnerReviewRequired: false }],
+    ['missing-date', 'razorpay', { recoveryOwnerReviewRequired: true }],
+    ['dodo', 'dodo', { nextRecoveryAt: '9999-12-31T23:59:59.999Z' }],
+  ]) {
+    const id = provider === 'dodo' ? checkout.record._id : `paymentRecord.restart-${name}`;
     const set = { provider, status: 'needs_recovery', verificationState: 'server_verified',
       reconciliationRecoveryTerminal: true, recoveryFailureCount: 12, recoveryAttemptCount: 12,
-      nextRecoveryAt: '9999-12-31T23:59:59.999Z' };
+      ...previous };
     if (provider === 'dodo') await fixture.commerce.patch(id).set(set).commit();
     else await fixture.commerce.create({ _id: id, _type: 'paymentRecord', backendOwner: 'supabase',
       cutoverGeneration: 0, ...set });
@@ -759,7 +771,7 @@ test('verified capture migration restores retries and saves a reversible recover
     assert.equal(error, null);
     return data.map(record => record._id);
   };
-  for (const state of states) assert.ok((await candidates()).includes(state._id));
+  for (const state of states) assert.ok(!(await candidates()).includes(state._id));
   await fixture.database.apply('20261108000000_resume_captured_payment_bookings.sql');
   for (const state of states) {
     const current = await fixture.commerce.getDocument(state._id);
@@ -768,18 +780,44 @@ test('verified capture migration restores retries and saves a reversible recover
     const [backup] = await fixture.database.sql`select previous_state, resumed_revision
       from migration.captured_payment_recovery_resumes where document_id = ${state._id}`;
     assert.equal(backup.resumed_revision, current._rev);
-    assert.deepEqual(backup.previous_state, { reconciliationRecoveryTerminal: true,
-      nextRecoveryAt: '9999-12-31T23:59:59.999Z' });
-    await fixture.commerce.patch(state._id).ifRevisionId(backup.resumed_revision)
-      .unset(['reconciliationRecoveryTerminal', 'nextRecoveryAt', 'recoveryOwnerReviewRequired'])
-      .set(backup.previous_state).commit();
+    assert.deepEqual(backup.previous_state, Object.fromEntries(
+      Object.entries(state).filter(([key]) => recoveryKeys.includes(key))));
+  }
+  const changed = await fixture.commerce.patch(states[0]._id).set({ recoveryReason: 'newer-update' }).commit();
+  const rollback = await fs.readFile(new URL(
+    '../supabase/rollbacks/20261108000000_resume_captured_payment_bookings.sql', import.meta.url), 'utf8');
+  await fixture.database.sql.unsafe(rollback);
+  assert.deepEqual(await fixture.commerce.getDocument(changed._id), changed);
+  for (const state of states.slice(1)) {
     const restored = await fixture.commerce.getDocument(state._id);
     assert.equal(restored.reconciliationRecoveryTerminal, true);
-    assert.equal(restored.nextRecoveryAt, state.nextRecoveryAt);
-    assert.equal(restored.recoveryOwnerReviewRequired, undefined);
+    for (const key of recoveryKeys) {
+      assert.equal(restored[key], state[key]);
+      assert.equal(Object.hasOwn(restored, key), Object.hasOwn(state, key));
+    }
+    assert.ok(!(await candidates()).includes(restored._id));
   }
   for (const original of excluded) assert.deepEqual(await fixture.commerce.getDocument(original._id), original);
+  const restored = await fixture.commerce.getDocument(checkout.record._id);
+  assert.ok(!(await candidates()).includes(restored._id));
   const recovered = await cron();
   assert.equal(recovered.status, 200, JSON.stringify(recovered));
-  await assertBookedOnHeldSlot(checkout);
+  assert.equal((await fixture.commerce.getDocument(restored._id)).bookingId, restored.bookingId);
+  assert.equal((await bookingsAt(checkout.payload.startTimeUTC)).length, 0);
+  await fixture.database.sql.unsafe(rollback);
+  assert.deepEqual(await fixture.commerce.getDocument(restored._id), restored);
 });
+
+for (const timing of ['unset', 'deferred']) {
+  test(`a stopped capture respects its terminal state with retry date ${timing}`, async () => {
+    const nextRecoveryAt = timing === 'unset' ? '' : new Date(RealDate.now() + 60 * 60_000).toISOString();
+    const checkout = await startCheckoutBeforeExpiry();
+    const stopped = await fixture.commerce.patch(checkout.record._id).set({
+      status: 'needs_recovery', verificationState: 'server_verified',
+      reconciliationRecoveryTerminal: true, recoveryFailureCount: 12, nextRecoveryAt,
+    }).commit();
+    assert.equal((await cron()).status, 200);
+    assert.deepEqual(await fixture.commerce.getDocument(stopped._id), stopped);
+    assert.equal((await bookingsAt(checkout.payload.startTimeUTC)).length, 0);
+  });
+}

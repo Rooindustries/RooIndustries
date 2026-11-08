@@ -333,6 +333,7 @@ UnconfirmedPaymentHoldExpires(s) ==
   /\ hold[s].exp + Backstop <= now
   /\ ~rec[hold[s].rec].knownCaptured
   /\ ~rec[hold[s].rec].merchantReview
+  /\ rec[hold[s].rec].pay # "captured"
   /\ hold' = [hold EXCEPT ![s].phase = "expired", ![s].nonce = DeadNonce]
   /\ rec' = [rec EXCEPT ![hold[s].rec].outlived =
                 rec[hold[s].rec].pay \in {"processing", "captured"} /\ ~rec[hold[s].rec].knownCaptured]

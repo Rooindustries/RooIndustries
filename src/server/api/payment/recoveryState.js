@@ -8,9 +8,9 @@ const isCapturedBookingRecovery = (record) =>
   record.providerRefundDetailsMissing !== true && record.dodoDisputeActive !== true &&
   !["refunded", "disputed"].includes(record.providerPaymentState);
 
-export const isExhaustedCaptureRecovery = (record) =>
-  record.reconciliationRecoveryTerminal === true && Number(record.recoveryFailureCount) >= 12 &&
-  isCapturedBookingRecovery(record);
+export const buildOwnerReviewState = (record, required) =>
+  required || record.recoveryOwnerReviewRequired === true
+    ? { recoveryOwnerReviewRequired: required } : {};
 
 const normalizeCount = (value) => {
   const count = Number(value);
@@ -25,7 +25,8 @@ export const buildRecoveryFailureState = (record) => {
   return {
     recoveryAttemptCount,
     recoveryFailureCount,
-    recoveryOwnerReviewRequired: ownerReviewRequired || record.providerPaymentState === "requires_merchant_action",
+    ...buildOwnerReviewState(record,
+      ownerReviewRequired || record.providerPaymentState === "requires_merchant_action"),
     reconciliationRecoveryTerminal: stopped,
     nextRecoveryAt: stopped ? "9999-12-31T23:59:59.999Z" : getNextPaymentRecoveryAt(recoveryFailureCount),
   };
@@ -33,7 +34,7 @@ export const buildRecoveryFailureState = (record) => {
 
 export const buildRecoveryCompletionState = (record) => ({
   recoveryFailureCount: 0,
-  recoveryOwnerReviewRequired: false,
+  ...buildOwnerReviewState(record, false),
   reconciliationRecoveryTerminal: record.providerRefundDetailsMissing === true,
 });
 
