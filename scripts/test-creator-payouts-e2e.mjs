@@ -7,6 +7,7 @@ import {once} from 'node:events';
 import {registerHooks} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import {execFileSync} from 'node:child_process';
+import {checkPayoutReadScale, createLegacyPayoutClient} from './lib/payout-read-scale.mjs';
 
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';
 const originalFetch = globalThis.fetch;
@@ -167,7 +168,7 @@ if (baselineMigration)
     .createHash('sha256')
     .update(baselineMigration)
     .digest('hex');
-let fixture, server, origin, commerce, documents, sql, earnings;
+let fixture, server, origin, commerce, documents, sql, earnings, legacyPayouts;
 let current,
   sequence = 0,
   eventSequence = 0;
@@ -271,15 +272,11 @@ const summary = async (creator, expected) => {
     client: commerce,
     ...args,
   });
+  assert.equal(native.total, expected, JSON.stringify({native, expected}));
   const fallback = await earnings.fetchReferralEarnings({
-    client: {fetch: commerce.fetch.bind(commerce)},
+    client: legacyPayouts,
     ...args,
   });
-  assert.equal(
-    native.total,
-    expected,
-    JSON.stringify({native, fallback, expected})
-  );
   assert.deepEqual(fallback, native);
   return {native, fallback};
 };
@@ -512,6 +509,7 @@ try {
       : [],
   });
   sql = fixture.sql;
+  legacyPayouts = createLegacyPayoutClient(sql);
   const applyCommissionMigration = async ({traceProjections = false} = {}) => {
     const connection = await sql.reserve();
     const definitions = [];
@@ -3004,7 +3002,7 @@ try {
       for (const result of [null, undefined]) {
         const fallback = await earnings.fetchReferralEarnings({
           client: {
-            fetch: commerce.fetch.bind(commerce),
+            ...legacyPayouts,
             referralEarnings: async () => result,
           },
           ...args,
@@ -3071,6 +3069,10 @@ try {
       historicalCorrectionDeferredTo: 'ROO-729',
     };
   });
+
+  await run('legacy-earnings-large-history', () =>
+    checkPayoutReadScale({sql, seed, summary})
+  );
 
   await run('all-payouts-projection-rebuilds', async () => {
     const snapshot = async () => ({
