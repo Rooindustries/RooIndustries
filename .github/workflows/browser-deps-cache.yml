@@ -1,0 +1,35 @@
+name: Browser system packages cache
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/actions/setup/action.yml
+      - .github/workflows/browser-deps-cache.yml
+      - scripts/install-browser-deps.sh
+      - package.json
+      - package-lock.json
+  schedule:
+    - cron: "41 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-deps:
+    name: Browser system packages (${{ matrix.browsers }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        browsers: [chromium, chromium webkit]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: 22
+          browsers: ${{ matrix.browsers }}

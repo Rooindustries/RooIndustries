@@ -1,5 +1,5 @@
 name: Set up the test toolchain
-description: Node, cached node_modules, cached Playwright browsers and restored Next build caches.
+description: Node, cached packages and Playwright browsers, and restored Next build caches.
 inputs:
   node-version:
     required: true
@@ -54,14 +54,37 @@ runs:
       with:
         path: ~/.cache/ms-playwright
         key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-${{ steps.playwright.outputs.browsers }}
-    - if: inputs.browsers != '' && steps.browsers.outputs.cache-hit != 'true'
+    - id: system-packages
+      if: ${{ inputs.browsers != '' && inputs.browser-deps == 'true' && !startsWith(runner.name, 'devbox-') }}
       shell: bash
-      run: npx playwright install ${{ inputs.browser-deps == 'true' && !startsWith(runner.name, 'devbox-') && '--with-deps' || '' }} $BROWSERS
+      run: |
+        . /etc/os-release
+        echo "os=$ID-$VERSION_ID" >> "$GITHUB_OUTPUT"
+        echo "image=${ImageVersion:-self-hosted}" >> "$GITHUB_OUTPUT"
+    - name: Restore browser system packages
+      id: apt-packages
+      if: ${{ inputs.browsers != '' && inputs.browser-deps == 'true' && !startsWith(runner.name, 'devbox-') }}
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.cache/roo-playwright-apt/*.deb
+        key: playwright-apt-${{ runner.arch }}-${{ steps.system-packages.outputs.os }}-${{ steps.playwright.outputs.version }}-${{ steps.playwright.outputs.browsers }}-${{ steps.system-packages.outputs.image }}
+        restore-keys: playwright-apt-${{ runner.arch }}-${{ steps.system-packages.outputs.os }}-${{ steps.playwright.outputs.version }}-${{ steps.playwright.outputs.browsers }}-
+    - name: Install cached browser system packages
+      id: install-system-packages
+      if: ${{ inputs.browsers != '' && inputs.browser-deps == 'true' && !startsWith(runner.name, 'devbox-') }}
+      shell: bash
+      run: bash scripts/install-browser-deps.sh $BROWSERS
       env:
         BROWSERS: ${{ inputs.browsers }}
-    - if: ${{ inputs.browsers != '' && steps.browsers.outputs.cache-hit == 'true' && inputs.browser-deps == 'true' && !startsWith(runner.name, 'devbox-') }}
+    - name: Save browser system packages
+      if: ${{ always() && steps.install-system-packages.outcome == 'success' && steps.apt-packages.outputs.cache-hit != 'true' && !startsWith(runner.name, 'devbox-') }}
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.cache/roo-playwright-apt/*.deb
+        key: ${{ steps.apt-packages.outputs.cache-primary-key }}
+    - if: inputs.browsers != '' && steps.browsers.outputs.cache-hit != 'true'
       shell: bash
-      run: npx playwright install-deps $BROWSERS
+      run: npx playwright install $BROWSERS
       env:
         BROWSERS: ${{ inputs.browsers }}
     - if: inputs.browsers != '' && steps.browsers.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
