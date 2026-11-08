@@ -31,10 +31,11 @@ import { sanitizeBrowserSearch } from "./lib/browserSearch";
 import { prefetchHomeSectionData } from "./lib/homeSectionData";
 import { whenUserInteracts } from "./lib/firstInteraction";
 import { migrateCheckoutStorageToSession } from "./lib/checkoutStorage";
-import { getPublicContent, getPublicContentPendingCount } from "./lib/publicContentClient";
+import { getPublicContentPendingCount } from "./lib/publicContentClient";
 import { useBookingDialogPending } from "./lib/bookingDialogHold";
 import { setVisibleTimeout } from "./lib/visibleTimeout";
 import { ownsTripEntry, SectionNavigationProvider } from "./lib/sectionNavigator";
+import { loadContent } from "./lib/contentCache";
 import { useIsomorphicLayoutEffect } from "./lib/useIsomorphicLayoutEffect";
 
 const Home = lazy(() => import("./legacyPages/Home"));
@@ -45,7 +46,7 @@ const Contact = lazy(() => import("./legacyPages/Contact"));
 const Privacy = lazy(async () => {
   const [{ default: Page }, initialData] = await Promise.all([
     import("./legacyPages/PrivacyPolicy"),
-    getPublicContent("privacy-policy").catch(() => null),
+    loadContent("privacy-policy").catch(() => null),
   ]);
   return { default: (props) => <Page {...props} initialData={props.initialData || initialData} /> };
 });

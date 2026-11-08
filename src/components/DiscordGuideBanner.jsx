@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { FaDiscord } from "react-icons/fa";
-import { reportRequestError } from "../lib/clientRequest";
-import { getPublicContent } from "../lib/publicContentClient";
+import { useLocation } from "react-router-dom";
+import { useContent } from "../lib/contentCache";
 import { usePublicContent } from "../next/PublicContentContext";
 
 const DEFAULT_BANNER = {
@@ -11,28 +11,10 @@ const DEFAULT_BANNER = {
 };
 
 export default function DiscordGuideBanner({ hidden = false }) {
-  const serverLink = usePublicContent().discordBanner?.link || "";
-  const [banner, setBanner] = useState(
-    serverLink ? { ...DEFAULT_BANNER, link: serverLink } : DEFAULT_BANNER
-  );
-
-  useEffect(() => {
-    if (serverLink) return undefined;
-    let mounted = true;
-    getPublicContent("discord-banner")
-      .then((data) => {
-        if (!mounted || !data) return;
-        setBanner((prev) => ({
-          text: DEFAULT_BANNER.text,
-          mobileText: DEFAULT_BANNER.mobileText,
-          link: data.link || prev.link,
-        }));
-      })
-      .catch(reportRequestError);
-    return () => {
-      mounted = false;
-    };
-  }, [serverLink]);
+  const location = useLocation();
+  const { discordBanner } = usePublicContent();
+  const { data } = useContent("discord-banner", discordBanner, { refreshKey: location.pathname });
+  const banner = { ...DEFAULT_BANNER, link: data?.link || DEFAULT_BANNER.link };
 
   return (
     <div

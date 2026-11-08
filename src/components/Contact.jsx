@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useForm, ValidationError } from "@formspree/react";
-import { getPublicContent } from "../lib/publicContentClient";
+import { useContent } from "../lib/contentCache";
 import companyContent from "../lib/companyContent";
 
 const { CONTACT_GUIDANCE } = companyContent;
 
 export default function Contact({ initialData = null }) {
-  const [contactData, setContactData] = useState(initialData);
-  const [contentFailed, setContentFailed] = useState(false);
+  const { data: contactData, failed: contentFailed } = useContent("contact", initialData, {
+    refreshSnapshot: true,
+  });
   const [copyStatus, setCopyStatus] = useState("idle");
   const copyResetTimeoutRef = useRef(null);
 
@@ -21,20 +22,6 @@ export default function Contact({ initialData = null }) {
     }
     return handleSubmit(event);
   };
-
-  useEffect(() => {
-    let active = true;
-    getPublicContent("contact")
-      .then((data) => {
-        if (!active) return;
-        setContactData(data || initialData);
-        setContentFailed(!data && !initialData);
-      })
-      .catch(() => {
-        if (active) setContentFailed(!initialData);
-      });
-    return () => { active = false; };
-  }, []);
 
   useEffect(
     () => () => {

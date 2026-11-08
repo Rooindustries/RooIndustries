@@ -128,7 +128,10 @@ for (const [name, viewport] of [
 
     test("benchmark before and after labels meet contrast", async ({ page, baseURL }, testInfo) => {
       const image = { _type: "image", asset: { _type: "reference", _ref: "image-contrast-probe", _supabaseUrl: new URL("/favicon-96x96.png", baseURL).href }, dimensions: { width: 96, height: 96 } };
-      await page.route("**/api/content/benchmarks", route => route.fulfill({ json: { ok: true, data: [{ title: "Contrast Probe", beforeImage: image, afterImage: image }] } }));
+      await page.route("**/api/content/benchmarks", async route => {
+        const { revision } = await (await route.fetch()).json();
+        await route.fulfill({ json: { ok: true, data: [{ title: "Contrast Probe", beforeImage: image, afterImage: image }], revision } });
+      });
       await page.goto("/benchmarks", { waitUntil: "networkidle" });
       const ratios = [];
       for (const label of ["BEFORE", "AFTER"]) {

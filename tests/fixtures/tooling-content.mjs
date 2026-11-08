@@ -82,6 +82,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
     document('contact', { title: 'Get In Touch', subtitle: 'Synthetic local contact information.', formId: '' }),
     document('about', { recordTitle: 'Synthetic local results', recordSubtitle: 'Local fixture content', recordDetails: [] }),
     document('services', { heading: 'Synthetic benefits', cards: [] }),
+    document('discordBanner', { link: 'https://discord.com/invite/qs5HKNyazD' }),
     document('referralBox', { heading: 'Join the Referral Program', description: 'Are you a creator? Enter your email to get started with registration.' }),
     document('howItWorks', { title: 'How It Works', steps: [] }),
     document('packagesSettings', {}),

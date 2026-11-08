@@ -1,7 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
-import { reportRequestError } from "../lib/clientRequest";
-import { getPublicContent } from "../lib/publicContentClient";
+import { useContent } from "../lib/contentCache";
 
 const HEX_CLIP_PATH = "circle(50% at 50% 50%)";
 
@@ -294,14 +293,7 @@ const Tag = ({ label, size = "sm" }) => {
 };
 
 export default function MeetTheTeam({ onSeoData, initialData = null }) {
-  const [rawData, setRawData] = useState(initialData);
-
-  useEffect(() => {
-    if (initialData) return;
-    getPublicContent("team")
-      .then(setRawData)
-      .catch(reportRequestError);
-  }, []);
+  const { data: rawData } = useContent("team", initialData);
 
   const resolved = useMemo(() => {
     const source = rawData || {};

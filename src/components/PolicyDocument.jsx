@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { PortableText } from "@portabletext/react";
-import { reportRequestError } from "../lib/clientRequest";
-import { getPublicContent } from "../lib/publicContentClient";
+import { useContent } from "../lib/contentCache";
 import { normalizePolicyLink } from "../lib/policyLinks";
 import contactEmail from "../lib/contactEmail";
 
@@ -91,15 +90,7 @@ export default function PolicyDocument({ data }) {
 }
 
 export function PolicyPage({ contentKey, initialData = null }) {
-  const [data, setData] = useState(initialData);
-
-  useEffect(() => {
-    getPublicContent(contentKey)
-      .then((next) => {
-        if (next) setData(next);
-      })
-      .catch(reportRequestError);
-  }, [contentKey]);
+  const { data } = useContent(contentKey, initialData, { refreshSnapshot: true });
 
   if (!data) return null;
 
