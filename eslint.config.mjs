@@ -3,7 +3,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 import roo, { rules } from "./eslint-rules/index.mjs";
 
 const emailTextRules = new Set(["no-hand-built-dollars"]);
-const pageOnly = "Files in tests/fixtures/browser are page scripts that Node reads as text and never runs.";
+const pageOnly = "A file in tests/fixtures/browser is one function the page runs; the fixtures read it as text.";
 const scriptRules = new Set(["no-parent-ipc-disconnect", "no-unchecked-group-signal", "no-linux-only-test-tooling"]);
 const navigationRules = new Set(["no-secure-context-navigation-keys"]);
 const testFiles = "src/**/__tests__/**";
@@ -36,11 +36,6 @@ export default [
     plugins: { roo },
     rules: {
       ...ruleSet(["no-hand-built-node-options", "no-unchecked-group-signal"]),
-      "no-restricted-imports": ["error", { patterns: [{ regex: "(^|/)browser/", message: pageOnly }] }],
-      "no-restricted-syntax": ["error",
-        { selector: "CallExpression[callee.name='require'][arguments.0.value=/(^|\\/)browser\\//]", message: pageOnly },
-        { selector: "ImportExpression[source.value=/(^|\\/)browser\\//]", message: pageOnly },
-      ],
     },
   },
   {
@@ -74,7 +69,13 @@ export default [
           .map((property) => ({ object, property, message: pageOnly }))),
       ],
       "no-restricted-syntax": ["error",
-        ...["ImportExpression", "Identifier[name='arguments']"].map((selector) => ({ selector, message: pageOnly })),
+        ...[
+          "Program > :not(ExpressionStatement)",
+          "Program > :nth-child(2)",
+          "Program > ExpressionStatement > :not(ArrowFunctionExpression, FunctionExpression)",
+          "ImportExpression",
+          "Identifier[name='arguments']",
+        ].map((selector) => ({ selector, message: pageOnly })),
       ],
       "no-with": "error",
     },

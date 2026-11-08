@@ -14,7 +14,7 @@ export default {
     },
     messages: {
       parent: "Only a child ends its own channel: call endOwnChannel() from scripts/lib/own-channel.mjs. " +
-        "Page code that stops an observer goes in tests/fixtures/browser/, as a page script the fixtures read as text.",
+        "Page code that stops an observer goes in tests/fixtures/browser/ as one function the fixtures read as text.",
     },
     schema: [],
   },
