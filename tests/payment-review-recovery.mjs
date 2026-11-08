@@ -73,6 +73,25 @@ for (const state of ['unverified', 'requires_merchant_action']) {
       if (previous === undefined) delete globalThis[key]; else globalThis[key] = previous;
     }
     fixture.setPaymentAmountOverrides({});
+    let proofLookupFailed = false;
+    fixture.setRequestHook(async (phase, request) => {
+      if (phase === 'before' && request.body?.p_ids?.some(id => id.startsWith('paymentProofClaim.'))) {
+        proofLookupFailed = true;
+        throw new Error('Synthetic captured payment proof lookup failure');
+      }
+    });
+    try {
+      assert.equal((await cron()).status, 200);
+    } finally {
+      fixture.setRequestHook(null);
+    }
+    assert.equal(proofLookupFailed, true);
+    const captured = await saved(checkout);
+    assert.equal(captured.verificationState, 'server_verified');
+    assert.equal(captured.recoveryFailureCount, 1);
+    assert.equal(captured.recoveryOwnerReviewRequired, true);
+    assert.equal((await status(checkout)).body.manualReviewRequired, true);
+    advanceToRetry(captured);
     assert.equal((await cron()).status, 200);
     const completed = await saved(checkout);
     assert.ok(completed.bookingId);
@@ -116,12 +135,34 @@ for (const outcome of ['booked', 'refunded', 'failed', 'cancelled', 'abandoned']
     const longToken = createPaymentAccessToken({ paymentRecordId: completed._id, provider: completed.provider,
       pricingFingerprint: completed.pricingFingerprint, backend: 'supabase', cutoverGeneration: 0,
       expirySeconds: 24 * 60 * 60 });
-    assert.equal((await status(checkout)).status, 200);
+    const mismatchedToken = createPaymentAccessToken({ paymentRecordId: completed._id, provider: completed.provider,
+      pricingFingerprint: 'another-quote', backend: 'supabase', cutoverGeneration: 0,
+      expirySeconds: 24 * 60 * 60 });
+    const before = await fixture.snapshot();
+    const readResult = async () => {
+      const expected = await status(checkout);
+      assert.equal(expected.status, 200);
+      for (const token of [checkout.token, longToken]) {
+        const response = await fixture.post('/api/payment/finalize', {}, token);
+        assert.equal(response.status, 200, JSON.stringify(response));
+        assert.deepEqual(response.body, expected.body);
+      }
+      for (const endpoint of ['status', 'finalize']) {
+        assert.equal((await fixture.post(`/api/payment/${endpoint}`, {}, mismatchedToken)).status, 403);
+        assert.equal((await fixture.post(`/api/payment/${endpoint}`, {}, `${checkout.token}invalid`)).status, 401);
+      }
+      assert.deepEqual(await fixture.snapshot(), before);
+    };
+    await readResult();
     now = deadline - 1;
-    assert.equal((await status(checkout)).status, 200);
+    await readResult();
     assert.equal((await saved(checkout)).reviewResultAccessUntil, completed.reviewResultAccessUntil);
     now = deadline;
     assert.equal((await status(checkout)).status, 401);
     assert.equal((await fixture.post('/api/payment/status', {}, longToken)).status, 401);
+    for (const token of [checkout.token, longToken]) {
+      assert.equal((await fixture.post('/api/payment/finalize', {}, token)).status, 401);
+    }
+    assert.deepEqual(await fixture.snapshot(), before);
   });
 }

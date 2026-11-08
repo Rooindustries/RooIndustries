@@ -657,13 +657,19 @@ for (const entry of ['webhook', 'cron', 'retry', 'reload']) {
       const completion = await fixture.commerce.getDocument(reviewed._id);
       const deadline = Date.parse(completion.reviewResultAccessUntil);
       assert.ok(deadline > Date.now() && deadline <= Date.now() + 60 * 60_000);
-      assert.equal((await fixture.post('/api/payment/finalize', {}, token)).status, 401);
+      const beforeRead = await fixture.snapshot();
+      const completedRead = await fixture.post('/api/payment/finalize', {}, token);
+      assert.equal(completedRead.status, 200, JSON.stringify(completedRead));
+      assert.equal(completedRead.body.status, final.body.status);
+      assert.equal(completedRead.body.bookingId, final.body.bookingId);
+      assert.deepEqual(await fixture.snapshot(), beforeRead);
       clockShiftMs = deadline - RealDate.now() - 1000;
       assert.equal((await fixture.post('/api/payment/status', {}, token)).status, 200);
       assert.equal((await fixture.commerce.getDocument(reviewed._id)).reviewResultAccessUntil,
         completion.reviewResultAccessUntil);
       clockShiftMs += 1000;
       assert.equal((await fixture.post('/api/payment/status', {}, token)).status, 401);
+      assert.equal((await fixture.post('/api/payment/finalize', {}, token)).status, 401);
     } finally {
       fixture.setRequestHook(null);
       if (previousReporter === undefined) delete globalThis[reportKey];

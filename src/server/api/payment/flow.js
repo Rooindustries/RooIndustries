@@ -10,6 +10,7 @@ import {
   buildPaymentReviewResultAccess,
   canReadPaymentReviewResult,
   isPaymentAwaitingReview,
+  isPaymentReviewResult,
 } from "./reviewAccess.js";
 import envValue from "../../supabase/envValue.cjs";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
@@ -893,6 +894,7 @@ const resolveRecordFromAccessToken = async ({
   paymentAccessToken = "",
   allowRecoveryExtension = false,
   allowStatusReadExtension = false,
+  allowReviewResultReadExtension = false,
 }) => {
   const tokenResult = verifyPaymentAccessToken({ token: paymentAccessToken });
   if (!tokenResult.ok && !tokenResult.expired) {
@@ -940,7 +942,9 @@ const resolveRecordFromAccessToken = async ({
         (allowStatusReadExtension && canReadPaymentReviewResult(record)));
     const recoveryMutationAllowed =
       allowRecoveryExtension && (status === PAYMENT_STATUS_NEEDS_RECOVERY || awaitingReview);
-    if (!withinRecoveryWindow || (!allowStatusReadExtension && !recoveryMutationAllowed)) {
+    const reviewResultReadAllowed = allowReviewResultReadExtension &&
+      isPaymentReviewResult(record) && canReadPaymentReviewResult(record);
+    if (!withinRecoveryWindow || (!allowStatusReadExtension && !recoveryMutationAllowed && !reviewResultReadAllowed)) {
       const error = new Error("Payment session expired.");
       error.status = 401;
       error.code = tokenResult.reason || "payment_access_token_expired";
@@ -3447,6 +3451,7 @@ export const finalizePaymentSession = async ({
           ""
       ).trim(),
       allowRecoveryExtension: true,
+      allowReviewResultReadExtension: true,
     });
     client = resolved.client;
   } catch (error) {
@@ -3460,6 +3465,12 @@ export const finalizePaymentSession = async ({
   const record = resolved?.record;
   const binding = validateImmutableProviderBinding({ record, providerData: flatProviderData });
   if (!binding.ok) return { httpStatus: 409, body: { ok: false, code: binding.reason } };
+  if (isPaymentReviewResult(record) && canReadPaymentReviewResult(record)) {
+    return {
+      httpStatus: 200,
+      body: await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record) }),
+    };
+  }
   if (record.provider === "dodo") {
     const result = await refreshDodoPayment({ client, record, source: "reconcile" });
     return { ...result, body: await buildBrowserCompletionBody({ client, record, body: result.body }) };

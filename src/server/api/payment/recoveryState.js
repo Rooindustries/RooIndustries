@@ -24,7 +24,7 @@ const normalizeCount = (value) => {
 export const buildRecoveryFailureState = (record) => {
   const recoveryAttemptCount = Math.min(12, normalizeCount(record.recoveryAttemptCount) + 1);
   const recoveryFailureCount = Math.min(12, normalizeCount(record.recoveryFailureCount) + 1);
-  const ownerReviewRequired = recoveryFailureCount >= 12;
+  const ownerReviewRequired = record.recoveryOwnerReviewRequired === true || recoveryFailureCount >= 12;
   return {
     recoveryAttemptCount,
     recoveryFailureCount,

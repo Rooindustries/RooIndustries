@@ -35,12 +35,14 @@ const hasPaymentReview = (record) =>
 export const isPaymentAwaitingReview = (record) =>
   !record.bookingId && REVIEW_PENDING_STATUSES.has(record.status) && hasPaymentReview(record);
 
+export const isPaymentReviewResult = (record) => REVIEW_RESULT_STATUSES.has(record.status);
+
 const isReviewCompletionPending = (record) =>
   hasPaymentReview(record) && (record.refundRequiresBookingSync === true || record.resourceReleasePending === true);
 
 export const buildPaymentReviewResultAccess = (record, values) => {
   const next = { ...record, ...values };
-  if (!hasPaymentReview(record) || isReviewCompletionPending(next) || !REVIEW_RESULT_STATUSES.has(next.status) ||
+  if (!hasPaymentReview(record) || isReviewCompletionPending(next) || !isPaymentReviewResult(next) ||
       (record.reviewResultAccessUntil && (record.reviewResultStatus || record.status) === next.status)) return {};
   return { reviewResultAccessUntil: new Date(Date.now() + REVIEW_RESULT_ACCESS_MS).toISOString(),
     reviewResultStatus: next.status };
@@ -49,5 +51,5 @@ export const buildPaymentReviewResultAccess = (record, values) => {
 export const canReadPaymentReviewResult = (record) => {
   if (isReviewCompletionPending(record)) return true;
   const expiresAt = Date.parse(record.reviewResultAccessUntil || "");
-  return REVIEW_RESULT_STATUSES.has(record.status) && Number.isFinite(expiresAt) && expiresAt > Date.now();
+  return isPaymentReviewResult(record) && Number.isFinite(expiresAt) && expiresAt > Date.now();
 };
