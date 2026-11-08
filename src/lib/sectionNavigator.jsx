@@ -74,6 +74,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
   useIsomorphicLayoutEffect(() => {
     locationRef.current = routeLocation;
     pendingRouteRef.current = false;
+    readPendingSectionTarget(routeLocation.pathname);
   }, [location, routeLocation]);
 
   const finishSectionTrip = useCallback(() => {
@@ -166,7 +167,7 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       }
 
       intentRef.current = normalizedHash;
-      writePendingSectionTarget(normalizedHash);
+      writePendingSectionTarget(normalizedHash, "/");
       writeRouteTransitionIntent(normalizedHash);
       document.documentElement.classList.add("route-transition-out");
       prefetchSectionData(normalizedHash);

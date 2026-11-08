@@ -47,6 +47,7 @@ jest.mock("../lib/homeSectionData", () => ({
 jest.mock("../lib/sectionNavigation", () => ({
   SECTION_TRIP_ENTRY: "__rooSectionTrip",
   clearPendingSectionTarget: jest.fn(),
+  readPendingSectionTarget: jest.fn(() => ""),
   clearRouteTransitionIntent: jest.fn(),
   consumeRouteTransitionIntent: jest.fn(() => null),
   isHomeSectionHash: jest.fn(() => false),
