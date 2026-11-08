@@ -56,10 +56,10 @@ runs:
         key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-${{ steps.playwright.outputs.browsers }}
     - if: inputs.browsers != '' && steps.browsers.outputs.cache-hit != 'true'
       shell: bash
-      run: npx playwright install ${{ inputs.browser-deps == 'true' && '--with-deps' || '' }} $BROWSERS
+      run: npx playwright install ${{ inputs.browser-deps == 'true' && runner.environment == 'github-hosted' && '--with-deps' || '' }} $BROWSERS
       env:
         BROWSERS: ${{ inputs.browsers }}
-    - if: inputs.browsers != '' && steps.browsers.outputs.cache-hit == 'true' && inputs.browser-deps == 'true'
+    - if: inputs.browsers != '' && steps.browsers.outputs.cache-hit == 'true' && inputs.browser-deps == 'true' && runner.environment == 'github-hosted'
       shell: bash
       run: npx playwright install-deps $BROWSERS
       env:

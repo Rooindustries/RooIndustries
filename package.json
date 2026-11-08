@@ -154,7 +154,8 @@
     "test:reproducible-build": "node --test tests/reproducible-build.test.mjs",
     "test:build-lock": "node --test tests/build-lock.test.mjs",
     "check:repository-files": "node scripts/check-repository-files.mjs",
-    "test:repository-files": "node --test tests/repository-files.test.mjs"
+    "test:repository-files": "node --test tests/repository-files.test.mjs",
+    "test:runner-routing": "node --test tests/runner-routing.test.mjs"
   },
   "eslintConfig": {
     "extends": [
@@ -184,6 +185,7 @@
     "globals": "17.13.0",
     "jest": "30.3.0",
     "jest-environment-jsdom": "30.3.0",
+    "js-yaml": "3.15.2",
     "postcss": "8.5.23",
     "tailwindcss": "^3.4.18",
     "tus-js-client": "^4.3.1"
