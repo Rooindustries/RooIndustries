@@ -368,8 +368,24 @@ for (const { label, link, path } of [ROUTE_AFTER_SECTION[1], ROUTE_AFTER_SECTION
 test("a route link after Home is painted keeps the seen section in history", async ({ page }) => {
   await openPage(page, "/reviews", "desktop");
   const startLength = await historyLength(page);
+  const departures = [];
+  await page.exposeFunction("recordHomeDeparture", (departure) => departures.push(departure));
+  await page.evaluate(() => {
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest('footer a[href="/tools"]')) return;
+      const section = document.querySelector("#services");
+      const veil = document.querySelector(".route-transition-veil");
+      window.recordHomeDeparture({
+        path: window.location.pathname,
+        hash: window.location.hash,
+        aligned: Boolean(section && Math.abs(section.getBoundingClientRect().top) <= 160),
+        unveiled: Boolean(veil && getComputedStyle(veil).opacity === "0"),
+      });
+    }, { capture: true });
+  });
   await clickAtHomeArrival(page, NAVBAR("benefits").selector, FOOTER("/tools").selector, true);
   await expectMatrixLanding(page, MATRIX_LINKS.Tools);
+  expect(departures).toEqual([{ path: "/", hash: "#services", aligned: true, unveiled: true }]);
   expect(await historyLength(page)).toBe(startLength + 2);
   await page.goBack();
   await expectMatrixLanding(page, MATRIX_LINKS.Benefits);
