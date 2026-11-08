@@ -3,7 +3,10 @@ reviews:
   high_level_summary_in_walkthrough: true
   pre_merge_checks:
     docstrings:
-      mode: off
+      mode: "off"
+  finishing_touches:
+    docstrings:
+      enabled: false
   auto_review:
     base_branches:
       - "^servi/archive-tourney-results$"
