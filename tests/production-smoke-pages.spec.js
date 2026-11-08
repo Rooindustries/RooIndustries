@@ -30,12 +30,60 @@ const paypalSdk = `window.paypal = {
   },
 };`;
 
+const runSmoke = (args, env) => new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, args, { env });
+  let output = "";
+  child.stdout.on("data", chunk => { output += chunk; });
+  child.stderr.on("data", chunk => { output += chunk; });
+  child.once("error", reject);
+  child.once("close", code => resolve({ code, output }));
+});
+
+for (const status of [200, 404, 503]) {
+  commandTest(`CLI smoke real Next packages with script status ${status}`, async ({ baseURL, request }) => {
+    const { startSite } = await import("./fixtures/fake-site.mjs");
+    const response = await request.get(`${baseURL}/packages`);
+    expect(response.ok()).toBe(true);
+    const html = await response.text();
+    expect(html).toMatch(/<link[^>]+rel="preload"[^>]+as="script"/);
+    const script = html.match(/<script[^>]+src="([^"]+)"/)[1];
+    const scriptPath = new URL(script, baseURL).pathname;
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "smoke-packages-"));
+    const report = path.join(directory, "report.json");
+    const site = await startSite({
+      upstream: baseURL, upstreamPaths: ["/packages", "/_next/"],
+      ...(status !== 200 ? { status: { [scriptPath]: status } } : {}),
+    });
+    try {
+      const result = await runSmoke(["scripts/production-smoke.mjs", "--base", site.base, "--report", report], {
+        PATH: process.env.PATH, HOME: process.env.HOME,
+        PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
+        SMOKE_MARKER_TIMEOUT_MS: "10000", SMOKE_DEADLINE_MS: "45000", GITHUB_ACTIONS: "true",
+      });
+      expect(result.code, result.output).toBe(status === 200 ? 0 : 2);
+      const rows = JSON.parse(await fs.readFile(report, "utf8")).results;
+      expect(rows.find(row => row.name === "package prices").ok, result.output).toBe(true);
+      const referral = rows.find(row => row.name === "referral capture");
+      expect(referral.ok, result.output).toBe(status === 200);
+      if (status !== 200) {
+        expect(referral.detail).toContain(String(status));
+        expect(referral.couldNotRun).toBeUndefined();
+      }
+      expect(site.requests.some(row => row.path === scriptPath)).toBe(true);
+      expect(site.requests.every(row => row.method === "GET")).toBe(true);
+    } finally {
+      await site.close();
+      await fs.rm(directory, { recursive: true });
+    }
+  });
+}
+
 for (const scenario of [
   { provider: "paypal", status: 200, code: 0 },
   { provider: "razorpay", status: 200, code: 0 },
   { provider: "paypal", status: 404, code: 2 },
   { provider: "razorpay", status: 404, code: 2 },
-  { provider: "paypal", status: 200, code: 2, ordinaryCi: true },
+  { provider: "paypal", status: 200, code: 1, ordinaryCi: true },
   { provider: "paypal", status: 200, code: 1, missingBrowser: true },
 ]) {
   commandTest(`CLI smoke ${scenario.provider} SDK ${scenario.status} exits ${scenario.code}` +
@@ -89,25 +137,18 @@ for (const scenario of [
       deployment_status: { state: "success", environment_url: deployment },
     }));
     try {
-      const result = await new Promise((resolve, reject) => {
-        const child = spawn(process.execPath, ["--import", path.resolve("tests/fixtures/smoke-provider-hosts.mjs"),
-          "scripts/production-smoke.mjs", "--base", site.base, "--report", report], {
-          env: { PATH: process.env.PATH, HOME: process.env.HOME,
-            PLAYWRIGHT_BROWSERS_PATH: scenario.missingBrowser ? path.join(directory, "missing")
-              : process.env.PLAYWRIGHT_BROWSERS_PATH,
-            SMOKE_PROVIDER_FIXTURE: providerOrigin, SMOKE_MARKER_TIMEOUT_MS: "10000", SMOKE_DEADLINE_MS: "45000",
-            GITHUB_ACTIONS: "true",
-            ...(!scenario.ordinaryCi ? {
-              GITHUB_EVENT_NAME: "deployment_status", GITHUB_EVENT_PATH: event, DEPLOYMENT_URL: deployment,
-              GITHUB_WORKFLOW_REF: "Rooindustries/RooIndustries/.github/workflows/production-smoke.yml@refs/heads/main",
-            } : {}),
-          },
-        });
-        let output = "";
-        child.stdout.on("data", chunk => { output += chunk; });
-        child.stderr.on("data", chunk => { output += chunk; });
-        child.once("error", reject);
-        child.once("close", code => resolve({ code, output }));
+      const result = await runSmoke(["--import", path.resolve("tests/fixtures/smoke-provider-hosts.mjs"),
+        "scripts/production-smoke.mjs", "--base", site.base, "--report", report], {
+        PATH: process.env.PATH, HOME: process.env.HOME,
+        PLAYWRIGHT_BROWSERS_PATH: scenario.missingBrowser ? path.join(directory, "missing")
+          : process.env.PLAYWRIGHT_BROWSERS_PATH,
+        SMOKE_PROVIDER_FIXTURE: providerOrigin, SMOKE_MARKER_TIMEOUT_MS: "10000", SMOKE_DEADLINE_MS: "45000",
+        GITHUB_ACTIONS: "true",
+        ...(!scenario.ordinaryCi ? {
+          GITHUB_EVENT_NAME: "deployment_status", GITHUB_EVENT_PATH: event, DEPLOYMENT_URL: deployment,
+          PRODUCTION_EVENT_URL: deployment,
+          GITHUB_WORKFLOW_REF: "Rooindustries/RooIndustries/.github/workflows/production-smoke.yml@refs/heads/main",
+        } : {}),
       });
       expect(result.code, result.output).toBe(scenario.code);
       expect([...site.requests, ...requests].every(request => request.method === "GET")).toBe(true);
@@ -120,7 +161,7 @@ for (const scenario of [
         const rows = JSON.parse(await fs.readFile(report, "utf8")).results;
         const payment = rows.find(row => row.name === "payment page renders");
         expect(payment.ok, result.output).toBe(scenario.code === 0);
-        expect(payment.couldNotRun).toBeUndefined();
+        expect(payment.couldNotRun).toBe(scenario.ordinaryCi ? true : undefined);
         if (scenario.ordinaryCi) expect(requests).toEqual([]);
         else expect(requests.some(request => request.path === (scenario.provider === "paypal"
           ? "/sdk/js" : "/v1/checkout.js"))).toBe(true);

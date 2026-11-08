@@ -37,7 +37,7 @@ export const startSite = (overrides = {}) => {
       return res.end(page("Deployment authentication required"));
     }
     if (overrides.dropNonBrowser && !/Mozilla/.test(req.headers["user-agent"] || "")) return req.socket.destroy();
-    overrides.onRequest?.(url.pathname);
+    if (overrides.onRequest?.(url.pathname, req, res)) return;
     const pending = failures.get(url.pathname);
     if (pending > 0) {
       failures.set(url.pathname, pending - 1);

@@ -30,6 +30,42 @@ const smoke = async (options, extra = {}) => {
   }
 };
 
+test("a required script blocked by the smoke's CI policy makes the check inconclusive", async () => {
+  const result = await smoke({ scriptSources: { "/booking": "https://fixture.invalid/optional.js" } }, {
+    GITHUB_ACTIONS: "true",
+  });
+  assert.equal(result.code, 1, result.output);
+  const booking = result.report.results.find(row => row.name === "booking page renders");
+  assert.equal(booking.couldNotRun, true);
+  assert.match(booking.detail, /smoke request policy/);
+  assert.ok(result.requests.every(row => row.method === "GET"));
+});
+
+test("a client-cancelled required request cannot fail an initialized page", async () => {
+  let release;
+  const started = new Promise(resolve => { release = resolve; });
+  const result = await smoke({
+    onRequest: (pathname, request, response) => {
+      if (request.url === "/api/payment/providers?cancelled=1") {
+        release();
+        return true;
+      }
+      if (pathname === "/__fixture/cancel-ready") {
+        started.then(() => response.end("ready"));
+        return true;
+      }
+    },
+    bodies: { "/booking": `<h1>Select a Date and Time for Your Session</h1><script>
+      const cancelled = new AbortController();
+      fetch('/api/payment/providers?cancelled=1', { signal: cancelled.signal }).catch(() => {});
+      fetch('/__fixture/cancel-ready').then(() => cancelled.abort());
+    </script>` },
+  });
+  assert.equal(result.code, 0, result.output);
+  assert.ok(result.requests.some(row => row.path === "/__fixture/cancel-ready"));
+  assert.equal(result.report.results.find(row => row.name === "booking page renders").ok, true);
+});
+
 for (const quote of [{ status: 503 }, { body: { ok: true } }, { body: { ok: false, error: "Unavailable" } }]) {
   test(`a real quote failure ${JSON.stringify(quote)} is a regression`, async () => {
     const result = await smoke({ quote });

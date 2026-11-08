@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { smokeRequest } from "./lib/production-smoke-request.mjs";
+import { smokeRequest, SmokeRequestRefusal, SmokeResponseError } from "./lib/production-smoke-request.mjs";
 import { isIP } from "node:net";
 import { isProductionMonitor } from "./lib/production-monitor.mjs";
 import { log, logError, redact, redactObject, deploymentOrigin } from "./lib/production-diagnostics.mjs";
@@ -83,17 +83,10 @@ const expectAvailability = async (response) => {
   if (!Array.isArray(body?.bookedSlots)) throw new Error("has no bookedSlots list");
 };
 
-const requiresCheckoutResource = (request, base) => {
-  if (["document", "script", "stylesheet"].includes(request.resourceType())) return true;
-  const url = new URL(request.url());
-  return url.origin === base && [
-    "/api/payment/quote", "/api/payment/providers", "/api/bookingAvailability",
-  ].includes(url.pathname);
-};
-
-const allowSmokeRequests = async (context, base, checkout, failed) => {
-  const active = new Set();
-  context.on("close", () => { for (const controller of active) controller.abort(); });
+const allowSmokeRequests = async (context, base, checkout, required, failed) => {
+  const active = new Map();
+  context.on("close", () => { for (const controller of active.values()) controller.abort(); });
+  context.on("requestfailed", request => active.get(request)?.abort());
   await context.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -109,11 +102,14 @@ const allowSmokeRequests = async (context, base, checkout, failed) => {
     }
     const allowed = (request.method() === "GET" || quote) &&
       (process.env.GITHUB_ACTIONS !== "true" || isCiTarget(url) || isProductionMonitor());
-    if (!allowed) return route.abort("blockedbyclient");
+    if (!allowed) {
+      if (required(request)) failed(new CouldNotRun(`${url.pathname} is blocked by the smoke request policy`));
+      return route.abort("blockedbyclient");
+    }
     if (quote) url.searchParams.set("packageTitle", checkout.packageTitle);
     const headers = smokeHeaders(url.href, base, request.headers());
     const controller = new AbortController();
-    active.add(controller);
+    active.set(request, controller);
     try {
       const response = await smokeRequest(url.href, {
         headers,
@@ -130,15 +126,16 @@ const allowSmokeRequests = async (context, base, checkout, failed) => {
       const responseHeaders = Object.fromEntries(response.headers);
       delete responseHeaders["content-encoding"];
       delete responseHeaders["content-length"];
-      return await route.fulfill({ status: response.status, headers: responseHeaders, body });
+      await route.fulfill({ status: response.status, headers: responseHeaders, body }).catch(() => {});
     } catch (error) {
-      if (!controller.signal.aborted && requiresCheckoutResource(request, base)) {
+      if (!controller.signal.aborted && required(request) && (url.origin === base ||
+          error instanceof SmokeResponseError || error.name === "TimeoutError" || error instanceof SmokeRequestRefusal)) {
         const detail = error.name === "TimeoutError" ? "timed out" : error.message;
-        failed(new Error(`${url.pathname} ${detail}`));
+        failed(error instanceof SmokeRequestRefusal ? new CouldNotRun(detail) : new Error(`${url.pathname} ${detail}`));
       }
       await route.abort("failed").catch(() => {});
     } finally {
-      active.delete(controller);
+      active.delete(request);
     }
   });
   await context.routeWebSocket(/.*/, (socket) => socket.close());
@@ -146,6 +143,14 @@ const allowSmokeRequests = async (context, base, checkout, failed) => {
 
 const withSmokePage = async (browser, base, contextOptions, check) => {
   const { checkout, ...browserOptions } = contextOptions;
+  const required = request => {
+    if (request.resourceType() === "script" && browserOptions.javaScriptEnabled === false) return false;
+    if (["document", "script", "stylesheet"].includes(request.resourceType())) return true;
+    const url = new URL(request.url());
+    return url.origin === base && [
+      "/api/payment/quote", "/api/payment/providers", "/api/bookingAvailability",
+    ].includes(url.pathname);
+  };
   const context = await browser.newContext({ ...browserOptions, serviceWorkers: "block" })
     .catch(error => { throw new CouldNotRun(error.message); });
   const pending = new Set();
@@ -156,7 +161,7 @@ const withSmokePage = async (browser, base, contextOptions, check) => {
   });
   const hasApplicationError = pattern => new RegExp(pattern, "i").test(document.body?.innerText || "");
   try {
-    await allowSmokeRequests(context, base, checkout, fail);
+    await allowSmokeRequests(context, base, checkout, required, fail);
     if (checkout) await context.addInitScript((booking) => {
       sessionStorage.setItem("checkout_booking_state", JSON.stringify(booking));
     }, checkout);
@@ -169,19 +174,14 @@ const withSmokePage = async (browser, base, contextOptions, check) => {
       fail(new Error(`${new URL(page.url()).pathname} has a rendering error: ${error.message}`));
     });
     page.on("request", request => {
-      if (requiresCheckoutResource(request, base)) pending.add(request);
+      if (required(request)) pending.add(request);
     });
     const finished = request => {
       pending.delete(request);
       if (!pending.size) drained?.();
     };
     page.on("requestfinished", finished);
-    page.on("requestfailed", request => {
-      if (browser.isConnected() && requiresCheckoutResource(request, base)) {
-        fail(new Error(`${new URL(request.url()).pathname} failed: ${request.failure()?.errorText}`));
-      }
-      finished(request);
-    });
+    page.on("requestfailed", finished);
     const renderedError = page.waitForFunction(hasApplicationError, APP_ERROR_PATTERN.source, {
       polling: 50, timeout: 0,
     }).then(() => {
@@ -394,7 +394,7 @@ const main = async () => {
     fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, redact([`### Money-path smoke on ${base}`, "", "| Result | Check | Detail |", "| --- | --- | --- |", ...rows, ""].join("\n")));
   }
   if (failed.length) log(`${failed.length} money-path check(s) failed on ${base}.`);
-  else if (unreachable.length) log(`Smoke could not run: ${unreachable.length} check(s) stopped because the browser closed.`);
+  else if (unreachable.length) log(`Smoke could not run: ${unreachable.length} check(s) stopped.`);
   else log(`All money-path checks passed on ${base}.`);
   const code = failed.length ? 2 : unreachable.length ? 1 : 0;
   if (options.report) fs.writeFileSync(options.report, JSON.stringify(redactObject({ version: 1, base, startedAt, completedAt: Date.now(), results })), { mode: 0o600 });
