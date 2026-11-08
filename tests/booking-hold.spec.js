@@ -275,8 +275,9 @@ for (const [shape, sameSlot] of [["refreshed", false], ["refreshed", true], ["ex
           startTimeUTC: sameSlot ? oldHold.startTimeUTC : `${date}T05:30:00.000Z`,
           displayTime: sameSlot ? "10:00 AM" : "11:00 AM" };
         const held = await native.post("/api/holdSlot", { packageTitle: payload.packageTitle,
-          startTimeUTC: payload.startTimeUTC, previousHoldId: delayed.body.refreshedHold?.slotHoldId,
-          previousHoldToken: delayed.body.refreshedHold?.slotHoldToken });
+          startTimeUTC: payload.startTimeUTC,
+          ...(sameSlot ? { previousHoldId: delayed.body.refreshedHold?.slotHoldId,
+            previousHoldToken: delayed.body.refreshedHold?.slotHoldToken } : {}) });
         expect(held.status).toBe(200);
         const nextHold = { ...oldHold, holdId: held.body.holdId, holdToken: held.body.holdToken,
           expiresAt: held.body.expiresAt, startTimeUTC: payload.startTimeUTC, phase: "active" };
@@ -306,6 +307,9 @@ for (const [shape, sameSlot] of [["refreshed", false], ["refreshed", true], ["ex
         release();
         await expect(page.getByRole("button", { name: "Checking payment...", exact: true })).toHaveCount(0);
         expect(await reservationState(page)).toEqual(newer);
+        if (shape === "refreshed" && !sameSlot) {
+          await expect.poll(async () => (await native.getHold(oldHold.holdId)).phase).toBe("released");
+        }
         expect((await native.getHold(nextHold.holdId)).holdNonce).toBeTruthy();
         await page.goto("/payment");
         await expect(page.getByRole("button", { name: "Resume checkout", exact: true })).toBeEnabled();
@@ -350,5 +354,115 @@ test("a delayed hold response cannot replace a reservation selected while it was
       release();
       await expect(page.getByRole("button", { name: "Next", exact: true }).last()).toBeEnabled();
       expect(await reservationState(page)).toEqual(newer);
+      await expect.poll(async () => (await native.getHold(first.body.holdId)).phase).toBe("released");
+      expect((await native.getHold(hold.holdId)).phase).toBe("active");
     } finally { release(); }
   });
+
+for (const leave of ["Close", "Back"]) {
+  for (const operation of ["Reserve", "Release payment", "Release Slot"]) {
+    test(`${leave} during slow ${operation} keeps the saved reservation correct on reopen`,
+      async ({ page, context, flow, native }) => {
+        const date = await native.nextSlotDate();
+        await routeToNative(context, native, date);
+        await page.goto("/packages");
+        await page.getByRole("link", { name: "Book Now" }).first().click();
+        await page.getByRole("button", { name: /^Earliest available:/ }).click();
+        await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+        const next = () => page.getByRole("button", { name: "Next", exact: true }).last();
+        if (operation !== "Reserve") {
+          await next().click();
+          await flow.details();
+          if (operation === "Release payment") {
+            await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+            await flow.payment();
+            await openCheckout(page);
+            await page.goBack();
+            await page.getByRole("link", { name: "Back to Booking", exact: true }).click();
+          }
+        }
+        let delayed;
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        const endpoint = operation === "Reserve" ? "/api/holdSlot"
+          : operation === "Release payment" ? "/api/payment/cancel" : "/api/releaseHold";
+        await page.route(`**${endpoint}`, async route => {
+          delayed = await native.post(endpoint, route.request().postDataJSON(), route.request().headers().authorization);
+          await gate;
+          await route.fulfill({ status: delayed.status, json: delayed.body });
+        });
+        try {
+          if (operation === "Reserve") await next().click();
+          else await page.getByRole("button", { name: operation, exact: true }).click();
+          await expect.poll(() => delayed?.status).toBe(200);
+          if (leave === "Close") {
+            await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+          } else {
+            await page.goBack();
+          }
+          await expect(page).not.toHaveURL(/\/booking$/);
+          await expect(page.locator(".ri-booking.transition-opacity")).toHaveCount(0);
+          const reopenedWhilePending = leave === "Close" && operation === "Reserve";
+          if (reopenedWhilePending) {
+            await page.getByRole("link", { name: "Book Now" }).first().click();
+            await expect(page.locator(".ri-booking.transition-opacity")).toBeVisible();
+          }
+          release();
+          if (operation === "Release Slot") {
+            await expect.poll(() => readHold(page)).toBeNull();
+          } else {
+            const holdId = delayed.body.holdId || delayed.body.refreshedHold.slotHoldId;
+            const holdToken = delayed.body.holdToken || delayed.body.refreshedHold.slotHoldToken;
+            await expect.poll(() => readHold(page)).toMatchObject({ holdId, holdToken });
+            if (operation === "Release payment") {
+              await expect.poll(() => page.evaluate(() => sessionStorage.getItem("payment_session_state"))).toBeNull();
+            }
+          }
+          if (leave === "Back") await page.goForward();
+          else if (!reopenedWhilePending) {
+            const reopen = operation === "Release Slot"
+              ? page.getByRole("link", { name: "Book Now" }).first()
+              : page.getByRole("button", { name: "Continue booking", exact: true });
+            await reopen.click();
+          }
+          if (operation === "Release Slot") {
+            await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+          } else if (operation === "Reserve") {
+            await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
+          } else {
+            await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+            await expect(page.getByRole("button", { name: "Release payment", exact: true })).toHaveCount(0);
+            await expect(page.getByRole("button", { name: "Continue to payment", exact: true })).toBeEnabled();
+          }
+        } finally { release(); }
+      });
+  }
+}
+
+for (const access of ["unreadable", "unwritable"]) {
+  test(`${access} storage still lets Reserve keep the held slot after reopening`,
+    async ({ page, context, flow, native }) => {
+      const date = await native.nextSlotDate();
+      await routeToNative(context, native, date);
+      await flow.booking();
+      await page.evaluate(access => {
+        if (access === "unreadable") {
+          Object.defineProperty(window, "sessionStorage", {
+            configurable: true, get() { throw new DOMException("Blocked", "SecurityError"); },
+          });
+        } else {
+          Storage.prototype.setItem = () => { throw new DOMException("Full", "QuotaExceededError"); };
+          Storage.prototype.removeItem = () => { throw new DOMException("Blocked", "SecurityError"); };
+        }
+      }, access);
+      await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+      await page.getByRole("button", { name: "Next", exact: true }).last().click();
+      await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
+      await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+      await page.getByRole("button", { name: "Continue booking", exact: true }).click();
+      await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
+      const held = (await native.evidence()).http.findLast(entry => entry.path === "/api/holdSlot");
+      expect(held.response.holdToken).toBeTruthy();
+      expect((await native.getHold(held.response.holdId)).phase).toBe("active");
+    });
+}

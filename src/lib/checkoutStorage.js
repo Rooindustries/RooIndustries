@@ -1,8 +1,10 @@
 export const BOOKING_DRAFT_STORAGE_KEY = "booking_draft";
 export const CHECKOUT_BOOKING_STORAGE_KEY = "checkout_booking_state";
+export const HOLD_STORAGE_KEY = "my_slot_hold";
+export const PAYMENT_SESSION_STORAGE_KEY = "payment_session_state";
 
 const LEGACY_CHECKOUT_KEYS = [
-  "my_slot_hold",
+  HOLD_STORAGE_KEY,
   BOOKING_DRAFT_STORAGE_KEY,
   "booking_modal_state",
   "booking_form_prefill",

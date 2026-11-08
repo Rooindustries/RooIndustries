@@ -1,5 +1,7 @@
+import { HOLD_STORAGE_KEY, PAYMENT_SESSION_STORAGE_KEY, CHECKOUT_BOOKING_STORAGE_KEY } from "../lib/checkoutStorage";
+import { readReservationStorage, writeReservationStorage, removeReservationStorage } from "../lib/reservationStorage";
 import { clearBookingConfirmation, createBookingConfirmation } from "../lib/confirmationReceipt";
-import { writeBrowserStorage, removeBrowserStorage } from "../lib/browserStorage";
+import { writeBrowserStorage } from "../lib/browserStorage";
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
 import { PayPalScriptProvider, PayPalButtons, usePayPalScriptReducer } from "@paypal/react-paypal-js";
@@ -133,8 +135,6 @@ export default function Payment({ hideFooter = false }) {
 
   const REFERRAL_STORAGE_KEY = "referral_session";
   const FLOW_BACKGROUND_KEY = "flow_background_location";
-  const PAYMENT_SESSION_STORAGE_KEY = "payment_session_state";
-  const CHECKOUT_BOOKING_STORAGE_KEY = "checkout_booking_state";
   const INTERNAL_PAYMENTS_KEY = "roo_internal_payments";
 
   const readStoredBackground = () => {
@@ -183,7 +183,7 @@ export default function Payment({ hideFooter = false }) {
 
   const readStoredPaymentSession = () => {
     try {
-      const raw = sessionStorage.getItem(PAYMENT_SESSION_STORAGE_KEY);
+      const raw = readReservationStorage(PAYMENT_SESSION_STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       if (
@@ -200,14 +200,10 @@ export default function Payment({ hideFooter = false }) {
 
   const writeStoredPaymentSession = (session) => {
     if (!session?.paymentAccessToken || !session?.provider || !session?.fingerprint || !session?.providerPayload) return false;
-    return writeBrowserStorage("sessionStorage", PAYMENT_SESSION_STORAGE_KEY, JSON.stringify(session));
+    return writeReservationStorage(PAYMENT_SESSION_STORAGE_KEY, JSON.stringify(session));
   };
 
-  const clearStoredPaymentSession = () => {
-    try {
-      sessionStorage.removeItem(PAYMENT_SESSION_STORAGE_KEY);
-    } catch {}
-  };
+  const clearStoredPaymentSession = () => removeReservationStorage(PAYMENT_SESSION_STORAGE_KEY);
 
   const readStoredCheckout = () => {
     try {
@@ -235,7 +231,7 @@ export default function Payment({ hideFooter = false }) {
 
     writeStoredCheckout(null);
     try {
-      removeBrowserStorage("sessionStorage", "my_slot_hold");
+      removeReservationStorage(HOLD_STORAGE_KEY);
       window.dispatchEvent(new CustomEvent("hold-state", { detail: null }));
     } catch {}
 
@@ -976,7 +972,7 @@ export default function Payment({ hideFooter = false }) {
     if (!sessionHoldToken) return true;
     let storedHoldToken = "";
     try {
-      storedHoldToken = JSON.parse(sessionStorage.getItem("my_slot_hold") || "null")?.holdToken;
+      storedHoldToken = JSON.parse(readReservationStorage(HOLD_STORAGE_KEY) || "null")?.holdToken;
     } catch {}
     const currentHoldTokens = [
       sessionHold?.slotHoldToken,
@@ -1006,7 +1002,7 @@ export default function Payment({ hideFooter = false }) {
     };
     setSessionHold(null);
     writeStoredCheckout(nextCheckout);
-    removeBrowserStorage("sessionStorage", "my_slot_hold");
+    removeReservationStorage(HOLD_STORAGE_KEY);
     window.dispatchEvent(new CustomEvent("hold-state", { detail: null }));
     dodoReturnHandled.current = "";
     const query = new URLSearchParams(location.search);
@@ -1071,7 +1067,7 @@ export default function Payment({ hideFooter = false }) {
           packagePrice,
           phase: "holding",
         };
-        writeBrowserStorage("sessionStorage", "my_slot_hold", JSON.stringify(holdState));
+        writeReservationStorage(HOLD_STORAGE_KEY, JSON.stringify(holdState));
         window.dispatchEvent(new CustomEvent("hold-state", { detail: holdState }));
       }
       clearPaymentSession("", operation.token);
@@ -1322,7 +1318,7 @@ export default function Payment({ hideFooter = false }) {
             packageTitle,
             phase: refreshedHold.phase || "payment_pending",
           };
-          writeBrowserStorage("sessionStorage", "my_slot_hold", JSON.stringify(holdState));
+          writeReservationStorage(HOLD_STORAGE_KEY, JSON.stringify(holdState));
           window.dispatchEvent(new CustomEvent("hold-state", { detail: holdState }));
         } catch {}
       }
