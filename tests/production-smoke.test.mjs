@@ -5,7 +5,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { packages, startSite } from "./fixtures/fake-site.mjs";
-import { DOMAIN, TOKEN, startVercel } from "./fixtures/fake-vercel.mjs";
+import { DOMAIN } from "./fixtures/fake-vercel.mjs";
+import { withRecovery } from "./fixtures/production-recovery.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const script = path.join(root, "scripts/production-smoke.mjs");
@@ -224,43 +225,14 @@ test("credential-bearing smoke and deployment URLs are refused without leaking t
   }
 });
 
-const gate = path.join(root, "scripts/production-deploy-gate.mjs");
 const LIVE_URL = "https://rooindustries-live-roo-industries.vercel.app";
 const PREVIOUS_URL = "https://rooindustries-previous-roo-industries.vercel.app";
 
-const runGate = (env) => new Promise(resolve => {
-  const childEnv = {
-    PATH: process.env.PATH,
-    HOME: process.env.HOME,
-    PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
-    SMOKE_RETRY_MS: "50",
-    GATE_LIVE_ATTEMPTS: "2",
-    GATE_LIVE_WAIT_MS: "20",
-    ROLLBACK_VERIFY_INTERVAL_MS: "20",
-    ROLLBACK_VERIFY_TIMEOUT_MS: "400",
-    ...env,
-  };
-  for (const key of Object.keys(childEnv)) if (childEnv[key] === undefined) delete childEnv[key];
-  const child = spawn(process.execPath, [gate], { cwd: root, env: childEnv });
-  let output = "";
-  child.stdout.on("data", chunk => { output += chunk; });
-  child.stderr.on("data", chunk => { output += chunk; });
-  child.on("close", code => resolve({ code, output }));
-});
-
-const withGate = async ({ site: siteOverrides, vercel: vercelOptions } = {}, body) => {
-  const site = await startSite(siteOverrides);
-  const vercel = await startVercel(vercelOptions);
-  try {
-    const exec = (env = {}) => runGate({ VERCEL_TOKEN: TOKEN, VERCEL_API_URL: vercel.origin, SMOKE_BASE_URL: site.base, DEPLOYMENT_URL: LIVE_URL, ...env });
-    await body({ site, vercel, exec });
-  } finally {
-    await site.close();
-    await vercel.close();
-  }
+const withGate = async ({ site, vercel } = {}, body) => {
+  await withRecovery({ site, vercel }, context => body(context));
 };
 
-const vercelChanges = vercel => vercel.requests.filter(request => request.method !== "GET");
+const vercelChanges = vercel => vercel.requests.filter(request => request.method !== "GET" && !request.path.startsWith("/repos/"));
 
 test("deploy gate: a healthy live deployment passes and nothing is rolled back", () => withGate({}, async ({ site, vercel, exec }) => {
   const result = await exec();
@@ -275,7 +247,7 @@ test("deploy gate: a money-path failure on the live deployment rolls production 
   const changes = vercelChanges(vercel);
   assert.equal(changes.length, 1);
   assert.equal(changes[0].path, "/v1/projects/prj_rooFixture/rollback/dpl_previous");
-  assert.match(changes[0].query.description, /Money-path smoke failed/);
+  assert.match(changes[0].query.description, /Repeated money-path regression/);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
   assert.match(result.output, /--undo/);
 }));
@@ -289,7 +261,7 @@ test("deploy gate: a CSP-blocked referral script rolls production back once", ()
   const changes = vercelChanges(vercel);
   assert.equal(changes.length, 1);
   assert.equal(changes[0].path, "/v1/projects/prj_rooFixture/rollback/dpl_previous");
-  assert.match(changes[0].query.description, /Money-path smoke failed/);
+  assert.match(changes[0].query.description, /Repeated money-path regression/);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
   assert.match(result.output, /--undo/);
 }));

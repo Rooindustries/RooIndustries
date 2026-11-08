@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const fixture = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "vercel-api.json"), "utf8"));
 
 export const TOKEN = "fixture-token-7f3a";
+export const HISTORY_TOKEN = "fixture-history-token-2a1d";
 export const DOMAIN = "www.rooindustries.com";
 
 const toSingleDeployment = (deployment, ownerId) => ({
@@ -23,6 +24,8 @@ const toSingleDeployment = (deployment, ownerId) => ({
   alias: [],
   aliasAssigned: deployment.readySubstate === "PROMOTED",
   aliasError: null,
+  deletedAt: deployment.deletedAt,
+  softDeletedByRetention: deployment.softDeletedByRetention,
 });
 
 export const startVercel = ({
@@ -34,6 +37,7 @@ export const startVercel = ({
   aliasSettlePolls = 0,
   aliasJobStatus = null,
   swapLiveOnAliasRead = 0,
+  swapLiveAfterAliasRead = 0,
   swapLiveTo = null,
   dropMutationResponse = false,
   swapLiveBeforeMutation = false,
@@ -41,8 +45,15 @@ export const startVercel = ({
   swapNewestOnDeploymentRead = 0,
   dropAcceptedRollback = false,
   promoteAssignPolls = 0,
+  historyError = false,
+  historyWriteError = false,
+  restoreError = false,
+  swapLiveBeforePromote = false,
+  mutationJob = job => job,
 } = {}) => {
   const state = structuredClone(fixture);
+  state.history = [];
+  state.historyStatuses = {};
   tweak?.(state);
   const requests = [];
   let aliasReads = 0;
@@ -73,22 +84,41 @@ export const startVercel = ({
       res.end(body === undefined ? "" : JSON.stringify(body));
     };
     const notFound = () => send(404, { error: { code: "not_found", message: "The resource was not found" } });
+    if (url.pathname.startsWith("/repos/Rooindustries/RooIndustries/deployments")) {
+      if (req.headers.authorization !== `Bearer ${HISTORY_TOKEN}`) return send(403, { message: "Not authorized" });
+      if (historyError) return send(503, { message: "History unavailable" });
+      const statusMatch = url.pathname.match(/\/deployments\/(\d+)\/statuses$/);
+      if (statusMatch) {
+        const id = Number(statusMatch[1]);
+        if (req.method === "GET") return send(200, state.historyStatuses[id] || []);
+        if (historyWriteError) return send(503, { message: "History write unavailable" });
+        const status = { id: Date.now(), ...parsedBody };
+        (state.historyStatuses[id] ||= []).unshift(status);
+        return send(201, status);
+      }
+      if (req.method === "GET") return send(200, state.history.slice(0, Number(url.searchParams.get("per_page") || 30)));
+      if (historyWriteError) return send(503, { message: "History write unavailable" });
+      const record = { id: Math.max(0, ...state.history.map(item => item.id)) + 1, sha: parsedBody.ref,
+        ...parsedBody, creator: { login: "github-actions[bot]" } };
+      state.history.unshift(record);
+      return send(201, record);
+    }
     if (req.headers.authorization !== `Bearer ${TOKEN}`) return send(403, { error: { code: "forbidden", message: "Not authorized" } });
     if (req.method === "POST" && (req.headers["content-type"] !== "application/json" || parsedBody === null || typeof parsedBody !== "object" || Array.isArray(parsedBody))) {
       return send(400, { error: { code: "bad_request", message: "Expected a JSON object body" } });
     }
     const owned = url.searchParams.get("teamId") === state.project.accountId;
-    const goLiveNewer = alias => {
-      const newerId = swapLiveTo || "dpl_newer";
+    const goLiveNewer = (alias, newerId = swapLiveTo || "dpl_newer") => {
       const current = state.deployments.find(item => item.uid === alias.deploymentId);
       if (current && !state.deployments.some(item => item.uid === newerId)) {
+        const newestCreated = Math.max(...state.deployments.map(item => item.created));
         state.deployments.unshift({
           ...structuredClone(current),
           uid: newerId,
           url: "rooindustries-newer-roo-industries.vercel.app",
-          created: current.created + 1000,
-          createdAt: current.createdAt + 1000,
-          ready: (current.ready || current.created) + 1000,
+          created: newestCreated + 1000,
+          createdAt: newestCreated + 1000,
+          ready: newestCreated + 1000,
           meta: {
             githubCommitSha: "9999999999999999999999999999999999999999",
             githubCommitMessage: "fix: a newer deploy went live",
@@ -110,7 +140,10 @@ export const startVercel = ({
         aliasReads += 1;
         if (swapLiveOnAliasRead && aliasReads === swapLiveOnAliasRead) goLiveNewer(alias);
       }
-      return alias ? send(200, alias) : notFound();
+      if (!alias) return notFound();
+      send(200, alias);
+      if (swapLiveAfterAliasRead && aliasReads === swapLiveAfterAliasRead) goLiveNewer(alias);
+      return;
     }
     if (req.method === "GET" && (match = url.pathname.match(/^\/v13\/deployments\/([^/]+)$/))) {
       const key = decodeURIComponent(match[1]);
@@ -173,33 +206,35 @@ export const startVercel = ({
       if (dropAcceptedRollback) {
         state.project.autoAssignCustomDomains = false;
         rollbackPosts += 1;
-        state.project.lastAliasRequest = {
+        state.project.lastAliasRequest = mutationJob({
           type: "rollback",
           jobStatus: "in-progress",
           fromDeploymentId: from,
           toDeploymentId: match[2],
           requestedAt: Date.now(),
-        };
+        });
         res.destroy();
         return;
       }
       state.project.autoAssignCustomDomains = false;
       rollbackPosts += 1;
-      state.project.lastAliasRequest = {
+      state.project.lastAliasRequest = mutationJob({
         type: "rollback",
         jobStatus: aliasJobStatus || (aliasSettlePolls ? "in-progress" : "succeeded"),
         fromDeploymentId: omitFromDeployment ? null : from,
         toDeploymentId: match[2],
         requestedAt: Date.now(),
-      };
+      });
       return dropMutationResponse ? req.socket.destroy() : send(201);
     }
     if (req.method === "POST" && (match = url.pathname.match(/^\/v10\/projects\/([^/]+)\/promote\/([^/]+)$/))) {
+      if (restoreError && rollbackPosts) return send(409, { error: { message: "Fixture restoration refused" } });
+      if (swapLiveBeforePromote && !promotePosted) goLiveNewer(state.aliases[DOMAIN], "dpl_newest");
       const from = state.aliases[DOMAIN].deploymentId;
       moveAlias(match[2]);
       promotePosted = true;
       state.project.autoAssignCustomDomains = promoteAssignPolls > 0 ? false : true;
-      state.project.lastAliasRequest = { type: "promote", jobStatus: "succeeded", fromDeploymentId: from, toDeploymentId: match[2], requestedAt: Date.now() };
+      state.project.lastAliasRequest = mutationJob({ type: "promote", jobStatus: "succeeded", fromDeploymentId: from, toDeploymentId: match[2], requestedAt: Date.now() });
       return dropMutationResponse ? req.socket.destroy() : send(promoteStatus);
     }
     return notFound();
