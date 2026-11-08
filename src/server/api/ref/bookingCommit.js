@@ -9,17 +9,21 @@ import { normalizeBookingStatus } from "../../booking/bookingStatus.js";
 import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
 import { appendCouponConsumption } from "./couponReservations.js";
 import { dispatchRescheduleNotifications } from "./bookingEmails.js";
-import { getSafeErrorCode } from "../../safeErrorLog.js";
+import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
 import { calculateCreatorCommission } from "../../referrals/commissionMoney.js";
 import { freezeBookingCommission } from "../../referrals/bookingCommission.js";
 
-const referralCommitFields = (referralId, referral) => {
+const referralCommitFields = (referralId, referral, bookingId) => {
   if (!referralId) return {};
   if (referral?._id) return {referralAccountingApplied: true};
+  logSafeError(`Referral review required: bookingId=${bookingId} referralId=${referralId}`, {
+    code: "creator_missing_at_commit",
+  });
   return {
     referralAccountingApplied: false, commissionPercent: 0, commissionAmount: 0,
     originalCommissionAmount: 0, dodoOriginalCommissionAmount: 0,
     referralReviewRequired: true, referralReviewReason: "creator_missing_at_commit",
+    ownerAlertRequired: true,
   };
 };
 
@@ -196,7 +200,7 @@ export const commitBookingTransaction = async ({
     ...(couponReservation?.redemption?._id
       ? { couponRedemptionId: couponReservation.redemption._id }
       : {}),
-    ...referralCommitFields(normalize(referralId), referral),
+    ...referralCommitFields(normalize(referralId), referral, doc._id),
     createdAt: doc.createdAt || now,
     updatedAt: now,
   };
@@ -333,8 +337,10 @@ export const createRequiresRescheduleBooking = async ({
   const referral = resolvedReferralId
     ? await client.fetch('*[_type == "referral" && _id == $id][0]{_id}', {id: resolvedReferralId})
     : null;
+  const bookingId = buildDeterministicBookingId({paymentRecordId: paymentRecord._id});
   const booking = prepareDeterministicBooking({
     booking: {
+      _id: bookingId,
       paymentRecordId: paymentRecord._id,
       ...(payload.originalOrderId ? { originalOrderId: payload.originalOrderId } : {}),
       cutoverGeneration: Math.max(0, Number(paymentRecord.cutoverGeneration) || 0),
@@ -369,6 +375,7 @@ export const createRequiresRescheduleBooking = async ({
         paymentRecord.provider === "razorpay" ? paymentRecord.providerOrderId : "",
       razorpayPaymentId: paymentRecord.provider === "dodo" ? "" : paymentRecord.providerPaymentId || "",
       email: payload.email || paymentRecord.payerEmail || "",
+      payerEmail: paymentRecord.payerEmail || "",
       discord: payload.discord || "",
       specs: payload.specs || "",
       mainGame: payload.mainGame || "",
@@ -383,7 +390,7 @@ export const createRequiresRescheduleBooking = async ({
       ...(resolvedReferralId
         ? {
             referral: { _type: "reference", _ref: resolvedReferralId },
-            ...referralCommitFields(resolvedReferralId, referral),
+            ...referralCommitFields(resolvedReferralId, referral, bookingId),
           }
         : {}),
       ...(couponReservation?.redemption?._id

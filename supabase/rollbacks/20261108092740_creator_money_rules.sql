@@ -33,11 +33,14 @@ begin
     paid_total := 0;
     foreach bucket in array array['Xoc', 'Vertex'] loop
       earned := (earnings->>lower(bucket))::numeric
-        + coalesce((saved.payload->>('earned' || bucket))::numeric,
+        + coalesce(case when btrim(coalesce(saved.payload->>('earned' || bucket), ''))
+          ~ '^-?[0-9]+([.][0-9]+)?$' then (saved.payload->>('earned' || bucket))::numeric end,
           (saved.previous->>lower(bucket))::numeric)
         - (saved.after_payload->>('earned' || bucket))::numeric;
-      select coalesce(sum((payment->>'amount')::numeric), 0) into paid
-      from jsonb_array_elements(coalesce(current_doc->(lower(bucket) || 'Payments'), '[]'::jsonb)) payment;
+      select coalesce(sum(case when btrim(coalesce(payment->>'amount', ''))
+        ~ '^-?[0-9]+([.][0-9]+)?$' then (payment->>'amount')::numeric else 0 end), 0) into paid
+      from jsonb_array_elements(case when jsonb_typeof(current_doc->(lower(bucket) || 'Payments')) = 'array'
+        then current_doc->(lower(bucket) || 'Payments') else '[]'::jsonb end) payment;
       doc := doc || jsonb_build_object('earned' || bucket, earned,
         'paid' || bucket, paid, 'owed' || bucket, greatest(0, earned - paid));
       earned_total := earned_total + earned;

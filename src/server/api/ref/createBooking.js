@@ -1336,7 +1336,7 @@ export default async function handler(req, res) {
     }
     const resolvedPackagePrice = `$${effectiveGrossAmount.toFixed(2)}`;
 
-    let verifiedPayerEmail = payerEmail;
+    let verifiedPayerEmail = internalPaymentRecord?.payerEmail || payerEmail;
 
     if (paymentProvider === "razorpay") {
       const canUseServerVerifiedCapture =
@@ -1451,7 +1451,7 @@ export default async function handler(req, res) {
 
     const resolvedPricing = await freezeBookingCommission({
       client: writeClient, pricing, buyerEmail: resolvedEmail,
-      payerEmail: internalPaymentRecord?.payerEmail || verifiedPayerEmail,
+      payerEmail: verifiedPayerEmail,
     });
     const {effectiveCommissionPercent, commissionAmount} = resolvedPricing;
 

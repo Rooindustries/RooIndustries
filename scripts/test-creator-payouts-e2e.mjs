@@ -26,6 +26,7 @@ const sources = [
   'src/server/api/ref/cronSyncAll.js',
   'src/server/api/ref/syncPayouts.js',
   'src/server/api/ref/payouts.js',
+  'src/server/api/ref/register.js',
   'src/server/api/ref/couponReservations.js',
   'src/server/supabase/documentClient.js',
   'src/server/supabase/shadowStore.js',
@@ -77,11 +78,15 @@ if (baseline) {
   }
 }
 let baselineRulesMigration;
+let baselineRollback;
 if (baseline) {
   try {
     baselineRulesMigration = execFileSync('git', ['show', `${baseline}:${rulesMigrationPath}`], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    baselineRollback = execFileSync('git', ['show', `${baseline}:supabase/rollbacks/20261108092740_creator_money_rules.sql`], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (error) {
     if (!/does not exist|exists on disk, but not in/.test(String(error.stderr))) throw error;
@@ -3541,7 +3546,7 @@ try {
       const result = await reconciliation;
       const elapsedMs = Date.now() - started;
       assert.equal(result.status, 200, JSON.stringify(result));
-      assert.ok(elapsedMs < 20000, `Email delivery blocked reconciliation for ${elapsedMs}ms.`);
+      assert.ok(elapsedMs < 20000, JSON.stringify({elapsedMs, paymentRecoveryObservedMs, result}));
       assert.equal(
         abortedCouponAlerts - abortedBefore,
         1,
@@ -3567,7 +3572,7 @@ try {
       const retried = await post('/api/payment/reconcile', {}, {authorization: 'Bearer fixture'});
       assert.equal(retried.status, 200, JSON.stringify(retried));
       const delivered = await Promise.all(alertIds.map(read));
-      assert.ok(delivered.every((row) => row.ownerAlertSentAt));
+      assert.ok(delivered.every((row) => row.ownerAlertSentAt), JSON.stringify({delivered, retried}));
       const attempts = emailRequests
         .slice(before)
         .filter((row) => row.body.subject === 'Paid checkout exceeded a coupon limit');
@@ -3748,7 +3753,8 @@ try {
   const {runCreatorMoneyRegressions} = await import('./lib/creator-money-regressions.mjs');
   await runCreatorMoneyRegressions({
     run, seed, documents, commerce, read, post, webhook, refundCurrent, fixture, sql,
-    startCheckout, rulesSql: baselineRulesMigration || fs.readFileSync(rulesMigrationPath, 'utf8'),
+    startCheckout, rulesSql: baselineRulesMigration || fs.readFileSync(rulesMigrationPath, 'utf8'), emailRequests,
+    rollbackSql: baselineRollback || fs.readFileSync('supabase/rollbacks/20261108092740_creator_money_rules.sql', 'utf8'),
   });
   await run('all-payouts-projection-rebuilds', async () => {
     const snapshot = async () => ({

@@ -10,11 +10,10 @@ const normalizeEmail = value => {
 
 export async function freezeBookingCommission({client, pricing, buyerEmail, payerEmail}) {
   const creatorId = String(pricing.effectiveReferralId || '').trim();
-  if (!creatorId) return pricing;
-  const creator = await client.fetch(
+  const creator = creatorId ? await client.fetch(
     '*[_type == "referral" && _id == $id][0]{creatorEmail}',
     {id: creatorId}
-  );
+  ) : null;
   const creators = [pricing.referralCreatorEmail, creator?.creatorEmail].map(normalizeEmail).filter(Boolean);
   const selfReferral = pricing.selfReferral === true ||
     [buyerEmail, payerEmail].map(normalizeEmail).some(email => email && creators.includes(email));

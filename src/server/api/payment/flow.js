@@ -1071,7 +1071,7 @@ const verifyProviderCapture = async ({
       ...verification,
       ok: true,
       trustedCapture: true,
-      payerEmail: "",
+      payerEmail: String(verification.payerEmail || "").trim(),
       providerOrderId: orderId,
       providerPaymentId: paymentId,
     };
@@ -1808,7 +1808,7 @@ const buildLegacyBookingPayload = ({
     paypalOrderId:
       record.provider === "dodo" ? "" : String(record.providerOrderId || providerData.paypalOrderId || "").trim(),
     payerEmail:
-      String(providerData.payerEmail || record.payerEmail || "").trim(),
+      String(record.payerEmail || providerData.payerEmail || "").trim(),
     razorpayOrderId:
       record.provider === "dodo" ? "" : String(record.providerOrderId || providerData.razorpayOrderId || "").trim(),
     razorpayPaymentId:

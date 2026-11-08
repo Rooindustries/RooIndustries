@@ -61,6 +61,8 @@ const removeExpiredPendingRegistration = async (referral) => {
     "successfulReferrals", "xocPayments", "vertexPayments", "earnedXoc",
     "earnedVertex", "earnedTotal", "paidXoc", "paidVertex", "paidTotal",
     "owedXoc", "owedVertex", "owedTotal", "notes",
+    "underReviewTotal", "emptyCodeReviewXoc", "emptyCodeReviewVertex",
+    "emptyCodeProtectedPaidXoc", "emptyCodeProtectedPaidVertex",
     "maxCommissionPercent", "currentDiscountPercent", "bypassUnlock",
   ].some((field) => {
     const value = current[field];

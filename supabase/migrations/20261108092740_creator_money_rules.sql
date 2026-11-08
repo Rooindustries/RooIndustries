@@ -199,7 +199,7 @@ as $$
     select source.legacy_sanity_id, source.payload,
       migration.try_timestamptz(source.payload->>'ownerAlertLastAttemptAt') as last_attempt
     from migration.source_documents source
-    where source.document_type = 'couponRedemption'
+    where source.document_type in ('couponRedemption', 'booking')
       and not source.tombstoned
       and source.payload->'ownerAlertRequired' = 'true'::jsonb
       and nullif(source.payload->>'ownerAlertSentAt', '') is null

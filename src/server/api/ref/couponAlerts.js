@@ -22,7 +22,9 @@ export async function dispatchCouponAlerts({client, redemptionId = ''}) {
     if (signal.aborted) break;
     try {
       const apiKey = String(process.env.RESEND_API_KEY || '').trim();
-      const current = await client.fetch('*[_type == $type && _id == $id][0]{...}', {type: 'couponRedemption', id: redemption._id});
+      const current = await client.fetch('*[_type == $type && _id == $id][0]{...}', {
+        type: redemption._type, id: redemption._id,
+      });
       if (!current?.ownerAlertRequired || current.ownerAlertSentAt) continue;
       const to = String(current.ownerAlertRecipient || settings?.ownerEmail || process.env.OWNER_EMAIL || '').trim();
       const from = String(current.ownerAlertFrom || process.env.FROM_EMAIL || '').trim();
@@ -32,20 +34,29 @@ export async function dispatchCouponAlerts({client, redemptionId = ''}) {
         ownerAlertRecipient: to, ownerAlertFrom: from, ownerAlertLastAttemptAt: new Date().toISOString(),
       }).commit();
       if (!apiKey || !to || !from) throw new Error('Coupon alert email is not configured.');
-      const key = `coupon-capacity/${createHash('sha256').update(redemption._id).digest('hex')}`;
+      const referralReview = current._type === 'booking' && current.referralReviewRequired === true;
+      const key = `${referralReview ? 'referral-review' : 'coupon-capacity'}/${
+        createHash('sha256').update(redemption._id).digest('hex')}`;
       const result = await new Resend(apiKey).emails.send({
-        from, to, subject: 'Paid checkout exceeded a coupon limit',
-        text: `A paid checkout kept its coupon discount after the coupon reached its use limit.\nBooking: ${redemption.bookingId}\nCoupon record: ${redemption.coupon?._ref}\nThe buyer keeps the agreed discount.`,
+        from, to, subject: referralReview ? 'Paid booking needs a creator review' : 'Paid checkout exceeded a coupon limit',
+        text: referralReview
+          ? ['A paid booking references a missing creator.', `Booking: ${current._id}`,
+            `Creator record: ${current.referral?._ref}`, 'Commission is held at zero until this is reviewed.'].join('\n')
+          : `A paid checkout kept its coupon discount after the coupon reached its use limit.\nBooking: ${redemption.bookingId}\nCoupon record: ${redemption.coupon?._ref}\nThe buyer keeps the agreed discount.`,
       }, {idempotencyKey: generation ? `${key}/${generation}` : key, signal});
       if (['validation_error', 'invalid_from_address'].includes(result.error?.name)) {
-        const fresh = await client.fetch('*[_type == $type && _id == $id][0]{...}', {type: 'couponRedemption', id: redemption._id});
+        const fresh = await client.fetch('*[_type == $type && _id == $id][0]{...}', {
+          type: current._type, id: redemption._id,
+        });
         if (!fresh.ownerAlertSentAt && Number(fresh.ownerAlertGeneration || 0) === generation) {
           await client.patch(fresh._id).ifRevisionId(fresh._rev)
             .unset(['ownerAlertFrom']).set({ownerAlertGeneration: generation + 1}).commit();
         }
       }
       if (result.error || !result.data?.id) throw new Error('Coupon alert delivery did not return a receipt.');
-      const fresh = await client.fetch('*[_type == $type && _id == $id][0]{...}', {type: 'couponRedemption', id: redemption._id});
+      const fresh = await client.fetch('*[_type == $type && _id == $id][0]{...}', {
+        type: current._type, id: redemption._id,
+      });
       if (!fresh.ownerAlertSentAt) await client.patch(fresh._id).ifRevisionId(fresh._rev).set({
         ownerAlertRequired: false, ownerAlertSentAt: new Date().toISOString(), ownerAlertProviderId: result.data.id,
       }).commit();
