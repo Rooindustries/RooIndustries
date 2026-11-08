@@ -16,7 +16,9 @@ describe("shared content cache", () => {
     now = 1_000_000;
     jest.spyOn(Date, "now").mockImplementation(() => now);
     ({ getPublicContent } = require("../lib/publicContentClient"));
-    ({ fetchHomeSectionData } = require("../lib/homeSectionData"));
+    const home = require("../lib/homeSectionData");
+    home.setHomeSectionLoader(async () => require("../lib/contentCache"));
+    ({ fetchHomeSectionData } = home);
     getPublicContent.mockReset();
   });
 

@@ -61,6 +61,7 @@ jest.mock("../lib/performanceProfile", () => ({
 }));
 jest.mock("../lib/homeSectionData", () => ({
   prefetchHomeSectionData: jest.fn().mockResolvedValue(undefined),
+    setHomeSectionLoader: jest.fn(),
 }));
 jest.mock("../lib/sectionNavigation", () => ({
   clearPendingSectionTarget: jest.fn(),

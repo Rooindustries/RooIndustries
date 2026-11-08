@@ -296,10 +296,19 @@ for (const exit of ["close", "back"]) {
     await controlContent(request, baseURL, {
       patch: { _id: "tooling-hero", headingLine1: "Published during booking" },
     });
+    await controlContent(request, baseURL, {
+      patch: { _id: "tooling-about", recordTitle: "Result published during booking" },
+    });
+    await controlContent(request, baseURL, {
+      patch: { _id: "tooling-package-0", tag: "Offer published during booking" },
+    });
     await page.clock.fastForward("01:01");
     if (exit === "back") await page.goBack();
     else await page.getByRole("button", { name: "Close", exact: true }).click();
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator("#top h1")).toContainText("Published during booking");
+    await expect(page.locator(".ri-proof-title").first()).toHaveText("Result published during booking");
+    await page.locator("#packages").scrollIntoViewIfNeeded();
+    await expect(page.locator("#packages").getByText("Offer published during booking", { exact: true })).toBeVisible();
   });
 }

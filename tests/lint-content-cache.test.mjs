@@ -17,3 +17,15 @@ test("public copy cannot bypass the shared content cache", async () => {
   const [result] = await eslint.lintText('import { useContent } from "../lib/contentCache";', { filePath });
   assert.equal(result.errorCount, 0);
 });
+
+test("sections cannot normalize cached package or FAQ content again", async () => {
+  for (const filePath of ["src/components/Packages.jsx", "src/components/Faq.jsx"]) {
+    for (const code of [
+      'import content from "../lib/packageContent";',
+      'import * as content from "../lib/packageContent.js";',
+    ]) {
+      const [result] = await eslint.lintText(code, { filePath });
+      assert.equal(result.messages.filter(({ ruleId }) => ruleId === "no-restricted-imports").length, 1);
+    }
+  }
+});

@@ -1,3 +1,4 @@
+import { buildPackageOffers } from "../lib/packageContent";
 import fs from "node:fs";
 import path from "node:path";
 import React, { useState } from "react";
@@ -246,7 +247,7 @@ describe("UI accessibility regressions", () => {
       <MemoryRouter>
         <SectionNavigationProvider>
           <Packages
-            initialPackages={[
+            initialPackages={buildPackageOffers([
               {
                 _id: "package-example",
                 title: "Standard plan",
@@ -254,7 +255,7 @@ describe("UI accessibility regressions", () => {
                 checkedBullets: ["Core tuning"],
                 uncheckedBullets: ["Extended support"],
               },
-            ]}
+            ])}
             initialSectionCopy={{ heading: "Example plans" }}
           />
         </SectionNavigationProvider>

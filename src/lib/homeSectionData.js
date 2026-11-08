@@ -1,4 +1,10 @@
-import { loadContent, readContent } from "./contentCache";
+import { normalizeContent } from "./normalizeContent";
+import { contentEntries } from "./contentEntries";
+
+let loadHome;
+export const setHomeSectionLoader = (loader) => {
+  loadHome = loader;
+};
 
 export const HOME_SECTION_DATA_KEYS = Object.freeze({
   reviews: "reviews",
@@ -70,13 +76,13 @@ export const HOME_SECTION_PREFETCH_BY_HASH = Object.freeze({
 
 const homeSectionResources = new Set(Object.values(HOME_SECTION_DATA_KEYS));
 
-export const readHomeSectionData = (key) => readContent(key)?.data ?? null;
+export const readHomeSectionData = (key) => contentEntries.get(key)?.data ?? null;
 
 export const fetchHomeSectionData = (key) => {
   if (!homeSectionResources.has(key)) {
     return Promise.reject(new Error(`Unknown home section key: ${key}`));
   }
-  return loadContent(key);
+  return loadHome().then(({ loadContent }) => loadContent(key, normalizeContent));
 };
 
 export const prefetchHomeSectionData = (keys = Object.values(HOME_SECTION_DATA_KEYS)) =>

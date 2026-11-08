@@ -231,7 +231,7 @@ async function fetchPackagesPageData({ requireContent = false } = {}) {
     read("packages-list"),
     read("packages-settings"),
   ]);
-  return { packagesList, packagesSettings };
+  return { packagesList: packagesList === null ? null : buildPackageOffers(packagesList), packagesSettings };
 }
 
 module.exports = {

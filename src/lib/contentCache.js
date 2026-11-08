@@ -1,27 +1,29 @@
 import { useCallback, useContext, useEffect, useSyncExternalStore } from "react";
-import { getPublicContentEntry } from "./publicContentClient";
 import { ContentRevisionContext, ContentVisibleContext } from "./ContentRevisionContext";
+import { normalizeContent } from "./normalizeContent";
+import { contentEntries as entries } from "./contentEntries";
+import { getPublicContentEntry } from "./publicContentClient";
 import { reportRequestError, requestDeadline } from "./clientRequest";
 
 const CONTENT_MAX_AGE_MS = 60 * 1000;
 
-const inBrowser = typeof window !== "undefined";
-const entries = new Map();
 const inflight = new Map();
 const listeners = new Map();
 let sequence = 0;
 
+const LIST_RESOURCES = new Set(["benchmarks", "tools", "reviews-gallery", "faq-questions", "packages-list"]);
+
+const matchesContentType = (resource, data) => {
+  if (data === null) return !LIST_RESOURCES.has(resource);
+  const isList = Array.isArray(data);
+  return LIST_RESOURCES.has(resource) ? isList : typeof data === "object" && !isList;
+};
+
 const isStale = (receivedAt) => Date.now() - receivedAt > CONTENT_MAX_AGE_MS;
 
-const outranks = (next, current) => {
-  if (!current) return true;
-  if (next.revision !== null && current.revision !== null && next.revision !== current.revision) {
-    return next.revision > current.revision;
-  }
-  if (next.revision === null && current.revision !== null) return false;
-  if (next.revision !== null && current.revision === null) return true;
-  return next.sequence >= current.sequence;
-};
+const outranks = (next, current) =>
+  !current || (next.revision ?? -1) > (current.revision ?? -1) ||
+  (next.revision === current.revision && next.sequence >= current.sequence);
 
 const notify = (resource) => {
   listeners.get(resource)?.forEach((listener) => listener());
@@ -36,7 +38,7 @@ const store = (resource, data, revision, requestSequence) => {
 
 const seedContent = (resource, data, revision, renderedAt) => {
   const current = entries.get(resource);
-  if (!inBrowser || current?.data === data) return;
+  if (current?.data === data) return;
   const entry = { data, revision, receivedAt: revision === null ? 0 : renderedAt, sequence: 0 };
   if (!outranks(entry, current)) return;
   entries.set(resource, entry);
@@ -52,10 +54,8 @@ const loadContent = (resource) => {
   const requestSequence = ++sequence;
   const request = getPublicContentEntry(resource, {}, { cache: "no-cache", signal: requestDeadline() })
     .then(({ data, revision }) => {
-      if (data !== null && (typeof data !== "object" || Array.isArray(data))) {
-        throw new Error("Public content could not be read.");
-      }
-      store(resource, data, revision, requestSequence);
+      if (!matchesContentType(resource, data)) throw new Error("Public content could not be read.");
+      store(resource, data === null ? null : normalizeContent(resource, data), revision, requestSequence);
       return entries.get(resource).data;
     })
     .catch((error) => {
@@ -89,7 +89,7 @@ const shownEntry = (cached, initialData, revision) => {
   return outranks({ revision, sequence: 0 }, cached) ? undefined : cached;
 };
 
-export function useContent(resource, initialData = null) {
+export function useContent(resource, initialData = null, { enabled = true } = {}) {
   const snapshot = useContext(ContentRevisionContext);
   const visible = useContext(ContentVisibleContext);
   const revision = snapshot?.revisions?.[resource];
@@ -104,8 +104,8 @@ export function useContent(resource, initialData = null) {
   }, [resource, initialData, snapshotRevision, renderedAt]);
 
   useEffect(() => {
-    if (visible) loadContent(resource).catch(() => {});
-  }, [resource, visible]);
+    if (enabled && visible) loadContent(resource).catch(() => {});
+  }, [resource, enabled, visible]);
 
   const entry = shownEntry(cached, initialData, snapshotRevision);
   return {

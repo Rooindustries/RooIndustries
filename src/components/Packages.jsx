@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useMemo, lazy, Suspense, startTransition } from "react";
+import React, { useState, useEffect, lazy, Suspense, startTransition } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { getWarrantyCallout } from "../lib/packageWarranty";
 import PriceDisplay from "./PriceDisplay";
 import { HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 import { useContent } from "../lib/contentCache";
 import homeCopy from "../lib/homeCopy";
-import packageContent from "../lib/packageContent";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import { persistBookingPackageSelection } from "../lib/checkoutStorage";
 import { trackEvent } from "../lib/analytics";
@@ -17,7 +16,6 @@ const PackageDetailsModal = lazy(loadPackageDetails);
 
 const REFERRAL_STORAGE_KEY = "referral_session";
 const AVAILABILITY_REFRESH_INTERVAL_MS = 60_000;
-const { buildPackageOffers } = packageContent;
 const { HOME_COPY } = homeCopy;
 
 export { getWarrantyCallout };
@@ -28,10 +26,7 @@ export default function Packages({
 }) {
   const handleHomeSectionLink = useHomeSectionLinkHandler();
   const { data: packageRows } = useContent(HOME_SECTION_DATA_KEYS.packagesList, initialPackages);
-  const packages = useMemo(
-    () => (packageRows !== null ? buildPackageOffers(packageRows) : []),
-    [packageRows]
-  );
+  const packages = packageRows ?? [];
   const { data: sectionCopy } = useContent(HOME_SECTION_DATA_KEYS.packagesSettings, initialSectionCopy);
   const [sessionAvailability, setSessionAvailability] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);

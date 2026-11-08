@@ -1,3 +1,4 @@
+import { normalizeFaqQuestions } from "../lib/packageContent";
 import React from "react";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import FaqSection from "../components/Faq";
@@ -99,13 +100,13 @@ describe("FaqSection", () => {
     render(
       <FaqSection
         initialFaqCopy={{}}
-        initialQuestions={[
+        initialQuestions={normalizeFaqQuestions([
           {
             question:
               'What does "Upgrade PC each 6 months and get reXOC\'d for free" mean?',
             answer: "Buy once and never again!",
           },
-        ]}
+        ])}
       />
     );
 

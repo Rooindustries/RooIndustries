@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import homeCopy from "../lib/homeCopy";
-import packageContent from "../lib/packageContent";
 import { HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 import { useContent } from "../lib/contentCache";
 import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinator";
@@ -21,7 +20,6 @@ const UPGRADE_HASH = "upgrade-path";
 const TRUST_HASH = "trust";
 const QUESTIONS_PER_PAGE = 10;
 const { HOME_COPY } = homeCopy;
-const { normalizeFaqQuestions } = packageContent;
 const UPGRADE_PATTERNS = [
   /upgrade path/i,
   /upgrade a single component/i,
@@ -106,16 +104,7 @@ export default function FaqSection({
   );
   const { data: faqCopy } = useContent(HOME_SECTION_DATA_KEYS.faqSettings, initialFaqCopy);
   const [openQuestions, setOpenQuestions] = useState({});
-  const { data: questionRows } = useContent(HOME_SECTION_DATA_KEYS.faqQuestions, initialQuestions);
-  const questions = useMemo(
-    () =>
-      questionRows !== null
-        ? Array.isArray(questionRows)
-          ? normalizeFaqQuestions(questionRows)
-          : []
-        : null,
-    [questionRows]
-  );
+  const { data: questions } = useContent(HOME_SECTION_DATA_KEYS.faqQuestions, initialQuestions);
 
   useEffect(() => {
     if (typeof window === "undefined") {

@@ -19,6 +19,9 @@ export default [
         patterns: [{
           group: ["**/publicContentClient", "**/publicContentClient.js"],
           message: "Read public copy through useContent so sections share revisions and refreshes.",
+        }, {
+          group: ["**/packageContent", "**/packageContent.js"],
+          message: "Normalize public content when it enters the shared cache, before rendering.",
         }],
       }],
     },
