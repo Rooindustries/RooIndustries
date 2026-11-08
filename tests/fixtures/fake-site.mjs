@@ -83,7 +83,7 @@ export const startSite = (overrides = {}) => {
       return res.end(JSON.stringify(quote.body || {
         ok: true, quoteFingerprint: "fixture-quote",
         quote: { grossAmount: 29.95, netAmount: 29.95, isFree: false },
-        providers: { dodo: { enabled: true, mode: "test" }, paypal: { enabled: false }, razorpay: { enabled: false } },
+        providers: overrides.providers || { dodo: { enabled: true, mode: "test" }, paypal: { enabled: false }, razorpay: { enabled: false } },
       }));
     }
     if (url.pathname === "/api/bookingAvailability") {
@@ -92,9 +92,10 @@ export const startSite = (overrides = {}) => {
     }
     if (url.pathname === "/api/payment/providers" && !overrides.apiUpstream) {
       res.writeHead(200, { "content-type": "application/json" });
-      return res.end(JSON.stringify({ ok: true, providers: { dodo: { enabled: true, mode: "test" } } }));
+      return res.end(JSON.stringify({ ok: true, providers: overrides.providers || { dodo: { enabled: true, mode: "test" } } }));
     }
-    if (overrides.upstream) {
+    if (overrides.upstream && (!overrides.upstreamPaths ||
+        overrides.upstreamPaths.some(prefix => url.pathname.startsWith(prefix)))) {
       if (url.pathname === "/api/payment/providers") {
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({ ok: true, providers: { dodo: { enabled: true, mode: "test" }, paypal: { enabled: false }, razorpay: { enabled: false } } }));
