@@ -9,6 +9,7 @@ export const FIXED_GROUPS = { navigation: ["section-nav.spec.js"], booking: ["bo
 export const REST_GROUPS = ["rest-1", "rest-2", "rest-3", "rest-4"];
 export const REST_1_EXTRA_SECONDS = 250;
 export const JOB_RESERVE_MS = 10 * 60 * 1000;
+const BROWSER_JOB_MINUTES = 60;
 
 const planJob = (deadlines, extraMs) => ({
   ...deadlines,
@@ -101,7 +102,7 @@ const browserMatrix = (specFiles, timings) => {
     } : rest[name];
     if (!assigned.files.length) throw new Error(`Browser group ${name} has no spec files`);
     const extraMs = name === "rest-1" ? REST_1_EXTRA_SECONDS * 1000 : 0;
-    const timeoutMs = Math.ceil((assigned.load * 1000 - extraMs) * 1.5 + 180000);
+    const timeoutMs = BROWSER_JOB_MINUTES * 60000 - JOB_RESERVE_MS - extraMs;
     console.error(`${name}: ${assigned.files.length} files, about ${Math.round(assigned.load)}s`);
     return {
       name,
@@ -114,20 +115,9 @@ const browserMatrix = (specFiles, timings) => {
 };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [group, timingsFile, format] = process.argv.slice(2);
-  if (group !== "native" && group !== "matrix" &&
-    !REST_GROUPS.includes(group) && !Object.hasOwn(FIXED_GROUPS, group)) {
-    throw new Error(`Unknown browser group "${group}"`);
-  }
+  const [group, timingsFile] = process.argv.slice(2);
+  if (group !== "native" && group !== "matrix") throw new Error(`Unknown browser group "${group}"`);
   const plan = group === "native" ? nativePlan : browserMatrix(listSpecFiles(),
     readTimings([timingsFile, path.join(".github", "playwright-timings.json")]));
-  if (group === "native" || group === "matrix") {
-    process.stdout.write(`${JSON.stringify(plan)}\n`);
-  } else if (format === "env") {
-    const { pattern, timeoutMs } = plan.suite.find(suite => suite.name === group);
-    process.stdout.write(`PW_FILES=${pattern}\nPW_GROUP_TIMEOUT_MS=${timeoutMs}\n`);
-  } else {
-    const { pattern } = plan.suite.find(suite => suite.name === group);
-    process.stdout.write(`${pattern}\n`);
-  }
+  process.stdout.write(`${JSON.stringify(plan)}\n`);
 }

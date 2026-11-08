@@ -30,7 +30,7 @@ export default [
     rules: { ...ruleSet([...navigationRules]), "react-hooks/refs": "error" },
   },
   {
-    files: ["scripts/**/*.{js,mjs,cjs}", "tests/**/*.{js,mjs,cjs}"],
+    files: ["scripts/**/*.{js,mjs,cjs}", "tests/**/*.{js,mjs,cjs}", "playwright*.config.js"],
     linterOptions: { reportUnusedDisableDirectives: "off" },
     languageOptions: { ecmaVersion: "latest", sourceType: "module", globals: { ...globals.node } },
     plugins: { roo },
@@ -46,7 +46,7 @@ export default [
     rules: ruleSet(["no-linux-only-test-tooling"]),
   },
   {
-    files: ["tests/**/*.{js,mjs,cjs}"],
+    files: ["tests/**/*.{js,mjs,cjs}", "playwright.*.config.js"],
     rules: ruleSet(["no-playwright-recording-overrides"]),
   },
   {

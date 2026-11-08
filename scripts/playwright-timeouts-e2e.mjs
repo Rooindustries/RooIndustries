@@ -10,6 +10,7 @@ import { yauzl } from "playwright-core/lib/zipBundle";
 import yaml from "js-yaml";
 import { spawnGroup, signalGroup, holdDescendants, releaseGroupMembers } from "./lib/process-group.mjs";
 import { installNetworkGuard, refuseEnvFiles } from "./lib/test-target-safety.mjs";
+import { JOB_RESERVE_MS } from "./playwright-groups.mjs";
 import { withNodeOption } from "./lib/node-options.mjs";
 
 refuseEnvFiles();
@@ -174,7 +175,12 @@ try {
   const budgetsFit = ["routes", "revalidation"].every(name => {
     const job = workflow.jobs[name];
     return job.strategy?.matrix?.suite.length === 2 && job.strategy["fail-fast"] === false &&
-      job["timeout-minutes"] * 60000 > Number(job.env.PW_GROUP_TIMEOUT_MS) + 120000;
+      job.strategy.matrix.suite.every(suite => {
+        const browserRuns = suite.name === "creator-portal" ? 2 : 1;
+        const required = browserRuns * Number(job.env.PW_GROUP_TIMEOUT_MS) +
+          (suite.extraMs || 0) + JOB_RESERVE_MS;
+        return (suite.timeoutMinutes || job["timeout-minutes"]) * 60000 >= required;
+      });
   });
   const steps = workflow.jobs.playwright.steps;
   const checkIndex = steps.findIndex(step => step.run?.includes("npm run test:playwright-timeouts"));

@@ -266,7 +266,7 @@ jobs:
     needs: tested-tree
     if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'roo-site' }}
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.suite.timeoutMinutes }}
     strategy:
       fail-fast: false
       matrix:
@@ -274,9 +274,12 @@ jobs:
           - name: api-routes
             script: test:api:routes
             port: "3231"
+            timeoutMinutes: 30
           - name: creator-portal
             script: test:creator:portal
             port: "3241"
+            extraMs: 900000
+            timeoutMinutes: 65
     env:
       ROO_TEST_HOST: 127.0.0.1
       PW_GROUP_TIMEOUT_MS: "1200000"
