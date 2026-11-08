@@ -42,9 +42,14 @@ yarn-error.log*
 
 # Documentation stays local and is never published.
 *.md
-!/AGENTS.md
-!/CLAUDE.md
-!/.agents/skills/**/SKILL.md
+
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.claude/
+.codex/
+.cursor/
+.agents/
 
 # Local-only tooling: probe scripts and bytecode caches.
 .local-probes/
